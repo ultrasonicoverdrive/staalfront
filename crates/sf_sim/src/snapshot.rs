@@ -1,0 +1,95 @@
+//! The read-only view of the world that the presentation draws from.
+//!
+//! The renderer runs at the screen refresh rate and interpolates between the
+//! last two ticks (PLAN.md section on simulation and presentation). Every
+//! [`EntityView`] therefore carries the position and facing at the end of the
+//! previous tick *and* of the current one; with a fraction `alpha` of the way
+//! to the next tick the renderer draws `prev + (pos - prev) * alpha`. The
+//! sim does the fixed-point part (it stores both states); turning them into
+//! floats for the GPU is the presentation's job, using the float conversion
+//! helpers of `sf_math` that sit behind its `render` feature (which this crate
+//! never enables).
+//!
+//! A [`Snapshot`] borrows the world immutably, so the world cannot be stepped
+//! while one is alive. That is the point: the presentation cannot mutate the
+//! simulation through it, and cannot observe a half-finished tick.
+
+use sf_math::{Facing, Vec2};
+
+use crate::ids::{EntityId, Kind, PlayerId, Tick};
+use crate::world::World;
+
+/// One live entity as the presentation sees it.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct EntityView {
+    /// The entity's handle; commands name it.
+    pub id: EntityId,
+    /// What it is (picks a mesh or an icon).
+    pub kind: Kind,
+    /// Who owns it (picks the colour).
+    pub owner: PlayerId,
+    /// Position at the end of the previous tick, in cells. Equal to `pos` for
+    /// an entity that has not moved, and on the tick it spawned.
+    pub prev_pos: Vec2,
+    /// Position at the end of the current tick, in cells.
+    pub pos: Vec2,
+    /// Facing at the end of the previous tick.
+    pub prev_facing: Facing,
+    /// Facing at the end of the current tick.
+    pub facing: Facing,
+}
+
+/// A read-only view of every live entity, in ascending slot order.
+#[derive(Copy, Clone)]
+pub struct Snapshot<'a> {
+    world: &'a World,
+}
+
+impl<'a> Snapshot<'a> {
+    pub(crate) fn new(world: &'a World) -> Snapshot<'a> {
+        Snapshot { world }
+    }
+
+    /// Ticks executed so far. `pos` in the views is the state after tick
+    /// `tick() - 1`, and `prev_pos` the state one tick before that.
+    pub fn tick(&self) -> Tick {
+        self.world.tick()
+    }
+
+    /// The map size in cells, `(width, height)`.
+    pub fn map_size(&self) -> (u32, u32) {
+        self.world.map_size()
+    }
+
+    /// The number of live entities.
+    pub fn len(&self) -> usize {
+        self.world.len()
+    }
+
+    /// True if there are no live entities.
+    pub fn is_empty(&self) -> bool {
+        self.world.is_empty()
+    }
+
+    /// One entity by id; `None` if it is gone or the id is stale.
+    pub fn get(&self, id: EntityId) -> Option<EntityView> {
+        self.world.get(id)
+    }
+
+    /// Every live entity, in ascending slot order. The order is stable from
+    /// tick to tick (entities never change slots), so a renderer can keep a
+    /// per-entity cache keyed by [`EntityId`] without surprises.
+    pub fn iter(&self) -> impl Iterator<Item = EntityView> + 'a {
+        let world = self.world;
+        (0..world.entities.len())
+            .filter(move |&i| world.entities.alive[i])
+            .map(move |i| world.view(i))
+    }
+
+    /// Replaces the contents of `out` with every live entity (the same order
+    /// as [`Snapshot::iter`]), reusing its allocation.
+    pub fn collect_into(&self, out: &mut Vec<EntityView>) {
+        out.clear();
+        out.extend(self.iter());
+    }
+}
