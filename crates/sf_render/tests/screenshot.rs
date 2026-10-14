@@ -30,10 +30,16 @@ fn golden_path() -> PathBuf {
 }
 
 /// Headless renderer on a software adapter if there is one, otherwise on any
-/// adapter. No adapter at all is a hard failure.
+/// adapter (not when the `CI` env var is set: there a software adapter is
+/// required). No adapter at all is a hard failure.
 fn renderer(width: u32, height: u32) -> Renderer {
     let r = Renderer::headless(width, height, &GpuOptions::software())
         .or_else(|software_err| {
+            // On CI a missing software adapter (lavapipe not installed) must
+            // not be masked by falling back to whatever else is there.
+            if std::env::var_os("CI").is_some() {
+                return Err(software_err);
+            }
             eprintln!("no software adapter ({software_err}); trying any adapter");
             Renderer::headless(
                 width,

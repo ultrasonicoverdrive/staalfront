@@ -3,6 +3,8 @@
 //! Opens the window (sf_engine), draws the sf_render test scene every frame
 //! (vsync) and prints the sim tick and frame rates once per second.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
@@ -16,10 +18,13 @@ struct Runner {
     total_ticks: u64,
     exit_after: Option<Duration>,
     renderer: Option<Renderer>,
+    /// Set when the renderer could not start or a frame failed; `main` then
+    /// exits with a non-zero code.
+    failed: Arc<AtomicBool>,
 }
 
 impl Runner {
-    fn new(exit_after: Option<Duration>) -> Self {
+    fn new(exit_after: Option<Duration>, failed: Arc<AtomicBool>) -> Self {
         let now = Instant::now();
         Self {
             started: None,
@@ -29,6 +34,7 @@ impl Runner {
             total_ticks: 0,
             exit_after,
             renderer: None,
+            failed,
         }
     }
 }
@@ -66,6 +72,7 @@ impl App for Runner {
             }
             Err(e) => {
                 eprintln!("sf_game: cannot start the renderer: {e}");
+                self.failed.store(true, Ordering::Relaxed);
                 ctx.request_exit();
             }
         }
@@ -82,6 +89,7 @@ impl App for Runner {
             && let Err(e) = renderer.render()
         {
             eprintln!("sf_game: render failed: {e}");
+            self.failed.store(true, Ordering::Relaxed);
             ctx.request_exit();
         }
         let actions = ctx.actions();
@@ -172,8 +180,12 @@ fn main() {
         frame_cap_hz: frame_cap_arg(),
         ..EngineConfig::default()
     };
-    if let Err(e) = sf_engine::run(config, Runner::new(exit_after_arg())) {
+    let failed = Arc::new(AtomicBool::new(false));
+    if let Err(e) = sf_engine::run(config, Runner::new(exit_after_arg(), failed.clone())) {
         eprintln!("sf_game: {e}");
+        std::process::exit(1);
+    }
+    if failed.load(Ordering::Relaxed) {
         std::process::exit(1);
     }
 }
