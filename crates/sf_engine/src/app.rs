@@ -3,7 +3,7 @@
 //! The application implements [`App`]; [`run`] owns the event loop and drives
 //! `fixed_update(tick)` at exactly 20 Hz and `render(alpha)` once per frame.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -25,9 +25,10 @@ pub struct EngineConfig {
     /// Initial inner size in logical (DPI-independent) pixels.
     pub size: (u32, u32),
     pub fullscreen: bool,
-    /// Upper bound on the frame rate while nothing else paces the loop.
-    /// `None` = uncapped. Once wgpu presents with vsync (WP1.4) this can be
-    /// `None`; until then it keeps the empty loop from spinning a core.
+    /// Optional upper bound on the frame rate. `None` (default) = render at
+    /// display rate: the loop polls and the present mode (vsync, WP1.4) paces
+    /// it. Until WP1.4 a blank window therefore spins a core; use a cap for
+    /// smoke tests.
     pub frame_cap_hz: Option<u32>,
 }
 
@@ -37,7 +38,7 @@ impl Default for EngineConfig {
             title: "Staalfront".to_owned(),
             size: (1280, 720),
             fullscreen: false,
-            frame_cap_hz: Some(60),
+            frame_cap_hz: None,
         }
     }
 }
@@ -263,7 +264,7 @@ impl<A: App> Handler<A> {
 }
 
 #[cfg(debug_assertions)]
-fn canonical(p: &Path) -> PathBuf {
+fn canonical(p: &Path) -> std::path::PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
 }
 

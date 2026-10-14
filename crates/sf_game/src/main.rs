@@ -120,8 +120,23 @@ fn exit_after_arg() -> Option<Duration> {
     None
 }
 
+/// `--frame-cap <hz>`: limit the frame rate (smoke tests; default uncapped).
+fn frame_cap_arg() -> Option<u32> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--frame-cap" {
+            return args.next()?.parse().ok();
+        }
+    }
+    None
+}
+
 fn main() {
-    if let Err(e) = sf_engine::run(EngineConfig::default(), Runner::new(exit_after_arg())) {
+    let config = EngineConfig {
+        frame_cap_hz: frame_cap_arg(),
+        ..EngineConfig::default()
+    };
+    if let Err(e) = sf_engine::run(config, Runner::new(exit_after_arg())) {
         eprintln!("sf_game: {e}");
         std::process::exit(1);
     }

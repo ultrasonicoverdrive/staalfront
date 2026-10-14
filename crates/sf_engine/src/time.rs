@@ -209,14 +209,12 @@ mod tests {
     #[test]
     fn exactly_twenty_ticks_per_second_at_60fps() {
         let mut fs = FixedStep::sim_default();
-        let frame = Duration::from_nanos(1_000_000_000 / 60);
+        let frame = Duration::from_nanos(16_666_667); // 1/60 s rounded up
         let mut ticks = 0u64;
         for _ in 0..60 {
             ticks += u64::from(fs.advance(frame).ticks);
         }
-        // 60 frames of 1/60 s (minus <60 ns rounding): 20 ticks, or 19 if the
-        // rounding left the accumulator a hair short of the 20th.
-        assert!((19..=20).contains(&ticks), "{ticks}");
+        assert_eq!(ticks, 20);
         // Whole seconds of exact multiples are exact.
         let mut fs = FixedStep::sim_default();
         let total: u64 = (0..100).map(|_| u64::from(fs.advance(ms(10)).ticks)).sum();

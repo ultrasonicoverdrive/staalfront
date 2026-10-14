@@ -49,7 +49,6 @@ graph TD
   sf_ai --> sf_sim
   sf_render --> sf_math
   sf_ui --> sf_math
-  sf_engine --> sf_math
   sf_net --> sf_sim
   sf_game --> sf_math
   sf_game --> sf_sim
@@ -75,7 +74,7 @@ graph TD
   sf_editor --> sf_data
 ```
 
-`sf_math`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
+`sf_math`, `sf_engine`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
 
 Rules stated in PLAN.md:
 
