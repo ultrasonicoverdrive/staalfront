@@ -76,6 +76,13 @@ graph TD
 
 `sf_math`, `sf_engine`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
 
+Rendering and windowing stay decoupled (WP1.4): `sf_engine` owns the `winit`
+window and knows nothing about `wgpu`; `sf_render` owns `wgpu` and knows nothing
+about `winit` or `sf_sim`. `sf_game` joins them: it hands the engine's window
+(`Arc<winit::window::Window>`) to `Renderer::for_window`, which takes any
+`wgpu::SurfaceTarget`. Headless rendering (`Renderer::headless`) needs no window
+and is what the screenshot tests use.
+
 Rules stated in PLAN.md:
 
 1. **`sf_sim` does not depend on `sf_render`** (§1.1). The simulation must be able

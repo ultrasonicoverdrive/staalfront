@@ -12,3 +12,13 @@ workspace = true
 
 [dependencies]
 sf_math = { path = "../../crates/sf_math" }
+# GPU API (Vulkan/DX12/Metal); 30.x is the current stable line (PLAN.md 1.0).
+wgpu = "30.0.1"
+# Render math (matrices for the placeholder view/projection); presentation only.
+glam = "0.34.1"
+# Safe casts of vertex/uniform structs to bytes for buffer uploads.
+bytemuck = { version = "1.25", features = ["derive"] }
+# PNG encode/decode for offscreen screenshots and golden images.
+png = "0.18.1"
+# Block on wgpu's async adapter/device requests without an async runtime.
+pollster = "1.0.1"

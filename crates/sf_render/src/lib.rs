@@ -1,12 +1,23 @@
 //! wgpu rendering: terrain, models, camera, zoom, effects and LOD.
+//!
+//! WP1.4 basics: device/surface setup ([`gpu`]), a forward renderer with depth
+//! buffer and one directional light + ambient ([`renderer`]), placeholder
+//! meshes and scene ([`mesh`], [`scene`]), shader hot-reload in debug builds
+//! and offscreen rendering to PNG for screenshot tests ([`image`]).
+//!
+//! This crate does not depend on `sf_sim` or on a windowing library; the
+//! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
-/// Name of this crate, a placeholder until the real API lands.
-pub const CRATE: &str = "sf_render";
+pub mod gpu;
+pub mod image;
+pub mod mesh;
+pub mod renderer;
+pub mod scene;
+#[cfg(debug_assertions)]
+mod shader_watch;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name() {
-        assert_eq!(super::CRATE, "sf_render");
-    }
-}
+pub use gpu::{Gpu, GpuOptions, RenderError};
+pub use image::{Rgba8, Tolerance};
+pub use renderer::{EMBEDDED_SHADER, Renderer};
+/// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
+pub use wgpu;
