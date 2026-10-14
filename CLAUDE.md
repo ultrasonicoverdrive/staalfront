@@ -1,9 +1,9 @@
 # Staalfront
 
-RTS in Rust (eigen dunne engine op wgpu + winit). Het volledige plan staat in
-`PLAN.md`; lees §1 (architectuur) en §5 (kwaliteitsregels) vóór elk werk.
+RTS in Rust (own thin engine on wgpu + winit). The full plan is in
+`PLAN.md`; read §1 (architecture) and §5 (quality rules) before any work.
 
-- Werkpakketten worden uitgevoerd door de agent `bouwer-sonnet` (`.claude/agents/`).
-- Eén werkpakket per branch `wp/<nummer>-<naam>`, altijd via PR.
-- `sf_sim` is deterministisch: geen floats, geen HashMap-iteratie, geen klok, geen I/O.
-- Dit project draait nooit op de thuisserver (OptiPlex).
+- Work packages are executed by the agent `bouwer-sonnet` (effort medium); WPs marked **[xhigh]** in PLAN.md by `bouwer-sonnet-xhigh` (`.claude/agents/`).
+- One work package per branch `wp/<number>-<name>`, always via PR.
+- `sf_sim` is deterministic: no floats, no HashMap iteration, no clock, no I/O.
+- This project never runs on the home server (OptiPlex).
