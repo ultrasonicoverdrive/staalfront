@@ -1,34 +1,38 @@
 # Conventions for agents and humans
 
-Source of truth: `PLAN.md` (§0, §5, §6, §10, §12) and `CLAUDE.md`. If this page
-and `PLAN.md` disagree, `PLAN.md` wins; fix this page.
+Source of truth: `PLAN.md`, `CLAUDE.md` and `.claude/agents/*.md`. If this page
+disagrees with them, they win; fix this page.
+
+Rule of this page: the numbered rules and bullet lists state only what those
+sources say (with the source cited). Anything else sits in a block labelled
+**Proposal (not decided)** and is not binding until it is moved into PLAN.md,
+CLAUDE.md or an agent file.
 
 ## 1. Language and naming (B8, B9)
 
-- Code, comments, docs, commit messages and PRs are in **English**.
+- Code, comments, docs, commit messages and PRs are in **English** (B9).
 - All game text (menus, UI, voices, subtitles) is **English** and lives in
-  language files, not in code, so translation stays possible later.
-- Crates use the `sf_` prefix and snake_case, as in the workspace map in
-  `architecture.md`. Rust naming follows standard Rust conventions. Further
-  naming rules: not covered by PLAN.md.
-- Branches: `wp/<number>-<name>`, for example `wp/0.3-docs`.
+  language files, not in code (B8).
+- Crates use the `sf_` prefix (PLAN.md §1.1).
+- Branches: `wp/<number>-<name>` (PLAN.md §12.2, CLAUDE.md), for example
+  `wp/0.3-docs`.
+- Further naming rules: not covered by PLAN.md.
 
 ## 2. Work package flow (PLAN.md §12.2)
 
 1. The orchestrator (main session) starts an agent with the WP number, its
    acceptance criteria from PLAN.md and the relevant `docs/`.
-2. One work package per branch `wp/<number>-<name>`, always via PR, never directly
-   on `main`. The agent works in its own git worktree, writes tests first where
-   possible, and runs `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` and
-   the headless scenarios.
+2. One work package per branch `wp/<number>-<name>`, always via PR
+   (CLAUDE.md). The agent works in its own git worktree/branch, writes tests
+   first where possible, and runs `cargo fmt`, `clippy -D warnings`, `cargo test`
+   and headless scenarios.
 3. The agent opens a PR with: **what was done, how it was tested, what was
    deliberately not done.**
 4. **Review gate:** the `reviewer` agent checks out the PR, runs the checks itself,
-   assesses it against the WP's acceptance criteria, the quality rules (section 4)
-   and the don'ts (section 6), and posts `APPROVE` or `CHANGES REQUESTED` as a PR
-   comment. The orchestrator merges **only after `APPROVE`**. On `CHANGES
-   REQUESTED` the builder fixes the findings on the same branch and the reviewer
-   reviews again.
+   assesses it against the WP's acceptance criteria, §5 and §12.4, and posts
+   `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only
+   after `APPROVE`; on `CHANGES REQUESTED` the builder fixes the findings on the
+   same branch and the reviewer reviews again.
 5. After each phase: a short playable build and a report in `docs/progress.md`.
 
 Parallelism (§12.3): at most 3 agents at a time, only on WPs without overlap in
@@ -61,48 +65,43 @@ rights.
 6. Game data in RON, not in code; adding a new unit means no Rust change.
 7. Document every non-obvious game rule in `docs/rules/`.
 
-Done for any WP: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
-and `cargo test` are green, and the WP's acceptance criteria are demonstrably met.
+The reviewer runs `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`
+and `cargo test` (`.claude/agents/reviewer.md`); they must be green, and the WP's
+acceptance criteria demonstrably met.
 
-## 5. Determinism rules for `sf_sim` (spelled out)
+## 5. Determinism in `sf_sim`
 
-`sf_sim` must give bit-identical results on Linux and Windows for the same
-start state and command sequence (B3, PLAN.md §6).
+Sources: CLAUDE.md, PLAN.md §5 rules 1-3, §6, WP0.1, WP1.3.
 
-- **No floats:** no `f32`/`f64` anywhere in `sf_sim`. Use `sf_math` fixed-point
-  types, vectors, angles and RNG. `glam` is presentation only.
-- **No hash-order iteration:** no iteration over `HashMap`/`HashSet`. Use
-  `BTreeMap`/`BTreeSet` or sorted vectors. CI lints the use of `HashMap`/`HashSet`
-  in `sf_sim` (WP0.1).
-- **No clock:** no `Instant`, `SystemTime` or any wall time. Time is the tick number.
-- **No I/O:** no files, network or environment access. Loading happens outside
-  (`sf_data`, `sf_engine`) and the data is passed in.
-- **No threads that affect sim order:** nothing whose result depends on thread
-  scheduling. Any parallelism must produce the same result as sequential
-  execution, in a fixed order. Whether parallelism is used inside the sim at all:
-  undecided (see PLAN.md §6).
-- **Randomness** only from the deterministic RNG in `sf_math` (PLAN.md WP0.2).
-  Where the seed lives (assumption: part of the sim state) is to be decided in
-  WP0.2/WP1.2.
-- **Mutation** only inside the sim tick, driven by `Command`s executed on tick N.
-- **Entity iteration** in the fixed storage order.
+- No floats (`f32`/`f64`); only `sf_math` types (§5 rule 2; CI lint, WP0.1).
+- No `HashMap`/`HashSet` iteration order; `BTreeMap` or sorted vectors (§5 rule 3;
+  CI lint, WP0.1).
+- No clock and no I/O (CLAUDE.md).
+- Threads are listed as a determinism leak (PLAN.md §6). Whether the sim may use
+  threads at all: undecided (see PLAN.md §6).
+- No world mutation outside the sim tick; the UI issues commands (§5 rule 1).
+- Determinism is checked by checksum tests on Linux and Windows in CI (§6) and by
+  comparing headless checksums across both OSes (WP1.3).
+- Changes to the determinism rules need approval (§12.4).
 
-### Changing something that affects the checksum
+### Changes that alter checksums
 
-A change that alters sim behavior changes the per-tick checksums and thus the
-regression baselines. Changes to the determinism rules themselves need approval
-(PLAN.md §12.4). For an intended behavior change:
+- A checksum baseline updated without explanation counts as a defect in review
+  (`.claude/agents/reviewer.md`: "checksums updated without explanation").
+- A change to the determinism rules needs approval (PLAN.md §12.4).
+- How baselines are stored: undecided (defined with WP1.2/WP1.3).
 
-1. State in the PR that the checksum changes and why.
-2. Update the affected headless scenario expectations in the same PR, and
-   explain the new values.
-3. Confirm Linux and Windows CI still agree on the new checksums.
-4. Never update a baseline just to make a failing test pass without knowing why
-   it changed: an unexplained checksum change is a determinism bug until proven
-   otherwise.
-
-The exact mechanism for storing baselines is defined with WP1.2/WP1.3 (undecided
-until then, see PLAN.md §3).
+> **Proposal (not decided)** — not in PLAN.md, CLAUDE.md or an agent file:
+> - Concrete forbidden items: `Instant`, `SystemTime`, file/network/environment
+>   access in `sf_sim`; loading happens outside `sf_sim` and data is passed in.
+> - Randomness only from the `sf_math` RNG, with the seed part of the sim state
+>   (to be decided in WP0.2/WP1.2).
+> - Entity iteration in the fixed storage order.
+> - Parallelism, if ever used, must give the same result as sequential execution.
+> - Steps for an intended checksum change: say in the PR that and why the
+>   checksum changes; update the scenario expectations in the same PR and explain
+>   them; confirm Linux and Windows CI agree; treat an unexplained change as a
+>   determinism bug.
 
 ## 6. What an agent does not do
 
@@ -111,34 +110,35 @@ until then, see PLAN.md §3).
 - No assets without a license line (§12.4).
 - Never original Red Alert files (`.mix`, `.aud`, `.vqa`, extracted WAVs) in the
   repo, a release or a CI artifact (§12.4, B11).
-- Never build or run the project on the home server (B6, §13).
-- Never work directly on `main` (§12.2 step 2, via `wp/<number>-<name>` branch
-  and PR); never merge before reviewer `APPROVE` (§12.2 step 4).
+- Never build or run the project on the home server (B6, §13, CLAUDE.md).
+- Never work directly on `main` (CLAUDE.md: always via PR on a
+  `wp/<number>-<name>` branch); never merge before reviewer `APPROVE` (§12.2
+  step 4).
 
 ## 7. Dependencies
 
-Every new dependency needs a motivation in the PR description: what it is for and
-why existing crates or the standard library do not suffice. The planned stack is
-in PLAN.md §1.0; anything outside it counts as new. Dependencies used by `sf_sim`
-and `sf_math` additionally must not break determinism (no floats in sim-visible
-behavior, no hidden clocks, I/O or hash ordering). A formal policy beyond this
-(license checks, `cargo deny`): undecided (see PLAN.md §12.4).
+No new dependency without motivation in the PR (PLAN.md §12.4). The planned stack
+is in PLAN.md §1.0.
+
+> **Proposal (not decided):** the motivation states what the dependency is for and
+> why the standard library or existing crates do not suffice; dependencies used by
+> `sf_sim`/`sf_math` must not break determinism; license checks (for example
+> `cargo deny`).
 
 ## 8. Assets and licensing (PLAN.md §10, B5, B11)
 
-- Every asset gets a license line in `assets/LICENSES.md` **from the first file
-  onward**: license, source URL, creator, per file.
-- v0 assets: primitives, procedural textures, CC0 or Pixabay (Pixabay Content
-  License) sounds. No rips from Red Alert or other games, even if they appear on
-  Pixabay.
-- **B11:** original Red Alert audio is optional, loaded at runtime from the
-  player's own files (WP11.7). Original Red Alert files are never committed,
-  released or put in a CI artifact. `.gitignore` already excludes `*.mix`,
-  `*.aud`, `*.vqa` and `/ra-original/`. Tests use only fixtures generated in the
-  test itself. Staalfront always works without original audio.
+- Record the license per asset in `assets/LICENSES.md`, from the first file onward
+  (§10).
+- Sound: CC0 (freesound) or Pixabay (Pixabay Content License); record license,
+  source URL and creator per file. No rips from Red Alert or other games in the
+  repo, even if they are on Pixabay (§10).
+- **B11:** original Red Alert audio is optional and loaded at runtime from the
+  player's own files (WP11.7); never in the repo, a release or a CI artifact.
+  Staalfront always works without it. WP11.7 tests use only fixtures generated in
+  the test itself. `.gitignore` excludes `*.mix`, `*.aud`, `*.vqa` and
+  `/ra-original/`.
 - **B5 clean-room:** use only the functional analysis, never read-and-retype EA
-  code (EA code is GPL). Own name, units, graphics and music; Red Alert names,
-  characters and texts are trademarks/copyright.
+  code (EA code is GPL). Own name, units, graphics and music are mandatory.
 
 ## 9. Commit messages
 
@@ -147,22 +147,23 @@ PLAN.md).
 
 ## 10. Testing expectations
 
-- **Gameplay WP:** a headless scenario in `sf_headless` that pins the behavior
-  with a checksum regression (rule 4). Prefer tests written first.
-- **Visual WP:** a screenshot test (offscreen render to PNG; Linux Mesa lavapipe,
-  Windows DX12 WARP) or a recorded short clip (rule 5).
-- **Math and sim primitives:** property tests (`proptest`), snapshots with `insta`
-  where fitting.
-- **Cross-OS:** CI runs on Linux and Windows; determinism checksums must be equal.
-- **Performance:** fps cannot be measured in the cloud container or in CI
-  (software rendering). The fps requirement is measured on the reference laptop.
+- **Gameplay WP:** a headless scenario that pins the behavior (checksum
+  regression), §5 rule 4. Tests first where possible (§12.2).
+- **Visual WP:** a screenshot test or a recorded short clip, §5 rule 5. Screenshot
+  tests render offscreen to PNG (Linux: Mesa lavapipe; Windows: DX12 WARP), WP1.4.
+- **Tools:** `proptest` for properties and `insta` for snapshots (PLAN.md §1.0);
+  property tests for `sf_math` (WP0.2).
+- **Cross-OS:** CI checks every PR on Linux and Windows (§13).
+- **Performance:** the cloud container and CI cannot measure fps (§13); the fps
+  requirement is measured on the reference laptop (B10, §2.4).
 
 ## 11. Docs
 
-- Game rules: `docs/rules/` (quality rule 7). One file per rule area; see
-  `docs/rules/README.md`.
-- Progress: add an entry to `docs/progress.md` after each phase (PLAN.md §12.2
-  step 5).
-- Architecture changes: update `docs/architecture.md` in the same PR.
-- The analysis (`docs/red-alert-analysis.md`) and `docs/mission-inspiration.md`
-  are source material, clean-room per B5; do not paste code from the original.
+- Game rules go in `docs/rules/` (PLAN.md §5 rule 7).
+- Add an entry to `docs/progress.md` after each phase (PLAN.md §12.2 step 5).
+- `docs/red-alert-analysis.md` and `docs/mission-inspiration.md` are source
+  material, clean-room per B5.
+
+> **Proposal (not decided):** one file per rule area in `docs/rules/` (see
+> `docs/rules/README.md`); update `docs/architecture.md` in the same PR as an
+> architecture change.

@@ -65,18 +65,20 @@ graph TD
   sf_editor[tools/sf_editor] --> sf_data
 ```
 
-Binding rules:
+Rules stated in PLAN.md:
 
-1. **`sf_sim` never depends on `sf_render`** (or on any crate that depends on
-   rendering, windowing, audio, network or the clock). The simulation must run
-   thousands of ticks per second in `sf_headless` without a GPU.
-2. `sf_ai` influences the world only through `Command`s to `sf_sim`.
-3. Engine crates (`sf_engine`, `sf_render`, `sf_ui`, `sf_audio`) know no game
-   rules: no "tank", no "ore"; only meshes, instances, entities, commands and
-   checksums.
-4. `sf_game` is the only place where everything is glued together.
-5. Presentation-only libraries (`egui`, `kira`, `glam`, `ffmpeg`, `winit`, `wgpu`)
-   stay out of `sf_sim`. `glam` is presentation only; the sim uses `sf_math`.
+1. **`sf_sim` does not depend on `sf_render`** (§1.1). The simulation must be able
+   to run thousands of ticks per second in `sf_headless` without a GPU.
+2. `sf_ai` talks to `sf_sim` only via commands (§1.1).
+3. In phase 1 the engine crates know no game rules: no "tank", no "ore", only
+   meshes, instances, entities, commands and checksums (§3, phase 1).
+4. `glam` is used only in the presentation; the sim uses fixed-point (§1.0).
+
+> **Proposal (not decided):** extend rule 1 to any crate that depends on
+> rendering, windowing, audio, network or the clock; apply rule 3 to the named
+> engine crates (`sf_engine`, `sf_render`, `sf_ui`, `sf_audio`); make `sf_game` the
+> only crate that glues everything together; keep presentation libraries (`egui`,
+> `kira`, `ffmpeg`, `winit`, `wgpu`) out of `sf_sim`.
 
 ## 3. Simulation and presentation split (B3, §1.2)
 
