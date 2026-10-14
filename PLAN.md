@@ -21,6 +21,7 @@ de EA-broncode). Uitvoering: Sonnet-agents op effort xhigh (zie §12).
 | B5 | Licentie broncode-referentie | **Clean-room**: alleen de functionele analyse gebruiken, nooit EA-code lezen-en-overtypen | EA-code is GPL; letterlijk overnemen maakt Staalfront GPL. Eigen naam, eenheden, graphics, muziek verplicht (handelsmerk). |
 | B6 | Waar wordt gebouwd | **GitHub + cloud-agents + laptop**, nooit op de thuisserver (zie §13) | De thuisserver draait live diensten en heeft geen ruimte (RAM, GPU) voor een Rust-gamebuild. |
 | B7 | Doelplatform v1 | Windows + Linux desktop. Web en macOS later. | Muis + toetsenbord; RTS op telefoon is een ander spel. |
+| B8 | Taal van het spel | **Engels** (menu's, UI-teksten, stemmen, ondertitels); alle spelteksten in taalbestanden, niet in code | Besluit Tijmen 14-10-2026. Taalbestanden houden vertalen later mogelijk. |
 
 ---
 
