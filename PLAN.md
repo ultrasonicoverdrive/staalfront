@@ -17,12 +17,13 @@ the EA source code). Execution: Sonnet agents at effort medium (see §12).
 | B2 | What "2.5D" means here | **True 3D world, fixed camera angle, low-poly models** | Sprites (like the original) get ugly with seamless zooming. 3D models stay sharp up close and simplify cleanly from afar. Gameplay stays flat (2D grid). |
 | B3 | Simulation | **Deterministic, fixed tick (20 Hz), fixed-point math, separate from rendering** | Enables replays, saving, multiplayer (lockstep) and automated tests. Adding it afterwards is nearly impossible. |
 | B4 | Cutscenes | **In-engine cartoon player (cutout/vector animation, scripted) + video as fallback** | Small, sharp at any resolution, lip-sync and translation adjustable afterwards. See §9. |
-| B5 | License of the source-code reference | **Clean-room**: use only the functional analysis, never read-and-retype EA code | EA code is GPL; copying it verbatim makes Staalfront GPL. Own name, units, graphics, music are mandatory (trademark). |
+| B5 | License of the source-code reference | **Clean-room**: use only the functional analysis, never read-and-retype EA code | EA code is GPL; copying it verbatim makes Staalfront GPL. Own name, units, graphics, music are mandatory (trademark). Exception for original audio: B11. |
 | B6 | Where it is built | **GitHub + cloud agents + laptop**, never on the home server (see §13) | The home server runs live services and has no room (RAM, GPU) for a Rust game build. |
 | B7 | Target platform v1 | Windows + Linux desktop. Web and macOS later. | Mouse + keyboard; an RTS on a phone is a different game. |
 | B8 | Language of the game | **English** (menus, UI texts, voices, subtitles); all game texts in language files, not in code | Decision Tijmen 14-10-2026. Language files keep translating possible later. |
 | B9 | Language of code and documentation | **English**: code, comments, docs, commit messages, PRs | Decision Tijmen 14-10-2026. |
 | B10 | Reference hardware | **Windows laptop with NVIDIA GTX 1050**, 1920×1080 | Decision Tijmen 14-10-2026. The fps requirements apply on this card; VRAM budget 2 GB (the smallest 1050 variant). |
+| B11 | Original Red Alert audio | **Optional, loaded at runtime from the player's own Red Alert files** (like OpenRA); never in the repo, a release or a CI artifact | Decision Tijmen 14-10-2026. EA released the code, not the media; the 2008 freeware download does not allow redistribution. Reading the player's own copy keeps the repo clean. Staalfront always works without it (CC0 sounds are the default). See WP11.7. |
 
 ---
 
@@ -285,6 +286,7 @@ Layered (analysis §12, §22G):
 - WP11.4 Music: dynamic (calm/combat).
 - WP11.5 Menus, settings (keys, sound, graphics), accessibility (colorblind colors, UI scale).
 - WP11.6 Real models and textures replace the placeholders (see §10 assets).
+- WP11.7 Original Red Alert audio (B11), optional, in `sf_audio`: reader for `.mix` archives (including Red Alert's encrypted headers: RSA-wrapped Blowfish key) and decoder for `.aud` (Westwood ADPCM and IMA ADPCM) to PCM; a mapping file in RON from Red Alert sound names to Staalfront sound-bank events; setting "Use original Red Alert audio" with the path to the player's install or freeware download. Missing or unknown files fall back to the CC0 sounds without error. Tests use only fixtures generated in the test itself (own encoder), never real Red Alert files; CI never needs them.
 
 ### Phase 12 — Cartoon cutscenes
 See §9 for the design.
@@ -391,7 +393,7 @@ Placeholders (geometric figures) keep the work going in the meantime.
 | 3D models | primitives (cube/cylinder) in faction color | Blender, artist, or CC0 packs (Kenney, Quaternius) as an interim step |
 | Terrain textures | procedural | CC0 (ambientCG, Poly Haven) |
 | Effects | own GPU particles | same, tuned |
-| Sound | CC0 (freesound) or Pixabay sounds (Pixabay Content License); record license, source URL and creator per file. No rips from Red Alert or other games, even if they are on Pixabay | own recordings/purchase |
+| Sound | CC0 (freesound) or Pixabay sounds (Pixabay Content License); record license, source URL and creator per file. No rips from Red Alert or other games in the repo, even if they are on Pixabay. Exception: original Red Alert audio via the runtime loader (B11, WP11.7), read from the player's own files | own recordings/purchase |
 | Voices | text-to-speech placeholder | voice actors |
 | Music | silence/CC0 | composer |
 | Cartoons | geometric figures | artist |
@@ -434,6 +436,7 @@ Conflicts in `Cargo.lock`/shared types are resolved by the orchestrator.
 - No change to sim determinism rules without approval.
 - No new dependency without motivation in the PR.
 - No assets without a license line.
+- Never original Red Alert files (`.mix`, `.aud`, `.vqa`, extracted WAVs) in the repo, a release or a CI artifact (B11).
 
 ---
 

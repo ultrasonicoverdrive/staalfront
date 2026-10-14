@@ -1,0 +1,7 @@
+/target/
+
+# Original Red Alert media never enter the repo (PLAN B11, §12.4)
+*.mix
+*.aud
+*.vqa
+/ra-original/
