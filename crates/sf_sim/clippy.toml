@@ -1,0 +1,6 @@
+# Determinism: iteration order of std hash collections is not stable.
+# Use BTreeMap/BTreeSet or sorted vectors instead (PLAN.md section 5, rule 3).
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is not deterministic; use BTreeMap or a sorted Vec" },
+    { path = "std::collections::HashSet", reason = "iteration order is not deterministic; use BTreeSet or a sorted Vec" },
+]
