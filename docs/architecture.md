@@ -35,10 +35,9 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 ### Dependency directions
 
 PLAN.md §1.1 fixes one hard rule (`sf_sim` never depends on `sf_render`) and
-describes each crate's role. It does not list every allowed edge. The diagram
-below shows the edges that follow from the stated roles; it is illustrative, and
-any edge not shown needs an explicit decision before it is added (undecided, see
-PLAN.md §1.1).
+describes each crate's role. Dependency edges beyond that hard rule are
+undecided (see PLAN.md §1.1). The diagram below is a non-binding sketch of the
+edges that follow from the stated roles.
 
 ```mermaid
 graph TD

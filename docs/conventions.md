@@ -10,7 +10,7 @@ and `PLAN.md` disagree, `PLAN.md` wins; fix this page.
   language files, not in code, so translation stays possible later.
 - Crates use the `sf_` prefix and snake_case, as in the workspace map in
   `architecture.md`. Rust naming follows standard Rust conventions. Further
-  naming rules: undecided (see PLAN.md §5).
+  naming rules: not covered by PLAN.md.
 - Branches: `wp/<number>-<name>`, for example `wp/0.3-docs`.
 
 ## 2. Work package flow (PLAN.md §12.2)
@@ -81,8 +81,9 @@ start state and command sequence (B3, PLAN.md §6).
   scheduling. Any parallelism must produce the same result as sequential
   execution, in a fixed order. Whether parallelism is used inside the sim at all:
   undecided (see PLAN.md §6).
-- **Randomness** only from the deterministic RNG in `sf_math`, seeded as part of
-  the sim state.
+- **Randomness** only from the deterministic RNG in `sf_math` (PLAN.md WP0.2).
+  Where the seed lives (assumption: part of the sim state) is to be decided in
+  WP0.2/WP1.2.
 - **Mutation** only inside the sim tick, driven by `Command`s executed on tick N.
 - **Entity iteration** in the fixed storage order.
 
@@ -103,15 +104,16 @@ regression baselines. Changes to the determinism rules themselves need approval
 The exact mechanism for storing baselines is defined with WP1.2/WP1.3 (undecided
 until then, see PLAN.md §3).
 
-## 6. What an agent does not do (PLAN.md §12.4)
+## 6. What an agent does not do
 
-- No change to the sim determinism rules without approval.
-- No new dependency without motivation in the PR.
-- No assets without a license line.
+- No change to the sim determinism rules without approval (§12.4).
+- No new dependency without motivation in the PR (§12.4).
+- No assets without a license line (§12.4).
 - Never original Red Alert files (`.mix`, `.aud`, `.vqa`, extracted WAVs) in the
-  repo, a release or a CI artifact (B11).
-- Never build or run the project on the home server (B6).
-- Never commit directly to `main`; never merge before reviewer `APPROVE`.
+  repo, a release or a CI artifact (§12.4, B11).
+- Never build or run the project on the home server (B6, §13).
+- Never work directly on `main` (§12.2 step 2, via `wp/<number>-<name>` branch
+  and PR); never merge before reviewer `APPROVE` (§12.2 step 4).
 
 ## 7. Dependencies
 
@@ -140,11 +142,8 @@ behavior, no hidden clocks, I/O or hash ordering). A formal policy beyond this
 
 ## 9. Commit messages
 
-Commit messages are in English (B9). A finer style guide is undecided (see
-PLAN.md §12). Working convention until then: a short imperative summary line,
-optionally with the WP number (for example `WP0.3: add architecture docs`), and a
-body explaining the why when it is not obvious. Agent commits end with the
-attribution trailer supplied by the session.
+Commit messages are in English (B9). Commit style is undecided (not covered by
+PLAN.md).
 
 ## 10. Testing expectations
 
