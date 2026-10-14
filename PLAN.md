@@ -6,7 +6,7 @@ spelregels van Command & Conquer: Red Alert, zonder diens naam, wereld, eenheden
 of media.*
 
 Opgesteld 14-10-2026. Bron: `docs/analyse-red-alert.md` (functionele analyse van
-de EA-broncode). Uitvoering: Sonnet-agents op effort xhigh (zie §12).
+de EA-broncode). Uitvoering: Sonnet-agents op effort medium (zie §12).
 
 ---
 
@@ -271,7 +271,7 @@ Gelaagd (analyse §12, §22G):
 **Klaar als:** de normale AI wint van een passieve speler en verliest van een goede; headless toernooi draait zonder vastlopers.
 
 ### Fase 10 — Missies en editor
-- WP10.1 Scenarioformaat: startobjecten, spelers, doelen, triggers (gebeurtenis → voorwaarde → actie), teams.
+- WP10.1 (voorwerk: `docs/missie-inspiratie.md`) Scenarioformaat: startobjecten, spelers, doelen, triggers (gebeurtenis → voorwaarde → actie), teams.
 - WP10.2 Triggersysteem in de sim (deterministisch): tijd, gebied betreden, object vernietigd, geld, enz.
 - WP10.3 Acties: berichten, versterkingen, filmpje starten, camera, overwinning/nederlaag.
 - WP10.4 `sf_editor`: terrein schilderen, objecten plaatsen, triggers bewerken, testen vanuit de editor.
@@ -390,7 +390,7 @@ komen. Placeholders (geometrische figuren) houden het werk intussen gaande.
 | 3D-modellen | primitieven (kubus/cilinder) in factiekleur | Blender, artiest, of CC0-packs (Kenney, Quaternius) als tussenstap |
 | Terreintextures | procedureel | CC0 (ambientCG, Poly Haven) |
 | Effecten | eigen GPU-deeltjes | idem, getuned |
-| Geluid | CC0 (freesound, licentie per bestand vastleggen) | eigen opnames/inkoop |
+| Geluid | CC0 (freesound) of Pixabay-geluiden (Pixabay Content License); licentie, bron-URL en maker per bestand vastleggen. Geen rips uit Red Alert of andere games, ook niet als ze op Pixabay staan | eigen opnames/inkoop |
 | Stemmen | tekst-naar-spraak placeholder | stemacteurs |
 | Muziek | stilte/CC0 | componist |
 | Tekenfilms | geometrische figuren | tekenaar |
@@ -402,7 +402,7 @@ Licentie per asset vastleggen in `assets/LICENTIES.md` — vanaf het eerste best
 ## 12. Uitvoering met agents
 
 ### 12.1 Agent-type
-`.claude/agents/bouwer-sonnet.md` (in de repo, reist mee naar elke omgeving) — model `sonnet`, effort `xhigh`. Voert één
+`.claude/agents/bouwer-sonnet.md` (in de repo, reist mee naar elke omgeving) — model `sonnet`, effort `medium` (besluit Tijmen 14-10-2026, was `xhigh`). Voert één
 werkpakket uit, werkt in een eigen git-worktree/branch, opent een PR.
 
 ### 12.2 Werkwijze per werkpakket

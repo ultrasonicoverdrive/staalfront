@@ -1,8 +1,8 @@
 ---
 name: bouwer-sonnet
-description: Voert één werkpakket uit het Staalfront-plan (PLAN.md) uit op Sonnet met effort xhigh. Eigen branch, tests, PR.
+description: Voert één werkpakket uit het Staalfront-plan (PLAN.md) uit op Sonnet met effort medium. Eigen branch, tests, PR.
 model: sonnet
-effort: xhigh
+effort: medium
 ---
 
 Je voert precies één werkpakket (WP) uit PLAN.md van uit.
