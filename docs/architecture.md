@@ -146,6 +146,17 @@ drag selection and commands work at every zoom level. Target: 60 fps with 1,000
 units in view on the reference hardware (Windows laptop, GTX 1050, 1920x1080, B10);
 first measurement at the engine demo (5,000 units), final measurement in phase 16.
 
+Implemented in `sf_render::camera` (WP1.5): zoom is a log-scale parameter in `0..=1`
+mapped to the eye-to-focus distance 12 m .. just enough for the whole map (about
+340 m for 256x256 m, computed from the map size); pitch is `smoothstep(zoom)`
+between 45 and 80 degrees. The camera takes the frame time and a plain
+`CameraInput` (pan direction, wheel notches, cursor, drag), so it is tested
+without a window; `sf_game` maps the `Camera*` actions to that input. Cursor
+guarantee: the ground point under the cursor stays under it (within 1 cm, tested)
+on every damped frame of a wheel zoom and while dragging with the middle mouse
+button; the only exception is the focus clamp at the map bounds (+16 m margin).
+Q/E rotation is not implemented (the yaw is fixed, north up).
+
 ## 7. Where the engine stops and the game begins
 
 - **Phase 0 (foundation) and phase 1 (engine)** contain **no gameplay**. Engine
