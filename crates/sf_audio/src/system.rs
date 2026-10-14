@@ -198,10 +198,11 @@ impl AudioSystem {
     }
 
     fn play_with(&mut self, name: &str, pos: Option<[f32; 3]>) {
+        // Look the name up first so unknown names warn even without a device.
+        let Some(def) = self.lookup(name) else { return };
         if self.player.is_none() {
             return;
         }
-        let Some(def) = self.lookup(name) else { return };
         let (mut gain, mut pan) = (self.base_gain(&def), 0.0);
         if let Some(pos) = pos {
             let m = spatial::mix(&self.listener, pos, &self.params);
@@ -231,10 +232,10 @@ impl AudioSystem {
     /// Start a music track, crossfading from the current one over
     /// [`crossfade`](Self::crossfade). Playing the running track again does nothing.
     pub fn play_music(&mut self, name: &str) {
+        let Some(def) = self.lookup(name) else { return };
         if self.player.is_none() {
             return;
         }
-        let Some(def) = self.lookup(name) else { return };
         let gain = self.base_gain(&def);
         let path = self.root.join(&def.file);
         let fade = self.crossfade;
@@ -372,7 +373,14 @@ mod tests {
         s.update();
         assert!(s.reload_bank().is_empty());
         assert_eq!(s.current_music(), None);
-        assert_eq!(s.stats(), Stats::default());
+        // Only the unknown name is noticed (and warned about) without a device.
+        assert_eq!(
+            s.stats(),
+            Stats {
+                unknown: 1,
+                ..Stats::default()
+            }
+        );
     }
 
     #[test]

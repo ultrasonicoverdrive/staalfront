@@ -78,6 +78,8 @@ pub(crate) struct Live<B: Backend> {
     warned: BTreeSet<PathBuf>,
     voices: VoiceLimiter<StaticSoundHandle>,
     music: Option<Music>,
+    /// Previous tracks still fading out.
+    fading: Vec<StaticSoundHandle>,
 }
 
 impl<B: Backend> Live<B> {
@@ -88,12 +90,18 @@ impl<B: Backend> Live<B> {
             warned: BTreeSet::new(),
             voices: VoiceLimiter::new(DEFAULT_MAX_TOTAL),
             music: None,
+            fading: Vec::new(),
         })
     }
 
     #[cfg(test)]
     pub fn manager_mut(&mut self) -> &mut AudioManager<B> {
         &mut self.manager
+    }
+
+    #[cfg(test)]
+    pub fn fading_states(&self) -> Vec<PlaybackState> {
+        self.fading.iter().map(|h| h.state()).collect()
     }
 
     #[cfg(test)]
@@ -166,6 +174,7 @@ impl<B: Backend> Player for Live<B> {
             Ok(handle) => {
                 if let Some(mut old) = self.music.take() {
                     old.handle.stop(tween);
+                    self.fading.push(old.handle);
                 }
                 self.music = Some(Music {
                     name: p.name.to_string(),
@@ -183,6 +192,7 @@ impl<B: Backend> Player for Live<B> {
     fn stop_music(&mut self, fade_out: Duration) {
         if let Some(mut m) = self.music.take() {
             m.handle.stop(fade(fade_out));
+            self.fading.push(m.handle);
         }
     }
 
@@ -199,6 +209,7 @@ impl<B: Backend> Player for Live<B> {
 
     fn tick(&mut self) {
         self.voices.prune(|h| h.state() != PlaybackState::Stopped);
+        self.fading.retain(|h| h.state() != PlaybackState::Stopped);
         if self
             .music
             .as_ref()
@@ -298,23 +309,41 @@ mod tests {
     fn music_crossfades_and_stops() {
         let path = click();
         let mut l = live();
+        // 0.5 s = 11025 frames at 22.05 kHz = ~87 mixer buffers of 128 frames.
         let fade = Duration::from_millis(500);
-        assert_eq!(l.play_music(&req("a", &path, 1), fade), Outcome::Played);
+        let looped = |name| {
+            let mut p = req(name, &path, 1);
+            p.looped = true;
+            p
+        };
+        assert_eq!(l.play_music(&looped("a"), fade), Outcome::Played);
         assert_eq!(l.music_name(), Some("a"));
-        assert_eq!(
-            l.play_music(&req("a", &path, 1), fade),
-            Outcome::AlreadyPlaying
-        );
+        assert_eq!(l.play_music(&looped("a"), fade), Outcome::AlreadyPlaying);
+        assert!(l.fading_states().is_empty());
 
-        assert_eq!(l.play_music(&req("b", &path, 1), fade), Outcome::Played);
+        assert_eq!(l.play_music(&looped("b"), fade), Outcome::Played);
         assert_eq!(l.music_name(), Some("b"));
-        // The mixer keeps running with both tracks mid-fade.
-        run(&mut l, 10);
+        // The old track is fading out, not cut: still sounding well into the fade ...
+        run(&mut l, 30);
+        l.tick();
+        assert_eq!(l.fading_states(), vec![PlaybackState::Stopping]);
+        // ... and gone once the fade time has passed. The new track plays on.
+        run(&mut l, 80);
+        l.tick();
+        assert!(l.fading_states().is_empty(), "old track must be stopped");
+        assert_eq!(l.music_name(), Some("b"));
+
         l.set_music_gain(0.3);
-        run(&mut l, 10);
+        run(&mut l, 5);
+        // Stopping fades out too, then the track is gone.
         l.stop_music(fade);
         assert_eq!(l.music_name(), None);
-        run(&mut l, 10);
+        run(&mut l, 30);
+        l.tick();
+        assert_eq!(l.fading_states(), vec![PlaybackState::Stopping]);
+        run(&mut l, 80);
+        l.tick();
+        assert!(l.fading_states().is_empty());
         l.stop_music(fade); // stopping nothing is fine
     }
 

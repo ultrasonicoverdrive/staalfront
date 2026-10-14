@@ -6,14 +6,18 @@
 //!
 //! The model:
 //! - **Distance**: full volume inside a reference radius, then a squared
-//!   fade to silence at the maximum radius.
-//! - **Zoom** ("quieter when zoomed out"): both radii grow with the camera
-//!   distance (the player sees more of the map, so more is audible and the
-//!   stereo image widens), but a global gain falls off linearly with camera
-//!   distance beyond a "near" distance, down to a floor.
+//!   fade to silence at the maximum radius. Both radii are fixed in world
+//!   metres.
+//! - **Zoom** ("quieter when zoomed out"): a global gain that falls off as
+//!   `near / camera_distance` beyond a "near" camera distance, down to a
+//!   floor.
+//! - **Monotonic by construction**: total gain = distance gain (independent
+//!   of the camera distance) x zoom gain (non-increasing in it), so for any
+//!   fixed world position, zooming out never makes a sound louder.
 //! - **Pan**: the source offset projected on the camera's right vector,
 //!   relative to a width that grows with camera distance (about the
-//!   half-width of the picture), clamped to `±max_pan`.
+//!   half-width of the picture), clamped to `±max_pan`. Pan does not affect
+//!   gain.
 
 /// What the player "hears from": derived from the camera every frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,14 +70,10 @@ impl Default for Listener {
 /// Tuning of the model. All distances in metres.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpatialParams {
-    /// Full volume within this horizontal distance (at zero camera distance).
+    /// Full volume within this horizontal distance from the focus.
     pub ref_radius: f32,
-    /// Silent beyond this horizontal distance (at zero camera distance).
+    /// Silent beyond this horizontal distance from the focus.
     pub max_radius: f32,
-    /// How much the full-volume radius grows per metre of camera distance.
-    pub ref_growth: f32,
-    /// How much the silent radius grows per metre of camera distance.
-    pub max_growth: f32,
     /// Camera distance up to which no zoom attenuation applies.
     pub near_distance: f32,
     /// Lowest zoom gain (reached when zoomed far out).
@@ -89,10 +89,8 @@ pub struct SpatialParams {
 impl Default for SpatialParams {
     fn default() -> Self {
         Self {
-            ref_radius: 10.0,
-            max_radius: 80.0,
-            ref_growth: 0.5,
-            max_growth: 1.5,
+            ref_radius: 25.0,
+            max_radius: 125.0,
             near_distance: 40.0,
             min_zoom_gain: 0.2,
             pan_width: 10.0,
@@ -129,11 +127,10 @@ pub fn zoom_gain(camera_distance: f32, p: &SpatialParams) -> f32 {
     (p.near_distance / d).clamp(p.min_zoom_gain.clamp(0.0, 1.0), 1.0)
 }
 
-/// Gain from the horizontal distance to the focus, for a given camera distance.
-pub fn distance_gain(horizontal: f32, camera_distance: f32, p: &SpatialParams) -> f32 {
-    let cam = sane(camera_distance);
-    let reference = p.ref_radius + p.ref_growth * cam;
-    let max = (p.max_radius + p.max_growth * cam).max(reference + 1e-3);
+/// Gain from the horizontal distance (metres) to the focus.
+pub fn distance_gain(horizontal: f32, p: &SpatialParams) -> f32 {
+    let reference = p.ref_radius.max(0.0);
+    let max = p.max_radius.max(reference + 1e-3);
     let t = ((sane(horizontal) - reference) / (max - reference)).clamp(0.0, 1.0);
     let inv = 1.0 - t;
     inv * inv
@@ -145,7 +142,7 @@ pub fn mix(listener: &Listener, source: [f32; 3], p: &SpatialParams) -> Mix {
     let oz = source[2] - listener.focus[2];
     let cam = sane(listener.distance);
     let horizontal = (ox * ox + oz * oz).sqrt();
-    let gain = distance_gain(horizontal, cam, p) * zoom_gain(cam, p);
+    let gain = distance_gain(horizontal, p) * zoom_gain(cam, p);
 
     let (rx, rz) = (listener.right[0], listener.right[2]);
     let rlen = (rx * rx + rz * rz).sqrt();
@@ -172,10 +169,8 @@ mod tests {
     use super::*;
 
     const P: SpatialParams = SpatialParams {
-        ref_radius: 10.0,
-        max_radius: 80.0,
-        ref_growth: 0.5,
-        max_growth: 1.5,
+        ref_radius: 25.0,
+        max_radius: 125.0,
         near_distance: 40.0,
         min_zoom_gain: 0.2,
         pan_width: 10.0,
@@ -200,7 +195,6 @@ mod tests {
 
     #[test]
     fn full_volume_inside_the_reference_radius() {
-        // camera 30 -> reference radius 10 + 15 = 25
         assert!(near(mix(&at(30.0), [120.0, 0.0, 100.0], &P).gain, 1.0));
         assert!(near(mix(&at(30.0), [100.0, 0.0, 125.0], &P).gain, 1.0));
     }
@@ -214,7 +208,6 @@ mod tests {
             assert!(g <= prev + 1e-6, "step {step}: {g} > {prev}");
             prev = g;
         }
-        // camera 30 -> max radius 80 + 45 = 125
         assert!(near(mix(&l, [100.0 + 125.0, 0.0, 100.0], &P).gain, 0.0));
         assert!(near(mix(&l, [100.0 + 500.0, 0.0, 100.0], &P).gain, 0.0));
         assert!(!mix(&l, [100.0 + 500.0, 0.0, 100.0], &P).is_audible());
@@ -222,8 +215,10 @@ mod tests {
 
     #[test]
     fn distance_gain_is_squared_fade_midway() {
-        // camera 0: reference 10, max 80; at 45 m t = 0.5 -> gain 0.25
-        assert!(near(distance_gain(45.0, 0.0, &P), 0.25));
+        // reference 25, max 125; at 75 m t = 0.5 -> gain 0.25
+        assert!(near(distance_gain(75.0, &P), 0.25));
+        assert!(near(distance_gain(25.0, &P), 1.0));
+        assert!(near(distance_gain(125.0, &P), 0.0));
     }
 
     #[test]
@@ -257,13 +252,39 @@ mod tests {
     }
 
     #[test]
-    fn zooming_out_widens_what_is_audible() {
-        // 120 m away: silent when close up (max 80 + 15 = 95) ...
-        let src = [220.0, 0.0, 100.0];
-        assert!(!mix(&at(10.0), src, &P).is_audible());
-        // ... audible when the camera is far (max 80 + 150 = 230), even
-        // though the zoom gain is lower.
-        assert!(mix(&at(100.0), src, &P).is_audible());
+    fn zooming_out_never_makes_a_fixed_source_louder() {
+        // Grid of source offsets (incl. 60 m off-centre, the case that used
+        // to get louder) x increasing camera distances.
+        let cams = [
+            1.0, 5.0, 10.0, 20.0, 30.0, 40.0, 41.0, 60.0, 100.0, 250.0, 1000.0,
+        ];
+        for dx in (-200..=200).step_by(10) {
+            for dz in (-200..=200).step_by(10) {
+                let src = [100.0 + dx as f32, 0.0, 100.0 + dz as f32];
+                for w in cams.windows(2) {
+                    let g1 = mix(&at(w[0]), src, &P).gain;
+                    let g2 = mix(&at(w[1]), src, &P).gain;
+                    assert!(
+                        g2 <= g1 + 1e-6,
+                        "offset ({dx},{dz}): cam {} -> {}: {g1} -> {g2}",
+                        w[0],
+                        w[1]
+                    );
+                }
+            }
+        }
+        // The regression case: 60 m off-centre.
+        let src = [160.0, 0.0, 100.0];
+        assert!(mix(&at(40.0), src, &P).gain <= mix(&at(20.0), src, &P).gain);
+    }
+
+    #[test]
+    fn audible_range_does_not_widen_when_zooming_out() {
+        // 140 m away is beyond the max radius: silent at every zoom level.
+        let src = [240.0, 0.0, 100.0];
+        for cam in [10.0, 100.0, 1000.0] {
+            assert!(!mix(&at(cam), src, &P).is_audible(), "cam {cam}");
+        }
     }
 
     #[test]
