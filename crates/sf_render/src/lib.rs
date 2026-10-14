@@ -5,9 +5,13 @@
 //! meshes and scene ([`mesh`], [`scene`]), shader hot-reload in debug builds
 //! and offscreen rendering to PNG for screenshot tests ([`image`]).
 //!
+//! WP1.5 adds the game camera ([`camera`]): log zoom toward the cursor, pitch
+//! that follows the zoom, damped panning, plus a 256x256 m world scene.
+//!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
+pub mod camera;
 pub mod gpu;
 pub mod image;
 pub mod mesh;
@@ -16,6 +20,7 @@ pub mod scene;
 #[cfg(debug_assertions)]
 mod shader_watch;
 
+pub use camera::{Camera, CameraConfig, CameraInput};
 pub use gpu::{Gpu, GpuOptions, RenderError};
 pub use image::{Rgba8, Tolerance};
 pub use renderer::{EMBEDDED_SHADER, Renderer};

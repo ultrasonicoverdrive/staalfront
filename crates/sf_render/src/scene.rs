@@ -127,6 +127,76 @@ pub fn test_scene() -> Vec<SceneObject> {
     ]
 }
 
+/// Ground-plane position of the magenta landmark in [`world_scene`] (metres).
+pub const WORLD_MARKER: (f32, f32) = (150.0, 90.0);
+
+/// Placeholder world for the camera: a `size` x `size` m ground (checkerboard
+/// of 8 m tiles), a grid of colored 2 m pillars every 16 m (hue by position,
+/// so scale and direction are readable at every zoom) and a few landmarks:
+/// a tank-sized block and a pyramid at the centre and a magenta marker at
+/// [`WORLD_MARKER`].
+pub fn world_scene(size: u32) -> Vec<SceneObject> {
+    let s = size as f32;
+    let tile = |x: f32, z: f32, w: f32, h: f32, y: f32, color: [f32; 3]| SceneObject {
+        mesh: MeshKind::Plane,
+        transform: Mat4::from_translation(Vec3::new(x, y, z))
+            * Mat4::from_scale(Vec3::new(w, 1.0, h)),
+        color,
+    };
+    let block = |x: f32, z: f32, scale: Vec3, color: [f32; 3]| SceneObject {
+        mesh: MeshKind::Cube,
+        transform: Mat4::from_translation(Vec3::new(x, 0.0, z)) * Mat4::from_scale(scale),
+        color,
+    };
+    let mut out = vec![tile(s / 2.0, s / 2.0, s, s, 0.0, [0.07, 0.20, 0.06])];
+    let tiles = size / 8;
+    for tz in 0..tiles {
+        for tx in 0..tiles {
+            if (tx + tz) % 2 == 0 {
+                out.push(tile(
+                    tx as f32 * 8.0 + 4.0,
+                    tz as f32 * 8.0 + 4.0,
+                    8.0,
+                    8.0,
+                    0.02,
+                    [0.10, 0.27, 0.08],
+                ));
+            }
+        }
+    }
+    let cells = size / 16;
+    for gz in 0..cells {
+        for gx in 0..cells {
+            let (fx, fz) = (gx as f32 / cells as f32, gz as f32 / cells as f32);
+            out.push(block(
+                gx as f32 * 16.0 + 8.0,
+                gz as f32 * 16.0 + 8.0,
+                Vec3::new(2.0, 1.5 + 3.0 * fz, 2.0),
+                [
+                    0.15 + 0.7 * fx,
+                    0.25 + 0.2 * (1.0 - fx) * fz,
+                    0.85 - 0.7 * fx,
+                ],
+            ));
+        }
+    }
+    let c = s / 2.0;
+    out.push(block(c, c, Vec3::new(6.0, 2.2, 3.2), [0.80, 0.08, 0.06]));
+    out.push(SceneObject {
+        mesh: MeshKind::Pyramid,
+        transform: Mat4::from_translation(Vec3::new(c + 10.0, 0.0, c - 6.0))
+            * Mat4::from_scale(Vec3::new(5.0, 6.0, 5.0)),
+        color: [0.85, 0.65, 0.05],
+    });
+    out.push(block(
+        WORLD_MARKER.0,
+        WORLD_MARKER.1,
+        Vec3::new(8.0, 5.0, 8.0),
+        [0.85, 0.05, 0.85],
+    ));
+    out
+}
+
 /// GPU uniform block, mirrors `Globals` in `scene.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
