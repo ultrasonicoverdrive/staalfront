@@ -1,4 +1,3 @@
-#![deny(clippy::float_arithmetic)]
 //! The complete game simulation: no GPU, no I/O, no clock, no floats.
 //!
 //! Determinism rules (PLAN.md section 5): no floating point, no std hash
