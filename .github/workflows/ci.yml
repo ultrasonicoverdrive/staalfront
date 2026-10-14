@@ -33,6 +33,9 @@ jobs:
       # must give identical bits in both (golden hashes in tests/golden.rs).
       - name: sf_math golden hashes in release mode
         run: cargo test --release -p sf_math
+      - name: Clippy (release)
+        if: runner.os == 'Linux'
+        run: cargo clippy --workspace --release --all-targets -- -D warnings
       - name: Determinism lint (sf_sim, sf_math)
         shell: bash
         run: scripts/check-sim-determinism.sh

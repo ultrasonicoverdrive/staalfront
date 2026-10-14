@@ -1,0 +1,24 @@
+// Input bindings: raw input -> engine-generic action names.
+// Hot-reloaded in debug builds (save the file while the game runs).
+//
+// Triggers: Key(<winit KeyCode>), Mouse(Left|Right|Middle|Back|Forward),
+//           WheelUp, WheelDown, EdgeLeft, EdgeRight, EdgeTop, EdgeBottom.
+// `mods` (Alt, Ctrl, Shift) must all be held; extra modifiers are ignored.
+(
+    // Width in pixels of the screen-edge band that counts as "cursor at edge".
+    edge_margin: 4,
+    bindings: {
+        CameraZoomIn: [(trigger: WheelUp)],
+        CameraZoomOut: [(trigger: WheelDown)],
+        CameraPanLeft: [(trigger: Key(KeyA)), (trigger: Key(ArrowLeft)), (trigger: EdgeLeft)],
+        CameraPanRight: [(trigger: Key(KeyD)), (trigger: Key(ArrowRight)), (trigger: EdgeRight)],
+        CameraPanUp: [(trigger: Key(KeyW)), (trigger: Key(ArrowUp)), (trigger: EdgeTop)],
+        CameraPanDown: [(trigger: Key(KeyS)), (trigger: Key(ArrowDown)), (trigger: EdgeBottom)],
+        CameraRotateLeft: [(trigger: Key(KeyQ))],
+        CameraRotateRight: [(trigger: Key(KeyE))],
+        CameraDrag: [(trigger: Mouse(Middle))],
+        ToggleFullscreen: [(trigger: Key(F11)), (trigger: Key(Enter), mods: [Alt])],
+        ToggleDebug: [(trigger: Key(F1))],
+        Quit: [(trigger: Key(Escape))],
+    },
+)
