@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/sf_math",
+    "crates/sf_sim",
+    "crates/sf_data",
+    "crates/sf_ai",
+    "crates/sf_engine",
+    "crates/sf_render",
+    "crates/sf_ui",
+    "crates/sf_audio",
+    "crates/sf_cutscene",
+    "crates/sf_net",
+    "crates/sf_game",
+    "tools/sf_editor",
+    "tools/sf_headless",
+    "tools/sf_demo",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "UNLICENSED"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

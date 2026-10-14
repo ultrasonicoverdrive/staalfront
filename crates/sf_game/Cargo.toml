@@ -1,0 +1,23 @@
+[package]
+name = "sf_game"
+description = "The game binary: glues all crates together."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sf_math = { path = "../../crates/sf_math" }
+sf_sim = { path = "../../crates/sf_sim" }
+sf_data = { path = "../../crates/sf_data" }
+sf_ai = { path = "../../crates/sf_ai" }
+sf_engine = { path = "../../crates/sf_engine" }
+sf_render = { path = "../../crates/sf_render" }
+sf_ui = { path = "../../crates/sf_ui" }
+sf_audio = { path = "../../crates/sf_audio" }
+sf_cutscene = { path = "../../crates/sf_cutscene" }
+sf_net = { path = "../../crates/sf_net" }

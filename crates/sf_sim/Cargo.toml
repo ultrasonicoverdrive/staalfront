@@ -1,0 +1,22 @@
+[package]
+name = "sf_sim"
+description = "The complete game simulation: no GPU, no I/O, no clock, no floats."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# `lints.workspace = true` cannot be combined with extra lints, so the
+# workspace lints are repeated here.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+float_arithmetic = "deny"
+float_cmp = "deny"
+float_cmp_const = "deny"
+cast_precision_loss = "deny"
+
+[dependencies]
+sf_math = { path = "../../crates/sf_math" }
