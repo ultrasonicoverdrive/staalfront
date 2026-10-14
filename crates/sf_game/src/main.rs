@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use sf_audio::AudioSystem;
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
 use sf_render::{GpuOptions, Renderer};
 
@@ -18,6 +19,7 @@ struct Runner {
     total_ticks: u64,
     exit_after: Option<Duration>,
     renderer: Option<Renderer>,
+    audio: Option<AudioSystem>,
     /// Set when the renderer could not start or a frame failed; `main` then
     /// exits with a non-zero code.
     failed: Arc<AtomicBool>,
@@ -34,6 +36,7 @@ impl Runner {
             total_ticks: 0,
             exit_after,
             renderer: None,
+            audio: None,
             failed,
         }
     }
@@ -52,6 +55,16 @@ impl App for Runner {
             ctx.scale_factor(),
             ctx.assets().root().display()
         );
+        let audio = AudioSystem::new(ctx.assets().root());
+        println!(
+            "audio: {}",
+            if audio.is_silent() {
+                "silent (no device)"
+            } else {
+                "device open"
+            }
+        );
+        self.audio = Some(audio);
         match Renderer::for_window(
             ctx.window().clone(),
             s.width,
@@ -97,6 +110,11 @@ impl App for Runner {
             ctx.toggle_fullscreen();
             println!("fullscreen: {}", ctx.is_fullscreen());
         }
+        if actions.pressed(Action::PlayTestSound)
+            && let Some(audio) = &mut self.audio
+        {
+            audio.play("test_click");
+        }
         if actions.pressed(Action::Quit) {
             println!("quit requested");
             ctx.request_exit();
@@ -140,6 +158,9 @@ impl App for Runner {
     }
 
     fn on_asset_changed(&mut self, _ctx: &mut Context, path: &std::path::Path) {
+        if let Some(audio) = &mut self.audio {
+            audio.on_asset_changed(path);
+        }
         println!("asset changed: {}", path.display());
     }
 

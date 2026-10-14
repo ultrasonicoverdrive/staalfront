@@ -28,11 +28,13 @@ pub enum Action {
     CameraDrag,
     ToggleFullscreen,
     ToggleDebug,
+    /// Plays the audio test sound (engine smoke test, not a game command).
+    PlayTestSound,
     Quit,
 }
 
 impl Action {
-    pub const ALL: [Action; 12] = [
+    pub const ALL: [Action; 13] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -44,6 +46,7 @@ impl Action {
         Action::CameraDrag,
         Action::ToggleFullscreen,
         Action::ToggleDebug,
+        Action::PlayTestSound,
         Action::Quit,
     ];
 }
