@@ -36,18 +36,22 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 
 PLAN.md §1.1 fixes one hard rule (`sf_sim` never depends on `sf_render`) and
 describes each crate's role. Dependency edges beyond that hard rule are
-undecided (see PLAN.md §1.1). The diagram below is a non-binding sketch of the
-edges that follow from the stated roles.
+undecided (see PLAN.md §1.1). The diagram below is factual: it lists the
+`path` dependencies between workspace crates in the `Cargo.toml` files, as of
+WP0.1 (current workspace). It will go stale as crates gain dependencies;
+`cargo tree` is authoritative.
 
 ```mermaid
 graph TD
   sf_sim --> sf_math
   sf_data --> sf_math
+  sf_ai --> sf_math
   sf_ai --> sf_sim
   sf_render --> sf_math
-  sf_ui --> sf_render
-  sf_cutscene --> sf_render
+  sf_ui --> sf_math
+  sf_engine --> sf_math
   sf_net --> sf_sim
+  sf_game --> sf_math
   sf_game --> sf_sim
   sf_game --> sf_data
   sf_game --> sf_ai
@@ -56,14 +60,22 @@ graph TD
   sf_game --> sf_ui
   sf_game --> sf_audio
   sf_game --> sf_cutscene
-  sf_headless[tools/sf_headless] --> sf_sim
+  sf_game --> sf_net
+  sf_headless[tools/sf_headless] --> sf_math
+  sf_headless --> sf_sim
   sf_headless --> sf_data
   sf_headless --> sf_ai
-  sf_demo[tools/sf_demo] --> sf_engine
+  sf_demo[tools/sf_demo] --> sf_math
+  sf_demo --> sf_engine
   sf_demo --> sf_render
-  sf_demo --> sf_sim
-  sf_editor[tools/sf_editor] --> sf_data
+  sf_demo --> sf_ui
+  sf_demo --> sf_audio
+  sf_editor[tools/sf_editor] --> sf_math
+  sf_editor --> sf_sim
+  sf_editor --> sf_data
 ```
+
+`sf_math`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
 
 Rules stated in PLAN.md:
 

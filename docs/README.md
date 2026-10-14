@@ -8,7 +8,7 @@
 | [`conventions.md`](conventions.md) | Rules for agents and humans: branch/PR flow, review gate, agents, quality rules, determinism, dependencies, assets, testing. |
 | [`red-alert-analysis.md`](red-alert-analysis.md) | Functional analysis of the Red Alert source code. Source material only; clean-room (B5): ideas, never code. |
 | [`mission-inspiration.md`](mission-inspiration.md) | Groundwork for phase 10 (missions and editor) and phase 15 (content). Clean-room. |
-| [`rules/`](rules/README.md) | Game rules, one file per rule area (filled from phase 2 onward). |
+| [`rules/`](rules/README.md) | Game rules (PLAN.md §5 rule 7). |
 | [`progress.md`](progress.md) | Report after each phase. |
 
 Read first: `PLAN.md` §1 (architecture) and §5 (quality rules), then

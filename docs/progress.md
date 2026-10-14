@@ -5,9 +5,9 @@ report and a pointer to the playable build.
 
 ## Phase 0 — Foundation
 
-Status: not started.
+Status: in progress.
 
-- WP0.1 Workspace, CI, lint: _pending_
+- WP0.1 Workspace, CI, lint: done (PR #2, 8267a83)
 - WP0.2 `sf_math`: _pending_
 - WP0.3 `docs/`: _pending_
 
