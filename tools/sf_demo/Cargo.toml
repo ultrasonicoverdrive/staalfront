@@ -1,0 +1,18 @@
+[package]
+name = "sf_demo"
+description = "Engine demo and benchmark (phase 1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sf_math = { path = "../../crates/sf_math" }
+sf_engine = { path = "../../crates/sf_engine" }
+sf_render = { path = "../../crates/sf_render" }
+sf_ui = { path = "../../crates/sf_ui" }
+sf_audio = { path = "../../crates/sf_audio" }

@@ -1,0 +1,17 @@
+[package]
+name = "sf_headless"
+description = "Runs the simulation without a screen: tests, balance, AI-vs-AI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sf_math = { path = "../../crates/sf_math" }
+sf_sim = { path = "../../crates/sf_sim" }
+sf_data = { path = "../../crates/sf_data" }
+sf_ai = { path = "../../crates/sf_ai" }

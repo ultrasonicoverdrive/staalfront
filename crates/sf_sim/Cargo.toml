@@ -1,0 +1,14 @@
+[package]
+name = "sf_sim"
+description = "The complete game simulation: no GPU, no I/O, no clock, no floats."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sf_math = { path = "../../crates/sf_math" }
