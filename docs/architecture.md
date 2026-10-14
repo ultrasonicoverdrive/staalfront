@@ -38,7 +38,7 @@ PLAN.md §1.1 fixes one hard rule (`sf_sim` never depends on `sf_render`) and
 describes each crate's role. Dependency edges beyond that hard rule are
 undecided (see PLAN.md §1.1). The diagram below is factual: it lists the
 `path` dependencies between workspace crates in the `Cargo.toml` files, as of
-WP0.1 (current workspace). It will go stale as crates gain dependencies;
+WP1.4 (checked against every `Cargo.toml`). It will go stale as crates gain dependencies;
 `cargo tree` is authoritative.
 
 ```mermaid
@@ -75,6 +75,13 @@ graph TD
 ```
 
 `sf_math`, `sf_engine`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
+
+Rendering and windowing stay decoupled (WP1.4): `sf_engine` owns the `winit`
+window and knows nothing about `wgpu`; `sf_render` owns `wgpu` and knows nothing
+about `winit` or `sf_sim`. `sf_game` joins them: it hands the engine's window
+(`Arc<winit::window::Window>`) to `Renderer::for_window`, which takes any
+`wgpu::SurfaceTarget`. Headless rendering (`Renderer::headless`) needs no window
+and is what the screenshot tests use.
 
 Rules stated in PLAN.md:
 

@@ -151,6 +151,9 @@ PLAN.md).
   regression), §5 rule 4. Tests first where possible (§12.2).
 - **Visual WP:** a screenshot test or a recorded short clip, §5 rule 5. Screenshot
   tests render offscreen to PNG (Linux: Mesa lavapipe; Windows: DX12 WARP), WP1.4.
+  Goldens live in `crates/<crate>/tests/golden/`; regenerate after an intended
+  change with `SF_UPDATE_GOLDEN=1 cargo test -p sf_render --test screenshot`
+  and review the PNG in the diff. A missing GPU adapter fails the test.
 - **Tools:** `proptest` for properties and `insta` for snapshots (PLAN.md §1.0);
   property tests for `sf_math` (WP0.2).
 - **Cross-OS:** CI checks every PR on Linux and Windows (§13).

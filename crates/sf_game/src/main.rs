@@ -1,11 +1,14 @@
 //! The game binary: glues all crates together.
 //!
-//! WP1.1: a bare runner. Opens the window, counts sim ticks and frames and
-//! prints the rates once per second. No rendering yet.
+//! Opens the window (sf_engine), draws the sf_render test scene every frame
+//! (vsync) and prints the sim tick and frame rates once per second.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
+use sf_render::{GpuOptions, Renderer};
 
 struct Runner {
     started: Option<Instant>,
@@ -14,10 +17,14 @@ struct Runner {
     frames: u32,
     total_ticks: u64,
     exit_after: Option<Duration>,
+    renderer: Option<Renderer>,
+    /// Set when the renderer could not start or a frame failed; `main` then
+    /// exits with a non-zero code.
+    failed: Arc<AtomicBool>,
 }
 
 impl Runner {
-    fn new(exit_after: Option<Duration>) -> Self {
+    fn new(exit_after: Option<Duration>, failed: Arc<AtomicBool>) -> Self {
         let now = Instant::now();
         Self {
             started: None,
@@ -26,6 +33,8 @@ impl Runner {
             frames: 0,
             total_ticks: 0,
             exit_after,
+            renderer: None,
+            failed,
         }
     }
 }
@@ -43,6 +52,30 @@ impl App for Runner {
             ctx.scale_factor(),
             ctx.assets().root().display()
         );
+        match Renderer::for_window(
+            ctx.window().clone(),
+            s.width,
+            s.height,
+            &GpuOptions::default(),
+        ) {
+            Ok(mut renderer) => {
+                println!(
+                    "renderer: {} ({:?}, vsync)",
+                    renderer.adapter_summary(),
+                    renderer.color_format()
+                );
+                renderer.watch_shader_file(
+                    ctx.assets().root().join("shaders/scene.wgsl"),
+                    Duration::from_millis(250),
+                );
+                self.renderer = Some(renderer);
+            }
+            Err(e) => {
+                eprintln!("sf_game: cannot start the renderer: {e}");
+                self.failed.store(true, Ordering::Relaxed);
+                ctx.request_exit();
+            }
+        }
     }
 
     fn fixed_update(&mut self, _ctx: &mut Context, _tick: u64) {
@@ -52,6 +85,13 @@ impl App for Runner {
 
     fn render(&mut self, ctx: &mut Context, _alpha: f32) {
         self.frames += 1;
+        if let Some(renderer) = &mut self.renderer
+            && let Err(e) = renderer.render()
+        {
+            eprintln!("sf_game: render failed: {e}");
+            self.failed.store(true, Ordering::Relaxed);
+            ctx.request_exit();
+        }
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {
             ctx.toggle_fullscreen();
@@ -90,6 +130,9 @@ impl App for Runner {
     }
 
     fn on_resize(&mut self, _ctx: &mut Context, size: Resized) {
+        if let Some(renderer) = &mut self.renderer {
+            renderer.resize(size.width, size.height);
+        }
         println!(
             "resized {}x{} @ {}",
             size.width, size.height, size.scale_factor
@@ -101,6 +144,7 @@ impl App for Runner {
     }
 
     fn on_exit(&mut self, _ctx: &mut Context) {
+        self.renderer = None; // release the surface before the window goes
         println!("exit after {} ticks", self.total_ticks);
     }
 }
@@ -136,8 +180,12 @@ fn main() {
         frame_cap_hz: frame_cap_arg(),
         ..EngineConfig::default()
     };
-    if let Err(e) = sf_engine::run(config, Runner::new(exit_after_arg())) {
+    let failed = Arc::new(AtomicBool::new(false));
+    if let Err(e) = sf_engine::run(config, Runner::new(exit_after_arg(), failed.clone())) {
         eprintln!("sf_game: {e}");
+        std::process::exit(1);
+    }
+    if failed.load(Ordering::Relaxed) {
         std::process::exit(1);
     }
 }
