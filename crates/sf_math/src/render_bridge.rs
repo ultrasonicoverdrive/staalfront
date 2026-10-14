@@ -17,7 +17,8 @@
 //! bans. `scripts/check-sim-determinism.sh` allows floats here and nowhere
 //! else in `crates/sf_math/src`, and forbids any mention of this module in
 //! `crates/sf_sim/src`; clippy's float lints are switched off for this module
-//! only (below).
+//! only (below). The module is also behind the `render` cargo feature, which
+//! `sf_sim` does not enable: built on its own, `sf_sim` cannot even name it.
 #![allow(clippy::float_arithmetic, clippy::cast_precision_loss)]
 
 use crate::fx::{FRAC_BITS, Fx};
