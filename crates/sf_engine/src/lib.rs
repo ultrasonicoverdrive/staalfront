@@ -1,12 +1,17 @@
 //! Main loop, window, input, time and assets; no game rules.
+//!
+//! - [`time`]: pure fixed-step accumulator (20 Hz sim) and frame-time stats.
+//! - [`input`]: raw input -> [`input::InputState`] -> named actions via RON bindings.
+//! - [`assets`]: asset root resolution and debug-only RON hot-reload.
+//! - [`app`]: the winit window and loop driving the [`App`] trait.
 
-/// Name of this crate, a placeholder until the real API lands.
-pub const CRATE: &str = "sf_engine";
+pub mod app;
+pub mod assets;
+pub mod input;
+pub mod time;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name() {
-        assert_eq!(super::CRATE, "sf_engine");
-    }
-}
+pub use app::{App, Context, EngineConfig, Resized, run};
+pub use assets::AssetRoot;
+pub use input::{Action, ActionState, Bindings, InputState};
+pub use time::{FixedStep, FrameStats, FrameSummary, SIM_HZ, SIM_STEP};
+pub use winit;

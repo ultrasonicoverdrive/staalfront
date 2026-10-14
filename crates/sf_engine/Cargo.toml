@@ -11,4 +11,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-sf_math = { path = "../../crates/sf_math" }
+# Window + event loop + raw input. Latest *stable* line (0.31 is still beta);
+# the `serde` feature lets RON name keys/buttons directly (KeyCode, MouseButton).
+winit = { version = "0.30.13", features = ["serde"] }
+# Derive for the RON-backed input binding types.
+serde = { version = "1", features = ["derive"] }
+# Project-wide data format (PLAN.md 1.0).
+ron = "0.12"
+# Debug-only file watcher for RON hot-reload; only used under cfg(debug_assertions).
+notify = { version = "8.2", default-features = false }
