@@ -89,14 +89,22 @@ Sources: CLAUDE.md, PLAN.md §5 rules 1-3, §6, WP0.1, WP1.3.
 - A checksum baseline updated without explanation counts as a defect in review
   (`.claude/agents/reviewer.md`: "checksums updated without explanation").
 - A change to the determinism rules needs approval (PLAN.md §12.4).
-- How baselines are stored: undecided (defined with WP1.2/WP1.3).
+- How baselines are stored (as built in WP1.2): golden checksums are committed in
+  `crates/sf_sim/tests/golden.rs`, produced by a fixed scenario (seed plus a
+  command script in `crates/sf_sim/tests/common/mod.rs`) and replayed on Linux
+  and Windows in CI (`cargo test --release -p sf_sim` for the full-size one).
+  Regenerate only for an intended behavior change, with
+  `cargo test --release -p sf_sim --test golden -- --ignored --nocapture print_golden_values`,
+  and explain the change in the PR. The cross-OS comparison of headless runs is WP1.3.
+
+As built in WP1.2 (`crates/sf_sim`): the only randomness is `sf_math::Rng`,
+explicitly seeded (the world seed and the number of entities spawned so far give
+each entity its own stream), and entities are always visited in ascending slot
+index.
 
 > **Proposal (not decided)** — not in PLAN.md, CLAUDE.md or an agent file:
 > - Concrete forbidden items: `Instant`, `SystemTime`, file/network/environment
 >   access in `sf_sim`; loading happens outside `sf_sim` and data is passed in.
-> - Randomness only from the `sf_math` RNG, with the seed part of the sim state
->   (to be decided in WP0.2/WP1.2).
-> - Entity iteration in the fixed storage order.
 > - Parallelism, if ever used, must give the same result as sequential execution.
 > - Steps for an intended checksum change: say in the PR that and why the
 >   checksum changes; update the scenario expectations in the same PR and explain

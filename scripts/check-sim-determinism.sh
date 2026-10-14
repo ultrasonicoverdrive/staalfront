@@ -7,8 +7,10 @@
 #
 # sf_math is shared with rendering, so it has exactly one exempt file,
 # crates/sf_math/src/render_bridge.rs (f32 conversion at the rendering
-# boundary). sf_sim may not mention that module at all. Tests that need
-# floats to judge sf_math (crates/sf_math/tests) are outside the scanned src.
+# boundary). sf_sim may not mention that module at all, and may not enable the
+# sf_math `render` cargo feature that compiles it (checked below). Tests that
+# need floats to judge sf_math (crates/sf_math/tests) are outside the scanned
+# src.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -47,6 +49,16 @@ scan() {
 
 scan crates/sf_sim/src "" "${patterns[@]}" "${sim_only_patterns[@]}"
 scan crates/sf_math/src crates/sf_math/src/render_bridge.rs "${patterns[@]}"
+
+# render_bridge only exists with sf_math's `render` cargo feature. sf_sim must
+# never switch that feature on, or the compiler stops guarding the boundary.
+hits=$(grep -nP '"render"' crates/sf_sim/Cargo.toml || true)
+if [ -n "$hits" ]; then
+    [ $fail -eq 0 ] && echo "determinism lint FAILED:" >&2
+    echo "sf_sim must not enable the sf_math render feature (crates/sf_sim/Cargo.toml):" >&2
+    echo "$hits" >&2
+    fail=1
+fi
 
 if [ $fail -ne 0 ]; then
     echo "Use sf_math fixed-point types and BTreeMap/BTreeSet or sorted Vec." >&2
