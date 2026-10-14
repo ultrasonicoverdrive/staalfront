@@ -7,7 +7,23 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+# `lints.workspace = true` cannot be combined with extra lints, so the
+# workspace lints are repeated here (same float lints as sf_sim). The only
+# module allowed to touch floats is `render_bridge`, which opts out locally.
+[lints.rust]
+unsafe_code = "forbid"
 
+[lints.clippy]
+float_arithmetic = "deny"
+float_cmp = "deny"
+float_cmp_const = "deny"
+cast_precision_loss = "deny"
+
+# No runtime dependencies: sf_math is `no_std` and shared by the simulation,
+# the renderer and the tools.
 [dependencies]
+
+[dev-dependencies]
+# Property-based tests. Default features (fork, timeout, bit-set) are off:
+# they pull in process-forking and tempfile machinery we do not use.
+proptest = { version = "1.12", default-features = false, features = ["std"] }
