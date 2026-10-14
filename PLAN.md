@@ -412,11 +412,18 @@ Decision Tijmen 14-10-2026 (was `xhigh` for everything). Each agent executes one
 work package, works in its own git worktree/branch, opens a PR. If a medium WP
 fails review twice, the orchestrator reruns it on `bouwer-sonnet-xhigh`.
 
+Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
+
+- `.claude/agents/reviewer.md` — effort `medium`: the review gate per PR (§12.2 step 4).
+- `.claude/agents/onderzoeker.md` — effort `low`: research questions (crates, APIs, algorithms, asset licenses); does not review.
+
+Decision Tijmen 14-10-2026.
+
 ### 12.2 Workflow per work package
 1. Orchestrator (main session) starts an agent with: WP number, the acceptance criteria from this plan, relevant `docs/`.
 2. Agent works on branch `wp/<number>-<name>`, writes tests first where possible, runs `cargo fmt`, `clippy -D warnings`, `cargo test`, headless scenarios.
 3. Agent opens a PR with: what was done, how it was tested, what was deliberately not done.
-4. Review gate: an `onderzoeker` agent (Opus) assesses the PR against §5 and the WP; then merge.
+4. Review gate: the `reviewer` agent checks out the PR, runs the checks itself, assesses it against the WP's acceptance criteria, §5 and §12.4, and posts `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only after `APPROVE`; on `CHANGES REQUESTED` the builder fixes the findings on the same branch and the reviewer reviews again.
 5. After each phase: short playable build + report in `docs/progress.md`.
 
 ### 12.3 Parallelism
