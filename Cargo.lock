@@ -1841,6 +1841,7 @@ name = "sf_math"
 version = "0.1.0"
 dependencies = [
  "proptest",
+ "sf_math",
 ]
 
 [[package]]
