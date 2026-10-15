@@ -216,12 +216,19 @@ fn diacritics_add_ink_above_the_letter() {
     let plain = ink_of("eee");
     let accent = ink_of("\u{e9}\u{e9}\u{e9}");
     let diaeresis = ink_of("\u{eb}\u{eb}\u{eb}");
+    let plain_i = ink_of("iii");
     let ij = ink_of("\u{ef}\u{ef}\u{ef}");
-    println!("ink: e {plain}, acute {accent}, diaeresis {diaeresis}, i-diaeresis {ij}");
+    println!(
+        "ink: e {plain}, acute {accent}, diaeresis {diaeresis}, i {plain_i}, i-diaeresis {ij}"
+    );
     assert!(plain > 50);
     assert!(accent > plain + 10, "the acute adds ink");
     assert!(diaeresis > plain + 10, "the diaeresis adds ink");
-    assert!(ij > 30);
+    assert!(plain_i > 20);
+    assert!(
+        ij > plain_i + 3,
+        "the second dot of the diaeresis adds ink to the i (which has a dot already)"
+    );
 }
 
 #[test]

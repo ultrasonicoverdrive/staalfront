@@ -28,7 +28,7 @@
 //! * **Input first.** See [`ui`]: presses and wheel over the UI are
 //!   consumed, releases always reach the game.
 //! * **Text** is rasterized with `ab_glyph` (pure Rust; chosen over `fontdue`
-//!   because it is already in the dependency tree and gives kerning access)
+//!   because it is small, pure Rust and exposes kerning)
 //!   from a 52 KB subset of Inter (SIL OFL, `assets/fonts/`). There is no
 //!   text shaping, right-to-left or font fallback; that is enough for an
 //!   English UI with Dutch names and diacritics. See [`text`].

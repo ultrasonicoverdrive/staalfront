@@ -17,8 +17,8 @@ sf_math = { path = "../../crates/sf_math" }
 sf_render = { path = "../../crates/sf_render" }
 sf_data = { path = "../../crates/sf_data" }
 # Glyph outlines -> coverage bitmaps, advances and kerning. Pure Rust, no
-# system font access, and already in the lockfile (winit's window decorations
-# use it), so it adds nothing new to the build. See the crate docs.
+# system font access. New to the build on Windows; on Linux winit's
+# window decorations (sctk-adwaita) already pull it in. See the crate docs.
 ab_glyph = "0.2.32"
 # Safe casts of the vertex/uniform structs to bytes for buffer uploads
 # (the same crate sf_render uses).

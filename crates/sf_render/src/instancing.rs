@@ -129,6 +129,8 @@ pub struct InstanceStats {
     pub tiles_visible: u32,
     /// Visible entities per [`MeshKind::index`].
     pub per_mesh: [u32; MeshKind::ALL.len()],
+    /// All entities per [`MeshKind::index`] (visible or not).
+    pub total_per_mesh: [u32; MeshKind::ALL.len()],
 }
 
 impl InstanceStats {
@@ -154,7 +156,21 @@ pub struct Instancer {
     tallest: f32,
     ground: (f32, f32),
     lists: [Vec<Instance>; MeshKind::ALL.len()],
+    /// Entities per mesh kind, counted when the tick is bucketed.
+    total_per_mesh: [u32; MeshKind::ALL.len()],
     stats: InstanceStats,
+}
+
+/// `(footprint, tallest)` of a style: half the diagonal of the widest
+/// footprint (covers any rotation) and the tallest shape.
+fn style_extent(style: &Style) -> (f32, f32) {
+    let footprint = style
+        .shapes()
+        .iter()
+        .map(|s| 0.5 * s.size[0].hypot(s.size[2]))
+        .fold(0.0, f32::max);
+    let tallest = style.shapes().iter().map(|s| s.size[1]).fold(0.0, f32::max);
+    (footprint, tallest)
 }
 
 impl Instancer {
@@ -167,13 +183,7 @@ impl Instancer {
         assert!(tile_size > 0.0, "tile size must be positive");
         let tiles_x = (map_size.0 / tile_size).ceil().max(1.0) as usize;
         let tiles_z = (map_size.1 / tile_size).ceil().max(1.0) as usize;
-        // Half the diagonal of the widest footprint covers any rotation.
-        let footprint = style
-            .shapes()
-            .iter()
-            .map(|s| 0.5 * s.size[0].hypot(s.size[2]))
-            .fold(0.0, f32::max);
-        let tallest = style.shapes().iter().map(|s| s.size[1]).fold(0.0, f32::max);
+        let (footprint, tallest) = style_extent(&style);
         Self {
             style,
             tile_size,
@@ -187,8 +197,18 @@ impl Instancer {
             tallest,
             ground: (0.0, 0.0),
             lists: Default::default(),
+            total_per_mesh: [0; MeshKind::ALL.len()],
             stats: InstanceStats::default(),
         }
+    }
+
+    /// Swap the look (palette and shapes), e.g. after `units.ron` was edited.
+    /// The entities are re-bucketed because the culling margins depend on the
+    /// shape sizes; the next [`Instancer::build`] uses the new look.
+    pub fn set_style(&mut self, style: Style) {
+        (self.footprint, self.tallest) = style_extent(&style);
+        self.style = style;
+        self.rebucket();
     }
 
     pub fn style(&self) -> &Style {
@@ -230,9 +250,11 @@ impl Instancer {
         let tiles = self.tiles_x * self.tiles_z;
         self.tile_start.clear();
         self.tile_start.resize(tiles + 1, 0);
+        self.total_per_mesh = [0; MeshKind::ALL.len()];
         for m in &self.motions {
             let t = self.tile_of(m.pos);
             self.tile_start[t + 1] += 1;
+            self.total_per_mesh[self.style.shape(m.shape).mesh.index()] += 1;
         }
         for t in 0..tiles {
             self.tile_start[t + 1] += self.tile_start[t];
@@ -280,6 +302,7 @@ impl Instancer {
         }
         let mut stats = InstanceStats {
             total: self.motions.len() as u32,
+            total_per_mesh: self.total_per_mesh,
             ..InstanceStats::default()
         };
         for t in 0..self.tiles_x * self.tiles_z {
@@ -521,5 +544,43 @@ mod tests {
             let ([x, z], _) = inst.motions[0].at(a);
             assert!(b.min.x <= x && x <= b.max.x && b.min.z <= z && z <= b.max.z);
         }
+    }
+
+    #[test]
+    fn totals_per_mesh_count_hidden_entities_too() {
+        let mut inst = instancer(3000, 256.0);
+        let near = camera(0.2, (128.0, 128.0), 256.0);
+        let stats = inst.build(&Frustum::from_view_proj(near.view_proj()), 0.5, |_, _| 0.0);
+        assert_eq!(stats.total_per_mesh.iter().sum::<u32>(), 3000);
+        assert!(stats.visible < stats.total);
+        for k in 0..MeshKind::ALL.len() {
+            assert!(stats.per_mesh[k] <= stats.total_per_mesh[k]);
+        }
+    }
+
+    #[test]
+    fn set_style_changes_the_look_and_the_per_mesh_totals() {
+        let mut inst = instancer(300, 64.0);
+        let cam = camera(1.0, (32.0, 32.0), 64.0);
+        let frustum = Frustum::from_view_proj(cam.view_proj());
+        let before = inst.build(&frustum, 0.0, |_, _| 0.0);
+        assert!(before.total_per_mesh[MeshKind::Cone.index()] > 0);
+        // Every shape becomes a cube, taller than any before, in one color.
+        let style = Style::from_ron(
+            "(palette: [(name: \"a\", srgb: (255, 0, 0))],
+              shapes: [(mesh: Cube, size: (1.0, 3.0, 1.0))])",
+        )
+        .unwrap();
+        inst.set_style(style);
+        let after = inst.build(&frustum, 0.0, |_, _| 0.0);
+        assert_eq!(after.total, before.total);
+        assert_eq!(after.total_per_mesh[MeshKind::Cube.index()], 300);
+        assert_eq!(after.total_per_mesh[MeshKind::Cone.index()], 0);
+        assert_eq!(inst.instances(MeshKind::Cone).len(), 0);
+        assert!(
+            inst.instances(MeshKind::Cube)
+                .iter()
+                .all(|i| i.color[0] > 0.9 && i.color[1] == 0.0)
+        );
     }
 }
