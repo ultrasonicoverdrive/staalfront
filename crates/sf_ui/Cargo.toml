@@ -12,3 +12,21 @@ workspace = true
 
 [dependencies]
 sf_math = { path = "../../crates/sf_math" }
+# Terrain map (minimap bake), camera (field-of-view frame, focus), the wgpu
+# re-export and the frame hook (`Renderer::render_with`) the UI pass hangs on.
+sf_render = { path = "../../crates/sf_render" }
+sf_data = { path = "../../crates/sf_data" }
+# Glyph outlines -> coverage bitmaps, advances and kerning. Pure Rust, no
+# system font access, and already in the lockfile (winit's window decorations
+# use it), so it adds nothing new to the build. See the crate docs.
+ab_glyph = "0.2.32"
+# Safe casts of the vertex/uniform structs to bytes for buffer uploads
+# (the same crate sf_render uses).
+bytemuck = { version = "1.25", features = ["derive"] }
+# UI settings (scale, colors) are RON (PLAN.md section 5 rule 6).
+serde = { version = "1", features = ["derive"] }
+ron = "0.12"
+
+[dev-dependencies]
+# Unproject through the camera's f64 view-projection in the minimap tests.
+glam = "0.34.1"

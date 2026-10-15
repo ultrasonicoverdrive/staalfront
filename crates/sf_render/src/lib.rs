@@ -37,7 +37,7 @@ pub use frustum::{Aabb, Frustum, Visibility};
 pub use gpu::{Gpu, GpuOptions, RenderError};
 pub use image::{Rgba8, Tolerance};
 pub use instancing::{InstanceStats, Instancer, Motion};
-pub use renderer::{DrawStats, EMBEDDED_SHADER, Renderer};
+pub use renderer::{DrawStats, EMBEDDED_SHADER, FrameTarget, Renderer};
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
 pub use wgpu;

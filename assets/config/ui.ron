@@ -1,0 +1,17 @@
+// Player-facing UI settings (sf_ui, WP1.12). Colors are sRGB (r, g, b, a).
+// Every field is optional; a missing field keeps the built-in default.
+(
+    // UI scale. The window's DPI scale factor is applied on top of this.
+    scale: 1.0,
+    // Default text size in logical pixels.
+    font_size: 14.0,
+    panel: Color(28, 34, 44, 235),
+    button: Color(60, 96, 150, 255),
+    button_hover: Color(84, 126, 188, 255),
+    button_pressed: Color(38, 64, 108, 255),
+    button_disabled: Color(70, 74, 82, 255),
+    text: Color(236, 240, 246, 255),
+    text_disabled: Color(130, 136, 146, 255),
+    minimap_frame: Color(18, 22, 30, 255),
+    fov_frame: Color(255, 255, 255, 235),
+)

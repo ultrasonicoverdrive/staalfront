@@ -2125,7 +2125,14 @@ dependencies = [
 name = "sf_ui"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
+ "bytemuck",
+ "glam 0.34.1",
+ "ron",
+ "serde",
+ "sf_data",
  "sf_math",
+ "sf_render",
 ]
 
 [[package]]

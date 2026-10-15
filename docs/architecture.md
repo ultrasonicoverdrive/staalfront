@@ -50,6 +50,8 @@ graph TD
   sf_render --> sf_math
   sf_render --> sf_data
   sf_ui --> sf_math
+  sf_ui --> sf_render
+  sf_ui --> sf_data
   sf_net --> sf_sim
   sf_game --> sf_math
   sf_game --> sf_sim
@@ -278,3 +280,33 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   `command_mix` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
+
+## 12. Player-facing UI (WP1.12)
+
+`sf_ui` is the in-game UI; `egui` stays for debug panels and tools. Details are in
+the crate docs (`crates/sf_ui/src/lib.rs`); the decisions:
+
+- **Immediate mode.** `Ui::begin_frame`, widgets in painter's order (`panel`,
+  `text_in`, `button`, `area`, `minimap`), `Ui::end_frame`. A button's `clicked` is
+  the return value of the call that declares it. The UI never touches the world;
+  the game turns responses into commands.
+- **One pipeline, two draw calls.** Every primitive is a tinted textured quad
+  (`DrawList`). Solid rectangles, glyph coverage and the procedural nine-slice skin
+  share one dynamically packed atlas (`Atlas`, shelf packer, grows in height); the
+  baked minimap is the second texture. `UiRenderer::render` records one render pass
+  on top of the scene through `Renderer::render_with` (the only `sf_render` change:
+  a closure hook that receives the frame's encoder and colour view; the egui overlay
+  of WP1.11 can use the same hook).
+- **Layout and scale.** Nine anchors plus an inward offset relative to the window or
+  another rectangle; sizes in logical pixels times the effective scale (`ui.ron`
+  `scale` times the window's DPI factor), snapped to whole pixels.
+- **Input first.** A press of any mouse button or a wheel notch over a panel, button
+  or area is consumed; a button pressed on the UI stays captured until released, so a
+  drag never leaks; releases always reach the game. `Ui::filter_for_game` applies the
+  rule to a raw `UiInput`; `Ui::blocks_pointer_at` answers from the last frame's
+  rectangles for an event hook (`App::on_window_event` of WP1.11).
+- **Minimap.** The terrain is baked once on the CPU (material average colour times
+  slope shading) and uploaded as a texture; unit dots and the field-of-view frame
+  (the four screen corners projected on the ground with `Camera::ground_point`,
+  clamped to the map) are drawn per frame; a left press or drag returns the world
+  point for `Camera::set_focus`.
