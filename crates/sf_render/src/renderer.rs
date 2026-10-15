@@ -45,6 +45,33 @@ struct GpuMesh {
     index_count: u32,
 }
 
+/// A per-frame instance buffer for one mesh kind (grows, never shrinks).
+#[derive(Default)]
+struct DynamicInstances {
+    buffer: Option<wgpu::Buffer>,
+    capacity: u64,
+    count: u32,
+}
+
+/// Draw-call counters of the last frame, for the debug panel (WP1.11).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DrawStats {
+    /// Instances in the per-frame lists (one draw call per non-empty mesh kind).
+    pub dynamic_instances: u32,
+    /// Draw calls for the per-frame instance lists.
+    pub dynamic_draw_calls: u32,
+    /// Draw calls for the static scene objects (one per mesh kind used).
+    pub scene_draw_calls: u32,
+    /// Draw calls for terrain chunks.
+    pub terrain_draw_calls: u32,
+}
+
+impl DrawStats {
+    pub fn total_draw_calls(&self) -> u32 {
+        self.dynamic_draw_calls + self.scene_draw_calls + self.terrain_draw_calls
+    }
+}
+
 pub struct Renderer {
     gpu: Gpu,
     target: Target,
@@ -61,6 +88,8 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     /// `(mesh index, instance range)` per draw call.
     draws: Vec<(usize, Range<u32>)>,
+    /// Per-frame instances (units), one buffer per mesh kind.
+    dynamic: Vec<DynamicInstances>,
     camera: PlaceholderCamera,
     /// When set, replaces the placeholder camera (see [`Renderer::set_view_proj`]).
     view_proj: Option<Mat4>,
@@ -163,6 +192,8 @@ impl Renderer {
                     MeshKind::Plane => MeshData::plane(),
                     MeshKind::Cube => MeshData::cube(),
                     MeshKind::Pyramid => MeshData::pyramid(),
+                    MeshKind::Cylinder => MeshData::cylinder(),
+                    MeshKind::Cone => MeshData::cone(),
                 };
                 upload_mesh(device, &data)
             })
@@ -185,6 +216,10 @@ impl Renderer {
             meshes,
             instances,
             draws,
+            dynamic: MeshKind::ALL
+                .iter()
+                .map(|_| DynamicInstances::default())
+                .collect(),
             camera,
             view_proj: None,
             lighting,
@@ -409,6 +444,44 @@ impl Renderer {
         self.draws = draws;
     }
 
+    /// Replace the per-frame instances of one mesh kind (units): one instance
+    /// buffer per mesh kind, one draw call. Cheap enough to call every frame;
+    /// the buffer grows when needed and is reused otherwise. An empty slice
+    /// hides the kind.
+    pub fn set_instances(&mut self, mesh: MeshKind, instances: &[Instance]) {
+        let slot = &mut self.dynamic[mesh.index()];
+        slot.count = instances.len() as u32;
+        if instances.is_empty() {
+            return;
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(instances);
+        let needed = bytes.len() as u64;
+        if slot.buffer.is_none() || slot.capacity < needed {
+            // Grow with headroom so a crowd changing size does not reallocate every frame.
+            let capacity = (needed + needed / 4).next_multiple_of(4096);
+            slot.buffer = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("unit instances"),
+                size: capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            slot.capacity = capacity;
+        }
+        if let Some(buffer) = &slot.buffer {
+            self.gpu.queue.write_buffer(buffer, 0, bytes);
+        }
+    }
+
+    /// Draw-call counters for the frame that is drawn next (or was just drawn).
+    pub fn draw_stats(&self) -> DrawStats {
+        DrawStats {
+            dynamic_instances: self.dynamic.iter().map(|d| d.count).sum(),
+            dynamic_draw_calls: self.dynamic.iter().filter(|d| d.count > 0).count() as u32,
+            scene_draw_calls: self.draws.len() as u32,
+            terrain_draw_calls: self.terrain_chunk_count() as u32,
+        }
+    }
+
     /// Show a terrain: builds the chunk meshes, the material texture array
     /// and the material index texture from `map` and draws it before the
     /// scene objects. Replaces a previous terrain. Call on map changes, not
@@ -478,17 +551,28 @@ impl Renderer {
                 pass.draw_indexed(0..chunk.index_count, 0, 0..1);
             }
         }
-        if self.draws.is_empty() {
-            return; // an empty instance buffer cannot be bound
-        }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.set_vertex_buffer(1, self.instances.slice(..));
-        for (mesh, range) in &self.draws {
-            let mesh = &self.meshes[*mesh];
+        // An empty instance buffer cannot be bound, so skip when there is nothing.
+        if !self.draws.is_empty() {
+            pass.set_vertex_buffer(1, self.instances.slice(..));
+            for (mesh, range) in &self.draws {
+                let mesh = &self.meshes[*mesh];
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, range.clone());
+            }
+        }
+        // Units: one buffer and one draw call per mesh kind.
+        for (index, slot) in self.dynamic.iter().enumerate() {
+            let (Some(buffer), true) = (&slot.buffer, slot.count > 0) else {
+                continue;
+            };
+            let mesh = &self.meshes[index];
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+            pass.set_vertex_buffer(1, buffer.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, range.clone());
+            pass.draw_indexed(0..mesh.index_count, 0, 0..slot.count);
         }
     }
 }

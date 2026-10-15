@@ -2105,6 +2105,8 @@ dependencies = [
  "glam 0.34.1",
  "png",
  "pollster",
+ "ron",
+ "serde",
  "sf_data",
  "sf_math",
  "wgpu",

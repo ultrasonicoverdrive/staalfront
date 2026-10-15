@@ -5,15 +5,23 @@ use glam::camera::rh;
 use glam::{Mat4, Vec3};
 
 /// Which placeholder mesh an object uses.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
 pub enum MeshKind {
     Plane,
     Cube,
     Pyramid,
+    Cylinder,
+    Cone,
 }
 
 impl MeshKind {
-    pub const ALL: [MeshKind; 3] = [MeshKind::Plane, MeshKind::Cube, MeshKind::Pyramid];
+    pub const ALL: [MeshKind; 5] = [
+        MeshKind::Plane,
+        MeshKind::Cube,
+        MeshKind::Pyramid,
+        MeshKind::Cylinder,
+        MeshKind::Cone,
+    ];
 
     pub fn index(self) -> usize {
         self as usize
