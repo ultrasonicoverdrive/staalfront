@@ -272,6 +272,25 @@ fn auto_zoom_arg() -> bool {
     std::env::args().skip(1).any(|a| a == "--auto-zoom")
 }
 
+/// `--zoom <0..1>` and `--focus <x,z>`: start the camera there (screenshots).
+fn camera_args() -> (Option<f64>, Option<DVec2>) {
+    let mut args = std::env::args().skip(1);
+    let (mut zoom, mut focus) = (None, None);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--zoom" => zoom = args.next().and_then(|v| v.parse().ok()),
+            "--focus" => {
+                focus = args.next().and_then(|v| {
+                    let (x, z) = v.split_once(',')?;
+                    Some(DVec2::new(x.parse().ok()?, z.parse().ok()?))
+                });
+            }
+            _ => {}
+        }
+    }
+    (zoom, focus)
+}
+
 /// `--frame-cap <hz>`: limit the frame rate (smoke tests; default uncapped).
 fn frame_cap_arg() -> Option<u32> {
     let mut args = std::env::args().skip(1);
@@ -307,10 +326,15 @@ fn main() {
         ..EngineConfig::default()
     };
     let failed = Arc::new(AtomicBool::new(false));
-    if let Err(e) = sf_engine::run(
-        config,
-        Runner::new(exit_after_arg(), auto_zoom_arg(), map, failed.clone()),
-    ) {
+    let mut runner = Runner::new(exit_after_arg(), auto_zoom_arg(), map, failed.clone());
+    let (zoom, focus) = camera_args();
+    if let Some(zoom) = zoom {
+        runner.camera.set_zoom(zoom);
+    }
+    if let Some(focus) = focus {
+        runner.camera.set_focus(focus);
+    }
+    if let Err(e) = sf_engine::run(config, runner) {
         eprintln!("sf_game: {e}");
         std::process::exit(1);
     }

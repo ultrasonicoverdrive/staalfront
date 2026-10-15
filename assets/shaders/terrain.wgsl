@@ -55,10 +55,10 @@ fn layer_at(cell: vec2<i32>) -> i32 {
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let uv = in.world_xz / params.tile_meters;
     // Cell centres sit at integer + 0.5; blend between the four nearest,
-    // with a narrow ramp around the cell borders.
+    // with a smooth ramp over a full cell (centre to centre).
     let p = in.world_xz - vec2<f32>(0.5, 0.5);
     let base = vec2<i32>(floor(p));
-    let w = smoothstep(vec2<f32>(0.3, 0.3), vec2<f32>(0.7, 0.7), fract(p));
+    let w = smoothstep(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), fract(p));
     let c00 = textureSample(materials, material_sampler, uv, layer_at(base)).rgb;
     let c10 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(1, 0))).rgb;
     let c01 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(0, 1))).rgb;

@@ -170,3 +170,23 @@ fn committed_test_map_loads() {
     }
     assert!(seen.iter().filter(|&&s| s).count() >= 4, "{seen:?}");
 }
+
+/// Guards against a flat-looking landscape: on small and large maps a good
+/// part of the terrain must be visibly sloped.
+#[test]
+fn generated_maps_have_real_slopes() {
+    for side in [64_u32, 256] {
+        let m = generate(side, side, 1);
+        let mut slopes: Vec<f32> = Vec::new();
+        for z in 0..i64::from(side) {
+            for x in 0..i64::from(side) {
+                let dx = m.vertex_height(x + 1, z) - m.vertex_height(x, z);
+                let dz = m.vertex_height(x, z + 1) - m.vertex_height(x, z);
+                slopes.push(dx.hypot(dz));
+            }
+        }
+        slopes.sort_by(f32::total_cmp);
+        let p90 = slopes[slopes.len() * 9 / 10];
+        assert!(p90 > 0.25, "{side}x{side}: 90th percentile slope {p90}");
+    }
+}

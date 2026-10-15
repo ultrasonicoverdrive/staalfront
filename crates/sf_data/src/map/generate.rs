@@ -63,6 +63,13 @@ fn fbm(seed: u32, x: f32, z: f32, octaves: u32) -> f32 {
     sum / norm
 }
 
+/// Size in metres the landscape features (hills, valley width, noise) scale
+/// with: the shorter map side, but capped so big maps get more hills of the
+/// same steepness instead of the same hills stretched flat.
+fn feature_scale(w: f32, h: f32) -> f32 {
+    w.min(h).min(96.0)
+}
+
 struct Landscape {
     seed: u32,
     w: f32,
@@ -74,14 +81,16 @@ struct Landscape {
 impl Landscape {
     fn new(width: u32, height: u32, seed: u32) -> Self {
         let (w, h) = (width as f32, height as f32);
-        let hills = (0..5)
+        let f = feature_scale(w, h);
+        let count = (5.0 * w * h / (f * f)).round() as u32;
+        let hills = (0..count)
             .map(|i| {
                 let s = seed.wrapping_add(7000 + i);
                 (
                     unit(s, 1, 0) * w,
                     unit(s, 2, 0) * h,
-                    (0.10 + 0.10 * unit(s, 3, 0)) * w.min(h),
-                    0.25 + 0.30 * unit(s, 4, 0),
+                    (0.05 + 0.05 * unit(s, 3, 0)) * f,
+                    0.45 + 0.40 * unit(s, 4, 0),
                 )
             })
             .collect();
@@ -104,15 +113,15 @@ impl Landscape {
 
     /// Height as a fraction of the scale, `0..=MAX_RELIEF`.
     fn height(&self, x: f32, z: f32) -> f32 {
-        let scale = self.w.min(self.h);
-        let mut v = 0.18 + 0.30 * fbm(self.seed, x / (scale * 0.35), z / (scale * 0.35), 4);
+        let scale = feature_scale(self.w, self.h);
+        let mut v = 0.20 + 0.60 * fbm(self.seed, x / (scale * 0.12), z / (scale * 0.12), 4);
         for &(hx, hz, radius, amp) in &self.hills {
             let d2 = ((x - hx).powi(2) + (z - hz).powi(2)) / (radius * radius);
             v += amp * (-d2).exp();
         }
         // Valley with a flat riverbed.
         let d = self.river_distance(x, z);
-        let valley = 1.0 - smooth((d / (scale * 0.14)).min(1.0));
+        let valley = 1.0 - smooth((d / (scale * 0.10)).min(1.0));
         v = v * (1.0 - 0.8 * valley) + 0.03 * valley;
         // Plateau in the north-west quarter.
         let (px, pz) = (x / self.w - 0.2, z / self.h - 0.18);
@@ -135,7 +144,7 @@ pub fn generate(width: u32, height: u32, seed: u32) -> Map {
     }
     let at = |x: usize, z: usize| f32::from(heights[z * vw + x]) / 65535.0 * HEIGHT_SCALE;
     let mut cells = Vec::with_capacity(width as usize * height as usize);
-    let scale = land.w.min(land.h);
+    let scale = feature_scale(land.w, land.h);
     for cz in 0..height as usize {
         for cx in 0..width as usize {
             let corners = [

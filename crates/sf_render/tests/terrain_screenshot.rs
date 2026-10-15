@@ -155,7 +155,7 @@ fn lit_fraction(map: &Map, vx: i64, vz: i64) -> f32 {
 }
 
 fn is_flat(map: &Map, vx: i64, vz: i64) -> bool {
-    vertex_normal(map, vx, vz)[1] > 0.985
+    vertex_normal(map, vx, vz)[1] > 0.95
 }
 
 #[test]
@@ -204,19 +204,16 @@ fn whole_map_shows_relief_and_all_materials() {
     );
 }
 
-#[test]
-fn sun_facing_slopes_are_brighter_than_shaded_ones() {
-    let map = test_map();
-    let c = camera(&map, 0.55, (32.0, 32.0));
-    let img = shot(&mut renderer(&map, false), &c);
-    // Luminance of visible vertices, ranked by how much they face the light:
-    // the most sun-facing tenth against the most shaded tenth.
+/// Mean luminance of the most sun-facing tenth and the most shaded tenth of
+/// the visible vertices of `map` (ranked by its normals), read from `img`
+/// (which may show a different map), plus the spread of the facing values.
+fn slope_contrast(map: &Map, img: &Rgba8, c: &Camera) -> (f32, f32, f32) {
     let mut seen = Vec::new();
     for vz in 0..=i64::from(map.height()) {
         for vx in 0..=i64::from(map.width()) {
             let y = map.vertex_height(vx, vz);
-            if let Some((px, py)) = project(&c, Vec3::new(vx as f32, y, vz as f32)) {
-                seen.push((lit_fraction(&map, vx, vz), luminance(img.pixel(px, py))));
+            if let Some((px, py)) = project(c, Vec3::new(vx as f32, y, vz as f32)) {
+                seen.push((lit_fraction(map, vx, vz), luminance(img.pixel(px, py))));
             }
         }
     }
@@ -225,20 +222,96 @@ fn sun_facing_slopes_are_brighter_than_shaded_ones() {
     assert!(n > 50, "{n}");
     let mean = |v: &[(f32, f32)]| v.iter().map(|p| p.1).sum::<f32>() / v.len() as f32;
     let (shaded, lit) = (&seen[..n], &seen[seen.len() - n..]);
-    println!(
-        "lit {:.1} (facing {:.2}), shaded {:.1} (facing {:.2})",
-        mean(lit),
-        lit[0].0,
-        mean(shaded),
-        shaded[n - 1].0
-    );
-    assert!(lit[0].0 - shaded[n - 1].0 > 0.05, "no real slope variety");
+    (mean(lit), mean(shaded), lit[0].0 - shaded[n - 1].0)
+}
+
+/// The same map with the same materials but flat ground.
+fn flattened(map: &Map) -> Map {
+    let flat = vec![10_000; map.heights().len()];
+    Map::from_parts(
+        map.width(),
+        map.height(),
+        map.height_scale(),
+        map.materials().to_vec(),
+        flat,
+        map.cells().to_vec(),
+    )
+    .expect("flat copy")
+}
+
+#[test]
+fn sun_facing_slopes_are_brighter_than_shaded_ones() {
+    let map = test_map();
+    let c = camera(&map, 0.55, (32.0, 32.0));
+    let img = shot(&mut renderer(&map, false), &c);
+    let (lit, shaded, spread) = slope_contrast(&map, &img, &c);
+    println!("relief: lit {lit:.1}, shaded {shaded:.1}, facing spread {spread:.2}");
+    assert!(spread > 0.4, "the test map has no real slopes: {spread}");
+    assert!(lit > shaded * 1.25, "lit {lit:.1} vs shaded {shaded:.1}");
+
+    // Control: the same materials on flat ground must NOT show that contrast
+    // (measured with the relief map's ranking), proving the check can fail.
+    let flat = flattened(&map);
+    let flat_img = shot(&mut renderer(&flat, false), &c);
+    let (lit, shaded, _) = slope_contrast(&map, &flat_img, &c);
+    println!("flat control: lit {lit:.1}, shaded {shaded:.1}");
     assert!(
-        mean(lit) > mean(shaded) * 1.08,
-        "lit {:.1} vs shaded {:.1}",
-        mean(lit),
-        mean(shaded)
+        lit < shaded * 1.12,
+        "flat map shows slope shading: {lit:.1} vs {shaded:.1}"
     );
+}
+
+/// Low-angle shot (zoomed in, pitch about 45 degrees) on the steepest part of
+/// the test map: the shading must clearly separate sun-facing from shaded
+/// slopes, in one material (grass-only render of that area is not needed:
+/// the contrast is measured against the flat render of the same view).
+#[test]
+fn relief_close_up_shows_lit_and_shaded_slopes() {
+    let map = test_map();
+    // Steepest 9x9 window of the map, found from the heightmap normals.
+    let (mut best, mut focus) = (-1.0_f32, (32.0, 32.0));
+    for vz in 6..=i64::from(map.height()) - 6 {
+        for vx in 6..=i64::from(map.width()) - 6 {
+            let mut steep = 0.0;
+            for dz in -4..=4 {
+                for dx in -4..=4 {
+                    steep += 1.0 - vertex_normal(&map, vx + dx, vz + dz)[1];
+                }
+            }
+            if steep > best {
+                best = steep;
+                focus = (vx as f64, vz as f64);
+            }
+        }
+    }
+    println!("steepest area around {focus:?}");
+    let c = camera(&map, 0.1, focus);
+    let img = shot(&mut renderer(&map, false), &c);
+    check_golden("terrain_relief_320.png", &img);
+    let flat_img = shot(&mut renderer(&flattened(&map), false), &c);
+    // Per-pixel difference to the flat render of the same view: the relief
+    // (lighting and perspective) changes a large part of the frame.
+    let diff = compare(&img, &flat_img, 30).expect("same size");
+    println!("relief vs flat: ratio {:.3}", diff.ratio());
+    assert!(
+        diff.ratio() > 0.3,
+        "relief barely changes the picture: {:.3}",
+        diff.ratio()
+    );
+    // Luminance spread across the frame (lit slope vs shaded slope).
+    let l: Vec<f32> = (0..img.height)
+        .flat_map(|y| (0..img.width).map(move |x| (x, y)))
+        .map(|(x, y)| luminance(img.pixel(x, y)))
+        .collect();
+    let (lo, hi) = (percentile(&l, 0.05), percentile(&l, 0.95));
+    println!("luminance p5 {lo:.1}, p95 {hi:.1}");
+    assert!(hi > lo * 1.5, "flat-looking frame: p5 {lo:.1}, p95 {hi:.1}");
+}
+
+fn percentile(values: &[f32], q: f32) -> f32 {
+    let mut v = values.to_vec();
+    v.sort_by(f32::total_cmp);
+    v[((v.len() - 1) as f32 * q) as usize]
 }
 
 #[test]
