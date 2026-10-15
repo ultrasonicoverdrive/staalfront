@@ -1,16 +1,179 @@
 //! The complete game simulation: no GPU, no I/O, no clock, no floats.
 //!
-//! Determinism rules (PLAN.md section 5): no floating point, no std hash
-//! collections, no clock, no I/O. Enforced by `scripts/check-sim-determinism.sh`, by
-//! `clippy::float_arithmetic` and by `clippy.toml`.
+//! `sf_sim` holds the world as a struct of arrays, advances it in fixed
+//! ticks, accepts input only as scheduled [`Command`]s, and fingerprints its
+//! state after every tick. Everything it computes is integer or `sf_math`
+//! fixed point, so the same seed and the same commands give bit-identical
+//! state on every machine, in debug and in release (PLAN.md decision B3).
+//! That is what replays, saves, lockstep multiplayer and headless tests stand
+//! on.
+//!
+//! In this work package the world contains one placeholder behaviour,
+//! "wander", so thousands of entities move around without any gameplay. There
+//! are no unit types, no terrain, no collision and no combat yet.
+//!
+//! ```
+//! use sf_math::Vec2;
+//! use sf_sim::{Command, Kind, PlayerId, Tick, World, WorldConfig};
+//!
+//! let mut world = World::new(WorldConfig::new(42)).unwrap();
+//! // Input is a command for a tick. Tick 0 is the one about to run.
+//! world
+//!     .schedule(
+//!         Tick(0),
+//!         PlayerId(0),
+//!         Command::Spawn { kind: Kind(1), pos: Vec2::from_ints(10, 10), owner: PlayerId(0) },
+//!     )
+//!     .unwrap();
+//! let report = world.step();
+//! assert_eq!(report.commands_executed, 1);
+//! assert_eq!(world.len(), 1);
+//! assert_eq!(world.checksum_history(), &[report.checksum]);
+//! // Let it wander for five seconds of game time.
+//! for _ in 0..100 {
+//!     world.step();
+//! }
+//! assert_eq!(world.tick(), Tick(101));
+//! // The presentation reads a snapshot: previous and current state.
+//! let view = world.snapshot().iter().next().unwrap();
+//! assert_ne!(view.pos, Vec2::from_ints(10, 10));
+//! // A command for a tick that already ran is refused.
+//! assert!(world.schedule(Tick(0), PlayerId(0), Command::Despawn { id: view.id }).is_err());
+//! ```
+//!
+//! # Time
+//!
+//! The simulation runs at [`TICKS_PER_SECOND`] (20) ticks per second, a fixed
+//! step. [`World::tick`] counts the ticks executed so far, which is also the
+//! number of the tick the next [`World::step`] runs. [`World::step`] advances
+//! exactly one tick and does, in this order:
+//!
+//! * run every command scheduled for this tick, in `(player, insertion)`
+//!   order;
+//! * for every live entity in ascending slot order: remember the previous
+//!   position and facing, then run its behaviour;
+//! * advance the tick counter;
+//! * compute the checksum of the new state and append it to the history.
+//!
+//! There is no clock: the caller decides how often to call `step` (the game
+//! binary from the engine's fixed-step loop, 20 times per second of game time;
+//! the headless runner as fast as it can). Speeds and durations are written per
+//! second and converted with [`per_tick`].
+//!
+//! # Entity storage
+//!
+//! Entities live in one struct-of-arrays store with a column per property:
+//! generation, live flag, kind, owner, position, previous position, facing,
+//! previous facing, behaviour, target, wander area and a random stream. An
+//! entity is a slot number, nothing more; the columns are plain `Vec`s walked
+//! in index order, which is cache friendly and the only iteration order the
+//! simulation ever uses.
+//!
+//! **Ids.** An [`EntityId`] is `{ index, generation }`. Each slot counts how
+//! often it has been freed; an id is valid only while its generation equals the
+//! slot's. A stale id (the entity was despawned, maybe replaced) is simply not
+//! found by [`World::get`], [`World::is_alive`] or any command.
+//!
+//! **Spawn.** A spawn takes the most recently freed slot (the free list is a
+//! stack, last freed is reused first), or appends a new slot when the free
+//! list is empty. Ids are therefore fully determined by the command history:
+//! in a fresh world the first spawn is `{ 0, 0 }`, the next `{ 1, 0 }`, and so
+//! on, which lets a scenario script name entities before they exist.
+//!
+//! **Despawn.** The slot becomes a tombstone *in place*: its live flag clears,
+//! its columns reset, its generation goes up by one, and its index is pushed on
+//! the free list. Nothing moves, there is no swap-remove, so the slot of every
+//! other entity, and therefore the iteration order, is unaffected by a despawn.
+//! Iteration order is ascending slot index, *not* age: a new entity that
+//! reuses a low slot is visited before older ones in higher slots. The columns
+//! never shrink (shrinking would let a stale id match a new entity of the same
+//! generation); a slot whose generation counter would overflow is retired
+//! instead of reused. The number of slots is capped at [`MAX_ENTITIES`].
+//!
+//! # Randomness
+//!
+//! Every entity owns a PCG32 stream ([`sf_math::Rng`]) seeded from the world
+//! seed and the number of entities spawned before it (not from its slot, which
+//! can be reused). Compared with one world generator this costs 16 bytes per
+//! entity and buys: an entity's random choices depend only on its own history,
+//! so spawning, despawning or commanding *other* entities never changes them;
+//! results do not depend on the order entities are processed in; and a later
+//! parallel update would not change results. Every stream state is part of the
+//! checksum.
+//!
+//! # Commands
+//!
+//! [`World::schedule`] is the only way input enters. See [`command`] for the
+//! ordering rules: commands run at the start of their tick by
+//! `(tick, player, insertion)`, a command for an already executed tick is
+//! rejected with [`ScheduleError::PastTick`], and commands naming stale ids
+//! skip those ids. The minimal set: [`Command::Spawn`], [`Command::Despawn`],
+//! [`Command::SetWanderArea`] and [`Command::MoveTo`]. Pending commands are
+//! simulation state: they are in the checksum and survive a clone of the
+//! world.
+//!
+//! # Checksum
+//!
+//! [`World::checksum`] hashes the whole state in a canonical order with
+//! FNV-1a (see [`checksum`] for exactly what is and is not covered). It is
+//! computed after every tick and kept in [`World::checksum_history`], where
+//! entry `k` is the state after tick `k`. `sf_headless` writes the history to
+//! disk and CI compares it between Linux and Windows; `tests/golden.rs` pins a
+//! scenario to committed values.
+//!
+//! # Wander
+//!
+//! New entities wander over the whole map: pick a random target in the
+//! entity's [`Area`], turn toward it, walk there at the configured speed, pick
+//! another on arrival. [`behavior`] describes the motion model. Positions are
+//! kept inside the map (default 256 by 256 cells, see [`WorldConfig`]) by
+//! construction: spawn positions, areas and targets are clamped, and every
+//! move is clamped again.
+//!
+//! # Presentation
+//!
+//! [`World::snapshot`] gives a read-only [`Snapshot`] of every live entity
+//! with previous and current position and facing, for interpolation between
+//! ticks. The crate has no rendering dependency and cannot reach the float
+//! conversions of `sf_math`.
+//!
+//! # Determinism rules and how they are enforced
+//!
+//! * No floating point types and no float literals:
+//!   `scripts/check-sim-determinism.sh` scans `src/` for them, and clippy's
+//!   float lints are denied for the crate.
+//! * No `std` hash collections: the same script, and `clippy.toml`
+//!   (`disallowed-types`). Ordered containers only (`BTreeMap`, `Vec`).
+//! * No clock, no I/O, no threads, no global state: nothing in `src/` touches
+//!   them; the `sf_math` generator is always seeded explicitly.
+//! * Every integer operation that could overflow is saturating or wrapping on
+//!   purpose, so debug builds (overflow checks on) and release builds compute
+//!   the same bits.
+//! * `sf_math`'s float helpers sit behind its `render` feature, which this
+//!   crate does not enable: built on its own, `sf_sim` cannot name them.
+//!
+//! # Not here yet
+//!
+//! Map terrain and occupancy (phase 2), unit definitions (phase 3), pathfinding
+//! and collision (phase 4), health, weapons and projectiles (phase 5), and
+//! saving the state to bytes (phase 13). The world is `Clone`, which already
+//! gives a perfect in-memory snapshot for tests.
 
-/// Name of this crate, a placeholder until the real API lands.
-pub const CRATE: &str = "sf_sim";
+pub mod behavior;
+pub mod checksum;
+pub mod command;
+mod entities;
+pub mod ids;
+pub mod snapshot;
+pub mod world;
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_name() {
-        assert_eq!(super::CRATE, "sf_sim");
-    }
-}
+pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
+pub use command::{Command, CommandQueue, ScheduleError};
+pub use ids::{
+    EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
+};
+pub use snapshot::{EntityView, Snapshot};
+pub use world::{
+    ConfigError, DEFAULT_MAP_SIDE, DEFAULT_SPEED, DEFAULT_TURN_PER_TICK, MAX_ENTITIES,
+    MAX_MAP_SIDE, StepReport, World, WorldConfig,
+};

@@ -76,6 +76,8 @@ graph TD
 ```
 
 `sf_math`, `sf_engine`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
+(`sf_math` lists itself as a dev-dependency with its `render` feature, only so that
+its own tests can use `render_bridge`; no other crate enables that feature yet.)
 
 Rendering and windowing stay decoupled (WP1.4): `sf_engine` owns the `winit`
 window and knows nothing about `wgpu`; `sf_render` owns `wgpu` and knows nothing
@@ -127,8 +129,29 @@ IDs** (no ECS framework; PLAN.md §1.0). Columns hold position, owner, health,
 mission, movement, weapon and so on. A fixed, predictable iteration order is what
 gives determinism; the layout is cache-friendly and has no hidden scheduling.
 Behavior per type comes from data (RON in `sf_data`), not from subclasses; this is
-the modern translation of the object hierarchy in the analysis. The exact column
-set and API are built in WP1.2 (undecided until then, see PLAN.md §3).
+the modern translation of the object hierarchy in the analysis.
+
+As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
+
+- **Columns:** generation, live flag, kind, owner, position and previous position,
+  facing and previous facing, behavior, target, wander area and one PCG32 stream
+  per entity. Health, mission, movement class and weapon columns arrive with their
+  phases.
+- **Ids:** `EntityId { index, generation }`. A stale id is simply not found.
+- **Despawn:** the slot becomes a tombstone in place (no swap-remove), its
+  generation goes up, its index goes on a LIFO free list. Iteration is always
+  ascending slot index, so a despawn never reorders anything.
+- **Tick:** `World::step()` runs exactly one 20 Hz tick: commands scheduled for
+  that tick (ordered by player, then insertion; a past tick is rejected), then the
+  behaviors, then the checksum.
+- **Checksum:** FNV-1a over the full state in a canonical order after every tick,
+  with the history kept for the headless runner. The previous position and facing
+  (render interpolation only) are the one deliberate exclusion.
+- **Presentation:** `World::snapshot()` is a read-only view with previous and
+  current position and facing per live entity.
+- **Floats:** `sf_math::render_bridge` sits behind sf_math's `render` cargo
+  feature, which `sf_sim` never enables, so `cargo build -p sf_sim` cannot reach
+  it. The presentation crates enable the feature when they need it.
 
 ## 5. Coordinates (§1.3)
 

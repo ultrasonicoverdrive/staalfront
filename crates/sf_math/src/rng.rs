@@ -423,6 +423,111 @@ mod tests {
         assert!(item.is_some());
     }
 
+    /// A PCG32 state whose next output is exactly `target`. The output is
+    /// `rotr(((s >> 18) ^ s) >> 27, s >> 59)`: with the top five bits of `s`
+    /// clear the rotation is zero, bits 27 to 58 of `(s >> 18) ^ s` are the
+    /// output, and each of those bits can be solved from the top down because
+    /// bit `p + 18` is either known already or above bit 58 (zero). Bits 0 to
+    /// 26 do not matter and are taken from `free_low`.
+    fn state_with_output(target: u32, free_low: u64) -> u64 {
+        let mut s = free_low & ((1 << 27) - 1);
+        for p in (27..=58u32).rev() {
+            let want = u64::from((target >> (p - 27)) & 1);
+            let above = if p + 18 <= 58 { (s >> (p + 18)) & 1 } else { 0 };
+            s |= (want ^ above) << p;
+        }
+        // The construction itself is checked, so a wrong helper cannot make
+        // the tests below pass or fail by accident.
+        let probe = Rng::from_state(RngState { state: s, inc: 1 }).next_u32();
+        assert_eq!(probe, target);
+        s
+    }
+
+    /// A generator whose first `next_u32` is `target`.
+    fn rng_whose_first_draw_is(target: u32) -> Rng {
+        Rng::from_state(RngState {
+            state: state_with_output(target, 0),
+            inc: 1,
+        })
+    }
+
+    /// `rng` after exactly `n` raw draws.
+    fn after_draws(rng: &Rng, n: u32) -> Rng {
+        let mut r = rng.clone();
+        for _ in 0..n {
+            r.next_u32();
+        }
+        r
+    }
+
+    #[test]
+    fn below_accepts_the_threshold_itself_and_rejects_the_value_under_it() {
+        // `threshold = 2^32 mod bound`. The values 0..threshold are rejected;
+        // `threshold` itself is the first accepted one, so `r >= threshold`
+        // is right and `r > threshold` would bias the result. The generator
+        // state afterwards tells how many draws were consumed.
+        for (bound, threshold) in [
+            (3u32, 1u32),
+            (5, 1),
+            (6, 4),
+            (7, 4),
+            (10, 6),
+            (0x8000_0001, 0x7FFF_FFFF),
+        ] {
+            assert_eq!(bound.wrapping_neg() % bound, threshold, "bound {bound}");
+
+            let mut rng = rng_whose_first_draw_is(threshold);
+            let one_draw = after_draws(&rng, 1);
+            assert_eq!(rng.below(bound), threshold % bound, "bound {bound}");
+            assert_eq!(rng, one_draw, "bound {bound}: accepted on the first draw");
+
+            let mut rng = rng_whose_first_draw_is(threshold - 1);
+            let one_draw = after_draws(&rng, 1);
+            rng.below(bound);
+            assert_ne!(rng, one_draw, "bound {bound}: rejected, drew again");
+        }
+        // A power of two has threshold zero: nothing is ever rejected.
+        let mut rng = rng_whose_first_draw_is(0);
+        let one_draw = after_draws(&rng, 1);
+        assert_eq!(rng.below(8), 0);
+        assert_eq!(rng, one_draw);
+    }
+
+    #[test]
+    fn below_u64_accepts_the_threshold_itself_and_rejects_the_value_under_it() {
+        // A state pair (s0, s1) with s1 = s0 * MULTIPLIER + inc, where s0
+        // outputs `hi` and s1 outputs `lo`: so the first `next_u64` is
+        // `hi << 32 | lo`. The increment must be odd; s0 even and s1 odd
+        // make `s1 - s0 * MULTIPLIER` odd.
+        let rng_whose_first_u64_is = |hi: u32, lo: u32| {
+            let s0 = state_with_output(hi, 0);
+            let s1 = state_with_output(lo, 1);
+            let inc = s1.wrapping_sub(s0.wrapping_mul(MULTIPLIER));
+            assert_eq!(inc & 1, 1);
+            let rng = Rng::from_state(RngState { state: s0, inc });
+            assert_eq!(rng.clone().next_u64(), u64::from(hi) << 32 | u64::from(lo));
+            rng
+        };
+        // The thresholds 2^64 mod 3 (one) and 2^64 mod 6 (four).
+        for (bound, threshold) in [(3u64, 1u32), (6, 4)] {
+            assert_eq!(bound.wrapping_neg() % bound, u64::from(threshold));
+
+            let mut rng = rng_whose_first_u64_is(0, threshold);
+            let two_draws = after_draws(&rng, 2);
+            assert_eq!(
+                rng.below_u64(bound),
+                u64::from(threshold) % bound,
+                "bound {bound}"
+            );
+            assert_eq!(rng, two_draws, "bound {bound}: accepted on the first pair");
+
+            let mut rng = rng_whose_first_u64_is(0, threshold - 1);
+            let two_draws = after_draws(&rng, 2);
+            rng.below_u64(bound);
+            assert_ne!(rng, two_draws, "bound {bound}: rejected, drew again");
+        }
+    }
+
     #[test]
     fn unbiased_bound_arithmetic() {
         // For every bound the accepted draw count is a multiple of the bound.
