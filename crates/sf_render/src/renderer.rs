@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 
+use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::{Gpu, GpuOptions, RenderError};
@@ -59,6 +60,8 @@ pub struct Renderer {
     /// `(mesh index, instance range)` per draw call.
     draws: Vec<(usize, Range<u32>)>,
     camera: PlaceholderCamera,
+    /// When set, replaces the placeholder camera (see [`Renderer::set_view_proj`]).
+    view_proj: Option<Mat4>,
     lighting: Lighting,
     #[cfg(debug_assertions)]
     watch: Option<crate::shader_watch::ShaderWatch>,
@@ -179,6 +182,7 @@ impl Renderer {
             instances,
             draws,
             camera,
+            view_proj: None,
             lighting,
             #[cfg(debug_assertions)]
             watch: None,
@@ -387,8 +391,25 @@ impl Renderer {
         Ok(Rgba8::new(width, height, pixels))
     }
 
+    /// Use this view-projection (wgpu clip space, depth `0..1`) instead of the
+    /// fixed placeholder camera. The caller rebuilds it when the size changes.
+    pub fn set_view_proj(&mut self, view_proj: Mat4) {
+        self.view_proj = Some(view_proj);
+    }
+
+    /// Replace the scene (all objects are re-uploaded; call on scene changes,
+    /// not every frame).
+    pub fn set_scene(&mut self, objects: &[SceneObject]) {
+        let (instances, draws) = upload_scene(&self.gpu.device, objects);
+        self.instances = instances;
+        self.draws = draws;
+    }
+
     fn write_globals(&self) {
-        let globals = Globals::new(self.camera.view_proj(aspect(self.size)), &self.lighting);
+        let view_proj = self
+            .view_proj
+            .unwrap_or_else(|| self.camera.view_proj(aspect(self.size)));
+        let globals = Globals::new(view_proj, &self.lighting);
         self.gpu
             .queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));

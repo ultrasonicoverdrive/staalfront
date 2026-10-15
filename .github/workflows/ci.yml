@@ -37,6 +37,12 @@ jobs:
       # must give identical bits in both (golden hashes in tests/golden.rs).
       - name: sf_math golden hashes in release mode
         run: cargo test --release -p sf_math
+      # sf_sim: the full-size determinism test (5000 wanderers, 10000 ticks) and
+      # the committed golden checksums (tests/golden.rs) run in release mode, the
+      # same values on Linux and Windows. `-p sf_sim` alone also builds sf_math
+      # without its `render` feature, so sf_sim cannot even name render_bridge.
+      - name: sf_sim determinism and golden checksums in release mode
+        run: cargo test --release -p sf_sim
       - name: Clippy (release)
         if: runner.os == 'Linux'
         run: cargo clippy --workspace --release --all-targets -- -D warnings

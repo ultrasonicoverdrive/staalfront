@@ -4,7 +4,8 @@
 //! (`sf_sim`) computes with nothing else, so that a tick produces
 //! bit-identical state on every machine, in debug and release, which replays,
 //! saves and lockstep multiplayer depend on (PLAN.md decision B3). The
-//! renderer shares the crate and converts at the edge via [`render_bridge`].
+//! renderer shares the crate and converts at the edge via `render_bridge`
+//! (behind the `render` cargo feature, see below).
 //!
 //! # What is in here
 //!
@@ -15,7 +16,7 @@
 //! | [`Facing`] | one of 256 directions; exact sin/cos, `atan2` replacement, turning |
 //! | [`Rng`] | PCG32 with unbiased range helpers and serialisable state |
 //! | [`hash::Fnv1a64`] | explicit little-endian FNV-1a for state checksums |
-//! | [`render_bridge`] | the only float code: `Fx`/`Vec2` to and from single-precision floats |
+//! | `render_bridge` | the only float code: `Fx`/`Vec2` to and from single-precision floats; exists only with the `render` feature |
 //!
 //! # The number format
 //!
@@ -86,6 +87,13 @@
 //!   floating-point sine, say) lives in `tests/`, outside the scanned `src/`.
 //! * `clippy::float_arithmetic`, `float_cmp` and `cast_precision_loss` are
 //!   denied for the whole crate except `render_bridge`.
+//! * `render_bridge` is compiled only with the `render` cargo feature, which
+//!   `sf_sim` never enables. Building `sf_sim` on its own (`cargo build -p
+//!   sf_sim`, `cargo test -p sf_sim`) therefore leaves the module out, so a
+//!   use of it is a compile error. Cargo unifies features across one build, so
+//!   a whole-workspace build that also contains a renderer has the module
+//!   present; the lint script and the isolated `-p sf_sim` CI step cover that
+//!   case.
 //! * Every integer width is explicit (`i64`, `i128`, `u32`, ...) and `usize`
 //!   never enters arithmetic, so 32-bit and 64-bit targets agree.
 //! * `tests/golden.rs` replays a fixed pseudo-random sequence of 100000 mixed
@@ -120,6 +128,7 @@ pub mod facing;
 pub mod fx;
 pub mod hash;
 mod int;
+#[cfg(feature = "render")]
 pub mod render_bridge;
 pub mod rng;
 mod trig;

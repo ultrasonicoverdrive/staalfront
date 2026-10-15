@@ -23,7 +23,19 @@ cast_precision_loss = "deny"
 # the renderer and the tools.
 [dependencies]
 
+[features]
+# Float conversion at the rendering boundary (`sf_math::render_bridge`). Off by
+# default and never enabled by sf_sim: with the feature off the module does not
+# exist, so the compiler (not just the lint script) stops the simulation from
+# reaching for floats. Presentation-side crates (sf_render, sf_ui, ...) enable it
+# with `sf_math = { path = "...", features = ["render"] }`.
+render = []
+
 [dev-dependencies]
+# sf_math's own tests exercise `render_bridge`, so they need the feature. A
+# self dev-dependency turns it on for `cargo test -p sf_math` only (it is not
+# built when another crate, such as sf_sim, is the package under test).
+sf_math = { path = ".", features = ["render"] }
 # Property-based tests. Default features (fork, timeout, bit-set) are off:
 # they pull in process-forking and tempfile machinery we do not use.
 proptest = { version = "1.12", default-features = false, features = ["std"] }
