@@ -49,7 +49,7 @@ M0 status:
   5000 --auto-zoom`, DX12): steady 60 fps at vsync with all 5,000 units in
   view; p99 17.4-18.2 ms is vsync timing jitter, not missed frames; two
   hitches of 34-40 ms when zooming out to the whole map. That laptop has a
-  GTX 1650, not the GTX 1050 named in PLAN.md.
+  GTX 1650; Tijmen made it the reference card (B10, 2026-10-15).
 
 Report: _to be written at the end of the phase._
 
