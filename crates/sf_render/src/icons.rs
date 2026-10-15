@@ -430,6 +430,31 @@ mod tests {
         }
     }
 
+    /// The model keeps the pixels the icon drops only if both shaders compute
+    /// the same threshold. WGSL has no includes, so the function is written
+    /// twice: it must be the same text in both, and the formula of
+    /// [`dither_rank`].
+    #[test]
+    fn both_shaders_carry_the_same_dither_function() {
+        let function = |src: &str| {
+            let start = src
+                .find("fn dither_threshold")
+                .expect("the function exists");
+            let end = start + src[start..].find("\n}\n").expect("it ends") + 2;
+            src[start..end]
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let scene = function(include_str!("../../../assets/shaders/scene.wgsl"));
+        let icon = function(include_str!("../../../assets/shaders/icon.wgsl"));
+        assert_eq!(scene, icon);
+        assert!(scene.contains(
+            "((xy & 1u) << 5u) | ((y & 1u) << 4u) | ((xy & 2u) << 2u) | ((y & 2u) << 1u) | ((xy & 4u) >> 1u) | ((y & 4u) >> 2u)"
+        ));
+        assert!(scene.contains("(f32(rank) + 0.5) / 64.0"));
+    }
+
     #[test]
     fn dither_thresholds_stay_strictly_inside_the_unit_interval() {
         for y in 0..8 {

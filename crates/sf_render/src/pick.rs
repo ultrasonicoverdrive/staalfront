@@ -10,10 +10,10 @@
 //!   height it stands on. A model smaller than `icons.click_min_px` on the
 //!   screen gets a bigger box, so a distant unit is still easy to hit (and
 //!   the click target does not shrink below the icon that replaces the
-//!   model). The nearest hit along the ray wins. If the caller knows where the
-//!   ray meets the terrain ([`PickQuery::terrain_t`], from `Ground::raycast`
-//!   of WP1.8) a model entered behind that point is hidden by the hill and
-//!   does not count.
+//!   model). The nearest hit along the ray wins. With the terrain known
+//!   ([`PickQuery::with_ground`]: the exact ray-terrain hit of WP1.8, stored
+//!   in [`PickQuery::terrain_t`]) a model entered behind the point where the
+//!   ray meets the ground is hidden by the hill and does not count.
 //! * **Strategic zoom (icons):** the icon's screen quad ([`icon_hit`]), the
 //!   same snapped square the shader draws, `size_px` wide. The terrain does
 //!   not hide icons (they are not depth tested), so it does not hide them

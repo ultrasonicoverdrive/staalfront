@@ -22,7 +22,7 @@ use sf_render::model::EyeView;
 use sf_render::pick::project_px;
 use sf_render::{
     Camera, CameraConfig, FrameView, Frustum, GpuOptions, Instancer, Motion, PickQuery, Renderer,
-    Style, UnitId,
+    Style, TerrainGround, UnitId,
 };
 
 const W: u32 = 640;
@@ -591,6 +591,15 @@ fn ten_thousand_units_at_close_mid_and_strategic_zoom() {
         let blend = inst
             .icon_config()
             .blend_for_camera(eye.focal_px, cam.distance() as f32, 1.0);
+        // The picture before WP1.9 for comparison: every unit a level-0
+        // model, whatever the zoom.
+        let mut base_ms = f64::MAX;
+        let mut base = Default::default();
+        for _ in 0..20 {
+            let started = Instant::now();
+            base = inst.build(&frustum, 0.5, |x, z| map.height_at(x, z));
+            base_ms = base_ms.min(started.elapsed().as_secs_f64() * 1e3);
+        }
         let mut best = f64::MAX;
         let mut stats = Default::default();
         for _ in 0..20 {
@@ -615,6 +624,20 @@ fn ten_thousand_units_at_close_mid_and_strategic_zoom() {
             draw.icon_draw_calls,
             draw.dynamic_triangles,
         );
+        // Picking at the middle of the screen (with the terrain ray, as the game does).
+        let ground = TerrainGround::new(&map);
+        let mut pick_ms = f64::MAX;
+        for _ in 0..20 {
+            let started = Instant::now();
+            let query = PickQuery::new([960.0, 540.0], vp, [1920.0, 1080.0]).with_ground(&ground);
+            let _ = inst.pick(&query);
+            pick_ms = pick_ms.min(started.elapsed().as_secs_f64() * 1e3);
+        }
+        println!(
+            "          |         | before WP1.9, level-0 models only: {} draw calls, {} triangles, {base_ms:.3} ms; pick incl. terrain ray {pick_ms:.3} ms",
+            base.model_draw_calls, base.model_triangles,
+        );
+        assert!(stats.model_triangles <= base.model_triangles);
         // What was counted at the draw calls is what the instancer built.
         assert_eq!(draw.dynamic_draw_calls, stats.model_draw_calls);
         assert_eq!(draw.icon_draw_calls, stats.icon_draw_calls);

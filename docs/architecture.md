@@ -315,7 +315,9 @@ the click sound in `sf_game` use it.
   steps, so 255 to 1 passes through 0), puts each unit on the terrain height
   (display only; the sim stays 2D) and fills one instance list per mesh kind.
   `Renderer::set_instances(kind, list)` keeps one growing instance buffer per
-  mesh kind: one draw call per kind.
+  mesh kind: one draw call per kind. Since WP1.9 the game calls
+  `Instancer::build_frame` (levels of detail, icons, picking; §14) and the lists
+  are per (mesh kind, level of detail); `build` is the level-0 models-only case.
 - **Culling:** entities are bucketed by map tile (32 m, the terrain chunk
   size) with a counting sort at tick time. A tile's box is the box around the
   previous and current positions of its members, grown by the largest shape
@@ -441,3 +443,92 @@ the crate docs (`crates/sf_ui/src/lib.rs`); the decisions:
   (the four screen corners projected on the ground with `Camera::ground_point`,
   which since WP1.8 is a terrain pick, clamped to the map) are drawn per frame; a left press or drag returns the world
   point for `Camera::set_focus`.
+
+## 14. Model LOD, strategic icons and picking (WP1.9)
+
+PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `icons`,
+`pick`; the crate docs are the reference), `Instancer::build_frame` and `pick` in
+`instancing`, the icon pass in `renderer` and `assets/shaders/icon.wgsl`.
+
+- **LOD chain per model** (`model.rs`). A shape has 1 to 4 levels, finest first;
+  level `i` is used while the model's *projected size* (bounding diameter times
+  `focal_px / distance`, physical pixels, so not scaled by the UI scale) is at
+  least `switch_px[i]`, the last level takes the rest. Selected **per instance
+  per frame** with hysteresis (`ModelLods::select`: coarser only when below
+  `switch * (1 - h)`, finer only when above `switch * (1 + h)`; the level of
+  each entity slot is kept in one byte, so it survives other units despawning).
+  The chain is data (`units.ron`, `lods: [(segments: Some(16), min_px: 60.0), ...]`);
+  the cube has one level, the cylinder and cone 16 / 8 / 5 facets
+  (`MeshData::cylinder_with`, `cone_with`).
+- **One draw per (mesh kind, level).** Meshes live in one table addressed by
+  `MeshId`: the five `MeshKind`s first (a kind is its own id), then the extra
+  meshes of `ModelSet::extra_meshes`. The instancer keeps one list per id, the
+  renderer one buffer and one draw per list (`Renderer::upload_units` registers the
+  extra meshes when `ModelSet::revision` changes, then uploads every list and the
+  icons). Three shapes with 1 + 3 + 3 levels make at most 7 model draws.
+  **For WP1.10:** load the glTF meshes, hand them to `ModelSet::new(extra, chains)`
+  with the asset's switch sizes and `Instancer::set_models`; selection, stats and
+  picking need no change. A level is one mesh today; a hull/turret model would add
+  a part list to `LodLevel`.
+- **When icons take over** (`icons.rs`, `icons:` in `units.ron`). The trigger is the
+  apparent size, at the camera focus, of a reference unit (`reference_size` 2 m):
+  `reference_size * focal_px / camera distance`. Models only at or above
+  `model_above_px` (28), icons only at or below `icon_below_px` (14), a cross-fade
+  in between that is linear in the *logarithm* of that size (so a wheel notch moves
+  it equally everywhere in the band). It is one number per frame, not per unit, so
+  all units cross over together, and it is in pixels, not in camera zoom (zoom 1.0
+  is 340 m on a 256 m map and 1360 m on a 1024 m map), so it means the same on every
+  map and resolution. The thresholds are logical pixels times the UI scale, like the
+  icon. The F1 panel shows the band as camera distances.
+- **Icons.** One instanced quad per unit, one draw call (`IconInstance`, 32 bytes:
+  world anchor, shape + flags, colour). The vertex shader projects the anchor and
+  lays a quad of `size_px * ui_scale` **pixels** around it (centre snapped to the
+  pixel grid so edges are crisp), so the size is the same at every zoom. The shape
+  (square, circle, triangle: `icon:` per shape) is a signed distance function in the
+  fragment shader, so it is crisp at every scale; fill = player colour (unlit, so it
+  is exactly the palette colour), dark outline, white when highlighted.
+- **The cross-fade is a dissolve, not alpha.** The blend is one number, the model
+  weight `m`; the icon weight is `1 - m` (the sum is exact by construction). Both
+  representations compare the pixel's 8x8 Bayer threshold with the same `m` (the
+  alpha of the instance colour): the model keeps the pixels with threshold `< m`
+  (`scene.wgsl`), the icon draws the others (`icon.wgsl`). Every pixel belongs to
+  exactly one of them: **no double-bright overlap, no dark dip from two
+  half-transparent layers, nothing to sort** (the models stay opaque and
+  depth-correct), nothing pops (at `m = 1` the test passes everywhere, at `m = 0` the
+  models are not even built). The price is a visible screen-door pattern for the
+  second or so of a zoom through the band. The icon's own antialiased edge is plain
+  alpha blending on top. Weight 1 skips the test in the shader.
+- **Icons are not depth tested** (documented choice). They are a map symbol drawn
+  after the scene, over terrain and models. A depth-tested billboard would be half
+  eaten by the ground below it on a tilted camera (the ground lower on the screen is
+  nearer the eye than the icon's anchor), and a symbol hidden by a hill is a unit
+  the player cannot find; at the zoom where icons exist the camera is 70 degrees or
+  more down and relief hides almost nothing. What a player may know about enemy
+  units is the fog of war's business (WP8.4), not the depth buffer's. Consequence:
+  icons on both sides of a ridge overlap without occluding.
+- **Picking per zoom** (`pick.rs`; `Instancer::pick(&PickQuery)` answers from the
+  records of the last `build_frame`, i.e. exactly what was drawn: the interpolated
+  position and facing and the terrain height of that frame).
+  * Models: the cursor ray against the model's oriented box (`ray_obb`), enlarged
+    so that its footprint is at least `click_min_px` (14, times the UI scale) wide on
+    the screen. The nearest hit along the ray wins. **Terrain occlusion:**
+    `PickQuery::with_ground(&Ground)` takes the exact ray-terrain hit of WP1.8 and a
+    model entered behind it is hidden by the hill.
+  * Icons: the cursor inside the icon's snapped screen quad, boundary inclusive
+    (`icon_hit`). Terrain does not hide icons (they are not depth tested). The icon
+    whose centre is nearest the cursor wins, then the nearer to the camera, then the
+    lower id.
+  * Cross-fade band: the representation with the larger weight, the model on a tie.
+  * Tile pruning: a tile is searched only if the cursor ray passes its box grown by
+    what a click volume can grow; 0.01 ms for 10,000 icons.
+- **Hover** (`sf_game`): `build_frame`, `pick`, `Instancer::highlight` (model tinted
+  towards white, icon gets a white outline), `Renderer::upload_units`. The F1 panel
+  names the unit and shows the level counts, the blend and the band; "Units" radio:
+  by zoom / models / icons. A click does nothing yet. `--hover x,y` fixes the cursor
+  for screenshots, `--unit-display` sets the radio.
+- **Counters:** `InstanceStats` (`per_lod`, `models`, `icons`, `model_triangles`,
+  `model_draw_calls`, `icon_draw_calls`); `DrawStats` (`dynamic_triangles`,
+  `icon_instances`, `icon_draw_calls`), counted in `CountedPass::draw` like the rest.
+  Models of a single-level shape count as level 0.
+- **Not hot-reloaded:** `icon.wgsl` (the scene shader is). `units.ron` is, in debug
+  builds, and rebuilds the model set.
