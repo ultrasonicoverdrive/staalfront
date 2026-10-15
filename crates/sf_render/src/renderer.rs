@@ -8,8 +8,11 @@ use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::{Gpu, GpuOptions, RenderError};
+use crate::icons::{IconInstance, IconParams};
 use crate::image::Rgba8;
+use crate::instancing::Instancer;
 use crate::mesh::{MeshData, Vertex};
+use crate::model::{BUILTIN_MESHES, MeshId};
 use crate::overlay::{Overlay, OverlayFrame};
 use crate::scene::{
     Globals, Instance, Lighting, MeshKind, PlaceholderCamera, SceneObject, test_scene,
@@ -19,6 +22,11 @@ use crate::scene::{
 /// builds start from it and may hot-reload from disk (see
 /// [`Renderer::watch_shader_file`]).
 pub const EMBEDDED_SHADER: &str = include_str!("../../../assets/shaders/scene.wgsl");
+
+/// The strategic icon shader (WP1.9), embedded at build time. Not
+/// hot-reloaded: it is small and stable, and the scene shader's reload
+/// path rebuilds a different pipeline.
+pub const ICON_SHADER: &str = include_str!("../../../assets/shaders/icon.wgsl");
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Format of the offscreen target (sRGB, so shader output is linear light).
@@ -84,11 +92,20 @@ pub struct DrawStats {
     pub scene_draw_calls: u32,
     /// Draw calls for terrain chunks (= chunks drawn).
     pub terrain_draw_calls: u32,
+    /// Triangles drawn from the per-frame lists (the unit models).
+    pub dynamic_triangles: u32,
+    /// Units drawn as strategic icons.
+    pub icon_instances: u32,
+    /// Draw calls for the icons: 1 when there are any, else 0.
+    pub icon_draw_calls: u32,
 }
 
 impl DrawStats {
     pub fn total_draw_calls(&self) -> u32 {
-        self.dynamic_draw_calls + self.scene_draw_calls + self.terrain_draw_calls
+        self.dynamic_draw_calls
+            + self.scene_draw_calls
+            + self.terrain_draw_calls
+            + self.icon_draw_calls
     }
 }
 
@@ -108,8 +125,18 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     /// `(mesh index, instance range)` per draw call.
     draws: Vec<(usize, Range<u32>)>,
-    /// Per-frame instances (units), one buffer per mesh kind.
+    /// Per-frame instances (units), one buffer per mesh (a kind at a level of detail).
     dynamic: Vec<DynamicInstances>,
+    /// `ModelSet::revision` of the extra meshes uploaded (0 = none yet).
+    model_revision: u64,
+    /// The strategic icons (WP1.9): their own pipeline, one instance buffer
+    /// and one draw call. No depth test, drawn after the units.
+    icon_pipeline: wgpu::RenderPipeline,
+    icon_params: wgpu::Buffer,
+    icon_bind_group: wgpu::BindGroup,
+    icon_indices: wgpu::Buffer,
+    icon_sizes: IconParams,
+    icons: DynamicInstances,
     camera: PlaceholderCamera,
     /// When set, replaces the placeholder camera (see [`Renderer::set_view_proj`]).
     view_proj: Option<Mat4>,
@@ -231,6 +258,48 @@ impl Renderer {
             }],
         });
 
+        // Strategic icons: a second small uniform (viewport and icon sizes)
+        // next to the shared globals.
+        let icon_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("icon params layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let icon_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("icon params"),
+            size: std::mem::size_of::<[f32; 4]>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let icon_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("icon params bind group"),
+            layout: &icon_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: icon_params.as_entire_binding(),
+            }],
+        });
+        let icon_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("icon pipeline layout"),
+            bind_group_layouts: &[Some(&bind_group_layout), Some(&icon_layout)],
+            immediate_size: 0,
+        });
+        let icon_pipeline = build_icon_pipeline(device, &icon_pipeline_layout, ICON_SHADER, format)
+            .unwrap_or_else(|e| panic!("embedded shader icon.wgsl is invalid: {e}"));
+        let icon_indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("icon quad indices"),
+            contents: bytemuck::cast_slice(&[0_u16, 1, 2, 0, 2, 3]),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         let meshes = MeshKind::ALL
             .iter()
             .map(|kind| {
@@ -266,6 +335,16 @@ impl Renderer {
                 .iter()
                 .map(|_| DynamicInstances::default())
                 .collect(),
+            model_revision: 0,
+            icon_pipeline,
+            icon_params,
+            icon_bind_group,
+            icon_indices,
+            icon_sizes: IconParams {
+                size_px: 14.0,
+                outline_px: 1.5,
+            },
+            icons: DynamicInstances::default(),
             camera,
             view_proj: None,
             lighting,
@@ -555,27 +634,56 @@ impl Renderer {
     /// the buffer grows when needed and is reused otherwise. An empty slice
     /// hides the kind.
     pub fn set_instances(&mut self, mesh: MeshKind, instances: &[Instance]) {
-        let slot = &mut self.dynamic[mesh.index()];
-        slot.count = instances.len() as u32;
-        if instances.is_empty() {
-            return;
+        self.set_mesh_instances(MeshId::of(mesh), instances);
+    }
+
+    /// Like [`Renderer::set_instances`] for any entry of the mesh table: a
+    /// mesh kind at a level of detail, or a mesh registered with
+    /// [`Renderer::set_model_meshes`]. An id that is not in the table is
+    /// ignored.
+    pub fn set_mesh_instances(&mut self, mesh: MeshId, instances: &[Instance]) {
+        if let Some(slot) = self.dynamic.get_mut(mesh.index()) {
+            fill_instances(&self.gpu, slot, "unit instances", instances);
         }
-        let bytes: &[u8] = bytemuck::cast_slice(instances);
-        let needed = bytes.len() as u64;
-        if slot.buffer.is_none() || slot.capacity < needed {
-            // Grow with headroom so a crowd changing size does not reallocate every frame.
-            let capacity = (needed + needed / 4).next_multiple_of(4096);
-            slot.buffer = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("unit instances"),
-                size: capacity,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-            slot.capacity = capacity;
+    }
+
+    /// Replace the meshes after the built-in kinds (ids `BUILTIN_MESHES..`):
+    /// the lower levels of detail of the placeholder shapes, later the glTF
+    /// models. Their instance lists start empty. Call when the model set
+    /// changes, not every frame; [`Renderer::upload_units`] does it when
+    /// needed.
+    pub fn set_model_meshes(&mut self, meshes: &[MeshData]) {
+        self.meshes.truncate(BUILTIN_MESHES);
+        self.meshes
+            .extend(meshes.iter().map(|m| upload_mesh(&self.gpu.device, m)));
+        self.dynamic.truncate(BUILTIN_MESHES);
+        self.dynamic
+            .resize_with(self.meshes.len(), DynamicInstances::default);
+    }
+
+    /// Replace the strategic icons of the frame: one instance buffer and one
+    /// draw call, drawn over the scene without a depth test. `params` are the
+    /// icon sizes in physical pixels (`Instancer::icon_params`). An empty
+    /// slice draws no icons.
+    pub fn set_icons(&mut self, icons: &[IconInstance], params: IconParams) {
+        self.icon_sizes = params;
+        fill_instances(&self.gpu, &mut self.icons, "icon instances", icons);
+    }
+
+    /// Upload everything the instancer built for the frame: the extra model
+    /// meshes if the model set changed, every instance list (one draw call
+    /// each) and the icons.
+    pub fn upload_units(&mut self, units: &Instancer) {
+        let models = units.models();
+        if self.model_revision != models.revision() {
+            self.set_model_meshes(models.extra_meshes());
+            self.model_revision = models.revision();
         }
-        if let Some(buffer) = &slot.buffer {
-            self.gpu.queue.write_buffer(buffer, 0, bytes);
+        for id in 0..models.mesh_count() {
+            let id = MeshId(id as u16);
+            self.set_mesh_instances(id, units.mesh_instances(id));
         }
+        self.set_icons(units.icon_instances(), units.icon_params());
     }
 
     /// Draw-call counters of the last rendered frame (all zero before the
@@ -661,6 +769,16 @@ impl Renderer {
         self.gpu
             .queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        // Icons: viewport, icon side and outline width, all in pixels.
+        let icon = [
+            self.size.0 as f32,
+            self.size.1 as f32,
+            self.icon_sizes.size_px,
+            self.icon_sizes.outline_px,
+        ];
+        self.gpu
+            .queue
+            .write_buffer(&self.icon_params, 0, bytemuck::bytes_of(&icon));
     }
 
     /// Record the scene pass and count the
@@ -722,6 +840,15 @@ impl Renderer {
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw(DrawGroup::Units, mesh.index_count, 0..slot.count);
         }
+        // Strategic icons last, over everything, one instanced quad each.
+        if let (Some(buffer), true) = (&self.icons.buffer, self.icons.count > 0) {
+            pass.set_pipeline(&self.icon_pipeline);
+            pass.set_bind_group(0, &self.bind_group);
+            pass.set_bind_group(1, &self.icon_bind_group);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.set_index_buffer(self.icon_indices.slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw(DrawGroup::Icons, 6, 0..self.icons.count);
+        }
         self.last_stats.set(pass.finish());
     }
 
@@ -740,6 +867,7 @@ enum DrawGroup {
     Terrain,
     Scene,
     Units,
+    Icons,
 }
 
 /// A render pass whose only way to draw is [`CountedPass::draw`], which
@@ -788,6 +916,11 @@ impl<'a> CountedPass<'a> {
             DrawGroup::Units => {
                 s.dynamic_draw_calls += 1;
                 s.dynamic_instances += n;
+                s.dynamic_triangles += index_count / 3 * n;
+            }
+            DrawGroup::Icons => {
+                s.icon_draw_calls += 1;
+                s.icon_instances += n;
             }
         }
     }
@@ -881,8 +1014,40 @@ fn upload_scene(
     (buffer, draws)
 }
 
+/// Write `items` into a growing per-frame instance buffer and set its count.
+fn fill_instances<T: bytemuck::Pod>(
+    gpu: &Gpu,
+    slot: &mut DynamicInstances,
+    label: &'static str,
+    items: &[T],
+) {
+    slot.count = items.len() as u32;
+    if items.is_empty() {
+        return;
+    }
+    let bytes: &[u8] = bytemuck::cast_slice(items);
+    let needed = bytes.len() as u64;
+    if slot.buffer.is_none() || slot.capacity < needed {
+        // Grow with headroom so a crowd changing size does not reallocate every frame.
+        let capacity = (needed + needed / 4).next_multiple_of(4096);
+        slot.buffer = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(label),
+            size: capacity,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }));
+        slot.capacity = capacity;
+    }
+    if let Some(buffer) = &slot.buffer {
+        gpu.queue.write_buffer(buffer, 0, bytes);
+    }
+}
+
 const VERTEX_ATTRS: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+/// An icon instance: world anchor, shape and flags, color with the model weight.
+const ICON_ATTRS: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Float32x4];
 const INSTANCE_ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
     2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4
 ];
@@ -942,6 +1107,66 @@ fn build_pipeline(
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    match pollster::block_on(scope.pop()) {
+        Some(e) => Err(e.to_string()),
+        None => Ok(pipeline),
+    }
+}
+
+/// The strategic icon pipeline: instance data only (the quad's corners come
+/// from the vertex index), alpha blending for the antialiased edge, no depth
+/// test and no depth write, no culling.
+fn build_icon_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    wgsl: &str,
+    format: wgpu::TextureFormat,
+) -> Result<wgpu::RenderPipeline, String> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("icon.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("icon pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<IconInstance>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &ICON_ATTRS,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),

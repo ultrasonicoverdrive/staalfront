@@ -1,0 +1,633 @@
+//! Models and their level-of-detail chains (WP1.9).
+//!
+//! # The chain
+//! A **model** is what a unit shape looks like in the world. It has a chain
+//! of `N` level-of-detail meshes (`N <= MAX_LODS`), finest first. Level `i`
+//! (for `i < N - 1`) is used while the model's *projected size* is at least
+//! `switch_px[i]` pixels; the last level takes everything smaller. The
+//! projected size is the model's bounding diameter ([`Shape::bounding_diameter`](crate::style::Shape::bounding_diameter))
+//! times the focal length over the distance to the eye, in physical pixels.
+//! It is a property of the picture, so it does not move with the UI scale.
+//!
+//! # Hysteresis
+//! [`ModelLods::select`] takes the level the same unit had last frame. A unit
+//! goes to a coarser level only when it is clearly below the switch size
+//! (`switch * (1 - h)`) and back to a finer one only when it is clearly above
+//! it (`switch * (1 + h)`), so a unit hovering at a switch size does not
+//! flicker. Without a previous level (a unit that was not drawn last frame)
+//! the level is the plain threshold ([`ModelLods::ideal`]), which is
+//! monotone: the farther away, the coarser or equal.
+//!
+//! # Meshes and draw calls
+//! Meshes live in one table, addressed by [`MeshId`]: the five built-in
+//! placeholder kinds come first (so a [`MeshKind`] is its own id), the lower
+//! detail variants and, in WP1.10, glTF meshes come after
+//! ([`ModelSet::extra_meshes`]). The instancer keeps **one instance list per
+//! mesh id** and the renderer one buffer and one draw call per list, so
+//! each (mesh kind, level) pair stays a single draw.
+//!
+//! # For WP1.10 (glTF models)
+//! A glTF model is built the same way: put its meshes (one per LOD level)
+//! into [`ModelSet::new`] as extra meshes and give the shape a [`ModelLods`]
+//! over their ids with the switch sizes of the asset. The instancing, the
+//! level selection, the stats and the picking need no change. A level is one
+//! mesh today; a model made of parts (hull and turret) would extend
+//! [`LodLevel`] by a part list, still one instance list per mesh.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use glam::{DMat4, DVec4, Mat4, Vec3};
+
+use crate::mesh::{MeshData, SEGMENTS};
+use crate::scene::MeshKind;
+use crate::style::{LodSpec, Style};
+
+/// Most levels a chain can have (the stats keep a counter per level).
+pub const MAX_LODS: usize = 4;
+
+/// How many meshes exist without registering any: one per [`MeshKind`].
+pub const BUILTIN_MESHES: usize = MeshKind::ALL.len();
+
+/// What the level selection and the click volumes need to know about the
+/// camera: where the eye is and how many pixels a radian covers.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EyeView {
+    pub eye: Vec3,
+    /// Pixels per radian at the screen centre: `viewport_height / (2 tan(fov_y / 2))`.
+    pub focal_px: f32,
+}
+
+/// Distances below this (metres) count as this, so an eye inside a model
+/// cannot divide by zero.
+const MIN_EYE_DISTANCE: f32 = 0.5;
+
+impl EyeView {
+    pub fn new(eye: Vec3, viewport_height_px: f32, fov_y: f32) -> Self {
+        Self {
+            eye,
+            focal_px: 0.5 * viewport_height_px / (0.5 * fov_y).tan(),
+        }
+    }
+
+    /// Recover the eye and the focal length from a perspective
+    /// view-projection (wgpu clip space, rigid view): the eye is the point
+    /// that maps to clip `(0, 0, z, 0)`, and the xyz part of the second row
+    /// has the length `1 / tan(fov_y / 2)`. The renderer and the picking can
+    /// then work with whatever matrix the frame was drawn with.
+    pub fn from_view_proj(view_proj: Mat4, viewport_height_px: f32) -> Self {
+        let m = DMat4::from_cols_array(&view_proj.to_cols_array().map(f64::from));
+        let eye = m.inverse() * DVec4::new(0.0, 0.0, 1.0, 0.0);
+        let eye = if eye.w.abs() > 1e-30 {
+            (eye.truncate() / eye.w).as_vec3()
+        } else {
+            Vec3::ZERO
+        };
+        let row1 = Vec3::new(view_proj.x_axis.y, view_proj.y_axis.y, view_proj.z_axis.y);
+        Self {
+            eye,
+            focal_px: 0.5 * viewport_height_px * row1.length(),
+        }
+    }
+
+    /// Size in physical pixels of something `size` metres across at `distance`.
+    pub fn projected_px(&self, size: f32, distance: f32) -> f32 {
+        size * self.focal_px / distance.max(MIN_EYE_DISTANCE)
+    }
+}
+
+/// An entry of the renderer's mesh table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MeshId(pub u16);
+
+impl MeshId {
+    /// The built-in mesh of a placeholder kind.
+    pub fn of(kind: MeshKind) -> Self {
+        Self(kind.index() as u16)
+    }
+
+    pub fn index(self) -> usize {
+        usize::from(self.0)
+    }
+}
+
+/// One level of a chain: the mesh to draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LodLevel {
+    pub mesh: MeshId,
+}
+
+/// Why a chain was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelError {
+    NoLevels,
+    TooManyLevels,
+    /// There must be one switch size fewer than there are levels.
+    SwitchCount,
+    /// Switch sizes must be positive, finite and strictly falling.
+    SwitchOrder,
+    /// A level names a mesh that is not in the table.
+    UnknownMesh,
+}
+
+impl std::fmt::Display for ModelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::NoLevels => "a model needs at least one level",
+            Self::TooManyLevels => "a model has more than MAX_LODS levels",
+            Self::SwitchCount => "a chain needs one switch size fewer than it has levels",
+            Self::SwitchOrder => "switch sizes must be positive and strictly falling",
+            Self::UnknownMesh => "a level names a mesh that does not exist",
+        })
+    }
+}
+
+impl std::error::Error for ModelError {}
+
+/// The level-of-detail chain of one model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelLods {
+    levels: Vec<LodLevel>,
+    /// `switch_px[i]`: level `i` is used while the projected size is at least this.
+    switch_px: Vec<f32>,
+}
+
+impl ModelLods {
+    /// A chain from its levels (finest first) and the `levels - 1` switch
+    /// sizes between them in pixels.
+    pub fn new(levels: Vec<LodLevel>, switch_px: Vec<f32>) -> Result<Self, ModelError> {
+        if levels.is_empty() {
+            return Err(ModelError::NoLevels);
+        }
+        if levels.len() > MAX_LODS {
+            return Err(ModelError::TooManyLevels);
+        }
+        if switch_px.len() + 1 != levels.len() {
+            return Err(ModelError::SwitchCount);
+        }
+        let ordered = switch_px.iter().all(|&px| px.is_finite() && px > 0.0)
+            && switch_px.windows(2).all(|w| w[0] > w[1]);
+        if !ordered {
+            return Err(ModelError::SwitchOrder);
+        }
+        Ok(Self { levels, switch_px })
+    }
+
+    /// A model with one level, drawn at every size.
+    pub fn single(mesh: MeshId) -> Self {
+        Self {
+            levels: vec![LodLevel { mesh }],
+            switch_px: Vec::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.levels.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
+    pub fn levels(&self) -> &[LodLevel] {
+        &self.levels
+    }
+
+    pub fn level(&self, level: u8) -> LodLevel {
+        self.levels[usize::from(level).min(self.levels.len() - 1)]
+    }
+
+    pub fn switch_px(&self) -> &[f32] {
+        &self.switch_px
+    }
+
+    /// The level for a projected size without any history: the finest level
+    /// whose switch size is reached, or the last one.
+    pub fn ideal(&self, px: f32) -> u8 {
+        self.switch_px.iter().take_while(|&&s| px < s).count() as u8
+    }
+
+    /// The level for a projected size `px`, given the level the unit had in
+    /// the previous frame (`None` = it was not drawn). `hysteresis` is the
+    /// relative margin (`0..1`) around each switch size.
+    pub fn select(&self, px: f32, previous: Option<u8>, hysteresis: f32) -> u8 {
+        let last = self.levels.len() - 1;
+        let Some(previous) = previous.filter(|&p| usize::from(p) <= last) else {
+            return self.ideal(px);
+        };
+        let h = if hysteresis.is_nan() {
+            0.0
+        } else {
+            hysteresis.clamp(0.0, 0.95)
+        };
+        let mut level = usize::from(previous);
+        // Coarser: only when clearly below the switch size of this level.
+        while level < last && px < self.switch_px[level] * (1.0 - h) {
+            level += 1;
+        }
+        // Finer: only when clearly above the switch size of the level above.
+        while level > 0 && px >= self.switch_px[level - 1] * (1.0 + h) {
+            level -= 1;
+        }
+        level as u8
+    }
+}
+
+/// All models of a style plus the meshes they need beyond the built-in kinds.
+#[derive(Clone, Debug)]
+pub struct ModelSet {
+    revision: u64,
+    extra: Vec<MeshData>,
+    /// Triangles of every mesh, built-in kinds first.
+    triangles: Vec<u32>,
+    models: Vec<ModelLods>,
+}
+
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
+impl ModelSet {
+    /// A set from extra meshes (ids `BUILTIN_MESHES..`) and one chain per
+    /// shape. This is the entry point for WP1.10: load the glTF meshes, push
+    /// them as `extra`, build the chains over their ids.
+    pub fn new(extra: Vec<MeshData>, models: Vec<ModelLods>) -> Result<Self, ModelError> {
+        let mesh_count = BUILTIN_MESHES + extra.len();
+        if models.is_empty() {
+            return Err(ModelError::NoLevels);
+        }
+        if models
+            .iter()
+            .any(|m| m.levels().iter().any(|l| l.mesh.index() >= mesh_count))
+        {
+            return Err(ModelError::UnknownMesh);
+        }
+        let builtin = MeshKind::ALL.map(|k| builtin_mesh(k).triangle_count());
+        let triangles = builtin
+            .into_iter()
+            .chain(extra.iter().map(MeshData::triangle_count))
+            .collect();
+        Ok(Self {
+            revision: NEXT_REVISION.fetch_add(1, Ordering::Relaxed),
+            extra,
+            triangles,
+            models,
+        })
+    }
+
+    /// The chains described by a style: round shapes get meshes with fewer
+    /// facets for their lower levels, other shapes keep one level.
+    pub fn from_style(style: &Style) -> Self {
+        let mut extra: Vec<(MeshKind, u32, MeshData)> = Vec::new();
+        let mut models = Vec::new();
+        for (i, shape) in style.shapes().iter().enumerate() {
+            let specs = style.lod_specs(i as u8);
+            let default = [LodSpec {
+                segments: None,
+                min_px: 0.0,
+            }];
+            let specs = if specs.is_empty() {
+                &default[..]
+            } else {
+                specs
+            };
+            let mut levels = Vec::new();
+            for spec in specs {
+                let segments = spec.segments.unwrap_or(SEGMENTS as u32);
+                let id = match shape.mesh {
+                    MeshKind::Cylinder | MeshKind::Cone if segments != SEGMENTS as u32 => {
+                        let found = extra
+                            .iter()
+                            .position(|(k, n, _)| *k == shape.mesh && *n == segments);
+                        let at = found.unwrap_or_else(|| {
+                            extra.push((
+                                shape.mesh,
+                                segments,
+                                round_mesh(shape.mesh, segments as usize),
+                            ));
+                            extra.len() - 1
+                        });
+                        MeshId((BUILTIN_MESHES + at) as u16)
+                    }
+                    kind => MeshId::of(kind),
+                };
+                levels.push(LodLevel { mesh: id });
+            }
+            let switch = specs[..specs.len() - 1].iter().map(|s| s.min_px).collect();
+            models.push(ModelLods::new(levels, switch).expect("the style validated its chains"));
+        }
+        let extra = extra.into_iter().map(|(_, _, m)| m).collect();
+        Self::new(extra, models).expect("the chains only name meshes that were registered")
+    }
+
+    /// Changes whenever a different set is built; the renderer compares it to
+    /// know when to upload the extra meshes again.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The meshes beyond the built-in kinds; mesh `BUILTIN_MESHES + i` is `extra_meshes()[i]`.
+    pub fn extra_meshes(&self) -> &[MeshData] {
+        &self.extra
+    }
+
+    /// Built-in kinds plus extra meshes.
+    pub fn mesh_count(&self) -> usize {
+        self.triangles.len()
+    }
+
+    pub fn mesh_triangles(&self, mesh: MeshId) -> u32 {
+        self.triangles.get(mesh.index()).copied().unwrap_or(0)
+    }
+
+    /// The chain of a shape (index wraps around as in `Style::shape`).
+    pub fn model(&self, shape: u8) -> &ModelLods {
+        &self.models[usize::from(shape) % self.models.len()]
+    }
+
+    pub fn models(&self) -> &[ModelLods] {
+        &self.models
+    }
+}
+
+fn builtin_mesh(kind: MeshKind) -> MeshData {
+    match kind {
+        MeshKind::Plane => MeshData::plane(),
+        MeshKind::Cube => MeshData::cube(),
+        MeshKind::Pyramid => MeshData::pyramid(),
+        MeshKind::Cylinder => MeshData::cylinder(),
+        MeshKind::Cone => MeshData::cone(),
+    }
+}
+
+fn round_mesh(kind: MeshKind, segments: usize) -> MeshData {
+    match kind {
+        MeshKind::Cone => MeshData::cone_with(segments),
+        _ => MeshData::cylinder_with(segments),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chain3() -> ModelLods {
+        let levels = (0..3)
+            .map(|i| LodLevel { mesh: MeshId(i) })
+            .collect::<Vec<_>>();
+        ModelLods::new(levels, vec![60.0, 25.0]).unwrap()
+    }
+
+    #[test]
+    fn the_eye_and_focal_length_come_back_out_of_the_view_projection() {
+        use crate::camera::{Camera, CameraConfig, DVec2};
+        for (w, h, zoom) in [(1280_u32, 720_u32, 0.0), (1280, 720, 0.6), (800, 1000, 1.0)] {
+            let cfg = CameraConfig {
+                map_size: DVec2::new(256.0, 256.0),
+                ..CameraConfig::default()
+            };
+            let mut cam = Camera::new(cfg, w, h);
+            cam.set_zoom(zoom);
+            cam.set_focus(DVec2::new(100.0, 90.0));
+            let view = EyeView::from_view_proj(cam.view_proj(), h as f32);
+            let eye = cam.eye();
+            let at = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
+            assert!((view.eye - at).length() < 0.05, "zoom {zoom}: {} vs {at}", view.eye);
+            let focal = 0.5 * h as f32 / (0.5 * cfg.fov_y as f32).tan();
+            assert!((view.focal_px - focal).abs() < focal * 1e-3, "{} vs {focal}", view.focal_px);
+            let direct = EyeView::new(at, h as f32, cfg.fov_y as f32);
+            assert!((direct.focal_px - view.focal_px).abs() < focal * 1e-3);
+            // A 2 m unit at the focus is `2 * focal / distance` pixels.
+            let px = view.projected_px(2.0, cam.distance() as f32);
+            assert!((px - 2.0 * focal / cam.distance() as f32).abs() < 0.05);
+        }
+    }
+
+    #[test]
+    fn chains_are_validated() {
+        let l = |n: u16| (0..n).map(|i| LodLevel { mesh: MeshId(i) }).collect();
+        assert!(ModelLods::new(l(3), vec![60.0, 25.0]).is_ok());
+        assert_eq!(ModelLods::new(vec![], vec![]), Err(ModelError::NoLevels));
+        assert_eq!(
+            ModelLods::new(l(5), vec![5.0, 4.0, 3.0, 2.0]),
+            Err(ModelError::TooManyLevels)
+        );
+        assert_eq!(
+            ModelLods::new(l(3), vec![60.0]),
+            Err(ModelError::SwitchCount)
+        );
+        for bad in [
+            vec![25.0, 60.0],
+            vec![60.0, 60.0],
+            vec![60.0, 0.0],
+            vec![f32::NAN, 5.0],
+        ] {
+            assert_eq!(ModelLods::new(l(3), bad), Err(ModelError::SwitchOrder));
+        }
+        assert_eq!(ModelLods::single(MeshId(1)).len(), 1);
+        assert_eq!(ModelLods::single(MeshId(1)).ideal(0.0), 0);
+    }
+
+    #[test]
+    fn the_ideal_level_is_monotone_in_the_size() {
+        let c = chain3();
+        // Boundaries: level 0 from 60 px up, level 1 from 25 px, else level 2.
+        assert_eq!(c.ideal(1000.0), 0);
+        assert_eq!(c.ideal(60.0), 0);
+        assert_eq!(c.ideal(59.99), 1);
+        assert_eq!(c.ideal(25.0), 1);
+        assert_eq!(c.ideal(24.99), 2);
+        assert_eq!(c.ideal(0.0), 2);
+        // Over a sweep of sizes the level never gets finer as the unit shrinks.
+        let mut last = 0;
+        for i in 0..=2000 {
+            let px = 200.0 * (1.0 - i as f32 / 2000.0);
+            let level = c.ideal(px);
+            assert!(
+                level >= last,
+                "level fell from {last} to {level} at {px} px"
+            );
+            last = level;
+        }
+        assert_eq!(last, 2);
+    }
+
+    /// Distance, not size, is what the player moves: size = k / distance, so
+    /// monotone in the size is monotone in the distance.
+    #[test]
+    fn selection_by_distance_is_monotone_with_and_without_history() {
+        let c = chain3();
+        let k = 2.0 * 1300.0; // diameter * focal length
+        for h in [0.0, 0.15, 0.5] {
+            let (mut level, mut last) = (None, 0);
+            for step in 0..4000 {
+                let distance = 5.0 + step as f32 * 0.1; // 5 m .. 405 m away
+                let l = c.select(k / distance, level, h);
+                assert!(l >= last, "h={h}: fell from {last} to {l} at {distance} m");
+                (level, last) = (Some(l), l);
+            }
+            assert_eq!(last, 2, "h={h}: the farthest unit uses the last level");
+            // The same going back in: never coarser as it comes closer.
+            for step in (0..4000).rev() {
+                let distance = 5.0 + step as f32 * 0.1;
+                let l = c.select(k / distance, level, h);
+                assert!(l <= last, "h={h}: rose from {last} to {l} at {distance} m");
+                (level, last) = (Some(l), l);
+            }
+            assert_eq!(last, 0, "h={h}: the nearest unit uses the finest level");
+        }
+    }
+
+    #[test]
+    fn without_history_or_hysteresis_selection_is_the_plain_threshold() {
+        let c = chain3();
+        for px in [0.0, 10.0, 24.99, 25.0, 40.0, 59.99, 60.0, 500.0] {
+            assert_eq!(c.select(px, None, 0.3), c.ideal(px));
+            for prev in 0..3 {
+                assert_eq!(
+                    c.select(px, Some(prev), 0.0),
+                    c.ideal(px),
+                    "{px} from {prev}"
+                );
+            }
+            // A stale level beyond the chain is ignored.
+            assert_eq!(c.select(px, Some(9), 0.3), c.ideal(px));
+        }
+    }
+
+    #[test]
+    fn hysteresis_holds_a_level_inside_the_band_and_moves_outside_it() {
+        let c = chain3();
+        let h = 0.2; // bands: 48..72 around 60, 20..30 around 25
+        // Level 0 holds down to 48 px, level 1 holds from 72 px down.
+        assert_eq!(c.select(55.0, Some(0), h), 0);
+        assert_eq!(c.select(48.01, Some(0), h), 0);
+        assert_eq!(c.select(47.99, Some(0), h), 1);
+        assert_eq!(c.select(65.0, Some(1), h), 1);
+        assert_eq!(c.select(71.99, Some(1), h), 1);
+        assert_eq!(c.select(72.01, Some(1), h), 0);
+        // The second boundary the same way.
+        assert_eq!(c.select(22.0, Some(1), h), 1);
+        assert_eq!(c.select(19.99, Some(1), h), 2);
+        assert_eq!(c.select(29.99, Some(2), h), 2);
+        assert_eq!(c.select(30.01, Some(2), h), 1);
+        // A big jump skips levels in one step, in both directions.
+        assert_eq!(c.select(1.0, Some(0), h), 2);
+        assert_eq!(c.select(500.0, Some(2), h), 0);
+    }
+
+    /// A unit wobbling around a switch size, as a camera shaking by a few
+    /// percent does: without hysteresis the level flips constantly, with it
+    /// the level never changes.
+    #[test]
+    fn a_wobble_around_a_switch_size_flickers_without_hysteresis_only() {
+        let c = chain3();
+        let changes = |h: f32| {
+            let mut level = Some(c.ideal(60.0));
+            let mut changes = 0;
+            for i in 0..1000 {
+                let px = 60.0 * (1.0 + 0.04 * (i as f32 * 1.7).sin());
+                let l = c.select(px, level, h);
+                changes += usize::from(Some(l) != level);
+                level = Some(l);
+            }
+            changes
+        };
+        let (without, with) = (changes(0.0), changes(0.15));
+        println!("level changes in 1000 wobbling frames: {without} without, {with} with");
+        assert!(without > 100, "the control must flicker: {without}");
+        assert_eq!(with, 0);
+    }
+
+    /// Whatever the history, the chosen level lies between the threshold
+    /// levels of the size one band down and one band up: a level is only ever
+    /// held while the size is within `h` (relative) of its switch size.
+    #[test]
+    fn the_chosen_level_stays_within_the_band_of_the_ideal() {
+        let c = chain3();
+        let h = 0.15;
+        let mut level = None;
+        let mut state = 12345_u32;
+        for _ in 0..20_000 {
+            // A random walk of the size, sometimes with a big jump.
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let r = (state >> 8) as f32 / 16_777_216.0;
+            let px = 2.0 + r * 120.0;
+            let l = c.select(px, level, h);
+            assert!(
+                l >= c.ideal(px / (1.0 - h)) && l <= c.ideal(px / (1.0 + h)),
+                "{px} px chose {l}"
+            );
+            level = Some(l);
+        }
+    }
+
+    #[test]
+    fn model_set_from_the_embedded_style_has_lower_poly_round_levels() {
+        let style = Style::embedded();
+        let set = ModelSet::from_style(&style);
+        assert_eq!(set.models().len(), style.shapes().len());
+        // The cube: one level, the built-in cube.
+        let cube = set.model(0);
+        assert_eq!(cube.len(), 1);
+        assert_eq!(cube.level(0).mesh, MeshId::of(MeshKind::Cube));
+        for shape in [1u8, 2] {
+            let m = set.model(shape);
+            assert!(m.len() >= 3, "shape {shape}: {} levels", m.len());
+            // Level 0 is the full-detail built-in mesh, the rest are extra
+            // meshes with strictly fewer triangles.
+            let kind = style.shape(shape).mesh;
+            assert_eq!(m.level(0).mesh, MeshId::of(kind));
+            let tris: Vec<u32> = m
+                .levels()
+                .iter()
+                .map(|l| set.mesh_triangles(l.mesh))
+                .collect();
+            assert!(tris.windows(2).all(|w| w[0] > w[1]), "{tris:?}");
+            for l in &m.levels()[1..] {
+                assert!(l.mesh.index() >= BUILTIN_MESHES);
+            }
+        }
+        assert_eq!(set.mesh_count(), BUILTIN_MESHES + set.extra_meshes().len());
+        // The meshes the ids name exist and have the triangles that were counted.
+        for (i, mesh) in set.extra_meshes().iter().enumerate() {
+            assert_eq!(
+                set.mesh_triangles(MeshId((BUILTIN_MESHES + i) as u16)),
+                mesh.triangle_count()
+            );
+        }
+    }
+
+    #[test]
+    fn identical_levels_share_a_mesh_and_revisions_differ() {
+        let style = Style::from_ron(
+            "(palette: [(name: \"a\", srgb: (1, 2, 3))],
+              shapes: [
+                (mesh: Cylinder, size: (1.0, 1.0, 1.0),
+                 lods: [(min_px: 40.0), (segments: Some(8), min_px: 0.0)]),
+                (mesh: Cylinder, size: (2.0, 1.0, 2.0),
+                 lods: [(min_px: 40.0), (segments: Some(8), min_px: 0.0)]),
+                (mesh: Cone, size: (1.0, 1.0, 1.0),
+                 lods: [(min_px: 40.0), (segments: Some(8), min_px: 0.0)]),
+              ])",
+        )
+        .unwrap();
+        let (a, b) = (ModelSet::from_style(&style), ModelSet::from_style(&style));
+        assert_ne!(a.revision(), b.revision());
+        // Two cylinders share their 8-facet mesh; the cone has its own.
+        assert_eq!(a.model(0).level(1).mesh, a.model(1).level(1).mesh);
+        assert_ne!(a.model(0).level(1).mesh, a.model(2).level(1).mesh);
+        assert_eq!(a.extra_meshes().len(), 2);
+    }
+
+    #[test]
+    fn a_set_refuses_chains_over_missing_meshes() {
+        let chain = ModelLods::single(MeshId(BUILTIN_MESHES as u16));
+        assert!(matches!(
+            ModelSet::new(vec![], vec![chain.clone()]),
+            Err(ModelError::UnknownMesh)
+        ));
+        assert!(ModelSet::new(vec![MeshData::cube()], vec![chain]).is_ok());
+        assert!(matches!(
+            ModelSet::new(vec![], vec![]),
+            Err(ModelError::NoLevels)
+        ));
+    }
+}

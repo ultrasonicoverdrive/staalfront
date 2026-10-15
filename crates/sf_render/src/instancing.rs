@@ -15,8 +15,24 @@
 //!   interpolated (`lerp(prev, current, alpha)`, facing along the shortest
 //!   arc), put on the ground (display only: the sim stays 2D) and appended
 //!   to the instance list of their mesh kind.
-//! * The caller uploads each list with `Renderer::set_instances`: one
-//!   instance buffer and one draw call per mesh kind.
+//! * The caller uploads the lists with `Renderer::upload_units`: one
+//!   instance buffer and one draw call per list.
+//!
+//! # Levels of detail, icons and picking (WP1.9)
+//! [`Instancer::build_frame`] takes a [`FrameView`]: besides the frustum and
+//! `alpha` it carries the camera (for the level selection) and the
+//! model/icon [`Blend`] of the frame. For every visible unit it
+//! * picks the level of its model's chain by projected size, with
+//!   hysteresis (the unit's last level is kept in a byte per entity slot),
+//!   and appends it to the list of that level's mesh: **one list, one
+//!   buffer and one draw call per (mesh kind, level)**, see [`crate::model`];
+//! * appends a model instance whose alpha is the model weight of the blend
+//!   (the dissolve threshold of the cross-fade) unless the weight is 0, and
+//!   an [`IconInstance`] unless it is 1, see [`crate::icons`];
+//! * records what it drew (id, the interpolated position it stands at, the
+//!   facing, where its instances went) so that [`Instancer::pick`] answers
+//!   from exactly the frame on the screen and [`Instancer::highlight`] can
+//!   tint the picked unit's instances before they are uploaded.
 //!
 //! # Tiles
 //! The map is divided into square tiles of [`DEFAULT_TILE_SIZE`] m (32 m, the
@@ -37,11 +53,25 @@ use sf_math::render_bridge::vec2_to_f32;
 use sf_math::{Facing, Vec2};
 
 use crate::frustum::{Aabb, Frustum};
+use crate::icons::{
+    Blend, Dominant, ICON_HIGHLIGHT, IconConfig, IconInstance, IconParams, snap_icon_center,
+};
+use crate::model::{EyeView, MAX_LODS, MeshId, ModelSet};
+use crate::pick::{
+    Pick, PickVia, UnitId, click_margin, click_reach, icon_hit, project_px, ray_hits_aabb, ray_obb,
+};
 use crate::scene::{Instance, MeshKind};
 use crate::style::Style;
 
 /// Tile edge in metres; equals the terrain chunk size (32 cells of 1 m).
 pub const DEFAULT_TILE_SIZE: f32 = 32.0;
+
+/// Marks "no level yet" in the per-entity hysteresis state.
+const NO_LEVEL: u8 = u8::MAX;
+
+/// Entity slots above this get no hysteresis state (a guard against a huge
+/// id allocating gigabytes; real worlds have a few ten thousand slots).
+const MAX_LOD_STATE: usize = 1 << 22;
 
 /// One entity's motion over the last sim tick, in render units (metres,
 /// facing in 1/256 turns).
@@ -51,6 +81,10 @@ pub struct Motion {
     pub shape: u8,
     /// Index into the style's palette (wraps around): the owner.
     pub player: u8,
+    /// The handle [`Instancer::pick`] returns for this unit. Left at
+    /// [`UnitId::NONE`], [`Instancer::update_tick`] numbers the unit by its
+    /// place in the list.
+    pub id: UnitId,
     prev: [f32; 2],
     pos: [f32; 2],
     prev_facing: u8,
@@ -71,11 +105,19 @@ impl Motion {
         Self {
             shape,
             player,
+            id: UnitId::NONE,
             prev: vec2_to_f32(prev_pos),
             pos: vec2_to_f32(pos),
             prev_facing: prev_facing.raw(),
             facing: facing.raw(),
         }
+    }
+
+    /// The same motion with the handle that picking returns for it (the
+    /// entity id, packed with [`UnitId::from_parts`]).
+    pub fn with_id(mut self, id: UnitId) -> Self {
+        self.id = id;
+        self
     }
 
     /// Position `(x, z)` and facing in steps at fraction `alpha` of the way
@@ -131,19 +173,117 @@ pub struct InstanceStats {
     pub per_mesh: [u32; MeshKind::ALL.len()],
     /// All entities per [`MeshKind::index`] (visible or not).
     pub total_per_mesh: [u32; MeshKind::ALL.len()],
+    /// Visible units drawn as models, per level of detail (index 0 = finest).
+    /// Their sum is `models`; the rest of `visible` is drawn as icons only.
+    pub per_lod: [u32; MAX_LODS],
+    /// Visible units drawn as models (any level).
+    pub models: u32,
+    /// Visible units drawn as icons.
+    pub icons: u32,
+    /// Triangles of the model instances submitted.
+    pub model_triangles: u64,
+    /// Draw calls of the model lists: one per non-empty (mesh kind, level).
+    pub model_draw_calls: u32,
+    /// Draw calls of the icons: 1 when there are any.
+    pub icon_draw_calls: u32,
 }
 
 impl InstanceStats {
-    /// Draw calls needed for the visible instances: one per used mesh kind.
+    /// Draw calls needed for the visible instances: one per non-empty
+    /// instance list (a mesh kind at a level of detail) plus one for the icons.
     pub fn draw_calls(&self) -> u32 {
-        self.per_mesh.iter().filter(|&&n| n > 0).count() as u32
+        self.model_draw_calls + self.icon_draw_calls
     }
+}
+
+/// What one [`Instancer::build_frame`] needs to know about the frame.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameView<'a> {
+    /// The camera's view frustum (tile culling).
+    pub frustum: &'a Frustum,
+    /// Interpolation factor between the previous and the current tick.
+    pub alpha: f32,
+    /// The camera for the level selection and the click volumes; `None` =
+    /// every model at its finest level.
+    pub eye: Option<EyeView>,
+    /// How much of the picture is models and how much is icons.
+    pub blend: Blend,
+    /// UI scale (window DPI factor times `ui.ron` scale): icons, their
+    /// zoom thresholds and the minimum click size scale with it.
+    pub ui_scale: f32,
+}
+
+impl<'a> FrameView<'a> {
+    /// Models only, all at their finest level: the view of WP1.6.
+    pub fn models_only(frustum: &'a Frustum, alpha: f32) -> Self {
+        Self {
+            frustum,
+            alpha,
+            eye: None,
+            blend: Blend::MODELS,
+            ui_scale: 1.0,
+        }
+    }
+
+    /// The full view: levels of detail by `eye`, models and icons by `blend`.
+    pub fn new(
+        frustum: &'a Frustum,
+        alpha: f32,
+        eye: EyeView,
+        blend: Blend,
+        ui_scale: f32,
+    ) -> Self {
+        Self {
+            frustum,
+            alpha,
+            eye: Some(eye),
+            blend,
+            ui_scale,
+        }
+    }
+}
+
+/// What a frame was built with, kept for the picking.
+#[derive(Clone, Copy, Debug)]
+struct FrameState {
+    blend: Blend,
+    ui_scale: f32,
+}
+
+/// Marks a record without a model or icon instance.
+const NO_INSTANCE: u32 = u32::MAX;
+
+/// What one visible unit looked like in the last frame.
+#[derive(Clone, Copy, Debug)]
+struct Drawn {
+    id: UnitId,
+    /// Where the model stands: interpolated `x`, terrain height, `z`.
+    pos: [f32; 3],
+    /// Interpolated facing in 1/256 turns.
+    steps: f32,
+    shape: u8,
+    /// The mesh list and the index in it of the unit's model instance.
+    model_mesh: u16,
+    model_index: u32,
+    /// Index in the icon list.
+    icon_index: u32,
+}
+
+/// The records of one visible tile.
+#[derive(Clone, Copy, Debug)]
+struct VisibleTile {
+    tile: u32,
+    start: u32,
+    end: u32,
 }
 
 /// Buckets motions by tile, culls tiles against a frustum and builds the
 /// per-mesh instance lists. Buffers are reused between frames.
 pub struct Instancer {
     style: Style,
+    models: ModelSet,
+    lod_hysteresis: f32,
+    icon_config: IconConfig,
     tile_size: f32,
     tiles_x: usize,
     tiles_z: usize,
@@ -155,10 +295,17 @@ pub struct Instancer {
     footprint: f32,
     tallest: f32,
     ground: (f32, f32),
-    lists: [Vec<Instance>; MeshKind::ALL.len()],
+    /// One list per mesh of the model set (a mesh kind at a level of detail).
+    lists: Vec<Vec<Instance>>,
+    icons: Vec<IconInstance>,
+    /// Last level of each entity slot, for the hysteresis.
+    lod_state: Vec<u8>,
     /// Entities per mesh kind, counted when the tick is bucketed.
     total_per_mesh: [u32; MeshKind::ALL.len()],
     stats: InstanceStats,
+    frame: Option<FrameState>,
+    records: Vec<Drawn>,
+    visible_tiles: Vec<VisibleTile>,
 }
 
 /// `(footprint, tallest)` of a style: half the diagonal of the widest
@@ -184,7 +331,12 @@ impl Instancer {
         let tiles_x = (map_size.0 / tile_size).ceil().max(1.0) as usize;
         let tiles_z = (map_size.1 / tile_size).ceil().max(1.0) as usize;
         let (footprint, tallest) = style_extent(&style);
+        let models = ModelSet::from_style(&style);
         Self {
+            lod_hysteresis: style.lod_settings().hysteresis,
+            icon_config: *style.icons(),
+            lists: vec![Vec::new(); models.mesh_count()],
+            models,
             style,
             tile_size,
             tiles_x,
@@ -196,23 +348,56 @@ impl Instancer {
             footprint,
             tallest,
             ground: (0.0, 0.0),
-            lists: Default::default(),
+            icons: Vec::new(),
+            lod_state: Vec::new(),
             total_per_mesh: [0; MeshKind::ALL.len()],
             stats: InstanceStats::default(),
+            frame: None,
+            records: Vec::new(),
+            visible_tiles: Vec::new(),
         }
     }
 
-    /// Swap the look (palette and shapes), e.g. after `units.ron` was edited.
-    /// The entities are re-bucketed because the culling margins depend on the
-    /// shape sizes; the next [`Instancer::build`] uses the new look.
+    /// Swap the look (palette, shapes, level-of-detail chains, icon
+    /// settings), e.g. after `units.ron` was edited. The entities are
+    /// re-bucketed because the culling margins depend on the shape sizes; the
+    /// next [`Instancer::build_frame`] uses the new look. The model set
+    /// changes, so [`Renderer::upload_units`](crate::Renderer::upload_units)
+    /// registers its meshes again.
     pub fn set_style(&mut self, style: Style) {
         (self.footprint, self.tallest) = style_extent(&style);
+        self.lod_hysteresis = style.lod_settings().hysteresis;
+        self.icon_config = *style.icons();
+        self.set_models(ModelSet::from_style(&style));
         self.style = style;
         self.rebucket();
     }
 
+    /// Use another set of models (meshes and chains per shape), for example
+    /// with glTF meshes (WP1.10). The set must have a chain for every shape
+    /// of the style that is in use (indices wrap around).
+    pub fn set_models(&mut self, models: ModelSet) {
+        self.lists = vec![Vec::new(); models.mesh_count()];
+        self.icons.clear();
+        self.lod_state.fill(NO_LEVEL);
+        self.records.clear();
+        self.visible_tiles.clear();
+        self.frame = None;
+        self.models = models;
+    }
+
     pub fn style(&self) -> &Style {
         &self.style
+    }
+
+    /// The models: their chains, and the meshes the renderer needs.
+    pub fn models(&self) -> &ModelSet {
+        &self.models
+    }
+
+    /// The icon settings of the style.
+    pub fn icon_config(&self) -> &IconConfig {
+        &self.icon_config
     }
 
     pub fn tile_size(&self) -> f32 {
@@ -233,10 +418,24 @@ impl Instancer {
         self.motions.is_empty()
     }
 
-    /// Replace the entities (call once per sim tick) and bucket them.
+    /// Replace the entities (call once per sim tick) and bucket them. A
+    /// motion without an id is numbered by its place in the list.
     pub fn update_tick(&mut self, motions: impl IntoIterator<Item = Motion>) {
         self.motions.clear();
         self.motions.extend(motions);
+        let mut highest = 0;
+        for (i, m) in self.motions.iter_mut().enumerate() {
+            if m.id == UnitId::NONE {
+                m.id = UnitId::from_parts(i as u32, 0);
+            }
+            highest = highest.max(m.id.index() as usize);
+        }
+        // One byte of hysteresis state per entity slot, kept between ticks
+        // (slots are stable in the simulation, so are the levels).
+        let wanted = (highest + 1).min(MAX_LOD_STATE);
+        if self.lod_state.len() < wanted && !self.motions.is_empty() {
+            self.lod_state.resize(wanted, NO_LEVEL);
+        }
         self.rebucket();
     }
 
@@ -289,17 +488,38 @@ impl Instancer {
     }
 
     /// Cull tiles against `frustum` and rebuild the instance lists for the
-    /// interpolation factor `alpha`. `ground(x, z)` is the terrain height
-    /// the unit stands on (display only). Returns the counters.
+    /// interpolation factor `alpha`, models only and all at their finest
+    /// level (the WP1.6 picture). `ground(x, z)` is the terrain height the
+    /// unit stands on (display only). Returns the counters. See
+    /// [`Instancer::build_frame`] for levels of detail and icons.
     pub fn build(
         &mut self,
         frustum: &Frustum,
         alpha: f32,
         ground: impl Fn(f32, f32) -> f32,
     ) -> InstanceStats {
+        self.build_frame(&FrameView::models_only(frustum, alpha), ground)
+    }
+
+    /// Cull tiles, select the level of detail of every visible model, and
+    /// rebuild the model lists and the icon list for `view`. `ground(x, z)`
+    /// is the terrain height the unit stands on (display only). Returns the
+    /// counters.
+    pub fn build_frame(
+        &mut self,
+        view: &FrameView<'_>,
+        ground: impl Fn(f32, f32) -> f32,
+    ) -> InstanceStats {
         for list in &mut self.lists {
             list.clear();
         }
+        self.icons.clear();
+        self.records.clear();
+        self.visible_tiles.clear();
+        let blend = view.blend;
+        let (models_on, icons_on) = (blend.models_drawn(), blend.icons_drawn());
+        let weight = blend.model();
+        let lift = self.icon_config.lift;
         let mut stats = InstanceStats {
             total: self.motions.len() as u32,
             total_per_mesh: self.total_per_mesh,
@@ -311,37 +531,331 @@ impl Instancer {
                 continue;
             }
             stats.tiles_total += 1;
-            if !frustum.intersects(&self.tile_boxes[t]) {
+            if !view.frustum.intersects(&self.tile_boxes[t]) {
                 continue;
             }
             stats.tiles_visible += 1;
+            let first = self.records.len() as u32;
             for &i in &self.order[start..end] {
                 let m = &self.motions[i as usize];
-                let ([x, z], steps) = m.at(alpha);
+                let ([x, z], steps) = m.at(view.alpha);
+                let y = ground(x, z);
                 let shape = self.style.shape(m.shape);
                 let [r, g, b] = self.style.linear(m.player);
-                self.lists[shape.mesh.index()].push(Instance {
-                    model: model_matrix(x, ground(x, z), z, steps, shape.size),
-                    color: [r, g, b, 1.0],
-                });
+                let mut drawn = Drawn {
+                    id: m.id,
+                    pos: [x, y, z],
+                    steps,
+                    shape: m.shape,
+                    model_mesh: 0,
+                    model_index: NO_INSTANCE,
+                    icon_index: NO_INSTANCE,
+                };
+                if models_on {
+                    let chain = self.models.model(m.shape);
+                    let level = match view.eye {
+                        Some(eye) if chain.len() > 1 => {
+                            let middle = Vec3::new(x, y + 0.5 * shape.size[1], z);
+                            let px = eye.projected_px(
+                                shape.bounding_diameter(),
+                                (middle - eye.eye).length(),
+                            );
+                            let slot = m.id.index() as usize;
+                            let previous =
+                                self.lod_state.get(slot).copied().filter(|&l| l != NO_LEVEL);
+                            let level = chain.select(px, previous, self.lod_hysteresis);
+                            if let Some(state) = self.lod_state.get_mut(slot) {
+                                *state = level;
+                            }
+                            level
+                        }
+                        _ => 0,
+                    };
+                    let mesh = chain.level(level).mesh;
+                    let list = &mut self.lists[mesh.index()];
+                    drawn.model_mesh = mesh.0;
+                    drawn.model_index = list.len() as u32;
+                    // The alpha is the model's weight in the cross-fade: the
+                    // fragment shader keeps that share of the pixels.
+                    list.push(Instance {
+                        model: model_matrix(x, y, z, steps, shape.size),
+                        color: [r, g, b, weight],
+                    });
+                    stats.per_lod[usize::from(level).min(MAX_LODS - 1)] += 1;
+                    stats.models += 1;
+                }
+                if icons_on {
+                    drawn.icon_index = self.icons.len() as u32;
+                    self.icons.push(IconInstance::new(
+                        [x, y + lift, z],
+                        shape.icon,
+                        [r, g, b],
+                        blend,
+                    ));
+                    stats.icons += 1;
+                }
+                self.records.push(drawn);
                 stats.per_mesh[shape.mesh.index()] += 1;
                 stats.visible += 1;
             }
+            self.visible_tiles.push(VisibleTile {
+                tile: t as u32,
+                start: first,
+                end: self.records.len() as u32,
+            });
         }
+        for (mesh, list) in self.lists.iter().enumerate() {
+            if !list.is_empty() {
+                stats.model_draw_calls += 1;
+                stats.model_triangles +=
+                    list.len() as u64 * u64::from(self.models.mesh_triangles(MeshId(mesh as u16)));
+            }
+        }
+        stats.icon_draw_calls = u32::from(!self.icons.is_empty());
+        self.frame = Some(FrameState {
+            blend,
+            ui_scale: view.ui_scale,
+        });
         self.stats = stats;
         stats
     }
 
-    /// The instances of the last [`Instancer::build`] for one mesh kind.
+    /// The instances of the last build for one mesh kind at its finest
+    /// level, if the style's chains start with the built-in meshes (the
+    /// default). Use [`Instancer::mesh_instances`] for any mesh.
     pub fn instances(&self, mesh: MeshKind) -> &[Instance] {
         &self.lists[mesh.index()]
+    }
+
+    /// The instances of the last build that use `mesh` (a mesh kind at one
+    /// level of detail): one draw call.
+    pub fn mesh_instances(&self, mesh: MeshId) -> &[Instance] {
+        self.lists.get(mesh.index()).map_or(&[], Vec::as_slice)
+    }
+
+    /// The icons of the last build: one draw call.
+    pub fn icon_instances(&self) -> &[IconInstance] {
+        &self.icons
+    }
+
+    /// The icon sizes of the last build in physical pixels (the settings
+    /// times the frame's UI scale).
+    pub fn icon_params(&self) -> IconParams {
+        let scale = self.frame.map_or(1.0, |f| f.ui_scale);
+        IconParams {
+            size_px: self.icon_config.icon_px(scale),
+            outline_px: self.icon_config.outline_px * scale,
+        }
+    }
+
+    /// The model/icon blend of the last build.
+    pub fn blend(&self) -> Blend {
+        self.frame.map_or(Blend::MODELS, |f| f.blend)
     }
 
     /// The counters of the last build.
     pub fn stats(&self) -> InstanceStats {
         self.stats
     }
+
+    /// The unit under the cursor in the frame of the last
+    /// [`Instancer::build_frame`], or `None`. Which representation is
+    /// tested depends on the blend: the model's bounding box while models
+    /// are at least half of the picture, the icon's screen quad beyond. See
+    /// [`crate::pick`] for the rules and the tie-breaks.
+    pub fn pick(&self, query: &crate::pick::PickQuery) -> Option<Pick> {
+        let frame = self.frame?;
+        let eye = EyeView::from_view_proj(query.view_proj, query.viewport[1]);
+        let ray = query.ray()?;
+        let best = match frame.blend.dominant() {
+            Dominant::Model => self.pick_model(query, &ray, &eye, frame.ui_scale),
+            Dominant::Icon => self.pick_icon(query, &ray, &eye, frame.ui_scale),
+        };
+        best.map(|c| Pick {
+            id: c.id,
+            via: c.via,
+            distance: c.distance,
+            cursor_distance: c.cursor_distance,
+            record: c.record,
+        })
+    }
+
+    fn pick_model(
+        &self,
+        query: &crate::pick::PickQuery,
+        ray: &crate::pick::PickRay,
+        eye: &EyeView,
+        ui_scale: f32,
+    ) -> Option<Candidate> {
+        let click_px = self.icon_config.click_min_px * ui_scale;
+        let mut best: Option<Candidate> = None;
+        for vt in &self.visible_tiles {
+            let tile = &self.tile_boxes[vt.tile as usize];
+            // The tile box, grown by the most any of its units' click volumes can grow.
+            let (centre, half) = ((tile.min + tile.max) * 0.5, (tile.max - tile.min) * 0.5);
+            let far = (centre - eye.eye).length() + half.length();
+            let reach = Vec3::splat(click_reach(far, eye, click_px));
+            if !ray_hits_aabb(ray, tile.min - reach, tile.max + reach) {
+                continue;
+            }
+            for (r, rec) in
+                (vt.start..vt.end).zip(&self.records[vt.start as usize..vt.end as usize])
+            {
+                let shape = self.style.shape(rec.shape);
+                let pos = Vec3::from(rec.pos);
+                let middle = pos + Vec3::new(0.0, 0.5 * shape.size[1], 0.0);
+                let distance = (middle - eye.eye).length();
+                // The smaller side of the footprint is what has to be wide
+                // enough to hit, whatever way the unit faces.
+                let footprint = shape.size[0].min(shape.size[2]);
+                let margin = click_margin(footprint, distance, eye.focal_px, click_px);
+                let Some(t) = ray_obb(ray, pos, rec.steps, shape.size, margin) else {
+                    continue;
+                };
+                // Entered behind the terrain the ray meets first: hidden by the ground.
+                if query
+                    .terrain_t
+                    .is_some_and(|ground_t| t > ground_t + margin + 0.05)
+                {
+                    continue;
+                }
+                let candidate = Candidate {
+                    id: rec.id,
+                    via: PickVia::Model,
+                    distance: t,
+                    cursor_distance: 0.0,
+                    // Models rank by depth only.
+                    rank: 0.0,
+                    record: r,
+                };
+                if best.is_none_or(|b| candidate.beats(&b)) {
+                    best = Some(candidate);
+                }
+            }
+        }
+        let mut best = best?;
+        // For the readout: how far the box centre is from the cursor on the screen.
+        let rec = &self.records[best.record as usize];
+        let middle =
+            Vec3::from(rec.pos) + Vec3::new(0.0, 0.5 * self.style.shape(rec.shape).size[1], 0.0);
+        best.cursor_distance = project_px(&query.view_proj, middle, query.viewport)
+            .map_or(0.0, |(p, _)| {
+                (p[0] - query.cursor[0]).hypot(p[1] - query.cursor[1])
+            });
+        Some(best)
+    }
+
+    fn pick_icon(
+        &self,
+        query: &crate::pick::PickQuery,
+        ray: &crate::pick::PickRay,
+        eye: &EyeView,
+        ui_scale: f32,
+    ) -> Option<Candidate> {
+        let size = self.icon_config.icon_px(ui_scale);
+        let lift = self.icon_config.lift;
+        let mut best: Option<Candidate> = None;
+        for vt in &self.visible_tiles {
+            let tile = &self.tile_boxes[vt.tile as usize];
+            // Everything whose icon quad can reach the cursor is within a
+            // few pixels' worth of metres of the cursor ray.
+            let (centre, half) = ((tile.min + tile.max) * 0.5, (tile.max - tile.min) * 0.5);
+            let far = (centre - eye.eye).length() + half.length();
+            let reach = Vec3::splat((0.75 * size + 1.0) * far / eye.focal_px.max(1.0) + lift);
+            if !ray_hits_aabb(ray, tile.min - reach, tile.max + reach) {
+                continue;
+            }
+            for (r, rec) in
+                (vt.start..vt.end).zip(&self.records[vt.start as usize..vt.end as usize])
+            {
+                let anchor = Vec3::new(rec.pos[0], rec.pos[1] + lift, rec.pos[2]);
+                let Some((px, _)) = project_px(&query.view_proj, anchor, query.viewport) else {
+                    continue;
+                };
+                // The quad the shader draws: centre snapped to the pixel grid.
+                let centre = [snap_icon_center(px[0], size), snap_icon_center(px[1], size)];
+                let Some(cursor_distance) = icon_hit(query.cursor, centre, size) else {
+                    continue;
+                };
+                let candidate = Candidate {
+                    id: rec.id,
+                    via: PickVia::Icon,
+                    distance: (anchor - eye.eye).length(),
+                    cursor_distance,
+                    rank: cursor_distance,
+                    record: r,
+                };
+                if best.is_none_or(|b| candidate.beats(&b)) {
+                    best = Some(candidate);
+                }
+            }
+        }
+        best
+    }
+
+    /// Mark the picked unit in the instance lists of the last build (before
+    /// they are uploaded): its model is tinted towards white, its icon gets
+    /// the highlight flag (a white outline). Does nothing if the pick is
+    /// from another frame.
+    pub fn highlight(&mut self, pick: &Pick) {
+        let Some(rec) = self.records.get(pick.record as usize).copied() else {
+            return;
+        };
+        if rec.id != pick.id {
+            return;
+        }
+        if rec.model_index != NO_INSTANCE
+            && let Some(instance) = self
+                .lists
+                .get_mut(usize::from(rec.model_mesh))
+                .and_then(|l| l.get_mut(rec.model_index as usize))
+        {
+            for c in &mut instance.color[..3] {
+                *c += (1.0 - *c) * HIGHLIGHT_TINT;
+            }
+        }
+        if rec.icon_index != NO_INSTANCE
+            && let Some(icon) = self.icons.get_mut(rec.icon_index as usize)
+        {
+            icon.flags |= ICON_HIGHLIGHT;
+        }
+    }
 }
+
+/// How far a highlighted model's colour moves towards white (linear light).
+const HIGHLIGHT_TINT: f32 = 0.55;
+
+/// A unit that is under the cursor, with what decides between two of them.
+#[derive(Clone, Copy, Debug)]
+struct Candidate {
+    id: UnitId,
+    via: PickVia,
+    distance: f32,
+    cursor_distance: f32,
+    /// Icons: the cursor distance, the nearest centre wins.
+    rank: f32,
+    record: u32,
+}
+
+impl Candidate {
+    /// Nearest icon centre to the cursor first, then the nearer to the
+    /// camera, then the lower id; for models the nearer hit along the ray,
+    /// then the lower id. Differences below a hundredth of a pixel or a
+    /// tenth of a millimetre count as equal.
+    fn beats(&self, other: &Candidate) -> bool {
+        if (self.rank - other.rank).abs() > 0.01 {
+            return self.rank < other.rank;
+        }
+        if (self.distance - other.distance).abs() > 1e-4 {
+            return self.distance < other.distance;
+        }
+        self.id < other.id
+    }
+}
+
+/// Levels of detail, icons, picking and the highlight (WP1.9).
+#[cfg(test)]
+mod frame_tests;
 
 #[cfg(test)]
 mod tests {

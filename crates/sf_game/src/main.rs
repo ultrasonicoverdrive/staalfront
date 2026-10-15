@@ -24,6 +24,15 @@
 //! toggles the unit dots) and the minimap bottom-right (`hud.rs`). The UI sees
 //! the mouse first: a press or wheel over it never reaches the camera.
 //!
+//! Model LOD, strategic icons and hover (WP1.9): each model has a chain of
+//! meshes chosen per unit by projected size (`assets/config/units.ron`); past
+//! a zoom threshold the units become screen-fixed icons in player colour, with
+//! a dithered cross-fade between the two. The unit under the cursor is
+//! picked (the model's box up close, the icon's quad far away), highlighted
+//! and named in the F1 panel; a click does nothing with it yet. `--hover x,y`
+//! fixes the cursor for screenshots, `--unit-display auto|models|icons` (and the
+//! F1 panel) forces the display.
+//!
 //! The ground is the engine terrain (WP1.7): a procedural 256x256 m map
 //! (seed 1) by default, or a map directory given with `--map <dir>`. The
 //! camera still works on the flat `y = 0` plane (focus height and the point
@@ -37,16 +46,16 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use debug_ui::{DebugUi, PanelData};
+use debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
 use sf_audio::{AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate};
 use sf_engine::{Action, App, Context, EngineConfig, Resized, winit};
 use sf_math::{Fx, Rng, Vec2};
 use sf_render::camera::DVec2;
-use sf_render::scene::{MeshKind, world_markers};
+use sf_render::scene::world_markers;
 use sf_render::{
-    Camera, CameraConfig, CameraInput, DebugView, Frustum, GpuOptions, InstanceStats, Instancer,
-    Motion, Renderer, Style,
+    Blend, Camera, CameraConfig, CameraInput, DebugView, EyeView, FrameView, Frustum, GpuOptions,
+    InstanceStats, Instancer, Motion, Pick, PickQuery, PickRay, PickVia, Renderer, Style, UnitId,
 };
 use sf_sim::{Command, EntityView, Kind, PlayerId, Tick, World, WorldConfig};
 
@@ -169,10 +178,19 @@ struct Runner {
     draw_calls: u32,
     frame_ms: Samples,
     build_ms: Samples,
+    pick_ms: Samples,
     upload_ms: Samples,
     tick_ms: Samples,
     last_frame: Option<Instant>,
     auto_zoom: bool,
+    /// The unit under the cursor in the last frame (hover only: a click
+    /// does nothing yet), highlighted in the picture and named in the F1 panel.
+    hovered: Option<Pick>,
+    /// Model/icon state of the last frame, for the F1 panel.
+    unit_view: UnitView,
+    /// `--hover x,y`: pretend the cursor is here (pixels), for screenshots
+    /// taken without a mouse.
+    hover_at: Option<(f32, f32)>,
     /// F1 panels (hidden by default).
     debug: DebugUi,
     /// Window size in pixels, to rebuild the camera when its tunables change.
@@ -227,10 +245,14 @@ impl Runner {
             draw_calls: 0,
             frame_ms: Samples::default(),
             build_ms: Samples::default(),
+            pick_ms: Samples::default(),
             upload_ms: Samples::default(),
             tick_ms: Samples::default(),
             last_frame: None,
             auto_zoom,
+            hovered: None,
+            unit_view: UnitView::default(),
+            hover_at: None,
             debug: DebugUi::new(camera_config),
             viewport: (1280, 720),
             failed,
@@ -309,6 +331,7 @@ impl Runner {
                 .map(Renderer::draw_stats)
                 .unwrap_or_default(),
             instances: self.stats,
+            units: self.unit_view.clone(),
             terrain_chunks: self
                 .renderer
                 .as_ref()
@@ -364,7 +387,114 @@ impl Runner {
     }
 }
 
+/// Distance along `ray` to the terrain surface, found by marching in half
+/// metre steps and bisecting the step that crosses the ground; `None` if the
+/// ray never gets under the ground over the map. It tells the unit picking
+/// which models a hill hides.
+fn terrain_hit(map: &Map, ray: &PickRay) -> Option<f32> {
+    const STEP: f32 = 0.5;
+    const FAR: f32 = 1500.0;
+    let (width, depth) = (map.width() as f32, map.height() as f32);
+    // Under the ground at distance `t` (outside the map there is no ground).
+    let under = |t: f32| {
+        let p = ray.origin + ray.dir * t;
+        (0.0..=width).contains(&p.x)
+            && (0.0..=depth).contains(&p.z)
+            && p.y <= map.height_at(p.x, p.z)
+    };
+    let mut t = 0.0;
+    while t < FAR {
+        if under(t + STEP) {
+            let (mut lo, mut hi) = (t, t + STEP);
+            for _ in 0..16 {
+                let mid = 0.5 * (lo + hi);
+                if under(mid) {
+                    hi = mid;
+                } else {
+                    lo = mid;
+                }
+            }
+            return Some(hi);
+        }
+        t += STEP;
+    }
+    None
+}
+
 impl Runner {
+    /// Build this frame's models and icons (level of detail per unit, the
+    /// cross-fade by zoom), pick the unit under the cursor in what was built
+    /// and highlight it. A click does nothing with it yet.
+    fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>) {
+        let view_proj = self.camera.view_proj();
+        let (width, height) = self.viewport;
+        let frustum = Frustum::from_view_proj(view_proj);
+        let eye = EyeView::from_view_proj(view_proj, height as f32);
+        let scale = self.hud.scale();
+        let icons = *self.instancer.icon_config();
+        let distance = self.camera.distance() as f32;
+        let blend = match self.debug.state.unit_display {
+            UnitDisplay::Auto => icons.blend_for_camera(eye.focal_px, distance, scale),
+            UnitDisplay::Models => Blend::MODELS,
+            UnitDisplay::Icons => Blend::ICONS,
+        };
+
+        // Cull by tile, interpolate, put the units on the ground, choose the
+        // level of detail and the model or icon.
+        let started = Instant::now();
+        let map = &self.map;
+        self.stats = self.instancer.build_frame(
+            &FrameView::new(&frustum, alpha, eye, blend, scale),
+            |x, z| map.height_at(x, z),
+        );
+        self.build_ms.push(started.elapsed());
+
+        // Hover: the model's box up close, the icon's quad far away.
+        let started = Instant::now();
+        let size = [width as f32, height as f32];
+        self.hovered = cursor.and_then(|(x, y)| {
+            let query = PickQuery::new([x, y], view_proj, size);
+            let hidden_behind = query.ray().and_then(|ray| terrain_hit(map, &ray));
+            self.instancer.pick(&query.with_terrain(hidden_behind))
+        });
+        if let Some(pick) = &self.hovered {
+            self.instancer.highlight(pick);
+        }
+        self.pick_ms.push(started.elapsed());
+
+        let hovered = self.hovered.as_ref().map(|p| {
+            let owner = self
+                .views
+                .iter()
+                .find(|v| v.id.index() == p.id.index() && v.id.generation() == p.id.generation())
+                .map(|v| v.owner.0);
+            HoveredUnit {
+                id: p.id.to_string(),
+                via: match p.via {
+                    PickVia::Model => "model",
+                    PickVia::Icon => "icon",
+                },
+                player: owner.map_or_else(String::new, |o| {
+                    self.instancer.style().color_name(o).to_owned()
+                }),
+                distance: p.distance,
+            }
+        });
+        let (above, below) = (icons.model_above_px * scale, icons.icon_below_px * scale);
+        self.unit_view = UnitView {
+            model_weight: blend.model(),
+            zoom: self.camera.zoom() as f32,
+            distance,
+            reference_px: icons.reference_px(eye.focal_px, distance),
+            model_above_px: above,
+            icon_below_px: below,
+            models_until: icons.distance_for_px(eye.focal_px, above),
+            icons_from: icons.distance_for_px(eye.focal_px, below),
+            ui_scale: scale,
+            hovered,
+        };
+    }
+
     /// Debug builds: `assets/config/units.ron` changed on disk. A broken
     /// file is reported and the old look stays.
     fn reload_style(&mut self, ctx: &Context, path: &std::path::Path) {
@@ -468,6 +598,7 @@ impl App for Runner {
                 v.prev_facing,
                 v.facing,
             )
+            .with_id(UnitId::from_parts(v.id.index(), v.id.generation()))
         }));
         self.tick_ms.push(started.elapsed());
     }
@@ -491,25 +622,27 @@ impl App for Runner {
         self.hud.frame(ctx, &mut self.camera, &self.views, stats);
         let input = self.camera_input(ctx, dt);
         self.camera.update(dt, &input);
-        if let Some(renderer) = &mut self.renderer {
+        if self.renderer.is_some() {
             let view_proj = self.camera.view_proj();
-            renderer.set_view_proj(view_proj);
-            // Cull by tile, interpolate, put the units on the ground.
+            if let Some(renderer) = &mut self.renderer {
+                renderer.set_view_proj(view_proj);
+            }
+            // The cursor, unless the UI or an F1 panel has it.
+            let blocked = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
+            let cursor = self.hover_at.or_else(|| {
+                ctx.input()
+                    .cursor()
+                    .filter(|_| !blocked)
+                    .map(|(x, y)| (x as f32, y as f32))
+            });
+            self.build_units(alpha, cursor);
             let started = Instant::now();
-            let map = &self.map;
-            self.stats =
-                self.instancer
-                    .build(&Frustum::from_view_proj(view_proj), alpha, |x, z| {
-                        map.height_at(x, z)
-                    });
-            self.build_ms.push(started.elapsed());
-            let started = Instant::now();
-            for kind in MeshKind::ALL {
-                renderer.set_instances(kind, self.instancer.instances(kind));
+            if let Some(renderer) = &mut self.renderer {
+                renderer.upload_units(&self.instancer);
+                // Of the previous frame: counted where the draws are recorded.
+                self.draw_calls = renderer.draw_stats().total_draw_calls();
             }
             self.upload_ms.push(started.elapsed());
-            // Of the previous frame: counted where the draws are recorded.
-            self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
         // The listener follows the camera (it does not rotate, so right = +X).
         let focus = self.camera.focus();
@@ -561,7 +694,7 @@ impl App for Runner {
             match ft {
                 Some(f) => println!(
                     "{} fps, {} ticks/s (total {}), frame ms avg {:.2} p99 {:.2} max {:.2}, \
-                     units {}/{} visible, {} draw calls",
+                     units {}/{} visible ({} models, levels {:?}, {} icons), {} draw calls",
                     self.frames,
                     self.ticks,
                     self.total_ticks,
@@ -570,6 +703,9 @@ impl App for Runner {
                     f.max.as_secs_f64() * 1e3,
                     self.stats.visible,
                     self.stats.total,
+                    self.stats.models,
+                    self.stats.per_lod,
+                    self.stats.icons,
                     self.draw_calls,
                 ),
                 None => println!("{} fps, {} ticks/s", self.frames, self.ticks),
@@ -624,8 +760,12 @@ impl App for Runner {
             self.frame_ms.describe(WARMUP_FRAMES)
         );
         println!(
-            "summary: build+cull ms {}",
+            "summary: build+cull+LOD+icons ms {}",
             self.build_ms.describe(WARMUP_FRAMES)
+        );
+        println!(
+            "summary: pick+terrain ray ms {}",
+            self.pick_ms.describe(WARMUP_FRAMES)
         );
         println!(
             "summary: instance upload ms {}",
@@ -645,7 +785,52 @@ impl App for Runner {
             self.stats.per_mesh,
             self.draw_calls,
         );
+        println!(
+            "summary: last frame {} models (levels {:?}, {} triangles, {} draw calls), \
+             {} icons ({} draw call), model weight {:.2}, hovered {}",
+            self.stats.models,
+            self.stats.per_lod,
+            self.stats.model_triangles,
+            self.stats.model_draw_calls,
+            self.stats.icons,
+            self.stats.icon_draw_calls,
+            self.unit_view.model_weight,
+            self.unit_view
+                .hovered
+                .as_ref()
+                .map_or_else(|| "none".to_string(), |h| format!("{} via {}", h.id, h.via)),
+        );
     }
+}
+
+/// `--hover <x,y>`: act as if the cursor were at this pixel (screenshots
+/// without a mouse): the unit under it is highlighted and named in F1.
+fn hover_arg() -> Option<(f32, f32)> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--hover" {
+            let v = args.next()?;
+            let (x, y) = v.split_once(',')?;
+            return Some((x.parse().ok()?, y.parse().ok()?));
+        }
+    }
+    None
+}
+
+/// `--unit-display <auto|models|icons>`: what the units are drawn as at start
+/// (the F1 panel switches it live).
+fn unit_display_arg() -> UnitDisplay {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--unit-display" {
+            return match args.next().as_deref() {
+                Some("models") => UnitDisplay::Models,
+                Some("icons") => UnitDisplay::Icons,
+                _ => UnitDisplay::Auto,
+            };
+        }
+    }
+    UnitDisplay::Auto
 }
 
 /// `--units <n>`: number of wandering units (default [`DEFAULT_UNITS`]).
@@ -754,6 +939,8 @@ fn main() {
     runner.debug.set_visible(panels);
     runner.debug.state.grid = grid;
     runner.debug.state.lod_tint = lod;
+    runner.hover_at = hover_arg();
+    runner.debug.state.unit_display = unit_display_arg();
     let (zoom, focus) = camera_args();
     if let Some(zoom) = zoom {
         runner.camera.set_zoom(zoom);

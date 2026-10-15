@@ -16,6 +16,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `fonts/OFL.txt` | License text of the Inter font (copied from the Debian `fonts-inter` package) | SIL Open Font License 1.1 |
 | `config/ui.ron` | Written for this project (UI scale, colors; WP1.12) | Project license (see workspace `Cargo.toml`) |
 | `shaders/ui.wgsl` | Written for this project (WP1.12) | Project license (see workspace `Cargo.toml`) |
+| `shaders/icon.wgsl` | Written for this project (WP1.9: strategic icons; the shapes are signed distance functions derived from plain geometry) | Project license (see workspace `Cargo.toml`) |
 
 ## Third-party code and fonts compiled into the binary (WP1.11)
 

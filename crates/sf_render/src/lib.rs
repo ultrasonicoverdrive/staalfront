@@ -15,6 +15,12 @@
 //! unit instances from two sim ticks, per-tile frustum culling, one instance
 //! buffer and one draw call per placeholder mesh (cube, cylinder, cone).
 //!
+//! WP1.9 adds model levels of detail ([`model`]), strategic icons with a
+//! dithered cross-fade ([`icons`]) and picking per zoom ([`pick`]): a chain of
+//! meshes per model chosen by projected size with hysteresis, screen-fixed
+//! icons in player colour past a zoom threshold, and a click volume that is the
+//! model's box when zoomed in and the icon's quad when zoomed out.
+//!
 //! WP1.11 adds the debug overlay layer ([`overlay`]): the egui painter
 //! (`egui-wgpu`) on this crate's wgpu device, a terrain LOD tint and a 1 m cell
 //! grid ([`DebugView`]), and draw-call counters taken at the actual draw calls.
@@ -25,10 +31,13 @@
 pub mod camera;
 pub mod frustum;
 pub mod gpu;
+pub mod icons;
 pub mod image;
 pub mod instancing;
 pub mod mesh;
+pub mod model;
 pub mod overlay;
+pub mod pick;
 pub mod renderer;
 pub mod scene;
 #[cfg(debug_assertions)]
@@ -40,9 +49,12 @@ mod terrain_gpu;
 pub use camera::{Camera, CameraConfig, CameraInput};
 pub use frustum::{Aabb, Frustum, Visibility};
 pub use gpu::{Gpu, GpuOptions, RenderError};
+pub use icons::{Blend, IconConfig, IconShape};
 pub use image::{Rgba8, Tolerance};
-pub use instancing::{InstanceStats, Instancer, Motion};
+pub use instancing::{FrameView, InstanceStats, Instancer, Motion};
+pub use model::{EyeView, MeshId, ModelLods, ModelSet};
 pub use overlay::OverlayFrame;
+pub use pick::{Pick, PickQuery, PickRay, PickVia, UnitId};
 pub use renderer::{DebugView, DrawStats, EMBEDDED_SHADER, FrameTarget, Renderer};
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
