@@ -34,10 +34,12 @@ fn view_of(cam: &Camera) -> (LodView, Frustum) {
     )
 }
 
+/// A config with the pure error-budget selection: no joining of draw calls.
 fn config(error_px: f32, hysteresis: f32) -> LodConfig {
     LodConfig {
         error_px,
         hysteresis,
+        draw_call_cost: 0.0,
         ..LodConfig::default()
     }
 }
@@ -50,6 +52,7 @@ fn the_shipped_config_is_valid_and_has_the_documented_defaults() {
     assert_eq!(c, TerrainConfig::default());
     assert_eq!(c.lod.error_px, 2.0);
     assert_eq!(c.lod.hysteresis, 0.25);
+    assert_eq!(c.lod.draw_call_cost, DEFAULT_DRAW_CALL_COST);
     assert_eq!(c.lod.force_level, None);
     assert!(!c.lod.tint_levels && c.seams);
     // Partial files fall back to the defaults.
@@ -70,6 +73,7 @@ fn bad_configs_are_refused() {
         "(lod: (error_px: -1.0))",
         "(lod: (hysteresis: 1.0))",
         "(lod: (hysteresis: -0.1))",
+        "(lod: (draw_call_cost: -1.0))",
         "(lod: (force_level: Some(6)))",
         "(lod: (error_pixels: 2.0))",
         "(seams: maybe)",
@@ -451,48 +455,211 @@ fn synthetic(side: u32) -> Map {
     .unwrap()
 }
 
+/// A bigger map with the generated hills: the 256 m map mirrored over and
+/// over (continuous at the seams), so the relief is as steep as the real
+/// thing and building it stays cheap (the generator itself is quadratic in
+/// the map size).
+fn mirrored_hills(side: u32) -> Map {
+    let base = generate(256, 256, 1);
+    let fold = |v: u32, size: u32| {
+        let u = v % (2 * size);
+        if u > size { 2 * size - u } else { u }
+    };
+    let heights = (0..=side)
+        .flat_map(|z| (0..=side).map(move |x| (x, z)))
+        .map(|(x, z)| base.raw_height(i64::from(fold(x, 256)), i64::from(fold(z, 256))))
+        .collect();
+    let cells = (0..side)
+        .flat_map(|z| (0..side).map(move |x| (x, z)))
+        .map(|(x, z)| {
+            base.material_at(
+                i64::from(fold(x, 256).min(255)),
+                i64::from(fold(z, 256).min(255)),
+            )
+        })
+        .collect();
+    Map::from_parts(
+        side,
+        side,
+        base.height_scale(),
+        base.materials().to_vec(),
+        heights,
+        cells,
+    )
+    .expect("valid map")
+}
+
 /// Whole-map zoom: the requirement (<= 300 terrain draw calls on a
-/// 256x256 map), and the same for the largest map the format allows.
+/// 256x256 map), and the same for the largest map the format allows. Joining
+/// draw calls (`draw_call_cost`) is what keeps the 1024 hills below 300; the
+/// numbers with and without it are printed for the report.
 #[test]
 fn whole_map_zoom_needs_few_draw_calls() {
     let cfg = LodConfig::default();
-    for side in [256_u32, 1024] {
-        let map = if side == 256 {
-            generate(256, 256, 1)
+    let pure = config(cfg.error_px, cfg.hysteresis);
+    // The generated hills at 256 and, mirrored, at 1024 (sixteen times the
+    // hills of the same steepness), and a smooth 1024 map for the other extreme.
+    for (side, smooth) in [(256_u32, false), (1024, false), (1024, true)] {
+        let map = if smooth {
+            synthetic(side)
+        } else if side == 256 {
+            generate(side, side, 1)
         } else {
-            synthetic(1024)
+            mirrored_hills(side)
         };
         let started = std::time::Instant::now();
         let mut p = planner_for(&map);
         let built = started.elapsed();
         let cam = camera(&map, 1.0, (f64::from(side) / 2.0, f64::from(side) / 2.0));
         let (view, fr) = view_of(&cam);
+
+        let mut fresh = p.clone();
+        let unjoined = p.select(&view, &fr, &pure, None).clone();
         let started = std::time::Instant::now();
-        let stats = p.select(&view, &fr, &cfg, None).stats;
+        let joined = fresh.select(&view, &fr, &cfg, None).clone();
         let first = started.elapsed();
         let started = std::time::Instant::now();
         for _ in 0..50 {
-            std::hint::black_box(p.select(&view, &fr, &cfg, None));
+            std::hint::black_box(fresh.select(&view, &fr, &cfg, None));
         }
         let each = started.elapsed() / 50;
+        let (u, j) = (unjoined.stats, joined.stats);
         println!(
-            "{side}x{side} whole map: {}/{} chunks drawn, {} draw calls, {} triangles, \
-             levels {:?}; mesh build {built:?}, select+cull {first:?} first, {each:?} each",
-            stats.chunks_visible,
-            stats.chunks_total,
-            stats.draw_calls,
-            stats.triangles,
-            stats.per_level
+            "{side}x{side}{} whole map: {}/{} chunks drawn. Strict budget: {} draw calls, {} triangles, \
+             levels {:?}. Joined: {} draw calls, {} triangles, levels {:?}. \
+             Mesh build {built:?}, select+cull {first:?} first, {each:?} each",
+            if smooth { " (smooth)" } else { "" },
+            j.chunks_visible,
+            j.chunks_total,
+            u.draw_calls,
+            u.triangles,
+            u.per_level,
+            j.draw_calls,
+            j.triangles,
+            j.per_level,
         );
-        assert_eq!(
-            stats.chunks_visible, stats.chunks_total,
-            "the whole map is in view"
-        );
-        assert!(stats.draw_calls <= 300, "{} draw calls", stats.draw_calls);
+        assert_eq!(j.chunks_visible, j.chunks_total, "the whole map is in view");
+        assert!(j.draw_calls <= 300, "{} draw calls", j.draw_calls);
+        assert!(j.draw_calls <= u.draw_calls);
+        // Joining only ever makes chunks finer, and costs less than it saves.
+        assert!(j.triangles >= u.triangles);
+        let saved = f64::from(u.draw_calls - j.draw_calls);
+        let extra = f64::from(j.triangles - u.triangles);
+        assert!(extra <= saved * f64::from(cfg.draw_call_cost) + 1.0);
+        for (id, (&a, &b)) in unjoined.level.iter().zip(&joined.level).enumerate() {
+            assert!(b <= a, "chunk {id} went coarser: {a} -> {b}");
+        }
         if side == 256 {
-            assert_eq!(stats.chunks_total, 64);
+            assert_eq!(j.chunks_total, 64);
         }
     }
+}
+
+/// The joining is an exact optimisation: it finds the cheapest choice of
+/// levels (triangles plus a price per run), checked against trying every
+/// choice on small random cases.
+#[test]
+fn joining_draw_calls_finds_the_cheapest_levels() {
+    let mut seed = 5_u64;
+    let mut rnd = move |n: u64| {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) % n
+    };
+    let run_cost = |ids: &[u32], levels: &[u8], tri: &dyn Fn(usize, u8) -> f32, cost: f32| {
+        let mut total = 0.0;
+        for k in 0..ids.len() {
+            total += tri(k, levels[k]);
+            if k == 0 || ids[k - 1] + 1 != ids[k] || levels[k - 1] != levels[k] {
+                total += cost;
+            }
+        }
+        total
+    };
+    let (mut dp, mut back, mut out) = (Vec::new(), Vec::new(), Vec::new());
+    let mut joined_cases = 0;
+    for case in 0..400 {
+        let n = 1 + rnd(6) as usize;
+        // Ascending ids, mostly consecutive.
+        let mut ids = Vec::new();
+        let mut id = rnd(10) as u32;
+        for _ in 0..n {
+            ids.push(id);
+            id += 1 + u32::from(rnd(4) == 0);
+        }
+        let target: Vec<u8> = (0..n).map(|_| rnd(4) as u8).collect();
+        // Triangles per chunk and level: falling steeply with the level.
+        let base: Vec<f32> = (0..n).map(|_| 8.0 + rnd(200) as f32).collect();
+        let tri = |k: usize, level: u8| base[k] / 4_f32.powi(i32::from(level));
+        let cost = rnd(120) as f32;
+        merge_levels(&ids, &target, tri, cost, &mut dp, &mut back, &mut out);
+        assert_eq!(out.len(), n);
+        assert!(
+            out.iter().zip(&target).all(|(l, t)| l <= t),
+            "case {case}: {out:?} exceeds {target:?}"
+        );
+        let got = run_cost(&ids, &out, &tri, cost);
+        // Every assignment with level <= target.
+        let mut best = f32::INFINITY;
+        let mut levels = vec![0_u8; n];
+        loop {
+            best = best.min(run_cost(&ids, &levels, &tri, cost));
+            let mut k = 0;
+            while k < n {
+                if levels[k] < target[k] {
+                    levels[k] += 1;
+                    break;
+                }
+                levels[k] = 0;
+                k += 1;
+            }
+            if k == n {
+                break;
+            }
+        }
+        assert!(
+            (got - best).abs() < 1e-3,
+            "case {case}: ids {ids:?} targets {target:?} cost {cost}: chose {out:?} for {got}, best {best}"
+        );
+        joined_cases += usize::from(out != target);
+    }
+    // The cases are not all trivial: joining does change levels.
+    assert!(joined_cases > 50, "{joined_cases}");
+    // No price, no joining.
+    let ids = [0, 1, 2, 3];
+    merge_levels(
+        &ids,
+        &[3, 1, 3, 2],
+        |_, l| 100.0 / 4_f32.powi(l.into()),
+        0.0,
+        &mut dp,
+        &mut back,
+        &mut out,
+    );
+    assert_eq!(out, [3, 1, 3, 2]);
+    // A huge price joins everything that touches, down to the finest target.
+    merge_levels(
+        &ids,
+        &[3, 1, 3, 2],
+        |_, l| 100.0 / 4_f32.powi(l.into()),
+        1.0e5,
+        &mut dp,
+        &mut back,
+        &mut out,
+    );
+    assert_eq!(out, [1, 1, 1, 1]);
+    // Chunks that do not touch cannot share a draw call, whatever the price.
+    merge_levels(
+        &[0, 5],
+        &[3, 1],
+        |_, l| 100.0 / 4_f32.powi(l.into()),
+        1.0e5,
+        &mut dp,
+        &mut back,
+        &mut out,
+    );
+    assert_eq!(out, [3, 1]);
 }
 
 #[test]

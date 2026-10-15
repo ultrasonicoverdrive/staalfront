@@ -12,6 +12,10 @@
         // A chunk goes coarser only if the coarser level fits in
         // error_px * (1 - hysteresis); 0 = no hysteresis (levels may flicker).
         hysteresis: 0.25,
+        // What one more draw call is worth, in triangles. The planner draws a
+        // chunk finer than the budget needs when that joins draw calls and costs
+        // fewer extra triangles than this. 0 = never (more draw calls).
+        draw_call_cost: 300.0,
         // Debug: draw every chunk at this level, e.g. Some(0) for full detail.
         force_level: None,
         // Debug: tint chunks by level (0 red, 1 orange, 2 yellow, 3 green,

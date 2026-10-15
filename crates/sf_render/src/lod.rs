@@ -22,11 +22,21 @@
 //!
 //! # Culling and draw calls
 //! A chunk whose box is outside the view frustum ([`Frustum`], the same code
-//! the instancing uses) is not drawn. The visible chunks of the same level
-//! have consecutive index ranges in the packed index buffer
-//! ([`crate::terrain::PackedTerrain`]), so chunks that are neighbours in the
-//! chunk list and share a level become **one** draw call. At whole-map zoom
-//! on a 256x256 map that is a handful of draws instead of 64.
+//! the instancing uses) is not drawn. The index ranges of one level are
+//! consecutive in chunk order in the packed index buffer
+//! ([`crate::terrain::PackedTerrain`]), so visible chunks with consecutive
+//! ids and the same level become **one** draw call.
+//!
+//! On hilly ground neighbouring chunks want different levels and the runs
+//! get short (a 1024x1024 map of hills at whole-map zoom: 459 draw calls
+//! when every chunk takes its coarsest level). So after the selection the
+//! planner may give a chunk a **finer** level than its budget needs when
+//! that joins draw calls: it minimises `triangles + draw_call_cost * draw
+//! calls` exactly (dynamic programming over the chunks in order, six states
+//! each, `merge_levels`). A finer level only lowers the error, so the pixel
+//! budget still holds; the price is triangles (the same map: 15 draw calls,
+//! 58k instead of 28k triangles). `draw_call_cost: 0` switches it off. The
+//! 256x256 map at whole-map zoom needs 18 draw calls.
 
 use glam::{DMat4, DVec4, Mat4, Vec3};
 use serde::Deserialize;
@@ -63,6 +73,12 @@ pub struct LodConfig {
     /// A chunk goes to a coarser level only if that level's error fits in
     /// `error_px * (1 - hysteresis)`. `0` = no hysteresis.
     pub hysteresis: f32,
+    /// What one more draw call is worth, in triangles. The planner may draw
+    /// a chunk at a *finer* level than the budget needs (never coarser) when
+    /// that joins draw calls and costs fewer extra triangles than this. `0`
+    /// = every chunk at its coarsest allowed level, as many draw calls as it
+    /// takes.
+    pub draw_call_cost: f32,
     /// Debug: draw every chunk at this level (clamped to what it has).
     pub force_level: Option<u8>,
     /// Debug: tint chunks by level (see `terrain.wgsl` for the colours).
@@ -74,11 +90,15 @@ impl Default for LodConfig {
         Self {
             error_px: 2.0,
             hysteresis: 0.25,
+            draw_call_cost: DEFAULT_DRAW_CALL_COST,
             force_level: None,
             tint_levels: false,
         }
     }
 }
+
+/// Default for [`LodConfig::draw_call_cost`].
+pub const DEFAULT_DRAW_CALL_COST: f32 = 300.0;
 
 impl LodConfig {
     /// Every chunk at full detail (the WP1.7 look).
@@ -150,6 +170,11 @@ impl TerrainConfig {
         if !(0.0..=0.9).contains(&lod.hysteresis) {
             return Err(TerrainConfigError::Invalid(
                 "lod.hysteresis must be between 0 and 0.9",
+            ));
+        }
+        if !lod.draw_call_cost.is_finite() || lod.draw_call_cost < 0.0 {
+            return Err(TerrainConfigError::Invalid(
+                "lod.draw_call_cost must be a finite number of triangles, 0 or more",
             ));
         }
         if lod
@@ -258,6 +283,7 @@ pub struct LodPlanner {
     ranges: Vec<Vec<Range<u32>>>,
     current: Vec<u8>,
     selection: Selection,
+    scratch: MergeScratch,
 }
 
 impl LodPlanner {
@@ -280,6 +306,7 @@ impl LodPlanner {
                 level: vec![NOT_DRAWN; n],
                 ..Selection::default()
             },
+            scratch: MergeScratch::default(),
         }
     }
 
@@ -309,17 +336,7 @@ impl LodPlanner {
     /// The coarsest level of `chunk` whose projected error is at most
     /// `budget_px` (0 if even level 1 is too coarse).
     pub fn coarsest_within(&self, chunk: usize, view: &LodView, budget_px: f32) -> u8 {
-        let c = &self.chunks[chunk];
-        let distance = distance_to_aabb(view.eye, &c.aabb);
-        let mut best = 0;
-        for (level, &error) in c.errors.iter().enumerate().skip(1) {
-            if view.pixels(error, distance) <= budget_px {
-                best = level as u8;
-            } else {
-                break;
-            }
-        }
-        best
+        coarsest_within(&self.chunks[chunk], view, budget_px)
     }
 
     /// Cull against `frustum`, choose a level per visible chunk and build the
@@ -333,41 +350,80 @@ impl LodPlanner {
         levels: Option<&[u8]>,
     ) -> &Selection {
         let n = self.chunks.len();
-        let mut stats = TerrainStats {
-            chunks_total: n as u32,
-            ..TerrainStats::default()
-        };
         self.selection.level.resize(n, NOT_DRAWN);
+
+        // 1. Cull, and choose each visible chunk's level.
+        let scratch = &mut self.scratch;
+        scratch.ids.clear();
+        let mut automatic = true;
         for id in 0..n {
             if !frustum.intersects(&self.chunks[id].aabb) {
                 self.selection.level[id] = NOT_DRAWN;
                 continue;
             }
-            let max = self.chunk_max_level(id);
-            let level = match (levels.and_then(|l| l.get(id)), config.force_level) {
-                (Some(&forced), _) | (None, Some(forced)) => forced.min(max),
-                (None, None) => {
-                    let budget = config.error_px;
-                    let current = self.current[id];
-                    let target = self.coarsest_within(id, view, budget);
-                    if current != NOT_DRAWN && current <= target {
-                        // Still within the budget: coarsen only with margin.
-                        let tight =
-                            self.coarsest_within(id, view, budget * (1.0 - config.hysteresis));
-                        current.max(tight)
-                    } else {
-                        target
-                    }
+            let max = self.chunks[id].errors.len() as u8 - 1;
+            let forced = levels
+                .and_then(|l| l.get(id))
+                .copied()
+                .or(config.force_level);
+            let level = if let Some(forced) = forced {
+                automatic = false;
+                forced.min(max)
+            } else {
+                let budget = config.error_px;
+                let current = self.current[id];
+                let target = coarsest_within(&self.chunks[id], view, budget);
+                if current != NOT_DRAWN && current <= target {
+                    // Still within the budget: coarsen only with margin.
+                    let tight =
+                        coarsest_within(&self.chunks[id], view, budget * (1.0 - config.hysteresis));
+                    current.max(tight)
+                } else {
+                    target
                 }
             };
-            self.current[id] = level;
             self.selection.level[id] = level;
+            scratch.ids.push(id as u32);
+        }
+
+        // 2. Join draw calls: where it pays, a chunk takes a finer level
+        // than its budget needs, so that neighbours share one.
+        if automatic && config.draw_call_cost > 0.0 {
+            let chunks = &self.chunks;
+            let selection = &mut self.selection;
+            scratch.targets.clear();
+            scratch
+                .targets
+                .extend(scratch.ids.iter().map(|&id| selection.level[id as usize]));
+            let ids = &scratch.ids;
+            merge_levels(
+                ids,
+                &scratch.targets,
+                |k, level| chunks[ids[k] as usize].triangles[usize::from(level)] as f32,
+                config.draw_call_cost,
+                &mut scratch.dp,
+                &mut scratch.back,
+                &mut scratch.chosen,
+            );
+            for (&id, &level) in scratch.ids.iter().zip(&scratch.chosen) {
+                selection.level[id as usize] = level;
+            }
+        }
+
+        // 3. Counters, and the draw list: per level, chunks with adjacent
+        // index ranges become one range.
+        let mut stats = TerrainStats {
+            chunks_total: n as u32,
+            ..TerrainStats::default()
+        };
+        for &id in &scratch.ids {
+            let id = id as usize;
+            let level = self.selection.level[id];
+            self.current[id] = level;
             stats.chunks_visible += 1;
             stats.per_level[usize::from(level)] += 1;
             stats.triangles += self.chunks[id].triangles[usize::from(level)];
         }
-
-        // Draw list: per level, merge chunks with adjacent index ranges.
         self.selection.draws.clear();
         for (level, ranges) in self.ranges.iter().enumerate() {
             let mut run: Option<Range<u32>> = None;
@@ -392,6 +448,92 @@ impl LodPlanner {
         stats.draw_calls = self.selection.draws.len() as u32;
         self.selection.stats = stats;
         &self.selection
+    }
+}
+
+/// The coarsest level of a chunk whose projected error is at most
+/// `budget_px` (0 if even level 1 is too coarse).
+fn coarsest_within(c: &ChunkLod, view: &LodView, budget_px: f32) -> u8 {
+    let distance = distance_to_aabb(view.eye, &c.aabb);
+    let mut best = 0;
+    for (level, &error) in c.errors.iter().enumerate().skip(1) {
+        if view.pixels(error, distance) <= budget_px {
+            best = level as u8;
+        } else {
+            break;
+        }
+    }
+    best
+}
+
+/// Working memory of [`merge_levels`], kept between frames.
+#[derive(Clone, Debug, Default)]
+struct MergeScratch {
+    /// Ids of the visible chunks, ascending.
+    ids: Vec<u32>,
+    targets: Vec<u8>,
+    chosen: Vec<u8>,
+    dp: Vec<f32>,
+    back: Vec<u8>,
+}
+
+/// Pick a level for every visible chunk, at most its `target` (the error
+/// budget), so that triangles plus `cost` per draw call is smallest. `ids`
+/// are the ascending ids of the visible chunks. A draw call is a run of
+/// chunks with consecutive ids and the same level (their index ranges touch),
+/// so the cost counts the runs. `triangles(k, level)` is the triangle count
+/// of the `k`-th visible chunk at a level. Exact dynamic programming over the
+/// chunks in order, at most six states each.
+fn merge_levels(
+    ids: &[u32],
+    target: &[u8],
+    triangles: impl Fn(usize, u8) -> f32,
+    cost: f32,
+    dp: &mut Vec<f32>,
+    back: &mut Vec<u8>,
+    out: &mut Vec<u8>,
+) {
+    const L: usize = LOD_LEVELS;
+    let n = ids.len();
+    out.clear();
+    if n == 0 {
+        return;
+    }
+    dp.clear();
+    dp.resize(n * L, f32::INFINITY);
+    back.clear();
+    back.resize(n * L, 0);
+    for k in 0..n {
+        for level in 0..=usize::from(target[k]) {
+            let own = triangles(k, level as u8);
+            if k == 0 {
+                dp[level] = own + cost;
+                continue;
+            }
+            // From the previous chunk at any level; a new run unless it has
+            // the same level and the next id.
+            let adjacent = ids[k - 1] + 1 == ids[k];
+            let (mut best, mut from) = (f32::INFINITY, 0_u8);
+            for prev in 0..=usize::from(target[k - 1]) {
+                let new_run = !(adjacent && prev == level);
+                let total = dp[(k - 1) * L + prev] + if new_run { cost } else { 0.0 };
+                if total < best {
+                    (best, from) = (total, prev as u8);
+                }
+            }
+            dp[k * L + level] = best + own;
+            back[k * L + level] = from;
+        }
+    }
+    // Walk back from the cheapest last level.
+    let last = (0..=usize::from(target[n - 1]))
+        .min_by(|&a, &b| dp[(n - 1) * L + a].total_cmp(&dp[(n - 1) * L + b]))
+        .unwrap_or(0);
+    out.resize(n, 0);
+    let mut level = last as u8;
+    for k in (0..n).rev() {
+        out[k] = level;
+        level = back[k * L + usize::from(level)];
     }
 }
 
