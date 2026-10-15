@@ -300,11 +300,19 @@ impl DebugUi {
 
     /// F1: flip the panels. Returns the new state.
     pub fn toggle(&mut self) -> bool {
-        self.visible = !self.visible;
+        self.set_visible(!self.visible);
         self.visible
     }
 
+    /// Show or hide. Hiding drops all egui state (pointer interaction
+    /// included): egui gets no events while hidden, so a slider held when F1
+    /// was pressed would otherwise never see its release and keep owning
+    /// the pointer.
     pub fn set_visible(&mut self, visible: bool) {
+        if self.visible && !visible {
+            self.ctx = egui::Context::default();
+            self.winit = None;
+        }
         self.visible = visible;
     }
 
@@ -531,6 +539,67 @@ mod tests {
         }
         assert!(last.unwrap() > 0, "visible panels paint something");
         assert_eq!(ui.ctx.cumulative_pass_nr(), 2);
+    }
+
+    /// Centre of the "Reset camera" button after the windows settled.
+    fn settle_and_find_reset(ctx: &egui::Context, state: &mut PanelState) -> egui::Pos2 {
+        fn find(shape: &egui::epaint::Shape, at: &mut Option<egui::Pos2>) {
+            match shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == "Reset camera" => {
+                    *at = Some(t.pos + t.galley.size() * 0.5);
+                }
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| find(s, at)),
+                _ => {}
+            }
+        }
+        let data = sample_data();
+        let mut at = None;
+        for _ in 0..2 {
+            let out = ctx.run_ui(screen(), |ui| {
+                show_panels(ui.ctx(), &data, state);
+            });
+            at = None;
+            out.shapes.iter().for_each(|c| find(&c.shape, &mut at));
+            let mut td = out.textures_delta;
+            td.clear();
+        }
+        at.expect("the reset button is drawn")
+    }
+
+    #[test]
+    fn hiding_mid_press_releases_the_pointer() {
+        let mut ui = DebugUi::new(CameraConfig::default());
+        ui.set_visible(true);
+        let mut state = ui.state;
+        let at = settle_and_find_reset(&ui.ctx, &mut state);
+        // Press and hold on a widget: egui now owns the pointer.
+        let data = sample_data();
+        for events in [
+            vec![egui::Event::PointerMoved(at)],
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        ] {
+            let mut input = screen();
+            input.events = events;
+            let out = ui.ctx.run_ui(input, |u| {
+                show_panels(u.ctx(), &data, &mut state);
+            });
+            let mut td = out.textures_delta;
+            td.clear();
+        }
+        assert!(ui.using_pointer(), "a held widget owns the pointer");
+        // F1 mid-press: hide, then show again. The release never arrived.
+        assert!(!ui.toggle());
+        assert!(!ui.using_pointer());
+        assert!(ui.toggle());
+        assert!(
+            !ui.using_pointer(),
+            "a stale press must not block the camera after reopening"
+        );
     }
 
     #[test]

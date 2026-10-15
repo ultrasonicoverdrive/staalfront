@@ -396,4 +396,32 @@ mod tests {
         assert!(!withhold(false, ElementState::Pressed));
         assert!(!withhold(false, ElementState::Released));
     }
+
+    /// The handler's path for a key event, as in `window_event`.
+    fn feed_key(input: &mut InputState, consumed: bool, state: ElementState) {
+        if !withhold(consumed, state) {
+            input.key_event(winit::keyboard::KeyCode::KeyW, state, false);
+        }
+    }
+
+    #[test]
+    fn a_consumed_press_then_a_passed_release_leaves_the_key_up() {
+        let mut input = InputState::new();
+        feed_key(&mut input, true, ElementState::Pressed);
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+        feed_key(&mut input, true, ElementState::Released);
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+        input.end_frame();
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+    }
+
+    #[test]
+    fn a_press_before_the_panel_took_over_still_ends_on_release() {
+        let mut input = InputState::new();
+        feed_key(&mut input, false, ElementState::Pressed);
+        assert!(input.key_down(winit::keyboard::KeyCode::KeyW));
+        // The panel opens and consumes the release: it must still pass.
+        feed_key(&mut input, true, ElementState::Released);
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+    }
 }

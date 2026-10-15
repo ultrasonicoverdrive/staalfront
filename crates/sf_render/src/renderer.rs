@@ -530,6 +530,10 @@ impl Renderer {
     /// Choose the terrain debug visualisations (LOD tint, cell grid).
     /// Cheap enough to call every frame.
     pub fn set_debug_view(&mut self, view: DebugView) {
+        // Unchanged: no uniform write (`set_terrain` re-applies the view).
+        if view == self.debug_view {
+            return;
+        }
         self.debug_view = view;
         if let Some(t) = &self.terrain {
             t.write_debug_view(&self.gpu.queue, view);
@@ -605,8 +609,7 @@ impl Renderer {
     /// Record the scene pass (and the overlay pass, if any) and count the
     /// draw calls into `last_stats`.
     fn draw(&self, encoder: &mut wgpu::CommandEncoder, color: &wgpu::TextureView) {
-        let mut stats = DrawStats::default();
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut pass = CountedPass::new(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: color,
@@ -628,20 +631,19 @@ impl Renderer {
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
-        });
+        }));
         if let Some(t) = &self.terrain {
             pass.set_pipeline(&t.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_bind_group(1, &t.bind_group, &[]);
+            pass.set_bind_group(0, &self.bind_group);
+            pass.set_bind_group(1, &t.bind_group);
             for chunk in &t.chunks {
                 pass.set_vertex_buffer(0, chunk.vertices.slice(..));
                 pass.set_index_buffer(chunk.indices.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..chunk.index_count, 0, 0..1);
-                stats.terrain_draw_calls += 1;
+                pass.draw(DrawGroup::Terrain, chunk.index_count, 0..1);
             }
         }
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(0, &self.bind_group);
         // An empty instance buffer cannot be bound, so skip when there is nothing.
         if !self.draws.is_empty() {
             pass.set_vertex_buffer(1, self.instances.slice(..));
@@ -649,9 +651,7 @@ impl Renderer {
                 let mesh = &self.meshes[*mesh];
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, range.clone());
-                stats.scene_draw_calls += 1;
-                stats.scene_instances += range.len() as u32;
+                pass.draw(DrawGroup::Scene, mesh.index_count, range.clone());
             }
         }
         // Units: one buffer and one draw call per mesh kind.
@@ -663,15 +663,75 @@ impl Renderer {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_vertex_buffer(1, buffer.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, 0..slot.count);
-            stats.dynamic_draw_calls += 1;
-            stats.dynamic_instances += slot.count;
+            pass.draw(DrawGroup::Units, mesh.index_count, 0..slot.count);
         }
-        drop(pass);
-        self.last_stats.set(stats);
+        self.last_stats.set(pass.finish());
         if let Some(overlay) = self.overlay.as_ref().filter(|o| o.has_jobs()) {
             overlay.paint(encoder, color, self.size);
         }
+    }
+}
+
+/// Which counter a draw call belongs to.
+#[derive(Clone, Copy)]
+enum DrawGroup {
+    Terrain,
+    Scene,
+    Units,
+}
+
+/// A render pass whose only way to draw is [`CountedPass::draw`], which
+/// issues the `draw_indexed` and counts it in one place: a draw cannot be
+/// added, removed or skipped without the counters following. The inner pass
+/// is private and only the state-setting calls are forwarded.
+struct CountedPass<'a> {
+    pass: wgpu::RenderPass<'a>,
+    stats: DrawStats,
+}
+
+impl<'a> CountedPass<'a> {
+    fn new(pass: wgpu::RenderPass<'a>) -> Self {
+        Self {
+            pass,
+            stats: DrawStats::default(),
+        }
+    }
+
+    fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
+        self.pass.set_pipeline(pipeline);
+    }
+
+    fn set_bind_group(&mut self, index: u32, group: &wgpu::BindGroup) {
+        self.pass.set_bind_group(index, group, &[]);
+    }
+
+    fn set_vertex_buffer(&mut self, slot: u32, buffer: wgpu::BufferSlice<'_>) {
+        self.pass.set_vertex_buffer(slot, buffer);
+    }
+
+    fn set_index_buffer(&mut self, buffer: wgpu::BufferSlice<'_>, format: wgpu::IndexFormat) {
+        self.pass.set_index_buffer(buffer, format);
+    }
+
+    fn draw(&mut self, group: DrawGroup, index_count: u32, instances: Range<u32>) {
+        let n = instances.end - instances.start;
+        self.pass.draw_indexed(0..index_count, 0, instances);
+        let s = &mut self.stats;
+        match group {
+            DrawGroup::Terrain => s.terrain_draw_calls += 1,
+            DrawGroup::Scene => {
+                s.scene_draw_calls += 1;
+                s.scene_instances += n;
+            }
+            DrawGroup::Units => {
+                s.dynamic_draw_calls += 1;
+                s.dynamic_instances += n;
+            }
+        }
+    }
+
+    fn finish(self) -> DrawStats {
+        self.stats
     }
 }
 
@@ -829,5 +889,29 @@ fn build_pipeline(
     match pollster::block_on(scope.pop()) {
         Some(e) => Err(e.to_string()),
         None => Ok(pipeline),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every `draw_indexed` goes through `CountedPass::draw`, which counts it
+    /// next to the call. If someone records a draw anywhere else (or splits
+    /// the counting from the call again) this fails.
+    #[test]
+    fn there_is_exactly_one_draw_indexed_call_site() {
+        let source = include_str!("renderer.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let needle = concat!(".draw", "_indexed(");
+        assert_eq!(production.matches(needle).count(), 1);
+        let helper = production.split("fn draw(&mut self, group").nth(1).unwrap();
+        let body = helper.split("fn finish").next().unwrap();
+        assert!(
+            body.contains(needle),
+            "the call site is the counting helper"
+        );
+        assert!(
+            body.contains("draw_calls += 1"),
+            "and it counts right there"
+        );
     }
 }

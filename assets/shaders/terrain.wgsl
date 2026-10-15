@@ -97,12 +97,15 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         let chunk = vec2<i32>(floor(in.world_xz / CHUNK_METERS));
         albedo = mix(albedo, chunk_tint(chunk), 0.55);
     }
-    // Debug cell grid: 1 m lines, chunk borders heavier and warm. Derivatives
-    // are taken unconditionally (uniform control flow); alpha 0 is a no-op.
-    let cell_lines = grid_lines(in.world_xz, 1.0, 1.0);
-    let chunk_lines = grid_lines(in.world_xz, CHUNK_METERS, 2.0);
-    albedo = mix(albedo, vec3<f32>(0.0, 0.0, 0.0), 0.55 * cell_lines * params.grid_alpha);
-    albedo = mix(albedo, vec3<f32>(1.0, 0.75, 0.1), 0.9 * chunk_lines * params.grid_alpha);
+    // Debug cell grid: 1 m lines, chunk borders heavier and warm. Skipped
+    // entirely when off. `grid_alpha` is a uniform, so the branch is uniform
+    // control flow and `fwidth` inside it is allowed.
+    if (params.grid_alpha > 0.0) {
+        let cell_lines = grid_lines(in.world_xz, 1.0, 1.0);
+        let chunk_lines = grid_lines(in.world_xz, CHUNK_METERS, 2.0);
+        albedo = mix(albedo, vec3<f32>(0.0, 0.0, 0.0), 0.55 * cell_lines * params.grid_alpha);
+        albedo = mix(albedo, vec3<f32>(1.0, 0.75, 0.1), 0.9 * chunk_lines * params.grid_alpha);
+    }
 
     let n = normalize(in.normal);
     let diffuse = max(dot(n, globals.light_dir.xyz), 0.0);
