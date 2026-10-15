@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use sf_audio::AudioSystem;
+use sf_audio::{AudioSystem, Listener};
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
 use sf_render::camera::DVec2;
 use sf_render::scene::world_scene;
@@ -179,6 +179,16 @@ impl App for Runner {
         if let Some(renderer) = &mut self.renderer {
             renderer.set_view_proj(self.camera.view_proj());
         }
+        // The listener follows the camera (it does not rotate, so right = +X).
+        let focus = self.camera.focus();
+        if let Some(audio) = &mut self.audio {
+            audio.set_listener(Listener::new(
+                [focus.x as f32, 0.0, focus.y as f32],
+                [1.0, 0.0, 0.0],
+                self.camera.distance() as f32,
+            ));
+            audio.update();
+        }
         if let Some(renderer) = &mut self.renderer
             && let Err(e) = renderer.render()
         {
@@ -194,7 +204,14 @@ impl App for Runner {
         if actions.pressed(Action::PlayTestSound)
             && let Some(audio) = &mut self.audio
         {
-            audio.play("test_click");
+            // Played where the cursor points on the ground (the focus if it
+            // is off the window or the sky), so pan and zoom can be heard.
+            let at = ctx
+                .input()
+                .cursor()
+                .and_then(|(x, y)| self.camera.ground_point(DVec2::new(x, y)))
+                .unwrap_or(focus);
+            audio.play_at("test_click", [at.x as f32, 0.0, at.y as f32]);
         }
         if actions.pressed(Action::Quit) {
             println!("quit requested");

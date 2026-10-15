@@ -369,15 +369,16 @@ mod tests {
         s.play("does_not_exist");
         s.play_music("test_click");
         s.play_music("test_click");
+        s.play_music("does_not_exist");
         s.stop_music();
         s.update();
         assert!(s.reload_bank().is_empty());
         assert_eq!(s.current_music(), None);
-        // Only the unknown name is noticed (and warned about) without a device.
+        // Only the two unknown names are noticed (and warned about) without a device.
         assert_eq!(
             s.stats(),
             Stats {
-                unknown: 1,
+                unknown: 2,
                 ..Stats::default()
             }
         );
