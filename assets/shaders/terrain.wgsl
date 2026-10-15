@@ -18,8 +18,10 @@ struct TerrainParams {
     map_cells: vec2<i32>,
     // World size of one texture repeat in metres.
     tile_meters: f32,
-    // Non-zero: tint every chunk by its level of detail (debug aid).
-    tint_levels: u32,
+    // Debug flags: bit 0 = tint chunks by their level of detail.
+    flags: u32,
+    // Debug cell grid opacity, 0 = off.
+    grid_alpha: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -70,6 +72,23 @@ fn layer_at(cell: vec2<i32>) -> i32 {
     return i32(textureLoad(cell_materials, c, 0).r);
 }
 
+// Chunk size in metres (32 cells), for the debug grid's chunk borders.
+const CHUNK_METERS: f32 = 32.0;
+
+// Anti-aliased line coverage `0..1` for lines every `period` metres, about
+// `px` pixels wide. Fades out once the lines are closer than ~2 px, so a
+// grazing view or a far zoom shows no moire.
+fn grid_lines(p: vec2<f32>, period: f32, px: f32) -> f32 {
+    let q = p / period;
+    let w = max(fwidth(q), vec2<f32>(1e-6, 1e-6));
+    let d = abs(fract(q - vec2<f32>(0.5, 0.5)) - vec2<f32>(0.5, 0.5)) / w;
+    let nearest = min(d.x, d.y);
+    let coverage = 1.0 - clamp(nearest - 0.5 * (px - 1.0), 0.0, 1.0);
+    let pixels_per_line = 1.0 / max(w.x, w.y);
+    let fade = clamp((pixels_per_line - 2.0) / 4.0, 0.0, 1.0);
+    return coverage * fade;
+}
+
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let uv = in.world_xz / params.tile_meters;
@@ -83,8 +102,17 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let c01 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(0, 1))).rgb;
     let c11 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(1, 1))).rgb;
     var albedo = mix(mix(c00, c10, w.x), mix(c01, c11, w.x), w.y);
-    if params.tint_levels != 0u {
+    if ((params.flags & 1u) != 0u) {
         albedo = mix(albedo, lod_tint(in.lod), 0.6);
+    }
+    // Debug cell grid: 1 m lines, chunk borders heavier and warm. Skipped
+    // entirely when off. `grid_alpha` is a uniform, so the branch is uniform
+    // control flow and `fwidth` inside it is allowed.
+    if (params.grid_alpha > 0.0) {
+        let cell_lines = grid_lines(in.world_xz, 1.0, 1.0);
+        let chunk_lines = grid_lines(in.world_xz, CHUNK_METERS, 2.0);
+        albedo = mix(albedo, vec3<f32>(0.0, 0.0, 0.0), 0.55 * cell_lines * params.grid_alpha);
+        albedo = mix(albedo, vec3<f32>(1.0, 0.75, 0.1), 0.9 * chunk_lines * params.grid_alpha);
     }
 
     let n = normalize(in.normal);

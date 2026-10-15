@@ -18,9 +18,6 @@
         draw_call_cost: 300.0,
         // Debug: draw every chunk at this level, e.g. Some(0) for full detail.
         force_level: None,
-        // Debug: tint chunks by level (0 red, 1 orange, 2 yellow, 3 green,
-        // 4 blue, 5 purple). WP1.11's panel toggles the same switch live.
-        tint_levels: false,
     ),
     // Debug: false removes the skirts under the chunk edges and so shows the
     // cracks between chunks of different levels.

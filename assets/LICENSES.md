@@ -13,3 +13,14 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `config/units.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `scenarios/*.ron`, `scenarios/*.expected` | Written for this project (headless scenarios and their pinned checksums, WP1.3) | Project license (see workspace `Cargo.toml`) |
 | `config/terrain.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
+
+## Third-party code and fonts compiled into the binary (WP1.11)
+
+These are not files in `assets/`, but they ship inside `sf_game` and need a notice.
+
+| Component | Origin | License |
+|---|---|---|
+| Default egui fonts (`epaint_default_fonts` 0.36.2, used by the F1 debug panels): Hack, Ubuntu-Light, Noto Emoji, emoji-icon-font | crates.io, `epaint_default_fonts` (fonts embedded in the crate) | crate: `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`; Hack: MIT-style (`Hack-Regular.txt`), Noto Emoji: SIL OFL-1.1 (`OFL.txt`), Ubuntu-Light: Ubuntu Font Licence 1.0 (`UFL.txt`), emoji-icon-font: MIT |
+| `egui`, `egui-wgpu`, `egui-winit` 0.36.2 and their transitive crates (`epaint`, `vello_cpu`, `skrifa`, `harfrust`, `accesskit`, ...) | crates.io | MIT OR Apache-2.0 (the typography crates are Apache-2.0 / MIT) |
+
+The font licence texts ship in the `epaint_default_fonts` crate (`fonts/OFL.txt`, `fonts/UFL.txt`, ...); a release build must include them in its third-party notice.

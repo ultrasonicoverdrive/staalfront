@@ -81,8 +81,6 @@ pub struct LodConfig {
     pub draw_call_cost: f32,
     /// Debug: draw every chunk at this level (clamped to what it has).
     pub force_level: Option<u8>,
-    /// Debug: tint chunks by level (see `terrain.wgsl` for the colours).
-    pub tint_levels: bool,
 }
 
 impl Default for LodConfig {
@@ -92,7 +90,6 @@ impl Default for LodConfig {
             hysteresis: 0.25,
             draw_call_cost: DEFAULT_DRAW_CALL_COST,
             force_level: None,
-            tint_levels: false,
         }
     }
 }
