@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
-use winit::event::{MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Fullscreen, Window, WindowId};
@@ -118,6 +118,17 @@ pub trait App {
     /// Once per frame. `alpha` in `[0,1)` is how far we are between the last
     /// and the next tick; use it to interpolate. Read input/actions here.
     fn render(&mut self, ctx: &mut Context, alpha: f32);
+
+    /// A raw window event, offered before the engine turns it into input.
+    /// Return `true` when an overlay UI (e.g. the egui debug panels) consumed
+    /// it: the engine then does not feed presses and wheel notches to the
+    /// input state, so a click on a slider does not also pan the camera.
+    /// Releases and cursor moves always reach the input state, so nothing
+    /// stays "held" and the cursor position stays current. Lifecycle events
+    /// (close, resize, focus) are never withheld.
+    fn on_window_event(&mut self, _ctx: &mut Context, _event: &WindowEvent) -> bool {
+        false
+    }
 
     /// Window resized or DPI scale changed (also once at start).
     fn on_resize(&mut self, _ctx: &mut Context, _size: Resized) {}
@@ -263,6 +274,14 @@ impl<A: App> Handler<A> {
     }
 }
 
+/// Whether a key or button event the app consumed is kept from the input
+/// state: presses are, releases are not (a release of something that was
+/// never pressed is ignored by the input state, and one that was pressed
+/// before the overlay took over must still end the hold).
+fn withhold(consumed: bool, state: ElementState) -> bool {
+    consumed && state.is_pressed()
+}
+
 #[cfg(debug_assertions)]
 fn canonical(p: &Path) -> std::path::PathBuf {
     p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
@@ -310,21 +329,30 @@ impl<A: App> ApplicationHandler for Handler<A> {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        let consumed = self
+            .with_ctx(|app, ctx| app.on_window_event(ctx, &event))
+            .unwrap_or(false);
         match event {
             WindowEvent::CloseRequested => self.exit = true,
             WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => self.resized(),
             WindowEvent::Focused(f) => self.input.set_focused(f),
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
+                if let PhysicalKey::Code(code) = event.physical_key
+                    && !withhold(consumed, event.state)
+                {
                     self.input.key_event(code, event.state, event.repeat);
                 }
             }
-            WindowEvent::MouseInput { state, button, .. } => self.input.mouse_button(button, state),
+            WindowEvent::MouseInput { state, button, .. } => {
+                if !withhold(consumed, state) {
+                    self.input.mouse_button(button, state);
+                }
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 self.input.cursor_moved(position.x, position.y)
             }
             WindowEvent::CursorLeft { .. } => self.input.cursor_left(),
-            WindowEvent::MouseWheel { delta, .. } => match delta {
+            WindowEvent::MouseWheel { delta, .. } if !consumed => match delta {
                 MouseScrollDelta::LineDelta(_, y) => self.input.wheel(y),
                 MouseScrollDelta::PixelDelta(p) => self.input.wheel_pixels(p.y as f32),
             },
@@ -354,5 +382,46 @@ impl<A: App> ApplicationHandler for Handler<A> {
         } else {
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consumed_presses_are_withheld_but_releases_pass() {
+        assert!(withhold(true, ElementState::Pressed));
+        assert!(!withhold(true, ElementState::Released));
+        assert!(!withhold(false, ElementState::Pressed));
+        assert!(!withhold(false, ElementState::Released));
+    }
+
+    /// The handler's path for a key event, as in `window_event`.
+    fn feed_key(input: &mut InputState, consumed: bool, state: ElementState) {
+        if !withhold(consumed, state) {
+            input.key_event(winit::keyboard::KeyCode::KeyW, state, false);
+        }
+    }
+
+    #[test]
+    fn a_consumed_press_then_a_passed_release_leaves_the_key_up() {
+        let mut input = InputState::new();
+        feed_key(&mut input, true, ElementState::Pressed);
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+        feed_key(&mut input, true, ElementState::Released);
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+        input.end_frame();
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
+    }
+
+    #[test]
+    fn a_press_before_the_panel_took_over_still_ends_on_release() {
+        let mut input = InputState::new();
+        feed_key(&mut input, false, ElementState::Pressed);
+        assert!(input.key_down(winit::keyboard::KeyCode::KeyW));
+        // The panel opens and consumes the release: it must still pass.
+        feed_key(&mut input, true, ElementState::Released);
+        assert!(!input.key_down(winit::keyboard::KeyCode::KeyW));
     }
 }

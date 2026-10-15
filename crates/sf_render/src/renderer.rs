@@ -1,6 +1,7 @@
 //! The forward renderer: window surface or offscreen texture, depth buffer,
 //! one directional light + ambient, the built-in test scene.
 
+use std::cell::Cell;
 use std::ops::Range;
 
 use glam::Mat4;
@@ -9,6 +10,7 @@ use wgpu::util::DeviceExt;
 use crate::gpu::{Gpu, GpuOptions, RenderError};
 use crate::image::Rgba8;
 use crate::mesh::{MeshData, Vertex};
+use crate::overlay::{Overlay, OverlayFrame};
 use crate::scene::{
     Globals, Instance, Lighting, MeshKind, PlaceholderCamera, SceneObject, test_scene,
 };
@@ -53,16 +55,22 @@ struct DynamicInstances {
     count: u32,
 }
 
-/// Draw-call counters of the last frame, for the debug panel (WP1.11).
+/// Draw-call counters of the last rendered frame, for the debug panel.
+///
+/// Counted where the `draw_indexed` calls are recorded, so a call that is
+/// skipped (or added) in [`Renderer::render`] shows up here by construction.
+/// The egui overlay pass is not included.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DrawStats {
-    /// Instances in the per-frame lists (one draw call per non-empty mesh kind).
+    /// Instances drawn from the per-frame lists (units).
     pub dynamic_instances: u32,
     /// Draw calls for the per-frame instance lists.
     pub dynamic_draw_calls: u32,
+    /// Instances drawn from the static scene.
+    pub scene_instances: u32,
     /// Draw calls for the static scene objects (one per mesh kind used).
     pub scene_draw_calls: u32,
-    /// Draw calls for terrain chunks.
+    /// Draw calls for terrain chunks (= chunks drawn).
     pub terrain_draw_calls: u32,
 }
 
@@ -94,8 +102,34 @@ pub struct Renderer {
     /// When set, replaces the placeholder camera (see [`Renderer::set_view_proj`]).
     view_proj: Option<Mat4>,
     lighting: Lighting,
+    /// Counters of the last rendered frame.
+    last_stats: Cell<DrawStats>,
+    /// Terrain debug visualisations (LOD tint, cell grid).
+    debug_view: DebugView,
+    /// The egui painter, created on the first [`Renderer::set_overlay`].
+    overlay: Option<Overlay>,
     #[cfg(debug_assertions)]
     watch: Option<crate::shader_watch::ShaderWatch>,
+}
+
+/// Terrain debug visualisations, switched from the F1 panel (WP1.11).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DebugView {
+    /// Tint terrain chunks by their chunk coordinates. Placeholder until the
+    /// terrain LOD (WP1.8) exists; it then shows the LOD level instead.
+    pub lod_tint: bool,
+    /// Opacity `0..=1` of the 1 m cell grid lines; `0` = off.
+    pub grid_alpha: f32,
+}
+
+impl DebugView {
+    /// Grid opacity for a camera distance in metres: fully visible when
+    /// zoomed in, gone when zoomed far out (where 1 m lines are sub-pixel).
+    pub fn grid_alpha_for_distance(distance: f64) -> f32 {
+        const FULL_UNTIL: f64 = 40.0;
+        const GONE_AT: f64 = 140.0;
+        (1.0 - (distance - FULL_UNTIL) / (GONE_AT - FULL_UNTIL)).clamp(0.0, 1.0) as f32
+    }
 }
 
 impl Renderer {
@@ -223,6 +257,9 @@ impl Renderer {
             camera,
             view_proj: None,
             lighting,
+            last_stats: Cell::new(DrawStats::default()),
+            debug_view: DebugView::default(),
+            overlay: None,
             #[cfg(debug_assertions)]
             watch: None,
         }
@@ -344,10 +381,16 @@ impl Renderer {
             }
         };
 
+        let extra = self.prepare_overlay(&mut encoder);
         self.draw(&mut encoder, &view);
-        self.gpu.queue.submit([encoder.finish()]);
+        self.gpu
+            .queue
+            .submit(extra.into_iter().chain([encoder.finish()]));
         if let Some(frame) = frame {
             self.gpu.queue.present(frame);
+        }
+        if let Some(overlay) = &mut self.overlay {
+            overlay.free_pending();
         }
         Ok(())
     }
@@ -367,6 +410,7 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("screenshot"),
             });
+        let extra = self.prepare_overlay(&mut encoder);
         let Target::Offscreen { texture } = &self.target else {
             unreachable!("checked above");
         };
@@ -403,7 +447,12 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
-        self.gpu.queue.submit([encoder.finish()]);
+        self.gpu
+            .queue
+            .submit(extra.into_iter().chain([encoder.finish()]));
+        if let Some(overlay) = &mut self.overlay {
+            overlay.free_pending();
+        }
 
         let (tx, rx) = std::sync::mpsc::channel();
         readback.slice(..).map_async(wgpu::MapMode::Read, move |r| {
@@ -472,13 +521,39 @@ impl Renderer {
         }
     }
 
-    /// Draw-call counters for the frame that is drawn next (or was just drawn).
+    /// Draw-call counters of the last rendered frame (all zero before the
+    /// first). They are counted at the `draw_indexed` calls themselves.
     pub fn draw_stats(&self) -> DrawStats {
-        DrawStats {
-            dynamic_instances: self.dynamic.iter().map(|d| d.count).sum(),
-            dynamic_draw_calls: self.dynamic.iter().filter(|d| d.count > 0).count() as u32,
-            scene_draw_calls: self.draws.len() as u32,
-            terrain_draw_calls: self.terrain_chunk_count() as u32,
+        self.last_stats.get()
+    }
+
+    /// Choose the terrain debug visualisations (LOD tint, cell grid).
+    /// Cheap enough to call every frame.
+    pub fn set_debug_view(&mut self, view: DebugView) {
+        // Unchanged: no uniform write (`set_terrain` re-applies the view).
+        if view == self.debug_view {
+            return;
+        }
+        self.debug_view = view;
+        if let Some(t) = &self.terrain {
+            t.write_debug_view(&self.gpu.queue, view);
+        }
+    }
+
+    /// Hand over the egui output for the next frame(s): drawn on top of the
+    /// scene by [`Renderer::render`] and [`Renderer::render_to_image`] until
+    /// replaced or cleared. The painter is created on the first call.
+    pub fn set_overlay(&mut self, frame: OverlayFrame) {
+        let (device, format) = (&self.gpu.device, self.format);
+        self.overlay
+            .get_or_insert_with(|| Overlay::new(device, format))
+            .set(device, &self.gpu.queue, frame);
+    }
+
+    /// Stop drawing the overlay (the panels are off): no extra render pass.
+    pub fn clear_overlay(&mut self) {
+        if let Some(o) = &mut self.overlay {
+            o.clear();
         }
     }
 
@@ -495,6 +570,9 @@ impl Renderer {
             DEPTH_FORMAT,
             map,
         ));
+        if let Some(t) = &self.terrain {
+            t.write_debug_view(&self.gpu.queue, self.debug_view);
+        }
     }
 
     /// Remove the terrain.
@@ -507,6 +585,17 @@ impl Renderer {
         self.terrain.as_ref().map_or(0, |t| t.chunks.len())
     }
 
+    /// Upload the overlay's buffers; returns command buffers its paint
+    /// callbacks want submitted first (none for plain egui).
+    fn prepare_overlay(&mut self, encoder: &mut wgpu::CommandEncoder) -> Vec<wgpu::CommandBuffer> {
+        match &mut self.overlay {
+            Some(o) if o.has_jobs() => {
+                o.prepare(&self.gpu.device, &self.gpu.queue, encoder, self.size)
+            }
+            _ => Vec::new(),
+        }
+    }
+
     fn write_globals(&self) {
         let view_proj = self
             .view_proj
@@ -517,8 +606,10 @@ impl Renderer {
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
     }
 
+    /// Record the scene pass (and the overlay pass, if any) and count the
+    /// draw calls into `last_stats`.
     fn draw(&self, encoder: &mut wgpu::CommandEncoder, color: &wgpu::TextureView) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut pass = CountedPass::new(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: color,
@@ -540,19 +631,19 @@ impl Renderer {
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
-        });
+        }));
         if let Some(t) = &self.terrain {
             pass.set_pipeline(&t.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_bind_group(1, &t.bind_group, &[]);
+            pass.set_bind_group(0, &self.bind_group);
+            pass.set_bind_group(1, &t.bind_group);
             for chunk in &t.chunks {
                 pass.set_vertex_buffer(0, chunk.vertices.slice(..));
                 pass.set_index_buffer(chunk.indices.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..chunk.index_count, 0, 0..1);
+                pass.draw(DrawGroup::Terrain, chunk.index_count, 0..1);
             }
         }
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_bind_group(0, &self.bind_group);
         // An empty instance buffer cannot be bound, so skip when there is nothing.
         if !self.draws.is_empty() {
             pass.set_vertex_buffer(1, self.instances.slice(..));
@@ -560,7 +651,7 @@ impl Renderer {
                 let mesh = &self.meshes[*mesh];
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, range.clone());
+                pass.draw(DrawGroup::Scene, mesh.index_count, range.clone());
             }
         }
         // Units: one buffer and one draw call per mesh kind.
@@ -572,8 +663,75 @@ impl Renderer {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_vertex_buffer(1, buffer.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, 0..slot.count);
+            pass.draw(DrawGroup::Units, mesh.index_count, 0..slot.count);
         }
+        self.last_stats.set(pass.finish());
+        if let Some(overlay) = self.overlay.as_ref().filter(|o| o.has_jobs()) {
+            overlay.paint(encoder, color, self.size);
+        }
+    }
+}
+
+/// Which counter a draw call belongs to.
+#[derive(Clone, Copy)]
+enum DrawGroup {
+    Terrain,
+    Scene,
+    Units,
+}
+
+/// A render pass whose only way to draw is [`CountedPass::draw`], which
+/// issues the `draw_indexed` and counts it in one place: a draw cannot be
+/// added, removed or skipped without the counters following. The inner pass
+/// is private and only the state-setting calls are forwarded.
+struct CountedPass<'a> {
+    pass: wgpu::RenderPass<'a>,
+    stats: DrawStats,
+}
+
+impl<'a> CountedPass<'a> {
+    fn new(pass: wgpu::RenderPass<'a>) -> Self {
+        Self {
+            pass,
+            stats: DrawStats::default(),
+        }
+    }
+
+    fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
+        self.pass.set_pipeline(pipeline);
+    }
+
+    fn set_bind_group(&mut self, index: u32, group: &wgpu::BindGroup) {
+        self.pass.set_bind_group(index, group, &[]);
+    }
+
+    fn set_vertex_buffer(&mut self, slot: u32, buffer: wgpu::BufferSlice<'_>) {
+        self.pass.set_vertex_buffer(slot, buffer);
+    }
+
+    fn set_index_buffer(&mut self, buffer: wgpu::BufferSlice<'_>, format: wgpu::IndexFormat) {
+        self.pass.set_index_buffer(buffer, format);
+    }
+
+    fn draw(&mut self, group: DrawGroup, index_count: u32, instances: Range<u32>) {
+        let n = instances.end - instances.start;
+        self.pass.draw_indexed(0..index_count, 0, instances);
+        let s = &mut self.stats;
+        match group {
+            DrawGroup::Terrain => s.terrain_draw_calls += 1,
+            DrawGroup::Scene => {
+                s.scene_draw_calls += 1;
+                s.scene_instances += n;
+            }
+            DrawGroup::Units => {
+                s.dynamic_draw_calls += 1;
+                s.dynamic_instances += n;
+            }
+        }
+    }
+
+    fn finish(self) -> DrawStats {
+        self.stats
     }
 }
 
@@ -731,5 +889,29 @@ fn build_pipeline(
     match pollster::block_on(scope.pop()) {
         Some(e) => Err(e.to_string()),
         None => Ok(pipeline),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every `draw_indexed` goes through `CountedPass::draw`, which counts it
+    /// next to the call. If someone records a draw anywhere else (or splits
+    /// the counting from the call again) this fails.
+    #[test]
+    fn there_is_exactly_one_draw_indexed_call_site() {
+        let source = include_str!("renderer.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let needle = concat!(".draw", "_indexed(");
+        assert_eq!(production.matches(needle).count(), 1);
+        let helper = production.split("fn draw(&mut self, group").nth(1).unwrap();
+        let body = helper.split("fn finish").next().unwrap();
+        assert!(
+            body.contains(needle),
+            "the call site is the counting helper"
+        );
+        assert!(
+            body.contains("draw_calls += 1"),
+            "and it counts right there"
+        );
     }
 }

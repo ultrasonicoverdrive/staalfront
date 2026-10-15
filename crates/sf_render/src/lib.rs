@@ -15,6 +15,10 @@
 //! unit instances from two sim ticks, per-tile frustum culling, one instance
 //! buffer and one draw call per placeholder mesh (cube, cylinder, cone).
 //!
+//! WP1.11 adds the debug overlay layer ([`overlay`]): the egui painter
+//! (`egui-wgpu`) on this crate's wgpu device, a terrain LOD tint and a 1 m cell
+//! grid ([`DebugView`]), and draw-call counters taken at the actual draw calls.
+//!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
@@ -24,6 +28,7 @@ pub mod gpu;
 pub mod image;
 pub mod instancing;
 pub mod mesh;
+pub mod overlay;
 pub mod renderer;
 pub mod scene;
 #[cfg(debug_assertions)]
@@ -37,7 +42,8 @@ pub use frustum::{Aabb, Frustum, Visibility};
 pub use gpu::{Gpu, GpuOptions, RenderError};
 pub use image::{Rgba8, Tolerance};
 pub use instancing::{InstanceStats, Instancer, Motion};
-pub use renderer::{DrawStats, EMBEDDED_SHADER, Renderer};
+pub use overlay::OverlayFrame;
+pub use renderer::{DebugView, DrawStats, EMBEDDED_SHADER, Renderer};
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
 pub use wgpu;

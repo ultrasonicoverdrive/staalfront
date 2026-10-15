@@ -26,14 +26,38 @@ pub struct GpuChunk {
 struct TerrainParams {
     map_cells: [i32; 2],
     tile_meters: f32,
+    /// Bit 0: tint chunks (placeholder LOD colouring).
+    flags: u32,
+    /// Opacity of the 1 m cell grid; 0 = off.
+    grid_alpha: f32,
     _pad: f32,
 }
+
+/// `flags` bit: tint chunks by chunk coordinates.
+const FLAG_LOD_TINT: u32 = 1;
 
 /// Everything `Renderer::set_terrain` creates.
 pub struct TerrainGpu {
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
     pub chunks: Vec<GpuChunk>,
+    /// The `TerrainParams` uniform, rewritten by [`TerrainGpu::write_debug_view`].
+    params: wgpu::Buffer,
+    map_cells: [i32; 2],
+}
+
+impl TerrainGpu {
+    /// Update the debug visualisation flags in the terrain uniform.
+    pub fn write_debug_view(&self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
+        let params = TerrainParams {
+            map_cells: self.map_cells,
+            tile_meters: TILE_METERS,
+            flags: if view.lod_tint { FLAG_LOD_TINT } else { 0 },
+            grid_alpha: view.grid_alpha.clamp(0.0, 1.0),
+            _pad: 0.0,
+        };
+        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
+    }
 }
 
 pub fn build(
@@ -158,9 +182,11 @@ pub fn build(
         contents: bytemuck::bytes_of(&TerrainParams {
             map_cells: [map.width() as i32, map.height() as i32],
             tile_meters: TILE_METERS,
+            flags: 0,
+            grid_alpha: 0.0,
             _pad: 0.0,
         }),
-        usage: wgpu::BufferUsages::UNIFORM,
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
     let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
@@ -278,5 +304,7 @@ pub fn build(
         pipeline,
         bind_group,
         chunks,
+        params,
+        map_cells: [map.width() as i32, map.height() as i32],
     }
 }
