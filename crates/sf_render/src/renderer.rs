@@ -47,6 +47,18 @@ struct GpuMesh {
     index_count: u32,
 }
 
+/// What an extra pass drawn on top of the scene needs: the device and queue,
+/// the frame's command encoder (record a render pass with `LoadOp::Load` on
+/// `view`), and the target's format and size in pixels.
+pub struct FrameTarget<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    pub view: &'a wgpu::TextureView,
+    pub format: wgpu::TextureFormat,
+    pub size: (u32, u32),
+}
+
 /// A per-frame instance buffer for one mesh kind (grows, never shrinks).
 #[derive(Default)]
 struct DynamicInstances {
@@ -345,8 +357,26 @@ impl Renderer {
         None
     }
 
+    /// The device and queue, for crates that draw their own passes
+    /// (`sf_ui` creates its pipeline and textures from these).
+    pub fn gpu(&self) -> &Gpu {
+        &self.gpu
+    }
+
     /// Draw one frame: present to the window, or fill the offscreen texture.
     pub fn render(&mut self) -> Result<(), RenderError> {
+        self.render_with(|_| {})
+    }
+
+    /// Like [`Renderer::render`], plus `overlay`: it is called after the scene
+    /// pass with the frame's encoder and colour target, to record a pass on
+    /// top (the player-facing UI of `sf_ui`). The egui overlay of
+    /// [`Renderer::set_overlay`] is still painted after it. Draws recorded by
+    /// the hook are not in [`DrawStats`] (the caller counts them).
+    pub fn render_with(
+        &mut self,
+        overlay: impl FnOnce(&mut FrameTarget),
+    ) -> Result<(), RenderError> {
         let _ = self.poll_shader_reload();
         self.write_globals();
         let mut encoder = self
@@ -383,6 +413,15 @@ impl Renderer {
 
         let extra = self.prepare_overlay(&mut encoder);
         self.draw(&mut encoder, &view);
+        overlay(&mut FrameTarget {
+            device: &self.gpu.device,
+            queue: &self.gpu.queue,
+            encoder: &mut encoder,
+            view: &view,
+            format: self.format,
+            size: self.size,
+        });
+        self.paint_overlay(&mut encoder, &view);
         self.gpu
             .queue
             .submit(extra.into_iter().chain([encoder.finish()]));
@@ -397,6 +436,15 @@ impl Renderer {
 
     /// Render and read the offscreen texture back as sRGB RGBA8.
     pub fn render_to_image(&mut self) -> Result<Rgba8, RenderError> {
+        self.render_to_image_with(|_| {})
+    }
+
+    /// Like [`Renderer::render_to_image`], with the same `overlay` hook as
+    /// [`Renderer::render_with`] (the UI screenshot tests use it).
+    pub fn render_to_image_with(
+        &mut self,
+        overlay: impl FnOnce(&mut FrameTarget),
+    ) -> Result<Rgba8, RenderError> {
         let Target::Offscreen { .. } = self.target else {
             return Err(RenderError::Readback(
                 "render_to_image needs a headless renderer".into(),
@@ -416,6 +464,15 @@ impl Renderer {
         };
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.draw(&mut encoder, &view);
+        overlay(&mut FrameTarget {
+            device: &self.gpu.device,
+            queue: &self.gpu.queue,
+            encoder: &mut encoder,
+            view: &view,
+            format: self.format,
+            size: self.size,
+        });
+        self.paint_overlay(&mut encoder, &view);
 
         let unpadded = width * 4;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -606,7 +663,7 @@ impl Renderer {
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
     }
 
-    /// Record the scene pass (and the overlay pass, if any) and count the
+    /// Record the scene pass and count the
     /// draw calls into `last_stats`.
     fn draw(&self, encoder: &mut wgpu::CommandEncoder, color: &wgpu::TextureView) {
         let mut pass = CountedPass::new(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -666,6 +723,11 @@ impl Renderer {
             pass.draw(DrawGroup::Units, mesh.index_count, 0..slot.count);
         }
         self.last_stats.set(pass.finish());
+    }
+
+    /// The egui overlay pass, last: scene, then the `render_with` hook
+    /// (`sf_ui`), then this, so the debug panels stay on top of the HUD.
+    fn paint_overlay(&self, encoder: &mut wgpu::CommandEncoder, color: &wgpu::TextureView) {
         if let Some(overlay) = self.overlay.as_ref().filter(|o| o.has_jobs()) {
             overlay.paint(encoder, color, self.size);
         }

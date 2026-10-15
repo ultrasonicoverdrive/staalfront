@@ -11,7 +11,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-sf_math = { path = "../../crates/sf_math" }
+sf_math = { path = "../../crates/sf_math", features = ["render"] }
 sf_sim = { path = "../../crates/sf_sim" }
 sf_data = { path = "../../crates/sf_data" }
 sf_ai = { path = "../../crates/sf_ai" }
