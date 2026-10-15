@@ -55,6 +55,8 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     globals: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    globals_layout: wgpu::BindGroupLayout,
+    terrain: Option<crate::terrain_gpu::TerrainGpu>,
     meshes: Vec<GpuMesh>,
     instances: wgpu::Buffer,
     /// `(mesh index, instance range)` per draw call.
@@ -178,6 +180,8 @@ impl Renderer {
             pipeline,
             globals,
             bind_group,
+            globals_layout: bind_group_layout,
+            terrain: None,
             meshes,
             instances,
             draws,
@@ -405,6 +409,31 @@ impl Renderer {
         self.draws = draws;
     }
 
+    /// Show a terrain: builds the chunk meshes, the material texture array
+    /// and the material index texture from `map` and draws it before the
+    /// scene objects. Replaces a previous terrain. Call on map changes, not
+    /// every frame.
+    pub fn set_terrain(&mut self, map: &sf_data::map::Map) {
+        self.terrain = Some(crate::terrain_gpu::build(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &self.globals_layout,
+            self.format,
+            DEPTH_FORMAT,
+            map,
+        ));
+    }
+
+    /// Remove the terrain.
+    pub fn clear_terrain(&mut self) {
+        self.terrain = None;
+    }
+
+    /// Number of terrain chunks drawn per frame (0 without terrain).
+    pub fn terrain_chunk_count(&self) -> usize {
+        self.terrain.as_ref().map_or(0, |t| t.chunks.len())
+    }
+
     fn write_globals(&self) {
         let view_proj = self
             .view_proj
@@ -439,6 +468,19 @@ impl Renderer {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        if let Some(t) = &self.terrain {
+            pass.set_pipeline(&t.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_bind_group(1, &t.bind_group, &[]);
+            for chunk in &t.chunks {
+                pass.set_vertex_buffer(0, chunk.vertices.slice(..));
+                pass.set_index_buffer(chunk.indices.slice(..), wgpu::IndexFormat::Uint16);
+                pass.draw_indexed(0..chunk.index_count, 0, 0..1);
+            }
+        }
+        if self.draws.is_empty() {
+            return; // an empty instance buffer cannot be bound
+        }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(1, self.instances.slice(..));

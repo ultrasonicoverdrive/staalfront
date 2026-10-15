@@ -38,7 +38,7 @@ PLAN.md §1.1 fixes one hard rule (`sf_sim` never depends on `sf_render`) and
 describes each crate's role. Dependency edges beyond that hard rule are
 undecided (see PLAN.md §1.1). The diagram below is factual: it lists the
 `path` dependencies between workspace crates in the `Cargo.toml` files, as of
-WP1.4 (checked against every `Cargo.toml`). It will go stale as crates gain dependencies;
+WP1.7 (checked against every `Cargo.toml`). It will go stale as crates gain dependencies;
 `cargo tree` is authoritative.
 
 ```mermaid
@@ -48,6 +48,7 @@ graph TD
   sf_ai --> sf_math
   sf_ai --> sf_sim
   sf_render --> sf_math
+  sf_render --> sf_data
   sf_ui --> sf_math
   sf_net --> sf_sim
   sf_game --> sf_math
@@ -171,7 +172,8 @@ first measurement at the engine demo (5,000 units), final measurement in phase 1
 
 Implemented in `sf_render::camera` (WP1.5): zoom is a log-scale parameter in `0..=1`
 mapped to the eye-to-focus distance 12 m .. just enough for the whole map (about
-340 m for 256x256 m, computed from the map size); pitch is `smoothstep(zoom)`
+340 m for 256x256 m in a square window, computed from the map size and the
+viewport aspect ratio, so a portrait window gets more distance); pitch is `smoothstep(zoom)`
 between 45 and 80 degrees. The camera takes the frame time and a plain
 `CameraInput` (pan direction, wheel notches, cursor, drag), so it is tested
 without a window; `sf_game` maps the `Camera*` actions to that input. Cursor
@@ -196,3 +198,27 @@ Q/E rotation is not implemented (the yaw is fixed, north up).
 
 On GitHub only: cloud agents, GitHub Actions (Linux + Windows) and the Windows
 laptop. Never on the home server (B6, PLAN.md §13).
+
+## 9. Terrain and the map format (WP1.7)
+
+- **Format** (`sf_data::map`, no GPU or sim dependency, so `sf_headless` and the
+  editor can read maps too): a directory `assets/maps/<name>/` with `map.ron`
+  (width, height in cells, `height_scale` = metres at 65535, material names,
+  file names), `height.png` (16-bit grayscale, (w+1) x (h+1) cell corners) and
+  `materials.png` (8-bit grayscale, w x h, index into the material list). The
+  loader checks sizes, bit depth, header ranges and material indices and
+  reports a `MapError` naming the file. The format knows no game terrain
+  types (phase 2). `sf_data::map::generate` is a seeded procedural generator;
+  `cargo run -p sf_data --example gen_map -- <dir> [w] [h] [seed]` writes one.
+- **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, one vertex/index buffer
+  each, positions and central-difference normals from the global heightmap (so
+  shared border vertices are bit-identical: no cracks), diagonals by global
+  cell parity, one AABB per chunk. WP1.8 adds LOD and culling on top of this
+  grid (coarser index buffers over the same vertices).
+- **Materials:** one material per cell, kept as an `R8Uint` texture; the shader
+  blends the four nearest cell centres and samples a `texture_2d_array` of
+  procedural 128 px tileable textures (mipmapped, anisotropic) with world-space
+  UVs (4 m per repeat). Lighting as in the scene shader.
+- **Camera limit:** the camera still intersects the flat `y = 0` plane, so with
+  relief the point "under the cursor" is the plane point (terrain stays below
+  6 m in the generated maps). Ray-terrain picking comes with the picking WP.

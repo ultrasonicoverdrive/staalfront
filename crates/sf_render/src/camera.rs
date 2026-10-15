@@ -132,10 +132,7 @@ pub struct Camera {
 impl Camera {
     /// New camera over the map centre at `cfg.start_zoom`, for a viewport in pixels.
     pub fn new(cfg: CameraConfig, width: u32, height: u32) -> Self {
-        let max_distance = cfg
-            .max_distance
-            .unwrap_or_else(|| fit_distance(&cfg))
-            .max(cfg.min_distance * 1.001);
+        let max_distance = max_distance_for(&cfg, width, height);
         let zoom = cfg.start_zoom.clamp(0.0, 1.0);
         Self {
             focus: cfg.map_size * 0.5,
@@ -154,8 +151,14 @@ impl Camera {
         &self.cfg
     }
 
+    /// Resize the viewport. Unless `max_distance` is configured, the farthest
+    /// distance is recomputed so the whole map still just fits at full
+    /// zoom-out for the new aspect ratio (a portrait window needs more
+    /// distance than a landscape one). The zoom value stays, so the distance
+    /// (and the view) changes with it.
     pub fn set_viewport(&mut self, width: u32, height: u32) {
         self.viewport = DVec2::new(f64::from(width.max(1)), f64::from(height.max(1)));
+        self.max_distance = max_distance_for(&self.cfg, width, height);
     }
 
     pub fn aspect(&self) -> f64 {
@@ -399,17 +402,25 @@ impl Camera {
     }
 }
 
-/// Smallest distance at which the whole map (centred, square viewport,
-/// fully zoomed-out pitch) is inside the view, plus 3 % slack.
-fn fit_distance(cfg: &CameraConfig) -> f64 {
+/// Farthest eye distance for a viewport: the configured one, or just enough
+/// to show the whole map.
+fn max_distance_for(cfg: &CameraConfig, width: u32, height: u32) -> f64 {
+    cfg.max_distance
+        .unwrap_or_else(|| fit_distance(cfg, width.max(1), height.max(1)))
+        .max(cfg.min_distance * 1.001)
+}
+
+/// Smallest distance at which the whole map (centred, fully zoomed-out pitch)
+/// is inside a `width` x `height` viewport, plus 3 % slack.
+fn fit_distance(cfg: &CameraConfig, width: u32, height: u32) -> f64 {
     let probe = |d: f64| -> bool {
         let mut cam = Camera::new(
             CameraConfig {
                 max_distance: Some(d.max(cfg.min_distance * 1.001)),
                 ..*cfg
             },
-            100,
-            100,
+            width,
+            height,
         );
         cam.set_zoom(1.0);
         let vp = cam.view_proj_f64();
@@ -628,7 +639,7 @@ mod tests {
 
     /// Same with the real map bounds, for cursors in the central 60 % of the
     /// window. Further out, zooming out on a 256 m map can ask for a focus
-    /// beyond the bounds (the screen shows ~700 m at full zoom-out); then
+    /// beyond the bounds (the screen shows ~540 m at full zoom-out); then
     /// the bounds win, see the module docs.
     #[test]
     fn cursor_point_holds_with_default_bounds_near_the_centre() {
@@ -912,5 +923,48 @@ mod tests {
             c.focus().x > f0.x + 1.0,
             "pan was swallowed by the zoom anchor"
         );
+    }
+    /// All four map corners are inside the view at full zoom-out.
+    fn whole_map_visible(c: &Camera) -> bool {
+        let vp = c.view_proj_f64();
+        let m = c.config().map_size;
+        [(0.0, 0.0), (m.x, 0.0), (0.0, m.y), (m.x, m.y)]
+            .iter()
+            .all(|&(x, z)| {
+                let clip = vp * DVec4::new(x, 0.0, z, 1.0);
+                clip.w > 0.0 && (clip.x / clip.w).abs() <= 1.0 && (clip.y / clip.w).abs() <= 1.0
+            })
+    }
+
+    #[test]
+    fn whole_map_fits_at_max_zoom_for_any_aspect_ratio() {
+        for (w, h) in [
+            (1920, 1080),
+            (1000, 1000),
+            (720, 1280),
+            (400, 2000),
+            (3440, 1440),
+        ] {
+            let mut c = Camera::new(CameraConfig::default(), w, h);
+            c.set_zoom(1.0);
+            assert!(whole_map_visible(&c), "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn resizing_to_portrait_refits_the_map() {
+        let mut c = Camera::new(CameraConfig::default(), 1920, 1080);
+        c.set_zoom(1.0);
+        let landscape = c.distance();
+        c.set_viewport(600, 1200);
+        assert!(
+            c.distance() > landscape * 1.2,
+            "{} vs {landscape}",
+            c.distance()
+        );
+        assert!(whole_map_visible(&c));
+        // Back to landscape: same distance again.
+        c.set_viewport(1920, 1080);
+        assert!((c.distance() - landscape).abs() < 1e-9);
     }
 }

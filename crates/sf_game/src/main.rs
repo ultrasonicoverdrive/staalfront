@@ -5,15 +5,22 @@
 //! once per second. Camera controls come from `assets/config/input.ron`:
 //! wheel = zoom toward the cursor, WASD/arrows/screen edge = pan, middle
 //! mouse drag = grab the ground.
+//!
+//! The ground is the engine terrain (WP1.7): a procedural 256x256 m map
+//! (seed 1) by default, or a map directory given with `--map <dir>`. The
+//! camera still works on the flat `y = 0` plane (focus height and the point
+//! under the cursor ignore the relief, which stays below 6 m); picking against
+//! the real terrain comes later.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use sf_audio::{AudioSystem, Listener};
+use sf_data::map::{Map, generate::generate};
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
 use sf_render::camera::DVec2;
-use sf_render::scene::world_scene;
+use sf_render::scene::world_markers;
 use sf_render::{Camera, CameraConfig, CameraInput, GpuOptions, Renderer};
 
 /// Longest frame time fed to the camera; a stall (window drag, breakpoint)
@@ -48,6 +55,7 @@ struct Runner {
     renderer: Option<Renderer>,
     audio: Option<AudioSystem>,
     camera: Camera,
+    map: Map,
     last_frame: Option<Instant>,
     auto_zoom: bool,
     /// Set when the renderer could not start or a frame failed; `main` then
@@ -56,8 +64,17 @@ struct Runner {
 }
 
 impl Runner {
-    fn new(exit_after: Option<Duration>, auto_zoom: bool, failed: Arc<AtomicBool>) -> Self {
+    fn new(
+        exit_after: Option<Duration>,
+        auto_zoom: bool,
+        map: Map,
+        failed: Arc<AtomicBool>,
+    ) -> Self {
         let now = Instant::now();
+        let camera_config = CameraConfig {
+            map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
+            ..CameraConfig::default()
+        };
         Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -67,7 +84,8 @@ impl Runner {
             exit_after,
             renderer: None,
             audio: None,
-            camera: Camera::new(CameraConfig::default(), 1280, 720),
+            camera: Camera::new(camera_config, 1280, 720),
+            map,
             last_frame: None,
             auto_zoom,
             failed,
@@ -145,7 +163,11 @@ impl App for Runner {
                     renderer.adapter_summary(),
                     renderer.color_format()
                 );
-                renderer.set_scene(&world_scene(256));
+                renderer.set_terrain(&self.map);
+                let map = &self.map;
+                renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
+                    map.height_at(x, z)
+                }));
                 renderer.watch_shader_file(
                     ctx.assets().root().join("shaders/scene.wgsl"),
                     Duration::from_millis(250),
@@ -288,6 +310,25 @@ fn auto_zoom_arg() -> bool {
     std::env::args().skip(1).any(|a| a == "--auto-zoom")
 }
 
+/// `--zoom <0..1>` and `--focus <x,z>`: start the camera there (screenshots).
+fn camera_args() -> (Option<f64>, Option<DVec2>) {
+    let mut args = std::env::args().skip(1);
+    let (mut zoom, mut focus) = (None, None);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--zoom" => zoom = args.next().and_then(|v| v.parse().ok()),
+            "--focus" => {
+                focus = args.next().and_then(|v| {
+                    let (x, z) = v.split_once(',')?;
+                    Some(DVec2::new(x.parse().ok()?, z.parse().ok()?))
+                });
+            }
+            _ => {}
+        }
+    }
+    (zoom, focus)
+}
+
 /// `--frame-cap <hz>`: limit the frame rate (smoke tests; default uncapped).
 fn frame_cap_arg() -> Option<u32> {
     let mut args = std::env::args().skip(1);
@@ -299,16 +340,39 @@ fn frame_cap_arg() -> Option<u32> {
     None
 }
 
+/// `--map <dir>`: load a map directory instead of generating the default.
+fn map_arg() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--map" {
+            return args.next();
+        }
+    }
+    None
+}
+
 fn main() {
+    let map = match map_arg() {
+        Some(dir) => Map::load(std::path::Path::new(&dir)).unwrap_or_else(|e| {
+            eprintln!("sf_game: cannot load map {dir}: {e}");
+            std::process::exit(1);
+        }),
+        None => generate(256, 256, 1),
+    };
     let config = EngineConfig {
         frame_cap_hz: frame_cap_arg(),
         ..EngineConfig::default()
     };
     let failed = Arc::new(AtomicBool::new(false));
-    if let Err(e) = sf_engine::run(
-        config,
-        Runner::new(exit_after_arg(), auto_zoom_arg(), failed.clone()),
-    ) {
+    let mut runner = Runner::new(exit_after_arg(), auto_zoom_arg(), map, failed.clone());
+    let (zoom, focus) = camera_args();
+    if let Some(zoom) = zoom {
+        runner.camera.set_zoom(zoom);
+    }
+    if let Some(focus) = focus {
+        runner.camera.set_focus(focus);
+    }
+    if let Err(e) = sf_engine::run(config, runner) {
         eprintln!("sf_game: {e}");
         std::process::exit(1);
     }

@@ -2020,6 +2020,9 @@ version = "0.1.0"
 name = "sf_data"
 version = "0.1.0"
 dependencies = [
+ "png",
+ "ron",
+ "serde",
  "sf_math",
 ]
 
@@ -2102,6 +2105,7 @@ dependencies = [
  "glam 0.34.1",
  "png",
  "pollster",
+ "sf_data",
  "sf_math",
  "wgpu",
 ]

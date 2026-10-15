@@ -12,6 +12,8 @@ workspace = true
 
 [dependencies]
 sf_math = { path = "../../crates/sf_math" }
+# Engine map format (header, heightmap, material map) the terrain is built from.
+sf_data = { path = "../../crates/sf_data" }
 # GPU API (Vulkan/DX12/Metal); 30.x is the current stable line (PLAN.md 1.0).
 wgpu = "30.0.1"
 # Render math (matrices for the placeholder view/projection); presentation only.
