@@ -1777,6 +1777,9 @@ version = "0.1.0"
 name = "sf_data"
 version = "0.1.0"
 dependencies = [
+ "png",
+ "ron",
+ "serde",
  "sf_math",
 ]
 
@@ -1858,6 +1861,7 @@ dependencies = [
  "glam",
  "png",
  "pollster",
+ "sf_data",
  "sf_math",
  "wgpu",
 ]

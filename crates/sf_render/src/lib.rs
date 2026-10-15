@@ -8,6 +8,9 @@
 //! WP1.5 adds the game camera ([`camera`]): log zoom toward the cursor, pitch
 //! that follows the zoom, damped panning, plus a 256x256 m world scene.
 //!
+//! WP1.7 adds the terrain ([`terrain`]): 32x32-cell chunk meshes from an
+//! `sf_data` map and a procedural material texture array.
+//!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
@@ -19,6 +22,8 @@ pub mod renderer;
 pub mod scene;
 #[cfg(debug_assertions)]
 mod shader_watch;
+pub mod terrain;
+mod terrain_gpu;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
 pub use gpu::{Gpu, GpuOptions, RenderError};
