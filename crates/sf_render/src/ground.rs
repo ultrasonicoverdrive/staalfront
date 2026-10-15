@@ -503,6 +503,35 @@ mod tests {
         assert!(g.raycast(DVec3::new(40.0, 50.0, 30.0), DVec3::Y).is_none());
     }
 
+    /// What a pick costs: the rays of a camera over the generated 256 m map
+    /// at three zoom levels (printed for the PR; the bound is only a sanity
+    /// check that holds in a debug build too).
+    #[test]
+    fn camera_rays_are_cheap() {
+        use crate::camera::{Camera, CameraConfig, DVec2};
+        let map = generate(256, 256, 1);
+        let ground = std::sync::Arc::new(TerrainGround::new(&map));
+        for zoom in [0.0, 0.5, 1.0] {
+            let mut cam = Camera::new(CameraConfig::default(), 1920, 1080);
+            cam.set_ground(ground.clone());
+            cam.set_zoom(zoom);
+            cam.set_focus(DVec2::new(128.0, 128.0));
+            let started = std::time::Instant::now();
+            let mut n = 0;
+            for y in (0..1080).step_by(24) {
+                for x in (0..1920).step_by(24) {
+                    std::hint::black_box(
+                        cam.ground_point_3d(DVec2::new(f64::from(x), f64::from(y))),
+                    );
+                    n += 1;
+                }
+            }
+            let each = started.elapsed() / n;
+            println!("zoom {zoom}: {n} picks, {each:?} each");
+            assert!(each < std::time::Duration::from_micros(500), "{each:?}");
+        }
+    }
+
     #[test]
     fn rays_through_vertices_and_along_cell_edges_do_not_slip_through() {
         // Integer coordinates and axis-aligned directions: the ray runs exactly
