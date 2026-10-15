@@ -11,7 +11,8 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-sf_math = { path = "../../crates/sf_math" }
+# `render` enables sf_math::render_bridge, the only fixed-point to f32 conversion.
+sf_math = { path = "../../crates/sf_math", features = ["render"] }
 # Engine map format (header, heightmap, material map) the terrain is built from.
 sf_data = { path = "../../crates/sf_data" }
 # GPU API (Vulkan/DX12/Metal); 30.x is the current stable line (PLAN.md 1.0).
@@ -24,3 +25,7 @@ bytemuck = { version = "1.25", features = ["derive"] }
 png = "0.18.1"
 # Block on wgpu's async adapter/device requests without an async runtime.
 pollster = "1.0.1"
+# The placeholder unit style (palette, shapes) is a RON file (PLAN.md section 5
+# rule 6); both crates are already in the workspace (sf_engine, sf_data).
+serde = { version = "1", features = ["derive"] }
+ron = "0.12"

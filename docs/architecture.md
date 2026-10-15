@@ -223,7 +223,34 @@ laptop. Never on the home server (B6, PLAN.md §13).
   relief the point "under the cursor" is the plane point (terrain stays below
   6 m in the generated maps). Ray-terrain picking comes with the picking WP.
 
-## 10. Headless runner (WP1.3)
+## 10. Instancing (WP1.6)
+
+- **Flow** (`sf_render::instancing`): once per sim tick the game turns each
+  `sf_sim::EntityView` into a `Motion` (previous and current position and
+  facing, converted to `f32` through `sf_math::render_bridge`, the only
+  fixed-point to float path; `sf_render` stays free of `sf_sim`). Once per
+  frame `Instancer::build(frustum, alpha, ground)` culls, interpolates
+  `lerp(prev, current, alpha)` (facing along the shortest arc of the 256
+  steps, so 255 to 1 passes through 0), puts each unit on the terrain height
+  (display only; the sim stays 2D) and fills one instance list per mesh kind.
+  `Renderer::set_instances(kind, list)` keeps one growing instance buffer per
+  mesh kind: one draw call per kind.
+- **Culling:** entities are bucketed by map tile (32 m, the terrain chunk
+  size) with a counting sort at tick time. A tile's box is the box around the
+  previous and current positions of its members, grown by the largest shape
+  footprint, with the terrain's height range plus the tallest shape as its
+  vertical extent; tiles outside the frustum (`Frustum::classify`, planes from
+  the view-projection) are skipped. Interpolated positions stay between the
+  two ticks, so nothing visible is dropped. Culling is per tile, not per unit.
+- **Look as data:** `assets/config/units.ron` holds the player palette (sRGB,
+  four colors) and the placeholder shapes (cube, cylinder, cone, with sizes).
+  Until units are data-driven (phase 2), `sf_game` uses entity kind modulo the
+  number of shapes and owner modulo the number of colors.
+- **Counters** for the later debug panel: `InstanceStats` (total, visible,
+  tiles, per mesh kind) from `Instancer::build` and `DrawStats` (instances and
+  draw calls: dynamic, static scene, terrain) from `Renderer::draw_stats`.
+
+## 11. Headless runner (WP1.3)
 
 `tools/sf_headless` (library plus binary; its crate documentation is the
 reference) runs a scenario file on `sf_sim` with no window and no GPU:

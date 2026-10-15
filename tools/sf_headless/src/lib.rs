@@ -6,8 +6,9 @@
 //! Windows compute bit-identical worlds (milestone M0: 10,000 ticks with 5,000
 //! wanderers), and later the base for balance runs and AI-vs-AI games.
 //!
-//! The crate depends on `sf_sim` and `sf_math` only (plus `ron` and `serde`
-//! for the scenario file); it must never depend on rendering, windowing or
+//! The crate runs on `sf_sim` and `sf_math` (plus `ron` and `serde` for the
+//! scenario file; `sf_data` and `sf_ai` are listed for later work and unused
+//! today); it must never depend on rendering, windowing or
 //! audio crates. The clock is read in exactly one place, [`cli::run_cli`],
 //! around the run; [`run::run`] is a pure function of the scenario and the
 //! options.

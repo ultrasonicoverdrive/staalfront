@@ -28,10 +28,12 @@ Status: in progress.
 - WP1.3 `sf_headless` (scenario runner, checksum log, Linux/Windows comparison in CI): in review (PR #12)
 - WP1.4 `sf_render` basics: done (PR #6, 0ae43bc)
 - WP1.5 camera, log zoom toward the cursor: done (PR #8, 4e7b88a)
-- WP1.6 instancing: in progress
+- WP1.6 instancing (placeholder meshes, interpolation, tile culling): done (PR #11, ab98531)
 - WP1.7 terrain (map format, chunk meshes, material texture array): done (PR #10, e2f920c)
 - WP1.13 `sf_audio`: done (PR #7, afad8d2)
-- WP1.8 to WP1.12, WP1.14: _pending_
+- WP1.8 terrain LOD, seams, culling, ray-terrain picking: in progress
+- WP1.11 egui debug panels: in progress
+- WP1.9, WP1.10, WP1.12, WP1.14: _pending_
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
 
