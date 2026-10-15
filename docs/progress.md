@@ -25,7 +25,7 @@ Status: in progress.
 
 - WP1.1 `sf_engine` main loop, input and frame timing: done (PR #4, aa5cf7b)
 - WP1.2 `sf_sim` core (world, commands, checksums, wander): done (PR #9, 4df4759)
-- WP1.3 `sf_headless` (scenario runner, checksum log, Linux/Windows comparison in CI): in review (PR #PRNUM)
+- WP1.3 `sf_headless` (scenario runner, checksum log, Linux/Windows comparison in CI): in review (PR #12)
 - WP1.4 `sf_render` basics: done (PR #6, 0ae43bc)
 - WP1.5 camera, log zoom toward the cursor: done (PR #8, 4e7b88a)
 - WP1.6 instancing: in progress
