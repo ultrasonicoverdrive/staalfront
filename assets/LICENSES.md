@@ -13,6 +13,10 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `config/units.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `scenarios/*.ron`, `scenarios/*.expected` | Written for this project (headless scenarios and their pinned checksums, WP1.3) | Project license (see workspace `Cargo.toml`) |
 | `config/terrain.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
+| `fonts/Inter-Medium-subset.otf` | Subset (Basic Latin, Latin-1 Supplement, Latin Extended-A, common punctuation and arrows; no hinting; made with `pyftsubset`) of Inter Medium by The Inter Project Authors, https://github.com/rsms/inter. The font declares no Reserved Font Name. 52 KB. | SIL Open Font License 1.1, full text in `fonts/OFL.txt` |
+| `fonts/OFL.txt` | License text of the Inter font (copied from the Debian `fonts-inter` package) | SIL Open Font License 1.1 |
+| `config/ui.ron` | Written for this project (UI scale, colors; WP1.12) | Project license (see workspace `Cargo.toml`) |
+| `shaders/ui.wgsl` | Written for this project (WP1.12) | Project license (see workspace `Cargo.toml`) |
 
 ## Third-party code and fonts compiled into the binary (WP1.11)
 

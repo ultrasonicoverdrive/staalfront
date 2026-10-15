@@ -33,12 +33,13 @@
 //!   polyline between full-detail heights of *that edge*, so it can never dip
 //!   below that minimum: whatever the neighbour's level is, the higher of the
 //!   two skirts reaches below the lower surface and the gap is closed exactly
-//!   (tested for every pair of levels). Stitching was the alternative; skirts
+//!   (tested for every pair of levels). The skirts face outward, so the one
+//!   that hides a gap (the higher chunk's, seen from the lower side) is a front
+//!   face and back-face culling stays on. Stitching was the alternative; skirts
 //!   win because a chunk's mesh then depends on nothing but itself: level
 //!   selection, hysteresis and culling stay per chunk, the index data is built
 //!   once, and chunks of equal level can be drawn in one call (see
-//!   [`PackedTerrain`]). The price is a few triangles per edge and a pipeline
-//!   without back-face culling.
+//!   [`PackedTerrain`]). The price is a few triangles per edge.
 //! * **Materials:** one material per *cell*, not per vertex. The material
 //!   index map is uploaded as an `R8Uint` texture and the fragment shader
 //!   blends the four nearest cell centres, so the mesh stays one shared

@@ -157,6 +157,10 @@ struct Anchor {
 /// eye by the whole remaining deficit, so it ends after a few.
 const CLEARANCE_PASSES: usize = 24;
 
+/// Set once the clearance search has fallen back (and said so on stderr).
+static CLEARANCE_FALLBACK_REPORTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// The camera. See the module docs for the model and the guarantees.
 #[derive(Clone, Debug)]
 pub struct Camera {
@@ -376,18 +380,31 @@ impl Camera {
         let (sp, cp) = p.sin_cos();
         // The eye has to be above the anchor, or the ray would point away from it.
         let mut y = min_y.max(anchor.ground.y + self.cfg.clearance - d * sp);
-        let mut pose = None;
-        for _ in 0..CLEARANCE_PASSES {
+        let pose_at = |y: f64| {
             let t = (anchor.ground.y - y - d * sp) / dir.y;
             let eye = anchor.ground - dir * t;
-            pose = Some((DVec2::new(eye.x, eye.z - d * cp), y));
+            (eye, (DVec2::new(eye.x, eye.z - d * cp), y))
+        };
+        for _ in 0..CLEARANCE_PASSES {
+            let (eye, pose) = pose_at(y);
             let deficit = self.ground.height(eye.x, eye.z) + self.cfg.clearance - eye.y;
             if deficit <= 1e-9 {
-                break;
+                return Some(pose);
             }
             y += deficit;
         }
-        pose
+        // Not settled: the terrain keeps rising as the eye slides back (a
+        // slope steeper than the view). Fall back to a pivot that puts the eye
+        // above the highest point of the ground, which is clear everywhere and
+        // still on the anchor ray; say so once.
+        if !CLEARANCE_FALLBACK_REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "sf_render: the camera clearance search did not settle after {CLEARANCE_PASSES} \
+                 passes; lifting the camera above the highest ground"
+            );
+        }
+        y = y.max(self.ground.max_height() + self.cfg.clearance - d * sp);
+        Some(pose_at(y).1)
     }
 
     fn clamp_focus(&self, f: DVec2) -> DVec2 {
@@ -1526,6 +1543,96 @@ mod tests {
         let px = DVec2::new(900.0, 200.0);
         assert_eq!(tuned.ground_point_3d(px), c.ground_point_3d(px));
         assert!(tuned.ground_point_3d(px).unwrap().y > 0.5);
+    }
+
+    /// A cliff face rising 5 m per metre to the south from `z = 0` to
+    /// `z = 300` (1,500 m high), flat before and behind it. Zoomed in on a
+    /// point of the cliff the eye that slides back along the anchor ray finds
+    /// the ground rising faster than the ray, so raising the pivot pass by
+    /// pass never settles.
+    #[derive(Debug)]
+    struct SteepRamp;
+
+    impl SteepRamp {
+        const SLOPE: f64 = 5.0;
+        const LENGTH: f64 = 300.0;
+    }
+
+    impl Ground for SteepRamp {
+        fn height(&self, _x: f64, z: f64) -> f64 {
+            Self::SLOPE * z.clamp(0.0, Self::LENGTH)
+        }
+
+        fn raycast(&self, o: DVec3, d: DVec3) -> Option<f64> {
+            // The three pieces: flat at 0 (z <= 0), the ramp, flat at the top.
+            let top = Self::SLOPE * Self::LENGTH;
+            let mut hits = Vec::new();
+            let at_z = |t: f64| o.z + t * d.z;
+            if d.y.abs() > 1e-12 {
+                let t0 = -o.y / d.y;
+                if t0 >= 0.0 && at_z(t0) <= 0.0 {
+                    hits.push(t0);
+                }
+                let t1 = (top - o.y) / d.y;
+                if t1 >= 0.0 && at_z(t1) >= Self::LENGTH {
+                    hits.push(t1);
+                }
+            }
+            let denom = d.y - Self::SLOPE * d.z;
+            if denom.abs() > 1e-12 {
+                let t = (Self::SLOPE * o.z - o.y) / denom;
+                if t >= 0.0 && (0.0..=Self::LENGTH).contains(&at_z(t)) {
+                    hits.push(t);
+                }
+            }
+            hits.into_iter().min_by(f64::total_cmp)
+        }
+
+        fn max_height(&self) -> f64 {
+            Self::SLOPE * Self::LENGTH
+        }
+    }
+
+    /// When the clearance search cannot settle, the camera goes above the
+    /// highest ground instead of ending a frame inside a slope, and says so
+    /// once.
+    #[test]
+    fn an_unsettled_clearance_search_falls_back_to_above_the_highest_ground() {
+        let mut c = Camera::new(
+            CameraConfig {
+                margin: 1.0e9,
+                ..CameraConfig::default()
+            },
+            1280,
+            720,
+        );
+        c.set_ground(Arc::new(SteepRamp));
+        c.set_zoom(1.0);
+        c.set_focus(DVec2::new(128.0, 150.0));
+        let px = DVec2::new(700.0, 400.0);
+        assert!(
+            c.ground_point_3d(px).is_some(),
+            "the cliff is under the cursor"
+        );
+        c.update(1.0 / 60.0, &wheel(6.0, px));
+        for _ in 0..200 {
+            c.update(1.0 / 60.0, &idle(px));
+            let eye = c.eye();
+            assert!(
+                eye.y >= c.ground().height(eye.x, eye.z) + 2.0 - 1e-6,
+                "the eye is inside the cliff: {eye}"
+            );
+        }
+        assert!(c.zoom() < 1.0);
+        assert!(
+            CLEARANCE_FALLBACK_REPORTED.load(std::sync::atomic::Ordering::Relaxed),
+            "the test never reached the fallback"
+        );
+        assert!(
+            c.eye().y >= SteepRamp.max_height() + 2.0 - 1e-6,
+            "{}",
+            c.eye().y
+        );
     }
 
     #[test]

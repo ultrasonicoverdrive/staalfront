@@ -4,14 +4,19 @@
 //!
 //! # Error metric
 //! Every chunk-level has a geometric error in metres ([`crate::terrain::LodMesh::error`]):
-//! the largest vertical distance to the full-detail surface. For a camera at
-//! `eye` with a focal length of `focal_px` pixels (half the viewport height
-//! over `tan(fov_y / 2)`), an error `e` at distance `d` moves a point on the
-//! screen by at most `e * focal_px / d` pixels, whatever the viewing
-//! direction. The planner uses the distance to the *nearest point of the
-//! chunk's box*, so the estimate is conservative: it never undersells the
-//! error of a chunk. A chunk takes the **coarsest level whose projected error
-//! is at most [`LodConfig::error_px`]**; level 0 is always allowed.
+//! the largest vertical distance to the full-detail surface. For a camera with
+//! a focal length of `focal_px` pixels (half the viewport height over
+//! `tan(fov_y / 2)`), a point at depth `z` (along the view axis) and distance
+//! `d` from the eye moves on the screen by at most `e * focal_px * d / z^2`
+//! pixels when it is displaced by `e` metres in the worst direction. That is
+//! `e * focal_px / d` at the screen centre (`d = z`) and `1 / cos^2` times
+//! more at an angle `theta` off the axis: 1.7 times at a 1080p corner.
+//! ([`LodView::pixels_in_box`] bounds this over a chunk's box:
+//! `sqrt(R^2 + z0^2) / z0^2`, with `z0` the smallest depth in the box and `R`
+//! its largest distance from the view axis, so the estimate never undersells
+//! the error of a chunk, at the screen centre or at its edge.) A chunk takes
+//! the **coarsest level whose projected error is at most
+//! [`LodConfig::error_px`]**; level 0 is always allowed.
 //!
 //! # Hysteresis
 //! A chunk keeps its level between frames. It goes finer as soon as its
@@ -28,15 +33,15 @@
 //! ids and the same level become **one** draw call.
 //!
 //! On hilly ground neighbouring chunks want different levels and the runs
-//! get short (a 1024x1024 map of hills at whole-map zoom: 459 draw calls
+//! get short (a 1024x1024 map of hills at whole-map zoom: 495 draw calls
 //! when every chunk takes its coarsest level). So after the selection the
 //! planner may give a chunk a **finer** level than its budget needs when
 //! that joins draw calls: it minimises `triangles + draw_call_cost * draw
 //! calls` exactly (dynamic programming over the chunks in order, six states
 //! each, `merge_levels`). A finer level only lowers the error, so the pixel
-//! budget still holds; the price is triangles (the same map: 15 draw calls,
-//! 58k instead of 28k triangles). `draw_call_cost: 0` switches it off. The
-//! 256x256 map at whole-map zoom needs 18 draw calls.
+//! budget still holds; the price is triangles (the same map: 17 draw calls,
+//! 60k instead of 34k triangles). `draw_call_cost: 0` switches it off. The
+//! 256x256 map at whole-map zoom needs 12 draw calls.
 
 use glam::{DMat4, DVec4, Mat4, Vec3};
 use serde::Deserialize;
@@ -190,21 +195,25 @@ impl TerrainConfig {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LodView {
     pub eye: Vec3,
+    /// Unit vector along the view axis.
+    pub forward: Vec3,
     /// Pixels per radian at the screen centre: `viewport_height / (2 tan(fov_y / 2))`.
     pub focal_px: f32,
 }
 
 impl LodView {
-    pub fn new(eye: Vec3, viewport_height_px: f32, fov_y: f32) -> Self {
+    pub fn new(eye: Vec3, forward: Vec3, viewport_height_px: f32, fov_y: f32) -> Self {
         Self {
             eye,
+            forward: forward.normalize(),
             focal_px: 0.5 * viewport_height_px / (0.5 * fov_y).tan(),
         }
     }
 
-    /// Recover the eye and the focal length from a perspective
+    /// Recover the eye, the view axis and the focal length from a perspective
     /// view-projection (wgpu clip space, rigid view): the eye is the point
-    /// that maps to clip `(0, 0, z, 0)`, and the xyz part of the second row
+    /// that maps to clip `(0, 0, z, 0)`, the xyz part of the last row is the
+    /// view axis (clip `w` is the depth), and the xyz part of the second row
     /// has the length `1 / tan(fov_y / 2)`. This lets the renderer work with
     /// whatever matrix it was given (the game camera or the placeholder one).
     pub fn from_view_proj(view_proj: Mat4, viewport_height_px: f32) -> Self {
@@ -216,15 +225,45 @@ impl LodView {
             Vec3::ZERO
         };
         let row1 = Vec3::new(view_proj.x_axis.y, view_proj.y_axis.y, view_proj.z_axis.y);
+        let row3 = Vec3::new(view_proj.x_axis.w, view_proj.y_axis.w, view_proj.z_axis.w);
         Self {
             eye,
+            forward: row3.try_normalize().unwrap_or(Vec3::NEG_Z),
             focal_px: 0.5 * viewport_height_px * row1.length(),
         }
     }
 
-    /// Screen-space size in pixels of `error` metres at `distance` metres.
+    /// Screen-space size in pixels of `error` metres at `distance` metres, for
+    /// a displacement across the view at the screen centre. Off the centre
+    /// this is too small (see the module docs): selection uses
+    /// [`LodView::pixels_in_box`].
     pub fn pixels(&self, error: f32, distance: f32) -> f32 {
         error * self.focal_px / distance.max(MIN_DISTANCE)
+    }
+
+    /// An upper bound, in pixels, of how far a displacement of `error` metres
+    /// (in any direction) can move any point of the box `b` on the screen,
+    /// anywhere on the screen: `error * focal_px * sqrt(R^2 + z0^2) / z0^2`.
+    /// Depths below [`MIN_DISTANCE`] count as that (a box at or across the
+    /// eye plane gets a huge bound, so it takes the finest level).
+    pub fn pixels_in_box(&self, error: f32, b: &Aabb) -> f32 {
+        let centre = (b.min + b.max) * 0.5;
+        let half = (b.max - b.min) * 0.5;
+        let depth_centre = self.forward.dot(centre - self.eye);
+        let reach = self.forward.abs().dot(half);
+        let z0 = (depth_centre - reach).max(MIN_DISTANCE);
+        let mut lateral2 = 0.0_f32;
+        for i in 0..8 {
+            let corner = Vec3::new(
+                if i & 1 == 0 { b.min.x } else { b.max.x },
+                if i & 2 == 0 { b.min.y } else { b.max.y },
+                if i & 4 == 0 { b.min.z } else { b.max.z },
+            );
+            let q = corner - self.eye;
+            let z = self.forward.dot(q);
+            lateral2 = lateral2.max(q.length_squared() - z * z);
+        }
+        error * self.focal_px * (lateral2 + z0 * z0).sqrt() / (z0 * z0)
     }
 }
 
@@ -451,10 +490,9 @@ impl LodPlanner {
 /// The coarsest level of a chunk whose projected error is at most
 /// `budget_px` (0 if even level 1 is too coarse).
 fn coarsest_within(c: &ChunkLod, view: &LodView, budget_px: f32) -> u8 {
-    let distance = distance_to_aabb(view.eye, &c.aabb);
     let mut best = 0;
     for (level, &error) in c.errors.iter().enumerate().skip(1) {
-        if view.pixels(error, distance) <= budget_px {
+        if view.pixels_in_box(error, &c.aabb) <= budget_px {
             best = level as u8;
         } else {
             break;

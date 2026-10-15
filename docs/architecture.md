@@ -50,6 +50,8 @@ graph TD
   sf_render --> sf_math
   sf_render --> sf_data
   sf_ui --> sf_math
+  sf_ui --> sf_render
+  sf_ui --> sf_data
   sf_net --> sf_sim
   sf_game --> sf_math
   sf_game --> sf_sim
@@ -249,11 +251,14 @@ laptop. Never on the home server (B6, PLAN.md §13).
   error). The errors never decrease with the level. Level normals are computed
   over the level's own step, like a mip chain.
 - **Selection** (`sf_render::lod`, CPU only, tested without a GPU): a chunk takes
-  the coarsest level whose projected error `error * focal_px / distance` is at
-  most `error_px` (2 px, `assets/config/terrain.ron`), with the distance to the
-  nearest point of the chunk's box, so the estimate is conservative. The eye and
-  the focal length are recovered from the view-projection, so the renderer needs
-  nothing but `set_view_proj`. Hysteresis (25 %) keeps a chunk from flickering:
+  the coarsest level whose projected error is at most `error_px` (2 px,
+  `assets/config/terrain.ron`). A displacement of `e` metres moves a point at
+  depth `z` and distance `d` by at most `e * focal_px * d / z^2` pixels (that is
+  `e * focal_px / d` at the screen centre and 1.7 times more at a 1080p corner);
+  `LodView::pixels_in_box` bounds it over the chunk's box, so the estimate holds
+  anywhere on the screen. The eye, the view axis and the focal length are
+  recovered from the view-projection, so the renderer needs nothing but
+  `set_view_proj`. Hysteresis (25 %) keeps a chunk from flickering:
   it goes finer as soon as its error exceeds the budget but coarser only when
   the coarser level fits into 75 % of it.
 - **Seams: skirts.** Neighbouring chunks at different levels meet along
@@ -265,7 +270,9 @@ laptop. Never on the home server (B6, PLAN.md §13).
   levels, and by rendering with the skirts off as the probe). Stitching was the
   alternative; skirts keep a chunk's mesh independent of its neighbours, which
   keeps selection, hysteresis and culling per chunk and the index data
-  precomputed. The pipeline draws without back-face culling.
+  precomputed. The skirts face outward, so the one that hides a gap (the higher
+  chunk's, seen from the lower side) is a front face: back-face culling stays on
+  and the seam render test covers both viewing sides.
 - **Culling and draw calls:** a chunk whose box is outside the frustum
   (`Frustum`, the code the instancing uses) is not drawn. All chunks and levels
   live in one vertex buffer and one `u32` index buffer, laid out level by level
@@ -273,8 +280,8 @@ laptop. Never on the home server (B6, PLAN.md §13).
   are one `draw_indexed`. Because hills make neighbours want different levels, the
   planner may also draw a chunk *finer* than its budget needs when that joins
   calls: it minimises triangles plus `draw_call_cost` (300) per call exactly
-  (dynamic programming). Numbers, whole-map zoom: 256x256 map 18 draw calls; a
-  1024x1024 map of hills 15 (459 without joining); a smooth 1024x1024 map 1.
+  (dynamic programming). Numbers, whole-map zoom: 256x256 map 12 draw calls; a
+  1024x1024 map of hills 17 (495 without joining); a smooth 1024x1024 map 1.
 - **Counters:** `Renderer::terrain_stats()` (`TerrainStats`: chunks total and
   visible, chunks per level, triangles, draw calls) and the same numbers in
   `DrawStats`.
@@ -402,4 +409,35 @@ triangles and the number of chunks per level (`DrawStats`).
 
 **Camera tunables** are applied by rebuilding the `Camera` from the edited
 config (`Camera::with_config`: same focus, pivot height, zoom, viewport and
-ground, so picking stays on the terrain; the velocity resets). Saving the tuned values to RON is not done yet.
+ground, so picking stays on the terrain; the velocity resets). Saving the
+tuned values to RON is not done yet.
+
+## 13. Player-facing UI (WP1.12)
+
+`sf_ui` is the in-game UI; `egui` stays for debug panels and tools. Details are in
+the crate docs (`crates/sf_ui/src/lib.rs`); the decisions:
+
+- **Immediate mode.** `Ui::begin_frame`, widgets in painter's order (`panel`,
+  `text_in`, `button`, `area`, `minimap`), `Ui::end_frame`. A button's `clicked` is
+  the return value of the call that declares it. The UI never touches the world;
+  the game turns responses into commands.
+- **One pipeline, two draw calls.** Every primitive is a tinted textured quad
+  (`DrawList`). Solid rectangles, glyph coverage and the procedural nine-slice skin
+  share one dynamically packed atlas (`Atlas`, shelf packer, grows in height); the
+  baked minimap is the second texture. `UiRenderer::render` records one render pass
+  on top of the scene through `Renderer::render_with` (the only `sf_render` change:
+  a closure hook that receives the frame's encoder and colour view; the egui overlay
+  of WP1.11 can use the same hook).
+- **Layout and scale.** Nine anchors plus an inward offset relative to the window or
+  another rectangle; sizes in logical pixels times the effective scale (`ui.ron`
+  `scale` times the window's DPI factor), snapped to whole pixels.
+- **Input first.** A press of any mouse button or a wheel notch over a panel, button
+  or area is consumed; a button pressed on the UI stays captured until released, so a
+  drag never leaks; releases always reach the game. `Ui::filter_for_game` applies the
+  rule to a raw `UiInput`; `Ui::blocks_pointer_at` answers from the last frame's
+  rectangles for an event hook (`App::on_window_event` of WP1.11).
+- **Minimap.** The terrain is baked once on the CPU (material average colour times
+  slope shading) and uploaded as a texture; unit dots and the field-of-view frame
+  (the four screen corners projected on the ground with `Camera::ground_point`,
+  which since WP1.8 is a terrain pick, clamped to the map) are drawn per frame; a left press or drag returns the world
+  point for `Camera::set_focus`.

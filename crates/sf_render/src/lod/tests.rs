@@ -2,6 +2,7 @@ use super::*;
 use crate::camera::{Camera, CameraConfig, DVec2};
 use crate::ground::{Ground, TerrainGround};
 use crate::terrain::{MAX_LEVEL, build_mesh, pack};
+use glam::DVec3;
 use sf_data::map::Map;
 use sf_data::map::generate::generate;
 use std::sync::Arc;
@@ -96,7 +97,19 @@ fn the_view_is_recovered_from_the_view_projection() {
                 err < 2e-3 * cam.distance().max(10.0),
                 "zoom {zoom}: eye off by {err} m"
             );
-            let expect = LodView::new(eye.as_vec3(), H as f32, cam.config().fov_y as f32);
+            let axis =
+                (DVec3::new(cam.focus().x, cam.focus_height(), cam.focus().y) - eye).normalize();
+            assert!(
+                (view.forward.as_dvec3() - axis).length() < 1e-4,
+                "zoom {zoom}: view axis {} vs {axis}",
+                view.forward
+            );
+            let expect = LodView::new(
+                eye.as_vec3(),
+                axis.as_vec3(),
+                H as f32,
+                cam.config().fov_y as f32,
+            );
             assert!((view.focal_px / expect.focal_px - 1.0).abs() < 1e-4);
         }
     }
@@ -104,13 +117,72 @@ fn the_view_is_recovered_from_the_view_projection() {
 
 #[test]
 fn pixels_scale_with_error_and_inverse_distance() {
-    let v = LodView::new(Vec3::ZERO, 1080.0, 45_f32.to_radians());
+    let v = LodView::new(Vec3::ZERO, Vec3::NEG_Z, 1080.0, 45_f32.to_radians());
     assert!((v.focal_px - 1303.7).abs() < 0.5);
     assert!((v.pixels(1.0, 100.0) - 13.037).abs() < 0.01);
     assert!((v.pixels(2.0, 100.0) / v.pixels(1.0, 100.0) - 2.0).abs() < 1e-6);
     assert!((v.pixels(1.0, 50.0) / v.pixels(1.0, 100.0) - 2.0).abs() < 1e-6);
     // Never divides by zero.
     assert!(v.pixels(1.0, 0.0).is_finite());
+}
+
+/// The bound holds anywhere on the screen. Points all over a 1080p picture
+/// are displaced by a small error in random directions and straight up; the
+/// pixels they really move never exceed `pixels_in_box`. The centre formula
+/// (`pixels`) is what the selection used before: it falls short by up to
+/// 1.7x at the corners, which this test would catch.
+#[test]
+fn the_projected_error_bound_holds_at_the_screen_edge() {
+    let map = generate(256, 256, 1);
+    let mut seed = 31_u64;
+    let mut rnd = move || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 11) as f64 / (1_u64 << 53) as f64
+    };
+    let error = 0.02_f32; // small, so the first-order bound is the right yardstick
+    let (mut worst_new, mut worst_old, mut samples) = (0.0_f64, 0.0_f64, 0);
+    for zoom in [0.0, 0.5, 1.0] {
+        let cam = camera(&map, zoom, (128.0, 128.0));
+        let (view, _) = view_of(&cam);
+        let m = cam.view_proj_f64();
+        let project = |p: DVec3| {
+            let c = m * p.extend(1.0);
+            let (nx, ny) = (c.x / c.w, c.y / c.w);
+            (nx * f64::from(W) / 2.0, ny * f64::from(H) / 2.0)
+        };
+        for _ in 0..6000 {
+            // A point the camera sees: pick a screen position and a depth.
+            let g = cam
+                .ground_point_3d(DVec2::new(rnd() * f64::from(W), rnd() * f64::from(H)))
+                .expect("ground under every pixel");
+            let p = g + DVec3::new(0.0, 2.0 * rnd(), 0.0);
+            let dir = if samples % 3 == 0 {
+                DVec3::Y
+            } else {
+                DVec3::new(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5).normalize()
+            };
+            let (a, b) = (project(p), project(p + dir * f64::from(error)));
+            let moved = ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+            let pf = p.as_vec3();
+            let point = Aabb::new(pf, pf);
+            let bound = f64::from(view.pixels_in_box(error, &point));
+            let old = f64::from(view.pixels(error, distance_to_aabb(view.eye, &point)));
+            worst_new = worst_new.max(moved / bound);
+            worst_old = worst_old.max(moved / old);
+            samples += 1;
+        }
+    }
+    println!("real / bound at most {worst_new:.3}; real / centre formula at most {worst_old:.3}");
+    assert!(worst_new <= 1.02, "the bound is exceeded: {worst_new}");
+    assert!(
+        worst_old > 1.4,
+        "the centre formula should fall short off-centre: {worst_old}"
+    );
+    // And the bound is not absurdly loose for a point: within a few percent
+    // of the real worst case somewhere (the worst direction exists).
+    assert!(worst_new > 0.8, "{worst_new}");
 }
 
 #[test]
@@ -134,7 +206,12 @@ fn the_level_is_monotone_in_distance() {
         let mut last = 0;
         let mut distance = 1.0_f32;
         while distance < 5000.0 {
-            let view = LodView::new(centre + Vec3::new(0.0, distance, 0.0), 1080.0, 0.785);
+            let view = LodView::new(
+                centre + Vec3::new(0.0, distance, 0.0),
+                Vec3::NEG_Y,
+                1080.0,
+                0.785,
+            );
             let level = p.coarsest_within(chunk, &view, 2.0);
             assert!(
                 level >= last,
@@ -201,11 +278,10 @@ fn the_projected_error_never_exceeds_the_budget() {
                 continue;
             }
             seen[usize::from(level)] += 1;
-            let d = distance_to_aabb(view.eye, p.chunk_aabb(id));
-            let px = view.pixels(p.chunk_error(id, level), d);
+            let px = view.pixels_in_box(p.chunk_error(id, level), p.chunk_aabb(id));
             assert!(
                 level == 0 || px <= cfg.error_px * 1.0001,
-                "chunk {id} level {level}: {px} px at {d} m"
+                "chunk {id} level {level}: {px} px"
             );
         }
     }
@@ -227,10 +303,9 @@ fn without_hysteresis_the_coarsest_level_within_budget_is_chosen() {
             if level == NOT_DRAWN {
                 continue;
             }
-            let d = distance_to_aabb(view.eye, p.chunk_aabb(id));
             assert_eq!(level, p.coarsest_within(id, &view, 1.5));
             if level < p.chunk_max_level(id) {
-                let next = view.pixels(p.chunk_error(id, level + 1), d);
+                let next = view.pixels_in_box(p.chunk_error(id, level + 1), p.chunk_aabb(id));
                 assert!(
                     next > 1.5,
                     "chunk {id}: level {} would fit ({next} px)",
@@ -253,7 +328,7 @@ fn hysteresis_stops_flicker() {
         let cfg = config(2.0, hysteresis);
         let aabb = *p.chunk_aabb(0);
         let centre = (aabb.min + aabb.max) * 0.5;
-        let at = |d: f32| LodView::new(centre + Vec3::new(0.0, d, 0.0), 1080.0, 0.785);
+        let at = |d: f32| LodView::new(centre + Vec3::new(0.0, d, 0.0), Vec3::NEG_Y, 1080.0, 0.785);
         // Find the distance where level 2 first fits the budget.
         let mut d = 1.0_f32;
         while p.coarsest_within(0, &at(d), 2.0) < 2 {

@@ -20,6 +20,10 @@
 //! hidden they cost nothing: no egui pass, no events forwarded. In debug builds
 //! `assets/config/units.ron` is hot-reloaded like the input and audio RON.
 //!
+//! HUD (WP1.12): `sf_ui` draws a top bar (fps, units, tick, a button that
+//! toggles the unit dots) and the minimap bottom-right (`hud.rs`). The UI sees
+//! the mouse first: a press or wheel over it never reaches the camera.
+//!
 //! The ground is the engine terrain (WP1.7): a procedural 256x256 m map
 //! (seed 1) by default, or a map directory given with `--map <dir>`. Since
 //! WP1.8 it has levels of detail and culling (`assets/config/terrain.ron`; the
@@ -31,6 +35,7 @@
 //! the click sound sit on the terrain surface.
 
 mod debug_ui;
+mod hud;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,6 +53,8 @@ use sf_render::{
     Instancer, LodConfig, Motion, Renderer, Style, TerrainConfig, TerrainGround, TerrainStats,
 };
 use sf_sim::{Command, EntityView, Kind, PlayerId, Tick, World, WorldConfig};
+
+use crate::hud::{Hud, HudStats};
 
 /// Longest frame time fed to the camera; a stall (window drag, breakpoint)
 /// must not make it jump.
@@ -153,6 +160,9 @@ struct Runner {
     renderer: Option<Renderer>,
     audio: Option<AudioSystem>,
     camera: Camera,
+    hud: Hud,
+    /// Frames counted in the last full second, for the top bar.
+    fps_shown: u32,
     map: Map,
     /// The terrain as a ground: camera picking, units and sounds stand on it.
     ground: Arc<TerrainGround>,
@@ -214,6 +224,8 @@ impl Runner {
             renderer: None,
             audio: None,
             camera,
+            hud: Hud::new(sf_engine::AssetRoot::resolve().root()),
+            fps_shown: 0,
             map,
             ground,
             lod,
@@ -246,7 +258,12 @@ impl Runner {
         };
         let cursor = ctx.input().cursor().map(|(x, y)| DVec2::new(x, y));
         let wheel = f64::from(ctx.input().wheel_delta());
-        let (zoom_notches, cursor) = if self.auto_zoom {
+        // The UI saw the mouse first: a wheel over it is not a zoom (the
+        // `CameraZoom*` actions fire on the raw wheel, so skip them too).
+        let wheel_blocked = self.hud.wheel_consumed() && wheel != 0.0;
+        let (zoom_notches, cursor) = if wheel_blocked {
+            (0.0, cursor)
+        } else if self.auto_zoom {
             let size = ctx.size();
             let t = self.started.map_or(0.0, |s| s.elapsed().as_secs_f64());
             let notches = auto_zoom_notches(t, (t - dt).max(0.0));
@@ -274,7 +291,7 @@ impl Runner {
             },
             zoom_notches,
             cursor,
-            drag: actions.held(Action::CameraDrag) && !ui_busy,
+            drag: actions.held(Action::CameraDrag) && !ui_busy && !self.hud.middle_captured(),
         }
     }
 
@@ -430,6 +447,7 @@ impl App for Runner {
                     Duration::from_millis(250),
                 );
                 self.camera.set_viewport(s.width, s.height);
+                self.hud.attach(&renderer, &self.map);
                 self.viewport = (s.width, s.height);
                 self.renderer = Some(renderer);
             }
@@ -471,6 +489,14 @@ impl App for Runner {
         }
         let dt = frame_dt.map_or(0.0, |d| d.as_secs_f64()).min(MAX_CAMERA_DT);
         self.update_debug_ui(ctx);
+        // Build the UI first (it may move the camera on a minimap click), then
+        // let the camera read the input the UI left over.
+        let stats = HudStats {
+            fps: self.fps_shown,
+            units: self.world.len() as u32,
+            tick: self.total_ticks,
+        };
+        self.hud.frame(ctx, &mut self.camera, &self.views, stats);
         let input = self.camera_input(ctx, dt);
         self.camera.update(dt, &input);
         if let Some(renderer) = &mut self.renderer {
@@ -505,7 +531,7 @@ impl App for Runner {
             audio.update();
         }
         if let Some(renderer) = &mut self.renderer {
-            if let Err(e) = renderer.render() {
+            if let Err(e) = self.hud.draw(renderer) {
                 eprintln!("sf_game: render failed: {e}");
                 self.failed.store(true, Ordering::Relaxed);
                 ctx.request_exit();
@@ -566,6 +592,7 @@ impl App for Runner {
                 ),
                 None => println!("{} fps, {} ticks/s", self.frames, self.ticks),
             }
+            self.fps_shown = self.frames;
             self.frames = 0;
             self.ticks = 0;
             self.report_at += Duration::from_secs(1);
@@ -594,6 +621,9 @@ impl App for Runner {
             audio.on_asset_changed(path);
         }
         self.reload_style(ctx, path);
+        if path.file_name().is_some_and(|n| n == "ui.ron") {
+            self.hud.reload_config(ctx.assets().root());
+        }
         println!("asset changed: {}", path.display());
     }
 

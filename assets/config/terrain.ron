@@ -3,8 +3,8 @@
 // Every 32x32-cell chunk has six meshes (steps of 1, 2, 4, 8, 16 and 32 cells,
 // levels 0 to 5) with a known geometric error in metres. Each frame a chunk
 // takes the coarsest level whose error, projected to the screen, is at most
-// `error_px` pixels (conservative: measured at the nearest point of the
-// chunk, in the render target's own pixels).
+// `error_px` pixels (an upper bound that holds anywhere on the screen, at its
+// centre and at its corners, in the render target's own pixels).
 (
     lod: (
         // Largest projected error in pixels. Default tuned for 1920x1080.

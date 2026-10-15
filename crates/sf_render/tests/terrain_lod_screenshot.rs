@@ -270,53 +270,70 @@ fn pit_seam_map() -> Map {
 
 /// Neighbouring chunks at different levels show no hole between them with
 /// the skirts; the same scene without skirts does (the probe), so the check
-/// can fail.
+/// can fail. Seen from both sides of the seam and with either chunk coarse:
+/// the terrain pipeline culls back faces, so each gap has to be covered by a
+/// wall that faces the viewer (the higher chunk's, seen from the lower side).
 #[test]
 fn no_cracks_between_chunks_of_different_levels_and_the_probe_finds_them_without_skirts() {
     let (w, h) = (640, 360);
     let map = pit_seam_map();
-    // The camera is west of the seam and looks north, so the rays on the
-    // right half of the picture cross the seam from west to east.
-    let cam = camera(&map, (w, h), 0.4, (24.0, 20.0));
+    // (camera x, levels of the west and east chunk, whether the viewer is on
+    // the side from which the slit can be seen). The camera looks north, so
+    // the rays on the right half of the picture cross the seam from a camera
+    // in the west to the east, and on the left half from the east to the west.
+    let cases = [
+        (24.0, vec![0, 1], true),  // viewer in the fine west, coarse east
+        (40.0, vec![1, 0], true),  // viewer in the fine east, coarse west
+        (24.0, vec![1, 0], false), // viewer on the coarse side: nothing to see
+        (40.0, vec![0, 1], false),
+    ];
+    for (camera_x, levels, visible) in cases {
+        let cam = camera(&map, (w, h), 0.4, (camera_x, 20.0));
+        let render = |seams: bool, levels: Vec<u8>| {
+            let mut r = renderer(w, h);
+            r.set_terrain_with(
+                &map,
+                &TerrainConfig {
+                    seams,
+                    lod: LodConfig::default(),
+                },
+            );
+            r.set_terrain_levels(Some(levels));
+            let img = shot(&mut r, &cam);
+            (img, r.terrain_stats())
+        };
 
-    let render = |seams: bool, levels: Vec<u8>| {
-        let mut r = renderer(w, h);
-        r.set_terrain_with(
-            &map,
-            &TerrainConfig {
-                seams,
-                lod: LodConfig::default(),
-            },
+        // Reference: both chunks at full detail have no crack; whatever sky
+        // there is belongs to the border of the map.
+        let (reference, _) = render(true, vec![0, 0]);
+        let baseline = sky_pixels(&reference);
+        let (with_skirts, stats) = render(true, levels.clone());
+        assert_eq!(
+            (stats.per_level[0], stats.per_level[1]),
+            (1, 1),
+            "{stats:?}"
         );
-        r.set_terrain_levels(Some(levels));
-        let img = shot(&mut r, &cam);
-        (img, r.terrain_stats())
-    };
-
-    // Reference: both chunks at full detail have no crack; whatever sky there
-    // is belongs to the border of the map.
-    let (reference, _) = render(true, vec![0, 0]);
-    let baseline = sky_pixels(&reference);
-    let (with_skirts, stats) = render(true, vec![0, 1]);
-    assert_eq!(
-        (stats.per_level[0], stats.per_level[1]),
-        (1, 1),
-        "{stats:?}"
-    );
-    let (without_skirts, _) = render(false, vec![0, 1]);
-    let (holes, cracks) = (sky_pixels(&with_skirts), sky_pixels(&without_skirts));
-    println!("sky pixels: {baseline} at full detail, {holes} with skirts, {cracks} without");
-    assert!(
-        cracks > baseline + 30,
-        "the probe found no cracks without skirts: {cracks} vs {baseline}"
-    );
-    assert!(
-        holes <= baseline + 2,
-        "cracks between chunks of different levels: {holes} sky pixels vs {baseline}"
-    );
-    // The skirts change little else: elsewhere the pictures are the same.
-    let diff = compare(&with_skirts, &without_skirts, 12).expect("same size");
-    assert!(diff.ratio() < 0.02, "{:.4}", diff.ratio());
+        let (without_skirts, _) = render(false, levels.clone());
+        let (holes, cracks) = (sky_pixels(&with_skirts), sky_pixels(&without_skirts));
+        println!(
+            "camera x {camera_x}, levels {levels:?}: sky pixels {baseline} at full detail, \
+             {holes} with skirts, {cracks} without"
+        );
+        if visible {
+            assert!(
+                cracks > baseline + 30,
+                "the probe found no cracks without skirts: {cracks} vs {baseline}"
+            );
+        }
+        assert!(
+            holes <= baseline + 2,
+            "cracks between chunks of different levels (camera x {camera_x}, levels {levels:?}): \
+             {holes} sky pixels vs {baseline}"
+        );
+        // The skirts change little else: elsewhere the pictures are the same.
+        let diff = compare(&with_skirts, &without_skirts, 12).expect("same size");
+        assert!(diff.ratio() < 0.02, "{:.4}", diff.ratio());
+    }
 }
 
 // --- level tint ---

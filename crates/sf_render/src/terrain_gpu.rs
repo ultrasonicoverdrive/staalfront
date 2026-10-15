@@ -278,9 +278,11 @@ pub fn build(
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
-            // The skirts are visible from either side; the surface needs no
-            // culling (a heightfield seen from above has no back faces).
-            cull_mode: None,
+            // Back faces are culled: the surface faces up and the skirts face
+            // outward. A skirt that covers a gap is the higher chunk's, seen
+            // from the lower side, which is its front (tested by rendering the
+            // seams from both sides).
+            cull_mode: Some(wgpu::Face::Back),
             ..Default::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {

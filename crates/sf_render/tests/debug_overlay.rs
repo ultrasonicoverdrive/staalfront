@@ -93,25 +93,47 @@ fn draw_calls_are_counted_where_they_are_recorded() {
     assert_eq!((s.dynamic_draw_calls, s.dynamic_instances), (1, 5));
     assert_eq!(s.total_draw_calls(), 2);
 
-    // Terrain: one draw call per run of visible chunks with the same level
-    // of detail (WP1.8), so never more than the chunks drawn. The chunk and
-    // triangle counters travel with the draw counters.
+    // Terrain (WP1.8): one draw call per run of visible chunks with the same
+    // level of detail. The whole 2x2-chunk map in view, levels pinned:
+    let mut cam = Camera::new(
+        CameraConfig {
+            map_size: DVec2::new(64.0, 64.0),
+            ..CameraConfig::default()
+        },
+        W,
+        H,
+    );
+    cam.set_zoom(1.0);
+    cam.set_focus(DVec2::new(32.0, 32.0));
+    r.set_view_proj(cam.view_proj());
     r.set_terrain(&test_map());
+    // Four chunks at full detail are one run (one call), 2 x 32 x 32 surface
+    // triangles each plus the skirts under their two inner edges (2 x 64).
+    r.set_terrain_levels(Some(vec![0, 0, 0, 0]));
     r.render_to_image().unwrap();
     let s = r.draw_stats();
-    assert_eq!(s.terrain_chunks_total, 4);
-    assert!((1..=4).contains(&s.terrain_chunks_visible), "{s:?}");
-    assert!(
-        s.terrain_draw_calls >= 1 && s.terrain_draw_calls <= s.terrain_chunks_visible,
+    assert_eq!(
+        (s.terrain_chunks_total, s.terrain_chunks_visible),
+        (4, 4),
         "{s:?}"
     );
-    assert!(s.terrain_triangles > 0);
+    assert_eq!(s.terrain_draw_calls, 1, "{s:?}");
+    assert_eq!(s.terrain_chunks_per_level, [4, 0, 0, 0, 0, 0]);
+    assert_eq!(s.terrain_triangles, 4 * (2 * 32 * 32 + 128));
+    assert_eq!(s.total_draw_calls(), 2 + 1);
+    // Alternating levels: no two chunks of one level touch in the index
+    // buffer, so four runs, four calls; a level-1 chunk has 2 x 16 x 16
+    // surface triangles plus 2 x 32 skirt triangles.
+    r.set_terrain_levels(Some(vec![0, 1, 0, 1]));
+    r.render_to_image().unwrap();
+    let s = r.draw_stats();
+    assert_eq!(s.terrain_draw_calls, 4, "{s:?}");
+    assert_eq!(s.terrain_chunks_per_level, [2, 2, 0, 0, 0, 0]);
     assert_eq!(
-        s.terrain_chunks_per_level.iter().sum::<u32>(),
-        s.terrain_chunks_visible,
-        "the level histogram counts every drawn chunk once"
+        s.terrain_triangles,
+        2 * (2 * 32 * 32 + 128) + 2 * (2 * 16 * 16 + 64)
     );
-    assert_eq!(s.total_draw_calls(), 2 + s.terrain_draw_calls);
+    assert_eq!(s.total_draw_calls(), 2 + 4);
     r.clear_terrain();
     r.render_to_image().unwrap();
     assert_eq!(r.draw_stats().terrain_draw_calls, 0);
