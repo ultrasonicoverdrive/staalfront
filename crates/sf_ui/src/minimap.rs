@@ -409,6 +409,41 @@ mod tests {
         assert!(close(q2[0].1, q[0].1, 0.1));
     }
 
+    /// With the terrain as the camera's ground (WP1.8), the corners of the
+    /// frame are the terrain points under the screen corners: they project
+    /// back to the corners at the terrain's height, and they differ from the
+    /// y = 0 plane's.
+    #[test]
+    fn fov_quad_on_relief_is_the_terrain_under_the_screen_corners() {
+        use sf_render::{Ground, TerrainGround};
+        let map = generate(256, 256, 1);
+        let ground = TerrainGround::new(&map);
+        let size = (1280_u32, 720_u32);
+        let mut cam = camera(256.0, 0.45, (128.0, 128.0), size);
+        cam.set_ground(std::sync::Arc::new(TerrainGround::new(&map)));
+        let q = fov_quad(&cam, (size.0 as f32, size.1 as f32), (256.0, 256.0));
+        let m = cam.view_proj_f64();
+        let want = [(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)];
+        for (corner, want) in q.iter().zip(want) {
+            let (x, z) = (f64::from(corner.0), f64::from(corner.1));
+            let clip = m * DVec4::new(x, ground.height(x, z), z, 1.0);
+            let (nx, ny) = (clip.x / clip.w, clip.y / clip.w);
+            assert!(
+                (nx - want.0).abs() < 1e-2 && (ny - want.1).abs() < 1e-2,
+                "{corner:?} projects to ({nx}, {ny}), want {want:?}"
+            );
+        }
+        let flat = camera(256.0, 0.45, (128.0, 128.0), size);
+        let qf = fov_quad(&flat, (size.0 as f32, size.1 as f32), (256.0, 256.0));
+        let apart = q
+            .iter()
+            .zip(&qf)
+            .map(|(a, b)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt())
+            .fold(0.0_f32, f32::max);
+        println!("largest corner difference to the flat-plane frame: {apart:.2} m");
+        assert!(apart > 0.5, "relief should move the frame: {apart}");
+    }
+
     #[test]
     fn fov_quad_is_clamped_to_the_map() {
         let cam = camera(256.0, 1.0, (128.0, 128.0), (1280, 720));

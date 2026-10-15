@@ -7,13 +7,16 @@ use std::ops::Range;
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
+use crate::frustum::Frustum;
 use crate::gpu::{Gpu, GpuOptions, RenderError};
 use crate::image::Rgba8;
+use crate::lod::{LodConfig, LodView, TerrainConfig, TerrainStats};
 use crate::mesh::{MeshData, Vertex};
 use crate::overlay::{Overlay, OverlayFrame};
 use crate::scene::{
     Globals, Instance, Lighting, MeshKind, PlaceholderCamera, SceneObject, test_scene,
 };
+use crate::terrain::LOD_LEVELS;
 
 /// The shader embedded at build time. Release builds always use this; debug
 /// builds start from it and may hot-reload from disk (see
@@ -82,8 +85,17 @@ pub struct DrawStats {
     pub scene_instances: u32,
     /// Draw calls for the static scene objects (one per mesh kind used).
     pub scene_draw_calls: u32,
-    /// Draw calls for terrain chunks (= chunks drawn).
+    /// Draw calls for the terrain: chunks of the same level of detail that
+    /// are neighbours in the chunk list share one call.
     pub terrain_draw_calls: u32,
+    /// Terrain chunks in the map.
+    pub terrain_chunks_total: u32,
+    /// Terrain chunks that passed the frustum test and were drawn.
+    pub terrain_chunks_visible: u32,
+    /// Terrain triangles drawn (surface and skirts).
+    pub terrain_triangles: u32,
+    /// Visible terrain chunks per level of detail (index 0 = full detail).
+    pub terrain_chunks_per_level: [u32; LOD_LEVELS],
 }
 
 impl DrawStats {
@@ -127,8 +139,8 @@ pub struct Renderer {
 /// Terrain debug visualisations, switched from the F1 panel (WP1.11).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DebugView {
-    /// Tint terrain chunks by their chunk coordinates. Placeholder until the
-    /// terrain LOD (WP1.8) exists; it then shows the LOD level instead.
+    /// Tint terrain chunks by their level of detail (`lod::LOD_TINT`: red for
+    /// full detail, then orange, yellow, green, blue, purple).
     pub lod_tint: bool,
     /// Opacity `0..=1` of the 1 m cell grid lines; `0` = off.
     pub grid_alpha: f32,
@@ -378,7 +390,7 @@ impl Renderer {
         overlay: impl FnOnce(&mut FrameTarget),
     ) -> Result<(), RenderError> {
         let _ = self.poll_shader_reload();
-        self.write_globals();
+        self.prepare_frame();
         let mut encoder = self
             .gpu
             .device
@@ -450,7 +462,7 @@ impl Renderer {
                 "render_to_image needs a headless renderer".into(),
             ));
         };
-        self.write_globals();
+        self.prepare_frame();
         let (width, height) = self.size;
         let mut encoder = self
             .gpu
@@ -614,11 +626,17 @@ impl Renderer {
         }
     }
 
-    /// Show a terrain: builds the chunk meshes, the material texture array
-    /// and the material index texture from `map` and draws it before the
-    /// scene objects. Replaces a previous terrain. Call on map changes, not
-    /// every frame.
+    /// Show a terrain with the shipped settings (`assets/config/terrain.ron`):
+    /// builds the chunk meshes of all levels of detail, the material texture
+    /// array and the material index texture from `map` and draws it before
+    /// the scene objects. Replaces a previous terrain. Call on map changes,
+    /// not every frame.
     pub fn set_terrain(&mut self, map: &sf_data::map::Map) {
+        self.set_terrain_with(map, &TerrainConfig::embedded());
+    }
+
+    /// Like [`Renderer::set_terrain`] with explicit settings.
+    pub fn set_terrain_with(&mut self, map: &sf_data::map::Map, config: &TerrainConfig) {
         self.terrain = Some(crate::terrain_gpu::build(
             &self.gpu.device,
             &self.gpu.queue,
@@ -626,10 +644,44 @@ impl Renderer {
             self.format,
             DEPTH_FORMAT,
             map,
+            config,
         ));
         if let Some(t) = &self.terrain {
             t.write_debug_view(&self.gpu.queue, self.debug_view);
         }
+    }
+
+    /// The level of detail settings in use (`None` without terrain).
+    pub fn terrain_lod(&self) -> Option<LodConfig> {
+        self.terrain.as_ref().map(|t| t.config.lod)
+    }
+
+    /// Change the level of detail settings live: error budget, hysteresis,
+    /// draw-call cost, forced level. The tint by level is
+    /// [`DebugView::lod_tint`], the skirts (`seams`) are part of the mesh and
+    /// change only with [`Renderer::set_terrain_with`].
+    pub fn set_terrain_lod(&mut self, lod: LodConfig) {
+        if let Some(t) = &mut self.terrain {
+            t.config.lod = lod;
+        }
+    }
+
+    /// Debug and tests: draw chunk `i` at level `levels[i]` (clamped to what
+    /// the chunk has) instead of selecting by error; `None` goes back to the
+    /// automatic selection. Chunks outside the view are still culled.
+    pub fn set_terrain_levels(&mut self, levels: Option<Vec<u8>>) {
+        if let Some(t) = &mut self.terrain {
+            t.level_override = levels;
+        }
+    }
+
+    /// Terrain counters of the last frame (all zero without terrain or before
+    /// the first frame).
+    pub fn terrain_stats(&self) -> TerrainStats {
+        self.terrain
+            .as_ref()
+            .map(|t| t.planner.selection().stats)
+            .unwrap_or_default()
     }
 
     /// Remove the terrain.
@@ -637,9 +689,10 @@ impl Renderer {
         self.terrain = None;
     }
 
-    /// Number of terrain chunks drawn per frame (0 without terrain).
+    /// Number of terrain chunks (0 without terrain); the visible ones are
+    /// drawn each frame, see [`Renderer::terrain_stats`].
     pub fn terrain_chunk_count(&self) -> usize {
-        self.terrain.as_ref().map_or(0, |t| t.chunks.len())
+        self.terrain.as_ref().map_or(0, |t| t.planner.chunk_count())
     }
 
     /// Upload the overlay's buffers; returns command buffers its paint
@@ -653,18 +706,28 @@ impl Renderer {
         }
     }
 
-    fn write_globals(&self) {
-        let view_proj = self
-            .view_proj
-            .unwrap_or_else(|| self.camera.view_proj(aspect(self.size)));
+    fn current_view_proj(&self) -> Mat4 {
+        self.view_proj
+            .unwrap_or_else(|| self.camera.view_proj(aspect(self.size)))
+    }
+
+    /// Everything that depends on the camera and happens before drawing: the
+    /// globals and the terrain's level selection and culling.
+    fn prepare_frame(&mut self) {
+        let view_proj = self.current_view_proj();
         let globals = Globals::new(view_proj, &self.lighting);
         self.gpu
             .queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        if let Some(t) = &mut self.terrain {
+            let view = LodView::from_view_proj(view_proj, self.size.1 as f32);
+            let frustum = Frustum::from_view_proj(view_proj);
+            t.planner
+                .select(&view, &frustum, &t.config.lod, t.level_override.as_deref());
+        }
     }
 
-    /// Record the scene pass and count the
-    /// draw calls into `last_stats`.
+    /// Record the scene pass and count the draw calls into `last_stats`.
     fn draw(&self, encoder: &mut wgpu::CommandEncoder, color: &wgpu::TextureView) {
         let mut pass = CountedPass::new(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene"),
@@ -693,10 +756,11 @@ impl Renderer {
             pass.set_pipeline(&t.pipeline);
             pass.set_bind_group(0, &self.bind_group);
             pass.set_bind_group(1, &t.bind_group);
-            for chunk in &t.chunks {
-                pass.set_vertex_buffer(0, chunk.vertices.slice(..));
-                pass.set_index_buffer(chunk.indices.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw(DrawGroup::Terrain, chunk.index_count, 0..1);
+            pass.set_vertex_buffer(0, t.vertices.slice(..));
+            pass.set_index_buffer(t.indices.slice(..), wgpu::IndexFormat::Uint32);
+            // One call per run of chunks with the same level (see `lod`).
+            for range in &t.planner.selection().draws {
+                pass.draw(DrawGroup::Terrain, range.clone(), 0..1);
             }
         }
         pass.set_pipeline(&self.pipeline);
@@ -708,7 +772,7 @@ impl Renderer {
                 let mesh = &self.meshes[*mesh];
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw(DrawGroup::Scene, mesh.index_count, range.clone());
+                pass.draw(DrawGroup::Scene, 0..mesh.index_count, range.clone());
             }
         }
         // Units: one buffer and one draw call per mesh kind.
@@ -720,9 +784,17 @@ impl Renderer {
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_vertex_buffer(1, buffer.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw(DrawGroup::Units, mesh.index_count, 0..slot.count);
+            pass.draw(DrawGroup::Units, 0..mesh.index_count, 0..slot.count);
         }
-        self.last_stats.set(pass.finish());
+        let mut stats = pass.finish();
+        if let Some(t) = &self.terrain {
+            // Which chunks were culled is the planner's business, not a draw call's.
+            let chunks = t.planner.selection().stats;
+            stats.terrain_chunks_total = chunks.chunks_total;
+            stats.terrain_chunks_visible = chunks.chunks_visible;
+            stats.terrain_chunks_per_level = chunks.per_level;
+        }
+        self.last_stats.set(stats);
     }
 
     /// The egui overlay pass, last: scene, then the `render_with` hook
@@ -775,12 +847,16 @@ impl<'a> CountedPass<'a> {
         self.pass.set_index_buffer(buffer, format);
     }
 
-    fn draw(&mut self, group: DrawGroup, index_count: u32, instances: Range<u32>) {
+    fn draw(&mut self, group: DrawGroup, indices: Range<u32>, instances: Range<u32>) {
         let n = instances.end - instances.start;
-        self.pass.draw_indexed(0..index_count, 0, instances);
+        let triangles = (indices.end - indices.start) / 3 * n;
+        self.pass.draw_indexed(indices, 0, instances);
         let s = &mut self.stats;
         match group {
-            DrawGroup::Terrain => s.terrain_draw_calls += 1,
+            DrawGroup::Terrain => {
+                s.terrain_draw_calls += 1;
+                s.terrain_triangles += triangles;
+            }
             DrawGroup::Scene => {
                 s.scene_draw_calls += 1;
                 s.scene_instances += n;

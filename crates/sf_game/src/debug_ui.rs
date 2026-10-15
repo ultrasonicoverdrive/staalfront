@@ -27,8 +27,6 @@ pub struct PanelData {
     pub draw: DrawStats,
     /// Instancing counters of the last build.
     pub instances: InstanceStats,
-    /// Terrain chunks in the map (drawn: `draw.terrain_draw_calls`).
-    pub terrain_chunks: usize,
     /// Ticks the sim has run (= the number of the next tick) and the checksum
     /// of the world right after the last one.
     pub sim_tick: u64,
@@ -43,7 +41,7 @@ pub struct PanelState {
     pub camera: CameraConfig,
     /// Reset target of the camera section.
     pub camera_default: CameraConfig,
-    /// Placeholder LOD colouring (chunk tint) on the terrain.
+    /// LOD colouring: tint terrain chunks by their level of detail.
     pub lod_tint: bool,
     /// 1 m cell grid on the terrain, fading with the zoom.
     pub grid: bool,
@@ -170,9 +168,15 @@ fn draw_calls(ui: &mut egui::Ui, data: &PanelData) {
         d.terrain_draw_calls,
     ));
     ui.label(format!(
-        "terrain chunks drawn {} / {}",
-        d.terrain_draw_calls, data.terrain_chunks
+        "terrain chunks drawn {} / {}, {} triangles",
+        d.terrain_chunks_visible, d.terrain_chunks_total, d.terrain_triangles
     ));
+    let levels: Vec<String> = d
+        .terrain_chunks_per_level
+        .iter()
+        .map(u32::to_string)
+        .collect();
+    ui.label(format!("chunks per level 0..5: {}", levels.join(" / ")));
     let i = &data.instances;
     ui.label(format!(
         "unit instances visible {} / {} ({} / {} tiles)",
@@ -248,7 +252,7 @@ fn camera_controls(ui: &mut egui::Ui, state: &mut PanelState) -> bool {
 
 fn view_toggles(ui: &mut egui::Ui, state: &mut PanelState) {
     ui.checkbox(&mut state.lod_tint, "LOD colouring")
-        .on_hover_text("Placeholder until terrain LOD exists: tints terrain chunks.");
+        .on_hover_text("Tints terrain chunks by level of detail: red = full detail, then orange, yellow, green, blue, purple (coarsest).");
     ui.checkbox(&mut state.grid, "Cell grid (1 m)")
         .on_hover_text("Fades out when zoomed far out; chunk borders (32 m) are yellow.");
 }
@@ -414,6 +418,10 @@ mod tests {
                 scene_instances: 5,
                 scene_draw_calls: 3,
                 terrain_draw_calls: 4,
+                terrain_chunks_total: 64,
+                terrain_chunks_visible: 12,
+                terrain_triangles: 9_216,
+                terrain_chunks_per_level: [4, 5, 3, 0, 0, 0],
             },
             instances: InstanceStats {
                 total: 1350,
@@ -423,7 +431,6 @@ mod tests {
                 per_mesh,
                 total_per_mesh,
             },
-            terrain_chunks: 64,
             sim_tick: 1234,
             checksum: Some(0x00de_adbe_ef12_3456),
             entities: 1350,
@@ -483,7 +490,8 @@ mod tests {
             "avg 16.70 ms",
             "p99 41.00 ms",
             "last 300 frames",
-            "terrain chunks drawn 4 / 64",
+            "terrain chunks drawn 12 / 64, 9216 triangles",
+            "chunks per level 0..5: 4 / 5 / 3 / 0 / 0 / 0",
             "unit instances visible 40 / 1350",
             "9 / 60 tiles",
             "ticks run 1234",
