@@ -95,7 +95,12 @@ Sources: CLAUDE.md, PLAN.md §5 rules 1-3, §6, WP0.1, WP1.3.
   and Windows in CI (`cargo test --release -p sf_sim` for the full-size one).
   Regenerate only for an intended behavior change, with
   `cargo test --release -p sf_sim --test golden -- --ignored --nocapture print_golden_values`,
-  and explain the change in the PR. The cross-OS comparison of headless runs is WP1.3.
+  and explain the change in the PR. The cross-OS comparison of headless runs is the
+  `headless-compare` CI job (WP1.3): `sf_headless` runs the scenarios in
+  `assets/scenarios/` on both OSes, each against the value committed in
+  `<scenario>.expected`, and `scripts/compare-headless-logs.sh` compares the logs.
+  An intended change to the simulation updates those `.expected` files too (steps in
+  `tools/sf_headless/tests/pinned.rs`).
 
 As built in WP1.2 (`crates/sf_sim`): the only randomness is `sf_math::Rng`,
 explicitly seeded (the world seed and the number of entities spawned so far give

@@ -1,0 +1,68 @@
+// A mid-size scenario that uses every kind of timed command, slot reuse and
+// stale ids, on a 128 by 128 map. Small enough for debug builds; it is pinned
+// by command_mix.expected and run by CI on Linux and Windows next to
+// wander_5000.ron.
+//
+// Entity ids: the 400 entities of the first group are {0..400, 0} in spawn
+// order. The despawns at tick 300 free slots 100..110 and 150; the twelve
+// spawns of tick 301 take them back, last freed first (150, 109, 108, ...),
+// one at generation 1, and the twelfth gets a fresh slot (400).
+Scenario(
+    name: "command_mix",
+    seed: 0x00C0_FFEE,
+    map: (width: 128, height: 128),
+    ticks: 1_500,
+    spawns: [
+        (
+            count: 400,
+            kinds: [0, 1, 2],
+            owners: [0, 1, 2, 3],
+            area: (min: (0, 0), max: (128, 128)),
+        ),
+        (
+            tick: 301,
+            player: 3,
+            count: 12,
+            kinds: [1],
+            owners: [3],
+            area: (min: (96, 96), max: (128, 128)),
+        ),
+    ],
+    commands: [
+        (
+            tick: 75,
+            player: 1,
+            command: SetWanderArea(ids: [Range(0, 40)], area: (min: (0, 0), max: (16, 16))),
+        ),
+        (
+            tick: 150,
+            player: 2,
+            command: MoveTo(ids: [Range(40, 80)], target: (64, 64)),
+        ),
+        (
+            tick: 300,
+            command: Despawn(ids: [Range(100, 110), Id(150, 0)]),
+        ),
+        // Names dead and living entities: the stale ids are skipped.
+        (
+            tick: 400,
+            player: 1,
+            command: MoveTo(ids: [Id(100, 0), Id(101, 0), Range(80, 90)], target: (100, 20)),
+        ),
+        // Only a stale id: the command changes nothing and counts as ignored.
+        (
+            tick: 500,
+            command: Despawn(ids: [Id(100, 0)]),
+        ),
+        (
+            tick: 750,
+            player: 2,
+            command: SetWanderArea(ids: [Range(40, 80)], area: (min: (50, 50), max: (80, 70))),
+        ),
+        // Slot 100 was reused by the respawns and is at generation 1.
+        (
+            tick: 800,
+            command: Despawn(ids: [Id(100, 1)]),
+        ),
+    ],
+)
