@@ -1,0 +1,20 @@
+// Placeholder unit look (WP1.6): player colors and the three primitive shapes.
+// Used by sf_render::Style; sf_game maps the sim's entity kind to a shape
+// (kind % number of shapes) and the owner to a color (owner % number of colors).
+//
+// Colors are sRGB 0-255 (converted to linear light on load). Sizes are
+// metres: (width along the facing, height, depth across); the meshes are unit
+// shapes standing on the ground.
+(
+    palette: [
+        (name: "red", srgb: (214, 40, 40)),
+        (name: "blue", srgb: (40, 100, 235)),
+        (name: "yellow", srgb: (245, 205, 40)),
+        (name: "magenta", srgb: (200, 60, 210)),
+    ],
+    shapes: [
+        (mesh: Cube, size: (1.2, 1.0, 1.2)),
+        (mesh: Cylinder, size: (1.2, 1.1, 1.2)),
+        (mesh: Cone, size: (1.2, 1.4, 1.2)),
+    ],
+)

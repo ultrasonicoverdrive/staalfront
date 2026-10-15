@@ -6,6 +6,14 @@
 //! wheel = zoom toward the cursor, WASD/arrows/screen edge = pan, middle
 //! mouse drag = grab the ground.
 //!
+//! Units (WP1.6): an `sf_sim` world with `--units N` wanderers (default 2000)
+//! is stepped by the engine's fixed 20 Hz tick and drawn instanced on top of
+//! the terrain: three placeholder shapes (cube, cylinder, cone) in four
+//! player colors, positions interpolated between the last two ticks with the
+//! engine's alpha, tile-culled against the camera frustum. The sim is 2D; the
+//! height a unit stands on is looked up in the terrain for display only.
+//! `--exit-after <s>` prints a frame-time and instancing summary on exit.
+//!
 //! The ground is the engine terrain (WP1.7): a procedural 256x256 m map
 //! (seed 1) by default, or a map directory given with `--map <dir>`. The
 //! camera still works on the flat `y = 0` plane (focus height and the point
@@ -19,9 +27,14 @@ use std::time::{Duration, Instant};
 use sf_audio::{AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate};
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
+use sf_math::{Fx, Rng, Vec2};
 use sf_render::camera::DVec2;
-use sf_render::scene::world_markers;
-use sf_render::{Camera, CameraConfig, CameraInput, GpuOptions, Renderer};
+use sf_render::scene::{MeshKind, world_markers};
+use sf_render::{
+    Camera, CameraConfig, CameraInput, Frustum, GpuOptions, InstanceStats, Instancer, Motion,
+    Renderer, Style,
+};
+use sf_sim::{Command, EntityView, Kind, PlayerId, Tick, World, WorldConfig};
 
 /// Longest frame time fed to the camera; a stall (window drag, breakpoint)
 /// must not make it jump.
@@ -45,6 +58,64 @@ fn auto_zoom_notches(elapsed: f64, prev: f64) -> f64 {
     }
 }
 
+/// Default number of wandering units.
+const DEFAULT_UNITS: u32 = 2000;
+
+/// Frames ignored in the exit summary (shader and buffer warm-up).
+const WARMUP_FRAMES: usize = 30;
+
+/// Millisecond samples with average / p99 / max (nearest rank).
+#[derive(Default)]
+struct Samples(Vec<f64>);
+
+impl Samples {
+    fn push(&mut self, d: Duration) {
+        self.0.push(d.as_secs_f64() * 1e3);
+    }
+
+    fn summary(&self, skip: usize) -> Option<(f64, f64, f64)> {
+        let mut v: Vec<f64> = self.0.iter().skip(skip).copied().collect();
+        if v.is_empty() {
+            return None;
+        }
+        v.sort_by(f64::total_cmp);
+        let avg = v.iter().sum::<f64>() / v.len() as f64;
+        let p99 = v[(v.len() * 99).div_ceil(100).max(1) - 1];
+        Some((avg, p99, v[v.len() - 1]))
+    }
+
+    fn describe(&self, skip: usize) -> String {
+        self.summary(skip).map_or_else(
+            || "n/a".to_string(),
+            |(avg, p99, max)| format!("avg {avg:.3} p99 {p99:.3} max {max:.3}"),
+        )
+    }
+}
+
+/// The placeholder shape of a sim entity kind (data-driven units come later).
+fn shape_of(kind: Kind) -> u8 {
+    (kind.0 % 256) as u8
+}
+
+/// Fill a world with `units` wanderers: kinds and owners are spread
+/// deterministically (kind = i mod 3, owner = (i / 3) mod 4, so every
+/// shape/color pair occurs), positions come from a seeded `sf_math::Rng`.
+fn spawn_units(world: &mut World, units: u32, map: (u32, u32)) {
+    let mut rng = Rng::new(0x5742_0106);
+    let (w, h) = (Fx::from_int(map.0 as i32), Fx::from_int(map.1 as i32));
+    for i in 0..units {
+        let pos = Vec2::new(rng.fx_range(Fx::ZERO, w), rng.fx_range(Fx::ZERO, h));
+        let command = Command::Spawn {
+            kind: Kind((i % 3) as u16),
+            pos,
+            owner: PlayerId(((i / 3) % 4) as u8),
+        };
+        world
+            .schedule(Tick(0), PlayerId(0), command)
+            .expect("tick 0 is not in the past");
+    }
+}
+
 struct Runner {
     started: Option<Instant>,
     report_at: Instant,
@@ -56,6 +127,17 @@ struct Runner {
     audio: Option<AudioSystem>,
     camera: Camera,
     map: Map,
+    world: World,
+    instancer: Instancer,
+    views: Vec<EntityView>,
+    units: u32,
+    /// Latest instancing and draw counters, for the once-a-second line.
+    stats: InstanceStats,
+    draw_calls: u32,
+    frame_ms: Samples,
+    build_ms: Samples,
+    upload_ms: Samples,
+    tick_ms: Samples,
     last_frame: Option<Instant>,
     auto_zoom: bool,
     /// Set when the renderer could not start or a frame failed; `main` then
@@ -68,9 +150,21 @@ impl Runner {
         exit_after: Option<Duration>,
         auto_zoom: bool,
         map: Map,
+        units: u32,
         failed: Arc<AtomicBool>,
     ) -> Self {
         let now = Instant::now();
+        let map_size = (map.width(), map.height());
+        let mut world = World::new(WorldConfig::new(1).with_map_size(map_size.0, map_size.1))
+            .expect("the map size is valid for a world");
+        spawn_units(&mut world, units, map_size);
+        let mut instancer =
+            Instancer::new(Style::embedded(), (map_size.0 as f32, map_size.1 as f32));
+        let heights = (0..=i64::from(map.height()))
+            .flat_map(|z| (0..=i64::from(map.width())).map(move |x| (x, z)))
+            .map(|(x, z)| map.vertex_height(x, z));
+        let (lo, hi) = heights.fold((f32::MAX, f32::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
+        instancer.set_height_range(lo, hi);
         let camera_config = CameraConfig {
             map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
             ..CameraConfig::default()
@@ -86,6 +180,16 @@ impl Runner {
             audio: None,
             camera: Camera::new(camera_config, 1280, 720),
             map,
+            world,
+            instancer,
+            views: Vec::new(),
+            units,
+            stats: InstanceStats::default(),
+            draw_calls: 0,
+            frame_ms: Samples::default(),
+            build_ms: Samples::default(),
+            upload_ms: Samples::default(),
+            tick_ms: Samples::default(),
             last_frame: None,
             auto_zoom,
             failed,
@@ -186,20 +290,52 @@ impl App for Runner {
     fn fixed_update(&mut self, _ctx: &mut Context, _tick: u64) {
         self.ticks += 1;
         self.total_ticks += 1;
+        self.world.step();
+        // Hand the new state to the presentation: once per tick the fixed-point
+        // positions are converted to f32 and bucketed by map tile.
+        let started = Instant::now();
+        self.world.snapshot().collect_into(&mut self.views);
+        self.instancer.update_tick(self.views.iter().map(|v| {
+            Motion::from_fixed(
+                shape_of(v.kind),
+                v.owner.0,
+                v.prev_pos,
+                v.pos,
+                v.prev_facing,
+                v.facing,
+            )
+        }));
+        self.tick_ms.push(started.elapsed());
     }
 
-    fn render(&mut self, ctx: &mut Context, _alpha: f32) {
+    fn render(&mut self, ctx: &mut Context, alpha: f32) {
         self.frames += 1;
         let now = Instant::now();
-        let dt = self
-            .last_frame
-            .replace(now)
-            .map_or(0.0, |t| now.duration_since(t).as_secs_f64())
-            .min(MAX_CAMERA_DT);
+        let frame_dt = self.last_frame.replace(now).map(|t| now.duration_since(t));
+        if let Some(d) = frame_dt {
+            self.frame_ms.push(d);
+        }
+        let dt = frame_dt.map_or(0.0, |d| d.as_secs_f64()).min(MAX_CAMERA_DT);
         let input = self.camera_input(ctx, dt);
         self.camera.update(dt, &input);
         if let Some(renderer) = &mut self.renderer {
-            renderer.set_view_proj(self.camera.view_proj());
+            let view_proj = self.camera.view_proj();
+            renderer.set_view_proj(view_proj);
+            // Cull by tile, interpolate, put the units on the ground.
+            let started = Instant::now();
+            let map = &self.map;
+            self.stats =
+                self.instancer
+                    .build(&Frustum::from_view_proj(view_proj), alpha, |x, z| {
+                        map.height_at(x, z)
+                    });
+            self.build_ms.push(started.elapsed());
+            let started = Instant::now();
+            for kind in MeshKind::ALL {
+                renderer.set_instances(kind, self.instancer.instances(kind));
+            }
+            self.upload_ms.push(started.elapsed());
+            self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
         // The listener follows the camera (it does not rotate, so right = +X).
         let focus = self.camera.focus();
@@ -250,13 +386,17 @@ impl App for Runner {
             let ft = ctx.frame_stats().summary();
             match ft {
                 Some(f) => println!(
-                    "{} fps, {} ticks/s (total {}), frame ms avg {:.2} p99 {:.2} max {:.2}",
+                    "{} fps, {} ticks/s (total {}), frame ms avg {:.2} p99 {:.2} max {:.2}, \
+                     units {}/{} visible, {} draw calls",
                     self.frames,
                     self.ticks,
                     self.total_ticks,
                     f.avg.as_secs_f64() * 1e3,
                     f.p99.as_secs_f64() * 1e3,
                     f.max.as_secs_f64() * 1e3,
+                    self.stats.visible,
+                    self.stats.total,
+                    self.draw_calls,
                 ),
                 None => println!("{} fps, {} ticks/s", self.frames, self.ticks),
             }
@@ -287,7 +427,54 @@ impl App for Runner {
     fn on_exit(&mut self, _ctx: &mut Context) {
         self.renderer = None; // release the surface before the window goes
         println!("exit after {} ticks", self.total_ticks);
+        // Summary for the stress test (software rendering: no fps claim).
+        println!(
+            "summary: {} units requested, {} in the world, {} frames",
+            self.units,
+            self.world.len(),
+            self.frame_ms.0.len() + 1,
+        );
+        println!(
+            "summary: frame ms {} (first {WARMUP_FRAMES} skipped)",
+            self.frame_ms.describe(WARMUP_FRAMES)
+        );
+        println!(
+            "summary: build+cull ms {}",
+            self.build_ms.describe(WARMUP_FRAMES)
+        );
+        println!(
+            "summary: instance upload ms {}",
+            self.upload_ms.describe(WARMUP_FRAMES)
+        );
+        println!(
+            "summary: per-tick convert+bucket ms {}",
+            self.tick_ms.describe(WARMUP_FRAMES / 3)
+        );
+        println!(
+            "summary: last frame {} of {} instances visible ({} of {} tiles), \
+             per mesh {:?}, {} draw calls",
+            self.stats.visible,
+            self.stats.total,
+            self.stats.tiles_visible,
+            self.stats.tiles_total,
+            self.stats.per_mesh,
+            self.draw_calls,
+        );
     }
+}
+
+/// `--units <n>`: number of wandering units (default [`DEFAULT_UNITS`]).
+fn units_arg() -> u32 {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--units" {
+            return args
+                .next()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_UNITS);
+        }
+    }
+    DEFAULT_UNITS
 }
 
 /// `--exit-after <seconds>`: quit by itself (smoke tests).
@@ -364,7 +551,13 @@ fn main() {
         ..EngineConfig::default()
     };
     let failed = Arc::new(AtomicBool::new(false));
-    let mut runner = Runner::new(exit_after_arg(), auto_zoom_arg(), map, failed.clone());
+    let mut runner = Runner::new(
+        exit_after_arg(),
+        auto_zoom_arg(),
+        map,
+        units_arg(),
+        failed.clone(),
+    );
     let (zoom, focus) = camera_args();
     if let Some(zoom) = zoom {
         runner.camera.set_zoom(zoom);
