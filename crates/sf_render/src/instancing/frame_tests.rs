@@ -870,3 +870,93 @@ fn the_query_ray_is_a_unit_ray() {
     let r: PickRay = query_at_px(&cam, [300.0, 200.0]).ray().unwrap();
     assert!((r.dir.length() - 1.0).abs() < 1e-5);
 }
+
+// ---------------------------------------------------------------------------
+// Occlusion by the real terrain (WP1.8's ray-terrain hit)
+// ---------------------------------------------------------------------------
+
+/// A 256 m map whose vertex heights come from `height(x, z)` (metres, up to 60).
+fn terrain(height: impl Fn(usize, usize) -> f32) -> std::sync::Arc<crate::ground::TerrainGround> {
+    let n = 257;
+    let heights = (0..n * n)
+        .map(|i| (height(i % n, i / n) / 60.0 * 65535.0) as u16)
+        .collect();
+    let map = sf_data::map::Map::from_parts(
+        256,
+        256,
+        60.0,
+        vec!["a".into()],
+        heights,
+        vec![0; 256 * 256],
+    )
+    .expect("valid terrain");
+    std::sync::Arc::new(crate::ground::TerrainGround::new(&map))
+}
+
+fn on(ground: &crate::ground::TerrainGround) -> impl Fn(f32, f32) -> f32 + '_ {
+    use crate::ground::Ground;
+    move |x, z| ground.height(f64::from(x), f64::from(z)) as f32
+}
+
+/// A ridge 12 m high between the camera and a unit hides it; a unit on the
+/// camera's side of the ridge is not hidden; without the terrain ray the
+/// hidden unit would be picked (so the test can fail).
+#[test]
+fn a_ridge_in_front_of_a_unit_hides_it_from_the_cursor() {
+    let ground = terrain(|_, z| if (105..=108).contains(&z) { 12.0 } else { 0.0 });
+    let cam = camera(0.15, (100.0, 100.0)); // the eye is south of the focus
+    let motions = [
+        still(0, 0, 1, (100.0, 100.0)),
+        still(0, 1, 2, (100.0, 111.0)),
+    ];
+    let mut inst = instancer(&motions);
+    build(&mut inst, &cam, 0.0, Blend::MODELS, 1.0, on(&ground));
+    let behind = query_over(&cam, Vec3::new(100.0, 0.5, 100.0), 0.0, 0.0);
+    let before = query_over(&cam, Vec3::new(100.0, 0.5, 111.0), 0.0, 0.0);
+    // Without the ground both are under the cursor ray ...
+    assert_eq!(
+        inst.pick(&behind).map(|p| p.id),
+        Some(UnitId::from_parts(1, 0))
+    );
+    assert_eq!(
+        inst.pick(&before).map(|p| p.id),
+        Some(UnitId::from_parts(2, 0))
+    );
+    // ... with it, the ridge hides the one behind it and not the one before it.
+    assert_eq!(
+        inst.pick(&behind.with_ground(&*ground)),
+        None,
+        "hidden by the ridge"
+    );
+    assert_eq!(
+        inst.pick(&before.with_ground(&*ground)).map(|p| p.id),
+        Some(UnitId::from_parts(2, 0))
+    );
+}
+
+/// A unit standing on a slope is not hidden by the ground it stands on.
+#[test]
+fn a_unit_on_a_slope_is_not_hidden_by_its_own_ground() {
+    let ground = terrain(|x, _| 0.06 * x as f32);
+    let cam = camera(0.15, (100.0, 100.0));
+    let mut inst = instancer(&[still(0, 0, 3, (100.0, 100.0))]);
+    build(&mut inst, &cam, 0.0, Blend::MODELS, 1.0, on(&ground));
+    let top = 0.06 * 100.0 + 1.0;
+    let mut hits = 0;
+    for (dy, h) in [(0.0, 0.5), (-8.0, 0.8), (6.0, 0.3)] {
+        let q = query_over(
+            &cam,
+            Vec3::new(100.0, ground_h(&ground, 100.0) + h, 100.0),
+            0.0,
+            dy,
+        );
+        hits += usize::from(inst.pick(&q.with_ground(&*ground)).is_some());
+    }
+    println!("unit top at {top} m: {hits}/3 clicks on it landed");
+    assert_eq!(hits, 3);
+}
+
+fn ground_h(ground: &crate::ground::TerrainGround, x: f32) -> f32 {
+    use crate::ground::Ground;
+    ground.height(f64::from(x), 100.0) as f32
+}

@@ -1,24 +1,19 @@
-//! Terrain on the GPU (WP1.7): per-chunk buffers, the material texture array,
-//! the per-cell material index texture and the terrain pipeline. Used by
-//! `Renderer::set_terrain`; the CPU side is [`crate::terrain`].
+//! Terrain on the GPU (WP1.7, WP1.8): one vertex buffer and one index buffer
+//! for all chunks and levels, the material texture array, the per-cell
+//! material index texture and the terrain pipeline. Used by
+//! `Renderer::set_terrain`; the CPU side is [`crate::terrain`], the level
+//! selection [`crate::lod`].
 
 use wgpu::util::DeviceExt;
 
-use crate::mesh::Vertex;
-use crate::terrain::{self, TEXTURE_SIZE, TILE_METERS};
+use crate::lod::{LodPlanner, TerrainConfig};
+use crate::terrain::{self, MeshOptions, TEXTURE_SIZE, TILE_METERS, TerrainVertex};
 
 /// The terrain shader, embedded at build time (no hot-reload yet).
 pub const EMBEDDED_TERRAIN_SHADER: &str = include_str!("../../../assets/shaders/terrain.wgsl");
 
-const VERTEX_ATTRS: [wgpu::VertexAttribute; 2] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
-
-/// One terrain chunk on the GPU: its own vertex and index buffer.
-pub struct GpuChunk {
-    pub vertices: wgpu::Buffer,
-    pub indices: wgpu::Buffer,
-    pub index_count: u32,
-}
+const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
 
 /// Mirrors `TerrainParams` in `terrain.wgsl`.
 #[repr(C)]
@@ -26,24 +21,30 @@ pub struct GpuChunk {
 struct TerrainParams {
     map_cells: [i32; 2],
     tile_meters: f32,
-    /// Bit 0: tint chunks (placeholder LOD colouring).
+    /// Debug flags, bit 0: tint chunks by their level of detail.
     flags: u32,
     /// Opacity of the 1 m cell grid; 0 = off.
     grid_alpha: f32,
     _pad: f32,
 }
 
-/// `flags` bit: tint chunks by chunk coordinates.
+/// `flags` bit: tint chunks by their level of detail.
 const FLAG_LOD_TINT: u32 = 1;
 
 /// Everything `Renderer::set_terrain` creates.
 pub struct TerrainGpu {
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group: wgpu::BindGroup,
-    pub chunks: Vec<GpuChunk>,
+    /// All chunks at all levels (see [`terrain::PackedTerrain`]).
+    pub vertices: wgpu::Buffer,
+    pub indices: wgpu::Buffer,
     /// The `TerrainParams` uniform, rewritten by [`TerrainGpu::write_debug_view`].
     params: wgpu::Buffer,
     map_cells: [i32; 2],
+    pub config: TerrainConfig,
+    pub planner: LodPlanner,
+    /// Debug: fixed level per chunk instead of the automatic selection.
+    pub level_override: Option<Vec<u8>>,
 }
 
 impl TerrainGpu {
@@ -67,26 +68,27 @@ pub fn build(
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
     map: &sf_data::map::Map,
+    config: &TerrainConfig,
 ) -> TerrainGpu {
-    // Chunk buffers.
-    let mesh = terrain::build_mesh(map);
-    let chunks = mesh
-        .chunks
-        .iter()
-        .map(|c| GpuChunk {
-            vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("terrain chunk vertices"),
-                contents: bytemuck::cast_slice(&c.vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-            indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("terrain chunk indices"),
-                contents: bytemuck::cast_slice(&c.indices),
-                usage: wgpu::BufferUsages::INDEX,
-            }),
-            index_count: c.indices.len() as u32,
-        })
-        .collect();
+    // Chunk meshes of all levels in one vertex and one index buffer.
+    let mesh = terrain::build_mesh_with(
+        map,
+        MeshOptions {
+            skirts: config.seams,
+        },
+    );
+    let packed = terrain::pack(&mesh);
+    let vertices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("terrain vertices"),
+        contents: bytemuck::cast_slice(&packed.vertices),
+        usage: wgpu::BufferUsages::VERTEX,
+    });
+    let indices = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("terrain indices"),
+        contents: bytemuck::cast_slice(&packed.indices),
+        usage: wgpu::BufferUsages::INDEX,
+    });
+    let planner = LodPlanner::new(&mesh, packed.ranges);
 
     // Material texture array with a full mip chain.
     let layers = map.materials().len() as u32;
@@ -268,7 +270,7 @@ pub fn build(
             entry_point: Some("vs_main"),
             compilation_options: Default::default(),
             buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as u64,
+                array_stride: std::mem::size_of::<TerrainVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
                 attributes: &VERTEX_ATTRS,
             })],
@@ -276,6 +278,10 @@ pub fn build(
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
+            // Back faces are culled: the surface faces up and the skirts face
+            // outward. A skirt that covers a gap is the higher chunk's, seen
+            // from the lower side, which is its front (tested by rendering the
+            // seams from both sides).
             cull_mode: Some(wgpu::Face::Back),
             ..Default::default()
         },
@@ -303,8 +309,12 @@ pub fn build(
     TerrainGpu {
         pipeline,
         bind_group,
-        chunks,
+        vertices,
+        indices,
         params,
         map_cells: [map.width() as i32, map.height() as i32],
+        config: *config,
+        planner,
+        level_override: None,
     }
 }

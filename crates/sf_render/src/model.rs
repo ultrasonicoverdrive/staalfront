@@ -389,9 +389,17 @@ mod tests {
             let view = EyeView::from_view_proj(cam.view_proj(), h as f32);
             let eye = cam.eye();
             let at = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
-            assert!((view.eye - at).length() < 0.05, "zoom {zoom}: {} vs {at}", view.eye);
+            assert!(
+                (view.eye - at).length() < 0.05,
+                "zoom {zoom}: {} vs {at}",
+                view.eye
+            );
             let focal = 0.5 * h as f32 / (0.5 * cfg.fov_y as f32).tan();
-            assert!((view.focal_px - focal).abs() < focal * 1e-3, "{} vs {focal}", view.focal_px);
+            assert!(
+                (view.focal_px - focal).abs() < focal * 1e-3,
+                "{} vs {focal}",
+                view.focal_px
+            );
             let direct = EyeView::new(at, h as f32, cfg.fov_y as f32);
             assert!((direct.focal_px - view.focal_px).abs() < focal * 1e-3);
             // A 2 m unit at the focus is `2 * focal / distance` pixels.

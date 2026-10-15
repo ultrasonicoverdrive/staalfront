@@ -1,4 +1,5 @@
-// Terrain shader (WP1.7): one shared vertex grid, material per cell.
+// Terrain shader (WP1.7, WP1.8): one vertex grid per chunk and level of
+// detail, material per cell.
 // The material index map is a texture (R8Uint, one texel per cell); the
 // fragment shader blends the four nearest cell centres. Materials live in a
 // texture array and are sampled with world-space UVs. Lighting as in
@@ -17,7 +18,7 @@ struct TerrainParams {
     map_cells: vec2<i32>,
     // World size of one texture repeat in metres.
     tile_meters: f32,
-    // Debug flags: bit 0 = tint chunks (placeholder LOD colouring).
+    // Debug flags: bit 0 = tint chunks by their level of detail.
     flags: u32,
     // Debug cell grid opacity, 0 = off.
     grid_alpha: f32,
@@ -32,13 +33,29 @@ struct TerrainParams {
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    // Level of detail of the mesh this vertex belongs to (0 = full detail).
+    @location(2) lod: u32,
 };
 
 struct VertexOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) world_xz: vec2<f32>,
+    @location(2) @interpolate(flat) lod: u32,
 };
+
+// Debug tint per level (linear light): red, orange, yellow, green, blue, purple.
+// Mirrored by sf_render::lod::LOD_TINT for the tests.
+fn lod_tint(level: u32) -> vec3<f32> {
+    switch level {
+        case 0u: { return vec3<f32>(0.80, 0.05, 0.05); }
+        case 1u: { return vec3<f32>(1.00, 0.40, 0.02); }
+        case 2u: { return vec3<f32>(0.90, 0.85, 0.05); }
+        case 3u: { return vec3<f32>(0.05, 0.60, 0.10); }
+        case 4u: { return vec3<f32>(0.05, 0.25, 1.00); }
+        default: { return vec3<f32>(0.55, 0.10, 0.90); }
+    }
+}
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
@@ -46,6 +63,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.clip = globals.view_proj * vec4<f32>(in.position, 1.0);
     out.normal = in.normal;
     out.world_xz = in.position.xz;
+    out.lod = in.lod;
     return out;
 }
 
@@ -54,7 +72,7 @@ fn layer_at(cell: vec2<i32>) -> i32 {
     return i32(textureLoad(cell_materials, c, 0).r);
 }
 
-// Chunk size in metres (32 cells), for the debug tint and chunk borders.
+// Chunk size in metres (32 cells), for the debug grid's chunk borders.
 const CHUNK_METERS: f32 = 32.0;
 
 // Anti-aliased line coverage `0..1` for lines every `period` metres, about
@@ -71,15 +89,6 @@ fn grid_lines(p: vec2<f32>, period: f32, px: f32) -> f32 {
     return coverage * fade;
 }
 
-// Placeholder palette for the chunk tint (until WP1.8 gives chunks a LOD level).
-fn chunk_tint(chunk: vec2<i32>) -> vec3<f32> {
-    let k = (chunk.x + 2 * chunk.y) & 3;
-    if (k == 0) { return vec3<f32>(0.95, 0.30, 0.25); }
-    if (k == 1) { return vec3<f32>(0.25, 0.85, 0.35); }
-    if (k == 2) { return vec3<f32>(0.30, 0.45, 0.95); }
-    return vec3<f32>(0.95, 0.85, 0.25);
-}
-
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let uv = in.world_xz / params.tile_meters;
@@ -94,8 +103,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let c11 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(1, 1))).rgb;
     var albedo = mix(mix(c00, c10, w.x), mix(c01, c11, w.x), w.y);
     if ((params.flags & 1u) != 0u) {
-        let chunk = vec2<i32>(floor(in.world_xz / CHUNK_METERS));
-        albedo = mix(albedo, chunk_tint(chunk), 0.55);
+        albedo = mix(albedo, lod_tint(in.lod), 0.6);
     }
     // Debug cell grid: 1 m lines, chunk borders heavier and warm. Skipped
     // entirely when off. `grid_alpha` is a uniform, so the branch is uniform

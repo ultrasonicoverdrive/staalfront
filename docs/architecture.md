@@ -184,6 +184,23 @@ on every damped frame of a wheel zoom and while dragging with the middle mouse
 button; the only exception is the focus clamp at the map bounds (+16 m margin).
 Q/E rotation is not implemented (the yaw is fixed, north up).
 
+Relief (WP1.8): the camera works against a `Ground` (`sf_render::ground`): flat
+by default, the terrain after `Camera::set_ground(TerrainGround)`. The point
+under the cursor is the first hit of the cursor's ray with the terrain
+triangles; zoom-to-cursor and the middle-mouse grab hold that 3D point under the
+cursor with the same closed form as before, which works because the ray direction
+depends only on the zoom: the eye lies on the line through the point along the
+ray, and the pivot's height decides where on that line. The pivot height is
+state (constant during a zoom or grab, easing toward the terrain under the focus
+while panning, never drifting when idle), and the eye keeps `clearance` (2 m)
+above the ground under it by raising the pivot, which slides the eye back along
+the anchor ray, so the cursor guarantee also holds on relief (tested to 1 cm on
+the generated map and on 18 m hills). A hill that moves in front of the point
+while the camera sinks behind it hides it; then the point under the cursor is
+the hill. Rays above the horizon have no ground point; a wheel step over the sky
+zooms about the screen centre. Beyond the map the ground is the plane at the
+lowest height of the map.
+
 ## 7. Where the engine stops and the game begins
 
 - **Phase 0 (foundation) and phase 1 (engine)** contain **no gameplay**. Engine
@@ -212,18 +229,80 @@ laptop. Never on the home server (B6, PLAN.md §13).
   reports a `MapError` naming the file. The format knows no game terrain
   types (phase 2). `sf_data::map::generate` is a seeded procedural generator;
   `cargo run -p sf_data --example gen_map -- <dir> [w] [h] [seed]` writes one.
-- **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, one vertex/index buffer
-  each, positions and central-difference normals from the global heightmap (so
-  shared border vertices are bit-identical: no cracks), diagonals by global
-  cell parity, one AABB per chunk. WP1.8 adds LOD and culling on top of this
-  grid (coarser index buffers over the same vertices).
+- **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
+  central-difference normals from the global heightmap (so shared border
+  vertices are bit-identical at equal levels), diagonals by global cell parity
+  (`diagonal_nw_se`, the one triangulation that the mesh, the surface height and
+  the picking share), one AABB per chunk (the same `Aabb` as the frustum code).
 - **Materials:** one material per cell, kept as an `R8Uint` texture; the shader
   blends the four nearest cell centres and samples a `texture_2d_array` of
   procedural 128 px tileable textures (mipmapped, anisotropic) with world-space
   UVs (4 m per repeat). Lighting as in the scene shader.
-- **Camera limit:** the camera still intersects the flat `y = 0` plane, so with
-  relief the point "under the cursor" is the plane point (terrain stays below
-  6 m in the generated maps). Ray-terrain picking comes with the picking WP.
+
+### Terrain level of detail, seams and culling (WP1.8)
+
+- **Levels:** every chunk has up to six meshes, level `l` using every `2^l`-th
+  vertex of the full grid (steps of 1 to 32 cells; edge chunks smaller than 32
+  only have the levels whose step divides their size). Each level stores its
+  **exact geometric error** in metres, the largest vertical distance to the
+  full-detail surface, found at the vertices of the common refinement of the two
+  piecewise-linear surfaces (lattice points and the centres of the cells the
+  coarse diagonal crosses; the coarse cell takes the diagonal with the smaller
+  error). The errors never decrease with the level. Level normals are computed
+  over the level's own step, like a mip chain.
+- **Selection** (`sf_render::lod`, CPU only, tested without a GPU): a chunk takes
+  the coarsest level whose projected error is at most `error_px` (2 px,
+  `assets/config/terrain.ron`). A displacement of `e` metres moves a point at
+  depth `z` and distance `d` by at most `e * focal_px * d / z^2` pixels (that is
+  `e * focal_px / d` at the screen centre and 1.7 times more at a 1080p corner);
+  `LodView::pixels_in_box` bounds it over the chunk's box, so the estimate holds
+  anywhere on the screen. The eye, the view axis and the focal length are
+  recovered from the view-projection, so the renderer needs nothing but
+  `set_view_proj`. Hysteresis (25 %) keeps a chunk from flickering:
+  it goes finer as soon as its error exceeds the budget but coarser only when
+  the coarser level fits into 75 % of it.
+- **Seams: skirts.** Neighbouring chunks at different levels meet along
+  different polylines. Every chunk-level hangs a skirt under each edge that has a
+  neighbour, down to the lowest full-detail height of that edge (minus 0.5 m).
+  A level's surface along an edge is a polyline between heights of that edge, so
+  it never dips below that minimum: the higher of the two skirts always reaches
+  the lower surface, whatever the neighbour's level (tested for every pair of
+  levels, and by rendering with the skirts off as the probe). Stitching was the
+  alternative; skirts keep a chunk's mesh independent of its neighbours, which
+  keeps selection, hysteresis and culling per chunk and the index data
+  precomputed. The skirts face outward, so the one that hides a gap (the higher
+  chunk's, seen from the lower side) is a front face: back-face culling stays on
+  and the seam render test covers both viewing sides.
+- **Culling and draw calls:** a chunk whose box is outside the frustum
+  (`Frustum`, the code the instancing uses) is not drawn. All chunks and levels
+  live in one vertex buffer and one `u32` index buffer, laid out level by level
+  and chunk by chunk, so visible chunks with consecutive ids and the same level
+  are one `draw_indexed`. Because hills make neighbours want different levels, the
+  planner may also draw a chunk *finer* than its budget needs when that joins
+  calls: it minimises triangles plus `draw_call_cost` (300) per call exactly
+  (dynamic programming). Numbers, whole-map zoom: 256x256 map 12 draw calls; a
+  1024x1024 map of hills 17 (495 without joining); a smooth 1024x1024 map 1.
+- **Counters:** `Renderer::terrain_stats()` (`TerrainStats`: chunks total and
+  visible, chunks per level, triangles, draw calls) and the same numbers in
+  `DrawStats`.
+- **Debug:** `TerrainConfig` (RON): `lod.force_level`, `seams: false` (shows the
+  cracks); the tint by level is `DebugView::lod_tint`, the F1 panel's LOD switch
+  (`lod::LOD_TINT`, `--debug-lod`); `Renderer::set_terrain_levels` fixes a level
+  per chunk for tests. The draw counters are taken at the one `draw_indexed`
+  site (`CountedPass`), terrain triangles included; chunks total/visible come
+  from the planner.
+
+### Picking (WP1.8)
+
+`sf_render::ground`: the `Ground` trait (height at a point, first hit of a ray)
+with `FlatGround` and `TerrainGround`. `TerrainGround` intersects the ray with
+the very triangles of the full-detail mesh in `f64`: clip to the map footprint
+and to the height range of the map, walk the cells front to back with a 2D DDA
+and test a cell's two triangles only if the ray's height range over the cell
+reaches the cell's corner heights. With the usual relief a camera ray crosses a
+handful of cells. Coarser levels deviate from the picked surface by at most
+their error, which is what the pixel budget allows. The camera, the units and
+the click sound in `sf_game` use it.
 
 ## 10. Instancing (WP1.6)
 
@@ -322,13 +401,16 @@ opacity in the terrain uniform. The grid is 1 m lines in the terrain fragment
 shader, anti-aliased with `fwidth`, fading out when lines get closer than ~2 px
 and with the camera distance (`DebugView::grid_alpha_for_distance`: full up to
 40 m, gone at 140 m); chunk borders (32 m) are heavier and yellow. **LOD
-colouring is a placeholder** until WP1.8 gives chunks a LOD level: it tints each
-terrain chunk by its chunk coordinates. WP1.8 should replace
-`chunk_tint(chunk)` in `terrain.wgsl` by the level (and may keep the flag).
+colouring** (WP1.8) tints every terrain chunk by its real level of detail: each
+terrain vertex carries the level of its mesh, the shader mixes in
+`lod_tint(level)` (red = full detail, then orange, yellow, green, blue, purple;
+`lod::LOD_TINT`) when the flag is set. The panel shows the chunks drawn, the
+triangles and the number of chunks per level (`DrawStats`).
 
 **Camera tunables** are applied by rebuilding the `Camera` from the edited
-config at the same focus and zoom (the camera has no setter; the velocity
-resets). Saving the tuned values to RON is not done yet.
+config (`Camera::with_config`: same focus, pivot height, zoom, viewport and
+ground, so picking stays on the terrain; the velocity resets). Saving the
+tuned values to RON is not done yet.
 
 ## 13. Player-facing UI (WP1.12)
 
@@ -357,5 +439,5 @@ the crate docs (`crates/sf_ui/src/lib.rs`); the decisions:
 - **Minimap.** The terrain is baked once on the CPU (material average colour times
   slope shading) and uploaded as a texture; unit dots and the field-of-view frame
   (the four screen corners projected on the ground with `Camera::ground_point`,
-  clamped to the map) are drawn per frame; a left press or drag returns the world
+  which since WP1.8 is a terrain pick, clamped to the map) are drawn per frame; a left press or drag returns the world
   point for `Camera::set_focus`.

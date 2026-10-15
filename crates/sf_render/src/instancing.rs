@@ -405,9 +405,16 @@ impl Instancer {
     }
 
     /// Lowest and highest terrain height (metres): the tile boxes get this
-    /// vertical range so relief cannot hide a unit.
+    /// vertical range so relief cannot hide a unit. Entities already known
+    /// are re-bucketed, so the order of this call and
+    /// [`Instancer::update_tick`] does not matter (found by the relief
+    /// culling test: the boxes used to keep the old range until the next
+    /// tick).
     pub fn set_height_range(&mut self, min: f32, max: f32) {
         self.ground = (min.min(max), max.max(min));
+        if !self.motions.is_empty() {
+            self.rebucket();
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -861,6 +868,7 @@ mod frame_tests;
 mod tests {
     use super::*;
     use crate::camera::{Camera, CameraConfig, DVec2};
+    use crate::ground::{Ground, TerrainGround};
     use sf_math::Fx;
 
     fn v2(x: i32, y: i32) -> Vec2 {
@@ -1007,6 +1015,105 @@ mod tests {
             assert!(in_view > 0, "test view shows nothing");
             assert!(stats.visible >= in_view, "{} < {in_view}", stats.visible);
         }
+    }
+
+    /// A 256 m map with hills up to about 20 m and slopes of the order of 0.5.
+    fn hilly_ground() -> std::sync::Arc<TerrainGround> {
+        let n = 257;
+        let heights = (0..n * n)
+            .map(|i| {
+                let (x, z) = ((i % n) as f32, (i / n) as f32);
+                let h = 10.0
+                    + 6.0 * (x * 0.045).sin() * (z * 0.037).cos()
+                    + 4.0 * (x * 0.021 + z * 0.033).sin();
+                (h / 20.0 * 65535.0) as u16
+            })
+            .collect();
+        let map = sf_data::map::Map::from_parts(
+            256,
+            256,
+            20.0,
+            vec!["a".into()],
+            heights,
+            vec![0; 256 * 256],
+        )
+        .expect("valid hills");
+        std::sync::Arc::new(TerrainGround::new(&map))
+    }
+
+    /// Bit pattern of an instance's ground position, to find it again.
+    fn key(x: f32, z: f32) -> (u32, u32) {
+        (x.to_bits(), z.to_bits())
+    }
+
+    /// `(units whose centre, half a metre above the hill they stand on, is
+    /// inside the frustum, how many of them are missing from the built
+    /// lists)`.
+    fn dropped_in_view(
+        inst: &mut Instancer,
+        ground: &TerrainGround,
+        motions: &[Motion],
+        frustum: &Frustum,
+        alpha: f32,
+    ) -> (usize, usize) {
+        let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        inst.build(frustum, alpha, height);
+        let built: std::collections::BTreeSet<(u32, u32)> = MeshKind::ALL
+            .iter()
+            .flat_map(|&k| inst.instances(k))
+            .map(|i| key(i.model[3][0], i.model[3][2]))
+            .collect();
+        let (mut in_view, mut dropped) = (0, 0);
+        for m in motions {
+            let ([x, z], _) = m.at(alpha);
+            if frustum.contains_point(Vec3::new(x, height(x, z) + 0.5, z)) {
+                in_view += 1;
+                dropped += usize::from(!built.contains(&key(x, z)));
+            }
+        }
+        (in_view, dropped)
+    }
+
+    /// The same brute-force check as above, on hills: seen through a camera
+    /// that follows the relief, a unit on a 20 m hill is in view from places
+    /// where the flat ground below it is not, so the tile boxes must reach up
+    /// to the terrain's highest point. A wrong height range (flat) drops
+    /// visible units, which shows that the test can fail.
+    #[test]
+    fn culling_never_drops_an_instance_that_is_in_view_on_relief() {
+        let side = 256.0;
+        let ground = hilly_ground();
+        let motions = crowd(4_000, side);
+        let views = [
+            (0.2, (60.0, 90.0)),
+            (0.35, (200.0, 30.0)),
+            (0.1, (10.0, 10.0)),
+            (0.45, (128.0, 200.0)),
+            (0.0, (30.0, 220.0)),
+        ];
+        let mut right = instancer(4_000, side);
+        right.set_height_range(0.0, 20.5);
+        let mut wrong = instancer(4_000, side);
+        wrong.set_height_range(0.0, 0.0);
+        let (mut total, mut wrongly_dropped) = (0, 0);
+        for (zoom, focus) in views {
+            let mut cam = camera(zoom, focus, f64::from(side));
+            cam.set_ground(ground.clone());
+            let frustum = Frustum::from_view_proj(cam.view_proj());
+            let (in_view, dropped) = dropped_in_view(&mut right, &ground, &motions, &frustum, 0.37);
+            assert!(in_view > 0, "zoom {zoom}: the test view shows nothing");
+            assert_eq!(
+                dropped, 0,
+                "zoom {zoom}: {dropped} of {in_view} visible units dropped"
+            );
+            total += in_view;
+            wrongly_dropped += dropped_in_view(&mut wrong, &ground, &motions, &frustum, 0.37).1;
+        }
+        println!("{total} units in view; a flat height range would drop {wrongly_dropped}");
+        assert!(
+            wrongly_dropped > 0,
+            "the relief case does not exercise the height range"
+        );
     }
 
     #[test]

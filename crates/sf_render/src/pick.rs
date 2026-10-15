@@ -101,6 +101,18 @@ impl PickQuery {
         self
     }
 
+    /// Where the cursor ray meets `ground` (the exact ray-terrain hit of
+    /// WP1.8: [`Ground::raycast`](crate::ground::Ground::raycast)), so a model
+    /// behind a hill is hidden by it. A ray that never meets the ground
+    /// hides nothing.
+    pub fn with_ground(self, ground: &dyn crate::ground::Ground) -> Self {
+        let hit = self
+            .ray()
+            .and_then(|r| ground.raycast(r.origin.as_dvec3(), r.dir.as_dvec3()))
+            .map(|t| t as f32);
+        self.with_terrain(hit)
+    }
+
     /// The ray from the near plane through the cursor, or `None` for a
     /// degenerate view.
     pub fn ray(&self) -> Option<PickRay> {

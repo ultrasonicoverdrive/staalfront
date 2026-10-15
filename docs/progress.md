@@ -25,15 +25,17 @@ Status: in progress.
 
 - WP1.1 `sf_engine` main loop, input and frame timing: done (PR #4, aa5cf7b)
 - WP1.2 `sf_sim` core (world, commands, checksums, wander): done (PR #9, 4df4759)
-- WP1.3 `sf_headless` (scenario runner, checksum log, Linux/Windows comparison in CI): in review (PR #12)
+- WP1.3 `sf_headless` (scenario runner, checksum log, Linux/Windows comparison in CI): done (PR #12, 305a9e3)
 - WP1.4 `sf_render` basics: done (PR #6, 0ae43bc)
 - WP1.5 camera, log zoom toward the cursor: done (PR #8, 4e7b88a)
 - WP1.6 instancing (placeholder meshes, interpolation, tile culling): done (PR #11, ab98531)
 - WP1.7 terrain (map format, chunk meshes, material texture array): done (PR #10, e2f920c)
 - WP1.13 `sf_audio`: done (PR #7, afad8d2)
-- WP1.8 terrain LOD, seams, culling, ray-terrain picking: in progress
-- WP1.11 egui debug panels: in progress
-- WP1.9, WP1.10, WP1.12, WP1.14: _pending_
+- WP1.8 terrain LOD, seams, culling, ray-terrain picking: this PR (#15)
+- WP1.9 model LOD and strategic icons: in progress
+- WP1.11 egui debug panels: done (PR #13, 76ea42c)
+- WP1.12 `sf_ui` (quads, nine-slice, text, buttons, anchors, minimap): done (PR #14, 58d3eb9)
+- WP1.10, WP1.14: _pending_
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
 
@@ -58,17 +60,38 @@ fixed, delete the entry in the same PR.
 3. **Bit-depth error prints Debug names.** The map loader's error for a PNG of the
    wrong bit depth shows "Eight-bit" / "Sixteen" (the `Debug` form of `png::BitDepth`)
    instead of "8-bit" / "16-bit".
-4. **Camera ray to ground uses the plane `y = 0`.** `sf_render::camera` finds the point
-   under the cursor on a flat plane, which is wrong on relief (terrain is up to
-   about 6 m high in the generated maps). Intersect the ray with the heightmap in
-   WP1.8 (terrain LOD and culling) or the picking work package, whichever comes first.
-5. **The command insertion sequence is machine-local.** `CommandQueue` orders a
+4. **The command insertion sequence is machine-local.** `CommandQueue` orders a
    tick's commands by `(player, insertion sequence)`; the sequence is a counter of
    the local queue. A lockstep package (WP14.1) must carry a per-player sequence
    number in the command packet and schedule with it, so that two machines order a
    player's commands identically no matter how packets arrive.
-6. **Release clippy runs on Linux only in CI.** The step
+5. **Release clippy runs on Linux only in CI.** The step
    `cargo clippy --workspace --release --all-targets -- -D warnings` is guarded with
    `if: runner.os == 'Linux'`, so a lint that appears only in release mode on
    Windows (for example behind `cfg(windows)`) would not be caught. Run it on both
    systems once the CI time allows.
+6. **The minimap's field-of-view frame is clamped per corner.** `sf_ui::fov_quad`
+   clamps each of the four ground points to the map, which bends the frame when the
+   view reaches past the map edge. Clip the quadrilateral against the map rectangle
+   as a polygon instead (WP1.12 follow-up, or the first package that touches the
+   minimap).
+7. **The minimap is baked once.** It does not follow terrain changes. Re-bake it when
+   the terrain changes (phase 2: terrain types in WP2.1 to WP2.3, later editing).
+8. **The minimap bake shows relief weakly.** Its slope shading is faint next to the
+   terrain in the main view. Use a stronger relief shading in the bake (WP1.12
+   follow-up, together with WP2.3).
+9. **Release packaging must ship the egui font licence texts.** `assets/LICENSES.md`
+   lists the default egui fonts (OFL-1.1, Ubuntu-font-1.0); the texts themselves are
+   in the `epaint_default_fonts` crate and have to be part of the third-party notice
+   of any release build (installer, phase 16).
+10. **The `draw_indexed` source test matches exact helper text.**
+    `renderer.rs` pins the single `draw_indexed` call site by the text of
+    `CountedPass::draw`. If that starts getting in the way of a harmless refactor,
+    loosen it to match `.draw_indexed(` only.
+11. **The determinism lint does not scan `tools/sf_headless`.**
+    `scripts/check-sim-determinism.sh` covers `sf_sim` and `sf_math`; the headless
+    runner is outside it. That is fine while it only calls `sf_sim`; extend the lint
+    when it grows logic of its own.
+12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
+    to a placeholder shape and the owner to a player colour by modulo. Replace it
+    with data-driven units (phase 2, WP3.1 and WP3.2).
