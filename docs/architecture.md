@@ -38,7 +38,7 @@ PLAN.md §1.1 fixes one hard rule (`sf_sim` never depends on `sf_render`) and
 describes each crate's role. Dependency edges beyond that hard rule are
 undecided (see PLAN.md §1.1). The diagram below is factual: it lists the
 `path` dependencies between workspace crates in the `Cargo.toml` files, as of
-WP1.7 (checked against every `Cargo.toml`). It will go stale as crates gain dependencies;
+WP1.11 (checked against every `Cargo.toml`). It will go stale as crates gain dependencies;
 `cargo tree` is authoritative.
 
 ```mermaid
@@ -245,7 +245,56 @@ laptop. Never on the home server (B6, PLAN.md §13).
 - **Look as data:** `assets/config/units.ron` holds the player palette (sRGB,
   four colors) and the placeholder shapes (cube, cylinder, cone, with sizes).
   Until units are data-driven (phase 2), `sf_game` uses entity kind modulo the
-  number of shapes and owner modulo the number of colors.
-- **Counters** for the later debug panel: `InstanceStats` (total, visible,
-  tiles, per mesh kind) from `Instancer::build` and `DrawStats` (instances and
-  draw calls: dynamic, static scene, terrain) from `Renderer::draw_stats`.
+  number of shapes and owner modulo the number of colors. Debug builds reload
+  it when it changes on disk (`Instancer::set_style`, WP1.11); a broken file is
+  reported and the old look stays.
+- **Counters** for the debug panel: `InstanceStats` (total, visible, tiles,
+  per mesh kind, visible and total) from `Instancer::build` and `DrawStats`
+  (instances and draw calls: dynamic, static scene, terrain) from
+  `Renderer::draw_stats`. `DrawStats` is counted at the `draw_indexed` calls
+  of the last rendered frame, not derived from instance counts.
+
+## 11. Debug panels (WP1.11)
+
+F1 (action `ToggleDebug` in `assets/config/input.ron`) toggles two egui
+windows: *Performance* (frame time graph of the last 300 frames with avg / p99 /
+max, draw calls and instances per mesh kind, terrain chunks drawn, sim tick and
+checksum in hex) and *Camera & view* (the live `CameraConfig` tunables: zoom
+step per notch, zoom and pan damping, pan speed, near and far pitch, reset; the
+LOD colouring and cell grid toggles). Off by default (`--debug-ui` opens it for
+screenshots; `--debug-grid` and `--debug-lod` preset the toggles).
+
+**Layers and dependency edges** (external crates, which the mermaid graph above
+does not list):
+
+| Crate | Depends on | Does |
+|---|---|---|
+| `sf_render` | `egui`, `egui-wgpu` | Paints: `OverlayFrame` (tessellated jobs + texture deltas) in a second render pass over the scene, on its own wgpu device. Knows no panels and no winit. |
+| `sf_engine` | (no egui) | `App::on_window_event` offers each raw window event to the app before the engine's own input state sees it. `true` = consumed: presses and wheel notches are withheld from `InputState`; releases and cursor moves always pass, so nothing sticks. |
+| `sf_game` | `egui`, `egui-winit` | `debug_ui`: builds the panels from plain data (`PanelData`, `PanelState`) and feeds events through `egui_winit::State`. The only place that knows both egui and the game. |
+
+Versions: `egui`, `egui-wgpu` and `egui-winit` 0.36.2 (0.36.x is the first line
+whose `egui-wgpu` requires wgpu 30; `egui-winit` requires winit 0.30.13, as
+`sf_engine` does). Default features are off (no clipboard, no link opening).
+
+**Input order.** While the panels are open, egui sees every window event first
+(`DebugUi::on_event`); what it consumes (pointer over a panel or a slider held,
+text field focused) never reaches the camera. A held slider also suppresses
+screen-edge panning. While hidden no event is forwarded.
+
+**Free while off.** Hidden panels run no egui pass, forward no events and the
+renderer records no overlay pass; the egui painter and winit state are created
+on the first show. Closing clears the overlay jobs.
+
+**Terrain views** (`Renderer::set_debug_view`, `DebugView`): a flag and an
+opacity in the terrain uniform. The grid is 1 m lines in the terrain fragment
+shader, anti-aliased with `fwidth`, fading out when lines get closer than ~2 px
+and with the camera distance (`DebugView::grid_alpha_for_distance`: full up to
+40 m, gone at 140 m); chunk borders (32 m) are heavier and yellow. **LOD
+colouring is a placeholder** until WP1.8 gives chunks a LOD level: it tints each
+terrain chunk by its chunk coordinates. WP1.8 should replace
+`chunk_tint(chunk)` in `terrain.wgsl` by the level (and may keep the flag).
+
+**Camera tunables** are applied by rebuilding the `Camera` from the edited
+config at the same focus and zoom (the camera has no setter; the velocity
+resets). Saving the tuned values to RON is not done yet.
