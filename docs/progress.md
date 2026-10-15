@@ -31,13 +31,25 @@ Status: in progress.
 - WP1.6 instancing (placeholder meshes, interpolation, tile culling): done (PR #11, ab98531)
 - WP1.7 terrain (map format, chunk meshes, material texture array): done (PR #10, e2f920c)
 - WP1.13 `sf_audio`: done (PR #7, afad8d2)
-- WP1.8 terrain LOD, seams, culling, ray-terrain picking: this PR (#15)
+- WP1.8 terrain LOD, seams, culling, ray-terrain picking: done (PR #15, 8f64071)
 - WP1.9 model LOD and strategic icons: in progress
 - WP1.11 egui debug panels: done (PR #13, 76ea42c)
 - WP1.12 `sf_ui` (quads, nine-slice, text, buttons, anchors, minimap): done (PR #14, 58d3eb9)
 - WP1.10, WP1.14: _pending_
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
+
+M0 status:
+- Headless 10,000 ticks with 5,000 wanderers, checksum equal on Linux and
+  Windows: met (CI `headless-compare`, since PR #12).
+- Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
+  2026-10-15 (main at 8f64071, terrain LOD and ray-terrain picking in).
+- p99 frame time <= 16.7 ms with 5,000 units in view: open, needs `sf_demo
+  --bench` (WP1.14). First run on the laptop (2026-10-15, `sf_game --units
+  5000 --auto-zoom`, DX12): steady 60 fps at vsync with all 5,000 units in
+  view; p99 17.4-18.2 ms is vsync timing jitter, not missed frames; two
+  hitches of 34-40 ms when zooming out to the whole map. That laptop has a
+  GTX 1650, not the GTX 1050 named in PLAN.md.
 
 Report: _to be written at the end of the phase._
 
@@ -95,3 +107,13 @@ fixed, delete the entry in the same PR.
 12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
     to a placeholder shape and the owner to a player colour by modulo. Replace it
     with data-driven units (phase 2, WP3.1 and WP3.2).
+13. **The p99 criterion cannot be met with vsync on.** At 60 Hz every frame
+    takes 16.67 ms and timing jitter puts p99 just above 16.7 ms even when no
+    frame is missed. `sf_demo --bench` (WP1.14) must run without vsync (or measure
+    CPU and GPU frame time separately) and in real fullscreen at 1920x1080.
+14. **Hitches of 34-40 ms when zooming out to the whole map** (laptop run,
+    2026-10-15): possibly a one-time instance buffer growth or LOD change; find
+    the cause in WP1.14 with the benchmark.
+15. **Vulkan hangs on the test laptop.** Adapter creation hung with Vulkan
+    (NVIDIA GTX 1650, Windows); the game window now uses DX12 on Windows.
+    `WGPU_BACKEND` overrides it, `SF_GPU_TRACE=1` prints each GPU startup step.

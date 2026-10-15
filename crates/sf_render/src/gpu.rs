@@ -47,13 +47,23 @@ impl Default for GpuOptions {
 }
 
 impl GpuOptions {
-    /// What the game window uses: the native APIs only (Vulkan, DX12, Metal;
-    /// no GL), the discrete GPU first. `WGPU_BACKEND` (e.g. `dx12`, `vulkan`)
-    /// and `WGPU_POWER_PREF` (`high`, `low`) override both, so a driver that
-    /// hangs on one API can be worked around without a rebuild.
+    /// What the game window uses: DX12 on Windows, the native APIs elsewhere
+    /// (Vulkan, Metal; never GL), the discrete GPU first. `WGPU_BACKEND`
+    /// (e.g. `dx12`, `vulkan`) and `WGPU_POWER_PREF` (`high`, `low`) override
+    /// both, so a driver that hangs on one API can be worked around without a
+    /// rebuild.
+    ///
+    /// Windows uses DX12 only because Vulkan hung during adapter creation on
+    /// the test laptop (NVIDIA GTX 1650 with Optimus, 2026-10-15), while DX12
+    /// started at once. DX12 is also what the CI screenshot tests use (WARP).
     pub fn window() -> Self {
+        let native = if cfg!(windows) {
+            wgpu::Backends::DX12
+        } else {
+            wgpu::Backends::PRIMARY
+        };
         Self {
-            backends: wgpu::Backends::PRIMARY.with_env(),
+            backends: native.with_env(),
             power_preference: wgpu::PowerPreference::from_env()
                 .unwrap_or(wgpu::PowerPreference::HighPerformance),
             force_fallback: false,
