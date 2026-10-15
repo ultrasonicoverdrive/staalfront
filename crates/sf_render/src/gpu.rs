@@ -47,6 +47,19 @@ impl Default for GpuOptions {
 }
 
 impl GpuOptions {
+    /// What the game window uses: the native APIs only (Vulkan, DX12, Metal;
+    /// no GL), the discrete GPU first. `WGPU_BACKEND` (e.g. `dx12`, `vulkan`)
+    /// and `WGPU_POWER_PREF` (`high`, `low`) override both, so a driver that
+    /// hangs on one API can be worked around without a rebuild.
+    pub fn window() -> Self {
+        Self {
+            backends: wgpu::Backends::PRIMARY.with_env(),
+            power_preference: wgpu::PowerPreference::from_env()
+                .unwrap_or(wgpu::PowerPreference::HighPerformance),
+            force_fallback: false,
+        }
+    }
+
     /// What the screenshot tests use: software adapter first, the primary
     /// native APIs only (so a GL emulation never sneaks in).
     pub fn software() -> Self {
@@ -69,6 +82,7 @@ pub struct Gpu {
 impl Gpu {
     /// Create an instance with the options' backends.
     pub fn instance(options: &GpuOptions) -> wgpu::Instance {
+        trace(&format!("instance ({:?})", options.backends));
         wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: options.backends,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -81,6 +95,7 @@ impl Gpu {
         options: &GpuOptions,
         surface: Option<&wgpu::Surface<'_>>,
     ) -> Result<Self, RenderError> {
+        trace(&format!("request adapter ({:?})", options.power_preference));
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: options.power_preference,
             force_fallback_adapter: options.force_fallback,
@@ -88,12 +103,18 @@ impl Gpu {
             ..Default::default()
         }))
         .map_err(|e| RenderError::NoAdapter(e.to_string()))?;
+        let info = adapter.get_info();
+        trace(&format!(
+            "adapter: {} [{:?}, {:?}]",
+            info.name, info.device_type, info.backend
+        ));
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("sf_render device"),
             ..Default::default()
         }))
         .map_err(|e| RenderError::Device(e.to_string()))?;
+        trace("device ready");
 
         Ok(Self {
             instance,
@@ -113,5 +134,13 @@ impl Gpu {
     pub fn adapter_summary(&self) -> String {
         let info = self.adapter.get_info();
         format!("{} [{:?}, {:?}]", info.name, info.device_type, info.backend)
+    }
+}
+
+/// Startup progress on stderr when the environment variable `SF_GPU_TRACE` is
+/// set: shows at which step a driver hangs (instance, adapter, device, surface).
+pub(crate) fn trace(step: &str) {
+    if std::env::var_os("SF_GPU_TRACE").is_some() {
+        eprintln!("sf_render gpu: {step}");
     }
 }
