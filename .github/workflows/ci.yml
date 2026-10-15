@@ -49,3 +49,61 @@ jobs:
       - name: Determinism lint (sf_sim, sf_math)
         shell: bash
         run: scripts/check-sim-determinism.sh
+
+  # WP1.3, milestone M0: the simulation must give the same checksums on Linux
+  # and Windows. Each OS runs the headless scenarios in release mode and
+  # requires the final checksum committed next to the scenario (--expect, so a
+  # drift on one OS fails by itself); the logs are uploaded, and the compare job
+  # below checks them against each other. Only sf_headless and its sim
+  # dependencies are built here: no wgpu, no audio.
+  headless:
+    name: headless (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain from rust-toolchain.toml
+        shell: bash
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the scenarios (release) against the committed checksums
+        shell: bash
+        run: |
+          mkdir -p headless-logs
+          status=0
+          for name in wander_5000 command_mix; do
+            cargo run --release -p sf_headless -- "assets/scenarios/$name.ron" \
+              --every 100 \
+              --out "headless-logs/$name.json" \
+              --expect "$(cat "assets/scenarios/$name.expected")" || status=1
+          done
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: headless-logs-${{ matrix.os }}
+          path: headless-logs/*.json
+          if-no-files-found: warn
+
+  headless-compare:
+    name: headless checksums equal on Linux and Windows
+    needs: headless
+    # Also when one OS failed its own --expect: the comparison then shows
+    # where the two logs part ways.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: headless-logs-*
+          path: headless-logs
+      - name: Compare the checksum lists (everything but the host block)
+        run: |
+          ls -R headless-logs
+          scripts/compare-headless-logs.sh \
+            headless-logs/headless-logs-ubuntu-latest \
+            headless-logs/headless-logs-windows-latest

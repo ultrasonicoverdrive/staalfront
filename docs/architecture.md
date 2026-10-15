@@ -222,3 +222,32 @@ laptop. Never on the home server (B6, PLAN.md §13).
 - **Camera limit:** the camera still intersects the flat `y = 0` plane, so with
   relief the point "under the cursor" is the plane point (terrain stays below
   6 m in the generated maps). Ray-terrain picking comes with the picking WP.
+
+## 10. Headless runner (WP1.3)
+
+`tools/sf_headless` (library plus binary; its crate documentation is the
+reference) runs a scenario file on `sf_sim` with no window and no GPU:
+
+```
+sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HEX]
+```
+
+- **Scenario** (`assets/scenarios/*.ron`): world seed, map size, run length,
+  spawn groups (count, kinds and owners cycled, area) and an optional list of
+  timed commands (`SetWanderArea`, `MoveTo`, `Despawn`, entities named by id).
+  Unknown fields and scenarios that cannot run (`ticks: 0`, a command after the
+  last tick, an area outside the map, ...) are reported with the file name and every
+  problem found. Everything is scheduled before tick 0, like a replay; the spawn
+  positions come from their own PCG32 stream seeded with the world seed, so
+  `wander_5000.ron` is the same crowd as the sf_sim golden scenario.
+- **Log** (`--out`): flat JSON, written by hand with a fixed layout: scenario, seed,
+  tick and command counts, initial and final checksum, the checksum after every
+  K-th tick, then a `host` block (OS, architecture, wall time, ticks/s). Everything
+  before `host` is deterministic; wall time is measured around the run in `cli.rs`
+  and never reaches `sf_sim`.
+- **Exit codes:** 0 ok, 1 `--expect` mismatch, 2 usage error, invalid scenario or
+  unwritable log.
+- **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers) and
+  `command_mix` in release mode on Linux and Windows against the committed
+  `<name>.expected` values and uploads the logs; `headless-compare` fails if the
+  two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).

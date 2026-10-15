@@ -1,0 +1,24 @@
+// Milestone M0 headline scenario (PLAN.md section 3, phase 1): 5,000 wanderers
+// for 10,000 ticks on the full 256 by 256 map. CI runs it in release mode on
+// Linux and Windows and requires the same checksums on both, and the final one
+// to equal wander_5000.expected.
+//
+// The seed and the spawn group are the crowd of the sf_sim golden scenario
+// (crates/sf_sim/tests/common/mod.rs): the same 5,000 entities at the same
+// positions. That scenario also runs a script of commands; this one is the
+// plain crowd, so the two final checksums differ on purpose. The scenario
+// command_mix.ron exercises the commands.
+Scenario(
+    name: "wander_5000",
+    seed: 0x57A1_F407,
+    map: (width: 256, height: 256),
+    ticks: 10_000,
+    spawns: [
+        (
+            count: 5_000,
+            kinds: [0, 1, 2],
+            owners: [0, 1, 2, 3],
+            area: (min: (0, 0), max: (256, 256)),
+        ),
+    ],
+)

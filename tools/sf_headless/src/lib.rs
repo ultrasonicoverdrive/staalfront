@@ -1,0 +1,107 @@
+//! `sf_headless`: runs the simulation without a screen.
+//!
+//! It loads a scenario file, runs the deterministic `sf_sim` world for N ticks
+//! as fast as it can, and writes the checksums and a JSON log. It is how agents
+//! test gameplay without a window or a GPU, how CI proves that Linux and
+//! Windows compute bit-identical worlds (milestone M0: 10,000 ticks with 5,000
+//! wanderers), and later the base for balance runs and AI-vs-AI games.
+//!
+//! The crate depends on `sf_sim` and `sf_math` only (plus `ron` and `serde`
+//! for the scenario file); it must never depend on rendering, windowing or
+//! audio crates. The clock is read in exactly one place, [`cli::run_cli`],
+//! around the run; [`run::run`] is a pure function of the scenario and the
+//! options.
+//!
+//! ```text
+//! cargo run --release -p sf_headless -- assets/scenarios/wander_5000.ron \
+//!     --every 100 --out target/wander_5000.json \
+//!     --expect "$(cat assets/scenarios/wander_5000.expected)"
+//! ```
+//!
+//! Options and exit codes are in [`cli`], the log layout in [`log`].
+//!
+//! # The scenario file
+//!
+//! A RON file with one `Scenario(...)`. Unknown fields are errors, as are
+//! scenarios that cannot run (`ticks: 0`, a command after the last tick, an
+//! empty or out-of-map area, ...); every problem is reported at once, with the
+//! file name (see [`Scenario::problems`] for the rules).
+//!
+//! | Field | Meaning |
+//! |---|---|
+//! | `name` | Name in logs; the file name without extension when left out. |
+//! | `seed` | World seed (decimal or `0x` hex, `_` allowed). Also seeds the placement stream that draws spawn positions. |
+//! | `map` | `(width: .., height: ..)` in cells, 1 to 1024; 256 by 256 when left out. |
+//! | `ticks` | Length of the run, at least 1. |
+//! | `spawns` | Groups of entities: `tick` (default 0), `player` (default 0; the issuer, which orders commands within a tick), `count`, `kinds`, `owners` (cycled: entity `i` gets `kinds[i % len]`), `area` (`(min: (x, y), max: (x, y))`, cells, max exclusive). |
+//! | `commands` | Timed commands: `tick`, `player` (default 0), `command`. |
+//!
+//! The commands are the `sf_sim` commands apart from `Spawn`:
+//! `SetWanderArea(ids: .., area: ..)`, `MoveTo(ids: .., target: (x, y))` and
+//! `Despawn(ids: ..)`. Entities are named by id: `Id(index, generation)` or
+//! `Range(from, to)` (slots `from..to` at generation 0; in a world without
+//! despawns the entities spawned `from`-th to `to`-th, in execution order).
+//!
+//! ```
+//! use sf_headless::run::{RunOptions, run};
+//! use sf_headless::scenario::Scenario;
+//!
+//! let scenario = Scenario::from_ron_str(r#"
+//!     Scenario(
+//!         name: "tiny",
+//!         seed: 0x57A1_F407,
+//!         map: (width: 64, height: 64),
+//!         ticks: 200,
+//!         spawns: [
+//!             // 100 wanderers, three kinds and two owners in turn.
+//!             (count: 100, kinds: [0, 1, 2], owners: [0, 1],
+//!              area: (min: (0, 0), max: (64, 64))),
+//!         ],
+//!         commands: [
+//!             // Ten of them go to the middle at tick 50, player 1 commanding.
+//!             (tick: 50, player: 1,
+//!              command: MoveTo(ids: [Range(0, 10)], target: (32, 32))),
+//!         ],
+//!     )
+//! "#).unwrap();
+//!
+//! let outcome = run(&scenario, &RunOptions { ticks: 200, every: 50 }).unwrap();
+//! assert_eq!(outcome.entities, 100);
+//! assert_eq!(outcome.samples.len(), 4); // after 50, 100, 150 and 200 ticks
+//! // Same scenario, same options, same checksums, on every machine.
+//! assert_eq!(outcome, run(&scenario, &RunOptions { ticks: 200, every: 50 }).unwrap());
+//! ```
+//!
+//! # Semantics worth knowing
+//!
+//! * Everything is scheduled **before tick 0**, spawns first (file order), then
+//!   commands (file order), as a replay would be. Pending commands are part of
+//!   the checksum, so the checksum of a scenario describes the whole script,
+//!   not only what has run so far. A command in the past cannot be written
+//!   (the world starts at tick 0); one at or after the last tick is rejected
+//!   because it would never run.
+//! * `--ticks N` replaces the scenario's length for one run. Commands after
+//!   tick N simply stay pending.
+//! * A checksum "after K ticks" is the one `World::checksum_history` has at
+//!   index `K - 1`. The log also holds `initial_checksum` (before tick 0, with
+//!   every command still pending) to tell a loading difference from a stepping
+//!   difference.
+//!
+//! # Cross-platform proof (CI)
+//!
+//! The `headless` job in `.github/workflows/ci.yml` runs the scenarios in
+//! `assets/scenarios/` in release mode on Linux and Windows, each with
+//! `--expect` of the value committed next to the scenario (`*.expected`) and
+//! uploads the logs. The `headless-compare` job then runs
+//! `scripts/compare-headless-logs.sh` on both sets: everything except the
+//! `host` block must be identical. A drift on one system fails its own
+//! `--expect`; a drift between the systems fails the comparison; both name the
+//! first checksum that differs.
+
+pub mod cli;
+pub mod log;
+pub mod run;
+pub mod scenario;
+
+pub use run::{Outcome, RunOptions, Sample};
+pub use scenario::{Scenario, ScenarioError};
