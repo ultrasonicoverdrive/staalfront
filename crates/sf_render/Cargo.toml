@@ -29,3 +29,10 @@ pollster = "1.0.1"
 # rule 6); both crates are already in the workspace (sf_engine, sf_data).
 serde = { version = "1", features = ["derive"] }
 ron = "0.12"
+# Debug overlay (WP1.11): egui draws the F1 panels; egui-wgpu is the matching
+# painter for our wgpu 30. Versions 0.36.x are the only egui line whose
+# egui-wgpu requires wgpu ^30. Default features are off: they only add
+# wgpu backends/targets we already configure (macOS jitter fix can return
+# with the macOS port).
+egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }
+egui-wgpu = { version = "0.36.2", default-features = false }

@@ -54,13 +54,10 @@ fn the_shipped_config_is_valid_and_has_the_documented_defaults() {
     assert_eq!(c.lod.hysteresis, 0.25);
     assert_eq!(c.lod.draw_call_cost, DEFAULT_DRAW_CALL_COST);
     assert_eq!(c.lod.force_level, None);
-    assert!(!c.lod.tint_levels && c.seams);
+    assert!(c.seams);
     // Partial files fall back to the defaults.
-    let c = TerrainConfig::from_ron("(lod: (error_px: 4.0, tint_levels: true))").unwrap();
-    assert_eq!(
-        (c.lod.error_px, c.lod.hysteresis, c.lod.tint_levels),
-        (4.0, 0.25, true)
-    );
+    let c = TerrainConfig::from_ron("(lod: (error_px: 4.0))").unwrap();
+    assert_eq!((c.lod.error_px, c.lod.hysteresis), (4.0, 0.25));
     let c = TerrainConfig::from_ron("(lod: (force_level: Some(3)), seams: false)").unwrap();
     assert_eq!(c.lod.force_level, Some(3));
     assert!(!c.seams);
@@ -76,6 +73,7 @@ fn bad_configs_are_refused() {
         "(lod: (draw_call_cost: -1.0))",
         "(lod: (force_level: Some(6)))",
         "(lod: (error_pixels: 2.0))",
+        "(lod: (tint_levels: true))", // the tint is the debug view's switch
         "(seams: maybe)",
         "not ron",
     ] {

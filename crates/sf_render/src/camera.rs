@@ -198,6 +198,20 @@ impl Camera {
         &self.cfg
     }
 
+    /// A camera with other tunables at the same focus, pivot height, zoom,
+    /// viewport and ground (the debug panel edits the config this way).
+    /// Motion in progress stops.
+    pub fn with_config(&self, cfg: CameraConfig) -> Camera {
+        let mut c = Camera::new(cfg, self.viewport.x as u32, self.viewport.y as u32);
+        c.ground = self.ground.clone();
+        c.focus = c.clamp_focus(self.focus);
+        c.focus_y = self.focus_y;
+        c.zoom = self.zoom.clamp(0.0, 1.0);
+        c.zoom_target = c.zoom;
+        c.lift_for_clearance();
+        c
+    }
+
     /// Use `ground` for picking and for the clearance. The pivot goes onto
     /// the ground under the focus, any zoom or drag in progress is dropped.
     pub fn set_ground(&mut self, ground: Arc<dyn Ground>) {
@@ -1491,6 +1505,27 @@ mod tests {
         // The eye hangs above the pivot by the pitch and distance of the zoom.
         let (d, p) = (c.distance(), c.pitch());
         assert!((c.eye().y - (c.focus_height() + d * p.sin())).abs() < 1e-9);
+    }
+
+    #[test]
+    fn with_config_keeps_the_pose_the_viewport_and_the_ground() {
+        let map = hills(256, 18.0);
+        let mut c = relief_camera(&map, 1280, 720);
+        c.set_zoom(0.4);
+        c.set_focus(DVec2::new(70.0, 90.0));
+        let tuned = c.with_config(CameraConfig {
+            pan_speed: 1.4,
+            ..*c.config()
+        });
+        assert_eq!(tuned.config().pan_speed, 1.4);
+        assert_eq!((tuned.focus(), tuned.zoom()), (c.focus(), c.zoom()));
+        assert_eq!(tuned.focus_height(), c.focus_height());
+        assert_eq!(tuned.aspect(), c.aspect());
+        assert_eq!(tuned.view_proj(), c.view_proj());
+        // Still picks against the terrain, not the plane.
+        let px = DVec2::new(900.0, 200.0);
+        assert_eq!(tuned.ground_point_3d(px), c.ground_point_3d(px));
+        assert!(tuned.ground_point_3d(px).unwrap().y > 0.5);
     }
 
     #[test]

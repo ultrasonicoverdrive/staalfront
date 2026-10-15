@@ -138,8 +138,9 @@ pub struct FrameStats {
 }
 
 impl FrameStats {
-    /// Default window: about four seconds at 60 fps.
-    pub const DEFAULT_CAPACITY: usize = 240;
+    /// Default window: about five seconds at 60 fps (the debug panel's graph
+    /// shows all of it).
+    pub const DEFAULT_CAPACITY: usize = 300;
 
     pub fn new(capacity: usize) -> Self {
         assert!(capacity >= 1, "window must hold at least one frame");

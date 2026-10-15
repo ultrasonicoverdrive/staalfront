@@ -21,7 +21,8 @@ use sf_render::lod::LOD_TINT;
 use sf_render::scene::{Lighting, MeshKind, SceneObject};
 use sf_render::terrain::LOD_LEVELS;
 use sf_render::{
-    Camera, CameraConfig, GpuOptions, Ground, LodConfig, Renderer, TerrainConfig, TerrainGround,
+    Camera, CameraConfig, DebugView, GpuOptions, Ground, LodConfig, Renderer, TerrainConfig,
+    TerrainGround,
 };
 
 const W: u32 = 320;
@@ -168,6 +169,7 @@ fn whole_map_with_relief_uses_far_fewer_triangles_and_looks_the_same() {
     assert_eq!(stats.terrain_chunks_total, 64);
     assert_eq!(stats.terrain_chunks_visible, 64);
     assert_eq!(stats.terrain_triangles, tstats.triangles);
+    assert_eq!(stats.terrain_chunks_per_level, tstats.per_level);
     assert_eq!(stats.terrain_draw_calls, tstats.draw_calls);
     assert!(
         stats.terrain_draw_calls >= 1 && stats.terrain_draw_calls <= 300,
@@ -343,9 +345,9 @@ fn level_tint_colours_chunks_by_level() {
     let plain = shot(&mut r, &cam);
     let stats = r.terrain_stats();
     assert_eq!(stats.per_level, [1; LOD_LEVELS]);
-    r.set_terrain_lod(LodConfig {
-        tint_levels: true,
-        ..LodConfig::default()
+    r.set_debug_view(DebugView {
+        lod_tint: true,
+        grid_alpha: 0.0,
     });
     let tinted = shot(&mut r, &cam);
 

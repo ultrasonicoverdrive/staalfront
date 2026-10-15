@@ -21,18 +21,15 @@ const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
 struct TerrainParams {
     map_cells: [i32; 2],
     tile_meters: f32,
-    tint_levels: u32,
+    /// Debug flags, bit 0: tint chunks by their level of detail.
+    flags: u32,
+    /// Opacity of the 1 m cell grid; 0 = off.
+    grid_alpha: f32,
+    _pad: f32,
 }
 
-impl TerrainParams {
-    fn new(map: &sf_data::map::Map, tint_levels: bool) -> Self {
-        Self {
-            map_cells: [map.width() as i32, map.height() as i32],
-            tile_meters: TILE_METERS,
-            tint_levels: u32::from(tint_levels),
-        }
-    }
-}
+/// `flags` bit: tint chunks by their level of detail.
+const FLAG_LOD_TINT: u32 = 1;
 
 /// Everything `Renderer::set_terrain` creates.
 pub struct TerrainGpu {
@@ -41,9 +38,9 @@ pub struct TerrainGpu {
     /// All chunks at all levels (see [`terrain::PackedTerrain`]).
     pub vertices: wgpu::Buffer,
     pub indices: wgpu::Buffer,
-    pub params: wgpu::Buffer,
-    /// The map the params were made for.
-    pub map_cells: (u32, u32),
+    /// The `TerrainParams` uniform, rewritten by [`TerrainGpu::write_debug_view`].
+    params: wgpu::Buffer,
+    map_cells: [i32; 2],
     pub config: TerrainConfig,
     pub planner: LodPlanner,
     /// Debug: fixed level per chunk instead of the automatic selection.
@@ -51,12 +48,14 @@ pub struct TerrainGpu {
 }
 
 impl TerrainGpu {
-    /// Write the debug tint switch into the params buffer.
-    pub fn write_params(&self, queue: &wgpu::Queue) {
+    /// Update the debug visualisation flags in the terrain uniform.
+    pub fn write_debug_view(&self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
         let params = TerrainParams {
-            map_cells: [self.map_cells.0 as i32, self.map_cells.1 as i32],
+            map_cells: self.map_cells,
             tile_meters: TILE_METERS,
-            tint_levels: u32::from(self.config.lod.tint_levels),
+            flags: if view.lod_tint { FLAG_LOD_TINT } else { 0 },
+            grid_alpha: view.grid_alpha.clamp(0.0, 1.0),
+            _pad: 0.0,
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
     }
@@ -182,7 +181,13 @@ pub fn build(
 
     let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("terrain params"),
-        contents: bytemuck::bytes_of(&TerrainParams::new(map, config.lod.tint_levels)),
+        contents: bytemuck::bytes_of(&TerrainParams {
+            map_cells: [map.width() as i32, map.height() as i32],
+            tile_meters: TILE_METERS,
+            flags: 0,
+            grid_alpha: 0.0,
+            _pad: 0.0,
+        }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
@@ -305,7 +310,7 @@ pub fn build(
         vertices,
         indices,
         params,
-        map_cells: (map.width(), map.height()),
+        map_cells: [map.width() as i32, map.height() as i32],
         config: *config,
         planner,
         level_override: None,
