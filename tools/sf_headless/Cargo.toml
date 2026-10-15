@@ -10,8 +10,18 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# Library plus binary: `src/lib.rs` holds everything testable (scenario file,
+# runner, JSON log, argument parsing), `src/main.rs` only forwards the process
+# arguments. Nothing here may depend on rendering, windowing or audio crates
+# (PLAN.md 1.1): the runner must work on a machine without a GPU.
 [dependencies]
 sf_math = { path = "../../crates/sf_math" }
 sf_sim = { path = "../../crates/sf_sim" }
 sf_data = { path = "../../crates/sf_data" }
 sf_ai = { path = "../../crates/sf_ai" }
+# Scenario files are RON like every other data file of the project
+# (PLAN.md 1.0, quality rule 6). Same versions as sf_data and sf_audio, so the
+# lockfile gains no new crate. sf_data is not used for this: the scenario type
+# names sf_sim commands, and sf_data may not depend on sf_sim.
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
