@@ -6,3 +6,5 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 |---|---|---|
 | `config/input.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `shaders/scene.wgsl` | Written for this project | Project license (see workspace `Cargo.toml`) |
+| `audio/bank.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
+| `audio/sfx/test_click.wav` | Synthesized for this repository by the generator in `crates/sf_audio/tests/test_sound.rs` (integer maths, no samples, no third-party material); author: Claude (Anthropic), WP1.13 | CC0 1.0 (public domain dedication) |

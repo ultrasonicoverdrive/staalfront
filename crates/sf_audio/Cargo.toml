@@ -11,3 +11,12 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# Mixing, panning, fades. 0.12.5 is the current stable line. Default features
+# are off to keep codecs minimal: WAV (+ PCM decoding) and OGG Vorbis only;
+# `cpal` is the real output backend. `cpal-realtime(-dbus)` is left out: it
+# only adds thread-priority tweaks and a libdbus system dependency.
+kira = { version = "0.12.5", default-features = false, features = ["cpal", "wav", "pcm", "ogg", "vorbis"] }
+# Derive for the RON-backed sound bank.
+serde = { version = "1", features = ["derive"] }
+# Project-wide data format (PLAN.md 1.0).
+ron = "0.12"
