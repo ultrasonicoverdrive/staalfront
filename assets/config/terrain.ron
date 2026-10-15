@@ -1,0 +1,24 @@
+// Terrain level of detail (WP1.8). Read by sf_render::lod::TerrainConfig.
+//
+// Every 32x32-cell chunk has six meshes (steps of 1, 2, 4, 8, 16 and 32 cells,
+// levels 0 to 5) with a known geometric error in metres. Each frame a chunk
+// takes the coarsest level whose error, projected to the screen, is at most
+// `error_px` pixels (conservative: measured at the nearest point of the
+// chunk, in the render target's own pixels).
+(
+    lod: (
+        // Largest projected error in pixels. Default tuned for 1920x1080.
+        error_px: 2.0,
+        // A chunk goes coarser only if the coarser level fits in
+        // error_px * (1 - hysteresis); 0 = no hysteresis (levels may flicker).
+        hysteresis: 0.25,
+        // Debug: draw every chunk at this level, e.g. Some(0) for full detail.
+        force_level: None,
+        // Debug: tint chunks by level (0 red, 1 orange, 2 yellow, 3 green,
+        // 4 blue, 5 purple). WP1.11's panel toggles the same switch live.
+        tint_levels: false,
+    ),
+    // Debug: false removes the skirts under the chunk edges and so shows the
+    // cracks between chunks of different levels.
+    seams: true,
+)

@@ -6,8 +6,10 @@ use std::ops::Range;
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
+use crate::frustum::Frustum;
 use crate::gpu::{Gpu, GpuOptions, RenderError};
 use crate::image::Rgba8;
+use crate::lod::{LodConfig, LodView, TerrainConfig, TerrainStats};
 use crate::mesh::{MeshData, Vertex};
 use crate::scene::{
     Globals, Instance, Lighting, MeshKind, PlaceholderCamera, SceneObject, test_scene,
@@ -62,8 +64,15 @@ pub struct DrawStats {
     pub dynamic_draw_calls: u32,
     /// Draw calls for the static scene objects (one per mesh kind used).
     pub scene_draw_calls: u32,
-    /// Draw calls for terrain chunks.
+    /// Draw calls for the terrain: chunks of the same level of detail that
+    /// are neighbours in the chunk list share one call.
     pub terrain_draw_calls: u32,
+    /// Terrain chunks in the map.
+    pub terrain_chunks_total: u32,
+    /// Terrain chunks that passed the frustum test and were drawn.
+    pub terrain_chunks_visible: u32,
+    /// Terrain triangles drawn (surface and skirts).
+    pub terrain_triangles: u32,
 }
 
 impl DrawStats {
@@ -311,7 +320,7 @@ impl Renderer {
     /// Draw one frame: present to the window, or fill the offscreen texture.
     pub fn render(&mut self) -> Result<(), RenderError> {
         let _ = self.poll_shader_reload();
-        self.write_globals();
+        self.prepare_frame();
         let mut encoder = self
             .gpu
             .device
@@ -359,7 +368,7 @@ impl Renderer {
                 "render_to_image needs a headless renderer".into(),
             ));
         };
-        self.write_globals();
+        self.prepare_frame();
         let (width, height) = self.size;
         let mut encoder = self
             .gpu
@@ -472,21 +481,32 @@ impl Renderer {
         }
     }
 
-    /// Draw-call counters for the frame that is drawn next (or was just drawn).
+    /// Draw-call counters for the frame that was drawn last (the terrain
+    /// numbers are those of the last [`Renderer::render`]).
     pub fn draw_stats(&self) -> DrawStats {
+        let terrain = self.terrain_stats();
         DrawStats {
             dynamic_instances: self.dynamic.iter().map(|d| d.count).sum(),
             dynamic_draw_calls: self.dynamic.iter().filter(|d| d.count > 0).count() as u32,
             scene_draw_calls: self.draws.len() as u32,
-            terrain_draw_calls: self.terrain_chunk_count() as u32,
+            terrain_draw_calls: terrain.draw_calls,
+            terrain_chunks_total: terrain.chunks_total,
+            terrain_chunks_visible: terrain.chunks_visible,
+            terrain_triangles: terrain.triangles,
         }
     }
 
-    /// Show a terrain: builds the chunk meshes, the material texture array
-    /// and the material index texture from `map` and draws it before the
-    /// scene objects. Replaces a previous terrain. Call on map changes, not
-    /// every frame.
+    /// Show a terrain with the shipped settings (`assets/config/terrain.ron`):
+    /// builds the chunk meshes of all levels of detail, the material texture
+    /// array and the material index texture from `map` and draws it before
+    /// the scene objects. Replaces a previous terrain. Call on map changes,
+    /// not every frame.
     pub fn set_terrain(&mut self, map: &sf_data::map::Map) {
+        self.set_terrain_with(map, &TerrainConfig::embedded());
+    }
+
+    /// Like [`Renderer::set_terrain`] with explicit settings.
+    pub fn set_terrain_with(&mut self, map: &sf_data::map::Map, config: &TerrainConfig) {
         self.terrain = Some(crate::terrain_gpu::build(
             &self.gpu.device,
             &self.gpu.queue,
@@ -494,7 +514,42 @@ impl Renderer {
             self.format,
             DEPTH_FORMAT,
             map,
+            config,
         ));
+    }
+
+    /// The level of detail settings in use (`None` without terrain).
+    pub fn terrain_lod(&self) -> Option<LodConfig> {
+        self.terrain.as_ref().map(|t| t.config.lod)
+    }
+
+    /// Change the level of detail settings live (the debug panel's switches):
+    /// error budget, hysteresis, forced level, level tint. The skirts
+    /// (`seams`) are part of the mesh and change only with
+    /// [`Renderer::set_terrain_with`].
+    pub fn set_terrain_lod(&mut self, lod: LodConfig) {
+        if let Some(t) = &mut self.terrain {
+            t.config.lod = lod;
+            t.write_params(&self.gpu.queue);
+        }
+    }
+
+    /// Debug and tests: draw chunk `i` at level `levels[i]` (clamped to what
+    /// the chunk has) instead of selecting by error; `None` goes back to the
+    /// automatic selection. Chunks outside the view are still culled.
+    pub fn set_terrain_levels(&mut self, levels: Option<Vec<u8>>) {
+        if let Some(t) = &mut self.terrain {
+            t.level_override = levels;
+        }
+    }
+
+    /// Terrain counters of the last frame (all zero without terrain or before
+    /// the first frame).
+    pub fn terrain_stats(&self) -> TerrainStats {
+        self.terrain
+            .as_ref()
+            .map(|t| t.planner.selection().stats)
+            .unwrap_or_default()
     }
 
     /// Remove the terrain.
@@ -502,19 +557,31 @@ impl Renderer {
         self.terrain = None;
     }
 
-    /// Number of terrain chunks drawn per frame (0 without terrain).
+    /// Number of terrain chunks (0 without terrain); the visible ones are
+    /// drawn each frame, see [`Renderer::terrain_stats`].
     pub fn terrain_chunk_count(&self) -> usize {
-        self.terrain.as_ref().map_or(0, |t| t.chunks.len())
+        self.terrain.as_ref().map_or(0, |t| t.planner.chunk_count())
     }
 
-    fn write_globals(&self) {
-        let view_proj = self
-            .view_proj
-            .unwrap_or_else(|| self.camera.view_proj(aspect(self.size)));
+    fn current_view_proj(&self) -> Mat4 {
+        self.view_proj
+            .unwrap_or_else(|| self.camera.view_proj(aspect(self.size)))
+    }
+
+    /// Everything that depends on the camera and happens before drawing: the
+    /// globals and the terrain's level selection and culling.
+    fn prepare_frame(&mut self) {
+        let view_proj = self.current_view_proj();
         let globals = Globals::new(view_proj, &self.lighting);
         self.gpu
             .queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
+        if let Some(t) = &mut self.terrain {
+            let view = LodView::from_view_proj(view_proj, self.size.1 as f32);
+            let frustum = Frustum::from_view_proj(view_proj);
+            t.planner
+                .select(&view, &frustum, &t.config.lod, t.level_override.as_deref());
+        }
     }
 
     fn draw(&self, encoder: &mut wgpu::CommandEncoder, color: &wgpu::TextureView) {
@@ -545,10 +612,10 @@ impl Renderer {
             pass.set_pipeline(&t.pipeline);
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_bind_group(1, &t.bind_group, &[]);
-            for chunk in &t.chunks {
-                pass.set_vertex_buffer(0, chunk.vertices.slice(..));
-                pass.set_index_buffer(chunk.indices.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..chunk.index_count, 0, 0..1);
+            pass.set_vertex_buffer(0, t.vertices.slice(..));
+            pass.set_index_buffer(t.indices.slice(..), wgpu::IndexFormat::Uint32);
+            for range in &t.planner.selection().draws {
+                pass.draw_indexed(range.clone(), 0, 0..1);
             }
         }
         pass.set_pipeline(&self.pipeline);

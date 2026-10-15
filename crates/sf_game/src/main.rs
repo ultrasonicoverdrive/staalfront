@@ -15,10 +15,13 @@
 //! `--exit-after <s>` prints a frame-time and instancing summary on exit.
 //!
 //! The ground is the engine terrain (WP1.7): a procedural 256x256 m map
-//! (seed 1) by default, or a map directory given with `--map <dir>`. The
-//! camera still works on the flat `y = 0` plane (focus height and the point
-//! under the cursor ignore the relief, which stays below 6 m); picking against
-//! the real terrain comes later.
+//! (seed 1) by default, or a map directory given with `--map <dir>`. Since
+//! WP1.8 it has levels of detail and culling (`assets/config/terrain.ron`; the
+//! flags `--lod-px <pixels>`, `--lod-level <n>` and `--lod-tint` override the
+//! error budget, force a level and tint chunks by level), and the camera
+//! works against the real terrain: the point under the cursor, the zoom
+//! toward it and the middle-mouse grab are ray-terrain picks, and units and
+//! the click sound sit on the terrain surface.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,8 +34,8 @@ use sf_math::{Fx, Rng, Vec2};
 use sf_render::camera::DVec2;
 use sf_render::scene::{MeshKind, world_markers};
 use sf_render::{
-    Camera, CameraConfig, CameraInput, Frustum, GpuOptions, InstanceStats, Instancer, Motion,
-    Renderer, Style,
+    Camera, CameraConfig, CameraInput, Frustum, GpuOptions, Ground, InstanceStats, Instancer,
+    LodConfig, Motion, Renderer, Style, TerrainConfig, TerrainGround, TerrainStats,
 };
 use sf_sim::{Command, EntityView, Kind, PlayerId, Tick, World, WorldConfig};
 
@@ -127,12 +130,16 @@ struct Runner {
     audio: Option<AudioSystem>,
     camera: Camera,
     map: Map,
+    /// The terrain as a ground: camera picking, units and sounds stand on it.
+    ground: Arc<TerrainGround>,
+    lod: LodConfig,
     world: World,
     instancer: Instancer,
     views: Vec<EntityView>,
     units: u32,
     /// Latest instancing and draw counters, for the once-a-second line.
     stats: InstanceStats,
+    terrain: TerrainStats,
     draw_calls: u32,
     frame_ms: Samples,
     build_ms: Samples,
@@ -151,6 +158,7 @@ impl Runner {
         auto_zoom: bool,
         map: Map,
         units: u32,
+        lod: LodConfig,
         failed: Arc<AtomicBool>,
     ) -> Self {
         let now = Instant::now();
@@ -160,15 +168,14 @@ impl Runner {
         spawn_units(&mut world, units, map_size);
         let mut instancer =
             Instancer::new(Style::embedded(), (map_size.0 as f32, map_size.1 as f32));
-        let heights = (0..=i64::from(map.height()))
-            .flat_map(|z| (0..=i64::from(map.width())).map(move |x| (x, z)))
-            .map(|(x, z)| map.vertex_height(x, z));
-        let (lo, hi) = heights.fold((f32::MAX, f32::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
-        instancer.set_height_range(lo, hi);
+        let ground = Arc::new(TerrainGround::new(&map));
+        instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let camera_config = CameraConfig {
             map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
             ..CameraConfig::default()
         };
+        let mut camera = Camera::new(camera_config, 1280, 720);
+        camera.set_ground(ground.clone());
         Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -178,13 +185,16 @@ impl Runner {
             exit_after,
             renderer: None,
             audio: None,
-            camera: Camera::new(camera_config, 1280, 720),
+            camera,
             map,
+            ground,
+            lod,
             world,
             instancer,
             views: Vec::new(),
             units,
             stats: InstanceStats::default(),
+            terrain: TerrainStats::default(),
             draw_calls: 0,
             frame_ms: Samples::default(),
             build_ms: Samples::default(),
@@ -268,9 +278,11 @@ impl App for Runner {
                     renderer.color_format()
                 );
                 renderer.set_terrain(&self.map);
+                renderer.set_terrain_lod(self.lod);
+                let ground = &self.ground;
                 let map = &self.map;
                 renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
-                    map.height_at(x, z)
+                    ground.height(f64::from(x), f64::from(z)) as f32
                 }));
                 renderer.watch_shader_file(
                     ctx.assets().root().join("shaders/scene.wgsl"),
@@ -323,11 +335,11 @@ impl App for Runner {
             renderer.set_view_proj(view_proj);
             // Cull by tile, interpolate, put the units on the ground.
             let started = Instant::now();
-            let map = &self.map;
+            let ground = &self.ground;
             self.stats =
                 self.instancer
                     .build(&Frustum::from_view_proj(view_proj), alpha, |x, z| {
-                        map.height_at(x, z)
+                        ground.height(f64::from(x), f64::from(z)) as f32
                     });
             self.build_ms.push(started.elapsed());
             let started = Instant::now();
@@ -335,24 +347,27 @@ impl App for Runner {
                 renderer.set_instances(kind, self.instancer.instances(kind));
             }
             self.upload_ms.push(started.elapsed());
-            self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
         // The listener follows the camera (it does not rotate, so right = +X).
         let focus = self.camera.focus();
+        let focus_y = self.camera.focus_height() as f32;
         if let Some(audio) = &mut self.audio {
             audio.set_listener(Listener::new(
-                [focus.x as f32, 0.0, focus.y as f32],
+                [focus.x as f32, focus_y, focus.y as f32],
                 [1.0, 0.0, 0.0],
                 self.camera.distance() as f32,
             ));
             audio.update();
         }
-        if let Some(renderer) = &mut self.renderer
-            && let Err(e) = renderer.render()
-        {
-            eprintln!("sf_game: render failed: {e}");
-            self.failed.store(true, Ordering::Relaxed);
-            ctx.request_exit();
+        if let Some(renderer) = &mut self.renderer {
+            if let Err(e) = renderer.render() {
+                eprintln!("sf_game: render failed: {e}");
+                self.failed.store(true, Ordering::Relaxed);
+                ctx.request_exit();
+            }
+            // Level selection and culling happen inside render().
+            self.terrain = renderer.terrain_stats();
+            self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {
@@ -362,14 +377,18 @@ impl App for Runner {
         if actions.pressed(Action::PlayTestSound)
             && let Some(audio) = &mut self.audio
         {
-            // Played where the cursor points on the ground (the focus if it
+            // Played where the cursor points on the terrain (the focus if it
             // is off the window or the sky), so pan and zoom can be heard.
             let at = ctx
                 .input()
                 .cursor()
-                .and_then(|(x, y)| self.camera.ground_point(DVec2::new(x, y)))
-                .unwrap_or(focus);
-            audio.play_at("test_click", [at.x as f32, 0.0, at.y as f32]);
+                .and_then(|(x, y)| self.camera.ground_point_3d(DVec2::new(x, y)))
+                .unwrap_or(sf_render::camera::DVec3::new(
+                    focus.x,
+                    focus_y.into(),
+                    focus.y,
+                ));
+            audio.play_at("test_click", [at.x as f32, at.y as f32, at.z as f32]);
         }
         if actions.pressed(Action::Quit) {
             println!("quit requested");
@@ -387,7 +406,7 @@ impl App for Runner {
             match ft {
                 Some(f) => println!(
                     "{} fps, {} ticks/s (total {}), frame ms avg {:.2} p99 {:.2} max {:.2}, \
-                     units {}/{} visible, {} draw calls",
+                     units {}/{} visible, terrain {}/{} chunks {} tris, {} draw calls",
                     self.frames,
                     self.ticks,
                     self.total_ticks,
@@ -396,6 +415,9 @@ impl App for Runner {
                     f.max.as_secs_f64() * 1e3,
                     self.stats.visible,
                     self.stats.total,
+                    self.terrain.chunks_visible,
+                    self.terrain.chunks_total,
+                    self.terrain.triangles,
                     self.draw_calls,
                 ),
                 None => println!("{} fps, {} ticks/s", self.frames, self.ticks),
@@ -459,6 +481,15 @@ impl App for Runner {
             self.stats.tiles_total,
             self.stats.per_mesh,
             self.draw_calls,
+        );
+        println!(
+            "summary: last frame terrain {}/{} chunks, {} triangles, {} terrain draw calls, \
+             chunks per level {:?}",
+            self.terrain.chunks_visible,
+            self.terrain.chunks_total,
+            self.terrain.triangles,
+            self.terrain.draw_calls,
+            self.terrain.per_level,
         );
     }
 }
@@ -527,6 +558,27 @@ fn frame_cap_arg() -> Option<u32> {
     None
 }
 
+/// The terrain settings: `assets/config/terrain.ron` as embedded, with the
+/// flags `--lod-px <pixels>` (error budget), `--lod-level <n>` (every chunk
+/// at that level) and `--lod-tint` (colour chunks by level) on top.
+fn lod_config_args() -> LodConfig {
+    let mut lod = TerrainConfig::embedded().lod;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--lod-px" => {
+                if let Some(px) = args.next().and_then(|v| v.parse::<f32>().ok()) {
+                    lod.error_px = px;
+                }
+            }
+            "--lod-level" => lod.force_level = args.next().and_then(|v| v.parse().ok()),
+            "--lod-tint" => lod.tint_levels = true,
+            _ => {}
+        }
+    }
+    lod
+}
+
 /// `--map <dir>`: load a map directory instead of generating the default.
 fn map_arg() -> Option<String> {
     let mut args = std::env::args().skip(1);
@@ -556,6 +608,7 @@ fn main() {
         auto_zoom_arg(),
         map,
         units_arg(),
+        lod_config_args(),
         failed.clone(),
     );
     let (zoom, focus) = camera_args();

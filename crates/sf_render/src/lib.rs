@@ -15,14 +15,20 @@
 //! unit instances from two sim ticks, per-tile frustum culling, one instance
 //! buffer and one draw call per placeholder mesh (cube, cylinder, cone).
 //!
+//! WP1.8 adds terrain level of detail and culling ([`lod`]), skirts that close the
+//! seams between chunks of different levels, and ray picking against the
+//! terrain ([`ground`]) for the camera.
+//!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
 pub mod camera;
 pub mod frustum;
 pub mod gpu;
+pub mod ground;
 pub mod image;
 pub mod instancing;
+pub mod lod;
 pub mod mesh;
 pub mod renderer;
 pub mod scene;
@@ -35,8 +41,10 @@ mod terrain_gpu;
 pub use camera::{Camera, CameraConfig, CameraInput};
 pub use frustum::{Aabb, Frustum, Visibility};
 pub use gpu::{Gpu, GpuOptions, RenderError};
+pub use ground::{FlatGround, Ground, TerrainGround};
 pub use image::{Rgba8, Tolerance};
 pub use instancing::{InstanceStats, Instancer, Motion};
+pub use lod::{LodConfig, TerrainConfig, TerrainStats};
 pub use renderer::{DrawStats, EMBEDDED_SHADER, Renderer};
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
