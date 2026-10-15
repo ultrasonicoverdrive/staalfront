@@ -1,0 +1,29 @@
+// Sound bank: named sounds for sf_audio. Hot-reloaded in debug builds.
+//
+// Each entry:
+//   file:            path relative to the assets directory (forward slashes)
+//   volume:          linear base volume, default 1.0
+//   pitch_variation: random playback-rate spread, 0.05 = +-5 %, default 0
+//   max_instances:   simultaneous voices of this sound, default 8
+//   category:        Sfx | Ui | Music (for volume settings), default Sfx
+//   looped:          repeat until stopped, default false
+//
+// Every file needs a line in assets/LICENSES.md.
+(
+    sounds: {
+        "test_click": (
+            file: "audio/sfx/test_click.wav",
+            volume: 0.8,
+            pitch_variation: 0.05,
+            max_instances: 4,
+            category: Sfx,
+        ),
+        // The same file as a looping "music" track, to exercise the crossfade.
+        "test_loop": (
+            file: "audio/sfx/test_click.wav",
+            volume: 0.5,
+            category: Music,
+            looped: true,
+        ),
+    },
+)

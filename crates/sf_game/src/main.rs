@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use sf_audio::{AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate};
 use sf_engine::{Action, App, Context, EngineConfig, Resized};
 use sf_render::camera::DVec2;
@@ -52,6 +53,7 @@ struct Runner {
     total_ticks: u64,
     exit_after: Option<Duration>,
     renderer: Option<Renderer>,
+    audio: Option<AudioSystem>,
     camera: Camera,
     map: Map,
     last_frame: Option<Instant>,
@@ -81,6 +83,7 @@ impl Runner {
             total_ticks: 0,
             exit_after,
             renderer: None,
+            audio: None,
             camera: Camera::new(camera_config, 1280, 720),
             map,
             last_frame: None,
@@ -138,6 +141,16 @@ impl App for Runner {
             ctx.scale_factor(),
             ctx.assets().root().display()
         );
+        let audio = AudioSystem::new(ctx.assets().root());
+        println!(
+            "audio: {}",
+            if audio.is_silent() {
+                "silent (no device)"
+            } else {
+                "device open"
+            }
+        );
+        self.audio = Some(audio);
         match Renderer::for_window(
             ctx.window().clone(),
             s.width,
@@ -188,6 +201,16 @@ impl App for Runner {
         if let Some(renderer) = &mut self.renderer {
             renderer.set_view_proj(self.camera.view_proj());
         }
+        // The listener follows the camera (it does not rotate, so right = +X).
+        let focus = self.camera.focus();
+        if let Some(audio) = &mut self.audio {
+            audio.set_listener(Listener::new(
+                [focus.x as f32, 0.0, focus.y as f32],
+                [1.0, 0.0, 0.0],
+                self.camera.distance() as f32,
+            ));
+            audio.update();
+        }
         if let Some(renderer) = &mut self.renderer
             && let Err(e) = renderer.render()
         {
@@ -199,6 +222,18 @@ impl App for Runner {
         if actions.pressed(Action::ToggleFullscreen) {
             ctx.toggle_fullscreen();
             println!("fullscreen: {}", ctx.is_fullscreen());
+        }
+        if actions.pressed(Action::PlayTestSound)
+            && let Some(audio) = &mut self.audio
+        {
+            // Played where the cursor points on the ground (the focus if it
+            // is off the window or the sky), so pan and zoom can be heard.
+            let at = ctx
+                .input()
+                .cursor()
+                .and_then(|(x, y)| self.camera.ground_point(DVec2::new(x, y)))
+                .unwrap_or(focus);
+            audio.play_at("test_click", [at.x as f32, 0.0, at.y as f32]);
         }
         if actions.pressed(Action::Quit) {
             println!("quit requested");
@@ -243,6 +278,9 @@ impl App for Runner {
     }
 
     fn on_asset_changed(&mut self, _ctx: &mut Context, path: &std::path::Path) {
+        if let Some(audio) = &mut self.audio {
+            audio.on_asset_changed(path);
+        }
         println!("asset changed: {}", path.display());
     }
 

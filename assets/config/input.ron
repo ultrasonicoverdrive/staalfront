@@ -19,6 +19,7 @@
         CameraDrag: [(trigger: Mouse(Middle))],
         ToggleFullscreen: [(trigger: Key(F11)), (trigger: Key(Enter), mods: [Alt])],
         ToggleDebug: [(trigger: Key(F1))],
+        PlayTestSound: [(trigger: Key(KeyT))],
         Quit: [(trigger: Key(Escape))],
     },
 )
