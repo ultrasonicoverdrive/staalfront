@@ -123,7 +123,7 @@ fn build_chunk(map: &Map, chunk: (u32, u32)) -> TerrainChunk {
             let b = a + 1; // north-east
             let c = a + vw as u16; // south-west
             let d = c + 1; // south-east
-            if (origin.0 + x + origin.1 + z) % 2 == 0 {
+            if (origin.0 + x + origin.1 + z).is_multiple_of(2) {
                 indices.extend_from_slice(&[a, c, d, a, d, b]);
             } else {
                 indices.extend_from_slice(&[a, c, b, b, c, d]);
@@ -397,8 +397,8 @@ mod tests {
             let distinct: std::collections::BTreeSet<_> =
                 t.chunks(4).map(|p| (p[0], p[1], p[2])).collect();
             assert!(distinct.len() > 50, "{} is flat", names[i]);
-            for j in 0..i {
-                assert_ne!(t, &textures[j]);
+            for other in &textures[..i] {
+                assert_ne!(t, other);
             }
         }
         // Tileable: the step across the wrap equals typical neighbour steps.
