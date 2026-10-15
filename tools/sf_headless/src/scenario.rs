@@ -1,0 +1,525 @@
+//! The scenario file: everything a headless run starts from.
+//!
+//! A scenario is a RON file (see the crate documentation for the format and an
+//! example). It is data only: a world seed, a map size, a run length, groups of
+//! entities to spawn and an optional list of timed commands. [`Scenario::build_world`]
+//! turns it into an `sf_sim` [`World`] with every command already scheduled, so
+//! a run never feeds anything into the simulation after tick 0 except the
+//! `step` calls themselves.
+//!
+//! # Determinism
+//!
+//! Loading is deterministic: the same file gives the same commands in the same
+//! order on every machine. The only randomness is the *placement stream*, a
+//! PCG32 stream seeded with the world seed (see [`PLACEMENT_STREAM`]) that
+//! draws the spawn positions, never the simulation's own streams. No clock, no
+//! environment, no file other than the scenario itself is read.
+//!
+//! # Scheduling order
+//!
+//! 1. every spawn group, in file order, entity by entity;
+//! 2. every timed command, in file order (a `Despawn` with several ids becomes
+//!    one `sf_sim` command per id).
+//!
+//! `sf_sim` runs the commands of one tick by `(player, scheduling order)`, so
+//! the file order matters only between commands of the same tick and player.
+//! Everything is scheduled before tick 0, as a replay would be; pending
+//! commands are part of the checksum, so this is also what the checksums of a
+//! scenario mean.
+//!
+//! # Entity ids
+//!
+//! In a fresh world the `n`-th `Spawn` command that runs gets the id
+//! `{ n, 0 }` as long as nothing was despawned before it. Commands name
+//! entities by that id ([`IdSpec`]); an id that is stale or never exists is
+//! skipped by `sf_sim`, which counts the command as ignored when none of its
+//! ids hit.
+
+use std::fmt;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
+use sf_math::{Fx, Rng, Vec2};
+use sf_sim::{
+    Area, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId, Tick,
+    World, WorldConfig,
+};
+
+/// The stream number of the placement generator: spawn positions come from
+/// `Rng::with_stream(seed, PLACEMENT_STREAM)`, one `x` then one `y` per entity,
+/// across all spawn groups in file order.
+///
+/// The value is the one `crates/sf_sim/tests/common/mod.rs` uses for its
+/// golden script, on purpose: a spawn group over the whole 256 by 256 map with
+/// kinds `[0, 1, 2]` and owners `[0, 1, 2, 3]` and the seed of the golden
+/// scenario is *the same crowd* as the sf_sim golden test (`tests/sim_crowd.rs`
+/// proves it). Changing it changes the checksum of every scenario.
+pub const PLACEMENT_STREAM: u64 = 0x5C21;
+
+/// A parsed, validated scenario file.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Scenario {
+    /// Name used in logs. Empty means "the file name without extension"
+    /// ([`Scenario::load`]) or "unnamed" ([`Scenario::from_ron_str`]).
+    #[serde(default)]
+    pub name: String,
+    /// Seeds the world and the placement stream.
+    pub seed: u64,
+    /// The map size in cells; 256 by 256 when left out.
+    #[serde(default)]
+    pub map: MapSize,
+    /// How many ticks to run; at least 1.
+    pub ticks: u64,
+    /// Groups of entities to create.
+    #[serde(default)]
+    pub spawns: Vec<SpawnGroup>,
+    /// Commands for later ticks.
+    #[serde(default)]
+    pub commands: Vec<TimedCommand>,
+}
+
+/// The map size in cells.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapSize {
+    /// Width in cells, `1..=1024`.
+    #[serde(default = "default_side")]
+    pub width: u32,
+    /// Height in cells, `1..=1024`.
+    #[serde(default = "default_side")]
+    pub height: u32,
+}
+
+fn default_side() -> u32 {
+    DEFAULT_MAP_SIDE
+}
+
+impl Default for MapSize {
+    fn default() -> MapSize {
+        MapSize {
+            width: DEFAULT_MAP_SIDE,
+            height: DEFAULT_MAP_SIDE,
+        }
+    }
+}
+
+/// A rectangle of the map in whole cells: `min` inclusive, `max` exclusive.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Rect {
+    /// The corner with the smallest coordinates, `(x, y)`.
+    pub min: (i32, i32),
+    /// The corner with the largest coordinates, `(x, y)`.
+    pub max: (i32, i32),
+}
+
+impl Rect {
+    fn to_area(self) -> Area {
+        Area::from_cells(self.min.0, self.min.1, self.max.0, self.max.1)
+    }
+
+    fn describe(self) -> String {
+        format!(
+            "({}, {})-({}, {})",
+            self.min.0, self.min.1, self.max.0, self.max.1
+        )
+    }
+}
+
+/// `count` entities created at `tick`, at random positions inside `area`.
+///
+/// Entity number `i` of the group (counting from 0) gets kind
+/// `kinds[i % kinds.len()]` and owner `owners[i % owners.len()]`, so
+/// `kinds: [0, 1, 2]` splits the group into three equal kinds.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnGroup {
+    /// The tick the spawns run at; 0 when left out.
+    #[serde(default)]
+    pub tick: u64,
+    /// The player the spawn commands are issued by (decides their order
+    /// within a tick); 0 when left out.
+    #[serde(default)]
+    pub player: u8,
+    /// How many entities, at least 1.
+    pub count: u32,
+    /// The kinds to cycle through, not empty.
+    pub kinds: Vec<u16>,
+    /// The owners to cycle through, not empty.
+    pub owners: Vec<u8>,
+    /// Where they appear, inside the map.
+    pub area: Rect,
+}
+
+/// A command for a later tick.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TimedCommand {
+    /// The tick it runs at, before the last tick of the scenario.
+    pub tick: u64,
+    /// The player who issues it; 0 when left out.
+    #[serde(default)]
+    pub player: u8,
+    /// What it does.
+    pub command: Action,
+}
+
+/// What a timed command does. These are the `sf_sim` commands apart from
+/// `Spawn`, which is what [`SpawnGroup`] is for.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum Action {
+    /// `Command::SetWanderArea`: wander inside `area`.
+    SetWanderArea {
+        /// The entities.
+        ids: Vec<IdSpec>,
+        /// Where they may wander, inside the map.
+        area: Rect,
+    },
+    /// `Command::MoveTo`: walk to `target` and stand there.
+    MoveTo {
+        /// The entities.
+        ids: Vec<IdSpec>,
+        /// The target cell `(x, y)`, inside the map.
+        target: (i32, i32),
+    },
+    /// `Command::Despawn` for each id.
+    Despawn {
+        /// The entities.
+        ids: Vec<IdSpec>,
+    },
+}
+
+/// Names entities by their `sf_sim` id.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum IdSpec {
+    /// One id: slot index and generation.
+    Id(u32, u32),
+    /// The slots `from..to` (end exclusive) at generation 0, which in a world
+    /// without despawns are the entities spawned `from`-th up to `to`-th.
+    Range(u32, u32),
+}
+
+impl IdSpec {
+    fn push_ids(self, out: &mut Vec<EntityId>) {
+        match self {
+            IdSpec::Id(index, generation) => out.push(EntityId::new(index, generation)),
+            IdSpec::Range(from, to) => out.extend((from..to).map(|i| EntityId::new(i, 0))),
+        }
+    }
+}
+
+fn expand(ids: &[IdSpec]) -> Vec<EntityId> {
+    let mut out = Vec::new();
+    for spec in ids {
+        spec.push_ids(&mut out);
+    }
+    out
+}
+
+/// Why a scenario could not be loaded or run.
+#[derive(Debug)]
+pub enum ScenarioError {
+    /// The file could not be read.
+    Io {
+        /// The file.
+        path: PathBuf,
+        /// What the operating system said.
+        source: io::Error,
+    },
+    /// The text is not valid RON for a scenario: syntax, an unknown field or
+    /// variant, a wrong type. `message` carries line and column.
+    Syntax {
+        /// The file, when the text came from one.
+        path: Option<PathBuf>,
+        /// The parser's message.
+        message: String,
+    },
+    /// The file parsed but describes something that cannot run. Lists every
+    /// problem found, not just the first.
+    Invalid {
+        /// The file, when the text came from one.
+        path: Option<PathBuf>,
+        /// One line per problem.
+        problems: Vec<String>,
+    },
+    /// `sf_sim` refused the world or a command.
+    Sim(String),
+}
+
+impl fmt::Display for ScenarioError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn at(f: &mut fmt::Formatter<'_>, path: &Option<PathBuf>) -> fmt::Result {
+            match path {
+                Some(p) => write!(f, "{}: ", p.display()),
+                None => Ok(()),
+            }
+        }
+        match self {
+            ScenarioError::Io { path, source } => {
+                write!(f, "cannot read {}: {source}", path.display())
+            }
+            ScenarioError::Syntax { path, message } => {
+                at(f, path)?;
+                write!(f, "invalid scenario: {message}")
+            }
+            ScenarioError::Invalid { path, problems } => {
+                at(f, path)?;
+                write!(f, "invalid scenario:")?;
+                for p in problems {
+                    write!(f, "\n  - {p}")?;
+                }
+                Ok(())
+            }
+            ScenarioError::Sim(message) => {
+                write!(f, "the simulation refused the scenario: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ScenarioError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ScenarioError::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+impl Scenario {
+    /// Reads and validates a scenario file. A scenario without a `name` is
+    /// named after the file.
+    pub fn load(path: &Path) -> Result<Scenario, ScenarioError> {
+        let text = std::fs::read_to_string(path).map_err(|source| ScenarioError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let mut scenario = Scenario::parse(&text, Some(path))?;
+        if scenario.name.is_empty()
+            && let Some(stem) = path.file_stem()
+        {
+            scenario.name = stem.to_string_lossy().into_owned();
+        }
+        Ok(scenario)
+    }
+
+    /// Parses and validates scenario text.
+    pub fn from_ron_str(text: &str) -> Result<Scenario, ScenarioError> {
+        Scenario::parse(text, None)
+    }
+
+    fn parse(text: &str, path: Option<&Path>) -> Result<Scenario, ScenarioError> {
+        let path = path.map(Path::to_path_buf);
+        let scenario: Scenario = ron::from_str(text).map_err(|e| ScenarioError::Syntax {
+            path: path.clone(),
+            message: e.to_string(),
+        })?;
+        let problems = scenario.problems();
+        if problems.is_empty() {
+            Ok(scenario)
+        } else {
+            Err(ScenarioError::Invalid { path, problems })
+        }
+    }
+
+    /// The name for logs: the scenario's own, or "unnamed".
+    pub fn display_name(&self) -> &str {
+        if self.name.is_empty() {
+            "unnamed"
+        } else {
+            &self.name
+        }
+    }
+
+    /// Every reason this scenario cannot run, one line each; empty when it can.
+    ///
+    /// Rules: `ticks` is at least 1; the map sides are in `1..=1024`; every
+    /// spawn group has a count, kinds, owners and a non-empty area inside the
+    /// map, and all groups together stay under the entity limit of `sf_sim`;
+    /// every tick (of a spawn group or a command) is before the last tick of
+    /// the run, otherwise it would never execute; command areas are non-empty
+    /// and inside the map, targets inside the map, id lists non-empty with ids
+    /// below the entity limit and ranges that are not empty. (A tick in the
+    /// past cannot be written: the world starts at tick 0 and everything is
+    /// scheduled before it.)
+    pub fn problems(&self) -> Vec<String> {
+        let mut p = Vec::new();
+        let MapSize { width, height } = self.map;
+        let map_ok = (1..=MAX_MAP_SIDE).contains(&width) && (1..=MAX_MAP_SIDE).contains(&height);
+        if !map_ok {
+            p.push(format!(
+                "map: width and height must be between 1 and {MAX_MAP_SIDE}, got {width}x{height}"
+            ));
+        }
+        if self.ticks == 0 {
+            p.push("ticks must be at least 1".into());
+        }
+
+        // A tick at or after `ticks` never runs. Not checked when `ticks` is
+        // itself wrong (everything would be reported).
+        let tick_problem = |at: &str, tick: u64| -> Option<String> {
+            (self.ticks > 0 && tick >= self.ticks).then(|| {
+                format!(
+                    "{at}: tick {tick} is after the last tick ({}); it would never run",
+                    self.ticks - 1
+                )
+            })
+        };
+        let area_problems = |at: &str, what: &str, r: Rect, out: &mut Vec<String>| {
+            if r.min.0 >= r.max.0 || r.min.1 >= r.max.1 {
+                out.push(format!(
+                    "{at}: {what} {} is empty or reversed (min must be below max on both axes)",
+                    r.describe()
+                ));
+            } else if map_ok
+                && (r.min.0 < 0
+                    || r.min.1 < 0
+                    || i64::from(r.max.0) > i64::from(width)
+                    || i64::from(r.max.1) > i64::from(height))
+            {
+                out.push(format!(
+                    "{at}: {what} {} lies outside the {width}x{height} map",
+                    r.describe()
+                ));
+            }
+        };
+
+        let mut total: u64 = 0;
+        for (i, g) in self.spawns.iter().enumerate() {
+            let at = format!("spawns[{i}]");
+            if g.count == 0 {
+                p.push(format!("{at}: count must be at least 1"));
+            }
+            total += u64::from(g.count);
+            if g.kinds.is_empty() {
+                p.push(format!("{at}: kinds must not be empty"));
+            }
+            if g.owners.is_empty() {
+                p.push(format!("{at}: owners must not be empty"));
+            }
+            p.extend(tick_problem(&at, g.tick));
+            area_problems(&at, "area", g.area, &mut p);
+        }
+        if total > u64::from(MAX_ENTITIES) {
+            p.push(format!(
+                "spawns: {total} entities in total, the limit is {MAX_ENTITIES}"
+            ));
+        }
+
+        for (i, c) in self.commands.iter().enumerate() {
+            let at = format!("commands[{i}]");
+            p.extend(tick_problem(&at, c.tick));
+            match &c.command {
+                Action::SetWanderArea { ids, area } => {
+                    id_problems(&at, ids, &mut p);
+                    area_problems(&at, "area", *area, &mut p);
+                }
+                Action::MoveTo { ids, target } => {
+                    id_problems(&at, ids, &mut p);
+                    if map_ok
+                        && (target.0 < 0
+                            || target.1 < 0
+                            || i64::from(target.0) >= i64::from(width)
+                            || i64::from(target.1) >= i64::from(height))
+                    {
+                        p.push(format!(
+                            "{at}: target ({}, {}) lies outside the {width}x{height} map",
+                            target.0, target.1
+                        ));
+                    }
+                }
+                Action::Despawn { ids } => id_problems(&at, ids, &mut p),
+            }
+        }
+        p
+    }
+
+    /// The world this scenario starts from: created with the scenario's seed
+    /// and map, every spawn and command scheduled, no tick run yet.
+    ///
+    /// Validates first, so a scenario edited in memory cannot run invalid.
+    pub fn build_world(&self) -> Result<World, ScenarioError> {
+        let problems = self.problems();
+        if !problems.is_empty() {
+            return Err(ScenarioError::Invalid {
+                path: None,
+                problems,
+            });
+        }
+        let config = WorldConfig::new(self.seed).with_map_size(self.map.width, self.map.height);
+        let mut world = World::new(config).map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
+
+        let mut placement = Rng::with_stream(self.seed, PLACEMENT_STREAM);
+        for g in &self.spawns {
+            let (x0, x1) = (Fx::from_int(g.area.min.0), Fx::from_int(g.area.max.0));
+            let (y0, y1) = (Fx::from_int(g.area.min.1), Fx::from_int(g.area.max.1));
+            for i in 0..g.count as usize {
+                let x = placement.fx_range(x0, x1);
+                let y = placement.fx_range(y0, y1);
+                let command = Command::Spawn {
+                    kind: Kind(g.kinds[i % g.kinds.len()]),
+                    pos: Vec2::new(x, y),
+                    owner: PlayerId(g.owners[i % g.owners.len()]),
+                };
+                world
+                    .schedule(Tick(g.tick), PlayerId(g.player), command)
+                    .map_err(sim)?;
+            }
+        }
+
+        for c in &self.commands {
+            let (tick, player) = (Tick(c.tick), PlayerId(c.player));
+            match &c.command {
+                Action::SetWanderArea { ids, area } => {
+                    let command = Command::SetWanderArea {
+                        ids: expand(ids),
+                        area: area.to_area(),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::MoveTo { ids, target } => {
+                    let command = Command::MoveTo {
+                        ids: expand(ids),
+                        target: Vec2::from_ints(target.0, target.1),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::Despawn { ids } => {
+                    for id in expand(ids) {
+                        world
+                            .schedule(tick, player, Command::Despawn { id })
+                            .map_err(sim)?;
+                    }
+                }
+            }
+        }
+        Ok(world)
+    }
+}
+
+fn id_problems(at: &str, ids: &[IdSpec], out: &mut Vec<String>) {
+    if ids.is_empty() {
+        out.push(format!("{at}: ids must not be empty"));
+    }
+    for spec in ids {
+        match *spec {
+            IdSpec::Id(index, _) if index >= MAX_ENTITIES => out.push(format!(
+                "{at}: Id({index}, ..) is not a valid slot (the limit is {MAX_ENTITIES} slots)"
+            )),
+            IdSpec::Range(from, to) if from >= to => out.push(format!(
+                "{at}: Range({from}, {to}) is empty (it covers from..to, end exclusive)"
+            )),
+            IdSpec::Range(_, to) if to > MAX_ENTITIES => out.push(format!(
+                "{at}: Range(.., {to}) goes past the limit of {MAX_ENTITIES} slots"
+            )),
+            _ => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

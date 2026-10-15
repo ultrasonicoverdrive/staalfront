@@ -7,7 +7,8 @@
 //! ```
 //!
 //! Defaults: 5000 wanderers, 10000 ticks (the headline scenario of the work
-//! package). `sf_headless` (WP1.3) will replace this with a real runner.
+//! package). The real runner is `sf_headless` (WP1.3), which also reports
+//! ticks per second; this example stays as a minimal throughput probe.
 
 use std::time::Instant;
 
