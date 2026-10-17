@@ -1,0 +1,38 @@
+// glTF model packs (WP1.10). `sf_game --models <pack>` draws the units with
+// the models of that pack instead of the placeholder shapes of units.ron
+// (whose palette, icon and level settings still apply). Unit kind `i` gets
+// model `i` of the list (wrapping around); `icon` is that kind's strategic
+// icon (Square, Circle or Triangle).
+//
+// `dir` is relative to `assets/`, `file` to `dir`. `axes` says where the
+// source has its front and up and how many metres one unit is; the loader
+// converts to the engine convention (metres, +Y up, front +X, ground at
+// Y = 0; docs/conventions.md) once, on load. The glTF spec puts the front at
+// +Z (`front: PlusZ`); the test pack was authored front +X already.
+// `lod_px`: a model's level i is drawn while its projected bounding diameter
+// is at least lod_px[i] pixels (the test pack's `screenPixelMin` extras).
+(
+    packs: {
+        "testpack": (
+            dir: "testpack_v1",
+            axes: (front: PlusX, up: PlusY, metres_per_unit: 1.0),
+            lod_px: [60.0, 30.0],
+            models: [
+                (file: "models/verkenner.glb", icon: Triangle),
+                (file: "models/pantserwagen.glb", icon: Triangle),
+                (file: "models/lichte_tank.glb", icon: Triangle),
+                (file: "models/gevechtstank.glb", icon: Triangle),
+                (file: "models/zware_tank.glb", icon: Triangle),
+                (file: "models/mobiele_artillerie.glb", icon: Triangle),
+                (file: "models/raketwagen.glb", icon: Triangle),
+                (file: "models/luchtafweerwagen.glb", icon: Triangle),
+                (file: "models/grondstofwagen.glb", icon: Triangle),
+                (file: "models/bouwvoertuig.glb", icon: Triangle),
+                (file: "models/energiecentrale.glb", icon: Square),
+                (file: "models/raffinaderij.glb", icon: Square),
+                (file: "models/voertuigfabriek.glb", icon: Square),
+                (file: "models/verdedigingstoren.glb", icon: Square),
+            ],
+        ),
+    },
+)

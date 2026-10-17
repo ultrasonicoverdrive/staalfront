@@ -157,6 +157,11 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
 
 ## 5. Coordinates (§1.3)
 
+- **Engine axes** (fixed in WP1.10, `docs/conventions.md` section 12): metres,
+  `+Y` up, the front of a model along `+X`, the ground at `Y = 0`, right-handed (a
+  model's right side is `+Z`). The sim's 2D `(x, y)` is the render `(x, z)`;
+  facing 0 is `+X` and turns towards `+Z`.
+
 - Gameplay happens on a **cell grid** (for example 1 cell = 1 m; maps 64x64 up to
   256x256).
 - Positions within a cell are fixed-point ("leptons", like the original).
@@ -466,10 +471,8 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
   renderer one buffer and one draw per list (`Renderer::upload_units` registers the
   extra meshes when `ModelSet::revision` changes, then uploads every list and the
   icons). Three shapes with 1 + 3 + 3 levels make at most 7 model draws.
-  **For WP1.10:** load the glTF meshes, hand them to `ModelSet::new(extra, chains)`
-  with the asset's switch sizes and `Instancer::set_models`; selection, stats and
-  picking need no change. A level is one mesh today; a hull/turret model would add
-  a part list to `LodLevel`.
+  glTF models (WP1.10, section 15) add a part list per level: one draw per
+  (part, level).
 - **When icons take over** (`icons.rs`, `icons:` in `units.ron`). The trigger is the
   apparent size, at the camera focus, of a reference unit (`reference_size` 2 m):
   `reference_size * focal_px / camera distance`. Models only at or above
@@ -533,7 +536,43 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
 - **Not hot-reloaded:** `icon.wgsl` (the scene shader is). `units.ron` is, in debug
   builds, and rebuilds the model set.
 
-## 15. Original Red Alert audio (WP11.7, B11)
+## 15. glTF models (WP1.10)
+
+`sf_render::glb` loads glTF 2.0 binaries (`.glb`) with the `gltf` crate (default
+features off; `names` and `utils` only: no image decoding, no file or base64 URIs).
+
+- **Axes once, in the loader.** `AxisConvention { front, up, metres_per_unit }`
+  (per pack in `assets/config/models.ron`) becomes one similarity `S = s * C`; the
+  rows of `C` are the source's front, up and right (`front x up`), so `det C = +1`
+  for any right-handed source (no mirror, the winding stays counter-clockwise).
+  Vertices get `S`, normals `C`, node matrices `S M S^-1`. The renderer and the
+  shaders never correct axes. The test pack is authored front `+X` (identity); a
+  spec-conformant glTF says `front: PlusZ`.
+- **Levels, parts, merge.** Each scene root is a level (`<model>_LOD<n>`). Below a
+  root, a node without a mesh or with children is a part (`hull`, `turret`,
+  `barrel`, `_LOD<n>` stripped); mesh leaves (`hull_steel_LOD0`, ...) merge into the
+  nearest part with their relative transform, so a part split per material is **one
+  vertex/index buffer**. The material is a per-vertex colour (`mesh::Vertex::color`:
+  rgb = base colour factor, a = team weight; `team` takes the player colour in
+  `scene.wgsl`). Parts without geometry below them are dropped (the test pack's
+  scout, trucks and buildings have empty turret/barrel nodes).
+- **Rig and instancing.** A level is a list of `RigPart`s (`model.rs`: mesh, parent,
+  rest transform, `Joint::Fixed | Yaw | Pitch`). Per instance the instancer poses
+  them (`pose_parts`: `parent * rest * joint`) and pushes one instance into each
+  part's list: **one draw per part per level**. The test pack is 83 part meshes (7
+  models with hull, turret and barrel, 7 hull-only, the rocket truck's coarsest
+  level without barrel), against 191 mesh nodes as delivered. The demo drive is
+  `Instancer::set_aim`: turrets track a fixed point, barrels rise a little.
+- **Bounds.** `ModelBounds` (the finest level's rest-pose box and a reach that
+  covers any joint angle) replace the placeholder shape size for the culling
+  margins, the level selection (diameter) and the click box (`ray_obb` around the
+  box's footprint centre).
+- **Errors, not panics.** Missing file, wrong version (GLB container or
+  `asset.version`), required extensions, skins, animation clips, textures,
+  non-triangle primitives, external buffers, missing normals, bad indices: each a
+  `GlbError` with a message. `sf_game --models <pack>` exits with that message.
+
+## 16. Original Red Alert audio (WP11.7, B11)
 
 **Where.** A module `sf_audio::ra`, not a separate crate: it only feeds
 decoded PCM into the existing kira player (`Player::inject`) and has no user

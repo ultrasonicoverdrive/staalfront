@@ -48,7 +48,7 @@
 
 use std::f32::consts::TAU;
 
-use glam::Vec3;
+use glam::{Mat4, Vec3};
 use sf_math::render_bridge::vec2_to_f32;
 use sf_math::{Facing, Vec2};
 
@@ -56,7 +56,7 @@ use crate::frustum::{Aabb, Frustum};
 use crate::icons::{
     Blend, Dominant, ICON_HIGHLIGHT, IconConfig, IconInstance, IconParams, snap_icon_center,
 };
-use crate::model::{EyeView, MAX_LODS, MeshId, ModelSet};
+use crate::model::{EyeView, MAX_LODS, MAX_PARTS, MeshId, ModelSet, PartAngles, pose_parts};
 use crate::pick::{
     Pick, PickVia, UnitId, click_margin, click_reach, icon_hit, project_px, ray_hits_aabb, ray_obb,
 };
@@ -186,6 +186,9 @@ pub struct InstanceStats {
     pub model_draw_calls: u32,
     /// Draw calls of the icons: 1 when there are any.
     pub icon_draw_calls: u32,
+    /// Model instances submitted (one per part of a unit drawn as a model;
+    /// equal to `models` for single-mesh models).
+    pub part_instances: u32,
 }
 
 impl InstanceStats {
@@ -262,9 +265,13 @@ struct Drawn {
     /// Interpolated facing in 1/256 turns.
     steps: f32,
     shape: u8,
-    /// The mesh list and the index in it of the unit's model instance.
+    /// The mesh list and the index in it of the unit's model instance (its
+    /// first part).
     model_mesh: u16,
     model_index: u32,
+    /// The instances of the further parts (`extra_parts` of them).
+    extra: [(u16, u32); MAX_PARTS - 1],
+    extra_parts: u8,
     /// Index in the icon list.
     icon_index: u32,
 }
@@ -306,18 +313,74 @@ pub struct Instancer {
     frame: Option<FrameState>,
     records: Vec<Drawn>,
     visible_tiles: Vec<VisibleTile>,
+    /// Where the turrets aim (`x`, `z`), the WP1.10 demo; `None` = straight ahead.
+    aim: Option<[f32; 2]>,
 }
 
-/// `(footprint, tallest)` of a style: half the diagonal of the widest
-/// footprint (covers any rotation) and the tallest shape.
-fn style_extent(style: &Style) -> (f32, f32) {
+/// `(footprint, tallest)` of a style and its models: half the diagonal of
+/// the widest footprint (covers any rotation) and the tallest shape; a model
+/// with parts counts with its reach (the farthest a vertex can get from the
+/// unit's origin with the joints turned).
+fn style_extent(style: &Style, models: &ModelSet) -> (f32, f32) {
     let footprint = style
         .shapes()
         .iter()
         .map(|s| 0.5 * s.size[0].hypot(s.size[2]))
         .fold(0.0, f32::max);
     let tallest = style.shapes().iter().map(|s| s.size[1]).fold(0.0, f32::max);
-    (footprint, tallest)
+    let reach = models
+        .models()
+        .iter()
+        .filter_map(|m| m.bounds())
+        .map(|b| b.reach)
+        .fold(0.0, f32::max);
+    (footprint.max(reach), tallest.max(reach))
+}
+
+/// What a unit's model looks like to the culling, the level selection and
+/// the picking: a box in the unit's frame, and the scale of its mesh.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ShapeGeom {
+    /// `(along the facing, height from the ground, across)` of the click box.
+    size: [f32; 3],
+    /// Centre of the box's footprint in the unit's frame (along, across).
+    offset: [f32; 2],
+    /// Diameter for the level selection.
+    diameter: f32,
+    /// Scale of the mesh in the model matrix: the shape size for the unit
+    /// placeholder meshes, 1 for glTF models (real metres).
+    scale: [f32; 3],
+}
+
+/// The world position of a point `offset` (along, across) in the frame of a
+/// unit at `pos` facing `steps`.
+fn offset_point(pos: Vec3, steps: f32, offset: [f32; 2]) -> Vec3 {
+    if offset == [0.0, 0.0] {
+        return pos;
+    }
+    let (s, c) = (steps * (TAU / 256.0)).sin_cos();
+    pos + Vec3::new(
+        offset[0] * c - offset[1] * s,
+        0.0,
+        offset[0] * s + offset[1] * c,
+    )
+}
+
+/// The turret and barrel angles of the demo: the turret turns towards
+/// `aim`, the barrel rises a little with the distance to it.
+pub fn aim_angles(x: f32, z: f32, steps: f32, aim: Option<[f32; 2]>) -> PartAngles {
+    let Some([ax, az]) = aim else {
+        return PartAngles::default();
+    };
+    let (dx, dz) = (ax - x, az - z);
+    if dx == 0.0 && dz == 0.0 {
+        return PartAngles::default();
+    }
+    let facing = steps * (TAU / 256.0);
+    PartAngles {
+        yaw: dz.atan2(dx) - facing,
+        pitch: (dx.hypot(dz) / 400.0).clamp(0.03, 0.35),
+    }
 }
 
 impl Instancer {
@@ -330,8 +393,8 @@ impl Instancer {
         assert!(tile_size > 0.0, "tile size must be positive");
         let tiles_x = (map_size.0 / tile_size).ceil().max(1.0) as usize;
         let tiles_z = (map_size.1 / tile_size).ceil().max(1.0) as usize;
-        let (footprint, tallest) = style_extent(&style);
         let models = ModelSet::from_style(&style);
+        let (footprint, tallest) = style_extent(&style, &models);
         Self {
             lod_hysteresis: style.lod_settings().hysteresis,
             icon_config: *style.icons(),
@@ -355,6 +418,35 @@ impl Instancer {
             frame: None,
             records: Vec::new(),
             visible_tiles: Vec::new(),
+            aim: None,
+        }
+    }
+
+    /// The WP1.10 demo of the part hierarchy: every turret turns towards
+    /// the point `(x, z)` and its barrel rises a little; `None` = turrets
+    /// straight ahead. Takes effect in the next build.
+    pub fn set_aim(&mut self, aim: Option<[f32; 2]>) {
+        self.aim = aim;
+    }
+
+    /// The look of shape `shape` to the culling, the level selection and
+    /// the picking: the model's real bounds (finest level) if it has them,
+    /// else the style's shape size.
+    fn geom(&self, shape: u8) -> ShapeGeom {
+        let s = self.style.shape(shape);
+        match self.models.model(shape).bounds() {
+            Some(b) => ShapeGeom {
+                size: [b.max.x - b.min.x, b.max.y.max(0.01), b.max.z - b.min.z],
+                offset: [0.5 * (b.min.x + b.max.x), 0.5 * (b.min.z + b.max.z)],
+                diameter: b.diameter(),
+                scale: [1.0; 3],
+            },
+            None => ShapeGeom {
+                size: s.size,
+                offset: [0.0, 0.0],
+                diameter: s.bounding_diameter(),
+                scale: s.size,
+            },
         }
     }
 
@@ -365,12 +457,19 @@ impl Instancer {
     /// changes, so [`Renderer::upload_units`](crate::Renderer::upload_units)
     /// registers its meshes again.
     pub fn set_style(&mut self, style: Style) {
-        (self.footprint, self.tallest) = style_extent(&style);
         self.lod_hysteresis = style.lod_settings().hysteresis;
         self.icon_config = *style.icons();
-        self.set_models(ModelSet::from_style(&style));
         self.style = style;
-        self.rebucket();
+        self.set_models(ModelSet::from_style(&self.style));
+    }
+
+    /// Swap the look and the models together (a style whose shapes go with
+    /// glTF models, see [`Instancer::set_models`]).
+    pub fn set_style_and_models(&mut self, style: Style, models: ModelSet) {
+        self.lod_hysteresis = style.lod_settings().hysteresis;
+        self.icon_config = *style.icons();
+        self.style = style;
+        self.set_models(models);
     }
 
     /// Use another set of models (meshes and chains per shape), for example
@@ -384,6 +483,9 @@ impl Instancer {
         self.visible_tiles.clear();
         self.frame = None;
         self.models = models;
+        // The culling margins depend on the model extents.
+        (self.footprint, self.tallest) = style_extent(&self.style, &self.models);
+        self.rebucket();
     }
 
     pub fn style(&self) -> &Style {
@@ -548,6 +650,7 @@ impl Instancer {
                 let ([x, z], steps) = m.at(view.alpha);
                 let y = ground(x, z);
                 let shape = self.style.shape(m.shape);
+                let geom = self.geom(m.shape);
                 let [r, g, b] = self.style.linear(m.player);
                 let mut drawn = Drawn {
                     id: m.id,
@@ -556,17 +659,20 @@ impl Instancer {
                     shape: m.shape,
                     model_mesh: 0,
                     model_index: NO_INSTANCE,
+                    extra: [(0, NO_INSTANCE); MAX_PARTS - 1],
+                    extra_parts: 0,
                     icon_index: NO_INSTANCE,
                 };
                 if models_on {
                     let chain = self.models.model(m.shape);
                     let level = match view.eye {
                         Some(eye) if chain.len() > 1 => {
-                            let middle = Vec3::new(x, y + 0.5 * shape.size[1], z);
-                            let px = eye.projected_px(
-                                shape.bounding_diameter(),
-                                (middle - eye.eye).length(),
+                            let middle = offset_point(
+                                Vec3::new(x, y + 0.5 * geom.size[1], z),
+                                steps,
+                                geom.offset,
                             );
+                            let px = eye.projected_px(geom.diameter, (middle - eye.eye).length());
                             let slot = m.id.index() as usize;
                             let previous =
                                 self.lod_state.get(slot).copied().filter(|&l| l != NO_LEVEL);
@@ -578,16 +684,44 @@ impl Instancer {
                         }
                         _ => 0,
                     };
-                    let mesh = chain.level(level).mesh;
-                    let list = &mut self.lists[mesh.index()];
-                    drawn.model_mesh = mesh.0;
-                    drawn.model_index = list.len() as u32;
                     // The alpha is the model's weight in the cross-fade: the
                     // fragment shader keeps that share of the pixels.
-                    list.push(Instance {
-                        model: model_matrix(x, y, z, steps, shape.size),
-                        color: [r, g, b, weight],
-                    });
+                    let color = [r, g, b, weight];
+                    let unit = model_matrix(x, y, z, steps, geom.scale);
+                    let parts = chain.parts(level);
+                    if parts.is_empty() {
+                        let mesh = chain.level(level).mesh;
+                        let list = &mut self.lists[mesh.index()];
+                        drawn.model_mesh = mesh.0;
+                        drawn.model_index = list.len() as u32;
+                        list.push(Instance { model: unit, color });
+                        stats.part_instances += 1;
+                    } else {
+                        // Hull, turret, barrel: one instance in each part's list.
+                        let mut world = [Mat4::IDENTITY; MAX_PARTS];
+                        let angles = aim_angles(x, z, steps, self.aim);
+                        pose_parts(Mat4::from_cols_array_2d(&unit), parts, angles, &mut world);
+                        for (i, part) in parts.iter().enumerate().take(MAX_PARTS) {
+                            // A part kept only as the frame of its children
+                            // has nothing to draw.
+                            if i > 0 && self.models.mesh_triangles(part.mesh) == 0 {
+                                continue;
+                            }
+                            let list = &mut self.lists[part.mesh.index()];
+                            let at = (part.mesh.0, list.len() as u32);
+                            list.push(Instance {
+                                model: world[i].to_cols_array_2d(),
+                                color,
+                            });
+                            if i == 0 {
+                                (drawn.model_mesh, drawn.model_index) = at;
+                            } else {
+                                drawn.extra[usize::from(drawn.extra_parts)] = at;
+                                drawn.extra_parts += 1;
+                            }
+                            stats.part_instances += 1;
+                        }
+                    }
                     stats.per_lod[usize::from(level).min(MAX_LODS - 1)] += 1;
                     stats.models += 1;
                 }
@@ -708,15 +842,17 @@ impl Instancer {
             for (r, rec) in
                 (vt.start..vt.end).zip(&self.records[vt.start as usize..vt.end as usize])
             {
-                let shape = self.style.shape(rec.shape);
-                let pos = Vec3::from(rec.pos);
-                let middle = pos + Vec3::new(0.0, 0.5 * shape.size[1], 0.0);
+                let geom = self.geom(rec.shape);
+                // The box's footprint centre (a model's real bounds need not
+                // be centred on the unit's origin).
+                let pos = offset_point(Vec3::from(rec.pos), rec.steps, geom.offset);
+                let middle = pos + Vec3::new(0.0, 0.5 * geom.size[1], 0.0);
                 let distance = (middle - eye.eye).length();
                 // The smaller side of the footprint is what has to be wide
                 // enough to hit, whatever way the unit faces.
-                let footprint = shape.size[0].min(shape.size[2]);
+                let footprint = geom.size[0].min(geom.size[2]);
                 let margin = click_margin(footprint, distance, eye.focal_px, click_px);
-                let Some(t) = ray_obb(ray, pos, rec.steps, shape.size, margin) else {
+                let Some(t) = ray_obb(ray, pos, rec.steps, geom.size, margin) else {
                     continue;
                 };
                 // Entered behind the terrain the ray meets first: hidden by the ground.
@@ -743,8 +879,9 @@ impl Instancer {
         let mut best = best?;
         // For the readout: how far the box centre is from the cursor on the screen.
         let rec = &self.records[best.record as usize];
-        let middle =
-            Vec3::from(rec.pos) + Vec3::new(0.0, 0.5 * self.style.shape(rec.shape).size[1], 0.0);
+        let geom = self.geom(rec.shape);
+        let middle = offset_point(Vec3::from(rec.pos), rec.steps, geom.offset)
+            + Vec3::new(0.0, 0.5 * geom.size[1], 0.0);
         best.cursor_distance = project_px(&query.view_proj, middle, query.viewport)
             .map_or(0.0, |(p, _)| {
                 (p[0] - query.cursor[0]).hypot(p[1] - query.cursor[1])
@@ -811,14 +948,20 @@ impl Instancer {
         if rec.id != pick.id {
             return;
         }
-        if rec.model_index != NO_INSTANCE
-            && let Some(instance) = self
+        let parts = std::iter::once((rec.model_mesh, rec.model_index))
+            .chain(rec.extra[..usize::from(rec.extra_parts)].iter().copied());
+        for (mesh, index) in parts {
+            if index == NO_INSTANCE {
+                continue;
+            }
+            if let Some(instance) = self
                 .lists
-                .get_mut(usize::from(rec.model_mesh))
-                .and_then(|l| l.get_mut(rec.model_index as usize))
-        {
-            for c in &mut instance.color[..3] {
-                *c += (1.0 - *c) * HIGHLIGHT_TINT;
+                .get_mut(usize::from(mesh))
+                .and_then(|l| l.get_mut(index as usize))
+            {
+                for c in &mut instance.color[..3] {
+                    *c += (1.0 - *c) * HIGHLIGHT_TINT;
+                }
             }
         }
         if rec.icon_index != NO_INSTANCE
@@ -863,6 +1006,10 @@ impl Candidate {
 /// Levels of detail, icons, picking and the highlight (WP1.9).
 #[cfg(test)]
 mod frame_tests;
+
+/// glTF models in the instancer (WP1.10).
+#[cfg(test)]
+mod glb_tests;
 
 #[cfg(test)]
 mod tests {

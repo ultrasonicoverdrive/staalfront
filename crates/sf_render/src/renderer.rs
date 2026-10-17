@@ -902,6 +902,10 @@ impl Renderer {
                 continue;
             };
             let mesh = &self.meshes[index];
+            // An empty mesh (a glTF part that is only a frame) cannot be bound.
+            if mesh.index_count == 0 {
+                continue;
+            }
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_vertex_buffer(1, buffer.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1122,8 +1126,10 @@ fn fill_instances<T: bytemuck::Pod>(
     }
 }
 
-const VERTEX_ATTRS: [wgpu::VertexAttribute; 2] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+/// Mesh vertex: position, normal, material colour with the team weight
+/// (location 7, after the instance attributes).
+const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 7 => Float32x4];
 /// An icon instance: world anchor, shape and flags, color with the model weight.
 const ICON_ATTRS: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Float32x4];

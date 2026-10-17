@@ -35,13 +35,18 @@
 //! mesh id** and the renderer one buffer and one draw call per list, so
 //! each (mesh kind, level) pair stays a single draw.
 //!
-//! # For WP1.10 (glTF models)
-//! A glTF model is built the same way: put its meshes (one per LOD level)
-//! into [`ModelSet::new`] as extra meshes and give the shape a [`ModelLods`]
-//! over their ids with the switch sizes of the asset. The instancing, the
-//! level selection, the stats and the picking need no change. A level is one
-//! mesh today; a model made of parts (hull and turret) would extend
-//! [`LodLevel`] by a part list, still one instance list per mesh.
+//! # Parts (WP1.10, glTF models)
+//! A level can be made of **parts** ([`RigPart`]): a hull, a turret on the
+//! hull and a barrel on the turret, each its own mesh with its rest
+//! transform relative to its parent part. Every part is one mesh id, so a
+//! unit at a level adds one instance to the list of each of its parts, and a
+//! (part, level) pair stays one draw call. The turret turns about its local
+//! `+Y` ([`Joint::Yaw`]) and the barrel tilts about its local `+Z`
+//! ([`Joint::Pitch`]); [`pose_parts`] computes the matrices per instance.
+//! A model with parts also carries its real bounds ([`ModelBounds`], at the
+//! finest level), which the culling, the level selection and the picking
+//! use instead of the placeholder shape size. See [`crate::glb`] for the
+//! loader.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -53,6 +58,77 @@ use crate::style::{LodSpec, Style};
 
 /// Most levels a chain can have (the stats keep a counter per level).
 pub const MAX_LODS: usize = 4;
+
+/// Most parts a level can have (hull, turret, barrel and one spare).
+pub const MAX_PARTS: usize = 4;
+
+/// How a part moves relative to its parent, driven per instance.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Joint {
+    /// Rigidly attached (the hull, any other part).
+    Fixed,
+    /// Turns about its local `+Y` (a turret). Positive angles turn the
+    /// part's front (`+X`) towards `+Z`, the same sense as the unit facing.
+    Yaw,
+    /// Tilts about its local `+Z` (a barrel). Positive angles lift the
+    /// part's front (`+X`) towards `+Y`.
+    Pitch,
+}
+
+/// One part of a level: its mesh, its parent (an earlier part, `None` = the
+/// unit itself) and its rest transform in the parent's frame, in engine
+/// axes (metres, `+Y` up, front `+X`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RigPart {
+    pub mesh: MeshId,
+    pub parent: Option<u8>,
+    pub rest: Mat4,
+    pub joint: Joint,
+}
+
+/// The real extent of a model with parts, in the unit's frame (front `+X`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModelBounds {
+    /// Box around the finest level in its rest pose.
+    pub min: Vec3,
+    pub max: Vec3,
+    /// No vertex of any level gets farther than this from the unit's origin,
+    /// whatever the joint angles (culling margins).
+    pub reach: f32,
+}
+
+impl ModelBounds {
+    /// Diameter of the sphere around the box (what the level selection
+    /// measures, like `Shape::bounding_diameter`).
+    pub fn diameter(&self) -> f32 {
+        (self.max - self.min).length()
+    }
+}
+
+/// The per-instance joint angles of a pose, radians.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PartAngles {
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+/// The world matrices of the parts of a level: `unit` is the unit's model
+/// matrix (position and facing), each part is `parent * rest * joint`.
+/// Writes `parts.len()` matrices into `out` (at most [`MAX_PARTS`]).
+pub fn pose_parts(unit: Mat4, parts: &[RigPart], angles: PartAngles, out: &mut [Mat4; MAX_PARTS]) {
+    for (i, part) in parts.iter().enumerate().take(MAX_PARTS) {
+        let joint = match part.joint {
+            Joint::Fixed => Mat4::IDENTITY,
+            // A positive yaw takes +X to +Z: a negative turn about +Y.
+            Joint::Yaw => Mat4::from_rotation_y(-angles.yaw),
+            Joint::Pitch => Mat4::from_rotation_z(angles.pitch),
+        };
+        let parent = part
+            .parent
+            .map_or(unit, |p| out[usize::from(p).min(i.saturating_sub(1))]);
+        out[i] = parent * part.rest * joint;
+    }
+}
 
 /// How many meshes exist without registering any: one per [`MeshKind`].
 pub const BUILTIN_MESHES: usize = MeshKind::ALL.len();
@@ -136,6 +212,9 @@ pub enum ModelError {
     SwitchOrder,
     /// A level names a mesh that is not in the table.
     UnknownMesh,
+    /// A level has no parts, more than [`MAX_PARTS`], or a part whose parent
+    /// is not an earlier part.
+    Parts,
 }
 
 impl std::fmt::Display for ModelError {
@@ -146,6 +225,7 @@ impl std::fmt::Display for ModelError {
             Self::SwitchCount => "a chain needs one switch size fewer than it has levels",
             Self::SwitchOrder => "switch sizes must be positive and strictly falling",
             Self::UnknownMesh => "a level names a mesh that does not exist",
+            Self::Parts => "a level needs 1 to MAX_PARTS parts, each after its parent",
         })
     }
 }
@@ -158,6 +238,9 @@ pub struct ModelLods {
     levels: Vec<LodLevel>,
     /// `switch_px[i]`: level `i` is used while the projected size is at least this.
     switch_px: Vec<f32>,
+    /// The parts of each level; empty = the level is its single mesh.
+    parts: Vec<Vec<RigPart>>,
+    bounds: Option<ModelBounds>,
 }
 
 impl ModelLods {
@@ -178,7 +261,38 @@ impl ModelLods {
         if !ordered {
             return Err(ModelError::SwitchOrder);
         }
-        Ok(Self { levels, switch_px })
+        Ok(Self {
+            levels,
+            switch_px,
+            parts: Vec::new(),
+            bounds: None,
+        })
+    }
+
+    /// A chain whose levels are made of parts (glTF models): the first part
+    /// of a level is its root (the hull). `bounds` is the real extent.
+    pub fn with_parts(
+        parts: Vec<Vec<RigPart>>,
+        switch_px: Vec<f32>,
+        bounds: ModelBounds,
+    ) -> Result<Self, ModelError> {
+        for level in &parts {
+            let ok = !level.is_empty()
+                && level.len() <= MAX_PARTS
+                && level.first().is_some_and(|p| p.parent.is_none())
+                && level
+                    .iter()
+                    .enumerate()
+                    .all(|(i, p)| p.parent.is_none_or(|q| usize::from(q) < i));
+            if !ok {
+                return Err(ModelError::Parts);
+            }
+        }
+        let levels = parts.iter().map(|l| LodLevel { mesh: l[0].mesh }).collect();
+        let mut chain = Self::new(levels, switch_px)?;
+        chain.parts = parts;
+        chain.bounds = Some(bounds);
+        Ok(chain)
     }
 
     /// A model with one level, drawn at every size.
@@ -186,7 +300,32 @@ impl ModelLods {
         Self {
             levels: vec![LodLevel { mesh }],
             switch_px: Vec::new(),
+            parts: Vec::new(),
+            bounds: None,
         }
+    }
+
+    /// The parts of a level (clamped like [`ModelLods::level`]); empty for a
+    /// single-mesh level.
+    pub fn parts(&self, level: u8) -> &[RigPart] {
+        if self.parts.is_empty() {
+            return &[];
+        }
+        &self.parts[usize::from(level).min(self.parts.len() - 1)]
+    }
+
+    /// The real extent of a model with parts; `None` = the placeholder shape
+    /// size applies.
+    pub fn bounds(&self) -> Option<&ModelBounds> {
+        self.bounds.as_ref()
+    }
+
+    /// Every mesh the chain draws (levels and parts).
+    pub fn meshes(&self) -> impl Iterator<Item = MeshId> + '_ {
+        self.levels
+            .iter()
+            .map(|l| l.mesh)
+            .chain(self.parts.iter().flatten().map(|p| p.mesh))
     }
 
     pub fn len(&self) -> usize {
@@ -264,7 +403,7 @@ impl ModelSet {
         }
         if models
             .iter()
-            .any(|m| m.levels().iter().any(|l| l.mesh.index() >= mesh_count))
+            .any(|m| m.meshes().any(|mesh| mesh.index() >= mesh_count))
         {
             return Err(ModelError::UnknownMesh);
         }

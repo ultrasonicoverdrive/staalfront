@@ -34,7 +34,7 @@ pub const MAX_ENTRY_SIZE: u32 = 64 * 1024 * 1024;
 ///
 /// Provenance: no non-GPL description of this hash was found. Tijmen accepted it
 /// as a format fact under B5 on 17-10-2026 (interoperability: the only way to look
-/// up a name in a MIX index); see `docs/architecture.md` section 15.
+/// up a name in a MIX index); see `docs/architecture.md` section 16.
 pub fn mix_id(name: &str) -> u32 {
     let upper: Vec<u8> = name.bytes().map(|b| b.to_ascii_uppercase()).collect();
     upper.chunks(4).fold(0u32, |id, group| {

@@ -49,11 +49,13 @@ pub struct UnitView {
     pub zoom: f32,
     pub distance: f32,
     /// Apparent size of the reference unit at the focus, in pixels, and the
-    /// thresholds of the cross-fade (already times the UI scale).
+    /// thresholds of the cross-fade (already times the UI scale). The size is
+    /// the one the blend compares, after `IconConfig::view_shrink`.
     pub reference_px: f32,
     pub model_above_px: f32,
     pub icon_below_px: f32,
-    /// The camera distances (metres) where the models end and the icons begin.
+    /// The camera distances (metres) where the models end and the icons
+    /// begin, as `blend_for_view` switches (shrink included).
     pub models_until: f32,
     pub icons_from: f32,
     pub ui_scale: f32,
