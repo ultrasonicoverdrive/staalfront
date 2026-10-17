@@ -577,7 +577,11 @@ links some of these pages carry:
 
 The file-name hash (rotate left by one, add the next four bytes) is not
 described on these pages ("a rolling hash" only); it is implemented from the
-author's general knowledge of the format and is unverified.
+author's general knowledge of the format and is unverified. **Decision Tijmen
+17-10-2026:** accepted as a format fact under B5. It is the only way to find a
+name in a MIX index, so it is dictated by interoperability; no non-GPL
+description of it was reachable; the Rust code is our own and not a translation
+of EA or OpenRA code. Replace the source note if a non-GPL description turns up.
 
 **Not verified against real files** (the repo and CI never have any): standard
 (big-endian word) Blowfish on the header bytes, the file-name hash, and IMA

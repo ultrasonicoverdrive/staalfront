@@ -31,6 +31,10 @@ pub const MAX_ENTRY_SIZE: u32 = 64 * 1024 * 1024;
 /// The file-name hash of TD/RA MIX files: upper-case the name, take it four
 /// bytes at a time as a little-endian `u32` (the last group zero-padded) and
 /// fold `id = rotate_left(id, 1) + group`.
+///
+/// Provenance: no non-GPL description of this hash was found. Tijmen accepted it
+/// as a format fact under B5 on 17-10-2026 (interoperability: the only way to look
+/// up a name in a MIX index); see `docs/architecture.md` section 15.
 pub fn mix_id(name: &str) -> u32 {
     let upper: Vec<u8> = name.bytes().map(|b| b.to_ascii_uppercase()).collect();
     upper.chunks(4).fold(0u32, |id, group| {
