@@ -95,6 +95,45 @@ fn every_briefing_converts_and_validates() {
     }
 }
 
+/// Every spoken line of a Fountain file in document order, read without the
+/// importer: a cue is an upper-case line after a blank line; its dialogue is
+/// the following non-parenthetical lines.
+fn spoken_lines(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut want: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let l = lines[i].trim();
+        let prev_blank = i == 0 || lines[i - 1].trim().is_empty();
+        let next_text = lines.get(i + 1).is_some_and(|n| !n.trim().is_empty());
+        let name = l.split('(').next().unwrap().trim();
+        let is_cue = prev_blank
+            && next_text
+            && !l.is_empty()
+            && !l.starts_with(['[', '>', '('])
+            && name == name.to_uppercase()
+            && name.chars().any(char::is_alphabetic)
+            && !l.starts_with("INT.")
+            && !l.starts_with("EXT.");
+        if is_cue {
+            let mut j = i + 1;
+            let mut words: Vec<&str> = Vec::new();
+            while j < lines.len() && !lines[j].trim().is_empty() {
+                let t = lines[j].trim();
+                if !t.starts_with('(') && !t.starts_with("[[") {
+                    words.extend(t.split_whitespace());
+                }
+                j += 1;
+            }
+            want.push(words.join(" "));
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    want
+}
+
 /// Every spoken line of the briefing ends up in the scene, word for word.
 #[test]
 fn no_dialogue_is_lost_or_invented() {
@@ -111,40 +150,8 @@ fn no_dialogue_is_lost_or_invented() {
                 source: None,
             },
         );
-        // Independent reading of the source: a cue is an upper-case line after
-        // a blank line; its dialogue is the following non-parenthetical lines.
-        let lines: Vec<&str> = text.lines().collect();
-        let mut want: Vec<String> = Vec::new();
-        let mut i = 0;
-        while i < lines.len() {
-            let l = lines[i].trim();
-            let prev_blank = i == 0 || lines[i - 1].trim().is_empty();
-            let next_text = lines.get(i + 1).is_some_and(|n| !n.trim().is_empty());
-            let name = l.split('(').next().unwrap().trim();
-            let is_cue = prev_blank
-                && next_text
-                && !l.is_empty()
-                && !l.starts_with(['[', '>', '('])
-                && name == name.to_uppercase()
-                && name.chars().any(char::is_alphabetic)
-                && !l.starts_with("INT.")
-                && !l.starts_with("EXT.");
-            if is_cue {
-                let mut j = i + 1;
-                let mut words: Vec<&str> = Vec::new();
-                while j < lines.len() && !lines[j].trim().is_empty() {
-                    let t = lines[j].trim();
-                    if !t.starts_with('(') && !t.starts_with("[[") {
-                        words.extend(t.split_whitespace());
-                    }
-                    j += 1;
-                }
-                want.push(words.join(" "));
-                i = j;
-            } else {
-                i += 1;
-            }
-        }
+        // Independent reading of the source, not through the importer.
+        let mut want = spoken_lines(&text);
         let mut got: Vec<String> = dialogue_texts(&import.scene)
             .into_iter()
             .map(|(_, t)| t)
@@ -311,4 +318,624 @@ fn scene_check_prints_line_numbered_errors() {
     assert!(stderr.contains(&want), "{stderr}");
     assert!(stderr.contains("unknown character \"ghost\""), "{stderr}");
     let _ = fs::remove_file(&bad);
+}
+
+// ---------------------------------------------------------------------------
+// WP12.5: the demo scene, the mission 1 briefing, directed by hand.
+//
+// The text is Tijmen's. The scene may add art, movement, camera and pauses; it
+// may not change, add or drop a spoken line, a speaker or a sound cue name.
+
+const DEMO_SCENE: &str = "assets/scenes/f1_m01_briefing.ron";
+const DEMO_BRIEFING: &str = "content/briefings/F1-M01.fountain";
+/// The shot of the command post; the generator names it after the scene heading.
+const DEMO_SHOT: &str = "forward_command_post_dawn";
+
+fn demo() -> sf_cutscene::LoadedScene {
+    load_file(&repo().join(DEMO_SCENE), Some(&repo().join("assets")))
+        .unwrap_or_else(|e| panic!("{e}"))
+}
+
+fn demo_briefing_text() -> String {
+    fs::read_to_string(repo().join(DEMO_BRIEFING)).unwrap()
+}
+
+/// What the generator makes of the briefing today.
+fn demo_fresh() -> sf_cutscene::fountain::Import {
+    convert(
+        &demo_briefing_text(),
+        &ImportOptions {
+            name: "f1_m01_briefing".into(),
+            source: None,
+        },
+    )
+}
+
+/// `(speaker, text, delivery)` of every line, in the order it is spoken.
+fn spoken(s: &Scene) -> Vec<(String, String, String)> {
+    s.events_in_order()
+        .into_iter()
+        .filter_map(|e| match e.kind {
+            EventKind::Dialogue {
+                speaker,
+                text,
+                delivery,
+                ..
+            } => Some((speaker.clone(), text.clone(), format!("{delivery:?}"))),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The sound cues by name, sorted (`Sfx radio click`, `Music Stop `, ...).
+fn cue_names(s: &Scene) -> Vec<String> {
+    let mut v: Vec<String> = s
+        .events_in_order()
+        .into_iter()
+        .filter_map(|e| match e.kind {
+            EventKind::Sfx { note, .. } => Some(format!("Sfx {note}")),
+            EventKind::Music { action, note, .. } => Some(format!("Music {action:?} {note}")),
+            EventKind::Ambience { action, note, .. } => Some(format!("Ambience {action:?} {note}")),
+            _ => None,
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn demo_scene_tells_the_briefing_word_for_word() {
+    let loaded = demo();
+    let scene = &loaded.scene;
+    let fresh = demo_fresh().scene;
+    assert_eq!(scene.source.as_deref(), Some(DEMO_BRIEFING));
+    assert_eq!(scene.title, fresh.title);
+
+    // Every line, its speaker and the order: the same as the importer makes
+    // of the Fountain file ...
+    let ours = spoken(scene);
+    assert_eq!(ours, spoken(&fresh), "dialogue differs from the importer's");
+    assert_eq!(ours.len(), 8);
+    // ... and the same as an independent reading of that file.
+    let texts: Vec<String> = ours.iter().map(|(_, t, _)| t.clone()).collect();
+    assert_eq!(texts, spoken_lines(&demo_briefing_text()));
+
+    // The cues keep their names (SFX, music, ambience, the map note).
+    assert_eq!(cue_names(scene), cue_names(&fresh));
+    let map_notes = |s: &Scene| -> Vec<String> {
+        s.events_in_order()
+            .into_iter()
+            .filter_map(|e| match e.kind {
+                EventKind::MapOverlay { note, .. } => Some(note.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(map_notes(scene), map_notes(&fresh));
+
+    // Every parenthetical is still a pose hint for its speaker.
+    let hints = |s: &Scene| -> Vec<(String, String)> {
+        s.events_in_order()
+            .into_iter()
+            .filter_map(|e| match e.kind {
+                EventKind::SetPose {
+                    character,
+                    hint: Some(h),
+                    ..
+                } => Some((character.clone(), h.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    let ours = hints(scene);
+    for h in hints(&fresh) {
+        assert!(ours.contains(&h), "pose hint {h:?} is gone");
+    }
+    // The cast is the importer's: the same ids and names.
+    let cast = |s: &Scene| -> Vec<(String, String)> {
+        let mut v: Vec<_> = s
+            .characters
+            .iter()
+            .map(|c| (c.id.clone(), c.name.clone()))
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(cast(scene), cast(&fresh));
+}
+
+/// The importer's durations stand, give or take 30 %.
+#[test]
+fn demo_scene_timing_stays_within_30_percent_of_the_importer() {
+    let durations = |s: &Scene| -> Vec<i32> {
+        s.events_in_order()
+            .into_iter()
+            .filter_map(|e| match e.kind {
+                EventKind::Dialogue { duration_ms, .. } => Some(*duration_ms),
+                _ => None,
+            })
+            .collect()
+    };
+    let ours = durations(&demo().scene);
+    let fresh = durations(&demo_fresh().scene);
+    assert_eq!(ours.len(), fresh.len());
+    for (i, (a, b)) in ours.iter().zip(&fresh).enumerate() {
+        assert!(
+            (b * 70 / 100..=b * 130 / 100).contains(a),
+            "line {}: {a} ms against the importer's {b} ms",
+            i + 1
+        );
+    }
+}
+
+/// Every edit of the generated skeleton says `hand edit`. An event line of the
+/// scene file is either one the generator writes today (comment or not) or
+/// carries that mark; the same holds for layers, characters, parts and poses
+/// (compared with a fresh run as data), and a removal is named in a note.
+#[test]
+fn demo_scene_marks_every_hand_edit() {
+    fn code(line: &str) -> &str {
+        line.split("  //").next().unwrap().trim()
+    }
+    let generated = demo_fresh().ron;
+    let generated: Vec<&str> = generated
+        .lines()
+        .filter(|l| l.trim_start().starts_with("(at:"))
+        .map(code)
+        .collect();
+    assert!(generated.len() > 20, "the generator's events were found");
+
+    let text = fs::read_to_string(repo().join(DEMO_SCENE)).unwrap();
+    let events: Vec<&str> = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with("(at:"))
+        .collect();
+    assert!(events.len() > 40, "{} event lines", events.len());
+    let mut kept = 0;
+    for line in &events {
+        if line.contains("hand edit") {
+            continue;
+        }
+        kept += 1;
+        assert!(
+            generated.contains(&code(line)),
+            "event neither as generated nor marked `hand edit`:\n{line}"
+        );
+    }
+    assert!(kept >= 5, "some events are exactly the generator's: {kept}");
+
+    // Layers, characters, parts and poses: compared as data with a fresh
+    // generator run. Whatever was added or changed has a `hand edit` on its own
+    // line; whatever was removed is named in a `hand edit: removed` note.
+    let fresh = demo_fresh().scene;
+    let ours = demo().scene;
+    let defs = definitions(&text);
+    let marked = |def: &Def| -> bool {
+        let (_, line) = defs
+            .iter()
+            .find(|(d, _)| d == def)
+            .unwrap_or_else(|| panic!("no definition line for {def:?}"));
+        line.contains("hand edit")
+    };
+    let removed_note = |name: &str| -> bool {
+        text.lines()
+            .any(|l| l.contains("hand edit: removed") && l.contains(name))
+    };
+    let (mut same_layers, mut same_parts) = (0, 0);
+    for l in &ours.layers {
+        if fresh.layers.iter().any(|f| f == l) {
+            same_layers += 1;
+        } else {
+            assert!(
+                marked(&Def::Layer(l.name.clone())),
+                "layer {} is new or changed but not marked `hand edit`",
+                l.name
+            );
+        }
+    }
+    for f in &fresh.layers {
+        if !ours.layers.iter().any(|l| l.name == f.name) {
+            assert!(
+                removed_note(&f.name),
+                "layer {} was dropped silently",
+                f.name
+            );
+        }
+    }
+    assert!(
+        same_layers >= 1,
+        "the generator's map layer is kept as it was"
+    );
+    for c in &ours.characters {
+        let f = fresh
+            .characters
+            .iter()
+            .find(|f| f.id == c.id)
+            .unwrap_or_else(|| panic!("{} is not in the briefing", c.id));
+        if f != c {
+            assert!(
+                marked(&Def::Character(c.id.clone())),
+                "{} is not marked",
+                c.id
+            );
+        }
+        for p in &c.parts {
+            if f.parts.iter().any(|q| q == p) {
+                same_parts += 1;
+            } else {
+                assert!(
+                    marked(&Def::Part(c.id.clone(), p.name.clone())),
+                    "{}/{} is new or changed but not marked `hand edit`",
+                    c.id,
+                    p.name
+                );
+            }
+        }
+        for q in &f.parts {
+            if !c.parts.iter().any(|p| p.name == q.name) {
+                assert!(
+                    removed_note(&q.name),
+                    "{}: part {} dropped silently",
+                    c.id,
+                    q.name
+                );
+            }
+        }
+        for p in &c.poses {
+            if !f.poses.iter().any(|q| q == p) {
+                assert!(
+                    marked(&Def::Pose(c.id.clone(), p.name.clone())),
+                    "{}/{} is new or changed but not marked `hand edit`",
+                    c.id,
+                    p.name
+                );
+            }
+        }
+        for q in &f.poses {
+            if !c.poses.iter().any(|p| p.name == q.name) {
+                assert!(
+                    removed_note(&q.name),
+                    "{}: pose {} dropped silently",
+                    c.id,
+                    q.name
+                );
+            }
+        }
+    }
+    println!("unchanged from the generator: {same_layers} layers, {same_parts} parts");
+    // The hand-made blocks say so too.
+    for needle in [
+        "// hand edit: the cast",
+        "-- the command post",
+        "-- the map insert",
+    ] {
+        assert!(text.contains(needle), "missing the comment `{needle}`");
+    }
+}
+
+/// What a definition line of the scene file defines.
+#[derive(Debug, PartialEq)]
+enum Def {
+    Layer(String),
+    Character(String),
+    Part(String, String),
+    Pose(String, String),
+}
+
+/// The lines of the scene file that define a layer, a character, a part or a
+/// pose, each with what it defines (the file is laid out one per line).
+fn definitions(text: &str) -> Vec<(Def, &str)> {
+    let quoted = |t: &str, prefix: &str| -> Option<String> {
+        Some(t.strip_prefix(prefix)?.split('"').next()?.to_string())
+    };
+    let (mut in_characters, mut who) = (false, String::new());
+    let mut v = Vec::new();
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with("characters: [") {
+            in_characters = true;
+        } else if t.starts_with("timeline:") {
+            break;
+        } else if !in_characters {
+            if let Some(n) = quoted(t, "(name: \"") {
+                v.push((Def::Layer(n), line));
+            }
+        } else if let Some(id) = quoted(t, "(id: \"") {
+            who.clone_from(&id);
+            v.push((Def::Character(id), line));
+        } else if let Some(n) = quoted(t, "(name: \"") {
+            if t.contains("art:") {
+                v.push((Def::Part(who.clone(), n), line));
+            } else if t.contains("parts: [") {
+                v.push((Def::Pose(who.clone(), n), line));
+            }
+        }
+    }
+    v
+}
+
+#[test]
+fn demo_scene_is_all_geometry_and_silent() {
+    let loaded = demo();
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+    // Nothing to be missing: no picture, no sound, no voice.
+    assert!(
+        loaded.missing_assets.is_empty(),
+        "{:?}",
+        loaded.missing_assets
+    );
+    let scene = &loaded.scene;
+    let is_image = |a: &sf_cutscene::Art| matches!(a, sf_cutscene::Art::Image(_));
+    assert!(!scene.layers.iter().any(|l| is_image(&l.art)));
+    assert!(
+        !scene
+            .characters
+            .iter()
+            .any(|c| c.parts.iter().any(|p| is_image(&p.art)))
+    );
+    for e in scene.events_in_order() {
+        match e.kind {
+            EventKind::Sfx { sound, .. } => assert!(sound.is_none()),
+            EventKind::Music { file, .. } | EventKind::Ambience { file, .. } => {
+                assert!(file.is_none());
+            }
+            EventKind::Dialogue { voice, lipsync, .. } => {
+                assert!(
+                    voice.is_none() && lipsync.is_none(),
+                    "voice slots stay empty"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The part and pose names an artist has to keep when replacing the
+/// placeholders (docs/cutscene-format.md, section 10).
+const KEPT_PARTS: [&str; 7] = [
+    "torso",
+    "head",
+    "mouth",
+    "upper_arm_l",
+    "upper_arm_r",
+    "forearm_l",
+    "forearm_r",
+];
+const KEPT_POSES: [&str; 4] = ["neutral", "point", "lean", "arms_crossed"];
+
+#[test]
+fn every_speaker_has_a_rig_with_the_kept_parts_and_poses() {
+    let scene = demo().scene;
+    let speakers: std::collections::BTreeSet<String> =
+        spoken(&scene).into_iter().map(|(s, _, _)| s).collect();
+    assert_eq!(speakers.len(), 2);
+    for id in &speakers {
+        let c = scene
+            .characters
+            .iter()
+            .find(|c| &c.id == id)
+            .unwrap_or_else(|| panic!("{id} has no character"));
+        for part in KEPT_PARTS {
+            assert!(
+                c.parts.iter().any(|p| p.name == part),
+                "{id}: no part {part}"
+            );
+        }
+        assert!(c.parts.len() >= 10, "{id}: a rig, not a stick");
+        // No two parts share a draw order: who is in front of whom does not
+        // depend on the order of the list (a pocket map under a sleeve, ...).
+        let mut zs: Vec<i32> = c.parts.iter().map(|p| p.z).collect();
+        zs.sort_unstable();
+        zs.dedup();
+        assert_eq!(zs.len(), c.parts.len(), "{id}: two parts share a z");
+        assert!(
+            (3..=5).contains(&c.poses.len()),
+            "{id}: {} poses",
+            c.poses.len()
+        );
+        for pose in KEPT_POSES {
+            assert!(
+                c.poses.iter().any(|p| p.name == pose),
+                "{id}: no pose {pose}"
+            );
+        }
+        for pose in &c.poses {
+            for pp in &pose.parts {
+                assert!(
+                    c.parts.iter().any(|p| p.name == pp.part),
+                    "{id}/{}: part {}",
+                    pose.name,
+                    pp.part
+                );
+            }
+        }
+        // Distinct poses look distinct.
+        for (i, a) in c.poses.iter().enumerate() {
+            for b in &c.poses[i + 1..] {
+                assert_ne!(a.parts, b.parts, "{id}: {} equals {}", a.name, b.name);
+            }
+        }
+    }
+    // The map in Elian's breast pocket is under his sleeve, not over it.
+    let elian = scene
+        .characters
+        .iter()
+        .find(|c| c.id == "captain_elian")
+        .unwrap();
+    let z = |n: &str| elian.parts.iter().find(|p| p.name == n).unwrap().z;
+    assert!(z("torso") < z("pocket_map") && z("pocket_map") < z("upper_arm_l"));
+    // Mira wears a headset: hand to ear for the radio.
+    let mira = scene.characters.iter().find(|c| c.id == "mira").unwrap();
+    assert!(mira.poses.iter().any(|p| p.name == "radio"));
+}
+
+#[test]
+fn the_command_post_has_two_or_three_parallax_depths() {
+    let scene = demo().scene;
+    let post: Vec<_> = scene
+        .layers
+        .iter()
+        .filter(|l| l.shots.iter().any(|s| s == DEMO_SHOT))
+        .collect();
+    let mut depths: Vec<f32> = post.iter().map(|l| l.parallax).collect();
+    depths.sort_by(f32::total_cmp);
+    depths.dedup();
+    assert!((2..=3).contains(&depths.len()), "depths {depths:?}");
+    assert!(depths.contains(&1.0), "the stage plane is one of them");
+    assert!(depths.iter().any(|d| *d < 1.0), "something far away");
+    // In front of and behind the figures.
+    assert!(post.iter().any(|l| l.z < 0) && post.iter().any(|l| l.z >= 0));
+    // The map shot has its own picture, drawn over the room.
+    let map: Vec<_> = scene
+        .layers
+        .iter()
+        .filter(|l| l.shots.iter().any(|s| s == "map"))
+        .collect();
+    assert!(map.len() >= 8, "{} map layers", map.len());
+    assert!(map.iter().all(|l| l.z > 0 && l.parallax == 0.0));
+}
+
+#[test]
+fn demo_scene_is_directed_walk_through() {
+    let scene = demo().scene;
+    let events = scene.events_in_order();
+    let at = |pred: &dyn Fn(&EventKind) -> bool| -> Vec<i32> {
+        events
+            .iter()
+            .filter(|e| pred(e.kind))
+            .map(|e| e.at)
+            .collect()
+    };
+    let line = |needle: &str| -> (i32, i32) {
+        events
+            .iter()
+            .find_map(|e| match e.kind {
+                EventKind::Dialogue {
+                    text, duration_ms, ..
+                } if text.starts_with(needle) => Some((e.at, e.at + duration_ms)),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no line starting {needle:?}"))
+    };
+
+    // Both characters walk in before the first line and leave at the end.
+    let first_line = line("The relay went dark").0;
+    for who in ["captain_elian", "mira"] {
+        let enter = at(&|k| matches!(k, EventKind::Enter { character, .. } if character == who));
+        let exit = at(&|k| matches!(k, EventKind::Exit { character } if character == who));
+        let moves = at(&|k| matches!(k, EventKind::Move { character, .. } if character == who));
+        assert_eq!((enter.len(), exit.len()), (1, 1), "{who}");
+        assert!(enter[0] < first_line && moves.len() >= 2, "{who}");
+        assert!(
+            exit[0] > line("Note it").1,
+            "{who} leaves after the last line"
+        );
+    }
+    assert!(scene.sample(scene.duration_ms()).characters.is_empty());
+
+    // Camera: moves, a push-in on the twist, the cut to the map and back.
+    let pans = at(&|k| matches!(k, EventKind::CameraPan { .. })).len();
+    let zooms = at(&|k| matches!(k, EventKind::CameraZoom { .. })).len();
+    assert!(pans >= 4 && zooms >= 4, "{pans} pans, {zooms} zooms");
+    let twist = line("One thing I cannot explain");
+    let push = events.iter().any(|e| {
+        matches!(e.kind, EventKind::CameraZoom { to, .. } if *to >= 1.3)
+            && (twist.0 - 100..twist.1).contains(&e.at)
+    });
+    assert!(push, "a close push-in on Mira's doubt");
+
+    let cuts: Vec<(i32, Option<String>)> = events
+        .iter()
+        .filter_map(|e| match e.kind {
+            EventKind::CameraCut { shot, .. } => Some((e.at, shot.clone())),
+            _ => None,
+        })
+        .collect();
+    let shots: Vec<Option<&str>> = cuts.iter().map(|(_, s)| s.as_deref()).collect();
+    assert_eq!(shots, [Some(DEMO_SHOT), Some("map"), Some(DEMO_SHOT)]);
+    let (map_in, map_out) = (cuts[1].0, cuts[2].0);
+    let overlay = events
+        .iter()
+        .find_map(|e| match e.kind {
+            EventKind::MapOverlay {
+                markers,
+                duration_ms,
+                ..
+            } => Some((e.at, *duration_ms, markers.clone())),
+            _ => None,
+        })
+        .expect("a map overlay");
+    assert_eq!(overlay.0, map_in, "the overlay starts with the cut");
+    assert!(overlay.0 + overlay.1 <= map_out);
+    assert!(overlay.2.len() >= 3 && overlay.2.iter().any(|m| m.to.is_some()));
+    assert!(overlay.2.iter().any(|m| m.to.is_none()));
+    let scouts = line("Scouts report");
+    assert!(
+        map_in < scouts.0 && scouts.1 <= map_out,
+        "the map line is spoken over the map"
+    );
+    // The briefing has no explosion, so nothing shakes.
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(e.kind, EventKind::CameraShake { .. }))
+    );
+
+    // Walk it at 25 fps like a player: finite everywhere, sounds exactly once.
+    let end = scene.duration_ms();
+    assert!((55_000..=70_000).contains(&end), "{end}");
+    let (mut prev, mut t, mut fired) = (None, 0, 0);
+    let (mut saw_map, mut max_chars) = (false, 0);
+    while t <= end {
+        let s = scene.sample_step(prev, t);
+        fired += s.sounds.len();
+        saw_map |= s.map_overlay.is_some();
+        max_chars = max_chars.max(s.characters.len());
+        for c in &s.characters {
+            for p in &c.parts {
+                assert!(p.world.tx.is_finite() && p.world.ty.is_finite(), "t={t}");
+            }
+        }
+        prev = Some(t);
+        t += 40;
+    }
+    assert!(saw_map);
+    assert_eq!(max_chars, 2);
+    let want = events.iter().filter(|e| e.kind.is_sound()).count();
+    assert_eq!(fired, want);
+    // At the middle of every line its subtitle is up, with the right text and
+    // with both characters on stage; the film ends on black.
+    for e in &events {
+        if let EventKind::Dialogue {
+            text, duration_ms, ..
+        } = e.kind
+        {
+            let s = scene.sample(e.at + duration_ms / 2);
+            assert_eq!(s.subtitle.expect("subtitle").text, *text);
+            assert_eq!(s.characters.len(), 2);
+        }
+    }
+    let last = scene.sample(end);
+    assert!(last.finished);
+    assert_eq!(last.fade.alpha, 1.0, "ends on black");
+}
+
+#[test]
+fn scene_check_passes_the_demo_scene_with_no_warnings() {
+    let scene = repo().join(DEMO_SCENE);
+    let assets = repo().join("assets");
+    let out = Command::new(env!("CARGO_BIN_EXE_scene_check"))
+        .arg(&scene)
+        .arg("--assets")
+        .arg(&assets)
+        .output()
+        .expect("run scene_check");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{stderr}");
+    assert!(
+        stdout.contains(", 0 warnings, 0 missing assets"),
+        "{stdout}"
+    );
+    assert!(stderr.is_empty(), "{stderr}");
 }

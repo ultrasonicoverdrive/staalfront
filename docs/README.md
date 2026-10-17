@@ -8,7 +8,7 @@
 | [`conventions.md`](conventions.md) | Rules for agents and humans: branch/PR flow, review gate, agents, quality rules, determinism, dependencies, assets, testing. |
 | [`red-alert-analysis.md`](red-alert-analysis.md) | Functional analysis of the Red Alert source code. Source material only; clean-room (B5): ideas, never code. |
 | [`mission-inspiration.md`](mission-inspiration.md) | Groundwork for phase 10 (missions and editor) and phase 15 (content). Clean-room. |
-| [`cutscene-format.md`](cutscene-format.md) | The scene format for cartoon cutscenes (WP12.1), its player (WP12.2) and the live preview (WP12.6): layers, rigs, poses, timeline events, validation, the Fountain importer, the `play_scene` viewer and its keys, and the live preview while writing (`--watch`, WP12.6). For writers, artists and the player implementer. |
+| [`cutscene-format.md`](cutscene-format.md) | The scene format for cartoon cutscenes (WP12.1), its player (WP12.2) and the live preview (WP12.6): layers, rigs, poses, timeline events, validation, the Fountain importer, the `play_scene` viewer and its keys, the live preview while writing (`--watch`, WP12.6), and how the demo briefing was directed, with the part and pose names an artist must keep (WP12.5). For writers, artists and the player implementer. |
 | [`rules/`](rules/README.md) | Game rules (PLAN.md §5 rule 7). |
 | [`progress.md`](progress.md) | Report after each phase. |
 
