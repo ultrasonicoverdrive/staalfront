@@ -7,11 +7,12 @@
 //! wanderers), and later the base for balance runs and AI-vs-AI games.
 //!
 //! The crate runs on `sf_sim` and `sf_math` (plus `ron` and `serde` for the
-//! scenario file; `sf_data` and `sf_ai` are listed for later work and unused
-//! today); it must never depend on rendering, windowing or
-//! audio crates. The clock is read in exactly one place, [`cli::run_cli`],
-//! around the run; [`run::run`] is a pure function of the scenario and the
-//! options.
+//! scenario file, and `sf_data` to read the map a scenario names, WP2.1;
+//! `sf_ai` is listed for later work and unused today); it must never depend
+//! on rendering, windowing or audio crates. The clock is read in exactly one
+//! place, [`cli::run_cli`], around the run; [`run::run`] is a pure function
+//! of the scenario and the options. Files are read only by
+//! [`Scenario::load`](scenario::Scenario::load), never while a run is going.
 //!
 //! ```text
 //! cargo run --release -p sf_headless -- assets/scenarios/wander_5000.ron \
@@ -33,13 +34,16 @@
 //! | `name` | Name in logs; the file name without extension when left out. |
 //! | `seed` | World seed (decimal or `0x` hex, `_` allowed). Also seeds the placement stream that draws spawn positions. |
 //! | `map` | `(width: .., height: ..)` in cells, 1 to 1024; 256 by 256 when left out. |
+//! | `map_name` | `Some("playfield256")`: the world is made on the terrain layer of `assets/maps/<name>/` (next to the scenario's directory); its size in cells must equal `map`. Without it every cell is open ground. |
 //! | `ticks` | Length of the run, at least 1. |
 //! | `spawns` | Groups of entities: `tick` (default 0), `player` (default 0; the issuer, which orders commands within a tick), `count`, `kinds`, `owners` (cycled: entity `i` gets `kinds[i % len]`), `area` (`(min: (x, y), max: (x, y))`, cells, max exclusive). |
 //! | `commands` | Timed commands: `tick`, `player` (default 0), `command`. |
 //!
 //! The commands are the `sf_sim` commands apart from `Spawn`:
-//! `SetWanderArea(ids: .., area: ..)`, `MoveTo(ids: .., target: (x, y))` and
-//! `Despawn(ids: ..)`. Entities are named by id: `Id(index, generation)` or
+//! `SetWanderArea(ids: .., area: ..)`, `MoveTo(ids: .., target: (x, y))`,
+//! `Despawn(ids: ..)` and `Place(kind: .., owner: .., cell: (x, y))`, a
+//! standing structure that occupies a buildable, free cell (and is ignored
+//! otherwise). Entities are named by id: `Id(index, generation)` or
 //! `Range(from, to)` (slots `from..to` at generation 0; in a world without
 //! despawns the entities spawned `from`-th to `to`-th, in execution order).
 //!

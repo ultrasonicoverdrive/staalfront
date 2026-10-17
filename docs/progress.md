@@ -63,6 +63,28 @@ M0 status:
 
 Report: _see "Phase 1 report" below._
 
+## Phase 2 — Playfield
+
+Status: in progress.
+
+- WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
+  terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39)
+- WP2.2 Materials per terrain type: open
+- WP2.3 Minimap shows terrain types: open
+- WP2.4 Cell grid overlay by terrain type and occupancy: open
+
+Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
+headless test checks terrain types and occupancy per cell. The headless half is met
+(`terrain_256`, `tools/sf_headless/tests/terrain.rs`); the presentation half waits for
+WP2.2 to WP2.4.
+
+WP2.1 notes. The six terrain types are RON data (`assets/config/terrain_types.ron`),
+a map stores them as `terrain.png` (one pixel per 4 m cell), the generator emits water,
+rock, ore, a road and bridges, and the sim keeps a type and an occupant per cell. The
+terrain and occupancy are in the checksum only when present, so `wander_5000`,
+`command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
+are in `docs/rules/terrain.md`.
+
 ## Phase 1 report (draft, WP1.14)
 
 Phase 1 delivers the engine. `sf_engine` runs the window and a fixed 20 Hz
@@ -110,6 +132,8 @@ fixed, delete the entry in the same PR.
    systems once the CI time allows.
 7. **The minimap is baked once.** It does not follow terrain changes. Re-bake it when
    the terrain changes (phase 2: terrain types in WP2.1 to WP2.3, later editing).
+   WP2.1 put the terrain types into the map data (`Map::terrain`) and the sim; the
+   bake does not read them yet, that is WP2.3.
 8. **The minimap bake shows relief weakly.** Its slope shading is faint next to the
    terrain in the main view. Use a stronger relief shading in the bake (WP1.12
    follow-up, together with WP2.3).
@@ -127,7 +151,9 @@ fixed, delete the entry in the same PR.
     when it grows logic of its own.
 12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
     to a placeholder shape and the owner to a player colour by modulo. Replace it
-    with data-driven units (phase 2, WP3.1 and WP3.2).
+    with data-driven units (phase 2, WP3.1 and WP3.2). WP2.1's `Place` takes the kind
+    as an opaque number too and the demo does not use `Place`, so the stand-in is
+    untouched.
 14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found
     in WP1.14 as far as software rendering shows it: the per-mesh instance
     buffers were created on the first frame their list was not empty and

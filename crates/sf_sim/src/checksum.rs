@@ -17,9 +17,24 @@
 //! | slots, ascending index | the generation of every slot, a live flag, and for a live slot: kind, owner, position, facing, behaviour, target, wander area, and the full state of the entity's random stream |
 //! | free list | its length and the indices in stack order, since that order decides which slot a later spawn gets |
 //! | pending commands | their count and each one in execution order: tick, player, and every field of the command |
+//! | terrain (`T`), only with a terrain layer | the terrain's digest: size, type definitions and the type of every cell, hashed once when the world is made |
+//! | occupancy (`O`), only while a cell is occupied | the number of occupied cells, then for each in ascending cell order: the cell index, the occupant's slot and its generation |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
+//!
+//! # Terrain and occupancy leave the old checksums alone
+//!
+//! The last two sections are written **only when they have content**, and after
+//! all the others. A world made with `World::new` has no terrain layer, and
+//! wanderers never occupy a cell, so for every world that existed before WP2.1
+//! the hashed bytes are exactly what they were: the golden values of
+//! `tests/golden.rs` and `wander_5000.expected` / `command_mix.expected` did not
+//! change, and `FORMAT_TAG` stays. A world with a layer or a structure gets
+//! the extra sections and so a checksum of its own, which is what the
+//! `terrain_256` scenario pins. The terrain is hashed through a digest computed
+//! once (it never changes), so a big map costs eight bytes per tick; occupancy
+//! costs a scan of the grid only while at least one cell is occupied.
 //!
 //! # What is deliberately left out
 //!
@@ -53,6 +68,8 @@ const SECTION_CONFIG: u8 = b'C';
 const SECTION_SLOTS: u8 = b'S';
 const SECTION_FREE: u8 = b'F';
 const SECTION_QUEUE: u8 = b'Q';
+const SECTION_TERRAIN: u8 = b'T';
+const SECTION_OCCUPANCY: u8 = b'O';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -85,6 +102,13 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
             h.write_u8(1);
             h.write_bytes(&kind.0.to_le_bytes());
             h.write_vec2(*pos);
+            h.write_u8(owner.0);
+        }
+        Command::Place { kind, cell, owner } => {
+            h.write_u8(5);
+            h.write_bytes(&kind.0.to_le_bytes());
+            h.write_u32(cell.x);
+            h.write_u32(cell.y);
             h.write_u8(owner.0);
         }
         Command::Despawn { id } => {
@@ -166,6 +190,24 @@ impl World {
             h.write_u64(tick.0);
             h.write_u8(player.0);
             write_command(&mut h, command);
+        }
+
+        // Terrain and occupancy (WP2.1). Each section is written only when
+        // there is something in it, after everything above, so the byte stream
+        // of a world without a terrain layer and without a structure is the one
+        // it always was.
+        if self.terrain.has_layer() {
+            h.write_u8(SECTION_TERRAIN);
+            h.write_u64(self.terrain.digest());
+        }
+        if self.occupancy.count() > 0 {
+            h.write_u8(SECTION_OCCUPANCY);
+            h.write_u64(len64(self.occupancy.count()));
+            for (cell, slot) in self.occupancy.occupied() {
+                h.write_u32(cell);
+                h.write_u32(slot);
+                h.write_u32(e.generation[slot as usize]);
+            }
         }
 
         h.finish()

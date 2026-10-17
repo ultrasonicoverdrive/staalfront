@@ -21,7 +21,8 @@ sf_data = { path = "../../crates/sf_data" }
 sf_ai = { path = "../../crates/sf_ai" }
 # Scenario files are RON like every other data file of the project
 # (PLAN.md 1.0, quality rule 6). Same versions as sf_data and sf_audio, so the
-# lockfile gains no new crate. sf_data is not used for this: the scenario type
-# names sf_sim commands, and sf_data may not depend on sf_sim.
+# lockfile gains no new crate. sf_data is not used for the scenario file itself:
+# the scenario type names sf_sim commands, and sf_data may not depend on sf_sim.
+# It is used to read the map (and its terrain layer) a scenario names (WP2.1).
 ron = "0.12"
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,59 @@
+// Terrain types and occupancy (WP2.1, phase 2 "done when"): a 256 by 256 cell
+// playfield (1,024 m) whose terrain layer is read from assets/maps/playfield256
+// (the generator's layer for seed 1: river, rock, ore, a road and a bridge, on
+// a flat map). 300 wanderers roam over it, ignoring the terrain as they did
+// before; structures are placed with Place. CI runs it on Linux and Windows and
+// requires the checksum in terrain_256.expected; the test
+// tools/sf_headless/tests/terrain.rs asserts the terrain types and the
+// occupancy of the cells named here.
+//
+// Cells (from the committed layer; the test checks every one of them):
+//   grass   (120,126) (121,126) (126,124) (130,125)
+//   road    (125,126)
+//   bridge  (126,126)
+//   water   (126,127)
+//   rock    (47,0)
+//   ore     (199,0)
+//
+// Entity ids: the wanderers are {0..300, 0}. The structures take the next slots
+// in execution order: (120,126) = 300, (121,126) = 301, (126,124) = 302,
+// (130,125) = 303. Refused placements create nothing. The despawn at tick 100
+// frees slot 301; the placement at tick 150 reuses it as {301, 1}.
+Scenario(
+    name: "terrain_256",
+    seed: 0x7E44_0021,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    ticks: 400,
+    spawns: [
+        (
+            count: 300,
+            kinds: [0, 1, 2],
+            owners: [0, 1, 2, 3],
+            area: (min: (0, 0), max: (256, 256)),
+        ),
+    ],
+    commands: [
+        // Four placements that stand ...
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (120, 126))),
+        (tick: 1, command: Place(kind: 11, owner: 1, cell: (121, 126))),
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (126, 124))),
+        (tick: 1, command: Place(kind: 12, owner: 2, cell: (130, 125))),
+        // ... and six that are refused: a bridge, water, a road, rock, ore (none
+        // of them buildable) and a cell that was just taken.
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (126, 126))),
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (126, 127))),
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (125, 126))),
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (47, 0))),
+        (tick: 1, command: Place(kind: 10, owner: 0, cell: (199, 0))),
+        (tick: 1, command: Place(kind: 99, owner: 0, cell: (120, 126))),
+        // A structure goes away; its cell is free again and is taken by another
+        // player at tick 150 (slot 301, generation 1).
+        (tick: 100, command: Despawn(ids: [Id(301, 0)])),
+        (tick: 150, player: 3, command: Place(kind: 13, owner: 3, cell: (121, 126))),
+        // A structure cannot be ordered to move: ignored.
+        (tick: 200, command: MoveTo(ids: [Id(300, 0)], target: (0, 0))),
+        // The cell of the first structure is still taken: refused.
+        (tick: 250, player: 1, command: Place(kind: 14, owner: 1, cell: (120, 126))),
+    ],
+)

@@ -1,6 +1,7 @@
 //! Engine map format (WP1.7).
 //!
-//! A map is a directory `assets/maps/<name>/` with three files:
+//! A map is a directory `assets/maps/<name>/` with three files, and an
+//! optional fourth (WP2.1):
 //!
 //! ```text
 //! map.ron        header (below)
@@ -8,6 +9,8 @@
 //!                of every cell corner (vertex grid)
 //! materials.png  8-bit grayscale, width x height pixels: the material index
 //!                of every cell
+//! terrain.png    (optional) 8-bit grayscale, one pixel per 4 m gameplay cell:
+//!                the terrain type id of every cell (see below)
 //! ```
 //!
 //! ```text
@@ -18,6 +21,7 @@
 //!     materials: ["grass", "dirt", "rock"],   // index = position in the list
 //!     heightmap: "height.png",
 //!     material_map: "materials.png",
+//!     terrain_map: Some("terrain.png"),   // optional; leave the line out for none
 //! )
 //! ```
 //!
@@ -26,10 +30,21 @@
 //! metre, so every side of a gameplay cell (4 m, `sf_math::CELL_METRES`) has
 //! four samples. A 1,024 x 1,024 map is a 256 x 256 cell playfield
 //! ([`Map::size_in_cells`]). The gameplay data (terrain type, occupancy, fog)
-//! will be per gameplay cell; this format only carries the visual terrain.
+//! is per gameplay cell.
 //!
-//! The format knows no game terrain types: a material is just a name the
-//! renderer turns into a texture. Height is visual only (PLAN.md 1.3). The
+//! **Terrain types (WP2.1).** A material is just a name the renderer turns
+//! into a texture. What a *gameplay* cell is (grass, road, water, rock, ore,
+//! bridge) is the optional terrain layer: [`TerrainLayer`], stored as
+//! `terrain.png`, an 8-bit grayscale PNG with one pixel per gameplay cell
+//! whose value is the id of a type in the table [`TerrainTypes`]
+//! (`assets/config/terrain_types.ron`). A PNG is what the other layers
+//! already are, so the decoder, the checks and the tooling are shared; it is
+//! tiny (a cell is a byte, and the layer has 16 times fewer pixels than the
+//! material map, with long runs of equal values), and any image editor can
+//! paint it, which suits the map editor of phase 10. A map whose header has no
+//! `terrain_map` has no layer and loads as before. The loader refuses a layer
+//! whose size is not [`Map::size_in_cells`] and a cell with an id the table
+//! does not know. Height is visual only (PLAN.md 1.3). The
 //! world frame is `x` east, `z` south, cell `(cx, cz)` covers
 //! `[cx, cx+1] x [cz, cz+1]` metres, vertex `(vx, vz)` sits at `(vx, vz)`.
 //!
@@ -37,8 +52,8 @@
 //! sizes, bit depths and material indices and reports a [`MapError`]. The two
 //! file names in `map.ron` must stay inside the map directory: no absolute
 //! path, drive prefix, network (UNC) path, `..` or Windows device name (`CON`),
-//! checked the same on every OS; a symlink that leads out of the directory is
-//! refused when loading. This
+//! checked the same on every OS (the optional `terrain_map` follows the same
+//! rules); a symlink that leads out of the directory is refused when loading. This
 //! crate has no GPU or simulation dependency, so the renderer, the editor and
 //! headless tools can all read maps. Floating point is used only for the
 //! visual height in metres and in [`generate`], which is not simulation code.
@@ -50,6 +65,8 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use crate::terrain::{TerrainLayer, TerrainTypes};
 
 /// Smallest and largest accepted side length in cells. PLAN.md 1.3 plans maps
 /// of 64 to 256; the limits are looser so tools and tests can use small maps.
@@ -73,6 +90,10 @@ pub struct MapHeader {
     pub heightmap: String,
     /// File name of the material index map, relative to the map directory.
     pub material_map: String,
+    /// File name of the terrain layer, relative to the map directory; `None`
+    /// for a map without terrain types (WP2.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain_map: Option<String>,
 }
 
 /// Why a map could not be read.
@@ -100,6 +121,12 @@ pub enum MapError {
         index: u8,
         materials: usize,
     },
+    /// A gameplay cell of the terrain layer has an id the table of terrain
+    /// types does not define.
+    TerrainId {
+        cell: (u32, u32),
+        id: u8,
+    },
 }
 
 impl fmt::Display for MapError {
@@ -119,6 +146,11 @@ impl fmt::Display for MapError {
                 "material map: cell ({}, {}) uses material {index} but the map lists only {materials}",
                 cell.0, cell.1
             ),
+            Self::TerrainId { cell, id } => write!(
+                f,
+                "terrain layer: cell ({}, {}) has terrain type id {id}, which the terrain types do not define",
+                cell.0, cell.1
+            ),
         }
     }
 }
@@ -136,6 +168,8 @@ pub struct Map {
     heights: Vec<u16>,
     /// `width * height` material indices, row-major.
     cells: Vec<u8>,
+    /// The terrain type of every gameplay cell, if the map has them.
+    terrain: Option<TerrainLayer>,
 }
 
 impl Map {
@@ -187,7 +221,41 @@ impl Map {
             materials,
             heights,
             cells,
+            terrain: None,
         })
+    }
+
+    /// The same map with a terrain layer (replacing any earlier one).
+    ///
+    /// The layer must be exactly [`Map::size_in_cells`] cells and use only ids
+    /// that `types` defines; the first cell (row-major) with an unknown id is
+    /// reported.
+    pub fn with_terrain(
+        mut self,
+        layer: TerrainLayer,
+        types: &TerrainTypes,
+    ) -> Result<Self, MapError> {
+        let (cw, ch) = self.size_in_cells();
+        if (layer.width(), layer.height()) != (cw, ch) {
+            return Err(MapError::Image {
+                file: "terrain".into(),
+                message: format!(
+                    "must be {cw}x{ch} cells for a {}x{} map, got {}x{}",
+                    self.width,
+                    self.height,
+                    layer.width(),
+                    layer.height()
+                ),
+            });
+        }
+        if let Some(i) = layer.ids().iter().position(|&id| types.get(id).is_none()) {
+            return Err(MapError::TerrainId {
+                cell: (i as u32 % cw, i as u32 / cw),
+                id: layer.ids()[i],
+            });
+        }
+        self.terrain = Some(layer);
+        Ok(self)
     }
 
     /// Read `dir/map.ron` and the files it names.
@@ -196,7 +264,15 @@ impl Map {
     /// inside the map directory, so a symlink in a downloaded map cannot lead
     /// out of it. (The check and the read are two steps; a map directory that
     /// another process changes while loading is not defended against.)
+    ///
+    /// A terrain layer is checked against the shipped table of terrain types
+    /// ([`TerrainTypes::embedded`]); [`Map::load_with`] takes another table.
     pub fn load(dir: &Path) -> Result<Self, MapError> {
+        Self::load_with(dir, &TerrainTypes::embedded())
+    }
+
+    /// [`Map::load`] with an explicit table of terrain types for the layer.
+    pub fn load_with(dir: &Path, types: &TerrainTypes) -> Result<Self, MapError> {
         let io = |path: &Path| {
             let path = path.to_path_buf();
             move |source| MapError::Io { path, source }
@@ -220,14 +296,43 @@ impl Map {
         validate_file_names(&parsed)?;
         let heightmap = read(&parsed.heightmap)?;
         let material_map = read(&parsed.material_map)?;
-        Self::parse(&header_text, &heightmap, &material_map)
+        let terrain = parsed.terrain_map.as_deref().map(read).transpose()?;
+        Self::parse_with(
+            &header_text,
+            &heightmap,
+            &material_map,
+            terrain.as_deref(),
+            types,
+        )
     }
 
-    /// Build a map from the header text and the two PNG files' bytes.
+    /// Build a map from the header text and the two PNG files' bytes. A header
+    /// that names a terrain layer is refused here (it needs
+    /// [`Map::parse_with`] and the layer's bytes).
     pub fn parse(
         header_ron: &str,
         heightmap_png: &[u8],
         material_png: &[u8],
+    ) -> Result<Self, MapError> {
+        Self::parse_with(
+            header_ron,
+            heightmap_png,
+            material_png,
+            None,
+            &TerrainTypes::embedded(),
+        )
+    }
+
+    /// Build a map from the header text and the bytes of its PNG files,
+    /// including the terrain layer when the header names one (and only then:
+    /// bytes without a `terrain_map` line, or a line without bytes, are an
+    /// error). `types` is the table the layer's ids are checked against.
+    pub fn parse_with(
+        header_ron: &str,
+        heightmap_png: &[u8],
+        material_png: &[u8],
+        terrain_png: Option<&[u8]>,
+        types: &TerrainTypes,
     ) -> Result<Self, MapError> {
         let header: MapHeader =
             ron::from_str(header_ron).map_err(|e| MapError::Ron(e.to_string()))?;
@@ -254,18 +359,38 @@ impl Map {
             png::BitDepth::Eight,
             (header.width, header.height),
         )?;
-        Self::from_parts(
+        let map = Self::from_parts(
             header.width,
             header.height,
             header.height_scale,
             header.materials,
             heights,
             cells,
-        )
+        )?;
+        match (&header.terrain_map, terrain_png) {
+            (None, None) => Ok(map),
+            (Some(name), Some(bytes)) => {
+                let (cw, ch) = map.size_in_cells();
+                let ids = decode_gray(name, bytes, png::BitDepth::Eight, (cw, ch))?;
+                // The size was just checked, so the layer cannot fail.
+                let layer = TerrainLayer::new(cw, ch, ids).map_err(|e| MapError::Image {
+                    file: name.clone(),
+                    message: e.to_string(),
+                })?;
+                map.with_terrain(layer, types)
+            }
+            (Some(name), None) => Err(MapError::Header(format!(
+                "terrain_map \"{name}\" is named but its bytes were not given (use Map::parse_with)"
+            ))),
+            (None, Some(_)) => Err(MapError::Header(
+                "a terrain layer was given but map.ron has no terrain_map".into(),
+            )),
+        }
     }
 
-    /// Write the three files into `dir` (created if needed); the file names
-    /// are `height.png` and `materials.png`.
+    /// Write the files into `dir` (created if needed); the file names are
+    /// `height.png`, `materials.png` and, for a map with terrain types,
+    /// `terrain.png`.
     pub fn save(&self, dir: &Path) -> Result<(), MapError> {
         let io = |path: PathBuf| move |source| MapError::Io { path, source };
         std::fs::create_dir_all(dir).map_err(io(dir.to_path_buf()))?;
@@ -276,6 +401,7 @@ impl Map {
             materials: self.materials.clone(),
             heightmap: "height.png".into(),
             material_map: "materials.png".into(),
+            terrain_map: self.terrain.as_ref().map(|_| TERRAIN_FILE.into()),
         };
         let text = ron::ser::to_string_pretty(&header, ron::ser::PrettyConfig::default())
             .map_err(|e| MapError::Ron(e.to_string()))?;
@@ -298,7 +424,40 @@ impl Map {
             (self.width, self.height),
         )?;
         std::fs::write(&path, png).map_err(io(path))?;
+        if let Some(layer) = &self.terrain {
+            let path = dir.join(TERRAIN_FILE);
+            std::fs::write(&path, encode_terrain(layer)?).map_err(io(path))?;
+        }
         Ok(())
+    }
+
+    /// Add (or replace) only the terrain layer of a map that is already in
+    /// `dir`: writes `terrain.png` and sets `terrain_map` in `map.ron`,
+    /// leaving the height and material files byte for byte as they are. Used
+    /// to give a committed map a layer without regenerating its terrain.
+    /// Does nothing if the map has no layer.
+    pub fn save_terrain_layer(&self, dir: &Path) -> Result<(), MapError> {
+        let Some(layer) = &self.terrain else {
+            return Ok(());
+        };
+        let io = |path: PathBuf| move |source| MapError::Io { path, source };
+        let header_path = dir.join("map.ron");
+        let text = std::fs::read_to_string(&header_path).map_err(io(header_path.clone()))?;
+        let mut header: MapHeader =
+            ron::from_str(&text).map_err(|e| MapError::Ron(e.to_string()))?;
+        header.terrain_map = Some(TERRAIN_FILE.into());
+        let text = ron::ser::to_string_pretty(&header, ron::ser::PrettyConfig::default())
+            .map_err(|e| MapError::Ron(e.to_string()))?;
+        let path = dir.join(TERRAIN_FILE);
+        std::fs::write(&path, encode_terrain(layer)?).map_err(io(path))?;
+        std::fs::write(&header_path, text + "\n").map_err(io(header_path))?;
+        Ok(())
+    }
+
+    /// The terrain type of every gameplay cell, if the map has them
+    /// (WP2.1). The layer has [`Map::size_in_cells`] cells.
+    pub fn terrain(&self) -> Option<&TerrainLayer> {
+        self.terrain.as_ref()
     }
 
     /// Map width in terrain cells (= metres).
@@ -409,11 +568,28 @@ fn validate_header(
     Ok(())
 }
 
-/// The two file names of a header must stay inside the map directory
-/// ([`check_file_name`]).
+/// The file name of the terrain layer [`Map::save`] writes.
+const TERRAIN_FILE: &str = "terrain.png";
+
+/// The file names of a header (two, and the terrain layer's when it has one)
+/// must stay inside the map directory ([`check_file_name`]).
 fn validate_file_names(header: &MapHeader) -> Result<(), MapError> {
     check_file_name("heightmap", &header.heightmap)?;
-    check_file_name("material_map", &header.material_map)
+    check_file_name("material_map", &header.material_map)?;
+    if let Some(name) = &header.terrain_map {
+        check_file_name("terrain_map", name)?;
+    }
+    Ok(())
+}
+
+/// A terrain layer as an 8-bit grayscale PNG, one pixel per gameplay cell.
+fn encode_terrain(layer: &TerrainLayer) -> Result<Vec<u8>, MapError> {
+    encode_gray(
+        TERRAIN_FILE,
+        layer.ids(),
+        png::BitDepth::Eight,
+        (layer.width(), layer.height()),
+    )
 }
 
 /// Refuse a file name from `map.ron` that could reach outside the map
@@ -429,7 +605,7 @@ fn validate_file_names(header: &MapHeader) -> Result<(), MapError> {
 /// does not read a file, and `CON` blocks. A relative name with `/` into a
 /// sub-directory is fine. [`Map::load`] adds the symlink check on the real
 /// file system.
-fn check_file_name(field: &str, name: &str) -> Result<(), MapError> {
+pub fn check_file_name(field: &str, name: &str) -> Result<(), MapError> {
     let refuse = |why: &str| {
         Err(MapError::Header(format!(
             "{field} \"{name}\" must be a file name inside the map directory, but {why}"
@@ -549,3 +725,6 @@ fn encode_gray(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod terrain_tests;

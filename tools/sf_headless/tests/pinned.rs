@@ -18,7 +18,7 @@
 //! ```
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
-//! value only). Do the same for `command_mix`. A change in `sf_sim` also moves
+//! value only). Do the same for `command_mix` and `terrain_256`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -31,6 +31,7 @@ use sf_headless::scenario::Scenario;
 
 const WANDER_5000_EXPECTED: &str = include_str!("../../../assets/scenarios/wander_5000.expected");
 const COMMAND_MIX_EXPECTED: &str = include_str!("../../../assets/scenarios/command_mix.expected");
+const TERRAIN_256_EXPECTED: &str = include_str!("../../../assets/scenarios/terrain_256.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -58,6 +59,14 @@ fn command_mix_matches_the_pinned_checksum() {
     check("command_mix", COMMAND_MIX_EXPECTED);
 }
 
+/// The 256 by 256 cell playfield with its terrain layer and placed structures
+/// (WP2.1). A new scenario: its value was pinned when it was added, the other
+/// two did not change.
+#[test]
+fn terrain_256_matches_the_pinned_checksum() {
+    check("terrain_256", TERRAIN_256_EXPECTED);
+}
+
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
 /// a debug build; `cargo test --release -p sf_headless` runs it, and CI runs
 /// it through the binary on both operating systems.
@@ -69,7 +78,11 @@ fn wander_5000_matches_the_pinned_checksum() {
 
 #[test]
 fn the_expected_files_hold_one_bare_checksum() {
-    for text in [WANDER_5000_EXPECTED, COMMAND_MIX_EXPECTED] {
+    for text in [
+        WANDER_5000_EXPECTED,
+        COMMAND_MIX_EXPECTED,
+        TERRAIN_256_EXPECTED,
+    ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");
         assert_eq!(line.len(), 18, "{text:?}");

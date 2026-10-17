@@ -69,7 +69,7 @@ fn spawn_and_command_defaults() {
 #[test]
 fn the_shipped_scenarios_are_valid() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenarios");
-    for name in ["wander_5000", "command_mix"] {
+    for name in ["wander_5000", "command_mix", "terrain_256"] {
         let s = Scenario::load(&dir.join(format!("{name}.ron"))).unwrap();
         assert_eq!(s.name, name);
     }
@@ -396,4 +396,137 @@ fn move_to_and_wander_commands_change_the_behaviour() {
         plain.step();
     }
     assert_ne!(world.checksum(), plain.checksum());
+}
+
+// ---- terrain and Place (WP2.1) ----------------------------------------------------
+
+fn temp_tree(label: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "sf_headless_terrain_{label}_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("scenarios")).unwrap();
+    dir
+}
+
+#[test]
+fn place_becomes_a_sim_command_in_file_order() {
+    let s = parse(&with_command(
+        "(tick: 2, player: 1, command: Place(kind: 5, owner: 3, cell: (3, 4)))",
+    ))
+    .unwrap();
+    let world = s.build_world().unwrap();
+    let placed: Vec<_> = world
+        .pending_commands()
+        .iter()
+        .filter_map(|(t, p, c)| match c {
+            Command::Place { kind, cell, owner } => Some((t.0, p.0, kind.0, *cell, owner.0)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(placed, vec![(2, 1, 5, Cell::new(3, 4), 3)]);
+}
+
+#[test]
+fn a_place_cell_must_lie_inside_the_map() {
+    for cell in ["(16, 0)", "(0, 16)", "(99, 99)"] {
+        let p = problems(&with_command(&format!(
+            "(tick: 2, command: Place(kind: 1, owner: 0, cell: {cell}))"
+        )));
+        assert!(has(&p, "outside the 16x16 map"), "{cell}: {p:?}");
+    }
+    assert!(
+        parse(&with_command(
+            "(tick: 2, command: Place(kind: 1, owner: 0, cell: (15, 15)))"
+        ))
+        .is_ok()
+    );
+}
+
+#[test]
+fn a_map_name_follows_the_map_file_name_rules() {
+    let with_name = |name: &str| format!("Scenario(seed: 1, ticks: 2, map_name: Some({name:?}))");
+    assert!(parse(&with_name("playfield256")).is_ok());
+    for bad in ["../x", "a/b", "C:\\x", "/etc", "CON", "", "a\\b"] {
+        let p = problems(&with_name(bad));
+        assert!(has(&p, "map_name"), "{bad:?}: {p:?}");
+    }
+}
+
+#[test]
+fn a_scenario_with_a_map_name_loads_the_terrain_of_the_map_next_to_it() {
+    let root = temp_tree("load");
+    // 16 x 16 m = 4 x 4 cells, with a terrain layer.
+    let map = sf_data::map::generate::generate_cells(4, 4, 1);
+    map.save(&root.join("maps").join("small")).unwrap();
+    let file = root.join("scenarios").join("small.ron");
+    std::fs::write(
+        &file,
+        "Scenario(seed: 1, map: (width: 4, height: 4), map_name: Some(\"small\"), ticks: 3)",
+    )
+    .unwrap();
+    let s = Scenario::load(&file).unwrap();
+    let terrain = s.terrain.as_ref().expect("terrain read");
+    assert_eq!((terrain.width(), terrain.height()), (4, 4));
+    assert_eq!(terrain.ids(), map.terrain().unwrap().ids());
+    let world = s.build_world().unwrap();
+    assert!(world.terrain().has_layer());
+    assert_eq!(world.terrain().digest(), terrain.digest());
+    // Without the name the scenario has no layer and another checksum.
+    std::fs::write(
+        &file,
+        "Scenario(seed: 1, map: (width: 4, height: 4), ticks: 3)",
+    )
+    .unwrap();
+    let plain = Scenario::load(&file).unwrap();
+    assert!(plain.terrain.is_none());
+    assert_ne!(
+        plain.build_world().unwrap().checksum(),
+        world.checksum(),
+        "the terrain is in the checksum"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn a_map_that_does_not_fit_the_scenario_is_reported_with_the_file() {
+    let root = temp_tree("mismatch");
+    let maps = root.join("maps");
+    // A map with a layer, but 6 x 6 cells.
+    sf_data::map::generate::generate_cells(6, 6, 1)
+        .save(&maps.join("six"))
+        .unwrap();
+    // A map without a layer.
+    let bare = sf_data::map::Map::from_parts(
+        16,
+        16,
+        1.0,
+        vec!["a".into()],
+        vec![0; 17 * 17],
+        vec![0; 256],
+    )
+    .unwrap();
+    bare.save(&maps.join("bare")).unwrap();
+    let file = root.join("scenarios").join("s.ron");
+    let load = |name: &str| {
+        std::fs::write(
+            &file,
+            format!(
+                "Scenario(seed: 1, map: (width: 4, height: 4), map_name: Some({name:?}), ticks: 3)"
+            ),
+        )
+        .unwrap();
+        Scenario::load(&file).unwrap_err().to_string()
+    };
+    let e = load("six");
+    assert!(
+        e.contains("s.ron") && e.contains("6x6 cells") && e.contains("4x4"),
+        "{e}"
+    );
+    let e = load("bare");
+    assert!(e.contains("no terrain layer"), "{e}");
+    let e = load("missing");
+    assert!(e.contains("missing") && e.contains("cannot read"), "{e}");
+    std::fs::remove_dir_all(&root).ok();
 }

@@ -252,7 +252,9 @@ impl Runner {
             speed: DEMO_SPEED,
             ..WorldConfig::new(1).with_map_size(cells.0, cells.1)
         };
-        let mut world = World::new(config).expect("the map size is valid for a world");
+        // WP2.1: the map's terrain types go to the sim (open ground if it has
+        // no terrain layer); nothing is drawn from them yet (WP2.2 to WP2.4).
+        let mut world = crate::playfield::make_world(config, &map);
         let population = Population::new(pack.as_ref());
         let units = options.units;
         let buildings = population.spawn(&mut world, units, cells);

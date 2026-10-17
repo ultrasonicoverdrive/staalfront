@@ -78,6 +78,7 @@ pub mod args;
 pub mod bench;
 pub mod debug_ui;
 pub mod hud;
+pub mod playfield;
 pub mod population;
 pub mod runner;
 mod sound_browser;
