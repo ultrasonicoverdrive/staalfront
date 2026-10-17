@@ -560,7 +560,7 @@ impl FramePlan {
         for c in &state.characters {
             for part in &c.parts {
                 let xf = view.then_after(&part.world);
-                p.art(&xf, &part.part.art, &mut res.images);
+                p.art(&xf, part.part.mouth_art(c.mouth), &mut res.images);
             }
         }
         for l in &state.front_layers {

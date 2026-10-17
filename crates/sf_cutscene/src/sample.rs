@@ -18,6 +18,7 @@
 //! pose change that begins while an earlier one is still running continues
 //! smoothly from where the earlier one had got to.
 
+use crate::lipsync::{self, MouthShape};
 use crate::math::{Affine, Color, Easing, Lerp, Ms, Vec2};
 use crate::model::{
     Character, Delivery, EventKind, Facing, Layer, LoopAction, MapMarker, Part, Pose, Scene,
@@ -110,6 +111,12 @@ pub struct CharacterState<'a> {
     /// Where the character's origin stands in the world.
     pub position: Vec2,
     pub facing: Facing,
+    /// The mouth shape of the lip-sync now (WP12.3): from the cue file, or the
+    /// flap made of the text when the line has none, while this character's
+    /// line is running; `X` otherwise. The renderer draws
+    /// [`Part::mouth_art`](crate::Part::mouth_art) of this shape on every part
+    /// that has mouth variants.
+    pub mouth: MouthShape,
     /// Parts in draw order (lowest `z` first).
     pub parts: Vec<PartState<'a>>,
 }
@@ -431,6 +438,8 @@ impl Scene {
         let mut fade_alpha = Channel::new(0.0_f32);
         let mut fade_color = Color::BLACK;
         let mut subtitle: Option<Subtitle<'_>> = None;
+        // The mouth of each character that is speaking at `t_ms`.
+        let mut mouths: Vec<MouthShape> = vec![MouthShape::X; self.characters.len()];
         let mut overlay: Option<MapOverlayState<'_>> = None;
         let mut music: Option<LoopState<'_>> = None;
         let mut ambience: Option<LoopState<'_>> = None;
@@ -511,6 +520,18 @@ impl Scene {
                 } => {
                     let elapsed = i64::from(t_ms) - i64::from(at);
                     if elapsed < i64::from(*duration_ms) {
+                        // A voice-over is not drawn talking.
+                        if *delivery != Delivery::VoiceOver
+                            && let Some(ci) = index_of(speaker)
+                        {
+                            mouths[ci] = lipsync::line_shape(
+                                &self.mouth_cues,
+                                lipsync.as_deref(),
+                                text,
+                                elapsed as Ms,
+                                *duration_ms,
+                            );
+                        }
                         subtitle = Some(Subtitle {
                             speaker,
                             speaker_name: self
@@ -645,6 +666,7 @@ impl Scene {
                     character: ch,
                     position,
                     facing: run.facing,
+                    mouth: mouths[i],
                     parts: resolve_parts(ch, &run.pose.eval(t_ms), &root),
                 }
             })

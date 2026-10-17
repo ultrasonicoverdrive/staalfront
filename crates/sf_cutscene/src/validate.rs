@@ -112,6 +112,15 @@ pub fn asset_refs(scene: &Scene) -> Vec<AssetRef> {
                     format!("characters[{c}].parts[{p}].art"),
                 );
             }
+            for (shape, art) in &part.mouth_shapes {
+                if let Art::Image(f) = art {
+                    push(
+                        f,
+                        format!("mouth shape {shape} of part {:?} of {:?}", part.name, ch.id),
+                        format!("characters[{c}].parts[{p}].mouth_shapes.{shape}"),
+                    );
+                }
+            }
         }
     }
     for (t, track) in scene.timeline.tracks.iter().enumerate() {
@@ -435,6 +444,13 @@ impl V<'_> {
                     &format!("part {:?} of {:?}", part.name, ch.id),
                     &part.art,
                 );
+                for (shape, art) in &part.mouth_shapes {
+                    self.art(
+                        &format!("{pp}.mouth_shapes.{shape}"),
+                        &format!("mouth shape {shape} of part {:?} of {:?}", part.name, ch.id),
+                        art,
+                    );
+                }
                 if !part.pivot.is_finite() || !part.offset.is_finite() {
                     self.err(
                         &pp,

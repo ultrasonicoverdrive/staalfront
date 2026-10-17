@@ -9,8 +9,11 @@
 //! Every struct rejects unknown fields, so a typo in a scene is an error with
 //! a line number rather than a silently ignored setting.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
+use crate::lipsync::{MouthCueSet, MouthShape};
 use crate::math::{Color, Easing, Ms, Vec2};
 
 /// The only format version this crate reads.
@@ -57,6 +60,11 @@ pub struct Scene {
     pub characters: Vec<Character>,
     #[serde(default)]
     pub timeline: Timeline,
+    /// The mouth-cue files the `Dialogue` events name, read by the loader when
+    /// it has an asset root (WP12.3). Not part of the scene file: a line whose
+    /// file is not in here is lip-synced with the flap made from its text.
+    #[serde(skip)]
+    pub mouth_cues: MouthCueSet,
 }
 
 /// Size of the frame in stage units (the origin is its centre).
@@ -189,6 +197,32 @@ pub struct Part {
     #[serde(default)]
     pub z: i32,
     pub art: Art,
+    /// Art for the mouth shapes (WP12.3), keyed by shape letter: on a part
+    /// that is the character's mouth, `{ "A": Rect(..), "D": Image(..), .. }`.
+    /// While the character speaks, the shape the lip-sync gives replaces
+    /// `art`; a shape that is not listed falls back as described at
+    /// [`Part::mouth_art`]. Every variant shares the part's `pivot` and
+    /// `offset`. Empty (the default) means the part never changes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mouth_shapes: BTreeMap<MouthShape, Art>,
+}
+
+impl Part {
+    /// The art to draw while the mouth shows `shape`: the variant for the
+    /// shape; else the first of the similar shapes ([`MouthShape::similar`])
+    /// that has one; else the variant for `X`; else the part's own `art`. A
+    /// part without `mouth_shapes` always draws its `art`.
+    pub fn mouth_art(&self, shape: MouthShape) -> &Art {
+        shape
+            .fallbacks()
+            .find_map(|s| self.mouth_shapes.get(&s))
+            .unwrap_or(&self.art)
+    }
+
+    /// Every picture of the part: its `art` and the mouth variants.
+    pub fn arts(&self) -> impl Iterator<Item = &Art> {
+        std::iter::once(&self.art).chain(self.mouth_shapes.values())
+    }
 }
 
 /// A named arrangement of the parts. Parts not listed stand at rest.
