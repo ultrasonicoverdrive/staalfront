@@ -32,12 +32,13 @@
 //! stage get a placeholder rig (see [`placeholder_character`]); those that only
 //! ever speak as `(V.O.)` or `(O.S.)` are voice-only (no parts).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fmt::Write as _;
 
 use ron::ser::PrettyConfig;
 
+use crate::lipsync::placeholder_mouth_shapes;
 use crate::math::{Color, Easing, Ms, Vec2};
 use crate::model::{
     Art, Character, Delivery, Event, EventKind, FORMAT_VERSION, Facing, Layer, LoopAction, Part,
@@ -441,6 +442,9 @@ const GROUND_Y: f32 = 330.0;
 /// The rig's origin is the middle of the torso, this far above the feet.
 const ORIGIN_Y: f32 = 100.0;
 
+/// The colour of the placeholder mouth.
+const MOUTH_COLOR: Color = Color::rgb(0x7a, 0x2e, 0x2e);
+
 /// The geometric stand-in for a cutout figure: legs, torso, two arms, head,
 /// eye and mouth, plus the four poses the importer can choose from.
 pub fn placeholder_character(id: &str, name: &str, body: Color) -> Character {
@@ -454,6 +458,7 @@ pub fn placeholder_character(id: &str, name: &str, body: Color) -> Character {
             offset,
             z,
             art,
+            mouth_shapes: BTreeMap::new(),
         };
     let parts = vec![
         part(
@@ -511,14 +516,19 @@ pub fn placeholder_character(id: &str, name: &str, body: Color) -> Character {
                 color: Color::BLACK,
             },
         ),
-        part(
-            "mouth",
-            Some("head"),
-            Vec2::ZERO,
-            Vec2::new(8.0, 22.0),
-            4,
-            rect(36.0, 8.0, Color::rgb(0x7a, 0x2e, 0x2e)),
-        ),
+        // The resting mouth, with a variant for every mouth shape (WP12.3), so
+        // the figure talks as soon as the scene has a line for it.
+        Part {
+            mouth_shapes: placeholder_mouth_shapes(36.0, 8.0, MOUTH_COLOR),
+            ..part(
+                "mouth",
+                Some("head"),
+                Vec2::ZERO,
+                Vec2::new(8.0, 22.0),
+                4,
+                rect(36.0, 8.0, MOUTH_COLOR),
+            )
+        },
     ];
     let pp = |part: &str, angle: f32, offset: Vec2| PartPose {
         part: part.into(),
@@ -1553,6 +1563,7 @@ pub fn convert(text: &str, options: &ImportOptions) -> Import {
         layers: b.layers,
         characters,
         timeline: Timeline { tracks },
+        mouth_cues: Default::default(),
     };
     let ron = emit(&scene, &lines, options.source.as_deref());
     Import {
@@ -2157,6 +2168,7 @@ mod tests {
             layers: vec![],
             characters: vec![c],
             timeline: Timeline::default(),
+            mouth_cues: Default::default(),
         };
         let v = crate::validate::validate(&scene);
         assert!(v.errors.is_empty(), "{:?}", v.errors);

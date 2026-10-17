@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use sf_cutscene::preview::{Applied, Preview, Source};
 use sf_cutscene::render::{CutsceneRenderer, FrameLayout, Rect};
-use sf_cutscene::{Scene, SceneState, load_file, load_str};
+use sf_cutscene::{Art, MouthShape, Scene, SceneState, Vec2, load_file, load_str};
 use sf_render::image::{self, Rgba8};
 use sf_render::{GpuOptions, Renderer};
 
@@ -790,5 +790,212 @@ fn check_moment(
             assert_eq!(count_in(img, &rect, |p| lum(p) > TEXT_LUM), 0, "{t_ms} ms");
         }
         _ => panic!("{t_ms} ms: the sampler and the renderer disagree about the subtitle"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WP12.3: lip-sync. The demo scene has no voice files, so the mouths flap from
+// the text of the lines. The PNGs in `docs/screenshots/wp12.3` were made with
+// `SF_SAVE_SHOTS`.
+
+/// Two states differ only in the mouth shapes: the same camera, fade, layers
+/// and, for every character, the same place and the same transform of every part.
+fn same_but_mouths(a: &SceneState<'_>, b: &SceneState<'_>) -> bool {
+    a.camera == b.camera
+        && a.fade == b.fade
+        && a.back_layers == b.back_layers
+        && a.front_layers == b.front_layers
+        && a.subtitle.map(|s| (s.speaker, s.text)) == b.subtitle.map(|s| (s.speaker, s.text))
+        && a.characters.len() == b.characters.len()
+        && a.characters.iter().zip(&b.characters).all(|(x, y)| {
+            x.position == y.position
+                && x.facing == y.facing
+                && x.parts.len() == y.parts.len()
+                && x.parts
+                    .iter()
+                    .zip(&y.parts)
+                    .all(|(p, q)| p.world == q.world)
+        })
+}
+
+/// The box around a character's mouth in the image, in pixels: the mouth part's
+/// joint through the camera and the viewport, `half` stage units each way.
+fn mouth_box(state: &SceneState<'_>, who: &str, layout: &FrameLayout, half: f32) -> Rect {
+    let c = state
+        .characters
+        .iter()
+        .find(|c| c.character.id == who)
+        .expect("on stage");
+    let mouth = c
+        .parts
+        .iter()
+        .find(|p| p.part.name == "mouth")
+        .expect("a mouth part");
+    let world = mouth.world.apply(Vec2::ZERO);
+    let v = layout.viewport;
+    let px = v.w / 1920.0 * state.camera.zoom;
+    let (cx, cy) = (
+        v.x + v.w / 2.0 + (world.x - state.camera.center.x) * px,
+        v.y + v.h / 2.0 + (world.y - state.camera.center.y) * px,
+    );
+    Rect {
+        x: cx - half * px,
+        y: cy - half * px,
+        w: 2.0 * half * px,
+        h: 2.0 * half * px,
+    }
+}
+
+/// How many pixels inside `r` differ between two images by more than a little.
+fn changed_in(a: &Rgba8, b: &Rgba8, r: &Rect) -> usize {
+    let (x0, y0) = (r.x.max(0.0) as u32, r.y.max(0.0) as u32);
+    let (x1, y1) = (
+        (r.right().ceil() as u32).min(a.width),
+        (r.bottom().ceil() as u32).min(a.height),
+    );
+    let mut n = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let (p, q) = (a.pixel(x, y), b.pixel(x, y));
+            if (0..3).any(|i| (i32::from(p[i]) - i32::from(q[i])).abs() > 16) {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// Is the mouth moving between these two frames: do enough pixels change in
+/// the box around it?
+fn mouth_moves(a: &Rgba8, b: &Rgba8, mouth: &Rect) -> bool {
+    changed_in(a, b, mouth) >= 150
+}
+
+fn art_area(a: &Art) -> f32 {
+    match a {
+        Art::Rect { w, h, .. } | Art::RoundRect { w, h, .. } => w * h,
+        _ => 0.0,
+    }
+}
+
+#[test]
+fn the_demo_mouths_move_mid_line_and_the_check_fails_without_lip_sync() {
+    let scene = demo();
+    let mut r = renderer(1280, 720);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), repo_assets());
+
+    // Mira's line "Operating on nothing, Captain. ..." runs from 10.1 to 16.1 s.
+    // From 10.9 s the camera and both figures stand still, so a difference
+    // between two frames of it can only be the mouth.
+    let (from, to) = (10_900, 16_000);
+    let mira = scene.character("mira").unwrap();
+    let mouth_part = &mira.parts[mira.part_index("mouth").unwrap()];
+    let area = |m: MouthShape| art_area(mouth_part.mouth_art(m));
+    let mut wide: Option<(i32, MouthShape)> = None;
+    let mut shut: Option<(i32, MouthShape)> = None;
+    for t in (from..to).step_by(10) {
+        let m = scene
+            .sample(t)
+            .characters
+            .iter()
+            .find(|c| c.character.id == "mira")
+            .unwrap()
+            .mouth;
+        if wide.is_none_or(|(_, w)| area(m) > area(w)) {
+            wide = Some((t, m));
+        }
+        if shut.is_none_or(|(_, s)| area(m) < area(s)) {
+            shut = Some((t, m));
+        }
+    }
+    let ((t_wide, m_wide), (t_shut, m_shut)) = (wide.unwrap(), shut.unwrap());
+    assert_ne!(
+        m_wide, m_shut,
+        "the flap uses more than one shape in this line"
+    );
+    assert!(
+        area(m_wide) > area(m_shut) * 2.0,
+        "{m_wide} against {m_shut}"
+    );
+
+    let state_a = scene.sample(t_shut);
+    let state_b = scene.sample(t_wide);
+    assert!(
+        same_but_mouths(&state_a, &state_b),
+        "{t_shut} ms and {t_wide} ms should differ only in the mouth"
+    );
+
+    // With lip-sync: the two frames differ in the box around Mira's mouth, and
+    // only there.
+    let (img_a, layout) = shoot_state(&mut r, &mut cs, &scene, &state_a);
+    let (img_b, _) = shoot_state(&mut r, &mut cs, &scene, &state_b);
+    save("6_mouth_closed.png", &img_a);
+    save("6_mouth_open.png", &img_b);
+    let mira_box = mouth_box(&state_a, "mira", &layout, 36.0);
+    let whole = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: img_a.width as f32,
+        h: img_a.height as f32,
+    };
+    assert!(
+        mouth_moves(&img_a, &img_b, &mira_box),
+        "the mouth is {m_shut} at {t_shut} ms and {m_wide} at {t_wide} ms, but the frames hardly differ: {} pixels",
+        changed_in(&img_a, &img_b, &mira_box)
+    );
+    assert_eq!(
+        changed_in(&img_a, &img_b, &mira_box),
+        changed_in(&img_a, &img_b, &whole),
+        "nothing outside the mouth changed"
+    );
+    // Elian is not speaking: his mouth box is the same in both.
+    let elian_box = mouth_box(&state_a, "captain_elian", &layout, 36.0);
+    assert!(!mouth_moves(&img_a, &img_b, &elian_box));
+    assert_eq!(changed_in(&img_a, &img_b, &elian_box), 0);
+
+    // Without lip-sync (every mouth at rest, as before WP12.3) the same two
+    // moments look alike and the same check says "not moving": the check can fail.
+    let mut rest_a = state_a.clone();
+    let mut rest_b = state_b.clone();
+    for c in rest_a.characters.iter_mut().chain(&mut rest_b.characters) {
+        c.mouth = MouthShape::X;
+    }
+    let (off_a, _) = shoot_state(&mut r, &mut cs, &scene, &rest_a);
+    let (off_b, _) = shoot_state(&mut r, &mut cs, &scene, &rest_b);
+    assert!(!mouth_moves(&off_a, &off_b, &mira_box));
+    assert_eq!(changed_in(&off_a, &off_b, &whole), 0, "identical frames");
+    // And the lip-synced frame is not the resting one.
+    assert!(changed_in(&img_b, &off_b, &mira_box) >= 150);
+}
+
+/// The same figure, each of the nine shapes drawn: nine different mouths.
+#[test]
+fn every_mouth_shape_of_the_demo_rig_draws_differently() {
+    let scene = demo();
+    let mut r = renderer(1280, 720);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), repo_assets());
+    let base = scene.sample(12_000);
+    let mut images = Vec::new();
+    let mut layout = None;
+    for shape in MouthShape::ALL {
+        let mut state = base.clone();
+        for c in &mut state.characters {
+            c.mouth = shape;
+        }
+        let (img, l) = shoot_state(&mut r, &mut cs, &scene, &state);
+        layout = Some(l);
+        images.push((shape, img));
+    }
+    let layout = layout.unwrap();
+    let mira = mouth_box(&base, "mira", &layout, 36.0);
+    for (i, (a, ia)) in images.iter().enumerate() {
+        for (b, ib) in &images[i + 1..] {
+            assert!(
+                changed_in(ia, ib, &mira) > 0,
+                "{a} and {b} look the same in the picture"
+            );
+        }
     }
 }

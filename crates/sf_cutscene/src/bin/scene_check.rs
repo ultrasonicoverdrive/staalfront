@@ -2,7 +2,8 @@
 //!
 //! Loads a scene and prints what is wrong with it, with line numbers. Exit
 //! status 0 = valid (warnings and missing assets are listed but not fatal),
-//! 1 = invalid or unreadable, 2 = bad usage.
+//! 1 = invalid or unreadable or a lip-sync cue file that cannot be used,
+//! 2 = bad usage.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -51,12 +52,30 @@ fn main() -> ExitCode {
                     None => eprintln!("{file}: note: missing {} ({})", m.file, m.used_by),
                 }
             }
+            // Lip-sync cue files (WP12.3): corrected ones are warnings; one that
+            // cannot be used makes the check fail, although the scene would play
+            // (that line flaps from its text).
+            let assets_dir = assets.as_deref().unwrap_or(Path::new("."));
+            let mut unusable = 0;
+            for i in &l.lipsync {
+                let at = assets_dir.join(&i.file).display().to_string();
+                let kind = if i.unusable { "error" } else { "warning" };
+                unusable += usize::from(i.unusable);
+                match i.line {
+                    Some(n) => eprintln!("{at}:{n}: {kind}: {}", i.message),
+                    None => eprintln!("{at}: {kind}: {}", i.message),
+                }
+            }
             println!(
-                "{file}: ok, {:.1} s, {} warnings, {} missing assets",
+                "{file}: ok, {:.1} s, {} warnings, {} missing assets, {} lip-sync files used",
                 f64::from(l.scene.duration_ms()) / 1000.0,
-                l.warnings.len(),
-                l.missing_assets.len()
+                l.warnings.len() + l.lipsync.len() - unusable,
+                l.missing_assets.len(),
+                l.scene.mouth_cues.len()
             );
+            if unusable > 0 {
+                return ExitCode::FAILURE;
+            }
             ExitCode::SUCCESS
         }
         Err(e) => {

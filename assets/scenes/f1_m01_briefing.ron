@@ -15,6 +15,9 @@
 //     built from rectangles and circles, and the map insert drawn as a map;
 //   - characters: a placeholder cutout rig per speaker with torso, head, mouth, two upper arms and
 //     two forearms and the five poses neutral / point / lean / arms_crossed / radio;
+//     (WP12.3) the mouth carries a picture for each of the nine lip-sync mouth shapes A-H and X, so
+//     both of them talk: the voice files and cue files are still empty, so the mouth flaps from the
+//     text of each line until a recording and its `lipsync` file are added;
 //   - direction: both walk in and leave, the parentheticals became poses, the camera drifts and
 //     pushes in on important lines, a cut to the map with pins and an arrow, the radio click.
 //   - timing: the dialogue durations are the importer's (words / 2.5 per second); only the pauses
@@ -107,7 +110,17 @@ Scene(
             (name: "legs", pivot: (0.0, -85.0), offset: (0.0, 0.0), z: -2, art: RoundRect(w: 120.0, h: 170.0, radius: 20.0, color: "#7f7350")),  // hand edit: legs: a root, so they stay upright when the torso leans
             (name: "torso", pivot: (0.0, 105.0), offset: (0.0, 0.0), z: -1, art: RoundRect(w: 150.0, h: 210.0, radius: 34.0, color: "#667046")),  // hand edit: joint at the hips
             (name: "head", parent: "torso", pivot: (0.0, 56.0), offset: (0.0, -204.0), z: 9, art: Circle(radius: 56.0, color: "#e0b48f")),  // hand edit: joint at the neck
-            (name: "mouth", parent: "head", pivot: (0.0, 0.0), offset: (15.0, -34.0), z: 13, art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e")),  // hand edit: KEEP: the mouth for lip-sync (WP12.3)
+            (name: "mouth", parent: "head", pivot: (0.0, 0.0), offset: (15.0, -34.0), z: 13, art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e"), mouth_shapes: {  // hand edit: KEEP: the mouth for lip-sync (WP12.3); `art` is the resting mouth, one picture per mouth shape follows (shapes are drawn in place of `art` while the character speaks)
+                "A": RoundRect(w: 30.0, h: 4.5, radius: 1.5, color: "#7a2e2e"),  // closed lips (P, B, M)
+                "B": RoundRect(w: 30.0, h: 8.5, radius: 2.8, color: "#eee6d6"),  // slightly open, teeth clenched (K, S, T)
+                "C": RoundRect(w: 23.0, h: 15.0, radius: 7.5, color: "#7a2e2e"),  // open (the vowels of "bed", "cat")
+                "D": RoundRect(w: 28.0, h: 25.0, radius: 12.5, color: "#7a2e2e"),  // wide open (the vowel of "father")
+                "E": RoundRect(w: 16.0, h: 20.0, radius: 8.0, color: "#7a2e2e"),  // rounded (the vowels of "off", "bird")
+                "F": RoundRect(w: 10.0, h: 12.0, radius: 5.0, color: "#7a2e2e"),  // puckered (U, OO, W)
+                "G": RoundRect(w: 21.0, h: 8.5, radius: 2.8, color: "#eee6d6"),  // upper teeth on the lower lip (F, V)
+                "H": RoundRect(w: 21.0, h: 13.5, radius: 6.7, color: "#c4625c"),  // tongue raised (a long L)
+                "X": RoundRect(w: 25.0, h: 3.0, radius: 1.0, color: "#7a2e2e"),  // at rest
+            }),
             (name: "eye", parent: "head", pivot: (0.0, 0.0), offset: (22.0, -66.0), z: 12, art: Circle(radius: 6.5, color: "#1b1b1b")),  // hand edit: new part
             (name: "upper_arm_l", parent: "torso", pivot: (0.0, -50.0), offset: (-78.0, -186.0), z: 1, art: RoundRect(w: 40.0, h: 100.0, radius: 18.0, color: "#59623a")),  // hand edit: shoulder joint at the top
             (name: "forearm_l", parent: "upper_arm_l", pivot: (0.0, -45.0), offset: (0.0, 90.0), z: 10, art: RoundRect(w: 34.0, h: 90.0, radius: 16.0, color: "#59623a")),  // hand edit: elbow joint at the top
@@ -158,7 +171,17 @@ Scene(
             (name: "legs", pivot: (0.0, -85.0), offset: (0.0, 0.0), z: -2, art: RoundRect(w: 120.0, h: 170.0, radius: 20.0, color: "#a89870")),  // hand edit: legs: a root, so they stay upright when the torso leans
             (name: "torso", pivot: (0.0, 105.0), offset: (0.0, 0.0), z: -1, art: RoundRect(w: 150.0, h: 210.0, radius: 34.0, color: "#52708a")),  // hand edit: joint at the hips
             (name: "head", parent: "torso", pivot: (0.0, 56.0), offset: (0.0, -204.0), z: 9, art: Circle(radius: 56.0, color: "#c8946c")),  // hand edit: joint at the neck
-            (name: "mouth", parent: "head", pivot: (0.0, 0.0), offset: (15.0, -34.0), z: 13, art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e")),  // hand edit: KEEP: the mouth for lip-sync (WP12.3)
+            (name: "mouth", parent: "head", pivot: (0.0, 0.0), offset: (15.0, -34.0), z: 13, art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e"), mouth_shapes: {  // hand edit: KEEP: the mouth for lip-sync (WP12.3); `art` is the resting mouth, one picture per mouth shape follows (shapes are drawn in place of `art` while the character speaks)
+                "A": RoundRect(w: 30.0, h: 4.5, radius: 1.5, color: "#7a2e2e"),  // closed lips (P, B, M)
+                "B": RoundRect(w: 30.0, h: 8.5, radius: 2.8, color: "#eee6d6"),  // slightly open, teeth clenched (K, S, T)
+                "C": RoundRect(w: 23.0, h: 15.0, radius: 7.5, color: "#7a2e2e"),  // open (the vowels of "bed", "cat")
+                "D": RoundRect(w: 28.0, h: 25.0, radius: 12.5, color: "#7a2e2e"),  // wide open (the vowel of "father")
+                "E": RoundRect(w: 16.0, h: 20.0, radius: 8.0, color: "#7a2e2e"),  // rounded (the vowels of "off", "bird")
+                "F": RoundRect(w: 10.0, h: 12.0, radius: 5.0, color: "#7a2e2e"),  // puckered (U, OO, W)
+                "G": RoundRect(w: 21.0, h: 8.5, radius: 2.8, color: "#eee6d6"),  // upper teeth on the lower lip (F, V)
+                "H": RoundRect(w: 21.0, h: 13.5, radius: 6.7, color: "#c4625c"),  // tongue raised (a long L)
+                "X": RoundRect(w: 25.0, h: 3.0, radius: 1.0, color: "#7a2e2e"),  // at rest
+            }),
             (name: "eye", parent: "head", pivot: (0.0, 0.0), offset: (22.0, -66.0), z: 12, art: Circle(radius: 6.5, color: "#1b1b1b")),  // hand edit: new part
             (name: "upper_arm_l", parent: "torso", pivot: (0.0, -50.0), offset: (-78.0, -186.0), z: 1, art: RoundRect(w: 40.0, h: 100.0, radius: 18.0, color: "#486279")),  // hand edit: shoulder joint at the top
             (name: "forearm_l", parent: "upper_arm_l", pivot: (0.0, -45.0), offset: (0.0, 90.0), z: 10, art: RoundRect(w: 34.0, h: 90.0, radius: 16.0, color: "#486279")),  // hand edit: elbow joint at the top

@@ -27,6 +27,15 @@
 //!   [`SceneState`], built on the public API of `sf_render` and `sf_ui`.
 //! * the `play_scene` binary: a window to preview a scene or a Fountain file.
 //!
+//! WP12.3 adds lip-sync:
+//!
+//! * [`lipsync`]: the nine mouth shapes, readers for Rhubarb's JSON and TSV
+//!   output into an integer-millisecond series ([`MouthCues`]), and the "flap"
+//!   fallback made from the text. [`CharacterState::mouth`] reports the shape
+//!   per character; a rig's `mouth` part draws the matching art variant.
+//! * [`rhubarb`]: finding and running the external `rhubarb` executable, for
+//!   the `lipsync` binary.
+//!
 //! WP12.6 adds the live preview (`play_scene --watch`):
 //!
 //! * [`watch`]: polling for changed files with a debounce ([`watch::SceneWatcher`]).
@@ -42,18 +51,21 @@
 
 pub mod controls;
 pub mod fountain;
+pub mod lipsync;
 pub mod load;
 pub mod math;
 pub mod model;
 pub mod player;
 pub mod preview;
 pub mod render;
+pub mod rhubarb;
 pub mod sample;
 pub mod span;
 pub mod validate;
 pub mod watch;
 
 pub use controls::{Action, Bindings, Key};
+pub use lipsync::{MouthCue, MouthCueSet, MouthCues, MouthShape};
 pub use load::{LoadedScene, SceneError, load_file, load_str, parse_str};
 pub use math::{Affine, Color, Easing, Ms, Vec2};
 pub use model::{

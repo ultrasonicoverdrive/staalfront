@@ -132,6 +132,7 @@ where the roots hang.
 | `pivot` | Where the joint is **inside the picture**, measured from the picture's centre. A hanging arm drawn with the shoulder at its top edge has `pivot: (0, -height/2)`. Default `(0, 0)` = rotate about the centre. |
 | `z` | Draw order inside the character, independent of the tree. Lower first, ties by list order. |
 | `art` | As for layers. |
+| `mouth_shapes` | Optional (WP12.3), for the part that is the character's mouth: art per mouth shape, `{ "A": Rect(..), "D": Image(..), .. }`. While the character speaks, the shape of the lip-sync replaces `art` (section 11). Default: none, the part never changes. All variants share the part's `pivot` and `offset`. |
 
 **Poses** are named arrangements. A pose lists the parts that differ from rest
 (`angle`, `offset` added to the rest offset, `scale` default `(1, 1)`); parts
@@ -177,7 +178,7 @@ Unlisted fields are required.
 | `Exit` | `character` | Leaves the stage. |
 | `Move` | `character`, `to`, `duration_ms`, `easing`, `facing` (unchanged) | Walks to `to`. |
 | `SetPose` | `character`, `pose`, `duration_ms` (0), `easing`, `hint` (none) | Blends from what the character looks like **now** to the pose. `hint` is the writer's stage direction, informational. |
-| `Dialogue` | `speaker`, `text`, `duration_ms` (> 0), `voice` (none), `lipsync` (none), `delivery` (`OnScreen`) | Subtitle for `duration_ms`; the voice file starts with it. `delivery`: `OnScreen`, `VoiceOver` (radio, narrator: V.O.), `OffScreen` (O.S.). `lipsync` is the mouth-shape file for `voice` (WP12.3). |
+| `Dialogue` | `speaker`, `text`, `duration_ms` (> 0), `voice` (none), `lipsync` (none), `delivery` (`OnScreen`) | Subtitle for `duration_ms`; the voice file starts with it. `delivery`: `OnScreen`, `VoiceOver` (radio, narrator: V.O.), `OffScreen` (O.S.). `lipsync` is the mouth-shape file (Rhubarb's JSON or TSV) for `voice`, section 11 (WP12.3); without it the mouth flaps from `text`. |
 | `Sfx` | `sound` (none), `note` (""), `volume` (1.0) | One-shot sound. |
 | `Music` | `action` (`Play`/`Stop`), `file` (none), `note`, `fade_ms` (0) | Start or stop the music. |
 | `Ambience` | same as `Music` | Start or stop the ambient bed. |
@@ -258,7 +259,7 @@ let fired = scene.fired_between(Some(prev_ms), t_ms);       // only the sound ev
   `position` already has the parallax folded in (draw it like a world object at
   `(position - camera.center) * zoom`). `shake` is added to everything,
   layers included.
-* Per character: `position`, `facing` and `parts` in draw order, each with the
+* Per character: `position`, `facing`, `mouth` (the lip-sync shape now, section 11) and `parts` in draw order, each with the
   blended `pose`, the world position of its `joint` and a `world` matrix that
   maps the part's picture (centred on its own origin) into the world, pivot,
   tree, scale and facing included.
@@ -504,10 +505,9 @@ milliseconds, so they are tested with a fake one); `Player::replace_scene` keeps
 ## 9. Not in this format yet
 
 * SVG pictures in the player (PNG only for now), pictures with a palette or grey scale.
-* Mouth shapes from speech: WP12.3 (`lipsync` only names the file).
 * Video fallback: WP12.4.
-* Swapping a part's picture inside a pose (mouth shapes, blinking eyes): not
-  needed for the placeholders; WP12.3 will decide how mouth shapes are chosen.
+* Swapping a part's picture inside a *pose* (blinking eyes, a hand that opens): only the mouth
+  has art variants, chosen by the lip-sync (section 11), not by poses.
 
 Found while directing the demo scene (section 10); none of them blocked it, each has a
 workaround there:
@@ -580,7 +580,7 @@ the Meridian emblem). `scale: 1.8`; art faces **right**; the character position 
 | `legs` | root | (0, -85) top | (0, 0) | -2 | a root of its own, so legs stay upright when the torso leans |
 | `torso` | root | (0, 105) hips | (0, 0) | -1 | `lean` rotates about the hips |
 | `head` | `torso` | (0, 56) neck | (0, -204) | 9 | |
-| `mouth` | `head` | (0, 0) | (15, -34) | 13 | **the lip-sync part** (WP12.3) |
+| `mouth` | `head` | (0, 0) | (15, -34) | 13 | **the lip-sync part** (WP12.3): `mouth_shapes` holds one picture per mouth shape, section 11 |
 | `upper_arm_l`, `upper_arm_r` | `torso` | (0, -50) shoulder | (-78, -186), (78, -186) | 1, 4 | `_r` is the arm on the side the figure faces |
 | `forearm_l`, `forearm_r` | upper arm | (0, -45) elbow | (0, 90) | 10, 5 | |
 | `hand_l`, `hand_r` | forearm | (0, 0) | (0, 88) | 19, 6 | `hand_l` is above the head so it shows at the ear |
@@ -618,3 +618,147 @@ off in the two-shot) and `demo_close_up_on_mira_cuts_nobody_off` (Elian is out o
 Mira is whole during the close-up). The frames are the PNGs above; `5_close_up.png` is the close-up.
 `demo_scene_marks_every_hand_edit` compares layers, characters, parts and poses with a fresh generator
 run as well as the events.
+
+## 11. Lip-sync (WP12.3)
+
+Characters move their mouths while they speak. The mouth shapes come from the recording of the line,
+analysed **offline** by [Rhubarb Lip Sync](https://github.com/DanielSWolf/rhubarb-lip-sync) (MIT licence;
+it is **not** in this repository and is never downloaded by it), and are stored next to the voice as a
+small text file, a time series of shapes. Before there are voices, the mouth **flaps** from the text of the
+line, so a scene with placeholder figures already talks.
+
+```
+voice recording (WAV) --lipsync (runs rhubarb)--> l017.json --named in the scene by `lipsync:`--> mouth shape per moment
+```
+
+### 11.1 The nine mouth shapes (for the artist)
+
+Rhubarb's basic six `A`-`F`, the extended `G`, `H` and `X`. Draw (or let the placeholder show) one mouth per
+shape; the shape letter is the key in `mouth_shapes`.
+
+| Shape | Looks like | For the sounds | If you have not drawn it, the rig shows the first of |
+|---|---|---|---|
+| `A` | closed lips | P, B, M | `X`, `B` |
+| `B` | slightly open, teeth clenched | K, S, T, long E | `C`, `A` |
+| `C` | open | the vowels of "bed", "cat" | `B`, `D` |
+| `D` | wide open | the vowel of "father" | `C`, `E` |
+| `E` | rounded, slightly open | the vowels of "off", "bird" | `F`, `C` |
+| `F` | puckered | U, OO, W | `E`, `C` |
+| `G` | upper teeth on the lower lip | F, V | `B`, `C` |
+| `H` | tongue raised | a long L | `C`, `D` |
+| `X` | at rest | pauses, silence, and the mouth of everybody who is not speaking | `A` |
+
+A missing shape is replaced by the first **similar** shape of the right-hand column that the rig has, then by
+`X`, then by the part's own `art`, so a rig can start with three or four mouths (`A`, `D`, `X`) and get more
+later. The table is fixed (`MouthShape::similar`).
+
+```ron
+(name: "mouth", parent: "head", offset: (15.0, -34.0), z: 13,
+ art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e"),      // the resting mouth, also the last fallback
+ mouth_shapes: {
+     "A": Image("art/halversen/mouth_a.png"),
+     "D": Image("art/halversen/mouth_d.png"),
+     "X": Image("art/halversen/mouth_x.png"),
+ }),
+```
+
+The variants are drawn in place of `art` on the same joint (`pivot`, `offset`, `z` are the part's), so make all
+the pictures the same size with the mouth in the same place. A scene that has no `mouth_shapes` anywhere
+loads and plays as before. A shape letter that is not one of the nine is an error with its line number; an
+`Image` variant that does not exist yet is in the missing-asset list like any picture. Placeholder figures:
+`fountain2scene` gives the figures it makes geometric mouths for all nine shapes (a thin line at rest, a firm
+line, a teeth bar, a small and a wide oval, a rounded "O", a small pucker, a short teeth bar, a tongue
+oval), and the demo scene's two rigs have their own, marked `hand edit`
+(`lipsync::placeholder_mouth_shapes` makes them for your own placeholder).
+
+### 11.2 The workflow for Tijmen: from a recording to a talking mouth
+
+1. **Record** the line as a WAV (mono or stereo, 16 bit is fine) and name the file after the line, e.g.
+   `f1_m01_017.wav` (the line number of the briefing, as in the `// line N` comment). Put it in
+   `assets/voice/`.
+2. **Install Rhubarb once.** Download the zip for your system from
+   <https://github.com/DanielSWolf/rhubarb-lip-sync/releases>, unzip it somewhere (keep its `res` folder
+   next to the program) and either add that folder to your PATH or pass `--rhubarb <path>` each time. Without
+   it the tool prints these steps and stops (exit status 3).
+3. **Run `lipsync`.** In PowerShell, from your clone:
+
+   ```powershell
+   cd C:\Users\Tijmen!\staalfront
+
+   # one line; the text makes Rhubarb's result better
+   cargo run -p sf_cutscene --bin lipsync -- assets\voice\f1_m01_017.wav --dialog "The relay went dark at 04:10." -o assets\voice\f1_m01_017.json
+
+   # if rhubarb is not on the PATH
+   cargo run -p sf_cutscene --bin lipsync -- assets\voice\f1_m01_017.wav -o assets\voice\f1_m01_017.json --rhubarb C:\Tools\Rhubarb\rhubarb.exe
+
+   # a whole folder: every WAV becomes <name>.json next to it (or in -o); texts are optional, one
+   # <name>.txt per line in --dialog-dir
+   cargo run -p sf_cutscene --bin lipsync -- --batch assets\voice --dialog-dir content\lines
+
+   # another language than English: the phonetic recogniser
+   cargo run -p sf_cutscene --bin lipsync -- assets\voice\f1_m01_017.wav --recognizer phonetic -o assets\voice\f1_m01_017.json
+   ```
+
+   (On Linux and macOS the same with `/` in the paths.) The tool checks what Rhubarb wrote and says how
+   many cues there are; a `.tsv` output name writes Rhubarb's TSV instead of JSON.
+4. **Name the files in the scene**: the voice and the mouth-shape file of the line.
+
+   ```ron
+   (at: 2200, kind: Dialogue(speaker: "captain_elian", text: "The relay went dark at 04:10.", duration_ms: 7600,
+                             voice: "voice/f1_m01_017.wav", lipsync: "voice/f1_m01_017.json")),
+   ```
+5. **Check** with `scene_check` (it reads the cue files too: a bad one is named with its line, exit
+   status 1) and **watch** with `play_scene --watch`: it also watches the cue files, so running `lipsync`
+   again shows the new mouth at once.
+
+Re-record a line and the duration changes? Set `duration_ms` to the length of the recording; cues that
+start after the end of the line are dropped (with a warning) and a last cue that runs past it is clipped.
+
+### 11.3 The files
+
+Both are what Rhubarb writes, read from its public description (the reader is our own code):
+
+* **JSON**: `{ "metadata": {..}, "mouthCues": [ { "start": 0.19, "end": 0.37, "value": "B" }, .. ] }`,
+  times in seconds.
+* **TSV**: one cue per line, `0.19<TAB>B`, the time is when the shape starts; Rhubarb ends a file with an
+  `X` at the end of the sound.
+
+Both become a series of integer milliseconds, counted from the start of the line (the voice file starts
+with the line). A cue holds until the next one starts; before the first one the mouth is at rest. Checks:
+
+| Problem | Result |
+|---|---|
+| unknown shape (not one of the nine capital letters), a malformed line, a negative time, a missing field, no cues at all | **error**, with the line number of the cue file |
+| cues out of order; two cues at one time (the later wins); overlapping cues | warning, corrected |
+| cues that start at or after the end of the line; a last cue that runs past it | warning, dropped / clipped |
+
+An error in a cue file never stops the scene: that line flaps from its text instead, and the loader reports it
+(`LoadedScene::lipsync`, printed by `scene_check` and `play_scene`). Cue files are only read when the loader
+has an asset root (`load_file(path, Some(assets))`; the viewer and the checker always have one).
+
+### 11.4 What the sampler says
+
+`SceneState` has per character a `mouth` shape: while a character's `Dialogue` line is running, the shape
+from the cue file at `elapsed = t - at` (or from the flap, when the line has no loaded cue file); otherwise
+`X`. A `VoiceOver` line is not drawn talking. It is a pure function of `t`, so a seek, a step or a pause always
+shows the right mouth. The renderer draws `Part::mouth_art(shape)` on every part that has `mouth_shapes`.
+
+**The flap.** Words are split into syllables (groups of vowels; the vowel gives the shape: A wide, E open, I
+narrow, O round, U puckered; a word that starts with B, M or P begins closed, one with F or V with teeth on the
+lip); words are separated by `X`, sentence ends by two. A slot lasts 100 to 125 ms (8 to 10 changes a
+second) within the line: a short text stops moving before the line ends, a long one is cut off at the end.
+Same text and length, same flap, every time.
+
+Frames: [`docs/screenshots/wp12.3/`](screenshots/wp12.3/): Mira at two moments of her line, the mouth
+closed and open, nothing else changed (made by `the_demo_mouths_move_mid_line_and_the_check_fails_without_lip_sync`
+with `SF_SAVE_SHOTS`).
+
+### 11.5 The tool in short
+
+```
+lipsync <voice.wav> [-o out.json|out.tsv] [--dialog TEXT | --dialog-file FILE] [--recognizer R] [--rhubarb PATH]
+lipsync --batch <folder> [-o <out-folder>] [--dialog-dir <folder>] [--format json|tsv] [--rhubarb PATH]
+```
+
+Exit status: 0 done, 1 Rhubarb failed or wrote something unusable (per line in a batch), 2 bad usage, 3
+Rhubarb not found. The tool only runs the `rhubarb` program; it does not contain or download it.

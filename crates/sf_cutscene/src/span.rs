@@ -235,6 +235,19 @@ impl Scanner<'_> {
         std::str::from_utf8(&self.b[start..self.i]).unwrap_or("")
     }
 
+    /// The text of a plain `"quoted"` key at the current position (no escapes),
+    /// without moving.
+    fn quoted_key(&self) -> Option<String> {
+        if self.peek() != Some(b'"') {
+            return None;
+        }
+        let rest = &self.b[self.i + 1..];
+        let end = rest
+            .iter()
+            .position(|&c| matches!(c, b'"' | b'\\' | b'\n'))?;
+        (rest[end] == b'"').then(|| String::from_utf8_lossy(&rest[..end]).into_owned())
+    }
+
     /// One value at `path`.
     fn value(&mut self, path: &str) {
         self.skip_ws();
@@ -329,11 +342,17 @@ impl Scanner<'_> {
             let p = format!("{path}[{index}]");
             index += 1;
             let before = self.i;
+            let key = self.quoted_key();
+            let key_line = self.line;
             self.value(&p);
             self.skip_ws();
             if self.peek() == Some(b':') {
-                // Map entry `key: value`.
+                // Map entry `key: value`. A map with text keys (a part's
+                // `mouth_shapes: { "A": ... }`) is also found by key.
                 self.bump();
+                if let Some(k) = key {
+                    self.out.entry(join(path, &k)).or_insert(key_line);
+                }
                 self.value(&format!("{p}.value"));
             }
             if self.i == before {
@@ -403,6 +422,16 @@ Scene(
             Some(15)
         );
         assert_eq!(ix.line_of("nonexistent"), Some(3));
+    }
+
+    #[test]
+    fn text_keys_of_a_map_are_found_by_name() {
+        let ix = SpanIndex::new(
+            "(parts: [(\n  mouth_shapes: {\n    \"A\": Rect(w: 1.0),\n    \"D\": Circle(),\n  },\n)])",
+        );
+        assert_eq!(ix.line_of("parts[0].mouth_shapes.A"), Some(3));
+        assert_eq!(ix.line_of("parts[0].mouth_shapes.D"), Some(4));
+        assert_eq!(ix.line_of("parts[0].mouth_shapes"), Some(2));
     }
 
     #[test]

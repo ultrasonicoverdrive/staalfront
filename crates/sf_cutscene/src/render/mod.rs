@@ -35,7 +35,7 @@ use sf_render::FrameTarget;
 use sf_render::wgpu::{self, util::DeviceExt};
 use sf_ui::atlas::WIDTH as ATLAS_WIDTH;
 
-use crate::model::{Art, Scene};
+use crate::model::{Art, Part, Scene};
 use crate::sample::SceneState;
 
 pub use images::{ImageStore, Picture};
@@ -338,7 +338,7 @@ impl CutsceneRenderer {
         let parts = scene
             .characters
             .iter()
-            .flat_map(|c| c.parts.iter().map(|p| &p.art));
+            .flat_map(|c| c.parts.iter().flat_map(Part::arts));
         for art in layers.chain(parts) {
             if let Art::Image(path) = art {
                 self.res.images.get(path);

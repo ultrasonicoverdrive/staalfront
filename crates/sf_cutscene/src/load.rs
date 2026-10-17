@@ -15,6 +15,7 @@ use std::fmt;
 use std::fs;
 use std::path::Path;
 
+use crate::lipsync::{self, LipsyncIssue};
 use crate::model::Scene;
 use crate::span::SpanIndex;
 use crate::validate::{self, Issue, MissingAsset};
@@ -28,6 +29,10 @@ pub struct LoadedScene {
     /// Referenced files not found under the asset root (empty when no root was
     /// given). Placeholders are allowed, so this is information, not failure.
     pub missing_assets: Vec<MissingAsset>,
+    /// Problems in the lip-sync cue files the scene names (empty when no
+    /// asset root was given, or all is well). They never stop the scene from
+    /// loading: a line whose file cannot be used is lip-synced with the flap.
+    pub lipsync: Vec<LipsyncIssue>,
 }
 
 /// Why a scene did not load.
@@ -109,7 +114,7 @@ pub fn parse_str(text: &str) -> Result<Scene, SceneError> {
 /// Parse and validate a scene from text. With `assets_root` the referenced
 /// files are checked for existence too.
 pub fn load_str(text: &str, assets_root: Option<&Path>) -> Result<LoadedScene, SceneError> {
-    let scene = parse_str(text)?;
+    let mut scene = parse_str(text)?;
     let index = SpanIndex::new(text);
     let mut report = validate::validate(&scene);
     for issue in report.errors.iter_mut().chain(report.warnings.iter_mut()) {
@@ -121,20 +126,22 @@ pub fn load_str(text: &str, assets_root: Option<&Path>) -> Result<LoadedScene, S
             issues: report.errors,
         });
     }
-    let missing_assets = match assets_root {
+    let (missing_assets, lipsync) = match assets_root {
         Some(root) => {
             let mut m = validate::missing_assets(&scene, root);
             for a in &mut m {
                 a.line = index.line_of(&a.path);
             }
-            m
+            let cue_issues = lipsync::load_cue_files(&mut scene, root);
+            (m, cue_issues)
         }
-        None => Vec::new(),
+        None => (Vec::new(), Vec::new()),
     };
     Ok(LoadedScene {
         scene,
         warnings: report.warnings,
         missing_assets,
+        lipsync,
     })
 }
 

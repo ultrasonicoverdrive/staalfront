@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::fountain::{ImportOptions, convert, scene_name};
 use crate::load::{LoadedScene, SceneError, load_str, parse_str};
 use crate::math::Ms;
-use crate::model::{Art, Delivery, Scene};
+use crate::model::{Art, Delivery, Part, Scene};
 use crate::player::{Mode, Player};
 use crate::render::{HudLine, HudPanel, HudTone};
 use crate::watch::SceneWatcher;
@@ -96,6 +96,27 @@ impl Loaded {
 
 pub type LoadResult = Result<Loaded, LoadFailure>;
 
+/// The problems in the lip-sync cue files of a loaded scene as warnings, with
+/// the line in the cue file.
+fn lipsync_diagnostics(l: &LoadedScene, assets: &Path) -> Vec<Diagnostic> {
+    l.lipsync
+        .iter()
+        .map(|i| Diagnostic {
+            file: assets.join(&i.file).display().to_string(),
+            line: i.line,
+            column: None,
+            message: if i.unusable {
+                format!(
+                    "lip-sync file not used, the mouth flaps from the text instead: {}",
+                    i.message
+                )
+            } else {
+                i.message.clone()
+            },
+        })
+        .collect()
+}
+
 /// The file being edited.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -166,7 +187,7 @@ impl Source {
         match self {
             Source::Scene(_) => match load_str(text, Some(assets)) {
                 Ok(l) => {
-                    let warnings = l
+                    let mut warnings: Vec<Diagnostic> = l
                         .warnings
                         .iter()
                         .map(|w| Diagnostic {
@@ -176,6 +197,7 @@ impl Source {
                             message: w.message.clone(),
                         })
                         .collect();
+                    warnings.extend(lipsync_diagnostics(&l, assets));
                     Ok(Loaded { scene: l, warnings })
                 }
                 Err(e) => Err(failure(e, &file, None)),
@@ -227,6 +249,7 @@ impl Source {
                         message,
                     });
                 }
+                warnings.extend(lipsync_diagnostics(&l, assets));
                 Ok(Loaded { scene: l, warnings })
             }
             Err(e) => Err(failure(e, &file, Some(ron))),
@@ -308,11 +331,29 @@ pub fn picture_paths(scene: &Scene) -> Vec<String> {
     let parts = scene
         .characters
         .iter()
-        .flat_map(|c| c.parts.iter().map(|p| &p.art));
+        .flat_map(|c| c.parts.iter().flat_map(Part::arts));
     let set: BTreeSet<&str> = layers
         .chain(parts)
         .filter_map(|a| match a {
             Art::Image(p) => Some(p.as_str()),
+            _ => None,
+        })
+        .collect();
+    set.into_iter().map(str::to_owned).collect()
+}
+
+/// Every lip-sync cue file a scene names, once each, sorted: watched like the
+/// pictures, so running the `lipsync` tool again shows at once.
+pub fn lipsync_paths(scene: &Scene) -> Vec<String> {
+    let set: BTreeSet<&str> = scene
+        .timeline
+        .tracks
+        .iter()
+        .flat_map(|t| &t.events)
+        .filter_map(|e| match &e.kind {
+            crate::model::EventKind::Dialogue {
+                lipsync: Some(p), ..
+            } => Some(p.as_str()),
             _ => None,
         })
         .collect();
@@ -343,6 +384,7 @@ pub struct Preview {
     loaded: bool,
     reloads: u32,
     pictures: Vec<String>,
+    cue_files: Vec<String>,
     hud_visible: bool,
 }
 
@@ -365,11 +407,13 @@ impl Preview {
             loaded: false,
             reloads: 0,
             pictures: Vec::new(),
+            cue_files: Vec::new(),
             hud_visible,
         };
         match first {
             Ok(l) => {
                 p.pictures = picture_paths(&l.scene.scene);
+                p.cue_files = lipsync_paths(&l.scene.scene);
                 p.player = Player::new(l.scene.scene);
                 p.loaded = true;
             }
@@ -385,6 +429,7 @@ impl Preview {
                 let recovered = !self.errors.is_empty();
                 self.errors.clear();
                 self.pictures = picture_paths(&l.scene.scene);
+                self.cue_files = lipsync_paths(&l.scene.scene);
                 if self.loaded {
                     self.player.replace_scene(l.scene.scene);
                 } else {
@@ -455,10 +500,11 @@ impl Preview {
     }
 
     /// The files whose change means a reload: the scene file, then the
-    /// pictures of the scene on screen, as paths.
+    /// pictures and the lip-sync cue files of the scene on screen, as paths.
     pub fn watched_files(&self) -> Vec<PathBuf> {
         let mut v = vec![self.source.path().to_path_buf()];
         v.extend(self.pictures.iter().map(|p| self.assets.join(p)));
+        v.extend(self.cue_files.iter().map(|p| self.assets.join(p)));
         v
     }
 
