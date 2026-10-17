@@ -24,6 +24,7 @@ the EA source code). Execution: Opus agents at effort low, medium for the WPs ma
 | B9 | Language of code and documentation | **English**: code, comments, docs, commit messages, PRs | Decision Tijmen 14-10-2026. |
 | B10 | Reference hardware | **Windows laptop with NVIDIA GTX 1650**, 1920×1080 | Decision Tijmen 14-10-2026, card corrected 15-10-2026 (the laptop has a GTX 1650, not a 1050). The fps requirements apply on this card; VRAM budget 2 GB kept (headroom below the 1650's 4 GB). |
 | B11 | Original Red Alert audio | **Optional, loaded at runtime from the player's own Red Alert files** (like OpenRA); never in the repo, a release or a CI artifact | Decision Tijmen 14-10-2026. EA released the code, not the media; the 2008 freeware download does not allow redistribution. Reading the player's own copy keeps the repo clean. Staalfront always works without it (CC0 sounds are the default). See WP11.7. |
+| B12 | Cell size | **1 gameplay cell = 4 m**; maps 64×64 up to 256×256 cells (256 m up to 1,024 m). The visual terrain keeps its 1 m resolution (heightmap and materials per metre); gameplay data (terrain type, occupancy, pathfinding, building footprints, fog) is per 4 m cell. | Decided by the orchestrator on Tijmen's instruction, 17-10-2026. Units are 4–8 m and buildings 8–16 m (test pack v1), so a tank takes about one cell and a building 2×2 to 4×4 cells, the proportion RTS games are built on. At 1 m per cell a 256-cell map is only ~35 tanks wide and buildings take 100–200 cells; growing the map instead would multiply pathfinding and fog work by 16. The engine already handles a 1,024 m terrain (WP1.8: 15–17 draw calls at whole-map zoom). Revisit only with a measured reason. |
 
 ---
 
@@ -93,8 +94,9 @@ what lets agents test gameplay without a screen.
 
 ### 1.3 Coordinates
 
-- Gameplay on a **cell grid** (e.g. 1 cell = 1 m, maps 64×64 up to 256×256),
-  positions within a cell in fixed-point ("leptons", like the original).
+- Gameplay on a **cell grid of 4 m cells** (B12), maps 64×64 up to 256×256 cells
+  (256 m up to 1,024 m); positions within a cell in fixed-point ("leptons", like the
+  original). The visual terrain stays at 1 m resolution: 4×4 terrain samples per cell.
 - Height is **visual only** plus a few gameplay effects (vision from a
   hill, slower uphill). No true 3D ballistics in v1.
 
@@ -182,7 +184,7 @@ with placeholders. Engine crates know no game rules: no "tank", no
 - WP1.13 `sf_audio` with `kira`: sound bank in RON, positional sound relative to the camera (volume and panning, quieter when zooming out), music with crossfade; without an audio device (CI) run on silently instead of crashing. One CC0 test sound with a license line.
 
 *Demo*
-- WP1.14 `sf_demo` — the engine demo: generated 256×256 map with relief, 5,000 wandering placeholder units (3 mesh kinds, 4 player colors, a few glTF test models), minimap, egui panels, sound on clicks. Benchmark mode `--bench`: fixed camera flight from close-up to full overview and back, writes frame times (p50/p95/p99) and the sim checksum to JSON. In CI: runs on lavapipe/WARP as a smoke test with screenshots at three zoom levels (no fps requirement, that hardware is software).
+- WP1.14 `sf_demo` — the engine demo: generated 256×256-cell map (1,024 m, B12) with relief, 5,000 wandering placeholder units (3 mesh kinds, 4 player colors, a few glTF test models), minimap, egui panels, sound on clicks. Benchmark mode `--bench`: fixed camera flight from close-up to full overview and back, writes frame times (p50/p95/p99) and the sim checksum to JSON. In CI: runs on lavapipe/WARP as a smoke test with screenshots at three zoom levels (no fps requirement, that hardware is software).
 
 **Order and parallelism:** WP1.1 and WP1.2 first (parallel). Then three tracks
 side by side: *sim* (1.3), *presentation* (1.4 → 1.5 → 1.6 → 1.7 → 1.8 →
@@ -203,7 +205,7 @@ The first gameplay work: the map gets meaning for the game.
 - WP2.3 Minimap shows terrain types (on the minimap of WP1.12).
 - WP2.4 Cell grid overlay colors by terrain type and occupancy.
 
-**Done when:** a 256×256 playfield loads in sim and presentation; headless test checks terrain types and occupancy per cell.
+**Done when:** a 256×256-cell (1,024 m) playfield loads in sim and presentation; headless test checks terrain types and occupancy per cell.
 
 ### Phase 3 — Units, selection and commands
 - WP3.1 `sf_data`: unit definitions (speed, turn rate, movement class, health, armor, weapons, cost, model).
