@@ -49,7 +49,7 @@ objects. Hence separate, stable building blocks:
 | Editor/debug UI | `egui` (via `egui-wgpu`) | Quick to build, only for tools and debug panels. |
 | Audio | `kira` | Mixing, positional, transitions for dynamic music. |
 | Data | `serde` + `ron` | Readable game data. |
-| Cartoon video fallback | `ffmpeg` as a separate process that delivers frames | No heavy bindings in the build. |
+| Cartoon video fallback | deferred (WP12.4); when picked up: `rav1d` + a Matroska demuxer + libopus, benchmarked against VP9 on the reference laptop | Research 17-10-2026: an `ffmpeg` process means shipping an LGPL binary and installer work; no clip exists yet. |
 | Tests | `proptest`, `insta` (snapshots) | Properties and regressions. |
 
 ### 1.1 Cargo workspace
@@ -295,7 +295,7 @@ See §9 for the design.
 - WP12.1 Script format (RON) for scenes: layers, characters, poses, movement, camera, dialogue, sound, timeline.
 - WP12.2 Player in `sf_cutscene`: cutout animation (jointed 2D figures), easing, transitions, subtitles, skipping.
 - WP12.3 Lip-sync: mouth shapes from speech files (Rhubarb Lip Sync, offline), stored as a time series.
-- WP12.4 Video fallback: WebM/AV1 playback for scenes delivered as video.
+- WP12.4 Video fallback: WebM/AV1 playback for scenes delivered as video. **Deferred** (orchestrator, 17-10-2026) until an artist delivers a clip: the scripted cutout path covers every scene, and video would add three native or immature dependencies (decoder, demuxer, Opus). When a clip arrives, first try converting it to a cutout or sprite sequence; otherwise build this WP with the stack in §1.0.
 - WP12.5 One complete demo scene (briefing mission 1) with placeholder figures.
 - WP12.6 Preview tool: reload scene live on save (for the artist).
 
