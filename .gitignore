@@ -5,3 +5,7 @@
 *.aud
 *.vqa
 /ra-original/
+# Default output folder name of sf_ra_extract (README); the tool also refuses
+# to write inside a repository. Not *.wav: assets/audio/sfx/test_click.wav
+# is tracked.
+RedAlertSounds/

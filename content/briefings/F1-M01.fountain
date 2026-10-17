@@ -3,23 +3,27 @@ Credit: Staalfront
 Author: Staalfront narrative team
 Draft date: 2026-10-17
 
-FADE IN:
+> FADE IN:
 
 INT. FORWARD COMMAND POST - DAWN
 
 [[AMBIENCE: radio hiss, distant engines, wind against canvas]]
 [[MUSIC: restrained military tension]]
 
-A map of the operational area is spread across a table. CAPTAIN ELIAN and MIRA stand over it.
+A map of the border farmland is spread across a trestle table. CAPTAIN ELIAN and MIRA stand over it.
 
 CAPTAIN ELIAN
 (serious)
 The relay went dark at 04:10. By dawn, every unit north of the ridge was operating on stale orders.
 
-[[SHOT: map]]
-[[MAP: operational area, player start, objective route, enemy approach]]
+MIRA
+(dry)
+Operating on nothing, Captain. The garrison has not acknowledged a message since the relay stopped.
 
-OPERATIONS OFFICER MIRA
+[[SHOT: map]]
+[[MAP: farmland south-west start, ore ridge to the north, road junction at centre, eastern road fading into unlit hills]]
+
+MIRA
 (measured)
 Scouts report a small hostile camp around the junction. No heavy armour yet.
 
@@ -27,7 +31,23 @@ CAPTAIN ELIAN
 (firm)
 Then we move before they can reinforce it. Establish a base, secure the junction, and keep the relay road open.
 
+MIRA
+(analytical)
+We have one construction center and five rifles. Power first, then barracks, or we are a camp ourselves.
+
+CAPTAIN ELIAN
+(pointing at map)
+The ore is on the ridge. Get a harvester working before the fight starts, not during it.
+
+MIRA
+(concerned)
+One thing I cannot explain. The camp sits on a junction that has no value unless someone knew we were coming here.
+
+CAPTAIN ELIAN
+(neutral)
+Note it. Take the junction and we will read what they left behind.
+
 [[SFX: radio click]]
 [[MUSIC: stop]]
 
-FADE OUT.
+> FADE OUT.

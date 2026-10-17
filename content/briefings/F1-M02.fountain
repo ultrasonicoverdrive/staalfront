@@ -3,21 +3,25 @@ Credit: Staalfront
 Author: Staalfront narrative team
 Draft date: 2026-10-17
 
-FADE IN:
+> FADE IN:
 
-INT. FORWARD COMMAND POST - DAWN
+INT. SIGNALS TENT - NIGHT
 
-[[AMBIENCE: radio hiss, distant engines, wind against canvas]]
-[[MUSIC: restrained military tension]]
+[[AMBIENCE: receiver static, a pencil scratching, rain on canvas]]
+[[MUSIC: low, held tension]]
 
-A map of the operational area is spread across a table. CAPTAIN ELIAN and MIRA stand over it.
+A field tablet and a hand-drawn sketch of the relay compound lie under a shaded lamp. CAPTAIN ELIAN and MIRA stand over it.
 
 MIRA
 (serious)
 Three friendly patrols were redirected into the same kill zone. The orders came from our own relay frequency.
 
+CAPTAIN ELIAN
+(neutral)
+Our frequency, not our hands. The schedule from the junction camp proved the first attack was timed. This proves someone is still talking.
+
 [[SHOT: map]]
-[[MAP: operational area, player start, objective route, enemy approach]]
+[[MAP: west tree line start, service path through scrub, drainage channel along the south, fenced relay compound east, service yard and water tower north of the road]]
 
 CAPTAIN ELIAN
 (measured)
@@ -27,7 +31,23 @@ MIRA
 (firm)
 Take the service path. Disable the transmitter and leave the civilian technicians alive.
 
+CAPTAIN ELIAN
+(short)
+Two scouts, two engineers, four rifles. No base, no second team. Two sightings and the garrison comes down the north road.
+
+MIRA
+(dry)
+And the technicians are the only people who can tell us what that mast actually is. Dead witnesses prove nothing.
+
+CAPTAIN ELIAN
+(pointing at map)
+The channel is sunk below the road. Nobody looks into it. That is your way out.
+
+MIRA
+(concerned)
+The signal strength is wrong for a mast that size, Captain. Either the set is bigger than the photographs show, or it is not where the mast is.
+
 [[SFX: radio click]]
 [[MUSIC: stop]]
 
-FADE OUT.
+> FADE OUT.

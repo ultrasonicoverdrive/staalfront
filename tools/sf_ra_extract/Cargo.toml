@@ -1,0 +1,17 @@
+[package]
+name = "sf_ra_extract"
+description = "Game sounds and music from the player's own Red Alert files to WAV (B11; runs only on the player's machine)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary like sf_headless: `src/lib.rs` holds everything testable,
+# `src/main.rs` only forwards the process arguments. Only sf_audio (its `ra`
+# readers and the WAV writer): no new crates in the lockfile.
+[dependencies]
+sf_audio = { path = "../../crates/sf_audio" }
