@@ -818,6 +818,8 @@ mod tests {
         let move_id = crate::ra::mix::mix_id("MOVE.AUD");
         std::fs::write(folder.join(format!("#{move_id:08X}.wav")), wav::write(&pcm)).unwrap();
         std::fs::write(folder.join("BAD.wav"), b"RIFF junk").unwrap();
+        // Header says more samples than the file holds: listed as broken.
+        std::fs::write(folder.join("CUT.wav"), &wav::write(&pcm)[..100]).unwrap();
         let mut s = mock_at(&d);
         s.enable_original_audio(&RaAudioConfig {
             enabled: true,
@@ -831,7 +833,7 @@ mod tests {
             .iter()
             .find(|a| a.label == "RedAlertSounds/SOUNDS.MIX (WAV folder)")
             .expect("WAV folder listed in the browser");
-        assert_eq!(wav_dir.entries.len(), 3);
+        assert_eq!(wav_dir.entries.len(), 4);
         for name in ["CLICK.AUD", "MOVE.AUD"] {
             let e = cat.find(name).unwrap();
             assert!(

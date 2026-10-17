@@ -597,7 +597,9 @@ found); names come from a player-supplied `--names` file hashed with
 `.git` (B11). On the game side `ra::scan` lists every directory with `.wav`
 files as an archive "<dir> (WAV folder)" (`EntryKind::Wav`), `wav_name` maps
 `CLICK.wav` to `CLICK.AUD` and `#1A2B3C4D.wav` to that id, and
-`Catalog::find` prefers a WAV entry over a MIX entry.
+`Catalog::find` prefers a WAV entry over a MIX entry. The scan classifies a
+WAV from its first 64 KiB (`wav::header`), so a folder of music tracks is
+listed without reading the samples; they are read when played.
 
 **Not verified against real files** (the repo and CI never have any): standard
 (big-endian word) Blowfish on the header bytes, the file-name hash, and IMA

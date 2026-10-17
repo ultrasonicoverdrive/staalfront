@@ -45,8 +45,28 @@ fn u32_at(b: &[u8], at: usize) -> Option<u32> {
     ))
 }
 
-/// Decode a 16-bit PCM WAV file.
-pub fn read(b: &[u8]) -> Result<Pcm, String> {
+/// Format and data location of a 16-bit PCM WAV.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Header {
+    pub channels: u16,
+    pub sample_rate: u32,
+    /// Byte offset and length of the sample data as the file declares them.
+    pub data_start: usize,
+    pub data_len: usize,
+}
+
+impl Header {
+    /// Playing time of the declared data in milliseconds.
+    pub fn duration_ms(&self) -> u64 {
+        let frames = (self.data_len / 2 / usize::from(self.channels)) as u64;
+        frames * 1000 / u64::from(self.sample_rate)
+    }
+}
+
+/// Read the chunk headers of `b` up to the data chunk. `b` may be only the
+/// start of the file (the scanner reads a few KiB, not whole tracks); the
+/// data chunk's declared length is returned, not checked against `b`.
+pub fn header(b: &[u8]) -> Result<Header, String> {
     if b.get(0..4) != Some(b"RIFF") || b.get(8..12) != Some(b"WAVE") {
         return Err("not a RIFF/WAVE file".into());
     }
@@ -55,13 +75,11 @@ pub fn read(b: &[u8]) -> Result<Pcm, String> {
     while let (Some(id), Some(len)) = (b.get(at..at + 4), u32_at(b, at + 4)) {
         let start = at + 8;
         let len = len as usize;
-        let end = start
-            .checked_add(len)
-            .filter(|&e| e <= b.len())
-            .ok_or("WAV chunk runs past the end")?;
-        let body = &b[start..end];
         match id {
             b"fmt " => {
+                let body = b
+                    .get(start..start.saturating_add(len))
+                    .ok_or("WAV chunk runs past the end")?;
                 let tag = u16_at(body, 0).ok_or("short fmt chunk")?;
                 let channels = u16_at(body, 2).ok_or("short fmt chunk")?;
                 let rate = u32_at(body, 4).ok_or("short fmt chunk")?;
@@ -76,24 +94,43 @@ pub fn read(b: &[u8]) -> Result<Pcm, String> {
             }
             b"data" => {
                 let (channels, sample_rate) = fmt.ok_or("WAV data before fmt")?;
-                if body.len() > MAX_OUTPUT {
-                    return Err("WAV data too large".into());
-                }
-                let samples = body
-                    .chunks_exact(2)
-                    .map(|p| i16::from_le_bytes([p[0], p[1]]))
-                    .collect();
-                return Ok(Pcm {
-                    sample_rate,
+                return Ok(Header {
                     channels,
-                    samples,
+                    sample_rate,
+                    data_start: start,
+                    data_len: len,
                 });
             }
             _ => {}
         }
-        at = end + (len & 1);
+        at = start
+            .checked_add(len)
+            .and_then(|e| e.checked_add(len & 1))
+            .ok_or("WAV chunk runs past the end")?;
     }
     Err("WAV has no data chunk".into())
+}
+
+/// Decode a 16-bit PCM WAV file.
+pub fn read(b: &[u8]) -> Result<Pcm, String> {
+    let h = header(b)?;
+    let end = h
+        .data_start
+        .checked_add(h.data_len)
+        .filter(|&e| e <= b.len())
+        .ok_or("WAV chunk runs past the end")?;
+    if h.data_len > MAX_OUTPUT {
+        return Err("WAV data too large".into());
+    }
+    let samples = b[h.data_start..end]
+        .chunks_exact(2)
+        .map(|p| i16::from_le_bytes([p[0], p[1]]))
+        .collect();
+    Ok(Pcm {
+        sample_rate: h.sample_rate,
+        channels: h.channels,
+        samples,
+    })
 }
 
 #[cfg(test)]
@@ -114,6 +151,13 @@ mod tests {
             assert!(read(&w[..cut]).is_err(), "cut at {cut}");
         }
         assert!(read(b"RIFF\xff\xff\xff\xffWAVEdata\xff\xff\xff\xff").is_err());
+        // The header alone is enough for the scanner.
+        let h = header(&w[..44]).unwrap();
+        assert_eq!(
+            (h.channels, h.sample_rate, h.data_start, h.data_len),
+            (2, 22050, 44, 12)
+        );
+        assert_eq!(h.duration_ms(), 0);
         let mut eight = w.clone();
         eight[34] = 8;
         assert!(read(&eight).is_err());
