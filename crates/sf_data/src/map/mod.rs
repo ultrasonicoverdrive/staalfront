@@ -12,7 +12,7 @@
 //!
 //! ```text
 //! (
-//!     width: 64,                 // cells, 1 cell = 1 m
+//!     width: 64,                 // terrain cells, 1 terrain cell = 1 m
 //!     height: 64,
 //!     height_scale: 8.0,         // metres for a heightmap value of 65535
 //!     materials: ["grass", "dirt", "rock"],   // index = position in the list
@@ -20,6 +20,13 @@
 //!     material_map: "materials.png",
 //! )
 //! ```
+//!
+//! **Two kinds of cell** (PLAN.md decision B12). The map's `width` and `height`
+//! count *terrain cells* of 1 m: the height and the material are stored per
+//! metre, so every side of a gameplay cell (4 m, `sf_math::CELL_METRES`) has
+//! four samples. A 1,024 x 1,024 map is a 256 x 256 cell playfield
+//! ([`Map::size_in_cells`]). The gameplay data (terrain type, occupancy, fog)
+//! will be per gameplay cell; this format only carries the visual terrain.
 //!
 //! The format knows no game terrain types: a material is just a name the
 //! renderer turns into a texture. Height is visual only (PLAN.md 1.3). The
@@ -271,14 +278,24 @@ impl Map {
         Ok(())
     }
 
-    /// Map width in cells (= metres).
+    /// Map width in terrain cells (= metres).
     pub fn width(&self) -> u32 {
         self.width
     }
 
-    /// Map height (north-south extent) in cells (= metres).
+    /// Map height (north-south extent) in terrain cells (= metres).
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// The map's size in gameplay cells of [`sf_math::CELL_METRES`] metres
+    /// (rounded up when a side is not a whole number of cells): what the
+    /// simulation's map size is.
+    pub fn size_in_cells(&self) -> (u32, u32) {
+        (
+            self.width.div_ceil(sf_math::CELL_METRES),
+            self.height.div_ceil(sf_math::CELL_METRES),
+        )
     }
 
     pub fn height_scale(&self) -> f32 {

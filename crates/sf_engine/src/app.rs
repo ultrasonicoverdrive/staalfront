@@ -24,7 +24,9 @@ pub struct EngineConfig {
     pub title: String,
     /// Initial inner size in logical (DPI-independent) pixels.
     pub size: (u32, u32),
-    pub fullscreen: bool,
+    /// Windowed, borderless fullscreen or exclusive fullscreen at a fixed
+    /// resolution; see [`ScreenMode`].
+    pub screen_mode: ScreenMode,
     /// Optional upper bound on the frame rate. `None` (default) = render at
     /// display rate: the loop polls and the present mode (vsync, WP1.4) paces
     /// it. Until WP1.4 a blank window therefore spins a core; use a cap for
@@ -37,10 +39,101 @@ impl Default for EngineConfig {
         Self {
             title: "Staalfront".to_owned(),
             size: (1280, 720),
-            fullscreen: false,
+            screen_mode: ScreenMode::Windowed,
             frame_cap_hz: None,
         }
     }
+}
+
+/// How the window covers the screen at start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScreenMode {
+    /// A normal window of [`EngineConfig::size`] logical pixels.
+    Windowed,
+    /// Borderless fullscreen on the primary monitor, at its own resolution.
+    Borderless,
+    /// Fullscreen on the primary monitor at exactly `width` x `height`
+    /// pixels. When the monitor already runs at that size this is borderless
+    /// fullscreen (no mode switch). Otherwise the best video mode of that
+    /// size is requested (exclusive fullscreen), and when there is none the
+    /// result is borderless at the native size; [`ScreenReport`] says which.
+    Fixed { width: u32, height: u32 },
+}
+
+/// What [`ScreenMode`] came out as, for logs and the benchmark file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScreenReport {
+    /// `windowed`, `borderless` or `exclusive`.
+    pub mode: &'static str,
+    /// The monitor's name, if the platform gives one.
+    pub monitor: Option<String>,
+    /// The monitor's size in pixels.
+    pub monitor_size: Option<(u32, u32)>,
+    /// Refresh rate of the mode in use, millihertz (0 = unknown).
+    pub refresh_mhz: u32,
+    /// Why the request was not met exactly (no such video mode, no monitor).
+    pub note: Option<String>,
+}
+
+/// The fullscreen state to ask winit for, and what to report about it.
+fn choose_fullscreen(
+    event_loop: &ActiveEventLoop,
+    mode: ScreenMode,
+) -> (Option<Fullscreen>, ScreenReport) {
+    let monitor = event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next());
+    let mut report = ScreenReport {
+        mode: "windowed",
+        monitor: monitor.as_ref().and_then(|m| m.name()),
+        monitor_size: monitor.as_ref().map(|m| {
+            let s = m.size();
+            (s.width, s.height)
+        }),
+        refresh_mhz: monitor
+            .as_ref()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .unwrap_or(0),
+        note: None,
+    };
+    let borderless = |report: &mut ScreenReport| {
+        report.mode = "borderless";
+        Some(Fullscreen::Borderless(monitor.clone()))
+    };
+    let fullscreen = match mode {
+        ScreenMode::Windowed => None,
+        ScreenMode::Borderless => borderless(&mut report),
+        ScreenMode::Fixed { width, height } => match &monitor {
+            None => {
+                report.note = Some("no monitor found; borderless on the default one".into());
+                borderless(&mut report)
+            }
+            Some(_) if report.monitor_size == Some((width, height)) => borderless(&mut report),
+            Some(m) => {
+                // The mode with the most pixel depth, then the highest refresh.
+                let best = m
+                    .video_modes()
+                    .filter(|v| v.size().width == width && v.size().height == height)
+                    .max_by_key(|v| (v.refresh_rate_millihertz(), v.bit_depth()));
+                match best {
+                    Some(v) => {
+                        report.mode = "exclusive";
+                        report.refresh_mhz = v.refresh_rate_millihertz();
+                        Some(Fullscreen::Exclusive(v))
+                    }
+                    None => {
+                        report.note = Some(format!(
+                            "the monitor has no {width}x{height} video mode; borderless at {}x{}",
+                            report.monitor_size.map_or(0, |s| s.0),
+                            report.monitor_size.map_or(0, |s| s.1)
+                        ));
+                        borderless(&mut report)
+                    }
+                }
+            }
+        },
+    };
+    (fullscreen, report)
 }
 
 /// Window size and DPI scale, delivered by [`App::on_resize`].
@@ -59,6 +152,7 @@ pub struct Context<'a> {
     actions: &'a ActionState,
     stats: &'a FrameStats,
     assets: &'a AssetRoot,
+    screen: &'a ScreenReport,
     exit: &'a mut bool,
 }
 
@@ -81,6 +175,10 @@ impl Context<'_> {
     /// DPI scale factor of the window's current monitor.
     pub fn scale_factor(&self) -> f64 {
         self.window.scale_factor()
+    }
+    /// How the window covers the screen, as it was set up at start.
+    pub fn screen_report(&self) -> &ScreenReport {
+        self.screen
     }
     /// Inner size in physical pixels.
     pub fn size(&self) -> PhysicalSize<u32> {
@@ -160,6 +258,7 @@ struct Handler<A: App> {
     actions: ActionState,
     stats: FrameStats,
     fixed: FixedStep,
+    screen: ScreenReport,
     exit: bool,
     started: bool,
     last_frame: Option<Instant>,
@@ -189,6 +288,13 @@ impl<A: App> Handler<A> {
             actions: ActionState::default(),
             stats: FrameStats::default(),
             fixed: FixedStep::sim_default(),
+            screen: ScreenReport {
+                mode: "windowed",
+                monitor: None,
+                monitor_size: None,
+                refresh_mhz: 0,
+                note: None,
+            },
             exit: false,
             started: false,
             last_frame: None,
@@ -206,6 +312,7 @@ impl<A: App> Handler<A> {
             actions: &self.actions,
             stats: &self.stats,
             assets: &self.assets,
+            screen: &self.screen,
             exit: &mut self.exit,
         };
         Some(f(&mut self.app, &mut ctx))
@@ -296,8 +403,10 @@ impl<A: App> ApplicationHandler for Handler<A> {
         let mut attrs = Window::default_attributes()
             .with_title(self.config.title.clone())
             .with_inner_size(LogicalSize::new(w, h));
-        if self.config.fullscreen {
-            attrs = attrs.with_fullscreen(Some(Fullscreen::Borderless(None)));
+        let (fullscreen, report) = choose_fullscreen(event_loop, self.config.screen_mode);
+        self.screen = report;
+        if fullscreen.is_some() {
+            attrs = attrs.with_fullscreen(fullscreen);
         }
         match event_loop.create_window(attrs) {
             Ok(window) => self.window = Some(Arc::new(window)),

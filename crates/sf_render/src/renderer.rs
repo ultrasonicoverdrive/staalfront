@@ -9,6 +9,7 @@ use wgpu::util::DeviceExt;
 
 use crate::frustum::Frustum;
 use crate::gpu::{Gpu, GpuOptions, RenderError};
+use crate::gpu_timer::GpuTimer;
 use crate::icons::{IconInstance, IconParams};
 use crate::image::Rgba8;
 use crate::instancing::Instancer;
@@ -161,6 +162,39 @@ pub struct Renderer {
     overlay: Option<Overlay>,
     #[cfg(debug_assertions)]
     watch: Option<crate::shader_watch::ShaderWatch>,
+    /// How the window presents and what was asked for (WP1.14).
+    present: PresentInfo,
+    /// GPU frame timing, created by [`Renderer::enable_gpu_timing`].
+    gpu_timer: Option<GpuTimer>,
+    /// Cumulative GPU buffer allocations made while running.
+    allocs: AllocStats,
+    /// The next frame is also copied out of the window (see
+    /// [`Renderer::capture_next_frame`]).
+    capture_requested: bool,
+    captured: Option<Rgba8>,
+    /// Time the last [`Renderer::render_with`] spent waiting for the swap
+    /// chain to hand out an image (the display pacing it, not CPU work).
+    acquire_wait: std::time::Duration,
+}
+
+/// How the window presents frames.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PresentInfo {
+    /// The wgpu present mode in use (`Fifo`, `Immediate`, `Mailbox`, ...),
+    /// or `offscreen`.
+    pub mode: String,
+    /// Set when the requested mode was not available.
+    pub note: Option<String>,
+}
+
+/// GPU buffers created after start-up, for the hitch analysis: every
+/// allocation is a possible stall on the frame that makes it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AllocStats {
+    /// Instance buffers created or grown (cumulative).
+    pub instance_buffers: u64,
+    /// Bytes of those buffers (cumulative).
+    pub instance_bytes: u64,
 }
 
 /// Terrain debug visualisations, switched from the F1 panel (WP1.11).
@@ -169,16 +203,18 @@ pub struct DebugView {
     /// Tint terrain chunks by their level of detail (`lod::LOD_TINT`: red for
     /// full detail, then orange, yellow, green, blue, purple).
     pub lod_tint: bool,
-    /// Opacity `0..=1` of the 1 m cell grid lines; `0` = off.
+    /// Opacity `0..=1` of the gameplay cell grid lines (one per 4 m cell,
+    /// B12); `0` = off.
     pub grid_alpha: f32,
 }
 
 impl DebugView {
     /// Grid opacity for a camera distance in metres: fully visible when
-    /// zoomed in, gone when zoomed far out (where 1 m lines are sub-pixel).
+    /// zoomed in, gone when zoomed far out (where the 4 m cell lines are
+    /// sub-pixel).
     pub fn grid_alpha_for_distance(distance: f64) -> f32 {
-        const FULL_UNTIL: f64 = 40.0;
-        const GONE_AT: f64 = 140.0;
+        const FULL_UNTIL: f64 = 160.0;
+        const GONE_AT: f64 = 560.0;
         (1.0 - (distance - FULL_UNTIL) / (GONE_AT - FULL_UNTIL)).clamp(0.0, 1.0) as f32
     }
 }
@@ -208,7 +244,17 @@ impl Renderer {
         if let Some(srgb) = caps.formats.iter().copied().find(|f| f.is_srgb()) {
             config.format = srgb;
         }
-        config.present_mode = wgpu::PresentMode::Fifo;
+        let (present_mode, note) = options.present.choose(&caps.present_modes);
+        config.present_mode = present_mode;
+        // So that a frame can be copied out for screenshots (`capture_next_frame`).
+        let can_capture = caps.usages.contains(wgpu::TextureUsages::COPY_SRC);
+        if can_capture {
+            config.usage |= wgpu::TextureUsages::COPY_SRC;
+        }
+        let present = PresentInfo {
+            mode: format!("{present_mode:?}"),
+            note,
+        };
         crate::gpu::trace("configure surface");
         surface.configure(&gpu.device, &config);
         crate::gpu::trace("surface ready");
@@ -218,6 +264,7 @@ impl Renderer {
             Target::Window { surface, config },
             format,
             (width, height),
+            present,
         ))
     }
 
@@ -226,15 +273,26 @@ impl Renderer {
         let gpu = Gpu::headless(options)?;
         let (width, height) = (width.max(1), height.max(1));
         let texture = offscreen_texture(&gpu.device, width, height);
+        let present = PresentInfo {
+            mode: "offscreen".into(),
+            note: None,
+        };
         Ok(Self::build(
             gpu,
             Target::Offscreen { texture },
             OFFSCREEN_FORMAT,
             (width, height),
+            present,
         ))
     }
 
-    fn build(gpu: Gpu, target: Target, format: wgpu::TextureFormat, size: (u32, u32)) -> Self {
+    fn build(
+        gpu: Gpu,
+        target: Target,
+        format: wgpu::TextureFormat,
+        size: (u32, u32),
+        present: PresentInfo,
+    ) -> Self {
         let device = &gpu.device;
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals layout"),
@@ -368,7 +426,65 @@ impl Renderer {
             overlay: None,
             #[cfg(debug_assertions)]
             watch: None,
+            present,
+            gpu_timer: None,
+            allocs: AllocStats::default(),
+            capture_requested: false,
+            captured: None,
+            acquire_wait: std::time::Duration::ZERO,
         }
+    }
+
+    /// How the window presents (the mode in use and why it differs from the
+    /// request, if it does).
+    pub fn present_info(&self) -> &PresentInfo {
+        &self.present
+    }
+
+    /// Start timing the GPU side of every frame. Returns `false` when the
+    /// device has no timestamp queries (the results then stay empty).
+    pub fn enable_gpu_timing(&mut self) -> bool {
+        if self.gpu_timer.is_none() {
+            self.gpu_timer = GpuTimer::new(&self.gpu);
+        }
+        self.gpu_timer.is_some()
+    }
+
+    /// GPU frame times in milliseconds that finished since the last call
+    /// (a frame's result arrives a few frames late).
+    pub fn take_gpu_frame_times(&mut self) -> Vec<f64> {
+        if let Some(timer) = &mut self.gpu_timer {
+            let _ = self.gpu.device.poll(wgpu::PollType::Poll);
+            timer.collect();
+            return timer.take();
+        }
+        Vec::new()
+    }
+
+    /// How long the last frame waited for the window's swap chain to give
+    /// it an image. With vsync this is the wait for the display; subtracted
+    /// from a frame's wall time it leaves the CPU work.
+    pub fn last_acquire_wait(&self) -> std::time::Duration {
+        self.acquire_wait
+    }
+
+    /// GPU buffers created after start-up so far.
+    pub fn alloc_stats(&self) -> AllocStats {
+        self.allocs
+    }
+
+    /// Copy the next frame rendered to the window into an image, to be
+    /// fetched with [`Renderer::take_capture`]. Works for the window only
+    /// when the surface allows copying out of it (otherwise nothing is
+    /// captured). Offscreen renderers use [`Renderer::render_to_image`].
+    pub fn capture_next_frame(&mut self) {
+        self.capture_requested = true;
+    }
+
+    /// The image requested with [`Renderer::capture_next_frame`], once the
+    /// frame has been rendered.
+    pub fn take_capture(&mut self) -> Option<Rgba8> {
+        self.captured.take()
     }
 
     /// The adapter in use, for logs.
@@ -487,7 +603,10 @@ impl Renderer {
             }
             Target::Window { surface, config } => {
                 use wgpu::CurrentSurfaceTexture as C;
-                match surface.get_current_texture() {
+                let waiting = std::time::Instant::now();
+                let acquired = surface.get_current_texture();
+                self.acquire_wait = waiting.elapsed();
+                match acquired {
                     C::Success(t) | C::Suboptimal(t) => {
                         let v = t
                             .texture
@@ -505,6 +624,10 @@ impl Renderer {
             }
         };
 
+        let slot = self
+            .gpu_timer
+            .as_mut()
+            .and_then(|timer| timer.begin(&mut encoder));
         let extra = self.prepare_overlay(&mut encoder);
         self.draw(&mut encoder, &view);
         overlay(&mut FrameTarget {
@@ -516,11 +639,32 @@ impl Renderer {
             size: self.size,
         });
         self.paint_overlay(&mut encoder, &view);
+        let readback = match (&frame, self.capture_requested) {
+            (Some(t), true) => {
+                self.capture_requested = false;
+                let can = t.texture.usage().contains(wgpu::TextureUsages::COPY_SRC);
+                can.then(|| queue_readback(&self.gpu.device, &mut encoder, &t.texture, self.size))
+            }
+            _ => None,
+        };
+        if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
+            timer.end(&mut encoder, slot);
+        }
         self.gpu
             .queue
             .submit(extra.into_iter().chain([encoder.finish()]));
+        if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
+            timer.submitted(slot);
+        }
         if let Some(frame) = frame {
             self.gpu.queue.present(frame);
+        }
+        if let Some(readback) = readback {
+            let bgra = matches!(
+                self.format,
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+            );
+            self.captured = finish_readback(&self.gpu.device, readback, self.size, bgra).ok();
         }
         if let Some(overlay) = &mut self.overlay {
             overlay.free_pending();
@@ -545,7 +689,6 @@ impl Renderer {
             ));
         };
         self.prepare_frame();
-        let (width, height) = self.size;
         let mut encoder = self
             .gpu
             .device
@@ -568,66 +711,17 @@ impl Renderer {
         });
         self.paint_overlay(&mut encoder, &view);
 
-        let unpadded = width * 4;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded = unpadded.div_ceil(align) * align;
-        let readback = self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: u64::from(padded) * u64::from(height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        let Target::Offscreen { texture } = &self.target else {
+            unreachable!("checked above");
+        };
+        let readback = queue_readback(&self.gpu.device, &mut encoder, texture, self.size);
         self.gpu
             .queue
             .submit(extra.into_iter().chain([encoder.finish()]));
         if let Some(overlay) = &mut self.overlay {
             overlay.free_pending();
         }
-
-        let (tx, rx) = std::sync::mpsc::channel();
-        readback.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        self.gpu
-            .device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|e| RenderError::Readback(e.to_string()))?;
-        rx.recv()
-            .map_err(|e| RenderError::Readback(e.to_string()))?
-            .map_err(|e| RenderError::Readback(e.to_string()))?;
-
-        let mapped = readback
-            .slice(..)
-            .get_mapped_range()
-            .map_err(|e| RenderError::Readback(e.to_string()))?;
-        let mut pixels = Vec::with_capacity(unpadded as usize * height as usize);
-        for row in mapped.chunks_exact(padded as usize) {
-            pixels.extend_from_slice(&row[..unpadded as usize]);
-        }
-        drop(mapped);
-        readback.unmap();
-        Ok(Rgba8::new(width, height, pixels))
+        finish_readback(&self.gpu.device, readback, self.size, false)
     }
 
     /// Use this view-projection (wgpu clip space, depth `0..1`) instead of the
@@ -658,7 +752,13 @@ impl Renderer {
     /// ignored.
     pub fn set_mesh_instances(&mut self, mesh: MeshId, instances: &[Instance]) {
         if let Some(slot) = self.dynamic.get_mut(mesh.index()) {
-            fill_instances(&self.gpu, slot, "unit instances", instances);
+            fill_instances(
+                &self.gpu,
+                &mut self.allocs,
+                slot,
+                "unit instances",
+                instances,
+            );
         }
     }
 
@@ -682,23 +782,60 @@ impl Renderer {
     /// slice draws no icons.
     pub fn set_icons(&mut self, icons: &[IconInstance], params: IconParams) {
         self.icon_sizes = params;
-        fill_instances(&self.gpu, &mut self.icons, "icon instances", icons);
+        fill_instances(
+            &self.gpu,
+            &mut self.allocs,
+            &mut self.icons,
+            "icon instances",
+            icons,
+        );
     }
 
     /// Upload everything the instancer built for the frame: the extra model
     /// meshes if the model set changed, every instance list (one draw call
     /// each) and the icons.
     pub fn upload_units(&mut self, units: &Instancer) {
+        self.sync_models(units);
+        for id in 0..units.models().mesh_count() {
+            let id = MeshId(id as u16);
+            self.set_mesh_instances(id, units.mesh_instances(id));
+        }
+        self.set_icons(units.icon_instances(), units.icon_params());
+    }
+
+    /// Upload the model set's extra meshes if the set changed.
+    fn sync_models(&mut self, units: &Instancer) {
         let models = units.models();
         if self.model_revision != models.revision() {
             self.set_model_meshes(models.extra_meshes());
             self.model_revision = models.revision();
         }
-        for id in 0..models.mesh_count() {
-            let id = MeshId(id as u16);
-            self.set_mesh_instances(id, units.mesh_instances(id));
+    }
+
+    /// Allocate every unit instance buffer at the largest size the
+    /// instancer's entities can ever need ([`Instancer::mesh_capacity`]),
+    /// once, at load. Without it a buffer is created on the first frame its
+    /// list is not empty and again whenever the list outgrows it, which is
+    /// what happens when the camera first zooms out over the whole crowd
+    /// (progress.md follow-up 14). Call again if the number of entities grows.
+    pub fn reserve_units(&mut self, units: &Instancer) {
+        self.sync_models(units);
+        for (index, &count) in units.mesh_capacity().iter().enumerate() {
+            if count > 0
+                && let Some(slot) = self.dynamic.get_mut(index)
+            {
+                let bytes = u64::from(count) * std::mem::size_of::<Instance>() as u64;
+                reserve_instances(&self.gpu, &mut self.allocs, slot, "unit instances", bytes);
+            }
         }
-        self.set_icons(units.icon_instances(), units.icon_params());
+        let bytes = units.len() as u64 * std::mem::size_of::<IconInstance>() as u64;
+        reserve_instances(
+            &self.gpu,
+            &mut self.allocs,
+            &mut self.icons,
+            "icon instances",
+            bytes,
+        );
     }
 
     /// Draw-call counters of the last rendered frame (all zero before the
@@ -1013,6 +1150,94 @@ impl<'a> CountedPass<'a> {
     }
 }
 
+/// A texture copy waiting to be mapped (see [`queue_readback`]).
+struct Readback {
+    buffer: wgpu::Buffer,
+    padded_row: u32,
+}
+
+/// Record a copy of `texture` (4 bytes per pixel) into a buffer that can be
+/// mapped; call [`finish_readback`] after the encoder was submitted.
+fn queue_readback(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    texture: &wgpu::Texture,
+    (width, height): (u32, u32),
+) -> Readback {
+    let unpadded = width * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let padded_row = unpadded.div_ceil(align) * align;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("readback"),
+        size: u64::from(padded_row) * u64::from(height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    Readback { buffer, padded_row }
+}
+
+/// Wait for a submitted [`Readback`] and return its pixels as RGBA
+/// (`bgra`: the texture stores blue first, as a window surface often does).
+fn finish_readback(
+    device: &wgpu::Device,
+    readback: Readback,
+    (width, height): (u32, u32),
+    bgra: bool,
+) -> Result<Rgba8, RenderError> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    readback
+        .buffer
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| RenderError::Readback(e.to_string()))?;
+    rx.recv()
+        .map_err(|e| RenderError::Readback(e.to_string()))?
+        .map_err(|e| RenderError::Readback(e.to_string()))?;
+    let mapped = readback
+        .buffer
+        .slice(..)
+        .get_mapped_range()
+        .map_err(|e| RenderError::Readback(e.to_string()))?;
+    let unpadded = width as usize * 4;
+    let mut pixels = Vec::with_capacity(unpadded * height as usize);
+    for row in mapped.chunks_exact(readback.padded_row as usize) {
+        pixels.extend_from_slice(&row[..unpadded]);
+    }
+    drop(mapped);
+    readback.buffer.unmap();
+    if bgra {
+        for px in pixels.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+    }
+    Ok(Rgba8::new(width, height, pixels))
+}
+
 fn aspect((w, h): (u32, u32)) -> f32 {
     w as f32 / h.max(1) as f32
 }
@@ -1097,9 +1322,34 @@ fn upload_scene(
     (buffer, draws)
 }
 
+/// Make sure the buffer of `slot` holds at least `bytes` (see
+/// [`Renderer::reserve_units`]); the count is left alone.
+fn reserve_instances(
+    gpu: &Gpu,
+    allocs: &mut AllocStats,
+    slot: &mut DynamicInstances,
+    label: &'static str,
+    bytes: u64,
+) {
+    if bytes == 0 || (slot.buffer.is_some() && slot.capacity >= bytes) {
+        return;
+    }
+    let capacity = bytes.next_multiple_of(4096);
+    slot.buffer = Some(gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: capacity,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    slot.capacity = capacity;
+    allocs.instance_buffers += 1;
+    allocs.instance_bytes += capacity;
+}
+
 /// Write `items` into a growing per-frame instance buffer and set its count.
 fn fill_instances<T: bytemuck::Pod>(
     gpu: &Gpu,
+    allocs: &mut AllocStats,
     slot: &mut DynamicInstances,
     label: &'static str,
     items: &[T],
@@ -1120,6 +1370,8 @@ fn fill_instances<T: bytemuck::Pod>(
             mapped_at_creation: false,
         }));
         slot.capacity = capacity;
+        allocs.instance_buffers += 1;
+        allocs.instance_bytes += capacity;
     }
     if let Some(buffer) = &slot.buffer {
         gpu.queue.write_buffer(buffer, 0, bytes);

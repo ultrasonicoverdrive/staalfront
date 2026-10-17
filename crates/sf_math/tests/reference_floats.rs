@@ -12,8 +12,11 @@
 )]
 
 use core::f64::consts::TAU;
-use sf_math::render_bridge::{fx_from_f32, fx_to_f32, vec2_from_f32, vec2_to_f32};
-use sf_math::{Facing, Fx, Rng, Vec2};
+use sf_math::render_bridge::{
+    METRES_PER_CELL, cells_to_metres, fx_from_f32, fx_to_f32, metres_to_cells,
+    vec2_cells_to_metres, vec2_from_f32, vec2_metres_to_cells, vec2_to_f32,
+};
+use sf_math::{CELL_METRES, Facing, Fx, Rng, Vec2};
 
 fn to_f64(v: Fx) -> f64 {
     v.raw() as f64 / 65536.0
@@ -172,4 +175,29 @@ fn bridge_rounds_to_nearest_and_saturates() {
     assert_eq!(fx_from_f32(1e30), Fx::MAX);
     assert_eq!(fx_from_f32(-1e30), Fx::MIN);
     assert_eq!(fx_from_f32(f32::MAX), Fx::MAX);
+}
+
+// ---- the cell size (B12) -------------------------------------------------------
+
+#[test]
+fn a_cell_is_four_metres_and_the_scale_is_exact() {
+    assert_eq!(CELL_METRES, 4);
+    assert_eq!(METRES_PER_CELL, 4.0);
+    // The whole 256-cell map is 1,024 m, and every position on it converts to
+    // metres and back without a bit lost.
+    assert_eq!(cells_to_metres(Fx::from_int(256)), 1024.0);
+    assert_eq!(
+        vec2_cells_to_metres(Vec2::from_ints(1, 2)),
+        [4.0, 8.0],
+        "(1, 2) cells"
+    );
+    let mut rng = Rng::new(0x4_c311);
+    for _ in 0..50_000 {
+        let v = Fx::from_raw(rng.range_i32(-(1 << 24), (1 << 24) + 1) as i64);
+        assert_eq!(cells_to_metres(v), fx_to_f32(v) * 4.0);
+        assert_eq!(metres_to_cells(cells_to_metres(v)), v);
+    }
+    let p = Vec2::new(Fx::from_ratio(1, 2), Fx::from_ratio(-5, 4));
+    assert_eq!(vec2_cells_to_metres(p), [2.0, -5.0]);
+    assert_eq!(vec2_metres_to_cells([2.0, -5.0]), p);
 }

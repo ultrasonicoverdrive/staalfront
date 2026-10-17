@@ -271,7 +271,7 @@ fn grid_and_lod_tint_change_only_the_terrain_and_switch_off_cleanly() {
     let (_, n_grid) = changed(&off, &with_grid);
     let total = (W * H) as usize;
     println!("grid changed {n_grid} of {total}");
-    // Zoomed in, 1 m lines darken a clear share of the ground, not all of it.
+    // Zoomed in, the 4 m cell lines darken a clear share of the ground, not all of it.
     assert!(n_grid * 100 > total * 2, "grid not visible: {n_grid}");
     assert!(
         n_grid * 100 < total * 60,
@@ -292,7 +292,7 @@ fn grid_and_lod_tint_change_only_the_terrain_and_switch_off_cleanly() {
     let diff = compare(&off, &again, 0).unwrap();
     assert_eq!(diff.differing, 0);
 
-    // Fully zoomed out the 1 m lines are about a pixel apart: the shader
+    // Fully zoomed out the cell lines are a few pixels apart: the shader
     // fades them (and the chunk borders stay) instead of turning the whole
     // ground into moire.
     let far_off = terrain_shot(&mut r, 1.0, DebugView::default());
@@ -306,13 +306,13 @@ fn grid_and_lod_tint_change_only_the_terrain_and_switch_off_cleanly() {
 fn grid_opacity_fades_with_the_camera_distance() {
     let a = DebugView::grid_alpha_for_distance;
     assert_eq!(a(12.0), 1.0, "closest zoom");
-    assert_eq!(a(40.0), 1.0);
-    assert_eq!(a(340.0), 0.0, "whole map in view");
+    assert_eq!(a(160.0), 1.0);
+    assert_eq!(a(1100.0), 0.0, "the 1,024 m map in view");
     let mut last = 1.0;
-    for d in (40..=140).step_by(5) {
+    for d in (160..=560).step_by(20) {
         let v = a(f64::from(d));
         assert!(v <= last, "fades monotonically at {d} m");
         last = v;
     }
-    assert!(a(90.0) > 0.0 && a(90.0) < 1.0);
+    assert!(a(360.0) > 0.0 && a(360.0) < 1.0);
 }

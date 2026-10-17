@@ -49,7 +49,7 @@
 use std::f32::consts::TAU;
 
 use glam::{Mat4, Vec3};
-use sf_math::render_bridge::vec2_to_f32;
+use sf_math::render_bridge::vec2_cells_to_metres;
 use sf_math::{Facing, Vec2};
 
 use crate::frustum::{Aabb, Frustum};
@@ -63,7 +63,8 @@ use crate::pick::{
 use crate::scene::{Instance, MeshKind};
 use crate::style::Style;
 
-/// Tile edge in metres; equals the terrain chunk size (32 cells of 1 m).
+/// Tile edge in metres; equals the terrain chunk size (32 terrain cells of
+/// 1 m, which is 8 gameplay cells of 4 m).
 pub const DEFAULT_TILE_SIZE: f32 = 32.0;
 
 /// Marks "no level yet" in the per-entity hysteresis state.
@@ -92,8 +93,10 @@ pub struct Motion {
 }
 
 impl Motion {
-    /// From the fixed-point state of the previous and current tick. Cells are
-    /// metres; the sim's `y` is the render `z`.
+    /// From the fixed-point state of the previous and current tick. The
+    /// positions are in simulation **cells**; this is where they become
+    /// metres (`sf_math::CELL_METRES` per cell, decision B12). The sim's `y`
+    /// is the render `z`.
     pub fn from_fixed(
         shape: u8,
         player: u8,
@@ -106,8 +109,8 @@ impl Motion {
             shape,
             player,
             id: UnitId::NONE,
-            prev: vec2_to_f32(prev_pos),
-            pos: vec2_to_f32(pos),
+            prev: vec2_cells_to_metres(prev_pos),
+            pos: vec2_cells_to_metres(pos),
             prev_facing: prev_facing.raw(),
             facing: facing.raw(),
         }
@@ -521,6 +524,31 @@ impl Instancer {
 
     pub fn len(&self) -> usize {
         self.motions.len()
+    }
+
+    /// The most instances each mesh of the model set can ever get from the
+    /// entities now known (index = [`MeshId`]): the number of entities whose
+    /// model uses the mesh in any level or part. A frame never exceeds it, so
+    /// a renderer can allocate that much once, at load, instead of growing
+    /// the buffers on the frame a crowd first comes into view.
+    pub fn mesh_capacity(&self) -> Vec<u32> {
+        let chains = self.models.models();
+        let mut per_shape = vec![0_u32; chains.len()];
+        for m in &self.motions {
+            per_shape[usize::from(m.shape) % chains.len()] += 1;
+        }
+        let mut bound = vec![0_u32; self.models.mesh_count()];
+        let mut seen = Vec::new();
+        for (chain, &count) in chains.iter().zip(&per_shape) {
+            seen.clear();
+            for mesh in chain.meshes() {
+                if !seen.contains(&mesh) {
+                    seen.push(mesh);
+                    bound[mesh.index()] += count;
+                }
+            }
+        }
+        bound
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1018,8 +1046,12 @@ mod tests {
     use crate::ground::{Ground, TerrainGround};
     use sf_math::Fx;
 
+    /// A position given in metres, as the cells the sim would hold.
     fn v2(x: i32, y: i32) -> Vec2 {
-        Vec2::from_ints(x, y)
+        Vec2::new(
+            Fx::from_ratio(i64::from(x), 4),
+            Fx::from_ratio(i64::from(y), 4),
+        )
     }
 
     fn motion(prev: Vec2, pos: Vec2, pf: u8, f: u8) -> Motion {
@@ -1041,9 +1073,10 @@ mod tests {
 
     #[test]
     fn fixed_point_fractions_convert_exactly() {
+        // Half a cell is two metres (B12: a cell is 4 m).
         let half = Fx::from_raw(Fx::ONE.raw() / 2);
         let m = motion(Vec2::new(half, half), Vec2::new(half, half), 0, 0);
-        assert_eq!(m.at(0.3).0, [0.5, 0.5]);
+        assert_eq!(m.at(0.3).0, [2.0, 2.0]);
     }
 
     #[test]
@@ -1083,7 +1116,7 @@ mod tests {
             .map(|i| {
                 let (cx, cz) = ((i % per_row) as f32 * step, (i / per_row) as f32 * step);
                 let (dx, dz) = (((i * 7) % 5) as f32 * 0.1, ((i * 3) % 5) as f32 * 0.1);
-                let to_fx = |v: f32| sf_math::render_bridge::fx_from_f32(v);
+                let to_fx = |v: f32| sf_math::render_bridge::metres_to_cells(v);
                 Motion::from_fixed(
                     (i % 3) as u8,
                     ((i / 3) % 4) as u8,

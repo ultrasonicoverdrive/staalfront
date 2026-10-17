@@ -23,9 +23,10 @@ struct TerrainParams {
     tile_meters: f32,
     /// Debug flags, bit 0: tint chunks by their level of detail.
     flags: u32,
-    /// Opacity of the 1 m cell grid; 0 = off.
+    /// Opacity of the gameplay cell grid; 0 = off.
     grid_alpha: f32,
-    _pad: f32,
+    /// Metres between the grid lines: one gameplay cell (B12).
+    cell_meters: f32,
 }
 
 /// `flags` bit: tint chunks by their level of detail.
@@ -55,7 +56,7 @@ impl TerrainGpu {
             tile_meters: TILE_METERS,
             flags: if view.lod_tint { FLAG_LOD_TINT } else { 0 },
             grid_alpha: view.grid_alpha.clamp(0.0, 1.0),
-            _pad: 0.0,
+            cell_meters: sf_math::render_bridge::METRES_PER_CELL,
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
     }
@@ -186,7 +187,7 @@ pub fn build(
             tile_meters: TILE_METERS,
             flags: 0,
             grid_alpha: 0.0,
-            _pad: 0.0,
+            cell_meters: sf_math::render_bridge::METRES_PER_CELL,
         }),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });

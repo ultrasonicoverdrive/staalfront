@@ -97,7 +97,7 @@ pub struct PanelState {
     pub camera_default: CameraConfig,
     /// LOD colouring: tint terrain chunks by their level of detail.
     pub lod_tint: bool,
-    /// 1 m cell grid on the terrain, fading with the zoom.
+    /// Cell grid (one line per 4 m cell) on the terrain, fading with the zoom.
     pub grid: bool,
     /// Sound browser: (archive, entry) whose play button was clicked.
     pub ra_play: Option<(usize, usize)>,
@@ -351,7 +351,7 @@ fn camera_controls(ui: &mut egui::Ui, state: &mut PanelState) -> bool {
 fn view_toggles(ui: &mut egui::Ui, state: &mut PanelState) {
     ui.checkbox(&mut state.lod_tint, "LOD colouring")
         .on_hover_text("Tints terrain chunks by level of detail: red = full detail, then orange, yellow, green, blue, purple (coarsest).");
-    ui.checkbox(&mut state.grid, "Cell grid (1 m)")
+    ui.checkbox(&mut state.grid, "Cell grid (4 m)")
         .on_hover_text("Fades out when zoomed far out; chunk borders (32 m) are yellow.");
     ui.horizontal(|ui| {
         ui.label("Units:");
@@ -633,7 +633,7 @@ mod tests {
             "ticks run 1234",
             "checksum 00deadbeef123456",
             "LOD colouring",
-            "Cell grid (1 m)",
+            "Cell grid (4 m)",
             "Units: LOD, icons, hover",
             "models 40 (level 0..3: 20 / 12 / 8 / 0), icons 30",
             "unit draw calls 2 models + 1 icons, 1280 triangles",

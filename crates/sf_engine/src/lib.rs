@@ -10,7 +10,7 @@ pub mod assets;
 pub mod input;
 pub mod time;
 
-pub use app::{App, Context, EngineConfig, Resized, run};
+pub use app::{App, Context, EngineConfig, Resized, ScreenMode, ScreenReport, run};
 pub use assets::AssetRoot;
 pub use input::{Action, ActionState, Bindings, InputState};
 pub use time::{FixedStep, FrameStats, FrameSummary, SIM_HZ, SIM_STEP};

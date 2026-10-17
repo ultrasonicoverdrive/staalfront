@@ -34,6 +34,47 @@ pub struct GpuOptions {
     /// Only accept a software ("fallback") adapter: Mesa lavapipe on Linux,
     /// DX12 WARP on Windows.
     pub force_fallback: bool,
+    /// How frames reach the window (ignored without one).
+    pub present: Present,
+}
+
+/// How a window presents its frames.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Present {
+    /// Wait for the display refresh (`Fifo`): no tearing, frame rate capped
+    /// at the refresh rate. What the game uses.
+    #[default]
+    Vsync,
+    /// Do not wait: `Immediate`, else `Mailbox`, else (with a note) `Fifo`.
+    /// What the benchmark uses, so that frame times measure the work and not
+    /// the display (progress.md follow-up 13).
+    Uncapped,
+}
+
+impl Present {
+    /// The present mode to configure from what the surface supports, and a
+    /// note when the request could not be met.
+    pub fn choose(self, supported: &[wgpu::PresentMode]) -> (wgpu::PresentMode, Option<String>) {
+        use wgpu::PresentMode as M;
+        match self {
+            Present::Vsync => (M::Fifo, None),
+            Present::Uncapped => {
+                let pick = [M::Immediate, M::Mailbox]
+                    .into_iter()
+                    .find(|m| supported.contains(m));
+                match pick {
+                    Some(m) => (m, None),
+                    None => (
+                        M::Fifo,
+                        Some(format!(
+                            "the surface supports neither Immediate nor Mailbox ({supported:?}); \
+                             vsync stays on and frame times are capped by the display"
+                        )),
+                    ),
+                }
+            }
+        }
+    }
 }
 
 impl Default for GpuOptions {
@@ -42,6 +83,7 @@ impl Default for GpuOptions {
             backends: wgpu::Backends::all(),
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback: false,
+            present: Present::Vsync,
         }
     }
 }
@@ -67,6 +109,7 @@ impl GpuOptions {
             power_preference: wgpu::PowerPreference::from_env()
                 .unwrap_or(wgpu::PowerPreference::HighPerformance),
             force_fallback: false,
+            present: Present::Vsync,
         }
     }
 
@@ -77,6 +120,7 @@ impl GpuOptions {
             backends: wgpu::Backends::PRIMARY,
             power_preference: wgpu::PowerPreference::LowPower,
             force_fallback: true,
+            present: Present::Vsync,
         }
     }
 }
@@ -87,6 +131,9 @@ pub struct Gpu {
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    /// The device can time whole frames (`TIMESTAMP_QUERY` and
+    /// `TIMESTAMP_QUERY_INSIDE_ENCODERS`), see [`crate::gpu_timer`].
+    pub timestamps: bool,
 }
 
 impl Gpu {
@@ -119,8 +166,17 @@ impl Gpu {
             info.name, info.device_type, info.backend
         ));
 
+        // Frame timing is optional: ask for it only when both features exist.
+        let timing =
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        let timestamps = adapter.features().contains(timing);
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("sf_render device"),
+            required_features: if timestamps {
+                timing
+            } else {
+                wgpu::Features::empty()
+            },
             ..Default::default()
         }))
         .map_err(|e| RenderError::Device(e.to_string()))?;
@@ -131,6 +187,7 @@ impl Gpu {
             adapter,
             device,
             queue,
+            timestamps,
         })
     }
 

@@ -2448,11 +2448,7 @@ dependencies = [
 name = "sf_demo"
 version = "0.1.0"
 dependencies = [
- "sf_audio",
- "sf_engine",
- "sf_math",
- "sf_render",
- "sf_ui",
+ "sf_game",
 ]
 
 [[package]]
@@ -2480,6 +2476,8 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui-winit",
+ "serde",
+ "serde_json",
  "sf_ai",
  "sf_audio",
  "sf_cutscene",

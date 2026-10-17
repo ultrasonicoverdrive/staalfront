@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use glam::Vec3;
 use sf_data::map::{Map, generate::generate};
-use sf_math::render_bridge::fx_from_f32;
+use sf_math::render_bridge::metres_to_cells;
 use sf_math::{Facing, Vec2};
 use sf_render::camera::DVec2;
 use sf_render::icons::Blend;
@@ -76,7 +76,7 @@ fn instancer(map: &Map, style: Style) -> Instancer {
 }
 
 fn fx2(x: f32, z: f32) -> Vec2 {
-    Vec2::new(fx_from_f32(x), fx_from_f32(z))
+    Vec2::new(metres_to_cells(x), metres_to_cells(z))
 }
 
 fn still(shape: u8, player: u8, id: u32, at: (f32, f32)) -> Motion {

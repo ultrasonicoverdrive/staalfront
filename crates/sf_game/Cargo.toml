@@ -10,6 +10,17 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# Library plus two binaries (WP1.14): the whole game shell lives in the library
+# ([`run`]); `sf_game` (this crate's `main.rs`) and `sf_demo` (tools/sf_demo)
+# only choose the defaults ([`Preset`]). See the crate docs.
+[lib]
+name = "sf_game"
+path = "src/lib.rs"
+
+[[bin]]
+name = "sf_game"
+path = "src/main.rs"
+
 [dependencies]
 sf_math = { path = "../../crates/sf_math", features = ["render"] }
 sf_sim = { path = "../../crates/sf_sim" }
@@ -27,3 +38,9 @@ sf_net = { path = "../../crates/sf_net" }
 # window system backends are already enabled through winit in sf_engine.
 egui = { version = "0.36.2", default-features = false, features = ["default_fonts"] }
 egui-winit = { version = "0.36.2", default-features = false, features = ["x11", "wayland"] }
+# Benchmark file (`sf_demo --bench`, WP1.14): bench.json is written with
+# serde_json from derived structs, so it is always valid JSON and the keys keep
+# their declaration order. Both crates are already in the lockfile (egui, kira
+# and ron use them); no new crate is added.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

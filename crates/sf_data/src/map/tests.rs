@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::generate::generate;
+use super::generate::{generate, generate_cells};
 use super::*;
 
 fn header(w: u32, h: u32) -> String {
@@ -189,4 +189,17 @@ fn generated_maps_have_real_slopes() {
         let p90 = slopes[slopes.len() * 9 / 10];
         assert!(p90 > 0.25, "{side}x{side}: 90th percentile slope {p90}");
     }
+}
+
+#[test]
+fn a_cell_is_four_terrain_cells_per_side() {
+    // B12: 256 x 256 gameplay cells are a 1,024 m map with 4 samples a side.
+    let map = generate_cells(16, 8, 1);
+    assert_eq!((map.width(), map.height()), (64, 32));
+    assert_eq!(map.size_in_cells(), (16, 8));
+    assert_eq!(map.heights().len(), 65 * 33);
+    // A side that is not a whole number of cells counts the partial cell.
+    assert_eq!(generate(65, 63, 1).size_in_cells(), (17, 16));
+    // The generator is the same one: cells are only a unit conversion.
+    assert_eq!(generate_cells(16, 8, 1), generate(64, 32, 1));
 }

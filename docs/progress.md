@@ -21,7 +21,7 @@ Windows, in debug and in release. No playable build yet (phase 0 has no gameplay
 
 ## Phase 1 — Engine
 
-Status: in progress.
+Status: all work packages done; M0 waits for the benchmark run on the laptop.
 
 - WP1.1 `sf_engine` main loop, input and frame timing: done (PR #4, aa5cf7b)
 - WP1.2 `sf_sim` core (world, commands, checksums, wander): done (PR #9, 4df4759)
@@ -32,28 +32,65 @@ Status: in progress.
 - WP1.7 terrain (map format, chunk meshes, material texture array): done (PR #10, e2f920c)
 - WP1.13 `sf_audio`: done (PR #7, afad8d2)
 - WP1.8 terrain LOD, seams, culling, ray-terrain picking: done (PR #15, 8f64071)
-- WP1.9 model LOD and strategic icons: in progress
+- WP1.9 model LOD and strategic icons: done (PR #16, d3c7f99)
 - WP1.11 egui debug panels: done (PR #13, 76ea42c)
 - WP1.12 `sf_ui` (quads, nine-slice, text, buttons, anchors, minimap): done (PR #14, 58d3eb9)
-- WP1.10, WP1.14: _pending_
+- WP1.10 glTF models (loader, axes, part hierarchy, per-part merge, instancing hook): done (PR #22, 07b4cb7)
+- WP1.14 `sf_demo` (engine demo, 1 km map at B12 scale, `--bench` without vsync): done (this PR)
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
 
 M0 status:
 - Headless 10,000 ticks with 5,000 wanderers, checksum equal on Linux and
-  Windows: met (CI `headless-compare`, since PR #12).
+  Windows: met (CI `headless-compare`, since PR #12). Unchanged by WP1.14: the
+  B12 scale change lives entirely in the presentation, `sf_sim` was not touched
+  and `wander_5000.expected` and the golden checksums are identical.
 - Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
-  2026-10-15 (main at 8f64071, terrain LOD and ray-terrain picking in).
-  Judged before the 34-40 ms zoom-out hitches of follow-up 14 were measured;
-  recheck once they are fixed.
-- p99 frame time <= 16.7 ms with 5,000 units in view: open, needs `sf_demo
-  --bench` (WP1.14). First run on the laptop (2026-10-15, `sf_game --units
-  5000 --auto-zoom`, DX12): steady 60 fps at vsync with all 5,000 units in
-  view; p99 17.4-18.2 ms is vsync timing jitter, not missed frames; two
-  hitches of 34-40 ms when zooming out to the whole map. That laptop has a
-  GTX 1650; Tijmen made it the reference card (B10, 2026-10-15).
+  2026-10-15 (main at 8f64071). Judged before the zoom-out hitches (below) were
+  looked at; to be re-judged with the demo, together with the benchmark.
+- CI green on two OSes including screenshot tests: met (PR #29 adds the demo
+  smoke test with screenshots on lavapipe and WARP).
+- egui panels show frame time, draw calls and checksum live: met (F1, WP1.11).
+- p99 frame time <= 16.7 ms with 5,000 units in view over the whole camera
+  flight: **pending Tijmen's laptop run** of `cargo run --release -p sf_demo --
+  --bench` (README, "Benchmark (M0)"). The benchmark exists, runs without vsync
+  in real fullscreen at 1920 x 1080 and writes `bench.json`; on lavapipe it only
+  proves the path works (about 70 ms per frame, software rendering, no meaning
+  for the GTX 1650). First laptop run before this WP (2026-10-15, `sf_game
+  --units 5000 --auto-zoom`, DX12, vsync): steady 60 fps, p99 17.4-18.2 ms
+  that was vsync jitter, two hitches of 34-40 ms when zooming out. That laptop
+  has a GTX 1650; Tijmen made it the reference card (B10, 2026-10-15).
 
-Report: _to be written at the end of the phase._
+Report: _see "Phase 1 report" below._
+
+## Phase 1 report (draft, WP1.14)
+
+Phase 1 delivers the engine. `sf_engine` runs the window and a fixed 20 Hz
+tick; `sf_render` draws a terrain in chunks with level of detail, seams and
+culling, instanced units with model levels of detail, glTF models with parts
+and strategic icons in player colour, picking and a log-scale camera that zooms
+toward the cursor; `sf_ui` draws the HUD and the minimap; `sf_audio` plays
+sounds (and, optionally, the player's own original Red Alert sounds); the F1
+egui panels show frame time, draw calls, instancing and the sim checksum; the
+deterministic `sf_sim` and `sf_headless` give identical checksums on Linux and
+Windows.
+
+The engine demo (`tools/sf_demo`, `cargo run --release -p sf_demo`) shows it all
+on a generated 1,024 m map (256 x 256 cells of 4 m, decision B12) with 5,000
+wandering units (cube, cylinder, cone and the vehicles of the glTF test pack,
+four player colours) and the pack's buildings standing in a base at the centre;
+the map has a minimap and a sound on clicks. B12 is in: one constant
+(`sf_math::CELL_METRES`, 4) converts the sim's cells to the metres of the
+terrain, camera, instancer, minimap and sound, applied at the sim-to-render
+boundary; the terrain has four samples per cell side. `--bench` flies a fixed
+75 s camera path and writes frame times (p50/p95/p99/max), CPU and GPU frame
+time, units in view, draw calls and triangles per phase, the slowest frames and
+the sim checksums to `bench.json`.
+
+M0 criteria: headless checksum met, CI on two OSes with screenshots met, panels
+met, smooth zoom judged on 2026-10-15, **p99 <= 16.7 ms on the GTX 1650: pending
+Tijmen's laptop run.** Phase 2 starts when that number is in and the zoom has
+been looked at again.
 
 ## Open follow-ups
 
@@ -109,13 +146,16 @@ fixed, delete the entry in the same PR.
 12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
     to a placeholder shape and the owner to a player colour by modulo. Replace it
     with data-driven units (phase 2, WP3.1 and WP3.2).
-13. **The p99 criterion cannot be met with vsync on.** At 60 Hz every frame
-    takes 16.67 ms and timing jitter puts p99 just above 16.7 ms even when no
-    frame is missed. `sf_demo --bench` (WP1.14) must run without vsync (or measure
-    CPU and GPU frame time separately) and in real fullscreen at 1920x1080.
-14. **Hitches of 34-40 ms when zooming out to the whole map** (laptop run,
-    2026-10-15): possibly a one-time instance buffer growth or LOD change; find
-    the cause in WP1.14 with the benchmark.
+14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found
+    in WP1.14 as far as software rendering shows it: the per-mesh instance
+    buffers were created on the first frame their list was not empty and
+    regrown on the way (66 creations during one slow zoom out, up to 2 in a
+    frame; the new `buffer_allocs` per frame in `bench.json` shows it), and are
+    now allocated once at load (`Renderer::reserve_units`; `--no-reserve` gives
+    the old behaviour). On lavapipe a creation costs under a millisecond, so
+    whether this explains 34-40 ms on DX12 is **not proven**: delete this entry
+    when the laptop's `bench.json` shows no hitch over 25 ms; if it does, the
+    `hitches.worst` list names the phase and the part of the frame.
 15. **Vulkan hangs on the test laptop.** Adapter creation hung with Vulkan
     (NVIDIA GTX 1650, Windows); the game window now uses DX12 on Windows.
     `WGPU_BACKEND` overrides it, `SF_GPU_TRACE=1` prints each GPU startup step.
@@ -127,3 +167,28 @@ fixed, delete the entry in the same PR.
     CI runs the workspace tests with `--test-threads=1` on Windows. Root fix still
     open: one shared device per test binary (or a lock in the screenshot helpers),
     then drop the flag.
+17. **The glTF self-child and cycle tests should assert "appears twice".**
+    In `sf_render::glb::tests` (`bad_hierarchies_and_accessors`) the node that
+    is its own child and the cycle only check that the error is `Invalid` or
+    `Parse`; they should assert the message "appears twice in the hierarchy",
+    which is the reason it is refused. A **diamond** test (one child shared by
+    two parents, which the same check also refuses) is missing (WP1.10 review).
+18. **A part's raw `matrix` must have orthogonal columns.** The loader refuses a
+    negative determinant (a mirror), but a shear with a positive determinant
+    passes and skews the lighting of that part; reject non-orthogonal columns in
+    a part's raw `matrix` (WP1.10 review).
+19. **Exclusive fullscreen is untested.** `--bench` asks for 1920 x 1080 and
+    uses borderless when the monitor already runs it, an exclusive video mode
+    when the monitor is bigger, borderless at the native size when there is no
+    such mode (`ScreenMode::Fixed`). Only the first and last paths ran (Xvfb
+    has no window manager and grants no fullscreen at all); the exclusive path
+    with wgpu on DX12 has not run anywhere. `bench.json` records the mode used
+    (`display.screen_mode`, `display.note`).
+20. **The demo map is gentle.** `generate` keeps the relief at most 6 m high at
+    every map size (hills of 5 to 10 m radius, more of them on a bigger map),
+    so at the whole-map zoom of the 1,024 m map the relief shows only as
+    shading. Add broad hills for big maps when the look of the map matters
+    (phase 2, WP2.3).
+21. **GPU times are attributed to the frame that was recording when they
+    arrived.** The per-phase `gpu_ms` therefore lags its frames by two or three
+    frames; the whole-flight GPU numbers are exact.

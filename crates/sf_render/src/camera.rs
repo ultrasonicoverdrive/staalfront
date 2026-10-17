@@ -8,8 +8,8 @@
 //! testable with synthetic input.
 //!
 //! # World frame
-//! `x` east, `y` up, `z` south (the camera looks towards `-z`); one cell is
-//! one metre. The ground is a [`Ground`]: flat (`y = 0`, [`FlatGround`], the
+//! `x` east, `y` up, `z` south (the camera looks towards `-z`); the unit is the
+//! metre (a simulation cell is 4 m, see `sf_math::CELL_METRES`). The ground is a [`Ground`]: flat (`y = 0`, [`FlatGround`], the
 //! default) or the terrain ([`Camera::set_ground`] with a
 //! [`crate::ground::TerrainGround`]). [`Camera::focus`] is the ground position
 //! at the centre of the screen and [`Camera::focus_height`] the height of the
@@ -81,7 +81,7 @@ use crate::ground::{FlatGround, Ground};
 /// Tunable camera parameters. [`Default`] is the shipped feel.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraConfig {
-    /// Map size in cells (= metres): `x` east, `y` south.
+    /// Map size in metres: `x` east, `y` south.
     pub map_size: DVec2,
     /// How far the focus may leave the map, in metres.
     pub margin: f64,
