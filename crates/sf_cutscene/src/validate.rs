@@ -21,8 +21,9 @@ use crate::model::{Art, Delivery, Event, EventKind, FORMAT_VERSION, Scene};
 /// zero, a pasted number) and would only produce garbage on screen, or numbers
 /// so large that single-precision geometry loses all accuracy.
 ///
-/// Positions, offsets, pivots, marker positions and the half-size of any
-/// picture, in stage units (a stage is 1920 wide by default).
+/// Positions, offsets, pivots, marker positions, the width and height of
+/// any shape, a circle's radius and a rounded corner's radius, in stage units
+/// (a stage is 1920 wide by default).
 pub const MAX_COORD: f32 = 100_000.0;
 /// Rotation of a part in a pose, in degrees (ten full turns).
 pub const MAX_ANGLE_DEG: f32 = 3_600.0;
@@ -324,6 +325,8 @@ impl V<'_> {
                         path,
                         format!("{what}: corner radius {radius} must be 0 or more"),
                     );
+                } else {
+                    self.range_one(path, &format!("{what}: corner radius"), *radius, MAX_COORD);
                 }
             }
             Art::Circle { radius, .. } => {

@@ -31,6 +31,29 @@ impl TextEngine {
         self.font.measure(text, px).0
     }
 
+    /// `s` itself if it fits `max_w` pixels at size `px`, else
+    /// [`TextEngine::with_ellipsis`].
+    pub fn ellipsize(&self, s: &str, px: f32, max_w: f32) -> String {
+        if self.width(s, px) <= max_w {
+            s.to_string()
+        } else {
+            self.with_ellipsis(s, px, max_w)
+        }
+    }
+
+    /// The longest start of `s` that fits `max_w` pixels together with a
+    /// trailing `...` (just `...` if not even one letter does).
+    pub fn with_ellipsis(&self, s: &str, px: f32, max_w: f32) -> String {
+        let mut t: Vec<char> = s.chars().collect();
+        loop {
+            let candidate = format!("{}...", t.iter().collect::<String>().trim_end());
+            if self.width(&candidate, px) <= max_w || t.is_empty() {
+                return candidate;
+            }
+            t.pop();
+        }
+    }
+
     /// Break `text` into lines no wider than `max_w` pixels at size `px`:
     /// greedy at spaces, explicit `\n` kept, a word wider than a whole line is
     /// cut between letters. Never returns an empty list (an empty text is one
@@ -78,12 +101,18 @@ impl TextEngine {
     }
 }
 
+/// The smallest subtitle font, in pixels. Text that does not fit at this size
+/// is cut with an ellipsis rather than made smaller.
+pub const MIN_SUBTITLE_PX: f32 = 14.0;
+
 /// Font size in pixels for a picture `height` pixels tall: 3.4 % of the
 /// height, so a 1080-line picture gets 37 px, a 720-line one 24 px; never
-/// smaller than 14 px (the smallest size that stays readable) or larger than
-/// 72 px.
+/// smaller than [`MIN_SUBTITLE_PX`] (14 px, the smallest size that stays
+/// readable) or larger than 72 px.
 pub fn subtitle_font_px(picture_height: f32) -> f32 {
-    (picture_height * 0.034).round().clamp(14.0, 72.0)
+    (picture_height * 0.034)
+        .round()
+        .clamp(MIN_SUBTITLE_PX, 72.0)
 }
 
 /// Where the subtitle goes: a box near the bottom of the picture holding the
@@ -108,24 +137,49 @@ pub struct SubtitleLayout {
 /// The box is as wide as its longest line (at most 70 % of the picture),
 /// centred, with its bottom 5 % of the picture height above the picture's
 /// bottom edge. If the text would fill more than 40 % of the picture's height
-/// the font shrinks (down to 12 px) until it fits.
+/// the font shrinks, but never below [`MIN_SUBTITLE_PX`]; if it still does not
+/// fit, the line is cut after the last line that fits and ends in `...`. The
+/// box therefore always lies inside the picture.
 pub fn layout_subtitle(text: &TextEngine, name: &str, body: &str, vp: &Rect) -> SubtitleLayout {
     let mut px = subtitle_font_px(vp.h);
     loop {
-        let layout = layout_at(text, name, body, vp, px);
-        if layout.rect.h <= vp.h * 0.4 || px <= 12.0 {
+        let at_floor = px <= MIN_SUBTITLE_PX;
+        let layout = layout_at(text, name, body, vp, px, at_floor);
+        if at_floor || layout.rect.h <= vp.h * 0.4 {
             return layout;
         }
         px -= 1.0;
     }
 }
 
-fn layout_at(text: &TextEngine, name: &str, body: &str, vp: &Rect, px: f32) -> SubtitleLayout {
+/// Lay out at `px`; with `cut`, keep only as many lines as fit 40 % of the
+/// picture's height (at least one) and end the last in `...`.
+fn layout_at(
+    text: &TextEngine,
+    name: &str,
+    body: &str,
+    vp: &Rect,
+    px: f32,
+    cut: bool,
+) -> SubtitleLayout {
     let pad_x = (px * 0.7).round();
     let pad_y = (px * 0.5).round();
     let max_text_w = (vp.w * 0.7 - 2.0 * pad_x).max(px * 4.0);
     let line_h = text.font.metrics(px).line_height().ceil();
-    let lines = text.wrap(body, px, max_text_w);
+    let mut lines = text.wrap(body, px, max_text_w);
+    if cut {
+        // One row is the speaker's name.
+        let rows = ((vp.h * 0.4 - 2.0 * pad_y) / line_h).floor();
+        let keep = (rows - 1.0).max(1.0) as usize;
+        if lines.len() > keep {
+            lines.truncate(keep);
+            // Something was cut: the last line says so, and still fits.
+            let last = lines.pop().unwrap_or_default();
+            lines.push(text.with_ellipsis(&last, px, max_text_w));
+        }
+    }
+    let name = text.ellipsize(name, px, max_text_w);
+    let name = name.as_str();
     let widest = lines
         .iter()
         .map(|l| text.width(l, px))
@@ -133,8 +187,8 @@ fn layout_at(text: &TextEngine, name: &str, body: &str, vp: &Rect, px: f32) -> S
         .fold(0.0_f32, f32::max);
     let w = (widest.ceil() + 2.0 * pad_x).min(vp.w);
     let h = pad_y * 2.0 + line_h * (1 + lines.len()) as f32;
-    let x = (vp.x + (vp.w - w) / 2.0).round();
-    let y = (vp.y + vp.h - vp.h * 0.05 - h).round();
+    let x = (vp.x + (vp.w - w) / 2.0).round().max(vp.x);
+    let y = (vp.y + vp.h - vp.h * 0.05 - h).round().max(vp.y);
     let text_x = x + pad_x;
     let first = y + pad_y;
     SubtitleLayout {
@@ -236,12 +290,80 @@ mod tests {
     }
 
     #[test]
-    fn a_huge_line_shrinks_the_font_to_fit() {
+    fn a_long_line_shrinks_the_font_to_fit() {
         let t = TextEngine::default();
-        let body = "word ".repeat(400);
+        // About 9 lines at 24 px, more than 40 % of the picture: shrinks, whole.
+        let body = "word ".repeat(110);
         let v = vp(1280.0, 720.0);
         let l = layout_subtitle(&t, "A", &body, &v);
-        assert!(l.font_px < subtitle_font_px(720.0));
-        assert!(l.rect.h <= v.h * 0.4 + 1.0 || l.font_px <= 12.0);
+        assert!(l.font_px < subtitle_font_px(720.0), "{}", l.font_px);
+        assert!(l.font_px >= MIN_SUBTITLE_PX);
+        assert!(l.rect.h <= v.h * 0.4 + 1.0);
+        assert!(
+            !l.lines.last().unwrap().0.ends_with("..."),
+            "nothing was cut"
+        );
+    }
+
+    #[test]
+    fn a_very_long_line_is_cut_with_an_ellipsis_and_stays_inside_the_picture() {
+        let t = TextEngine::default();
+        let body = "The engineers need twelve minutes. ".repeat(150);
+        let long_name =
+            "Lieutenant Colonel Bartholomew Featherstonehaugh-Cholmondeley the Third".repeat(3);
+        for (w, h) in [
+            (1920.0, 1080.0),
+            (1280.0, 720.0),
+            (640.0, 360.0),
+            (320.0, 180.0),
+        ] {
+            let v = Rect {
+                x: 0.0,
+                y: 0.0,
+                w,
+                h,
+            };
+            let l = layout_subtitle(&t, &long_name, &body, &v);
+            assert!(l.font_px >= MIN_SUBTITLE_PX, "{w}x{h}: {} px", l.font_px);
+            assert!(
+                l.rect.x >= v.x && l.rect.right() <= v.right(),
+                "{w}x{h}: {l:?}"
+            );
+            assert!(
+                l.rect.y >= v.y && l.rect.bottom() <= v.bottom(),
+                "{w}x{h}: {l:?}"
+            );
+            assert!(
+                l.rect.h <= v.h * 0.4 + l.font_px * 2.0,
+                "{w}x{h}: {} high",
+                l.rect.h
+            );
+            let (last, _) = l.lines.last().unwrap();
+            assert!(
+                last.ends_with("..."),
+                "{w}x{h}: cut line ends in an ellipsis: {last:?}"
+            );
+            assert!(l.name.ends_with("..."), "the name is cut too: {}", l.name);
+            for text in l
+                .lines
+                .iter()
+                .map(|(s, _)| s)
+                .chain(std::iter::once(&l.name))
+            {
+                assert!(
+                    t.width(text, l.font_px) <= l.max_text_w + 0.5,
+                    "{w}x{h}: {text:?} too wide"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ellipsize_keeps_short_text_and_shortens_long_text() {
+        let t = TextEngine::default();
+        assert_eq!(t.ellipsize("short", 24.0, 500.0), "short");
+        let e = t.ellipsize("This sentence is much too long for the box", 24.0, 200.0);
+        assert!(e.ends_with("...") && t.width(&e, 24.0) <= 200.0, "{e}");
+        assert_eq!(t.ellipsize("abc", 24.0, 1.0), "...");
     }
 }

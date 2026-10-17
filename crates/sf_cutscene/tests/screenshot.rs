@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use sf_cutscene::render::{CutsceneRenderer, FrameLayout, Rect};
-use sf_cutscene::{Scene, load_file, load_str};
+use sf_cutscene::{Scene, SceneState, load_file, load_str};
 use sf_render::image::{self, Rgba8};
 use sf_render::{GpuOptions, Renderer};
 
@@ -69,11 +69,33 @@ fn shoot(
     scene: &Scene,
     t_ms: i32,
 ) -> (Rgba8, FrameLayout) {
-    let state = scene.sample(t_ms);
+    shoot_state(r, cutscenes, scene, &scene.sample(t_ms))
+}
+
+fn shoot_state(
+    r: &mut Renderer,
+    cutscenes: &mut CutsceneRenderer,
+    scene: &Scene,
+    state: &SceneState<'_>,
+) -> (Rgba8, FrameLayout) {
     let img = r
-        .render_to_image_with(|t| cutscenes.render(t, scene, &state, None))
+        .render_to_image_with(|t| cutscenes.render(t, scene, state, None))
         .expect("render");
     (img, cutscenes.layout().expect("layout").clone())
+}
+
+/// The map table is (217, 201, 160), luminance 201; white text is 255.
+const TEXT_LUM: u32 = 235;
+
+/// A subtitle is really drawn inside `r`: the dark box covers more than half
+/// of it (the dimmest picture behind it is far brighter than the box) and it
+/// holds at least `min_text` text-white pixels, which no picture content in
+/// this scene reaches (the brightest, the table, is below `TEXT_LUM`).
+fn has_subtitle(img: &Rgba8, r: &Rect, min_text: usize) -> bool {
+    let area = (r.w * r.h) as usize;
+    let dark = count_in(img, r, |p| lum(p) < 110);
+    let text = count_in(img, r, |p| lum(p) > TEXT_LUM);
+    dark * 2 > area && text >= min_text
 }
 
 fn lum(p: [u8; 4]) -> u32 {
@@ -199,8 +221,8 @@ fn example_briefing_at_three_moments() {
     );
     let sub = layout.subtitle.expect("the second line is up at 10 s");
     assert!(
-        count_in(&map, &sub.rect, |p| lum(p) > 200) > 400,
-        "text on the map too"
+        has_subtitle(&map, &sub.rect, 400),
+        "a dark box with text on the map too"
     );
 
     // The frames differ.
@@ -220,7 +242,7 @@ fn the_subtitle_is_readable_at_1080p() {
     let sub = layout.subtitle.expect("the order is being given at 21 s");
     assert!(sub.font_px >= 34.0, "{} px", sub.font_px);
     assert!(sub.lines.len() >= 2);
-    assert!(count_in(&img, &sub.rect, |p| lum(p) > 200) > 1500);
+    assert!(has_subtitle(&img, &sub.rect, 1500));
     // The box stays inside the picture and above its lower edge.
     assert!(sub.rect.bottom() < layout.viewport.bottom());
     assert!(sub.rect.x >= 0.0 && sub.rect.right() <= w as f32);
@@ -246,6 +268,38 @@ fn another_window_shape_gets_bars_and_a_clipped_picture() {
         near(img.pixel(400, (v.y + 20.0) as u32), [0x6b, 0x7a, 0x99], 8),
         "picture inside"
     );
+}
+
+/// The subtitle checks must be able to fail: the same frames without the
+/// subtitle do not pass them (on the map the table alone is bright enough to
+/// have fooled a plain brightness check).
+#[test]
+fn the_subtitle_checks_fail_when_no_subtitle_is_drawn() {
+    let scene = example();
+    let mut r = renderer(1280, 720);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), repo_assets());
+    for t in [4000, 10_000] {
+        let (with, layout) = shoot(&mut r, &mut cs, &scene, t);
+        let rect = layout.subtitle.expect("a line is up").rect;
+        assert!(
+            has_subtitle(&with, &rect, 400),
+            "{t} ms: the check passes with a subtitle"
+        );
+        let mut state = scene.sample(t);
+        state.subtitle = None;
+        let (without, layout) = shoot_state(&mut r, &mut cs, &scene, &state);
+        assert!(layout.subtitle.is_none());
+        assert!(
+            !has_subtitle(&without, &rect, 400),
+            "{t} ms: the check fails without one"
+        );
+        assert_eq!(
+            count_in(&without, &rect, |p| lum(p) > TEXT_LUM),
+            0,
+            "no text pixels"
+        );
+    }
 }
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -291,6 +345,10 @@ Scene(
     let mut r = renderer(640, 360);
     let gpu = r.gpu();
     let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), &dir);
+    // Loading up front tells which pictures will be placeholders before any
+    // frame is drawn (the viewer prints this list).
+    cs.preload_pictures(&scene);
+    assert_eq!(cs.failed_pictures().len(), 1);
     let (img, _) = shoot(&mut r, &mut cs, &scene, 0);
     save("png_parts.png", &img);
     // Stage unit = pixel here. The picture spans x 70..170 (centre 120), y 150..210.

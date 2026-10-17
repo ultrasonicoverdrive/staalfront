@@ -337,6 +337,15 @@ fn rounded_rectangles_are_checked_like_rectangles() {
         line_of(&t, "radius: -2"),
         "corner radius -2 must be 0 or more",
     );
+    let t = with(
+        "Rect(w: 10, h: 10, color: \"#000000\")",
+        "RoundRect(w: 10, h: 10, radius: 1e9, color: \"#000000\")",
+    );
+    assert_error(
+        &t,
+        line_of(&t, "radius: 1e9"),
+        "corner radius 1000000000 is out of range",
+    );
     let ok = with(
         "Rect(w: 10, h: 10, color: \"#000000\")",
         "RoundRect(w: 10, h: 10, radius: 4, color: \"#000000\")",

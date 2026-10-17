@@ -188,6 +188,23 @@ struct Viewer {
     renderer: Option<Renderer>,
     cutscenes: Option<CutsceneRenderer>,
     shown_title: String,
+    /// Pictures whose failure was already printed.
+    reported: std::collections::BTreeSet<String>,
+}
+
+impl Viewer {
+    /// Print each picture that could not be loaded, once, with the reason, so
+    /// a writer knows why a part shows as a magenta box.
+    fn report_failed_pictures(&mut self) {
+        let Some(cutscenes) = &self.cutscenes else {
+            return;
+        };
+        for (path, why) in cutscenes.failed_pictures() {
+            if self.reported.insert(path.to_string()) {
+                eprintln!("play_scene: picture {path}: {why} - drawn as a magenta box");
+            }
+        }
+    }
 }
 
 fn describe(e: &SoundEvent) -> String {
@@ -233,13 +250,16 @@ impl App for Viewer {
             Ok(renderer) => {
                 eprintln!("play_scene: {}", renderer.adapter_summary());
                 let gpu = renderer.gpu();
-                self.cutscenes = Some(CutsceneRenderer::new(
+                let mut cutscenes = CutsceneRenderer::new(
                     &gpu.device,
                     &gpu.queue,
                     renderer.color_format(),
                     &self.assets,
-                ));
+                );
+                cutscenes.preload_pictures(self.player.scene());
+                self.cutscenes = Some(cutscenes);
                 self.renderer = Some(renderer);
+                self.report_failed_pictures();
             }
             Err(e) => {
                 eprintln!("play_scene: cannot open the renderer: {e}");
@@ -327,6 +347,8 @@ impl App for Viewer {
             eprintln!("play_scene: render failed: {e}");
             ctx.request_exit();
         }
+
+        self.report_failed_pictures();
     }
 }
 
@@ -364,6 +386,7 @@ fn main() -> ExitCode {
         renderer: None,
         cutscenes: None,
         shown_title: String::new(),
+        reported: std::collections::BTreeSet::new(),
     };
     let config = EngineConfig {
         title: format!("Staalfront cutscene - {title}"),

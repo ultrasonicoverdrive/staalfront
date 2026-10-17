@@ -35,7 +35,7 @@ use sf_render::FrameTarget;
 use sf_render::wgpu::{self, util::DeviceExt};
 use sf_ui::atlas::WIDTH as ATLAS_WIDTH;
 
-use crate::model::Scene;
+use crate::model::{Art, Scene};
 use crate::sample::SceneState;
 
 pub use images::{ImageStore, Picture};
@@ -316,6 +316,22 @@ impl CutsceneRenderer {
     /// Pictures that were asked for and could not be loaded, with the reason.
     pub fn failed_pictures(&self) -> Vec<(&str, &str)> {
         self.res.images.failures()
+    }
+
+    /// Load every picture the scene refers to now instead of when it is first
+    /// drawn, so that [`CutsceneRenderer::failed_pictures`] is complete before
+    /// the first frame.
+    pub fn preload_pictures(&mut self, scene: &Scene) {
+        let layers = scene.layers.iter().map(|l| &l.art);
+        let parts = scene
+            .characters
+            .iter()
+            .flat_map(|c| c.parts.iter().map(|p| &p.art));
+        for art in layers.chain(parts) {
+            if let Art::Image(path) = art {
+                self.res.images.get(path);
+            }
+        }
     }
 
     /// Where the last frame put things (the picture, the subtitle box).

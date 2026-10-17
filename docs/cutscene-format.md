@@ -223,7 +223,7 @@ the line of the offending value:
 | **One speaker overlaps their own line** | different speakers may talk over each other; back to back is fine |
 | Character acts without being on stage; enters twice; exits when absent | `Move`, `SetPose`, `Exit`, `Enter` |
 | Non-positive sizes, zoom; non-finite numbers | |
-| **Out of range**: an angle beyond 3600 degrees, a position, offset, pivot, shape size or shake beyond 100 000 stage units, a scale or parallax beyond 1000, a zoom outside 0.001 to 1000 | almost always a typo (an extra zero); the limits are `MAX_ANGLE_DEG`, `MAX_COORD`, `MAX_SCALE`, `MIN_ZOOM`, `MAX_ZOOM` in `validate.rs` |
+| **Out of range**: an angle beyond 3600 degrees, a position, offset, pivot, shape size, corner radius or shake beyond 100 000 stage units, a scale or parallax beyond 1000, a zoom outside 0.001 to 1000 | almost always a typo (an extra zero); the limits are `MAX_ANGLE_DEG`, `MAX_COORD`, `MAX_SCALE`, `MIN_ZOOM`, `MAX_ZOOM` in `validate.rs` |
 | Asset path that is empty, absolute, has `\`, or contains `..` | scenes cannot reach outside the asset root |
 | Unsupported `format` | |
 
@@ -350,8 +350,10 @@ order, rotated about their joints, mirrored for `facing: Left`); the layers in f
 the whole window, the fade colour, and the **subtitle**: a dark box near the bottom of the
 picture with the speaker's name (yellow; light blue for `VoiceOver`, grey for `OffScreen`)
 and the line in white, wrapped to at most 70 % of the picture width. The text is 3.4 % of
-the picture height (37 px at 1080p, 24 px at 720p, never under 14 px) and shrinks only for a
-line that would fill more than 40 % of the picture.
+the picture height (37 px at 1080p, 24 px at 720p, never under 14 px). A line that would fill
+more than 40 % of the picture shrinks the text, down to 14 px; if it still does not fit, the
+rest is cut and the box ends in `...` (the box always stays inside the picture; keep lines
+short, a subtitle is not a paragraph).
 
 * The shapes (`Rect`, `RoundRect`, `Circle`) are the placeholder art; they are drawn smooth
   at any rotation. `Image` parts and layers need an 8-bit RGB or RGBA **PNG** below
