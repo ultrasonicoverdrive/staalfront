@@ -27,6 +27,12 @@ fn shipped() -> UnitDefs {
         .unwrap_or_else(|e| panic!("the shipped definitions load: {e}"))
 }
 
+/// The text with Unix line ends: a Windows checkout may turn the files into
+/// CRLF, and the substitutions below match across lines.
+fn lf(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
 /// Loads the shipped files with a substitution applied to one of them.
 fn load_with(
     classes: impl Fn(&str) -> String,
@@ -34,9 +40,9 @@ fn load_with(
     units: impl Fn(&str) -> String,
 ) -> Result<UnitDefs, sf_data::units::DefError> {
     let (c, w, u) = (
-        classes(EMBEDDED_CLASSES),
-        weapons(EMBEDDED_WEAPONS),
-        units(EMBEDDED_UNITS),
+        classes(&lf(EMBEDDED_CLASSES)),
+        weapons(&lf(EMBEDDED_WEAPONS)),
+        units(&lf(EMBEDDED_UNITS)),
     );
     let sources = DefSources {
         classes: DefFile {
@@ -57,7 +63,7 @@ fn load_with(
 
 fn replace_units(from: &str, to: &str) -> Result<UnitDefs, sf_data::units::DefError> {
     assert!(
-        EMBEDDED_UNITS.contains(from),
+        lf(EMBEDDED_UNITS).contains(from),
         "test setup: {from:?} not found"
     );
     load_with(str::to_string, str::to_string, |t| t.replacen(from, to, 1))
