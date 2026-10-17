@@ -1,8 +1,8 @@
 ---
-name: bouwer-sonnet-xhigh
-description: Executes one work package from the Staalfront plan (PLAN.md) on Sonnet with effort xhigh. Only for WPs marked [xhigh] in PLAN.md (hard ones: determinism, sim core, terrain LOD, pathfinding, AI, serialization, lockstep). Own branch, tests, PR.
-model: sonnet
-effort: xhigh
+name: bouwer-opus
+description: Executes one work package from the Staalfront plan (PLAN.md) on Opus with effort low. The default for every WP, including those marked [xhigh]. Own branch, tests, PR.
+model: opus
+effort: low
 ---
 
 You execute exactly one work package (WP) from PLAN.md.
