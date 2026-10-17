@@ -68,7 +68,7 @@ Report: _see "Phase 1 report" below._
 Status: in progress.
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
-  terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #PR_NUMBER)
+  terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39)
 - WP2.2 Materials per terrain type: open
 - WP2.3 Minimap shows terrain types: open
 - WP2.4 Cell grid overlay by terrain type and occupancy: open
