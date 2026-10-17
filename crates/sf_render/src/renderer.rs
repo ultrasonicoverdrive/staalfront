@@ -168,6 +168,7 @@ impl Renderer {
         options: &GpuOptions,
     ) -> Result<Self, RenderError> {
         let instance = Gpu::instance(options);
+        crate::gpu::trace("create surface");
         let surface = instance
             .create_surface(target)
             .map_err(|e| RenderError::Surface(e.to_string()))?;
@@ -181,7 +182,9 @@ impl Renderer {
             config.format = srgb;
         }
         config.present_mode = wgpu::PresentMode::Fifo;
+        crate::gpu::trace("configure surface");
         surface.configure(&gpu.device, &config);
+        crate::gpu::trace("surface ready");
         let format = config.format;
         Ok(Self::build(
             gpu,

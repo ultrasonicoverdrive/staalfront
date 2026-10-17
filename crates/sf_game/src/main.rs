@@ -423,12 +423,12 @@ impl App for Runner {
             }
         );
         self.audio = Some(audio);
-        match Renderer::for_window(
-            ctx.window().clone(),
-            s.width,
-            s.height,
-            &GpuOptions::default(),
-        ) {
+        let gpu_options = GpuOptions::window();
+        println!(
+            "renderer: starting ({:?}, {:?})",
+            gpu_options.backends, gpu_options.power_preference
+        );
+        match Renderer::for_window(ctx.window().clone(), s.width, s.height, &gpu_options) {
             Ok(mut renderer) => {
                 println!(
                     "renderer: {} ({:?}, vsync)",
