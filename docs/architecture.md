@@ -31,6 +31,7 @@ fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows
 | `tools/sf_editor` | Map and mission editor. |
 | `tools/sf_headless` | Simulation without a screen: tests, balance, AI-vs-AI. |
 | `tools/sf_demo` | Engine demo and benchmark of milestone M0 (phase 1): the `sf_game` library with the demo's defaults. |
+| `tools/sf_asset_check` | Checks delivered `.glb` models against the art brief (LODs, budgets, materials, team colour, bounds, node names); see section 15. |
 
 ### Dependency directions
 
@@ -74,6 +75,8 @@ graph TD
   sf_editor[tools/sf_editor] --> sf_math
   sf_editor --> sf_sim
   sf_editor --> sf_data
+  sf_asset_check[tools/sf_asset_check] --> sf_render
+  sf_asset_check --> sf_data
 ```
 
 `sf_math`, `sf_engine` and `sf_audio` have no workspace dependencies yet. `sf_cutscene` (WP12.2)
@@ -617,6 +620,30 @@ features off; `names` and `utils` only: no image decoding, no file or base64 URI
   `asset.version`), required extensions, skins, animation clips, textures,
   non-triangle primitives, external buffers, missing normals, bad indices: each a
   `GlbError` with a message. `sf_game --models <pack>` exits with that message.
+
+### Checking a model delivery (`tools/sf_asset_check`)
+
+Art arrives as `.glb` files made outside the repo, so a delivery is checked
+before it is added: `cargo run -p sf_asset_check -- <file or folder>`
+(`--format markdown` for a PR body, `--deny-warnings` to fail on warnings; the
+rules and thresholds are the table in the crate documentation). The geometry it
+judges (triangles, bounds, team flag) comes out of `sf_render::glb::load_glb`
+with the engine axes, so the check sees what the engine draws; the document
+itself (`gltf` crate) supplies what the loader drops: material names, the node
+tree per LOD root and the empty `fx_*` nodes. The class that sets the triangle
+budget comes from the role in `unit_defs.ron` (infantry 1500/250/60, two-figure
+units twice that, vehicle, decor and wreck 1500/500/150, building 5000/1500/300).
+`assets/set_v3` (the third delivery, 30 models) is the first set it was run on;
+`crates/sf_render/tests/set_v3_load.rs` loads every file through the engine
+loader and `tools/sf_asset_check/tests/set_v3.rs` pins that the checker can
+judge all of them.
+
+Two things about the loader that a model must know: a mesh node **without
+children** is folded into its parent part, so a `turret` or `barrel` that is a
+plain mesh node cannot turn or tilt on its own (give it an empty node with the
+mesh as a child, as the test pack does; the checker's `engine-parts` rule); and
+the figures' `torso`, `head`, `arm_*`, `leg_*` nodes, being mesh leaves, merge
+into one `body` part per level.
 
 ## 16. Original Red Alert audio (WP11.7, B11)
 
