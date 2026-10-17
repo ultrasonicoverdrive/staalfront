@@ -37,6 +37,7 @@ use sf_math::Vec2;
 
 use crate::behavior::Area;
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
+use crate::terrain::Cell;
 
 /// Something a player asks the simulation to do. Engine-generic: no game
 /// rules, only what the placeholder world can do.
@@ -49,6 +50,20 @@ pub enum Command {
         kind: Kind,
         /// Where, in cells.
         pos: Vec2,
+        /// Who owns it.
+        owner: PlayerId,
+    },
+    /// Place a structure of `kind` for `owner` on `cell` (WP2.1): an entity
+    /// that stands still in the middle of the cell and occupies it until it is
+    /// despawned. Ignored (it counts as a command that changed nothing) when
+    /// the cell is outside the map, its terrain is not buildable, or another
+    /// structure already occupies it. A structure does not wander and ignores
+    /// `MoveTo` and `SetWanderArea`. See `docs/rules/terrain.md`.
+    Place {
+        /// What to create.
+        kind: Kind,
+        /// Where.
+        cell: Cell,
         /// Who owns it.
         owner: PlayerId,
     },

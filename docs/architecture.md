@@ -151,6 +151,10 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
 - **Checksum:** FNV-1a over the full state in a canonical order after every tick,
   with the history kept for the headless runner. The previous position and facing
   (render interpolation only) are the one deliberate exclusion.
+- **Terrain and occupancy (WP2.1):** a terrain type and an occupant per cell, in
+  arrays sized by the map; `Command::Place` is the one way to occupy a cell, so
+  occupancy changes only in the tick. Their checksum sections exist only when they
+  have content, which keeps every older checksum as it was (`sf_sim::checksum`).
 - **Presentation:** `World::snapshot()` is a read-only view with previous and
   current position and facing per live entity.
 - **Floats:** `sf_math::render_bridge` sits behind sf_math's `render` cargo
@@ -245,10 +249,22 @@ laptop. Never on the home server (B6, PLAN.md §13).
   `materials.png` (8-bit grayscale, w x h, index into the material list). The
   loader checks sizes, bit depth, header ranges and material indices and
   reports a `MapError` naming the file. The format knows no game terrain
-  types (phase 2). `sf_data::map::generate` is a seeded procedural generator,
+  types of its own: those are the optional fourth file (WP2.1, below).
+  `sf_data::map::generate` is a seeded procedural generator,
   bit-exact on every OS (integer hashing and `sf_math` fixed point; golden
   hashes in `crates/sf_data/tests/golden.rs`);
   `cargo run -p sf_data --example gen_map -- <dir> [w] [h] [seed]` writes one.
+- **Terrain types per gameplay cell (WP2.1).** `sf_data::terrain` has the table of
+  terrain types (`assets/config/terrain_types.ron`: id, name, passable per movement
+  class, buildable, harvestable) and `TerrainLayer`, one type id per 4 m cell. A map
+  may carry the layer as `terrain.png` (`terrain_map` in `map.ron`: 8-bit grayscale,
+  one pixel per gameplay cell, ids checked against the table, file name checked with
+  the same rules as the other files); `generate` emits water, rock, ore, a road and
+  bridges. `sf_sim` stores the terrain type and the occupant of each cell in
+  fixed-size row-major arrays (`sf_sim::terrain`), created from numbers handed over by
+  the caller: `sf_game::playfield` when the game starts a map, `sf_headless` when a
+  scenario names a map (`map_name`), so the simulation does no I/O. What the types
+  mean for the game: `docs/rules/terrain.md`.
 - **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
   central-difference normals from the global heightmap (so shared border
   vertices are bit-identical at equal levels), diagonals by global cell parity
@@ -383,8 +399,12 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   and never reaches `sf_sim`.
 - **Exit codes:** 0 ok, 1 `--expect` mismatch, 2 usage error, invalid scenario or
   unwritable log.
-- **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers) and
-  `command_mix` in release mode on Linux and Windows against the committed
+- **Terrain scenarios (WP2.1):** `map_name: Some("playfield256")` makes the world on the
+  terrain layer of `assets/maps/<name>/`, and the action `Place(kind, owner, cell)`
+  puts a structure on a cell. The map is read by `Scenario::load` only, never while a
+  run goes. `terrain_256.ron` is the 256 x 256 cell playfield with structures.
+- **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
+  `command_mix` and `terrain_256` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

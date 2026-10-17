@@ -2,10 +2,12 @@
 //!
 //! WP1.7 adds the engine map format ([`map`]): a RON header, a 16-bit
 //! heightmap and a per-cell material index map, with a validating loader and
-//! a deterministic procedural generator. Game rules (terrain types) are not
-//! part of it; those come in phase 2.
+//! a deterministic procedural generator. WP2.1 adds the terrain types
+//! ([`terrain`]): a RON table of what a gameplay cell can be (grass, road,
+//! water, rock, ore, bridge) and an optional per-cell layer of them in a map.
 
 pub mod map;
+pub mod terrain;
 
 /// Name of this crate, a placeholder until the real API lands.
 pub const CRATE: &str = "sf_data";

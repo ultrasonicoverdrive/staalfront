@@ -11,6 +11,7 @@ use sf_math::{Facing, Rng, Vec2};
 
 use crate::behavior::{Area, Behavior};
 use crate::ids::{Kind, PlayerId};
+use crate::terrain::NO_CELL;
 
 /// One row of values for a freshly spawned entity.
 #[derive(Clone, Debug)]
@@ -52,6 +53,11 @@ pub(crate) struct Entities {
     pub area: Vec<Area>,
     /// The entity's own random stream.
     pub rng: Vec<Rng>,
+    /// The row-major index of the cell the entity occupies, or [`NO_CELL`] if
+    /// it occupies none (wanderers). Only `Place` sets it; the world's
+    /// occupancy grid is the same information indexed by cell, and the
+    /// checksum covers it from there.
+    pub cell: Vec<u32>,
 }
 
 impl Entities {
@@ -76,6 +82,7 @@ impl Entities {
         self.target.push(None);
         self.area.push(Area::new(Vec2::ZERO, Vec2::ZERO));
         self.rng.push(Rng::new(0));
+        self.cell.push(NO_CELL);
         index
     }
 
@@ -94,6 +101,7 @@ impl Entities {
         self.target[i] = None;
         self.area[i] = row.area;
         self.rng[i] = row.rng;
+        self.cell[i] = NO_CELL;
     }
 
     /// Frees slot `i`: marks it dead and resets every column to its neutral
@@ -111,5 +119,6 @@ impl Entities {
         self.target[i] = None;
         self.area[i] = Area::new(Vec2::ZERO, Vec2::ZERO);
         self.rng[i] = Rng::new(0);
+        self.cell[i] = NO_CELL;
     }
 }

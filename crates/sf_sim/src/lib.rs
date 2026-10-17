@@ -8,9 +8,10 @@
 //! That is what replays, saves, lockstep multiplayer and headless tests stand
 //! on.
 //!
-//! In this work package the world contains one placeholder behaviour,
-//! "wander", so thousands of entities move around without any gameplay. There
-//! are no unit types, no terrain, no collision and no combat yet.
+//! The world contains one placeholder behaviour, "wander", so thousands of
+//! entities move around without any gameplay. There are no unit types, no
+//! collision and no combat yet. Since WP2.1 the map has a terrain type and an
+//! occupant per cell (see "Terrain and occupancy" below).
 //!
 //! ```
 //! use sf_math::Vec2;
@@ -64,7 +65,8 @@
 //!
 //! Entities live in one struct-of-arrays store with a column per property:
 //! generation, live flag, kind, owner, position, previous position, facing,
-//! previous facing, behaviour, target, wander area and a random stream. An
+//! previous facing, behaviour, target, wander area, a random stream and the
+//! cell a structure occupies (none for a wanderer). An
 //! entity is a slot number, nothing more; the columns are plain `Vec`s walked
 //! in index order, which is cache friendly and the only iteration order the
 //! simulation ever uses.
@@ -107,8 +109,8 @@
 //! ordering rules: commands run at the start of their tick by
 //! `(tick, player, insertion)`, a command for an already executed tick is
 //! rejected with [`ScheduleError::PastTick`], and commands naming stale ids
-//! skip those ids. The minimal set: [`Command::Spawn`], [`Command::Despawn`],
-//! [`Command::SetWanderArea`] and [`Command::MoveTo`]. Pending commands are
+//! skip those ids. The minimal set: [`Command::Spawn`], [`Command::Place`],
+//! [`Command::Despawn`], [`Command::SetWanderArea`] and [`Command::MoveTo`]. Pending commands are
 //! simulation state: they are in the checksum and survive a clone of the
 //! world.
 //!
@@ -129,6 +131,43 @@
 //! kept inside the map (default 256 by 256 cells, see [`WorldConfig`]) by
 //! construction: spawn positions, areas and targets are clamped, and every
 //! move is clamped again.
+//!
+//! # Terrain and occupancy
+//!
+//! Every cell of the map (a gameplay cell is 4 m, so `Fx::ONE` of position)
+//! has a terrain type and an occupant, both in fixed-size row-major arrays
+//! (see [`terrain`]). [`World::new`] gives open ground everywhere;
+//! [`World::with_terrain`] takes a [`Terrain`] that the caller built from a
+//! map's terrain layer (`sf_data` reads the file, `sf_game` or `sf_headless`
+//! hands the numbers over, so the simulation does no I/O). The queries are
+//! read-only: [`World::terrain_at`], [`World::occupant_at`],
+//! [`World::cell_of`], [`World::cell_at`]. The only way to change occupancy is
+//! the tick: [`Command::Place`] spawns a standing structure that claims its
+//! cell if the terrain is buildable and the cell is free, and despawning it
+//! frees the cell. Wanderers occupy nothing and ignore terrain, so scenarios
+//! without `Place` and without a layer behave, and checksum, exactly as before
+//! (see [`checksum`]).
+//!
+//! ```
+//! use sf_sim::{Cell, Command, Kind, PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, World, WorldConfig};
+//!
+//! // A 4 x 1 map: three open cells and one cell of water.
+//! let water = TerrainDef { id: TerrainId(2), flags: TerrainFlags::default() };
+//! let grass = TerrainDef { id: TerrainId(0), flags: TerrainFlags::OPEN };
+//! let terrain = Terrain::from_layer(4, 1, &[0, 0, 2, 0], &[grass, water]).unwrap();
+//! let config = WorldConfig::new(1).with_map_size(4, 1);
+//! let mut world = World::with_terrain(config, terrain).unwrap();
+//! let place = |x| Command::Place { kind: Kind(7), cell: Cell::new(x, 0), owner: PlayerId(0) };
+//! for x in [0, 2, 0] {
+//!     world.schedule(Tick(0), PlayerId(0), place(x)).unwrap();
+//! }
+//! let report = world.step();
+//! // The first one stands; the one on water and the second one on the same cell are ignored.
+//! assert_eq!((report.commands_executed, report.commands_ignored), (1, 2));
+//! assert_eq!(world.terrain_at(Cell::new(2, 0)), Some(TerrainId(2)));
+//! assert!(world.occupant_at(Cell::new(0, 0)).is_some());
+//! assert!(world.occupant_at(Cell::new(2, 0)).is_none());
+//! ```
 //!
 //! # Presentation
 //!
@@ -154,7 +193,7 @@
 //!
 //! # Not here yet
 //!
-//! Map terrain and occupancy (phase 2), unit definitions (phase 3), pathfinding
+//! Unit definitions (phase 3), pathfinding
 //! and collision (phase 4), health, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
@@ -165,6 +204,7 @@ pub mod command;
 mod entities;
 pub mod ids;
 pub mod snapshot;
+pub mod terrain;
 pub mod world;
 
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
@@ -173,6 +213,9 @@ pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
 };
 pub use snapshot::{EntityView, Snapshot};
+pub use terrain::{
+    Cell, NO_OCCUPANT, Occupancy, Terrain, TerrainDef, TerrainError, TerrainFlags, TerrainId,
+};
 pub use world::{
     ConfigError, DEFAULT_MAP_SIDE, DEFAULT_SPEED, DEFAULT_TURN_PER_TICK, MAX_ENTITIES,
     MAX_MAP_SIDE, StepReport, World, WorldConfig,

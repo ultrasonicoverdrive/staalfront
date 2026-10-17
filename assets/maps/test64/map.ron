@@ -11,4 +11,5 @@
     ],
     heightmap: "height.png",
     material_map: "materials.png",
+    terrain_map: Some("terrain.png"),
 )

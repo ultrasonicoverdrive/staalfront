@@ -10,6 +10,21 @@
 //! with a riverbed, and a flat plateau. Materials are engine placeholders:
 //! `grass`, `dirt`, `rock`, `sand`, `dark_ground`.
 //!
+//! **Terrain types (WP2.1).** The generated map also carries a terrain layer,
+//! one type per 4 m gameplay cell ([`terrain_for`]), integer only like the rest:
+//!
+//! * `water` where the river is drawn (the riverbed material `sand`), `rock`
+//!   where the rock material is (steep or high ground); a cell takes the
+//!   material that covers at least half of its 16 samples, water first;
+//! * a few `ore` fields: round patches of 2 to 4 cells radius on grass;
+//! * one `road` from the west edge to the east edge along a staircase path from
+//!   a fifth of the map's height to four fifths of it, so it always has to cross
+//!   the river, and a `bridge` on every road cell that lies on water.
+//!
+//! The layer is a function of the map's heights-derived materials and the
+//! seed, so a map whose files already exist (the committed `test64`) can get
+//! its layer without regenerating anything else.
+//!
 //! Replacements for the former float functions: the river's `sin` is the
 //! `sf_math` sine table of [`Facing`] (256 steps per turn) interpolated
 //! linearly; a hill's `exp(-d2)` is `(1 - d2 / 8)^8` (the same peak and
@@ -21,6 +36,7 @@ use sf_math::hash::Fnv1a64;
 use sf_math::{Facing, Fx, Rng};
 
 use super::Map;
+use crate::terrain::{TerrainLayer, TerrainTypes};
 
 /// Material names, in index order.
 pub const MATERIALS: [&str; 5] = ["grass", "dirt", "rock", "sand", "dark_ground"];
@@ -310,7 +326,7 @@ pub fn generate(width: u32, height: u32, seed: u32) -> Map {
             cells.push(material);
         }
     }
-    Map::from_parts(
+    let map = Map::from_parts(
         width,
         height,
         HEIGHT_SCALE,
@@ -318,7 +334,133 @@ pub fn generate(width: u32, height: u32, seed: u32) -> Map {
         heights,
         cells,
     )
-    .expect("the generator produces a valid map")
+    .expect("the generator produces a valid map");
+    let layer = terrain_for(&map, seed);
+    map.with_terrain(layer, &TerrainTypes::embedded())
+        .expect("the generator produces a valid terrain layer")
+}
+
+/// Salt of the ore fields' hash stream (the hills use `7000 + i`, the material
+/// noise `555`).
+const ORE_SALT: u32 = 9100;
+/// How many places an ore field tries before it is left out (a field needs a
+/// grass cell for its centre).
+const ORE_TRIES: u32 = 64;
+
+/// How many ore fields a map of `cells` gameplay cells gets: one per 8,192
+/// cells, at least two (8 on the 256 x 256 map).
+fn ore_field_count(cells: u64) -> u32 {
+    (cells / 8192).max(2) as u32
+}
+
+/// The terrain layer of a map: one type per gameplay cell, as described in the
+/// module documentation. Deterministic: depends on the map's materials and on
+/// `seed` only.
+///
+/// The river and the rocks are read from the materials called `sand` and
+/// `rock` (the generator's riverbed and steep ground); a map without such a
+/// material has no water or rock. The ids come from the shipped table
+/// ([`TerrainTypes::embedded`]) by name, so renumbering the table changes
+/// nothing here.
+pub fn terrain_for(map: &Map, seed: u32) -> TerrainLayer {
+    let types = TerrainTypes::embedded();
+    let id = |name: &str| {
+        types
+            .id_of(name)
+            .unwrap_or_else(|| panic!("the terrain types lack \"{name}\""))
+    };
+    let (grass, road, water, rock, ore, bridge) = (
+        id("grass"),
+        id("road"),
+        id("water"),
+        id("rock"),
+        id("ore"),
+        id("bridge"),
+    );
+    let material = |name: &str| {
+        map.materials()
+            .iter()
+            .position(|m| m == name)
+            .map(|i| i as u8)
+    };
+    let (sand, stone) = (material("sand"), material("rock"));
+
+    let (cw, ch) = map.size_in_cells();
+    let side = sf_math::CELL_METRES;
+    let (w, h) = (map.width(), map.height());
+    let mut ids = Vec::with_capacity(cw as usize * ch as usize);
+    for cz in 0..ch {
+        for cx in 0..cw {
+            // The samples of this cell (fewer at an edge that is not a whole
+            // number of cells).
+            let (mut n, mut sands, mut rocks) = (0_u32, 0_u32, 0_u32);
+            for z in cz * side..((cz + 1) * side).min(h) {
+                for x in cx * side..((cx + 1) * side).min(w) {
+                    let m = map.material_at(i64::from(x), i64::from(z));
+                    n += 1;
+                    sands += u32::from(Some(m) == sand);
+                    rocks += u32::from(Some(m) == stone);
+                }
+            }
+            ids.push(if sands > 0 && sands * 2 >= n {
+                water
+            } else if rocks > 0 && rocks * 2 >= n {
+                rock
+            } else {
+                grass
+            });
+        }
+    }
+    let at = |x: u32, z: u32| z as usize * cw as usize + x as usize;
+
+    // Ore fields: round patches on grass.
+    let fields = ore_field_count(u64::from(cw) * u64::from(ch));
+    for i in 0..fields {
+        let s = seed.wrapping_add(ORE_SALT + i);
+        let radius = 2 + (hash(s, 9, 9) % 3) as i32;
+        let centre = (0..ORE_TRIES)
+            .map(|k| {
+                let k = k as i32;
+                (hash(s, k, 1) % cw, hash(s, k, 2) % ch)
+            })
+            .find(|&(x, z)| ids[at(x, z)] == grass);
+        let Some((x0, z0)) = centre else { continue };
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dz * dz > radius * radius {
+                    continue;
+                }
+                let (x, z) = (i64::from(x0) + i64::from(dx), i64::from(z0) + i64::from(dz));
+                if x < 0 || z < 0 || x >= i64::from(cw) || z >= i64::from(ch) {
+                    continue;
+                }
+                let cell = at(x as u32, z as u32);
+                if ids[cell] == grass {
+                    ids[cell] = ore;
+                }
+            }
+        }
+    }
+
+    // The road: a staircase from the west edge to the east edge, one cell
+    // wide and joined by sides (no diagonal gaps). It starts at a fifth of
+    // the height and ends at four fifths, so it crosses the river band (which
+    // keeps within a third and two thirds of the height). A map too small for
+    // that has no road.
+    if cw >= 2 && ch >= 5 {
+        let (z_from, z_to) = (i64::from(ch) / 5, i64::from(ch) * 4 / 5);
+        let mut previous = z_from;
+        for x in 0..cw {
+            let z = z_from + (z_to - z_from) * i64::from(x) / i64::from(cw - 1);
+            for zz in previous.min(z)..=previous.max(z) {
+                let cell = at(x, zz as u32);
+                ids[cell] = if ids[cell] == water { bridge } else { road };
+            }
+            previous = z;
+        }
+    }
+
+    TerrainLayer::new(cw, ch, ids).expect("one id per cell")
 }
 
 #[cfg(test)]

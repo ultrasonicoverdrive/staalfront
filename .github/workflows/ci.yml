@@ -114,7 +114,7 @@ jobs:
         run: |
           mkdir -p headless-logs
           status=0
-          for name in wander_5000 command_mix; do
+          for name in wander_5000 command_mix terrain_256; do
             cargo run --release -p sf_headless -- "assets/scenarios/$name.ron" \
               --every 100 \
               --out "headless-logs/$name.json" \

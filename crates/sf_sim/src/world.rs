@@ -9,6 +9,7 @@ use crate::command::{Command, CommandQueue, ScheduleError};
 use crate::entities::{Entities, NewEntity};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::snapshot::{EntityView, Snapshot};
+use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 
 /// The most slots a world will ever allocate. A `Spawn` beyond it is ignored.
 /// It bounds memory against a runaway command stream and keeps slot indices
@@ -98,6 +99,8 @@ pub enum ConfigError {
     SpeedTooLow,
     /// A turn rate of zero would leave misaligned entities stuck forever.
     NoTurning,
+    /// The terrain layer's size is not the map size of the configuration.
+    TerrainSize,
 }
 
 impl fmt::Display for ConfigError {
@@ -107,6 +110,7 @@ impl fmt::Display for ConfigError {
             ConfigError::MapTooLarge => "a map side is above the maximum",
             ConfigError::SpeedTooLow => "the speed rounds to zero per tick",
             ConfigError::NoTurning => "the turn rate per tick is zero",
+            ConfigError::TerrainSize => "the terrain layer is not the size of the map",
         })
     }
 }
@@ -140,6 +144,10 @@ pub struct World {
     live: u32,
     /// Spawns so far; gives every entity its own random stream.
     pub(crate) spawn_serial: u64,
+    /// The terrain type of every cell. Fixed at creation.
+    pub(crate) terrain: Terrain,
+    /// Who stands on each cell. Changed only by commands, inside the tick.
+    pub(crate) occupancy: Occupancy,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -176,19 +184,38 @@ fn entity_rng(seed: u64, serial: u64) -> Rng {
 }
 
 impl World {
-    /// A world at tick zero with no entities.
+    /// A world at tick zero with no entities and no terrain layer: every cell
+    /// is open ground ([`Terrain::open`]).
     pub fn new(config: WorldConfig) -> Result<World, ConfigError> {
         config.validate()?;
-        Ok(World {
+        let terrain = Terrain::open(config.width, config.height);
+        Ok(World::with_parts(config, terrain))
+    }
+
+    /// A world at tick zero with no entities, on the given terrain. The
+    /// terrain must be exactly the size of the map in the configuration
+    /// ([`ConfigError::TerrainSize`] otherwise).
+    pub fn with_terrain(config: WorldConfig, terrain: Terrain) -> Result<World, ConfigError> {
+        config.validate()?;
+        if (terrain.width(), terrain.height()) != (config.width, config.height) {
+            return Err(ConfigError::TerrainSize);
+        }
+        Ok(World::with_parts(config, terrain))
+    }
+
+    fn with_parts(config: WorldConfig, terrain: Terrain) -> World {
+        World {
             config,
             tick: Tick::ZERO,
             entities: Entities::default(),
             free: Vec::new(),
             live: 0,
             spawn_serial: 0,
+            occupancy: Occupancy::new(config.width, config.height),
+            terrain,
             queue: CommandQueue::new(),
             history: Vec::new(),
-        })
+        }
     }
 
     // ---- reading ----------------------------------------------------------
@@ -206,6 +233,49 @@ impl World {
     /// Ticks executed so far, which is also the number of the next tick.
     pub fn tick(&self) -> Tick {
         self.tick
+    }
+
+    /// The terrain: a type and its flags for every cell. Read-only; it never
+    /// changes after the world is created.
+    pub fn terrain(&self) -> &Terrain {
+        &self.terrain
+    }
+
+    /// The terrain type of `cell`; `None` outside the map.
+    pub fn terrain_at(&self, cell: Cell) -> Option<TerrainId> {
+        self.terrain.id_at(cell)
+    }
+
+    /// The entity that occupies `cell`; `None` if it is free or outside the
+    /// map. Only structures created by [`Command::Place`] occupy cells.
+    pub fn occupant_at(&self, cell: Cell) -> Option<EntityId> {
+        let slot = self.occupancy.slot_at(self.occupancy.index(cell)?)? as usize;
+        Some(EntityId::new(slot as u32, self.entities.generation[slot]))
+    }
+
+    /// True if `cell` is inside the map and occupied.
+    pub fn is_occupied(&self, cell: Cell) -> bool {
+        self.occupant_at(cell).is_some()
+    }
+
+    /// The cell an entity occupies; `None` for a stale id and for an entity
+    /// that occupies none (every wanderer).
+    pub fn cell_of(&self, id: EntityId) -> Option<Cell> {
+        let i = self.live_index(id)?;
+        let cell = self.entities.cell[i];
+        (cell != NO_CELL).then(|| self.occupancy.cell(cell))
+    }
+
+    /// How many cells are occupied.
+    pub fn occupied_cells(&self) -> usize {
+        self.occupancy.count()
+    }
+
+    /// The cell a position lies in; `None` outside the map.
+    pub fn cell_at(&self, pos: Vec2) -> Option<Cell> {
+        let (x, y) = pos.cell();
+        let (x, y) = (u32::try_from(x).ok()?, u32::try_from(y).ok()?);
+        (x < self.config.width && y < self.config.height).then_some(Cell::new(x, y))
     }
 
     /// The number of live entities.
@@ -364,6 +434,17 @@ impl World {
     /// new one at the end. The entity starts wandering over the whole map with
     /// a random heading from its own stream.
     pub(crate) fn spawn(&mut self, kind: Kind, pos: Vec2, owner: PlayerId) -> Option<EntityId> {
+        self.spawn_as(kind, pos, owner, Behavior::Wander)
+    }
+
+    /// [`World::spawn`] with a given starting behaviour.
+    fn spawn_as(
+        &mut self,
+        kind: Kind,
+        pos: Vec2,
+        owner: PlayerId,
+        behavior: Behavior,
+    ) -> Option<EntityId> {
         let index = match self.free.pop() {
             Some(i) => i as usize,
             None => {
@@ -385,7 +466,7 @@ impl World {
                 owner,
                 pos: pos.clamp(pos_min, pos_max),
                 facing,
-                behavior: Behavior::Wander,
+                behavior,
                 area: self.bounds(),
                 rng,
             },
@@ -405,6 +486,10 @@ impl World {
         let Some(i) = self.live_index(id) else {
             return false;
         };
+        // A structure frees its cell in the same command.
+        if self.entities.cell[i] != NO_CELL {
+            self.occupancy.release(self.entities.cell[i]);
+        }
         self.entities.clear(i);
         if let Some(next) = self.entities.generation[i].checked_add(1) {
             self.entities.generation[i] = next;
@@ -414,16 +499,46 @@ impl World {
         true
     }
 
+    /// Places a structure: an entity that stands still on `cell` and occupies
+    /// it until it is despawned. `None` (nothing happens) if the cell is outside
+    /// the map, its terrain is not buildable, it is already occupied, or the
+    /// entity limit is reached.
+    fn place(&mut self, kind: Kind, cell: Cell, owner: PlayerId) -> Option<EntityId> {
+        let index = self.occupancy.index(cell)?;
+        if !self.terrain.flags_at(cell)?.buildable || self.occupancy.slot_at(index).is_some() {
+            return None;
+        }
+        // The middle of the cell: its corner plus one half in each direction.
+        let pos = Vec2::new(
+            Fx::from_i64(i64::from(cell.x)) + Fx::HALF,
+            Fx::from_i64(i64::from(cell.y)) + Fx::HALF,
+        );
+        let id = self.spawn_as(kind, pos, owner, Behavior::Idle)?;
+        let claimed = self.occupancy.claim(index, id.index());
+        debug_assert!(claimed, "the cell was free a moment ago");
+        self.entities.cell[id.index() as usize] = index;
+        Some(id)
+    }
+
+    /// Whether the entity in slot `i` is a structure (it occupies a cell).
+    /// Structures do not wander or move.
+    fn is_structure(&self, i: usize) -> bool {
+        self.entities.cell[i] != NO_CELL
+    }
+
     /// Runs one command. True if it changed anything.
     fn apply(&mut self, command: Command) -> bool {
         match command {
             Command::Spawn { kind, pos, owner } => self.spawn(kind, pos, owner).is_some(),
+            Command::Place { kind, cell, owner } => self.place(kind, cell, owner).is_some(),
             Command::Despawn { id } => self.despawn(id),
             Command::SetWanderArea { ids, area } => {
                 let area = area.clamped_to(self.bounds());
                 let mut changed = false;
                 for id in ids {
-                    if let Some(i) = self.live_index(id) {
+                    if let Some(i) = self.live_index(id)
+                        && !self.is_structure(i)
+                    {
                         self.entities.area[i] = area;
                         self.entities.behavior[i] = Behavior::Wander;
                         self.entities.target[i] = None;
@@ -437,7 +552,9 @@ impl World {
                 let target = target.clamp(pos_min, pos_max);
                 let mut changed = false;
                 for id in ids {
-                    if let Some(i) = self.live_index(id) {
+                    if let Some(i) = self.live_index(id)
+                        && !self.is_structure(i)
+                    {
                         self.entities.behavior[i] = Behavior::MoveTo;
                         self.entities.target[i] = Some(target);
                         changed = true;

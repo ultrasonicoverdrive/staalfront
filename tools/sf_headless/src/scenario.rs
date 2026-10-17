@@ -40,10 +40,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use sf_data::map::Map;
+use sf_data::terrain::TerrainTypes;
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
-    Area, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId, Tick,
-    World, WorldConfig,
+    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId,
+    Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -70,6 +72,17 @@ pub struct Scenario {
     /// The map size in cells; 256 by 256 when left out.
     #[serde(default)]
     pub map: MapSize,
+    /// The name of a map directory whose terrain layer the world is made on:
+    /// `assets/maps/<name>/`, found next to the scenario file (the scenario
+    /// is `assets/scenarios/<file>.ron`). The map's size in gameplay cells
+    /// must equal `map`. Left out: no terrain layer, every cell is open ground.
+    /// Only [`Scenario::load`] can read the map; see [`Scenario::terrain`].
+    #[serde(default)]
+    pub map_name: Option<String>,
+    /// The terrain read from `map_name` by [`Scenario::load`], handed to the
+    /// world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub terrain: Option<Terrain>,
     /// How many ticks to run; at least 1.
     pub ticks: u64,
     /// Groups of entities to create.
@@ -190,6 +203,18 @@ pub enum Action {
         /// The entities.
         ids: Vec<IdSpec>,
     },
+    /// `Command::Place`: a standing structure on a cell. Refused by the
+    /// simulation (the command counts as ignored) on terrain that is not
+    /// buildable and on an occupied cell. The entity takes the next free id,
+    /// like a spawn.
+    Place {
+        /// What to create.
+        kind: u16,
+        /// Who owns it.
+        owner: u8,
+        /// The cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+    },
 }
 
 /// Names entities by their `sf_sim` id.
@@ -209,6 +234,25 @@ impl IdSpec {
             IdSpec::Range(from, to) => out.extend((from..to).map(|i| EntityId::new(i, 0))),
         }
     }
+}
+
+/// The simulation's table of terrain types from the data table: the ids and
+/// the flags, no names. (`sf_game` does the same when it starts a map; the
+/// data crate cannot name the simulation's types, so each consumer converts.)
+pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
+    types
+        .iter()
+        .map(|t| TerrainDef {
+            id: TerrainId(t.id),
+            flags: TerrainFlags {
+                foot: t.passable.foot,
+                wheeled: t.passable.wheeled,
+                tracked: t.passable.tracked,
+                buildable: t.buildable,
+                harvestable: t.harvestable,
+            },
+        })
+        .collect()
 }
 
 fn expand(ids: &[IdSpec]) -> Vec<EntityId> {
@@ -303,7 +347,40 @@ impl Scenario {
         {
             scenario.name = stem.to_string_lossy().into_owned();
         }
+        if let Some(name) = scenario.map_name.clone() {
+            scenario.terrain = Some(scenario.load_terrain(&name, path)?);
+        }
         Ok(scenario)
+    }
+
+    /// Reads the terrain layer of map `name`, which lives in
+    /// `<scenario directory>/../maps/<name>`, checks that it is the scenario's
+    /// map size and turns it into the simulation's [`Terrain`].
+    fn load_terrain(&self, name: &str, scenario_file: &Path) -> Result<Terrain, ScenarioError> {
+        let invalid = |problem: String| ScenarioError::Invalid {
+            path: Some(scenario_file.to_path_buf()),
+            problems: vec![format!("map_name \"{name}\": {problem}")],
+        };
+        let dir = scenario_file
+            .parent()
+            .unwrap_or(Path::new(""))
+            .join("..")
+            .join("maps")
+            .join(name);
+        let map = Map::load(&dir).map_err(|e| invalid(e.to_string()))?;
+        let layer = map
+            .terrain()
+            .ok_or_else(|| invalid("the map has no terrain layer".into()))?;
+        let (width, height) = (self.map.width, self.map.height);
+        if (layer.width(), layer.height()) != (width, height) {
+            return Err(invalid(format!(
+                "the map is {}x{} cells but the scenario's map is {width}x{height}",
+                layer.width(),
+                layer.height()
+            )));
+        }
+        let defs = sim_definitions(&TerrainTypes::embedded());
+        Terrain::from_layer(width, height, layer.ids(), &defs).map_err(|e| invalid(e.to_string()))
     }
 
     /// Parses and validates scenario text.
@@ -356,6 +433,17 @@ impl Scenario {
         }
         if self.ticks == 0 {
             p.push("ticks must be at least 1".into());
+        }
+        if let Some(name) = &self.map_name {
+            // The same file name rules as the files of a map (no path out of
+            // the maps directory, no Windows device names), and a single name.
+            if let Err(e) = sf_data::map::check_file_name("map_name", name) {
+                p.push(e.to_string());
+            } else if name.contains('/') {
+                p.push(format!(
+                    "map_name \"{name}\" must be the name of one map directory, without '/'"
+                ));
+            }
         }
 
         // A tick at or after `ticks` never runs. Not checked when `ticks` is
@@ -432,6 +520,14 @@ impl Scenario {
                     }
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
+                Action::Place { cell, .. } => {
+                    if map_ok && (cell.0 >= width || cell.1 >= height) {
+                        p.push(format!(
+                            "{at}: cell ({}, {}) lies outside the {width}x{height} map",
+                            cell.0, cell.1
+                        ));
+                    }
+                }
             }
         }
         p
@@ -449,8 +545,22 @@ impl Scenario {
                 problems,
             });
         }
+        if self.map_name.is_some() && self.terrain.is_none() {
+            return Err(ScenarioError::Invalid {
+                path: None,
+                problems: vec![
+                    "map_name: the terrain is read from the map's files, so the scenario \
+                     must be loaded with Scenario::load"
+                        .into(),
+                ],
+            });
+        }
         let config = WorldConfig::new(self.seed).with_map_size(self.map.width, self.map.height);
-        let mut world = World::new(config).map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        let mut world = match &self.terrain {
+            Some(terrain) => World::with_terrain(config, terrain.clone()),
+            None => World::new(config),
+        }
+        .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
 
         let mut placement = Rng::with_stream(self.seed, PLACEMENT_STREAM);
@@ -494,6 +604,14 @@ impl Scenario {
                             .schedule(tick, player, Command::Despawn { id })
                             .map_err(sim)?;
                     }
+                }
+                Action::Place { kind, owner, cell } => {
+                    let command = Command::Place {
+                        kind: Kind(*kind),
+                        cell: Cell::new(cell.0, cell.1),
+                        owner: PlayerId(*owner),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
                 }
             }
         }

@@ -3,21 +3,21 @@ use std::path::PathBuf;
 use super::generate::{generate, generate_cells};
 use super::*;
 
-fn header(w: u32, h: u32) -> String {
+pub(super) fn header(w: u32, h: u32) -> String {
     format!(
         "(width: {w}, height: {h}, height_scale: 4.0, materials: [\"a\", \"b\"], \
          heightmap: \"height.png\", material_map: \"materials.png\")"
     )
 }
 
-fn height_png(w: u32, h: u32) -> Vec<u8> {
+pub(super) fn height_png(w: u32, h: u32) -> Vec<u8> {
     let data: Vec<u8> = (0..w * h)
         .flat_map(|i| ((i * 97) as u16).to_be_bytes())
         .collect();
     encode_gray("height.png", &data, png::BitDepth::Sixteen, (w, h)).unwrap()
 }
 
-fn cells_png(w: u32, h: u32, value: u8) -> Vec<u8> {
+pub(super) fn cells_png(w: u32, h: u32, value: u8) -> Vec<u8> {
     let data = vec![value; (w * h) as usize];
     encode_gray("materials.png", &data, png::BitDepth::Eight, (w, h)).unwrap()
 }
@@ -225,7 +225,7 @@ fn a_cell_is_four_terrain_cells_per_side() {
 // --- file names in map.ron ---
 
 /// A header whose two file names are replaced.
-fn header_with_names(heightmap: &str, material_map: &str) -> String {
+pub(super) fn header_with_names(heightmap: &str, material_map: &str) -> String {
     format!(
         "(width: 4, height: 3, height_scale: 4.0, materials: [\"a\", \"b\"], \
          heightmap: {heightmap:?}, material_map: {material_map:?})"
@@ -234,7 +234,7 @@ fn header_with_names(heightmap: &str, material_map: &str) -> String {
 
 /// Names that point outside the map directory, on any OS, with a word of the
 /// reason the message must give.
-const ESCAPING_NAMES: [(&str, &str); 14] = [
+pub(super) const ESCAPING_NAMES: [(&str, &str); 14] = [
     ("/etc/passwd", "absolute"),
     ("\\windows\\system32\\x", "absolute"),
     ("C:\\x", "drive"),
