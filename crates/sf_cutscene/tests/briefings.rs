@@ -468,9 +468,10 @@ fn demo_scene_timing_stays_within_30_percent_of_the_importer() {
     }
 }
 
-/// Every edit of the generated skeleton says `hand edit`: an event line of the
+/// Every edit of the generated skeleton says `hand edit`. An event line of the
 /// scene file is either one the generator writes today (comment or not) or
-/// carries that mark.
+/// carries that mark; the same holds for layers, characters, parts and poses
+/// (compared with a fresh run as data), and a removal is named in a note.
 #[test]
 fn demo_scene_marks_every_hand_edit() {
     fn code(line: &str) -> &str {
@@ -502,6 +503,106 @@ fn demo_scene_marks_every_hand_edit() {
         );
     }
     assert!(kept >= 5, "some events are exactly the generator's: {kept}");
+
+    // Layers, characters, parts and poses: compared as data with a fresh
+    // generator run. Whatever was added or changed has a `hand edit` on its own
+    // line; whatever was removed is named in a `hand edit: removed` note.
+    let fresh = demo_fresh().scene;
+    let ours = demo().scene;
+    let defs = definitions(&text);
+    let marked = |def: &Def| -> bool {
+        let (_, line) = defs
+            .iter()
+            .find(|(d, _)| d == def)
+            .unwrap_or_else(|| panic!("no definition line for {def:?}"));
+        line.contains("hand edit")
+    };
+    let removed_note = |name: &str| -> bool {
+        text.lines()
+            .any(|l| l.contains("hand edit: removed") && l.contains(name))
+    };
+    let (mut same_layers, mut same_parts) = (0, 0);
+    for l in &ours.layers {
+        if fresh.layers.iter().any(|f| f == l) {
+            same_layers += 1;
+        } else {
+            assert!(
+                marked(&Def::Layer(l.name.clone())),
+                "layer {} is new or changed but not marked `hand edit`",
+                l.name
+            );
+        }
+    }
+    for f in &fresh.layers {
+        if !ours.layers.iter().any(|l| l.name == f.name) {
+            assert!(
+                removed_note(&f.name),
+                "layer {} was dropped silently",
+                f.name
+            );
+        }
+    }
+    assert!(
+        same_layers >= 1,
+        "the generator's map layer is kept as it was"
+    );
+    for c in &ours.characters {
+        let f = fresh
+            .characters
+            .iter()
+            .find(|f| f.id == c.id)
+            .unwrap_or_else(|| panic!("{} is not in the briefing", c.id));
+        if f != c {
+            assert!(
+                marked(&Def::Character(c.id.clone())),
+                "{} is not marked",
+                c.id
+            );
+        }
+        for p in &c.parts {
+            if f.parts.iter().any(|q| q == p) {
+                same_parts += 1;
+            } else {
+                assert!(
+                    marked(&Def::Part(c.id.clone(), p.name.clone())),
+                    "{}/{} is new or changed but not marked `hand edit`",
+                    c.id,
+                    p.name
+                );
+            }
+        }
+        for q in &f.parts {
+            if !c.parts.iter().any(|p| p.name == q.name) {
+                assert!(
+                    removed_note(&q.name),
+                    "{}: part {} dropped silently",
+                    c.id,
+                    q.name
+                );
+            }
+        }
+        for p in &c.poses {
+            if !f.poses.iter().any(|q| q == p) {
+                assert!(
+                    marked(&Def::Pose(c.id.clone(), p.name.clone())),
+                    "{}/{} is new or changed but not marked `hand edit`",
+                    c.id,
+                    p.name
+                );
+            }
+        }
+        for q in &f.poses {
+            if !c.poses.iter().any(|p| p.name == q.name) {
+                assert!(
+                    removed_note(&q.name),
+                    "{}: pose {} dropped silently",
+                    c.id,
+                    q.name
+                );
+            }
+        }
+    }
+    println!("unchanged from the generator: {same_layers} layers, {same_parts} parts");
     // The hand-made blocks say so too.
     for needle in [
         "// hand edit: the cast",
@@ -510,6 +611,47 @@ fn demo_scene_marks_every_hand_edit() {
     ] {
         assert!(text.contains(needle), "missing the comment `{needle}`");
     }
+}
+
+/// What a definition line of the scene file defines.
+#[derive(Debug, PartialEq)]
+enum Def {
+    Layer(String),
+    Character(String),
+    Part(String, String),
+    Pose(String, String),
+}
+
+/// The lines of the scene file that define a layer, a character, a part or a
+/// pose, each with what it defines (the file is laid out one per line).
+fn definitions(text: &str) -> Vec<(Def, &str)> {
+    let quoted = |t: &str, prefix: &str| -> Option<String> {
+        Some(t.strip_prefix(prefix)?.split('"').next()?.to_string())
+    };
+    let (mut in_characters, mut who) = (false, String::new());
+    let mut v = Vec::new();
+    for line in text.lines() {
+        let t = line.trim_start();
+        if t.starts_with("characters: [") {
+            in_characters = true;
+        } else if t.starts_with("timeline:") {
+            break;
+        } else if !in_characters {
+            if let Some(n) = quoted(t, "(name: \"") {
+                v.push((Def::Layer(n), line));
+            }
+        } else if let Some(id) = quoted(t, "(id: \"") {
+            who.clone_from(&id);
+            v.push((Def::Character(id), line));
+        } else if let Some(n) = quoted(t, "(name: \"") {
+            if t.contains("art:") {
+                v.push((Def::Part(who.clone(), n), line));
+            } else if t.contains("parts: [") {
+                v.push((Def::Pose(who.clone(), n), line));
+            }
+        }
+    }
+    v
 }
 
 #[test]
@@ -580,6 +722,12 @@ fn every_speaker_has_a_rig_with_the_kept_parts_and_poses() {
             );
         }
         assert!(c.parts.len() >= 10, "{id}: a rig, not a stick");
+        // No two parts share a draw order: who is in front of whom does not
+        // depend on the order of the list (a pocket map under a sleeve, ...).
+        let mut zs: Vec<i32> = c.parts.iter().map(|p| p.z).collect();
+        zs.sort_unstable();
+        zs.dedup();
+        assert_eq!(zs.len(), c.parts.len(), "{id}: two parts share a z");
         assert!(
             (3..=5).contains(&c.poses.len()),
             "{id}: {} poses",
@@ -608,6 +756,14 @@ fn every_speaker_has_a_rig_with_the_kept_parts_and_poses() {
             }
         }
     }
+    // The map in Elian's breast pocket is under his sleeve, not over it.
+    let elian = scene
+        .characters
+        .iter()
+        .find(|c| c.id == "captain_elian")
+        .unwrap();
+    let z = |n: &str| elian.parts.iter().find(|p| p.name == n).unwrap().z;
+    assert!(z("torso") < z("pocket_map") && z("pocket_map") < z("upper_arm_l"));
     // Mira wears a headset: hand to ear for the radio.
     let mira = scene.characters.iter().find(|c| c.id == "mira").unwrap();
     assert!(mira.poses.iter().any(|p| p.name == "radio"));

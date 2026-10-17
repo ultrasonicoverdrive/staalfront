@@ -545,7 +545,8 @@ cargo run -p sf_cutscene --bin scene_check -- assets/scenes/f1_m01_briefing.ron 
 1. `fountain2scene content/briefings/F1-M01.fountain assets/scenes/f1_m01_briefing.ron`: the
    skeleton (section 7).
 2. Direct it **by hand in the RON**. Every event that differs from the generator's carries
-   `// hand edit: why`; events that carry only `// line N` are untouched. The header of the file
+   `// hand edit: why`, and so does every layer, character, part and pose that is new or changed;
+   a removal is a note `// hand edit: removed <name> ...`. Events that carry only `// line N` are untouched. The header of the file
    lists what was added. A test (`demo_scene_marks_every_hand_edit`) fails when an edit is not marked.
 3. **The text is the writer's.** Do not change, add or drop a spoken line, a speaker or a sound
    cue name in the RON. A test (`demo_scene_tells_the_briefing_word_for_word`) compares every line,
@@ -562,8 +563,8 @@ cargo run -p sf_cutscene --bin scene_check -- assets/scenes/f1_m01_briefing.ron 
 | Parallax | **Three depths**: `0.6` (tent wall, the flap with the dawn, notice board), `1.0` (floor, centre pole, table, props: where the figures stand), `1.2` (the lantern on its cord and the canvas edge, in front of the figures and sliding past faster). The table (`z >= 0`) is in front of the figures so they stand behind it. All of it is `Rect`, `RoundRect` and `Circle`. |
 | Map | `[[SHOT: map]]` is a second shot, `map`, with layers of its own at `z >= 40` and `parallax: 0`: the paper, farmland (south-west), the ore ridge (north), the road junction (centre) with the camp, the east road fading out into unlit hills. The `MapOverlay` adds pins and an arrow on top. |
 | Entering, leaving | Elian walks in through the flap (`Enter` off stage left, `Move`), Mira follows from the right. At the end they turn (`facing`) and walk out during the fade, then `Exit`. |
-| Poses from parentheticals | serious → `lean`, dry → `arms_crossed`, measured → `neutral`, firm → `arms_crossed`, analytical → `lean`, pointing at map → `point`, concerned → `arms_crossed`, neutral → `neutral`. Added: `lean` while Elian listens to the doubt, `radio` (hand to the headset) just before the radio click. The original words stay as `hint`. |
-| Camera | A slow drift towards Elian on the first line; a pan to the speaker when it matters (`EaseInOut`, 0.7 to 0.9 s); a cut to the map one beat after Mira's line, back to the post framed on Elian; a wide two-shot for the pointing; a **push-in from 1.0 to 1.4 on Mira's doubt** (`EaseIn`, over the whole line); back to Elian for the last line; wide again for the radio. No shake: the briefing has no explosion. |
+| Poses from parentheticals | serious → `lean`, dry → `arms_crossed`, measured → `neutral`, firm → `arms_crossed`, analytical → `lean`, pointing at map → `point`, concerned → `arms_crossed`, neutral → `neutral`. Added: `arms_crossed` while Elian listens to the doubt (his arms stay close to his body, so the close-up on Mira has him out of the frame), `radio` (hand to the headset) just before the radio click. The original words stay as `hint`. |
+| Camera | A slow drift towards Elian on the first line; a pan to the speaker when it matters (`EaseInOut`, 0.7 to 0.9 s); a cut to the map one beat after Mira's line, back to the post framed on Elian; a wide two-shot for the pointing; a **close-up on Mira's doubt**: pan and zoom to 1.7 in 0.9 s so Elian leaves the frame, then a slow push-in to 1.9 over the rest of her line (`EaseIn`); nobody is cut off by the frame edge; back to Elian for the last line; wide again for the radio. No shake: the briefing has no explosion. |
 | Timing | Dialogue durations are the importer's (words / 2.5 per second); a test keeps them within 30 % of it. Only the pauses grew where the scene reads better: half a second to read the map, 0.9 s before Mira's doubt, 0.6 s before the closing line, a 0.5 s beat between the radio click and the fade. |
 | V.O. | Nobody in this briefing speaks over the radio, so there is no off-screen speaker. If a briefing has one, give that character no parts (section 3.2) and put a radio or a framed picture on the stage as a layer, with `delivery: VoiceOver`. |
 | Sound | `sound`, `file`, `voice` and `lipsync` stay `None`; the cue names (`radio click`, `restrained military tension`, ...) are in `note`. |
@@ -576,21 +577,24 @@ the Meridian emblem). `scale: 1.8`; art faces **right**; the character position 
 
 | Part | Parent | Joint inside the picture (`pivot`) | Rest `offset` | `z` | |
 |---|---|---|---|---|---|
-| `legs` | root | (0, -85) top | (0, 0) | -1 | a root of its own, so legs stay upright when the torso leans |
-| `torso` | root | (0, 105) hips | (0, 0) | 0 | `lean` rotates about the hips |
-| `head` | `torso` | (0, 56) neck | (0, -204) | 5 | |
-| `mouth` | `head` | (0, 0) | (15, -34) | 7 | **the lip-sync part** (WP12.3) |
-| `upper_arm_l`, `upper_arm_r` | `torso` | (0, -50) shoulder | (-78, -186), (78, -186) | 1, 3 | `_r` is the arm on the side the figure faces |
-| `forearm_l`, `forearm_r` | upper arm | (0, -45) elbow | (0, 90) | 6, 4 | |
-| `hand_l`, `hand_r` | forearm | (0, 0) | (0, 88) | 9, 4 | `hand_l` is above the head so it shows at the ear |
-| `eye` | `head` | (0, 0) | (22, -66) | 7 | |
-| Elian only | | | | | `cap`, `cap_brim`, `eye_bag`, `pocket_map`, `patch` |
-| Mira only | | | | | `hair`, `headset_band`, `headset_cup`, `headset_mic`, `tablet`, `tablet_screen`, `patch` |
+| `legs` | root | (0, -85) top | (0, 0) | -2 | a root of its own, so legs stay upright when the torso leans |
+| `torso` | root | (0, 105) hips | (0, 0) | -1 | `lean` rotates about the hips |
+| `head` | `torso` | (0, 56) neck | (0, -204) | 9 | |
+| `mouth` | `head` | (0, 0) | (15, -34) | 13 | **the lip-sync part** (WP12.3) |
+| `upper_arm_l`, `upper_arm_r` | `torso` | (0, -50) shoulder | (-78, -186), (78, -186) | 1, 4 | `_r` is the arm on the side the figure faces |
+| `forearm_l`, `forearm_r` | upper arm | (0, -45) elbow | (0, 90) | 10, 5 | |
+| `hand_l`, `hand_r` | forearm | (0, 0) | (0, 88) | 19, 6 | `hand_l` is above the head so it shows at the ear |
+| `eye` | `head` | (0, 0) | (22, -66) | 12 | |
+| Elian only | `head` (`cap`, `cap_brim`, `eye_bag`), `torso` (`pocket_map`), `upper_arm_l` (`patch`) | (0, 0) | | 14, 15, 11, 0, 2 | cap, brim, tired eyes, the folded map in the breast pocket (under the sleeve), the Meridian sun on the sleeve |
+| Mira only | `head` (`hair`, `headset_band`, `headset_cup`, `headset_mic`), `hand_r` (`tablet`), `tablet` (`tablet_screen`), `upper_arm_l` (`patch`) | (0, 0) | | 3, 16, 17, 18, 7, 8, 2 | hair behind the face, the headset, the field tablet in her right hand, the sun on the sleeve |
+
+**No two parts of a rig share a `z`** (a test checks it), so who is in front of whom never depends on
+the order of the list. When you add a part, give it a free number.
 
 **Keep these names** when you replace a shape by a picture, because poses and events look parts
 up by name: **`torso`, `head`, `mouth`, `upper_arm_l`, `upper_arm_r`, `forearm_l`, `forearm_r`**
 (and `legs`, `hand_l`, `hand_r`, which the poses do not touch but the layering needs). The extra
-parts (cap, hair, headset) are free: rename or drop them, no pose mentions them. Keep the **parent chain** (arm -> forearm -> hand, everything else -> torso) and
+parts (cap, hair, headset) are free: rename or drop them, no pose mentions them. Keep the **parent chain** (`upper_arm` -> `forearm` -> `hand`; `torso` -> `head`, `upper_arm_l`, `upper_arm_r`; `head` -> `mouth`, `eye`; `legs` and `torso` are roots; extras hang where the table says, the cap from `head`, the tablet from `hand_r`) and
 draw each picture so that its joint sits where the table says; then the angles in the poses stay
 right. Change a joint, and the poses need new angles.
 
@@ -609,5 +613,8 @@ preview, not on paper.
 the CLI) and `tests/screenshot.rs` (`demo_briefing_at_four_moments`: the first line, the map shot,
 a two-shot, the fade-out; each frame is not empty, and where a line is spoken the subtitle is
 really drawn, checked the way WP12.2 does it and shown to **fail** on the same frame without the
-subtitle; where nobody speaks, nothing bright sits where a subtitle would be). The four frames are
-the PNGs above.
+subtitle; where nobody speaks, nothing bright sits where a subtitle would be; the figures are not cut
+off in the two-shot) and `demo_close_up_on_mira_cuts_nobody_off` (Elian is out of the picture and
+Mira is whole during the close-up). The frames are the PNGs above; `5_close_up.png` is the close-up.
+`demo_scene_marks_every_hand_edit` compares layers, characters, parts and poses with a fresh generator
+run as well as the events.

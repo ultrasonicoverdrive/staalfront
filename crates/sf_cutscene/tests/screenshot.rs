@@ -522,6 +522,43 @@ const ELIAN_JACKET: [u8; 3] = [0x66, 0x70, 0x46];
 const MIRA_JACKET: [u8; 3] = [0x52, 0x70, 0x8a];
 const TENT_CANVAS: [u8; 3] = [0xa3, 0x9a, 0x74];
 const MAP_SHEET: [u8; 3] = [0xe2, 0xd4, 0xad];
+/// What each figure is made of (jacket, sleeve, skin and, for Mira, hair).
+const ELIAN_COLOURS: &[[u8; 3]] = &[ELIAN_JACKET, [0x59, 0x62, 0x3a], [0xe0, 0xb4, 0x8f]];
+const MIRA_COLOURS: &[[u8; 3]] = &[
+    MIRA_JACKET,
+    [0x48, 0x62, 0x79],
+    [0xc8, 0x94, 0x6c],
+    [0x2a, 0x24, 0x20],
+];
+
+/// Pixels of a colour in the three-pixel strips along the left, right and top
+/// edge of the picture: a figure that the frame cuts off shows up there.
+fn on_edge(img: &Rgba8, v: &Rect, rgb: [u8; 3]) -> usize {
+    let strips = [
+        Rect {
+            x: v.x,
+            y: v.y,
+            w: 3.0,
+            h: v.h,
+        },
+        Rect {
+            x: v.right() - 3.0,
+            y: v.y,
+            w: 3.0,
+            h: v.h,
+        },
+        Rect {
+            x: v.x,
+            y: v.y,
+            w: v.w,
+            h: 3.0,
+        },
+    ];
+    strips
+        .iter()
+        .map(|s| count_in(img, s, |p| near(p, rgb, 6)))
+        .sum()
+}
 
 /// Horizontal centre of the pixels of a colour inside `r`, and how many there are.
 fn centre_x(img: &Rgba8, r: &Rect, rgb: [u8; 3]) -> (f32, usize) {
@@ -635,6 +672,11 @@ fn demo_briefing_at_four_moments() {
         "Elian left, Mira right: {ex}, {mx}"
     );
     assert!(mx - ex > 300.0);
+    for (who, colours) in [("Elian", ELIAN_COLOURS), ("Mira", MIRA_COLOURS)] {
+        for &c in colours {
+            assert_eq!(on_edge(&two, &v, c), 0, "{who} is cut off by the frame");
+        }
+    }
 
     // 4. The fade-out: half way to black, the figures walking out, nobody speaking.
     let t = 61_900;
@@ -657,6 +699,43 @@ fn demo_briefing_at_four_moments() {
         (&map, &two),
     ] {
         assert_ne!(a.pixels, b.pixels);
+    }
+}
+
+/// The push-in on Mira's doubt is a real close-up: Elian is out of the picture
+/// and Mira is whole, with nothing of her cut off at the left, right or top
+/// edge, from the moment the camera has settled until the end of her line.
+#[test]
+fn demo_close_up_on_mira_cuts_nobody_off() {
+    let scene = demo();
+    let mut r = renderer(1280, 720);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), repo_assets());
+    for (i, t) in [47_200, 50_000, 54_500].into_iter().enumerate() {
+        let (img, layout) = shoot(&mut r, &mut cs, &scene, t);
+        if i == 1 {
+            save("5_close_up.png", &img);
+        }
+        check_moment(&mut r, &mut cs, &scene, t, &img, &layout);
+        assert_eq!(layout.subtitle.as_ref().expect("Mira speaks").name, "Mira");
+        let v = layout.viewport;
+        for &c in ELIAN_COLOURS {
+            // A stray blended pixel may match a colour; a figure is thousands.
+            let n = count_in(&img, &v, |p| near(p, c, 6));
+            assert!(n < 100, "{t} ms: Elian is in the picture ({n} px of {c:?})");
+        }
+        assert!(
+            count_in(&img, &v, |p| near(p, [0xc8, 0x94, 0x6c], 6)) > 8_000,
+            "{t} ms: Mira's face fills the picture"
+        );
+        for &c in MIRA_COLOURS {
+            // A cut-off figure is hundreds of pixels along the edge.
+            let n = on_edge(&img, &v, c);
+            assert!(
+                n < 60,
+                "{t} ms: Mira is cut off by the frame ({n} px of {c:?})"
+            );
+        }
     }
 }
 
