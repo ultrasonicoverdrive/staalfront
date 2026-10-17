@@ -15,6 +15,7 @@ members = [
     "tools/sf_editor",
     "tools/sf_headless",
     "tools/sf_demo",
+    "tools/sf_ra_extract",
 ]
 
 [workspace.package]

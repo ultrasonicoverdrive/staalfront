@@ -23,6 +23,7 @@
 pub mod aud;
 pub mod crypto;
 pub mod mix;
+pub mod wav;
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -44,9 +45,9 @@ pub const CONFIG_FILE: &str = "config/audio.ron";
 /// Directory levels searched for `.mix` files below the configured path.
 const MAX_DIR_DEPTH: usize = 4;
 /// Archives inside archives followed this deep.
-const MAX_NEST_DEPTH: usize = 3;
+pub const MAX_NEST_DEPTH: usize = 3;
 /// Files looked at, at most (a wrong path such as `/` must not take long).
-const MAX_FILES: usize = 4096;
+const MAX_FILES: usize = 16_384;
 /// Caps on one scan, against archive bombs (overlapping entries, nesting).
 /// The whole Red Alert release (both CDs) is a few dozen archives, a few
 /// thousand entries and well under 1 GiB, so real files never get near them.
@@ -69,7 +70,8 @@ pub struct AudioConfig {
 pub struct RaAudioConfig {
     #[serde(default)]
     pub enabled: bool,
-    /// The install or freeware download directory (or one `.mix` file).
+    /// The install or freeware download directory, one `.mix` file, or a
+    /// folder of WAV files written by `sf_ra_extract`.
     #[serde(default)]
     pub path: String,
 }
@@ -143,7 +145,13 @@ pub enum EntryKind {
         millis: u64,
         compression: Compression,
     },
-    /// Looks like AUD but does not decode.
+    /// A 16-bit PCM WAV file in a WAV folder (from `sf_ra_extract`).
+    Wav {
+        sample_rate: u32,
+        channels: u16,
+        millis: u64,
+    },
+    /// Looks like AUD (or WAV) but does not decode.
     Broken(String),
     /// A nested archive (listed as an archive of its own).
     Mix,
@@ -194,26 +202,63 @@ impl Catalog {
         self.archives
             .iter()
             .flat_map(|a| &a.entries)
-            .filter(|e| matches!(e.kind, EntryKind::Aud { .. }))
+            .filter(|e| e.kind.playable())
             .count()
     }
 
-    /// The first playable entry with this name (or `#hex` id).
+    /// The first playable entry with this name (or `#hex` id); a WAV
+    /// folder entry wins over an AUD in a MIX archive.
     pub fn find(&self, name: &str) -> Option<&EntryInfo> {
         let id = id_for(name);
         let wanted_loose = name.to_ascii_uppercase();
-        self.archives
-            .iter()
-            .flat_map(|a| &a.entries)
-            .filter(|e| matches!(e.kind, EntryKind::Aud { .. }))
-            .find(|e| e.id == id || e.name.as_deref() == Some(wanted_loose.as_str()))
+        let hit = |e: &&EntryInfo| e.id == id || e.name.as_deref() == Some(wanted_loose.as_str());
+        let all = || self.archives.iter().flat_map(|a| &a.entries);
+        all()
+            .filter(|e| matches!(e.kind, EntryKind::Wav { .. }))
+            .find(hit)
+            .or_else(|| {
+                all()
+                    .filter(|e| matches!(e.kind, EntryKind::Aud { .. }))
+                    .find(hit)
+            })
+    }
+}
+
+impl EntryKind {
+    /// AUD or WAV that decodes.
+    pub fn playable(&self) -> bool {
+        matches!(self, EntryKind::Aud { .. } | EntryKind::Wav { .. })
     }
 }
 
 /// Read and decode one entry.
 pub fn decode_entry(e: &EntryInfo) -> Result<Pcm, String> {
     let bytes = read_at(&e.path, e.offset, e.size).map_err(|x| x.to_string())?;
+    if matches!(e.kind, EntryKind::Wav { .. }) {
+        return wav::read(&bytes);
+    }
     aud::decode(&bytes).map_err(|x| x.to_string())
+}
+
+/// The name and id of a WAV written by `sf_ra_extract`: `#1A2B3C4D.wav` is
+/// that id; `CLICK.wav` is `CLICK.AUD` (the tool drops `.AUD`); a stem that
+/// still has an extension (`FOO.JUV.wav`) keeps it.
+pub fn wav_name(file_name: &str) -> (u32, Option<String>) {
+    let stem = file_name
+        .len()
+        .checked_sub(4)
+        .filter(|&n| file_name.is_char_boundary(n))
+        .map_or(file_name, |n| &file_name[..n]);
+    if let Some(hex) = stem.strip_prefix('#')
+        && let Ok(id) = u32::from_str_radix(hex, 16)
+    {
+        return (id, None);
+    }
+    let mut name = stem.to_ascii_uppercase();
+    if !name.contains('.') {
+        name.push_str(".AUD");
+    }
+    (mix::mix_id(&name), Some(name))
 }
 
 fn read_at(path: &Path, offset: u64, size: u32) -> std::io::Result<Vec<u8>> {
@@ -255,7 +300,36 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Bytes of a WAV file read to classify it (chunks before `data`).
+const WAV_HEADER_BYTES: u32 = 64 * 1024;
+
 fn classify(path: &Path, offset: u64, size: u32, key: &RsaKey) -> EntryKind {
+    if offset == 0 && has_ext(path, "wav") {
+        // Only the header is read here (a music track is tens of MiB); the
+        // samples are read when the entry is played.
+        let header = if size > mix::MAX_ENTRY_SIZE {
+            Err("WAV larger than 64 MiB".to_string())
+        } else {
+            read_at(path, 0, size.min(WAV_HEADER_BYTES))
+                .map_err(|e| e.to_string())
+                .and_then(|b| wav::header(&b, size as usize))
+                .and_then(|h| {
+                    if h.data_start.saturating_add(h.data_len) > size as usize {
+                        Err("WAV chunk runs past the end".to_string())
+                    } else {
+                        Ok(h)
+                    }
+                })
+        };
+        return match header {
+            Ok(h) => EntryKind::Wav {
+                sample_rate: h.sample_rate,
+                channels: h.channels,
+                millis: h.duration_ms(),
+            },
+            Err(e) => EntryKind::Broken(e),
+        };
+    }
     let Ok(mut f) = File::open(path) else {
         return EntryKind::Other;
     };
@@ -323,7 +397,7 @@ impl Scanner<'_> {
             EntryKind::Other
         } else {
             let k = classify(path, offset, size, self.key);
-            if matches!(k, EntryKind::Aud { .. } | EntryKind::Broken(_)) {
+            if k.playable() || matches!(k, EntryKind::Broken(_)) {
                 self.decoded += u64::from(size);
             }
             k
@@ -379,8 +453,9 @@ impl Scanner<'_> {
     }
 }
 
-/// List every MIX archive (nested ones too) and loose `.aud` file under
-/// `root` (a directory or one `.mix` file). Never fails: what cannot be read
+/// List every MIX archive (nested ones too), loose `.aud` file and WAV
+/// folder (one archive per directory holding `.wav` files, as written by
+/// `sf_ra_extract`) under `root` (a directory or one `.mix` file). Never fails: what cannot be read
 /// ends up in [`Catalog::problems`].
 pub fn scan(root: &Path, key: &RsaKey, known_names: &[String]) -> Catalog {
     let mut s = Scanner {
@@ -409,6 +484,7 @@ pub fn scan(root: &Path, key: &RsaKey, known_names: &[String]) -> Catalog {
             .push(format!("{} does not exist", root.display()));
         return s.catalog;
     }
+    let mut wav_dirs: BTreeMap<String, ArchiveInfo> = BTreeMap::new();
     let mut loose = ArchiveInfo {
         label: "(loose .aud files)".into(),
         encrypted: false,
@@ -428,6 +504,34 @@ pub fn scan(root: &Path, key: &RsaKey, known_names: &[String]) -> Catalog {
                 Ok(a) => s.archive(&a, label, 0),
                 Err(e) => s.catalog.problems.push(format!("{label}: {e}")),
             }
+        } else if has_ext(&path, "wav") {
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let Ok(size) = u32::try_from(size) else {
+                continue;
+            };
+            let file = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let (id, name) = wav_name(&file);
+            let dir = label.rsplit_once('/').map_or(".", |(d, _)| d).to_string();
+            let kind = s.kind(&path, 0, size).0;
+            wav_dirs
+                .entry(dir.clone())
+                .or_insert_with(|| ArchiveInfo {
+                    label: format!("{dir} (WAV folder)"),
+                    encrypted: false,
+                    entries: Vec::new(),
+                })
+                .entries
+                .push(EntryInfo {
+                    id,
+                    name,
+                    kind,
+                    path,
+                    offset: 0,
+                    size,
+                });
         } else if has_ext(&path, "aud") {
             let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             let Ok(size) = u32::try_from(size) else {
@@ -449,6 +553,7 @@ pub fn scan(root: &Path, key: &RsaKey, known_names: &[String]) -> Catalog {
     if !loose.entries.is_empty() {
         s.catalog.archives.push(loose);
     }
+    s.catalog.archives.extend(wav_dirs.into_values());
     s.catalog
 }
 

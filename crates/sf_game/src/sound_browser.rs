@@ -92,6 +92,20 @@ pub fn show(ctx: &egui::Context, data: &PanelData, state: &mut PanelState) {
                                                 if *channels == 2 { "stereo" } else { "mono" }
                                             ));
                                         }
+                                        EntryKind::Wav {
+                                            sample_rate,
+                                            channels,
+                                            millis,
+                                        } => {
+                                            if ui.small_button("play").clicked() {
+                                                state.ra_play = Some((ai, ei));
+                                            }
+                                            ui.monospace(e.label());
+                                            ui.weak(format!(
+                                                "WAV {sample_rate} Hz {} {millis} ms",
+                                                if *channels == 2 { "stereo" } else { "mono" }
+                                            ));
+                                        }
                                         EntryKind::Broken(err) => {
                                             ui.monospace(e.label());
                                             ui.label(RichText::new(err).color(Color32::LIGHT_RED));
