@@ -260,7 +260,7 @@ win. First moment to really play and adjust the design.
 - WP8.1 Shroud (never seen) and fog of war (seen, not current) per player, cell-based in the sim.
 - WP8.2 Vision range per unit, height bonus.
 - WP8.3 Presentation: soft edges, last-seen buildings as a "ghost".
-- WP8.4 Minimap and strategic icons respect vision.
+- WP8.4 Minimap and strategic icons respect vision. Icons are drawn last and without depth, so a fog layer cannot hide them: unseen units must be removed from the icon list on the CPU (see `sf_render::icons`).
 
 ### Phase 9 — Computer opponent
 Layered (analysis §12, §22G):

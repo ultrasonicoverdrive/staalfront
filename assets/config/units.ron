@@ -1,4 +1,5 @@
-// Placeholder unit look (WP1.6): player colors and the three primitive shapes.
+// Placeholder unit look (WP1.6, extended in WP1.9): player colors, the three
+// primitive shapes with their level-of-detail chains, and the strategic icons.
 // Used by sf_render::Style; sf_game maps the sim's entity kind to a shape
 // (kind % number of shapes) and the owner to a color (owner % number of colors).
 //
@@ -13,8 +14,54 @@
         (name: "magenta", srgb: (200, 60, 210)),
     ],
     shapes: [
-        (mesh: Cube, size: (1.2, 1.0, 1.2)),
-        (mesh: Cylinder, size: (1.2, 1.1, 1.2)),
-        (mesh: Cone, size: (1.2, 1.4, 1.2)),
+        // `icon` is the strategic-zoom symbol (Square, Circle or Triangle).
+        // `lods` is the level-of-detail chain, finest first: a level is used
+        // while the model's projected bounding diameter is at least `min_px`
+        // pixels, the last level says 0 and takes everything smaller.
+        // `segments` is the number of facets of a round shape (default 16).
+        // A shape without `lods` has one level (the cube has nothing to
+        // reduce). Glb models (WP1.10) give their own meshes per level.
+        (mesh: Cube, size: (1.2, 1.0, 1.2), icon: Square),
+        (
+            mesh: Cylinder, size: (1.2, 1.1, 1.2), icon: Circle,
+            lods: [
+                (segments: Some(16), min_px: 60.0),
+                (segments: Some(8), min_px: 30.0),
+                (segments: Some(5), min_px: 0.0),
+            ],
+        ),
+        (
+            mesh: Cone, size: (1.2, 1.4, 1.2), icon: Triangle,
+            lods: [
+                (segments: Some(16), min_px: 60.0),
+                (segments: Some(8), min_px: 30.0),
+                (segments: Some(5), min_px: 0.0),
+            ],
+        ),
     ],
+    lod: (
+        // A level changes only when the size is this fraction past its switch
+        // size (0.15 = 15 % below to go coarser, 15 % above to go finer), so a
+        // unit at a switch distance does not flicker between two levels.
+        hysteresis: 0.15,
+    ),
+    // Units are models up close and icons far away, with a dithered cross-fade
+    // between (see sf_render::icons). The trigger is how big a reference unit
+    // (`reference_size` metres across) looks at the camera focus, in logical
+    // pixels (they scale with the UI scale, like the icon itself).
+    icons: (
+        reference_size: 2.0,
+        // At or above this apparent size: models only.
+        model_above_px: 28.0,
+        // At or below: icons only. In between the two cross-fade.
+        icon_below_px: 14.0,
+        // Side of the icon quad; the same at every zoom.
+        size_px: 14.0,
+        // Dark outline inside the icon's edge.
+        outline_px: 1.5,
+        // Height of the icon's anchor over the ground, metres.
+        lift: 0.5,
+        // Smallest size of a model's click volume on the screen.
+        click_min_px: 14.0,
+    ),
 )

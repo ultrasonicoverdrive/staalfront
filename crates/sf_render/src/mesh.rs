@@ -114,11 +114,18 @@ impl MeshData {
     /// Cylinder standing on the ground: radius 0.5, `y` in `[0, 1]`,
     /// [`SEGMENTS`] flat-shaded side facets plus a bottom and a top cap.
     pub fn cylinder() -> Self {
+        Self::cylinder_with(SEGMENTS)
+    }
+
+    /// A cylinder like [`MeshData::cylinder`] with `segments` side facets
+    /// (the lower levels of detail use fewer). At least 3.
+    pub fn cylinder_with(segments: usize) -> Self {
+        let segments = segments.max(MIN_SEGMENTS);
         let mut m = Self::default();
-        for i in 0..SEGMENTS {
-            let (a, b) = ring_pair(i);
+        for i in 0..segments {
+            let (a, b) = ring_pair(i, segments);
             let (a_top, b_top) = ([a[0], 1.0, a[2]], [b[0], 1.0, b[2]]);
-            m.quad([b, a, a_top, b_top], ring_mid_normal(i));
+            m.quad([b, a, a_top, b_top], ring_mid_normal(i, segments));
             m.triangle([[0.0, 1.0, 0.0], b_top, a_top], [0.0, 1.0, 0.0]);
             m.triangle([[0.0, 0.0, 0.0], a, b], [0.0, -1.0, 0.0]);
         }
@@ -128,13 +135,23 @@ impl MeshData {
     /// Cone standing on the ground: base radius 0.5, apex at `y = 1`,
     /// [`SEGMENTS`] flat-shaded side facets plus a base cap.
     pub fn cone() -> Self {
+        Self::cone_with(SEGMENTS)
+    }
+
+    /// A cone like [`MeshData::cone`] with `segments` side facets. At least 3.
+    pub fn cone_with(segments: usize) -> Self {
+        let segments = segments.max(MIN_SEGMENTS);
         let mut m = Self::default();
-        // Side slope: 1 up over 0.5 across, so the normal tilts up by 0.5/|(0.5,1)|.
-        let k = 0.5_f32.hypot(1.0);
-        let (horizontal, up) = (1.0 / k, 0.5 / k);
-        for i in 0..SEGMENTS {
-            let (a, b) = ring_pair(i);
-            let n = ring_mid_normal(i);
+        // A flat facet rises 1 over the distance of its chord from the axis,
+        // 0.5 * cos(pi / segments) (0.5 for a smooth cone, noticeably less
+        // for the few facets of a low level of detail), so its normal tilts
+        // up by rho / |(rho, 1)|.
+        let rho = 0.5 * (std::f32::consts::PI / segments as f32).cos();
+        let k = rho.hypot(1.0);
+        let (horizontal, up) = (1.0 / k, rho / k);
+        for i in 0..segments {
+            let (a, b) = ring_pair(i, segments);
+            let n = ring_mid_normal(i, segments);
             m.triangle(
                 [b, a, [0.0, 1.0, 0.0]],
                 [n[0] * horizontal, up, n[2] * horizontal],
@@ -143,23 +160,32 @@ impl MeshData {
         }
         m
     }
+
+    /// Number of triangles.
+    pub fn triangle_count(&self) -> u32 {
+        (self.indices.len() / 3) as u32
+    }
 }
 
-/// Facets around a round placeholder mesh.
+/// Facets around a round placeholder mesh (the full-detail level).
 pub const SEGMENTS: usize = 16;
 
-/// Ring points (radius 0.5, `y = 0`) at the start and end of facet `i`.
-fn ring_pair(i: usize) -> ([f32; 3], [f32; 3]) {
+/// Fewest facets a round mesh can have.
+pub const MIN_SEGMENTS: usize = 3;
+
+/// Ring points (radius 0.5, `y = 0`) at the start and end of facet `i` of
+/// `segments`.
+fn ring_pair(i: usize, segments: usize) -> ([f32; 3], [f32; 3]) {
     let point = |j: usize| {
-        let angle = j as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+        let angle = j as f32 / segments as f32 * std::f32::consts::TAU;
         [0.5 * angle.cos(), 0.0, 0.5 * angle.sin()]
     };
     (point(i), point(i + 1))
 }
 
-/// Unit outward normal (horizontal) of facet `i`.
-fn ring_mid_normal(i: usize) -> [f32; 3] {
-    let angle = (i as f32 + 0.5) / SEGMENTS as f32 * std::f32::consts::TAU;
+/// Unit outward normal (horizontal) of facet `i` of `segments`.
+fn ring_mid_normal(i: usize, segments: usize) -> [f32; 3] {
+    let angle = (i as f32 + 0.5) / segments as f32 * std::f32::consts::TAU;
     [angle.cos(), 0.0, angle.sin()]
 }
 
@@ -193,6 +219,29 @@ mod tests {
         assert_eq!(MeshData::cylinder().indices.len(), 16 * 4 * 3);
         // 16 side triangles + 16 base triangles.
         assert_eq!(MeshData::cone().indices.len(), 16 * 2 * 3);
+    }
+
+    #[test]
+    fn lower_detail_round_meshes_are_well_formed_and_smaller() {
+        for segments in [3, 4, 5, 6, 8, 12, 16, 32] {
+            let (cyl, cone) = (
+                MeshData::cylinder_with(segments),
+                MeshData::cone_with(segments),
+            );
+            check(&cyl);
+            check(&cone);
+            assert_eq!(cyl.triangle_count() as usize, segments * 4);
+            assert_eq!(cone.triangle_count() as usize, segments * 2);
+            for v in cyl.vertices.iter().chain(&cone.vertices) {
+                assert!(v.position[0].hypot(v.position[2]) <= 0.5 + 1e-6);
+                assert!((0.0..=1.0).contains(&v.position[1]));
+            }
+        }
+        // The default meshes are the 16-facet ones, bit for bit.
+        assert_eq!(MeshData::cylinder(), MeshData::cylinder_with(SEGMENTS));
+        assert_eq!(MeshData::cone(), MeshData::cone_with(SEGMENTS));
+        // Fewer than three facets is not a solid: clamped.
+        assert_eq!(MeshData::cylinder_with(0), MeshData::cylinder_with(3));
     }
 
     #[test]
