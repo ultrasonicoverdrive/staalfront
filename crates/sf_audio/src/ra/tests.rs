@@ -261,3 +261,37 @@ fn shipped_mapping_and_config_parse() {
     assert!(w.is_none());
     assert!(Mapping::parse("(sounds: {").is_err());
 }
+
+/// An old-format archive whose `n` entries all cover the same bytes.
+fn overlapping(n: u32, payload: &[u8]) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&(n as u16).to_le_bytes());
+    v.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    for id in 0..n {
+        v.extend_from_slice(&(id + 1).to_le_bytes());
+        v.extend_from_slice(&0u32.to_le_bytes());
+        v.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    }
+    v.extend_from_slice(payload);
+    v
+}
+
+/// Archive bomb: four levels of 50 overlapping entries would be 50^4
+/// visits; each region is classified and opened only once.
+#[test]
+fn overlapping_nested_entries_are_visited_once() {
+    let (public, _) = test_keypair();
+    let d = scratch("bomb");
+    let mut data = encode(&beep(200), Compression::Ima);
+    for _ in 0..4 {
+        data = overlapping(50, &data);
+    }
+    std::fs::write(d.join("BOMB.MIX"), &data).unwrap();
+    let c = scan(&d, &public, &[]);
+    assert_eq!(c.archives.len(), 4, "{:?}", c.problems);
+    let entries: usize = c.archives.iter().map(|a| a.entries.len()).sum();
+    assert_eq!(entries, 200);
+    assert!(entries <= MAX_ENTRIES && c.archives.len() <= MAX_ARCHIVES);
+    assert_eq!(c.sound_count(), 50, "listed 50 times, decoded once");
+    std::fs::remove_dir_all(d).ok();
+}

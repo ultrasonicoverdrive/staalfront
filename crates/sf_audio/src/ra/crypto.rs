@@ -6,9 +6,19 @@
 //!   Each block is a little-endian number `c`; `m = c^e mod n` with the
 //!   public key gives 39 bytes of plaintext (little-endian). The first 56
 //!   bytes of the 78 are the Blowfish key.
-//! - **Blowfish** (Schneier 1993) in ECB mode, with the two 32-bit halves of
-//!   each 8-byte block read **little-endian** (the standard reads them
-//!   big-endian). We swap each 4-byte word around a standard implementation.
+//! - **Blowfish** (Schneier 1993), standard, in ECB mode on the header bytes
+//!   as they are: the MIX description says only "Blowfish algorithm in ECB
+//!   mode", 8-byte blocks, the header zero-padded to whole blocks. We use the
+//!   RustCrypto `blowfish` crate unchanged (standard big-endian word order).
+//!   That this matches the real files cannot be confirmed without real Red
+//!   Alert files (none may be used); a mismatch shows as a decode error in
+//!   the sound browser, never a crash.
+//!
+//! Source: ModdingWiki, "MIX Format (Westwood)",
+//! <https://moddingwiki.shikadi.net/wiki/MIX_Format_(Westwood)>, section on
+//! header encryption: two 40-byte RSA blocks, little-endian "big" integers,
+//! public exponent 0x10001, result a 56-byte Blowfish key; the public key
+//! is listed there as base64 DER (big-endian).
 
 use blowfish::Blowfish;
 use blowfish::cipher::generic_array::GenericArray;
@@ -93,13 +103,8 @@ impl RsaKey {
     }
 }
 
-/// Blowfish-ECB with Westwood's little-endian word order.
+/// Standard Blowfish in ECB mode.
 pub struct WwBlowfish(Blowfish);
-
-fn swap_words(block: &mut [u8; 8]) {
-    block[..4].reverse();
-    block[4..].reverse();
-}
 
 impl WwBlowfish {
     pub fn new(key: &[u8]) -> Option<WwBlowfish> {
@@ -107,17 +112,13 @@ impl WwBlowfish {
     }
 
     pub fn decrypt_block(&self, block: &mut [u8; 8]) {
-        swap_words(block);
         self.0
             .decrypt_block(GenericArray::from_mut_slice(&mut block[..]));
-        swap_words(block);
     }
 
     pub fn encrypt_block(&self, block: &mut [u8; 8]) {
-        swap_words(block);
         self.0
             .encrypt_block(GenericArray::from_mut_slice(&mut block[..]));
-        swap_words(block);
     }
 
     /// Decrypt whole blocks in place; a trailing partial block is left alone.
@@ -205,8 +206,8 @@ mod tests {
         assert!(base64_decode("a$b").is_none());
     }
 
-    /// Schneier's published test vectors (standard, big-endian Blowfish):
-    /// with the words swapped around our cipher it must give exactly these.
+    /// Schneier's published test vectors (standard Blowfish): our cipher
+    /// must give exactly these.
     #[test]
     fn blowfish_known_answer_vectors() {
         let vectors: [([u8; 8], [u8; 8], [u8; 8]); 3] = [
@@ -229,25 +230,16 @@ mod tests {
         for (key, plain, cipher) in vectors {
             let bf = WwBlowfish::new(&key).unwrap();
             let mut b = plain;
-            swap_words(&mut b);
             bf.encrypt_block(&mut b);
-            swap_words(&mut b);
             assert_eq!(b, cipher);
-            swap_words(&mut b);
             bf.decrypt_block(&mut b);
-            swap_words(&mut b);
             assert_eq!(b, plain);
         }
     }
 
     #[test]
-    fn little_endian_words_differ_from_the_standard_order() {
+    fn ecb_over_whole_blocks_only() {
         let bf = WwBlowfish::new(&[0; 8]).unwrap();
-        let mut b = [0x01, 0, 0, 0, 0, 0, 0, 0];
-        bf.encrypt_block(&mut b);
-        let mut s = [0, 0, 0, 0x01, 0, 0, 0, 0];
-        bf.encrypt_block(&mut s);
-        assert_ne!(b, s);
         let mut data = [7u8; 20];
         bf.encrypt(&mut data);
         assert_eq!(&data[16..], &[7; 4], "partial block untouched");

@@ -13,8 +13,12 @@
 //!   sound browser in the F1 panel); [`load`] resolves a [`Mapping`] from
 //!   Staalfront sound events to Red Alert file names against it.
 //!
-//! Everything here returns errors; a missing or broken install only means
-//! the CC0 sounds keep playing.
+//! The readers return errors on bad input, never panic. A scan visits each
+//! (file, offset, size) region once and stops at [`MAX_ARCHIVES`],
+//! [`MAX_ENTRIES`] and [`MAX_DECODED_BYTES`] (one problem line), so a
+//! crafted archive with overlapping, nested entries cannot blow up time or
+//! memory. A missing or broken install only means the CC0 sounds keep
+//! playing.
 
 pub mod aud;
 pub mod crypto;
@@ -43,6 +47,13 @@ const MAX_DIR_DEPTH: usize = 4;
 const MAX_NEST_DEPTH: usize = 3;
 /// Files looked at, at most (a wrong path such as `/` must not take long).
 const MAX_FILES: usize = 4096;
+/// Caps on one scan, against archive bombs (overlapping entries, nesting).
+/// The whole Red Alert release (both CDs) is a few dozen archives, a few
+/// thousand entries and well under 1 GiB, so real files never get near them.
+pub const MAX_ARCHIVES: usize = 512;
+pub const MAX_ENTRIES: usize = 100_000;
+/// Bytes of AUD data read and decoded per scan.
+pub const MAX_DECODED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 /// `assets/config/audio.ron`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -279,6 +290,12 @@ struct Scanner<'a> {
     key: &'a RsaKey,
     names: BTreeMap<u32, String>,
     catalog: Catalog,
+    /// Every (file, offset, size) region classified so far: overlapping or
+    /// repeated entries are decoded once, nested archives opened once.
+    regions: BTreeMap<(PathBuf, u64, u32), EntryKind>,
+    entries: usize,
+    decoded: u64,
+    capped: bool,
 }
 
 impl Scanner<'_> {
@@ -286,7 +303,40 @@ impl Scanner<'_> {
         self.names.get(&id).cloned()
     }
 
+    fn cap(&mut self, what: &str) {
+        if !self.capped {
+            self.capped = true;
+            self.catalog
+                .problems
+                .push(format!("scan stopped early: more than {what}"));
+        }
+    }
+
+    /// Classify a region once; later visits reuse the result.
+    fn kind(&mut self, path: &Path, offset: u64, size: u32) -> (EntryKind, bool) {
+        let key = (path.to_path_buf(), offset, size);
+        if let Some(k) = self.regions.get(&key) {
+            return (k.clone(), false);
+        }
+        let kind = if self.decoded.saturating_add(u64::from(size)) > MAX_DECODED_BYTES {
+            self.cap("the decode budget");
+            EntryKind::Other
+        } else {
+            let k = classify(path, offset, size, self.key);
+            if matches!(k, EntryKind::Aud { .. } | EntryKind::Broken(_)) {
+                self.decoded += u64::from(size);
+            }
+            k
+        };
+        self.regions.insert(key, kind.clone());
+        (kind, true)
+    }
+
     fn archive(&mut self, archive: &MixArchive, label: String, depth: usize) {
+        if self.catalog.archives.len() >= MAX_ARCHIVES {
+            self.cap(&format!("{MAX_ARCHIVES} archives"));
+            return;
+        }
         let mut info = ArchiveInfo {
             label: label.clone(),
             encrypted: archive.index.encrypted,
@@ -294,7 +344,12 @@ impl Scanner<'_> {
         };
         let mut nested = Vec::new();
         for e in &archive.index.entries {
-            let kind = classify(&archive.path, e.offset, e.size, self.key);
+            if self.entries >= MAX_ENTRIES {
+                self.cap(&format!("{MAX_ENTRIES} entries"));
+                break;
+            }
+            self.entries += 1;
+            let (kind, first) = self.kind(&archive.path, e.offset, e.size);
             let entry = EntryInfo {
                 id: e.id,
                 name: self.name(e.id),
@@ -303,7 +358,7 @@ impl Scanner<'_> {
                 size: e.size,
                 kind,
             };
-            if entry.kind == EntryKind::Mix {
+            if entry.kind == EntryKind::Mix && first {
                 nested.push((*e, entry.label()));
             }
             info.entries.push(entry);
@@ -338,6 +393,10 @@ pub fn scan(root: &Path, key: &RsaKey, known_names: &[String]) -> Catalog {
             root: root.to_path_buf(),
             ..Catalog::default()
         },
+        regions: BTreeMap::new(),
+        entries: 0,
+        decoded: 0,
+        capped: false,
     };
     let mut files = Vec::new();
     if root.is_file() {
@@ -380,7 +439,7 @@ pub fn scan(root: &Path, key: &RsaKey, known_names: &[String]) -> Catalog {
             loose.entries.push(EntryInfo {
                 id: name.as_deref().map(mix::mix_id).unwrap_or(0),
                 name,
-                kind: classify(&path, 0, size, key),
+                kind: s.kind(&path, 0, size).0,
                 path,
                 offset: 0,
                 size,

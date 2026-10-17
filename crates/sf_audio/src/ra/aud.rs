@@ -1,4 +1,25 @@
-//! AUD sound files (Westwood), decoded from the public format description:
+//! AUD sound files (Westwood).
+//!
+//! **Provenance (clean-room, B5).** Written only from these public format
+//! descriptions, never from the EA source release or OpenRA:
+//! - ModdingWiki, "Westwood AUD Format",
+//!   <https://moddingwiki.shikadi.net/wiki/Westwood_AUD_Format>: header and
+//!   chunk layout, flags, compression codes 1 and 99;
+//! - MultimediaWiki, "Westwood ADPCM Audio",
+//!   <https://wiki.multimedia.cx/index.php/Westwood_ADPCM_Audio> (based on
+//!   Valery V. Anisimovsky's WS-AUD notes): the Westwood ADPCM codes and
+//!   tables, the 0x80 start per chunk, "equal sizes = stored raw", the
+//!   sign-extended 5-bit delta, chunks independent of each other, and the
+//!   `LL RR` stereo nibble layout of IMA sound in C&C/Red Alert VQA files;
+//! - IMA Digital Audio Focus and Technical Working Groups, "Recommended
+//!   Practices for Enhancing Digital Audio Compatibility in Multimedia
+//!   Systems" (1992): IMA ADPCM step and index tables.
+//!
+//! Not in any of these and therefore assumptions, unverified against real
+//! files: IMA predictor/index carrying over between AUD chunks, the `LL RR`
+//! layout for stereo IMA *AUD* files (described only for VQA), and the
+//! sample layout of stereo or 16-bit Westwood ADPCM (the description says it
+//! has only ever been seen as mono 8-bit).
 //!
 //! - **Header** (12 bytes, little-endian): `u16 sample rate`, `u32 size of
 //!   the compressed data`, `u32 size of the output`, `u8 flags` (bit 0
@@ -6,23 +27,14 @@
 //!   ADPCM).
 //! - **Chunks**: `u16 compressed size`, `u16 output size`, `u32 0x0000DEAF`,
 //!   then the compressed bytes.
-//! - **Westwood ADPCM** ("SND1"): 8-bit unsigned output. Each command byte
-//!   has a 2-bit code and a 6-bit count: 0 = `count+1` bytes of four 2-bit
-//!   deltas, 1 = `count+1` bytes of two 4-bit deltas (low nibble first),
-//!   2 = a 5-bit signed delta when bit 5 of the count is set, otherwise
-//!   `count+1` raw samples, 3 = repeat the last sample `count+1` times. A
-//!   chunk whose compressed size equals its output size is stored raw. The
-//!   running sample starts at 0x80 in every chunk and is clamped to 0..=255.
-//! - **IMA ADPCM** (IMA Digital Audio Focus and Technical Working Groups,
-//!   "Recommended Practices for Enhancing Digital Audio Compatibility in
-//!   Multimedia Systems", 1992): 4-bit codes, low nibble first, 16-bit
-//!   output. The predictor and step index carry over from chunk to chunk.
-//!
-//! Stereo: the output is interleaved left/right. For IMA each channel keeps
-//! its own predictor and the nibbles alternate left/right; for Westwood
-//! ADPCM the output bytes alternate. Real Red Alert sound effects are mono;
-//! these stereo layouts follow from the description but are not checked
-//! against real files.
+//! - **Westwood ADPCM**: 8-bit unsigned output. Each command byte has a
+//!   2-bit code and a 6-bit count: 0 = `count+1` bytes of four 2-bit deltas,
+//!   1 = `count+1` bytes of two 4-bit deltas (low nibble first), 2 = a 5-bit
+//!   signed delta when bit 5 of the count is set (output as a byte, not
+//!   clipped), otherwise `count+1` raw samples, 3 = repeat the last sample
+//!   `count+1` times. ADPCM deltas are clipped to 0..=255.
+//! - **IMA ADPCM**: 4-bit codes, low nibble first, 16-bit output. Stereo:
+//!   one byte (two nibbles) left, then one byte right.
 
 use std::fmt;
 
@@ -202,7 +214,7 @@ pub fn ws_decode_chunk(input: &[u8], out_len: usize, out: &mut Vec<u8>) -> Resul
     };
     let push = |out: &mut Vec<u8>, s: i32| {
         if out.len() < end {
-            out.push(s.clamp(0, 255) as u8);
+            out.push(s as u8);
         }
     };
     while out.len() < end {
@@ -231,8 +243,10 @@ pub fn ws_decode_chunk(input: &[u8], out_len: usize, out: &mut Vec<u8>) -> Resul
                 if count & 0x20 != 0 {
                     // 5-bit two's complement delta.
                     let delta = ((cmd << 3) as i8 >> 3) as i32;
-                    sample = (sample + delta).clamp(0, 255);
-                    push(out, sample);
+                    sample += delta;
+                    if out.len() < end {
+                        out.push(sample as u8);
+                    }
                 } else {
                     for _ in 0..=count {
                         let b = next(&mut i)?;
@@ -312,7 +326,6 @@ pub fn decode(bytes: &[u8]) -> Result<Pcm, AudError> {
     let mut raw: Vec<u8> = Vec::new(); // Westwood: 8-bit output bytes
     let mut samples: Vec<i16> = Vec::new();
     let mut ima = [ImaState::default(); 2];
-    let mut ch = 0usize;
     let mut at = HEADER_LEN;
     let data_end = HEADER_LEN
         .checked_add(h.size as usize)
@@ -338,10 +351,19 @@ pub fn decode(bytes: &[u8]) -> Result<Pcm, AudError> {
         match h.compression {
             Compression::Westwood => ws_decode_chunk(input, usize::from(out), &mut raw)?,
             Compression::Ima => {
-                for &b in input {
-                    for nib in [b & 0x0F, b >> 4] {
-                        samples.push(ima[ch].decode(nib));
-                        ch = (ch + 1) % channels;
+                if channels == 2 {
+                    for pair in input.chunks_exact(2) {
+                        let (l, r) = (pair[0], pair[1]);
+                        let l1 = ima[0].decode(l & 0x0F);
+                        let l2 = ima[0].decode(l >> 4);
+                        let r1 = ima[1].decode(r & 0x0F);
+                        let r2 = ima[1].decode(r >> 4);
+                        samples.extend_from_slice(&[l1, r1, l2, r2]);
+                    }
+                } else {
+                    for &b in input {
+                        samples.push(ima[0].decode(b & 0x0F));
+                        samples.push(ima[0].decode(b >> 4));
                     }
                 }
             }
@@ -464,12 +486,15 @@ pub fn encode(pcm: &Pcm, compression: Compression) -> Vec<u8> {
             let mut st = [ImaState::default(); 2];
             for part in pcm.samples.chunks(2048) {
                 let mut enc = Vec::with_capacity(part.len() / 2 + 1);
-                for (k, pair) in part.chunks(2).enumerate() {
-                    let lo = st[(2 * k) % channels].encode(pair[0]);
-                    let hi = pair
-                        .get(1)
-                        .map_or(0, |&s| st[(2 * k + 1) % channels].encode(s));
-                    enc.push(lo | (hi << 4));
+                // Two frames at a time: mono = one byte, stereo = L byte, R byte.
+                for group in part.chunks(2 * channels) {
+                    for (c, state) in st.iter_mut().enumerate().take(channels) {
+                        let first = group.get(c).copied().unwrap_or(0);
+                        let second = group.get(c + channels).copied().unwrap_or(first);
+                        let lo = state.encode(first);
+                        let hi = state.encode(second);
+                        enc.push(lo | (hi << 4));
+                    }
                 }
                 chunk(&enc, part.len() * 2, &mut body);
             }
@@ -599,6 +624,10 @@ mod tests {
         out.clear();
         ws_decode_chunk(&[0xBF, 0x81, 0x10, 0x20, 0xC2], 6, &mut out).unwrap();
         assert_eq!(out, [0x7F, 0x10, 0x20, 0x20, 0x20, 0x20]);
+        // 5-bit delta is output as a byte without clipping: raw 0xFF, +15.
+        out.clear();
+        ws_decode_chunk(&[0x80, 0xFF, 0xAF, 0xC0], 3, &mut out).unwrap();
+        assert_eq!(out, [0xFF, 0x0E, 0x0E]);
         // Equal sizes: stored raw.
         out.clear();
         ws_decode_chunk(&[1, 2, 3], 3, &mut out).unwrap();
@@ -613,6 +642,24 @@ mod tests {
             ws_decode_chunk(&[0x41, 0x00], 4, &mut out),
             Err(AudError::Truncated)
         );
+    }
+
+    /// Stereo IMA: one byte of left nibbles, then one of right (`LL RR`).
+    #[test]
+    fn ima_stereo_layout() {
+        let mut aud = Vec::new();
+        aud.extend_from_slice(&22050u16.to_le_bytes());
+        aud.extend_from_slice(&10u32.to_le_bytes());
+        aud.extend_from_slice(&8u32.to_le_bytes());
+        aud.push(3);
+        aud.push(99);
+        aud.extend_from_slice(&2u16.to_le_bytes());
+        aud.extend_from_slice(&8u16.to_le_bytes());
+        aud.extend_from_slice(&CHUNK_ID.to_le_bytes());
+        aud.extend_from_slice(&[0x07, 0x00]);
+        let pcm = decode(&aud).unwrap();
+        assert_eq!(pcm.channels, 2);
+        assert_eq!(pcm.samples, [11, 0, 13, 0]);
     }
 
     #[test]

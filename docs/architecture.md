@@ -460,24 +460,34 @@ decodes AUD (Westwood ADPCM and IMA ADPCM, mono/stereo, 8/16-bit) to PCM.
 sound (with the bank entry's volume and category when it has one) and every
 other event its CC0 sound. Nothing found, or anything broken: one warning,
 the CC0 sounds keep playing; no reader panics (a fuzz-style test feeds random
-and mutated input).
+and mutated input), and a scan visits each archive region once and stops at
+fixed caps on archives, entries and decoded bytes.
 
 **Clean-room (B5).** Written only from public format descriptions, never from
-the EA source release or OpenRA (both GPL):
-- MIX format, ModdingWiki: <https://moddingwiki.shikadi.net/wiki/MIX_Format_(Westwood)>
-  (header layouts, flags, ID hash, the encrypted-header scheme and Westwood's
-  published public key);
-- AUD format, ModdingWiki: <https://moddingwiki.shikadi.net/wiki/AUD_Format>;
-- Westwood ADPCM, ModdingWiki: <https://moddingwiki.shikadi.net/wiki/Westwood_ADPCM_Format>;
-- IMA ADPCM: the IMA "Recommended Practices for Enhancing Digital Audio
-  Compatibility in Multimedia Systems" (1992), step and index tables;
-- Blowfish: B. Schneier, "Description of a New Variable-Length Key, 64-Bit
-  Block Cipher (Blowfish)" (1993) and its published test vectors (used via the
-  RustCrypto `blowfish` crate); RSA: plain modular exponentiation (`num-bigint`).
+the EA source release or OpenRA (both GPL), and without following the code
+links some of these pages carry:
+- ModdingWiki, "MIX Format (Westwood)": <https://moddingwiki.shikadi.net/wiki/MIX_Format_(Westwood)>
+  (header layouts, flags, entry table, the encrypted-header scheme: two
+  40-byte little-endian RSA blocks, exponent 0x10001, a 56-byte key for
+  Blowfish in ECB mode, and Westwood's published public key);
+- ModdingWiki, "Westwood AUD Format": <https://moddingwiki.shikadi.net/wiki/Westwood_AUD_Format>
+  (header, chunk layout, compression codes);
+- MultimediaWiki, "Westwood ADPCM Audio": <https://wiki.multimedia.cx/index.php/Westwood_ADPCM_Audio>
+  (based on Valery V. Anisimovsky's WS-AUD notes: Westwood ADPCM codes,
+  tables, per-chunk 0x80 start, raw chunks, 5-bit delta, `LL RR` stereo IMA
+  layout in VQA sound);
+- IMA "Recommended Practices for Enhancing Digital Audio Compatibility in
+  Multimedia Systems" (1992): IMA ADPCM tables;
+- Blowfish: B. Schneier (1993) and his published test vectors, via the
+  RustCrypto `blowfish` crate unchanged; RSA: plain modular exponentiation
+  (`num-bigint`).
 
-**Not verified against real files** (the repo and CI never have any): the
-little-endian Blowfish word order, the byte order of the RSA blocks, the
-per-chunk reset of the Westwood ADPCM sample and the stereo layouts follow the
-descriptions; a mismatch shows up as a decode error in the sound browser, not
+The file-name hash (rotate left by one, add the next four bytes) is not
+described on these pages ("a rolling hash" only); it is implemented from the
+author's general knowledge of the format and is unverified.
+
+**Not verified against real files** (the repo and CI never have any): standard
+(big-endian word) Blowfish on the header bytes, the file-name hash, IMA state
+carrying over between AUD chunks and the stereo layouts of AUD files; a mismatch shows up as a decode error in the sound browser, not
 as a crash. Tests build their own fixtures (own ADPCM encoders, own MIX
 writer, an own multi-prime RSA test key).

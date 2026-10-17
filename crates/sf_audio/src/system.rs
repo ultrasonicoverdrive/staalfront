@@ -387,11 +387,8 @@ impl AudioSystem {
         let Some(p) = &mut self.player else {
             return Ok(());
         };
-        let key = ra_key(&format!(
-            "browser/{}@{}",
-            entry.path.display(),
-            entry.offset
-        ));
+        // One key: only the last-played browser sound stays in memory.
+        let key = ra_key("browser");
         p.inject(key.clone(), pcm.to_static_sound());
         let outcome = p.play(&Play {
             name: "ra.browser",
