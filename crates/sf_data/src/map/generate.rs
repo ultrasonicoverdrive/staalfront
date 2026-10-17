@@ -396,10 +396,16 @@ mod tests {
     #[test]
     fn the_generator_source_has_no_floats() {
         let source = include_str!("generate.rs");
+        // Line endings may be CRLF (a Windows checkout), so split on the
+        // line start of the test module only.
         let production = source
-            .split("#[cfg(test)]\nmod tests")
+            .split("\nmod tests {")
             .next()
             .expect("the file has a production part");
+        assert!(
+            production.len() < source.len() - 1000,
+            "the test module was found and cut off"
+        );
         for (n, line) in production.lines().enumerate() {
             let code = line.split("//").next().unwrap_or("");
             if code.contains("pub const HEIGHT_SCALE: f32 = 8.0;") {
