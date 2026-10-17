@@ -2459,6 +2459,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sf_ra_extract"
+version = "0.1.0"
+dependencies = [
+ "sf_audio",
+]
+
+[[package]]
 name = "sf_render"
 version = "0.1.0"
 dependencies = [

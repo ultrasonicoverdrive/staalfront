@@ -799,4 +799,72 @@ mod tests {
         assert_eq!(q.stats(), Stats::default());
         std::fs::remove_dir_all(d).ok();
     }
+
+    #[test]
+    fn original_audio_from_a_wav_folder_wins_over_the_mix() {
+        use crate::ra::aud::Pcm;
+        use crate::ra::{EntryKind, wav};
+        let (d, install) = ra_root("ra_wav");
+        // A WAV folder as sf_ra_extract writes it, next to the MIX: CLICK by
+        // name, MOVE.AUD by its raw id.
+        let folder = install.join("RedAlertSounds").join("SOUNDS.MIX");
+        std::fs::create_dir_all(&folder).unwrap();
+        let pcm = Pcm {
+            sample_rate: 11025,
+            channels: 2,
+            samples: (0..400).map(|i| (i * 37 % 2000) as i16).collect(),
+        };
+        std::fs::write(folder.join("CLICK.wav"), wav::write(&pcm)).unwrap();
+        let move_id = crate::ra::mix::mix_id("MOVE.AUD");
+        std::fs::write(folder.join(format!("#{move_id:08X}.wav")), wav::write(&pcm)).unwrap();
+        std::fs::write(folder.join("BAD.wav"), b"RIFF junk").unwrap();
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 2 });
+        let cat = s.original_audio_catalog().unwrap();
+        let wav_dir = cat
+            .archives
+            .iter()
+            .find(|a| a.label == "RedAlertSounds/SOUNDS.MIX (WAV folder)")
+            .expect("WAV folder listed in the browser");
+        assert_eq!(wav_dir.entries.len(), 3);
+        for name in ["CLICK.AUD", "MOVE.AUD"] {
+            let e = cat.find(name).unwrap();
+            assert!(
+                matches!(
+                    e.kind,
+                    EntryKind::Wav {
+                        sample_rate: 11025,
+                        channels: 2,
+                        ..
+                    }
+                ),
+                "{name}"
+            );
+            assert_eq!(crate::ra::decode_entry(e).unwrap(), pcm);
+        }
+        assert!(
+            wav_dir
+                .entries
+                .iter()
+                .any(|e| matches!(e.kind, EntryKind::Broken(_)))
+        );
+        s.play("unit.move");
+        assert_eq!(s.stats().played, 1);
+
+        // Only the WAV folder (the MIX gone): still loads.
+        std::fs::remove_file(install.join("SOUNDS.MIX")).ok();
+        let mut q = mock_at(&d);
+        q.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.join("RedAlertSounds").display().to_string(),
+        });
+        wait_for_ra(&mut q);
+        assert_eq!(q.original_audio_status(), RaStatus::Ready { mapped: 2 });
+        std::fs::remove_dir_all(d).ok();
+    }
 }
