@@ -14,8 +14,23 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::Path;
 
-use crate::math::Ms;
+use crate::math::{Ms, Vec2};
 use crate::model::{Art, Delivery, Event, EventKind, FORMAT_VERSION, Scene};
+
+/// Sanity limits. A scene that exceeds one is almost certainly a typo (an extra
+/// zero, a pasted number) and would only produce garbage on screen, or numbers
+/// so large that single-precision geometry loses all accuracy.
+///
+/// Positions, offsets, pivots, marker positions and the half-size of any
+/// picture, in stage units (a stage is 1920 wide by default).
+pub const MAX_COORD: f32 = 100_000.0;
+/// Rotation of a part in a pose, in degrees (ten full turns).
+pub const MAX_ANGLE_DEG: f32 = 3_600.0;
+/// Scale factors: pose scale, character scale, layer parallax.
+pub const MAX_SCALE: f32 = 1_000.0;
+/// Camera zoom must lie in `MIN_ZOOM..=MAX_ZOOM`.
+pub const MIN_ZOOM: f32 = 0.001;
+pub const MAX_ZOOM: f32 = 1_000.0;
 
 /// One problem found in a scene.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -214,6 +229,29 @@ fn finite_pos(x: f32) -> bool {
 }
 
 impl V<'_> {
+    /// Error when a (finite) point has a coordinate beyond `limit`.
+    fn range_xy(&mut self, path: impl Into<String>, what: &str, v: Vec2, limit: f32) {
+        if v.is_finite() && (v.x.abs() > limit || v.y.abs() > limit) {
+            self.err(
+                path,
+                format!(
+                    "{what} ({}, {}) is out of range: each coordinate must be between -{limit} and {limit}",
+                    v.x, v.y
+                ),
+            );
+        }
+    }
+
+    /// Error when a (finite) number is beyond `limit` in either direction.
+    fn range_one(&mut self, path: impl Into<String>, what: &str, v: f32, limit: f32) {
+        if v.is_finite() && v.abs() > limit {
+            self.err(
+                path,
+                format!("{what} {v} is out of range: it must be between -{limit} and {limit}"),
+            );
+        }
+    }
+
     fn err(&mut self, path: impl Into<String>, message: impl Into<String>) {
         self.errors.push(Issue {
             path: path.into(),
@@ -255,6 +293,22 @@ impl V<'_> {
         }
     }
 
+    fn rect_size(&mut self, path: &str, what: &str, w: f32, h: f32) {
+        if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
+            self.err(
+                path,
+                format!("{what}: rectangle size {w} x {h} must be positive"),
+            );
+        } else {
+            self.range_xy(
+                path,
+                &format!("{what}: rectangle size"),
+                Vec2::new(w, h),
+                MAX_COORD,
+            );
+        }
+    }
+
     fn art(&mut self, path: &str, what: &str, art: &Art) {
         match art {
             Art::Image(f) => {
@@ -262,11 +316,13 @@ impl V<'_> {
                     self.err(path, format!("{what}: {m}"));
                 }
             }
-            Art::Rect { w, h, .. } => {
-                if !(w.is_finite() && h.is_finite() && *w > 0.0 && *h > 0.0) {
+            Art::Rect { w, h, .. } => self.rect_size(path, what, *w, *h),
+            Art::RoundRect { w, h, radius, .. } => {
+                self.rect_size(path, what, *w, *h);
+                if !(radius.is_finite() && *radius >= 0.0) {
                     self.err(
                         path,
-                        format!("{what}: rectangle size {w} x {h} must be positive"),
+                        format!("{what}: corner radius {radius} must be 0 or more"),
                     );
                 }
             }
@@ -276,6 +332,8 @@ impl V<'_> {
                         path,
                         format!("{what}: circle radius {radius} must be positive"),
                     );
+                } else {
+                    self.range_one(path, &format!("{what}: circle radius"), *radius, MAX_COORD);
                 }
             }
         }
@@ -300,6 +358,18 @@ impl V<'_> {
             if !l.pos.is_finite() || !finite_pos(l.parallax) {
                 self.err(&p, format!("layer {:?} has a non-finite number", l.name));
             }
+            self.range_xy(
+                format!("{p}.pos"),
+                &format!("layer {:?}: position", l.name),
+                l.pos,
+                MAX_COORD,
+            );
+            self.range_one(
+                format!("{p}.parallax"),
+                &format!("layer {:?}: parallax", l.name),
+                l.parallax,
+                MAX_SCALE,
+            );
             for (k, s) in l.shots.iter().enumerate() {
                 if !shots.contains(s.as_str()) {
                     self.err(
@@ -337,6 +407,12 @@ impl V<'_> {
                     format!("character {:?}: scale {} must be positive", ch.id, ch.scale),
                 );
             }
+            self.range_one(
+                format!("{cp}.scale"),
+                &format!("character {:?}: scale", ch.id),
+                ch.scale,
+                MAX_SCALE,
+            );
 
             // Parts.
             let mut parts: BTreeMap<&str, usize> = BTreeMap::new();
@@ -365,6 +441,19 @@ impl V<'_> {
                         ),
                     );
                 }
+                let who = format!("character {:?}: part {:?}", ch.id, part.name);
+                self.range_xy(
+                    format!("{pp}.pivot"),
+                    &format!("{who}: pivot"),
+                    part.pivot,
+                    MAX_COORD,
+                );
+                self.range_xy(
+                    format!("{pp}.offset"),
+                    &format!("{who}: offset"),
+                    part.offset,
+                    MAX_COORD,
+                );
             }
             for (p, part) in ch.parts.iter().enumerate() {
                 if let Some(parent) = &part.parent {
@@ -450,6 +539,28 @@ impl V<'_> {
                             ),
                         );
                     }
+                    let who = format!(
+                        "character {:?}: pose {:?}, part {:?}",
+                        ch.id, pose.name, pp.part
+                    );
+                    self.range_one(
+                        format!("{qp}.angle"),
+                        &format!("{who}: angle"),
+                        pp.angle,
+                        MAX_ANGLE_DEG,
+                    );
+                    self.range_xy(
+                        format!("{qp}.offset"),
+                        &format!("{who}: offset"),
+                        pp.offset,
+                        MAX_COORD,
+                    );
+                    self.range_xy(
+                        format!("{qp}.scale"),
+                        &format!("{who}: scale"),
+                        pp.scale,
+                        MAX_SCALE,
+                    );
                 }
             }
         }
@@ -547,6 +658,12 @@ impl V<'_> {
                         format!("{who}: position is not finite"),
                     );
                 }
+                self.range_xy(
+                    format!("{kp}.pos"),
+                    &format!("{who}: position"),
+                    *pos,
+                    MAX_COORD,
+                );
                 if let (Some(pose), true) = (pose, known) {
                     self.pose_known(&format!("{kp}.pose"), who, character, pose);
                 }
@@ -564,6 +681,12 @@ impl V<'_> {
                 if !to.is_finite() {
                     self.err(format!("{kp}.to"), format!("{who}: target is not finite"));
                 }
+                self.range_xy(
+                    format!("{kp}.to"),
+                    &format!("{who}: target"),
+                    *to,
+                    MAX_COORD,
+                );
                 self.duration(ep, who, *duration_ms, false);
             }
             EventKind::SetPose {
@@ -625,6 +748,12 @@ impl V<'_> {
                 if !to.is_finite() {
                     self.err(format!("{kp}.to"), format!("{who}: target is not finite"));
                 }
+                self.range_xy(
+                    format!("{kp}.to"),
+                    &format!("{who}: target"),
+                    *to,
+                    MAX_COORD,
+                );
                 self.duration(ep, who, *duration_ms, false);
             }
             EventKind::CameraZoom {
@@ -634,6 +763,11 @@ impl V<'_> {
                     self.err(
                         format!("{kp}.to"),
                         format!("{who}: zoom {to} must be more than 0"),
+                    );
+                } else if !(MIN_ZOOM..=MAX_ZOOM).contains(to) {
+                    self.err(
+                        format!("{kp}.to"),
+                        format!("{who}: zoom {to} is out of range: it must be between {MIN_ZOOM} and {MAX_ZOOM}"),
                     );
                 }
                 self.duration(ep, who, *duration_ms, false);
@@ -645,10 +779,21 @@ impl V<'_> {
                         format!("{who}: centre is not finite"),
                     );
                 }
+                self.range_xy(
+                    format!("{kp}.center"),
+                    &format!("{who}: centre"),
+                    *center,
+                    MAX_COORD,
+                );
                 if !(zoom.is_finite() && *zoom > 0.0) {
                     self.err(
                         format!("{kp}.zoom"),
                         format!("{who}: zoom {zoom} must be more than 0"),
+                    );
+                } else if !(MIN_ZOOM..=MAX_ZOOM).contains(zoom) {
+                    self.err(
+                        format!("{kp}.zoom"),
+                        format!("{who}: zoom {zoom} is out of range: it must be between {MIN_ZOOM} and {MAX_ZOOM}"),
                     );
                 }
                 if shot.as_deref().is_some_and(|s| s.trim().is_empty()) {
@@ -665,6 +810,12 @@ impl V<'_> {
                         format!("{who}: amplitude {amplitude} must be 0 or more"),
                     );
                 }
+                self.range_one(
+                    format!("{kp}.amplitude"),
+                    &format!("{who}: amplitude"),
+                    *amplitude,
+                    MAX_COORD,
+                );
                 self.duration(ep, who, *duration_ms, true);
             }
             EventKind::Transition { duration_ms, .. } | EventKind::Wait { duration_ms } => {
@@ -682,6 +833,12 @@ impl V<'_> {
                             format!("{kp}.markers[{m}]"),
                             format!("{who}: marker {:?} is not finite", marker.label),
                         );
+                    }
+                    let mp = format!("{kp}.markers[{m}]");
+                    let what = format!("{who}: marker {:?}", marker.label);
+                    self.range_xy(&mp, &what, marker.at, MAX_COORD);
+                    if let Some(to) = marker.to {
+                        self.range_xy(&mp, &what, to, MAX_COORD);
                     }
                 }
             }

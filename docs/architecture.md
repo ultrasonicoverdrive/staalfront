@@ -25,7 +25,7 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
 | `sf_ui` | Own UI: widgets, text, minimap; later sidebar, selection, menus. |
 | `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
-| `sf_cutscene` | Cartoon player and script format. The RON scene format, its loader/validator, the render-free `Scene::sample` and the Fountain importer exist (WP12.1, `docs/cutscene-format.md`); the player is WP12.2. |
+| `sf_cutscene` | Cartoon player and script format. The RON scene format, its loader/validator, the render-free `Scene::sample` and the Fountain importer (WP12.1), the player state machine, the wgpu renderer on top of the engine renderer's frame hook, and the `play_scene` viewer (WP12.2); `docs/cutscene-format.md`. |
 | `sf_net` | Lockstep network (later, phase 14). |
 | `sf_game` | The game shell: a library (window loop, camera, HUD, F1 panels, the benchmark) and the development viewer binary. |
 | `tools/sf_editor` | Map and mission editor. |
@@ -63,6 +63,9 @@ graph TD
   sf_game --> sf_audio
   sf_game --> sf_cutscene
   sf_game --> sf_net
+  sf_cutscene --> sf_engine
+  sf_cutscene --> sf_render
+  sf_cutscene --> sf_ui
   sf_headless[tools/sf_headless] --> sf_math
   sf_headless --> sf_sim
   sf_headless --> sf_data
@@ -73,7 +76,10 @@ graph TD
   sf_editor --> sf_data
 ```
 
-`sf_math`, `sf_engine`, `sf_audio` and `sf_cutscene` have no workspace dependencies yet.
+`sf_math`, `sf_engine` and `sf_audio` have no workspace dependencies yet. `sf_cutscene` (WP12.2)
+depends on `sf_render` (the frame hook, the PNG reader), `sf_ui` (the font and glyph atlas) and
+`sf_engine` (only for the `play_scene` window); it never depends on `sf_audio`: sound leaves the
+player through a trait.
 (`sf_math` lists itself as a dev-dependency with its `render` feature, only so that
 its own tests can use `render_bridge`; no other crate enables that feature yet.)
 

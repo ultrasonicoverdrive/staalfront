@@ -20,7 +20,8 @@
 
 use crate::math::{Affine, Color, Easing, Lerp, Ms, Vec2};
 use crate::model::{
-    Character, Delivery, EventKind, Facing, Layer, MapMarker, Part, Pose, Scene, TransitionKind,
+    Character, Delivery, EventKind, Facing, Layer, LoopAction, MapMarker, Part, Pose, Scene,
+    TransitionKind,
 };
 
 /// Everything about a frame; see the module docs.
@@ -43,9 +44,41 @@ pub struct SceneState<'a> {
     pub subtitle: Option<Subtitle<'a>>,
     pub fade: Fade,
     pub map_overlay: Option<MapOverlayState<'a>>,
+    /// The music that is playing at `time_ms`: the latest `Music` event up to
+    /// and including `time_ms` if it was a `Play`; `None` after a `Stop` (also
+    /// while that stop is still fading out) or before any music. A player that
+    /// seeks restarts exactly this.
+    pub music: Option<LoopState<'a>>,
+    /// The ambient bed at `time_ms`, found the same way.
+    pub ambience: Option<LoopState<'a>>,
     /// Sound events that started in `(prev, t]`; empty after [`Scene::sample`],
     /// filled by [`Scene::sample_step`].
     pub sounds: Vec<FiredEvent<'a>>,
+}
+
+/// A looping sound (music or ambience) that is playing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LoopState<'a> {
+    /// The sound file, if the scene has one yet.
+    pub file: Option<&'a str>,
+    /// The writer's description (`"low drums, tense"`).
+    pub note: &'a str,
+    /// The fade-in the `Play` event asked for.
+    pub fade_ms: Ms,
+    /// When the `Play` event happened.
+    pub since_ms: Ms,
+}
+
+/// A voice-over file that is mid-way through at some time; see
+/// [`Scene::voices_running_at`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunningVoice<'a> {
+    pub speaker: &'a str,
+    pub file: &'a str,
+    /// When the line started.
+    pub started_ms: Ms,
+    /// How far into the line the asked time is (always more than 0).
+    pub elapsed_ms: Ms,
 }
 
 /// The camera at one instant.
@@ -318,6 +351,29 @@ fn resolve_parts<'a>(ch: &'a Character, pose: &[PartXform], root: &Affine) -> Ve
 }
 
 // ---------------------------------------------------------------------------
+// Music and ambience
+// ---------------------------------------------------------------------------
+
+/// What a `Music` or `Ambience` event does to the state of its bed.
+fn loop_state<'a>(
+    action: LoopAction,
+    file: &'a Option<String>,
+    note: &'a str,
+    fade_ms: Ms,
+    at: Ms,
+) -> Option<LoopState<'a>> {
+    match action {
+        LoopAction::Play => Some(LoopState {
+            file: file.as_deref(),
+            note,
+            fade_ms,
+            since_ms: at,
+        }),
+        LoopAction::Stop => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Shake
 // ---------------------------------------------------------------------------
 
@@ -376,6 +432,8 @@ impl Scene {
         let mut fade_color = Color::BLACK;
         let mut subtitle: Option<Subtitle<'_>> = None;
         let mut overlay: Option<MapOverlayState<'_>> = None;
+        let mut music: Option<LoopState<'_>> = None;
+        let mut ambience: Option<LoopState<'_>> = None;
         let mut runs: Vec<CharRun> = self
             .characters
             .iter()
@@ -524,10 +582,19 @@ impl Scene {
                         });
                     }
                 }
-                EventKind::Sfx { .. }
-                | EventKind::Music { .. }
-                | EventKind::Ambience { .. }
-                | EventKind::Wait { .. } => {}
+                EventKind::Music {
+                    action,
+                    file,
+                    note,
+                    fade_ms,
+                } => music = loop_state(*action, file, note, *fade_ms, at),
+                EventKind::Ambience {
+                    action,
+                    file,
+                    note,
+                    fade_ms,
+                } => ambience = loop_state(*action, file, note, *fade_ms, at),
+                EventKind::Sfx { .. } | EventKind::Wait { .. } => {}
             }
         }
 
@@ -597,8 +664,36 @@ impl Scene {
                 alpha: fade_alpha.eval(t_ms),
             },
             map_overlay: overlay,
+            music,
+            ambience,
             sounds: Vec::new(),
         }
+    }
+
+    /// The voice-over lines that have started before `t_ms` and are still
+    /// running at `t_ms` (a line that starts exactly at `t_ms` is not one: it
+    /// is a sound event of that instant). A player that seeks into the middle
+    /// of a spoken line uses this to resume the recording at the right place.
+    pub fn voices_running_at(&self, t_ms: Ms) -> Vec<RunningVoice<'_>> {
+        self.events_in_order()
+            .into_iter()
+            .filter_map(|e| match e.kind {
+                EventKind::Dialogue {
+                    speaker,
+                    voice: Some(file),
+                    duration_ms,
+                    ..
+                } if e.at < t_ms && i64::from(t_ms) < i64::from(e.at) + i64::from(*duration_ms) => {
+                    Some(RunningVoice {
+                        speaker,
+                        file,
+                        started_ms: e.at,
+                        elapsed_ms: t_ms - e.at,
+                    })
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// The frame at `t_ms` plus the sound events that started in
@@ -1070,5 +1165,57 @@ Scene(
         let s = sc.sample(21_500);
         assert_eq!(s.characters.len(), 1);
         assert!(part(&s, "arm").pose.angle.is_finite());
+    }
+
+    #[test]
+    fn music_and_ambience_at_a_time_after_a_seek() {
+        let sc = fixture();
+        // Before any music event nothing plays.
+        assert!(sc.sample(-1).music.is_none());
+        let m = sc.sample(0).music.expect("music from 0 ms");
+        assert_eq!((m.note, m.since_ms, m.file), ("drums", 0, None));
+        assert!(sc.sample(0).ambience.is_none());
+        assert_eq!(sc.sample(999).ambience, None);
+        let a = sc.sample(1000).ambience.expect("ambience from 1000 ms");
+        assert_eq!((a.note, a.since_ms), ("rain", 1000));
+        // The stop at 4500 ends the music (also during its fade); the
+        // ambience is a separate bed and carries on.
+        assert!(sc.sample(4499).music.is_some());
+        assert!(sc.sample(4500).music.is_none());
+        assert!(sc.sample(9000).music.is_none());
+        assert!(sc.sample(9000).ambience.is_some());
+    }
+
+    #[test]
+    fn a_later_play_replaces_the_bed_and_a_stop_without_play_is_nothing() {
+        let sc = fixture_from(&FIXTURE.replace(
+            "(at: 4500, kind: Music(action: Stop, fade_ms: 200)),",
+            "(at: 2000, kind: Music(note: \"strings\", file: \"m/s.ogg\", fade_ms: 300)),\n            (at: 4500, kind: Music(action: Stop, fade_ms: 200)),\n            (at: 6000, kind: Ambience(action: Stop)),",
+        ));
+        let m = sc.sample(3000).music.unwrap();
+        assert_eq!(
+            (m.note, m.file, m.fade_ms, m.since_ms),
+            ("strings", Some("m/s.ogg"), 300, 2000)
+        );
+        assert!(sc.sample(6000).ambience.is_none());
+    }
+
+    #[test]
+    fn voices_running_at_reports_the_offset_into_the_line() {
+        let sc = fixture();
+        // "Hello." starts at 200 and lasts 1000 ms; it has a voice file.
+        assert!(
+            sc.voices_running_at(200).is_empty(),
+            "starting now is an event"
+        );
+        let v = sc.voices_running_at(700);
+        assert_eq!(v.len(), 1);
+        assert_eq!(
+            (v[0].file, v[0].started_ms, v[0].elapsed_ms),
+            ("v/hello.wav", 200, 500)
+        );
+        assert!(sc.voices_running_at(1200).is_empty(), "the line has ended");
+        // Lines without a voice file are never reported.
+        assert!(sc.voices_running_at(1300).is_empty());
     }
 }

@@ -275,6 +275,76 @@ fn bad_numbers() {
 }
 
 #[test]
+fn huge_angles_offsets_and_zooms_are_out_of_range() {
+    // Review follow-up of WP12.1: a typo like 4500000 must not pass as a number.
+    let t = with(
+        "(part: \"arm\", angle: 45)",
+        "(part: \"arm\", angle: 4500000)",
+    );
+    assert_error(
+        &t,
+        line_of(&t, "angle: 4500000"),
+        "angle 4500000 is out of range",
+    );
+    let t = with(
+        "(part: \"arm\", angle: 45)",
+        "(part: \"arm\", angle: 45, offset: (1e30, 0))",
+    );
+    assert_error(&t, line_of(&t, "offset: (1e30"), "offset");
+    let t = with(
+        "(part: \"arm\", angle: 45)",
+        "(part: \"arm\", angle: 45, scale: (5000, 1))",
+    );
+    assert_error(&t, line_of(&t, "scale: (5000"), "scale");
+    let t = with("pos: (0, 0)", "pos: (250000, 0)");
+    assert_error(
+        &t,
+        line_of(&t, "pos: (250000"),
+        "position (250000, 0) is out of range",
+    );
+    let t = with(
+        "CameraCut(shot: \"main\")",
+        "CameraCut(zoom: 100000, shot: \"main\")",
+    );
+    assert_error(
+        &t,
+        line_of(&t, "zoom: 100000"),
+        "zoom 100000 is out of range",
+    );
+    let t = with(
+        "CameraCut(shot: \"main\")",
+        "CameraCut(zoom: 0.00001, shot: \"main\")",
+    );
+    assert_error(&t, line_of(&t, "zoom: 0.00001"), "is out of range");
+    let t = with("Rect(w: 10, h: 10,", "Rect(w: 10, h: 9999999,");
+    assert_error(&t, line_of(&t, "h: 9999999"), "rectangle size");
+    // Large but sane numbers are fine.
+    let ok = with(
+        "(part: \"arm\", angle: 45)",
+        "(part: \"arm\", angle: -720, offset: (500, -500))",
+    );
+    assert!(load_str(&ok, None).is_ok());
+}
+
+#[test]
+fn rounded_rectangles_are_checked_like_rectangles() {
+    let t = with(
+        "Rect(w: 10, h: 10, color: \"#000000\")",
+        "RoundRect(w: 10, h: 10, radius: -2, color: \"#000000\")",
+    );
+    assert_error(
+        &t,
+        line_of(&t, "radius: -2"),
+        "corner radius -2 must be 0 or more",
+    );
+    let ok = with(
+        "Rect(w: 10, h: 10, color: \"#000000\")",
+        "RoundRect(w: 10, h: 10, radius: 4, color: \"#000000\")",
+    );
+    assert!(load_str(&ok, None).is_ok());
+}
+
+#[test]
 fn all_problems_are_reported_in_one_go() {
     let t = with("Enter(character: \"a\"", "Enter(character: \"zed\"")
         .replace("pose: \"up\"", "pose: \"down\"");

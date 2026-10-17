@@ -1,21 +1,21 @@
 # Cutscene scene format (WP12.1)
 
-For the **writer** (turning a Fountain briefing into a scene), the **artist**
-(rigging figures, painting backgrounds) and the **implementer** (WP12.2, the
-player). The source of truth for names and defaults is
+For the **writer** (turning a Fountain briefing into a scene and previewing it),
+the **artist** (rigging figures, painting backgrounds) and the **implementer**
+(whoever hooks the player into the game). The source of truth for names and defaults is
 `crates/sf_cutscene/src/model.rs`; the example to copy from is
 [`assets/scenes/example_bridge.ron`](../assets/scenes/example_bridge.ron).
 
 A scene is one cartoon, a **RON** file: background layers, cutout characters
-and a timeline of events at fixed millisecond times. The cartoon player (WP12.2)
-draws it; this crate (`sf_cutscene`) defines it, checks it and can say what the
-frame looks like at any time, without drawing anything.
+and a timeline of events at fixed millisecond times. This crate (`sf_cutscene`)
+defines it, checks it, can say what the frame looks like at any time without
+drawing anything, and has the player that draws and plays it (section 8).
 
 ```
 content/briefings/F1-M01.fountain ──fountain2scene──▶ assets/scenes/f1_m01.ron
                                                           │  edit by hand: art, voices, camera
                                                           ▼
-                                       scene_check  ──▶  player (WP12.2)
+                                       scene_check  ──▶  play_scene (window) / the game's player
 ```
 
 Clean-room (B5): scenes contain only Staalfront's own content.
@@ -28,6 +28,12 @@ cargo run -p sf_cutscene --bin fountain2scene -- content/briefings/F1-M01.founta
 
 # Check a scene you edited; errors come with line numbers
 cargo run -p sf_cutscene --bin scene_check -- assets/scenes/f1_m01.ron
+
+# Watch it (section 8): a window, Space pauses, Esc quits
+cargo run -p sf_cutscene --bin play_scene -- assets/scenes/f1_m01.ron
+
+# Or skip the conversion step and watch a Fountain file directly
+cargo run -p sf_cutscene --bin play_scene -- --fountain content/briefings/F1-M01.fountain
 ```
 
 Both look for the asset root in `./assets` (or `--assets DIR`) to list missing
@@ -40,7 +46,8 @@ In code:
 ```rust
 let loaded = sf_cutscene::load_file(path, Some(assets_root))?;   // parse + validate
 let scene = loaded.scene;
-let state = scene.sample_step(prev_ms, now_ms);                  // once per frame
+let state = scene.sample_step(prev_ms, now_ms);                  // once per frame (no player)
+let mut player = sf_cutscene::Player::new(scene);                // or let the player keep the time (section 8)
 ```
 
 ## 2. Units and conventions
@@ -85,7 +92,7 @@ Scene(
 
 | Field | Meaning |
 |---|---|
-| `art` | `Image("path")` (PNG/SVG, drawn centred, one image pixel per stage unit), `Rect(w, h, color)` or `Circle(radius, color)`. The shapes are the placeholders. |
+| `art` | `Image("path")` (a PNG, drawn centred, one image pixel per stage unit), `Rect(w, h, color)`, `RoundRect(w, h, radius, color)` or `Circle(radius, color)`. The shapes are the placeholders. |
 | `pos` | Where the layer sits in the world. Default `(0, 0)`. |
 | `parallax` | How strongly the layer follows a camera pan. `1` (default) moves with the world, where the characters stand; `0` is glued to the frame (a sky); `0.5` is far away; `2` is a foreground that slides past faster. |
 | `z` | Draw order. **`z < 0` is behind all characters, `z >= 0` in front of them.** Lower is drawn first. Default 0. |
@@ -216,6 +223,7 @@ the line of the offending value:
 | **One speaker overlaps their own line** | different speakers may talk over each other; back to back is fine |
 | Character acts without being on stage; enters twice; exits when absent | `Move`, `SetPose`, `Exit`, `Enter` |
 | Non-positive sizes, zoom; non-finite numbers | |
+| **Out of range**: an angle beyond 3600 degrees, a position, offset, pivot, shape size or shake beyond 100 000 stage units, a scale or parallax beyond 1000, a zoom outside 0.001 to 1000 | almost always a typo (an extra zero); the limits are `MAX_ANGLE_DEG`, `MAX_COORD`, `MAX_SCALE`, `MIN_ZOOM`, `MAX_ZOOM` in `validate.rs` |
 | Asset path that is empty, absolute, has `\`, or contains `..` | scenes cannot reach outside the asset root |
 | Unsupported `format` | |
 
@@ -252,6 +260,11 @@ let fired = scene.fired_between(Some(prev_ms), t_ms);       // only the sound ev
 * `subtitle` (speaker, name, text, `delivery`, `voice`, `lipsync`, elapsed time;
   if lines of two speakers overlap, the one that started last), `fade`
   (`color`, `alpha` 0..1), `map_overlay`, `finished`.
+* `music` and `ambience`: **what is playing at `t`** (`LoopState`: file, note, fade, when it
+  started), found from the last `Music` / `Ambience` event up to `t`; `None` after a `Stop`
+  or before the first `Play`. This is what a player restarts after a seek.
+  `scene.voices_running_at(t)` lists the voice lines that started before `t` and are still
+  running, with how far into the line `t` is.
 * `sounds`: the sound events that **started in `(prev, t]`**: `Sfx`, `Music`,
   `Ambience`, and `Dialogue` with a `voice` file. `prev = None` on the first
   call fires everything from time 0 on. Consecutive intervals `(a, b]`, `(b, c]`
@@ -287,9 +300,111 @@ Each generated event ends in `// line N`, the line in the Fountain file it
 came from. The output is a **starting point**: regenerate with care, it
 overwrites hand edits. Add real art, voices and direction in the RON.
 
-## 8. Not in this format yet
+## 8. Playing a scene (WP12.2)
 
-* Drawing and playing: WP12.2. Skipping and subtitle styling: WP12.2.
+Two pieces: the **player** (`sf_cutscene::Player`), a state machine that keeps the time, and
+the **renderer** (`sf_cutscene::render::CutsceneRenderer`), which draws one frame. The
+player has no clock of its own: whoever calls it passes the wall-clock milliseconds, so it is
+testable and the game can slave it to anything.
+
+### 8.1 Previewing a briefing (writer, artist)
+
+```
+cargo run -p sf_cutscene --bin play_scene -- assets/scenes/f1_m01.ron
+cargo run -p sf_cutscene --bin play_scene -- --fountain content/briefings/F1-M01.fountain
+```
+
+The second form converts the Fountain file in memory (nothing is written), so the loop is:
+edit the `.fountain` file, close the window, run it again. Warnings of the converter and
+files that are missing (art, voices, sounds) are printed first; missing art is drawn as a
+magenta box, missing sounds are silent. Sound cues are **printed** as they come up
+(`[ 20.1 s] sfx: radio static`), because there is no sound yet. Options: `--assets DIR`
+(otherwise found like the game does: `SF_ASSETS`, or `assets/` near the program),
+`--quit-after MS` (leave by itself, for smoke tests). The window can be resized; the picture
+keeps its shape (bars appear), and the subtitle size follows the picture height.
+
+| Key | Does |
+|---|---|
+| Space, click | pause / continue |
+| Left, Right | back / forward 2 seconds |
+| N, Tab | start of the next shot (at the last shot: the end) |
+| Home, R | start over |
+| End | skip to the end (the last frame stays) |
+| Esc | quit |
+
+A thin bar along the bottom edge shows how far the scene is, with a tick where every shot
+starts; two small bars in the top right corner mean "paused". The window title shows the
+time. **Shots** are the `CameraCut` events that name a shot (section 4.1); `N` jumps from
+one to the next, so name a shot at every place you want to be able to skip to.
+
+### 8.2 What is drawn
+
+(Frames of the example briefing, made by the screenshot test with `SF_SAVE_SHOTS`:
+[`docs/screenshots/wp12.2/`](screenshots/wp12.2/): mid-dialogue, during the fade-out, the map
+overlay, a 1080p frame, and a window of another shape with bars.)
+
+Back to front: the background layers (`z < 0`) with their parallax under the camera's pan,
+zoom and shake; the characters, every part as the sampler placed it (parts in their `z`
+order, rotated about their joints, mirrored for `facing: Left`); the layers in front
+(`z >= 0`); the map overlay (pins, arrows and their labels, glued to the frame). Then, over
+the whole window, the fade colour, and the **subtitle**: a dark box near the bottom of the
+picture with the speaker's name (yellow; light blue for `VoiceOver`, grey for `OffScreen`)
+and the line in white, wrapped to at most 70 % of the picture width. The text is 3.4 % of
+the picture height (37 px at 1080p, 24 px at 720p, never under 14 px) and shrinks only for a
+line that would fill more than 40 % of the picture.
+
+* The shapes (`Rect`, `RoundRect`, `Circle`) are the placeholder art; they are drawn smooth
+  at any rotation. `Image` parts and layers need an 8-bit RGB or RGBA **PNG** below
+  `assets/`; **SVG is not supported by the player yet** (export a PNG). A picture that cannot
+  be loaded is a magenta box.
+* Fades: `FadeOut` to a colour, `FadeIn` from it, `Cut` removes it; subtitles stay on top of
+  a fade so a line is never lost in the dark.
+* The font is the UI's (Inter, `sf_ui`); the characters of the Latin-1 and Latin Extended-A
+  blocks are there.
+
+### 8.3 Controls for the game
+
+`sf_cutscene::Bindings` maps keys to what the player can do. `Bindings::game()` is for a
+briefing in the game: **Esc, Space or a click skips to the end**, one configurable key
+(`next_shot`, default Enter) jumps to the next shot. `Bindings::viewer()` is the table
+above. Bindings are RON (`Bindings::from_ron_str("(next_shot: [Char('k')])")`; unnamed
+fields keep the game preset). The player takes a `Key` (`Escape`, `Space`, `Enter`, `Tab`,
+`Left`, `Right`, `Home`, `End`, `Click`, `Char('x')`), so it does not depend on a window
+system: `player.press(key, &bindings)`.
+
+### 8.4 Using the player in code
+
+```rust
+let mut player = Player::new(scene);
+let mut cutscenes = CutsceneRenderer::new(&gpu.device, &gpu.queue, renderer.color_format(), assets_root);
+// every frame:
+player.update(wall_ms, &mut sound_sink);            // wall_ms: any monotonic ms clock
+let state = player.sample();
+renderer.render_with(|target| cutscenes.render(target, player.scene(), &state, None))?;
+if player.is_finished() { /* the scene is over: go on with the mission */ }
+```
+
+`Player` controls: `play`, `pause`, `toggle_pause`, `seek(ms)`, `seek_by(ms)`, `restart`,
+`skip_to_end`, `skip_to_next_shot`; state: `mode()` (`Playing`, `Paused`, `Finished`),
+`time_ms()`, `duration_ms()`, `shot_starts()`. A frame that took more than 500 ms of wall
+time advances the scene by only 500 ms (a hitch must not skip dialogue).
+`CutsceneRenderer::render` adds one pass to the engine renderer's frame (it clears the
+target to black and draws the picture, letterboxed); it does not touch `sf_render`.
+
+**Sound** goes out through the `SoundSink` trait (a closure `FnMut(&SoundEvent)` works too),
+so `sf_audio` can be hooked in later without `sf_cutscene` depending on it. The player never
+plays anything itself. What it sends:
+
+| `SoundEvent` | When |
+|---|---|
+| `Sfx`, `Voice { offset_ms: 0 }`, `Bed { Music / Ambience, Play / Stop }` | once, as the time passes the event |
+| `Pause`, `Resume` | when the player is paused / continues; nothing else happens while paused |
+| `StopAll`, then `Bed` (music, ambience) and `Voice { offset_ms }` for what is sounding | after a **seek** or a jump to the next shot: sound is put back the way it would be had the scene played normally up to the new time. Sound effects in between are not played; an event exactly at the new time fires normally after the restore. A seek made while paused is carried out when playback continues. |
+| `StopAll` | **skip to the end**: the scene is over. A scene that plays to its end sends nothing at the end. |
+
+## 9. Not in this format yet
+
+* SVG pictures in the player (PNG only for now), pictures with a palette or grey scale.
 * Mouth shapes from speech: WP12.3 (`lipsync` only names the file).
 * Video fallback: WP12.4.
 * Live reload for the artist: WP12.6.

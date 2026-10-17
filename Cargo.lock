@@ -2434,9 +2434,13 @@ dependencies = [
 name = "sf_cutscene"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "proptest",
  "ron",
  "serde",
+ "sf_engine",
+ "sf_render",
+ "sf_ui",
 ]
 
 [[package]]

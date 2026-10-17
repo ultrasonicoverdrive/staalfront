@@ -73,7 +73,9 @@ The objective must be spoken clearly in the last 2–3 lines.
 To see how a briefing will be taken apart for the cartoon player (shots, line timing, pose
 hints), convert it (from the repo root): `cargo run -p sf_cutscene --bin fountain2scene -- content/briefings/F1-M01.fountain /tmp/f1_m01.ron`
 (`docs/cutscene-format.md` §7 lists what each convention becomes, and the importer warns about
-anything it cannot place).
+anything it cannot place). To watch it as a cartoon with placeholder figures and subtitles, in a
+window, without writing a file: `cargo run -p sf_cutscene --bin play_scene -- --fountain content/briefings/F1-M01.fountain`
+(Space pauses, Left/Right seek, N jumps to the next shot, Esc quits; §8 of the same document).
 
 ## Checking
 
