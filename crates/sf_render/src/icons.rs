@@ -440,7 +440,7 @@ mod tests {
             let start = src
                 .find("fn dither_threshold")
                 .expect("the function exists");
-            let end = start + src[start..].find("\n}\n").expect("it ends") + 2;
+            let end = start + src[start..].find("\n}").expect("it ends") + 2; // CRLF-safe
             src[start..end]
                 .split_whitespace()
                 .collect::<Vec<_>>()
