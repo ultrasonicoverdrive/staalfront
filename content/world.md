@@ -24,7 +24,7 @@ _Serious / over-the-top / satirical / grim. Name a few reference works for the t
 | Emblem idea | | |
 | Strength in battle (e.g. armour / speed / artillery) | | |
 | Weakness | | |
-| Exclusive unit roles (e.g. ids from `assets/testpack_v1/manifest.json`) | | |
+| Exclusive unit roles (plain English role names) | | |
 
 ## 4. Places
 

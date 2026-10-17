@@ -25,8 +25,8 @@ can later be converted into the engine formats:
   for yourself may be in any language. Put them in Fountain notes `[[ ... ]]` or in the
   "Notes" sections.
 - **Units by role, not by final name**: `light_tank`, `artillery`, `engineer`, and so on.
-  Use the ids in `assets/testpack_v1/manifest.json` where they fit, or a plain role
-  name. The final unit names come later.
+  Use a plain English role name (`battle_tank`, `construction_center`,
+  `resource_truck`). The final unit names come later.
 - **Map sizes in cells**: one cell is 4 m (PLAN.md B12). Maps are 64×64 to 256×256
   cells (256 m to 1 km). A tank is about one cell, a building 2×2 to 4×3 cells.
 - **Codes**: missions are `F1-M01` … `F2-M10` (faction, mission). A mission file and
