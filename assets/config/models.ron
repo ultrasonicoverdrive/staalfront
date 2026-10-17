@@ -34,5 +34,48 @@
                 (file: "models/verdedigingstoren.glb", icon: Square),
             ],
         ),
+        // The third art delivery (Tijmen, 17-10-2026): 14 infantry, the four
+        // ore field stages, rocks, trees and wrecks, all in engine axes
+        // already (front +X, up +Y, metres) with three LODs each. Infantry
+        // wander (Circle); decor and wrecks stand still (Square: in
+        // `sf_game` a Square icon makes a model a fixed object near the base
+        // centre). Not wired into `unit_defs.ron` yet.
+        "set_v3": (
+            dir: "set_v3",
+            axes: (front: PlusX, up: PlusY, metres_per_unit: 1.0),
+            lod_px: [60.0, 30.0],
+            models: [
+                (file: "meridian_engineer.glb", icon: Circle),
+                (file: "meridian_rifleman.glb", icon: Circle),
+                (file: "meridian_rocket_trooper.glb", icon: Circle),
+                (file: "meridian_scout.glb", icon: Circle),
+                (file: "meridian_sniper.glb", icon: Circle),
+                (file: "neutral_civilian.glb", icon: Circle),
+                (file: "neutral_technician.glb", icon: Circle),
+                (file: "veyran_combat_engineer.glb", icon: Circle),
+                (file: "veyran_demolition_team.glb", icon: Circle),
+                (file: "veyran_engineer.glb", icon: Circle),
+                (file: "veyran_medic.glb", icon: Circle),
+                (file: "veyran_rifleman.glb", icon: Circle),
+                (file: "veyran_rocket_trooper.glb", icon: Circle),
+                (file: "veyran_scout.glb", icon: Circle),
+                (file: "neutral_ore_field_stage_01.glb", icon: Square),
+                (file: "neutral_ore_field_stage_02.glb", icon: Square),
+                (file: "neutral_ore_field_stage_03.glb", icon: Square),
+                (file: "neutral_ore_field_stage_04.glb", icon: Square),
+                (file: "neutral_rock_large.glb", icon: Square),
+                (file: "neutral_rock_small.glb", icon: Square),
+                (file: "neutral_tree_broadleaf.glb", icon: Square),
+                (file: "neutral_tree_broadleaf_burnt.glb", icon: Square),
+                (file: "neutral_tree_broadleaf_fallen.glb", icon: Square),
+                (file: "neutral_tree_pine.glb", icon: Square),
+                (file: "neutral_tree_pine_burnt.glb", icon: Square),
+                (file: "neutral_tree_pine_fallen.glb", icon: Square),
+                (file: "neutral_wreck_heavy_vehicle.glb", icon: Square),
+                (file: "neutral_wreck_light_vehicle.glb", icon: Square),
+                (file: "neutral_wreck_medium_vehicle.glb", icon: Square),
+                (file: "neutral_wreck_vessel.glb", icon: Square),
+            ],
+        ),
     },
 )
