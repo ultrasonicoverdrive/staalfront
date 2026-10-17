@@ -5,7 +5,7 @@ close-up to the whole map and cartoon cutscenes. Inspired by the game rules of
 Command & Conquer: Red Alert, without its name, world, units or media.*
 
 Drawn up 14-10-2026. Source: `docs/red-alert-analysis.md` (functional analysis of
-the EA source code). Execution: Opus agents at effort low (see §12).
+the EA source code). Execution: Opus agents at effort low, medium for the WPs marked [xhigh] (see §12).
 
 ---
 
@@ -407,7 +407,7 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 ### 12.1 Agent type
 Two agents, both in the repo (they travel to every environment), both model `opus`, same instructions:
 
-- `.claude/agents/bouwer-opus.md` — effort `low`: the default for every WP.
+- `.claude/agents/bouwer-opus.md` — effort `low`: the default for every WP not marked **[xhigh]**.
 - `.claude/agents/bouwer-opus-medium.md` — effort `medium`: for the hard WPs, marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
 
 Decision Tijmen 17-10-2026 (was Sonnet at medium, and Sonnet at xhigh for [xhigh]

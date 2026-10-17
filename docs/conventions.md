@@ -45,7 +45,7 @@ Agent definitions live in `.claude/agents/`.
 
 | Agent | Model / effort | Use |
 |---|---|---|
-| `bouwer-opus` | opus, low | Default for every WP. |
+| `bouwer-opus` | opus, low | Default for every WP not marked **[xhigh]**. |
 | `bouwer-opus-medium` | opus, medium | WPs marked **[xhigh]** in PLAN.md §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep), and a WP that failed review twice on `bouwer-opus`. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |

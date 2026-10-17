@@ -43,7 +43,8 @@ M0 status:
 - Headless 10,000 ticks with 5,000 wanderers, checksum equal on Linux and
   Windows: met (CI `headless-compare`, since PR #12).
 - Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
-  2026-10-15 (main at 8f64071, terrain LOD and ray-terrain picking in).
+  2026-10-15 (main at 8f64071, terrain LOD and ray-terrain picking in); judged before the 34-40 ms zoom-out hitches
+  of follow-up 14 were measured, so recheck once they are fixed).
 - p99 frame time <= 16.7 ms with 5,000 units in view: open, needs `sf_demo
   --bench` (WP1.14). First run on the laptop (2026-10-15, `sf_game --units
   5000 --auto-zoom`, DX12): steady 60 fps at vsync with all 5,000 units in
