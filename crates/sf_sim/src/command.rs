@@ -67,6 +67,37 @@ pub enum Command {
         /// Who owns it.
         owner: PlayerId,
     },
+    /// Create a mobile unit or an object of `kind` for `owner` at `pos`, with
+    /// the stats of its entry in the world's unit table (WP3.2): hit points,
+    /// speed per tick and turn rate. It occupies no cell and stands idle (it
+    /// does not wander). Ignored (it counts as a command that changed nothing)
+    /// when the table does not define `kind` or defines it as a structure,
+    /// when `pos` is outside the map or on a cell a structure occupies, or at
+    /// the entity limit. See `docs/rules/units.md`.
+    SpawnUnit {
+        /// What to create.
+        kind: Kind,
+        /// Where, in cells.
+        pos: Vec2,
+        /// Who owns it.
+        owner: PlayerId,
+    },
+    /// Place a structure of `kind` for `owner` with its footprint anchored on
+    /// `cell` (WP3.2): the cell with the smallest x and y, the footprint
+    /// extending east and south. The structure takes its hit points from the
+    /// unit table, stands in the middle of its footprint and occupies every
+    /// cell of it. Ignored when the table does not define `kind` or defines it
+    /// as something other than a structure, when any cell of the footprint is
+    /// outside the map, not buildable or already occupied, or at the entity
+    /// limit; nothing is placed in part. See `docs/rules/units.md`.
+    PlaceStructure {
+        /// What to create.
+        kind: Kind,
+        /// The anchor cell.
+        cell: Cell,
+        /// Who owns it.
+        owner: PlayerId,
+    },
     /// Remove an entity.
     Despawn {
         /// The entity.

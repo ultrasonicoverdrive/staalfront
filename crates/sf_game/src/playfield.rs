@@ -11,7 +11,11 @@
 
 use sf_data::map::Map;
 use sf_data::terrain::TerrainTypes;
-use sf_sim::{Terrain, TerrainDef, TerrainFlags, TerrainId, World, WorldConfig};
+use sf_data::units::UnitDefs;
+use sf_sim::{
+    Footprint, Kind, Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats, UnitTable, World,
+    WorldConfig,
+};
 
 /// The simulation's table of terrain types: ids and flags, no names.
 pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
@@ -28,6 +32,29 @@ pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
             },
         })
         .collect()
+}
+
+/// The simulation's unit table from the unit definitions (WP3.2): for each
+/// role the few fields the rules read, copied out of the converted roles.
+/// `sf_sim` does not depend on `sf_data`, so each consumer converts (the
+/// headless runner has the same function).
+pub fn sim_unit_table(defs: &UnitDefs) -> Result<UnitTable, String> {
+    let stats = defs
+        .sim_units()
+        .iter()
+        .map(|r| UnitStats {
+            kind: Kind(r.kind),
+            hp: r.hp,
+            movement_class: r.movement_class,
+            speed_per_tick: r.speed_per_tick,
+            turn_per_tick: r.turn_per_tick,
+            size: r.size,
+            footprint: r
+                .footprint
+                .map(|(width, height)| Footprint { width, height }),
+        })
+        .collect();
+    UnitTable::new(stats).map_err(|e| e.to_string())
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a

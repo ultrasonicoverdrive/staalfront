@@ -412,8 +412,12 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   terrain layer of `assets/maps/<name>/`, and the action `Place(kind, owner, cell)`
   puts a structure on a cell. The map is read by `Scenario::load` only, never while a
   run goes. `terrain_256.ron` is the 256 x 256 cell playfield with structures.
+- **Unit scenarios (WP3.2):** `unit_defs: true` makes the world with the shipped unit
+  definitions as its unit table; the actions `SpawnUnit(kind, owner, cell)` and
+  `PlaceStructure(kind, owner, cell)` then create a unit or a structure with its
+  footprint from `unit_defs.ron`. `units_spawn.ron` spawns every role once.
 - **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
-  `command_mix` and `terrain_256` in release mode on Linux and Windows against the committed
+  `command_mix`, `terrain_256` and `units_spawn` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

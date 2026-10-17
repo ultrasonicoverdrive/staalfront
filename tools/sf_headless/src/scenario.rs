@@ -42,10 +42,12 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use sf_data::map::Map;
 use sf_data::terrain::TerrainTypes;
+use sf_data::units::{SimUnitDef, UnitDefs};
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
-    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId,
-    Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, World, WorldConfig,
+    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Footprint, Kind, MAX_ENTITIES, MAX_MAP_SIDE,
+    PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitStats, UnitTable, World,
+    WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -83,6 +85,14 @@ pub struct Scenario {
     /// world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
     pub terrain: Option<Terrain>,
+    /// Make the world with the shipped unit definitions (`unit_defs.ron`,
+    /// compiled in) as its unit table, so that `SpawnUnit` and
+    /// `PlaceStructure` know the roles (WP3.2). Required by those two actions;
+    /// the legacy `Spawn` groups and `Place` ignore the table, so a scenario
+    /// that sets this and uses neither action only differs by the table's
+    /// checksum section.
+    #[serde(default)]
+    pub unit_defs: bool,
     /// How many ticks to run; at least 1.
     pub ticks: u64,
     /// Groups of entities to create.
@@ -203,6 +213,32 @@ pub enum Action {
         /// The entities.
         ids: Vec<IdSpec>,
     },
+    /// `Command::SpawnUnit`: a unit or object of the unit table, standing in
+    /// the middle of `cell`. Needs `unit_defs: true`. Refused by the
+    /// simulation (the command counts as ignored) for an unknown kind, for a
+    /// structure, and on a cell a structure occupies. The entity takes the next
+    /// free id, like a spawn.
+    SpawnUnit {
+        /// The permanent kind number of the role.
+        kind: u16,
+        /// Who owns it.
+        owner: u8,
+        /// The cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+    },
+    /// `Command::PlaceStructure`: a structure of the unit table with its
+    /// footprint anchored on `cell` (its smallest x and y). Needs
+    /// `unit_defs: true`. Refused by the simulation unless the kind is a
+    /// structure and every cell of the footprint is on the map, buildable and
+    /// free.
+    PlaceStructure {
+        /// The permanent kind number of the role.
+        kind: u16,
+        /// Who owns it.
+        owner: u8,
+        /// The anchor cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+    },
     /// `Command::Place`: a standing structure on a cell. Refused by the
     /// simulation (the command counts as ignored) on terrain that is not
     /// buildable and on an occupied cell. The entity takes the next free id,
@@ -253,6 +289,31 @@ pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
             },
         })
         .collect()
+}
+
+/// The simulation's unit table from the unit definitions: the few fields the
+/// rules read, copied out of the converted roles. (`sf_game` does the same;
+/// `sf_sim` may not depend on `sf_data`, so each consumer converts.)
+pub fn sim_unit_stats(roles: &[SimUnitDef]) -> Vec<UnitStats> {
+    roles
+        .iter()
+        .map(|r| UnitStats {
+            kind: Kind(r.kind),
+            hp: r.hp,
+            movement_class: r.movement_class,
+            speed_per_tick: r.speed_per_tick,
+            turn_per_tick: r.turn_per_tick,
+            size: r.size,
+            footprint: r
+                .footprint
+                .map(|(width, height)| Footprint { width, height }),
+        })
+        .collect()
+}
+
+/// [`sim_unit_stats`] checked and sorted into a [`UnitTable`].
+pub fn sim_unit_table(defs: &UnitDefs) -> Result<UnitTable, String> {
+    UnitTable::new(sim_unit_stats(defs.sim_units())).map_err(|e| e.to_string())
 }
 
 fn expand(ids: &[IdSpec]) -> Vec<EntityId> {
@@ -520,11 +581,23 @@ impl Scenario {
                     }
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
-                Action::Place { cell, .. } => {
+                Action::Place { cell, .. }
+                | Action::SpawnUnit { cell, .. }
+                | Action::PlaceStructure { cell, .. } => {
                     if map_ok && (cell.0 >= width || cell.1 >= height) {
                         p.push(format!(
                             "{at}: cell ({}, {}) lies outside the {width}x{height} map",
                             cell.0, cell.1
+                        ));
+                    }
+                    if !self.unit_defs
+                        && matches!(
+                            c.command,
+                            Action::SpawnUnit { .. } | Action::PlaceStructure { .. }
+                        )
+                    {
+                        p.push(format!(
+                            "{at}: SpawnUnit and PlaceStructure need `unit_defs: true`"
                         ));
                     }
                 }
@@ -561,6 +634,12 @@ impl Scenario {
             None => World::new(config),
         }
         .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        if self.unit_defs {
+            let table = sim_unit_table(&UnitDefs::embedded()).map_err(ScenarioError::Sim)?;
+            world = world
+                .with_units(table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
 
         let mut placement = Rng::with_stream(self.seed, PLACEMENT_STREAM);
@@ -607,6 +686,25 @@ impl Scenario {
                 }
                 Action::Place { kind, owner, cell } => {
                     let command = Command::Place {
+                        kind: Kind(*kind),
+                        cell: Cell::new(cell.0, cell.1),
+                        owner: PlayerId(*owner),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::SpawnUnit { kind, owner, cell } => {
+                    let command = Command::SpawnUnit {
+                        kind: Kind(*kind),
+                        pos: Vec2::new(
+                            Fx::from_i64(i64::from(cell.0)) + Fx::HALF,
+                            Fx::from_i64(i64::from(cell.1)) + Fx::HALF,
+                        ),
+                        owner: PlayerId(*owner),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::PlaceStructure { kind, owner, cell } => {
+                    let command = Command::PlaceStructure {
                         kind: Kind(*kind),
                         cell: Cell::new(cell.0, cell.1),
                         owner: PlayerId(*owner),

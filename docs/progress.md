@@ -92,13 +92,27 @@ Status: in progress.
 - WP3.1 Unit definitions (`sf_data::units`: movement classes, armor and damage types,
   weapons, 43 roles of `content/units.md` with their design-target stats, validation
   with file and line, conversion to fixed point for the sim): done
-- WP3.2 to WP3.6: open
+- WP3.2 Units and structures spawn in the sim from the definitions (`sf_sim::UnitTable`,
+  `Command::SpawnUnit` and `Command::PlaceStructure`, footprints in the occupancy grid,
+  hit points and per-unit speed), the `units_spawn` scenario, a data-driven look per role
+  in `sf_game` (`roster.rs`) and the `sf_game` sandbox: done
+- WP3.3 to WP3.6: open
 
 WP3.1 notes. The data is `assets/config/unit_classes.ron`, `weapon_defs.ron` and
 `unit_defs.ron`; every record has a permanent `kind` number (order in the file does not
 matter, removed records leave tombstones), so numbers are never reused. Tests compare every role with the stats, capacities and tech-tree factions of
 `content/units.md`. The simulation does not use the definitions yet and its checksums
 are unchanged. Fields, units of measure and the placeholders: `docs/rules/units.md`.
+
+WP3.2 notes. The simulation takes its own `UnitStats` (hit points, movement class, speed
+per tick, turn rate, size, footprint) in a `UnitTable` that the game and the headless
+runner build from `sf_data` (the same way the terrain is handed over; `sf_sim` still does
+not depend on `sf_data`). Two new commands make units and structures; the old `Spawn` and
+`Place` stay as the placeholders they were, so `wander_5000`, `command_mix`, `terrain_256`
+and the sf_sim goldens are byte-identical. A mobile unit occupies no cell; a structure
+occupies its whole footprint, all or nothing. `sf_game` starts in a sandbox (a few units and
+structures of each side, `--crowd` brings the old 2,000 wanderers back); `sf_demo` and its
+benchmark are the crowd scene, untouched. Rules: `docs/rules/units.md`.
 
 ## Phase 1 report (draft, WP1.14)
 
@@ -164,13 +178,6 @@ fixed, delete the entry in the same PR.
     `scripts/check-sim-determinism.sh` covers `sf_sim` and `sf_math`; the headless
     runner is outside it. That is fine while it only calls `sf_sim`; extend the lint
     when it grows logic of its own.
-12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
-    to a placeholder shape and the owner to a player colour by modulo. Replace it
-    with data-driven units. WP3.1 delivered the data half (`sf_data::units`, the kind
-    number of a role is the permanent `kind` written in its record in
-    `assets/config/unit_defs.ron`); WP3.2 spawns
-    from it and removes the stand-in. WP2.1's `Place` takes the kind as an opaque number
-    too and the demo does not use `Place`, so the stand-in is untouched.
 14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found
     in WP1.14 as far as software rendering shows it: the per-mesh instance
     buffers were created on the first frame their list was not empty and

@@ -12,17 +12,29 @@ use sf_render::Present;
 
 use crate::debug_ui::UnitDisplay;
 
+/// What the world starts with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scene {
+    /// A crowd of wandering placeholder entities (the engine demo and its
+    /// benchmark, and `sf_game --crowd`): kinds are opaque numbers that
+    /// [`crate::population`] maps to shapes.
+    Crowd,
+    /// The sandbox (WP3.2): a few units and structures of each side from the
+    /// unit definitions, spawned on the playfield ([`crate::sandbox`]).
+    Sandbox,
+}
+
 /// Which binary is running: sets the defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Preset {
-    /// `sf_game`: the development viewer, 2,000 placeholder units.
+    /// `sf_game`: the development viewer, the sandbox.
     Game,
     /// `sf_demo`: the engine demo of milestone M0, 5,000 units, the test
     /// pack's models in the mix, benchmark mode.
     Demo,
 }
 
-/// Units of the dev viewer.
+/// Placeholder units of the dev viewer's `--crowd` scene.
 pub const GAME_UNITS: u32 = 2000;
 /// Units of the engine demo (PLAN.md WP1.14).
 pub const DEMO_UNITS: u32 = 5000;
@@ -51,9 +63,16 @@ pub struct BenchOptions {
 #[derive(Clone, Debug)]
 pub struct Options {
     pub preset: Preset,
+    /// What the world starts with.
+    pub scene: Scene,
+    /// Placeholder wanderers: the crowd of the crowd scene, extra ones on top
+    /// of the sandbox (none by default).
     pub units: u32,
-    /// Model pack name, `None` = placeholder shapes only.
+    /// Model pack name for the crowd scene, `None` = placeholder shapes only.
     pub models: Option<String>,
+    /// Draw the roles of the unit definitions with their glTF models
+    /// (sandbox scene); false (`--models none`) = placeholder shapes only.
+    pub role_models: bool,
     /// Map directory; `None` = generate a `map_cells` square map.
     pub map_dir: Option<String>,
     pub map_cells: u32,
@@ -91,8 +110,10 @@ impl Options {
         let demo = preset == Preset::Demo;
         let mut o = Options {
             preset,
-            units: if demo { DEMO_UNITS } else { GAME_UNITS },
+            scene: if demo { Scene::Crowd } else { Scene::Sandbox },
+            units: if demo { DEMO_UNITS } else { 0 },
             models: demo.then(|| DEMO_PACK.to_owned()),
+            role_models: true,
             map_dir: None,
             map_cells: DEFAULT_MAP_CELLS,
             exit_after: None,
@@ -115,6 +136,7 @@ impl Options {
             reserve: true,
             warnings: Vec::new(),
         };
+        let mut units_given = false;
         let mut bench = false;
         let mut bench_seconds = DEFAULT_BENCH_SECONDS;
         let mut bench_frames = None;
@@ -136,16 +158,22 @@ impl Options {
                 "--units" => {
                     if let Some(v) = value(&mut o.warnings) {
                         match v.parse() {
-                            Ok(n) => o.units = n,
+                            Ok(n) => {
+                                o.units = n;
+                                units_given = true;
+                            }
                             Err(_) => o.warnings.push(format!("--units {v}: not a number")),
                         }
                     }
                 }
                 "--models" => {
                     if let Some(v) = value(&mut o.warnings) {
+                        o.role_models = v != "none";
                         o.models = (v != "none").then_some(v);
                     }
                 }
+                "--crowd" => o.scene = Scene::Crowd,
+                "--sandbox" => o.scene = Scene::Sandbox,
                 "--map" => o.map_dir = value(&mut o.warnings),
                 "--map-cells" => {
                     if let Some(v) = value(&mut o.warnings) {
@@ -262,6 +290,10 @@ impl Options {
             }
         }
 
+        // The viewer's crowd is the old 2,000 placeholder units.
+        if !demo && o.scene == Scene::Crowd && !units_given {
+            o.units = GAME_UNITS;
+        }
         if bench {
             o.bench = Some(BenchOptions {
                 seconds: bench_seconds,
@@ -300,17 +332,39 @@ mod tests {
     #[test]
     fn the_presets_differ_in_their_defaults_only() {
         let game = parse(Preset::Game, "");
-        assert_eq!((game.units, game.models.as_deref()), (GAME_UNITS, None));
+        assert_eq!(
+            (game.scene, game.units, game.models.as_deref()),
+            (Scene::Sandbox, 0, None)
+        );
+        assert!(game.role_models);
         let demo = parse(Preset::Demo, "");
         assert_eq!(
-            (demo.units, demo.models.as_deref()),
-            (DEMO_UNITS, Some(DEMO_PACK))
+            (demo.scene, demo.units, demo.models.as_deref()),
+            (Scene::Crowd, DEMO_UNITS, Some(DEMO_PACK))
         );
         assert_eq!(demo.map_cells, 256);
         assert!(demo.bench.is_none() && demo.shots.is_none());
         assert_eq!(demo.present, Present::Vsync);
         assert_eq!(demo.screen, ScreenMode::Windowed);
         assert!(demo.reserve);
+    }
+
+    #[test]
+    fn the_viewer_can_still_show_the_old_crowd() {
+        let o = parse(Preset::Game, "--crowd");
+        assert_eq!((o.scene, o.units), (Scene::Crowd, GAME_UNITS));
+        let o = parse(Preset::Game, "--crowd --units 300 --models testpack");
+        assert_eq!((o.scene, o.units), (Scene::Crowd, 300));
+        assert_eq!(o.models.as_deref(), Some("testpack"));
+        // Extra wanderers on top of the sandbox.
+        let o = parse(Preset::Game, "--units 500");
+        assert_eq!((o.scene, o.units), (Scene::Sandbox, 500));
+        // The demo is the crowd whatever else is said, unless asked for the sandbox.
+        assert_eq!(parse(Preset::Demo, "--bench").scene, Scene::Crowd);
+        assert_eq!(parse(Preset::Demo, "--sandbox").scene, Scene::Sandbox);
+        // `--models none` turns the glTF models of the roles off too.
+        let o = parse(Preset::Game, "--models none");
+        assert!(!o.role_models && o.models.is_none());
     }
 
     #[test]
@@ -369,7 +423,7 @@ mod tests {
             Preset::Game,
             "--units many --map-cells 999 --resolution big --exit-after",
         );
-        assert_eq!(o.units, GAME_UNITS);
+        assert_eq!(o.units, 0);
         assert_eq!(o.map_cells, DEFAULT_MAP_CELLS);
         assert_eq!(o.screen, ScreenMode::Windowed);
         assert_eq!(o.warnings.len(), 4, "{:?}", o.warnings);

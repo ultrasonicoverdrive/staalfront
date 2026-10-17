@@ -1,0 +1,352 @@
+//! The sandbox: what `sf_game` puts on the playfield when it starts (WP3.2).
+//!
+//! A few structures and units of each side, spawned through the command queue
+//! on tick 0 with `Command::PlaceStructure` and `Command::SpawnUnit`, from the
+//! roles of the unit definitions. Meridian (player 0) stands west of the middle
+//! of the map, Veyran (player 1) east of it, and a handful of neutral roles
+//! (player 2) in between. Nothing moves: orders are WP3.4.
+//!
+//! Where things go is decided by the map, deterministically: a structure takes
+//! the free spot nearest to its base's anchor where every cell of its footprint
+//! (and a cell of room around it) is buildable, a unit takes the free cell of
+//! open ground nearest to the front of its base, on a lattice of two cells.
+//! The same map always gives the same sandbox.
+//!
+//! Vessels are left out: nothing tells open water from rock yet (WP4.1), so
+//! there is nowhere sure to put a gunboat.
+
+use std::collections::BTreeSet;
+
+use sf_data::units::UnitDefs;
+use sf_math::{Fx, Vec2};
+use sf_sim::{Cell, Command, Kind, PlayerId, World};
+
+/// The number of the player who owns Meridian's things.
+pub const MERIDIAN: u8 = 0;
+/// The number of the player who owns Veyran's things.
+pub const VEYRAN: u8 = 1;
+/// The owner of the neutral roles (colour three of the palette).
+pub const NEUTRAL: u8 = 2;
+
+/// How far from the middle of the map a base is, in cells.
+const BASE_OFFSET: i32 = 14;
+/// How far in front of its structures a side's units gather, in cells.
+const FRONT: i32 = 7;
+
+/// One side: its owner, its place and what it has.
+struct Side {
+    owner: u8,
+    /// Which way the front is: `1` east, `-1` west, `0` neither.
+    toward: i32,
+    /// Offset of the base anchor from the middle of the map, in cells.
+    at: (i32, i32),
+    structures: &'static [&'static str],
+    units: &'static [(&'static str, u32)],
+}
+
+const SIDES: [Side; 3] = [
+    Side {
+        owner: MERIDIAN,
+        toward: 1,
+        at: (-BASE_OFFSET, 0),
+        structures: &[
+            "construction_center",
+            "power_plant",
+            "refinery",
+            "barracks",
+            "vehicle_factory",
+            "radar",
+            "defence_tower",
+        ],
+        units: &[
+            ("rifleman", 4),
+            ("rocket_trooper", 2),
+            ("engineer", 1),
+            ("scout", 1),
+            ("sniper", 1),
+            ("harvester", 1),
+            ("light_tank", 2),
+            ("heavy_tank", 1),
+            ("siege_artillery", 1),
+            ("repair_truck", 1),
+            ("light_transport", 1),
+        ],
+    },
+    Side {
+        owner: VEYRAN,
+        toward: -1,
+        at: (BASE_OFFSET, 0),
+        structures: &[
+            "construction_center",
+            "power_plant",
+            "refinery",
+            "barracks",
+            "vehicle_factory",
+            "fortified_bunker",
+        ],
+        units: &[
+            ("rifleman", 4),
+            ("rocket_trooper", 2),
+            ("medic", 1),
+            ("demolition_team", 1),
+            ("combat_engineer", 1),
+            ("heavy_gun_team", 1),
+            ("harvester", 1),
+            ("light_tank", 2),
+            ("heavy_tank", 1),
+            ("siege_artillery", 1),
+            ("transport_truck", 1),
+        ],
+    },
+    Side {
+        owner: NEUTRAL,
+        toward: 0,
+        at: (0, -16),
+        structures: &["relay_transmitter", "fuel_depot", "archive_building"],
+        units: &[
+            ("supply_truck", 1),
+            ("civilian", 2),
+            ("technician", 1),
+            ("evidence_crate", 1),
+        ],
+    },
+];
+
+/// What was scheduled.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Plan {
+    /// `PlaceStructure` commands scheduled.
+    pub structures: u32,
+    /// `SpawnUnit` commands scheduled.
+    pub units: u32,
+    /// Roles named above that the definitions do not have, or things for
+    /// which the map had no room: not scheduled.
+    pub skipped: u32,
+}
+
+/// Cells the sandbox has already promised, structures with a cell of room.
+struct Taken(BTreeSet<(i32, i32)>);
+
+/// Schedules the sandbox on tick 0 of `world`, which must have been made with
+/// the unit table of `defs`. Nothing runs until the world is stepped.
+pub fn schedule(world: &mut World, defs: &UnitDefs) -> Plan {
+    let (width, height) = world.map_size();
+    let middle = (width as i32 / 2, height as i32 / 2);
+    let mut taken = Taken(BTreeSet::new());
+    let mut plan = Plan::default();
+    for side in &SIDES {
+        let anchor = (middle.0 + side.at.0, middle.1 + side.at.1);
+        for id in side.structures {
+            let Some(kind) = defs.kind_of(id) else {
+                plan.skipped += 1;
+                continue;
+            };
+            let footprint = defs.sim_unit(kind).and_then(|u| u.footprint);
+            let spot = footprint.and_then(|(w, h)| find_structure(world, &taken, anchor, w, h));
+            let Some((cell, (w, h))) = spot.zip(footprint) else {
+                plan.skipped += 1;
+                continue;
+            };
+            // The footprint and a cell of room all around it.
+            for y in cell.1 - 1..cell.1 + i32::from(h) + 1 {
+                for x in cell.0 - 1..cell.0 + i32::from(w) + 1 {
+                    taken.0.insert((x, y));
+                }
+            }
+            send(
+                world,
+                side.owner,
+                Command::PlaceStructure {
+                    kind: Kind(kind),
+                    cell: Cell::new(cell.0 as u32, cell.1 as u32),
+                    owner: PlayerId(side.owner),
+                },
+            );
+            plan.structures += 1;
+        }
+        let front = (anchor.0 + side.toward * FRONT, anchor.1 + 2 + FRONT / 3);
+        for (id, count) in side.units {
+            for _ in 0..*count {
+                let Some(kind) = defs.kind_of(id) else {
+                    plan.skipped += 1;
+                    continue;
+                };
+                let Some(cell) = find_unit(world, &taken, front) else {
+                    plan.skipped += 1;
+                    continue;
+                };
+                taken.0.insert(cell);
+                let pos = Vec2::new(
+                    Fx::from_int(cell.0) + Fx::HALF,
+                    Fx::from_int(cell.1) + Fx::HALF,
+                );
+                send(
+                    world,
+                    side.owner,
+                    Command::SpawnUnit {
+                        kind: Kind(kind),
+                        pos,
+                        owner: PlayerId(side.owner),
+                    },
+                );
+                plan.units += 1;
+            }
+        }
+    }
+    plan
+}
+
+fn send(world: &mut World, player: u8, command: Command) {
+    world
+        .schedule(world.tick(), PlayerId(player), command)
+        .expect("the tick that is about to run is not in the past");
+}
+
+/// Cells at distance `r` (the chessboard distance) from `c`, in a fixed order.
+fn ring(c: (i32, i32), r: i32) -> impl Iterator<Item = (i32, i32)> {
+    let side = 2 * r + 1;
+    (0..side * side)
+        .map(move |i| (c.0 - r + i % side, c.1 - r + i / side))
+        .filter(move |&(x, y)| (x - c.0).abs().max((y - c.1).abs()) == r)
+}
+
+/// The nearest spot for a `w` x `h` structure with a cell of room around it:
+/// every cell buildable, on the map and not promised.
+fn find_structure(
+    world: &World,
+    taken: &Taken,
+    near: (i32, i32),
+    w: u8,
+    h: u8,
+) -> Option<(i32, i32)> {
+    let ok = |x0: i32, y0: i32| {
+        (y0 - 1..y0 + i32::from(h) + 1).all(|y| {
+            (x0 - 1..x0 + i32::from(w) + 1)
+                .all(|x| !taken.0.contains(&(x, y)) && buildable(world, x, y))
+        })
+    };
+    (0..64).find_map(|r| ring(near, r).find(|&(x, y)| ok(x, y)))
+}
+
+/// The nearest free cell of open ground on the two-cell lattice of `near`.
+fn find_unit(world: &World, taken: &Taken, near: (i32, i32)) -> Option<(i32, i32)> {
+    (0..64).find_map(|r| {
+        ring(near, r).find(|&(x, y)| {
+            (x - near.0) % 2 == 0
+                && (y - near.1) % 2 == 0
+                && !taken.0.contains(&(x, y))
+                && open_ground(world, x, y)
+        })
+    })
+}
+
+fn flags_at(world: &World, x: i32, y: i32) -> Option<sf_sim::TerrainFlags> {
+    let cell = Cell::new(u32::try_from(x).ok()?, u32::try_from(y).ok()?);
+    world.terrain().flags_at(cell)
+}
+
+fn buildable(world: &World, x: i32, y: i32) -> bool {
+    flags_at(world, x, y).is_some_and(|f| f.buildable)
+}
+
+/// Passable for every kind of ground unit: foot, wheeled and tracked.
+fn open_ground(world: &World, x: i32, y: i32) -> bool {
+    flags_at(world, x, y).is_some_and(|f| f.foot && f.wheeled && f.tracked)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::playfield::{make_world, sim_unit_table};
+    use sf_data::map::generate::generate_cells;
+    use sf_sim::WorldConfig;
+
+    fn world_for(cells: u32, seed: u32) -> (World, UnitDefs) {
+        let defs = UnitDefs::embedded();
+        let map = generate_cells(cells, cells, seed);
+        let config = WorldConfig::new(1).with_map_size(cells, cells);
+        let world = make_world(config, &map)
+            .with_units(sim_unit_table(&defs).unwrap())
+            .unwrap();
+        (world, defs)
+    }
+
+    #[test]
+    fn the_sandbox_is_all_placed_and_nothing_is_refused() {
+        for seed in [1, 2, 7] {
+            let (mut world, defs) = world_for(256, seed);
+            let plan = schedule(&mut world, &defs);
+            assert_eq!(plan.skipped, 0, "seed {seed}");
+            assert_eq!((plan.structures, plan.units), (16, 37), "seed {seed}");
+            let report = world.step();
+            assert_eq!(report.commands_ignored, 0, "seed {seed}");
+            assert_eq!(report.commands_executed, 53, "seed {seed}");
+            assert_eq!(world.len(), 53);
+        }
+    }
+
+    #[test]
+    fn every_side_has_structures_and_units_of_its_own() {
+        let (mut world, defs) = world_for(256, 1);
+        schedule(&mut world, &defs);
+        world.step();
+        for owner in [MERIDIAN, VEYRAN, NEUTRAL] {
+            let mine: Vec<_> = world
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == PlayerId(owner))
+                .collect();
+            let structures = mine
+                .iter()
+                .filter(|v| world.footprint_of(v.id).is_some())
+                .count();
+            assert!(structures >= 3, "owner {owner}: {structures} structures");
+            assert!(mine.len() - structures >= 5, "owner {owner}");
+            assert!(mine.iter().all(|v| v.has_stats));
+        }
+    }
+
+    #[test]
+    fn the_sandbox_is_deterministic_and_stands_still() {
+        let run = || {
+            let (mut world, defs) = world_for(256, 1);
+            schedule(&mut world, &defs);
+            for _ in 0..40 {
+                world.step();
+            }
+            world
+        };
+        let (a, b) = (run(), run());
+        assert_eq!(a.checksum_history(), b.checksum_history());
+        for v in a.snapshot().iter() {
+            assert_eq!(v.pos, v.prev_pos, "nothing moves without orders");
+        }
+    }
+
+    #[test]
+    fn a_small_map_skips_what_does_not_fit_and_refuses_nothing() {
+        let (mut world, defs) = world_for(32, 3);
+        let plan = schedule(&mut world, &defs);
+        let report = world.step();
+        assert_eq!(report.commands_ignored, 0);
+        assert_eq!(
+            plan.structures + plan.units,
+            report.commands_executed,
+            "everything scheduled stands"
+        );
+        assert!(plan.structures + plan.units > 0);
+    }
+
+    #[test]
+    fn units_stand_clear_of_structures() {
+        let (mut world, defs) = world_for(256, 1);
+        schedule(&mut world, &defs);
+        world.step();
+        for v in world.snapshot().iter() {
+            if world.footprint_of(v.id).is_none() {
+                let cell = world.cell_at(v.pos).unwrap();
+                assert!(!world.is_occupied(cell), "{} in a structure", v.kind.0);
+            }
+        }
+    }
+}

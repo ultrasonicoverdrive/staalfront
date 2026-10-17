@@ -63,11 +63,27 @@ jobs:
           run --bench --windowed --frames 300 --out demo-out/bench.json
           test -s demo-out/bench.json
           grep -q '"samples": 300' demo-out/bench.json
+      # WP3.2: the same for `sf_game`, which starts in the sandbox (units and
+      # structures of each side spawned from the unit definitions, drawn with
+      # the models and shapes the definitions name): three screenshots.
+      - name: Sandbox smoke test (screenshots)
+        shell: bash
+        run: |
+          mkdir -p sandbox-out
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a -s "-screen 0 1920x1080x24" cargo run -p sf_game -- --shots sandbox-out
+          else
+            cargo run -p sf_game -- --shots sandbox-out
+          fi
+          ls -l sandbox-out
+          for shot in close_up middle whole_map; do test -s "sandbox-out/$shot.png"; done
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
           name: demo-smoke-${{ matrix.os }}
-          path: demo-out/
+          path: |
+            demo-out/
+            sandbox-out/
           if-no-files-found: warn
       # Debug builds check integer overflow, release builds do not; sf_math
       # must give identical bits in both (golden hashes in tests/golden.rs).
@@ -114,7 +130,7 @@ jobs:
         run: |
           mkdir -p headless-logs
           status=0
-          for name in wander_5000 command_mix terrain_256; do
+          for name in wander_5000 command_mix terrain_256 units_spawn; do
             cargo run --release -p sf_headless -- "assets/scenarios/$name.ron" \
               --every 100 \
               --out "headless-logs/$name.json" \

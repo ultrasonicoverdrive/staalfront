@@ -19,6 +19,7 @@
 //! | pending commands | their count and each one in execution order: tick, player, and every field of the command |
 //! | terrain (`T`), only with a terrain layer | the terrain's digest: size, type definitions and the type of every cell, hashed once when the world is made |
 //! | occupancy (`O`), only while a cell is occupied | the number of occupied cells, then for each in ascending cell order: the cell index, the occupant's slot and its generation |
+//! | units (`U`), only with a unit table | the table's digest (every kind with its hit points, movement class, speed, turn rate, size and footprint), then the number of entities made from it and for each, in slot order: the slot and its current hit points |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -35,6 +36,16 @@
 //! `terrain_256` scenario pins. The terrain is hashed through a digest computed
 //! once (it never changes), so a big map costs eight bytes per tick; occupancy
 //! costs a scan of the grid only while at least one cell is occupied.
+//!
+//! The unit table section (WP3.2) follows the same rule: it is written only for
+//! a world made with a non-empty `UnitTable`, after the others. The legacy
+//! `Spawn` and `Place` commands do not consult the table, so every scenario
+//! that does not use `SpawnUnit` or `PlaceStructure` and has no table hashes
+//! exactly as before. A footprint of several cells is already in the occupancy
+//! section (one entry per occupied cell). Which table entry an entity came from
+//! is not hashed on its own: it follows from the kind and the table, and the
+//! slots in the units section tell a table entity from a legacy one of the
+//! same kind number.
 //!
 //! # What is deliberately left out
 //!
@@ -59,6 +70,7 @@ use sf_math::{Rng, Vec2};
 
 use crate::behavior::Area;
 use crate::command::Command;
+use crate::entities::NO_DEF;
 use crate::world::World;
 
 /// Written first. Bump the number when the layout of the hashed bytes changes.
@@ -70,6 +82,7 @@ const SECTION_FREE: u8 = b'F';
 const SECTION_QUEUE: u8 = b'Q';
 const SECTION_TERRAIN: u8 = b'T';
 const SECTION_OCCUPANCY: u8 = b'O';
+const SECTION_UNITS: u8 = b'U';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -106,6 +119,19 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
         }
         Command::Place { kind, cell, owner } => {
             h.write_u8(5);
+            h.write_bytes(&kind.0.to_le_bytes());
+            h.write_u32(cell.x);
+            h.write_u32(cell.y);
+            h.write_u8(owner.0);
+        }
+        Command::SpawnUnit { kind, pos, owner } => {
+            h.write_u8(6);
+            h.write_bytes(&kind.0.to_le_bytes());
+            h.write_vec2(*pos);
+            h.write_u8(owner.0);
+        }
+        Command::PlaceStructure { kind, cell, owner } => {
+            h.write_u8(7);
             h.write_bytes(&kind.0.to_le_bytes());
             h.write_u32(cell.x);
             h.write_u32(cell.y);
@@ -207,6 +233,20 @@ impl World {
                 h.write_u32(cell);
                 h.write_u32(slot);
                 h.write_u32(e.generation[slot as usize]);
+            }
+        }
+
+        // The unit table (WP3.2): its digest, then the hit points of every
+        // entity made from it. Written only for a world that has a table, so
+        // the worlds above are untouched.
+        if !self.units.is_empty() {
+            h.write_u8(SECTION_UNITS);
+            h.write_u64(self.units.digest());
+            let made = (0..slots).filter(|&i| e.alive[i] && e.def[i] != NO_DEF);
+            h.write_u64(len64(made.clone().count()));
+            for i in made {
+                h.write_u32(i as u32);
+                h.write_u32(e.hp[i]);
             }
         }
 
