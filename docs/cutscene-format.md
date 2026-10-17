@@ -34,6 +34,9 @@ cargo run -p sf_cutscene --bin play_scene -- assets/scenes/f1_m01.ron
 
 # Or skip the conversion step and watch a Fountain file directly
 cargo run -p sf_cutscene --bin play_scene -- --fountain content/briefings/F1-M01.fountain
+
+# While writing: the window reloads every time you save (section 8.5)
+cargo run -p sf_cutscene --bin play_scene -- --watch --fountain content/briefings/F1-M01.fountain
 ```
 
 Both look for the asset root in `./assets` (or `--assets DIR`) to list missing
@@ -314,22 +317,26 @@ cargo run -p sf_cutscene --bin play_scene -- assets/scenes/f1_m01.ron
 cargo run -p sf_cutscene --bin play_scene -- --fountain content/briefings/F1-M01.fountain
 ```
 
-The second form converts the Fountain file in memory (nothing is written), so the loop is:
+The second form converts the Fountain file in memory (nothing is written). Add `--watch` and
+the window reloads by itself whenever you save the file (section 8.5); without it the loop is:
 edit the `.fountain` file, close the window, run it again. Warnings of the converter and
 files that are missing (art, voices, sounds) are printed first; missing art is drawn as a
 magenta box, missing sounds are silent. Sound cues are **printed** as they come up
 (`[ 20.1 s] sfx: radio static`), because there is no sound yet. Options: `--assets DIR`
 (otherwise found like the game does: `SF_ASSETS`, or `assets/` near the program),
-`--quit-after MS` (leave by itself, for smoke tests). The window can be resized; the picture
+`--quit-after MS` (leave by itself, for smoke tests), `--watch` (section 8.5). The window can be resized; the picture
 keeps its shape (bars appear), and the subtitle size follows the picture height.
 
 | Key | Does |
 |---|---|
 | Space, click | pause / continue |
 | Left, Right | back / forward 2 seconds |
+| J, L | back / forward 1 second |
+| `,` and `.` | back / forward 0.1 second |
 | N, Tab | start of the next shot (at the last shot: the end) |
 | Home, R | start over |
 | End | skip to the end (the last frame stays) |
+| H | show / hide the writer's HUD (section 8.5) |
 | Esc | quit |
 
 A thin bar along the bottom edge shows how far the scene is, with a tick where every shot
@@ -404,11 +411,92 @@ plays anything itself. What it sends:
 | `StopAll`, then `Bed` (music, ambience) and `Voice { offset_ms }` for what is sounding | after a **seek** or a jump to the next shot: sound is put back the way it would be had the scene played normally up to the new time. Sound effects in between are not played; an event exactly at the new time fires normally after the restore. A seek made while paused is carried out when playback continues. |
 | `StopAll` | **skip to the end**: the scene is over. A scene that plays to its end sends nothing at the end. |
 
+### 8.5 Writing with a live preview (`--watch`, WP12.6)
+
+For the writer (and the artist): leave the viewer open next to your editor and **save**; the
+window shows the new version within about half a second, at the same moment of the scene you
+were looking at. It is a flag of `play_scene`, so everything in 8.1 (keys, `--assets`) works
+the same.
+
+**Tijmen, writing a briefing.** In PowerShell, from your clone, once:
+
+```powershell
+cd C:\Users\Tijmen!\staalfront
+cargo run -p sf_cutscene --bin play_scene -- --watch --fountain content\briefings\F1-M01.fountain
+```
+
+(The first run builds for a few minutes; after that it starts at once.) Open the same
+`.fountain` file in your editor and write. Every save re-converts the briefing (nothing is
+written to disk) and plays on from where it was. For a scene RON file (the artist), leave out
+`--fountain`: `... play_scene -- --watch assets\scenes\f1_m01.ron`. To leave: Esc in the
+window, or Ctrl+C in the terminal.
+
+| Key | Does |
+|---|---|
+| H | show / hide the **writer's HUD**, a small box top left: current time / total and whether it plays, the shot (`2 / 5  field_command_tent_dawn`), the active speaker (with `(V.O.)` / `(O.S.)`), and the path of the file being watched. On by default with `--watch`. |
+| J, L | back / forward 1 second |
+| `,` and `.` | back / forward 0.1 second (hold to repeat is not supported: tap) |
+| Space | pause; stepping while paused moves the picture and the subtitle, so you can read a line at your own speed |
+| N, Home, End, Left, Right | as in 8.1 |
+
+**What is watched.** The scene file (or the `.fountain` file) and every picture the scene
+refers to, also pictures that do not exist yet: the moment the artist saves one, it appears.
+A save is noticed within 250 ms and applied 150 ms after the last change, so an editor that
+writes a temporary file and renames it, or deletes and recreates the file, gives one clean
+reload and never a half-written file. Saving without changing anything (or `touch`) reloads
+too; that is the way to force one. Sound is not played by the viewer; cues are printed in the
+terminal as before, and after a reload the music, ambience and voice line that belong to the
+current moment are announced again, as after a seek.
+
+**What happens to the time.** The playhead stays at the same time `t` in the new version. If
+the new version is shorter than `t`, it stays at the end. A paused scene stays paused; a scene
+that had reached its end plays on if you made it longer.
+
+**When the file has an error.** The window never closes and never goes blank. It keeps playing
+the **last good version** and shows a red box in the top left corner, and the same lines are
+printed in the terminal:
+
+```
+Reload failed - still showing the last good version:
+assets/scenes/f1_m01.ron:22:105: Expected float
+assets/scenes/f1_m01.ron:105: track "stage", event 0: Enter at 0 ms: unknown character "zed"
+```
+
+Each line reads `file:line:column: message` as in `scene_check`; a message that only knows
+the line (an unknown character, two lines at once: everything the validator finds) has no
+column. A Fountain file almost never fails to convert (the converter turns oddities into
+warnings, printed in the terminal when the file loads, see section 7), so errors are mostly a
+thing of the RON. If one does happen, the line is the line **in your Fountain file** (the
+converter keeps track of where every event came from); when the problem belongs to the
+generated scene rather than to a line of yours, the message says "(generated scene, line N)".
+More than 12 errors show the
+first 12 and "... and N more". Fix the file and save: the red box disappears by itself and the
+terminal says `error fixed, reloaded`. The window title also says `ERROR, see the overlay`
+while the last save is not valid. If the file is already broken when you start with `--watch`,
+the window opens empty with the errors on it and loads the scene the moment it is valid
+(without `--watch`, a broken file is reported and the program ends with status 1). A file that
+does not exist ends the program with status 2 either way.
+
+**Pictures.** A picture that cannot be loaded (missing, not a PNG, an unsupported kind) stays a
+**magenta box**, and an amber box lists each with the reason (`art/halversen/head.png: file not
+found`). Fix or add the file, save it, and the box and the list update. Pictures are read again
+on every reload, so a repainted PNG shows up too. SVG is still not supported (8.2).
+
+Frames of this: [`docs/screenshots/wp12.6/`](screenshots/wp12.6/): the error overlay with the
+HUD, the pictures list while two pictures do not load, and the same scene after one was saved.
+
+**How it is built.** Polling, not a file-watch library: every 250 ms the watched files are
+compared by size, modification time and a hash of the content (file systems with coarse time
+stamps, such as FAT, or Windows updating the time late, can show two saves as alike in size and
+time; the hash tells them apart; files over 32 MiB are compared by size and time only). In code:
+`sf_cutscene::preview::{Source, Preview, LivePreview}` (the reload state machine and the HUD
+text) and `sf_cutscene::watch::{SceneWatcher, Debounce}` (both take the clock as a number of
+milliseconds, so they are tested with a fake one); `Player::replace_scene` keeps the playhead.
+
 ## 9. Not in this format yet
 
 * SVG pictures in the player (PNG only for now), pictures with a palette or grey scale.
 * Mouth shapes from speech: WP12.3 (`lipsync` only names the file).
 * Video fallback: WP12.4.
-* Live reload for the artist: WP12.6.
 * Swapping a part's picture inside a pose (mouth shapes, blinking eyes): not
   needed for the placeholders; WP12.3 will decide how mouth shapes are chosen.

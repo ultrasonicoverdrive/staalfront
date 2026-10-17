@@ -11,38 +11,48 @@
 //! right corner mean "paused". Sound cues are printed to the terminal as they
 //! come up (there is no sound yet).
 //!
-//! Options: `--assets DIR` (default: found like the game does), `--quit-after
-//! MS` (leave by itself, for smoke tests).
+//! `--watch` (WP12.6) reloads the scene when the file or one of its pictures is
+//! saved: the playhead stays where it is, a broken save keeps the last good
+//! scene on screen with the error (`file:line:col: message`) in an overlay and on
+//! stderr, and the overlay goes when the file is fixed. H toggles a small HUD
+//! (time, shot, speaker, file), J and L step -/+ 1 s, `,` and `.` step -/+ 0.1 s.
+//! It is a flag of this viewer, not a second binary: the window, the keys, the
+//! renderer and the way a scene is found are the same, and a writer has one
+//! command to remember.
+//!
+//! Options: `--watch`, `--assets DIR` (default: found like the game does),
+//! `--quit-after MS` (leave by itself, for smoke tests).
 //! Exit status: 0 = played and quit, 1 = the scene is invalid or the window
 //! could not be opened, 2 = bad usage or an unreadable file.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use sf_cutscene::fountain::{ImportOptions, convert, scene_name};
+use sf_cutscene::preview::{Applied, LivePreview, Preview, Source, seconds};
 use sf_cutscene::render::{CutsceneRenderer, Hud};
-use sf_cutscene::{
-    Bindings, Key, LoopAction, Player, RecordingSink, SoundEvent, load_file, load_str,
-};
+use sf_cutscene::{Bindings, Key, LoopAction, RecordingSink, SoundEvent};
 use sf_engine::winit::event::MouseButton;
 use sf_engine::winit::keyboard::KeyCode;
 use sf_engine::{App, AssetRoot, Context, EngineConfig, Resized};
 use sf_render::{GpuOptions, Renderer};
 
-const USAGE: &str = "usage: play_scene <scene.ron> [--assets DIR] [--quit-after MS]\n\
-       play_scene --fountain <file.fountain> [--assets DIR] [--quit-after MS]\n\
+const USAGE: &str = "usage: play_scene <scene.ron> [--watch] [--assets DIR] [--quit-after MS]\n\
+       play_scene --fountain <file.fountain> [--watch] [--assets DIR] [--quit-after MS]\n\
   --fountain FILE  convert a Fountain briefing on the fly and play it\n\
+  --watch          reload when the file or one of its pictures is saved (keeps the\n\
+                   playhead; errors show in an overlay, the last good scene stays)\n\
   --assets DIR     asset root (default: found like the game does)\n\
   --quit-after MS  quit by itself after MS milliseconds (smoke tests)\n\
-keys: Space/click pause, Left/Right seek 2 s, N/Tab next shot, Home/R restart,\n\
-      End skip to the end, Esc quit";
+keys: Space/click pause, Left/Right seek 2 s, J/L seek 1 s, , and . seek 0.1 s,\n\
+      N/Tab next shot, Home/R restart, End skip to the end, H writer HUD, Esc quit";
 
 struct Args {
     scene: Option<PathBuf>,
     fountain: Option<PathBuf>,
     assets: Option<PathBuf>,
     quit_after: Option<u64>,
+    watch: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -51,6 +61,7 @@ fn parse_args() -> Result<Args, String> {
         fountain: None,
         assets: None,
         quit_after: None,
+        watch: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -59,6 +70,7 @@ fn parse_args() -> Result<Args, String> {
                 println!("{USAGE}");
                 std::process::exit(0);
             }
+            "--watch" => a.watch = true,
             "--fountain" => a.fountain = Some(args.next().ok_or("--fountain needs a file")?.into()),
             "--assets" => a.assets = Some(args.next().ok_or("--assets needs a directory")?.into()),
             "--quit-after" => {
@@ -79,61 +91,6 @@ fn parse_args() -> Result<Args, String> {
         (None, None) => Err("give a scene file or --fountain FILE".into()),
         (Some(_), Some(_)) => Err("give either a scene file or --fountain, not both".into()),
         _ => Ok(a),
-    }
-}
-
-/// Load the scene and print what `scene_check` would. `Err` carries the exit code.
-fn load(args: &Args, assets: &Path) -> Result<sf_cutscene::LoadedScene, ExitCode> {
-    let (name, loaded) = if let Some(path) = &args.fountain {
-        let text = std::fs::read_to_string(path).map_err(|e| {
-            eprintln!("play_scene: {}: cannot read: {e}", path.display());
-            ExitCode::from(2)
-        })?;
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("scene");
-        let import = convert(
-            &text,
-            &ImportOptions {
-                name: scene_name(stem),
-                source: Some(path.display().to_string().replace('\\', "/")),
-            },
-        );
-        for w in &import.warnings {
-            eprintln!("{}:{}: warning: {}", path.display(), w.line, w.message);
-        }
-        (
-            path.display().to_string(),
-            load_str(&import.ron, Some(assets)),
-        )
-    } else if let Some(path) = &args.scene {
-        (path.display().to_string(), load_file(path, Some(assets)))
-    } else {
-        unreachable!("parse_args needs one of them")
-    };
-    match loaded {
-        Ok(l) => {
-            for w in &l.warnings {
-                match w.line {
-                    Some(n) => eprintln!("{name}:{n}: warning: {}", w.message),
-                    None => eprintln!("{name}: warning: {}", w.message),
-                }
-            }
-            for m in &l.missing_assets {
-                eprintln!(
-                    "{name}: note: missing {} ({}) - drawn as a placeholder or silent",
-                    m.file, m.used_by
-                );
-            }
-            Ok(l)
-        }
-        Err(e) => {
-            eprintln!("{}", e.clone().in_file(&name));
-            // An unreadable file is a usage problem; an invalid scene is not.
-            Err(if matches!(e, sf_cutscene::SceneError::Io { .. }) {
-                ExitCode::from(2)
-            } else {
-                ExitCode::FAILURE
-            })
-        }
     }
 }
 
@@ -179,8 +136,17 @@ const KEYS: [(KeyCode, Key); 38] = [
     (KeyCode::Digit4, Key::Char('4')),
 ];
 
+/// The writer's fine-step keys: J and L one second back and forward, `,` and
+/// `.` a tenth of a second.
+const FINE_STEPS: [(KeyCode, i32); 4] = [
+    (KeyCode::KeyJ, -1000),
+    (KeyCode::KeyL, 1000),
+    (KeyCode::Comma, -100),
+    (KeyCode::Period, 100),
+];
+
 struct Viewer {
-    player: Player,
+    live: LivePreview,
     bindings: Bindings,
     assets: PathBuf,
     quit_after: Option<u64>,
@@ -202,6 +168,40 @@ impl Viewer {
         for (path, why) in cutscenes.failed_pictures() {
             if self.reported.insert(path.to_string()) {
                 eprintln!("play_scene: picture {path}: {why} - drawn as a magenta box");
+            }
+        }
+    }
+
+    /// Look for a saved file; on a reload read the pictures again and say on
+    /// stderr what happened.
+    fn check_for_reload(&mut self, now: u64) {
+        let Some(reload) = self.live.tick(now) else {
+            return;
+        };
+        let preview = self.live.preview();
+        match reload.applied {
+            Applied::Reloaded { recovered } => {
+                for line in &reload.notes {
+                    eprintln!("{line}");
+                }
+                let p = preview.player();
+                eprintln!(
+                    "play_scene: {}reloaded; {} s long, staying at {} s",
+                    if recovered { "error fixed, " } else { "" },
+                    seconds(p.duration_ms()),
+                    seconds(p.time_ms()),
+                );
+                if let Some(cutscenes) = &mut self.cutscenes {
+                    cutscenes.forget_pictures();
+                    cutscenes.preload_pictures(preview.player().scene());
+                }
+                self.reported.clear();
+            }
+            Applied::Rejected => {
+                eprintln!("play_scene: reload failed, still showing the last good version:");
+                for d in preview.errors() {
+                    eprintln!("{d}");
+                }
             }
         }
     }
@@ -256,7 +256,7 @@ impl App for Viewer {
                     renderer.color_format(),
                     &self.assets,
                 );
-                cutscenes.preload_pictures(self.player.scene());
+                cutscenes.preload_pictures(self.live.preview().player().scene());
                 self.cutscenes = Some(cutscenes);
                 self.renderer = Some(renderer);
                 self.report_failed_pictures();
@@ -284,6 +284,8 @@ impl App for Viewer {
             ctx.request_exit();
             return;
         }
+        self.check_for_reload(now);
+
         // Keys and clicks to the player.
         let mut presses: Vec<Key> = KEYS
             .iter()
@@ -293,31 +295,43 @@ impl App for Viewer {
         if ctx.input().button_pressed(MouseButton::Left) {
             presses.push(Key::Click);
         }
+        let preview = self.live.preview_mut();
         for key in presses {
-            self.player.press(key, &self.bindings);
+            preview.player_mut().press(key, &self.bindings);
+        }
+        // The writer's keys: fine steps and the HUD.
+        for (code, delta) in FINE_STEPS {
+            if ctx.input().key_pressed(code) {
+                preview.step(delta);
+            }
+        }
+        if ctx.input().key_pressed(KeyCode::KeyH) {
+            preview.toggle_hud();
         }
 
         let mut heard = RecordingSink::default();
-        self.player.update(now, &mut heard);
+        preview.player_mut().update(now, &mut heard);
+        let player = preview.player();
         for e in &heard.0 {
             eprintln!(
                 "[{:6.1} s] {}",
-                f64::from(self.player.time_ms()) / 1000.0,
+                f64::from(player.time_ms()) / 1000.0,
                 describe(e)
             );
         }
 
         let title = format!(
-            "{} - {:.1} / {:.1} s{}",
-            self.player
+            "{} - {:.1} / {:.1} s{}{}",
+            player
                 .scene()
                 .title
                 .as_deref()
-                .unwrap_or(&self.player.scene().name),
-            f64::from(self.player.time_ms()) / 1000.0,
-            f64::from(self.player.duration_ms()) / 1000.0,
-            if self.player.is_paused() {
-                " (paused)"
+                .unwrap_or(&player.scene().name),
+            f64::from(player.time_ms()) / 1000.0,
+            f64::from(player.duration_ms()) / 1000.0,
+            if player.is_paused() { " (paused)" } else { "" },
+            if preview.has_errors() {
+                " - ERROR, see the overlay"
             } else {
                 ""
             },
@@ -330,19 +344,26 @@ impl App for Viewer {
         let (Some(renderer), Some(cutscenes)) = (&mut self.renderer, &mut self.cutscenes) else {
             return;
         };
-        let duration = f64::from(self.player.duration_ms().max(1));
+        let preview = self.live.preview();
+        let player = preview.player();
+        let duration = f64::from(player.duration_ms().max(1));
+        let failed: Vec<(String, String)> = cutscenes
+            .failed_pictures()
+            .into_iter()
+            .map(|(p, why)| (p.to_string(), why.to_string()))
+            .collect();
         let hud = Hud {
-            progress: (f64::from(self.player.time_ms()) / duration) as f32,
-            shot_marks: self
-                .player
+            progress: (f64::from(player.time_ms()) / duration) as f32,
+            shot_marks: player
                 .shot_starts()
                 .iter()
                 .map(|s| (f64::from(*s) / duration) as f32)
                 .collect(),
-            paused: self.player.is_paused(),
+            paused: player.is_paused(),
+            panels: preview.panels(&failed),
         };
-        let state = self.player.sample();
-        let scene = self.player.scene();
+        let state = player.sample();
+        let scene = player.scene();
         if let Err(e) = renderer.render_with(|t| cutscenes.render(t, scene, &state, Some(&hud))) {
             eprintln!("play_scene: render failed: {e}");
             ctx.request_exit();
@@ -364,21 +385,53 @@ fn main() -> ExitCode {
         .assets
         .clone()
         .unwrap_or_else(|| AssetRoot::resolve().root().to_path_buf());
-    let loaded = match load(&args, &assets) {
-        Ok(l) => l,
-        Err(code) => return code,
+    let source = match (&args.fountain, &args.scene) {
+        (Some(f), _) => Source::Fountain(f.clone()),
+        (None, Some(s)) => Source::Scene(s.clone()),
+        (None, None) => unreachable!("parse_args needs one of them"),
     };
-    let title = loaded
-        .scene
+    let first = source.load(&assets);
+    let file = source.path().display().to_string();
+    match &first {
+        Ok(l) => {
+            for line in l.notes(&file) {
+                eprintln!("{line}");
+            }
+        }
+        Err(f) => {
+            for d in &f.diagnostics {
+                eprintln!("{d}");
+            }
+            // A file that is not there is a usage problem; a bad file is not.
+            // Watching, a bad file is no reason to leave: the window opens
+            // with the errors on it and loads the file when it is fixed.
+            if f.unreadable {
+                return ExitCode::from(2);
+            }
+            if !args.watch {
+                return ExitCode::FAILURE;
+            }
+            eprintln!("play_scene: waiting for a valid {file} (the window shows the errors)");
+        }
+    }
+    let preview = Preview::new(source, assets.clone(), first, args.watch);
+    let player = preview.player();
+    let title = player
+        .scene()
         .title
         .clone()
-        .unwrap_or_else(|| loaded.scene.name.clone());
+        .unwrap_or_else(|| player.scene().name.clone());
     eprintln!(
-        "play_scene: {title}, {:.1} s; Space pauses, Left/Right seek, N next shot, Esc quits",
-        f64::from(loaded.scene.duration_ms()) / 1000.0
+        "play_scene: {title}, {:.1} s; Space pauses, Left/Right seek, N next shot, H HUD, Esc quits{}",
+        f64::from(player.duration_ms()) / 1000.0,
+        if args.watch {
+            "; watching for saves"
+        } else {
+            ""
+        },
     );
     let viewer = Viewer {
-        player: Player::new(loaded.scene),
+        live: LivePreview::new(preview, args.watch),
         bindings: Bindings::viewer(),
         assets,
         quit_after: args.quit_after,
