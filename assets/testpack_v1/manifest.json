@@ -1,0 +1,258 @@
+{
+  "pakket": "Staalfront prototype 1.0",
+  "status": "prototype, niet in engine getest",
+  "eenheden": [
+    {
+      "id": "verkenner",
+      "naam": "Verkenner",
+      "rol": "Snelle verkenning",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        4.0,
+        1.5,
+        2.1
+      ],
+      "model": "models/verkenner.glb",
+      "icon": "icons/icon_verkenner.svg",
+      "triangles_per_lod": [
+        108,
+        72,
+        72
+      ]
+    },
+    {
+      "id": "pantserwagen",
+      "naam": "Pantserwagen",
+      "rol": "Transport en ondersteuning",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        5.8,
+        2.3,
+        2.7
+      ],
+      "model": "models/pantserwagen.glb",
+      "icon": "icons/icon_pantserwagen.svg",
+      "triangles_per_lod": [
+        108,
+        72,
+        72
+      ]
+    },
+    {
+      "id": "lichte_tank",
+      "naam": "Lichte tank",
+      "rol": "Mobiele frontlinie",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        5.0,
+        2.1,
+        2.8
+      ],
+      "model": "models/lichte_tank.glb",
+      "icon": "icons/icon_lichte_tank.svg",
+      "triangles_per_lod": [
+        120,
+        84,
+        84
+      ]
+    },
+    {
+      "id": "gevechtstank",
+      "naam": "Gevechtstank",
+      "rol": "Algemene frontlinie",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        6.6,
+        2.5,
+        3.4
+      ],
+      "model": "models/gevechtstank.glb",
+      "icon": "icons/icon_gevechtstank.svg",
+      "triangles_per_lod": [
+        120,
+        84,
+        84
+      ]
+    },
+    {
+      "id": "zware_tank",
+      "naam": "Zware tank",
+      "rol": "Zware doorbraak",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        7.5,
+        2.9,
+        4.0
+      ],
+      "model": "models/zware_tank.glb",
+      "icon": "icons/icon_zware_tank.svg",
+      "triangles_per_lod": [
+        120,
+        84,
+        84
+      ]
+    },
+    {
+      "id": "mobiele_artillerie",
+      "naam": "Mobiele artillerie",
+      "rol": "Indirecte vuursteun",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        6.8,
+        2.8,
+        3.1
+      ],
+      "model": "models/mobiele_artillerie.glb",
+      "icon": "icons/icon_mobiele_artillerie.svg",
+      "triangles_per_lod": [
+        120,
+        84,
+        84
+      ]
+    },
+    {
+      "id": "raketwagen",
+      "naam": "Raketwagen",
+      "rol": "Langeafstandsondersteuning",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        7.0,
+        3.0,
+        2.8
+      ],
+      "model": "models/raketwagen.glb",
+      "icon": "icons/icon_raketwagen.svg",
+      "triangles_per_lod": [
+        156,
+        120,
+        84
+      ]
+    },
+    {
+      "id": "luchtafweerwagen",
+      "naam": "Luchtafweerwagen",
+      "rol": "Luchtverdediging",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        5.8,
+        2.7,
+        3.0
+      ],
+      "model": "models/luchtafweerwagen.glb",
+      "icon": "icons/icon_luchtafweerwagen.svg",
+      "triangles_per_lod": [
+        156,
+        120,
+        96
+      ]
+    },
+    {
+      "id": "grondstofwagen",
+      "naam": "Grondstofwagen",
+      "rol": "Grondstoffen verzamelen",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        7.2,
+        3.4,
+        3.6
+      ],
+      "model": "models/grondstofwagen.glb",
+      "icon": "icons/icon_grondstofwagen.svg",
+      "triangles_per_lod": [
+        120,
+        84,
+        84
+      ]
+    },
+    {
+      "id": "bouwvoertuig",
+      "naam": "Bouwvoertuig",
+      "rol": "Mobiele basisuitbreiding",
+      "basisvorm": "driehoek",
+      "rompmaat_m": [
+        8.0,
+        3.5,
+        3.8
+      ],
+      "model": "models/bouwvoertuig.glb",
+      "icon": "icons/icon_bouwvoertuig.svg",
+      "triangles_per_lod": [
+        120,
+        84,
+        84
+      ]
+    },
+    {
+      "id": "energiecentrale",
+      "naam": "Energiecentrale",
+      "rol": "Energievoorziening",
+      "basisvorm": "vierkant",
+      "rompmaat_m": [
+        10.0,
+        9.0,
+        8.0
+      ],
+      "model": "models/energiecentrale.glb",
+      "icon": "icons/icon_energiecentrale.svg",
+      "triangles_per_lod": [
+        72,
+        72,
+        72
+      ]
+    },
+    {
+      "id": "raffinaderij",
+      "naam": "Raffinaderij",
+      "rol": "Grondstoffen verwerken",
+      "basisvorm": "vierkant",
+      "rompmaat_m": [
+        12.0,
+        8.0,
+        10.0
+      ],
+      "model": "models/raffinaderij.glb",
+      "icon": "icons/icon_raffinaderij.svg",
+      "triangles_per_lod": [
+        84,
+        84,
+        72
+      ]
+    },
+    {
+      "id": "voertuigfabriek",
+      "naam": "Voertuigfabriek",
+      "rol": "Voertuigen produceren",
+      "basisvorm": "vierkant",
+      "rompmaat_m": [
+        14.0,
+        7.0,
+        11.0
+      ],
+      "model": "models/voertuigfabriek.glb",
+      "icon": "icons/icon_voertuigfabriek.svg",
+      "triangles_per_lod": [
+        72,
+        72,
+        48
+      ]
+    },
+    {
+      "id": "verdedigingstoren",
+      "naam": "Verdedigingstoren",
+      "rol": "Basisverdediging",
+      "basisvorm": "vierkant",
+      "rompmaat_m": [
+        4.5,
+        6.0,
+        4.5
+      ],
+      "model": "models/verdedigingstoren.glb",
+      "icon": "icons/icon_verdedigingstoren.svg",
+      "triangles_per_lod": [
+        60,
+        60,
+        60
+      ]
+    }
+  ]
+}
