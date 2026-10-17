@@ -45,12 +45,14 @@
 
 mod debug_ui;
 mod hud;
+mod sound_browser;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
+use sf_audio::ra::{AudioConfig, RaAudioConfig};
 use sf_audio::{AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate};
 use sf_engine::{Action, App, Context, EngineConfig, Resized, winit};
@@ -169,6 +171,8 @@ struct Runner {
     exit_after: Option<Duration>,
     renderer: Option<Renderer>,
     audio: Option<AudioSystem>,
+    /// Why the last sound-browser play failed (shown in the browser).
+    ra_play_error: Option<String>,
     camera: Camera,
     hud: Hud,
     /// Frames counted in the last full second, for the top bar.
@@ -242,6 +246,7 @@ impl Runner {
             exit_after,
             renderer: None,
             audio: None,
+            ra_play_error: None,
             camera,
             hud: Hud::new(sf_engine::AssetRoot::resolve().root()),
             fps_shown: 0,
@@ -346,6 +351,24 @@ impl Runner {
             sim_tick: self.world.tick().0,
             checksum: self.world.checksum_history().last().copied(),
             entities: self.world.len(),
+            ra_status: self.audio.as_ref().map(AudioSystem::original_audio_status),
+            ra_catalog: self
+                .audio
+                .as_ref()
+                .and_then(AudioSystem::original_audio_catalog),
+            ra_play_error: self.ra_play_error.clone(),
+        }
+    }
+
+    /// Sound browser: play the entry whose button was clicked (one short
+    /// AUD decode, on click only).
+    fn play_browser_sound(&mut self, catalog: Option<&sf_audio::ra::Catalog>) {
+        let Some((a, e)) = self.debug.state.ra_play.take() else {
+            return;
+        };
+        let entry = catalog.and_then(|c| c.archives.get(a)?.entries.get(e));
+        if let (Some(entry), Some(audio)) = (entry, &mut self.audio) {
+            self.ra_play_error = audio.play_original_entry(entry).err();
         }
     }
 
@@ -376,6 +399,7 @@ impl Runner {
                     camera_changed = Some(self.debug.state.camera);
                 }
             }
+            self.play_browser_sound(data.ra_catalog.as_deref());
         }
         if let Some(config) = camera_changed {
             self.apply_camera_config(config);
@@ -515,7 +539,19 @@ impl App for Runner {
             ctx.scale_factor(),
             ctx.assets().root().display()
         );
-        let audio = AudioSystem::new(ctx.assets().root());
+        let mut audio = AudioSystem::new(ctx.assets().root());
+        // Original Red Alert audio (WP11.7): config file, `--ra-audio` wins.
+        let (mut audio_config, warning) = AudioConfig::load(ctx.assets().root());
+        if let Some(w) = warning {
+            eprintln!("sf_audio: {w}");
+        }
+        if let Some(path) = ra_audio_arg() {
+            audio_config.ra_audio = RaAudioConfig {
+                enabled: true,
+                path,
+            };
+        }
+        audio.enable_original_audio(&audio_config.ra_audio);
         println!(
             "audio: {}",
             if audio.is_silent() {
@@ -845,6 +881,18 @@ fn units_arg() -> u32 {
         }
     }
     DEFAULT_UNITS
+}
+
+/// `--ra-audio <path>`: use the original Red Alert sounds from the player's
+/// own files under `path` for this run (WP11.7).
+fn ra_audio_arg() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--ra-audio" {
+            return args.next();
+        }
+    }
+    None
 }
 
 /// `--exit-after <seconds>`: quit by itself (smoke tests).

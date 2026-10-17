@@ -79,6 +79,11 @@ pub struct PanelData {
     pub sim_tick: u64,
     pub checksum: Option<u64>,
     pub entities: usize,
+    /// Original Red Alert audio (WP11.7): `None` = no audio system.
+    pub ra_status: Option<sf_audio::RaStatus>,
+    pub ra_catalog: Option<std::sync::Arc<sf_audio::ra::Catalog>>,
+    /// Why the last sound-browser play failed.
+    pub ra_play_error: Option<String>,
 }
 
 /// What the panels edit.
@@ -92,6 +97,8 @@ pub struct PanelState {
     pub lod_tint: bool,
     /// 1 m cell grid on the terrain, fading with the zoom.
     pub grid: bool,
+    /// Sound browser: (archive, entry) whose play button was clicked.
+    pub ra_play: Option<(usize, usize)>,
     /// Models, icons or by the zoom.
     pub unit_display: UnitDisplay,
 }
@@ -103,6 +110,7 @@ impl PanelState {
             camera_default: camera,
             lod_tint: false,
             grid: false,
+            ra_play: None,
             unit_display: UnitDisplay::Auto,
         }
     }
@@ -150,6 +158,7 @@ pub fn show_panels(ctx: &egui::Context, data: &PanelData, state: &mut PanelState
                 .default_open(true)
                 .show(ui, |ui| view_toggles(ui, state));
         });
+    crate::sound_browser::show(ctx, data, state);
     camera_changed
 }
 
@@ -558,6 +567,7 @@ mod tests {
             sim_tick: 1234,
             checksum: Some(0x00de_adbe_ef12_3456),
             entities: 1350,
+            ..PanelData::default()
         }
     }
 
