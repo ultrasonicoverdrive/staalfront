@@ -1,5 +1,7 @@
 # Herkomst en gebruik
 
+(Source pack's provenance list, kept as delivered except for the "not included" marks. In this repository the file `LICENSES.md` of the pack is stored as `LICENSES_bron.md`.)
+
 Maker: gegenereerd met Microsoft Copilot voor dit Staalfront-prototype. Geen externe spelassets gebruikt.
 
 De gegenereerde geometrie, pictogrammen, documentatie en broncode worden aangeboden onder CC0-1.0 voor zover daarop rechten kunnen rusten en de aanbieder die kan prijsgeven. Geen garantie van exclusiviteit, rechtenvrijheid of geschiktheid. Merken en rechten van derden vallen hier niet onder.
@@ -9,50 +11,50 @@ De conceptreferentie is gegenereerd met Microsoft Copilot en dient alleen als vi
 ## Bestanden
 
 - `README.md` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `START_HIER.html` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `docs/build_staalfront.py` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `docs/validatie.json` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `START_HIER.html` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
+- `docs/build_staalfront.py` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
+- `docs/validatie.json` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_bouwvoertuig.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_bouwvoertuig_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_bouwvoertuig_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_bouwvoertuig_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_energiecentrale.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_energiecentrale_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_energiecentrale_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_energiecentrale_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_gevechtstank.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_gevechtstank_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_gevechtstank_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_gevechtstank_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_grondstofwagen.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_grondstofwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_grondstofwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_grondstofwagen_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_lichte_tank.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_lichte_tank_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_lichte_tank_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_lichte_tank_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_luchtafweerwagen.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_luchtafweerwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_luchtafweerwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_luchtafweerwagen_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_mobiele_artillerie.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_mobiele_artillerie_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_mobiele_artillerie_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_mobiele_artillerie_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_pantserwagen.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_pantserwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_pantserwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_pantserwagen_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_raffinaderij.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_raffinaderij_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_raffinaderij_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_raffinaderij_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_raketwagen.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_raketwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_raketwagen_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_raketwagen_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_verdedigingstoren.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_verdedigingstoren_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_verdedigingstoren_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_verdedigingstoren_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_verkenner.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_verkenner_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_verkenner_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_verkenner_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_voertuigfabriek.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_voertuigfabriek_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_voertuigfabriek_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_voertuigfabriek_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `icons/icon_zware_tank.svg` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `icons/icon_zware_tank_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `icons/icon_zware_tank_128.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
 - `icons/icon_zware_tank_64.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `manifest.json` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `models/bouwvoertuig.glb` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
@@ -69,6 +71,6 @@ De conceptreferentie is gegenereerd met Microsoft Copilot en dient alleen als vi
 - `models/verkenner.glb` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `models/voertuigfabriek.glb` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
 - `models/zware_tank.glb` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `preview/conceptreferentie.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `preview/iconen_14px_1x.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
-- `preview/iconen_14px_4x.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd
+- `preview/conceptreferentie.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
+- `preview/iconen_14px_1x.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
+- `preview/iconen_14px_4x.png` | Microsoft Copilot | CC0-1.0 voor zover van toepassing | in dit pakket gegenereerd | **not included in this repository**
