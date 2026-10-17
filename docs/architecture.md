@@ -265,6 +265,15 @@ laptop. Never on the home server (B6, PLAN.md §13).
   the caller: `sf_game::playfield` when the game starts a map, `sf_headless` when a
   scenario names a map (`map_name`), so the simulation does no I/O. What the types
   mean for the game: `docs/rules/terrain.md`.
+- **Unit definitions (WP3.1).** `sf_data::units` loads `assets/config/unit_classes.ron`
+  (movement classes, armor types, damage types), `weapon_defs.ron` and `unit_defs.ron`
+  (one record per role of `content/units.md`), checks them (unique ids, every reference
+  resolves, model and icon files exist; errors carry file, line and column) and converts
+  them to `SimUnitDef`/`SimWeaponDef`: `sf_math::Fx` and integers in the sim's units, no
+  floats. The permanent `kind` number written in a record (not its place in the file) is
+  its `sf_sim::Kind`; removed records leave tombstones. The 20 Hz constants live in
+  `sf_math`, so `sf_data` needs no dependency on `sf_sim`. `sf_sim` does not read the
+  definitions yet (WP3.2). Fields and units: `docs/rules/units.md`.
 - **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
   central-difference normals from the global heightmap (so shared border
   vertices are bit-identical at equal levels), diagonals by global cell parity

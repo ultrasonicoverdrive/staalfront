@@ -85,6 +85,21 @@ terrain and occupancy are in the checksum only when present, so `wander_5000`,
 `command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
 are in `docs/rules/terrain.md`.
 
+## Phase 3 — Units, selection and commands
+
+Status: in progress.
+
+- WP3.1 Unit definitions (`sf_data::units`: movement classes, armor and damage types,
+  weapons, 43 roles of `content/units.md` with their design-target stats, validation
+  with file and line, conversion to fixed point for the sim): done
+- WP3.2 to WP3.6: open
+
+WP3.1 notes. The data is `assets/config/unit_classes.ron`, `weapon_defs.ron` and
+`unit_defs.ron`; every record has a permanent `kind` number (order in the file does not
+matter, removed records leave tombstones), so numbers are never reused. Tests compare every role with the stats, capacities and tech-tree factions of
+`content/units.md`. The simulation does not use the definitions yet and its checksums
+are unchanged. Fields, units of measure and the placeholders: `docs/rules/units.md`.
+
 ## Phase 1 report (draft, WP1.14)
 
 Phase 1 delivers the engine. `sf_engine` runs the window and a fixed 20 Hz
@@ -151,9 +166,11 @@ fixed, delete the entry in the same PR.
     when it grows logic of its own.
 12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
     to a placeholder shape and the owner to a player colour by modulo. Replace it
-    with data-driven units (phase 2, WP3.1 and WP3.2). WP2.1's `Place` takes the kind
-    as an opaque number too and the demo does not use `Place`, so the stand-in is
-    untouched.
+    with data-driven units. WP3.1 delivered the data half (`sf_data::units`, the kind
+    number of a role is the permanent `kind` written in its record in
+    `assets/config/unit_defs.ron`); WP3.2 spawns
+    from it and removes the stand-in. WP2.1's `Place` takes the kind as an opaque number
+    too and the demo does not use `Place`, so the stand-in is untouched.
 14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found
     in WP1.14 as far as software rendering shows it: the per-mesh instance
     buffers were created on the first frame their list was not empty and
