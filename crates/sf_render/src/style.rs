@@ -1,10 +1,14 @@
 //! The placeholder unit look as data (`assets/config/units.ron`): the player
-//! color palette and the primitive shapes (PLAN.md section 5 rule 6).
+//! color palette, the primitive shapes with their level-of-detail chains
+//! (WP1.9) and the strategic icon settings (PLAN.md section 5 rule 6).
 
 use std::fmt;
 
 use serde::Deserialize;
 
+use crate::icons::{IconConfig, IconShape};
+use crate::mesh::{MIN_SEGMENTS, SEGMENTS};
+use crate::model::MAX_LODS;
 use crate::scene::MeshKind;
 
 /// The shipped style, embedded at build time (like the shader).
@@ -14,6 +18,39 @@ pub const EMBEDDED_STYLE: &str = include_str!("../../../assets/config/units.ron"
 struct StyleFile {
     palette: Vec<PaletteEntry>,
     shapes: Vec<ShapeEntry>,
+    #[serde(default)]
+    lod: LodSettings,
+    #[serde(default)]
+    icons: IconConfig,
+}
+
+/// Model level-of-detail settings shared by all shapes.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LodSettings {
+    /// A model goes to a coarser level only when its projected size is below
+    /// the switch size times `1 - hysteresis`, and back to a finer one when it
+    /// is above the switch size times `1 + hysteresis`. `0` = no hysteresis.
+    pub hysteresis: f32,
+}
+
+impl Default for LodSettings {
+    fn default() -> Self {
+        Self { hysteresis: 0.15 }
+    }
+}
+
+/// One level of a shape's chain, as written in the file.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LodSpec {
+    /// Facets of a round shape (cylinder, cone) at this level; absent = the
+    /// full-detail [`SEGMENTS`].
+    #[serde(default)]
+    pub segments: Option<u32>,
+    /// The level is used while the model's projected bounding diameter is at
+    /// least this many pixels. The last level of a chain says `0`.
+    pub min_px: f32,
 }
 
 #[derive(Deserialize)]
@@ -26,6 +63,12 @@ struct PaletteEntry {
 struct ShapeEntry {
     mesh: MeshKind,
     size: (f32, f32, f32),
+    /// The strategic icon; absent = a square.
+    #[serde(default)]
+    icon: IconShape,
+    /// The level-of-detail chain, finest first; absent = one level.
+    #[serde(default)]
+    lods: Vec<LodSpec>,
 }
 
 /// One placeholder shape: which mesh and how big (metres).
@@ -34,6 +77,17 @@ pub struct Shape {
     pub mesh: MeshKind,
     /// `(along the facing, height, across)`.
     pub size: [f32; 3],
+    /// What the strategic icon looks like.
+    pub icon: IconShape,
+}
+
+impl Shape {
+    /// Diameter in metres of the sphere around the shape's box, whatever the
+    /// facing: the size LOD selection and click volumes work with.
+    pub fn bounding_diameter(&self) -> f32 {
+        (self.size[0] * self.size[0] + self.size[1] * self.size[1] + self.size[2] * self.size[2])
+            .sqrt()
+    }
 }
 
 /// Why a style file was refused.
@@ -61,6 +115,9 @@ pub struct Style {
     srgb: Vec<[u8; 3]>,
     linear: Vec<[f32; 3]>,
     shapes: Vec<Shape>,
+    lods: Vec<Vec<LodSpec>>,
+    lod: LodSettings,
+    icons: IconConfig,
 }
 
 impl Style {
@@ -89,7 +146,12 @@ impl Style {
             if s.mesh == MeshKind::Plane {
                 return Err(StyleError::Invalid("a unit shape cannot be a plane"));
             }
+            check_chain(s.mesh, &s.lods)?;
         }
+        if !(0.0..1.0).contains(&file.lod.hysteresis) {
+            return Err(StyleError::Invalid("lod.hysteresis must be in 0..1"));
+        }
+        file.icons.validate().map_err(StyleError::Invalid)?;
         Ok(Self {
             names: file.palette.iter().map(|p| p.name.clone()).collect(),
             srgb: file
@@ -108,8 +170,12 @@ impl Style {
                 .map(|s| Shape {
                     mesh: s.mesh,
                     size: [s.size.0, s.size.1, s.size.2],
+                    icon: s.icon,
                 })
                 .collect(),
+            lods: file.shapes.iter().map(|s| s.lods.clone()).collect(),
+            lod: file.lod,
+            icons: file.icons,
         })
     }
 
@@ -143,7 +209,62 @@ impl Style {
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
     }
+
+    /// The level-of-detail chain written for a shape (index wraps around as
+    /// in [`Style::shape`]); empty = a single full-detail level.
+    pub fn lod_specs(&self, index: u8) -> &[LodSpec] {
+        &self.lods[usize::from(index) % self.lods.len()]
+    }
+
+    /// Hysteresis and other settings shared by all chains.
+    pub fn lod_settings(&self) -> LodSettings {
+        self.lod
+    }
+
+    /// Strategic icon and cross-fade settings.
+    pub fn icons(&self) -> &IconConfig {
+        &self.icons
+    }
 }
+
+/// Whether a chain is usable for a shape of kind `mesh`: the levels'
+/// switch sizes fall strictly, the last one says 0, and only round shapes
+/// have facets to reduce.
+fn check_chain(mesh: MeshKind, lods: &[LodSpec]) -> Result<(), StyleError> {
+    if lods.len() > MAX_LODS {
+        return Err(StyleError::Invalid("a shape has more than 4 levels"));
+    }
+    let round = matches!(mesh, MeshKind::Cylinder | MeshKind::Cone);
+    for (i, level) in lods.iter().enumerate() {
+        if let Some(n) = level.segments {
+            if !round {
+                return Err(StyleError::Invalid(
+                    "segments only apply to a cylinder or a cone",
+                ));
+            }
+            if !(MIN_SEGMENTS as u32..=128).contains(&n) {
+                return Err(StyleError::Invalid("segments must be between 3 and 128"));
+            }
+        }
+        let last = i + 1 == lods.len();
+        if last {
+            if level.min_px != 0.0 {
+                return Err(StyleError::Invalid("the last level must have min_px 0"));
+            }
+        } else if !(level.min_px.is_finite() && level.min_px > 0.0) {
+            return Err(StyleError::Invalid("a level's min_px must be positive"));
+        }
+        if i > 0 && level.min_px >= lods[i - 1].min_px {
+            return Err(StyleError::Invalid(
+                "the min_px of the levels must fall from the first to the last",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The facet count of a round mesh when a level does not say.
+pub const DEFAULT_SEGMENTS: u32 = SEGMENTS as u32;
 
 /// sRGB byte to linear light (the exact piecewise transfer function).
 pub fn srgb_to_linear(byte: u8) -> f32 {
@@ -186,6 +307,86 @@ mod tests {
         assert!((srgb_to_linear(255) - 1.0).abs() < 1e-6);
         // sRGB 128 is about 0.2159 linear.
         assert!((srgb_to_linear(128) - 0.2159).abs() < 1e-3);
+    }
+
+    #[test]
+    fn embedded_style_has_a_chain_for_the_round_shapes_and_valid_icons() {
+        let s = Style::embedded();
+        assert!(s.lod_specs(0).len() <= 1, "the cube keeps one level");
+        for round in [1, 2] {
+            let chain = s.lod_specs(round);
+            assert!(chain.len() >= 3, "{chain:?}");
+            assert_eq!(chain[0].segments.unwrap_or(DEFAULT_SEGMENTS), 16);
+            let n: Vec<_> = chain.iter().filter_map(|l| l.segments).collect();
+            assert!(n.windows(2).all(|w| w[0] > w[1]), "fewer facets: {n:?}");
+        }
+        s.icons().validate().unwrap();
+        let shapes: Vec<_> = s.shapes().iter().map(|s| s.icon).collect();
+        assert_eq!(
+            shapes,
+            [IconShape::Square, IconShape::Circle, IconShape::Triangle]
+        );
+        assert!((0.0..1.0).contains(&s.lod_settings().hysteresis));
+    }
+
+    #[test]
+    fn a_style_without_lod_and_icon_sections_gets_the_defaults() {
+        let s = Style::from_ron(
+            "(palette: [(name: \"a\", srgb: (1, 2, 3))], shapes: [(mesh: Cube, size: (1.0, 1.0, 1.0))])",
+        )
+        .unwrap();
+        assert_eq!(*s.icons(), IconConfig::default());
+        assert_eq!(s.lod_settings(), LodSettings::default());
+        assert!(s.lod_specs(0).is_empty());
+        assert_eq!(s.shape(0).icon, IconShape::Square);
+    }
+
+    fn with_lods(mesh: &str, lods: &str) -> Result<Style, StyleError> {
+        Style::from_ron(&format!(
+            "(palette: [(name: \"a\", srgb: (1, 2, 3))],
+              shapes: [(mesh: {mesh}, size: (1.0, 1.0, 1.0), lods: {lods})])"
+        ))
+    }
+
+    #[test]
+    fn lod_chains_are_validated() {
+        let ok = "[(segments: Some(16), min_px: 40.0), (segments: Some(8), min_px: 12.0), (segments: Some(5), min_px: 0.0)]";
+        assert!(with_lods("Cylinder", ok).is_ok());
+        for bad in [
+            // Not falling.
+            "[(min_px: 10.0), (min_px: 20.0), (min_px: 0.0)]",
+            "[(min_px: 20.0), (min_px: 20.0), (min_px: 0.0)]",
+            // The last level must say 0, the others must not.
+            "[(min_px: 20.0), (min_px: 5.0)]",
+            "[(min_px: 0.0), (min_px: 0.0)]",
+            // Too many levels.
+            "[(min_px: 50.0), (min_px: 40.0), (min_px: 30.0), (min_px: 20.0), (min_px: 0.0)]",
+            // Facets: out of range.
+            "[(segments: Some(2), min_px: 10.0), (min_px: 0.0)]",
+            "[(segments: Some(500), min_px: 10.0), (min_px: 0.0)]",
+        ] {
+            assert!(with_lods("Cylinder", bad).is_err(), "{bad}");
+        }
+        // A cube has no facets to reduce.
+        assert!(with_lods("Cube", "[(segments: Some(8), min_px: 0.0)]").is_err());
+        assert!(with_lods("Cube", "[(min_px: 0.0)]").is_ok());
+    }
+
+    #[test]
+    fn bad_lod_and_icon_settings_are_refused() {
+        let base = |extra: &str| {
+            Style::from_ron(&format!(
+                "(palette: [(name: \"a\", srgb: (1, 2, 3))],
+                  shapes: [(mesh: Cube, size: (1.0, 1.0, 1.0))], {extra})"
+            ))
+        };
+        assert!(base("lod: (hysteresis: 0.2)").is_ok());
+        assert!(base("lod: (hysteresis: 1.5)").is_err());
+        assert!(base("lod: (hysteresis: -0.1)").is_err());
+        assert!(base("icons: (size_px: 20.0)").is_ok());
+        assert!(base("icons: (size_px: 1.0)").is_err());
+        assert!(base("icons: (icon_below_px: 50.0)").is_err());
+        assert!(base("icons: (nonsense: 1.0)").is_err());
     }
 
     #[test]

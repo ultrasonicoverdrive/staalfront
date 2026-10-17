@@ -15,9 +15,56 @@ use sf_engine::{FrameSummary, winit};
 use sf_render::scene::MeshKind;
 use sf_render::{CameraConfig, DrawStats, InstanceStats, OverlayFrame};
 
+/// What the units are drawn as (WP1.9): by the zoom, or forced for a look.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnitDisplay {
+    /// Models up close, icons far away, a dithered cross-fade between.
+    #[default]
+    Auto,
+    /// Always models (the level of detail still applies).
+    Models,
+    /// Always icons.
+    Icons,
+}
+
+/// The unit under the cursor, for the readout.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoveredUnit {
+    /// The entity id (`index`v`generation`).
+    pub id: String,
+    /// `"model"` or `"icon"`: which volume the cursor is in.
+    pub via: &'static str,
+    /// Name of the owner's colour.
+    pub player: String,
+    /// Distance in metres along the cursor ray (model) or from the eye (icon).
+    pub distance: f32,
+}
+
+/// The model/icon state of the frame, for the panel.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UnitView {
+    /// Share of the picture that is models; the icons have `1 - model_weight`.
+    pub model_weight: f32,
+    /// Camera zoom `0..=1` and the eye-to-focus distance in metres.
+    pub zoom: f32,
+    pub distance: f32,
+    /// Apparent size of the reference unit at the focus, in pixels, and the
+    /// thresholds of the cross-fade (already times the UI scale).
+    pub reference_px: f32,
+    pub model_above_px: f32,
+    pub icon_below_px: f32,
+    /// The camera distances (metres) where the models end and the icons begin.
+    pub models_until: f32,
+    pub icons_from: f32,
+    pub ui_scale: f32,
+    pub hovered: Option<HoveredUnit>,
+}
+
 /// Everything the panels show, gathered by the game once per frame.
 #[derive(Default)]
 pub struct PanelData {
+    /// Models, icons and the unit under the cursor.
+    pub units: UnitView,
     /// The last frames, oldest first, in milliseconds (the graph).
     pub frame_ms: Vec<f32>,
     /// Average / p99 / max over those frames (the engine's nearest-rank
@@ -52,6 +99,8 @@ pub struct PanelState {
     pub grid: bool,
     /// Sound browser: (archive, entry) whose play button was clicked.
     pub ra_play: Option<(usize, usize)>,
+    /// Models, icons or by the zoom.
+    pub unit_display: UnitDisplay,
 }
 
 impl PanelState {
@@ -62,6 +111,7 @@ impl PanelState {
             lod_tint: false,
             grid: false,
             ra_play: None,
+            unit_display: UnitDisplay::Auto,
         }
     }
 }
@@ -89,6 +139,9 @@ pub fn show_panels(ctx: &egui::Context, data: &PanelData, state: &mut PanelState
             CollapsingHeader::new("Draw calls and instances")
                 .default_open(true)
                 .show(ui, |ui| draw_calls(ui, data));
+            CollapsingHeader::new("Units: LOD, icons, hover")
+                .default_open(true)
+                .show(ui, |ui| unit_levels(ui, data));
             CollapsingHeader::new("Simulation")
                 .default_open(true)
                 .show(ui, |ui| simulation(ui, data));
@@ -211,6 +264,40 @@ fn draw_calls(ui: &mut egui::Ui, data: &PanelData) {
         });
 }
 
+/// Levels of detail, the cross-fade to icons and the hovered unit (WP1.9).
+fn unit_levels(ui: &mut egui::Ui, data: &PanelData) {
+    let (i, u, d) = (&data.instances, &data.units, &data.draw);
+    ui.label(format!(
+        "models {} (level 0..3: {} / {} / {} / {}), icons {}",
+        i.models, i.per_lod[0], i.per_lod[1], i.per_lod[2], i.per_lod[3], i.icons
+    ));
+    ui.label(format!(
+        "unit draw calls {} models + {} icons, {} triangles",
+        d.dynamic_draw_calls, d.icon_draw_calls, d.dynamic_triangles
+    ));
+    ui.label(format!(
+        "cross-fade: models {:.0} %, icons {:.0} %",
+        u.model_weight * 100.0,
+        (1.0 - u.model_weight) * 100.0
+    ));
+    ui.add(egui::ProgressBar::new(1.0 - u.model_weight).desired_width(220.0));
+    ui.label(format!(
+        "zoom {:.2}, camera {:.0} m, reference unit {:.1} px",
+        u.zoom, u.distance, u.reference_px
+    ));
+    ui.label(format!(
+        "models above {:.0} px (to {:.0} m), icons below {:.0} px (from {:.0} m), UI scale {:.2}",
+        u.model_above_px, u.models_until, u.icon_below_px, u.icons_from, u.ui_scale
+    ));
+    match &u.hovered {
+        Some(h) => ui.label(format!(
+            "hovering: unit {} ({}) by {}, {:.1} m",
+            h.id, h.player, h.via, h.distance
+        )),
+        None => ui.label("hovering: none"),
+    };
+}
+
 fn simulation(ui: &mut egui::Ui, data: &PanelData) {
     ui.label(format!("ticks run {}", data.sim_tick));
     match data.checksum {
@@ -264,6 +351,13 @@ fn view_toggles(ui: &mut egui::Ui, state: &mut PanelState) {
         .on_hover_text("Tints terrain chunks by level of detail: red = full detail, then orange, yellow, green, blue, purple (coarsest).");
     ui.checkbox(&mut state.grid, "Cell grid (1 m)")
         .on_hover_text("Fades out when zoomed far out; chunk borders (32 m) are yellow.");
+    ui.horizontal(|ui| {
+        ui.label("Units:");
+        ui.radio_value(&mut state.unit_display, UnitDisplay::Auto, "by zoom")
+            .on_hover_text("Models up close, icons far away, a dithered cross-fade between.");
+        ui.radio_value(&mut state.unit_display, UnitDisplay::Models, "models");
+        ui.radio_value(&mut state.unit_display, UnitDisplay::Icons, "icons");
+    });
 }
 
 /// Run one egui pass for `input` and tessellate it. Returns the frame to
@@ -332,6 +426,12 @@ impl DebugUi {
     /// A dragged slider owns the pointer even outside the panel.
     pub fn using_pointer(&self) -> bool {
         self.visible && self.ctx.egui_is_using_pointer()
+    }
+
+    /// The pointer is over a panel (or a widget is held): hovering the
+    /// units behind it would be wrong.
+    pub fn pointer_over_panel(&self) -> bool {
+        self.visible && self.ctx.egui_wants_pointer_input()
     }
 
     fn winit_state(&mut self, window: &winit::window::Window) -> &mut egui_winit::State {
@@ -427,6 +527,9 @@ mod tests {
                 scene_instances: 5,
                 scene_draw_calls: 3,
                 terrain_draw_calls: 4,
+                dynamic_triangles: 1280,
+                icon_instances: 30,
+                icon_draw_calls: 1,
                 terrain_chunks_total: 64,
                 terrain_chunks_visible: 12,
                 terrain_triangles: 9_216,
@@ -439,6 +542,27 @@ mod tests {
                 tiles_visible: 9,
                 per_mesh,
                 total_per_mesh,
+                per_lod: [20, 12, 8, 0],
+                models: 40,
+                icons: 30,
+                ..InstanceStats::default()
+            },
+            units: UnitView {
+                model_weight: 0.75,
+                zoom: 0.62,
+                distance: 96.0,
+                reference_px: 21.5,
+                model_above_px: 28.0,
+                icon_below_px: 14.0,
+                models_until: 80.0,
+                icons_from: 160.0,
+                ui_scale: 1.0,
+                hovered: Some(HoveredUnit {
+                    id: "12v3".into(),
+                    via: "model",
+                    player: "blue".into(),
+                    distance: 41.25,
+                }),
             },
             sim_tick: 1234,
             checksum: Some(0x00de_adbe_ef12_3456),
@@ -508,6 +632,14 @@ mod tests {
             "checksum 00deadbeef123456",
             "LOD colouring",
             "Cell grid (1 m)",
+            "Units: LOD, icons, hover",
+            "models 40 (level 0..3: 20 / 12 / 8 / 0), icons 30",
+            "unit draw calls 2 models + 1 icons, 1280 triangles",
+            "cross-fade: models 75 %, icons 25 %",
+            "zoom 0.62, camera 96 m, reference unit 21.5 px",
+            "models above 28 px (to 80 m), icons below 14 px (from 160 m)",
+            "hovering: unit 12v3 (blue) by model, 41.2 m",
+            "by zoom",
             "zoom step per notch",
             "pan speed",
             "pitch zoomed in (deg)",
@@ -526,6 +658,59 @@ mod tests {
         let (texts, _) = pass(&ctx, &PanelData::default(), &mut state);
         assert!(texts.iter().any(|t| t.contains("no frames yet")));
         assert!(texts.iter().any(|t| t.contains("checksum -")));
+        assert!(texts.iter().any(|t| t.contains("hovering: none")));
+    }
+
+    #[test]
+    fn the_unit_display_radio_changes_the_state() {
+        // Click the "icons" radio button: the state follows.
+        let ctx = egui::Context::default();
+        let mut state = PanelState::new(CameraConfig::default());
+        assert_eq!(state.unit_display, UnitDisplay::Auto);
+        let data = sample_data();
+        for _ in 0..2 {
+            let out = ctx.run_ui(screen(), |ui| {
+                show_panels(ui.ctx(), &data, &mut state);
+            });
+            let mut td = out.textures_delta;
+            td.clear();
+        }
+        // Find the radio's label and click on it (the whole widget responds).
+        fn find(shape: &egui::epaint::Shape, at: &mut Option<egui::Pos2>) {
+            match shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == "icons" => {
+                    *at = Some(t.pos + t.galley.size() * 0.5);
+                }
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| find(s, at)),
+                _ => {}
+            }
+        }
+        let out = ctx.run_ui(screen(), |ui| {
+            show_panels(ui.ctx(), &data, &mut state);
+        });
+        let mut at = None;
+        out.shapes.iter().for_each(|c| find(&c.shape, &mut at));
+        let mut td = out.textures_delta;
+        td.clear();
+        let at = at.expect("the radio is drawn");
+        for pressed in [None, Some(true), Some(false)] {
+            let mut input = screen();
+            input.events = match pressed {
+                None => vec![egui::Event::PointerMoved(at)],
+                Some(p) => vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: p,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            };
+            let out = ctx.run_ui(input, |ui| {
+                show_panels(ui.ctx(), &data, &mut state);
+            });
+            let mut td = out.textures_delta;
+            td.clear();
+        }
+        assert_eq!(state.unit_display, UnitDisplay::Icons);
     }
 
     #[test]

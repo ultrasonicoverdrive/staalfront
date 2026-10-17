@@ -187,6 +187,18 @@ impl Hud {
         self.ui.wheel_consumed()
     }
 
+    /// The UI scale (`ui.ron` scale times the window's DPI factor) of the
+    /// last frame: strategic icons and their click size follow it.
+    pub fn scale(&self) -> f32 {
+        self.ui.scale()
+    }
+
+    /// The cursor is over a UI panel, button or the minimap: the units
+    /// behind it are not hovered.
+    pub fn pointer_over_ui(&self) -> bool {
+        self.ui.pointer_over_ui()
+    }
+
     /// The middle button went down on the UI and is still held.
     pub fn middle_captured(&self) -> bool {
         self.ui.button_captured(MouseButton::Middle)
