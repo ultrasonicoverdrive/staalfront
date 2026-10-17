@@ -69,3 +69,19 @@
 - Voice: mid, breathless under pressure.
 - Speech habit or catchphrase: describes danger in practical terms.
 - Notes: One-off voice, minimal animation set.
+
+## ENGINEER KOVAC
+- Faction: Veyran Directorate
+- Role in the story: Demolition and bridge engineer; calls the charges at Stone Bridge.
+- Appears in missions: F2-M04
+- Look: 50s, stocky, scarred hands, cold-weather overalls, folded detonator case.
+- Poses/emotions needed: calculating, impatient, relieved.
+- Voice: low, unhurried, counts out loud under stress.
+- Speech habit or catchphrase: gives times to the second.
+- Notes: One-off voice, minimal animation set. Escort object in F2-M04.
+
+## OPERATIONS (system voice)
+- Faction: both (neutral UI voice)
+- Role in the story: Objective updates and timer warnings only; never story content.
+- Appears in missions: all
+- Voice: neutral, flat, radio-filtered. One actor, two short lines per mission at most.
