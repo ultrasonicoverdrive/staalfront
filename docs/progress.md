@@ -98,19 +98,6 @@ Findings from the phase 1 work packages that are not fixed yet. Each is meant fo
 the work package named in it (or the first one that touches the code); when one is
 fixed, delete the entry in the same PR.
 
-1. **Map generator is not bit-exact across operating systems.**
-   `sf_data::map::generate` uses the platform's `sin`, `exp` and `sqrt` (floats), so
-   its output may differ in the last bit between Linux and Windows. It is only a
-   tool today. Before `sf_sim` reads map heights (phase 2, WP2.1) the generator must
-   be made bit-exact (integer or `sf_math` fixed point) or the generated map must
-   stay out of the simulation (a committed file instead of a generated one).
-2. **Map file names are joined unchecked.** `sf_data::map` joins the names in
-   `map.ron` (`heightmap`, `material_map`) onto the map directory without checking
-   them, so an absolute path or `..` escapes the directory. Reject both before maps
-   can come from other players (lobby, downloads, WP14.3 at the latest).
-3. **Bit-depth error prints Debug names.** The map loader's error for a PNG of the
-   wrong bit depth shows "Eight-bit" / "Sixteen" (the `Debug` form of `png::BitDepth`)
-   instead of "8-bit" / "16-bit".
 4. **The command insertion sequence is machine-local.** `CommandQueue` orders a
    tick's commands by `(player, insertion sequence)`; the sequence is a counter of
    the local queue. A lockstep package (WP14.1) must carry a per-player sequence
@@ -121,11 +108,6 @@ fixed, delete the entry in the same PR.
    `if: runner.os == 'Linux'`, so a lint that appears only in release mode on
    Windows (for example behind `cfg(windows)`) would not be caught. Run it on both
    systems once the CI time allows.
-6. **The minimap's field-of-view frame is clamped per corner.** `sf_ui::fov_quad`
-   clamps each of the four ground points to the map, which bends the frame when the
-   view reaches past the map edge. Clip the quadrilateral against the map rectangle
-   as a polygon instead (WP1.12 follow-up, or the first package that touches the
-   minimap).
 7. **The minimap is baked once.** It does not follow terrain changes. Re-bake it when
    the terrain changes (phase 2: terrain types in WP2.1 to WP2.3, later editing).
 8. **The minimap bake shows relief weakly.** Its slope shading is faint next to the
@@ -159,24 +141,6 @@ fixed, delete the entry in the same PR.
 15. **Vulkan hangs on the test laptop.** Adapter creation hung with Vulkan
     (NVIDIA GTX 1650, Windows); the game window now uses DX12 on Windows.
     `WGPU_BACKEND` overrides it, `SF_GPU_TRACE=1` prints each GPU startup step.
-16. **WARP crashes in parallel GPU tests on Windows.** `check (windows-latest)`
-    crashed with STATUS_ACCESS_VIOLATION (0xc0000005) twice on the same commit
-    (PR #18, run 39009873035), once in `debug_overlay` and once in
-    `camera_screenshot`, while main and every other run stayed green. Likely
-    cause: several tests create a DX12 WARP device at the same time. Mitigation:
-    CI runs the workspace tests with `--test-threads=1` on Windows. Root fix still
-    open: one shared device per test binary (or a lock in the screenshot helpers),
-    then drop the flag.
-17. **The glTF self-child and cycle tests should assert "appears twice".**
-    In `sf_render::glb::tests` (`bad_hierarchies_and_accessors`) the node that
-    is its own child and the cycle only check that the error is `Invalid` or
-    `Parse`; they should assert the message "appears twice in the hierarchy",
-    which is the reason it is refused. A **diamond** test (one child shared by
-    two parents, which the same check also refuses) is missing (WP1.10 review).
-18. **A part's raw `matrix` must have orthogonal columns.** The loader refuses a
-    negative determinant (a mirror), but a shear with a positive determinant
-    passes and skews the lighting of that part; reject non-orthogonal columns in
-    a part's raw `matrix` (WP1.10 review).
 19. **Exclusive fullscreen is untested.** `--bench` asks for 1920 x 1080 and
     uses borderless when the monitor already runs it, an exclusive video mode
     when the monitor is bigger, borderless at the native size when there is no
@@ -189,6 +153,3 @@ fixed, delete the entry in the same PR.
     so at the whole-map zoom of the 1,024 m map the relief shows only as
     shading. Add broad hills for big maps when the look of the map matters
     (phase 2, WP2.3).
-21. **GPU times are attributed to the frame that was recording when they
-    arrived.** The per-phase `gpu_ms` therefore lags its frames by two or three
-    frames; the whole-flight GPU numbers are exact.

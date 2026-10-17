@@ -245,7 +245,9 @@ laptop. Never on the home server (B6, PLAN.md §13).
   `materials.png` (8-bit grayscale, w x h, index into the material list). The
   loader checks sizes, bit depth, header ranges and material indices and
   reports a `MapError` naming the file. The format knows no game terrain
-  types (phase 2). `sf_data::map::generate` is a seeded procedural generator;
+  types (phase 2). `sf_data::map::generate` is a seeded procedural generator,
+  bit-exact on every OS (integer hashing and `sf_math` fixed point; golden
+  hashes in `crates/sf_data/tests/golden.rs`);
   `cargo run -p sf_data --example gen_map -- <dir> [w] [h] [seed]` writes one.
 - **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
   central-difference normals from the global heightmap (so shared border

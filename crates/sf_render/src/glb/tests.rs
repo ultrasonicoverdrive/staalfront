@@ -532,14 +532,78 @@ fn bad_hierarchies_and_accessors() {
         e
     };
 
+    // The three shapes the "appears twice" check refuses: a node that is its
+    // own child, a cycle and a diamond (one node below two parents). Each
+    // must fail for that reason and name the node, not just fail.
+    let twice = |e: &GlbError, node: &str, what: &str| {
+        assert!(matches!(e, GlbError::Invalid(_)), "{what}: {e}");
+        let text = e.to_string();
+        assert!(
+            text.contains("appears twice in the hierarchy") && text.contains(node),
+            "{what}: {text}"
+        );
+    };
     // A node that is its own child.
     let mut scene = base();
     scene.nodes[hull].children.push(hull);
-    clear(&scene, "self child");
+    let e = clear(&scene, "self child");
+    twice(&e, "hull", "self child");
     // A cycle: the barrel has the hull as a child.
     let mut scene = base();
     scene.nodes[barrel].children.push(hull);
-    clear(&scene, "cycle");
+    let e = clear(&scene, "cycle");
+    twice(&e, "hull", "cycle");
+    // A diamond: one extra node is a child of the turret and of the barrel
+    // (which is itself a child of the turret), so it is reached twice.
+    let mut scene = base();
+    let shared = scene.nodes.len();
+    scene.nodes.push(writer::Node {
+        name: "shared_LOD0".into(),
+        ..writer::Node::default()
+    });
+    scene.nodes[turret].children.push(shared);
+    scene.nodes[barrel].children.push(shared);
+    let e = clear(&scene, "diamond");
+    twice(&e, "shared", "diamond");
+    // The same node under two siblings of the hull is a diamond as well.
+    let mut scene = base();
+    let (left, right, shared) = (
+        scene.nodes.len(),
+        scene.nodes.len() + 1,
+        scene.nodes.len() + 2,
+    );
+    for (name, children) in [
+        ("left_LOD0", vec![shared]),
+        ("right_LOD0", vec![shared]),
+        ("shared_LOD0", vec![]),
+    ] {
+        scene.nodes.push(writer::Node {
+            name: name.into(),
+            children,
+            ..writer::Node::default()
+        });
+    }
+    scene.nodes[hull].children.extend([left, right]);
+    let e = clear(&scene, "diamond below the hull");
+    twice(&e, "shared", "diamond below the hull");
+    // The same shape without sharing loads: two children, each with its own
+    // child. (An empty node is pruned; the point is that it is not refused.)
+    let mut scene = base();
+    let first = scene.nodes.len();
+    for (name, children) in [
+        ("left_LOD0", vec![first + 2]),
+        ("right_LOD0", vec![first + 3]),
+        ("left_leaf_LOD0", vec![]),
+        ("right_leaf_LOD0", vec![]),
+    ] {
+        scene.nodes.push(writer::Node {
+            name: name.into(),
+            children,
+            ..writer::Node::default()
+        });
+    }
+    scene.nodes[hull].children.extend([first, first + 1]);
+    assert!(load_glb(&writer::write(&scene), &AxisConvention::ENGINE).is_ok());
     // A chain 200,000 nodes deep under the barrel.
     let mut scene = base();
     let first = scene.nodes.len();
@@ -577,6 +641,63 @@ fn bad_hierarchies_and_accessors() {
     let mut scene = base();
     scene.nodes[turret].scale = Some([2.0, 2.0, 2.0]);
     assert!(load_glb(&writer::write(&scene), &AxisConvention::ENGINE).is_ok());
+
+    // A raw `matrix` that shears: columns of equal length, a positive
+    // determinant and still not at right angles. The turret sits at (0, 1, 0).
+    let turret_matrix = |columns: [[f32; 3]; 3]| {
+        let [x, y, z] = columns;
+        [
+            x[0], x[1], x[2], 0.0, y[0], y[1], y[2], 0.0, z[0], z[1], z[2], 0.0, 0.0, 1.0, 0.0, 1.0,
+        ]
+    };
+    let with_matrix = |columns: [[f32; 3]; 3]| {
+        let mut scene = base();
+        scene.nodes[turret].matrix = Some(turret_matrix(columns));
+        writer::write(&scene)
+    };
+    let skew = |cosine: f32| {
+        // The Y column leans away from Y by an angle whose cosine to the X
+        // column is `cosine`; its length stays 1.
+        [
+            [1.0, 0.0, 0.0],
+            [cosine, (1.0 - cosine * cosine).sqrt(), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    };
+    for (cosine, what) in [(0.5, "a 60 degree shear"), (0.01, "a 0.6 degree shear")] {
+        let columns = skew(cosine);
+        let det = columns[0][0] * columns[1][1] - columns[0][1] * columns[1][0];
+        assert!(det > 0.0, "{what}: a positive determinant");
+        let e = load_err(&with_matrix(columns));
+        assert!(matches!(e, GlbError::Unsupported(_)), "{what}: {e}");
+        let text = e.to_string();
+        assert!(
+            text.contains("turret") && text.contains("skewed") && text.contains("columns 0 and 1"),
+            "{what}: {text}"
+        );
+    }
+    // Shears between the other pairs of columns are refused as well.
+    let e = load_err(&with_matrix([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.3, 0.0, (1.0f32 - 0.09).sqrt()],
+    ]));
+    assert!(e.to_string().contains("columns 0 and 2"), "{e}");
+    let e = load_err(&with_matrix([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.3, (1.0f32 - 0.09).sqrt()],
+    ]));
+    assert!(e.to_string().contains("columns 1 and 2"), "{e}");
+    // Inside the tolerance (cosine 1e-4, 0.006 degrees) the matrix passes, and
+    // so does a clean rotation with a uniform scale written as a matrix: a
+    // quarter turn about Y, doubled.
+    assert!(load_glb(&with_matrix(skew(1e-4)), &AxisConvention::ENGINE).is_ok());
+    let quarter_turn = [[0.0, 0.0, -2.0], [0.0, 2.0, 0.0], [2.0, 0.0, 0.0]];
+    assert!(load_glb(&with_matrix(quarter_turn), &AxisConvention::ENGINE).is_ok());
+    // And the plain identity matrix.
+    let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    assert!(load_glb(&with_matrix(identity), &AxisConvention::ENGINE).is_ok());
 
     // An accessor that claims more vertices than its buffer view holds:
     // same byte length, so the GLB chunks stay valid.

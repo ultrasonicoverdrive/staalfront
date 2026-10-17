@@ -53,5 +53,5 @@ pub use color::{Color, UiConfig};
 pub use draw::{DrawList, Texture};
 pub use gpu::UiRenderer;
 pub use layout::{Anchor, Rect};
-pub use minimap::{Minimap, MinimapGeometry, MinimapImage, fov_quad};
+pub use minimap::{Minimap, MinimapGeometry, MinimapImage, clip_to_rect, fov_polygon, fov_quad};
 pub use ui::{AreaResponse, MouseButton, Response, Ui, UiInput};
