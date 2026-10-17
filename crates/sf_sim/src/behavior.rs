@@ -36,7 +36,8 @@
 
 use sf_math::{Fx, Rng, Vec2};
 
-use crate::entities::Entities;
+use crate::entities::{Entities, NO_DEF};
+use crate::units::UnitTable;
 
 /// What an entity does each tick.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -142,9 +143,27 @@ pub(crate) struct Motion {
     pub pos_max: Vec2,
 }
 
+impl Motion {
+    /// The motion of one entity: the world's own speed and turn rate for an
+    /// entity without a unit table entry, the entry's speed per tick and turn
+    /// rate for a unit made from one (WP3.2).
+    fn of_entity(&self, def: u32, units: &UnitTable) -> Motion {
+        if def == NO_DEF {
+            return *self;
+        }
+        let stats = units.at(def as usize);
+        Motion {
+            step: stats.speed_per_tick,
+            step_sq: stats.speed_per_tick.square(),
+            turn_per_tick: stats.turn_per_tick,
+            ..*self
+        }
+    }
+}
+
 /// Runs one tick of behaviour for every live entity, in ascending slot
 /// order. Also records the previous position and facing for interpolation.
-pub(crate) fn advance_all(e: &mut Entities, m: &Motion) {
+pub(crate) fn advance_all(e: &mut Entities, world_motion: &Motion, units: &UnitTable) {
     let slots = e.len();
     for i in 0..slots {
         if !e.alive[i] {
@@ -152,6 +171,10 @@ pub(crate) fn advance_all(e: &mut Entities, m: &Motion) {
         }
         e.prev_pos[i] = e.pos[i];
         e.prev_facing[i] = e.facing[i];
+        if e.behavior[i] == Behavior::Idle {
+            continue;
+        }
+        let m = &world_motion.of_entity(e.def[i], units);
         match e.behavior[i] {
             Behavior::Idle => {}
             Behavior::Wander => {

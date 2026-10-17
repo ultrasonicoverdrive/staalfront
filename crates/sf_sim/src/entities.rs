@@ -13,6 +13,10 @@ use crate::behavior::{Area, Behavior};
 use crate::ids::{Kind, PlayerId};
 use crate::terrain::NO_CELL;
 
+/// The `def` column value of an entity that has no entry in the unit table
+/// (every legacy `Spawn` wanderer and `Place` structure).
+pub(crate) const NO_DEF: u32 = u32::MAX;
+
 /// One row of values for a freshly spawned entity.
 #[derive(Clone, Debug)]
 pub(crate) struct NewEntity {
@@ -23,6 +27,10 @@ pub(crate) struct NewEntity {
     pub behavior: Behavior,
     pub area: Area,
     pub rng: Rng,
+    /// Position in the unit table, or [`NO_DEF`].
+    pub def: u32,
+    /// Hit points at birth (zero without a table entry).
+    pub hp: u32,
 }
 
 /// The columns. Index `i` of every vector describes slot `i`.
@@ -58,6 +66,13 @@ pub(crate) struct Entities {
     /// occupancy grid is the same information indexed by cell, and the
     /// checksum covers it from there.
     pub cell: Vec<u32>,
+    /// The position of the entity's kind in the world's unit table, or
+    /// [`NO_DEF`] for an entity that was not made from a table entry. Derived
+    /// from the kind and the table, so it is not hashed on its own.
+    pub def: Vec<u32>,
+    /// Current hit points; zero for an entity without a table entry and for
+    /// one that cannot be damaged. Hashed (it will change in phase 5).
+    pub hp: Vec<u32>,
 }
 
 impl Entities {
@@ -83,6 +98,8 @@ impl Entities {
         self.area.push(Area::new(Vec2::ZERO, Vec2::ZERO));
         self.rng.push(Rng::new(0));
         self.cell.push(NO_CELL);
+        self.def.push(NO_DEF);
+        self.hp.push(0);
         index
     }
 
@@ -102,6 +119,8 @@ impl Entities {
         self.area[i] = row.area;
         self.rng[i] = row.rng;
         self.cell[i] = NO_CELL;
+        self.def[i] = row.def;
+        self.hp[i] = row.hp;
     }
 
     /// Frees slot `i`: marks it dead and resets every column to its neutral
@@ -120,5 +139,7 @@ impl Entities {
         self.area[i] = Area::new(Vec2::ZERO, Vec2::ZERO);
         self.rng[i] = Rng::new(0);
         self.cell[i] = NO_CELL;
+        self.def[i] = NO_DEF;
+        self.hp[i] = 0;
     }
 }

@@ -32,6 +32,12 @@ pub enum UnitDisplay {
 pub struct HoveredUnit {
     /// The entity id (`index`v`generation`).
     pub id: String,
+    /// What it is: the role id of the unit definitions (`light_tank`), or
+    /// `placeholder <n>` for an entity the simulation did not make from them.
+    pub kind: String,
+    /// Current and full hit points; `None` for an entity without any (the
+    /// placeholder crowd).
+    pub hp: Option<(u32, u32)>,
     /// `"model"` or `"icon"`: which volume the cursor is in.
     pub via: &'static str,
     /// Name of the owner's colour.
@@ -293,11 +299,24 @@ fn unit_levels(ui: &mut egui::Ui, data: &PanelData) {
     ));
     match &u.hovered {
         Some(h) => ui.label(format!(
-            "hovering: unit {} ({}) by {}, {:.1} m",
-            h.id, h.player, h.via, h.distance
+            "hovering: {} {} ({}) by {}, {:.1} m, {}",
+            h.kind,
+            h.id,
+            h.player,
+            h.via,
+            h.distance,
+            hp_text(h.hp)
         )),
         None => ui.label("hovering: none"),
     };
+}
+
+/// "HP 40/50", or "no hit points" for an entity that has none.
+fn hp_text(hp: Option<(u32, u32)>) -> String {
+    match hp {
+        Some((now, full)) => format!("HP {now}/{full}"),
+        None => "no hit points".to_owned(),
+    }
 }
 
 fn simulation(ui: &mut egui::Ui, data: &PanelData) {
@@ -561,6 +580,8 @@ mod tests {
                 ui_scale: 1.0,
                 hovered: Some(HoveredUnit {
                     id: "12v3".into(),
+                    kind: "light_tank".into(),
+                    hp: Some((320, 400)),
                     via: "model",
                     player: "blue".into(),
                     distance: 41.25,
@@ -640,7 +661,7 @@ mod tests {
             "cross-fade: models 75 %, icons 25 %",
             "zoom 0.62, camera 96 m, reference unit 21.5 px",
             "models above 28 px (to 80 m), icons below 14 px (from 160 m)",
-            "hovering: unit 12v3 (blue) by model, 41.2 m",
+            "hovering: light_tank 12v3 (blue) by model, 41.2 m, HP 320/400",
             "by zoom",
             "zoom step per notch",
             "pan speed",
@@ -651,6 +672,27 @@ mod tests {
         }
         // Only mesh kinds that exist are listed.
         assert!(has("Cube") && has("Cone") && !has("Pyramid"));
+    }
+
+    #[test]
+    fn the_hovered_unit_is_named_with_its_hit_points() {
+        let ctx = egui::Context::default();
+        let mut state = PanelState::new(CameraConfig::default());
+        let mut data = sample_data();
+        // An entity without hit points (the placeholder crowd).
+        if let Some(h) = data.units.hovered.as_mut() {
+            h.kind = "placeholder 2".into();
+            h.hp = None;
+        }
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("hovering: placeholder 2 12v3 (blue)")
+                    && t.contains("no hit points")),
+            "{texts:?}"
+        );
+        assert_eq!(hp_text(Some((0, 50))), "HP 0/50");
     }
 
     #[test]

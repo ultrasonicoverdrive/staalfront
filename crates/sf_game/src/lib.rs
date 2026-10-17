@@ -10,9 +10,9 @@
 //! (phase 2 on: data-driven units, orders, the actual UI) and will stop being
 //! a demo. Both need the same window loop, camera, HUD, F1 panels and
 //! renderer glue, so that code lives here once and a binary only picks the
-//! defaults ([`Preset`]): `sf_game` 2,000 placeholder units, `sf_demo` 5,000
-//! units with the test pack's glTF models mixed in and `--bench`. Nothing is
-//! duplicated, and the day `sf_game` grows beyond the demo the shared part
+//! defaults ([`Preset`]): `sf_game` starts in the sandbox (below), `sf_demo` shows
+//! 5,000 wandering units with the test pack's glTF models mixed in and has
+//! `--bench`. Nothing is duplicated, and the day `sf_game` grows beyond the demo the shared part
 //! can be split off without touching `sf_demo`.
 //!
 //! # What the window shows
@@ -31,6 +31,16 @@
 //! `Motion::from_fixed` and the minimap dots in `hud.rs` both use
 //! `vec2_cells_to_metres`. The default map is 256 x 256 cells = 1,024 m
 //! (`--map-cells n` for a smaller one, `--map <dir>` for a map directory).
+//!
+//! **Sandbox (WP3.2).** `sf_game` starts with a few units and structures of each
+//! side, spawned from the unit definitions (`assets/config/unit_defs.ron`)
+//! through the command queue ([`sandbox`]); each role is drawn with the model
+//! or placeholder shape and the strategic icon its definition names, structures
+//! at their footprint of 4 m cells ([`roster`], [`looks`]); the F1 panel names the
+//! hovered unit and shows its hit points. Nothing moves yet (orders are WP3.4).
+//! `--crowd` brings back the old scene of 2,000 placeholder wanderers, `--units
+//! N` adds N of them to the sandbox, `--models none` draws the roles as shapes.
+//! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).
 //!
 //! **Units (WP1.6).** An `sf_sim` world with `--units N` wanderers is stepped
 //! by the engine's fixed 20 Hz tick and drawn instanced on top of the
@@ -78,9 +88,12 @@ pub mod args;
 pub mod bench;
 pub mod debug_ui;
 pub mod hud;
+pub mod looks;
 pub mod playfield;
 pub mod population;
+pub mod roster;
 pub mod runner;
+pub mod sandbox;
 mod sound_browser;
 
 use std::sync::Arc;

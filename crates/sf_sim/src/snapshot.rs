@@ -37,6 +37,15 @@ pub struct EntityView {
     pub prev_facing: Facing,
     /// Facing at the end of the current tick.
     pub facing: Facing,
+    /// Whether the entity was made from the world's unit table
+    /// ([`Command::SpawnUnit`](crate::Command::SpawnUnit),
+    /// [`Command::PlaceStructure`](crate::Command::PlaceStructure)), so that
+    /// `kind` is a role and `hp` is real. False for the placeholder wanderers
+    /// and structures of the legacy `Spawn` and `Place`, whose kind is an
+    /// opaque number.
+    pub has_stats: bool,
+    /// Current hit points; zero when `has_stats` is false.
+    pub hp: u32,
 }
 
 /// A read-only view of every live entity, in ascending slot order.

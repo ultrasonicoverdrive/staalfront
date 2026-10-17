@@ -69,7 +69,7 @@ fn spawn_and_command_defaults() {
 #[test]
 fn the_shipped_scenarios_are_valid() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenarios");
-    for name in ["wander_5000", "command_mix", "terrain_256"] {
+    for name in ["wander_5000", "command_mix", "terrain_256", "units_spawn"] {
         let s = Scenario::load(&dir.join(format!("{name}.ron"))).unwrap();
         assert_eq!(s.name, name);
     }

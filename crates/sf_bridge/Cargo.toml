@@ -1,0 +1,19 @@
+[package]
+name = "sf_bridge"
+description = "Hands the unit definitions of sf_data to the simulation of sf_sim."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The one place that knows both sides. `sf_sim` may not depend on `sf_data`
+# (the simulation reads no files and no definitions of its own) and `sf_data`
+# may not depend on `sf_sim`, so the copy of the few fields the rules read
+# lives here, in a crate with no logic and no dependencies beyond the two.
+[dependencies]
+sf_sim = { path = "../../crates/sf_sim" }
+sf_data = { path = "../../crates/sf_data" }

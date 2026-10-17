@@ -14,10 +14,11 @@
 //! gaps (tombstones), so look a number up with `UnitDefs::sim_unit` and
 //! `UnitDefs::sim_weapon` instead of indexing the slices.
 //!
-//! The types live here, in `sf_data`, rather than in `sf_sim`: `sf_sim` does not
-//! use them until WP3.2, and the dependency direction (`sf_sim` reading
-//! `sf_data` or the plain structs moving) is for that WP to settle. Nothing
-//! about them is serialized, so moving them later changes no file.
+//! The types live here, in `sf_data`, and `sf_sim` does not depend on this
+//! crate (WP3.2 kept it that way, as for the terrain): `sf_sim` has its own
+//! `UnitStats` with the few fields its rules read, and the small crate
+//! `sf_bridge` copies a `SimUnitDef` into one (for `sf_game` and `sf_headless`). Nothing about these types is serialized, so
+//! moving them later changes no file.
 
 use sf_math::Fx;
 

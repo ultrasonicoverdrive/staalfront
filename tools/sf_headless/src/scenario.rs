@@ -42,10 +42,11 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use sf_data::map::Map;
 use sf_data::terrain::TerrainTypes;
+use sf_data::units::UnitDefs;
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
     Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId,
-    Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, World, WorldConfig,
+    Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -83,6 +84,21 @@ pub struct Scenario {
     /// world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
     pub terrain: Option<Terrain>,
+    /// The unit definitions the world is made with, as the name of a directory
+    /// `assets/scenarios/<name>/` (next to the scenario file) holding
+    /// `unit_classes.ron`, `weapon_defs.ron` and `unit_defs.ron` (WP3.2). The
+    /// definitions become the world's unit table, which `SpawnUnit` and
+    /// `PlaceStructure` need. A scenario that is pinned by a checksum names a
+    /// **frozen copy** of the files, so that a balance change in
+    /// `assets/config/` does not move its checksum. Read by
+    /// [`Scenario::load`] only, see [`Scenario::unit_table`]. The legacy `Spawn`
+    /// groups and `Place` ignore the table.
+    #[serde(default)]
+    pub unit_defs: Option<String>,
+    /// The unit table read from `unit_defs` by [`Scenario::load`], handed to the
+    /// world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub unit_table: Option<UnitTable>,
     /// How many ticks to run; at least 1.
     pub ticks: u64,
     /// Groups of entities to create.
@@ -203,6 +219,32 @@ pub enum Action {
         /// The entities.
         ids: Vec<IdSpec>,
     },
+    /// `Command::SpawnUnit`: a unit or object of the unit table, standing in
+    /// the middle of `cell`. Needs `unit_defs`. Refused by the
+    /// simulation (the command counts as ignored) for an unknown kind, for a
+    /// structure, and on a cell a structure occupies. The entity takes the next
+    /// free id, like a spawn.
+    SpawnUnit {
+        /// The permanent kind number of the role.
+        kind: u16,
+        /// Who owns it.
+        owner: u8,
+        /// The cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+    },
+    /// `Command::PlaceStructure`: a structure of the unit table with its
+    /// footprint anchored on `cell` (its smallest x and y). Needs
+    /// `unit_defs`. Refused by the simulation unless the kind is a
+    /// structure and every cell of the footprint is on the map, buildable and
+    /// free.
+    PlaceStructure {
+        /// The permanent kind number of the role.
+        kind: u16,
+        /// Who owns it.
+        owner: u8,
+        /// The anchor cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+    },
     /// `Command::Place`: a standing structure on a cell. Refused by the
     /// simulation (the command counts as ignored) on terrain that is not
     /// buildable and on an occupied cell. The entity takes the next free id,
@@ -253,6 +295,20 @@ pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
             },
         })
         .collect()
+}
+
+/// Reads the unit definitions in `<scenario directory>/<name>/` (the model and
+/// icon files they name are looked up under `<scenario directory>/..`, the
+/// assets directory) and turns them into the simulation's unit table.
+fn load_unit_table(name: &str, scenario_file: &Path) -> Result<UnitTable, ScenarioError> {
+    let invalid = |problem: String| ScenarioError::Invalid {
+        path: Some(scenario_file.to_path_buf()),
+        problems: vec![format!("unit_defs \"{name}\": {problem}")],
+    };
+    let scenarios = scenario_file.parent().unwrap_or(Path::new(""));
+    let defs = UnitDefs::load(&scenarios.join(name), &scenarios.join(".."))
+        .map_err(|e| invalid(e.to_string()))?;
+    sf_bridge::unit_table(&defs).map_err(invalid)
 }
 
 fn expand(ids: &[IdSpec]) -> Vec<EntityId> {
@@ -350,6 +406,9 @@ impl Scenario {
         if let Some(name) = scenario.map_name.clone() {
             scenario.terrain = Some(scenario.load_terrain(&name, path)?);
         }
+        if let Some(name) = scenario.unit_defs.clone() {
+            scenario.unit_table = Some(load_unit_table(&name, path)?);
+        }
         Ok(scenario)
     }
 
@@ -446,6 +505,17 @@ impl Scenario {
             }
         }
 
+        if let Some(name) = &self.unit_defs {
+            // A single directory name next to the scenario, like `map_name`.
+            if let Err(e) = sf_data::map::check_file_name("unit_defs", name) {
+                p.push(e.to_string());
+            } else if name.contains('/') {
+                p.push(format!(
+                    "unit_defs \"{name}\" must be the name of one directory, without '/'"
+                ));
+            }
+        }
+
         // A tick at or after `ticks` never runs. Not checked when `ticks` is
         // itself wrong (everything would be reported).
         let tick_problem = |at: &str, tick: u64| -> Option<String> {
@@ -520,11 +590,23 @@ impl Scenario {
                     }
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
-                Action::Place { cell, .. } => {
+                Action::Place { cell, .. }
+                | Action::SpawnUnit { cell, .. }
+                | Action::PlaceStructure { cell, .. } => {
                     if map_ok && (cell.0 >= width || cell.1 >= height) {
                         p.push(format!(
                             "{at}: cell ({}, {}) lies outside the {width}x{height} map",
                             cell.0, cell.1
+                        ));
+                    }
+                    if self.unit_defs.is_none()
+                        && matches!(
+                            c.command,
+                            Action::SpawnUnit { .. } | Action::PlaceStructure { .. }
+                        )
+                    {
+                        p.push(format!(
+                            "{at}: SpawnUnit and PlaceStructure need `unit_defs`"
                         ));
                     }
                 }
@@ -561,6 +643,21 @@ impl Scenario {
             None => World::new(config),
         }
         .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        if self.unit_defs.is_some() {
+            let Some(table) = self.unit_table.clone() else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "unit_defs: the definitions are read from the files next to the \
+                         scenario, so the scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
+            world = world
+                .with_units(table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
 
         let mut placement = Rng::with_stream(self.seed, PLACEMENT_STREAM);
@@ -607,6 +704,25 @@ impl Scenario {
                 }
                 Action::Place { kind, owner, cell } => {
                     let command = Command::Place {
+                        kind: Kind(*kind),
+                        cell: Cell::new(cell.0, cell.1),
+                        owner: PlayerId(*owner),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::SpawnUnit { kind, owner, cell } => {
+                    let command = Command::SpawnUnit {
+                        kind: Kind(*kind),
+                        pos: Vec2::new(
+                            Fx::from_i64(i64::from(cell.0)) + Fx::HALF,
+                            Fx::from_i64(i64::from(cell.1)) + Fx::HALF,
+                        ),
+                        owner: PlayerId(*owner),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::PlaceStructure { kind, owner, cell } => {
+                    let command = Command::PlaceStructure {
                         kind: Kind(*kind),
                         cell: Cell::new(cell.0, cell.1),
                         owner: PlayerId(*owner),

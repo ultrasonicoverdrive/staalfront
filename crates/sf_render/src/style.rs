@@ -212,6 +212,31 @@ impl Style {
         })
     }
 
+    /// This style with more shapes after its own (WP3.2): each variant is a
+    /// shape of its own size and strategic icon that keeps the level-of-detail
+    /// chain of an existing shape, `(chain_of, shape)` where `chain_of` is the
+    /// index of the shape to copy it from. This is how one placeholder mesh
+    /// (a cube) becomes a building of several footprints, or a cone of several
+    /// sizes, without losing its chain of facets: [`ModelSet::from_style`]
+    /// builds the variants' chains from the copies. The result may have no
+    /// more than 255 shapes.
+    ///
+    /// [`ModelSet::from_style`]: crate::model::ModelSet::from_style
+    pub fn with_variants(&self, variants: &[(u8, Shape)]) -> Result<Style, StyleError> {
+        if self.shapes.len() + variants.len() > 255 {
+            return Err(StyleError::Invalid("more than 255 shapes"));
+        }
+        let mut style = self.clone();
+        for (chain_of, shape) in variants {
+            if !shape.size.iter().all(|v| v.is_finite() && *v > 0.0) {
+                return Err(StyleError::Invalid("a shape size is not positive"));
+            }
+            style.lods.push(self.lod_specs(*chain_of).to_vec());
+            style.shapes.push(*shape);
+        }
+        Ok(style)
+    }
+
     pub fn color_count(&self) -> usize {
         self.linear.len()
     }
@@ -312,6 +337,54 @@ pub fn srgb_to_linear(byte: u8) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn variants_follow_the_style_and_keep_the_chain_they_come_from() {
+        let base = Style::embedded();
+        let cone = base
+            .shapes()
+            .iter()
+            .position(|s| s.mesh == MeshKind::Cone)
+            .unwrap() as u8;
+        let big = Shape {
+            mesh: MeshKind::Cone,
+            size: [6.0, 5.0, 6.0],
+            icon: IconShape::Circle,
+        };
+        let style = base.with_variants(&[(cone, big), (0, big)]).unwrap();
+        assert_eq!(style.shape_count(), base.shape_count() + 2);
+        assert_eq!(&style.shapes()[..base.shape_count()], base.shapes());
+        let n = base.shape_count() as u8;
+        assert_eq!(style.shape(n), big);
+        // The first took the cone's chain of facets, the second the cube's
+        // (none: one level).
+        assert_eq!(style.lod_specs(n), base.lod_specs(cone));
+        assert!(!style.lod_specs(n).is_empty());
+        assert_eq!(style.lod_specs(n + 1), base.lod_specs(0));
+        // The rest of the style is the same.
+        assert_eq!(style.color_count(), base.color_count());
+        assert_eq!(style.lod_settings(), base.lod_settings());
+        // No variants: the same style.
+        assert_eq!(base.with_variants(&[]).unwrap(), base);
+    }
+
+    #[test]
+    fn variants_are_checked() {
+        let base = Style::embedded();
+        let flat = Shape {
+            mesh: MeshKind::Cube,
+            size: [1.0, 0.0, 1.0],
+            icon: IconShape::Square,
+        };
+        assert!(base.with_variants(&[(0, flat)]).is_err());
+        let ok = Shape {
+            size: [1.0; 3],
+            ..flat
+        };
+        let many = vec![(0, ok); 253];
+        assert!(base.with_variants(&many).is_err(), "3 + 253 is over 255");
+        assert!(base.with_variants(&many[..252]).is_ok());
+    }
 
     #[test]
     fn embedded_style_has_four_colors_and_three_shapes() {

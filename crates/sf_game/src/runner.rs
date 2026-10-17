@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use sf_audio::ra::{AudioConfig, RaAudioConfig};
 use sf_audio::{AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate_cells};
+use sf_data::units::UnitDefs;
 use sf_engine::winit::event::MouseButton;
 use sf_engine::{Action, App, Context, Resized, winit};
 use sf_math::Fx;
@@ -26,11 +27,13 @@ use sf_render::{
 };
 use sf_sim::{EntityView, World, WorldConfig};
 
-use crate::args::{BenchOptions, Options};
+use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
+use crate::looks::Looks;
 use crate::population::Population;
+use crate::roster::{self, Roster};
 
 /// Walking speed of the demo's units: 1.5 cells a second, 6 m/s (22 km/h),
 /// a believable tank. The sim's default of 4 cells a second was a walking
@@ -173,7 +176,8 @@ pub struct Runner {
     instancer: Instancer,
     /// The glTF models the units are drawn with, after the placeholders.
     pack: Option<LoadedPack>,
-    population: Population,
+    /// How an entity is drawn (and named in the F1 panel).
+    looks: Looks,
     buildings: u32,
     /// Map size in sim cells (B12): what the sim was created with.
     cells: (u32, u32),
@@ -254,24 +258,27 @@ impl Runner {
         };
         // WP2.1: the map's terrain types go to the sim (open ground if it has
         // no terrain layer); nothing is drawn from them yet (WP2.2 to WP2.4).
-        let mut world = crate::playfield::make_world(config, &map);
-        let population = Population::new(pack.as_ref());
-        let units = options.units;
-        let buildings = population.spawn(&mut world, units, cells);
-        // Tick 0 creates the entities; the buildings are then told to stay.
-        let mut views = Vec::new();
-        world.step();
-        world.snapshot().collect_into(&mut views);
-        population.plant_buildings(&mut world, &views);
+        let world = crate::playfield::make_world(config, &map);
+        let style = placeholder_style(Style::embedded());
+        let start = match options.scene {
+            Scene::Crowd => crowd_scene(world, &options, pack.as_ref(), cells),
+            Scene::Sandbox => sandbox_scene(world, &options, &style, cells),
+        };
+        let SceneStart {
+            world,
+            looks,
+            views,
+            units,
+            buildings,
+        } = start;
 
         let map_metres = (map.width() as f32, map.height() as f32);
-        let style = placeholder_style(Style::embedded());
         let mut instancer = Instancer::new(style.clone(), map_metres);
-        apply_pack(&mut instancer, pack.as_ref(), style);
-        if pack.is_some() {
+        apply_looks(&mut instancer, &looks, pack.as_ref(), style);
+        if pack.is_some() || looks.roster().is_some_and(|r| r.pack().is_some()) {
             instancer.set_aim(Some([0.5 * map_metres.0, 0.5 * map_metres.1]));
         }
-        instancer.update_tick(views.iter().map(|v| motion_of(&population, v)));
+        instancer.update_tick(views.iter().map(|v| motion_of(&looks, v)));
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let camera_config = CameraConfig {
@@ -326,7 +333,7 @@ impl Runner {
             world,
             instancer,
             pack,
-            population,
+            looks,
             buildings,
             cells,
             views,
@@ -358,9 +365,9 @@ impl Runner {
 
 /// A sim entity as the instancer wants it. The positions are in cells;
 /// `Motion::from_fixed` is where they become metres (B12).
-fn motion_of(population: &Population, v: &EntityView) -> Motion {
+fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
     Motion::from_fixed(
-        population.shape_of(v.kind),
+        looks.shape_of(v),
         v.owner.0,
         v.prev_pos,
         v.pos,
@@ -558,13 +565,22 @@ impl Runner {
         self.pick_ms.push(started.elapsed());
 
         let hovered = self.hovered.as_ref().map(|p| {
-            let owner = self
+            let view = self
                 .views
                 .iter()
-                .find(|v| v.id.index() == p.id.index() && v.id.generation() == p.id.generation())
-                .map(|v| v.owner.0);
+                .find(|v| v.id.index() == p.id.index() && v.id.generation() == p.id.generation());
+            let owner = view.map(|v| v.owner.0);
+            // The role's name and its hit points (current and full) for an
+            // entity the simulation made from the unit definitions.
+            let kind = view.map_or_else(String::new, |v| self.looks.name_of(v));
+            let hp = view.filter(|v| v.has_stats).map(|v| {
+                let full = self.world.stats_of(v.id).map_or(v.hp, |s| s.hp);
+                (v.hp, full)
+            });
             HoveredUnit {
                 id: p.id.to_string(),
+                kind,
+                hp,
                 via: match p.via {
                     PickVia::Model => "model",
                     PickVia::Icon => "icon",
@@ -618,7 +634,7 @@ impl Runner {
         match result {
             Ok(style) => {
                 // Keep the models; take the new palette and settings.
-                apply_pack(&mut self.instancer, self.pack.as_ref(), style);
+                apply_looks(&mut self.instancer, &self.looks, self.pack.as_ref(), style);
                 println!("reloaded {}", units.display());
             }
             Err(e) => eprintln!(
@@ -1019,9 +1035,9 @@ impl App for Runner {
         // Hand the new state to the presentation: once per tick the fixed-point
         // positions (cells) are converted to f32 metres and bucketed by map tile.
         self.world.snapshot().collect_into(&mut self.views);
-        let population = &self.population;
+        let looks = &self.looks;
         self.instancer
-            .update_tick(self.views.iter().map(|v| motion_of(population, v)));
+            .update_tick(self.views.iter().map(|v| motion_of(looks, v)));
         let spent = started.elapsed();
         self.tick_ms.push(spent);
         self.sim_since_frame += spent;
@@ -1279,6 +1295,125 @@ impl App for Runner {
 /// Draw the units with the placeholder shapes of `base` and, with a pack,
 /// the pack's models after them (shape `PLACEHOLDER_SHAPES + i` is model
 /// `i`), with the palette and settings of `base`.
+/// Put the look of the scene on the instancer: the crowd's placeholder shapes
+/// and model pack, or the sandbox's size variants and role models.
+fn apply_looks(
+    instancer: &mut Instancer,
+    looks: &Looks,
+    crowd_pack: Option<&LoadedPack>,
+    base: Style,
+) {
+    match looks.roster() {
+        Some(roster) => {
+            let style = roster.style(&base);
+            apply_pack(instancer, roster.pack(), style);
+        }
+        None => apply_pack(instancer, crowd_pack, base),
+    }
+}
+
+/// What a scene starts with.
+struct SceneStart {
+    world: World,
+    looks: Looks,
+    /// The entities after tick 0.
+    views: Vec<EntityView>,
+    /// Entities, as the scene counts them.
+    units: u32,
+    /// Buildings of the crowd's base.
+    buildings: u32,
+}
+
+/// The engine demo's scene: a crowd of placeholder wanderers and, with a model
+/// pack, a base of its buildings. Unchanged since WP1.14 (the M0 benchmark is
+/// measured on it).
+fn crowd_scene(
+    mut world: World,
+    options: &Options,
+    pack: Option<&LoadedPack>,
+    cells: (u32, u32),
+) -> SceneStart {
+    let population = Population::new(pack);
+    let units = options.units;
+    let buildings = population.spawn(&mut world, units, cells);
+    // Tick 0 creates the entities; the buildings are then told to stay.
+    let mut views = Vec::new();
+    world.step();
+    world.snapshot().collect_into(&mut views);
+    population.plant_buildings(&mut world, &views);
+    SceneStart {
+        world,
+        looks: Looks::Crowd(population),
+        views,
+        units,
+        buildings,
+    }
+}
+
+/// The sandbox (WP3.2): units and structures of each side, spawned from the
+/// unit definitions, and the looks the definitions give them. Anything that
+/// goes wrong (a definition file that does not load, a role without a model)
+/// is reported and the game carries on with what it has.
+fn sandbox_scene(
+    mut world: World,
+    options: &Options,
+    style: &Style,
+    cells: (u32, u32),
+) -> SceneStart {
+    let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|e| {
+        eprintln!("sf_game: {e}; using the unit definitions compiled in");
+        UnitDefs::embedded()
+    });
+    match sf_bridge::unit_table(&defs) {
+        Ok(table) => {
+            world = world
+                .with_units(table)
+                .expect("a world that has not started takes its unit table");
+        }
+        Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
+    }
+    let models_ron =
+        std::fs::read_to_string(assets.join(roster::MODELS_FILE)).unwrap_or_else(|e| {
+            eprintln!(
+                "sf_game: {}: {e}; roles are drawn as shapes",
+                roster::MODELS_FILE
+            );
+            String::new()
+        });
+    let use_models = options.role_models && !models_ron.is_empty();
+    let roster =
+        Roster::build(&defs, style, &assets, &models_ron, use_models).unwrap_or_else(|e| {
+            eprintln!("sf_game: {e}; roles are drawn as shapes");
+            Roster::build(&defs, style, &assets, "", false).expect("shapes alone fit")
+        });
+    for warning in &roster.warnings {
+        eprintln!("sf_game: {warning}");
+    }
+    let plan = crate::sandbox::schedule(&mut world, &defs);
+    // Extra placeholder wanderers (`--units`), the crowd's way.
+    let crowd = Population::new(None);
+    crowd.spawn(&mut world, options.units, cells);
+    let mut views = Vec::new();
+    let report = world.step();
+    world.snapshot().collect_into(&mut views);
+    println!(
+        "sandbox: {} structures and {} units placed ({} refused, {} left out), {} placeholder wanderers",
+        plan.structures, plan.units, report.commands_ignored, plan.skipped, options.units
+    );
+    let units = views.len() as u32;
+    SceneStart {
+        world,
+        looks: Looks::Roster {
+            roster: Box::new(roster),
+            crowd,
+        },
+        views,
+        units,
+        buildings: plan.structures,
+    }
+}
+
 fn apply_pack(instancer: &mut Instancer, pack: Option<&LoadedPack>, base: Style) {
     let Some(pack) = pack else {
         instancer.set_style(base);
@@ -1310,4 +1445,158 @@ pub fn load_pack(name: &str) -> Result<LoadedPack, String> {
         started.elapsed().as_secs_f64() * 1000.0
     );
     Ok(pack)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::Preset;
+    use sf_data::map::generate::generate_cells;
+    use sf_sim::{Command, Kind, PlayerId, Tick};
+
+    fn options(preset: Preset, line: &str) -> Options {
+        Options::parse(preset, line.split_whitespace().map(str::to_owned))
+    }
+
+    fn world(cells: u32) -> World {
+        let map = generate_cells(cells, cells, 1);
+        let config = WorldConfig {
+            speed: DEMO_SPEED,
+            ..WorldConfig::new(1).with_map_size(cells, cells)
+        };
+        crate::playfield::make_world(config, &map)
+    }
+
+    /// The engine demo's scene is what it was before WP3.2: the crowd, made
+    /// by `Population` with the test pack, no unit table, the buildings told
+    /// to stay. The benchmark (milestone M0) is measured on it.
+    #[test]
+    fn the_demo_scene_is_the_crowd_it_always_was() {
+        let o = options(Preset::Demo, "");
+        assert_eq!((o.scene, o.units), (Scene::Crowd, 5000));
+        let pack = load_pack("testpack").unwrap();
+        let cells = (64, 64);
+        let start = crowd_scene(world(64), &o, Some(&pack), cells);
+        assert!(start.world.unit_table().is_empty(), "no unit table");
+        assert_eq!(start.units, 5000);
+        assert!(start.buildings > 0);
+        assert!(start.views.iter().all(|v| !v.has_stats));
+
+        // The same by hand, the way Runner::new did it before the scenes.
+        let mut by_hand = world(64);
+        let population = Population::new(Some(&pack));
+        population.spawn(&mut by_hand, 5000, cells);
+        let mut views = Vec::new();
+        by_hand.step();
+        by_hand.snapshot().collect_into(&mut views);
+        population.plant_buildings(&mut by_hand, &views);
+        let mut mine = start.world;
+        for _ in 0..150 {
+            mine.step();
+            by_hand.step();
+        }
+        assert_eq!(mine.checksum_history(), by_hand.checksum_history());
+        // Entities keep the shapes the population gave them.
+        for v in &start.views {
+            assert_eq!(start.looks.shape_of(v), population.shape_of(v.kind));
+        }
+    }
+
+    #[test]
+    fn the_sandbox_is_made_from_the_definitions_and_every_unit_has_a_shape() {
+        let o = options(Preset::Game, "");
+        assert_eq!(o.scene, Scene::Sandbox);
+        let style = placeholder_style(Style::embedded());
+        let start = sandbox_scene(world(128), &o, &style, (128, 128));
+        assert_eq!(start.world.unit_table().len(), 43);
+        let (structures, units) = crate::sandbox::wanted(&UnitDefs::embedded());
+        let all = (structures + units) as usize;
+        assert_eq!(start.views.len(), all);
+        assert_eq!(start.units as usize, all);
+        assert_eq!(start.buildings, structures);
+        let roster = start.looks.roster().expect("the sandbox has a roster");
+        let shapes =
+            roster.style(&style).shape_count() + roster.pack().map_or(0, |p| p.models.len());
+        for v in &start.views {
+            assert!(v.has_stats);
+            assert!(usize::from(start.looks.shape_of(v)) < shapes);
+            let name = start.looks.name_of(v);
+            assert_eq!(Some(name.as_str()), roster.name_of(v.kind));
+            // The hit points the panel shows are the definition's.
+            assert_eq!(Some(v.hp), start.world.stats_of(v.id).map(|s| s.hp));
+        }
+        // The same start every time.
+        let again = sandbox_scene(world(128), &o, &style, (128, 128));
+        let (mut a, mut b) = (start.world, again.world);
+        for _ in 0..30 {
+            a.step();
+            b.step();
+        }
+        assert_eq!(a.checksum_history(), b.checksum_history());
+    }
+
+    #[test]
+    fn extra_placeholder_wanderers_join_the_sandbox_and_are_not_roles() {
+        let o = options(Preset::Game, "--units 200");
+        let style = placeholder_style(Style::embedded());
+        let mut start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let all = {
+            let (a, b) = crate::sandbox::wanted(&UnitDefs::embedded());
+            (a + b) as usize
+        };
+        assert_eq!(start.views.len(), all + 200);
+        let (roles, crowd): (Vec<&EntityView>, Vec<&EntityView>) =
+            start.views.iter().partition(|v| v.has_stats);
+        assert_eq!((roles.len(), crowd.len()), (all, 200));
+        // The wanderers keep the demo's shapes, whatever role shares their kind.
+        for v in &crowd {
+            assert!(v.kind.0 < 3);
+            assert_eq!(usize::from(start.looks.shape_of(v)), usize::from(v.kind.0));
+            assert_eq!(start.looks.name_of(v), format!("placeholder {}", v.kind.0));
+        }
+        // And they wander; the roles do not.
+        let before = start.views.clone();
+        for _ in 0..40 {
+            start.world.step();
+        }
+        start.world.snapshot().collect_into(&mut start.views);
+        for (a, b) in before.iter().zip(&start.views) {
+            assert_eq!(a.pos != b.pos, !a.has_stats, "{:?}", a.kind);
+        }
+    }
+
+    #[test]
+    fn models_none_draws_the_roles_as_shapes() {
+        let o = options(Preset::Game, "--models none");
+        let style = placeholder_style(Style::embedded());
+        let start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let roster = start.looks.roster().unwrap();
+        assert!(roster.pack().is_none());
+        assert!(!start.views.is_empty());
+    }
+
+    #[test]
+    fn a_unit_can_still_be_spawned_into_the_sandbox_through_the_queue() {
+        let o = options(Preset::Game, "");
+        let style = placeholder_style(Style::embedded());
+        let mut start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let tick = start.world.tick();
+        let before = start.world.len();
+        start
+            .world
+            .schedule(
+                tick,
+                PlayerId(0),
+                Command::SpawnUnit {
+                    kind: Kind(20),
+                    pos: sf_math::Vec2::from_ints(3, 3),
+                    owner: PlayerId(0),
+                },
+            )
+            .unwrap();
+        assert_eq!(tick, Tick(1));
+        let report = start.world.step();
+        assert_eq!(report.commands_executed, 1);
+        assert_eq!(start.world.len(), before + 1);
+    }
 }

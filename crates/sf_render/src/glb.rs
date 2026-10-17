@@ -182,6 +182,26 @@ pub struct LoadedModel {
     pub levels: Vec<LoadedLevel>,
 }
 
+impl LoadedModel {
+    /// The same model `factor` times as big in every direction: vertex
+    /// positions and the translations of the part transforms scale, rotations
+    /// and normals do not. A uniform scale keeps a turret's yaw and a barrel's
+    /// pitch exactly as they were.
+    pub fn scaled(&self, factor: f32) -> LoadedModel {
+        let mut model = self.clone();
+        for level in &mut model.levels {
+            for part in &mut level.parts {
+                part.rest.w_axis =
+                    (part.rest.w_axis.truncate() * factor).extend(part.rest.w_axis.w);
+                for v in &mut part.mesh.vertices {
+                    v.position = v.position.map(|c| c * factor);
+                }
+            }
+        }
+        model
+    }
+}
+
 /// `name` without a trailing `_LOD<digits>`, and the number if there was one.
 pub fn split_lod_suffix(name: &str) -> (&str, Option<u32>) {
     if let Some(at) = name.rfind("_LOD") {
@@ -1185,6 +1205,64 @@ pub fn load_pack(config: &str, name: &str, assets: &Path) -> Result<LoadedPack, 
     Ok(LoadedPack {
         icons: spec.models.iter().map(|m| m.icon).collect(),
         models,
+        set,
+    })
+}
+
+/// Load one `.glb` file by its path under `assets/` (WP3.2): the model of a
+/// unit definition. The file must lie in the directory (`dir`) of a pack in
+/// `models.ron`, which says how to read it (axes) and where its levels of
+/// detail switch; `icon` is the strategic icon the model's shape gets. The
+/// result is a pack of one model, so several of them can be joined with
+/// [`ModelSet::concat`] without the models having to be one pack's list.
+///
+/// With `fit` set to `(along x, along z)` metres the model is scaled, the
+/// same in every direction, until its finest level just fits a box of that
+/// size on the ground (it may grow or shrink, by no more than a factor of 4
+/// either way): a building then stands on its footprint of 4 m cells.
+pub fn load_pack_model(
+    config: &str,
+    path: &str,
+    icon: crate::icons::IconShape,
+    assets: &Path,
+    fit: Option<(f32, f32)>,
+) -> Result<LoadedPack, GlbError> {
+    let file: PackFile =
+        ron::from_str(config).map_err(|e| GlbError::Invalid(format!("models.ron: {e}")))?;
+    let (name, spec) = file
+        .packs
+        .iter()
+        .find(|(_, spec)| {
+            path.strip_prefix(spec.dir.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+        })
+        .ok_or_else(|| {
+            GlbError::Invalid(format!(
+                "{path}: no model pack in models.ron has this directory"
+            ))
+        })?;
+    let file = assets.join(path);
+    let model = load_glb_file(&file, &spec.axes).map_err(|e| match e {
+        GlbError::Io(e) => GlbError::Io(e),
+        other => GlbError::Invalid(format!("{}: {other}", file.display())),
+    })?;
+    let model = match fit {
+        Some((x, z)) => {
+            let b = bounds_of(&model);
+            let (have_x, have_z) = (b.max.x - b.min.x, b.max.z - b.min.z);
+            if have_x > 0.0 && have_z > 0.0 && x > 0.0 && z > 0.0 {
+                model.scaled((x / have_x).min(z / have_z).clamp(0.25, 4.0))
+            } else {
+                model
+            }
+        }
+        None => model,
+    };
+    let set = model_set(std::slice::from_ref(&model), &spec.lod_px)
+        .map_err(|e| GlbError::Invalid(format!("pack {name}: {e}")))?;
+    Ok(LoadedPack {
+        models: vec![model],
+        icons: vec![icon],
         set,
     })
 }

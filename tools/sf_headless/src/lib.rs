@@ -35,6 +35,7 @@
 //! | `seed` | World seed (decimal or `0x` hex, `_` allowed). Also seeds the placement stream that draws spawn positions. |
 //! | `map` | `(width: .., height: ..)` in cells, 1 to 1024; 256 by 256 when left out. |
 //! | `map_name` | `Some("playfield256")`: the world is made on the terrain layer of `assets/maps/<name>/` (next to the scenario's directory); its size in cells must equal `map`. Without it every cell is open ground. |
+//! | `unit_defs` | `Some("units_spawn_defs")`: the world is made with the unit definitions in `assets/scenarios/<name>/` (`unit_classes.ron`, `weapon_defs.ron`, `unit_defs.ron`; a frozen copy, so balance changes do not move a pinned checksum) as its unit table, which `SpawnUnit` and `PlaceStructure` need (WP3.2). Read by `Scenario::load`, like `map_name`. |
 //! | `ticks` | Length of the run, at least 1. |
 //! | `spawns` | Groups of entities: `tick` (default 0), `player` (default 0; the issuer, which orders commands within a tick), `count`, `kinds`, `owners` (cycled: entity `i` gets `kinds[i % len]`), `area` (`(min: (x, y), max: (x, y))`, cells, max exclusive). |
 //! | `commands` | Timed commands: `tick`, `player` (default 0), `command`. |
@@ -43,7 +44,13 @@
 //! `SetWanderArea(ids: .., area: ..)`, `MoveTo(ids: .., target: (x, y))`,
 //! `Despawn(ids: ..)` and `Place(kind: .., owner: .., cell: (x, y))`, a
 //! standing structure that occupies a buildable, free cell (and is ignored
-//! otherwise). Entities are named by id: `Id(index, generation)` or
+//! otherwise). With `unit_defs` there are two more:
+//! `SpawnUnit(kind: .., owner: .., cell: (x, y))`, a unit or object of the
+//! definitions in the middle of a cell, and `PlaceStructure(kind: .., owner:
+//! .., cell: (x, y))`, a structure of the definitions with its footprint
+//! anchored on the cell (all of its cells must be buildable and free).
+//! Both take the next free id like a spawn and are ignored for an unknown
+//! kind or the wrong sort of kind. Entities are named by id: `Id(index, generation)` or
 //! `Range(from, to)` (slots `from..to` at generation 0; in a world without
 //! despawns the entities spawned `from`-th to `to`-th, in execution order).
 //!

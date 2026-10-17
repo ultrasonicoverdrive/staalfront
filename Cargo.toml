@@ -4,6 +4,7 @@ members = [
     "crates/sf_math",
     "crates/sf_sim",
     "crates/sf_data",
+    "crates/sf_bridge",
     "crates/sf_ai",
     "crates/sf_engine",
     "crates/sf_render",

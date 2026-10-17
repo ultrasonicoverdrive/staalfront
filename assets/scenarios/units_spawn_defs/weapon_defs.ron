@@ -1,0 +1,53 @@
+// Weapons (WP3.1). Read by sf_data::units; unit_defs.ron refers to them by id.
+//
+//   range, min_range, splash_radius   cells (1 cell = 4 m, B12)
+//   reload                            game seconds, a whole number of 20 Hz
+//                                     ticks (a multiple of 0.05)
+//   damage                            hit points per hit, before armor (WP5.3)
+//   damage_type                       a name from unit_classes.ron
+//   projectile                        Straight, Arc, Guided or Falling (WP5.2)
+//   kind                              the permanent number of the weapon (what
+//                                     the simulation uses): never changed, never
+//                                     reused; records may stand in any order. A
+//                                     removed weapon leaves a tombstone in
+//                                     `retired_weapons` (below).
+//
+// Ranges (and min_range of the howitzer) are the design targets of
+// content/units.md. Everything marked `placeholder` is not in that file and is
+// a guess for the balance rounds of phase 15: damage, reload, splash, and the
+// numbers of the weapons that units.md names without stats.
+(
+    weapons: [
+        // Baseline infantry rifle.
+        (kind: 0, id: "rifle", range: 4, reload: 1, damage: 6, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        // Anti-armour rocket (rocket_trooper).
+        (kind: 1, id: "rocket", range: 5, reload: 2.5, damage: 45, damage_type: "rocket", projectile: Guided), // placeholder: reload, damage
+        // Sniper: infantry only (an armor-table matter, WP5.3).
+        (kind: 2, id: "long_rifle", range: 8, reload: 3, damage: 40, damage_type: "precision", projectile: Straight), // placeholder: reload, damage
+        (kind: 3, id: "pistol", range: 3, reload: 1, damage: 4, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        (kind: 4, id: "carbine", range: 3, reload: 0.8, damage: 5, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        // Demolition team: destroys any structure on contact, so the range is
+        // touching distance and the damage is more than any structure's hit points.
+        (kind: 5, id: "satchel_charge", range: 0.5, reload: 1, damage: 5000, damage_type: "demolition", projectile: Straight), // placeholder: range, reload, damage
+        // light_tank.
+        (kind: 6, id: "cannon", range: 5, reload: 2, damage: 35, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        // heavy_tank.
+        (kind: 7, id: "twin_cannon", range: 5, reload: 2, damage: 60, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        // siege_artillery.
+        (kind: 8, id: "howitzer", range: 10, min_range: 3, reload: 5, damage: 90, damage_type: "shell", projectile: Arc, splash_radius: 1.5), // placeholder: reload, damage, splash
+        // heavy_gun_team.
+        (kind: 9, id: "anti_tank_gun", range: 6, reload: 2.5, damage: 70, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        // gunboat.
+        (kind: 10, id: "naval_cannon", range: 6, reload: 2, damage: 45, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        // defence_tower: anti-infantry and light vehicles.
+        (kind: 11, id: "tower_gun", range: 6, reload: 0.8, damage: 8, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        // advanced_defences: anti-armour gun emplacement.
+        (kind: 12, id: "emplacement_gun", range: 7, reload: 2.5, damage: 80, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        // automated_gun (F2-M10 hub prototype defence).
+        (kind: 13, id: "automated_gun", range: 8, reload: 1, damage: 20, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        // unmanned_artillery (F2-M09): units.md gives no numbers.
+        (kind: 14, id: "battery_shell", range: 12, min_range: 3, reload: 6, damage: 80, damage_type: "shell", projectile: Arc, splash_radius: 1.5), // placeholder: all numbers
+    ],
+    // Tombstones of removed weapons, as (kind: <number>, name: "<old id>").
+    retired_weapons: [],
+)
