@@ -5,7 +5,7 @@ close-up to the whole map and cartoon cutscenes. Inspired by the game rules of
 Command & Conquer: Red Alert, without its name, world, units or media.*
 
 Drawn up 14-10-2026. Source: `docs/red-alert-analysis.md` (functional analysis of
-the EA source code). Execution: Sonnet agents at effort medium (see §12).
+the EA source code). Execution: Opus agents at effort low, medium for the WPs marked [xhigh] (see §12).
 
 ---
 
@@ -405,14 +405,15 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 ## 12. Execution with agents
 
 ### 12.1 Agent type
-Two agents, both in the repo (they travel to every environment), both model `sonnet`, same instructions:
+Two agents, both in the repo (they travel to every environment), both model `opus`, same instructions:
 
-- `.claude/agents/bouwer-sonnet.md` — effort `medium`: the default for every WP.
-- `.claude/agents/bouwer-sonnet-xhigh.md` — effort `xhigh`: for the hard WPs, marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
+- `.claude/agents/bouwer-opus.md` — effort `low`: the default for every WP not marked **[xhigh]**.
+- `.claude/agents/bouwer-opus-medium.md` — effort `medium`: for the hard WPs, marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
 
-Decision Tijmen 14-10-2026 (was `xhigh` for everything). Each agent executes one
-work package, works in its own git worktree/branch, opens a PR. If a medium WP
-fails review twice, the orchestrator reruns it on `bouwer-sonnet-xhigh`.
+Decision Tijmen 17-10-2026 (was Sonnet at medium, and Sonnet at xhigh for [xhigh]
+WPs, from 14-10-2026). Each agent executes one work package, works in its own git
+worktree/branch, opens a PR. If a WP fails review twice on `bouwer-opus`, the
+orchestrator reruns it on `bouwer-opus-medium`.
 
 Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
 
@@ -458,5 +459,5 @@ The project lives **only on GitHub**; nothing goes on the home server
 
 1. Link cloud agents to the GitHub repo (§13).
 2. Confirm decisions B1–B7.
-3. Agent type `bouwer-sonnet` active, start phase 0 (WP0.1 through WP0.3), then phase 1 (engine).
+3. Agent type `bouwer-opus` active (was `bouwer-sonnet` until 17-10-2026), start phase 0 (WP0.1 through WP0.3), then phase 1 (engine).
 4. At M0 (engine demo): benchmark on the laptop, view the zoom and tune the camera sensitivity together. Only then phase 2.
