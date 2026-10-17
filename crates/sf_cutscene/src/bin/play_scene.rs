@@ -191,11 +191,6 @@ impl Viewer {
                     seconds(p.duration_ms()),
                     seconds(p.time_ms()),
                 );
-                if let Some(cutscenes) = &mut self.cutscenes {
-                    cutscenes.forget_pictures();
-                    cutscenes.preload_pictures(preview.player().scene());
-                }
-                self.reported.clear();
             }
             Applied::Rejected => {
                 eprintln!("play_scene: reload failed, still showing the last good version:");
@@ -204,6 +199,14 @@ impl Viewer {
                 }
             }
         }
+        // After either outcome the pictures are read again: the last good
+        // scene's pictures stay watched while the file is broken, so a picture
+        // saved in that time shows up too.
+        if let Some(cutscenes) = &mut self.cutscenes {
+            cutscenes.forget_pictures();
+            cutscenes.preload_pictures(self.live.preview().player().scene());
+        }
+        self.reported.clear();
     }
 }
 

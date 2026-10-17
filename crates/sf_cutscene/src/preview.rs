@@ -30,6 +30,11 @@ use crate::watch::SceneWatcher;
 
 /// How many error lines the overlay lists before "... and N more".
 pub const MAX_LISTED_ERRORS: usize = 12;
+/// The largest scene or Fountain file the preview reads (a real scene is a few
+/// hundred KiB at most). A bigger one is a mistake, and reading it on every
+/// poll would stall the window.
+pub const MAX_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
+const MIB: u64 = 1024 * 1024;
 
 /// One problem, located like a compiler message: `file:line:col: message`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,21 +113,50 @@ impl Source {
     }
 
     /// Read the file and load it. `assets` is the asset root (to list missing
-    /// pictures and sounds).
+    /// pictures and sounds). A file above [`MAX_SOURCE_BYTES`] is refused
+    /// without being read (see [`Source::load_limited`]).
     pub fn load(&self, assets: &Path) -> LoadResult {
+        self.load_limited(assets, MAX_SOURCE_BYTES)
+    }
+
+    /// [`Source::load`] with another size limit (tests). The size is checked
+    /// before reading, and the read itself stops one byte past the limit, so
+    /// a file that grows between the check and the read cannot get through.
+    pub fn load_limited(&self, assets: &Path, limit: u64) -> LoadResult {
+        use std::io::Read;
         let file = self.path().display().to_string();
-        match std::fs::read_to_string(self.path()) {
-            Ok(text) => self.load_text(&text, assets),
-            Err(e) => Err(LoadFailure {
-                diagnostics: vec![Diagnostic {
-                    file,
-                    line: None,
-                    column: None,
-                    message: format!("cannot read: {e}"),
-                }],
-                unreadable: true,
-            }),
+        let fail = |message: String, unreadable: bool| LoadFailure {
+            diagnostics: vec![Diagnostic {
+                file: file.clone(),
+                line: None,
+                column: None,
+                message,
+            }],
+            unreadable,
+        };
+        let too_large = |len: u64| {
+            fail(
+                format!(
+                    "file too large ({} MiB, limit {} MiB)",
+                    len.div_ceil(MIB),
+                    limit.div_ceil(MIB)
+                ),
+                false,
+            )
+        };
+        let opened = std::fs::File::open(self.path()).and_then(|f| f.metadata().map(|m| (f, m)));
+        let (f, meta) = opened.map_err(|e| fail(format!("cannot read: {e}"), true))?;
+        if meta.len() > limit {
+            return Err(too_large(meta.len()));
         }
+        let mut text = String::new();
+        f.take(limit.saturating_add(1))
+            .read_to_string(&mut text)
+            .map_err(|e| fail(format!("cannot read: {e}"), true))?;
+        if text.len() as u64 > limit {
+            return Err(too_large(text.len() as u64));
+        }
+        self.load_text(&text, assets)
     }
 
     /// Load from text already read (the file read is the only I/O of
@@ -155,7 +189,7 @@ impl Source {
                         source: Some(file.replace('\\', "/")),
                     },
                 );
-                let mut warnings: Vec<Diagnostic> = import
+                let converter_warnings: Vec<Diagnostic> = import
                     .warnings
                     .iter()
                     .map(|w| Diagnostic {
@@ -165,23 +199,37 @@ impl Source {
                         message: w.message.clone(),
                     })
                     .collect();
-                match load_str(&import.ron, Some(assets)) {
-                    Ok(l) => {
-                        for w in &l.warnings {
-                            let (line, message) =
-                                fountain_position(&import.ron, w.line, &w.message);
-                            warnings.push(Diagnostic {
-                                file: file.clone(),
-                                line,
-                                column: None,
-                                message,
-                            });
-                        }
-                        Ok(Loaded { scene: l, warnings })
-                    }
-                    Err(e) => Err(failure(e, &file, Some(&import.ron))),
-                }
+                self.load_converted(&import.ron, converter_warnings, assets)
             }
+        }
+    }
+
+    /// Load the scene a Fountain file was converted to. Problems in it are
+    /// reported with the line of the **Fountain** file (from the `// line N` the
+    /// converter puts after every event). Split from [`Source::load_text`] so
+    /// the tests can feed a converted briefing with an error put into it (the
+    /// converter itself only produces valid scenes).
+    fn load_converted(
+        &self,
+        ron: &str,
+        mut warnings: Vec<Diagnostic>,
+        assets: &Path,
+    ) -> LoadResult {
+        let file = self.path().display().to_string();
+        match load_str(ron, Some(assets)) {
+            Ok(l) => {
+                for w in &l.warnings {
+                    let (line, message) = fountain_position(ron, w.line, &w.message);
+                    warnings.push(Diagnostic {
+                        file: file.clone(),
+                        line,
+                        column: None,
+                        message,
+                    });
+                }
+                Ok(Loaded { scene: l, warnings })
+            }
+            Err(e) => Err(failure(e, &file, Some(ron))),
         }
     }
 }
@@ -569,7 +617,10 @@ impl LivePreview {
     }
 }
 
-/// What one reload did.
+/// What one reload did. A reload is also what a changed picture causes, so the
+/// caller reads the pictures of the scene on screen again after **either**
+/// outcome: while the scene file is broken, the last good scene's pictures stay
+/// watched ([`Preview::watched_files`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reload {
     pub applied: Applied,
@@ -899,6 +950,128 @@ Scene(
         let (line, msg) = fountain_position(ron, Some(3), "boom");
         assert_eq!(line, None);
         assert!(msg.contains("generated scene, line 3"), "{msg}");
+    }
+
+    #[test]
+    fn a_file_over_the_size_cap_is_refused_and_the_old_scene_stays() {
+        let dir = std::env::temp_dir().join(format!("sf_cutscene-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("big.ron");
+        std::fs::write(&file, scene_ron("one", 6000)).unwrap();
+        let src = Source::Scene(file.clone());
+        let assets = Path::new("assets");
+        let first = src.load(assets);
+        assert!(first.is_ok(), "a normal file loads at the real limit");
+        let mut p = Preview::new(src.clone(), PathBuf::from("assets"), first, false);
+
+        // Over the real cap: 8 MiB + 1 byte (a sparse file, nothing is written).
+        let f = std::fs::File::create(&file).unwrap();
+        f.set_len(MAX_SOURCE_BYTES + 1).unwrap();
+        drop(f);
+        let failure = src.load(assets).unwrap_err();
+        assert!(!failure.unreadable);
+        assert_eq!(
+            failure.diagnostics[0].message,
+            "file too large (9 MiB, limit 8 MiB)"
+        );
+        assert_eq!(p.apply(Err(failure)), Applied::Rejected);
+        assert!(p.panels(&[])[0].lines[1].text.contains("file too large"));
+        assert_eq!(p.player().scene().name, "one", "the last good scene stays");
+
+        // A custom limit, and exactly at the limit is fine.
+        std::fs::write(&file, scene_ron("two", 6000)).unwrap();
+        let len = std::fs::metadata(&file).unwrap().len();
+        assert!(src.load_limited(assets, len).is_ok());
+        let e = src.load_limited(assets, len - 1).unwrap_err();
+        assert!(
+            e.diagnostics[0]
+                .message
+                .starts_with("file too large (1 MiB, limit 1 MiB)")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A real briefing, converted by the real converter, with one error put into
+    /// the generated scene (the converter never produces an invalid scene, and
+    /// no Fountain text was found that does): the validator's message must come
+    /// out with the line of the Fountain file the event was written on.
+    #[test]
+    fn a_validation_error_in_a_converted_briefing_points_at_the_fountain_line() {
+        let fountain = include_str!("../../../content/briefings/F1-M01.fountain");
+        let path = PathBuf::from("content/briefings/F1-M01.fountain");
+        let import = convert(
+            fountain,
+            &ImportOptions {
+                name: scene_name("F1-M01"),
+                source: None,
+            },
+        );
+        let src = Source::Fountain(path);
+        assert!(
+            src.load_converted(&import.ron, Vec::new(), Path::new("assets"))
+                .is_ok(),
+            "the briefing is valid as converted"
+        );
+        // Pick the third spoken line and make its speaker someone who is not in
+        // the scene.
+        let (n, target) = import
+            .ron
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.contains("Dialogue(speaker: \""))
+            .nth(2)
+            .expect("a briefing has dialogue");
+        let fountain_line: usize = target
+            .rsplit_once("// line ")
+            .and_then(|(_, t)| t.trim().parse().ok())
+            .expect("every event ends in its Fountain line");
+        let start = target.find("speaker: \"").unwrap() + "speaker: \"".len();
+        let end = start + target[start..].find('"').unwrap();
+        let mut lines: Vec<String> = import.ron.lines().map(str::to_owned).collect();
+        lines[n] = format!("{}nobody{}", &target[..start], &target[end..]);
+        let broken = lines.join("\n");
+
+        let failure = src
+            .load_converted(&broken, Vec::new(), Path::new("assets"))
+            .unwrap_err();
+        assert!(!failure.unreadable);
+        let d = &failure.diagnostics[0];
+        assert!(d.message.contains("nobody"), "{d}");
+        assert_eq!(d.line, Some(fountain_line), "{d}");
+        assert_eq!(
+            d.column, None,
+            "no column: it is not about the Fountain file"
+        );
+        assert_eq!(
+            d.to_string(),
+            format!(
+                "content/briefings/F1-M01.fountain:{fountain_line}: {}",
+                d.message
+            )
+        );
+        // That line really is part of the briefing (not a line of the
+        // generated scene).
+        assert!(fountain_line <= fountain.lines().count());
+        assert!(
+            !fountain
+                .lines()
+                .nth(fountain_line - 1)
+                .unwrap()
+                .trim()
+                .is_empty()
+        );
+        // A syntax error in the generated scene (no marker on its line) says
+        // where in the generated scene instead of pointing at a wrong line.
+        let syntax = import.ron.replacen("Scene(", "Scene((", 1);
+        let failure = src
+            .load_converted(&syntax, Vec::new(), Path::new("assets"))
+            .unwrap_err();
+        let d = &failure.diagnostics[0];
+        assert_eq!(d.column, None);
+        assert!(
+            d.line.is_some() || d.message.contains("generated scene, line"),
+            "{d}"
+        );
     }
 
     #[test]

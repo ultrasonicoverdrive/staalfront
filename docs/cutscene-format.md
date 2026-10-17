@@ -428,7 +428,7 @@ cargo run -p sf_cutscene --bin play_scene -- --watch --fountain content\briefing
 (The first run builds for a few minutes; after that it starts at once.) Open the same
 `.fountain` file in your editor and write. Every save re-converts the briefing (nothing is
 written to disk) and plays on from where it was. For a scene RON file (the artist), leave out
-`--fountain`: `... play_scene -- --watch assets\scenes\f1_m01.ron`. To leave: Esc in the
+`--fountain`: `... play_scene -- --watch assets\scenes\example_bridge.ron`. To leave: Esc in the
 window, or Ctrl+C in the terminal.
 
 | Key | Does |
@@ -441,10 +441,13 @@ window, or Ctrl+C in the terminal.
 
 **What is watched.** The scene file (or the `.fountain` file) and every picture the scene
 refers to, also pictures that do not exist yet: the moment the artist saves one, it appears.
-A save is noticed within 250 ms and applied 150 ms after the last change, so an editor that
-writes a temporary file and renames it, or deletes and recreates the file, gives one clean
-reload and never a half-written file. Saving without changing anything (or `touch`) reloads
-too; that is the way to force one. Sound is not played by the viewer; cues are printed in the
+The files are looked at every 250 ms; a change is applied after the first look that finds
+nothing new, so a save shows up 0.25 to 0.5 s later, and a write that takes several steps (an
+editor that writes a temporary file and renames it, deletes and recreates the file, or writes
+half the file first and the rest 50 ms later) gives one reload after the last step, never one
+with a half-written file. Saving without changing anything (or `touch`) reloads too; that is
+the way to force one. A scene or Fountain file over 8 MiB is not read at all: the red box says
+`file too large (9 MiB, limit 8 MiB)` and the last good version stays. Sound is not played by the viewer; cues are printed in the
 terminal as before, and after a reload the music, ambience and voice line that belong to the
 current moment are announced again, as after a seek.
 
@@ -458,8 +461,8 @@ printed in the terminal:
 
 ```
 Reload failed - still showing the last good version:
-assets/scenes/f1_m01.ron:22:105: Expected float
-assets/scenes/f1_m01.ron:105: track "stage", event 0: Enter at 0 ms: unknown character "zed"
+assets/scenes/example_bridge.ron:22:105: Expected float
+assets/scenes/example_bridge.ron:105: track "stage", event 0: Enter at 0 ms: unknown character "zed"
 ```
 
 Each line reads `file:line:column: message` as in `scene_check`; a message that only knows
@@ -486,9 +489,12 @@ Frames of this: [`docs/screenshots/wp12.6/`](screenshots/wp12.6/): the error ove
 HUD, the pictures list while two pictures do not load, and the same scene after one was saved.
 
 **How it is built.** Polling, not a file-watch library: every 250 ms the watched files are
-compared by size, modification time and a hash of the content (file systems with coarse time
-stamps, such as FAT, or Windows updating the time late, can show two saves as alike in size and
-time; the hash tells them apart; files over 32 MiB are compared by size and time only). In code:
+compared by size and modification time; a file that changed, or whose time is less than 2 s old,
+is also hashed (file systems with coarse time stamps, such as FAT, or Windows updating the time
+late, can show two saves as alike in size and time, and the hash tells them apart; a file that
+has not been touched for 2 s only costs a `stat`; files over 32 MiB are never hashed). The reload
+waits for a quiet period of at least one poll interval after the last change that was seen (the
+150 ms "debounce" is raised to the interval; shorter, it would end before the next look). In code:
 `sf_cutscene::preview::{Source, Preview, LivePreview}` (the reload state machine and the HUD
 text) and `sf_cutscene::watch::{SceneWatcher, Debounce}` (both take the clock as a number of
 milliseconds, so they are tested with a fake one); `Player::replace_scene` keeps the playhead.

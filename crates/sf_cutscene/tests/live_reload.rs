@@ -102,10 +102,104 @@ fn the_reload_waits_for_the_burst_to_settle() {
     let mut live = open(Source::Scene(file.clone()), &dir.assets());
     assert!(live.tick(0).is_none());
     fs::write(&file, scene("two", 6000, None)).unwrap();
-    assert!(live.tick(250).is_none(), "seen at 250, waits 150 ms");
-    assert!(live.tick(399).is_none());
-    let r = live.tick(400).expect("settled");
+    assert!(live.tick(250).is_none(), "seen at 250, now settling");
+    assert!(
+        live.tick(400).is_none(),
+        "a whole poll interval of quiet first"
+    );
+    assert!(live.tick(499).is_none());
+    let r = live.tick(500).expect("the look at 500 found nothing new");
     assert_eq!(r.applied, Applied::Reloaded { recovered: false });
+}
+
+/// The editor writes in two steps, with a look of the watcher in between
+/// (default timing). The first part is not valid; it must not be loaded, and
+/// the whole file must come as the one and only reload.
+#[test]
+fn a_two_step_write_is_one_reload_of_the_whole_file() {
+    let dir = TempDir::new("twostep");
+    let file = dir.path("scene.ron");
+    let good = scene("two", 7000, None);
+    fs::write(&file, scene("one", 6000, None)).unwrap();
+    let mut live = open(Source::Scene(file.clone()), &dir.assets());
+    run(&mut live, 0, 200);
+
+    fs::write(&file, &good[..good.len() / 2]).unwrap(); // step 1: half a file
+    let mut reloads = run(&mut live, 210, 290); // the look at 250 sees it
+    fs::write(&file, &good).unwrap(); // step 2, 50 ms later
+    reloads.extend(run(&mut live, 300, 3000));
+    assert_eq!(
+        reloads,
+        [Applied::Reloaded { recovered: false }],
+        "no rejected half file, no second reload"
+    );
+    assert!(!live.preview().has_errors());
+    assert_eq!(live.preview().player().scene().name, "two");
+}
+
+/// A picture saved while the scene file is broken must still cause a reload
+/// (the viewer reads the pictures again after every one): the last good
+/// scene's pictures stay watched.
+#[test]
+fn a_picture_saved_while_the_scene_is_broken_is_still_noticed() {
+    let dir = TempDir::new("brokenpic");
+    let file = dir.path("scene.ron");
+    let pic = dir.assets().join("art/bg.png");
+    fs::create_dir_all(dir.assets().join("art")).unwrap();
+    fs::write(&pic, b"v1").unwrap();
+    fs::write(&file, scene("one", 6000, Some("art/bg.png"))).unwrap();
+    let mut live = open(Source::Scene(file.clone()), &dir.assets());
+    run(&mut live, 0, 500);
+
+    fs::write(&file, "Scene(").unwrap();
+    assert_eq!(run(&mut live, 510, 1300), [Applied::Rejected]);
+    assert!(live.preview().has_errors());
+    assert_eq!(
+        live.preview().watched_files(),
+        [file.clone(), pic.clone()],
+        "the last good scene's picture is still watched"
+    );
+
+    fs::write(&pic, b"version 2").unwrap();
+    assert_eq!(
+        run(&mut live, 1310, 2200),
+        [Applied::Rejected],
+        "the picture change is noticed (and the file is still broken)"
+    );
+    assert_eq!(live.preview().player().scene().name, "one");
+
+    // Fixing the scene brings the reload as usual.
+    fs::write(&file, scene("two", 6000, Some("art/bg.png"))).unwrap();
+    assert_eq!(
+        run(&mut live, 2210, 3000),
+        [Applied::Reloaded { recovered: true }]
+    );
+}
+
+/// A scene file over the size limit is refused without being read; the last
+/// good scene stays and the overlay says why.
+#[test]
+fn a_scene_file_over_the_size_limit_is_refused_through_the_whole_path() {
+    let dir = TempDir::new("toolarge");
+    let file = dir.path("scene.ron");
+    fs::write(&file, scene("one", 6000, None)).unwrap();
+    let mut live = open(Source::Scene(file.clone()), &dir.assets());
+    run(&mut live, 0, 500);
+
+    let f = fs::File::create(&file).unwrap();
+    f.set_len(sf_cutscene::preview::MAX_SOURCE_BYTES + 1)
+        .unwrap();
+    drop(f);
+    assert_eq!(run(&mut live, 510, 1300), [Applied::Rejected]);
+    let p = live.preview();
+    assert_eq!(p.player().scene().name, "one");
+    assert!(
+        p.errors()[0]
+            .message
+            .starts_with("file too large (9 MiB, limit 8 MiB)"),
+        "{}",
+        p.errors()[0]
+    );
 }
 
 #[test]
