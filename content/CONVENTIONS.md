@@ -16,3 +16,5 @@ Every `missions/*.md` must satisfy these rules before it counts as implementatio
 12. **After the mission (K)**: carry-over flags, optional evidence flag name (`evidence_<code>`), and a test scenario list of at least 6 concrete checks.
 13. Keep the existing "## Notes" paragraph at the end.
 14. Language: English, as in the source files.
+15. **Timing check**: every number that depends on travel (convoy, escape, wave arrival, patrol loop, deadline, target length) is worked out with the speeds of `units.md` (cells per second) and the arithmetic, distance in cells ÷ speed = time, is written at the end of the Notes section under "Timing check". Timers that a message or briefing line states ("nine minutes", "ninety seconds") keep the stated value; the geometry and the speeds are adjusted around them.
+16. Every `MSG_` speaker is a character of `cast.md` or OPERATIONS; every briefing cue is one too, spelled as in `cast.md`. `scripts/validate.py` enforces both.
