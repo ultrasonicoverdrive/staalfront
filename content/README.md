@@ -24,8 +24,8 @@ can later be converted into the engine formats:
 
 ## Rules
 
-- **Own content only (B5).** No names, characters, stories, dialogue or scenes from Red
-  Alert or other games, not even redrawn or paraphrased. Taking over the *structure* is
+- **Own content only (B5).** No names, characters, stories, dialogue or scenes from any
+  existing game, not even redrawn or paraphrased. Taking over the *structure* is
   fine: see `docs/mission-inspiration.md` and `docs/cutscene-inspiration.md`.
 - **Game text is English (B8).** Dialogue, objectives and messages go in English. Notes
   for yourself may be in any language. Put them in Fountain notes `[[ ... ]]` or in the
@@ -77,7 +77,7 @@ python3 -I content/scripts/validate.py
 python3 content/scripts/export_messages.py
 ```
 
-`validate.py` checks the 20 mission files (sections, references, roles, objectives, win/lose, MSG speakers) and the 20 briefings (every cue is in `cast.md`; every speaker is in the room or marked `(V.O.)`/`(O.S.)`; transitions other than `TO:` start with `>`). It skips `_template.*` and `EXAMPLE-*`; name a file to check it anyway. The exit code is 1 on any error. Run it before each commit, and run `export_messages.py` after changing a message.
+`validate.py` checks the 20 mission files (sections, references, roles, objectives, win/lose, MSG speakers) and the 20 briefings (every cue is in `cast.md`; every speaker is in the room or marked `(V.O.)`/`(O.S.)`; transitions other than `TO:` start with `>`; "in the room" means an action sentence names the speaker with a verb such as stand, sit, lean or wait). It also fails if a role name or title from another game appears anywhere in `content/` (B5). It skips `_template.*` and `EXAMPLE-*`; name a file to check it anyway. The exit code is 1 on any error. Run it before each commit, and run `export_messages.py` after changing a message.
 
 ## Workflow
 

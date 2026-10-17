@@ -11,6 +11,8 @@ conventions in README.md:
   * every speaker is in the room per the action lines, unless the cue carries (V.O.)
     or (O.S.); a speaker who is on the radio must carry one of them;
   * a transition other than "... TO:" starts with ">" (for example "> FADE OUT.").
+The whole of content/ is also scanned for names that belong to other games (B5):
+the role names construction-yard and naval-yard (with an underscore) and the title of the game that inspired the genre are errors.
 
 Usage (from anywhere; run it isolated):
     python3 -I content/scripts/validate.py                  # every campaign file
@@ -186,8 +188,22 @@ SCENE_HEADING = re.compile(r"^(INT|EXT|EST|INT\./EXT|INT/EXT|I/E)[. ]", re.I)
 # Words that start a screenplay transition; "FADE IN:" and "FADE OUT." are the usual ones.
 TRANSITION_WORDS = re.compile(
     r"^(FADE|CUT|DISSOLVE|WIPE|IRIS|SMASH|MATCH|JUMP|HARD CUT|THE END|BACK TO)\b")
-RADIO_WORDS = re.compile(r"\b(voice|handset|radio|telephone|phone|intercom|loudspeaker)\b", re.I)
-RADIO_PAREN = re.compile(r"\b(over (the )?(radio|phone|handset)|on (the )?radio|radio)\b", re.I)
+RADIO_WORDS = re.compile(r"\b(voice|handset|radio|telephone|phone|intercom|loudspeaker|crackles?|through it|on the line)\b", re.I)
+# A speaker counts as present only if an action sentence names them together with one
+# of these verbs. A name alone is not enough: "Mira holds the handset. Rusk crackles
+# through it." names Rusk, but not as being in the room, so his cue needs (V.O.).
+# Limitation: the check is a word list, not a parser. A presence verb that is not in the
+# list is reported as an error (add it here), and a sentence that uses a listed verb for
+# someone on the radio ("Rusk waits on the line") would pass.
+PRESENCE_VERBS = (
+    "stand", "stands", "stood", "sit", "sits", "sat", "lean", "leans", "crouch", "crouches",
+    "kneel", "kneels", "wait", "waits", "watch", "watches", "study", "studies", "read", "reads",
+    "hold", "holds", "bend", "bends", "pace", "paces", "enter", "enters", "walk", "walks",
+    "look", "looks", "work", "works", "rest", "rests", "lie", "lies", "face", "faces",
+    "point", "points", "arrives", "arrive",
+)
+PRESENCE_RE = re.compile(r"\b(" + "|".join(PRESENCE_VERBS) + r")\b", re.I)
+RADIO_PAREN =re.compile(r"\b(over (the )?(radio|phone|handset)|on (the )?radio|radio)\b", re.I)
 
 
 def fountain_blocks(text):
@@ -210,6 +226,17 @@ def fountain_blocks(text):
 
 def is_upper_line(s):
     return s == s.upper() and re.search(r"[A-Z]", s) is not None
+
+
+def named_as_present(name, scene_action):
+    """True if an action sentence names the speaker with a presence verb and does not
+    describe a radio, handset or other channel."""
+    surname = name.split()[-1]
+    for sentence in re.split(r"(?<=[.!?])\s+", scene_action):
+        if re.search(rf"\b({re.escape(name)}|{re.escape(surname)})\b", sentence, re.I) \
+                and PRESENCE_RE.search(sentence) and not RADIO_WORDS.search(sentence):
+            return True
+    return False
 
 
 def validate_briefing(path, cast):
@@ -253,18 +280,11 @@ def validate_briefing(path, cast):
             parens = " ".join(l for l in block[1:] if l.strip().startswith("("))
             if not on_radio and RADIO_PAREN.search(parens):
                 errors.append(f"{name} speaks over the radio ({parens.strip()}) but the cue lacks (V.O.) or (O.S.)")
-            if not on_radio:
-                surname = name.split()[-1]
-                if not re.search(rf"\b({re.escape(name)}|{re.escape(surname)})\b", scene_action, re.I):
-                    errors.append(f"{name} speaks but is not named in the action lines of the scene before the first line (write (V.O.) or (O.S.) if on the radio)")
-                else:
-                    # named only as a voice on a handset? then the cue must say so
-                    for sentence in re.split(r"(?<=[.!?])\s+", scene_action):
-                        if re.search(rf"\b({re.escape(name)}|{re.escape(surname)})", sentence, re.I) \
-                                and RADIO_WORDS.search(sentence) \
-                                and not re.search(r"\b(stand|stands|sit|sits|lean|leans|crouch|crouches|kneel|kneels)\b", sentence, re.I):
-                            errors.append(f"{name} is on the radio per the action line '{sentence.strip()}' but the cue lacks (V.O.) or (O.S.)")
-                            break
+            if not on_radio and not named_as_present(name, scene_action):
+                errors.append(
+                    f"{name} speaks without (V.O.)/(O.S.) but the action lines of the scene do not say that "
+                    f"{name.split()[-1]} is in the room (a sentence naming them with a verb such as stand, sit, "
+                    f"lean, crouch, wait, watch; or write the cue as '{name} (V.O.)' if on the radio)")
             first_cue_seen.add(name)
             continue
         # Everything else is action.
@@ -273,6 +293,31 @@ def validate_briefing(path, cast):
     if not first_cue_seen:
         errors.append("no dialogue found")
     return errors, warnings
+
+
+# --------------------------------------------------------------------------- forbidden terms
+
+# Names that belong to another game (B5, clean-room). The patterns are written so that
+# this file does not match itself.
+FORBIDDEN = [
+    (re.compile(r"construction[_ ]yard", re.I), "use construction_center / construction center"),
+    (re.compile(r"naval[_ ]yard", re.I), "use shipyard"),
+    (re.compile(r"red\s+alert", re.I), "do not name the other game; say \"existing games\""),
+]
+TEXT_SUFFIXES = {".md", ".fountain", ".csv", ".py", ".txt", ".json", ".ron"}
+
+
+def check_forbidden_terms():
+    errors = []
+    for p in sorted(ROOT.rglob("*")):
+        if not p.is_file() or p.suffix not in TEXT_SUFFIXES or "__pycache__" in p.parts:
+            continue
+        text = p.read_text(encoding="utf-8")
+        for pattern, advice in FORBIDDEN:
+            for m in pattern.finditer(text):
+                line = text.count("\n", 0, m.start()) + 1
+                errors.append(f"{p.relative_to(ROOT)}:{line}: forbidden term '{m.group(0)}' ({advice})")
+    return errors
 
 
 # --------------------------------------------------------------------------- main
@@ -298,6 +343,11 @@ def main(argv):
             print(f"    E: {e}")
         for w in warns:
             print(f"    W: {w}")
+    term_errors = check_forbidden_terms()
+    total_err += len(term_errors)
+    print(f"[{'OK ' if not term_errors else 'ERR'}] content/: forbidden terms, {len(term_errors)} errors")
+    for e in term_errors:
+        print(f"    E: {e}")
     print(f"{len(paths)} files checked, {total_err} errors")
     return 1 if total_err else 0
 

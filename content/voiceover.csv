@@ -136,7 +136,7 @@ F2-M05,MSG_09,COMMANDER SAVA,The team is lost. The arsenal keeps its secret and 
 F2-M06,MSG_01,PETROV,"The transfer completes in eighteen minutes. Once the ships leave, we lose the trail."
 F2-M06,MSG_02,COMMANDER SAVA,"Capture the control room before the transfer ends. If the docks are scuttled, push inland through the service works."
 F2-M06,MSG_03,PETROV,Charges on the causeway — they are blowing the dock bridges under us! Pull back from the water. The service works are the only way in now.
-F2-M06,MSG_04,COMMANDER SAVA,The naval yard is cleared for use. Gunboats can reach the inlet below the station; keep them out of range of the shore guns until the tank farm is down.
+F2-M06,MSG_04,COMMANDER SAVA,The shipyard is cleared for use. Gunboats can reach the inlet below the station; keep them out of range of the shore guns until the tank farm is down.
 F2-M06,MSG_05,OPERATIONS,Transfer at fifty percent. Nine minutes remain.
 F2-M06,MSG_06,OPERATIONS,Transfer at eighty-five percent. Three minutes remain.
 F2-M06,MSG_07,COMMANDER SAVA,Control room is ours. Shut the valves and hold the building. They will try to take it back.

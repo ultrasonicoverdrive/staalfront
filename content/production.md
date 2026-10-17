@@ -123,7 +123,7 @@ PLAN gives WP10.1 "scenario format: starting objects, players, goals, triggers (
 | Alliances that change at run time; a team shown to the player as an ally; a player hostile to everyone (Hub) | F1-M08, F2-M10 | needs to be added to WP10.1 (player diplomacy matrix, display faction) | |
 | AI profile switch (`defends` → `attacks` → `harasses`); AI ignores marked units; stop income or refill; start production | F1-M03, F1-M05, F2-M06, F2-M07 | WP10.3 via §2 (AI starts producing, preferred target) on the phase 9 API; the profile switch needs to be added to WP10.3 and phase 9 | P1 |
 | Modify sight range (night −2, storm −2) | F2-M05, F2-M08 | needs to be added to WP10.3, built on WP8.2 | |
-| Enable a build option or restrict where it can be placed (naval_yard only inside Z_INLET) | F1-M05, F2-M06 | WP10.5 gates the tech tree per campaign step; a trigger action and a zone restriction need to be added to WP10.3 and WP6.2 | |
+| Enable a build option or restrict where it can be placed (shipyard only inside Z_INLET) | F1-M05, F2-M06 | WP10.5 gates the tech tree per campaign step; a trigger action and a zone restriction need to be added to WP10.3 and WP6.2 | |
 | Set a campaign flag; end-of-mission choice dialog | all, F2-M10 | WP10.5 (campaign structure, choices); `set_campaign_flag` and `show_choice` need to be added to WP10.3 | P1 |
 | Variable type "unit reference" (`ledger_carrier`) | F2-M05 | needs to be added to WP10.1 (variable types) | |
 | A unit boards a vehicle and leaves the map on exit (ferry, trucks leaving at the pass) | F2-M03, F2-M08 | WP10.1 via §3 (load/unload); removal on exit is the single-object removal above | |
@@ -147,7 +147,7 @@ The additions land in WP10.1 (object hit points, `inspect_only`, diplomacy matri
 
 ## 6. Testing
 
-1. **Doc validation** — `python3 -I content/scripts/validate.py` on every commit: references resolve, roles exist in `units.md`, required objectives have a completing trigger, win and loss triggers present, every MSG speaker and every briefing cue is in `cast.md`, every speaker is in the room or marked (V.O.)/(O.S.), transitions carry ">". The tech tree per mission is not checked automatically.
+1. **Doc validation** — `python3 -I content/scripts/validate.py` on every commit: references resolve, roles exist in `units.md`, required objectives have a completing trigger, win and loss triggers present, every MSG speaker and every briefing cue is in `cast.md`, every speaker is in the room (named with a presence verb) or marked (V.O.)/(O.S.), transitions carry ">", and no name that belongs to another game (B5) appears anywhere in `content/`. The tech tree per mission is not checked automatically.
 2. **Smoke test** per mission — the section K test scenario, scripted where the engine allows (force-trigger TR_ codes).
 3. **Playtest** — one tester per difficulty band; record completion time vs. target length (±25 % acceptable), number of attempts, where players got stuck. Missions missing the window twice get a tuning pass.
 4. **Difficulty curve** — plot attempts per mission; a lighter mission must follow each 4+ mission (F1-M07 after M06, F2-M07 after M06 are the intended breathers).

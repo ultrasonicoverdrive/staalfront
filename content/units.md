@@ -31,7 +31,7 @@ Canonical role names. Mission documents, team tables and triggers must only use 
 | radar | 900 | −50 | 700 | Minimap + reveals 12-cell radius. Unlocked F1-M08 / F2-M08. |
 | defence_tower | 500 | −20 | 600 | Anti-infantry/light vehicle, range 6. Unlocked F1-M04 / F2-M04. |
 | advanced_defences | 900 | −40 | 800 | Anti-armour gun emplacement, range 7. Unlocked F1-M09 / F2-M09. |
-| naval_yard | 1000 | −40 | 900 | Only on coastal maps (F1-M06, F2-M06). |
+| shipyard | 1000 | −40 | 900 | Only on coastal maps (F1-M06, F2-M06). |
 | decoy_emplacement | 150 | 0 | 150 | Meridian only. Looks like defence_tower to enemy AI; draws fire. Unlocked F1-M05. |
 | fortified_bunker | 600 | 0 | 1200 | Veyran only. Garrison 5 infantry. Unlocked F2-M04. |
 
@@ -86,7 +86,7 @@ Canonical role names. Mission documents, team tables and triggers must only use 
 | M03 | vehicle_factory, light_tank, rocket_trooper, repair_truck, light_transport | vehicle_factory, light_tank, rocket_trooper, transport_truck |
 | M04 | defence_tower | defence_tower, combat_engineer, fortified_bunker, heavy_gun_team |
 | M05 | decoy_emplacement | demolition_team |
-| M06 | amphibious_transport, naval_yard | naval_yard, gunboat (naval_support) |
+| M06 | amphibious_transport, shipyard | shipyard, gunboat (naval_support) |
 | M07 | sniper | medic |
 | M08 | heavy_tank, radar | repair_truck, radar |
 | M09 | siege_artillery, advanced_defences | siege_artillery, heavy_tank, advanced_defences |

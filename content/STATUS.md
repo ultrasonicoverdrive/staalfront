@@ -13,7 +13,7 @@ This package is the complete design plan for the Staalfront campaigns: world bib
 - `units.md`: canonical unit/structure roles, target stats, speeds in cells per second, per-campaign tech tree, difficulty conventions.
 - `CONVENTIONS.md`: the contract every mission document must satisfy.
 - `production.md`: phases, pipeline, mapping onto PLAN.md (§2a), engine data and trigger primitives against PLAN (§3, §3a), audio/art scope, testing, risks, open decisions.
-- `scripts/validate.py`: `python3 -I content/scripts/validate.py` checks every mission document (references resolve, roles exist, objectives have completing triggers, win/lose present, MSG speakers are in `cast.md`) and every briefing (cues are in `cast.md`, speakers are in the room or marked (V.O.)/(O.S.), transitions other than `TO:` start with `>`). Templates and examples are skipped unless named. Run before each commit.
+- `scripts/validate.py`: `python3 -I content/scripts/validate.py` checks every mission document (references resolve, roles exist, objectives have completing triggers, win/lose present, MSG speakers are in `cast.md`) and every briefing (cues are in `cast.md`, speakers are in the room or marked (V.O.)/(O.S.), transitions other than `TO:` start with `>`), and scans all of `content/` for names that belong to other games (B5). Templates and examples are skipped unless named. Run before each commit.
 - `scripts/export_messages.py`: exports all in-mission lines to `voiceover.csv` for the recording session or the voice tool.
 - `voiceover.csv`: current export (193 lines, 16 of them OPERATIONS).
 
@@ -31,4 +31,4 @@ Map sketches (`missions/<code>-map.png`) and engine data remain production tasks
 ## Open points for Tijmen
 Creative or story-level questions that the alignment pass deliberately did not decide are collected in the "Points for Tijmen" list of PR #26 (map size of F1-M02, briefing and message lines whose distances or times no longer match the speeds, the F2-M01 slot in the production phases, the Petrov question, and more).
 
-All dialogue, characters, faction names, and story events are original. The campaign takes inspiration from the broad mission variety and briefing-led structure of classic RTS games, not from copied Red Alert content.
+All content is original: no characters, dialogue, missions or scenes are taken from existing games. The campaign follows the broad mission variety and briefing-led structure that is common in the genre.
