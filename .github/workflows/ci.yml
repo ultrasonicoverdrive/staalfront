@@ -32,14 +32,13 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # --nocapture prints the adapter the screenshot tests used (lavapipe / WARP).
-      - if: runner.os != 'Windows'
-        run: cargo test --workspace -- --nocapture
-      # On Windows the GPU tests run one at a time: DX12 WARP crashed with
-      # STATUS_ACCESS_VIOLATION (0xc0000005) twice in a row when several screenshot
-      # tests created devices in parallel threads (PR #18, run 39009873035, in
-      # debug_overlay and camera_screenshot). Same tests, serial; see progress.md.
-      - if: runner.os == 'Windows'
-        run: cargo test --workspace -- --nocapture --test-threads=1
+      # Tests run in parallel threads on both systems. DX12 WARP once crashed with
+      # STATUS_ACCESS_VIOLATION (0xc0000005) when several screenshot tests
+      # created devices at the same time (PR #18, run 39009873035); since then
+      # `Renderer::headless` hands out one device at a time per process
+      # (`sf_render::gpu::HeadlessSlot`), so the Windows run no longer needs
+      # `--test-threads=1`.
+      - run: cargo test --workspace -- --nocapture
       # WP1.14: the engine demo as a smoke test on the software adapter (lavapipe
       # on Linux under Xvfb, WARP on Windows): three screenshots of the window
       # (close-up, middle with the F1 panels, whole map) and a short benchmark
@@ -74,6 +73,10 @@ jobs:
       # must give identical bits in both (golden hashes in tests/golden.rs).
       - name: sf_math golden hashes in release mode
         run: cargo test --release -p sf_math
+      # sf_data: the generated maps (tests/golden.rs) hash to the same pinned
+      # values on both systems and in both profiles; the generator is fixed point.
+      - name: sf_data generated-map golden hashes in release mode
+        run: cargo test --release -p sf_data --test golden
       # sf_sim: the full-size determinism test (5000 wanderers, 10000 ticks) and
       # the committed golden checksums (tests/golden.rs) run in release mode, the
       # same values on Linux and Windows. `-p sf_sim` alone also builds sf_math

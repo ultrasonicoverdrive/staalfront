@@ -34,7 +34,11 @@
 //! `[cx, cx+1] x [cz, cz+1]` metres, vertex `(vx, vz)` sits at `(vx, vz)`.
 //!
 //! The loader ([`Map::load`], [`Map::parse`]) validates dimensions, file
-//! sizes, bit depths and material indices and reports a [`MapError`]. This
+//! sizes, bit depths and material indices and reports a [`MapError`]. The two
+//! file names in `map.ron` must stay inside the map directory: no absolute
+//! path, drive prefix, network (UNC) path, `..` or Windows device name (`CON`),
+//! checked the same on every OS; a symlink that leads out of the directory is
+//! refused when loading. This
 //! crate has no GPU or simulation dependency, so the renderer, the editor and
 //! headless tools can all read maps. Floating point is used only for the
 //! visual height in metres and in [`generate`], which is not simulation code.
@@ -187,15 +191,33 @@ impl Map {
     }
 
     /// Read `dir/map.ron` and the files it names.
+    ///
+    /// Every file is resolved first (symlinks followed) and must still lie
+    /// inside the map directory, so a symlink in a downloaded map cannot lead
+    /// out of it. (The check and the read are two steps; a map directory that
+    /// another process changes while loading is not defended against.)
     pub fn load(dir: &Path) -> Result<Self, MapError> {
+        let io = |path: &Path| {
+            let path = path.to_path_buf();
+            move |source| MapError::Io { path, source }
+        };
+        let inside = dir.canonicalize().map_err(io(dir))?;
         let read = |name: &str| {
             let path = dir.join(name);
-            std::fs::read(&path).map_err(|source| MapError::Io { path, source })
+            let resolved = path.canonicalize().map_err(io(&path))?;
+            if !resolved.starts_with(&inside) {
+                return Err(MapError::Header(format!(
+                    "{name} leads outside the map directory (a symlink?): it resolves to {}",
+                    resolved.display()
+                )));
+            }
+            std::fs::read(&resolved).map_err(io(&resolved))
         };
         let header = read("map.ron")?;
         let header_text = String::from_utf8_lossy(&header);
         let parsed: MapHeader =
             ron::from_str(&header_text).map_err(|e| MapError::Ron(e.to_string()))?;
+        validate_file_names(&parsed)?;
         let heightmap = read(&parsed.heightmap)?;
         let material_map = read(&parsed.material_map)?;
         Self::parse(&header_text, &heightmap, &material_map)
@@ -215,6 +237,7 @@ impl Map {
             header.height_scale,
             &header.materials,
         )?;
+        validate_file_names(&header)?;
         let heights = decode_gray(
             &header.heightmap,
             heightmap_png,
@@ -386,6 +409,73 @@ fn validate_header(
     Ok(())
 }
 
+/// The two file names of a header must stay inside the map directory
+/// ([`check_file_name`]).
+fn validate_file_names(header: &MapHeader) -> Result<(), MapError> {
+    check_file_name("heightmap", &header.heightmap)?;
+    check_file_name("material_map", &header.material_map)
+}
+
+/// Refuse a file name from `map.ron` that could reach outside the map
+/// directory (maps can come from other players: lobby, downloads).
+///
+/// The check is on the text, the same on every OS, because a map made on
+/// Windows must be refused on Linux too: an absolute path (`/x`, `\x`), a
+/// network path (`\\server\x`, `//server/x`), a drive prefix (`C:\x`, `C:x`,
+/// and any `:` at all, which also keeps NTFS streams out), a `..` component
+/// a backslash anywhere else (the separator of a map file name is `/`) and a
+/// Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`,
+/// in any case, with or without an extension) in any component: opening one
+/// does not read a file, and `CON` blocks. A relative name with `/` into a
+/// sub-directory is fine. [`Map::load`] adds the symlink check on the real
+/// file system.
+fn check_file_name(field: &str, name: &str) -> Result<(), MapError> {
+    let refuse = |why: &str| {
+        Err(MapError::Header(format!(
+            "{field} \"{name}\" must be a file name inside the map directory, but {why}"
+        )))
+    };
+    if name.is_empty() {
+        return refuse("it is empty");
+    }
+    if name.contains('\0') {
+        return refuse("it contains a NUL character");
+    }
+    if name.starts_with("\\\\") || name.starts_with("//") {
+        return refuse("it is a network (UNC) path");
+    }
+    if name.starts_with('/') || name.starts_with('\\') {
+        return refuse("it is an absolute path");
+    }
+    if name.contains(':') {
+        return refuse("it has a drive prefix or a ':' (an absolute path on Windows)");
+    }
+    if name.split(['/', '\\']).any(|part| part == "..") {
+        return refuse("it contains \"..\" (the parent directory)");
+    }
+    if name.contains('\\') {
+        return refuse("it contains a backslash (use '/' between directories)");
+    }
+    if let Some(device) = name.split('/').find(|part| is_device_name(part)) {
+        return refuse(&format!("\"{device}\" is a Windows device name"));
+    }
+    Ok(())
+}
+
+/// Whether a path component names a Windows device: the part before the first
+/// dot, without trailing spaces (Windows ignores both), is `CON`, `PRN`,
+/// `AUX`, `NUL`, `COM1`-`COM9` or `LPT1`-`LPT9`, in any case.
+fn is_device_name(component: &str) -> bool {
+    let stem = component.split('.').next().unwrap_or("").trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            upper
+                .strip_prefix(prefix)
+                .is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+        })
+}
+
 /// Decode a grayscale PNG of the expected depth and size to raw bytes
 /// (16-bit samples stay big-endian as stored in the file).
 fn decode_gray(
@@ -406,7 +496,9 @@ fn decode_gray(
         return Err(MapError::Image {
             file: file.to_string(),
             message: format!(
-                "must be a {depth:?}-bit grayscale PNG, got {bit_depth:?}-bit {color:?}"
+                "must be a {}-bit grayscale PNG, got {}-bit {color:?}",
+                bits(depth),
+                bits(bit_depth)
             ),
         });
     }
@@ -421,6 +513,17 @@ fn decode_gray(
     let info = reader.next_frame(&mut buf).map_err(png_err)?;
     buf.truncate(info.buffer_size());
     Ok(buf)
+}
+
+/// The number of bits of a PNG bit depth ("8", not the `Debug` name "Eight").
+fn bits(depth: png::BitDepth) -> u8 {
+    match depth {
+        png::BitDepth::One => 1,
+        png::BitDepth::Two => 2,
+        png::BitDepth::Four => 4,
+        png::BitDepth::Eight => 8,
+        png::BitDepth::Sixteen => 16,
+    }
 }
 
 fn encode_gray(

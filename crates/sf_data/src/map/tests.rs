@@ -74,7 +74,25 @@ fn rejects_a_material_index_out_of_range() {
 fn rejects_a_wrong_bit_depth() {
     let eight = encode_gray("h", &[0; 20], png::BitDepth::Eight, (5, 4)).unwrap();
     let err = Map::parse(&header(4, 3), &eight, &cells_png(4, 3, 0)).unwrap_err();
-    assert!(err.to_string().contains("Sixteen"), "{err}");
+    let text = err.to_string();
+    assert!(
+        text.contains("must be a 16-bit grayscale PNG, got 8-bit Grayscale"),
+        "{text}"
+    );
+    // The materials need 8 bits; 16 is refused the other way round.
+    let sixteen = height_png(4, 3);
+    let err = Map::parse(&header(4, 3), &height_png(5, 4), &sixteen).unwrap_err();
+    let text = err.to_string();
+    assert!(
+        text.contains("materials.png")
+            && text.contains("must be a 8-bit grayscale PNG, got 16-bit"),
+        "{text}"
+    );
+    // The Debug names of png::BitDepth never reach the message.
+    assert!(
+        !text.contains("Eight") && !text.contains("Sixteen"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -202,4 +220,232 @@ fn a_cell_is_four_terrain_cells_per_side() {
     assert_eq!(generate(65, 63, 1).size_in_cells(), (17, 16));
     // The generator is the same one: cells are only a unit conversion.
     assert_eq!(generate_cells(16, 8, 1), generate(64, 32, 1));
+}
+
+// --- file names in map.ron ---
+
+/// A header whose two file names are replaced.
+fn header_with_names(heightmap: &str, material_map: &str) -> String {
+    format!(
+        "(width: 4, height: 3, height_scale: 4.0, materials: [\"a\", \"b\"], \
+         heightmap: {heightmap:?}, material_map: {material_map:?})"
+    )
+}
+
+/// Names that point outside the map directory, on any OS, with a word of the
+/// reason the message must give.
+const ESCAPING_NAMES: [(&str, &str); 14] = [
+    ("/etc/passwd", "absolute"),
+    ("\\windows\\system32\\x", "absolute"),
+    ("C:\\x", "drive"),
+    ("C:/x", "drive"),
+    ("d:x.png", "drive"),
+    ("c:\\windows\\win.ini", "drive"),
+    ("\\\\server\\share\\x", "UNC"),
+    ("//server/share/x", "UNC"),
+    ("../height.png", ".."),
+    ("sub/../../height.png", ".."),
+    ("..\\height.png", ".."),
+    ("sub\\..\\..\\x", ".."),
+    ("height.png:stream", "':'"),
+    ("a\\b.png", "backslash"),
+];
+
+#[test]
+fn parse_refuses_file_names_that_escape_the_map_directory() {
+    for (name, word) in ESCAPING_NAMES {
+        for (field, text) in [
+            ("heightmap", header_with_names(name, "materials.png")),
+            ("material_map", header_with_names("height.png", name)),
+        ] {
+            let err = Map::parse(&text, &height_png(5, 4), &cells_png(4, 3, 0)).unwrap_err();
+            let message = err.to_string();
+            assert!(matches!(err, MapError::Header(_)), "{name}: {message}");
+            assert!(
+                message.contains(field) && message.contains(word) && message.contains(name),
+                "{field} {name:?}: {message}"
+            );
+        }
+    }
+    for (name, why) in [("", "empty"), ("a\0b.png", "NUL")] {
+        let text = header_with_names(name, "materials.png");
+        let err = Map::parse(&text, &height_png(5, 4), &cells_png(4, 3, 0)).unwrap_err();
+        assert!(err.to_string().contains(why), "{name:?}: {err}");
+    }
+}
+
+#[test]
+fn parse_accepts_plain_and_sub_directory_names() {
+    for name in [
+        "height.png",
+        "sub/height.png",
+        "./height.png",
+        "my..map.png",
+    ] {
+        let text = header_with_names(name, "materials.png");
+        let m = Map::parse(&text, &height_png(5, 4), &cells_png(4, 3, 0));
+        assert!(m.is_ok(), "{name}: {:?}", m.err());
+    }
+}
+
+/// `load` must refuse before it reads: the file the name points at exists,
+/// and the error must be the name check, not the content of that file.
+#[test]
+fn load_refuses_an_escaping_name_before_reading_the_file() {
+    let base = std::env::temp_dir().join(format!("sf_data_map_names_{}", std::process::id()));
+    let dir = base.join("map");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(base.join("outside.png"), height_png(5, 4)).unwrap();
+    std::fs::write(dir.join("materials.png"), cells_png(4, 3, 0)).unwrap();
+    let absolute = base.join("outside.png").display().to_string();
+    for name in [
+        "../outside.png",
+        absolute.as_str(),
+        "C:\\x",
+        "\\\\server\\x",
+    ] {
+        std::fs::write(
+            dir.join("map.ron"),
+            header_with_names(name, "materials.png"),
+        )
+        .unwrap();
+        let err = Map::load(&dir).unwrap_err();
+        assert!(
+            matches!(err, MapError::Header(_)),
+            "{name}: {err} (it must not have been read)"
+        );
+    }
+    // The same files with a name inside the directory load.
+    std::fs::write(dir.join("height.png"), height_png(5, 4)).unwrap();
+    std::fs::write(
+        dir.join("map.ron"),
+        header_with_names("height.png", "materials.png"),
+    )
+    .unwrap();
+    let loaded = Map::load(&dir);
+    std::fs::remove_dir_all(&base).ok();
+    assert!(loaded.is_ok(), "{:?}", loaded.err());
+}
+
+// --- Windows device names and symlinks ---
+
+/// `CON` and friends are refused on every OS: a map made for Windows must not
+/// be able to open a device there, and the same map must fail the same way
+/// everywhere.
+#[test]
+fn parse_refuses_windows_device_names_on_every_os() {
+    let refused = [
+        "CON",
+        "con",
+        "Nul",
+        "PRN.png",
+        "aux.txt",
+        "NUL.tar.gz",
+        "COM1",
+        "com9.png",
+        "LPT1",
+        "lpt9.png",
+        "sub/CON",
+        "sub/nul.png",
+        "con/height.png",
+        "CON.",
+        "CON .png",
+        "Com5.height.png",
+    ];
+    for name in refused {
+        for (field, text) in [
+            ("heightmap", header_with_names(name, "materials.png")),
+            ("material_map", header_with_names("height.png", name)),
+        ] {
+            let err = Map::parse(&text, &height_png(5, 4), &cells_png(4, 3, 0)).unwrap_err();
+            let message = err.to_string();
+            assert!(matches!(err, MapError::Header(_)), "{name}: {message}");
+            assert!(
+                message.contains(field) && message.contains("device name"),
+                "{field} {name:?}: {message}"
+            );
+        }
+    }
+    // Names that only look similar are fine.
+    for name in [
+        "CONSOLE.png",
+        "icon.png",
+        "NULL.png",
+        "COM0.png",
+        "COM10.png",
+        "LPT.png",
+        "COMX",
+        "my.CON",
+        "xCON",
+    ] {
+        let text = header_with_names(name, "materials.png");
+        let m = Map::parse(&text, &height_png(5, 4), &cells_png(4, 3, 0));
+        assert!(m.is_ok(), "{name}: {:?}", m.err());
+    }
+}
+
+#[test]
+fn load_refuses_a_device_name_without_opening_it() {
+    // `CON` would block on a Windows console read; here the name check must
+    // fire before any file system access.
+    let dir = std::env::temp_dir().join(format!("sf_data_map_con_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("materials.png"), cells_png(4, 3, 0)).unwrap();
+    std::fs::write(
+        dir.join("map.ron"),
+        header_with_names("CON", "materials.png"),
+    )
+    .unwrap();
+    let err = Map::load(&dir).unwrap_err();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(matches!(err, MapError::Header(_)), "{err}");
+}
+
+/// A symlink inside the map directory that points outside is refused, for a
+/// file, for a directory in the middle of the name, and for `map.ron` itself.
+#[cfg(unix)]
+#[test]
+fn load_refuses_a_symlink_that_leads_outside_the_map_directory() {
+    use std::os::unix::fs::symlink;
+    let base = std::env::temp_dir().join(format!("sf_data_map_links_{}", std::process::id()));
+    let dir = base.join("map");
+    let outside = base.join("outside");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("height.png"), height_png(5, 4)).unwrap();
+    std::fs::write(dir.join("materials.png"), cells_png(4, 3, 0)).unwrap();
+    symlink(outside.join("height.png"), dir.join("link.png")).unwrap();
+    symlink(&outside, dir.join("linked_dir")).unwrap();
+
+    for name in ["link.png", "linked_dir/height.png"] {
+        let header = header_with_names(name, "materials.png");
+        std::fs::write(dir.join("map.ron"), header).unwrap();
+        let err = Map::load(&dir).unwrap_err();
+        assert!(matches!(err, MapError::Header(_)), "{name}: {err}");
+        assert!(
+            err.to_string().contains("outside the map directory"),
+            "{name}: {err}"
+        );
+    }
+
+    // map.ron itself as a link to a header outside.
+    let header = header_with_names("height.png", "materials.png");
+    std::fs::write(outside.join("map.ron"), header).unwrap();
+    std::fs::remove_file(dir.join("map.ron")).unwrap();
+    symlink(outside.join("map.ron"), dir.join("map.ron")).unwrap();
+    let err = Map::load(&dir).unwrap_err();
+    assert!(
+        err.to_string().contains("outside the map directory"),
+        "{err}"
+    );
+
+    // A symlink that stays inside the directory is fine.
+    std::fs::remove_file(dir.join("map.ron")).unwrap();
+    std::fs::write(dir.join("real_height.png"), height_png(5, 4)).unwrap();
+    symlink(dir.join("real_height.png"), dir.join("inner.png")).unwrap();
+    let header = header_with_names("inner.png", "materials.png");
+    std::fs::write(dir.join("map.ron"), header).unwrap();
+    let loaded = Map::load(&dir);
+    std::fs::remove_dir_all(&base).ok();
+    assert!(loaded.is_ok(), "{:?}", loaded.err());
 }

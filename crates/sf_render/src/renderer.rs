@@ -8,7 +8,7 @@ use glam::Mat4;
 use wgpu::util::DeviceExt;
 
 use crate::frustum::Frustum;
-use crate::gpu::{Gpu, GpuOptions, RenderError};
+use crate::gpu::{Gpu, GpuOptions, HeadlessSlot, RenderError};
 use crate::gpu_timer::GpuTimer;
 use crate::icons::{IconInstance, IconParams};
 use crate::image::Rgba8;
@@ -177,6 +177,11 @@ pub struct Renderer {
     /// Time the last [`Renderer::render_with`] spent waiting for the swap
     /// chain to hand out an image (the display pacing it, not CPU work).
     acquire_wait: std::time::Duration,
+    /// An offscreen renderer holds the process's one headless slot
+    /// ([`HeadlessSlot`]). **Keep this the last field**: fields drop in
+    /// order, so the slot is released only after the device and every
+    /// resource are gone.
+    headless_slot: Option<HeadlessSlot>,
 }
 
 /// How the window presents frames.
@@ -280,7 +285,13 @@ impl Renderer {
     }
 
     /// Renderer drawing into an offscreen texture (screenshots, tests).
+    ///
+    /// Only one headless renderer exists per process at a time: this waits
+    /// until the previous one is dropped (see [`HeadlessSlot`]), so tests that
+    /// run in parallel threads take turns on the GPU. Do not keep two alive in
+    /// one thread.
     pub fn headless(width: u32, height: u32, options: &GpuOptions) -> Result<Self, RenderError> {
+        let slot = HeadlessSlot::acquire();
         let gpu = Gpu::headless(options)?;
         let (width, height) = (width.max(1), height.max(1));
         let texture = offscreen_texture(&gpu.device, width, height);
@@ -288,13 +299,15 @@ impl Renderer {
             mode: "offscreen".into(),
             note: None,
         };
-        Ok(Self::build(
+        let mut renderer = Self::build(
             gpu,
             Target::Offscreen { texture },
             OFFSCREEN_FORMAT,
             (width, height),
             present,
-        ))
+        );
+        renderer.headless_slot = Some(slot);
+        Ok(renderer)
     }
 
     fn build(
@@ -444,6 +457,7 @@ impl Renderer {
             capture_requested: false,
             captured: None,
             acquire_wait: std::time::Duration::ZERO,
+            headless_slot: None,
         }
     }
 

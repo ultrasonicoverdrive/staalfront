@@ -5,7 +5,9 @@
 use sf_data::map::generate::generate;
 use sf_render::camera::DVec2;
 use sf_render::{Camera, CameraConfig};
-use sf_ui::{Anchor, Minimap, MinimapGeometry, MouseButton, Rect, Ui, UiConfig, UiInput, fov_quad};
+use sf_ui::{
+    Anchor, Minimap, MinimapGeometry, MouseButton, Rect, Ui, UiConfig, UiInput, fov_polygon,
+};
 
 const SCREEN: (u32, u32) = (1280, 720);
 
@@ -50,14 +52,14 @@ impl Fixture {
     /// Returns the input the game would act on.
     fn frame(&mut self, raw: UiInput) -> UiInput {
         self.ui.begin_frame(raw, SCREEN, 1.0);
-        let fov = fov_quad(
+        let fov = fov_polygon(
             &self.camera,
             (SCREEN.0 as f32, SCREEN.1 as f32),
             (128.0, 128.0),
         );
         let target = self
             .ui
-            .minimap(&self.minimap, "minimap", self.frame, Some(fov), []);
+            .minimap(&self.minimap, "minimap", self.frame, Some(&fov), []);
         self.ui.end_frame();
         if let Some((x, z)) = target {
             self.camera
@@ -168,15 +170,16 @@ fn the_frame_follows_the_camera_after_a_click() {
     let mut f = Fixture::new();
     f.camera.set_zoom(0.2);
     let g = f.geometry();
-    let before = fov_quad(&f.camera, (1280.0, 720.0), (128.0, 128.0));
+    let before = fov_polygon(&f.camera, (1280.0, 720.0), (128.0, 128.0));
     let (sx, sy) = g.world_to_screen(100.0, 100.0);
     f.frame(mouse((sx, sy), true, true, false));
-    let after = fov_quad(&f.camera, (1280.0, 720.0), (128.0, 128.0));
+    let after = fov_polygon(&f.camera, (1280.0, 720.0), (128.0, 128.0));
     // The frame's centre moved to the clicked point (the view is centred on the focus).
-    let mid = |q: &[(f32, f32); 4]| {
+    let mid = |q: &[(f32, f32)]| {
+        let n = q.len() as f32;
         (
-            q.iter().map(|p| p.0).sum::<f32>() / 4.0,
-            q.iter().map(|p| p.1).sum::<f32>() / 4.0,
+            q.iter().map(|p| p.0).sum::<f32>() / n,
+            q.iter().map(|p| p.1).sum::<f32>() / n,
         )
     };
     let (bx, _) = mid(&before);

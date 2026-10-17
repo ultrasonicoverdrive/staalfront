@@ -17,7 +17,7 @@ use sf_render::camera::DVec2;
 use sf_render::image::{self, Rgba8};
 use sf_render::{Camera, CameraConfig, GpuOptions, Renderer};
 use sf_ui::{
-    Anchor, Color, Minimap, MinimapGeometry, Rect, Ui, UiConfig, UiInput, UiRenderer, fov_quad,
+    Anchor, Color, Minimap, MinimapGeometry, Rect, Ui, UiConfig, UiInput, UiRenderer, fov_polygon,
 };
 
 const W: u32 = 640;
@@ -294,7 +294,7 @@ struct MinimapScene {
     img: Rgba8,
     frame: Rect,
     geom: MinimapGeometry,
-    quad: [(f32, f32); 4],
+    quad: Vec<(f32, f32)>,
     minimap: Minimap,
 }
 
@@ -326,7 +326,7 @@ fn minimap_scene(with_overlays: bool) -> MinimapScene {
         (10.0, 10.0),
         (170.0, 170.0),
     );
-    let quad = fov_quad(&cam, (W as f32, H as f32), (128.0, 128.0));
+    let quad = fov_polygon(&cam, (W as f32, H as f32), (128.0, 128.0));
     let dots = [
         ((30.0, 30.0), Color(255, 0, 0, 255)),
         ((100.0, 90.0), Color(255, 0, 0, 255)),
@@ -335,7 +335,7 @@ fn minimap_scene(with_overlays: bool) -> MinimapScene {
         &minimap,
         "minimap",
         frame,
-        with_overlays.then_some(quad),
+        with_overlays.then_some(quad.as_slice()),
         if with_overlays {
             dots.to_vec()
         } else {
@@ -416,15 +416,15 @@ fn minimap_draws_unit_dots_and_the_field_of_view_frame() {
             });
         assert!(red, "red unit dot at ({x}, {z}) -> ({sx}, {sy})");
     }
-    for (x, z) in s.quad {
+    for &(x, z) in &s.quad {
         assert!(
             x > 1.0 && x < 127.0 && z > 1.0 && z < 127.0,
             "frame not clamped: ({x}, {z})"
         );
     }
     // The midpoint of each side of the frame is a white line.
-    for i in 0..4 {
-        let (a, b) = (s.quad[i], s.quad[(i + 1) % 4]);
+    for i in 0..s.quad.len() {
+        let (a, b) = (s.quad[i], s.quad[(i + 1) % s.quad.len()]);
         let (sx, sy) = s.geom.world_to_screen((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
         let white = (-1i32..=1)
             .flat_map(|dy| (-1i32..=1).map(move |dx| (dx, dy)))

@@ -21,7 +21,7 @@ use sf_math::render_bridge::vec2_cells_to_metres;
 use sf_render::camera::DVec2;
 use sf_render::{Camera, RenderError, Renderer};
 use sf_sim::EntityView;
-use sf_ui::{Anchor, Color, Minimap, MouseButton, Ui, UiConfig, UiInput, UiRenderer, fov_quad};
+use sf_ui::{Anchor, Color, Minimap, MouseButton, Ui, UiConfig, UiInput, UiRenderer, fov_polygon};
 
 /// Longest side of the baked minimap image in pixels.
 const MINIMAP_BAKE_SIDE: u32 = 256;
@@ -159,7 +159,7 @@ impl Hud {
                 (MINIMAP_SIZE, MINIMAP_SIZE),
             );
             let map = minimap.map_size();
-            let fov = fov_quad(camera, (size.width as f32, size.height as f32), map);
+            let fov = fov_polygon(camera, (size.width as f32, size.height as f32), map);
             let dots = self.show_dots.then(|| {
                 views.iter().map(|v| {
                     let [x, z] = vec2_cells_to_metres(v.pos);
@@ -173,7 +173,7 @@ impl Hud {
                 minimap,
                 "minimap",
                 frame,
-                Some(fov),
+                Some(&fov),
                 dots.into_iter().flatten(),
             ) {
                 camera.set_focus(DVec2::new(f64::from(x), f64::from(z)));

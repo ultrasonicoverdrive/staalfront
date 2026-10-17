@@ -1,8 +1,10 @@
 //! Write a procedural map to a directory.
 //!
 //! `cargo run -p sf_data --example gen_map -- <out_dir> [width] [height] [seed]`
-//! (defaults 64 x 64, seed 1). The committed test map is
-//! `gen_map assets/maps/test64 64 64 1`.
+//! (defaults 64 x 64, seed 1). The committed test map `assets/maps/test64` was
+//! made with this command by the earlier float version of the generator;
+//! the generator is bit-exact now and gives a slightly different map, which is
+//! why the committed files are not regenerated (the terrain goldens use them).
 
 use std::path::PathBuf;
 

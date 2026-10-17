@@ -1,6 +1,8 @@
 //! wgpu instance, adapter and device setup, with or without a window surface.
 
 use std::fmt;
+use std::sync::{Condvar, Mutex, PoisonError};
+use std::time::Duration;
 
 /// Errors from setting up or driving the renderer.
 #[derive(Debug)]
@@ -213,10 +215,115 @@ impl Gpu {
     }
 }
 
+/// How long [`HeadlessSlot::acquire`] waits for another headless device
+/// before it gives up (a device held by the waiting thread itself would
+/// otherwise wait forever).
+const SLOT_WAIT: Duration = Duration::from_secs(20 * 60);
+
+/// `true` while a headless renderer of this process exists.
+static HEADLESS_SLOT: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
+/// The right to have a headless (offscreen) device: only one exists per
+/// process at a time, so a test binary whose tests run in parallel threads
+/// never has two software devices creating or drawing at once.
+///
+/// Why: on Windows the DX12 software adapter (WARP) crashed with
+/// STATUS_ACCESS_VIOLATION (0xc0000005) when several screenshot tests built
+/// and used a device at the same moment (PR #18, run 39009873035, twice on the
+/// same commit). CI used to work around it with `--test-threads=1` for all
+/// tests; this lock serialises only the GPU tests (the other tests of the
+/// binary still run in parallel) and sits where every offscreen renderer is
+/// made, so no test helper can forget it.
+///
+/// [`Renderer::headless`](crate::Renderer::headless) takes the slot before it
+/// creates the device and keeps it until the renderer is dropped, the last
+/// thing that happens to it. Holding two headless renderers in one thread
+/// would wait for the first one forever; the wait ends in a panic after
+/// [`SLOT_WAIT`] instead of a hung test run. A window renderer takes no slot.
+pub struct HeadlessSlot(());
+
+impl HeadlessSlot {
+    /// Wait for the slot and take it.
+    ///
+    /// # Panics
+    /// After [`SLOT_WAIT`] (twenty minutes) without getting it.
+    pub fn acquire() -> Self {
+        let (lock, free) = &HEADLESS_SLOT;
+        let mut taken = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        while *taken {
+            let (guard, timeout) = free
+                .wait_timeout(taken, SLOT_WAIT)
+                .unwrap_or_else(PoisonError::into_inner);
+            taken = guard;
+            assert!(
+                !(timeout.timed_out() && *taken),
+                "waited {SLOT_WAIT:?} for the headless GPU slot: a headless renderer is held \
+                 (by this thread?) and never dropped; only one can exist at a time"
+            );
+        }
+        *taken = true;
+        Self(())
+    }
+}
+
+impl Drop for HeadlessSlot {
+    fn drop(&mut self) {
+        let (lock, free) = &HEADLESS_SLOT;
+        *lock.lock().unwrap_or_else(PoisonError::into_inner) = false;
+        free.notify_one();
+    }
+}
+
 /// Startup progress on stderr when the environment variable `SF_GPU_TRACE` is
 /// set: shows at which step a driver hangs (instance, adapter, device, surface).
 pub(crate) fn trace(step: &str) {
     if std::env::var_os("SF_GPU_TRACE").is_some() {
         eprintln!("sf_render gpu: {step}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
+
+    /// However many threads ask, only one holds the slot at a time, and each
+    /// gets it in the end.
+    #[test]
+    fn the_headless_slot_is_held_by_one_thread_at_a_time() {
+        static HOLDERS: AtomicUsize = AtomicUsize::new(0);
+        static MOST: AtomicUsize = AtomicUsize::new(0);
+        static DONE: AtomicUsize = AtomicUsize::new(0);
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                thread::spawn(|| {
+                    let _slot = HeadlessSlot::acquire();
+                    let now = HOLDERS.fetch_add(1, Ordering::SeqCst) + 1;
+                    MOST.fetch_max(now, Ordering::SeqCst);
+                    thread::sleep(Duration::from_millis(10));
+                    HOLDERS.fetch_sub(1, Ordering::SeqCst);
+                    DONE.fetch_add(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().expect("no thread panicked");
+        }
+        assert_eq!(MOST.load(Ordering::SeqCst), 1);
+        assert_eq!(DONE.load(Ordering::SeqCst), 8);
+    }
+
+    /// A thread that panics while it holds the slot does not lock the others
+    /// out: the slot's drop runs while unwinding.
+    #[test]
+    fn a_panic_while_holding_the_slot_releases_it() {
+        let held = thread::spawn(|| {
+            let _slot = HeadlessSlot::acquire();
+            panic!("a failing screenshot test");
+        })
+        .join();
+        assert!(held.is_err());
+        drop(HeadlessSlot::acquire());
     }
 }

@@ -432,6 +432,20 @@ impl Level {
                 "part {name}: a non-uniform scale in the node transform"
             )));
         }
+        // A node given as a raw `matrix` can also shear: columns of equal
+        // length that are not at right angles (positive determinant, uniform
+        // lengths, and still skewed lighting). The tolerance is the same
+        // 1e-3 as for the lengths, here on the cosine of the angle between
+        // two columns (0.06 degrees off a right angle).
+        for (a, b) in [(0, 1), (0, 2), (1, 2)] {
+            let cosine = linear.col(a).dot(linear.col(b)) / (lengths[a] * lengths[b]);
+            if cosine.abs() > 1e-3 {
+                return Err(GlbError::Unsupported(format!(
+                    "part {name}: a skewed (non-orthogonal) node transform \
+                     (columns {a} and {b} are not at right angles)"
+                )));
+            }
+        }
         let joint = match name.as_str() {
             "turret" => Joint::Yaw,
             "barrel" => Joint::Pitch,
@@ -711,6 +725,9 @@ pub mod writer {
         pub translation: [f32; 3],
         /// Written as `scale` when set (tests: mirrors, non-uniform scale).
         pub scale: Option<[f32; 3]>,
+        /// Written as a raw `matrix` (16 numbers, column-major as in glTF)
+        /// instead of `translation` and `scale` when set (tests: a shear).
+        pub matrix: Option<[f32; 16]>,
         pub prim: Option<Prim>,
         pub children: Vec<usize>,
     }
@@ -745,17 +762,19 @@ pub mod writer {
         let (mut views, mut accessors, mut meshes) = (Vec::new(), Vec::new(), Vec::new());
         let mut nodes_json = Vec::new();
         for node in &scene.nodes {
-            let mut members = vec![
-                format!("\"name\":\"{}\"", node.name),
-                format!(
+            let mut members = vec![format!("\"name\":\"{}\"", node.name)];
+            if let Some(m) = node.matrix {
+                members.push(format!("\"matrix\":[{}]", list(m.map(f))));
+            } else {
+                members.push(format!(
                     "\"translation\":[{},{},{}]",
                     f(node.translation[0]),
                     f(node.translation[1]),
                     f(node.translation[2])
-                ),
-            ];
-            if let Some(s) = node.scale {
-                members.push(format!("\"scale\":[{},{},{}]", f(s[0]), f(s[1]), f(s[2])));
+                ));
+                if let Some(s) = node.scale {
+                    members.push(format!("\"scale\":[{},{},{}]", f(s[0]), f(s[1]), f(s[2])));
+                }
             }
             if !node.children.is_empty() {
                 members.push(format!("\"children\":[{}]", list(&node.children)));
