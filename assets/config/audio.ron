@@ -1,0 +1,15 @@
+// Audio settings.
+//
+// ra_audio: "Use original Red Alert audio" (WP11.7). Off by default; the CC0
+// sounds of assets/audio/bank.ron always work. When on, the sounds named in
+// assets/audio/ra_mapping.ron are read from the player's own Red Alert files
+// under `path` (the install directory or the freeware download; MIX archives
+// are searched a few directory levels deep). Missing or broken files fall back
+// to the CC0 sounds with one warning. `sf_game --ra-audio <path>` turns it on
+// for one run.
+(
+    ra_audio: (
+        enabled: false,
+        path: "",
+    ),
+)

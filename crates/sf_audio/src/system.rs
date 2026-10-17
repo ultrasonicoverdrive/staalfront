@@ -2,12 +2,15 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
 use kira::{AudioManagerSettings, DefaultBackend};
 
 use crate::bank::{Bank, Category, SoundDef};
 use crate::live::{Live, Outcome, Play, Player};
+use crate::ra::{self, Catalog, EntryInfo, Mapping, RaAudioConfig};
 use crate::spatial::{self, Listener, SpatialParams};
 
 /// Bank file relative to the asset root.
@@ -42,6 +45,46 @@ pub struct AudioSystem {
     rng: u32,
     stats: Stats,
     warned: BTreeSet<String>,
+    ra: Ra,
+}
+
+/// Original Red Alert audio (WP11.7): off, loading on a background thread,
+/// or ready with the events it replaces.
+enum Ra {
+    Off,
+    Loading(Receiver<ra::Loaded>),
+    Ready {
+        catalog: Arc<Catalog>,
+        events: BTreeSet<String>,
+    },
+}
+
+/// State of the original Red Alert audio, for the sound browser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RaStatus {
+    Off,
+    Loading,
+    /// Scanned: how many events now use a Red Alert sound.
+    Ready {
+        mapped: usize,
+    },
+}
+
+/// Synthetic cache key of a decoded Red Alert sound.
+fn ra_key(what: &str) -> PathBuf {
+    PathBuf::from(format!("ra-audio:{what}"))
+}
+
+/// Bank entry used for a mapped event that has no CC0 sound yet.
+fn default_def(key: &Path) -> SoundDef {
+    SoundDef {
+        file: key.display().to_string(),
+        volume: 1.0,
+        pitch_variation: 0.0,
+        max_instances: crate::bank::DEFAULT_MAX_INSTANCES,
+        category: Category::Sfx,
+        looped: false,
+    }
 }
 
 impl AudioSystem {
@@ -76,6 +119,7 @@ impl AudioSystem {
             rng: 0x9E37_79B9,
             stats: Stats::default(),
             warned: BTreeSet::new(),
+            ra: Ra::Off,
         };
         sys.load_bank();
         sys
@@ -199,7 +243,9 @@ impl AudioSystem {
 
     fn play_with(&mut self, name: &str, pos: Option<[f32; 3]>) {
         // Look the name up first so unknown names warn even without a device.
-        let Some(def) = self.lookup(name) else { return };
+        let Some((def, path)) = self.resolve(name) else {
+            return;
+        };
         if self.player.is_none() {
             return;
         }
@@ -214,7 +260,6 @@ impl AudioSystem {
             pan = m.pan;
         }
         let rate = self.rate_for(&def);
-        let path = self.root.join(&def.file);
         let outcome = self.player.as_mut().map(|p| {
             p.play(&Play {
                 name,
@@ -232,12 +277,13 @@ impl AudioSystem {
     /// Start a music track, crossfading from the current one over
     /// [`crossfade`](Self::crossfade). Playing the running track again does nothing.
     pub fn play_music(&mut self, name: &str) {
-        let Some(def) = self.lookup(name) else { return };
+        let Some((def, path)) = self.resolve(name) else {
+            return;
+        };
         if self.player.is_none() {
             return;
         }
         let gain = self.base_gain(&def);
-        let path = self.root.join(&def.file);
         let fade = self.crossfade;
         let outcome = self.player.as_mut().map(|p| {
             p.play_music(
@@ -269,14 +315,148 @@ impl AudioSystem {
         self.player.as_ref().and_then(|p| p.music_name())
     }
 
-    /// Per-frame housekeeping (releases finished voices).
+    /// Per-frame housekeeping (releases finished voices, picks up the
+    /// original Red Alert sounds once their background load is done).
     pub fn update(&mut self) {
         if let Some(p) = &mut self.player {
             p.tick();
         }
+        self.poll_ra();
+    }
+
+    // ---- original Red Alert audio (WP11.7) ---------------------------------
+
+    /// "Use original Red Alert audio": scan `config.path` and decode the
+    /// sounds named in `audio/ra_mapping.ron` on a background thread; they
+    /// replace their events once [`update`](Self::update) sees the result.
+    /// Disabled, an empty path, or nothing found: the CC0 sounds stay, with
+    /// one warning on stderr. Never blocks and never panics.
+    pub fn enable_original_audio(&mut self, config: &RaAudioConfig) {
+        self.ra = Ra::Off;
+        if !config.enabled {
+            return;
+        }
+        if config.path.trim().is_empty() {
+            eprintln!(
+                "sf_audio: original Red Alert audio is on but no path is set; using the CC0 sounds"
+            );
+            return;
+        }
+        let mapping = Mapping::load(&self.root).unwrap_or_else(|e| {
+            eprintln!("sf_audio: no Red Alert sound mapping ({e}); only the sound browser works");
+            Mapping::default()
+        });
+        let path = PathBuf::from(config.path.trim());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("sf_audio ra loader".into())
+            .spawn(move || {
+                let loaded = ra::load(&path, &mapping, &ra::crypto::RsaKey::westwood());
+                let _ = tx.send(loaded);
+            });
+        match spawned {
+            Ok(_) => self.ra = Ra::Loading(rx),
+            Err(e) => eprintln!(
+                "sf_audio: cannot start the Red Alert audio loader ({e}); using the CC0 sounds"
+            ),
+        }
+    }
+
+    pub fn original_audio_status(&self) -> RaStatus {
+        match &self.ra {
+            Ra::Off => RaStatus::Off,
+            Ra::Loading(_) => RaStatus::Loading,
+            Ra::Ready { events, .. } => RaStatus::Ready {
+                mapped: events.len(),
+            },
+        }
+    }
+
+    /// What was found under the configured path (the sound browser).
+    pub fn original_audio_catalog(&self) -> Option<Arc<Catalog>> {
+        match &self.ra {
+            Ra::Ready { catalog, .. } => Some(Arc::clone(catalog)),
+            _ => None,
+        }
+    }
+
+    /// Sound browser: decode one entry and play it (UI category, no
+    /// position). Returns the decode error to show next to the entry.
+    pub fn play_original_entry(&mut self, entry: &EntryInfo) -> Result<(), String> {
+        let pcm = ra::decode_entry(entry)?;
+        let Some(p) = &mut self.player else {
+            return Ok(());
+        };
+        let key = ra_key(&format!(
+            "browser/{}@{}",
+            entry.path.display(),
+            entry.offset
+        ));
+        p.inject(key.clone(), pcm.to_static_sound());
+        let outcome = p.play(&Play {
+            name: "ra.browser",
+            path: &key,
+            gain: self.category_volume[Category::Ui.index()],
+            pan: 0.0,
+            rate: 1.0,
+            max_instances: 4,
+            looped: false,
+        });
+        self.record(Some(outcome));
+        match outcome {
+            Outcome::Failed => Err("the output refused the sound".into()),
+            _ => Ok(()),
+        }
+    }
+
+    fn poll_ra(&mut self) {
+        let Ra::Loading(rx) = &self.ra else { return };
+        let loaded = match rx.try_recv() {
+            Ok(l) => l,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                eprintln!("sf_audio: the Red Alert audio loader stopped; using the CC0 sounds");
+                self.ra = Ra::Off;
+                return;
+            }
+        };
+        if let Some(w) = &loaded.warning {
+            eprintln!("sf_audio: {w}");
+        }
+        let mut events = BTreeSet::new();
+        for (event, data) in loaded.sounds {
+            if let Some(p) = &mut self.player {
+                p.inject(ra_key(&event), data);
+            }
+            events.insert(event);
+        }
+        self.ra = Ra::Ready {
+            catalog: Arc::new(loaded.catalog),
+            events,
+        };
     }
 
     // ---- helpers ----------------------------------------------------------
+
+    /// The definition and file for a name: a mapped Red Alert sound first
+    /// (with the bank's volume and category when the event has one), else
+    /// the bank.
+    fn resolve(&mut self, name: &str) -> Option<(SoundDef, PathBuf)> {
+        if let Ra::Ready { events, .. } = &self.ra
+            && events.contains(name)
+        {
+            let key = ra_key(name);
+            let def = self
+                .bank
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| default_def(&key));
+            return Some((def, key));
+        }
+        let def = self.lookup(name)?;
+        let path = self.root.join(&def.file);
+        Some((def, path))
+    }
 
     fn lookup(&mut self, name: &str) -> Option<SoundDef> {
         match self.bank.get(name) {
@@ -323,6 +503,7 @@ impl AudioSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ra::RaAudioConfig;
     use kira::backend::mock::{MockBackend, MockBackendSettings};
 
     fn assets() -> PathBuf {
@@ -509,5 +690,116 @@ mod tests {
         // Real cpal: no device in CI/containers -> silent; with one -> live.
         let s = AudioSystem::new(assets());
         let _ = s.is_silent();
+    }
+
+    /// Wait (in a test) until the background load is done.
+    fn wait_for_ra(s: &mut AudioSystem) {
+        for _ in 0..500 {
+            s.update();
+            if s.original_audio_status() != RaStatus::Loading {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("Red Alert audio loader did not finish");
+    }
+
+    /// A scratch asset root with a mapping and a fake Red Alert install
+    /// built from our own encoder and MIX writer.
+    fn ra_root(name: &str) -> (PathBuf, PathBuf) {
+        use crate::ra::aud::{Compression, Pcm, encode};
+        use crate::ra::mix::{MixFormat, mix_id, write_mix};
+        let d = scratch(
+            name,
+            r#"(sounds: {"ui.click": (file: "audio/sfx/test_click.wav", category: Ui)})"#,
+        );
+        std::fs::write(
+            d.join("audio/ra_mapping.ron"),
+            r#"(sounds: {"ui.click": "CLICK.AUD", "unit.move": "MOVE.AUD", "unit.attack": "GONE.AUD"})"#,
+        )
+        .unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let aud = encode(&pcm, Compression::Ima);
+        let mix = write_mix(
+            &[(mix_id("CLICK.AUD"), &aud), (mix_id("MOVE.AUD"), &aud)],
+            MixFormat::Plain,
+        );
+        let install = d.join("redalert");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+        (d, install)
+    }
+
+    fn mock_at(root: &Path) -> AudioSystem {
+        let settings = AudioManagerSettings::<MockBackend> {
+            backend_settings: MockBackendSettings { sample_rate: 22050 },
+            ..Default::default()
+        };
+        AudioSystem::with_player(root, Box::new(Live::new(settings).unwrap()))
+    }
+
+    #[test]
+    fn original_audio_replaces_mapped_events_and_falls_back_for_the_rest() {
+        let (d, install) = ra_root("ra_on");
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 2 });
+        // Mapped, with and without a CC0 entry: both play.
+        s.play("ui.click");
+        s.play("unit.move");
+        assert_eq!(s.stats().played, 2);
+        assert_eq!(s.stats().unknown, 0);
+        // Mapped but missing in the install, no CC0 sound: silence.
+        s.play("unit.attack");
+        assert_eq!(s.stats().unknown, 1);
+        // The browser plays any entry.
+        let cat = s.original_audio_catalog().unwrap();
+        let entry = cat.find("MOVE.AUD").unwrap().clone();
+        assert!(s.play_original_entry(&entry).is_ok());
+        assert_eq!(s.stats().played, 3);
+        let mut broken = entry.clone();
+        broken.size = 10;
+        assert!(s.play_original_entry(&broken).is_err());
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn original_audio_with_a_missing_path_keeps_the_cc0_sounds() {
+        let (d, _) = ra_root("ra_missing");
+        let mut s = mock_at(&d);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: "/nonexistent".into(),
+        });
+        wait_for_ra(&mut s);
+        assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 0 });
+        s.play("ui.click");
+        assert_eq!(s.stats().played, 1, "CC0 click");
+        // Disabled or no path: nothing starts.
+        s.enable_original_audio(&RaAudioConfig::default());
+        assert_eq!(s.original_audio_status(), RaStatus::Off);
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: " ".into(),
+        });
+        assert_eq!(s.original_audio_status(), RaStatus::Off);
+        // Silent backend: loads, and the API stays a no-op.
+        let mut q = AudioSystem::silent(&d);
+        q.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: d.join("redalert").display().to_string(),
+        });
+        wait_for_ra(&mut q);
+        q.play("unit.move");
+        assert_eq!(q.stats(), Stats::default());
+        std::fs::remove_dir_all(d).ok();
     }
 }

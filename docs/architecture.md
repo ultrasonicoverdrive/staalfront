@@ -24,7 +24,7 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 | `sf_engine` | Main loop, window, input, time, assets. No game rules. |
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
 | `sf_ui` | Own UI: widgets, text, minimap; later sidebar, selection, menus. |
-| `sf_audio` | Sound, voices, music. |
+| `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
 | `sf_cutscene` | Cartoon player and script format. |
 | `sf_net` | Lockstep network (later, phase 14). |
 | `sf_game` | Binary app that glues everything together. |
@@ -441,3 +441,43 @@ the crate docs (`crates/sf_ui/src/lib.rs`); the decisions:
   (the four screen corners projected on the ground with `Camera::ground_point`,
   which since WP1.8 is a terrain pick, clamped to the map) are drawn per frame; a left press or drag returns the world
   point for `Camera::set_focus`.
+
+## 14. Original Red Alert audio (WP11.7, B11)
+
+**Where.** A module `sf_audio::ra`, not a separate crate: it only feeds
+decoded PCM into the existing kira player (`Player::inject`) and has no user
+outside `sf_audio` and the F1 sound browser in `sf_game`. Split it out only if
+a tool (an extractor, the editor) ever needs the readers without kira.
+
+**What.** `ra::mix` reads MIX archives (TD header, Red Alert plain and
+encrypted headers, nested archives, lookup by the file-name hash),
+`ra::crypto` does the RSA + Blowfish step of encrypted headers, `ra::aud`
+decodes AUD (Westwood ADPCM and IMA ADPCM, mono/stereo, 8/16-bit) to PCM.
+`ra::scan` lists everything under the configured path (the sound browser),
+`ra::load` also decodes the sounds named in `assets/audio/ra_mapping.ron`.
+`AudioSystem::enable_original_audio` runs `load` on a background thread;
+`update()` picks the result up, after which a mapped event plays the Red Alert
+sound (with the bank entry's volume and category when it has one) and every
+other event its CC0 sound. Nothing found, or anything broken: one warning,
+the CC0 sounds keep playing; no reader panics (a fuzz-style test feeds random
+and mutated input).
+
+**Clean-room (B5).** Written only from public format descriptions, never from
+the EA source release or OpenRA (both GPL):
+- MIX format, ModdingWiki: <https://moddingwiki.shikadi.net/wiki/MIX_Format_(Westwood)>
+  (header layouts, flags, ID hash, the encrypted-header scheme and Westwood's
+  published public key);
+- AUD format, ModdingWiki: <https://moddingwiki.shikadi.net/wiki/AUD_Format>;
+- Westwood ADPCM, ModdingWiki: <https://moddingwiki.shikadi.net/wiki/Westwood_ADPCM_Format>;
+- IMA ADPCM: the IMA "Recommended Practices for Enhancing Digital Audio
+  Compatibility in Multimedia Systems" (1992), step and index tables;
+- Blowfish: B. Schneier, "Description of a New Variable-Length Key, 64-Bit
+  Block Cipher (Blowfish)" (1993) and its published test vectors (used via the
+  RustCrypto `blowfish` crate); RSA: plain modular exponentiation (`num-bigint`).
+
+**Not verified against real files** (the repo and CI never have any): the
+little-endian Blowfish word order, the byte order of the RSA blocks, the
+per-chunk reset of the Westwood ADPCM sample and the stereo layouts follow the
+descriptions; a mismatch shows up as a decode error in the sound browser, not
+as a crash. Tests build their own fixtures (own ADPCM encoders, own MIX
+writer, an own multi-prime RSA test key).
