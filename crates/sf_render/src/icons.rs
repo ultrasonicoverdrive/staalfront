@@ -232,20 +232,69 @@ impl IconConfig {
         max_distance: f32,
         ui_scale: f32,
     ) -> Blend {
-        let lo = self.icon_below_px * ui_scale;
-        let at_max = self.reference_px(focal_px, max_distance);
-        if at_max.is_nan() || at_max <= lo {
+        let Some(shrink) = self.view_shrink(focal_px, max_distance, ui_scale) else {
             // The band ends before the maximum zoom (or the input is NaN).
             return self.blend_for_camera(focal_px, distance, ui_scale);
-        }
+        };
         // At the maximum zoom (to rounding: the camera computes its distance
         // through a power, which can land a hair short of the maximum).
         if distance >= max_distance * (1.0 - 1e-4) {
             return Blend::ICONS;
         }
-        let shrink = lo / at_max;
         self.blend(self.reference_px(focal_px, distance) * shrink, ui_scale)
     }
+
+    /// The factor [`IconConfig::blend_for_view`] scales every apparent size
+    /// by, or `None` when it does not scale (the band ends before
+    /// `max_distance`).
+    pub fn view_shrink(&self, focal_px: f32, max_distance: f32, ui_scale: f32) -> Option<f32> {
+        let lo = self.icon_below_px * ui_scale;
+        let at_max = self.reference_px(focal_px, max_distance);
+        if at_max.is_nan() || at_max <= lo {
+            return None;
+        }
+        Some(lo / at_max)
+    }
+
+    /// The band [`IconConfig::blend_for_view`] really uses, for the F1 panel:
+    /// the reference unit's apparent size after the shrink, and the camera
+    /// distances where the models start to fade (`models_until`) and where
+    /// only icons are left (`icons_from`). Without a shrink this is the plain
+    /// [`IconConfig::reference_px`] and [`IconConfig::distance_for_px`].
+    pub fn view_band(
+        &self,
+        focal_px: f32,
+        distance: f32,
+        max_distance: f32,
+        ui_scale: f32,
+    ) -> ViewBand {
+        let shrink = self
+            .view_shrink(focal_px, max_distance, ui_scale)
+            .unwrap_or(1.0);
+        let (hi, lo) = (
+            self.model_above_px * ui_scale,
+            self.icon_below_px * ui_scale,
+        );
+        ViewBand {
+            reference_px: self.reference_px(focal_px, distance) * shrink,
+            shrink,
+            models_until: self.distance_for_px(focal_px, hi / shrink),
+            icons_from: self.distance_for_px(focal_px, lo / shrink),
+        }
+    }
+}
+
+/// The model/icon band of a view as [`IconConfig::blend_for_view`] applies it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewBand {
+    /// Apparent size of the reference unit after the shrink, pixels.
+    pub reference_px: f32,
+    /// The shrink factor (1 = none).
+    pub shrink: f32,
+    /// Camera distance up to which only models are drawn.
+    pub models_until: f32,
+    /// Camera distance from which only icons are drawn.
+    pub icons_from: f32,
 }
 
 /// How much of the picture is models and how much is icons.
@@ -411,6 +460,36 @@ pub struct IconParams {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The F1 band (WP1.9 review follow-up): the distances it shows are
+    /// where `blend_for_view` really switches, shrink included.
+    #[test]
+    fn the_view_band_matches_where_blend_for_view_switches() {
+        let c = IconConfig::default();
+        let focal = 870.0;
+        for max_distance in [100.0_f32, 400.0, 2000.0] {
+            let band = c.view_band(focal, 50.0, max_distance, 1.0);
+            let blend = |d: f32| c.blend_for_view(focal, d, max_distance, 1.0).model();
+            if band.models_until < max_distance * 0.99 {
+                assert_eq!(blend(band.models_until * 0.999), 1.0, "{max_distance}");
+                assert!(blend(band.models_until * 1.01) < 1.0, "{max_distance}");
+            }
+            if band.icons_from < max_distance * 0.99 {
+                assert!(blend(band.icons_from * 0.99) > 0.0, "{max_distance}");
+                assert_eq!(blend(band.icons_from * 1.001), 0.0, "{max_distance}");
+            }
+            assert!(band.icons_from <= max_distance * 1.0001);
+            let plain = c.reference_px(focal, 50.0);
+            assert!((band.reference_px - plain * band.shrink).abs() < 1e-3);
+        }
+        // A camera that can go far past the band: no shrink.
+        assert_eq!(c.view_band(focal, 50.0, 2000.0, 1.0).shrink, 1.0);
+        // One whose maximum is inside the band (a small map): shrunk, and
+        // the icons start exactly at the maximum.
+        let band = c.view_band(focal, 50.0, 100.0, 1.0);
+        assert!(band.shrink < 1.0);
+        assert!((band.icons_from - 100.0).abs() < 0.05, "{band:?}");
+    }
 
     #[test]
     fn default_config_is_valid() {

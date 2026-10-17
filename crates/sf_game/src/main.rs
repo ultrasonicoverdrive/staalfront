@@ -42,6 +42,12 @@
 //! works against the real terrain: the point under the cursor, the zoom
 //! toward it and the middle-mouse grab are ray-terrain picks, and units and
 //! the click sound sit on the terrain surface.
+//!
+//! glTF models (WP1.10): `--models testpack` draws the units with the 14
+//! models of the test pack (`assets/config/models.ron`) instead of the cube,
+//! cylinder and cone: 14 unit kinds, kind `i` is model `i`, each with its
+//! level-of-detail chain, its parts (hull, turret, barrel) and its icon. The
+//! turrets track the map centre (a demo of the part hierarchy).
 
 mod debug_ui;
 mod hud;
@@ -56,6 +62,7 @@ use sf_data::map::{Map, generate::generate};
 use sf_engine::{Action, App, Context, EngineConfig, Resized, winit};
 use sf_math::{Fx, Rng, Vec2};
 use sf_render::camera::DVec2;
+use sf_render::glb::{self, LoadedPack};
 use sf_render::scene::world_markers;
 use sf_render::{
     Blend, Camera, CameraConfig, CameraInput, DebugView, EyeView, FrameView, Frustum, GpuOptions,
@@ -141,18 +148,21 @@ fn shape_of(kind: Kind) -> u8 {
     (kind.0 % 256) as u8
 }
 
+/// Unit kinds spawned with the placeholder shapes (cube, cylinder, cone).
+const PLACEHOLDER_KINDS: u32 = 3;
+
 /// Fill a world with `units` wanderers: kinds and owners are spread
-/// deterministically (kind = i mod 3, owner = (i / 3) mod 4, so every
-/// shape/color pair occurs), positions come from a seeded `sf_math::Rng`.
-fn spawn_units(world: &mut World, units: u32, map: (u32, u32)) {
+/// deterministically (kind = i mod `kinds`, owner = (i / `kinds`) mod 4, so
+/// every shape/color pair occurs), positions come from a seeded `sf_math::Rng`.
+fn spawn_units(world: &mut World, units: u32, map: (u32, u32), kinds: u32) {
     let mut rng = Rng::new(0x5742_0106);
     let (w, h) = (Fx::from_int(map.0 as i32), Fx::from_int(map.1 as i32));
     for i in 0..units {
         let pos = Vec2::new(rng.fx_range(Fx::ZERO, w), rng.fx_range(Fx::ZERO, h));
         let command = Command::Spawn {
-            kind: Kind((i % 3) as u16),
+            kind: Kind((i % kinds) as u16),
             pos,
-            owner: PlayerId(((i / 3) % 4) as u8),
+            owner: PlayerId(((i / kinds) % 4) as u8),
         };
         world
             .schedule(Tick(0), PlayerId(0), command)
@@ -179,6 +189,8 @@ struct Runner {
     lod: LodConfig,
     world: World,
     instancer: Instancer,
+    /// `--models <pack>`: the glTF models the units are drawn with.
+    pack: Option<LoadedPack>,
     views: Vec<EntityView>,
     units: u32,
     /// Latest instancing and draw counters, for the once-a-second line.
@@ -216,15 +228,23 @@ impl Runner {
         map: Map,
         units: u32,
         lod: LodConfig,
+        pack: Option<LoadedPack>,
         failed: Arc<AtomicBool>,
     ) -> Self {
         let now = Instant::now();
         let map_size = (map.width(), map.height());
         let mut world = World::new(WorldConfig::new(1).with_map_size(map_size.0, map_size.1))
             .expect("the map size is valid for a world");
-        spawn_units(&mut world, units, map_size);
+        let kinds = pack
+            .as_ref()
+            .map_or(PLACEHOLDER_KINDS, |p| p.models.len() as u32);
+        spawn_units(&mut world, units, map_size, kinds);
         let mut instancer =
             Instancer::new(Style::embedded(), (map_size.0 as f32, map_size.1 as f32));
+        if let Some(pack) = &pack {
+            apply_pack(&mut instancer, pack, Style::embedded());
+            instancer.set_aim(Some([0.5 * map_size.0 as f32, 0.5 * map_size.1 as f32]));
+        }
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let camera_config = CameraConfig {
@@ -250,6 +270,7 @@ impl Runner {
             lod,
             world,
             instancer,
+            pack,
             views: Vec::new(),
             units,
             stats: InstanceStats::default(),
@@ -459,15 +480,23 @@ impl Runner {
             }
         });
         let (above, below) = (icons.model_above_px * scale, icons.icon_below_px * scale);
+        // The band as `blend_for_view` applies it (with its shrink on a map
+        // whose whole-map view would still show models).
+        let band = icons.view_band(
+            eye.focal_px,
+            distance,
+            self.camera.max_distance() as f32,
+            scale,
+        );
         self.unit_view = UnitView {
             model_weight: blend.model(),
             zoom: self.camera.zoom() as f32,
             distance,
-            reference_px: icons.reference_px(eye.focal_px, distance),
+            reference_px: band.reference_px,
             model_above_px: above,
             icon_below_px: below,
-            models_until: icons.distance_for_px(eye.focal_px, above),
-            icons_from: icons.distance_for_px(eye.focal_px, below),
+            models_until: band.models_until,
+            icons_from: band.icons_from,
             ui_scale: scale,
             hovered,
         };
@@ -491,7 +520,11 @@ impl Runner {
             .and_then(|text| Style::from_ron(&text).map_err(|e| e.to_string()));
         match result {
             Ok(style) => {
-                self.instancer.set_style(style);
+                match &self.pack {
+                    // Keep the models; take the new palette and settings.
+                    Some(pack) => apply_pack(&mut self.instancer, pack, style),
+                    None => self.instancer.set_style(style),
+                }
                 println!("reloaded {}", units.display());
             }
             Err(e) => eprintln!(
@@ -936,7 +969,51 @@ fn map_arg() -> Option<String> {
     None
 }
 
+/// Draw the units with the models of `pack`, with the palette and settings of `base`.
+fn apply_pack(instancer: &mut Instancer, pack: &LoadedPack, base: Style) {
+    match pack.style(&base) {
+        Ok(style) => instancer.set_style_and_models(style, pack.set.clone()),
+        Err(e) => eprintln!("sf_game: cannot use the model pack: {e}"),
+    }
+}
+
+/// `--models <pack>`: draw the units with a glTF model pack from
+/// `assets/config/models.ron` (e.g. `testpack`). A pack that does not load
+/// is an error: the game exits with the loader's message.
+fn models_arg() -> Option<LoadedPack> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == "--models" {
+            let name = args.next().unwrap_or_default();
+            let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+            let config = assets.join(glb::MODELS_CONFIG);
+            let loaded = std::fs::read_to_string(&config)
+                .map_err(|e| format!("{}: {e}", config.display()))
+                .and_then(|text| {
+                    let started = Instant::now();
+                    let pack = glb::load_pack(&text, &name, &assets).map_err(|e| e.to_string())?;
+                    println!(
+                        "models: pack {name}, {} models, {} part meshes, loaded in {:.1} ms",
+                        pack.models.len(),
+                        pack.set.extra_meshes().len(),
+                        started.elapsed().as_secs_f64() * 1000.0
+                    );
+                    Ok(pack)
+                });
+            return match loaded {
+                Ok(pack) => Some(pack),
+                Err(e) => {
+                    eprintln!("sf_game: --models {name}: {e}");
+                    std::process::exit(1);
+                }
+            };
+        }
+    }
+    None
+}
+
 fn main() {
+    let models = models_arg();
     let map = match map_arg() {
         Some(dir) => Map::load(std::path::Path::new(&dir)).unwrap_or_else(|e| {
             eprintln!("sf_game: cannot load map {dir}: {e}");
@@ -955,6 +1032,7 @@ fn main() {
         map,
         units_arg(),
         lod_config_args(),
+        models,
         failed.clone(),
     );
     let (panels, grid, lod) = debug_ui_args();
