@@ -28,6 +28,8 @@ struct Slot {
     buffer: wgpu::Buffer,
     /// Set by the map callback (`MAPPING` until then); `None` = free.
     pending: Option<Arc<AtomicU8>>,
+    /// The caller's tag of the frame in this slot (see [`GpuTimer::submitted`]).
+    tag: u64,
 }
 
 /// Measures the GPU time of whole frames.
@@ -37,8 +39,9 @@ pub struct GpuTimer {
     slots: Vec<Slot>,
     /// Nanoseconds per timestamp tick.
     period_ns: f32,
-    /// Finished measurements in milliseconds, oldest first.
-    done: Vec<f64>,
+    /// Finished measurements: the tag of the frame and its GPU time in
+    /// milliseconds, oldest first.
+    done: Vec<(u64, f64)>,
 }
 
 impl GpuTimer {
@@ -68,6 +71,7 @@ impl GpuTimer {
                     mapped_at_creation: false,
                 }),
                 pending: None,
+                tag: 0,
             })
             .collect();
         Some(Self {
@@ -95,7 +99,9 @@ impl GpuTimer {
     }
 
     /// Start mapping the slot's buffer; call after the frame was submitted.
-    pub fn submitted(&mut self, slot: usize) {
+    /// `tag` is the caller's number for this frame; it comes back with the
+    /// result, which is several frames later (see [`Self::take`]).
+    pub fn submitted(&mut self, slot: usize, tag: u64) {
         let ready = Arc::new(AtomicU8::new(MAPPING));
         let flag = ready.clone();
         self.slots[slot]
@@ -108,6 +114,7 @@ impl GpuTimer {
                 );
             });
         self.slots[slot].pending = Some(ready);
+        self.slots[slot].tag = tag;
     }
 
     /// Collect the frames whose mapping has finished (the caller polls the
@@ -129,8 +136,10 @@ impl GpuTimer {
                 };
                 let (start, end) = (word(0), word(1));
                 if end > start {
-                    self.done
-                        .push((end - start) as f64 * f64::from(self.period_ns) / 1e6);
+                    self.done.push((
+                        slot.tag,
+                        (end - start) as f64 * f64::from(self.period_ns) / 1e6,
+                    ));
                 }
                 drop(range);
                 slot.buffer.unmap();
@@ -139,8 +148,9 @@ impl GpuTimer {
         }
     }
 
-    /// The measurements finished since the last call, in milliseconds.
-    pub fn take(&mut self) -> Vec<f64> {
+    /// The measurements finished since the last call: the tag given to
+    /// [`Self::submitted`] for the frame, and its GPU time in milliseconds.
+    pub fn take(&mut self) -> Vec<(u64, f64)> {
         std::mem::take(&mut self.done)
     }
 }

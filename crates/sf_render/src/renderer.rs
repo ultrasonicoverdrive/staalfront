@@ -166,6 +166,8 @@ pub struct Renderer {
     present: PresentInfo,
     /// GPU frame timing, created by [`Renderer::enable_gpu_timing`].
     gpu_timer: Option<GpuTimer>,
+    /// Caller's number for the frames submitted now (GPU timing).
+    gpu_frame_tag: u64,
     /// Cumulative GPU buffer allocations made while running.
     allocs: AllocStats,
     /// The next frame is also copied out of the window (see
@@ -209,13 +211,21 @@ pub struct DebugView {
 }
 
 impl DebugView {
+    /// Camera distance in cells up to which the grid is fully visible, and
+    /// from which it is gone. They are cells, not metres, so that they follow
+    /// the cell size (B12: 40 and 140 when a cell was a metre, now 160 m and
+    /// 560 m).
+    pub const GRID_FULL_UNTIL_CELLS: f64 = 40.0;
+    pub const GRID_GONE_AT_CELLS: f64 = 140.0;
+
     /// Grid opacity for a camera distance in metres: fully visible when
-    /// zoomed in, gone when zoomed far out (where the 4 m cell lines are
+    /// zoomed in, gone when zoomed far out (where the cell lines are
     /// sub-pixel).
     pub fn grid_alpha_for_distance(distance: f64) -> f32 {
-        const FULL_UNTIL: f64 = 160.0;
-        const GONE_AT: f64 = 560.0;
-        (1.0 - (distance - FULL_UNTIL) / (GONE_AT - FULL_UNTIL)).clamp(0.0, 1.0) as f32
+        let cell = f64::from(sf_math::render_bridge::METRES_PER_CELL);
+        let full_until = Self::GRID_FULL_UNTIL_CELLS * cell;
+        let gone_at = Self::GRID_GONE_AT_CELLS * cell;
+        (1.0 - (distance - full_until) / (gone_at - full_until)).clamp(0.0, 1.0) as f32
     }
 }
 
@@ -246,9 +256,10 @@ impl Renderer {
         }
         let (present_mode, note) = options.present.choose(&caps.present_modes);
         config.present_mode = present_mode;
-        // So that a frame can be copied out for screenshots (`capture_next_frame`).
+        // So that a frame can be copied out for screenshots (`capture_next_frame`),
+        // only when asked for: the benchmark measures the normal surface.
         let can_capture = caps.usages.contains(wgpu::TextureUsages::COPY_SRC);
-        if can_capture {
+        if options.capture && can_capture {
             config.usage |= wgpu::TextureUsages::COPY_SRC;
         }
         let present = PresentInfo {
@@ -428,6 +439,7 @@ impl Renderer {
             watch: None,
             present,
             gpu_timer: None,
+            gpu_frame_tag: 0,
             allocs: AllocStats::default(),
             capture_requested: false,
             captured: None,
@@ -450,9 +462,18 @@ impl Renderer {
         self.gpu_timer.is_some()
     }
 
-    /// GPU frame times in milliseconds that finished since the last call
-    /// (a frame's result arrives a few frames late).
-    pub fn take_gpu_frame_times(&mut self) -> Vec<f64> {
+    /// Number the frames submitted from now on (until the next call) with
+    /// `tag`; [`Renderer::take_gpu_frame_times`] hands it back with each GPU
+    /// time, so a result that arrives frames late can be credited to the
+    /// frame it measured.
+    pub fn set_gpu_frame_tag(&mut self, tag: u64) {
+        self.gpu_frame_tag = tag;
+    }
+
+    /// GPU frame times that finished since the last call, as `(tag, ms)`
+    /// with the tag from [`Renderer::set_gpu_frame_tag`] at the time the
+    /// frame was submitted (a frame's result arrives a few frames late).
+    pub fn take_gpu_frame_times(&mut self) -> Vec<(u64, f64)> {
         if let Some(timer) = &mut self.gpu_timer {
             let _ = self.gpu.device.poll(wgpu::PollType::Poll);
             timer.collect();
@@ -475,8 +496,8 @@ impl Renderer {
 
     /// Copy the next frame rendered to the window into an image, to be
     /// fetched with [`Renderer::take_capture`]. Works for the window only
-    /// when the surface allows copying out of it (otherwise nothing is
-    /// captured). Offscreen renderers use [`Renderer::render_to_image`].
+    /// when the renderer was made with [`GpuOptions::capture`] and the
+    /// surface allows copying out of it (otherwise nothing is captured). Offscreen renderers use [`Renderer::render_to_image`].
     pub fn capture_next_frame(&mut self) {
         self.capture_requested = true;
     }
@@ -654,7 +675,7 @@ impl Renderer {
             .queue
             .submit(extra.into_iter().chain([encoder.finish()]));
         if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
-            timer.submitted(slot);
+            timer.submitted(slot, self.gpu_frame_tag);
         }
         if let Some(frame) = frame {
             self.gpu.queue.present(frame);

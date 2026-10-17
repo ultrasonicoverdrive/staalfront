@@ -751,7 +751,7 @@ impl Runner {
             segment: segment as u8,
         });
         run.allocs_seen = allocs;
-        run.rec.push_gpu(gpu);
+        run.rec.push_gpu(gpu, bench::WARMUP_FRAMES);
         let finished = match run.opts.frames {
             Some(n) => run.rec.frames.len() >= n as usize,
             None => run
@@ -935,6 +935,8 @@ impl App for Runner {
         self.audio = Some(audio);
         let gpu_options = GpuOptions {
             present: self.options.present,
+            // Screenshots copy the window frame out; nothing else needs it.
+            capture: self.options.shots.is_some(),
             ..GpuOptions::window()
         };
         println!(
@@ -1085,6 +1087,10 @@ impl App for Runner {
             audio.update();
         }
         if let Some(renderer) = &mut self.renderer {
+            // The GPU time of this frame arrives frames later; the number
+            // lets the benchmark credit it to this frame (`bench_after_render`
+            // counts `run.frame` up after the draw).
+            renderer.set_gpu_frame_tag(self.bench.as_ref().map_or(0, |b| u64::from(b.frame)));
             let drawing = Instant::now();
             let drawn = self.hud.draw(renderer);
             self.render_ms.push(drawing.elapsed());
