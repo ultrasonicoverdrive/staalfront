@@ -16,7 +16,7 @@ the EA source code). Execution: Sonnet 5 agents at effort high (see §12).
 | B1 | Engine | **Own thin engine on wgpu + winit**, no off-the-shelf engine (see §1.0) | An RTS has one camera, one kind of world and thousands of identical objects: exactly what you control tightly yourself with instancing. Full control over determinism, tick order and memory. |
 | B2 | What "2.5D" means here | **True 3D world, fixed camera angle, low-poly models** | Sprites (like the original) get ugly with seamless zooming. 3D models stay sharp up close and simplify cleanly from afar. Gameplay stays flat (2D grid). |
 | B3 | Simulation | **Deterministic, fixed tick (20 Hz), fixed-point math, separate from rendering** | Enables replays, saving, multiplayer (lockstep) and automated tests. Adding it afterwards is nearly impossible. |
-| B4 | Cutscenes | **In-engine cartoon player (cutout/vector animation, scripted) + video as fallback** | Small, sharp at any resolution, lip-sync and translation adjustable afterwards. See §9. |
+| B4 | Cutscenes | **In-engine cartoon player (cutout/vector animation, scripted) + video as fallback (deferred, WP12.4)** | Small, sharp at any resolution, lip-sync and translation adjustable afterwards. See §9. |
 | B5 | License of the source-code reference | **Clean-room**: use only the functional analysis, never read-and-retype EA code | EA code is GPL; copying it verbatim makes Staalfront GPL. Own name, units, graphics, music are mandatory (trademark). Exception for original audio: B11. |
 | B6 | Where it is built | **GitHub + cloud agents + laptop**, never on the home server (see §13) | The home server runs live services and has no room (RAM, GPU) for a Rust game build. |
 | B7 | Target platform v1 | Windows + Linux desktop. Web and macOS later. | Mouse + keyboard; an RTS on a phone is a different game. |
@@ -49,7 +49,7 @@ objects. Hence separate, stable building blocks:
 | Editor/debug UI | `egui` (via `egui-wgpu`) | Quick to build, only for tools and debug panels. |
 | Audio | `kira` | Mixing, positional, transitions for dynamic music. |
 | Data | `serde` + `ron` | Readable game data. |
-| Cartoon video fallback | `ffmpeg` as a separate process that delivers frames | No heavy bindings in the build. |
+| Cartoon video fallback | deferred (WP12.4); when picked up: `rav1d` + a Matroska demuxer + libopus, benchmarked against VP9 on the reference laptop | Research 17-10-2026: an `ffmpeg` process means shipping an LGPL binary and installer work; no clip exists yet. |
 | Tests | `proptest`, `insta` (snapshots) | Properties and regressions. |
 
 ### 1.1 Cargo workspace
@@ -295,7 +295,7 @@ See §9 for the design.
 - WP12.1 Script format (RON) for scenes: layers, characters, poses, movement, camera, dialogue, sound, timeline.
 - WP12.2 Player in `sf_cutscene`: cutout animation (jointed 2D figures), easing, transitions, subtitles, skipping.
 - WP12.3 Lip-sync: mouth shapes from speech files (Rhubarb Lip Sync, offline), stored as a time series.
-- WP12.4 Video fallback: WebM/AV1 playback for scenes delivered as video.
+- WP12.4 Video fallback: WebM/AV1 playback for scenes delivered as video. **Deferred** (orchestrator, 17-10-2026) until an artist delivers a clip: the scripted cutout path covers every scene, and video would add three native or immature dependencies (decoder, demuxer, Opus). When a clip arrives, first try converting it to a cutout or sprite sequence; otherwise build this WP with the stack in §1.0.
 - WP12.5 One complete demo scene (briefing mission 1) with placeholder figures.
 - WP12.6 Preview tool: reload scene live on save (for the artist).
 

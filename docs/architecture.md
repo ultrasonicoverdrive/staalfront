@@ -10,8 +10,8 @@ with a fixed camera angle and low-poly models (B2); gameplay is flat, on a 2D ce
 grid. Components: `winit` (window/input), `wgpu` (GPU, instancing), `glam`
 (render math, presentation only), own struct-of-arrays storage (simulation), `gltf`
 (models), own UI on wgpu, `egui`/`egui-wgpu` (editor and debug UI only), `kira`
-(audio), `serde` + `ron` (data), `ffmpeg` as a separate process (cartoon video
-fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B7).
+(audio), `serde` + `ron` (data), `proptest` + `insta` (tests). The cartoon video
+fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows + Linux (B7).
 
 ## 2. Crate map
 
@@ -103,7 +103,7 @@ Rules stated in PLAN.md:
 > rendering, windowing, audio, network or the clock; apply rule 3 to the named
 > engine crates (`sf_engine`, `sf_render`, `sf_ui`, `sf_audio`); make `sf_game` the
 > only crate that glues everything together; keep presentation libraries (`egui`,
-> `kira`, `ffmpeg`, `winit`, `wgpu`) out of `sf_sim`.
+> `kira`, `winit`, `wgpu`) out of `sf_sim`.
 
 ## 3. Simulation and presentation split (B3, §1.2)
 
