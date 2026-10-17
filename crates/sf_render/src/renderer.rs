@@ -1130,6 +1130,14 @@ const ICON_ATTRS: [wgpu::VertexAttribute; 3] =
 const INSTANCE_ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
     2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4
 ];
+/// The model instances: one step per instance, so every vertex of an instance
+/// reads the same matrix and color, and with it the same cross-fade weight
+/// (`color.a`, location 6).
+const INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+    array_stride: std::mem::size_of::<Instance>() as u64,
+    step_mode: wgpu::VertexStepMode::Instance,
+    attributes: &INSTANCE_ATTRS,
+};
 
 /// Compile `wgsl` and build the scene pipeline. Validation errors (WGSL
 /// syntax, types, binding mismatches) come back as `Err` instead of
@@ -1158,11 +1166,7 @@ fn build_pipeline(
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &VERTEX_ATTRS,
                 }),
-                Some(wgpu::VertexBufferLayout {
-                    array_stride: std::mem::size_of::<Instance>() as u64,
-                    step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &INSTANCE_ATTRS,
-                }),
+                Some(INSTANCE_LAYOUT),
             ],
         },
         primitive: wgpu::PrimitiveState {
@@ -1260,6 +1264,35 @@ fn build_icon_pipeline(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// The model's cross-fade weight is the alpha of the instance color: it
+    /// must step per instance (every vertex of an instance carries the same
+    /// weight) and reach the fragment shader flat, as in icon.wgsl, so the
+    /// two dither tests see the identical number.
+    #[test]
+    fn the_model_weight_is_per_instance_and_flat() {
+        assert_eq!(INSTANCE_LAYOUT.step_mode, wgpu::VertexStepMode::Instance);
+        let color = INSTANCE_LAYOUT
+            .attributes
+            .iter()
+            .find(|a| a.shader_location == 6)
+            .expect("the color attribute");
+        assert_eq!(color.offset, std::mem::offset_of!(Instance, color) as u64);
+        assert_eq!(color.format, wgpu::VertexFormat::Float32x4);
+        let flat = |src: &str| {
+            src.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("@interpolate(flat) weight: f32")
+        };
+        let scene = include_str!("../../../assets/shaders/scene.wgsl");
+        assert!(scene.contains("out.weight = in.color.a;"));
+        assert!(scene.contains("@location(6) color: vec4<f32>"));
+        assert!(flat(scene), "scene.wgsl weight is flat");
+        assert!(flat(include_str!("../../../assets/shaders/icon.wgsl")));
+    }
+
     /// Every `draw_indexed` goes through `CountedPass::draw`, which counts it
     /// next to the call. If someone records a draw anywhere else (or splits
     /// the counting from the call again) this fails.

@@ -14,9 +14,18 @@
 //! goes to a coarser level only when it is clearly below the switch size
 //! (`switch * (1 - h)`) and back to a finer one only when it is clearly above
 //! it (`switch * (1 + h)`), so a unit hovering at a switch size does not
-//! flicker. Without a previous level (a unit that was not drawn last frame)
-//! the level is the plain threshold ([`ModelLods::ideal`]), which is
-//! monotone: the farther away, the coarser or equal.
+//! flicker. Without a previous level the level is the plain threshold
+//! ([`ModelLods::ideal`]), which is monotone: the farther away, the coarser or
+//! equal. That is the case for a unit that has never been drawn, and for every
+//! unit after [`Instancer::set_models`](crate::instancing::Instancer::set_models).
+//!
+//! A unit that is culled (its tile is outside the view) or not drawn as a
+//! model (icons only) **keeps** the level it had when it was last drawn; it is
+//! not reset. That is harmless: whatever the previous level, `select` returns
+//! a level within the hysteresis band of the plain threshold (test
+//! `the_chosen_level_stays_within_the_band_of_the_ideal`), so a stale level
+//! only decides *which* of the at most two levels allowed inside a band a
+//! returning unit gets, never a level from far outside it.
 //!
 //! # Meshes and draw calls
 //! Meshes live in one table, addressed by [`MeshId`]: the five built-in

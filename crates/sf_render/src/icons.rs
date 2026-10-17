@@ -60,6 +60,24 @@
 //! anchor point. The price: icons of units on both sides of a ridge overlap
 //! on the screen without occluding anything. Picking follows the drawing
 //! (see [`crate::pick`]).
+//!
+//! # Fog of war (for WP8.4)
+//! Because icons are drawn last and without depth, a fog layer drawn into the
+//! scene cannot hide them. WP8.4 must remove the units the player cannot see
+//! from the icon list on the CPU (in [`crate::Instancer::build_frame`]), not
+//! rely on the fog rendering to cover them.
+//!
+//! # The whole-map view
+//! The thresholds are independent of the map size, but the camera's whole-map
+//! distance is not: it grows with the map, so on a small map at a low
+//! resolution the reference unit can still be bigger than `icon_below_px`
+//! when the camera is zoomed out all the way (with the default camera a 64 m
+//! map at 1080p sits at about 31 px, models only; a 256 m map at 4K and UI
+//! scale 1 at about 15.5 px, still in the cross-fade). [`IconConfig::blend_for_view`] therefore takes the camera's
+//! maximum distance and, when the band would end beyond it, shifts the band
+//! towards the camera (its width in log size stays the same) so that the
+//! maximum zoom is always icons only. On maps where the band ends before the
+//! maximum distance nothing changes.
 
 use bytemuck::{Pod, Zeroable};
 use serde::Deserialize;
@@ -199,6 +217,37 @@ impl IconConfig {
     }
 }
 
+impl IconConfig {
+    /// [`IconConfig::blend_for_camera`] for a camera that cannot go farther
+    /// than `max_distance` (its whole-map distance): if the reference unit
+    /// would still be above the icon threshold there, every apparent size is
+    /// scaled down by the same factor so that `max_distance` lands exactly on
+    /// the threshold. The blend stays continuous and monotone in the
+    /// distance, and the maximum zoom is always [`Blend::ICONS`] (see the
+    /// module docs, "The whole-map view").
+    pub fn blend_for_view(
+        &self,
+        focal_px: f32,
+        distance: f32,
+        max_distance: f32,
+        ui_scale: f32,
+    ) -> Blend {
+        let lo = self.icon_below_px * ui_scale;
+        let at_max = self.reference_px(focal_px, max_distance);
+        if at_max.is_nan() || at_max <= lo {
+            // The band ends before the maximum zoom (or the input is NaN).
+            return self.blend_for_camera(focal_px, distance, ui_scale);
+        }
+        // At the maximum zoom (to rounding: the camera computes its distance
+        // through a power, which can land a hair short of the maximum).
+        if distance >= max_distance * (1.0 - 1e-4) {
+            return Blend::ICONS;
+        }
+        let shrink = lo / at_max;
+        self.blend(self.reference_px(focal_px, distance) * shrink, ui_scale)
+    }
+}
+
 /// How much of the picture is models and how much is icons.
 ///
 /// One number: the model weight `m`. The icon weight is `1 - m`, so the two
@@ -259,10 +308,13 @@ impl Blend {
         dither_threshold(x, y) < self.model
     }
 
-    /// Whether the icon is drawn at the screen pixel `(x, y)`: exactly where
-    /// the model is not (the test of `icon.wgsl`).
+    /// Whether the icon is drawn at the screen pixel `(x, y)`: the dither
+    /// threshold is at or above the model weight. This is the test of
+    /// `icon.wgsl` (which discards where `threshold < weight`), written out on
+    /// its own rather than as `!model_at` so that the tests can catch the two
+    /// shaders disagreeing on a pixel that sits exactly on a threshold.
     pub fn icon_at(self, x: u32, y: u32) -> bool {
-        !self.model_at(x, y)
+        dither_threshold(x, y) >= self.model
     }
 }
 
@@ -491,6 +543,92 @@ mod tests {
         // The ends: no dissolve at all, and no model at all.
         assert!((0..64).all(|i| Blend::MODELS.model_at(i % 8, i / 8)));
         assert!((0..64).all(|i| Blend::ICONS.icon_at(i % 8, i / 8)));
+    }
+
+    /// The pixels that sit exactly on a threshold: weight `(rank + 0.5) / 64`
+    /// is exact in f32, and there `model_at` must say no and `icon_at` yes.
+    /// A `<=` in one test (or a `>` in the other) fails here.
+    #[test]
+    fn a_weight_exactly_on_a_threshold_gives_the_pixel_to_the_icon() {
+        for rank in 0..64 {
+            let blend = Blend::from_model_weight((rank as f32 + 0.5) / 64.0);
+            let (x, y) = (0..64)
+                .map(|i| (i % 8, i / 8))
+                .find(|&(x, y)| dither_rank(x, y) == rank)
+                .unwrap();
+            assert!(!blend.model_at(x, y), "rank {rank}: model on its threshold");
+            assert!(blend.icon_at(x, y), "rank {rank}: icon on its threshold");
+        }
+    }
+
+    #[test]
+    fn at_the_maximum_zoom_there_are_only_icons_on_every_map_size() {
+        let c = IconConfig::default();
+        // 1080p and 4K with a 45 degree field of view, UI scale 1 and 2, and
+        // whole-map distances from a 64 m map to a 1024 m map.
+        for height in [1080.0_f32, 2160.0] {
+            let focal = 0.5 * height / (22.5_f32.to_radians()).tan();
+            for scale in [1.0, 2.0] {
+                for max in [60.0_f32, 85.0, 170.0, 340.0, 1360.0] {
+                    assert_eq!(c.blend_for_view(focal, max, max, scale), Blend::ICONS);
+                    // Continuous and monotone up to it, never models again.
+                    let mut previous = 1.0_f32;
+                    for i in 0..=400 {
+                        // Even steps in log distance (as the zoom moves).
+                        let d = 2.0 * (max / 2.0).powf(i as f32 / 400.0);
+                        let m = c.blend_for_view(focal, d, max, scale).model();
+                        assert!(m <= previous + 1e-6, "{height} {scale} {max} {d}");
+                        assert!(previous - m < 0.1, "a jump at {d} on {max}");
+                        previous = m;
+                    }
+                    // Where the plain band already ends before the maximum,
+                    // nothing changes.
+                    if c.reference_px(focal, max) <= c.icon_below_px * scale {
+                        for d in [5.0, 20.0, 50.0, max] {
+                            assert_eq!(
+                                c.blend_for_view(focal, d, max, scale),
+                                c.blend_for_camera(focal, d, scale)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The same with the real camera, as sf_game calls it: zoomed out all the
+    /// way on a 64 m and a 256 m map, at 1080p and 4K.
+    #[test]
+    fn the_real_camera_at_maximum_zoom_shows_icons_only() {
+        use crate::camera::{Camera, CameraConfig, DVec2};
+        use crate::model::EyeView;
+        let c = IconConfig::default();
+        for map in [64.0, 256.0, 1024.0] {
+            for (w, h) in [(1920, 1080), (3840, 2160)] {
+                let mut cam = Camera::new(
+                    CameraConfig {
+                        map_size: DVec2::new(map, map),
+                        ..CameraConfig::default()
+                    },
+                    w,
+                    h,
+                );
+                cam.set_zoom(1.0);
+                let eye = EyeView::from_view_proj(cam.view_proj(), h as f32);
+                let (d, max) = (cam.distance() as f32, cam.max_distance() as f32);
+                let plain = c.reference_px(eye.focal_px, d);
+                println!("{map} m map at {w}x{h}: {plain:.1} px at {d:.0} m");
+                if map == 64.0 && h == 1080 {
+                    // The case from the review: in the band without the clamp.
+                    assert!(c.blend_for_camera(eye.focal_px, d, 1.0).models_drawn());
+                }
+                assert_eq!(
+                    c.blend_for_view(eye.focal_px, d, max, 1.0),
+                    Blend::ICONS,
+                    "{map} m map at {w}x{h}"
+                );
+            }
+        }
     }
 
     #[test]

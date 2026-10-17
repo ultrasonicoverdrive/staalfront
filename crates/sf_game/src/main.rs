@@ -407,7 +407,12 @@ impl Runner {
         let icons = *self.instancer.icon_config();
         let distance = self.camera.distance() as f32;
         let blend = match self.debug.state.unit_display {
-            UnitDisplay::Auto => icons.blend_for_camera(eye.focal_px, distance, scale),
+            UnitDisplay::Auto => icons.blend_for_view(
+                eye.focal_px,
+                distance,
+                self.camera.max_distance() as f32,
+                scale,
+            ),
             UnitDisplay::Models => Blend::MODELS,
             UnitDisplay::Icons => Blend::ICONS,
         };

@@ -33,7 +33,11 @@ struct VertexOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
     @location(1) color: vec3<f32>,
-    @location(2) weight: f32,
+    // The cross-fade weight, the same for every vertex of an instance (it
+    // comes from the per-instance color). Flat like in icon.wgsl, so both
+    // shaders compare the exact value against the threshold; an interpolated
+    // value could round across a threshold and draw a pixel twice or never.
+    @location(2) @interpolate(flat) weight: f32,
 };
 
 // Threshold of the pixel in the 8x8 Bayer ordering, in (0, 1). The same

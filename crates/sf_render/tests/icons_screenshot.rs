@@ -94,8 +94,12 @@ fn still(shape: u8, player: u8, id: u32, at: (f32, f32)) -> Motion {
 /// The blend the game would use at this camera.
 fn blend_at(inst: &Instancer, cam: &Camera, ui_scale: f32) -> Blend {
     let eye = EyeView::from_view_proj(cam.view_proj(), H as f32);
-    inst.icon_config()
-        .blend_for_camera(eye.focal_px, cam.distance() as f32, ui_scale)
+    inst.icon_config().blend_for_view(
+        eye.focal_px,
+        cam.distance() as f32,
+        cam.max_distance() as f32,
+        ui_scale,
+    )
 }
 
 /// Build the frame as sf_game does and upload it. `models` / `icons` can
@@ -434,7 +438,22 @@ fn the_cross_fade_is_exactly_complementary_in_every_pixel() {
     let inside = || (y0..y0 + 10).flat_map(move |y| (x0..x0 + 10).map(move |x| (x, y)));
 
     let mut model_share = Vec::new();
-    for weight in [0.0, 0.125, 0.25, 0.5, 0.75, 0.875, 1.0] {
+    // Besides round weights, weights exactly on a dither threshold
+    // `(rank + 0.5) / 64` (exact in f32): there the pixel of that rank belongs
+    // to the icon, so a `<=` in scene.wgsl (or a `>` in icon.wgsl) fails here.
+    for weight in [
+        0.0,
+        0.5 / 64.0,
+        0.125,
+        0.25,
+        33.0 / 128.0,
+        0.5,
+        65.0 / 128.0,
+        0.75,
+        0.875,
+        127.0 / 128.0,
+        1.0,
+    ] {
         let blend = Blend::from_model_weight(weight);
         let model_only = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (true, false));
         let icon_only = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (false, true));
@@ -588,9 +607,12 @@ fn ten_thousand_units_at_close_mid_and_strategic_zoom() {
         r.set_view_proj(vp);
         let frustum = Frustum::from_view_proj(vp);
         let eye = EyeView::from_view_proj(vp, 1080.0);
-        let blend = inst
-            .icon_config()
-            .blend_for_camera(eye.focal_px, cam.distance() as f32, 1.0);
+        let blend = inst.icon_config().blend_for_view(
+            eye.focal_px,
+            cam.distance() as f32,
+            cam.max_distance() as f32,
+            1.0,
+        );
         // The picture before WP1.9 for comparison: every unit a level-0
         // model, whatever the zoom.
         let mut base_ms = f64::MAX;
