@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 out = ROOT / "voiceover.csv"
 rows = []
-for p in sorted((ROOT / "missions").glob("*.md")):
+for p in sorted((ROOT / "missions").glob("F?-M??.md")):  # campaign missions only, no template or example
     text = p.read_text(encoding="utf-8")
     i, j = text.find("## B. Story"), text.find("## C. Map")
     for line in text[i:j].splitlines():

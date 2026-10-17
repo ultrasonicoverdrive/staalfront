@@ -1,7 +1,25 @@
 #!/usr/bin/env python3
-"""Validate Staalfront mission documents against CONVENTIONS.md and units.md.
+"""Validate the Staalfront story content (stdlib only).
 
-Usage: python scripts/validate.py [missions/F1-M03.md ...]
+Mission documents (missions/F?-M??.md) are checked against CONVENTIONS.md and units.md:
+sections, references, roles, objectives, win/lose triggers, and the speakers of the
+MSG table (they must exist in cast.md; OPERATIONS is the system voice).
+
+Briefings (briefings/F?-M??.fountain) are checked against cast.md and the Fountain
+conventions in README.md:
+  * every dialogue cue is a character of cast.md (OPERATIONS is the system voice);
+  * every speaker is in the room per the action lines, unless the cue carries (V.O.)
+    or (O.S.); a speaker who is on the radio must carry one of them;
+  * a transition other than "... TO:" starts with ">" (for example "> FADE OUT.").
+
+Usage (from anywhere; run it isolated):
+    python3 -I content/scripts/validate.py                  # every campaign file
+    python3 -I content/scripts/validate.py FILE [FILE ...]  # selected files
+
+Without arguments the templates (_template.*) and the worked examples (EXAMPLE-*) are
+skipped, because they are deliberately incomplete or use made-up characters. Pass them
+by path to check them anyway.
+
 Exit code 1 if any error is found.
 """
 import re
@@ -10,7 +28,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 UNITS = ROOT / "units.md"
+CAST = ROOT / "cast.md"
 MISSIONS = ROOT / "missions"
+BRIEFINGS = ROOT / "briefings"
+
+SYSTEM_VOICE = "OPERATIONS"
 
 GENERIC_PHRASES = [
     "The situation has changed. Reassess the objective markers and proceed.",
@@ -29,6 +51,11 @@ SECTION_HEADINGS = [
 ]
 
 
+def is_campaign_file(path):
+    name = path.name
+    return not (name.startswith("_") or name.startswith("EXAMPLE"))
+
+
 def load_roles():
     roles = set()
     for line in UNITS.read_text(encoding="utf-8").splitlines():
@@ -36,6 +63,17 @@ def load_roles():
         if m and m.group(1) not in {"role", "after"}:
             roles.add(m.group(1))
     return roles
+
+
+def load_cast():
+    """Names of the characters in cast.md: the '## NAME' headings, without '(note)'."""
+    cast = set()
+    for line in CAST.read_text(encoding="utf-8").splitlines():
+        m = re.match(r"##\s+(.+?)\s*$", line)
+        if m:
+            cast.add(re.sub(r"\s*\(.*?\)\s*$", "", m.group(1)).strip())
+    cast.add(SYSTEM_VOICE)
+    return cast
 
 
 def section(text, start, end):
@@ -55,10 +93,11 @@ def table_rows(block):
     return rows
 
 
-def validate(path, roles):
+# --------------------------------------------------------------------------- missions
+
+def validate_mission(path, roles, cast):
     errors, warnings = [], []
     text = path.read_text(encoding="utf-8")
-    code = path.stem
 
     for h in SECTION_HEADINGS:
         if h not in text:
@@ -85,6 +124,11 @@ def validate(path, roles):
     defined["TR"] = {r[0].strip("`") for r in table_rows(sec_h)[1:] if r and r[0].startswith("TR_")}
     sec_b = section(text, "## B. Story", "## C.")
     defined["MSG"] = {r[0] for r in table_rows(sec_b)[1:] if r and r[0].startswith("MSG_")}
+
+    # Every MSG speaker must be a character of cast.md (OPERATIONS is the system voice)
+    for r in table_rows(sec_b)[1:]:
+        if len(r) >= 3 and r[0].startswith("MSG_") and r[1] not in cast:
+            errors.append(f"{r[0]} speaker '{r[1]}' is not in cast.md")
 
     # References in triggers and teams
     ref_text = sec_g + sec_h
@@ -129,22 +173,132 @@ def validate(path, roles):
     if not re.search(r"\|\s*TR_\d+\s*\|[^\n]*\blose\b", sec_h, re.I):
         errors.append("no trigger with a lose action")
 
+    # Every mission has a briefing of the same code
+    if not (BRIEFINGS / f"{path.stem}.fountain").exists():
+        errors.append(f"briefings/{path.stem}.fountain is missing")
+
     return errors, warnings
 
 
+# --------------------------------------------------------------------------- briefings
+
+SCENE_HEADING = re.compile(r"^(INT|EXT|EST|INT\./EXT|INT/EXT|I/E)[. ]", re.I)
+# Words that start a screenplay transition; "FADE IN:" and "FADE OUT." are the usual ones.
+TRANSITION_WORDS = re.compile(
+    r"^(FADE|CUT|DISSOLVE|WIPE|IRIS|SMASH|MATCH|JUMP|HARD CUT|THE END|BACK TO)\b")
+RADIO_WORDS = re.compile(r"\b(voice|handset|radio|telephone|phone|intercom|loudspeaker)\b", re.I)
+RADIO_PAREN = re.compile(r"\b(over (the )?(radio|phone|handset)|on (the )?radio|radio)\b", re.I)
+
+
+def fountain_blocks(text):
+    """Split a Fountain file into blank-line separated blocks (title page dropped)."""
+    blocks, cur = [], []
+    for line in text.splitlines():
+        if line.strip() == "":
+            if cur:
+                blocks.append(cur)
+                cur = []
+        else:
+            cur.append(line.rstrip())
+    if cur:
+        blocks.append(cur)
+    # The title page is the first block when it consists of 'Key: value' lines.
+    if blocks and all(re.match(r"^[A-Za-z ]+:", l) or l.startswith((" ", "\t")) for l in blocks[0]):
+        blocks = blocks[1:]
+    return blocks
+
+
+def is_upper_line(s):
+    return s == s.upper() and re.search(r"[A-Z]", s) is not None
+
+
+def validate_briefing(path, cast):
+    errors, warnings = [], []
+    text = path.read_text(encoding="utf-8")
+    blocks = fountain_blocks(text)
+
+    scene_action = ""           # action text of the current scene so far
+    first_cue_seen = set()
+    for block in blocks:
+        first = block[0].strip()
+        # notes, forced transitions and centered text
+        if first.startswith("[["):
+            continue
+        if first.startswith(">"):
+            continue
+        if SCENE_HEADING.match(first) or first.startswith("."):
+            scene_action = ""
+            continue
+        single = len(block) == 1
+        # Transition rule: "... TO:" is recognised by Fountain itself; every other
+        # transition needs a leading ">".
+        if single and is_upper_line(first):
+            if first.endswith("TO:"):
+                continue
+            if TRANSITION_WORDS.match(first):
+                errors.append(f"transition '{first}' needs a leading '>' (write '> {first}')")
+                continue
+        # Dialogue block: an upper-case cue followed by (parenthetical and) text.
+        if not single and is_upper_line(first) and not first.startswith("("):
+            m = re.match(r"^([^()^]+?)\s*((?:\([^)]*\)\s*)*)\^?$", first)
+            name = (m.group(1) if m else first).strip()
+            ext = (m.group(2) if m else "").strip()
+            extension = re.findall(r"\(([^)]*)\)", ext)
+            on_radio = any(e.strip().upper() in {"V.O.", "O.S."} for e in extension)
+            if name not in cast:
+                errors.append(f"cue '{name}' is not in cast.md")
+                continue
+            if name == SYSTEM_VOICE:
+                continue
+            parens = " ".join(l for l in block[1:] if l.strip().startswith("("))
+            if not on_radio and RADIO_PAREN.search(parens):
+                errors.append(f"{name} speaks over the radio ({parens.strip()}) but the cue lacks (V.O.) or (O.S.)")
+            if not on_radio:
+                surname = name.split()[-1]
+                if not re.search(rf"\b({re.escape(name)}|{re.escape(surname)})\b", scene_action, re.I):
+                    errors.append(f"{name} speaks but is not named in the action lines of the scene before the first line (write (V.O.) or (O.S.) if on the radio)")
+                else:
+                    # named only as a voice on a handset? then the cue must say so
+                    for sentence in re.split(r"(?<=[.!?])\s+", scene_action):
+                        if re.search(rf"\b({re.escape(name)}|{re.escape(surname)})", sentence, re.I) \
+                                and RADIO_WORDS.search(sentence) \
+                                and not re.search(r"\b(stand|stands|sit|sits|lean|leans|crouch|crouches|kneel|kneels)\b", sentence, re.I):
+                            errors.append(f"{name} is on the radio per the action line '{sentence.strip()}' but the cue lacks (V.O.) or (O.S.)")
+                            break
+            first_cue_seen.add(name)
+            continue
+        # Everything else is action.
+        scene_action += " " + " ".join(l.strip() for l in block)
+
+    if not first_cue_seen:
+        errors.append("no dialogue found")
+    return errors, warnings
+
+
+# --------------------------------------------------------------------------- main
+
 def main(argv):
     roles = load_roles()
-    paths = [Path(a) for a in argv] or sorted(MISSIONS.glob("*.md"))
+    cast = load_cast()
+    if argv:
+        paths = [Path(a) for a in argv]
+    else:
+        paths = [p for p in sorted(MISSIONS.glob("*.md")) if is_campaign_file(p)]
+        paths += [p for p in sorted(BRIEFINGS.glob("*.fountain")) if is_campaign_file(p)]
     total_err = 0
     for p in paths:
-        errs, warns = validate(p, roles)
+        if p.suffix == ".fountain":
+            errs, warns = validate_briefing(p, cast)
+        else:
+            errs, warns = validate_mission(p, roles, cast)
         total_err += len(errs)
         status = "OK " if not errs else "ERR"
-        print(f"[{status}] {p.name}: {len(errs)} errors, {len(warns)} warnings")
+        print(f"[{status}] {p.resolve().parent.name}/{p.name}: {len(errs)} errors, {len(warns)} warnings")
         for e in errs:
             print(f"    E: {e}")
         for w in warns:
             print(f"    W: {w}")
+    print(f"{len(paths)} files checked, {total_err} errors")
     return 1 if total_err else 0
 
 
