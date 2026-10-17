@@ -2433,6 +2433,11 @@ dependencies = [
 [[package]]
 name = "sf_cutscene"
 version = "0.1.0"
+dependencies = [
+ "proptest",
+ "ron",
+ "serde",
+]
 
 [[package]]
 name = "sf_data"

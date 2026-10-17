@@ -1,0 +1,145 @@
+// Example scene (WP12.1): content/briefings/EXAMPLE-bridge.fountain converted with
+//     cargo run -p sf_cutscene --bin fountain2scene -- \
+//         content/briefings/EXAMPLE-bridge.fountain assets/scenes/example_bridge.ron
+// and then checked by hand. The generated skeleton was correct as it came out; the
+// hand edits only add what a Fountain note cannot say, each marked `hand edit`:
+//   - arrows and pins on the map overlay,
+//   - Oda steps towards the major while she speaks (a Move with easing),
+//   - the major points when he gives the order (a pose change),
+//   - a slow push-in during that order (CameraZoom) and a shake on the explosion.
+// Everything else is generator output. Figures are geometric placeholders
+// (docs/cutscene-format.md); there are no files to be missing, the sound slots are
+// silent (`sound: None`, the writer's wish is in `note`).
+// `// line N` after an event is the line in the Fountain file it came from.
+#![enable(implicit_some)]
+Scene(
+    format: 1,
+    name: "example_bridge",
+    title: "EXAMPLE — Hold the Crossing (briefing)",
+    source: "content/briefings/EXAMPLE-bridge.fountain",
+    stage: (width: 1920, height: 1080),
+    layers: [
+        (name: "field_command_tent_dawn_wall", art: Rect(w: 2400.0, h: 1400.0, color: "#6b7a99"), pos: (0.0, 0.0), parallax: 0.8, z: -20, shots: ["field_command_tent_dawn"]),
+        (name: "field_command_tent_dawn_floor", art: Rect(w: 2400.0, h: 420.0, color: "#40495b"), pos: (0.0, 540.0), parallax: 1.0, z: -19, shots: ["field_command_tent_dawn"]),
+        (name: "map_table", art: Rect(w: 1920.0, h: 1080.0, color: "#d9c9a0"), pos: (0.0, 0.0), parallax: 0.0, z: 40, shots: ["map"]),
+    ],
+    characters: [
+        (id: "major_halversen", name: "Major Halversen", z: 0, scale: 1.0, parts: [
+            (name: "legs", parent: Some("torso"), pivot: (0.0, 0.0), offset: (0.0, 170.0), z: -1, art: Rect(w: 90.0, h: 120.0, color: "#223952")),
+            (name: "torso", parent: None, pivot: (0.0, 0.0), offset: (0.0, 0.0), z: 0, art: Rect(w: 130.0, h: 220.0, color: "#3a5f8a")),
+            (name: "arm_l", parent: Some("torso"), pivot: (0.0, -75.0), offset: (-83.0, -95.0), z: 2, art: Rect(w: 36.0, h: 150.0, color: "#2e4c6e")),
+            (name: "arm_r", parent: Some("torso"), pivot: (0.0, -75.0), offset: (83.0, -95.0), z: 2, art: Rect(w: 36.0, h: 150.0, color: "#2e4c6e")),
+            (name: "head", parent: Some("torso"), pivot: (0.0, 0.0), offset: (0.0, -165.0), z: 3, art: Circle(radius: 55.0, color: "#e8c39e")),
+            (name: "eye", parent: Some("head"), pivot: (0.0, 0.0), offset: (18.0, -8.0), z: 4, art: Circle(radius: 7.0, color: "#000000")),
+            (name: "mouth", parent: Some("head"), pivot: (0.0, 0.0), offset: (8.0, 22.0), z: 4, art: Rect(w: 36.0, h: 8.0, color: "#7a2e2e")),
+        ], poses: [
+            (name: "neutral", parts: []),
+            (name: "forceful", parts: [
+                (part: "torso", angle: 3.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "head", angle: -4.0, offset: (4.0, -3.0), scale: (1.0, 1.0)),
+                (part: "arm_r", angle: -20.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+            ]),
+            (name: "subdued", parts: [
+                (part: "torso", angle: 2.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "head", angle: 12.0, offset: (0.0, 6.0), scale: (1.0, 1.0)),
+                (part: "arm_l", angle: 6.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "arm_r", angle: -6.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+            ]),
+            (name: "point", parts: [
+                (part: "torso", angle: 2.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "head", angle: -3.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "arm_r", angle: -75.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+            ]),
+        ]),
+        (id: "lieutenant_oda", name: "Lieutenant Oda", z: 0, scale: 1.0, parts: [
+            (name: "legs", parent: Some("torso"), pivot: (0.0, 0.0), offset: (0.0, 170.0), z: -1, art: Rect(w: 90.0, h: 120.0, color: "#522222")),
+            (name: "torso", parent: None, pivot: (0.0, 0.0), offset: (0.0, 0.0), z: 0, art: Rect(w: 130.0, h: 220.0, color: "#8a3a3a")),
+            (name: "arm_l", parent: Some("torso"), pivot: (0.0, -75.0), offset: (-83.0, -95.0), z: 2, art: Rect(w: 36.0, h: 150.0, color: "#6e2e2e")),
+            (name: "arm_r", parent: Some("torso"), pivot: (0.0, -75.0), offset: (83.0, -95.0), z: 2, art: Rect(w: 36.0, h: 150.0, color: "#6e2e2e")),
+            (name: "head", parent: Some("torso"), pivot: (0.0, 0.0), offset: (0.0, -165.0), z: 3, art: Circle(radius: 55.0, color: "#e8c39e")),
+            (name: "eye", parent: Some("head"), pivot: (0.0, 0.0), offset: (18.0, -8.0), z: 4, art: Circle(radius: 7.0, color: "#000000")),
+            (name: "mouth", parent: Some("head"), pivot: (0.0, 0.0), offset: (8.0, 22.0), z: 4, art: Rect(w: 36.0, h: 8.0, color: "#7a2e2e")),
+        ], poses: [
+            (name: "neutral", parts: []),
+            (name: "forceful", parts: [
+                (part: "torso", angle: 3.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "head", angle: -4.0, offset: (4.0, -3.0), scale: (1.0, 1.0)),
+                (part: "arm_r", angle: -20.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+            ]),
+            (name: "subdued", parts: [
+                (part: "torso", angle: 2.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "head", angle: 12.0, offset: (0.0, 6.0), scale: (1.0, 1.0)),
+                (part: "arm_l", angle: 6.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "arm_r", angle: -6.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+            ]),
+            (name: "point", parts: [
+                (part: "torso", angle: 2.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "head", angle: -3.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+                (part: "arm_r", angle: -75.0, offset: (0.0, 0.0), scale: (1.0, 1.0)),
+            ]),
+        ]),
+    ],
+    timeline: (
+        tracks: [
+            (
+                name: "transition",
+                events: [
+                    (at: 0, kind: Transition(kind: FadeIn, duration_ms: 800, color: "#000000")),  // line 8
+                    (at: 30800, kind: Transition(kind: FadeOut, duration_ms: 800, color: "#000000")),  // line 39
+                ],
+            ),
+            (
+                name: "camera",
+                events: [
+                    (at: 0, kind: CameraCut(center: (0.0, 0.0), zoom: 1.0, shot: Some("field_command_tent_dawn"))),  // line 10
+                    (at: 0, kind: Wait(duration_ms: 2000)),  // line 10
+                    (at: 6300, kind: CameraCut(center: (0.0, 0.0), zoom: 1.0, shot: Some("map"))),  // line 21
+                    (at: 15500, kind: CameraCut(center: (0.0, 0.0), zoom: 1.0, shot: Some("field_command_tent_dawn"))),
+                    (at: 20100, kind: CameraZoom(to: 1.15, duration_ms: 10400, easing: EaseInOut)),  // hand edit: slow push-in during the order
+                    (at: 30800, kind: CameraShake(amplitude: 14.0, duration_ms: 700)),  // hand edit: the explosion
+                ],
+            ),
+            (
+                name: "stage",
+                events: [
+                    (at: 0, kind: Enter(character: "major_halversen", pos: (-360.0, 100.0), facing: Right, pose: Some("neutral"))),  // line 10
+                    (at: 0, kind: Enter(character: "lieutenant_oda", pos: (360.0, 100.0), facing: Left, pose: Some("neutral"))),  // line 10
+                    (at: 2000, kind: SetPose(character: "major_halversen", pose: "subdued", duration_ms: 300, easing: EaseInOut, hint: Some("tired, steady"))),  // line 19
+                    (at: 15800, kind: SetPose(character: "lieutenant_oda", pose: "forceful", duration_ms: 300, easing: EaseInOut, hint: Some("sharp"))),  // line 29
+                    (at: 15800, kind: Move(character: "lieutenant_oda", to: (230.0, 100.0), duration_ms: 700, easing: EaseOut, facing: None)),  // hand edit: steps in towards the major
+                    (at: 20100, kind: SetPose(character: "major_halversen", pose: "point", duration_ms: 400, easing: EaseInOut, hint: Some("pointing east, giving the order"))),  // hand edit
+                ],
+            ),
+            (
+                name: "dialogue",
+                events: [
+                    (at: 2000, kind: Dialogue(speaker: "major_halversen", text: "Commander. They're coming for the river, and they're coming today.", duration_ms: 4000, voice: None, lipsync: None, delivery: OnScreen)),  // line 19
+                    (at: 6300, kind: Dialogue(speaker: "major_halversen", text: "Two bridges. We can't hold both. The engineers can drop the west one, but they need twelve minutes and nobody shooting at them.", duration_ms: 9200, voice: None, lipsync: None, delivery: OnScreen)),  // line 25
+                    (at: 15800, kind: Dialogue(speaker: "lieutenant_oda", text: "Scouts report armour on the north road. Lots of it.", duration_ms: 4000, voice: None, lipsync: None, delivery: OnScreen)),  // line 29
+                    (at: 20100, kind: Dialogue(speaker: "major_halversen", text: "Then you give the engineers their twelve minutes. Keep the post standing until that bridge goes into the water. After that, nothing crosses in the east.", duration_ms: 10400, voice: None, lipsync: None, delivery: OnScreen)),  // line 34
+                ],
+            ),
+            (
+                name: "audio",
+                events: [
+                    (at: 0, kind: Ambience(action: Play, file: None, note: "rain on canvas, distant engines", fade_ms: 0)),  // line 12
+                    (at: 0, kind: Music(action: Play, file: None, note: "low drums, tense", fade_ms: 0)),  // line 13
+                    (at: 20100, kind: Sfx(sound: None, note: "radio static", volume: 1.0)),  // line 31
+                    (at: 30800, kind: Sfx(sound: None, note: "distant explosion", volume: 1.0)),  // line 36
+                    (at: 30800, kind: Music(action: Stop, file: None, note: "", fade_ms: 0)),  // line 37
+                ],
+            ),
+            (
+                name: "overlay",
+                events: [
+                    (at: 6300, kind: MapOverlay(note: "two arrows from the north towards BRIDGE_W and BRIDGE_E", markers: [
+                        (label: "armour", at: (-300.0, -420.0), to: (-300.0, -150.0)),
+                        (label: "armour", at: (300.0, -420.0), to: (300.0, -150.0)),
+                        (label: "BRIDGE_W", at: (-300.0, -110.0)),
+                        (label: "BRIDGE_E", at: (300.0, -110.0)),
+                    ], duration_ms: 9200)),  // line 22; hand edit: the markers
+                ],
+            ),
+        ],
+    ),
+)

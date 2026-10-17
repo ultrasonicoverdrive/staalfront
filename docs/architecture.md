@@ -25,7 +25,7 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
 | `sf_ui` | Own UI: widgets, text, minimap; later sidebar, selection, menus. |
 | `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
-| `sf_cutscene` | Cartoon player and script format. |
+| `sf_cutscene` | Cartoon player and script format. The RON scene format, its loader/validator, the render-free `Scene::sample` and the Fountain importer exist (WP12.1, `docs/cutscene-format.md`); the player is WP12.2. |
 | `sf_net` | Lockstep network (later, phase 14). |
 | `sf_game` | Binary app that glues everything together. |
 | `tools/sf_editor` | Map and mission editor. |

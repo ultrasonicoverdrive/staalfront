@@ -11,3 +11,13 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+# Serde derive for the RON scene format; same versions as the other crates
+# (no new package in Cargo.lock).
+serde = { version = "1", features = ["derive"] }
+# Project-wide data format (PLAN.md 1.0); scenes are RON.
+ron = "0.12"
+
+[dev-dependencies]
+# Property test: every sound event fires exactly once for any sample step
+# size. Same version and features as sf_math (already in Cargo.lock).
+proptest = { version = "1.12", default-features = false, features = ["std"] }
