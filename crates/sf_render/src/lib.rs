@@ -26,7 +26,7 @@
 //! model's box when zoomed in and the icon's quad when zoomed out.
 //!
 //! WP1.11 adds the debug overlay layer ([`overlay`]): the egui painter
-//! (`egui-wgpu`) on this crate's wgpu device, the terrain LOD tint and a 1 m cell
+//! (`egui-wgpu`) on this crate's wgpu device, the terrain LOD tint and a 4 m cell
 //! grid ([`DebugView`]), and draw-call counters taken at the actual draw calls.
 //!
 //! WP1.10 adds glTF models ([`glb`]): `.glb` loading with the axis/unit
@@ -42,6 +42,7 @@ pub mod camera;
 pub mod frustum;
 pub mod glb;
 pub mod gpu;
+pub mod gpu_timer;
 pub mod ground;
 pub mod icons;
 pub mod image;
@@ -61,7 +62,7 @@ mod terrain_gpu;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
 pub use frustum::{Aabb, Frustum, Visibility};
-pub use gpu::{Gpu, GpuOptions, RenderError};
+pub use gpu::{Gpu, GpuOptions, Present, RenderError};
 pub use ground::{FlatGround, Ground, TerrainGround};
 pub use icons::{Blend, IconConfig, IconShape, ViewBand};
 pub use image::{Rgba8, Tolerance};
@@ -70,7 +71,9 @@ pub use lod::{LodConfig, TerrainConfig, TerrainStats};
 pub use model::{EyeView, MeshId, ModelLods, ModelSet};
 pub use overlay::OverlayFrame;
 pub use pick::{Pick, PickQuery, PickRay, PickVia, UnitId};
-pub use renderer::{DebugView, DrawStats, EMBEDDED_SHADER, FrameTarget, Renderer};
+pub use renderer::{
+    AllocStats, DebugView, DrawStats, EMBEDDED_SHADER, FrameTarget, PresentInfo, Renderer,
+};
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
 pub use wgpu;

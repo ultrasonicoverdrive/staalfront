@@ -192,8 +192,9 @@ PLAN.md §3 WP1.10 has this WP fix the engine convention here:
   Right-handed, so a model's right side is `+Z` (front x up).
 - This matches what the engine already did: facing 0 points along `+X` and
   increases towards `+Z` (`sf_render::instancing::model_matrix`, a proper rotation,
-  no mirror), and the sim's 2D `(x, y)` in cells (1 cell = 1 m) is the render
-  `(x, z)` (`Motion::from_fixed`).
+  no mirror), and the sim's 2D `(x, y)` in cells (1 cell = 4 m, B12) is the render
+  `(x, z)` in metres (`Motion::from_fixed` multiplies by
+  `sf_math::CELL_METRES`).
 - glTF assets are converted to it **once, in the loader** (`sf_render::glb`), from
   the axes given per pack in `assets/config/models.ron`; the renderer and the
   shaders never correct axes. The glTF spec's own front is `+Z`; the test pack

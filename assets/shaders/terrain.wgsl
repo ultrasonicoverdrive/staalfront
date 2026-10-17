@@ -22,6 +22,8 @@ struct TerrainParams {
     flags: u32,
     // Debug cell grid opacity, 0 = off.
     grid_alpha: f32,
+    // Metres in one gameplay cell: the spacing of the debug grid (B12).
+    cell_meters: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -72,7 +74,8 @@ fn layer_at(cell: vec2<i32>) -> i32 {
     return i32(textureLoad(cell_materials, c, 0).r);
 }
 
-// Chunk size in metres (32 cells), for the debug grid's chunk borders.
+// Chunk size in metres (32 terrain cells of 1 m), for the debug grid's chunk
+// borders.
 const CHUNK_METERS: f32 = 32.0;
 
 // Anti-aliased line coverage `0..1` for lines every `period` metres, about
@@ -105,11 +108,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if ((params.flags & 1u) != 0u) {
         albedo = mix(albedo, lod_tint(in.lod), 0.6);
     }
-    // Debug cell grid: 1 m lines, chunk borders heavier and warm. Skipped
+    // Debug cell grid: a line every gameplay cell (4 m), chunk borders heavier
+    // and warm. Skipped
     // entirely when off. `grid_alpha` is a uniform, so the branch is uniform
     // control flow and `fwidth` inside it is allowed.
     if (params.grid_alpha > 0.0) {
-        let cell_lines = grid_lines(in.world_xz, 1.0, 1.0);
+        let cell_lines = grid_lines(in.world_xz, params.cell_meters, 1.0);
         let chunk_lines = grid_lines(in.world_xz, CHUNK_METERS, 2.0);
         albedo = mix(albedo, vec3<f32>(0.0, 0.0, 0.0), 0.55 * cell_lines * params.grid_alpha);
         albedo = mix(albedo, vec3<f32>(1.0, 0.75, 0.1), 0.9 * chunk_lines * params.grid_alpha);

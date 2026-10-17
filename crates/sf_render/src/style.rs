@@ -179,6 +179,19 @@ impl Style {
         })
     }
 
+    /// The same style with every shape `factor` times as big in each
+    /// direction (levels of detail, palette and icons stay). The placeholder
+    /// sizes in `units.ron` are about a metre; the demo scales them up to
+    /// vehicle size for the 4 m cell (B12) without touching the file that the
+    /// render tests are written against.
+    pub fn scaled(&self, factor: f32) -> Style {
+        let mut style = self.clone();
+        for shape in &mut style.shapes {
+            shape.size = shape.size.map(|v| v * factor);
+        }
+        style
+    }
+
     /// The same palette, icon and level settings with other shapes (one per
     /// glTF model of a pack, WP1.10). The shapes get no placeholder level
     /// chains: their models bring their own.

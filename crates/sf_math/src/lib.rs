@@ -16,6 +16,7 @@
 //! | [`Facing`] | one of 256 directions; exact sin/cos, `atan2` replacement, turning |
 //! | [`Rng`] | PCG32 with unbiased range helpers and serialisable state |
 //! | [`hash::Fnv1a64`] | explicit little-endian FNV-1a for state checksums |
+//! | [`CELL_METRES`] | the scale between a cell and the metres of the presentation (4) |
 //! | `render_bridge` | the only float code: `Fx`/`Vec2` to and from single-precision floats; exists only with the `render` feature |
 //!
 //! # The number format
@@ -138,3 +139,16 @@ pub use facing::Facing;
 pub use fx::{FRAC_BITS, Fx, LEPTONS_PER_CELL};
 pub use rng::{Rng, RngState};
 pub use vec2::Vec2;
+
+/// Metres in one cell: the scale between the simulation and everything that
+/// is drawn, heard or measured (PLAN.md decision B12).
+///
+/// Simulation positions are in cells ([`Fx::ONE`] is one cell). The terrain,
+/// the camera, the models and the sounds are in metres, with four terrain
+/// samples along every cell side. This is the one number that connects the
+/// two; the presentation applies it at the boundary
+/// (`render_bridge::cells_to_metres`), the simulation never reads it, so the
+/// checksums do not depend on it. It is an integer so that map sizes can be
+/// counted exactly (`Map::size_in_cells` in `sf_data`); the renderer's single-precision
+/// copy is `render_bridge::METRES_PER_CELL`.
+pub const CELL_METRES: u32 = 4;

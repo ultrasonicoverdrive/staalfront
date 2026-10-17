@@ -9,7 +9,7 @@ use super::*;
 use crate::camera::{Camera, CameraConfig, DVec2};
 use crate::glb::{self, LoadedPack};
 use crate::pick::PickQuery;
-use sf_math::render_bridge::fx_from_f32;
+use sf_math::render_bridge::metres_to_cells;
 
 const W: f32 = 1280.0;
 const H: f32 = 720.0;
@@ -21,7 +21,7 @@ fn pack() -> LoadedPack {
 }
 
 fn unit(shape: u8, player: u8, id: u32, at: (f32, f32), facing: u8) -> Motion {
-    let p = Vec2::new(fx_from_f32(at.0), fx_from_f32(at.1));
+    let p = Vec2::new(metres_to_cells(at.0), metres_to_cells(at.1));
     Motion::from_fixed(
         shape,
         player,

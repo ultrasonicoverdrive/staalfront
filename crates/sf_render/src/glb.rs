@@ -1091,11 +1091,10 @@ pub struct LoadedPack {
 }
 
 impl LoadedPack {
-    /// `base` (palette, icon and level settings) with one shape per model:
-    /// its real size (finest level) and the icon of its kind.
-    pub fn style(&self, base: &crate::Style) -> Result<crate::Style, crate::style::StyleError> {
-        let shapes = self
-            .set
+    /// One shape per model: its real size (finest level) and the icon of its
+    /// kind.
+    fn shapes(&self) -> Vec<crate::style::Shape> {
+        self.set
             .models()
             .iter()
             .zip(&self.icons)
@@ -1112,7 +1111,25 @@ impl LoadedPack {
                     icon,
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    /// `base` (palette, icon and level settings) with one shape per model:
+    /// its real size (finest level) and the icon of its kind.
+    pub fn style(&self, base: &crate::Style) -> Result<crate::Style, crate::style::StyleError> {
+        base.with_shapes(self.shapes())
+    }
+
+    /// The placeholder shapes of `base` followed by one shape per model:
+    /// shape `base.shape_count() + i` is model `i`. Goes with the set
+    /// `ModelSet::from_style(base).concat(&pack.set)`; this is how the demo
+    /// draws cubes, cylinders, cones and glTF models in one scene.
+    pub fn style_after(
+        &self,
+        base: &crate::Style,
+    ) -> Result<crate::Style, crate::style::StyleError> {
+        let mut shapes = base.shapes().to_vec();
+        shapes.extend(self.shapes());
         base.with_shapes(shapes)
     }
 }

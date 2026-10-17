@@ -27,10 +27,10 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 | `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
 | `sf_cutscene` | Cartoon player and script format. |
 | `sf_net` | Lockstep network (later, phase 14). |
-| `sf_game` | Binary app that glues everything together. |
+| `sf_game` | The game shell: a library (window loop, camera, HUD, F1 panels, the benchmark) and the development viewer binary. |
 | `tools/sf_editor` | Map and mission editor. |
 | `tools/sf_headless` | Simulation without a screen: tests, balance, AI-vs-AI. |
-| `tools/sf_demo` | Engine demo and benchmark (phase 1). |
+| `tools/sf_demo` | Engine demo and benchmark of milestone M0 (phase 1): the `sf_game` library with the demo's defaults. |
 
 ### Dependency directions
 
@@ -67,11 +67,7 @@ graph TD
   sf_headless --> sf_sim
   sf_headless --> sf_data
   sf_headless --> sf_ai
-  sf_demo[tools/sf_demo] --> sf_math
-  sf_demo --> sf_engine
-  sf_demo --> sf_render
-  sf_demo --> sf_ui
-  sf_demo --> sf_audio
+  sf_demo[tools/sf_demo] --> sf_game
   sf_editor[tools/sf_editor] --> sf_math
   sf_editor --> sf_sim
   sf_editor --> sf_data
@@ -162,9 +158,20 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   model's right side is `+Z`). The sim's 2D `(x, y)` is the render `(x, z)`;
   facing 0 is `+X` and turns towards `+Z`.
 
-- Gameplay happens on a **cell grid** (for example 1 cell = 1 m; maps 64x64 up to
-  256x256).
+- Gameplay happens on a **cell grid of 4 m cells** (B12; maps 64x64 up to
+  256x256 cells, so 256 m up to 1,024 m). The visual terrain keeps its 1 m
+  resolution: four terrain samples along every cell side.
 - Positions within a cell are fixed-point ("leptons", like the original).
+- **One scale constant at the boundary.** `sf_sim` positions are in cells
+  (`Fx::ONE` = 1 cell) and never see a metre. `sf_math::CELL_METRES` (4) is the
+  only place the scale lives; the presentation applies it where the sim's
+  numbers enter the renderer: `render_bridge::vec2_cells_to_metres` (used by
+  `Motion::from_fixed`, the minimap dots and the camera/audio focus) and back
+  with `render_bridge::vec2_metres_to_cells` for a picked ground point that
+  becomes a command. The map size handed to the sim is
+  `Map::size_in_cells()`, the camera, the instancer and the terrain take metres
+  (`Map::width()`). Because the sim never reads the constant, the checksums
+  (headless goldens, `wander_5000.expected`) do not change when it does.
 - Height is **visual only**, plus a few gameplay effects (vision from a hill,
   slower uphill). No true 3D ballistics in v1.
 
@@ -227,7 +234,7 @@ laptop. Never on the home server (B6, PLAN.md §13).
 
 - **Format** (`sf_data::map`, no GPU or sim dependency, so `sf_headless` and the
   editor can read maps too): a directory `assets/maps/<name>/` with `map.ron`
-  (width, height in cells, `height_scale` = metres at 65535, material names,
+  (width, height in terrain cells of 1 m, `height_scale` = metres at 65535, material names,
   file names), `height.png` (16-bit grayscale, (w+1) x (h+1) cell corners) and
   `materials.png` (8-bit grayscale, w x h, index into the material list). The
   loader checks sizes, bit depth, header ranges and material indices and
@@ -332,8 +339,10 @@ the click sound in `sf_game` use it.
   two ticks, so nothing visible is dropped. Culling is per tile, not per unit.
 - **Look as data:** `assets/config/units.ron` holds the player palette (sRGB,
   four colors) and the placeholder shapes (cube, cylinder, cone, with sizes).
-  Until units are data-driven (phase 2), `sf_game` uses entity kind modulo the
-  number of shapes and owner modulo the number of colors. Debug builds reload
+  Until units are data-driven (phase 2), `sf_game` maps the entity kind to a
+  shape with a small table (`population.rs`) and the owner modulo the number of
+  colors. The shapes are drawn three times the size in `units.ron`
+  (`PLACEHOLDER_SCALE`, vehicle size on a 4 m cell). Debug builds reload
   it when it changes on disk (`Instancer::set_style`, WP1.11); a broken file is
   reported and the old look stays.
 - **Counters** for the debug panel: `InstanceStats` (total, visible, tiles,
@@ -404,10 +413,10 @@ renderer records no overlay pass; the egui painter and winit state are created
 on the first show. Closing clears the overlay jobs.
 
 **Terrain views** (`Renderer::set_debug_view`, `DebugView`): a flag and an
-opacity in the terrain uniform. The grid is 1 m lines in the terrain fragment
-shader, anti-aliased with `fwidth`, fading out when lines get closer than ~2 px
-and with the camera distance (`DebugView::grid_alpha_for_distance`: full up to
-40 m, gone at 140 m); chunk borders (32 m) are heavier and yellow. **LOD
+opacity in the terrain uniform. The grid is a line per gameplay cell (4 m, the `cell_meters` uniform) in the
+terrain fragment shader, anti-aliased with `fwidth`, fading out when lines get
+closer than ~2 px and with the camera distance
+(`DebugView::grid_alpha_for_distance`: full up to 160 m, gone at 560 m); chunk borders (32 m) are heavier and yellow. **LOD
 colouring** (WP1.8) tints every terrain chunk by its real level of detail: each
 terrain vertex carries the level of its mesh, the shader mixes in
 `lod_tint(level)` (red = full detail, then orange, yellow, green, blue, purple;
@@ -652,3 +661,52 @@ chunk carry-over and stereo layout (described for VQA/Westwood IMA, applied to
 AUD as well); a mismatch shows up as a decode error in the sound browser, not
 as a crash. Tests build their own fixtures (own ADPCM encoders, own MIX
 writer, an own multi-prime RSA test key).
+
+## 17. Engine demo and benchmark (WP1.14, milestone M0)
+
+**One library, two binaries.** The whole shell (window loop, camera, HUD, F1
+panels, benchmark) is the `sf_game` library. `sf_game` (the development viewer,
+2,000 placeholder units) and `tools/sf_demo` (5,000 units with the test pack's
+models, `--bench`) are ten-line binaries that choose the defaults
+(`Preset::Game`, `Preset::Demo`). `sf_demo` is its own crate because PLAN.md and
+the README name it and because it is the fixed thing M0 is measured with, while
+`sf_game` will turn into the real game; nothing is duplicated.
+
+**The demo world.** A generated 256 x 256 cell map (1,024 m, seed 1;
+`generate_cells`), 5,000 entities from `population.rs`: three placeholder shapes
+and, from the pack, the vehicle models (wandering) and the buildings (the models
+with a square icon; 24 of them stand in a base at the centre: the sim is told
+`MoveTo` their own position, which makes them idle). Units walk 1.5 cells/s
+(6 m/s). The scale (B12) is applied at one place, see section 5.
+
+**`--bench`.** `bench::SEGMENTS` is the fixed camera flight (close-up, glide
+out, whole map, glide in, a quick flick out and back, a low pass across the
+map); the camera pose is a pure function of the progress, which follows the
+clock (75 s) or, with `--frames N`, the frame count. 90 warm-up frames at the
+start pose are flown but not recorded. The run defaults to true fullscreen at
+1920 x 1080 (`ScreenMode::Fixed`: borderless when the monitor already runs that,
+else the best exclusive video mode of that size, else borderless with a note)
+and to no vsync (`Present::Uncapped`: `Immediate`, else `Mailbox`, else `Fifo`
+with a note). Per frame it records the wall time between frames, the CPU time
+(sim ticks plus the frame callback minus the wait for the swap chain), the
+parts of it (build, upload, render), units in view, draw calls, triangles and
+the instance buffers created during the frame; GPU time comes from two
+timestamp queries around the frame's commands (`sf_render::gpu_timer`, read back
+without waiting, a few frames late; "n/a" when the adapter has none). The
+percentile is the nearest rank. `bench.json` holds the whole-flight and
+per-phase statistics, the 12 slowest frames with their breakdown, the display
+and present mode actually used, and the sim checksum after every 100th tick
+(compare machines at equal ticks).
+
+**`--shots <dir>`** writes `close_up.png`, `middle.png` (F1 panels open) and
+`whole_map.png` from the window itself (`Renderer::capture_next_frame`, which
+copies the swap-chain image) and exits; CI runs it and a 300-frame `--bench` on
+lavapipe (Xvfb) and WARP.
+
+**Zoom-out hitches (follow-up 14).** Every per-mesh instance buffer used to be
+created on the first frame its list was not empty and regrown (with 25 %
+headroom) when it grew, so the first zoom out over the crowd created dozens of
+buffers during the zoom. `Renderer::reserve_units` allocates every buffer at the
+largest size its entities can need (`Instancer::mesh_capacity`) at load; the
+bench reports `buffer_allocs` per frame and phase, and `--no-reserve` brings
+the old behaviour back to compare.

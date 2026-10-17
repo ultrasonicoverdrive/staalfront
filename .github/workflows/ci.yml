@@ -25,9 +25,9 @@ jobs:
       - name: Install toolchain from rust-toolchain.toml
         shell: bash
         run: rustup show active-toolchain || rustup toolchain install
-      - name: Software Vulkan driver (Mesa lavapipe) for the screenshot tests; ALSA headers for sf_audio (kira/cpal)
+      - name: Software Vulkan driver (Mesa lavapipe) for the screenshot tests; ALSA headers for sf_audio (kira/cpal); Xvfb and the X11 keyboard library for the demo smoke test
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libasound2-dev xvfb libxkbcommon-x11-0
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -40,6 +40,36 @@ jobs:
       # debug_overlay and camera_screenshot). Same tests, serial; see progress.md.
       - if: runner.os == 'Windows'
         run: cargo test --workspace -- --nocapture --test-threads=1
+      # WP1.14: the engine demo as a smoke test on the software adapter (lavapipe
+      # on Linux under Xvfb, WARP on Windows): three screenshots of the window
+      # (close-up, middle with the F1 panels, whole map) and a short benchmark
+      # flight to keep the bench.json path working. No fps is asserted: this
+      # hardware is software. `--windowed` because a CI display cannot do
+      # 1920x1080 fullscreen. The numbers of the real benchmark come from the
+      # laptop (README, "Benchmark (M0)").
+      - name: Demo smoke test (screenshots and short benchmark)
+        shell: bash
+        run: |
+          mkdir -p demo-out
+          run() {
+            if [ "$RUNNER_OS" = "Linux" ]; then
+              xvfb-run -a -s "-screen 0 1920x1080x24" cargo run -p sf_demo -- "$@"
+            else
+              cargo run -p sf_demo -- "$@"
+            fi
+          }
+          run --shots demo-out
+          ls -l demo-out
+          for shot in close_up middle whole_map; do test -s "demo-out/$shot.png"; done
+          run --bench --windowed --frames 300 --out demo-out/bench.json
+          test -s demo-out/bench.json
+          grep -q '"samples": 300' demo-out/bench.json
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: demo-smoke-${{ matrix.os }}
+          path: demo-out/
+          if-no-files-found: warn
       # Debug builds check integer overflow, release builds do not; sf_math
       # must give identical bits in both (golden hashes in tests/golden.rs).
       - name: sf_math golden hashes in release mode

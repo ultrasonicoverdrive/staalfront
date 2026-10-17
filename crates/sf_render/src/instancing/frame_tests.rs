@@ -4,13 +4,13 @@
 use super::*;
 use crate::camera::{Camera, CameraConfig, DVec2};
 use crate::pick::{PickQuery, PickRay};
-use sf_math::render_bridge::fx_from_f32;
+use sf_math::render_bridge::metres_to_cells;
 
 const W: f32 = 1280.0;
 const H: f32 = 720.0;
 
 fn fx2(x: f32, z: f32) -> Vec2 {
-    Vec2::new(fx_from_f32(x), fx_from_f32(z))
+    Vec2::new(metres_to_cells(x), metres_to_cells(z))
 }
 
 /// A unit standing still at `at`.
@@ -376,7 +376,10 @@ fn icons_sit_over_the_ground_with_the_shape_and_color_of_their_unit() {
 // ---------------------------------------------------------------------------
 
 fn one_cube_at(at: (f32, f32)) -> Instancer {
-    instancer(&[still(0, 0, 11, at)])
+    // A cube of 1.2 x 1.0 x 1.2 m whatever the shipped placeholder sizes are
+    // (they follow the cell size, B12): the pixel offsets below are for it.
+    let style = style_ron("(mesh: Cube, size: (1.2, 1.0, 1.2), icon: Square)", "");
+    instancer_with(style, &[still(0, 0, 11, at)])
 }
 
 #[test]

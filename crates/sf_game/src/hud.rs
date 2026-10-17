@@ -17,7 +17,7 @@ use std::path::Path;
 use sf_data::map::Map;
 use sf_engine::Context;
 use sf_engine::winit::event::MouseButton as WinitButton;
-use sf_math::render_bridge::vec2_to_f32;
+use sf_math::render_bridge::vec2_cells_to_metres;
 use sf_render::camera::DVec2;
 use sf_render::{Camera, RenderError, Renderer};
 use sf_sim::EntityView;
@@ -162,7 +162,7 @@ impl Hud {
             let fov = fov_quad(camera, (size.width as f32, size.height as f32), map);
             let dots = self.show_dots.then(|| {
                 views.iter().map(|v| {
-                    let [x, z] = vec2_to_f32(v.pos);
+                    let [x, z] = vec2_cells_to_metres(v.pos);
                     (
                         (x, z),
                         OWNER_DOTS[usize::from(v.owner.0) % OWNER_DOTS.len()],

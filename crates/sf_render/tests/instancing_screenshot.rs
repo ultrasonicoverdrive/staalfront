@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use glam::{DVec4, Vec3};
 use sf_data::map::{Map, generate::generate};
-use sf_math::render_bridge::fx_from_f32;
+use sf_math::render_bridge::metres_to_cells;
 use sf_math::{Facing, Vec2};
 use sf_render::camera::DVec2;
 use sf_render::image::{self, Rgba8, Tolerance, compare};
@@ -80,7 +80,7 @@ fn instancer(map: &Map) -> Instancer {
 }
 
 fn fx2(x: f32, z: f32) -> Vec2 {
-    Vec2::new(fx_from_f32(x), fx_from_f32(z))
+    Vec2::new(metres_to_cells(x), metres_to_cells(z))
 }
 
 /// Cull, interpolate, upload and render one frame.

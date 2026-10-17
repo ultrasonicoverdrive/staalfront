@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use glam::camera::rh;
 use glam::{Mat4, Vec3, Vec4};
 use sf_data::map::Map;
-use sf_math::render_bridge::fx_from_f32;
+use sf_math::render_bridge::metres_to_cells;
 use sf_math::{Facing, Vec2};
 use sf_render::camera::DVec2;
 use sf_render::glb::{self, AxisConvention, writer};
@@ -60,7 +60,7 @@ fn renderer(w: u32, h: u32) -> Renderer {
 }
 
 fn unit(shape: u8, player: u8, id: u32, at: (f32, f32), facing: u8) -> Motion {
-    let p = Vec2::new(fx_from_f32(at.0), fx_from_f32(at.1));
+    let p = Vec2::new(metres_to_cells(at.0), metres_to_cells(at.1));
     Motion::from_fixed(
         shape,
         player,

@@ -320,6 +320,26 @@ impl ModelLods {
         self.bounds.as_ref()
     }
 
+    /// The same chain with every extra mesh (id `BUILTIN_MESHES` and up)
+    /// moved up by `by` places in the table; the built-in kinds stay.
+    fn shifted(&self, by: usize) -> Self {
+        let shift = |m: MeshId| {
+            if m.index() < BUILTIN_MESHES {
+                m
+            } else {
+                MeshId((m.index() + by) as u16)
+            }
+        };
+        let mut chain = self.clone();
+        for level in &mut chain.levels {
+            level.mesh = shift(level.mesh);
+        }
+        for part in chain.parts.iter_mut().flatten() {
+            part.mesh = shift(part.mesh);
+        }
+        chain
+    }
+
     /// Every mesh the chain draws (levels and parts).
     pub fn meshes(&self) -> impl Iterator<Item = MeshId> + '_ {
         self.levels
@@ -463,6 +483,25 @@ impl ModelSet {
         }
         let extra = extra.into_iter().map(|(_, _, m)| m).collect();
         Self::new(extra, models).expect("the chains only name meshes that were registered")
+    }
+
+    /// This set followed by `other`: the shapes of `other` come after the
+    /// shapes of `self` (shape `self.models().len() + i` is `other`'s shape
+    /// `i`) and its extra meshes after ours. The demo draws placeholder shapes
+    /// and glTF models in one scene this way. `None` if the mesh table would
+    /// outgrow a [`MeshId`].
+    pub fn concat(&self, other: &ModelSet) -> Option<ModelSet> {
+        if BUILTIN_MESHES + self.extra.len() + other.extra.len() > usize::from(u16::MAX) {
+            return None;
+        }
+        let extra = self.extra.iter().chain(&other.extra).cloned().collect();
+        let models = self
+            .models
+            .iter()
+            .cloned()
+            .chain(other.models.iter().map(|m| m.shifted(self.extra.len())))
+            .collect();
+        ModelSet::new(extra, models).ok()
     }
 
     /// Changes whenever a different set is built; the renderer compares it to
@@ -785,5 +824,27 @@ mod tests {
             ModelSet::new(vec![], vec![]),
             Err(ModelError::NoLevels)
         ));
+    }
+
+    #[test]
+    fn concat_appends_shapes_and_moves_their_meshes_behind_ours() {
+        let a = ModelSet::new(vec![MeshData::cube()], vec![ModelLods::single(MeshId(5))]).unwrap();
+        let b = ModelSet::new(
+            vec![MeshData::cone(), MeshData::cylinder()],
+            vec![
+                ModelLods::single(MeshId(6)),
+                ModelLods::single(MeshId::of(MeshKind::Cube)),
+            ],
+        )
+        .unwrap();
+        let both = a.concat(&b).unwrap();
+        assert_eq!(both.models().len(), 3);
+        assert_eq!(both.extra_meshes().len(), 3);
+        assert_eq!(both.model(0).level(0).mesh, MeshId(5));
+        // b's second extra mesh (id 6) now sits behind a's one extra mesh: id 7.
+        assert_eq!(both.model(1).level(0).mesh, MeshId(7));
+        // A built-in kind keeps its id.
+        assert_eq!(both.model(2).level(0).mesh, MeshId::of(MeshKind::Cube));
+        assert_eq!(both.mesh_count(), BUILTIN_MESHES + 3);
     }
 }
