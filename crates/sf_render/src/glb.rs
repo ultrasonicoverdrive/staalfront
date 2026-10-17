@@ -294,17 +294,18 @@ pub fn load_glb(bytes: &[u8], axes: &AxisConvention) -> Result<LoadedModel, GlbE
     let mut levels = Vec::new();
     for (_, root) in &roots {
         let mut level = Level::default();
+        level.enter(root, 0)?;
         let root_matrix = node_matrix(root);
         if root.mesh().is_some() {
             // The root itself has geometry: it is the first part.
             let at = level.add_part(root, None, root_matrix)?;
             for child in root.children() {
-                level.visit(&child, Some(at), node_matrix(&child), blob)?;
+                level.visit(&child, Some(at), node_matrix(&child), blob, 1)?;
             }
             level.merge_node(root, at, Mat4::IDENTITY, blob)?;
         } else {
             for child in root.children() {
-                level.visit(&child, None, root_matrix * node_matrix(&child), blob)?;
+                level.visit(&child, None, root_matrix * node_matrix(&child), blob, 1)?;
             }
         }
         level.prune();
@@ -328,6 +329,18 @@ pub fn load_glb(bytes: &[u8], axes: &AxisConvention) -> Result<LoadedModel, GlbE
     })
 }
 
+/// Why an attribute could not be read: absent, or its accessor runs past
+/// the data it points into (the reader returns nothing in both cases).
+fn missing(prim: &gltf::Primitive<'_>, semantic: gltf::Semantic, name: &str) -> GlbError {
+    match prim.get(&semantic) {
+        None if name == "NORMAL" => GlbError::Unsupported("primitives without NORMAL".into()),
+        None => GlbError::Invalid(format!("a primitive has no {name}")),
+        Some(_) => GlbError::Invalid(format!(
+            "{name} accessor out of range (past the end of its buffer, or the buffer is missing)"
+        )),
+    }
+}
+
 fn node_matrix(node: &gltf::Node<'_>) -> Mat4 {
     Mat4::from_cols_array_2d(&node.transform().matrix())
 }
@@ -336,9 +349,33 @@ fn node_matrix(node: &gltf::Node<'_>) -> Mat4 {
 #[derive(Default)]
 struct Level {
     parts: Vec<LoadedPart>,
+    /// Nodes already met in this level: a node that is its own child, a
+    /// cycle or a node used twice is refused instead of recursing forever.
+    seen: std::collections::BTreeSet<usize>,
 }
 
+/// Deepest node hierarchy below a level root (the test pack needs 4).
+pub const MAX_NODE_DEPTH: usize = 32;
+
 impl Level {
+    /// Mark `node` as visited at `depth`; an error for a cycle, a node used
+    /// twice or a hierarchy deeper than [`MAX_NODE_DEPTH`].
+    fn enter(&mut self, node: &gltf::Node<'_>, depth: usize) -> Result<(), GlbError> {
+        if depth > MAX_NODE_DEPTH {
+            return Err(GlbError::Invalid(format!(
+                "node hierarchy deeper than {MAX_NODE_DEPTH} levels"
+            )));
+        }
+        if !self.seen.insert(node.index()) {
+            return Err(GlbError::Invalid(format!(
+                "node {} ({}) appears twice in the hierarchy (a cycle or a shared node)",
+                node.index(),
+                node.name().unwrap_or("unnamed")
+            )));
+        }
+        Ok(())
+    }
+
     /// Drop the parts without geometry below them (the test pack's scout and
     /// buildings have an empty `turret` and `barrel` node): they would be
     /// draw calls of nothing. An empty part that carries a part with
@@ -375,6 +412,26 @@ impl Level {
             return Err(GlbError::Invalid("a node matrix is not finite".into()));
         }
         let name = strip_lod_suffix(node.name().unwrap_or("part")).to_owned();
+        // A part's frame goes to the GPU as an instance matrix, and the
+        // shader turns normals with it (no inverse transpose) and culls back
+        // faces: a mirror or a non-uniform scale would light it wrongly or
+        // turn it inside out.
+        let linear = Mat3::from_mat4(rest);
+        let lengths = [0, 1, 2].map(|i| linear.col(i).length());
+        let (lo, hi) = (
+            lengths.iter().copied().fold(f32::MAX, f32::min),
+            lengths.iter().copied().fold(0.0, f32::max),
+        );
+        if linear.determinant() <= 0.0 {
+            return Err(GlbError::Unsupported(format!(
+                "part {name}: a mirrored (or degenerate) node transform"
+            )));
+        }
+        if hi - lo > 1e-3 * hi {
+            return Err(GlbError::Unsupported(format!(
+                "part {name}: a non-uniform scale in the node transform"
+            )));
+        }
         let joint = match name.as_str() {
             "turret" => Joint::Yaw,
             "barrel" => Joint::Pitch,
@@ -397,13 +454,15 @@ impl Level {
         parent: Option<usize>,
         to_parent: Mat4,
         blob: Option<&[u8]>,
+        depth: usize,
     ) -> Result<(), GlbError> {
+        self.enter(node, depth)?;
         let is_part = node.mesh().is_none() || node.children().next().is_some();
         if is_part {
             let at = self.add_part(node, parent, to_parent)?;
             self.merge_node(node, at, Mat4::IDENTITY, blob)?;
             for child in node.children() {
-                self.visit(&child, Some(at), node_matrix(&child), blob)?;
+                self.visit(&child, Some(at), node_matrix(&child), blob, depth + 1)?;
             }
             return Ok(());
         }
@@ -468,11 +527,11 @@ impl Level {
             });
             let positions: Vec<[f32; 3]> = reader
                 .read_positions()
-                .ok_or_else(|| GlbError::Invalid("a primitive has no POSITION".into()))?
+                .ok_or_else(|| missing(&prim, gltf::Semantic::Positions, "POSITION"))?
                 .collect();
             let normals: Vec<[f32; 3]> = reader
                 .read_normals()
-                .ok_or_else(|| GlbError::Unsupported("primitives without NORMAL".into()))?
+                .ok_or_else(|| missing(&prim, gltf::Semantic::Normals, "NORMAL"))?
                 .collect();
             if normals.len() != positions.len() {
                 return Err(GlbError::Invalid(
@@ -650,6 +709,8 @@ pub mod writer {
     pub struct Node {
         pub name: String,
         pub translation: [f32; 3],
+        /// Written as `scale` when set (tests: mirrors, non-uniform scale).
+        pub scale: Option<[f32; 3]>,
         pub prim: Option<Prim>,
         pub children: Vec<usize>,
     }
@@ -693,6 +754,9 @@ pub mod writer {
                     f(node.translation[2])
                 ),
             ];
+            if let Some(s) = node.scale {
+                members.push(format!("\"scale\":[{},{},{}]", f(s[0]), f(s[1]), f(s[2])));
+            }
             if !node.children.is_empty() {
                 members.push(format!("\"children\":[{}]", list(&node.children)));
             }

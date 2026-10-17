@@ -512,6 +512,86 @@ fn bad_files_give_clear_errors_not_panics() {
         load_err(&writer::write(&scene)),
         GlbError::Invalid(_) | GlbError::Parse(_)
     ));
+
+    bad_hierarchies_and_accessors();
+}
+
+/// Node graphs that would recurse forever or blow the stack, mirrored and
+/// non-uniformly scaled parts, and an accessor past its buffer.
+fn bad_hierarchies_and_accessors() {
+    let base = || writer::orientation(&AxisConvention::ENGINE);
+    let (hull, turret, barrel) = (1, 8, 15);
+    assert_eq!(base().nodes[turret].name, "turret_LOD0");
+    assert_eq!(base().nodes[barrel].name, "barrel_LOD0");
+    let clear = |scene: &Scene, what: &str| {
+        let e = load_err(&writer::write(scene));
+        assert!(
+            matches!(e, GlbError::Invalid(_) | GlbError::Parse(_)),
+            "{what}: {e}"
+        );
+        e
+    };
+
+    // A node that is its own child.
+    let mut scene = base();
+    scene.nodes[hull].children.push(hull);
+    clear(&scene, "self child");
+    // A cycle: the barrel has the hull as a child.
+    let mut scene = base();
+    scene.nodes[barrel].children.push(hull);
+    clear(&scene, "cycle");
+    // A chain 200,000 nodes deep under the barrel.
+    let mut scene = base();
+    let first = scene.nodes.len();
+    let deep = 200_000;
+    for i in 0..deep {
+        scene.nodes.push(writer::Node {
+            name: format!("link{i}"),
+            children: if i + 1 < deep {
+                vec![first + i + 1]
+            } else {
+                vec![]
+            },
+            ..writer::Node::default()
+        });
+    }
+    scene.nodes[barrel].children.push(first);
+    let e = clear(&scene, "deep chain");
+    assert!(e.to_string().contains("deeper"), "{e}");
+
+    // A mirrored turret and a turret stretched along one axis.
+    for (scale, what) in [
+        ([-1.0, 1.0, 1.0], "mirror"),
+        ([1.0, 2.0, 1.0], "non-uniform"),
+    ] {
+        let mut scene = base();
+        scene.nodes[turret].scale = Some(scale);
+        let e = load_err(&writer::write(&scene));
+        assert!(matches!(e, GlbError::Unsupported(_)), "{what}: {e}");
+        assert!(
+            e.to_string().contains("turret") && e.to_string().contains(what),
+            "{e}"
+        );
+    }
+    // A uniform scale is fine.
+    let mut scene = base();
+    scene.nodes[turret].scale = Some([2.0, 2.0, 2.0]);
+    assert!(load_glb(&writer::write(&scene), &AxisConvention::ENGINE).is_ok());
+
+    // An accessor that claims more vertices than its buffer view holds:
+    // same byte length, so the GLB chunks stay valid.
+    let mut bytes = writer::write(&base());
+    let at = bytes
+        .windows(9)
+        .position(|w| w == b"\"count\":4")
+        .expect("a 4-vertex accessor");
+    bytes[at + 8] = b'9';
+    let e = load_err(&bytes);
+    assert!(!e.to_string().contains("has no POSITION"), "{e}");
+    assert!(
+        e.to_string().contains("out of range") || matches!(e, GlbError::Parse(_)),
+        "{e}"
+    );
 }
 
 #[test]

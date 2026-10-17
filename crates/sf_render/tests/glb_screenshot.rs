@@ -205,6 +205,20 @@ fn the_orientation_model_shows_front_top_and_right_where_the_engine_expects() {
         t[0] > 120 && t[1] > 90 && t[2] < t[1] / 2,
         "turret in player colour: {t:?}"
     );
+    // The node matrices are converted too: the barrel pivot sits 0.3 m
+    // forward of the turret (+X in engine axes, +Z in the file), so its
+    // dark tip passes x = 1.0 at turret height. Seen close up from +Z, the
+    // centre pixel is the barrel; with an unconverted pivot the barrel
+    // would end at x = 0.8 and this pixel would be background.
+    let tip = c + Vec3::new(1.0, 1.2, 0.0);
+    let vp = look(tip + Vec3::new(0.0, 0.0, 3.0), tip, Vec3::Y);
+    let img = shot(&mut inst, 0, vp);
+    let (bx, by) = pixel_of(vp, tip);
+    let p = img.pixel(bx, by);
+    assert!(
+        p[0] < 40 && p[1] < 40 && p[2] < 40,
+        "dark barrel tip at x = 1.0 seen from +Z: {p:?}"
+    );
     // Facing 64 (a quarter turn towards +Z): now the +Z camera sees the front.
     let vp = look(c + Vec3::new(0.0, 0.5, 7.0), mid, Vec3::Y);
     let img = shot(&mut inst, 64, vp);
