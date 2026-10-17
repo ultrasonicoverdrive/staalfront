@@ -2,7 +2,7 @@ mission,code,speaker,line
 F1-M01,MSG_01,MIRA,Scouts report a small hostile camp around the junction. No heavy armour yet.
 F1-M01,MSG_02,CAPTAIN ELIAN,"Then we move before they can reinforce it. Establish a base, secure the junction, and keep the relay road open."
 F1-M01,MSG_03,CAPTAIN ELIAN,"Power first, then the barracks. Put the refinery next to the ore field on the ridge and get the harvester working."
-F1-M01,MSG_04,MIRA,"Base is up. The junction camp is two hundred metres east of your gate. Six rifles, one light tank, no entrenchments."
+F1-M01,MSG_04,MIRA,"Base is up. The junction camp is a hundred and forty metres east of your gate. Six rifles, one light tank, no entrenchments."
 F1-M01,MSG_05,MIRA,"Captain, a second patrol is coming down the eastern road. Not from the camp. They were already on their way before we arrived."
 F1-M01,MSG_06,CAPTAIN ELIAN,"Hold them at the junction. Infantry in the farm walls, keep the harvester out of their line."
 F1-M01,MSG_07,MIRA,"Junction clear. I pulled their patrol schedule off the camp radio. Both groups were ordered here two days ago, with our arrival time on it."
@@ -90,11 +90,11 @@ F1-M10,MSG_05,MIRA,Three minutes on the wipe. Do not shell the archive. Everythi
 F1-M10,MSG_06,CAPTAIN ELIAN,The offensive is moving. Everything you have at the south gate. The archive can wait six minutes; the base cannot.
 F1-M10,MSG_07,MIRA,"Data room is ours and the wipe is stopped. Elian, these deployment orders were not written here. The routing header is the private network from the relay logs, and the same header is on orders addressed to our side."
 F1-M10,MSG_08,OPERATIONS,Archive erased. Regional command centre destroyed. No records recovered.
-F2-M01,MSG_01,PETROV,"Tracks lead north, but the snow has hidden their numbers."
+F2-M01,MSG_01,DRAVEC,"Tracks lead north, but the snow has hidden their numbers."
 F2-M01,MSG_02,COMMANDER SAVA,Establish a foothold and clear the junction. Expect a second group to emerge once we commit.
 F2-M01,MSG_03,COMMANDER SAVA,"Power and a barracks. That is a foothold. Now the junction: their outpost sits on the north road, four structures, light guard. Take it down."
-F2-M01,MSG_04,PETROV,"Movement at the old service tunnel, north-west, two hundred metres from your yard! Raiders, mixed kit, no Compact markings. They are coming for the base."
-F2-M01,MSG_05,PETROV,"Outpost is rubble. The junction is ours, but someone used that tunnel to wait for us."
+F2-M01,MSG_04,DRAVEC,"Movement at the old service tunnel, ninety metres north of your yard! Raiders, mixed kit, no Compact markings. They are coming for the base."
+F2-M01,MSG_05,DRAVEC,"Outpost is rubble. The junction is ours, but someone used that tunnel to wait for us."
 F2-M01,MSG_06,COMMANDER SAVA,"Raiders broken, junction held. Report everything you found in that tunnel to Lenka. Nothing about this ambush fits a border skirmish."
 F2-M01,MSG_07,COMMANDER SAVA,Harvester lost. Without ore we cannot replace what we lose. Protect the next one.
 F2-M01,MSG_08,COMMANDER SAVA,The yard is gone and the column is scattered. We pull back to the pass. The junction stays theirs.
@@ -108,11 +108,11 @@ F2-M02,MSG_07,LENKA,Rubble does not tell us who sent the order. We needed that p
 F2-M02,MSG_08,COMMANDER SAVA,"The mill transmitter is silent and the volunteers are alive. Lenka has the origin codes. Somebody is writing orders for both armies, and it is not us."
 F2-M03,MSG_01,COMMANDER SAVA,We have one transport and a small escort. There is no time to bring the full column around the lake.
 F2-M03,MSG_02,COMMANDER SAVA,"Open the shoreline route, repair the ferry engine, and escort everyone to the evacuation point."
-F2-M03,MSG_03,PETROV,"Landing is clear. Ferry is casting off from the north pier — eight families aboard, four minutes across. Keep the bank clear until she docks."
-F2-M03,MSG_04,PETROV,"She's stopped. Engine's dead, sixty metres out, drifting. The crew says they can't fix it alone. Get an engineer onto the ferry — and the Compact has seen her stop. Hold that shoreline, three minutes, whatever it costs."
-F2-M03,MSG_05,PETROV,Ninety seconds. They are pushing the tree line on the east road. Do not let a tank reach the water.
-F2-M03,MSG_06,PETROV,"Engine's turning. She's docking. Get those people into the trucks and out of here — five to a truck, two runs or two trucks."
-F2-M03,MSG_07,PETROV,"That's everyone we could bring. Some of them stayed on the bank. Write it down, Commander. Somebody should."
+F2-M03,MSG_03,DRAVEC,"Landing is clear. Ferry is casting off from the north pier — eight families aboard, four minutes across. Keep the bank clear until she docks."
+F2-M03,MSG_04,DRAVEC,"She's stopped. Engine's dead, thirty metres out, drifting. The crew says they can't fix it alone. Get an engineer onto the ferry — and the Compact has seen her stop. Hold that shoreline, three minutes, whatever it costs."
+F2-M03,MSG_05,DRAVEC,Ninety seconds. They are pushing the tree line on the east road. Do not let a tank reach the water.
+F2-M03,MSG_06,DRAVEC,"Engine's turning. She's docking. Get those people into the trucks and out of here — five to a truck, two runs or two trucks."
+F2-M03,MSG_07,DRAVEC,"That's everyone we could bring. Some of them stayed on the bank. Write it down, Commander. Somebody should."
 F2-M03,MSG_08,COMMANDER SAVA,The ferry is lost with the families aboard. There is no second crossing. Withdraw the escort.
 F2-M04,MSG_01,ENGINEER KOVAC,"I can bring it down cleanly, but I need time and an observation post to call the charges."
 F2-M04,MSG_02,COMMANDER SAVA,"Hold the riverbank, secure the hill, and protect the engineers until the bridge is destroyed."
@@ -133,17 +133,17 @@ F2-M05,MSG_06,LENKA,The archive is burning. Whatever was in there is ash. We hav
 F2-M05,MSG_07,LENKA,The ledger carrier is down — the book is lying where he fell. Somebody pick it up.
 F2-M05,MSG_08,COMMANDER SAVA,"You are clear. An empty arsenal, a full ledger, and a broker's name that belongs to neither army. Lenka, start pulling that thread. Quietly."
 F2-M05,MSG_09,COMMANDER SAVA,The team is lost. The arsenal keeps its secret and the Compact keeps its story. We will not get a second look.
-F2-M06,MSG_01,PETROV,"The transfer completes in eighteen minutes. Once the ships leave, we lose the trail."
+F2-M06,MSG_01,DRAVEC,"The transfer completes in eighteen minutes. Once the ships leave, we lose the trail."
 F2-M06,MSG_02,COMMANDER SAVA,"Capture the control room before the transfer ends. If the docks are scuttled, push inland through the service works."
-F2-M06,MSG_03,PETROV,Charges on the causeway — they are blowing the dock bridges under us! Pull back from the water. The service works are the only way in now.
+F2-M06,MSG_03,DRAVEC,Charges on the causeway — they are blowing the dock bridges under us! Pull back from the water. The service works are the only way in now.
 F2-M06,MSG_04,COMMANDER SAVA,The shipyard is cleared for use. Gunboats can reach the inlet below the station; keep them out of range of the shore guns until the tank farm is down.
 F2-M06,MSG_05,OPERATIONS,Transfer at fifty percent. Nine minutes remain.
 F2-M06,MSG_06,OPERATIONS,Transfer at eighty-five percent. Three minutes remain.
 F2-M06,MSG_07,COMMANDER SAVA,Control room is ours. Shut the valves and hold the building. They will try to take it back.
-F2-M06,MSG_08,PETROV,"The pumps are stopped and the ships are still moored. Whoever owns those hulls, they answer to no flag we know."
+F2-M06,MSG_08,DRAVEC,"The pumps are stopped and the ships are still moored. Whoever owns those hulls, they answer to no flag we know."
 F2-M06,MSG_09,COMMANDER SAVA,The last vessel has cleared the breakwater. We have nothing to show for this but a burning station. Withdraw.
 F2-M06,MSG_10,LENKA,Harbour registry recovered from the sunk tanker. The owner is a shell company. Keep it; it will matter.
-F2-M06,MSG_11,PETROV,They have the control room back. Two minutes before the pumps restart. Retake it.
+F2-M06,MSG_11,DRAVEC,They have the control room back. Two minutes before the pumps restart. Retake it.
 F2-M07,MSG_01,COMMANDER SAVA,The complex is full of blind corners and old irrigation channels. A direct assault could bury the evidence.
 F2-M07,MSG_02,LENKA,"Reach the analysts, escort them out, and preserve the transmission equipment."
 F2-M07,MSG_03,LENKA,"Your scout is looking at a dry channel, not a hedge. They run under the whole orchard. That is how the Compact scouts keep appearing behind us."
@@ -157,24 +157,24 @@ F2-M07,MSG_10,LENKA,The rig is gone. Without the recording we cannot prove what 
 F2-M07,MSG_11,LENKA,That is the pump-house log tape. Dates and frequencies. Keep it dry.
 F2-M08,MSG_01,LENKA,The enemy knows what is in those trucks. Expect attacks at both ends of the route.
 F2-M08,MSG_02,COMMANDER SAVA,Get the convoy through before the weather closes the pass. Protect the records even if the rear guard must fall back.
-F2-M08,MSG_03,PETROV,"Rockets on the gorge bridge, behind the convoy! They are cutting the road between us and the staging area. Rear guard, you are on your own side of that gap."
+F2-M08,MSG_03,DRAVEC,"Rockets on the gorge bridge, behind the convoy! They are cutting the road between us and the staging area. Rear guard, you are on your own side of that gap."
 F2-M08,MSG_04,COMMANDER SAVA,Repair trucks keep the escort moving; engineers can rebuild the bridge if you need the rear guard back. Decide which matters more. The storm will not wait.
 F2-M08,MSG_05,OPERATIONS,Storm front at the ridge. Eleven minutes until the pass closes.
 F2-M08,MSG_06,OPERATIONS,Visibility dropping. Four minutes until the pass closes.
-F2-M08,MSG_07,PETROV,Truck down! The records in that one are gone. Two left — do not lose another.
+F2-M08,MSG_07,DRAVEC,Truck down! The records in that one are gone. Two left — do not lose another.
 F2-M08,MSG_08,LENKA,"The ledger copies are through. Shell companies, transfer dates, a broker's name on every page. We can name who paid for this war."
 F2-M08,MSG_09,COMMANDER SAVA,The pass is closed and the records are on the wrong side of it. Pull the rear guard in before the snow takes them too.
-F2-M08,MSG_10,PETROV,"Staging area is gone. The originals were in that headquarters. Whatever the trucks carry, we cannot verify it now."
-F2-M08,MSG_11,PETROV,"Compact column on the lower road heading for the staging area. Bunkers up, hold the gate."
+F2-M08,MSG_10,DRAVEC,"Staging area is gone. The originals were in that headquarters. Whatever the trucks carry, we cannot verify it now."
+F2-M08,MSG_11,DRAVEC,"Compact column on the lower road heading for the staging area. Bunkers up, hold the gate."
 F2-M08,MSG_12,LENKA,"That is the courier's satchel from the ambush. Routing slips, same broker. Bag it."
 F2-M09,MSG_01,COMMANDER SAVA,Destroying the main building first will leave the batteries active. We must cut their eyes and power.
-F2-M09,MSG_02,PETROV,"Disable the power relays, destroy the uplink, then take the central compound before the barrage begins."
+F2-M09,MSG_02,DRAVEC,"Disable the power relays, destroy the uplink, then take the central compound before the barrage begins."
 F2-M09,MSG_03,LENKA,"Look at those batteries. No crews, no flags, no supply tents. Someone is fielding guns that do not need soldiers. Remember that."
-F2-M09,MSG_04,PETROV,First relay down. Their gun emplacements are on the uplink's power now; two more and the whole ring goes dark.
+F2-M09,MSG_04,DRAVEC,First relay down. Their gun emplacements are on the uplink's power now; two more and the whole ring goes dark.
 F2-M09,MSG_05,LENKA,"That was the last relay. The uplink is unshielded, but the complex has a backup generator. You have five minutes before it spins up."
 F2-M09,MSG_06,OPERATIONS,Backup generator online in two minutes thirty.
 F2-M09,MSG_07,COMMANDER SAVA,The generator is running and the batteries are firing on our base. Every twenty seconds until that uplink is down. Move.
-F2-M09,MSG_08,PETROV,Uplink destroyed. The batteries are silent and the compound's blast doors are open. Take it.
+F2-M09,MSG_08,DRAVEC,Uplink destroyed. The batteries are silent and the compound's blast doors are open. Take it.
 F2-M09,MSG_09,LENKA,"The compound is ours. Target lists, firing schedules, and a maintenance contract for the batteries — signed by the same broker as the ledgers. We know who built this, and now we know where they coordinate it from."
 F2-M09,MSG_10,COMMANDER SAVA,Our base is gone under that barrage. Nothing left to strike with. Withdraw.
 F2-M09,MSG_11,LENKA,"Those are the battery blueprints. Automated fire control, no operator. If there is a bigger one somewhere, we will want these."

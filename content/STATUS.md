@@ -29,6 +29,6 @@ Since v3 (17-10-2026):
 Map sketches (`missions/<code>-map.png`) and engine data remain production tasks.
 
 ## Open points for Tijmen
-Creative or story-level questions that the alignment pass deliberately did not decide are collected in the "Points for Tijmen" list of PR #26 (map size of F1-M02, briefing and message lines whose distances or times no longer match the speeds, the F2-M01 slot in the production phases, the Petrov question, and more).
+Creative or story-level questions that the alignment pass deliberately did not decide are collected in the "Points for Tijmen" list of PR #26 (map size of F1-M02, briefing and message lines whose distances or times no longer match the speeds, the F2-M01 slot in the production phases, the Petrov name question, now resolved by the rename to Dravec, and more).
 
 All content is original: no characters, dialogue, missions or scenes are taken from existing games. The campaign follows the broad mission variety and briefing-led structure that is common in the genre.

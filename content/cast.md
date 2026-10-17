@@ -50,7 +50,7 @@
 - Speech habit or catchphrase: distinguishes a clue from proof.
 - Notes: Keeps the campaign focused on evidence rather than revenge.
 
-## PETROV
+## DRAVEC
 - Faction: Veyran Directorate
 - Role in the story: Field lieutenant and escort leader.
 - Appears in missions: F2-M01, F2-M03, F2-M06, F2-M08, F2-M09
