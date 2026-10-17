@@ -1,16 +1,38 @@
-//! Placeholder meshes generated in code (position + normal per vertex).
+//! Placeholder meshes generated in code (position, normal and material
+//! colour per vertex).
 //!
 //! All meshes sit on the `y = 0` plane with `+Y` up, footprint within
 //! `x, z` in `[-0.5, 0.5]`.
 
 use bytemuck::{Pod, Zeroable};
 
-/// One mesh vertex: position and unit normal.
+/// One mesh vertex: position, unit normal and material colour.
+///
+/// `color.rgb` is the material's base colour (linear light) and `color.a`
+/// the **team weight**: 1 takes the instance colour (the player colour), 0
+/// keeps the material colour. The placeholder meshes are all team colour
+/// ([`Vertex::TEAM`]); glTF models (WP1.10) mark the `team` material with 1
+/// and every other material with 0.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    pub color: [f32; 4],
+}
+
+impl Vertex {
+    /// The vertex colour that takes the instance's colour entirely.
+    pub const TEAM: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+    /// A team-coloured vertex (the placeholder meshes).
+    pub const fn team(position: [f32; 3], normal: [f32; 3]) -> Self {
+        Self {
+            position,
+            normal,
+            color: Self::TEAM,
+        }
+    }
 }
 
 /// CPU-side indexed triangle mesh (counter-clockwise front faces).
@@ -26,7 +48,7 @@ impl MeshData {
     fn quad(&mut self, corners: [[f32; 3]; 4], normal: [f32; 3]) {
         let base = self.vertices.len() as u32;
         for position in corners {
-            self.vertices.push(Vertex { position, normal });
+            self.vertices.push(Vertex::team(position, normal));
         }
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -35,7 +57,7 @@ impl MeshData {
     fn triangle(&mut self, corners: [[f32; 3]; 3], normal: [f32; 3]) {
         let base = self.vertices.len() as u32;
         for position in corners {
-            self.vertices.push(Vertex { position, normal });
+            self.vertices.push(Vertex::team(position, normal));
         }
         self.indices.extend_from_slice(&[base, base + 1, base + 2]);
     }

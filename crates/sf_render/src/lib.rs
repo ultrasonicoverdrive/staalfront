@@ -29,11 +29,18 @@
 //! (`egui-wgpu`) on this crate's wgpu device, the terrain LOD tint and a 1 m cell
 //! grid ([`DebugView`]), and draw-call counters taken at the actual draw calls.
 //!
+//! WP1.10 adds glTF models ([`glb`]): `.glb` loading with the axis/unit
+//! conversion to the engine convention done once in the loader, the
+//! per-material nodes of a part merged into one mesh (per-vertex material
+//! colour, `team` = player colour), and parts (hull, turret, barrel) posed per
+//! instance ([`model::pose_parts`]), one draw call per part per level.
+//!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
 pub mod camera;
 pub mod frustum;
+pub mod glb;
 pub mod gpu;
 pub mod ground;
 pub mod icons;
@@ -56,7 +63,7 @@ pub use camera::{Camera, CameraConfig, CameraInput};
 pub use frustum::{Aabb, Frustum, Visibility};
 pub use gpu::{Gpu, GpuOptions, RenderError};
 pub use ground::{FlatGround, Ground, TerrainGround};
-pub use icons::{Blend, IconConfig, IconShape};
+pub use icons::{Blend, IconConfig, IconShape, ViewBand};
 pub use image::{Rgba8, Tolerance};
 pub use instancing::{FrameView, InstanceStats, Instancer, Motion};
 pub use lod::{LodConfig, TerrainConfig, TerrainStats};

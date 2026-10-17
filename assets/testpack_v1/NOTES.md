@@ -25,3 +25,14 @@ Known issues:
    still. Custom icons are only usable from WP3.6.
 4. **Axes** (+X front, Y up, metres, ground Y=0) follow the proposal that WP1.10
    fixes in `docs/conventions.md`.
+5. **Empty parts** (found in WP1.10): the scout, the armoured car, the
+   construction vehicle, the resource truck and three buildings (power plant,
+   refinery, vehicle factory) have `turret_LOD*`/`barrel_LOD*` nodes without
+   any mesh below them, and the rocket truck's `LOD2` has an empty barrel. The
+   loader drops parts without geometry, so those models are a hull only (no
+   draw call for nothing).
+
+Status after WP1.10: issues 1 and 2 are handled by the loader (`sf_render::glb`):
+one mesh per part per level, suffixes stripped. Every orientation in the pack
+matches the engine convention, so `assets/config/models.ron` loads it with
+`front: PlusX` (no rotation).

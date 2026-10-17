@@ -15,6 +15,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `testpack_v1/` models, icons, `manifest.json`, `README.md`, `LICENSES_bron.md` | Generated with Microsoft Copilot for this project (Staalfront assetpakket 1.0, supplied by Tijmen 15-10-2026); `LICENSES_bron.md` is the source pack's own provenance list | CC0 1.0 "for as far as rights exist" (see `testpack_v1/LICENSES_bron.md`); test material for WP1.10/WP1.14, not release art |
 | `testpack_v1/NOTES.md` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `config/units.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
+| `config/models.ron` | Written for this project (WP1.10: glTF model packs) | Project license (see workspace `Cargo.toml`) |
 | `scenarios/*.ron`, `scenarios/*.expected` | Written for this project (headless scenarios and their pinned checksums, WP1.3) | Project license (see workspace `Cargo.toml`) |
 | `config/terrain.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `fonts/Inter-Medium-subset.otf` | Subset (Basic Latin, Latin-1 Supplement, Latin Extended-A, common punctuation and arrows; no hinting; made with `pyftsubset`) of Inter Medium by The Inter Project Authors, https://github.com/rsms/inter. The font declares no Reserved Font Name. 52 KB. | SIL Open Font License 1.1, full text in `fonts/OFL.txt` |

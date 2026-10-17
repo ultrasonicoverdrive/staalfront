@@ -30,4 +30,4 @@ Grounded, tense, and occasionally dryly ironic. The world should feel like a cla
 Late-industrial alternate history. Conventional infantry, tanks, artillery, trucks, engineers, radar, limited aircraft and coastal craft are possible. No magic, aliens, or supernatural technology. Advanced automated defence exists only as a late-campaign prototype and must be foreshadowed.
 
 ## 6. Things we never do
-No real-world nations or real political leaders. No copied Red Alert characters, dialogue, mission titles, named weapons, cutscenes, or plot twists. No glorification of atrocities. Civilians are people to protect, not disposable set dressing.
+No real-world nations or real political leaders. No characters, dialogue, mission titles, named weapons, cutscenes, or plot twists copied from existing games. No glorification of atrocities. Civilians are people to protect, not disposable set dressing.

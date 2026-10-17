@@ -15,11 +15,17 @@ can later be converted into the engine formats:
 | `campaign.md` | Both campaigns, one line per mission. |
 | `missions/<code>.md` | One file per mission, copied from `missions/_template.md`. |
 | `briefings/<code>.fountain` | One briefing script per mission, in Fountain format, copied from `briefings/_template.fountain`. |
+| `units.md` | The unit and structure roles missions may use, their stats, **speeds in cells per second**, the tech tree per campaign. |
+| `CONVENTIONS.md` | The contract every mission file must satisfy (sections A-K, messages, timers, triggers). |
+| `production.md` | Production plan: phases, how they map onto PLAN.md (phases 10, 12, 15, M2), the trigger primitives the engine must offer (§3a), voice and art scope, risks. |
+| `scripts/validate.py` | The checker, see "Checking" below. |
+| `scripts/export_messages.py` | Writes every in-mission line to `voiceover.csv`. |
+| `STATUS.md` | Where the package stands. |
 
 ## Rules
 
-- **Own content only (B5).** No names, characters, stories, dialogue or scenes from Red
-  Alert or other games, not even redrawn or paraphrased. Taking over the *structure* is
+- **Own content only (B5).** No names, characters, stories, dialogue or scenes from any
+  existing game, not even redrawn or paraphrased. Taking over the *structure* is
   fine: see `docs/mission-inspiration.md` and `docs/cutscene-inspiration.md`.
 - **Game text is English (B8).** Dialogue, objectives and messages go in English. Notes
   for yourself may be in any language. Put them in Fountain notes `[[ ... ]]` or in the
@@ -28,7 +34,8 @@ can later be converted into the engine formats:
   Use a plain English role name (`battle_tank`, `construction_center`,
   `resource_truck`). The final unit names come later.
 - **Map sizes in cells**: one cell is 4 m (PLAN.md B12). Maps are 64×64 to 256×256
-  cells (256 m to 1 km). A tank is about one cell, a building 2×2 to 4×3 cells.
+  cells (256 m to 1 km): each side 64 to 256 cells. A tank is about one cell, a building 2×2 to 4×3 cells.
+- **Speeds in cells per second** (`units.md`): infantry 0.7, light tank 2.0, heavy tank 1.1. Work out every travel time as distance in cells ÷ speed, and write the arithmetic at the end of the mission's Notes (CONVENTIONS.md rule 15).
 - **Codes**: missions are `F1-M01` … `F2-M10` (faction, mission). A mission file and
   its briefing share the code.
 
@@ -57,10 +64,20 @@ the files stay valid Fountain:
 | `[[AMBIENCE: wind, distant guns]]` | Background sound under the scene. |
 | `[[SHOT: map]]` / `[[SHOT: wide]]` / `[[SHOT: reaction ADJUTANT]]` | Camera hint for the auto-director. Optional: without one it picks a shot itself. |
 | `[[MAP: arrow from P_START to BRIDGE_W]]` | Something drawn on the briefing map. |
-| `CUT TO:` / `> FADE OUT.` | Transition. Fountain recognises lines ending in `TO:` by itself; other transitions need a leading `>`. |
+| `CUT TO:` / `> FADE IN:` / `> FADE OUT.` | Transition. Fountain recognises lines ending in `TO:` by itself; every other transition, `FADE IN:` and `FADE OUT.` included, needs a leading `>`. |
+| `ENGINEER VENN (V.O.)` / `(O.S.)` | A speaker who is not in the room (on the radio or off screen). Everyone else must be named in the action lines before they speak. |
 
 Length guideline: 30–90 seconds per briefing, which is about 60–200 spoken words.
 The objective must be spoken clearly in the last 2–3 lines.
+
+## Checking
+
+```
+python3 -I content/scripts/validate.py
+python3 content/scripts/export_messages.py
+```
+
+`validate.py` checks the 20 mission files (sections, references, roles, objectives, win/lose, MSG speakers) and the 20 briefings (every cue is in `cast.md`; every speaker is in the room or marked `(V.O.)`/`(O.S.)`; transitions other than `TO:` start with `>`; "in the room" means an action sentence names the speaker with a verb such as stand, sit, lean or wait). It also fails if a role name or title from another game appears anywhere in `content/` (B5). It skips `_template.*` and `EXAMPLE-*`; name a file to check it anyway. The exit code is 1 on any error. Run it before each commit, and run `export_messages.py` after changing a message.
 
 ## Workflow
 

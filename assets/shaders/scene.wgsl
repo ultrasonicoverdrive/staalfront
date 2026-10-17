@@ -27,6 +27,10 @@ struct VertexIn {
     @location(4) model2: vec4<f32>,
     @location(5) model3: vec4<f32>,
     @location(6) color: vec4<f32>,
+    // Per-vertex material colour (linear RGB) and team weight (WP1.10): 1 =
+    // the instance (player) colour, 0 = the material's own colour. The
+    // placeholder meshes are all team colour.
+    @location(7) material: vec4<f32>,
 };
 
 struct VertexOut {
@@ -57,7 +61,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     var out: VertexOut;
     out.clip = globals.view_proj * model * vec4<f32>(in.position, 1.0);
     out.normal = (model * vec4<f32>(in.normal, 0.0)).xyz;
-    out.color = in.color.rgb;
+    out.color = mix(in.material.rgb, in.color.rgb, in.material.a);
     out.weight = in.color.a;
     return out;
 }

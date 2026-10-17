@@ -183,3 +183,20 @@ PLAN.md).
 > **Proposal (not decided):** one file per rule area in `docs/rules/` (see
 > `docs/rules/README.md`); update `docs/architecture.md` in the same PR as an
 > architecture change.
+
+## 12. Engine coordinates and model axes (WP1.10)
+
+PLAN.md §3 WP1.10 has this WP fix the engine convention here:
+
+- **Metres, `+Y` up, the front of a model along `+X`, the ground at `Y = 0`.**
+  Right-handed, so a model's right side is `+Z` (front x up).
+- This matches what the engine already did: facing 0 points along `+X` and
+  increases towards `+Z` (`sf_render::instancing::model_matrix`, a proper rotation,
+  no mirror), and the sim's 2D `(x, y)` in cells (1 cell = 1 m) is the render
+  `(x, z)` (`Motion::from_fixed`).
+- glTF assets are converted to it **once, in the loader** (`sf_render::glb`), from
+  the axes given per pack in `assets/config/models.ron`; the renderer and the
+  shaders never correct axes. The glTF spec's own front is `+Z`; the test pack
+  (`assets/testpack_v1`) was authored front `+X`.
+- Part joints: a turret turns about its local `+Y` (positive = front towards `+Z`,
+  the facing sense), a barrel tilts about its local `+Z` (positive = muzzle up).

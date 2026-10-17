@@ -179,6 +179,26 @@ impl Style {
         })
     }
 
+    /// The same palette, icon and level settings with other shapes (one per
+    /// glTF model of a pack, WP1.10). The shapes get no placeholder level
+    /// chains: their models bring their own.
+    pub fn with_shapes(&self, shapes: Vec<Shape>) -> Result<Style, StyleError> {
+        if shapes.is_empty() || shapes.len() > 255 {
+            return Err(StyleError::Invalid("1 to 255 shapes"));
+        }
+        if shapes
+            .iter()
+            .any(|s| !s.size.iter().all(|v| v.is_finite() && *v > 0.0))
+        {
+            return Err(StyleError::Invalid("a shape size is not positive"));
+        }
+        Ok(Style {
+            lods: vec![Vec::new(); shapes.len()],
+            shapes,
+            ..self.clone()
+        })
+    }
+
     pub fn color_count(&self) -> usize {
         self.linear.len()
     }
