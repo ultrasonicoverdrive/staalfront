@@ -3,8 +3,10 @@
 For the **writer** (turning a Fountain briefing into a scene and previewing it),
 the **artist** (rigging figures, painting backgrounds) and the **implementer**
 (whoever hooks the player into the game). The source of truth for names and defaults is
-`crates/sf_cutscene/src/model.rs`; the example to copy from is
-[`assets/scenes/example_bridge.ron`](../assets/scenes/example_bridge.ron).
+`crates/sf_cutscene/src/model.rs`; the examples to copy from are the small
+[`assets/scenes/example_bridge.ron`](../assets/scenes/example_bridge.ron) and the complete,
+hand-directed mission 1 briefing
+[`assets/scenes/f1_m01_briefing.ron`](../assets/scenes/f1_m01_briefing.ron) (section 10).
 
 A scene is one cartoon, a **RON** file: background layers, cutout characters
 and a timeline of events at fixed millisecond times. This crate (`sf_cutscene`)
@@ -506,3 +508,106 @@ milliseconds, so they are tested with a fake one); `Player::replace_scene` keeps
 * Video fallback: WP12.4.
 * Swapping a part's picture inside a pose (mouth shapes, blinking eyes): not
   needed for the placeholders; WP12.3 will decide how mouth shapes are chosen.
+
+Found while directing the demo scene (section 10); none of them blocked it, each has a
+workaround there:
+
+* **Layers do not animate.** A lamp cannot light up on the radio click, a flag cannot move. The
+  only change a layer knows is "visible in this shot".
+* **No idle or walk motion.** A `Move` glides; there is no looping bob or breathing, so a figure
+  that stands still is perfectly still. (In the demo the table hides the legs, which hides the
+  gliding.)
+* **No rest rotation for parts and layers.** A slanted prop or a table seen in perspective needs a
+  picture; the placeholders draw the table edge-on.
+* **A part's draw order is fixed per part, not per pose.** "The hand is in front of the head only
+  in the radio pose" is solved by giving that hand a high `z` for all poses.
+* **Times are absolute.** A pause that grows pushes every later event, in all tracks, by hand;
+  a relative time (`after: <event>`) would make the pauses cheap to tune.
+* **A map overlay shows all its markers at once**, so pins cannot appear as the line mentions
+  them, and the overlay is glued to the frame while the map layers zoom with the camera: the demo
+  does not zoom during the map shot, or the pins would slide off their places.
+
+## 10. How the demo scene was directed (WP12.5)
+
+[`assets/scenes/f1_m01_briefing.ron`](../assets/scenes/f1_m01_briefing.ron) is the mission 1
+briefing, complete: two speakers, one room, a map insert, camera work, 62 seconds. It is a model
+for the artist who replaces the placeholders and for the writer who directs the next briefing.
+Frames: [`docs/screenshots/wp12.5/`](screenshots/wp12.5/) (first line, the map, a two-shot, the
+fade-out), made by `demo_briefing_at_four_moments` with `SF_SAVE_SHOTS`.
+
+```
+cargo run -p sf_cutscene --bin play_scene -- --watch assets/scenes/f1_m01_briefing.ron
+cargo run -p sf_cutscene --bin scene_check -- assets/scenes/f1_m01_briefing.ron   # 0 warnings, 0 missing assets
+```
+
+### 10.1 The workflow
+
+1. `fountain2scene content/briefings/F1-M01.fountain assets/scenes/f1_m01_briefing.ron`: the
+   skeleton (section 7).
+2. Direct it **by hand in the RON**. Every event that differs from the generator's carries
+   `// hand edit: why`; events that carry only `// line N` are untouched. The header of the file
+   lists what was added. A test (`demo_scene_marks_every_hand_edit`) fails when an edit is not marked.
+3. **The text is the writer's.** Do not change, add or drop a spoken line, a speaker or a sound
+   cue name in the RON. A test (`demo_scene_tells_the_briefing_word_for_word`) compares every line,
+   its speaker and the order with the Fountain file, twice: through the importer and by an
+   independent reading. Change the story in the `.fountain` file and redo the hand edits.
+   (Regenerating overwrites the RON; keep a copy of the hand edits, `git diff` helps.)
+4. Preview while you work with `--watch`; the writer's HUD (`H`) shows the shot and the speaker.
+
+### 10.2 What was decided
+
+| Part of the scene | Decision |
+|---|---|
+| Location | One heading, so one shot, `forward_command_post_dawn`: a tent, dawn outside the open flap, a trestle table with the map, a field radio (the ambience cue), a hanging lantern. |
+| Parallax | **Three depths**: `0.6` (tent wall, the flap with the dawn, notice board), `1.0` (floor, centre pole, table, props: where the figures stand), `1.2` (the lantern on its cord and the canvas edge, in front of the figures and sliding past faster). The table (`z >= 0`) is in front of the figures so they stand behind it. All of it is `Rect`, `RoundRect` and `Circle`. |
+| Map | `[[SHOT: map]]` is a second shot, `map`, with layers of its own at `z >= 40` and `parallax: 0`: the paper, farmland (south-west), the ore ridge (north), the road junction (centre) with the camp, the east road fading out into unlit hills. The `MapOverlay` adds pins and an arrow on top. |
+| Entering, leaving | Elian walks in through the flap (`Enter` off stage left, `Move`), Mira follows from the right. At the end they turn (`facing`) and walk out during the fade, then `Exit`. |
+| Poses from parentheticals | serious → `lean`, dry → `arms_crossed`, measured → `neutral`, firm → `arms_crossed`, analytical → `lean`, pointing at map → `point`, concerned → `arms_crossed`, neutral → `neutral`. Added: `lean` while Elian listens to the doubt, `radio` (hand to the headset) just before the radio click. The original words stay as `hint`. |
+| Camera | A slow drift towards Elian on the first line; a pan to the speaker when it matters (`EaseInOut`, 0.7 to 0.9 s); a cut to the map one beat after Mira's line, back to the post framed on Elian; a wide two-shot for the pointing; a **push-in from 1.0 to 1.4 on Mira's doubt** (`EaseIn`, over the whole line); back to Elian for the last line; wide again for the radio. No shake: the briefing has no explosion. |
+| Timing | Dialogue durations are the importer's (words / 2.5 per second); a test keeps them within 30 % of it. Only the pauses grew where the scene reads better: half a second to read the map, 0.9 s before Mira's doubt, 0.6 s before the closing line, a 0.5 s beat between the radio click and the fade. |
+| V.O. | Nobody in this briefing speaks over the radio, so there is no off-screen speaker. If a briefing has one, give that character no parts (section 3.2) and put a radio or a framed picture on the stage as a layer, with `delivery: VoiceOver`. |
+| Sound | `sound`, `file`, `voice` and `lipsync` stay `None`; the cue names (`radio click`, `restrained military tension`, ...) are in `note`. |
+
+### 10.3 The rigs, and the names an artist must keep
+
+Each speaking character is a cutout rig of about 12 parts, built from rounded rectangles and
+circles in the faction's colours (Meridian: sand, olive, weathered blue; the sun on the sleeve is
+the Meridian emblem). `scale: 1.8`; art faces **right**; the character position is the **hips**.
+
+| Part | Parent | Joint inside the picture (`pivot`) | Rest `offset` | `z` | |
+|---|---|---|---|---|---|
+| `legs` | root | (0, -85) top | (0, 0) | -1 | a root of its own, so legs stay upright when the torso leans |
+| `torso` | root | (0, 105) hips | (0, 0) | 0 | `lean` rotates about the hips |
+| `head` | `torso` | (0, 56) neck | (0, -204) | 5 | |
+| `mouth` | `head` | (0, 0) | (15, -34) | 7 | **the lip-sync part** (WP12.3) |
+| `upper_arm_l`, `upper_arm_r` | `torso` | (0, -50) shoulder | (-78, -186), (78, -186) | 1, 3 | `_r` is the arm on the side the figure faces |
+| `forearm_l`, `forearm_r` | upper arm | (0, -45) elbow | (0, 90) | 6, 4 | |
+| `hand_l`, `hand_r` | forearm | (0, 0) | (0, 88) | 9, 4 | `hand_l` is above the head so it shows at the ear |
+| `eye` | `head` | (0, 0) | (22, -66) | 7 | |
+| Elian only | | | | | `cap`, `cap_brim`, `eye_bag`, `pocket_map`, `patch` |
+| Mira only | | | | | `hair`, `headset_band`, `headset_cup`, `headset_mic`, `tablet`, `tablet_screen`, `patch` |
+
+**Keep these names** when you replace a shape by a picture, because poses and events look parts
+up by name: **`torso`, `head`, `mouth`, `upper_arm_l`, `upper_arm_r`, `forearm_l`, `forearm_r`**
+(and `legs`, `hand_l`, `hand_r`, which the poses do not touch but the layering needs). The extra
+parts (cap, hair, headset) are free: rename or drop them, no pose mentions them. Keep the **parent chain** (arm -> forearm -> hand, everything else -> torso) and
+draw each picture so that its joint sits where the table says; then the angles in the poses stay
+right. Change a joint, and the poses need new angles.
+
+**The poses, five names** (the artist may change the numbers, not the names): `neutral` (arms
+hang, a little bent), `point` (right arm out and down, onto the map), `lean` (torso 12 degrees
+forward, both arms straight onto the table), `arms_crossed` (forearms across the chest), `radio`
+(left forearm up to the headset; Mira only). Elian has the first four, Mira all five: 3 to 5 poses
+per character is the budget.
+
+Angles are degrees, clockwise positive, relative to the parent; check a new pose in the
+preview, not on paper.
+
+### 10.4 Tests
+
+`crates/sf_cutscene/tests/briefings.rs` (text, markers, parts, poses, depths, direction, timing,
+the CLI) and `tests/screenshot.rs` (`demo_briefing_at_four_moments`: the first line, the map shot,
+a two-shot, the fade-out; each frame is not empty, and where a line is spoken the subtitle is
+really drawn, checked the way WP12.2 does it and shown to **fail** on the same frame without the
+subtitle; where nobody speaks, nothing bright sits where a subtitle would be). The four frames are
+the PNGs above.

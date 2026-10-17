@@ -503,3 +503,213 @@ fn a_picture_changed_on_disk_shows_after_forget_pictures() {
     assert!(cs.failed_pictures().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---------------------------------------------------------------------------
+// WP12.5: the demo scene (mission 1 briefing) at four moments. The PNGs in
+// `docs/screenshots/wp12.5` were made with `SF_SAVE_SHOTS`.
+
+fn demo() -> Scene {
+    load_file(
+        &repo_assets().join("scenes/f1_m01_briefing.ron"),
+        Some(&repo_assets()),
+    )
+    .unwrap_or_else(|e| panic!("{e}"))
+    .scene
+}
+
+/// Pixels of the placeholder rigs and of the map, as the scene paints them.
+const ELIAN_JACKET: [u8; 3] = [0x66, 0x70, 0x46];
+const MIRA_JACKET: [u8; 3] = [0x52, 0x70, 0x8a];
+const TENT_CANVAS: [u8; 3] = [0xa3, 0x9a, 0x74];
+const MAP_SHEET: [u8; 3] = [0xe2, 0xd4, 0xad];
+
+/// Horizontal centre of the pixels of a colour inside `r`, and how many there are.
+fn centre_x(img: &Rgba8, r: &Rect, rgb: [u8; 3]) -> (f32, usize) {
+    let (mut sum, mut n) = (0.0_f64, 0_usize);
+    let (x0, y0) = (r.x.max(0.0) as u32, r.y.max(0.0) as u32);
+    let (x1, y1) = (
+        (r.right().ceil() as u32).min(img.width),
+        (r.bottom().ceil() as u32).min(img.height),
+    );
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if near(img.pixel(x, y), rgb, 6) {
+                sum += f64::from(x);
+                n += 1;
+            }
+        }
+    }
+    ((sum / n.max(1) as f64) as f32, n)
+}
+
+#[test]
+fn demo_briefing_at_four_moments() {
+    let (w, h) = (1280, 720);
+    let scene = demo();
+    let mut r = renderer(w, h);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), repo_assets());
+
+    // 1. The first line: Elian leans on the table, Mira stands across from him.
+    let t = 3500;
+    let (first, layout) = shoot(&mut r, &mut cs, &scene, t);
+    save("1_first_line.png", &first);
+    check_moment(&mut r, &mut cs, &scene, t, &first, &layout);
+    let sub = layout.subtitle.as_ref().expect("Elian speaks at 3.5 s");
+    assert_eq!(sub.name, "Captain Elian");
+    assert!(
+        sub.lines[0].0.starts_with("The relay went dark"),
+        "{:?}",
+        sub.lines
+    );
+    let v = layout.viewport;
+    assert!(
+        count_in(&first, &v, |p| near(p, TENT_CANVAS, 6)) > 60_000,
+        "the tent"
+    );
+    assert!(count_in(&first, &v, |p| near(p, ELIAN_JACKET, 6)) > 6_000);
+    assert!(count_in(&first, &v, |p| near(p, MIRA_JACKET, 6)) > 6_000);
+
+    // 2. The map shot: the map fills the picture, the characters are gone from
+    // it, the pins and the arrow of the overlay are on it.
+    let t = 19_000;
+    let (map, layout) = shoot(&mut r, &mut cs, &scene, t);
+    save("2_map.png", &map);
+    check_moment(&mut r, &mut cs, &scene, t, &map, &layout);
+    let sub = layout.subtitle.as_ref().expect("Mira speaks over the map");
+    assert_eq!(sub.name, "Mira");
+    let v = layout.viewport;
+    assert!(
+        count_in(&map, &v, |p| near(p, MAP_SHEET, 6)) > 300_000,
+        "the sheet"
+    );
+    assert_eq!(
+        count_in(&map, &v, |p| near(p, ELIAN_JACKET, 6)),
+        0,
+        "no Elian"
+    );
+    assert_eq!(
+        count_in(&map, &v, |p| near(p, MIRA_JACKET, 6)),
+        0,
+        "no Mira"
+    );
+    assert!(
+        count_in(&map, &v, |p| near(p, [0xa4, 0xad, 0x74], 6)) > 5_000,
+        "farmland"
+    );
+    assert!(
+        count_in(&map, &v, |p| near(p, [0x9b, 0x84, 0x66], 6)) > 10_000,
+        "ore ridge"
+    );
+    assert!(
+        count_in(&map, &v, |p| near(p, [0x8e, 0x4a, 0x4a], 6)) > 150,
+        "hostile camp"
+    );
+    assert!(
+        count_in(&map, &v, |p| near(p, [226, 72, 58], 12)) > 150,
+        "pins"
+    );
+    assert!(
+        count_in(&map, &v, |p| near(p, [200, 52, 40], 12)) > 300,
+        "arrow"
+    );
+
+    // 3. Mid-scene two-shot: Elian points at the map while he gives the next
+    // order; the camera is wide, both figures are whole and on their own side.
+    let t = 41_000;
+    let (two, layout) = shoot(&mut r, &mut cs, &scene, t);
+    save("3_two_shot.png", &two);
+    check_moment(&mut r, &mut cs, &scene, t, &two, &layout);
+    let sub = layout.subtitle.as_ref().expect("Elian speaks at 41 s");
+    assert_eq!(sub.name, "Captain Elian");
+    let v = layout.viewport;
+    let (ex, en) = centre_x(&two, &v, ELIAN_JACKET);
+    let (mx, mn) = centre_x(&two, &v, MIRA_JACKET);
+    assert!(
+        en > 10_000 && mn > 10_000,
+        "both in the picture: {en}, {mn}"
+    );
+    let mid = v.x + v.w / 2.0;
+    assert!(
+        ex < mid - 150.0 && mx > mid + 150.0,
+        "Elian left, Mira right: {ex}, {mx}"
+    );
+    assert!(mx - ex > 300.0);
+
+    // 4. The fade-out: half way to black, the figures walking out, nobody speaking.
+    let t = 61_900;
+    let (fade, layout) = shoot(&mut r, &mut cs, &scene, t);
+    save("4_fade_out.png", &fade);
+    check_moment(&mut r, &mut cs, &scene, t, &fade, &layout);
+    assert!(layout.subtitle.is_none(), "the last line ended at 60.7 s");
+    assert!(
+        mean_lum(&fade) < mean_lum(&first) * 0.8 && mean_lum(&fade) > 5.0,
+        "half way to black: {} against {}",
+        mean_lum(&fade),
+        mean_lum(&first)
+    );
+
+    // Four different pictures.
+    for (a, b) in [
+        (&first, &map),
+        (&first, &two),
+        (&first, &fade),
+        (&map, &two),
+    ] {
+        assert_ne!(a.pixels, b.pixels);
+    }
+}
+
+/// The checks every moment must pass. The frame is not empty. Where a line is
+/// being spoken the subtitle is really drawn (a dark box with text-white pixels
+/// that no picture content reaches), and the very same check fails on the same
+/// frame without the subtitle: it can fail. Where nobody speaks, there is no
+/// box and no text-white pixel where a subtitle would be.
+fn check_moment(
+    r: &mut Renderer,
+    cs: &mut CutsceneRenderer,
+    scene: &Scene,
+    t_ms: i32,
+    img: &Rgba8,
+    layout: &FrameLayout,
+) {
+    assert!(distinct_colours(img) > 20, "{t_ms} ms: not an empty frame");
+    assert!(mean_lum(img) > 5.0, "{t_ms} ms: not black");
+    let state = scene.sample(t_ms);
+    match (&state.subtitle, &layout.subtitle) {
+        (Some(line), Some(sub)) => {
+            assert!(
+                has_subtitle(img, &sub.rect, 400),
+                "{t_ms} ms: no subtitle text pixels for {:?}",
+                line.text
+            );
+            let mut bare = scene.sample(t_ms);
+            bare.subtitle = None;
+            let (without, l2) = shoot_state(r, cs, scene, &bare);
+            assert!(l2.subtitle.is_none());
+            assert!(
+                !has_subtitle(&without, &sub.rect, 400),
+                "{t_ms} ms: the check also passes without a subtitle"
+            );
+            assert_eq!(
+                count_in(&without, &sub.rect, |p| lum(p) > TEXT_LUM),
+                0,
+                "{t_ms} ms: picture content as bright as text"
+            );
+        }
+        (None, None) => {
+            // Where the box of the nearest line would sit, nothing is bright.
+            let near_line = scene.sample(60_000);
+            assert!(near_line.subtitle.is_some(), "a line is up at 60 s");
+            let (probe, probe_layout) = shoot(r, cs, scene, 60_000);
+            let rect = probe_layout.subtitle.expect("layout of the line").rect;
+            assert!(has_subtitle(&probe, &rect, 400));
+            assert!(
+                !has_subtitle(img, &rect, 400),
+                "{t_ms} ms: a ghost subtitle"
+            );
+            assert_eq!(count_in(img, &rect, |p| lum(p) > TEXT_LUM), 0, "{t_ms} ms");
+        }
+        _ => panic!("{t_ms} ms: the sampler and the renderer disagree about the subtitle"),
+    }
+}

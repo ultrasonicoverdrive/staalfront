@@ -1,0 +1,304 @@
+// F1-M01 "Ashes at First Light": the mission 1 briefing, a complete demo scene (WP12.5).
+//
+// Generated with
+//     cargo run -p sf_cutscene --bin fountain2scene -- \
+//         content/briefings/F1-M01.fountain assets/scenes/f1_m01_briefing.ron
+// and then directed by hand like a cartoon briefing. Every edit of the generated skeleton is
+// marked with a `//` comment saying `hand edit`; the events that carry only `// line N` are
+// exactly as the generator wrote them. A test keeps both promises: the spoken lines, their
+// speakers and their order still match the Fountain file word for word, and every event that
+// differs from the generator's says `hand edit`.
+//
+// What was added (see also docs/cutscene-format.md, section 10):
+//   - layers: three parallax depths (0.6 wall and dawn, 1.0 floor / table / props, 1.2 hanging lantern)
+//     built from rectangles and circles, and the map insert drawn as a map;
+//   - characters: a placeholder cutout rig per speaker with torso, head, mouth, two upper arms and
+//     two forearms and the five poses neutral / point / lean / arms_crossed / radio;
+//   - direction: both walk in and leave, the parentheticals became poses, the camera drifts and
+//     pushes in on important lines, a cut to the map with pins and an arrow, the radio click.
+//   - timing: the dialogue durations are the importer's (words / 2.5 per second); only the pauses
+//     between lines grew, three of them on purpose: half a second to read the map, a longer pause
+//     before Mira's doubt, a beat before the closing line. Everything else is the importer's 0.3 s.
+// There is no explosion in this briefing, so the camera does not shake; nobody speaks over the
+// radio (V.O.), so there is no off-screen speaker to show. The figures are geometric placeholders;
+// there are no files to be missing and the sound slots are silent (`sound: None`, the writer's wish
+// is in `note`).
+#![enable(implicit_some)]
+Scene(
+    format: 1,
+    name: "f1_m01_briefing",
+    title: "F1-M01 — Ashes at First Light (briefing)",
+    source: "content/briefings/F1-M01.fountain",
+    stage: (width: 1920, height: 1080),
+    layers: [
+        // -- the command post, depth 1 of 3 (parallax 0.6): the tent wall and the dawn outside
+        (name: "forward_command_post_dawn_canvas", art: Rect(w: 3000.0, h: 1700.0, color: "#a39a74"), pos: (0.0, 0.0), parallax: 0.6, z: -40, shots: ["forward_command_post_dawn"]),  // tent wall: sand canvas
+        (name: "forward_command_post_dawn_seam_1", art: Rect(w: 16.0, h: 1700.0, color: "#8e8660"), pos: (-1000.0, 0.0), parallax: 0.6, z: -39, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_seam_2", art: Rect(w: 16.0, h: 1700.0, color: "#8e8660"), pos: (-330.0, 0.0), parallax: 0.6, z: -39, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_seam_3", art: Rect(w: 16.0, h: 1700.0, color: "#8e8660"), pos: (330.0, 0.0), parallax: 0.6, z: -39, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_seam_4", art: Rect(w: 16.0, h: 1700.0, color: "#8e8660"), pos: (1000.0, 0.0), parallax: 0.6, z: -39, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_door_frame", art: RoundRect(w: 430.0, h: 620.0, radius: 40.0, color: "#5b5238"), pos: (-640.0, -60.0), parallax: 0.6, z: -38, shots: ["forward_command_post_dawn"]),  // the tent flap, open on the dawn
+        (name: "forward_command_post_dawn_dawn_sky", art: RoundRect(w: 380.0, h: 570.0, radius: 28.0, color: "#ecc79b"), pos: (-640.0, -60.0), parallax: 0.6, z: -37, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_dawn_glow", art: Circle(radius: 95.0, color: "#f2d3a8"), pos: (-600.0, 70.0), parallax: 0.6, z: -36, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_dawn_sun", art: Circle(radius: 46.0, color: "#f5dfb3"), pos: (-600.0, 80.0), parallax: 0.6, z: -35, shots: ["forward_command_post_dawn"]),  // a small sun: the Meridian emblem
+        (name: "forward_command_post_dawn_dawn_hills", art: RoundRect(w: 380.0, h: 170.0, radius: 28.0, color: "#5f768b"), pos: (-640.0, 150.0), parallax: 0.6, z: -34, shots: ["forward_command_post_dawn"]),  // weathered-blue ridge, north of the relay
+        (name: "forward_command_post_dawn_wall_board", art: Rect(w: 250.0, h: 170.0, color: "#7a6a46"), pos: (650.0, -250.0), parallax: 0.6, z: -33, shots: ["forward_command_post_dawn"]),  // notice board
+        (name: "forward_command_post_dawn_wall_board_sheet", art: Rect(w: 190.0, h: 120.0, color: "#cdbd92"), pos: (650.0, -250.0), parallax: 0.6, z: -32, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_wall_board_pin", art: Circle(radius: 8.0, color: "#b8442f"), pos: (650.0, -300.0), parallax: 0.6, z: -31, shots: ["forward_command_post_dawn"]),
+        // -- depth 2 of 3 (parallax 1.0, where the characters stand): floor, pole, table with the map
+        (name: "forward_command_post_dawn_floor", art: Rect(w: 3000.0, h: 560.0, color: "#4c4533"), pos: (0.0, 400.0), parallax: 1.0, z: -30, shots: ["forward_command_post_dawn"]),  // ground inside the tent
+        (name: "forward_command_post_dawn_pole", art: Rect(w: 34.0, h: 1700.0, color: "#5b4a35"), pos: (0.0, -100.0), parallax: 1.0, z: -29, shots: ["forward_command_post_dawn"]),  // centre pole, between the two figures
+        (name: "forward_command_post_dawn_table_top", art: Rect(w: 3000.0, h: 40.0, color: "#8a6a46"), pos: (0.0, 252.0), parallax: 1.0, z: 1, shots: ["forward_command_post_dawn"]),  // trestle table: the figures stand behind it
+        (name: "forward_command_post_dawn_table_front", art: Rect(w: 3000.0, h: 520.0, color: "#54402b"), pos: (0.0, 530.0), parallax: 1.0, z: 1, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_table_map", art: RoundRect(w: 820.0, h: 26.0, radius: 8.0, color: "#cdbd92"), pos: (0.0, 232.0), parallax: 1.0, z: 2, shots: ["forward_command_post_dawn"]),  // the map of the border farmland, seen edge-on
+        (name: "forward_command_post_dawn_table_map_road", art: Rect(w: 520.0, h: 5.0, color: "#9a8458"), pos: (-30.0, 232.0), parallax: 1.0, z: 3, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_table_map_pin", art: Circle(radius: 8.0, color: "#b8442f"), pos: (90.0, 228.0), parallax: 1.0, z: 3, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_lamp_base", art: RoundRect(w: 48.0, h: 18.0, radius: 6.0, color: "#3e3a30"), pos: (-790.0, 233.0), parallax: 1.0, z: 2, shots: ["forward_command_post_dawn"]),  // hurricane lamp
+        (name: "forward_command_post_dawn_lamp_glass", art: RoundRect(w: 46.0, h: 74.0, radius: 18.0, color: "#e6b866"), pos: (-790.0, 188.0), parallax: 1.0, z: 2, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_radio_body", art: RoundRect(w: 210.0, h: 120.0, radius: 14.0, color: "#556b4a"), pos: (790.0, 182.0), parallax: 1.0, z: 2, shots: ["forward_command_post_dawn"]),  // field radio: its hiss is the ambience cue
+        (name: "forward_command_post_dawn_radio_grille", art: RoundRect(w: 78.0, h: 78.0, radius: 10.0, color: "#3b4a34"), pos: (735.0, 182.0), parallax: 1.0, z: 3, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_radio_dial", art: Circle(radius: 24.0, color: "#cdbd92"), pos: (840.0, 170.0), parallax: 1.0, z: 3, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_radio_lamp", art: Circle(radius: 7.0, color: "#c0452f"), pos: (840.0, 214.0), parallax: 1.0, z: 3, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_radio_antenna", art: Rect(w: 6.0, h: 230.0, color: "#2f2f2f"), pos: (868.0, 40.0), parallax: 1.0, z: 2, shots: ["forward_command_post_dawn"]),
+        // -- depth 3 of 3 (parallax 1.2, in front of the figures): the lamp on its cord, the canvas edge
+        (name: "forward_command_post_dawn_lamp_cord", art: Rect(w: 5.0, h: 330.0, color: "#2c2a24"), pos: (60.0, -400.0), parallax: 1.2, z: 5, shots: ["forward_command_post_dawn"]),  // hanging lantern: slides past faster than the figures
+        (name: "forward_command_post_dawn_lamp_shade", art: RoundRect(w: 120.0, h: 70.0, radius: 30.0, color: "#4d5a3c"), pos: (60.0, -228.0), parallax: 1.2, z: 5, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_lamp_light", art: Circle(radius: 24.0, color: "#f0cd86"), pos: (60.0, -198.0), parallax: 1.2, z: 6, shots: ["forward_command_post_dawn"]),
+        (name: "forward_command_post_dawn_canvas_edge", art: Rect(w: 3000.0, h: 110.0, color: "#6b6446"), pos: (0.0, -560.0), parallax: 1.2, z: 5, shots: ["forward_command_post_dawn"]),  // canvas edge along the top of the frame
+        // -- the map insert ([[SHOT: map]]); glued to the frame (parallax 0). The pins and arrows come from the MapOverlay event
+        (name: "map_table", art: Rect(w: 1920.0, h: 1080.0, color: "#d9c9a0"), pos: (0.0, 0.0), parallax: 0.0, z: 40, shots: ["map"]),  // from the importer, kept
+        (name: "map_sheet", art: RoundRect(w: 1740.0, h: 920.0, radius: 36.0, color: "#e2d4ad"), pos: (0.0, 0.0), parallax: 0.0, z: 41, shots: ["map"]),  // the paper
+        (name: "map_field_1", art: Rect(w: 210.0, h: 120.0, color: "#a4ad74"), pos: (-650.0, 100.0), parallax: 0.0, z: 42, shots: ["map"]),  // farmland, south-west
+        (name: "map_field_2", art: Rect(w: 190.0, h: 110.0, color: "#b3b680"), pos: (-420.0, 90.0), parallax: 0.0, z: 42, shots: ["map"]),
+        (name: "map_field_3", art: Rect(w: 190.0, h: 130.0, color: "#b3b680"), pos: (-660.0, 240.0), parallax: 0.0, z: 42, shots: ["map"]),
+        (name: "map_field_4", art: Rect(w: 230.0, h: 120.0, color: "#98a46c"), pos: (-450.0, 230.0), parallax: 0.0, z: 42, shots: ["map"]),
+        (name: "map_field_5", art: Rect(w: 120.0, h: 150.0, color: "#a4ad74"), pos: (-250.0, 150.0), parallax: 0.0, z: 42, shots: ["map"]),
+        (name: "map_ridge", art: RoundRect(w: 940.0, h: 150.0, radius: 70.0, color: "#9b8466"), pos: (-60.0, -300.0), parallax: 0.0, z: 42, shots: ["map"]),  // ore ridge, north
+        (name: "map_ridge_core", art: RoundRect(w: 720.0, h: 70.0, radius: 35.0, color: "#7d6a50"), pos: (-60.0, -300.0), parallax: 0.0, z: 43, shots: ["map"]),
+        (name: "map_ridge_peak_1", art: Circle(radius: 34.0, color: "#6c5a43"), pos: (-300.0, -300.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_ridge_peak_2", art: Circle(radius: 34.0, color: "#6c5a43"), pos: (-120.0, -290.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_ridge_peak_3", art: Circle(radius: 34.0, color: "#6c5a43"), pos: (80.0, -300.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_ridge_peak_4", art: Circle(radius: 34.0, color: "#6c5a43"), pos: (250.0, -290.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_road_west", art: Rect(w: 1050.0, h: 24.0, color: "#9a8458"), pos: (-280.0, 20.0), parallax: 0.0, z: 43, shots: ["map"]),  // road from the start to the junction
+        (name: "map_road_north", art: Rect(w: 24.0, h: 640.0, color: "#9a8458"), pos: (0.0, -170.0), parallax: 0.0, z: 43, shots: ["map"]),  // relay road, north to the ridge
+        (name: "map_junction", art: Circle(radius: 46.0, color: "#8a7550"), pos: (0.0, 20.0), parallax: 0.0, z: 44, shots: ["map"]),  // the road junction
+        (name: "map_junction_inner", art: Circle(radius: 30.0, color: "#e2d4ad"), pos: (0.0, 20.0), parallax: 0.0, z: 45, shots: ["map"]),
+        (name: "map_camp_1", art: Rect(w: 22.0, h: 22.0, color: "#8e4a4a"), pos: (34.0, -22.0), parallax: 0.0, z: 46, shots: ["map"]),  // small hostile camp
+        (name: "map_camp_2", art: Rect(w: 22.0, h: 22.0, color: "#8e4a4a"), pos: (70.0, 4.0), parallax: 0.0, z: 46, shots: ["map"]),
+        (name: "map_camp_3", art: Rect(w: 22.0, h: 22.0, color: "#8e4a4a"), pos: (50.0, 46.0), parallax: 0.0, z: 46, shots: ["map"]),
+        (name: "map_road_east_1", art: Rect(w: 200.0, h: 24.0, color: "#9a8458ff"), pos: (160.0, 20.0), parallax: 0.0, z: 43, shots: ["map"]),  // eastern road, fading out
+        (name: "map_road_east_2", art: Rect(w: 200.0, h: 24.0, color: "#9a8458a0"), pos: (360.0, 20.0), parallax: 0.0, z: 43, shots: ["map"]),
+        (name: "map_road_east_3", art: Rect(w: 200.0, h: 24.0, color: "#9a845850"), pos: (560.0, 20.0), parallax: 0.0, z: 43, shots: ["map"]),
+        (name: "map_unlit_1", art: Rect(w: 46.0, h: 800.0, color: "#2e3a4818"), pos: (623.0, 0.0), parallax: 0.0, z: 44, shots: ["map"]),  // the unlit hills: darker the further east
+        (name: "map_unlit_2", art: Rect(w: 46.0, h: 800.0, color: "#2e3a4834"), pos: (669.0, 0.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_unlit_3", art: Rect(w: 46.0, h: 800.0, color: "#2e3a4850"), pos: (715.0, 0.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_unlit_4", art: Rect(w: 46.0, h: 800.0, color: "#2e3a486c"), pos: (761.0, 0.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_unlit_5", art: Rect(w: 46.0, h: 800.0, color: "#2e3a4888"), pos: (807.0, 0.0), parallax: 0.0, z: 44, shots: ["map"]),
+        (name: "map_hill_1", art: Circle(radius: 60.0, color: "#2a354280"), pos: (740.0, -150.0), parallax: 0.0, z: 45, shots: ["map"]),
+        (name: "map_hill_2", art: Circle(radius: 66.0, color: "#2a354280"), pos: (770.0, 150.0), parallax: 0.0, z: 45, shots: ["map"]),
+        (name: "map_hill_3", art: Circle(radius: 40.0, color: "#2a354280"), pos: (700.0, 60.0), parallax: 0.0, z: 45, shots: ["map"]),
+    ],
+    // hand edit: the cast (geometric placeholder rigs)
+    characters: [
+        (id: "captain_elian", name: "Captain Elian", z: 0, scale: 1.8, parts: [
+            (name: "legs", pivot: (0.0, -85.0), offset: (0.0, 0.0), z: -1, art: RoundRect(w: 120.0, h: 170.0, radius: 20.0, color: "#7f7350")),  // legs: a root, so they stay upright when the torso leans
+            (name: "torso", pivot: (0.0, 105.0), offset: (0.0, 0.0), z: 0, art: RoundRect(w: 150.0, h: 210.0, radius: 34.0, color: "#667046")),  // joint at the hips
+            (name: "head", parent: "torso", pivot: (0.0, 56.0), offset: (0.0, -204.0), z: 5, art: Circle(radius: 56.0, color: "#e0b48f")),  // joint at the neck
+            (name: "mouth", parent: "head", pivot: (0.0, 0.0), offset: (15.0, -34.0), z: 7, art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e")),  // KEEP: the mouth for lip-sync (WP12.3)
+            (name: "eye", parent: "head", pivot: (0.0, 0.0), offset: (22.0, -66.0), z: 7, art: Circle(radius: 6.5, color: "#1b1b1b")),
+            (name: "upper_arm_l", parent: "torso", pivot: (0.0, -50.0), offset: (-78.0, -186.0), z: 1, art: RoundRect(w: 40.0, h: 100.0, radius: 18.0, color: "#59623a")),  // shoulder joint at the top
+            (name: "forearm_l", parent: "upper_arm_l", pivot: (0.0, -45.0), offset: (0.0, 90.0), z: 6, art: RoundRect(w: 34.0, h: 90.0, radius: 16.0, color: "#59623a")),  // elbow joint at the top
+            (name: "hand_l", parent: "forearm_l", pivot: (0.0, 0.0), offset: (0.0, 88.0), z: 9, art: Circle(radius: 20.0, color: "#e0b48f")),  // hand: draws over the head in the radio pose
+            (name: "upper_arm_r", parent: "torso", pivot: (0.0, -50.0), offset: (78.0, -186.0), z: 3, art: RoundRect(w: 40.0, h: 100.0, radius: 18.0, color: "#59623a")),  // shoulder joint at the top
+            (name: "forearm_r", parent: "upper_arm_r", pivot: (0.0, -45.0), offset: (0.0, 90.0), z: 4, art: RoundRect(w: 34.0, h: 90.0, radius: 16.0, color: "#59623a")),  // elbow joint at the top
+            (name: "hand_r", parent: "forearm_r", pivot: (0.0, 0.0), offset: (0.0, 88.0), z: 4, art: Circle(radius: 20.0, color: "#e0b48f")),
+            (name: "cap", parent: "head", pivot: (0.0, 0.0), offset: (6.0, -104.0), z: 8, art: RoundRect(w: 124.0, h: 44.0, radius: 20.0, color: "#4d6a82")),  // weathered-blue field cap
+            (name: "cap_brim", parent: "head", pivot: (0.0, 0.0), offset: (62.0, -92.0), z: 8, art: RoundRect(w: 56.0, h: 12.0, radius: 5.0, color: "#3d546a")),
+            (name: "eye_bag", parent: "head", pivot: (0.0, 0.0), offset: (22.0, -56.0), z: 6, art: RoundRect(w: 18.0, h: 5.0, radius: 2.0, color: "#a8805f")),  // tired eyes
+            (name: "pocket_map", parent: "torso", pivot: (0.0, 0.0), offset: (-44.0, -150.0), z: 1, art: Rect(w: 32.0, h: 26.0, color: "#cdbd92")),  // folded map in the breast pocket
+            (name: "patch", parent: "upper_arm_l", pivot: (0.0, 0.0), offset: (0.0, 30.0), z: 2, art: Circle(radius: 10.0, color: "#d9a441")),  // Meridian sun on the sleeve
+        ], poses: [
+            (name: "neutral", parts: [
+                (part: "torso", angle: 0.0),
+                (part: "head", angle: 0.0),
+                (part: "upper_arm_l", angle: 5.0),
+                (part: "forearm_l", angle: 8.0),
+                (part: "upper_arm_r", angle: -6.0),
+                (part: "forearm_r", angle: -10.0),
+            ]),
+            (name: "point", parts: [
+                (part: "torso", angle: 3.0),
+                (part: "head", angle: 6.0),
+                (part: "upper_arm_l", angle: 4.0),
+                (part: "forearm_l", angle: 10.0),
+                (part: "upper_arm_r", angle: -48.0),
+                (part: "forearm_r", angle: -10.0),
+            ]),
+            (name: "lean", parts: [
+                (part: "torso", angle: 12.0),
+                (part: "head", angle: -6.0),
+                (part: "upper_arm_l", angle: -42.0),
+                (part: "forearm_l", angle: 5.0),
+                (part: "upper_arm_r", angle: -47.0),
+                (part: "forearm_r", angle: 5.0),
+            ]),
+            (name: "arms_crossed", parts: [
+                (part: "torso", angle: 0.0),
+                (part: "head", angle: 3.0),
+                (part: "upper_arm_l", angle: -5.0),
+                (part: "forearm_l", angle: -85.0),
+                (part: "upper_arm_r", angle: 5.0),
+                (part: "forearm_r", angle: 85.0),
+            ]),
+        ]),
+        (id: "mira", name: "Mira", z: 0, scale: 1.8, parts: [
+            (name: "legs", pivot: (0.0, -85.0), offset: (0.0, 0.0), z: -1, art: RoundRect(w: 120.0, h: 170.0, radius: 20.0, color: "#a89870")),  // legs: a root, so they stay upright when the torso leans
+            (name: "torso", pivot: (0.0, 105.0), offset: (0.0, 0.0), z: 0, art: RoundRect(w: 150.0, h: 210.0, radius: 34.0, color: "#52708a")),  // joint at the hips
+            (name: "head", parent: "torso", pivot: (0.0, 56.0), offset: (0.0, -204.0), z: 5, art: Circle(radius: 56.0, color: "#c8946c")),  // joint at the neck
+            (name: "mouth", parent: "head", pivot: (0.0, 0.0), offset: (15.0, -34.0), z: 7, art: RoundRect(w: 30.0, h: 9.0, radius: 4.0, color: "#7a2e2e")),  // KEEP: the mouth for lip-sync (WP12.3)
+            (name: "eye", parent: "head", pivot: (0.0, 0.0), offset: (22.0, -66.0), z: 7, art: Circle(radius: 6.5, color: "#1b1b1b")),
+            (name: "upper_arm_l", parent: "torso", pivot: (0.0, -50.0), offset: (-78.0, -186.0), z: 1, art: RoundRect(w: 40.0, h: 100.0, radius: 18.0, color: "#486279")),  // shoulder joint at the top
+            (name: "forearm_l", parent: "upper_arm_l", pivot: (0.0, -45.0), offset: (0.0, 90.0), z: 6, art: RoundRect(w: 34.0, h: 90.0, radius: 16.0, color: "#486279")),  // elbow joint at the top
+            (name: "hand_l", parent: "forearm_l", pivot: (0.0, 0.0), offset: (0.0, 88.0), z: 9, art: Circle(radius: 20.0, color: "#c8946c")),  // hand: draws over the head in the radio pose
+            (name: "upper_arm_r", parent: "torso", pivot: (0.0, -50.0), offset: (78.0, -186.0), z: 3, art: RoundRect(w: 40.0, h: 100.0, radius: 18.0, color: "#486279")),  // shoulder joint at the top
+            (name: "forearm_r", parent: "upper_arm_r", pivot: (0.0, -45.0), offset: (0.0, 90.0), z: 4, art: RoundRect(w: 34.0, h: 90.0, radius: 16.0, color: "#486279")),  // elbow joint at the top
+            (name: "hand_r", parent: "forearm_r", pivot: (0.0, 0.0), offset: (0.0, 88.0), z: 4, art: Circle(radius: 20.0, color: "#c8946c")),
+            (name: "hair", parent: "head", pivot: (0.0, 0.0), offset: (-5.0, -64.0), z: 3, art: Circle(radius: 59.0, color: "#2a2420")),  // close-cropped hair, behind the face
+            (name: "headset_band", parent: "head", pivot: (0.0, 0.0), offset: (-12.0, -88.0), z: 8, art: RoundRect(w: 10.0, h: 52.0, radius: 4.0, color: "#38434d")),  // headset
+            (name: "headset_cup", parent: "head", pivot: (0.0, 0.0), offset: (-14.0, -52.0), z: 8, art: Circle(radius: 17.0, color: "#38434d")),
+            (name: "headset_mic", parent: "head", pivot: (0.0, 0.0), offset: (32.0, -30.0), z: 8, art: Circle(radius: 6.0, color: "#38434d")),
+            (name: "tablet", parent: "hand_r", pivot: (0.0, 0.0), offset: (8.0, 22.0), z: 5, art: RoundRect(w: 46.0, h: 62.0, radius: 6.0, color: "#4a5a68")),  // field tablet
+            (name: "tablet_screen", parent: "tablet", pivot: (0.0, 0.0), offset: (0.0, 0.0), z: 6, art: Rect(w: 36.0, h: 50.0, color: "#8fb0c0")),
+            (name: "patch", parent: "upper_arm_l", pivot: (0.0, 0.0), offset: (0.0, 30.0), z: 2, art: Circle(radius: 10.0, color: "#d9a441")),  // Meridian sun on the sleeve
+        ], poses: [
+            (name: "neutral", parts: [
+                (part: "torso", angle: 0.0),
+                (part: "head", angle: 0.0),
+                (part: "upper_arm_l", angle: 5.0),
+                (part: "forearm_l", angle: 8.0),
+                (part: "upper_arm_r", angle: -6.0),
+                (part: "forearm_r", angle: -10.0),
+            ]),
+            (name: "point", parts: [
+                (part: "torso", angle: 3.0),
+                (part: "head", angle: 6.0),
+                (part: "upper_arm_l", angle: 4.0),
+                (part: "forearm_l", angle: 10.0),
+                (part: "upper_arm_r", angle: -48.0),
+                (part: "forearm_r", angle: -10.0),
+            ]),
+            (name: "lean", parts: [
+                (part: "torso", angle: 12.0),
+                (part: "head", angle: -6.0),
+                (part: "upper_arm_l", angle: -42.0),
+                (part: "forearm_l", angle: 5.0),
+                (part: "upper_arm_r", angle: -47.0),
+                (part: "forearm_r", angle: 5.0),
+            ]),
+            (name: "arms_crossed", parts: [
+                (part: "torso", angle: 0.0),
+                (part: "head", angle: 3.0),
+                (part: "upper_arm_l", angle: -5.0),
+                (part: "forearm_l", angle: -85.0),
+                (part: "upper_arm_r", angle: 5.0),
+                (part: "forearm_r", angle: 85.0),
+            ]),
+            (name: "radio", parts: [
+                (part: "torso", angle: 0.0),
+                (part: "head", angle: -3.0),
+                (part: "upper_arm_l", angle: -80.0),
+                (part: "forearm_l", angle: -116.0),
+                (part: "upper_arm_r", angle: -6.0),
+                (part: "forearm_r", angle: -10.0),
+            ]),
+        ]),
+    ],
+    timeline: (
+        tracks: [
+            (
+                name: "transition",
+                events: [
+                    (at: 0, kind: Transition(kind: FadeIn, duration_ms: 800, color: "#000000")),  // line 6
+                    (at: 61500, kind: Transition(kind: FadeOut, duration_ms: 800, color: "#000000")),  // line 53; hand edit: half a second after the radio click, not on it
+                ],
+            ),
+            (
+                name: "camera",
+                events: [
+                    (at: 0, kind: CameraCut(center: (0.0, 0.0), zoom: 1.0, shot: Some("forward_command_post_dawn"))),  // line 8
+                    (at: 0, kind: Wait(duration_ms: 2000)),  // line 8
+                    (at: 2200, kind: CameraPan(to: (-110.0, -30.0), duration_ms: 7000, easing: EaseInOut)),  // hand edit: slow drift towards Elian during his first line
+                    (at: 2200, kind: CameraZoom(to: 1.1, duration_ms: 7000, easing: EaseInOut)),  // hand edit
+                    (at: 10100, kind: CameraPan(to: (110.0, -30.0), duration_ms: 800, easing: EaseInOut)),  // hand edit: over to Mira for her dry answer
+                    (at: 16400, kind: CameraCut(center: (0.0, 0.0), zoom: 1.0, shot: Some("map"))),  // line 23; hand edit: the cut comes a beat after her line ends
+                    (at: 22100, kind: CameraCut(center: (-90.0, -20.0), zoom: 1.08, shot: Some("forward_command_post_dawn"))),  // hand edit: back to the post, framed on Elian (the generator cut back to a wide)
+                    (at: 22600, kind: CameraPan(to: (-140.0, -30.0), duration_ms: 7500, easing: EaseInOut)),  // hand edit: push in on the order
+                    (at: 22600, kind: CameraZoom(to: 1.16, duration_ms: 7500, easing: EaseInOut)),  // hand edit
+                    (at: 30900, kind: CameraPan(to: (120.0, -30.0), duration_ms: 700, easing: EaseInOut)),  // hand edit: Mira
+                    (at: 30900, kind: CameraZoom(to: 1.08, duration_ms: 700, easing: EaseInOut)),  // hand edit
+                    (at: 38400, kind: CameraPan(to: (0.0, 0.0), duration_ms: 800, easing: EaseInOut)),  // hand edit: wide two-shot for the pointing
+                    (at: 38400, kind: CameraZoom(to: 1.0, duration_ms: 800, easing: EaseInOut)),  // hand edit
+                    (at: 46100, kind: CameraPan(to: (210.0, -60.0), duration_ms: 1200, easing: EaseInOut)),  // hand edit: close on Mira for the twist
+                    (at: 46100, kind: CameraZoom(to: 1.4, duration_ms: 8800, easing: EaseIn)),  // hand edit: and keep pushing in
+                    (at: 55500, kind: CameraPan(to: (-120.0, -20.0), duration_ms: 900, easing: EaseInOut)),  // hand edit: back to Elian for the last line
+                    (at: 55500, kind: CameraZoom(to: 1.2, duration_ms: 900, easing: EaseInOut)),  // hand edit
+                    (at: 60400, kind: CameraPan(to: (0.0, 0.0), duration_ms: 1000, easing: EaseInOut)),  // hand edit: pull back to both for the radio
+                    (at: 60400, kind: CameraZoom(to: 1.0, duration_ms: 1000, easing: EaseInOut)),  // hand edit
+                ],
+            ),
+            (
+                name: "stage",
+                events: [
+                    (at: 0, kind: Enter(character: "captain_elian", pos: (-900.0, 340.0), facing: Right, pose: Some("neutral"))),  // line 8; hand edit: comes in through the tent flap, off stage left
+                    (at: 0, kind: Move(character: "captain_elian", to: (-390.0, 340.0), duration_ms: 1800, easing: EaseOut, facing: None)),  // hand edit: walks to his place at the table
+                    (at: 700, kind: Enter(character: "mira", pos: (1150.0, 340.0), facing: Left, pose: Some("neutral"))),  // line 8; hand edit: Mira follows in from the right
+                    (at: 700, kind: Move(character: "mira", to: (390.0, 340.0), duration_ms: 1600, easing: EaseOut, facing: None)),  // hand edit
+                    (at: 2200, kind: SetPose(character: "captain_elian", pose: "lean", duration_ms: 500, easing: EaseInOut, hint: Some("serious"))),  // line 17; hand edit: pose from the parenthetical (serious)
+                    (at: 10100, kind: SetPose(character: "mira", pose: "arms_crossed", duration_ms: 400, easing: EaseInOut, hint: Some("dry"))),  // line 21; hand edit: pose from the parenthetical (dry)
+                    (at: 16900, kind: SetPose(character: "mira", pose: "neutral", duration_ms: 400, easing: EaseInOut, hint: Some("measured"))),  // line 28; hand edit: pose from the parenthetical (measured)
+                    (at: 22600, kind: SetPose(character: "captain_elian", pose: "arms_crossed", duration_ms: 500, easing: EaseInOut, hint: Some("firm"))),  // line 32; hand edit: pose from the parenthetical (firm)
+                    (at: 30900, kind: SetPose(character: "mira", pose: "lean", duration_ms: 400, easing: EaseInOut, hint: Some("analytical"))),  // line 36; hand edit: pose from the parenthetical (analytical)
+                    (at: 38400, kind: SetPose(character: "captain_elian", pose: "point", duration_ms: 500, easing: EaseInOut, hint: Some("pointing at map"))),  // line 40; hand edit: pose from the parenthetical (pointing at map)
+                    (at: 45600, kind: SetPose(character: "captain_elian", pose: "lean", duration_ms: 600, easing: EaseInOut, hint: Some("listening"))),  // hand edit: Elian listens, leaning on the table while Mira raises the doubt
+                    (at: 46100, kind: SetPose(character: "mira", pose: "arms_crossed", duration_ms: 400, easing: EaseInOut, hint: Some("concerned"))),  // line 44; hand edit: pose from the parenthetical (concerned)
+                    (at: 55500, kind: SetPose(character: "captain_elian", pose: "neutral", duration_ms: 500, easing: EaseInOut, hint: Some("neutral"))),  // line 48; hand edit: pose from the parenthetical (neutral)
+                    (at: 60600, kind: SetPose(character: "mira", pose: "radio", duration_ms: 400, easing: EaseInOut, hint: Some("hand to ear for the radio"))),  // hand edit: Mira's hand goes to her headset just before the radio click
+                    (at: 61300, kind: SetPose(character: "mira", pose: "neutral", duration_ms: 300, easing: EaseInOut, hint: None)),  // hand edit: hand down again, they leave
+                    (at: 61300, kind: SetPose(character: "captain_elian", pose: "neutral", duration_ms: 300, easing: EaseInOut, hint: None)),  // hand edit
+                    (at: 61500, kind: Move(character: "captain_elian", to: (-1150.0, 340.0), duration_ms: 800, easing: EaseIn, facing: Left)),  // hand edit: Elian leaves through the flap during the fade
+                    (at: 61500, kind: Move(character: "mira", to: (1250.0, 340.0), duration_ms: 800, easing: EaseIn, facing: Right)),  // hand edit: Mira leaves to the right
+                    (at: 62300, kind: Exit(character: "captain_elian")),  // hand edit
+                    (at: 62300, kind: Exit(character: "mira")),  // hand edit
+                ],
+            ),
+            (
+                name: "dialogue",
+                events: [
+                    (at: 2200, kind: Dialogue(speaker: "captain_elian", text: "The relay went dark at 04:10. By dawn, every unit north of the ridge was operating on stale orders.", duration_ms: 7600, voice: None, lipsync: None, delivery: OnScreen)),  // line 17; hand edit: starts at 2200 ms (importer 2000 ms), starts when Elian has walked in
+                    (at: 10100, kind: Dialogue(speaker: "mira", text: "Operating on nothing, Captain. The garrison has not acknowledged a message since the relay stopped.", duration_ms: 6000, voice: None, lipsync: None, delivery: OnScreen)),  // line 21; hand edit: starts at 10100 ms (importer 9900 ms)
+                    (at: 16900, kind: Dialogue(speaker: "mira", text: "Scouts report a small hostile camp around the junction. No heavy armour yet.", duration_ms: 5200, voice: None, lipsync: None, delivery: OnScreen)),  // line 28; hand edit: starts at 16900 ms (importer 16200 ms), half a second to read the map first
+                    (at: 22600, kind: Dialogue(speaker: "captain_elian", text: "Then we move before they can reinforce it. Establish a base, secure the junction, and keep the relay road open.", duration_ms: 8000, voice: None, lipsync: None, delivery: OnScreen)),  // line 32; hand edit: starts at 22600 ms (importer 21700 ms), half a second after the cut back
+                    (at: 30900, kind: Dialogue(speaker: "mira", text: "We have one construction center and five rifles. Power first, then barracks, or we are a camp ourselves.", duration_ms: 7200, voice: None, lipsync: None, delivery: OnScreen)),  // line 36; hand edit: starts at 30900 ms (importer 30000 ms)
+                    (at: 38400, kind: Dialogue(speaker: "captain_elian", text: "The ore is on the ridge. Get a harvester working before the fight starts, not during it.", duration_ms: 6800, voice: None, lipsync: None, delivery: OnScreen)),  // line 40; hand edit: starts at 38400 ms (importer 37500 ms)
+                    (at: 46100, kind: Dialogue(speaker: "mira", text: "One thing I cannot explain. The camp sits on a junction that has no value unless someone knew we were coming here.", duration_ms: 8800, voice: None, lipsync: None, delivery: OnScreen)),  // line 44; hand edit: starts at 46100 ms (importer 44600 ms), a longer pause before the twist
+                    (at: 55500, kind: Dialogue(speaker: "captain_elian", text: "Note it. Take the junction and we will read what they left behind.", duration_ms: 5200, voice: None, lipsync: None, delivery: OnScreen)),  // line 48; hand edit: starts at 55500 ms (importer 53700 ms), a beat after Mira's doubt
+                ],
+            ),
+            (
+                name: "audio",
+                events: [
+                    (at: 0, kind: Ambience(action: Play, file: None, note: "radio hiss, distant engines, wind against canvas", fade_ms: 0)),  // line 10
+                    (at: 0, kind: Music(action: Play, file: None, note: "restrained military tension", fade_ms: 0)),  // line 11
+                    (at: 61000, kind: Sfx(sound: None, note: "radio click", volume: 1.0)),  // line 50; hand edit: 0.3 s after Elian's line, with Mira's hand at her ear
+                    (at: 61000, kind: Music(action: Stop, file: None, note: "", fade_ms: 0)),  // line 51; hand edit: moved with the click
+                ],
+            ),
+            (
+                name: "overlay",
+                events: [
+                    (at: 16400, kind: MapOverlay(note: "farmland south-west start, ore ridge to the north, road junction at centre, eastern road fading into unlit hills", markers: [(label: "START", at: (-560.0, 170.0)), (label: "ORE RIDGE", at: (-60.0, -300.0)), (label: "JUNCTION", at: (0.0, 20.0)), (label: "EAST ROAD", at: (320.0, 20.0), to: (800.0, 20.0))], duration_ms: 5700)),  // line 24; hand edit: pins and an arrow on the map, and it lasts through the whole map shot
+                ],
+            ),
+        ],
+    ),
+)
