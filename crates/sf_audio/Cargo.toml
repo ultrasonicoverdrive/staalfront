@@ -20,3 +20,9 @@ kira = { version = "0.12.5", default-features = false, features = ["cpal", "wav"
 serde = { version = "1", features = ["derive"] }
 # Project-wide data format (PLAN.md 1.0).
 ron = "0.12"
+# WP11.7 (optional original Red Alert audio, B11). RSA step of encrypted MIX
+# headers: one modular exponentiation on a 320-bit number. Pure Rust, MIT/Apache.
+num-bigint = "0.4.6"
+# Blowfish block cipher for encrypted MIX headers (RustCrypto, MIT/Apache).
+# 0.9 is the stable line on cipher 0.4.
+blowfish = "0.9.1"

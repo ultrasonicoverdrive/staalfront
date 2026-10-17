@@ -24,7 +24,7 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 | `sf_engine` | Main loop, window, input, time, assets. No game rules. |
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
 | `sf_ui` | Own UI: widgets, text, minimap; later sidebar, selection, menus. |
-| `sf_audio` | Sound, voices, music. |
+| `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
 | `sf_cutscene` | Cartoon player and script format. |
 | `sf_net` | Lockstep network (later, phase 14). |
 | `sf_game` | Binary app that glues everything together. |
@@ -571,3 +571,60 @@ features off; `names` and `utils` only: no image decoding, no file or base64 URI
   `asset.version`), required extensions, skins, animation clips, textures,
   non-triangle primitives, external buffers, missing normals, bad indices: each a
   `GlbError` with a message. `sf_game --models <pack>` exits with that message.
+
+## 16. Original Red Alert audio (WP11.7, B11)
+
+**Where.** A module `sf_audio::ra`, not a separate crate: it only feeds
+decoded PCM into the existing kira player (`Player::inject`) and has no user
+outside `sf_audio` and the F1 sound browser in `sf_game`. Split it out only if
+a tool (an extractor, the editor) ever needs the readers without kira.
+
+**What.** `ra::mix` reads MIX archives (TD header, Red Alert plain and
+encrypted headers, nested archives, lookup by the file-name hash),
+`ra::crypto` does the RSA + Blowfish step of encrypted headers, `ra::aud`
+decodes AUD (Westwood ADPCM and IMA ADPCM, mono/stereo, 8/16-bit) to PCM.
+`ra::scan` lists everything under the configured path (the sound browser),
+`ra::load` also decodes the sounds named in `assets/audio/ra_mapping.ron`.
+`AudioSystem::enable_original_audio` runs `load` on a background thread;
+`update()` picks the result up, after which a mapped event plays the Red Alert
+sound (with the bank entry's volume and category when it has one) and every
+other event its CC0 sound. Nothing found, or anything broken: one warning,
+the CC0 sounds keep playing; no reader panics (a fuzz-style test feeds random
+and mutated input), and a scan visits each archive region once and stops at
+fixed caps on archives, entries and decoded bytes.
+
+**Clean-room (B5).** Written only from public format descriptions, never from
+the EA source release or OpenRA (both GPL), and without following the code
+links some of these pages carry:
+- ModdingWiki, "MIX Format (Westwood)": <https://moddingwiki.shikadi.net/wiki/MIX_Format_(Westwood)>
+  (header layouts, flags, entry table, the encrypted-header scheme: two
+  40-byte little-endian RSA blocks, exponent 0x10001, a 56-byte key for
+  Blowfish in ECB mode, and Westwood's published public key);
+- ModdingWiki, "Westwood AUD Format": <https://moddingwiki.shikadi.net/wiki/Westwood_AUD_Format>
+  (header, chunk layout, compression codes);
+- MultimediaWiki, "Westwood ADPCM Audio": <https://wiki.multimedia.cx/index.php/Westwood_ADPCM_Audio>
+  (based on Valery V. Anisimovsky's WS-AUD notes: Westwood ADPCM codes,
+  tables, per-chunk 0x80 start, raw chunks, 5-bit delta, `LL RR` stereo IMA
+  layout in VQA sound);
+- MultimediaWiki, "Westwood IMA ADPCM": <https://wiki.multimedia.cx/index.php/Westwood_IMA_ADPCM>
+  (predictor and index start at 0 and carry across chunks, stereo `L1L0 R1R0`);
+- IMA "Recommended Practices for Enhancing Digital Audio Compatibility in
+  Multimedia Systems" (1992): IMA ADPCM tables;
+- Blowfish: B. Schneier (1993) and his published test vectors, via the
+  RustCrypto `blowfish` crate unchanged; RSA: plain modular exponentiation
+  (`num-bigint`).
+
+The file-name hash (rotate left by one, add the next four bytes) is not
+described on these pages ("a rolling hash" only); it is implemented from the
+author's general knowledge of the format and is unverified. **Decision Tijmen
+17-10-2026:** accepted as a format fact under B5. It is the only way to find a
+name in a MIX index, so it is dictated by interoperability; no non-GPL
+description of it was reachable; the Rust code is our own and not a translation
+of EA or OpenRA code. Replace the source note if a non-GPL description turns up.
+
+**Not verified against real files** (the repo and CI never have any): standard
+(big-endian word) Blowfish on the header bytes, the file-name hash, and IMA
+chunk carry-over and stereo layout (described for VQA/Westwood IMA, applied to
+AUD as well); a mismatch shows up as a decode error in the sound browser, not
+as a crash. Tests build their own fixtures (own ADPCM encoders, own MIX
+writer, an own multi-prime RSA test key).

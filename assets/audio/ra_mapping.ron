@@ -1,0 +1,36 @@
+// Original Red Alert audio (WP11.7, B11): which of the player's own Red
+// Alert sounds replaces which Staalfront sound event. Names only: no audio
+// from Red Alert is ever in this repository.
+//
+// Used only when "Use original Red Alert audio" is on (assets/config/audio.ron
+// or `sf_game --ra-audio <path>`). An event whose file is not found keeps
+// its CC0 sound from bank.ron (or stays silent if it has none yet).
+//
+//   sounds: event -> file name inside the MIX archives ("NAME.AUD"), or the
+//           raw id "#1A2B3C4D" the F1 sound browser shows for entries whose
+//           name it does not know.
+//   names:  extra file names the sound browser should show instead of ids.
+//
+// The file names below are first guesses; check them in the F1 sound browser
+// (Sound browser > play) and correct them there.
+(
+    sounds: {
+        "ui.click": "CLICK.AUD",
+        "unit.select": "AWAIT1.AUD",
+        "unit.move": "ACKNO.AUD",
+        "unit.attack": "AFFIRM1.AUD",
+        "building.placed": "PLACBLDG.AUD",
+        "explosion.small": "KABOOM1.AUD",
+    },
+    names: [
+        "MAIN.MIX",
+        "REDALERT.MIX",
+        "SOUNDS.MIX",
+        "SPEECH.MIX",
+        "ALLIES.MIX",
+        "RUSSIAN.MIX",
+        "LOCAL.MIX",
+        "CONQUER.MIX",
+        "SCORES.MIX",
+    ],
+)

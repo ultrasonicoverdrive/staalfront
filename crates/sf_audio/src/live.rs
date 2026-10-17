@@ -49,6 +49,9 @@ pub(crate) trait Player {
     fn tick(&mut self);
     /// Drop decoded files (after a bank reload) so edits are picked up.
     fn clear_cache(&mut self);
+    /// Register already decoded audio under a synthetic path (original Red
+    /// Alert sounds); kept across [`clear_cache`](Self::clear_cache).
+    fn inject(&mut self, key: PathBuf, data: StaticSoundData);
 }
 
 pub(crate) fn amplitude_to_db(a: f32) -> Decibels {
@@ -75,6 +78,8 @@ pub(crate) struct Live<B: Backend> {
     manager: AudioManager<B>,
     /// Decoded files by path; `None` = failed once (not retried until the cache is cleared).
     cache: BTreeMap<PathBuf, Option<StaticSoundData>>,
+    /// Decoded in memory, not from a file (see [`Player::inject`]).
+    injected: BTreeMap<PathBuf, StaticSoundData>,
     warned: BTreeSet<PathBuf>,
     voices: VoiceLimiter<StaticSoundHandle>,
     music: Option<Music>,
@@ -87,6 +92,7 @@ impl<B: Backend> Live<B> {
         Ok(Self {
             manager: AudioManager::new(settings)?,
             cache: BTreeMap::new(),
+            injected: BTreeMap::new(),
             warned: BTreeSet::new(),
             voices: VoiceLimiter::new(DEFAULT_MAX_TOTAL),
             music: None,
@@ -110,6 +116,9 @@ impl<B: Backend> Live<B> {
     }
 
     fn data(&mut self, path: &Path) -> Option<StaticSoundData> {
+        if let Some(d) = self.injected.get(path) {
+            return Some(d.clone());
+        }
         if !self.cache.contains_key(path) {
             let loaded = match StaticSoundData::from_file(path) {
                 Ok(d) => Some(d),
@@ -222,6 +231,10 @@ impl<B: Backend> Player for Live<B> {
     fn clear_cache(&mut self) {
         self.cache.clear();
         self.warned.clear();
+    }
+
+    fn inject(&mut self, key: PathBuf, data: StaticSoundData) {
+        self.injected.insert(key, data);
     }
 }
 

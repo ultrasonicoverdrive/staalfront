@@ -18,6 +18,16 @@
             max_instances: 4,
             category: Sfx,
         ),
+        // Generic events (WP11.7); ra_mapping.ron can replace them with the
+        // player's original Red Alert sounds. Events without a CC0 sound yet
+        // (unit.select, unit.move, unit.attack, building.placed,
+        // explosion.small) are silent unless mapped.
+        "ui.click": (
+            file: "audio/sfx/test_click.wav",
+            volume: 0.6,
+            max_instances: 2,
+            category: Ui,
+        ),
         // The same file as a looping "music" track, to exercise the crossfade.
         "test_loop": (
             file: "audio/sfx/test_click.wav",
