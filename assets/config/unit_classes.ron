@@ -1,0 +1,45 @@
+// Movement classes, armor types and damage types (WP3.1). Read by
+// sf_data::units; unit_defs.ron and weapon_defs.ron refer to these names.
+//
+// A name's position in its list is its index in the simulation, so only ever
+// append to a list; never reorder or remove an entry that is in use.
+//
+// Each entry is a struct with just a `name` for now, so that the work packages
+// that give the tables meaning can add fields without changing the format:
+//
+//   * movement_classes, WP4.1: the terrain cost per terrain type name (a
+//     `terrain_costs` field), replacing the three `passable` flags of
+//     terrain_types.ron (which has no hover, water or air yet). WP3.1 decides
+//     nothing about terrain costs.
+//   * armor_types and damage_types, WP5.3: the percentage of a damage type that
+//     an armor type takes (a damage table), and the splash falloff.
+//
+// docs/rules/units.md describes the six movement classes and the placeholder
+// armor and damage types below.
+(
+    movement_classes: [
+        (name: "foot"),    // infantry
+        (name: "wheeled"), // trucks and light vehicles
+        (name: "tracked"), // tanks, artillery, harvesters
+        (name: "hover"),   // crosses land and water (the amphibious transport)
+        (name: "water"),   // vessels
+        (name: "air"),     // aircraft; no role uses it yet
+    ],
+    // placeholder: the set of armor types is a first guess for WP5.3.
+    armor_types: [
+        (name: "none"),      // cannot be damaged (ore field)
+        (name: "infantry"),
+        (name: "light"),     // light vehicles, vessels and small objects
+        (name: "heavy"),     // heavy vehicles
+        (name: "structure"),
+    ],
+    // placeholder: the set of damage types is a first guess for WP5.3.
+    damage_types: [
+        (name: "bullet"),     // small arms and machine guns
+        (name: "precision"),  // long rifle: infantry only (the armor table will say so)
+        (name: "rocket"),     // anti-armour rockets
+        (name: "cannon"),     // tank and gun shells
+        (name: "shell"),      // artillery
+        (name: "demolition"), // satchel charges
+    ],
+)

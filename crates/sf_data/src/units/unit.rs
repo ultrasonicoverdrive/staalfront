@@ -1,0 +1,615 @@
+//! Unit, structure and mission-object definitions (`assets/config/unit_defs.ron`).
+//!
+//! One record per role of `content/units.md`. The file lists them in a fixed
+//! order and that order is the **kind number** the simulation uses
+//! (`sf_sim::Kind`): new roles are appended at the end, never inserted, so that
+//! saves, replays and scenario files keep their meaning. `docs/rules/units.md`
+//! describes every field and its unit of measure.
+
+use std::path::Path;
+
+use serde::Deserialize;
+
+use super::classes::{ClassTables, is_valid_name};
+use super::decimal::Decimal;
+use super::error::{DefError, Source};
+use super::weapon::WeaponDef;
+
+/// Largest speed accepted, cells per second.
+const MAX_SPEED_MILLI: i64 = 20_000;
+/// Largest value accepted for hit points, cost and the like.
+const MAX_BIG: u32 = 1_000_000;
+/// Largest footprint side, in cells.
+const MAX_FOOTPRINT: u8 = 16;
+/// Largest radius or distance of an ability, in cells.
+const MAX_CELLS_MILLI: i64 = 64_000;
+/// Most weapons one unit may carry.
+const MAX_WEAPONS: usize = 4;
+/// Most unit definitions (the kind number is a `u16`).
+pub const MAX_UNITS: usize = 1024;
+
+/// Which side can use a role. A role can be open to more than one side;
+/// `Neutral` roles (civilians, mission objects) belong to no player.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub enum Faction {
+    /// The first campaign faction.
+    Meridian,
+    /// The second campaign faction.
+    Veyran,
+    /// Nobody: civilians and mission objects.
+    Neutral,
+}
+
+impl Faction {
+    /// The bit of this faction in the availability mask of the simulation
+    /// definitions.
+    pub const fn bit(self) -> u8 {
+        match self {
+            Faction::Meridian => 1,
+            Faction::Veyran => 2,
+            Faction::Neutral => 4,
+        }
+    }
+}
+
+/// What sort of thing a role is. Decides which fields are required.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum Category {
+    /// A person: moves on foot.
+    Infantry,
+    /// A land vehicle (or an amphibious one).
+    Vehicle,
+    /// A vessel on water.
+    Vessel,
+    /// A building. Stands on a footprint of cells and never moves.
+    Structure,
+    /// Anything else that stands in the world: a crate to pick up, an ore
+    /// field. Never moves; may have no hit points (zero means it cannot be
+    /// damaged).
+    Object,
+}
+
+impl Category {
+    /// Whether this category can have a movement class.
+    pub const fn mobile(self) -> bool {
+        matches!(
+            self,
+            Category::Infantry | Category::Vehicle | Category::Vessel
+        )
+    }
+}
+
+/// A placeholder 3D shape (the three primitives of `units.ron`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum ModelShape {
+    /// A box.
+    Cube,
+    /// A cylinder.
+    Cylinder,
+    /// A cone.
+    Cone,
+}
+
+/// The symbol drawn at strategic zoom (the three shapes of `units.ron`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum IconShape {
+    /// Square (structures).
+    Square,
+    /// Circle.
+    Circle,
+    /// Triangle (vehicles).
+    Triangle,
+}
+
+/// What a role looks like up close.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum Model {
+    /// A placeholder primitive from `units.ron`.
+    Shape(ModelShape),
+    /// A glTF binary, a path relative to `assets/` (for example
+    /// `testpack_v1/models/lichte_tank.glb`); the file must exist.
+    Glb(String),
+}
+
+/// How many cells a structure covers: `width` along x, `height` along y.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Footprint {
+    /// Cells along x, 1 to 16.
+    pub width: u8,
+    /// Cells along y, 1 to 16.
+    pub height: u8,
+}
+
+/// A structure that explodes when it is destroyed.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeathBlast {
+    /// Radius in cells.
+    pub radius: Decimal,
+    /// Damage to everything inside, before armor.
+    pub damage: u32,
+}
+
+/// What a role can do besides move and shoot: generic data fields that the
+/// work packages after WP3.1 read. All are optional and default to "no".
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Flags {
+    /// Captures enemy structures by walking into them.
+    pub can_capture: bool,
+    /// Repairs friendly structures it touches.
+    pub repairs_structures: bool,
+    /// Places a demolition charge on a marked object.
+    pub places_charges: bool,
+    /// Is used up when it destroys a structure on contact.
+    pub consumed_on_use: bool,
+    /// Collects resources and drops them at a refinery.
+    pub harvests: bool,
+    /// Deploys to fire: immobile while it does.
+    pub deploys: bool,
+    /// Infantry it carries (0 means it carries none).
+    pub transports: u8,
+    /// Vehicles it carries instead of infantry (0 means none).
+    pub transports_vehicles: u8,
+    /// Infantry that can garrison it (a bunker).
+    pub garrison: u8,
+    /// Radius in cells in which it heals infantry (0 means it does not).
+    pub heal_radius: Decimal,
+    /// Radius in cells in which it repairs vehicles (0 means it does not).
+    pub repair_radius: Decimal,
+    /// Cannot be seen by the enemy while standing still in cover terrain.
+    pub stealth_in_cover: bool,
+    /// Structure ids it can build in the field.
+    pub builds: Vec<String>,
+    /// Looks like this other role to the enemy AI.
+    pub disguise_as: Option<String>,
+    /// Unit id that comes free with it when it is finished (a refinery's
+    /// harvester).
+    pub comes_with: Option<String>,
+    /// A structure that can only be placed on the coast.
+    pub needs_water: bool,
+    /// Radius in cells around it in which the owner may build (a base anchor);
+    /// 0 means none.
+    pub build_radius: Decimal,
+    /// Enables the minimap for its owner.
+    pub minimap: bool,
+    /// Explodes when destroyed.
+    pub death_blast: Option<DeathBlast>,
+    /// Is picked up by infantry walking onto it.
+    pub pickup: bool,
+    /// Fires at every faction, its own included.
+    pub fires_at_all: bool,
+}
+
+/// One role, as written in the file.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnitDef {
+    /// Unique snake_case role name, exactly as in `content/units.md`.
+    pub id: String,
+    /// Which sides can use it.
+    pub factions: Vec<Faction>,
+    /// What sort of thing it is.
+    pub category: Category,
+    /// Price in credits; absent means it cannot be bought or built.
+    #[serde(default)]
+    pub cost: Option<u32>,
+    /// Time to build, in game seconds (whole ticks); required with a `cost`,
+    /// absent without.
+    #[serde(default)]
+    pub build_seconds: Decimal,
+    /// Hit points. Zero is only allowed for an `Object` and means it cannot be
+    /// damaged.
+    pub hp: u32,
+    /// Name of an armor type in `unit_classes.ron`.
+    pub armor: String,
+    /// Power produced (positive) or used (negative); structures only.
+    #[serde(default)]
+    pub power: i32,
+    /// Name of a movement class in `unit_classes.ron`; absent for things that
+    /// never move.
+    #[serde(default)]
+    pub movement: Option<String>,
+    /// Speed in cells per game second (4 m per cell). Stored as `sf_math`
+    /// fixed point after loading.
+    #[serde(default)]
+    pub speed: Decimal,
+    /// Speed on water in cells per second, for an amphibious unit that is
+    /// slower (or faster) there than on land; absent means the same as `speed`.
+    #[serde(default)]
+    pub water_speed: Option<Decimal>,
+    /// Facing steps (of 256 per full turn) it turns per tick.
+    #[serde(default)]
+    pub turn_rate: u8,
+    /// Diameter in cells (for collision and selection); not for structures.
+    #[serde(default)]
+    pub size: Decimal,
+    /// Cells covered; structures only, and required for them.
+    #[serde(default)]
+    pub footprint: Option<Footprint>,
+    /// How far it sees, in cells.
+    #[serde(default)]
+    pub sight: Decimal,
+    /// Ids from `weapon_defs.ron`, at most four.
+    #[serde(default)]
+    pub weapons: Vec<String>,
+    /// What it looks like up close.
+    pub model: Model,
+    /// The symbol at strategic zoom.
+    pub strategic_icon: IconShape,
+    /// The picture in the build menu, a PNG path relative to `assets/`; the
+    /// file must exist.
+    #[serde(default)]
+    pub icon: Option<String>,
+    /// Abilities.
+    #[serde(default)]
+    pub flags: Flags,
+}
+
+/// The RON file.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UnitsFile {
+    units: Vec<UnitDef>,
+}
+
+/// Where a file reference is checked: with `Some(dir)` the file must exist
+/// under `dir`; with `None` only the shape of the path is checked.
+#[derive(Copy, Clone)]
+pub(crate) struct Assets<'a> {
+    pub dir: Option<&'a Path>,
+}
+
+impl Assets<'_> {
+    /// `Ok` if `rel` is a plain relative path with the right extension, and
+    /// (when a directory is known) names an existing file.
+    fn check(&self, rel: &str, extension: &str) -> Result<(), String> {
+        let bad_shape = rel.is_empty()
+            || rel.starts_with('/')
+            || rel.starts_with('\\')
+            || rel.contains('\\')
+            || rel.contains(':')
+            || rel.split('/').any(|part| part.is_empty() || part == "..");
+        if bad_shape {
+            return Err(format!(
+                "\"{rel}\" is not a plain relative path (no \"..\", no leading slash)"
+            ));
+        }
+        if !rel.ends_with(extension) {
+            return Err(format!("\"{rel}\" should end with {extension}"));
+        }
+        if let Some(dir) = self.dir
+            && !dir.join(rel).is_file()
+        {
+            return Err(format!("\"{rel}\" does not exist under {}", dir.display()));
+        }
+        Ok(())
+    }
+}
+
+/// Parses `unit_defs.ron` and checks every record against the tables and the
+/// weapons.
+pub(crate) fn parse(
+    src: Source<'_>,
+    classes: &ClassTables,
+    weapons: &[WeaponDef],
+    assets: Assets<'_>,
+) -> Result<Vec<UnitDef>, DefError> {
+    let file: UnitsFile = ron::from_str(src.text).map_err(|e| src.ron_error(&e))?;
+    let units = file.units;
+    if units.is_empty() {
+        return Err(src.error("the list of units is empty"));
+    }
+    if units.len() > MAX_UNITS {
+        return Err(src.error(format!("more than {MAX_UNITS} units")));
+    }
+    for (i, u) in units.iter().enumerate() {
+        let id = u.id.as_str();
+        if !is_valid_name(id) {
+            return Err(src.error_at_record(
+                "id",
+                id,
+                0,
+                format!("unit id \"{id}\" is not snake_case (a-z, 0-9, _)"),
+            ));
+        }
+        if units[..i].iter().any(|o| o.id == u.id) {
+            let nth = units[..i].iter().filter(|o| o.id == u.id).count();
+            return Err(src.error_at_record(
+                "id",
+                id,
+                nth,
+                format!("unit id \"{id}\" appears twice"),
+            ));
+        }
+        let ctx = Ctx {
+            src,
+            classes,
+            weapons,
+            units: &units,
+            assets,
+            u,
+        };
+        ctx.check()?;
+    }
+    Ok(units)
+}
+
+/// Everything the checks of one record need.
+struct Ctx<'a> {
+    src: Source<'a>,
+    classes: &'a ClassTables,
+    weapons: &'a [WeaponDef],
+    units: &'a [UnitDef],
+    assets: Assets<'a>,
+    u: &'a UnitDef,
+}
+
+impl Ctx<'_> {
+    /// An error inside this record at the quoted `needle`.
+    fn at(&self, needle: &str, msg: impl std::fmt::Display) -> DefError {
+        self.src.error_in_record(
+            "id",
+            &self.u.id,
+            needle,
+            format!("unit \"{}\": {msg}", self.u.id),
+        )
+    }
+
+    /// An error on the record's id line.
+    fn here(&self, msg: impl std::fmt::Display) -> DefError {
+        self.at(&self.u.id, msg)
+    }
+
+    fn check(&self) -> Result<(), DefError> {
+        self.check_factions()?;
+        self.check_numbers()?;
+        self.check_movement()?;
+        self.check_references()?;
+        self.check_flags()
+    }
+
+    fn check_factions(&self) -> Result<(), DefError> {
+        let f = &self.u.factions;
+        if f.is_empty() {
+            return Err(self.here("factions is empty (use [Neutral] for mission objects)"));
+        }
+        for (i, a) in f.iter().enumerate() {
+            if f[..i].contains(a) {
+                return Err(self.here(format!("faction {a:?} is listed twice")));
+            }
+        }
+        if f.contains(&Faction::Neutral) && f.len() > 1 {
+            return Err(self.here("Neutral cannot be combined with another faction"));
+        }
+        Ok(())
+    }
+
+    fn check_numbers(&self) -> Result<(), DefError> {
+        let u = self.u;
+        if u.hp > MAX_BIG || (u.hp == 0 && u.category != Category::Object) {
+            return Err(self.here(format!(
+                "hp {} must be 1 to {MAX_BIG} (0 is only allowed for an Object)",
+                u.hp
+            )));
+        }
+        match u.cost {
+            Some(c) => {
+                if c == 0 || c > MAX_BIG {
+                    return Err(self.here(format!("cost {c} must be 1 to {MAX_BIG}")));
+                }
+                match u.build_seconds.to_ticks() {
+                    None => {
+                        return Err(self.here(format!(
+                            "build_seconds {} is not a whole number of ticks (a multiple of 0.05)",
+                            u.build_seconds
+                        )));
+                    }
+                    Some(0) => return Err(self.here("a unit with a cost needs build_seconds")),
+                    Some(_) => {}
+                }
+            }
+            None => {
+                if !u.build_seconds.is_zero() {
+                    return Err(self.here("build_seconds without a cost"));
+                }
+            }
+        }
+        if u.power != 0 && u.category != Category::Structure {
+            return Err(self.here("only a Structure can have power"));
+        }
+        if !(-100_000..=100_000).contains(&u.power) {
+            return Err(self.here(format!("power {} is out of range", u.power)));
+        }
+        if u.sight.is_negative() || u.sight.milli() > MAX_CELLS_MILLI {
+            return Err(self.here(format!("sight {} must be 0 to 64 cells", u.sight)));
+        }
+        if u.sight.is_zero() && u.category != Category::Object {
+            return Err(self.here("sight must be above 0"));
+        }
+        if u.category == Category::Structure {
+            let Some(fp) = u.footprint else {
+                return Err(self.here("a Structure needs a footprint"));
+            };
+            for (side, name) in [(fp.width, "width"), (fp.height, "height")] {
+                if side == 0 || side > MAX_FOOTPRINT {
+                    return Err(self.at(
+                        &u.id,
+                        format!("footprint {name} {side} must be 1 to {MAX_FOOTPRINT}"),
+                    ));
+                }
+            }
+            if !u.size.is_zero() {
+                return Err(self.here("a Structure has a footprint, not a size"));
+            }
+        } else {
+            if u.footprint.is_some() {
+                return Err(self.here("only a Structure has a footprint"));
+            }
+            if u.size.milli() <= 0 || u.size.milli() > 16_000 {
+                return Err(self.here(format!("size {} must be above 0 and at most 16", u.size)));
+            }
+        }
+        Ok(())
+    }
+
+    fn check_movement(&self) -> Result<(), DefError> {
+        let u = self.u;
+        match &u.movement {
+            Some(m) => {
+                if !u.category.mobile() {
+                    return Err(self.at(
+                        m,
+                        "only Infantry, Vehicle and Vessel can have a movement class",
+                    ));
+                }
+                if self.classes.movement_index(m).is_none() {
+                    return Err(self.at(
+                        m,
+                        format!("unknown movement class \"{m}\" (not in unit_classes.ron)"),
+                    ));
+                }
+                if u.speed.milli() <= 0 || u.speed.milli() > MAX_SPEED_MILLI {
+                    return Err(self.here(format!(
+                        "speed {} must be above 0 and at most 20 cells per second",
+                        u.speed
+                    )));
+                }
+                if let Some(w) = u.water_speed
+                    && (w.milli() <= 0 || w.milli() > MAX_SPEED_MILLI)
+                {
+                    return Err(self.here(format!(
+                        "water_speed {w} must be above 0 and at most 20 cells per second"
+                    )));
+                }
+                if u.turn_rate == 0 {
+                    return Err(self.here("turn_rate must be at least 1 for a unit that moves"));
+                }
+            }
+            None => {
+                if u.category.mobile() {
+                    return Err(self.here("an Infantry, Vehicle or Vessel needs a movement class"));
+                }
+                if !u.speed.is_zero() || u.water_speed.is_some() || u.turn_rate != 0 {
+                    return Err(self.here("speed, water_speed and turn_rate need a movement class"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_references(&self) -> Result<(), DefError> {
+        let u = self.u;
+        if self.classes.armor_index(&u.armor).is_none() {
+            return Err(self.at(
+                &u.armor,
+                format!(
+                    "unknown armor type \"{}\" (not in unit_classes.ron)",
+                    u.armor
+                ),
+            ));
+        }
+        if u.weapons.len() > MAX_WEAPONS {
+            return Err(self.here(format!("more than {MAX_WEAPONS} weapons")));
+        }
+        for (i, w) in u.weapons.iter().enumerate() {
+            if !self.weapons.iter().any(|d| d.id == *w) {
+                return Err(self.at(
+                    w,
+                    format!("unknown weapon \"{w}\" (not in weapon_defs.ron)"),
+                ));
+            }
+            if u.weapons[..i].contains(w) {
+                return Err(self.at(w, format!("weapon \"{w}\" is listed twice")));
+            }
+        }
+        if let Model::Glb(path) = &u.model
+            && let Err(e) = self.assets.check(path, ".glb")
+        {
+            return Err(self.at(path, format!("model: {e}")));
+        }
+        if let Some(path) = &u.icon
+            && let Err(e) = self.assets.check(path, ".png")
+        {
+            return Err(self.at(path, format!("icon: {e}")));
+        }
+        Ok(())
+    }
+
+    fn find(&self, id: &str) -> Option<&UnitDef> {
+        self.units.iter().find(|d| d.id == id)
+    }
+
+    fn check_flags(&self) -> Result<(), DefError> {
+        let u = self.u;
+        let f = &u.flags;
+        for (name, radius) in [
+            ("heal_radius", f.heal_radius),
+            ("repair_radius", f.repair_radius),
+            ("build_radius", f.build_radius),
+        ] {
+            if radius.is_negative() || radius.milli() > MAX_CELLS_MILLI {
+                return Err(self.here(format!("{name} {radius} must be 0 to 64 cells")));
+            }
+        }
+        let moves = u.movement.is_some();
+        for (name, on) in [
+            ("harvests", f.harvests),
+            ("deploys", f.deploys),
+            ("can_capture", f.can_capture),
+            ("repairs_structures", f.repairs_structures),
+            ("places_charges", f.places_charges),
+            ("consumed_on_use", f.consumed_on_use),
+            ("stealth_in_cover", f.stealth_in_cover),
+        ] {
+            if on && !moves {
+                return Err(self.here(format!("{name} needs a unit that moves")));
+            }
+        }
+        if (f.transports > 0 || f.transports_vehicles > 0) && !moves {
+            return Err(
+                self.here("transports needs a unit that moves (use garrison for a structure)")
+            );
+        }
+        if f.garrison > 0 && u.category != Category::Structure {
+            return Err(self.here("garrison is for a Structure"));
+        }
+        if f.needs_water && u.category != Category::Structure {
+            return Err(self.here("needs_water is for a Structure"));
+        }
+        if f.minimap && u.category != Category::Structure {
+            return Err(self.here("minimap is for a Structure"));
+        }
+        if (!f.build_radius.is_zero()) && u.category != Category::Structure {
+            return Err(self.here("build_radius is for a Structure"));
+        }
+        if let Some(b) = f.death_blast
+            && (b.radius.milli() <= 0 || b.radius.milli() > MAX_CELLS_MILLI || b.damage == 0)
+        {
+            return Err(self.here("death_blast needs a radius above 0 and a damage above 0"));
+        }
+        for b in &f.builds {
+            match self.find(b) {
+                None => {
+                    return Err(self.at(b, format!("builds: unknown unit \"{b}\"")));
+                }
+                Some(d) if d.category != Category::Structure => {
+                    return Err(self.at(b, format!("builds: \"{b}\" is not a Structure")));
+                }
+                Some(_) => {}
+            }
+        }
+        for (name, target) in [
+            ("disguise_as", &f.disguise_as),
+            ("comes_with", &f.comes_with),
+        ] {
+            if let Some(t) = target
+                && self.find(t).is_none()
+            {
+                return Err(self.at(t, format!("{name}: unknown unit \"{t}\"")));
+            }
+        }
+        Ok(())
+    }
+}

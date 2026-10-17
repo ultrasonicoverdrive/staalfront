@@ -5,9 +5,13 @@
 //! a deterministic procedural generator. WP2.1 adds the terrain types
 //! ([`terrain`]): a RON table of what a gameplay cell can be (grass, road,
 //! water, rock, ore, bridge) and an optional per-cell layer of them in a map.
+//! WP3.1 adds the unit, structure and weapon definitions ([`units`]): RON
+//! files with validation that names the file and line, and their conversion
+//! to fixed-point numbers for the simulation.
 
 pub mod map;
 pub mod terrain;
+pub mod units;
 
 /// Name of this crate, a placeholder until the real API lands.
 pub const CRATE: &str = "sf_data";

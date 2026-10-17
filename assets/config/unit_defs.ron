@@ -1,0 +1,370 @@
+#![enable(implicit_some)]
+// Unit, structure and mission-object definitions (WP3.1): one record per role of
+// content/units.md, with its design-target stats. Read by sf_data::units, which
+// checks every reference; docs/rules/units.md describes each field.
+//
+// ORDER IS THE KIND NUMBER. The simulation's `Kind` is the position of a record
+// in this list, so append new roles at the end and never reorder or remove one
+// that a scenario or a save may use. Adding a role is only a new record here
+// (and weapons in weapon_defs.ron, if it needs new ones): no Rust change.
+//
+// Units of measure: distances, sizes and sight in cells (1 cell = 4 m, B12);
+// speed in cells per game second (20 ticks); build_seconds in game seconds;
+// turn_rate in facing steps (256 per full turn) per tick; cost in credits;
+// power in power units (+ produces, - uses); hp abstract.
+//
+// What content/units.md states is used as is: roles, cost, power, hp, speed,
+// weapon ranges, capacities and radii, and the faction that gets the role in
+// its tech tree. Everything else is a placeholder, marked with a
+// `placeholder:` comment on the record: build_seconds, turn_rate, size, sight,
+// armor type, the footprints of mission structures and the model/icon choices
+// (the testpack_v1 models stand in until real art, WP11.6; roles without a
+// model use a primitive shape).
+(
+    units: [
+        // ---- Shared structures -------------------------------------------
+        (
+            id: "construction_center", factions: [Meridian, Veyran], category: Structure,
+            hp: 1500, armor: "structure", footprint: (width: 4, height: 4), sight: 10,
+            flags: (build_radius: 8),
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: sight, model. No cost: it is the base anchor, not bought.
+        ),
+        (
+            id: "power_plant", factions: [Meridian, Veyran], category: Structure,
+            cost: 300, build_seconds: 15, hp: 600, armor: "structure", power: 100,
+            footprint: (width: 2, height: 3), sight: 5,
+            model: Glb("testpack_v1/models/energiecentrale.glb"), strategic_icon: Square,
+            icon: "testpack_v1/icons/icon_energiecentrale_64.png",
+            // placeholder: build_seconds, sight.
+        ),
+        (
+            id: "refinery", factions: [Meridian, Veyran], category: Structure,
+            cost: 1200, build_seconds: 40, hp: 900, armor: "structure", power: -30,
+            footprint: (width: 3, height: 4), sight: 5,
+            flags: (comes_with: "harvester"),
+            model: Glb("testpack_v1/models/raffinaderij.glb"), strategic_icon: Square,
+            icon: "testpack_v1/icons/icon_raffinaderij_64.png",
+            // placeholder: build_seconds, sight.
+        ),
+        (
+            id: "barracks", factions: [Meridian, Veyran], category: Structure,
+            cost: 400, build_seconds: 20, hp: 700, armor: "structure", power: -20,
+            footprint: (width: 2, height: 3), sight: 5,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: build_seconds, sight, model.
+        ),
+        (
+            id: "vehicle_factory", factions: [Meridian, Veyran], category: Structure,
+            cost: 1500, build_seconds: 50, hp: 1000, armor: "structure", power: -40,
+            footprint: (width: 3, height: 4), sight: 5,
+            model: Glb("testpack_v1/models/voertuigfabriek.glb"), strategic_icon: Square,
+            icon: "testpack_v1/icons/icon_voertuigfabriek_64.png",
+            // placeholder: build_seconds, sight.
+        ),
+        (
+            id: "radar", factions: [Meridian, Veyran], category: Structure,
+            cost: 900, build_seconds: 35, hp: 700, armor: "structure", power: -50,
+            footprint: (width: 2, height: 2), sight: 12,
+            flags: (minimap: true),
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: build_seconds, model. Sight 12 is "reveals 12-cell radius".
+        ),
+        (
+            id: "defence_tower", factions: [Meridian, Veyran], category: Structure,
+            cost: 500, build_seconds: 20, hp: 600, armor: "structure", power: -20,
+            footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"],
+            model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
+            icon: "testpack_v1/icons/icon_verdedigingstoren_64.png",
+            // placeholder: build_seconds, sight.
+        ),
+        (
+            id: "advanced_defences", factions: [Meridian, Veyran], category: Structure,
+            cost: 900, build_seconds: 35, hp: 800, armor: "structure", power: -40,
+            footprint: (width: 2, height: 2), sight: 8, weapons: ["emplacement_gun"],
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: build_seconds, sight, model.
+        ),
+        (
+            id: "shipyard", factions: [Meridian, Veyran], category: Structure,
+            cost: 1000, build_seconds: 40, hp: 900, armor: "structure", power: -40,
+            footprint: (width: 4, height: 5), sight: 5,
+            flags: (needs_water: true),
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: build_seconds, sight, model.
+        ),
+        (
+            id: "decoy_emplacement", factions: [Meridian], category: Structure,
+            cost: 150, build_seconds: 8, hp: 150, armor: "structure",
+            footprint: (width: 1, height: 1), sight: 5,
+            flags: (disguise_as: "defence_tower"),
+            model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
+            // placeholder: build_seconds, sight. It uses the tower's model on purpose.
+        ),
+        (
+            id: "fortified_bunker", factions: [Veyran], category: Structure,
+            cost: 600, build_seconds: 25, hp: 1200, armor: "structure",
+            footprint: (width: 2, height: 2), sight: 7,
+            flags: (garrison: 5),
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: build_seconds, sight, model.
+        ),
+
+        // ---- Shared units ------------------------------------------------
+        (
+            id: "harvester", factions: [Meridian, Veyran], category: Vehicle,
+            cost: 1100, build_seconds: 30, hp: 800, armor: "heavy",
+            movement: "tracked", speed: 1.2, turn_rate: 6, size: 1.5, sight: 4,
+            flags: (harvests: true),
+            model: Glb("testpack_v1/models/grondstofwagen.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_grondstofwagen_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "rifleman", factions: [Meridian, Veyran], category: Infantry,
+            cost: 100, build_seconds: 5, hp: 50, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
+            weapons: ["rifle"],
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "rocket_trooper", factions: [Meridian, Veyran], category: Infantry,
+            cost: 300, build_seconds: 12, hp: 45, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
+            weapons: ["rocket"],
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "engineer", factions: [Meridian, Veyran], category: Infantry,
+            cost: 500, build_seconds: 15, hp: 25, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
+            flags: (can_capture: true, repairs_structures: true, places_charges: true),
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "scout", factions: [Meridian, Veyran], category: Infantry,
+            cost: 400, build_seconds: 10, hp: 25, armor: "infantry",
+            movement: "foot", speed: 1.3, turn_rate: 16, size: 0.4, sight: 8,
+            weapons: ["pistol"],
+            flags: (stealth_in_cover: true),
+            model: Glb("testpack_v1/models/verkenner.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_verkenner_64.png",
+            // placeholder: build_seconds, turn_rate, size. Sight 8 is from units.md.
+        ),
+        (
+            id: "sniper", factions: [Meridian], category: Infantry,
+            cost: 600, build_seconds: 20, hp: 40, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 9,
+            weapons: ["long_rifle"],
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "medic", factions: [Veyran], category: Infantry,
+            cost: 400, build_seconds: 12, hp: 40, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
+            flags: (heal_radius: 2),
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "demolition_team", factions: [Veyran], category: Infantry,
+            cost: 700, build_seconds: 20, hp: 60, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.5, sight: 5,
+            weapons: ["satchel_charge"],
+            flags: (consumed_on_use: true),
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "light_tank", factions: [Meridian, Veyran], category: Vehicle,
+            cost: 700, build_seconds: 20, hp: 400, armor: "light",
+            movement: "tracked", speed: 2, turn_rate: 10, size: 1.2, sight: 6,
+            weapons: ["cannon"],
+            model: Glb("testpack_v1/models/lichte_tank.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_lichte_tank_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "heavy_tank", factions: [Meridian, Veyran], category: Vehicle,
+            cost: 1400, build_seconds: 40, hp: 900, armor: "heavy",
+            movement: "tracked", speed: 1.1, turn_rate: 6, size: 1.5, sight: 7,
+            weapons: ["twin_cannon"],
+            model: Glb("testpack_v1/models/zware_tank.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_zware_tank_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "siege_artillery", factions: [Meridian, Veyran], category: Vehicle,
+            cost: 1600, build_seconds: 45, hp: 300, armor: "light",
+            movement: "tracked", speed: 1, turn_rate: 5, size: 1.5, sight: 6,
+            weapons: ["howitzer"],
+            model: Glb("testpack_v1/models/mobiele_artillerie.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_mobiele_artillerie_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "repair_truck", factions: [Meridian, Veyran], category: Vehicle,
+            cost: 800, build_seconds: 25, hp: 350, armor: "light",
+            movement: "wheeled", speed: 1.8, turn_rate: 8, size: 1.3, sight: 5,
+            flags: (repair_radius: 2),
+            model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "transport_truck", factions: [Veyran], category: Vehicle,
+            cost: 600, build_seconds: 18, hp: 300, armor: "light",
+            movement: "wheeled", speed: 2.2, turn_rate: 8, size: 1.3, sight: 5,
+            flags: (transports: 5),
+            model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "light_transport", factions: [Meridian], category: Vehicle,
+            cost: 600, build_seconds: 18, hp: 250, armor: "light",
+            movement: "wheeled", speed: 2.5, turn_rate: 10, size: 1.2, sight: 5,
+            flags: (transports: 4),
+            model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
+            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
+            // placeholder: build_seconds, armor, turn_rate, size, sight.
+        ),
+        (
+            id: "amphibious_transport", factions: [Meridian], category: Vehicle,
+            cost: 900, build_seconds: 30, hp: 400, armor: "light",
+            movement: "hover", speed: 1.5, water_speed: 1.2, turn_rate: 6, size: 1.5, sight: 5,
+            flags: (transports: 5, transports_vehicles: 1),
+            model: Shape(Cylinder), strategic_icon: Triangle,
+            // placeholder: build_seconds, armor, turn_rate, size, sight, model.
+            // "Carries 5 infantry or 1 vehicle": the two capacities are alternatives.
+        ),
+        (
+            id: "combat_engineer", factions: [Veyran], category: Infantry,
+            cost: 600, build_seconds: 18, hp: 60, armor: "infantry",
+            movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
+            weapons: ["carbine"],
+            flags: (can_capture: true, repairs_structures: true, places_charges: true, builds: ["fortified_bunker"]),
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "heavy_gun_team", factions: [Veyran], category: Infantry,
+            cost: 500, build_seconds: 15, hp: 80, armor: "infantry",
+            movement: "foot", speed: 0.6, turn_rate: 8, size: 0.6, sight: 6,
+            weapons: ["anti_tank_gun"],
+            flags: (deploys: true),
+            model: Shape(Cone), strategic_icon: Triangle,
+            // placeholder: build_seconds, turn_rate, size, sight, model.
+        ),
+        (
+            id: "gunboat", factions: [Veyran], category: Vessel,
+            cost: 1200, build_seconds: 35, hp: 600, armor: "light",
+            movement: "water", speed: 2, turn_rate: 4, size: 1.5, sight: 7,
+            weapons: ["naval_cannon"],
+            model: Shape(Cylinder), strategic_icon: Circle,
+            // placeholder: build_seconds, armor, turn_rate, size, sight, model.
+        ),
+        (
+            id: "supply_truck", factions: [Neutral], category: Vehicle,
+            hp: 300, armor: "light",
+            movement: "wheeled", speed: 1.2, turn_rate: 8, size: 1.3, sight: 5,
+            model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
+            // placeholder: armor, turn_rate, size, sight. Mission object, not buildable.
+        ),
+        (
+            id: "civilian", factions: [Neutral], category: Infantry,
+            hp: 25, armor: "infantry",
+            movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
+            model: Shape(Cone), strategic_icon: Circle,
+            // placeholder: turn_rate, size, sight, model.
+        ),
+        (
+            id: "technician", factions: [Neutral], category: Infantry,
+            hp: 25, armor: "infantry",
+            movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
+            model: Shape(Cone), strategic_icon: Circle,
+            // placeholder: turn_rate, size, sight, model.
+        ),
+
+        // ---- Enemy-only and mission objects ------------------------------
+        // Footprints, sight, size and armor of these are placeholders; only
+        // the hit points (and the notes of units.md) are design targets.
+        (
+            id: "relay_transmitter", factions: [Neutral], category: Structure,
+            hp: 400, armor: "structure", footprint: (width: 2, height: 2), sight: 5,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: footprint, sight, model.
+        ),
+        (
+            id: "fuel_depot", factions: [Neutral], category: Structure,
+            hp: 500, armor: "structure", footprint: (width: 2, height: 2), sight: 4,
+            flags: (death_blast: (radius: 3, damage: 200)),
+            model: Shape(Cylinder), strategic_icon: Square,
+            // placeholder: footprint, sight, model, blast damage. "Explodes, damages radius 3."
+        ),
+        (
+            id: "archive_building", factions: [Neutral], category: Structure,
+            hp: 800, armor: "structure", footprint: (width: 3, height: 3), sight: 5,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: footprint, sight, model.
+        ),
+        (
+            id: "evidence_crate", factions: [Neutral], category: Object,
+            hp: 100, armor: "light", size: 0.5, sight: 0,
+            flags: (pickup: true),
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: armor, size, model. "Picked up by infantry walking onto it."
+        ),
+        (
+            id: "ferry", factions: [Neutral], category: Vessel,
+            hp: 600, armor: "light",
+            movement: "water", speed: 0.2, turn_rate: 2, size: 3, sight: 4,
+            model: Shape(Cylinder), strategic_icon: Circle,
+            // placeholder: armor, turn_rate, size, sight, model. Speed 0.2 is from units.md.
+        ),
+        (
+            id: "bridge_segment", factions: [Neutral], category: Structure,
+            hp: 500, armor: "structure", footprint: (width: 1, height: 1), sight: 3,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: footprint, sight, model. Engineers destroy and repair it.
+        ),
+        (
+            id: "rail_spur", factions: [Neutral], category: Structure,
+            hp: 600, armor: "structure", footprint: (width: 1, height: 1), sight: 3,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: footprint, sight, model. Demolition target.
+        ),
+        (
+            id: "automated_gun", factions: [Neutral], category: Structure,
+            hp: 700, armor: "structure", footprint: (width: 1, height: 1), sight: 8,
+            weapons: ["automated_gun"],
+            flags: (fires_at_all: true),
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: footprint, sight, model. Range 8 is from units.md.
+        ),
+        (
+            id: "generator", factions: [Neutral], category: Structure,
+            hp: 400, armor: "structure", power: 50, footprint: (width: 1, height: 1), sight: 3,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: power, footprint, sight, model. "Backup power structure."
+        ),
+        (
+            id: "unmanned_artillery", factions: [Neutral], category: Structure,
+            hp: 300, armor: "structure", footprint: (width: 2, height: 2), sight: 6,
+            weapons: ["battery_shell"],
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: footprint, sight, model, weapon. "Fires when uplink alive" is
+            // mission logic (F2-M09), not a field.
+        ),
+        (
+            id: "ore_field", factions: [Neutral], category: Object,
+            hp: 0, armor: "none", size: 1, sight: 0,
+            model: Shape(Cube), strategic_icon: Square,
+            // placeholder: size, model. A terrain resource: no hit points ("—" in units.md).
+        ),
+    ],
+)
