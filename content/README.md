@@ -5,7 +5,8 @@ play it. The files are plain text, so they work in any editor, diff well in git,
 can later be converted into the engine formats:
 
 - missions → scenario format (WP10.1–10.3);
-- briefings → cutscene scripts (WP12.1, auto-direction WP12.9, voices WP12.7).
+- briefings → cutscene scripts (WP12.1). Later they also feed the voice tool and the
+  auto-direction proposed in `docs/cutscene-inspiration.md` §4 (not yet in PLAN.md).
 
 | File | What goes in it |
 |---|---|
@@ -24,9 +25,10 @@ can later be converted into the engine formats:
   for yourself may be in any language. Put them in Fountain notes `[[ ... ]]` or in the
   "Notes" sections.
 - **Units by role, not by final name**: `light_tank`, `artillery`, `engineer`, and so on.
-  See the role list in the asset list. The final unit names come later.
-- **Map sizes as proportions** ("bridge at one third from the west") until the cell size
-  is decided (open decision, before phase 2).
+  Use the ids in `assets/testpack_v1/manifest.json` where they fit, or a plain role
+  name. The final unit names come later.
+- **Map sizes in cells**: one cell is 4 m (PLAN.md B12). Maps are 64×64 to 256×256
+  cells (256 m to 1 km). A tank is about one cell, a building 2×2 to 4×3 cells.
 - **Codes**: missions are `F1-M01` … `F2-M10` (faction, mission). A mission file and
   its briefing share the code.
 
@@ -54,8 +56,8 @@ the files stay valid Fountain:
 | `[[MUSIC: tense, low]]` / `[[MUSIC: stop]]` | Music cue. |
 | `[[AMBIENCE: wind, distant guns]]` | Background sound under the scene. |
 | `[[SHOT: map]]` / `[[SHOT: wide]]` / `[[SHOT: reaction ADJUTANT]]` | Camera hint for the auto-director. Optional: without one it picks a shot itself. |
-| `[[MAP: arrow from P_START to BRUG_W]]` | Something drawn on the briefing map. |
-| `CUT TO:` / `FADE OUT.` | Transition. |
+| `[[MAP: arrow from P_START to BRIDGE_W]]` | Something drawn on the briefing map. |
+| `CUT TO:` / `> FADE OUT.` | Transition. Fountain recognises lines ending in `TO:` by itself; other transitions need a leading `>`. |
 
 Length guideline: 30–90 seconds per briefing, which is about 60–200 spoken words.
 The objective must be spoken clearly in the last 2–3 lines.

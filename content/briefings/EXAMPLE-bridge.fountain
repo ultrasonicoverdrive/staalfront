@@ -19,7 +19,7 @@ MAJOR HALVERSEN
 Commander. They're coming for the river, and they're coming today.
 
 [[SHOT: map]]
-[[MAP: two arrows from the north towards BRIDGE_WEST and BRIDGE_EAST]]
+[[MAP: two arrows from the north towards BRIDGE_W and BRIDGE_E]]
 
 MAJOR HALVERSEN
 Two bridges. We can't hold both. The engineers can drop the west one, but they need twelve minutes and nobody shooting at them.
@@ -36,4 +36,4 @@ Then you give the engineers their twelve minutes. Keep the post standing until t
 [[SFX: distant explosion]]
 [[MUSIC: stop]]
 
-FADE OUT.
+> FADE OUT.

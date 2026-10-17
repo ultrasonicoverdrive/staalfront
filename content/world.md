@@ -1,7 +1,7 @@
 # World bible
 
-Fill this in before any mission. It decides the art direction (asset list, open
-question 1), the look of the factions and the tone of every briefing.
+Fill this in before any mission. It decides the art direction, the look of the factions
+and the tone of every briefing.
 
 ## 1. Setting in one paragraph
 
@@ -33,8 +33,8 @@ them becomes a terrain look and a briefing background._
 
 ## 5. Technology level
 
-_What exists and what doesn't: helicopters, aircraft, ships, superweapon(s)? This settles
-asset-list questions 4, 5 and 7._
+_What exists and what doesn't: helicopters, aircraft, ships, superweapon(s), walls,
+mines? This decides which models and icons need to be made._
 
 ## 6. Things we never do
 

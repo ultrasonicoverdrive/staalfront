@@ -73,9 +73,9 @@ of the scenario format (WP10.1–10.3).
 
 ## G. Teams
 
-| Team | Owner | Composition (roles × count) | Leaves when | Orders, in order | Refill? |
-|---|---|---|---|---|---|
-| T_ | | | | | |
+| Team | Owner | Composition (roles × count) | Leaves when | Wait until complete? | AI may create it itself? | Orders, in order | Refill? |
+|---|---|---|---|---|---|---|---|
+| T_ | | | | | | | |
 
 **Orders**:
 - move to point/zone
@@ -89,17 +89,27 @@ of the scenario format (WP10.1–10.3).
 - invulnerable for a while
 - go to step N
 - hunt to the death
+- spy
+- attack on command
+- carry out a unit order
 
 ## H. Triggers
 
-| Code | When (events) | And also (conditions) | Then (actions) | How often |
-|---|---|---|---|---|
-| TR_01 | mission start | — | | once |
+| Code | Owner | Attached to | When (events) | And also (conditions) | Then (actions) | How often |
+|---|---|---|---|---|---|---|
+| TR_01 | Player | — | mission start | — | | once |
+
+- **Owner**: the player the trigger belongs to; events such as "building destroyed"
+  then apply to that player.
+- **Attached to**: nothing, or an object, cell, zone or player. "When all attached
+  objects have reported" counts these.
+- **Several events**: write `A AND B` (both), `A OR B` (either), or `A → action 1;
+  B → action 2` (linked).
 
 **Events**
 - **Place**: enters zone/object, crosses line, leaves map.
 - **Discovery**: discovers object/player.
-- **Combat**: object attacked/destroyed, N units/buildings of X destroyed, all of X destroyed, all bridges destroyed, no factories left.
+- **Combat**: object attacked/destroyed, N units/buildings of X destroyed, all of X destroyed, all bridges destroyed, fake buildings destroyed, no factories left.
 - **Infiltration**: building spied on/robbed, civilian evacuated.
 - **Economy**: money above threshold, type built, building exists, power shortage.
 - **Time**: time elapsed, timer expired.
@@ -109,9 +119,9 @@ of the scenario format (WP10.1–10.3).
 - **Outcome**: win, lose, allow win.
 - **Army**: create/disband team, reinforcements at point, all hunt, AI starts producing, AI may form teams, AI preferred target.
 - **Base**: AI expands, AI sells everything.
-- **Vision**: reveal map/zone, mark landing zone.
-- **Presentation**: message MSG_, sound, music, cutscene, camera to point.
-- **Logic**: force/disable trigger, timer start/stop/set, set variable.
+- **Vision**: reveal map/zone, let vision fog over again, mark landing zone.
+- **Presentation**: message MSG_, sound, music, speech, cutscene, camera to point.
+- **Logic**: force/disable trigger, timer start/stop/set/increase/decrease, set/clear variable.
 - **Special**: destroy object, superweapon charge/fire, show/complete objective.
 
 **How often**: once / every time / when all attached objects have reported.
@@ -133,6 +143,8 @@ reviewer must be able to check that the triggers do this._
 ## K. After the mission
 
 - **Carry over**: surviving units yes/no, timer yes/no.
+- **Options**: last mission of the campaign, no score screen, playable only once, no
+  map selection, money from crates/resources.
 - **Choice**: next mission, or a branch (e.g. M04A / M04B).
 - **Test scenario**: what a headless test must prove, e.g. "with no input, T_ATTACK_1
   leaves at 3:00".

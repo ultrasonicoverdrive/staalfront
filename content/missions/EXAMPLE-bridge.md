@@ -25,7 +25,7 @@ Medium size, with a river running north to south.
 - **Enemy 1**: AI, attacks.
 
 ## E. Starting setup
-- **Player**: construction yard, 2 light_tank and 4 rifleman in Z_BASE.
+- **Player**: construction_center, 2 light_tank and 4 rifleman in Z_BASE.
 - **Neutral**: BRIDGE_W and BRIDGE_E.
 - **Key object**: `OBJ_ENGINEER_POST`, a player building next to BRIDGE_W.
 
@@ -43,7 +43,7 @@ Medium size, with a river running north to south.
 |---|---|---|---|---|
 | TR_01 | mission start | — | briefing; show objective A; start T_CHARGE | once |
 | TR_02 | 2:00 elapsed | — | create T_WAVE_1; MSG_01 | once |
-| TR_03 | 6:00 elapsed | `bridge_w_intact` | create T_WAVE_2 | once |
+| TR_03 | 6:00 elapsed | — | create T_WAVE_2 | once |
 | TR_04 | T_CHARGE expired | `OBJ_ENGINEER_POST` alive | destroy BRIDGE_W; `bridge_w_intact` = no; MSG_02; complete A | once |
 | TR_05 | `OBJ_ENGINEER_POST` destroyed | — | lose | once |
 | TR_06 | objective A completed | no enemy units in Z_CROSSING_E | win | every time |
@@ -52,6 +52,12 @@ Medium size, with a river running north to south.
 - **A**: "Protect the engineer post until the west bridge is down (12:00)."
 - **Win**: TR_06.
 - **Lose**: TR_05.
+
+## J. Flow in words
+The first wave comes over the east bridge at 2:00 and tests the player's starting
+units. The player builds towers. At 6:00 a heavier wave aims at the west bridge and the
+engineer post: that is the real threat. At 12:00 the west bridge drops (twist), the
+southern wave is cut off, and the player clears the east bank to win.
 
 ## K. Test scenario
 With no input, T_WAVE_1 leaves at 2:00. If the post survives, BRIDGE_W is gone at 12:00.
