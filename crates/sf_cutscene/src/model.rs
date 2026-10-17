@@ -86,6 +86,14 @@ pub enum Art {
     Image(String),
     /// A rectangle of `w` x `h` stage units, centred on the origin.
     Rect { w: f32, h: f32, color: Color },
+    /// A rectangle with rounded corners, centred on the origin. A `radius`
+    /// larger than half the shorter side is drawn as half of it.
+    RoundRect {
+        w: f32,
+        h: f32,
+        radius: f32,
+        color: Color,
+    },
     /// A circle of the given radius, centred on the origin.
     Circle { radius: f32, color: Color },
 }

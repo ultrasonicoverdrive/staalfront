@@ -16,6 +16,18 @@ workspace = true
 serde = { version = "1", features = ["derive"] }
 # Project-wide data format (PLAN.md 1.0); scenes are RON.
 ron = "0.12"
+# The player draws with wgpu through the existing renderer's public API: its
+# frame hook (`FrameTarget`), the wgpu re-export, `Renderer::for_window` and
+# `headless`, and the PNG reader. Nothing in sf_render is changed.
+sf_render = { path = "../../crates/sf_render" }
+# The UI's embedded font (Inter, OFL), glyph rasteriser cache and atlas for the
+# subtitles. Nothing in sf_ui is changed.
+sf_ui = { path = "../../crates/sf_ui" }
+# The `play_scene` viewer's window and loop (winit is re-exported from it).
+sf_engine = { path = "../../crates/sf_engine" }
+# Safe casts of the vertex/uniform structs to bytes (same crate and features as
+# sf_render and sf_ui; already in Cargo.lock).
+bytemuck = { version = "1.25", features = ["derive"] }
 
 [dev-dependencies]
 # Property test: every sound event fires exactly once for any sample step
