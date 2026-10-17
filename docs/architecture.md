@@ -567,6 +567,8 @@ links some of these pages carry:
   (based on Valery V. Anisimovsky's WS-AUD notes: Westwood ADPCM codes,
   tables, per-chunk 0x80 start, raw chunks, 5-bit delta, `LL RR` stereo IMA
   layout in VQA sound);
+- MultimediaWiki, "Westwood IMA ADPCM": <https://wiki.multimedia.cx/index.php/Westwood_IMA_ADPCM>
+  (predictor and index start at 0 and carry across chunks, stereo `L1L0 R1R0`);
 - IMA "Recommended Practices for Enhancing Digital Audio Compatibility in
   Multimedia Systems" (1992): IMA ADPCM tables;
 - Blowfish: B. Schneier (1993) and his published test vectors, via the
@@ -578,7 +580,8 @@ described on these pages ("a rolling hash" only); it is implemented from the
 author's general knowledge of the format and is unverified.
 
 **Not verified against real files** (the repo and CI never have any): standard
-(big-endian word) Blowfish on the header bytes, the file-name hash, IMA state
-carrying over between AUD chunks and the stereo layouts of AUD files; a mismatch shows up as a decode error in the sound browser, not
+(big-endian word) Blowfish on the header bytes, the file-name hash, and IMA
+chunk carry-over and stereo layout (described for VQA/Westwood IMA, applied to
+AUD as well); a mismatch shows up as a decode error in the sound browser, not
 as a crash. Tests build their own fixtures (own ADPCM encoders, own MIX
 writer, an own multi-prime RSA test key).

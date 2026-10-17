@@ -11,15 +11,18 @@
 //!   tables, the 0x80 start per chunk, "equal sizes = stored raw", the
 //!   sign-extended 5-bit delta, chunks independent of each other, and the
 //!   `LL RR` stereo nibble layout of IMA sound in C&C/Red Alert VQA files;
+//! - MultimediaWiki, "Westwood IMA ADPCM",
+//!   <https://wiki.multimedia.cx/index.php/Westwood_IMA_ADPCM>: predictor
+//!   and index start at 0 and are kept across chunks; low nibble first;
+//!   stereo bytes alternate `L1L0 R1R0 ...`;
 //! - IMA Digital Audio Focus and Technical Working Groups, "Recommended
 //!   Practices for Enhancing Digital Audio Compatibility in Multimedia
 //!   Systems" (1992): IMA ADPCM step and index tables.
 //!
-//! Not in any of these and therefore assumptions, unverified against real
-//! files: IMA predictor/index carrying over between AUD chunks, the `LL RR`
-//! layout for stereo IMA *AUD* files (described only for VQA), and the
-//! sample layout of stereo or 16-bit Westwood ADPCM (the description says it
-//! has only ever been seen as mono 8-bit).
+//! Caveats, unverified against real files: the IMA chunk carry-over and
+//! the stereo byte layout are described for VQA / Westwood IMA and applied
+//! to AUD as well; stereo or 16-bit Westwood ADPCM is not described (only
+//! mono 8-bit has been seen) and its layout here is our assumption.
 //!
 //! - **Header** (12 bytes, little-endian): `u16 sample rate`, `u32 size of
 //!   the compressed data`, `u32 size of the output`, `u8 flags` (bit 0
