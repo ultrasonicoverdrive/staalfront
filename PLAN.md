@@ -407,13 +407,13 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 ### 12.1 Agent type
 Two agents, both in the repo (they travel to every environment), both model `opus`, same instructions:
 
-- `.claude/agents/bouwer-opus.md` — effort `low`: the default for every WP, including the hard ones marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep). For those the reviewer probes harder.
-- `.claude/agents/bouwer-opus-zwaar.md` — effort `high`: only for a WP that failed review twice on `bouwer-opus`.
+- `.claude/agents/bouwer-opus.md` — effort `low`: the default for every WP.
+- `.claude/agents/bouwer-opus-medium.md` — effort `medium`: for the hard WPs, marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
 
 Decision Tijmen 17-10-2026 (was Sonnet at medium, and Sonnet at xhigh for [xhigh]
 WPs, from 14-10-2026). Each agent executes one work package, works in its own git
-worktree/branch, opens a PR. If a WP fails review twice, the orchestrator reruns
-it on `bouwer-opus-zwaar`.
+worktree/branch, opens a PR. If a WP fails review twice on `bouwer-opus`, the
+orchestrator reruns it on `bouwer-opus-medium`.
 
 Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
 

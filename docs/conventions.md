@@ -45,13 +45,13 @@ Agent definitions live in `.claude/agents/`.
 
 | Agent | Model / effort | Use |
 |---|---|---|
-| `bouwer-opus` | opus, low | Default for every WP, including those marked **[xhigh]** in PLAN.md §3. |
-| `bouwer-opus-zwaar` | opus, high | A WP that failed review twice on `bouwer-opus`. |
+| `bouwer-opus` | opus, low | Default for every WP. |
+| `bouwer-opus-medium` | opus, medium | WPs marked **[xhigh]** in PLAN.md §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep), and a WP that failed review twice on `bouwer-opus`. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
 
-If a WP fails review twice, the orchestrator reruns it on
-`bouwer-opus-zwaar` (decision Tijmen 17-10-2026; before that the builders ran on Sonnet). The two supporting agents have no edit, commit or push
+If a WP fails review twice on `bouwer-opus`, the orchestrator reruns it on
+`bouwer-opus-medium` (decision Tijmen 17-10-2026; before that the builders ran on Sonnet). The two supporting agents have no edit, commit or push
 rights.
 
 ## 4. Quality rules (PLAN.md §5, apply to every WP)
