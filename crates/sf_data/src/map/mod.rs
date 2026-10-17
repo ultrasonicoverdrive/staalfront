@@ -36,7 +36,9 @@
 //! The loader ([`Map::load`], [`Map::parse`]) validates dimensions, file
 //! sizes, bit depths and material indices and reports a [`MapError`]. The two
 //! file names in `map.ron` must stay inside the map directory: no absolute
-//! path, drive prefix, network (UNC) path or `..`, checked the same on every OS. This
+//! path, drive prefix, network (UNC) path, `..` or Windows device name (`CON`),
+//! checked the same on every OS; a symlink that leads out of the directory is
+//! refused when loading. This
 //! crate has no GPU or simulation dependency, so the renderer, the editor and
 //! headless tools can all read maps. Floating point is used only for the
 //! visual height in metres and in [`generate`], which is not simulation code.
@@ -189,10 +191,27 @@ impl Map {
     }
 
     /// Read `dir/map.ron` and the files it names.
+    ///
+    /// Every file is resolved first (symlinks followed) and must still lie
+    /// inside the map directory, so a symlink in a downloaded map cannot lead
+    /// out of it. (The check and the read are two steps; a map directory that
+    /// another process changes while loading is not defended against.)
     pub fn load(dir: &Path) -> Result<Self, MapError> {
+        let io = |path: &Path| {
+            let path = path.to_path_buf();
+            move |source| MapError::Io { path, source }
+        };
+        let inside = dir.canonicalize().map_err(io(dir))?;
         let read = |name: &str| {
             let path = dir.join(name);
-            std::fs::read(&path).map_err(|source| MapError::Io { path, source })
+            let resolved = path.canonicalize().map_err(io(&path))?;
+            if !resolved.starts_with(&inside) {
+                return Err(MapError::Header(format!(
+                    "{name} leads outside the map directory (a symlink?): it resolves to {}",
+                    resolved.display()
+                )));
+            }
+            std::fs::read(&resolved).map_err(io(&resolved))
         };
         let header = read("map.ron")?;
         let header_text = String::from_utf8_lossy(&header);
@@ -404,8 +423,12 @@ fn validate_file_names(header: &MapHeader) -> Result<(), MapError> {
 /// Windows must be refused on Linux too: an absolute path (`/x`, `\x`), a
 /// network path (`\\server\x`, `//server/x`), a drive prefix (`C:\x`, `C:x`,
 /// and any `:` at all, which also keeps NTFS streams out), a `..` component
-/// and a backslash anywhere else (the separator of a map file name is `/`).
-/// A relative name with `/` into a sub-directory is fine.
+/// a backslash anywhere else (the separator of a map file name is `/`) and a
+/// Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`,
+/// in any case, with or without an extension) in any component: opening one
+/// does not read a file, and `CON` blocks. A relative name with `/` into a
+/// sub-directory is fine. [`Map::load`] adds the symlink check on the real
+/// file system.
 fn check_file_name(field: &str, name: &str) -> Result<(), MapError> {
     let refuse = |why: &str| {
         Err(MapError::Header(format!(
@@ -433,7 +456,24 @@ fn check_file_name(field: &str, name: &str) -> Result<(), MapError> {
     if name.contains('\\') {
         return refuse("it contains a backslash (use '/' between directories)");
     }
+    if let Some(device) = name.split('/').find(|part| is_device_name(part)) {
+        return refuse(&format!("\"{device}\" is a Windows device name"));
+    }
     Ok(())
+}
+
+/// Whether a path component names a Windows device: the part before the first
+/// dot, without trailing spaces (Windows ignores both), is `CON`, `PRN`,
+/// `AUX`, `NUL`, `COM1`-`COM9` or `LPT1`-`LPT9`, in any case.
+fn is_device_name(component: &str) -> bool {
+    let stem = component.split('.').next().unwrap_or("").trim_end();
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            upper
+                .strip_prefix(prefix)
+                .is_some_and(|n| matches!(n.as_bytes(), [b'1'..=b'9']))
+        })
 }
 
 /// Decode a grayscale PNG of the expected depth and size to raw bytes

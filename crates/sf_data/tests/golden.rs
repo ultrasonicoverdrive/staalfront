@@ -49,18 +49,18 @@ fn check(cells: u32, seed: u32, expected: (u64, u64)) {
 /// 64 x 64 cells = 256 x 256 m, the smallest map size of PLAN.md 1.3.
 #[test]
 fn the_64_cell_map_is_pinned() {
-    check(64, 1, (0x2358_d8fd_db4e_3826, 0x3fa7_2356_59d8_4c3e));
+    check(64, 1, (0x872e_74f4_80f8_c64d, 0xa2ea_ee42_c7f7_4e8c));
 }
 
 /// 256 x 256 cells = 1,024 x 1,024 m, the largest map and the demo map.
 #[test]
 fn the_256_cell_map_is_pinned() {
-    check(256, 1, (0x3652_2a04_d73b_8be1, 0xed4e_8e43_a9c3_7b13));
+    check(256, 1, (0xdeab_ab98_9866_e939, 0xae6b_97c9_9e37_0857));
 }
 
 /// Another seed, so a change that only touches a seed-dependent path (the
 /// hills, the river phase) cannot hide behind seed 1.
 #[test]
 fn another_seed_is_pinned_too() {
-    check(64, 7, (0x8e3f_3b41_1d30_2795, 0xc9e8_2e36_c67d_aefc));
+    check(64, 7, (0x9915_8215_647e_8d16, 0xcd4c_0943_d878_0a37));
 }

@@ -1,9 +1,10 @@
 //! Procedural test map generator: bit-exact for a given size and seed on every
-//! platform. Integer hashing for the noise and `sf_math` fixed point
-//! ([`Fx`]) for everything else: no float, no `sin`/`exp`/`sqrt` of the
-//! platform. A golden test (`tests/golden.rs`) pins a hash of a generated 64 x
-//! 64 cell and a 256 x 256 cell map, and CI runs it on Linux and Windows, so
-//! the simulation can read terrain from generated maps (WP2.1).
+//! platform. The noise hash comes from `sf_math` ([`Fnv1a64`] chained into
+//! [`Rng`]) and everything else is `sf_math` fixed point ([`Fx`]): no float,
+//! no `sin`/`exp`/`sqrt` of the platform. A golden test (`tests/golden.rs`)
+//! pins a hash of a generated 64 x 64 cell and a 256 x 256 cell map, and CI
+//! runs it on Linux and Windows, so the simulation can read terrain from
+//! generated maps (WP2.1).
 //!
 //! The landscape: gentle noise hills, a few round hills, a winding valley
 //! with a riverbed, and a flat plateau. Materials are engine placeholders:
@@ -16,7 +17,8 @@
 //! reach is exact instead of a cut-off); the plateau's `sqrt` is
 //! [`Fx::sqrt`].
 
-use sf_math::{Facing, Fx};
+use sf_math::hash::Fnv1a64;
+use sf_math::{Facing, Fx, Rng};
 
 use super::Map;
 
@@ -47,13 +49,17 @@ fn ratio(num: i64, den: i64) -> Fx {
     Fx::from_ratio(num, den)
 }
 
+/// A stateless 32-bit hash of a lattice point, from `sf_math` only: the
+/// FNV-1a hash of `(seed, x, z)` seeds a PCG32 generator, and the hash is its
+/// first output. (FNV alone mixes the last bytes too weakly for noise, and a
+/// PCG seeded straight with a small integer gives nearly equal first outputs
+/// for neighbouring seeds; chaining the two avoids both.)
 fn hash(seed: u32, x: i32, z: i32) -> u32 {
-    let mut h = seed ^ (x as u32).wrapping_mul(0x85eb_ca6b) ^ (z as u32).wrapping_mul(0xc2b2_ae35);
-    h ^= h >> 16;
-    h = h.wrapping_mul(0x7feb_352d);
-    h ^= h >> 15;
-    h = h.wrapping_mul(0x846c_a68b);
-    h ^ (h >> 16)
+    let mut key = Fnv1a64::new();
+    key.write_u32(seed);
+    key.write_i32(x);
+    key.write_i32(z);
+    Rng::new(key.finish()).next_u32()
 }
 
 /// A lattice value in `0..1` (16 bits).
@@ -183,7 +189,7 @@ impl Landscape {
         }
     }
 
-    /// The lattice step of the noise, in metres: a tenth of the scale.
+    /// The lattice step of the noise, in metres: 0.12 of the scale (12/100).
     fn noise_step(&self) -> Fx {
         ratio(i64::from(self.scale) * 12, 100)
     }
@@ -335,6 +341,57 @@ mod tests {
                     "at ({vx}, {vz})"
                 );
             }
+        }
+    }
+
+    /// The lattice hash must look random: uniform, and not correlated with
+    /// its neighbours in x, in z or in the seed (a weak hash shows up as
+    /// stripes in the value noise).
+    #[test]
+    fn the_lattice_hash_is_uniform_and_uncorrelated() {
+        let n = 64_i32;
+        let value = |seed: u32, x: i32, z: i32| unit(seed, x, z).raw() as f64 / 65536.0;
+        let mut sum = 0.0;
+        let mut buckets = [0_u32; 16];
+        for z in 0..n {
+            for x in 0..n {
+                let v = value(1, x, z);
+                sum += v;
+                buckets[(v * 16.0) as usize] += 1;
+            }
+        }
+        let count = f64::from(n * n);
+        assert!((sum / count - 0.5).abs() < 0.02, "mean {}", sum / count);
+        for (i, b) in buckets.iter().enumerate() {
+            assert!(
+                (f64::from(*b) - count / 16.0).abs() < 60.0,
+                "bucket {i}: {b}"
+            );
+        }
+        // Pearson correlation with the neighbour in each direction.
+        let correlation = |other: &dyn Fn(i32, i32) -> f64| {
+            let (mut sa, mut sb, mut saa, mut sbb, mut sab) = (0.0, 0.0, 0.0, 0.0, 0.0);
+            for z in 0..n {
+                for x in 0..n {
+                    let (a, b) = (value(1, x, z), other(x, z));
+                    sa += a;
+                    sb += b;
+                    saa += a * a;
+                    sbb += b * b;
+                    sab += a * b;
+                }
+            }
+            let cov = sab / count - sa / count * sb / count;
+            cov / ((saa / count - (sa / count).powi(2)) * (sbb / count - (sb / count).powi(2)))
+                .sqrt()
+        };
+        for (name, r) in [
+            ("x + 1", correlation(&|x, z| value(1, x + 1, z))),
+            ("z + 1", correlation(&|x, z| value(1, x, z + 1))),
+            ("seed + 1", correlation(&|x, z| value(2, x, z))),
+            ("swapped", correlation(&|x, z| value(1, z, x))),
+        ] {
+            assert!(r.abs() < 0.06, "{name}: correlation {r}");
         }
     }
 

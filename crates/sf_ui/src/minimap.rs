@@ -579,6 +579,16 @@ mod tests {
         // Touching only at a corner or along an edge leaves no area.
         let corner = [(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)];
         assert!(clip_to_rect(&corner, (10.0, 10.0)).is_empty());
+        // A square beside the map that shares part of one edge with it: east,
+        // west, south and north edge.
+        for (x, z) in [(10.0, 2.0), (-6.0, 2.0), (2.0, 10.0), (2.0, -6.0)] {
+            let beside = [(x, z), (x + 6.0, z), (x + 6.0, z + 6.0), (x, z + 6.0)];
+            let clipped = clip_to_rect(&beside, (10.0, 10.0));
+            assert!(
+                clipped.is_empty(),
+                "beside the map at ({x}, {z}): {clipped:?}"
+            );
+        }
         assert!(clip_to_rect(&[], (10.0, 10.0)).is_empty());
     }
 
