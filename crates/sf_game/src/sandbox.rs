@@ -1,10 +1,14 @@
 //! The sandbox: what `sf_game` puts on the playfield when it starts (WP3.2).
 //!
-//! A few structures and units of each side, spawned through the command queue
-//! on tick 0 with `Command::PlaceStructure` and `Command::SpawnUnit`, from the
-//! roles of the unit definitions. Meridian (player 0) stands west of the middle
-//! of the map, Veyran (player 1) east of it, and a handful of neutral roles
-//! (player 2) in between. Nothing moves: orders are WP3.4.
+//! Every structure, unit and object of the unit definitions, once for each
+//! side that can have it, spawned through the command queue on tick 0 with
+//! `Command::PlaceStructure` and `Command::SpawnUnit`. Nothing about *which*
+//! roles is written here: a side gets the roles whose `factions` name it, so a
+//! role added to `assets/config/unit_defs.ron` shows up with no change to the
+//! code (quality rule 6). Meridian (player 0) stands west of the middle of the
+//! map, Veyran (player 1) east of it and the neutral roles (player 2) north of
+//! it; those three seats are the only layout that is written here. Nothing
+//! moves: orders are WP3.4.
 //!
 //! Where things go is decided by the map, deterministically: a structure takes
 //! the free spot nearest to its base's anchor where every cell of its footprint
@@ -17,7 +21,7 @@
 
 use std::collections::BTreeSet;
 
-use sf_data::units::UnitDefs;
+use sf_data::units::{Category, Faction, UnitDef, UnitDefs};
 use sf_math::{Fx, Vec2};
 use sf_sim::{Cell, Command, Kind, PlayerId, World};
 
@@ -33,84 +37,58 @@ const BASE_OFFSET: i32 = 14;
 /// How far in front of its structures a side's units gather, in cells.
 const FRONT: i32 = 7;
 
-/// One side: its owner, its place and what it has.
+/// One side: its owner, the roles it gets and its place on the map.
 struct Side {
+    faction: Faction,
     owner: u8,
     /// Which way the front is: `1` east, `-1` west, `0` neither.
     toward: i32,
     /// Offset of the base anchor from the middle of the map, in cells.
     at: (i32, i32),
-    structures: &'static [&'static str],
-    units: &'static [(&'static str, u32)],
 }
 
 const SIDES: [Side; 3] = [
     Side {
+        faction: Faction::Meridian,
         owner: MERIDIAN,
         toward: 1,
         at: (-BASE_OFFSET, 0),
-        structures: &[
-            "construction_center",
-            "power_plant",
-            "refinery",
-            "barracks",
-            "vehicle_factory",
-            "radar",
-            "defence_tower",
-        ],
-        units: &[
-            ("rifleman", 4),
-            ("rocket_trooper", 2),
-            ("engineer", 1),
-            ("scout", 1),
-            ("sniper", 1),
-            ("harvester", 1),
-            ("light_tank", 2),
-            ("heavy_tank", 1),
-            ("siege_artillery", 1),
-            ("repair_truck", 1),
-            ("light_transport", 1),
-        ],
     },
     Side {
+        faction: Faction::Veyran,
         owner: VEYRAN,
         toward: -1,
         at: (BASE_OFFSET, 0),
-        structures: &[
-            "construction_center",
-            "power_plant",
-            "refinery",
-            "barracks",
-            "vehicle_factory",
-            "fortified_bunker",
-        ],
-        units: &[
-            ("rifleman", 4),
-            ("rocket_trooper", 2),
-            ("medic", 1),
-            ("demolition_team", 1),
-            ("combat_engineer", 1),
-            ("heavy_gun_team", 1),
-            ("harvester", 1),
-            ("light_tank", 2),
-            ("heavy_tank", 1),
-            ("siege_artillery", 1),
-            ("transport_truck", 1),
-        ],
     },
     Side {
+        faction: Faction::Neutral,
         owner: NEUTRAL,
         toward: 0,
         at: (0, -16),
-        structures: &["relay_transmitter", "fuel_depot", "archive_building"],
-        units: &[
-            ("supply_truck", 1),
-            ("civilian", 2),
-            ("technician", 1),
-            ("evidence_crate", 1),
-        ],
     },
 ];
+
+/// Whether `side` gets this role: its faction is among the role's, and it is
+/// not a vessel.
+fn belongs_to(def: &UnitDef, side: &Side) -> bool {
+    def.category != Category::Vessel && def.factions.contains(&side.faction)
+}
+
+/// How many structures and units (and objects) the definitions give the
+/// sandbox: what [`schedule`] sets out to place on a map with room for it.
+pub fn wanted(defs: &UnitDefs) -> (u32, u32) {
+    let mut count = (0, 0);
+    for side in &SIDES {
+        for def in defs.units().iter().filter(|d| belongs_to(d, side)) {
+            if def.category == Category::Structure {
+                count.0 += 1;
+            } else {
+                count.1 += 1;
+            }
+        }
+    }
+    count
+}
 
 /// What was scheduled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -119,8 +97,7 @@ pub struct Plan {
     pub structures: u32,
     /// `SpawnUnit` commands scheduled.
     pub units: u32,
-    /// Roles named above that the definitions do not have, or things for
-    /// which the map had no room: not scheduled.
+    /// Roles for which the map had no room: not scheduled.
     pub skipped: u32,
 }
 
@@ -136,12 +113,13 @@ pub fn schedule(world: &mut World, defs: &UnitDefs) -> Plan {
     let mut plan = Plan::default();
     for side in &SIDES {
         let anchor = (middle.0 + side.at.0, middle.1 + side.at.1);
-        for id in side.structures {
-            let Some(kind) = defs.kind_of(id) else {
-                plan.skipped += 1;
-                continue;
-            };
-            let footprint = defs.sim_unit(kind).and_then(|u| u.footprint);
+        let front = (anchor.0 + side.toward * FRONT, anchor.1 + 2 + FRONT / 3);
+        let roles = defs.units().iter().filter(|d| belongs_to(d, side));
+        // Structures first, so units are placed around them; both in kind order.
+        let (structures, others): (Vec<&UnitDef>, Vec<&UnitDef>) =
+            roles.partition(|d| d.category == Category::Structure);
+        for def in structures {
+            let footprint = defs.sim_unit(def.kind).and_then(|u| u.footprint);
             let spot = footprint.and_then(|(w, h)| find_structure(world, &taken, anchor, w, h));
             let Some((cell, (w, h))) = spot.zip(footprint) else {
                 plan.skipped += 1;
@@ -157,40 +135,33 @@ pub fn schedule(world: &mut World, defs: &UnitDefs) -> Plan {
                 world,
                 side.owner,
                 Command::PlaceStructure {
-                    kind: Kind(kind),
+                    kind: Kind(def.kind),
                     cell: Cell::new(cell.0 as u32, cell.1 as u32),
                     owner: PlayerId(side.owner),
                 },
             );
             plan.structures += 1;
         }
-        let front = (anchor.0 + side.toward * FRONT, anchor.1 + 2 + FRONT / 3);
-        for (id, count) in side.units {
-            for _ in 0..*count {
-                let Some(kind) = defs.kind_of(id) else {
-                    plan.skipped += 1;
-                    continue;
-                };
-                let Some(cell) = find_unit(world, &taken, front) else {
-                    plan.skipped += 1;
-                    continue;
-                };
-                taken.0.insert(cell);
-                let pos = Vec2::new(
-                    Fx::from_int(cell.0) + Fx::HALF,
-                    Fx::from_int(cell.1) + Fx::HALF,
-                );
-                send(
-                    world,
-                    side.owner,
-                    Command::SpawnUnit {
-                        kind: Kind(kind),
-                        pos,
-                        owner: PlayerId(side.owner),
-                    },
-                );
-                plan.units += 1;
-            }
+        for def in others {
+            let Some(cell) = find_unit(world, &taken, front) else {
+                plan.skipped += 1;
+                continue;
+            };
+            taken.0.insert(cell);
+            let pos = Vec2::new(
+                Fx::from_int(cell.0) + Fx::HALF,
+                Fx::from_int(cell.1) + Fx::HALF,
+            );
+            send(
+                world,
+                side.owner,
+                Command::SpawnUnit {
+                    kind: Kind(def.kind),
+                    pos,
+                    owner: PlayerId(side.owner),
+                },
+            );
+            plan.units += 1;
         }
     }
     plan
@@ -257,7 +228,7 @@ fn open_ground(world: &World, x: i32, y: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::playfield::{make_world, sim_unit_table};
+    use crate::playfield::make_world;
     use sf_data::map::generate::generate_cells;
     use sf_sim::WorldConfig;
 
@@ -266,7 +237,7 @@ mod tests {
         let map = generate_cells(cells, cells, seed);
         let config = WorldConfig::new(1).with_map_size(cells, cells);
         let world = make_world(config, &map)
-            .with_units(sim_unit_table(&defs).unwrap())
+            .with_units(sf_bridge::unit_table(&defs).unwrap())
             .unwrap();
         (world, defs)
     }
@@ -277,11 +248,16 @@ mod tests {
             let (mut world, defs) = world_for(256, seed);
             let plan = schedule(&mut world, &defs);
             assert_eq!(plan.skipped, 0, "seed {seed}");
-            assert_eq!((plan.structures, plan.units), (16, 37), "seed {seed}");
+            let (structures, units) = wanted(&defs);
+            assert_eq!(
+                (plan.structures, plan.units),
+                (structures, units),
+                "seed {seed}"
+            );
             let report = world.step();
             assert_eq!(report.commands_ignored, 0, "seed {seed}");
-            assert_eq!(report.commands_executed, 53, "seed {seed}");
-            assert_eq!(world.len(), 53);
+            assert_eq!(report.commands_executed, structures + units, "seed {seed}");
+            assert_eq!(world.len() as u32, structures + units);
         }
     }
 

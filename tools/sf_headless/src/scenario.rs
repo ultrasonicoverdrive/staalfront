@@ -42,12 +42,11 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use sf_data::map::Map;
 use sf_data::terrain::TerrainTypes;
-use sf_data::units::{SimUnitDef, UnitDefs};
+use sf_data::units::UnitDefs;
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
-    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Footprint, Kind, MAX_ENTITIES, MAX_MAP_SIDE,
-    PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitStats, UnitTable, World,
-    WorldConfig,
+    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId,
+    Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -85,14 +84,21 @@ pub struct Scenario {
     /// world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
     pub terrain: Option<Terrain>,
-    /// Make the world with the shipped unit definitions (`unit_defs.ron`,
-    /// compiled in) as its unit table, so that `SpawnUnit` and
-    /// `PlaceStructure` know the roles (WP3.2). Required by those two actions;
-    /// the legacy `Spawn` groups and `Place` ignore the table, so a scenario
-    /// that sets this and uses neither action only differs by the table's
-    /// checksum section.
+    /// The unit definitions the world is made with, as the name of a directory
+    /// `assets/scenarios/<name>/` (next to the scenario file) holding
+    /// `unit_classes.ron`, `weapon_defs.ron` and `unit_defs.ron` (WP3.2). The
+    /// definitions become the world's unit table, which `SpawnUnit` and
+    /// `PlaceStructure` need. A scenario that is pinned by a checksum names a
+    /// **frozen copy** of the files, so that a balance change in
+    /// `assets/config/` does not move its checksum. Read by
+    /// [`Scenario::load`] only, see [`Scenario::unit_table`]. The legacy `Spawn`
+    /// groups and `Place` ignore the table.
     #[serde(default)]
-    pub unit_defs: bool,
+    pub unit_defs: Option<String>,
+    /// The unit table read from `unit_defs` by [`Scenario::load`], handed to the
+    /// world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub unit_table: Option<UnitTable>,
     /// How many ticks to run; at least 1.
     pub ticks: u64,
     /// Groups of entities to create.
@@ -214,7 +220,7 @@ pub enum Action {
         ids: Vec<IdSpec>,
     },
     /// `Command::SpawnUnit`: a unit or object of the unit table, standing in
-    /// the middle of `cell`. Needs `unit_defs: true`. Refused by the
+    /// the middle of `cell`. Needs `unit_defs`. Refused by the
     /// simulation (the command counts as ignored) for an unknown kind, for a
     /// structure, and on a cell a structure occupies. The entity takes the next
     /// free id, like a spawn.
@@ -228,7 +234,7 @@ pub enum Action {
     },
     /// `Command::PlaceStructure`: a structure of the unit table with its
     /// footprint anchored on `cell` (its smallest x and y). Needs
-    /// `unit_defs: true`. Refused by the simulation unless the kind is a
+    /// `unit_defs`. Refused by the simulation unless the kind is a
     /// structure and every cell of the footprint is on the map, buildable and
     /// free.
     PlaceStructure {
@@ -291,29 +297,18 @@ pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
         .collect()
 }
 
-/// The simulation's unit table from the unit definitions: the few fields the
-/// rules read, copied out of the converted roles. (`sf_game` does the same;
-/// `sf_sim` may not depend on `sf_data`, so each consumer converts.)
-pub fn sim_unit_stats(roles: &[SimUnitDef]) -> Vec<UnitStats> {
-    roles
-        .iter()
-        .map(|r| UnitStats {
-            kind: Kind(r.kind),
-            hp: r.hp,
-            movement_class: r.movement_class,
-            speed_per_tick: r.speed_per_tick,
-            turn_per_tick: r.turn_per_tick,
-            size: r.size,
-            footprint: r
-                .footprint
-                .map(|(width, height)| Footprint { width, height }),
-        })
-        .collect()
-}
-
-/// [`sim_unit_stats`] checked and sorted into a [`UnitTable`].
-pub fn sim_unit_table(defs: &UnitDefs) -> Result<UnitTable, String> {
-    UnitTable::new(sim_unit_stats(defs.sim_units())).map_err(|e| e.to_string())
+/// Reads the unit definitions in `<scenario directory>/<name>/` (the model and
+/// icon files they name are looked up under `<scenario directory>/..`, the
+/// assets directory) and turns them into the simulation's unit table.
+fn load_unit_table(name: &str, scenario_file: &Path) -> Result<UnitTable, ScenarioError> {
+    let invalid = |problem: String| ScenarioError::Invalid {
+        path: Some(scenario_file.to_path_buf()),
+        problems: vec![format!("unit_defs \"{name}\": {problem}")],
+    };
+    let scenarios = scenario_file.parent().unwrap_or(Path::new(""));
+    let defs = UnitDefs::load(&scenarios.join(name), &scenarios.join(".."))
+        .map_err(|e| invalid(e.to_string()))?;
+    sf_bridge::unit_table(&defs).map_err(invalid)
 }
 
 fn expand(ids: &[IdSpec]) -> Vec<EntityId> {
@@ -411,6 +406,9 @@ impl Scenario {
         if let Some(name) = scenario.map_name.clone() {
             scenario.terrain = Some(scenario.load_terrain(&name, path)?);
         }
+        if let Some(name) = scenario.unit_defs.clone() {
+            scenario.unit_table = Some(load_unit_table(&name, path)?);
+        }
         Ok(scenario)
     }
 
@@ -507,6 +505,17 @@ impl Scenario {
             }
         }
 
+        if let Some(name) = &self.unit_defs {
+            // A single directory name next to the scenario, like `map_name`.
+            if let Err(e) = sf_data::map::check_file_name("unit_defs", name) {
+                p.push(e.to_string());
+            } else if name.contains('/') {
+                p.push(format!(
+                    "unit_defs \"{name}\" must be the name of one directory, without '/'"
+                ));
+            }
+        }
+
         // A tick at or after `ticks` never runs. Not checked when `ticks` is
         // itself wrong (everything would be reported).
         let tick_problem = |at: &str, tick: u64| -> Option<String> {
@@ -590,14 +599,14 @@ impl Scenario {
                             cell.0, cell.1
                         ));
                     }
-                    if !self.unit_defs
+                    if self.unit_defs.is_none()
                         && matches!(
                             c.command,
                             Action::SpawnUnit { .. } | Action::PlaceStructure { .. }
                         )
                     {
                         p.push(format!(
-                            "{at}: SpawnUnit and PlaceStructure need `unit_defs: true`"
+                            "{at}: SpawnUnit and PlaceStructure need `unit_defs`"
                         ));
                     }
                 }
@@ -634,8 +643,17 @@ impl Scenario {
             None => World::new(config),
         }
         .map_err(|e| ScenarioError::Sim(e.to_string()))?;
-        if self.unit_defs {
-            let table = sim_unit_table(&UnitDefs::embedded()).map_err(ScenarioError::Sim)?;
+        if self.unit_defs.is_some() {
+            let Some(table) = self.unit_table.clone() else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "unit_defs: the definitions are read from the files next to the \
+                         scenario, so the scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
             world = world
                 .with_units(table)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;

@@ -106,8 +106,9 @@ are unchanged. Fields, units of measure and the placeholders: `docs/rules/units.
 
 WP3.2 notes. The simulation takes its own `UnitStats` (hit points, movement class, speed
 per tick, turn rate, size, footprint) in a `UnitTable` that the game and the headless
-runner build from `sf_data` (the same way the terrain is handed over; `sf_sim` still does
-not depend on `sf_data`). Two new commands make units and structures; the old `Spawn` and
+runner build with `sf_bridge` from `sf_data` (the same way the terrain is handed over;
+`sf_sim` still does not depend on `sf_data`). `units_spawn` is pinned against a frozen
+copy of the definitions; the sandbox places every role of the shipped file by faction. Two new commands make units and structures; the old `Spawn` and
 `Place` stay as the placeholders they were, so `wander_5000`, `command_mix`, `terrain_256`
 and the sf_sim goldens are byte-identical. A mobile unit occupies no cell; a structure
 occupies its whole footprint, all or nothing. `sf_game` starts in a sandbox (a few units and

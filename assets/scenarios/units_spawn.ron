@@ -1,15 +1,25 @@
-// Units and structures from the definitions (WP3.2): every role of
-// assets/config/unit_defs.ron is spawned once on the 256 by 256 cell playfield
-// (assets/maps/playfield256), a few commands are refused on purpose, a
-// structure is despawned and its cells are built on again, and two units walk.
+// Units and structures from the definitions (WP3.2): every role of the
+// definitions in assets/scenarios/units_spawn_defs/ is spawned once on the
+// 256 by 256 cell playfield (assets/maps/playfield256), a few commands are
+// refused on purpose, a structure is despawned and its cells are built on
+// again, and two units walk.
 // CI runs it on Linux and Windows and requires the checksum in
 // units_spawn.expected; tools/sf_headless/tests/units.rs asserts the hit
 // points, the footprints in the occupancy grid and the refusals. There are no
 // wanderers: the legacy Spawn does not know the definitions.
 //
-// `unit_defs: true` makes the world with the shipped definitions as its unit
-// table. Kinds are the permanent numbers of the records. Owners: 0 Meridian,
-// 1 Veyran, 2 neutral (a role of both factions belongs to Meridian here).
+// `unit_defs` names a directory next to this file with a FROZEN copy of
+// unit_classes.ron, weapon_defs.ron and unit_defs.ron (as they were when the
+// scenario was written). The world's unit table, and so the checksum, comes
+// from the copy: a balance change in assets/config/ does not move this
+// checksum. Do not edit the copy to rebalance; change it only to change what
+// this scenario tests, and re-pin units_spawn.expected. That every role of the
+// SHIPPED definitions can be spawned is tested without a checksum, by
+// tools/sf_headless/tests/shipped_roles.rs.
+//
+// `unit_defs` is read by the loader (Scenario::load), like map_name. Kinds are
+// the permanent numbers of the records. Owners: 0 Meridian, 1 Veyran, 2 neutral
+// (a role of both factions belongs to Meridian here).
 //
 // Entity ids: the 19 structures take slots 0 to 18 in the order written below,
 // the 24 units and objects slots 19 to 42; refused commands create nothing and
@@ -24,7 +34,7 @@ Scenario(
     seed: 0x5EED_0032,
     map: (width: 256, height: 256),
     map_name: Some("playfield256"),
-    unit_defs: true,
+    unit_defs: Some("units_spawn_defs"),
     ticks: 400,
     commands: [
         // --- structures, at tick 0 (slots 0 to 18) ---

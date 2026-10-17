@@ -1365,7 +1365,7 @@ fn sandbox_scene(
         eprintln!("sf_game: {e}; using the unit definitions compiled in");
         UnitDefs::embedded()
     });
-    match crate::playfield::sim_unit_table(&defs) {
+    match sf_bridge::unit_table(&defs) {
         Ok(table) => {
             world = world
                 .with_units(table)
@@ -1509,9 +1509,11 @@ mod tests {
         let style = placeholder_style(Style::embedded());
         let start = sandbox_scene(world(128), &o, &style, (128, 128));
         assert_eq!(start.world.unit_table().len(), 43);
-        assert_eq!(start.views.len(), 53);
-        assert_eq!(start.units, 53);
-        assert_eq!(start.buildings, 16);
+        let (structures, units) = crate::sandbox::wanted(&UnitDefs::embedded());
+        let all = (structures + units) as usize;
+        assert_eq!(start.views.len(), all);
+        assert_eq!(start.units as usize, all);
+        assert_eq!(start.buildings, structures);
         let roster = start.looks.roster().expect("the sandbox has a roster");
         let shapes =
             roster.style(&style).shape_count() + roster.pack().map_or(0, |p| p.models.len());
@@ -1538,10 +1540,14 @@ mod tests {
         let o = options(Preset::Game, "--units 200");
         let style = placeholder_style(Style::embedded());
         let mut start = sandbox_scene(world(128), &o, &style, (128, 128));
-        assert_eq!(start.views.len(), 53 + 200);
+        let all = {
+            let (a, b) = crate::sandbox::wanted(&UnitDefs::embedded());
+            (a + b) as usize
+        };
+        assert_eq!(start.views.len(), all + 200);
         let (roles, crowd): (Vec<&EntityView>, Vec<&EntityView>) =
             start.views.iter().partition(|v| v.has_stats);
-        assert_eq!((roles.len(), crowd.len()), (53, 200));
+        assert_eq!((roles.len(), crowd.len()), (all, 200));
         // The wanderers keep the demo's shapes, whatever role shares their kind.
         for v in &crowd {
             assert!(v.kind.0 < 3);
@@ -1566,7 +1572,7 @@ mod tests {
         let start = sandbox_scene(world(128), &o, &style, (128, 128));
         let roster = start.looks.roster().unwrap();
         assert!(roster.pack().is_none());
-        assert_eq!(start.views.len(), 53);
+        assert!(!start.views.is_empty());
     }
 
     #[test]
@@ -1575,6 +1581,7 @@ mod tests {
         let style = placeholder_style(Style::embedded());
         let mut start = sandbox_scene(world(128), &o, &style, (128, 128));
         let tick = start.world.tick();
+        let before = start.world.len();
         start
             .world
             .schedule(
@@ -1590,6 +1597,6 @@ mod tests {
         assert_eq!(tick, Tick(1));
         let report = start.world.step();
         assert_eq!(report.commands_executed, 1);
-        assert_eq!(start.world.len(), 54);
+        assert_eq!(start.world.len(), before + 1);
     }
 }

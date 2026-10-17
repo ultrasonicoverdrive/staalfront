@@ -18,6 +18,8 @@ workspace = true
 sf_math = { path = "../../crates/sf_math" }
 sf_sim = { path = "../../crates/sf_sim" }
 sf_data = { path = "../../crates/sf_data" }
+# The copy of the unit definitions into the simulation's unit table (WP3.2), shared with sf_game.
+sf_bridge = { path = "../../crates/sf_bridge" }
 sf_ai = { path = "../../crates/sf_ai" }
 # Scenario files are RON like every other data file of the project
 # (PLAN.md 1.0, quality rule 6). Same versions as sf_data and sf_audio, so the

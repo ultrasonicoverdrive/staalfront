@@ -626,20 +626,26 @@ impl World {
         {
             return None;
         }
+        // Check every cell first and keep the indices: nothing below can fail
+        // half way, so a refusal never leaves a half-made entity behind.
+        let mut indices =
+            Vec::with_capacity(usize::from(footprint.width) * usize::from(footprint.height));
         for cell in footprint_cells(anchor, footprint) {
             let index = self.occupancy.index(cell)?;
             if !self.terrain.flags_at(cell)?.buildable || self.occupancy.slot_at(index).is_some() {
                 return None;
             }
+            indices.push(index);
         }
         // The middle of the footprint: the anchor corner plus half its size.
         let pos = Vec2::new(
             Fx::from_i64(i64::from(anchor.x)) + Fx::from_ratio(i64::from(width), 2),
             Fx::from_i64(i64::from(anchor.y)) + Fx::from_ratio(i64::from(height), 2),
         );
+        // The only step that can still refuse (the entity limit); it comes
+        // before anything is claimed.
         let id = self.spawn_with(kind, pos, owner, Behavior::Idle, birth)?;
-        for cell in footprint_cells(anchor, footprint) {
-            let index = self.occupancy.index(cell)?;
+        for index in indices {
             let claimed = self.occupancy.claim(index, id.index());
             debug_assert!(claimed, "the cells were free a moment ago");
         }

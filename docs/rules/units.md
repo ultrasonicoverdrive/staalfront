@@ -23,8 +23,8 @@ demo, WP1.6.)
 
 `UnitDefs::load(config_dir, assets_dir)` reads the three files and checks them;
 `UnitDefs::embedded()` is the same data compiled in. `sf_sim` does not depend on
-`sf_data`: the game and the headless runner copy the fields the rules read into a
-`sf_sim::UnitTable` (see "Spawning").
+`sf_data`: the small crate `sf_bridge` copies the fields the rules read into a
+`sf_sim::UnitTable` (see "Spawning"), for both the game and the headless runner.
 
 ## Units of measure
 
@@ -191,7 +191,7 @@ the checks after parsing):
 
 `sf_sim` knows a unit kind only through its **unit table**, `sf_sim::UnitTable`: for each
 kind number its hit points, movement class, speed per tick, turn rate, size and (for a
-structure) footprint. The caller builds it from `UnitDefs::sim_units()` and hands it to
+structure) footprint. `sf_bridge::unit_table(&UnitDefs)` builds it from `UnitDefs::sim_units()` and the caller hands it to
 the world once, right after the world is made (`World::with_units`, as the terrain is
 handed over); a world cannot take it after it has started. The table is fixed for the
 whole game and a digest of it is in the checksum.
@@ -277,7 +277,10 @@ WP3.2: `crates/sf_sim/tests/units.rs` (stats at birth, footprints, refusals, per
 legacy commands, checksum), `assets/scenarios/units_spawn.ron` with
 `tools/sf_headless/tests/units.rs` (every role of the shipped file spawned on the 256 x 256
 playfield, hit points, footprint occupancy and refusals asserted, the checksum pinned on
-Linux and Windows by CI), and in `sf_game` the roster (`roster.rs`), the sandbox
+Linux and Windows by CI; it reads a **frozen copy** of the definitions,
+`assets/scenarios/units_spawn_defs/`, so a balance change does not force a re-pin),
+`tools/sf_headless/tests/shipped_roles.rs` (every role of the shipped files placed
+automatically and accepted, no checksum), and in `sf_game` the roster (`roster.rs`), the sandbox
 (`sandbox.rs`) and the scenes (`runner.rs`).
 
 WP3.1:

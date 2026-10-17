@@ -25,6 +25,8 @@ path = "src/main.rs"
 sf_math = { path = "../../crates/sf_math", features = ["render"] }
 sf_sim = { path = "../../crates/sf_sim" }
 sf_data = { path = "../../crates/sf_data" }
+# The copy of the unit definitions into the simulation's unit table (WP3.2), shared with sf_headless.
+sf_bridge = { path = "../../crates/sf_bridge" }
 sf_ai = { path = "../../crates/sf_ai" }
 sf_engine = { path = "../../crates/sf_engine" }
 sf_render = { path = "../../crates/sf_render" }

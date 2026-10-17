@@ -1,9 +1,10 @@
-//! The `units_spawn` scenario (WP3.2): every role of the unit definitions is
+//! The `units_spawn` scenario (WP3.2): every role of its frozen unit definitions is
 //! spawned on the 256 by 256 cell playfield, and the hit points, the footprints
 //! in the occupancy grid and the refusals are asserted.
 //!
-//! The roles are those of `assets/config/unit_defs.ron` (43 of them: 19
-//! structures, 22 mobile units and 2 objects); the cells are those the
+//! The roles are those of the frozen copy in `assets/scenarios/units_spawn_defs/`
+//! (43 of them: 19 structures, 22 mobile units and 2 objects, as the shipped file
+//! had them in WP3.2; `shipped_roles.rs` covers the shipped file itself); the cells are those the
 //! scenario file names, on the terrain layer `assets/maps/playfield256`.
 
 mod common;
@@ -12,7 +13,7 @@ use std::collections::BTreeSet;
 
 use common::scenario_path;
 use sf_data::units::UnitDefs;
-use sf_headless::scenario::{Scenario, ScenarioError, sim_unit_table};
+use sf_headless::scenario::{Scenario, ScenarioError};
 use sf_math::{Fx, Vec2};
 use sf_sim::{Cell, EntityId, Footprint, Kind, PlayerId, StepReport, UnitClass, World};
 
@@ -27,8 +28,11 @@ fn run(ticks: u64) -> (World, Vec<StepReport>) {
     (world, reports)
 }
 
+/// The frozen definitions the scenario names (`unit_defs`), not the shipped
+/// ones: the scenario's checksum must not move with a balance change.
 fn defs() -> UnitDefs {
-    UnitDefs::embedded()
+    let scenarios = scenario_path("");
+    UnitDefs::load(&scenarios.join("units_spawn_defs"), &scenarios.join("..")).unwrap()
 }
 
 /// Slot of the entity of `kind` (the scenario spawns each role once).
@@ -47,7 +51,7 @@ fn id_of_kind(world: &World, kind: u16) -> EntityId {
 fn the_scenario_is_the_playfield_with_the_shipped_definitions() {
     let s = scenario();
     assert_eq!((s.map.width, s.map.height), (256, 256));
-    assert!(s.unit_defs);
+    assert_eq!(s.unit_defs.as_deref(), Some("units_spawn_defs"));
     assert!(s.terrain.as_ref().unwrap().has_layer());
     let world = s.build_world().unwrap();
     assert_eq!(world.unit_table().len(), defs().units().len());
@@ -62,8 +66,8 @@ fn every_role_of_the_definitions_is_spawned_once_with_its_hit_points() {
     let kinds_defined: BTreeSet<u16> = defs.units().iter().map(|u| u.kind).collect();
     assert_eq!(
         kinds_present, kinds_defined,
-        "units_spawn.ron must spawn every role of unit_defs.ron: add the new one \
-         and pin the new checksum in units_spawn.expected"
+        "units_spawn.ron must spawn every role of its frozen definitions \
+         (assets/scenarios/units_spawn_defs)"
     );
     assert_eq!(world.len(), defs.units().len());
     for view in world.snapshot().iter() {
@@ -78,7 +82,7 @@ fn every_role_of_the_definitions_is_spawned_once_with_its_hit_points() {
 #[test]
 fn the_sim_has_the_stats_of_the_converted_roles() {
     let (world, _) = run(1);
-    let table = sim_unit_table(&defs()).unwrap();
+    let table = sf_bridge::unit_table(&defs()).unwrap();
     assert_eq!(world.unit_table(), &table);
     let defs = defs();
     for role in defs.sim_units() {
@@ -319,10 +323,36 @@ fn the_unit_actions_need_the_definitions() {
         problems.iter().all(|p| p.contains("unit_defs")),
         "{problems:?}"
     );
-    // With the flag it loads, and the cells must be on the map.
-    let ok = text.replace("seed: 1,", "seed: 1, unit_defs: true,");
+    // With the name it parses, but the files are read by Scenario::load only.
+    let ok = text.replace(
+        "seed: 1,",
+        "seed: 1, unit_defs: Some(\"units_spawn_defs\"),",
+    );
     let s = Scenario::from_ron_str(&ok).unwrap();
-    assert!(s.build_world().is_ok());
+    let Err(ScenarioError::Invalid { problems, .. }) = s.build_world() else {
+        panic!("the definitions cannot be read from text");
+    };
+    assert!(problems[0].contains("Scenario::load"), "{problems:?}");
+    // The cells must be on the map, and the name is one directory.
     let outside = ok.replace("cell: (1, 1)", "cell: (8, 1)");
     assert!(Scenario::from_ron_str(&outside).is_err());
+    for bad in ["a/b", "..", "C:x"] {
+        let t = text.replace("seed: 1,", &format!("seed: 1, unit_defs: Some(\"{bad}\"),"));
+        assert!(Scenario::from_ron_str(&t).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_missing_definitions_directory_is_an_error_naming_it() {
+    let dir = std::env::temp_dir().join(format!("sf_units_defs_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("s.ron");
+    std::fs::write(
+        &file,
+        "Scenario(seed: 1, ticks: 5, map: (width: 8, height: 8), unit_defs: Some(\"nope\"))",
+    )
+    .unwrap();
+    let err = Scenario::load(&file).unwrap_err().to_string();
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(err.contains("unit_defs \"nope\""), "{err}");
 }

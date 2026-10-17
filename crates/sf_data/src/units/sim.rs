@@ -16,9 +16,8 @@
 //!
 //! The types live here, in `sf_data`, and `sf_sim` does not depend on this
 //! crate (WP3.2 kept it that way, as for the terrain): `sf_sim` has its own
-//! `UnitStats` with the few fields its rules read, and the consumers
-//! (`sf_game::playfield::sim_unit_table`, `sf_headless::scenario::sim_unit_table`)
-//! copy a `SimUnitDef` into one. Nothing about these types is serialized, so
+//! `UnitStats` with the few fields its rules read, and the small crate
+//! `sf_bridge` copies a `SimUnitDef` into one (for `sf_game` and `sf_headless`). Nothing about these types is serialized, so
 //! moving them later changes no file.
 
 use sf_math::Fx;
