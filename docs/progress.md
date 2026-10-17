@@ -36,7 +36,7 @@ Status: all work packages done; M0 waits for the benchmark run on the laptop.
 - WP1.11 egui debug panels: done (PR #13, 76ea42c)
 - WP1.12 `sf_ui` (quads, nine-slice, text, buttons, anchors, minimap): done (PR #14, 58d3eb9)
 - WP1.10 glTF models (loader, axes, part hierarchy, per-part merge, instancing hook): done (PR #22, 07b4cb7)
-- WP1.14 `sf_demo` (engine demo, 1 km map at B12 scale, `--bench` without vsync): done (this PR)
+- WP1.14 `sf_demo` (engine demo, 1 km map at B12 scale, `--bench` without vsync): done (PR #30)
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
 
@@ -48,7 +48,7 @@ M0 status:
 - Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
   2026-10-15 (main at 8f64071). Judged before the zoom-out hitches (below) were
   looked at; to be re-judged with the demo, together with the benchmark.
-- CI green on two OSes including screenshot tests: met (PR #29 adds the demo
+- CI green on two OSes including screenshot tests: met (PR #30 adds the demo
   smoke test with screenshots on lavapipe and WARP).
 - egui panels show frame time, draw calls and checksum live: met (F1, WP1.11).
 - p99 frame time <= 16.7 ms with 5,000 units in view over the whole camera
