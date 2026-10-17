@@ -93,7 +93,7 @@ F1-M10,MSG_08,OPERATIONS,Archive erased. Regional command centre destroyed. No r
 F2-M01,MSG_01,DRAVEC,"Tracks lead north, but the snow has hidden their numbers."
 F2-M01,MSG_02,COMMANDER SAVA,Establish a foothold and clear the junction. Expect a second group to emerge once we commit.
 F2-M01,MSG_03,COMMANDER SAVA,"Power and a barracks. That is a foothold. Now the junction: their outpost sits on the north road, four structures, light guard. Take it down."
-F2-M01,MSG_04,DRAVEC,"Movement at the old service tunnel, north-west, ninety metres from your yard! Raiders, mixed kit, no Compact markings. They are coming for the base."
+F2-M01,MSG_04,DRAVEC,"Movement at the old service tunnel, ninety metres north of your yard! Raiders, mixed kit, no Compact markings. They are coming for the base."
 F2-M01,MSG_05,DRAVEC,"Outpost is rubble. The junction is ours, but someone used that tunnel to wait for us."
 F2-M01,MSG_06,COMMANDER SAVA,"Raiders broken, junction held. Report everything you found in that tunnel to Lenka. Nothing about this ambush fits a border skirmish."
 F2-M01,MSG_07,COMMANDER SAVA,Harvester lost. Without ore we cannot replace what we lose. Protect the next one.
