@@ -5,19 +5,23 @@ Draft date: 2026-10-17
 
 FADE IN:
 
-INT. FORWARD COMMAND POST - DAWN
+INT. COASTAL BUNKER - NIGHT
 
-[[AMBIENCE: radio hiss, distant engines, wind against canvas]]
-[[MUSIC: restrained military tension]]
+[[AMBIENCE: surf against concrete, wind in a gun slit, a map case snapping shut]]
+[[MUSIC: low, restrained tension]]
 
-A map of the operational area is spread across a table. CAPTAIN ELIAN and MIRA stand over it.
+A chart of the coast is spread across an ammunition crate. CAPTAIN ELIAN and MIRA stand over it.
 
 MIRA
 (serious)
 Their sensor array has mapped our patrol routes for weeks. Every move we make is being anticipated.
 
+CAPTAIN ELIAN
+(neutral)
+Then we stop being anticipated.
+
 [[SHOT: map]]
-[[MAP: operational area, player start, objective route, enemy approach]]
+[[MAP: commando start in the south-west, drainage cut to the station walls, three masts inside, service road north, diversion force under trees in the north-west, signal ridge marker]]
 
 CAPTAIN ELIAN
 (measured)
@@ -26,6 +30,22 @@ A small team can cross the drainage cut unseen. The main force will draw their a
 MIRA
 (firm)
 Destroy the array and its backup generator. If either remains, the system will come back online.
+
+CAPTAIN ELIAN
+(short)
+Seven commandos. No base, no money, no replacements. The diversion goes in once, when your scout stands on the ridge marker.
+
+MIRA
+(dry)
+A diversion that goes in before the culvert is open buys you nothing but a quieter funeral. Pick the moment.
+
+CAPTAIN ELIAN
+(pointing at map)
+Sniper takes the culvert guards from range. Engineers follow. Charges on all three masts.
+
+MIRA
+(analytical)
+The generator is not on the photographs, Captain. We know it exists because the array has never once gone dark. I cannot tell you where it is until the masts stop drawing power.
 
 [[SFX: radio click]]
 [[MUSIC: stop]]

@@ -1,6 +1,6 @@
 # Production plan — Staalfront campaigns
 
-Scope: two campaigns × 10 missions, 20 briefings, 7 voiced characters + system voice, 20 new maps. This plan assumes a classic-RTS engine with scripted triggers (zones, teams, timers, variables) and a map editor. Engine-specific syntax is out of scope; `CONVENTIONS.md` defines the document contract that engine data must be generated from.
+Scope: two campaigns × 10 missions, 20 briefings, 7 voiced characters + system voice, 20 new maps. Target engine: Staalfront's own engine (B1) with the trigger model from WP10.1. The mission documents use the primitives of that model (zones, points, teams, timers, variables, messages); `CONVENTIONS.md` defines the document contract that engine data is generated from. Where a mission needs a primitive WP10.1 does not provide, §7 lists the fallback.
 
 ## 0. Current state
 
@@ -32,7 +32,7 @@ Rules:
 
 | Phase | Missions | Why this order |
 |---|---|---|
-| P1 Vertical slice | F1-M01, F1-M03, F2-M02 | One of each core type: base-building tutorial, escort with route switch, infiltration with inspection/penalty. Proves the trigger model, escort AI, alarm mechanic and civilian-penalty logic. |
+| P1 Vertical slice | F1-M01, F1-M03, F2-M02 | Deliberately not "the first three campaign missions" (F1-M01–M03): those are two conquest-style maps and one infiltration, which leaves escort AI and the inspection/penalty logic untested until P2. This set covers one of each core type: base-building tutorial, escort with route switch, infiltration with inspection/penalty — and proves the trigger model, escort AI, alarm mechanic and civilian-penalty logic in the first slice. |
 | P2 Core systems | F1-M04, F2-M04, F1-M06, F2-M03 | Timed defence, bridge demolition/repair, flood stages, ferry repair. Everything timer/terrain-state related. |
 | P3 Mid-campaign | F1-M02, F1-M05, F1-M07, F2-M05, F2-M06, F2-M07 | Commando and deception missions; reuse P1/P2 systems. |
 | P4 Late campaign | F1-M08, F1-M09, F2-M08, F2-M09 | Large maps, waves, reserves, artillery scripting. |
@@ -74,14 +74,13 @@ Estimated effort per mission (one designer + one scripter, excluding art): P1 mi
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Engine has no terrain-state triggers (flood, scuttle, bridge) | F1-M06, F2-M04, F2-M06, F2-M08 twists cannot be built as written | Decide in P1; fallback is blocking structures. |
+| WP10.1 has no terrain-state triggers (flood, scuttle, bridge) | F1-M06, F2-M04, F2-M06, F2-M08 twists cannot be built as written | Decide in P1; fallback is blocking structures. |
 | Escort AI makes convoys unplayable | F1-M03, F2-M03, F2-M07, F2-M08 | Convoy units move only on player order ("follow" mode) rather than scripted paths. Decide in P1. |
-| Three-player final (F2-M10) with a hostile-to-all Hub | engine may not support a non-aligned third AI | Alternative: automated_guns as player-neutral structures with "fire at everyone" flag, no third player. |
+| Three-player final (F2-M10) with a hostile-to-all Hub | WP10.1 may not support a non-aligned third AI | Alternative: automated_guns as player-neutral structures with "fire at everyone" flag, no third player. |
 | Message count (≈120 lines) outgrows voice budget | polish | Operations lines can be text-only. |
 | Decoy mechanic depends on enemy AI targeting rules | F1-M05 | Make decoys explicitly high-priority targets for AI instead of relying on visual deception. |
 
 ## 8. Open decisions
 
-- Target engine and its trigger model (determines §3 and §7 fallbacks).
 - Whether surviving units carry over between missions (docs assume no).
 - Localisation: English is the source; Dutch is the first translation if needed.

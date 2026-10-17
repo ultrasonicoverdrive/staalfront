@@ -1,5 +1,5 @@
 mission,code,speaker,line
-F1-M01,MSG_01,OPERATIONS OFFICER MIRA,Scouts report a small hostile camp around the junction. No heavy armour yet.
+F1-M01,MSG_01,MIRA,Scouts report a small hostile camp around the junction. No heavy armour yet.
 F1-M01,MSG_02,CAPTAIN ELIAN,"Then we move before they can reinforce it. Establish a base, secure the junction, and keep the relay road open."
 F1-M01,MSG_03,CAPTAIN ELIAN,"Power first, then the barracks. Put the refinery next to the ore field on the ridge and get the harvester working."
 F1-M01,MSG_04,MIRA,"Base is up. The junction camp is two hundred metres east of your gate. Six rifles, one light tank, no entrenchments."
@@ -90,11 +90,11 @@ F1-M10,MSG_05,MIRA,Three minutes on the wipe. Do not shell the archive. Everythi
 F1-M10,MSG_06,CAPTAIN ELIAN,The offensive is moving. Everything you have at the south gate. The archive can wait six minutes; the base cannot.
 F1-M10,MSG_07,MIRA,"Data room is ours and the wipe is stopped. Elian, these deployment orders were not written here. The routing header is the private network from the relay logs, and the same header is on orders addressed to our side."
 F1-M10,MSG_08,OPERATIONS,Archive erased. Regional command centre destroyed. No records recovered.
-F2-M01,MSG_01,LIEUTENANT PETROV,"Tracks lead north, but the snow has hidden their numbers."
+F2-M01,MSG_01,PETROV,"Tracks lead north, but the snow has hidden their numbers."
 F2-M01,MSG_02,COMMANDER SAVA,Establish a foothold and clear the junction. Expect a second group to emerge once we commit.
 F2-M01,MSG_03,COMMANDER SAVA,"Power and a barracks. That is a foothold. Now the junction: their outpost sits on the north road, four structures, light guard. Take it down."
-F2-M01,MSG_04,LIEUTENANT PETROV,"Movement at the old service tunnel, north-west, two hundred metres from your yard! Raiders, mixed kit, no Compact markings. They are coming for the base."
-F2-M01,MSG_05,LIEUTENANT PETROV,"Outpost is rubble. The junction is ours, but someone used that tunnel to wait for us."
+F2-M01,MSG_04,PETROV,"Movement at the old service tunnel, north-west, two hundred metres from your yard! Raiders, mixed kit, no Compact markings. They are coming for the base."
+F2-M01,MSG_05,PETROV,"Outpost is rubble. The junction is ours, but someone used that tunnel to wait for us."
 F2-M01,MSG_06,COMMANDER SAVA,"Raiders broken, junction held. Report everything you found in that tunnel to Lenka. Nothing about this ambush fits a border skirmish."
 F2-M01,MSG_07,COMMANDER SAVA,Harvester lost. Without ore we cannot replace what we lose. Protect the next one.
 F2-M01,MSG_08,COMMANDER SAVA,The yard is gone and the column is scattered. We pull back to the pass. The junction stays theirs.
@@ -107,12 +107,12 @@ F2-M02,MSG_06,COMMANDER SAVA,"You fired on the farm post. Civilians are dead for
 F2-M02,MSG_07,LENKA,Rubble does not tell us who sent the order. We needed that post intact. The source is lost; command is recalling you.
 F2-M02,MSG_08,COMMANDER SAVA,"The mill transmitter is silent and the volunteers are alive. Lenka has the origin codes. Somebody is writing orders for both armies, and it is not us."
 F2-M03,MSG_01,COMMANDER SAVA,We have one transport and a small escort. There is no time to bring the full column around the lake.
-F2-M03,MSG_02,LENKA,"Open the shoreline route, repair the ferry engine, and escort everyone to the evacuation point."
-F2-M03,MSG_03,LIEUTENANT PETROV,"Landing is clear. Ferry is casting off from the north pier — eight families aboard, four minutes across. Keep the bank clear until she docks."
-F2-M03,MSG_04,LIEUTENANT PETROV,"She's stopped. Engine's dead, sixty metres out, drifting. The crew says they can't fix it alone. Get an engineer onto the ferry — and the Compact has seen her stop. Hold that shoreline, three minutes, whatever it costs."
-F2-M03,MSG_05,LIEUTENANT PETROV,Ninety seconds. They are pushing the tree line on the east road. Do not let a tank reach the water.
-F2-M03,MSG_06,LIEUTENANT PETROV,"Engine's turning. She's docking. Get those people into the trucks and out of here — five to a truck, two runs or two trucks."
-F2-M03,MSG_07,LIEUTENANT PETROV,"That's everyone we could bring. Some of them stayed on the bank. Write it down, Commander. Somebody should."
+F2-M03,MSG_02,COMMANDER SAVA,"Open the shoreline route, repair the ferry engine, and escort everyone to the evacuation point."
+F2-M03,MSG_03,PETROV,"Landing is clear. Ferry is casting off from the north pier — eight families aboard, four minutes across. Keep the bank clear until she docks."
+F2-M03,MSG_04,PETROV,"She's stopped. Engine's dead, sixty metres out, drifting. The crew says they can't fix it alone. Get an engineer onto the ferry — and the Compact has seen her stop. Hold that shoreline, three minutes, whatever it costs."
+F2-M03,MSG_05,PETROV,Ninety seconds. They are pushing the tree line on the east road. Do not let a tank reach the water.
+F2-M03,MSG_06,PETROV,"Engine's turning. She's docking. Get those people into the trucks and out of here — five to a truck, two runs or two trucks."
+F2-M03,MSG_07,PETROV,"That's everyone we could bring. Some of them stayed on the bank. Write it down, Commander. Somebody should."
 F2-M03,MSG_08,COMMANDER SAVA,The ferry is lost with the families aboard. There is no second crossing. Withdraw the escort.
 F2-M04,MSG_01,ENGINEER KOVAC,"I can bring it down cleanly, but I need time and an observation post to call the charges."
 F2-M04,MSG_02,COMMANDER SAVA,"Hold the riverbank, secure the hill, and protect the engineers until the bridge is destroyed."

@@ -2,11 +2,13 @@
 
 Canonical role names. Mission documents, team tables and triggers must only use names from this file. Stats are design targets for first implementation (tune in playtest).
 
+**Units of measure**: distances and ranges are in cells (1 cell = 4 m, per B12). **Speed is in cells per 10 s of game time**, so speed 4 = 1.6 m/s (infantry walking pace), speed 6 = 2.4 m/s, speed 7 = 2.8 m/s. These are relative gameplay values on a compressed map scale, not realistic vehicle speeds. HP is abstract. Cost is in credits.
+
 ## Shared structures
 
 | Role | Cost | Power | HP | Notes |
 |---|---:|---:|---:|---|
-| construction_yard | — | 0 | 1500 | Base anchor. Build radius 8 cells. |
+| construction_center | — | 0 | 1500 | Base anchor. Build radius 8 cells (32 m). |
 | power_plant | 300 | +100 | 600 | |
 | refinery | 1200 | −30 | 900 | Comes with 1 harvester. |
 | barracks | 400 | −20 | 700 | Infantry. |
@@ -20,7 +22,7 @@ Canonical role names. Mission documents, team tables and triggers must only use 
 
 ## Shared units
 
-| Role | Cost | HP | Speed | Weapon | Notes |
+| Role | Cost | HP | Speed (cells/10 s) | Weapon | Notes |
 |---|---:|---:|---:|---|---|
 | harvester | 1100 | 800 | 4 | — | Collects ore. |
 | rifleman | 100 | 50 | 4 | rifle, range 4 | Baseline infantry. |

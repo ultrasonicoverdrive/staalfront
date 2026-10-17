@@ -43,7 +43,7 @@
 ## LENKA
 - Faction: Veyran Directorate
 - Role in the story: Intelligence officer investigating forged orders and hidden funding.
-- Appears in missions: F2-M02, F2-M05, F2-M07, F2-M09, F2-M10
+- Appears in missions: F2-M02, F2-M05, F2-M06 (one radio line), F2-M07, F2-M08, F2-M09, F2-M10
 - Look: late 20s, slim, dark field coat, paper files in a waterproof sleeve.
 - Poses/emotions needed: analytical, wary, determined, alarmed.
 - Voice: mid-high, clear, quick, restrained.
@@ -83,5 +83,5 @@
 ## OPERATIONS (system voice)
 - Faction: both (neutral UI voice)
 - Role in the story: Objective updates and timer warnings only; never story content.
-- Appears in missions: all
+- Appears in missions: all (name: OPERATIONS)
 - Voice: neutral, flat, radio-filtered. One actor, two short lines per mission at most.

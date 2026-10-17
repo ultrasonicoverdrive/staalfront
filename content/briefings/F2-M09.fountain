@@ -5,27 +5,41 @@ Draft date: 2026-10-17
 
 FADE IN:
 
-INT. MOUNTAIN OPERATIONS ROOM - DAWN
+INT. FORWARD COMMAND POST, RAILWAY CUTTING - NIGHT
 
-[[AMBIENCE: radio hiss, distant engines, wind against canvas]]
-[[MUSIC: restrained military tension]]
+[[AMBIENCE: distant artillery, rail wagons creaking, radar sweep ticking]]
+[[MUSIC: heavy, mechanical tension]]
 
-A map of the operational area is spread across a table. CAPTAIN ELIAN and MIRA stand over it.
+An aerial sketch of the command complex is pinned to a wagon wall. COMMANDER SAVA, LENKA and PETROV stand over it. A siege gun is being cleaned outside.
 
 LENKA
-(serious)
+(analytical)
 The command complex is coordinating unmanned artillery across the whole front. The uplink is its weak point.
-
-[[SHOT: map]]
-[[MAP: operational area, player start, objective route, enemy approach]]
 
 COMMANDER SAVA
 (measured)
 Destroying the main building first will leave the batteries active. We must cut their eyes and power.
 
+[[SHOT: map]]
+[[MAP: player base in the south, east and west underpasses, three power relays west, north and east, uplink on the ridge covered by advanced defences, central compound with west gate, artillery pits around the ring]]
+
+PETROV
+Three relays. West is nearest, past the underpass; north runs the top of the map; east is the long side. Siege guns outrange their towers at every one. Waves through the underpasses every four minutes.
+
+COMMANDER SAVA
+(clipped)
+The risk is the ridge. Once the relays are dark, every gun in that ring is on the uplink's power and the slope is covered. We hold the ridge foot with armour and let the siege guns do the work from range.
+
+LENKA
+Command says the batteries are Compact crews. We have watched the pits for two days. Nobody has walked to a gun. That is a clue, not proof; I want the compound's files before I call it either.
+
 PETROV
 (firm)
 Disable the power relays, destroy the uplink, then take the central compound before the barrage begins.
+
+COMMANDER SAVA
+(quieter)
+And if the complex has a reserve we have not seen, we will know by how fast it answers. Count the minutes.
 
 [[SFX: radio click]]
 [[MUSIC: stop]]
