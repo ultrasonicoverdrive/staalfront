@@ -305,11 +305,16 @@ fn grid_and_lod_tint_change_only_the_terrain_and_switch_off_cleanly() {
 #[test]
 fn grid_opacity_fades_with_the_camera_distance() {
     let a = DebugView::grid_alpha_for_distance;
+    // The fade distances follow the cell size: 40 and 140 cells.
+    let cell = f64::from(sf_math::render_bridge::METRES_PER_CELL);
+    let (full, gone) = (40.0 * cell, 140.0 * cell);
+    assert_eq!((full, gone), (160.0, 560.0), "at the 4 m cell of B12");
     assert_eq!(a(12.0), 1.0, "closest zoom");
-    assert_eq!(a(160.0), 1.0);
+    assert_eq!(a(full), 1.0);
+    assert_eq!(a(gone), 0.0);
     assert_eq!(a(1100.0), 0.0, "the 1,024 m map in view");
     let mut last = 1.0;
-    for d in (160..=560).step_by(20) {
+    for d in (full as i32..=gone as i32).step_by(20) {
         let v = a(f64::from(d));
         assert!(v <= last, "fades monotonically at {d} m");
         last = v;

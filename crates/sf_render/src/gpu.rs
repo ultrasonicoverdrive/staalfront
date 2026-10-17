@@ -36,6 +36,12 @@ pub struct GpuOptions {
     pub force_fallback: bool,
     /// How frames reach the window (ignored without one).
     pub present: Present,
+    /// Let a window frame be copied out for screenshots
+    /// ([`crate::Renderer::capture_next_frame`]). Off by default: the extra
+    /// surface usage can change how a driver allocates the swap chain, so a
+    /// benchmark leaves it off and measures the normal surface (ignored
+    /// without a window; the offscreen target can always be captured).
+    pub capture: bool,
 }
 
 /// How a window presents its frames.
@@ -84,6 +90,7 @@ impl Default for GpuOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback: false,
             present: Present::Vsync,
+            capture: false,
         }
     }
 }
@@ -110,6 +117,7 @@ impl GpuOptions {
                 .unwrap_or(wgpu::PowerPreference::HighPerformance),
             force_fallback: false,
             present: Present::Vsync,
+            capture: false,
         }
     }
 
@@ -121,6 +129,7 @@ impl GpuOptions {
             power_preference: wgpu::PowerPreference::LowPower,
             force_fallback: true,
             present: Present::Vsync,
+            capture: false,
         }
     }
 }

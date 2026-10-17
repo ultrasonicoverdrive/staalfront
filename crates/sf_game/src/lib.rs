@@ -26,10 +26,11 @@
 //! **Scale (B12).** The sim counts 4 m cells; the map handed to the sim is
 //! `Map::size_in_cells()` of a terrain with four 1 m samples per cell side.
 //! The camera, the instancer, the minimap and the sound listener work in
-//! metres, and the one place where the sim's cells become metres is
-//! `Motion::from_fixed` (`sf_math::CELL_METRES`). The default map is 256 x 256
-//! cells = 1,024 m (`--map-cells n` for a smaller one, `--map <dir>` for a
-//! map directory).
+//! metres, and cells become metres only through the helpers of
+//! `sf_math::render_bridge` (`sf_math::CELL_METRES`): the units in
+//! `Motion::from_fixed` and the minimap dots in `hud.rs` both use
+//! `vec2_cells_to_metres`. The default map is 256 x 256 cells = 1,024 m
+//! (`--map-cells n` for a smaller one, `--map <dir>` for a map directory).
 //!
 //! **Units (WP1.6).** An `sf_sim` world with `--units N` wanderers is stepped
 //! by the engine's fixed 20 Hz tick and drawn instanced on top of the

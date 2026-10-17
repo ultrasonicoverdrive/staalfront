@@ -41,28 +41,52 @@ Display > Graphics, or the NVIDIA control panel), and **close other GPU-heavy
 apps** (browsers with video, games, screen recorders). Do not touch the mouse
 or keyboard during the flight; the demo ignores camera input while it runs.
 
-```sh
+In PowerShell, from your clone (the `!` in `C:\Users\Tijmen!\staalfront` is
+fine in PowerShell; in cmd it is fine too unless delayed expansion is on):
+
+```powershell
+cd C:\Users\Tijmen!\staalfront
 cargo run --release -p sf_demo -- --bench
 ```
 
 It opens in real fullscreen at 1920 x 1080 without vsync, flies the path, writes
-**`bench.json` in the folder you ran the command from** (or give
-`--out C:\path\bench.json`) and quits. It prints a one-line summary and notes
-(for example if vsync could not be turned off or the resolution is not 1080p).
+**`bench.json` in the folder you ran the command from** (the shell's current
+folder, so `C:\Users\Tijmen!\staalfront\bench.json` after the commands above;
+`cargo run` does not change it) and quits. To put it somewhere else give
+`--out`, for example `--out C:\Users\Tijmen!\bench.json`. It prints a one-line
+summary and notes (for example if vsync could not be turned off or the
+resolution is not 1080p).
 
 **Paste back:** the whole `bench.json` (about 600 lines) and the last lines the
 command printed (`bench: ...`). The important numbers are `frame_ms.p99`,
 `gpu_ms` (or "n/a"), `display.actual`, `present.mode`, `criterion.caveats`, and
 under `hitches` the slowest frames with the instance buffers created in them.
 
-If it does not start: `SF_GPU_TRACE=1` prints every GPU start-up step to stderr
-(set it as `$env:SF_GPU_TRACE=1` in PowerShell, `set SF_GPU_TRACE=1` in cmd), so
-a hang shows where it sits. The game window uses DX12 on Windows;
-`WGPU_BACKEND=vulkan` (or `dx12`) overrides that. Other flags: `--seconds 30`
-shorter flight, `--frames 300` fixed number of frames (smoke test), `--windowed`
-or `--resolution 1280x720` instead of 1080p fullscreen, `--present vsync` to
-measure with vsync on, `--no-reserve` to turn the instance-buffer pre-allocation
-off (follow-up 14).
+If it does not start, set `SF_GPU_TRACE` and run it again: it prints every GPU
+start-up step to stderr, so a hang shows where it sits. The game window uses
+DX12 on Windows; `WGPU_BACKEND` (`vulkan` or `dx12`) overrides that. An
+environment variable lasts for the terminal window you set it in:
+
+| | PowerShell | cmd |
+|---|---|---|
+| GPU trace | `$env:SF_GPU_TRACE=1` | `set SF_GPU_TRACE=1` |
+| Backend | `$env:WGPU_BACKEND="vulkan"` | `set WGPU_BACKEND=vulkan` |
+| Remove again | `Remove-Item Env:SF_GPU_TRACE` | `set SF_GPU_TRACE=` |
+
+```powershell
+$env:SF_GPU_TRACE=1
+$env:WGPU_BACKEND="vulkan"
+cargo run --release -p sf_demo -- --bench
+```
+
+(bash: `SF_GPU_TRACE=1 WGPU_BACKEND=vulkan cargo run --release -p sf_demo -- --bench`.)
+
+Other flags: `--seconds 30` shorter flight, `--frames 300` fixed number of
+frames (smoke test), `--windowed` or `--resolution 1280x720` instead of 1080p
+fullscreen, `--present vsync` to measure with vsync on, `--no-reserve` to turn
+the instance-buffer pre-allocation off (follow-up 14). `--shots <dir>` (three
+screenshots) is the only mode that lets the window be copied out; `--bench`
+leaves the surface as it is.
 
 ## Original Red Alert audio (optional)
 

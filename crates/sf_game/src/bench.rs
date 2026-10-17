@@ -173,8 +173,10 @@ pub struct FrameSample {
 #[derive(Default)]
 pub struct Recorder {
     pub frames: Vec<FrameSample>,
-    /// GPU frame times in the order they finished, with the index of the
-    /// frame that was being recorded when each arrived.
+    /// GPU frame times in the order they finished, each with the index (in
+    /// `frames`) of the frame it measured. The result arrives a few frames
+    /// after the frame was submitted, so this is not the frame being
+    /// recorded when it arrived.
     pub gpu: Vec<(usize, f64)>,
     /// Checksums of the sim: `(ticks run, checksum)` every 100 ticks.
     pub checksums: Vec<(u64, u64)>,
@@ -185,9 +187,17 @@ impl Recorder {
         self.frames.push(sample);
     }
 
-    pub fn push_gpu(&mut self, times: impl IntoIterator<Item = f64>) {
-        let at = self.frames.len().saturating_sub(1);
-        self.gpu.extend(times.into_iter().map(|t| (at, t)));
+    /// Add GPU times as `(frame number, ms)`. The frame number counts every
+    /// frame of the run from 0, warm-up included; the first `warmup` frames
+    /// are not measured, so their times are dropped and the others are
+    /// credited to `frames[number - warmup]`, the frame they were submitted
+    /// in, however late they arrive.
+    pub fn push_gpu(&mut self, times: impl IntoIterator<Item = (u64, f64)>, warmup: u32) {
+        for (number, ms) in times {
+            if let Some(at) = number.checked_sub(u64::from(warmup)) {
+                self.gpu.push((at as usize, ms));
+            }
+        }
     }
 }
 
@@ -765,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn gpu_times_are_attributed_to_the_frame_they_arrived_in() {
+    fn gpu_times_are_attributed_to_the_frame_they_measured() {
         let mut rec = recorder();
         rec.gpu = vec![(10, 2.0), (30, 4.0), (31, 6.0)];
         let mut f = facts(false, false);
@@ -775,5 +785,35 @@ mod tests {
         assert_eq!(r.gpu_ms.stats.as_ref().unwrap().samples, 3);
         assert_eq!(r.phases[0].gpu_ms.as_ref().unwrap().samples, 1);
         assert_eq!(r.phases[1].gpu_ms.as_ref().unwrap().samples, 2);
+    }
+
+    #[test]
+    fn a_late_gpu_time_goes_to_the_frame_it_was_submitted_in() {
+        let warmup = 5;
+        let mut rec = Recorder::default();
+        // Two phases of three measured frames; the frames are recorded one
+        // at a time and each result arrives two frames after its frame.
+        for i in 0..6 {
+            rec.push(FrameSample {
+                segment: u8::from(i >= 3),
+                ..FrameSample::default()
+            });
+        }
+        // Frame numbers count the warm-up: measured frame k is number k + 5.
+        // Frame 2 (last of phase 0) is measured at 7.0 ms, frame 3 (first of
+        // phase 1) at 1.0 ms; both arrive while frames 4 and 5 are recorded.
+        rec.push_gpu([(7, 7.0)], warmup);
+        rec.push_gpu([(8, 1.0)], warmup);
+        // A warm-up frame's time (number 3) is dropped, number 5 is frame 0.
+        rec.push_gpu([(3, 99.0), (5, 3.0)], warmup);
+        assert_eq!(rec.gpu, vec![(2, 7.0), (3, 1.0), (0, 3.0)]);
+        let mut f = facts(false, false);
+        f.gpu_enabled = true;
+        let r = Report::build(&rec, f);
+        let (p0, p1) = (&r.phases[0], &r.phases[1]);
+        assert_eq!(p0.gpu_ms.as_ref().unwrap().samples, 2);
+        assert_eq!(p0.gpu_ms.as_ref().unwrap().max, 7.0);
+        assert_eq!(p1.gpu_ms.as_ref().unwrap().samples, 1);
+        assert_eq!(p1.gpu_ms.as_ref().unwrap().max, 1.0);
     }
 }

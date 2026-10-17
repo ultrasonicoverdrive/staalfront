@@ -527,8 +527,9 @@ impl Instancer {
     }
 
     /// The most instances each mesh of the model set can ever get from the
-    /// entities now known (index = [`MeshId`]): the number of entities whose
-    /// model uses the mesh in any level or part. A frame never exceeds it, so
+    /// entities now known (index = [`MeshId`]): per entity, the most times its
+    /// model uses the mesh in one level (a model whose two parts share a mesh
+    /// counts it twice), summed over the entities. A frame never exceeds it, so
     /// a renderer can allocate that much once, at load, instead of growing
     /// the buffers on the frame a crowd first comes into view.
     pub fn mesh_capacity(&self) -> Vec<u32> {
@@ -538,14 +539,9 @@ impl Instancer {
             per_shape[usize::from(m.shape) % chains.len()] += 1;
         }
         let mut bound = vec![0_u32; self.models.mesh_count()];
-        let mut seen = Vec::new();
         for (chain, &count) in chains.iter().zip(&per_shape) {
-            seen.clear();
-            for mesh in chain.meshes() {
-                if !seen.contains(&mesh) {
-                    seen.push(mesh);
-                    bound[mesh.index()] += count;
-                }
+            for (mesh, uses) in chain.peak_mesh_uses() {
+                bound[mesh.index()] += count * uses;
             }
         }
         bound
@@ -1345,6 +1341,56 @@ mod tests {
             let ([x, z], _) = inst.motions[0].at(a);
             assert!(b.min.x <= x && x <= b.max.x && b.min.z <= z && z <= b.max.z);
         }
+    }
+
+    /// A mesh used by two parts of one model gets two instances per entity,
+    /// and `mesh_capacity` reserves for both (it used to count the mesh once
+    /// per model, follow-up to WP1.14).
+    #[test]
+    fn mesh_capacity_counts_a_mesh_once_per_use() {
+        use crate::mesh::MeshData;
+        use crate::model::{Joint, ModelBounds, ModelLods, RigPart};
+        let shared = MeshId(crate::model::BUILTIN_MESHES as u16);
+        let part = |parent| RigPart {
+            mesh: shared,
+            parent,
+            rest: Mat4::IDENTITY,
+            joint: Joint::Fixed,
+        };
+        let bounds = ModelBounds {
+            min: Vec3::splat(-1.0),
+            max: Vec3::splat(1.0),
+            reach: 2.0,
+        };
+        // Shape 0: two parts over one mesh at both levels. Shape 1: a plain
+        // single-mesh model over the same mesh.
+        let twin = ModelLods::with_parts(
+            vec![
+                vec![part(None), part(Some(0))],
+                vec![part(None), part(Some(0))],
+            ],
+            vec![50.0],
+            bounds,
+        )
+        .unwrap();
+        let single = ModelLods::single(shared);
+        let models = ModelSet::new(vec![MeshData::cube()], vec![twin, single]).unwrap();
+        let mut inst = Instancer::new(Style::embedded(), (64.0, 64.0));
+        inst.set_models(models);
+        let mut motions = Vec::new();
+        for i in 0..5 {
+            let mut m = motion(v2(8 + 4 * i, 8), v2(8 + 4 * i, 8), 0, 0);
+            m.shape = (i % 2) as u8;
+            motions.push(m);
+        }
+        inst.update_tick(motions);
+        // Three entities of shape 0 (2 uses each) and two of shape 1 (1 use).
+        let capacity = inst.mesh_capacity();
+        assert_eq!(capacity[shared.index()], 3 * 2 + 2);
+        // And a frame really draws that many, so the bound is tight.
+        let cam = camera(1.0, (32.0, 32.0), 64.0);
+        inst.build(&Frustum::from_view_proj(cam.view_proj()), 0.0, |_, _| 0.0);
+        assert_eq!(inst.mesh_instances(shared).len(), 8);
     }
 
     #[test]

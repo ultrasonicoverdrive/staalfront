@@ -348,6 +348,32 @@ impl ModelLods {
             .chain(self.parts.iter().flatten().map(|p| p.mesh))
     }
 
+    /// The most instances one entity of this model puts into each mesh's
+    /// list in a frame: per use, so a model whose two parts share a mesh
+    /// counts it twice. The levels are alternatives (one is drawn per
+    /// entity), so the largest level decides. Meshes that are never drawn
+    /// are left out.
+    pub fn peak_mesh_uses(&self) -> Vec<(MeshId, u32)> {
+        let mut peak: Vec<(MeshId, u32)> = Vec::new();
+        for level in 0..self.levels.len() {
+            let level = level as u8;
+            let parts = self.parts(level);
+            let meshes: Vec<MeshId> = if parts.is_empty() {
+                vec![self.level(level).mesh]
+            } else {
+                parts.iter().take(MAX_PARTS).map(|p| p.mesh).collect()
+            };
+            for &mesh in &meshes {
+                let uses = meshes.iter().filter(|&&m| m == mesh).count() as u32;
+                match peak.iter_mut().find(|(m, _)| *m == mesh) {
+                    Some((_, best)) => *best = (*best).max(uses),
+                    None => peak.push((mesh, uses)),
+                }
+            }
+        }
+        peak
+    }
+
     pub fn len(&self) -> usize {
         self.levels.len()
     }
