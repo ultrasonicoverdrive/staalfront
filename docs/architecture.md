@@ -25,7 +25,7 @@ fallback), `proptest` + `insta` (tests). Target platforms v1: Windows + Linux (B
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
 | `sf_ui` | Own UI: widgets, text, minimap; later sidebar, selection, menus. |
 | `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
-| `sf_cutscene` | Cartoon player and script format. The RON scene format, its loader/validator, the render-free `Scene::sample` and the Fountain importer (WP12.1), the player state machine, the wgpu renderer on top of the engine renderer's frame hook, and the `play_scene` viewer (WP12.2); `docs/cutscene-format.md`. |
+| `sf_cutscene` | Cartoon player and script format. The RON scene format, its loader/validator, the render-free `Scene::sample` and the Fountain importer (WP12.1), the player state machine, the wgpu renderer on top of the engine renderer's frame hook, the `play_scene` viewer (WP12.2), and the live preview `play_scene --watch` (WP12.6: polling file watcher, reload state machine, writer HUD); `docs/cutscene-format.md`. |
 | `sf_net` | Lockstep network (later, phase 14). |
 | `sf_game` | The game shell: a library (window loop, camera, HUD, F1 panels, the benchmark) and the development viewer binary. |
 | `tools/sf_editor` | Map and mission editor. |

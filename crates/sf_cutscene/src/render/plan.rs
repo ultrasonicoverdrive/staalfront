@@ -97,7 +97,8 @@ impl Rect {
     }
 }
 
-/// Playback information for the viewer's overlay; drawn without any text.
+/// Playback information for the viewer's overlay: the progress bar along the
+/// bottom, and (live preview, WP12.6) text panels stacked down the left edge.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Hud {
     /// `0..=1` along the scene.
@@ -105,6 +106,45 @@ pub struct Hud {
     /// Where the shots start, `0..=1`.
     pub shot_marks: Vec<f32>,
     pub paused: bool,
+    /// Text boxes, top left, first one on top. Empty = no text at all.
+    pub panels: Vec<HudPanel>,
+}
+
+/// How a panel or one of its lines looks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HudTone {
+    /// White on dark blue.
+    Normal,
+    /// Grey-blue: secondary information.
+    Dim,
+    /// Amber: something is not as intended, but the scene plays.
+    Warning,
+    /// Red: something is wrong and was not applied.
+    Error,
+}
+
+/// One line of text in a [`HudPanel`]; wrapped to the window if it is long.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HudLine {
+    pub text: String,
+    pub tone: HudTone,
+}
+
+impl HudLine {
+    pub fn new(text: impl Into<String>, tone: HudTone) -> HudLine {
+        HudLine {
+            text: text.into(),
+            tone,
+        }
+    }
+}
+
+/// A box of text over the picture (the writer's HUD, the error list). The
+/// tone sets the colour of the box; each line has a tone of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HudPanel {
+    pub tone: HudTone,
+    pub lines: Vec<HudLine>,
 }
 
 /// Where things ended up, for tests and for the caller (the screenshot test
@@ -558,7 +598,7 @@ impl FramePlan {
             None => None,
         };
         if let Some(hud) = hud {
-            draw_hud(&mut p, hud, target);
+            draw_hud(&mut p, hud, target, &mut res.text);
         }
 
         FramePlan {
@@ -665,7 +705,120 @@ fn draw_map(
     }
 }
 
-fn draw_hud(p: &mut Painter, hud: &Hud, target: (u32, u32)) {
+const PANEL_BG: [Color; 4] = [
+    Color {
+        r: 10,
+        g: 14,
+        b: 24,
+        a: 215,
+    },
+    Color {
+        r: 10,
+        g: 14,
+        b: 24,
+        a: 215,
+    },
+    Color {
+        r: 44,
+        g: 30,
+        b: 6,
+        a: 232,
+    },
+    Color {
+        r: 58,
+        g: 10,
+        b: 12,
+        a: 238,
+    },
+];
+const PANEL_TEXT: [Color; 4] = [
+    Color::rgb(255, 255, 255),
+    Color::rgb(160, 176, 204),
+    Color::rgb(255, 205, 100),
+    Color::rgb(255, 160, 150),
+];
+
+fn tone_index(t: HudTone) -> usize {
+    match t {
+        HudTone::Normal => 0,
+        HudTone::Dim => 1,
+        HudTone::Warning => 2,
+        HudTone::Error => 3,
+    }
+}
+
+/// The font size of the HUD panels for a target of this height.
+pub fn panel_font_px(target_height: f32) -> f32 {
+    (target_height * 0.026).round().clamp(12.0, 36.0)
+}
+
+/// Stack the panels down the left edge, each as wide as its longest line (at
+/// most the window), lines wrapped, and cut with a "... N more lines" when they
+/// would run into the bottom `reserved` pixels.
+fn draw_panels(
+    p: &mut Painter,
+    panels: &[HudPanel],
+    target: (u32, u32),
+    reserved: f32,
+    text: &mut TextEngine,
+) {
+    let (w, h) = (target.0 as f32, target.1 as f32);
+    let px = panel_font_px(h);
+    let line_h = (px * 1.3).round();
+    let pad = (px * 0.5).round();
+    let margin = pad;
+    let max_text_w = (w - 2.0 * margin - 2.0 * pad).max(px);
+    let mut y = margin;
+    for panel in panels {
+        let mut rows: Vec<(String, HudTone)> = Vec::new();
+        for line in &panel.lines {
+            for row in text.wrap(&line.text, px, max_text_w) {
+                rows.push((row, line.tone));
+            }
+        }
+        if rows.is_empty() {
+            continue;
+        }
+        let room = ((h - reserved - y - 2.0 * pad) / line_h).floor();
+        if room < 1.0 {
+            break;
+        }
+        let room = room as usize;
+        if rows.len() > room {
+            if room >= 2 {
+                let hidden = rows.len() - (room - 1);
+                rows.truncate(room - 1);
+                rows.push((format!("... {hidden} more lines"), HudTone::Dim));
+            } else {
+                rows.truncate(1);
+            }
+        }
+        let widest = rows
+            .iter()
+            .map(|(r, _)| text.width(r, px))
+            .fold(0.0_f32, f32::max);
+        let rect = Rect {
+            x: margin,
+            y,
+            w: (widest + 2.0 * pad).ceil().min(w - 2.0 * margin),
+            h: rows.len() as f32 * line_h + 2.0 * pad,
+        };
+        p.rounded(rect, pad * 0.6, PANEL_BG[tone_index(panel.tone)]);
+        for (i, (row, tone)) in rows.iter().enumerate() {
+            p.text(
+                text,
+                rect.x + pad,
+                rect.y + pad + i as f32 * line_h,
+                row,
+                px,
+                PANEL_TEXT[tone_index(*tone)],
+            );
+        }
+        y += rect.h + margin * 0.5;
+    }
+}
+
+fn draw_hud(p: &mut Painter, hud: &Hud, target: (u32, u32), text: &mut TextEngine) {
     let (w, h) = (target.0 as f32, target.1 as f32);
     let bar = (h * 0.008).round().max(4.0);
     p.solid(
@@ -702,6 +855,7 @@ fn draw_hud(p: &mut Painter, hud: &Hud, target: (u32, u32)) {
             Color::rgb(255, 255, 255),
         );
     }
+    draw_panels(p, &hud.panels, target, bar * 2.0, text);
     if hud.paused {
         let s = (h * 0.045).round().max(12.0);
         let (x, y) = (w - s * 2.0, s * 0.8);
@@ -1017,6 +1171,7 @@ mod tests {
             progress: 0.5,
             shot_marks: vec![0.0, 0.2, 0.5],
             paused: true,
+            panels: Vec::new(),
         };
         let mut res = Resources::new("x");
         let with = FramePlan::build(scene.stage, &state, (1280, 720), &mut res, Some(&hud));
@@ -1027,5 +1182,81 @@ mod tests {
         let fill = &with.vertices[start + 4..start + 8];
         assert_eq!(fill[0].color, [232, 176, 74, 255]);
         assert_eq!(fill[1].pos[0], 640.0);
+    }
+    fn plan_with_panels(panels: Vec<HudPanel>, target: (u32, u32)) -> (FramePlan, FramePlan) {
+        let scene = example();
+        let state = scene.sample(1000);
+        let mut res = Resources::new("x");
+        let base = Hud::default();
+        let with = Hud {
+            panels,
+            ..Hud::default()
+        };
+        (
+            FramePlan::build(scene.stage, &state, target, &mut res, Some(&with)),
+            FramePlan::build(scene.stage, &state, target, &mut res, Some(&base)),
+        )
+    }
+
+    #[test]
+    fn a_panel_adds_a_box_and_text_inside_the_window() {
+        let panel = HudPanel {
+            tone: HudTone::Error,
+            lines: vec![
+                HudLine::new("scene.ron:12:5: unknown field `colour`", HudTone::Error),
+                HudLine::new("keeping the last good version", HudTone::Dim),
+            ],
+        };
+        let (with, without) = plan_with_panels(vec![panel], (1280, 720));
+        assert!(with.vertices.len() > without.vertices.len() + 4 * 20);
+        for v in &with.vertices[without.vertices.len()..] {
+            assert!(v.pos[0] >= 0.0 && v.pos[0] <= 1280.0, "{:?}", v.pos);
+            assert!(v.pos[1] >= 0.0 && v.pos[1] <= 720.0, "{:?}", v.pos);
+        }
+        // The first quad after the bar is the box, in the error colour.
+        let first = &with.vertices[without.vertices.len()];
+        assert_eq!(first.color, [58, 10, 12, 238]);
+    }
+
+    #[test]
+    fn a_long_line_wraps_and_a_tall_panel_is_cut_to_the_window() {
+        let long = "x".repeat(400);
+        let lines = (0..200)
+            .map(|i| HudLine::new(format!("{i} {long}"), HudTone::Warning))
+            .collect();
+        let panel = HudPanel {
+            tone: HudTone::Warning,
+            lines,
+        };
+        let (with, without) = plan_with_panels(vec![panel], (800, 450));
+        let bar = (450.0_f32 * 0.008).round().max(4.0);
+        for v in &with.vertices[without.vertices.len()..] {
+            assert!(v.pos[0] >= -1.0 && v.pos[0] <= 801.0, "{:?}", v.pos);
+            assert!(
+                v.pos[1] <= 450.0 - bar * 2.0 + 1.5,
+                "stays above the progress bar: {:?}",
+                v.pos
+            );
+        }
+    }
+
+    #[test]
+    fn panels_stack_downwards_and_an_empty_one_is_skipped() {
+        let one = |t: &str| HudPanel {
+            tone: HudTone::Normal,
+            lines: vec![HudLine::new(t, HudTone::Normal)],
+        };
+        let empty = HudPanel {
+            tone: HudTone::Normal,
+            lines: vec![],
+        };
+        let (with, without) = plan_with_panels(vec![one("a"), empty, one("b")], (1280, 720));
+        let boxes: Vec<f32> = with.vertices[without.vertices.len()..]
+            .chunks(4)
+            .filter(|q| q[0].color == [10, 14, 24, 215] && q[0].kind == super::KIND_SHAPE)
+            .map(|q| q[0].pos[1])
+            .collect();
+        assert_eq!(boxes.len(), 2, "{boxes:?}");
+        assert!(boxes[1] > boxes[0]);
     }
 }

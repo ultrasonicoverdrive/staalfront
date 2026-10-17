@@ -76,6 +76,8 @@ hints), convert it (from the repo root): `cargo run -p sf_cutscene --bin fountai
 anything it cannot place). To watch it as a cartoon with placeholder figures and subtitles, in a
 window, without writing a file: `cargo run -p sf_cutscene --bin play_scene -- --fountain content/briefings/F1-M01.fountain`
 (Space pauses, Left/Right seek, N jumps to the next shot, Esc quits; §8 of the same document).
+Add `--watch` and the window reloads every time you save the file, at the same moment of the scene,
+and shows any error with its line in an overlay (§8.5; PowerShell command there).
 
 ## Checking
 

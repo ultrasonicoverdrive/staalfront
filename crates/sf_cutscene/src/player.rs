@@ -326,6 +326,32 @@ impl Player {
         }
     }
 
+    /// Swap in an edited version of the scene (live preview, WP12.6) and
+    /// **keep the playhead**: the player continues at the same time, clamped to
+    /// the new length, in the same mode (a paused scene stays paused; a scene
+    /// that had reached its end plays on if the new one is longer).
+    ///
+    /// The sound is put back like after a seek: the sink gets
+    /// [`SoundEvent::StopAll`], then the music, ambience and voice line that
+    /// belong to that time in the *new* scene (immediately on the next
+    /// [`Player::update`], or when playback continues if paused). If the new
+    /// length puts the playhead at the very end, it is the same as skipping
+    /// there.
+    pub fn replace_scene(&mut self, scene: Scene) {
+        let (mode, time) = (self.mode, self.time);
+        let mut fresh = Player::new(scene);
+        fresh.last_wall = self.last_wall;
+        // Whatever was waiting for the sink is still owed to it.
+        fresh.outbox = std::mem::take(&mut self.outbox);
+        fresh.seek(time);
+        if mode == Mode::Paused && fresh.mode == Mode::Playing {
+            // Already paused as far as the sink knows: no second `Pause`, and
+            // no `Resume` later (the pending restore replaces it).
+            fresh.mode = Mode::Paused;
+        }
+        *self = fresh;
+    }
+
     // -- time ------------------------------------------------------------
 
     /// Advance to the caller's clock `now_ms` (any monotonic millisecond
@@ -759,6 +785,123 @@ Scene(
         assert_eq!(step(&mut p, 400), vec![SoundEvent::Pause]);
         p.play();
         assert_eq!(step(&mut p, 500)[0], SoundEvent::StopAll);
+    }
+
+    fn scene_of(text: &str) -> Scene {
+        load_str(text, None).expect("scene").scene
+    }
+
+    #[test]
+    fn replacing_the_scene_keeps_the_time_and_restores_the_sound_like_a_seek() {
+        let mut p = player();
+        step(&mut p, 0);
+        step(&mut p, 300);
+        p.seek(3200);
+        step(&mut p, 300); // the restore
+        // The edited scene: a longer line, so the voice offset stays the same.
+        p.replace_scene(scene_of(&SCENE.replace("Hello.", "Hello there.")));
+        assert_eq!(p.time_ms(), 3200);
+        assert!(p.is_playing());
+        let e = step(&mut p, 400);
+        assert_eq!(e[0], SoundEvent::StopAll, "{e:?}");
+        assert!(
+            e.iter().any(|e| matches!(
+                e,
+                SoundEvent::Bed {
+                    bed: Bed::Music,
+                    ..
+                }
+            )),
+            "{e:?}"
+        );
+        assert!(
+            e.iter().any(|e| matches!(
+                e,
+                SoundEvent::Bed {
+                    bed: Bed::Ambience,
+                    ..
+                }
+            )),
+            "{e:?}"
+        );
+        assert!(
+            e.iter().any(|e| matches!(
+                e,
+                SoundEvent::Voice {
+                    offset_ms: 1200,
+                    ..
+                }
+            )),
+            "{e:?}"
+        );
+        // And it goes on from there, events once each.
+        assert!(notes(&step(&mut p, 500)).is_empty());
+    }
+
+    #[test]
+    fn replacing_with_a_shorter_scene_clamps_the_time_to_its_end() {
+        let mut p = player();
+        step(&mut p, 0);
+        p.seek(5000);
+        step(&mut p, 10);
+        p.replace_scene(scene_of(
+            r##"Scene(name: "short", timeline: (tracks: [(name: "t", events: [(at: 0, kind: Wait(duration_ms: 2000))])]))"##,
+        ));
+        assert_eq!(p.duration_ms(), 2000);
+        assert_eq!(p.time_ms(), 2000);
+        assert!(p.is_finished());
+        assert_eq!(step(&mut p, 20), vec![SoundEvent::StopAll]);
+    }
+
+    #[test]
+    fn replacing_a_scene_that_was_paused_keeps_it_paused_without_a_second_pause() {
+        let mut p = player();
+        step(&mut p, 0);
+        step(&mut p, 300);
+        p.seek(3200);
+        step(&mut p, 300);
+        p.pause();
+        assert_eq!(step(&mut p, 400), vec![SoundEvent::Pause]);
+        p.replace_scene(scene_of(&SCENE.replace("Hello.", "Hi.")));
+        assert!(p.is_paused());
+        assert_eq!(p.time_ms(), 3200);
+        assert_eq!(p.sample().time_ms, 3200, "the frame is the new scene's");
+        assert!(step(&mut p, 500).is_empty(), "no sound while paused");
+        p.play();
+        let e = step(&mut p, 600);
+        assert_eq!(e[0], SoundEvent::StopAll);
+        assert!(!e.contains(&SoundEvent::Resume), "{e:?}");
+    }
+
+    #[test]
+    fn a_scene_that_had_ended_plays_on_when_the_new_one_is_longer() {
+        let mut p = player();
+        p.skip_to_end();
+        step(&mut p, 0);
+        assert!(p.is_finished());
+        let longer = SCENE.replace(
+            "(at: 4000, kind: Music(action: Stop)),",
+            "(at: 4000, kind: Music(action: Stop)), (at: 9000, kind: Sfx(note: \"late\")),",
+        );
+        p.replace_scene(scene_of(&longer));
+        assert_eq!(p.time_ms(), 6000);
+        assert!(p.is_playing(), "the new part is there to be watched");
+        let mut heard = Vec::new();
+        for now in (1..=40).map(|k| 100 + k * 100) {
+            heard.extend(notes(&step(&mut p, now)));
+        }
+        assert_eq!(heard, ["late"]);
+        assert!(p.is_finished());
+    }
+
+    #[test]
+    fn replacing_the_scene_while_the_end_stays_the_end_stays_finished() {
+        let mut p = player();
+        p.skip_to_end();
+        step(&mut p, 0);
+        p.replace_scene(scene_of(&SCENE.replace("Hello.", "Hi.")));
+        assert!(p.is_finished());
+        assert_eq!(p.time_ms(), 6000);
     }
 
     #[test]

@@ -39,7 +39,10 @@ use crate::model::{Art, Scene};
 use crate::sample::SceneState;
 
 pub use images::{ImageStore, Picture};
-pub use plan::{FrameLayout, FramePlan, Hud, Rect, Resources, Vertex, fit_viewport, view_affine};
+pub use plan::{
+    FrameLayout, FramePlan, Hud, HudLine, HudPanel, HudTone, Rect, Resources, Vertex, fit_viewport,
+    panel_font_px, view_affine,
+};
 pub use text::{SubtitleLayout, TextEngine, layout_subtitle, subtitle_font_px};
 
 /// The shader, embedded at build time.
@@ -316,6 +319,15 @@ impl CutsceneRenderer {
     /// Pictures that were asked for and could not be loaded, with the reason.
     pub fn failed_pictures(&self) -> Vec<(&str, &str)> {
         self.res.images.failures()
+    }
+
+    /// Drop every picture (pixels and GPU copies) and every recorded failure,
+    /// so the files are read again the next time they are needed. The live
+    /// preview calls this after a scene or a picture file changed, then
+    /// [`CutsceneRenderer::preload_pictures`].
+    pub fn forget_pictures(&mut self) {
+        self.res.images.clear();
+        self.pictures.clear();
     }
 
     /// Load every picture the scene refers to now instead of when it is first

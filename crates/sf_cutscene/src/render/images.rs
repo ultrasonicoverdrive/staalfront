@@ -90,6 +90,14 @@ impl ImageStore {
             .insert(path.to_string(), Entry::Loaded(self.pictures.len() - 1));
     }
 
+    /// Forget every picture, loaded or failed, so the next [`ImageStore::get`]
+    /// reads the files again (live preview after a file changed). Earlier
+    /// [`PictureRef`]s are void afterwards.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.pictures.clear();
+    }
+
     /// The decoded picture behind a [`PictureRef`].
     pub fn picture(&self, index: usize) -> &Picture {
         &self.pictures[index]
@@ -159,6 +167,20 @@ mod tests {
         assert_eq!(s.get("a.png"), Some(r));
         assert_eq!(s.picture(r.index).pixels.len(), 8);
         assert!(s.failures().is_empty());
+    }
+
+    #[test]
+    fn clear_forgets_pictures_and_failures() {
+        let mut s = ImageStore::new("nowhere");
+        s.insert("a.png", tiny());
+        assert!(s.get("b.png").is_none());
+        s.clear();
+        assert!(s.failures().is_empty());
+        assert!(
+            s.get("a.png").is_none(),
+            "gone; asked again it is read from disk"
+        );
+        assert_eq!(s.failures().len(), 1);
     }
 
     #[test]

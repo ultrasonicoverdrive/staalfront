@@ -18,6 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
+use sf_cutscene::preview::{Applied, Preview, Source};
 use sf_cutscene::render::{CutsceneRenderer, FrameLayout, Rect};
 use sf_cutscene::{Scene, SceneState, load_file, load_str};
 use sf_render::image::{self, Rgba8};
@@ -374,5 +375,131 @@ Scene(
     );
     assert_eq!(cs.failed_pictures().len(), 1);
     assert_eq!(cs.failed_pictures()[0].0, "art/gone.png");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// WP12.6: the live preview's text over the picture, drawn for real: the red
+/// error box with the `file:line:col` message, the amber list of pictures that
+/// did not load, and the writer's HUD. The same frame without panels has none
+/// of those pixels in that corner.
+#[test]
+fn the_error_overlay_and_the_writer_hud_are_drawn_over_the_picture() {
+    use sf_cutscene::render::Hud;
+
+    let (w, h) = (1280, 720);
+    let scene = example();
+    let text = std::fs::read_to_string(repo_assets().join("scenes/example_bridge.ron")).unwrap();
+    let source = Source::Scene(PathBuf::from("scenes/f1_m01.ron"));
+    let first = source.load_text(&text, &repo_assets());
+    let mut preview = Preview::new(source.clone(), repo_assets(), first, true);
+    preview.player_mut().seek(4000);
+    let broken = text.replacen("pos:", "pos: (", 1);
+    assert_eq!(
+        preview.apply(source.load_text(&broken, &repo_assets())),
+        Applied::Rejected
+    );
+    let pictures = vec![(
+        "art/halversen/head.png".to_string(),
+        "file not found".to_string(),
+    )];
+    let panels = preview.panels(&pictures);
+    assert_eq!(panels.len(), 3, "errors, pictures, HUD");
+
+    let mut r = renderer(w, h);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), repo_assets());
+    let state = scene.sample(4000);
+    let mut frame = |panels: Vec<sf_cutscene::render::HudPanel>| {
+        let hud = Hud {
+            progress: 0.1,
+            panels,
+            ..Hud::default()
+        };
+        r.render_to_image_with(|t| cs.render(t, &scene, &state, Some(&hud)))
+            .expect("render")
+    };
+    let with = frame(panels);
+    let without = frame(Vec::new());
+    save("overlay_error.png", &with);
+
+    let corner = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 700.0,
+        h: 330.0,
+    };
+    // The error box: dark red, with light-red text (255, 160, 150) on it.
+    // Dark and reddish with a little blue in it (the placeholder figures'
+    // dark red mouths have none), (63, 34, 44) on lavapipe.
+    let red_box = |p: [u8; 4]| {
+        let (r, g, b) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
+        r > g + 15 && b > g + 3 && r > b + 8 && lum(p) < 100
+    };
+    let red_text =
+        |p: [u8; 4]| p[0] > 235 && (130..190).contains(&p[1]) && p[2] > 120 && p[2] < 190;
+    assert!(count_in(&with, &corner, red_box) > 5_000);
+    assert!(count_in(&with, &corner, red_text) > 100);
+    assert_eq!(count_in(&without, &corner, red_box), 0);
+    assert_eq!(count_in(&without, &corner, red_text), 0);
+    // The amber list and the white HUD text.
+    let amber = |p: [u8; 4]| p[0] > 235 && (190..225).contains(&p[1]) && p[2] > 70 && p[2] < 130;
+    assert!(count_in(&with, &corner, amber) > 100, "amber picture list");
+    assert!(
+        count_in(&with, &corner, |p| lum(p) > TEXT_LUM) > 100,
+        "HUD text"
+    );
+    assert_eq!(count_in(&without, &corner, amber), 0);
+}
+
+/// WP12.6: after `forget_pictures` a picture that changed on disk is read
+/// again; before it, the old pixels stay.
+#[test]
+fn a_picture_changed_on_disk_shows_after_forget_pictures() {
+    let dir = temp_dir("reload");
+    let write = |rgba: [u8; 4]| {
+        let pixels = rgba.repeat(20 * 20);
+        image::write_png(&dir.join("art/p.png"), &Rgba8::new(20, 20, pixels)).unwrap();
+    };
+    write([255, 0, 0, 255]);
+    let scene = load_str(
+        r##"Scene(name: "p", stage: (width: 640, height: 360), layers: [
+            (name: "bg", art: Rect(w: 700.0, h: 400.0, color: "#204020"), z: -5),
+            (name: "p", art: Image("art/p.png"), z: -4),
+            (name: "gone", art: Image("art/later.png"), pos: (200.0, 0.0), z: -3),
+        ])"##,
+        None,
+    )
+    .expect("scene")
+    .scene;
+    let mut r = renderer(640, 360);
+    let gpu = r.gpu();
+    let mut cs = CutsceneRenderer::new(&gpu.device, &gpu.queue, r.color_format(), &dir);
+    cs.preload_pictures(&scene);
+    let (img, _) = shoot(&mut r, &mut cs, &scene, 0);
+    assert!(near(img.pixel(320, 180), [255, 0, 0], 4));
+    assert_eq!(cs.failed_pictures().len(), 1, "art/later.png is missing");
+
+    write([0, 0, 255, 255]);
+    image::write_png(
+        &dir.join("art/later.png"),
+        &Rgba8::new(20, 20, [0, 255, 0, 255].repeat(400)),
+    )
+    .unwrap();
+    let (img, _) = shoot(&mut r, &mut cs, &scene, 0);
+    assert!(
+        near(img.pixel(320, 180), [255, 0, 0], 4),
+        "cached: still red"
+    );
+
+    cs.forget_pictures();
+    assert!(cs.failed_pictures().is_empty());
+    cs.preload_pictures(&scene);
+    let (img, _) = shoot(&mut r, &mut cs, &scene, 0);
+    assert!(
+        near(img.pixel(320, 180), [0, 0, 255], 4),
+        "read again: blue"
+    );
+    assert!(near(img.pixel(520, 180), [0, 255, 0], 4), "the new picture");
+    assert!(cs.failed_pictures().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
