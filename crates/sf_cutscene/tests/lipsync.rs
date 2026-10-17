@@ -629,10 +629,31 @@ fn the_converters_placeholder_figures_talk() {
 
 // -- the lipsync tool ----------------------------------------------------------
 
+/// One process is started at a time. A program that was just copied or written
+/// can be refused (`ETXTBSY`) on Linux when another thread forks while the file
+/// is still open for writing; taking turns avoids it.
+static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn spawn_guard() -> std::sync::MutexGuard<'static, ()> {
+    SPAWN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn run_tool(args: &[&str], path: &Path) -> (Option<i32>, String, String) {
+    run_tool_env(args, path, &[])
+}
+
+fn run_tool_env(
+    args: &[&str],
+    path: &Path,
+    envs: &[(&str, &str)],
+) -> (Option<i32>, String, String) {
+    let _turn = spawn_guard();
     let out = Command::new(env!("CARGO_BIN_EXE_lipsync"))
         .args(args)
         .env("PATH", path)
+        .envs(envs.iter().copied())
         .output()
         .expect("run lipsync");
     (
@@ -698,42 +719,40 @@ fn the_tool_reports_bad_usage_before_anything_else() {
     assert!(stdout.contains("--batch"));
 }
 
-/// A stand-in for `rhubarb` (a shell script), to test how the tool calls it:
-/// it logs its arguments and writes a fixed cue file where `-o` says.
-#[cfg(unix)]
+// The tests below run a real program as `rhubarb`: the helper binary
+// `fake_rhubarb` of this crate, copied under that name into a folder whose name
+// has a space and a `!` in it (as a Windows user folder can). It works the same
+// on every system. See `src/bin/fake_rhubarb.rs` for what it does.
+
+/// A fresh folder `.../sf_lipsync_test_<pid>_Tijmen! <name>` holding a copy of
+/// the stand-in under the name `rhubarb` (`rhubarb.exe` on Windows).
+fn fake_rhubarb_dir(name: &str) -> (PathBuf, PathBuf) {
+    let dir = temp_dir(&format!("Tijmen! {name}"));
+    let exe = dir.join(sf_cutscene::rhubarb::executable_names()[0]);
+    let _turn = spawn_guard();
+    fs::copy(env!("CARGO_BIN_EXE_fake_rhubarb"), &exe).unwrap();
+    (dir, exe)
+}
+
+fn leftover_temp_files(dir: &Path) -> Vec<String> {
+    fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".staalfront-lipsync-") || n.ends_with(".tmp"))
+        .collect()
+}
+
 #[test]
-fn the_tool_runs_rhubarb_for_one_file_and_for_a_folder() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = temp_dir("fake_rhubarb");
-    let exe = dir.join("rhubarb");
+fn the_tool_runs_rhubarb_for_one_file_in_a_folder_with_spaces_and_a_bang() {
+    let (dir, exe) = fake_rhubarb_dir("one file");
     let log = dir.join("calls.log");
-    fs::write(
-        &exe,
-        format!(
-            "#!/bin/sh\n\
-PATH=/usr/bin:/bin\n\
-echo \"$@\" >> '{log}'\n\
-d=''\n\
-while [ $# -gt 0 ]; do\n\
-  case \"$1\" in -o) out=\"$2\"; shift;; -d) d=\"$2\"; shift;; esac\n\
-  shift\n\
-done\n\
-if [ -n \"$d\" ]; then cat \"$d\" >> '{log}'; echo >> '{log}'; fi\n\
-case \"$out\" in *.tsv) printf '0.00\\tX\\n0.50\\tD\\n1.00\\tX\\n' > \"$out\";;\n\
-*) printf '{{ \"mouthCues\": [ {{ \"start\": 0.0, \"end\": 0.5, \"value\": \"X\" }}, {{ \"start\": 0.5, \"end\": 1.0, \"value\": \"D\" }} ] }}' > \"$out\";; esac\n",
-            log = log.display()
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
-    let empty = temp_dir("fake_rhubarb_path");
-
-    // One file, text on the command line, found by --rhubarb.
-    let wav = dir.join("l017.wav");
+    let wav = dir.join("l 017.wav");
     fs::write(&wav, "RIFF").unwrap();
-    let out = dir.join("out").join("l017.json");
-    let (code, stdout, stderr) = run_tool(
+    let out_dir = dir.join("cue files");
+    let out = out_dir.join("l 017.json");
+    let empty = temp_dir("one_file_path");
+    let (code, stdout, stderr) = run_tool_env(
         &[
             wav.to_str().unwrap(),
             "--dialog",
@@ -744,34 +763,51 @@ case \"$out\" in *.tsv) printf '0.00\\tX\\n0.50\\tD\\n1.00\\tX\\n' > \"$out\";;\
             exe.to_str().unwrap(),
         ],
         &empty,
+        &[("FAKE_RHUBARB_LOG", log.to_str().unwrap())],
     );
     assert_eq!(code, Some(0), "{stdout}{stderr}");
     assert!(stdout.contains("3 cues"), "{stdout}"); // X, D and the closing rest
-    let cues = sf_cutscene::lipsync::parse_cues(&fs::read_to_string(&out).unwrap(), 5000).unwrap();
+    let text = fs::read_to_string(&out).unwrap();
+    let cues = sf_cutscene::lipsync::parse_cues(&text, 5000).unwrap();
     assert_eq!(cues.cues.shape_at(600), D);
     let calls = fs::read_to_string(&log).unwrap();
     assert!(calls.contains("-f json"), "{calls}");
     assert!(calls.contains("-d "), "{calls}");
     assert!(
-        calls.contains("Hold the line."),
+        calls.contains("dialog: Hold the line."),
         "the text reached rhubarb:\n{calls}"
     );
-    assert!(calls.contains("l017.wav"), "{calls}");
-    // The temporary text file is gone.
+    assert!(calls.contains("l 017.wav"), "{calls}");
+    // Rhubarb was asked to write a temporary file, not the target.
+    assert!(!calls.contains("l 017.json"), "{calls}");
+    // Nothing is left behind: only the cue file in its folder, and the text
+    // file made for `-d` is gone from the temporary folder.
+    assert_eq!(
+        fs::read_dir(&out_dir).unwrap().count(),
+        1,
+        "{:?}",
+        fs::read_dir(&out_dir).unwrap().collect::<Vec<_>>()
+    );
     let leftovers = fs::read_dir(std::env::temp_dir())
         .unwrap()
         .filter_map(Result::ok)
         .filter(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            name.starts_with("staalfront-lipsync-") && name.ends_with("-l017.txt")
+            name.starts_with("staalfront-lipsync-") && name.ends_with("-l 017.txt")
         })
         .count();
     assert_eq!(leftovers, 0);
+}
 
-    // Found on PATH, TSV by the file name, with a recogniser.
+#[test]
+fn the_tool_finds_rhubarb_on_the_path_and_writes_tsv_by_the_file_name() {
+    let (dir, _exe) = fake_rhubarb_dir("on path");
+    let log = dir.join("calls.log");
+    let wav = dir.join("l1.wav");
+    fs::write(&wav, "RIFF").unwrap();
     let tsv = dir.join("one.tsv");
-    let path_with_rhubarb = std::env::join_paths([dir.clone()]).unwrap();
-    let (code, stdout, stderr) = run_tool(
+    let path = std::env::join_paths([dir.clone()]).unwrap();
+    let (code, stdout, stderr) = run_tool_env(
         &[
             wav.to_str().unwrap(),
             "-o",
@@ -779,7 +815,8 @@ case \"$out\" in *.tsv) printf '0.00\\tX\\n0.50\\tD\\n1.00\\tX\\n' > \"$out\";;\
             "--recognizer",
             "phonetic",
         ],
-        Path::new(&path_with_rhubarb),
+        Path::new(&path),
+        &[("FAKE_RHUBARB_LOG", log.to_str().unwrap())],
     );
     assert_eq!(code, Some(0), "{stdout}{stderr}");
     assert!(fs::read_to_string(&tsv).unwrap().starts_with("0.00\tX"));
@@ -788,55 +825,148 @@ case \"$out\" in *.tsv) printf '0.00\\tX\\n0.50\\tD\\n1.00\\tX\\n' > \"$out\";;\
         calls.contains("-f tsv") && calls.contains("-r phonetic"),
         "{calls}"
     );
+}
 
-    // A folder: l003 and l011 (with a text), the others are ignored.
-    let voices = dir.join("voices");
+#[test]
+fn a_batch_skips_cue_files_that_exist_unless_forced() {
+    let (dir, exe) = fake_rhubarb_dir("batch");
+    let log = dir.join("calls.log");
+    let voices = dir.join("voice files");
     let texts = dir.join("texts");
     let cues_out = dir.join("cues");
-    fs::create_dir_all(&voices).unwrap();
-    fs::create_dir_all(&texts).unwrap();
+    for d in [&voices, &texts, &cues_out] {
+        fs::create_dir_all(d).unwrap();
+    }
     for n in ["l011.wav", "l003.wav", "readme.txt"] {
         fs::write(voices.join(n), "RIFF").unwrap();
     }
     fs::write(texts.join("l011.txt"), "Eleven.").unwrap();
-    fs::remove_file(&log).unwrap();
-    let (code, stdout, stderr) = run_tool(
-        &[
+    // l003 has a cue file already (say, corrected by hand).
+    let hand_made = "0.00\tX\n0.25\tA\n";
+    fs::write(cues_out.join("l003.tsv"), hand_made).unwrap();
+    let empty = temp_dir("batch_path");
+    let envs = [("FAKE_RHUBARB_LOG", log.to_str().unwrap())];
+    let batch = |extra: &[&str]| {
+        let mut args = vec![
             "--batch",
             voices.to_str().unwrap(),
             "-o",
             cues_out.to_str().unwrap(),
+            "--format",
+            "tsv",
             "--dialog-dir",
             texts.to_str().unwrap(),
             "--rhubarb",
             exe.to_str().unwrap(),
-        ],
-        &empty,
-    );
-    assert_eq!(code, Some(0), "{stdout}{stderr}");
-    assert!(stdout.contains("2 of 2 lines done"), "{stdout}");
-    assert!(cues_out.join("l003.json").is_file() && cues_out.join("l011.json").is_file());
-    let calls = fs::read_to_string(&log).unwrap();
-    assert_eq!(
-        calls.matches("-d ").count(),
-        1,
-        "only l011 has a text:\n{calls}"
-    );
-    assert!(calls.contains("Eleven."), "{calls}");
-    let first = calls.find("l003.wav").unwrap();
-    assert!(
-        first < calls.find("l011.wav").unwrap(),
-        "in name order:\n{calls}"
-    );
+        ];
+        args.extend_from_slice(extra);
+        run_tool_env(&args, &empty, &envs)
+    };
 
-    // A failing rhubarb is reported per line and fails the batch.
-    fs::write(
-        &exe,
-        "#!/bin/sh\necho 'cannot read the sound file' >&2\nexit 1\n",
-    )
-    .unwrap();
-    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
-    let (code, _, stderr) = run_tool(
+    let (code, stdout, stderr) = batch(&[]);
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    assert!(stdout.contains("l003: skipped"), "{stdout}");
+    assert!(stdout.contains("--force"), "{stdout}");
+    assert!(
+        stdout.contains("1 of 2 lines done, 1 skipped, 0 failed"),
+        "{stdout}"
+    );
+    assert_eq!(
+        fs::read_to_string(cues_out.join("l003.tsv")).unwrap(),
+        hand_made
+    );
+    assert!(cues_out.join("l011.tsv").is_file());
+    let calls = fs::read_to_string(&log).unwrap();
+    assert!(!calls.contains("l003.wav"), "l003 was not run:\n{calls}");
+    assert!(calls.contains("dialog: Eleven."), "{calls}");
+    assert_eq!(calls.matches("-d ").count(), 1, "{calls}");
+
+    // --force redoes both, in name order.
+    fs::remove_file(&log).unwrap();
+    let (code, stdout, stderr) = batch(&["--force"]);
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+    assert!(
+        stdout.contains("2 of 2 lines done, 0 skipped, 0 failed"),
+        "{stdout}"
+    );
+    assert_ne!(
+        fs::read_to_string(cues_out.join("l003.tsv")).unwrap(),
+        hand_made
+    );
+    let calls = fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.find("l003.wav").unwrap() < calls.find("l011.wav").unwrap(),
+        "{calls}"
+    );
+    assert!(leftover_temp_files(&cues_out).is_empty());
+
+    // --force without --batch is a usage error.
+    let (code, _, stderr) = run_tool(&["a.wav", "--force"], &empty);
+    assert_eq!(code, Some(2), "{stderr}");
+}
+
+#[test]
+fn a_run_that_fails_never_touches_a_good_cue_file_or_leaves_a_temporary_one() {
+    let (dir, exe) = fake_rhubarb_dir("failures");
+    let wav = dir.join("l1.wav");
+    fs::write(&wav, "RIFF").unwrap();
+    let out = dir.join("l1.tsv");
+    let good = "0.00\tX\n0.50\tD\n1.00\tX\n";
+    let empty = temp_dir("failures_path");
+    for (mode, message) in [
+        // Half a file written, then a failure.
+        ("fail", "cannot read the sound file"),
+        // Exit status 0 but nothing written: the old file must not pass for new.
+        ("silent", "did not write"),
+        // A file that is not a cue file.
+        ("garbage", ":2: unknown mouth shape"),
+    ] {
+        fs::write(&out, good).unwrap();
+        let (code, stdout, stderr) = run_tool_env(
+            &[
+                wav.to_str().unwrap(),
+                "-o",
+                out.to_str().unwrap(),
+                "--rhubarb",
+                exe.to_str().unwrap(),
+            ],
+            &empty,
+            &[("FAKE_RHUBARB_MODE", mode)],
+        );
+        assert_eq!(code, Some(1), "{mode}: {stdout}{stderr}");
+        assert!(stderr.contains(message), "{mode}: {stderr}");
+        assert_eq!(
+            fs::read_to_string(&out).unwrap(),
+            good,
+            "{mode}: the good file is unchanged"
+        );
+        assert!(
+            leftover_temp_files(&dir).is_empty(),
+            "{mode}: {:?}",
+            leftover_temp_files(&dir)
+        );
+        // And with no file there before, none appears.
+        fs::remove_file(&out).unwrap();
+        let (code, _, _) = run_tool_env(
+            &[
+                wav.to_str().unwrap(),
+                "-o",
+                out.to_str().unwrap(),
+                "--rhubarb",
+                exe.to_str().unwrap(),
+            ],
+            &empty,
+            &[("FAKE_RHUBARB_MODE", mode)],
+        );
+        assert_eq!(code, Some(1), "{mode}");
+        assert!(!out.exists(), "{mode}: no file is created");
+        assert!(leftover_temp_files(&dir).is_empty(), "{mode}");
+    }
+    // A batch reports each failing line and fails, with the folder untouched.
+    let voices = dir.join("voices");
+    fs::create_dir_all(&voices).unwrap();
+    fs::write(voices.join("l7.wav"), "RIFF").unwrap();
+    let (code, _, stderr) = run_tool_env(
         &[
             "--batch",
             voices.to_str().unwrap(),
@@ -844,30 +974,15 @@ case \"$out\" in *.tsv) printf '0.00\\tX\\n0.50\\tD\\n1.00\\tX\\n' > \"$out\";;\
             exe.to_str().unwrap(),
         ],
         &empty,
+        &[("FAKE_RHUBARB_MODE", "fail")],
     );
     assert_eq!(code, Some(1), "{stderr}");
-    assert!(stderr.contains("cannot read the sound file"), "{stderr}");
-    assert!(stderr.contains("l003"), "{stderr}");
-
-    // A rhubarb that writes rubbish is caught, with the line.
-    fs::write(
-        &exe,
-        "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in -o) out=\"$2\"; shift;; esac; shift; done\nprintf '0.00\\tX\\n0.20\\tQ\\n' > \"$out\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&exe, fs::Permissions::from_mode(0o755)).unwrap();
-    let (code, _, stderr) = run_tool(
-        &[
-            wav.to_str().unwrap(),
-            "-o",
-            tsv.to_str().unwrap(),
-            "--rhubarb",
-            exe.to_str().unwrap(),
-        ],
-        &empty,
+    assert!(
+        stderr.contains("l7:") && stderr.contains("cannot read the sound file"),
+        "{stderr}"
     );
-    assert_eq!(code, Some(1), "{stderr}");
-    assert!(stderr.contains(":2: unknown mouth shape"), "{stderr}");
+    assert!(!voices.join("l7.json").exists());
+    assert!(leftover_temp_files(&voices).is_empty());
 }
 
 #[test]
@@ -877,6 +992,7 @@ fn scene_check_names_a_cue_file_it_cannot_use() {
     write(&root, "voice/l2.tsv", "0.00\tX\n0.40\tZ\n");
     write(&root, "scene.ron", SCENE);
     let run = |extra: &[&str]| {
+        let _turn = spawn_guard();
         Command::new(env!("CARGO_BIN_EXE_scene_check"))
             .arg(root.join("scene.ron"))
             .arg("--assets")

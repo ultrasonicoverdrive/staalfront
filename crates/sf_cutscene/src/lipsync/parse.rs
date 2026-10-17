@@ -576,7 +576,15 @@ fn finish(mut raw: Vec<Raw>, duration_ms: Ms) -> Result<Parsed, LipsyncError> {
 
     // Inside the line: drop what starts after it, clip what runs past it.
     let first_late = kept.iter().position(|c| c.start_ms >= duration_ms);
-    if let Some(i) = first_late {
+    // Rhubarb ends a file with an `X` exactly at the end of the sound: that is
+    // the normal case and not worth a warning.
+    let closing_rest = |c: &Raw| c.start_ms == duration_ms && c.shape == MouthShape::X;
+    if let Some(i) = first_late
+        && kept.len() - i == 1
+        && closing_rest(&kept[i])
+    {
+        kept.truncate(i);
+    } else if let Some(i) = first_late {
         let n = kept.len() - i;
         warn(
             &mut warnings,
@@ -603,17 +611,20 @@ fn finish(mut raw: Vec<Raw>, duration_ms: Ms) -> Result<Parsed, LipsyncError> {
     }
 
     // To a series of starts. A gap between one cue's end and the next start is
-    // rest; so is what follows the last cue's end.
+    // rest; so is what follows the last cue's end. A cue with no length (its end
+    // is its start, or both round to the same millisecond) shows nothing: it
+    // becomes a rest, and never a second cue at the same time.
     let mut cues: Vec<MouthCue> = Vec::with_capacity(kept.len());
     for (i, c) in kept.iter().enumerate() {
+        let zero_length = c.end_ms == Some(c.start_ms);
         cues.push(MouthCue {
             start_ms: c.start_ms,
-            shape: c.shape,
+            shape: if zero_length { MouthShape::X } else { c.shape },
         });
         let next_start = kept.get(i + 1).map_or(duration_ms, |n| n.start_ms);
         if let Some(end) = c
             .end_ms
-            .filter(|&e| e < next_start && c.shape != MouthShape::X)
+            .filter(|&e| e > c.start_ms && e < next_start && c.shape != MouthShape::X)
         {
             cues.push(MouthCue {
                 start_ms: end,

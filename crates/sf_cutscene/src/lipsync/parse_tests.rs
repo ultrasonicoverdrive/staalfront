@@ -313,3 +313,73 @@ fn cue_lists_built_by_hand_are_sorted_and_deduplicated() {
     assert_eq!(c.len(), 2);
     assert_eq!(c.shape_at(250), D);
 }
+
+#[test]
+fn a_cue_with_no_length_is_a_rest_and_never_a_second_cue_at_one_time() {
+    // start == end: it shows nothing, so the mouth rests there.
+    let text = r#"{ "mouthCues": [
+        { "start": 0.0, "end": 0.3, "value": "A" },
+        { "start": 0.3, "end": 0.3, "value": "D" },
+        { "start": 0.6, "end": 0.9, "value": "B" }
+    ] }"#;
+    let p = parse_json(text, 1000).unwrap();
+    assert_eq!(series(&p), [(0, A), (300, X), (600, B), (900, X)]);
+    // The same on the very first and the very last cue.
+    let text = r#"{ "mouthCues": [
+        { "start": 0.0, "end": 0.0, "value": "D" },
+        { "start": 0.5, "end": 0.5, "value": "C" }
+    ] }"#;
+    let p = parse_json(text, 1000).unwrap();
+    assert_eq!(series(&p), [(0, X), (500, X)]);
+}
+
+#[test]
+fn times_that_round_to_the_same_millisecond_do_not_make_two_cues_at_one_time() {
+    // The end of one cue and the start of the next are the same millisecond.
+    let text = r#"{ "mouthCues": [
+        { "start": 0.0, "end": 0.2004, "value": "A" },
+        { "start": 0.2001, "end": 0.5, "value": "D" }
+    ] }"#;
+    let p = parse_json(text, 1000).unwrap();
+    assert_eq!(series(&p), [(0, A), (200, D), (500, X)]);
+    // A start and an end that round together: zero length.
+    let text = r#"{ "mouthCues": [ { "start": 0.1996, "end": 0.2003, "value": "A" } ] }"#;
+    let p = parse_json(text, 1000).unwrap();
+    assert_eq!(series(&p), [(200, X)]);
+    // Two starts that round together: the later wins, with a warning.
+    let p = parse_tsv("0.0004\tA\n0.0003\tB\n0.0002\tD\n", 1000).unwrap();
+    assert_eq!(series(&p), [(0, D)]);
+    assert!(!p.warnings.is_empty());
+    // Same with the end of the last cue at the end of the line.
+    let text = r#"{ "mouthCues": [ { "start": 0.5, "end": 1.0004, "value": "A" } ] }"#;
+    assert_eq!(series(&parse_json(text, 1000).unwrap()), [(500, A)]);
+}
+
+#[test]
+fn a_closing_rest_exactly_at_the_end_of_the_sound_is_not_worth_a_warning() {
+    let p = parse_tsv("0.00\tX\n0.50\tA\n1.00\tX\n", 1000).unwrap();
+    assert_eq!(series(&p), [(0, X), (500, A)]);
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
+    // One millisecond later, or another shape, or more than one cue: still a warning.
+    assert_eq!(
+        parse_tsv("0.00\tX\n1.001\tX\n", 1000)
+            .unwrap()
+            .warnings
+            .len(),
+        1
+    );
+    assert_eq!(
+        parse_tsv("0.00\tX\n1.00\tA\n", 1000)
+            .unwrap()
+            .warnings
+            .len(),
+        1
+    );
+    assert_eq!(
+        parse_tsv("0.00\tX\n1.00\tX\n1.20\tA\n", 1000)
+            .unwrap()
+            .warnings
+            .len(),
+        1
+    );
+}

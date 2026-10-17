@@ -57,9 +57,15 @@ pub struct MouthCues {
 impl MouthCues {
     /// Build from cues the caller has already put in strictly increasing
     /// order of start time (the parsers and the flap do).
+    ///
+    /// If they are not (a bug in a caller), they are put in order rather than
+    /// trusted: a wrong series must never panic or break the lookup.
     pub(crate) fn from_sorted(cues: Vec<MouthCue>) -> MouthCues {
-        debug_assert!(cues.windows(2).all(|w| w[0].start_ms < w[1].start_ms));
-        MouthCues { cues }
+        if cues.windows(2).all(|w| w[0].start_ms < w[1].start_ms) {
+            MouthCues { cues }
+        } else {
+            MouthCues::new(cues)
+        }
     }
 
     /// Build from any list: sorted by time, and where two cues share a time
@@ -194,7 +200,7 @@ pub fn load_cue_files(scene: &mut Scene, root: &Path) -> Vec<LipsyncIssue> {
             continue; // the validator has reported it
         }
         let full = root.join(&path);
-        let text = match read_limited(&full) {
+        let text = match read_text_limited(&full) {
             Ok(Some(t)) => t,
             Ok(None) => continue,
             Err(message) => {
@@ -230,8 +236,9 @@ pub fn load_cue_files(scene: &mut Scene, root: &Path) -> Vec<LipsyncIssue> {
     issues
 }
 
-/// The text of a file, `None` when there is no such file (a folder is no file).
-fn read_limited(path: &Path) -> Result<Option<String>, String> {
+/// The text of a file of at most [`MAX_CUE_FILE_BYTES`], `None` when there is no
+/// such file (a folder is no file).
+pub fn read_text_limited(path: &Path) -> Result<Option<String>, String> {
     match fs::metadata(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(format!("cannot read: {e}")),

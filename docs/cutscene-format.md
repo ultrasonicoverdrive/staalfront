@@ -692,15 +692,19 @@ oval), and the demo scene's two rigs have their own, marked `hand edit`
    cargo run -p sf_cutscene --bin lipsync -- assets\voice\f1_m01_017.wav -o assets\voice\f1_m01_017.json --rhubarb C:\Tools\Rhubarb\rhubarb.exe
 
    # a whole folder: every WAV becomes <name>.json next to it (or in -o); texts are optional, one
-   # <name>.txt per line in --dialog-dir
+   # <name>.txt per line in --dialog-dir. Lines that have a cue file already are skipped and listed
+   # (it may be corrected by hand); add --force to redo them
    cargo run -p sf_cutscene --bin lipsync -- --batch assets\voice --dialog-dir content\lines
+   cargo run -p sf_cutscene --bin lipsync -- --batch assets\voice --force
 
    # another language than English: the phonetic recogniser
    cargo run -p sf_cutscene --bin lipsync -- assets\voice\f1_m01_017.wav --recognizer phonetic -o assets\voice\f1_m01_017.json
    ```
 
    (On Linux and macOS the same with `/` in the paths.) The tool checks what Rhubarb wrote and says how
-   many cues there are; a `.tsv` output name writes Rhubarb's TSV instead of JSON.
+   many cues there are; a `.tsv` output name writes Rhubarb's TSV instead of JSON. The result is
+   written safely: Rhubarb writes a temporary file next to the target and the target is replaced only
+   when the run succeeded and the file reads as a cue file, so a failed run never damages a good one.
 4. **Name the files in the scene**: the voice and the mouth-shape file of the line.
 
    ```ron
@@ -730,7 +734,8 @@ with the line). A cue holds until the next one starts; before the first one the 
 |---|---|
 | unknown shape (not one of the nine capital letters), a malformed line, a negative time, a missing field, no cues at all | **error**, with the line number of the cue file |
 | cues out of order; two cues at one time (the later wins); overlapping cues | warning, corrected |
-| cues that start at or after the end of the line; a last cue that runs past it | warning, dropped / clipped |
+| cues that start at or after the end of the line (except Rhubarb's closing `X` exactly at the end); a last cue that runs past it | warning, dropped / clipped |
+| a cue with no length (`start` = `end`) | a rest at that time |
 
 An error in a cue file never stops the scene: that line flaps from its text instead, and the loader reports it
 (`LoadedScene::lipsync`, printed by `scene_check` and `play_scene`). Cue files are only read when the loader
@@ -757,7 +762,7 @@ with `SF_SAVE_SHOTS`).
 
 ```
 lipsync <voice.wav> [-o out.json|out.tsv] [--dialog TEXT | --dialog-file FILE] [--recognizer R] [--rhubarb PATH]
-lipsync --batch <folder> [-o <out-folder>] [--dialog-dir <folder>] [--format json|tsv] [--rhubarb PATH]
+lipsync --batch <folder> [-o <out-folder>] [--dialog-dir <folder>] [--format json|tsv] [--force] [--rhubarb PATH]
 ```
 
 Exit status: 0 done, 1 Rhubarb failed or wrote something unusable (per line in a batch), 2 bad usage, 3

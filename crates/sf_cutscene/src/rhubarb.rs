@@ -14,6 +14,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Where the releases of Rhubarb Lip Sync are published.
 pub const RELEASES_URL: &str = "https://github.com/DanielSWolf/rhubarb-lip-sync/releases";
@@ -180,8 +181,15 @@ pub enum RunError {
     Start(io::Error),
     /// Rhubarb ran and failed; its own message.
     Failed { status: String, message: String },
-    /// A temporary or output file could not be handled.
+    /// A temporary or output file could not be handled, or Rhubarb said it was
+    /// done but wrote nothing.
     Io(String),
+    /// Rhubarb wrote a file that is not a usable cue file.
+    Invalid {
+        file: PathBuf,
+        line: usize,
+        message: String,
+    },
 }
 
 impl fmt::Display for RunError {
@@ -195,42 +203,115 @@ impl fmt::Display for RunError {
                 write!(f, "rhubarb failed ({status}): {message}")
             }
             RunError::Io(m) => f.write_str(m),
+            RunError::Invalid {
+                file,
+                line,
+                message,
+            } => write!(
+                f,
+                "rhubarb wrote a cue file that cannot be used ({}:{line}: {message}); nothing was replaced",
+                file.display()
+            ),
         }
     }
 }
 
 impl std::error::Error for RunError {}
 
-/// A temporary dialog file that is removed when it goes out of scope.
-struct TempDialog(PathBuf);
+/// A file that is removed when it goes out of scope, unless it was kept.
+struct TempFile {
+    path: PathBuf,
+    keep: bool,
+}
 
-impl Drop for TempDialog {
+impl Drop for TempFile {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
+        if !self.keep {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }
 
-/// Run `exe` for `job`. Returns when Rhubarb has written `job.out`.
-pub fn run(exe: &Path, job: &Job) -> Result<(), RunError> {
-    let (dialog_path, _temp) = match &job.dialog {
-        None => (None, None),
-        Some(Dialog::File(p)) => (Some(p.clone()), None),
+/// Counts the temporary files of this process, so that names never repeat.
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Create a new, empty file `<dir>/<prefix><pid>-<n>-<tail>` that did not exist
+/// before. `create_new` makes the name ours alone: no other process or earlier
+/// run can have it.
+fn create_unique(dir: &Path, prefix: &str, tail: &str) -> io::Result<(fs::File, TempFile)> {
+    let mut last = None;
+    for _ in 0..100 {
+        let n = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!("{prefix}{}-{n}-{tail}", std::process::id()));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((file, TempFile { path, keep: false })),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| io::Error::other("no free temporary name")))
+}
+
+/// Run `exe` for `job`. Rhubarb writes to a temporary file next to the target;
+/// only when it exited cleanly **and** what it wrote reads as a cue file (at
+/// most [`crate::lipsync::MAX_CUE_FILE_BYTES`]) is that file moved over
+/// `job.out`. On any failure the temporary file is removed and an existing
+/// `job.out` is left exactly as it was. Returns the cues that were written,
+/// read with no line to clip to, and the corrections that reading made.
+pub fn run(exe: &Path, job: &Job) -> Result<crate::lipsync::Parsed, RunError> {
+    let out_dir = job
+        .out
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let stem = job
+        .wav
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or("line");
+
+    // The text for `-d`: a given file, or one made from the text (and removed after).
+    let mut _dialog_guard = None;
+    let dialog_path = match &job.dialog {
+        None => None,
+        Some(Dialog::File(p)) => Some(p.clone()),
         Some(Dialog::Text(text)) => {
-            let path = std::env::temp_dir().join(format!(
-                "staalfront-lipsync-{}-{}.txt",
-                std::process::id(),
-                job.wav
-                    .file_stem()
-                    .and_then(OsStr::to_str)
-                    .unwrap_or("line")
-            ));
-            fs::write(&path, text)
-                .map_err(|e| RunError::Io(format!("cannot write {}: {e}", path.display())))?;
-            (Some(path.clone()), Some(TempDialog(path)))
+            use std::io::Write;
+            let (mut file, guard) = create_unique(
+                &std::env::temp_dir(),
+                "staalfront-lipsync-",
+                &format!("{stem}.txt"),
+            )
+            .map_err(|e| RunError::Io(format!("cannot create a temporary text file: {e}")))?;
+            file.write_all(text.as_bytes())
+                .map_err(|e| RunError::Io(format!("cannot write {}: {e}", guard.path.display())))?;
+            drop(file);
+            let path = guard.path.clone();
+            _dialog_guard = Some(guard);
+            Some(path)
         }
     };
+
+    // Rhubarb's output goes to a file of its own, in the target folder (so the
+    // final rename stays on one disk).
+    let (placeholder, mut temp_out) =
+        create_unique(out_dir, ".staalfront-lipsync-", &format!("{stem}.tmp")).map_err(|e| {
+            RunError::Io(format!(
+                "cannot create a file in {}: {e}",
+                out_dir.display()
+            ))
+        })?;
+    drop(placeholder);
+    let attempt = Job {
+        out: temp_out.path.clone(),
+        ..job.clone()
+    };
     let output = Command::new(exe)
-        .args(arguments(job, dialog_path.as_deref()))
+        .args(arguments(&attempt, dialog_path.as_deref()))
         .output()
         .map_err(RunError::Start)?;
     if !output.status.success() {
@@ -248,13 +329,29 @@ pub fn run(exe: &Path, job: &Job) -> Result<(), RunError> {
             message: message.trim().to_string(),
         });
     }
-    if !job.out.is_file() {
-        return Err(RunError::Io(format!(
-            "rhubarb finished but did not write {}",
+    let text = match crate::lipsync::read_text_limited(&temp_out.path) {
+        Ok(Some(t)) if !t.trim().is_empty() => t,
+        Ok(_) => {
+            return Err(RunError::Io(format!(
+                "rhubarb finished but did not write {}",
+                job.out.display()
+            )));
+        }
+        Err(m) => return Err(RunError::Io(format!("{}: {m}", job.out.display()))),
+    };
+    let parsed = crate::lipsync::parse_cues(&text, i32::MAX).map_err(|e| RunError::Invalid {
+        file: job.out.clone(),
+        line: e.line,
+        message: e.message,
+    })?;
+    fs::rename(&temp_out.path, &job.out).map_err(|e| {
+        RunError::Io(format!(
+            "cannot write {}: {e} (the old file, if any, is unchanged)",
             job.out.display()
-        )));
-    }
-    Ok(())
+        ))
+    })?;
+    temp_out.keep = true; // it is the target now
+    Ok(parsed)
 }
 
 /// One recording of a batch.
@@ -309,6 +406,17 @@ pub fn plan_batch(
             })
         })
         .collect())
+}
+
+/// Split a batch into what is to be done and what is left alone because its
+/// output exists already (all of it is to be done with `force`). An existing
+/// cue file may be hand-corrected or cost a long run; a batch must not
+/// overwrite it by surprise.
+pub fn split_existing(plan: Vec<BatchItem>, force: bool) -> (Vec<BatchItem>, Vec<BatchItem>) {
+    if force {
+        return (plan, Vec::new());
+    }
+    plan.into_iter().partition(|b| !b.job.out.exists())
 }
 
 #[cfg(test)]

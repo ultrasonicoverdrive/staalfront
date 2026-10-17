@@ -176,3 +176,94 @@ fn a_line_without_a_cue_file_or_with_one_that_is_not_loaded_flaps() {
     }
     assert!(want.iter().any(|s| *s != X), "the flap moves the mouth");
 }
+
+// -- random cue files never panic ------------------------------------------------
+
+use super::parse::{parse_json, parse_tsv};
+
+fn seconds(ms: u32) -> String {
+    format!("{}.{:03}", ms / 1000, ms % 1000)
+}
+
+fn assert_well_formed(c: &MouthCues, duration: Ms) {
+    // (A file whose cues all come after the line ends gives an empty series: rest.)
+    let s = shapes(c);
+    assert!(
+        s.windows(2).all(|w| w[0].0 < w[1].0),
+        "sorted, no two at one time: {s:?}"
+    );
+    assert!(
+        s.iter().all(|(t, _)| *t >= 0 && *t < duration.max(1)),
+        "inside the line: {s:?}"
+    );
+    // Lookups work everywhere, and the series never overlaps itself: the shape in
+    // force at a cue's start is that cue's.
+    for (t, shape) in &s {
+        assert_eq!(c.shape_at(*t), *shape);
+    }
+    for t in [-1, 0, duration - 1, duration, duration + 1] {
+        let _ = c.shape_at(t);
+    }
+}
+
+proptest! {
+    /// Any list of cues, in any order, with any lengths (including none) and
+    /// times that collide: the reader either refuses it or gives a sorted series.
+    #[test]
+    fn random_json_cue_lists_never_panic(
+        cues in proptest::collection::vec((0u32..4000, 0u32..4000, 0usize..9, any::<bool>()), 0..40),
+        duration in 1i32..5000,
+    ) {
+        let body: Vec<String> = cues
+            .iter()
+            .map(|&(start, end, shape, with_end)| {
+                let end = if with_end { format!(", \"end\": {}", seconds(end)) } else { String::new() };
+                format!(
+                    "{{ \"start\": {}{end}, \"value\": \"{}\" }}",
+                    seconds(start),
+                    MouthShape::ALL[shape]
+                )
+            })
+            .collect();
+        let text = format!("{{ \"mouthCues\": [ {} ] }}", body.join(", "));
+        if let Ok(p) = parse_json(&text, duration) {
+            assert_well_formed(&p.cues, duration);
+        }
+    }
+
+    #[test]
+    fn random_tsv_cue_lists_never_panic(
+        cues in proptest::collection::vec((0u32..4000, 0usize..9), 0..40),
+        duration in 1i32..5000,
+    ) {
+        let text: String = cues
+            .iter()
+            .map(|&(t, shape)| format!("{}\t{}\n", seconds(t), MouthShape::ALL[shape]))
+            .collect();
+        if let Ok(p) = parse_tsv(&text, duration) {
+            assert_well_formed(&p.cues, duration);
+        }
+    }
+
+    /// Whatever text it is given, in either format.
+    #[test]
+    fn random_text_never_panics(text in ".{0,300}", duration in -5i32..5000) {
+        if let Ok(p) = parse_cues(&text, duration) {
+            assert_well_formed(&p.cues, duration);
+        }
+    }
+
+    /// Cue lists built by hand, in any order and with repeats.
+    #[test]
+    fn hand_built_series_are_sorted_and_unique(
+        cues in proptest::collection::vec((-100i32..500, 0usize..9), 0..30),
+    ) {
+        let c = MouthCues::new(
+            cues.iter()
+                .map(|&(t, s)| super::MouthCue { start_ms: t, shape: MouthShape::ALL[s] })
+                .collect(),
+        );
+        let s = shapes(&c);
+        prop_assert!(s.windows(2).all(|w| w[0].0 < w[1].0));
+    }
+}

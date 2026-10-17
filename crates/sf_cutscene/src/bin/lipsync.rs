@@ -8,11 +8,15 @@
 //! Exit status: 0 = done, 1 = Rhubarb failed or wrote something unusable,
 //! 2 = bad usage or an input that does not exist, 3 = Rhubarb was not found
 //! (the install instructions are printed).
+//!
+//! Output is atomic: Rhubarb writes a temporary file next to the target, and the
+//! target is replaced only after the file has been read back and checked, so a
+//! failed run never touches a good cue file. A batch skips lines whose cue file
+//! exists, unless `--force`.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use sf_cutscene::lipsync::parse_cues;
 use sf_cutscene::rhubarb::{self, Dialog, Format, Job};
 
 const USAGE: &str = "usage: lipsync <voice.wav> [-o <out.json>] [--dialog TEXT | --dialog-file FILE]\n\
@@ -24,7 +28,8 @@ const USAGE: &str = "usage: lipsync <voice.wav> [-o <out.json>] [--dialog TEXT |
   --dialog-file FILE  the same, in a text file\n\
   --batch FOLDER      every *.wav in FOLDER, each named by its line id (l017.wav -> l017.json)\n\
   --dialog-dir DIR    with --batch: DIR/<id>.txt is the text of that line, when it exists\n\
-  --format json|tsv   with --batch: the file type (default json)\n\
+  --format json|tsv   with --batch: the file type (default json)
+  --force             with --batch: also redo lines whose cue file exists (default: skip them)\n\
   --recognizer NAME   pocketSphinx (English, default) or phonetic (any language)\n\
   --rhubarb PATH      the rhubarb program, when it is not on PATH\n\
 \n\
@@ -41,6 +46,7 @@ struct Options {
     format: Option<Format>,
     recognizer: Option<String>,
     rhubarb: Option<PathBuf>,
+    force: bool,
 }
 
 fn usage_error(message: &str) -> ExitCode {
@@ -61,6 +67,7 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Options>, Str
             "--dialog-dir" => o.dialog_dir = Some(value("--dialog-dir")?.into()),
             "--batch" => o.batch = Some(value("--batch")?.into()),
             "--recognizer" => o.recognizer = Some(value("--recognizer")?),
+            "--force" => o.force = true,
             "--rhubarb" => o.rhubarb = Some(value("--rhubarb")?.into()),
             "--format" => {
                 let v = value("--format")?;
@@ -77,17 +84,13 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<Option<Options>, Str
     Ok(Some(o))
 }
 
-/// Run one job and read back what Rhubarb wrote. Returns a summary line.
+/// Run one job (Rhubarb writes a temporary file, which replaces the target only
+/// once it has been checked). Returns a summary line.
 fn run_job(exe: &Path, job: &Job) -> Result<String, String> {
     if let Some(dir) = job.out.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    rhubarb::run(exe, job).map_err(|e| e.to_string())?;
-    let text =
-        std::fs::read_to_string(&job.out).map_err(|e| format!("{}: {e}", job.out.display()))?;
-    // No line to clip to yet: the cue file is checked on its own.
-    let parsed = parse_cues(&text, i32::MAX)
-        .map_err(|e| format!("{}:{}: {}", job.out.display(), e.line, e.message))?;
+    let parsed = rhubarb::run(exe, job).map_err(|e| e.to_string())?;
     for w in &parsed.warnings {
         eprintln!("{}:{}: warning: {}", job.out.display(), w.line, w.message);
     }
@@ -115,8 +118,8 @@ fn main() -> ExitCode {
     if opts.dialog.is_some() && opts.dialog_file.is_some() {
         return usage_error("use --dialog or --dialog-file, not both");
     }
-    if opts.batch.is_none() && (opts.dialog_dir.is_some() || opts.format.is_some()) {
-        return usage_error("--dialog-dir and --format are for --batch");
+    if opts.batch.is_none() && (opts.dialog_dir.is_some() || opts.format.is_some() || opts.force) {
+        return usage_error("--dialog-dir, --format and --force are for --batch");
     }
 
     // Rhubarb first: without it nothing else matters, and the message is the
@@ -144,8 +147,16 @@ fn main() -> ExitCode {
         if plan.is_empty() {
             return usage_error(&format!("{}: no .wav files", folder.display()));
         }
+        let (todo, skipped) = rhubarb::split_existing(plan, opts.force);
+        for item in &skipped {
+            println!(
+                "{}: skipped, {} exists already (--force to redo it)",
+                item.id,
+                item.job.out.display()
+            );
+        }
         let mut failed = 0;
-        for item in &plan {
+        for item in &todo {
             match run_job(&exe, &item.job) {
                 Ok(s) => println!("{}: {s}", item.id),
                 Err(m) => {
@@ -154,7 +165,12 @@ fn main() -> ExitCode {
                 }
             }
         }
-        println!("{} of {} lines done", plan.len() - failed, plan.len());
+        println!(
+            "{} of {} lines done, {} skipped, {failed} failed",
+            todo.len() - failed,
+            todo.len() + skipped.len(),
+            skipped.len()
+        );
         return if failed == 0 {
             ExitCode::SUCCESS
         } else {
