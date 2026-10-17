@@ -43,7 +43,7 @@
 ## LENKA
 - Faction: Veyran Directorate
 - Role in the story: Intelligence officer investigating forged orders and hidden funding.
-- Appears in missions: F2-M02, F2-M05, F2-M07, F2-M09, F2-M10
+- Appears in missions: F2-M02, F2-M05, F2-M06 (one radio line), F2-M07, F2-M08, F2-M09, F2-M10
 - Look: late 20s, slim, dark field coat, paper files in a waterproof sleeve.
 - Poses/emotions needed: analytical, wary, determined, alarmed.
 - Voice: mid-high, clear, quick, restrained.
@@ -69,3 +69,19 @@
 - Voice: mid, breathless under pressure.
 - Speech habit or catchphrase: describes danger in practical terms.
 - Notes: One-off voice, minimal animation set.
+
+## ENGINEER KOVAC
+- Faction: Veyran Directorate
+- Role in the story: Demolition and bridge engineer; calls the charges at Stone Bridge.
+- Appears in missions: F2-M04
+- Look: 50s, stocky, scarred hands, cold-weather overalls, folded detonator case.
+- Poses/emotions needed: calculating, impatient, relieved.
+- Voice: low, unhurried, counts out loud under stress.
+- Speech habit or catchphrase: gives times to the second.
+- Notes: One-off voice, minimal animation set. Escort object in F2-M04.
+
+## OPERATIONS (system voice)
+- Faction: both (neutral UI voice)
+- Role in the story: Objective updates and timer warnings only; never story content.
+- Appears in missions: F1-M01, F1-M02, F1-M04, F1-M05, F1-M08, F1-M10, F2-M06, F2-M07, F2-M08, F2-M09, F2-M10 (11 missions, 16 lines in the MSG tables; cue name: OPERATIONS)
+- Voice: neutral, flat, radio-filtered. One actor, one or two short lines per mission; F2-M10 has four (the vault countdown calls at 8:00, 4:00 and 1:30 and the culvert report).
