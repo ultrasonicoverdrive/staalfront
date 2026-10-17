@@ -18,9 +18,3 @@ ron = "0.12"
 serde = { version = "1", features = ["derive"] }
 # 16-bit heightmap and 8-bit material map files of the map format.
 png = "0.18.1"
-
-[dev-dependencies]
-# Tests only: keeps the 20 Hz constants of the definitions equal to the
-# simulation's (a path dependency, not a new external crate; sf_sim does not
-# depend on sf_data).
-sf_sim = { path = "../../crates/sf_sim" }

@@ -37,15 +37,21 @@ definitions yet: WP3.2 spawns units from them.
 | power | power units | positive produces, negative uses |
 
 Numbers are written with at most three decimals (`speed: 1.2`) and are read as
-thousandths, never as floats. A number that cannot be held exactly (`0.0004`) or a
-duration that is not a whole number of ticks (`reload: 0.12`) is refused. Distances
-and speeds become `sf_math::Fx` (so `1.2` is `Fx::from_ratio(6, 5)`), durations become
-tick counts.
+thousandths, never as floats. The decimals are counted on the text of the file: a
+number with a fourth decimal (`0.0004`, `1.0000000001`, even `1.0000`) or with an
+exponent (`12e-1`) is refused with its line, and so is a duration that is not a whole
+number of ticks (`reload: 0.12`). Distances and sizes become `sf_math::Fx` (so `1.2` is
+`Fx::from_ratio(6, 5)`), durations become tick counts. A speed also becomes a distance
+per tick, **rounded once** from the exact decimal (`speed / 20` to the nearest
+1/65536): heavy_tank at 1.1 cells/s moves 3604 raw units per tick, where rounding 1.1
+first and dividing by 20 afterwards gives 3605 (and is off for about 2.5 % of all
+speeds). The simulation moves by `speed_per_tick`; `speed` (per second) is for tools
+and display.
 
 ## `unit_classes.ron`
 
-Three lists of entries, each with a unique snake_case `name`. A name's **position** is
-its index in the simulation (a `u8`), so entries are only appended.
+Three lists of entries, each with a permanent `kind` number (0 to 255, see "Numbers are
+permanent" below) and a unique snake_case `name`.
 
 * `movement_classes`: foot, wheeled, tracked, hover, water, air. Hover crosses land and
   water (the amphibious transport); no role uses air yet. **Terrain costs per movement
@@ -63,6 +69,7 @@ WP5.3 adds the damage-times-armor table and the splash falloff next to these lis
 
 | Field | Meaning |
 |---|---|
+| `kind` | the permanent number of the weapon, 0 to 4095, unique (see "Numbers are permanent") |
 | `id` | unique snake_case name that units refer to |
 | `range` | longest distance it can hit, cells, above 0 |
 | `min_range` | shortest distance it can hit, cells, default 0, below `range` (the howitzer cannot hit what is next to it) |
@@ -74,12 +81,12 @@ WP5.3 adds the damage-times-armor table and the splash falloff next to these lis
 
 ## `unit_defs.ron`
 
-The **order of the records is the kind number** (`sf_sim::Kind`): append new roles at
-the end and never reorder or remove one that a scenario or a save may use. A test pins
-the order of the roster as shipped.
+Every record carries its permanent number (`sf_sim::Kind`); the order of the records in
+the file does not matter.
 
 | Field | Meaning |
 |---|---|
+| `kind` | the permanent number of the role, 0 to 4095, unique (see "Numbers are permanent") |
 | `id` | unique snake_case role name, exactly as in `content/units.md` |
 | `factions` | `[Meridian]`, `[Veyran]`, `[Meridian, Veyran]` or `[Neutral]` (mission objects, civilians); Neutral cannot be combined |
 | `category` | `Infantry`, `Vehicle`, `Vessel`, `Structure` or `Object` (a crate, an ore field) |
@@ -134,6 +141,30 @@ tree is in `content/units.md`; it becomes data with building requirements in WP6
 and mission logic such as "fires while the uplink is alive". Which faction a role
 belongs to is checked against the tech tree by a test.
 
+## Numbers are permanent
+
+The simulation, scenario files, saves and replays name a unit, a weapon, a movement
+class, an armor type or a damage type by the **`kind` number written in its record**,
+not by its name and not by its place in the file. Rules:
+
+* A number is chosen by hand when a record is written (the next free one) and **never
+  changes**.
+* Two live records of one list never share a number (the load is refused).
+* The order of the records in the file is irrelevant: sorting, grouping or inserting
+  records changes nothing. A test loads a shuffled copy of all three files and checks
+  that the definitions and the simulation definitions are identical.
+* To remove a record, delete it and add a **tombstone** with its number to the
+  `retired_*` list of that file: `retired_units: [(kind: 12, name: "old_role")]`
+  (`retired_weapons`, `retired_movement_classes`, `retired_armor_types`,
+  `retired_damage_types` likewise). The number is then never handed out again: a live
+  record on a retired number is refused, and so is a number retired twice.
+* The numbers as shipped in WP3.1 (the position each record had in the file then) are
+  pinned by a test.
+
+Because numbers can have gaps, look one up with `UnitDefs::sim_unit(kind)` and
+`sim_weapon(kind)`; the `sim_units()` and `sim_weapons()` slices are sorted by kind, not
+indexed by it.
+
 ## What is validated
 
 Loading reports the first problem as `file:line:column: message` (the line comes from
@@ -141,27 +172,35 @@ the RON parser for syntax and type errors, and from a search for the record's id
 the checks after parsing):
 
 * ids are unique snake_case names (a test keeps the role names of other games out of
-  the shipped file; roles are named only as in `content/units.md`);
+  the shipped file; roles are named only as in `content/units.md`), and every
+  `kind` is unique within its list and not retired;
 * every weapon, movement class, armor type, damage type, `builds`, `disguise_as` and
   `comes_with` reference resolves; model and icon files exist and stay inside `assets/`
   (no `..`, no absolute path);
 * numbers are in range, durations are whole ticks, a Structure has a footprint and a
   mobile unit a movement class, a speed and a turn rate;
-* tests check every role of the tables in `content/units.md` exists, and that cost,
-  power, hit points, speed, weapon range, minimum range, capacities, radii and sight
-  match what that file states.
+* tests check both ways that the ids of the defs are exactly the roles of the tables in
+  `content/units.md` (a role deleted from that file fails too), and that cost, power,
+  hit points, speed, weapon range, minimum range, capacities, radii and the relations
+  "looks like", "comes with" and "build ... in the field" match what its notes say;
+  sight where it states one.
 
 ## Conversion for the simulation
 
 `UnitDefs::sim_units()` and `sim_weapons()` give `SimUnitDef` and `SimWeaponDef`:
-integers and `sf_math::Fx` in the sim's own units (speed in cells per second, times in
-ticks, names as indices, a faction mask). No float type crosses (a test checks the
-conversion module). They live in `sf_data` until WP3.2 settles how `sf_sim` takes
-them.
+integers and `sf_math::Fx` in the sim's own units (distances in cells, speed in cells
+per second and per tick, times in ticks, names as kind numbers, a faction mask). No
+float type crosses (a test checks the conversion module). They live in `sf_data` until
+WP3.2 settles how `sf_sim` takes them. The 20 Hz constants (`TICKS_PER_SECOND`,
+`TICK_MILLIS`) are in `sf_math`, which `sf_sim` re-exports and `sf_data` uses, so the
+two crates need no dependency on each other.
 
 ## Where it is tested
 
 `crates/sf_data/tests/units.rs`: the shipped data loads and every reference resolves;
-the roster, stats and factions against `content/units.md`; the structure footprints of
-the art brief; appending a unit, a weapon, a damage type and a movement class as data
-only; refusals with file and line; the conversion.
+the roster (both ways), stats and factions against `content/units.md`; the structure
+footprints of the art brief; the shipped kind numbers; a shuffled file giving identical
+definitions; duplicate and retired numbers; appending a unit, a weapon, a damage type
+and a movement class as data only; refusals with file and line, including numbers with
+too many decimals; the conversion, and the speed per tick against the exact rounding
+for every speed from 0.001 to 20.000 cells per second.

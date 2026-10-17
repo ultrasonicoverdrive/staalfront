@@ -4,29 +4,36 @@
 //! Game data wants to say `speed: 1.2`. A float in the data would be a hazard
 //! (two machines could disagree about the last bit), so the value is turned into
 //! an integer of thousandths the moment it is read and refused if that loses
-//! anything (`0.0004`, `NaN`). From there on it is integer arithmetic only:
-//! [`Decimal::to_fx`] makes the `sf_math` fixed-point number, and
-//! [`Decimal::to_ticks`] a whole number of 20 Hz ticks.
+//! anything (`0.0004`, `1.0000000001`, `NaN`). From there on it is integer
+//! arithmetic only: [`Decimal::to_fx`] makes the `sf_math` fixed-point number,
+//! [`Decimal::to_fx_per_tick`] a rate per 20 Hz tick, and
+//! [`Decimal::to_ticks`] a whole number of ticks.
 //!
-//! This file is the only place in the unit definitions where a float type is
-//! named, and only to read the text of the data file.
+//! The decimals are counted on the **text** of the number (`FromStr` is exact).
+//! The RON reader hands a visitor an `f64`; this file turns it back into its
+//! shortest text, which is the digits that were written (for any number with at
+//! most 15 significant digits), and parses that. On top of this, the file
+//! loaders scan the raw text of a data file for number literals with more than
+//! three decimals (`Source::check_numbers`), so even a literal with too many
+//! digits to survive the `f64` is refused, with its line number. This file is
+//! the only place in the unit definitions where a float type is named.
 
 use std::fmt;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::de::{self, Deserializer, Visitor};
-use sf_math::Fx;
+use sf_math::{Fx, TICK_MILLIS as TICK_MILLIS_U32, TICKS_PER_SECOND as TICKS_PER_SECOND_U32};
 
 /// Largest accepted magnitude, in whole units (a speed, a range or a number
 /// of seconds beyond a million is a typo).
 const MAX_WHOLE: i64 = 1_000_000;
 
-/// Milliseconds of game time per tick (20 Hz, B3). The same number as
-/// `sf_sim::TICK_MILLIS`; a test in `tests/units.rs` keeps them equal.
-pub const TICK_MILLIS: i64 = 50;
+/// Milliseconds of game time per tick (20 Hz, B3): `sf_math::TICK_MILLIS`.
+pub const TICK_MILLIS: i64 = TICK_MILLIS_U32 as i64;
 
-/// Ticks per game second (B3). Mirrors `sf_sim::TICKS_PER_SECOND`.
-pub const TICKS_PER_SECOND: u32 = 20;
+/// Ticks per game second (B3): `sf_math::TICKS_PER_SECOND`.
+pub const TICKS_PER_SECOND: u32 = TICKS_PER_SECOND_U32;
 
 /// A decimal number with at most three decimals, as thousandths.
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -62,6 +69,15 @@ impl Decimal {
         Fx::from_ratio(self.0, 1000)
     }
 
+    /// A rate per game second (cells per second) as a rate per tick, rounded
+    /// **once**: `value / (1000 * 20)` to the nearest raw unit, ties away from
+    /// zero. Going through [`Decimal::to_fx`] and dividing that by 20 rounds
+    /// twice and is off by one raw unit for about 2.5 % of all values (1.1
+    /// cells per second gives 3605 that way, and 3604 is right).
+    pub const fn to_fx_per_tick(self) -> Fx {
+        Fx::from_ratio(self.0, 1000 * TICKS_PER_SECOND as i64)
+    }
+
     /// A duration in game seconds as whole ticks, or `None` if it is negative
     /// or not an exact multiple of one tick (0.05 s). Silent rounding would
     /// make a typo (`0.12`) look like a design choice.
@@ -75,6 +91,54 @@ impl Decimal {
         } else {
             Some(ticks as u32)
         }
+    }
+}
+
+/// Why a text is not a [`Decimal`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParseDecimalError(String);
+
+impl fmt::Display for ParseDecimalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ParseDecimalError {}
+
+impl FromStr for Decimal {
+    type Err = ParseDecimalError;
+
+    /// Parses `-?digits(.digits)?` with at most three decimals and a whole part
+    /// of at most a million, exactly. An exponent, a `+` sign, white space or a
+    /// fourth decimal (even a zero) is refused.
+    fn from_str(text: &str) -> Result<Decimal, ParseDecimalError> {
+        let err = |why: &str| ParseDecimalError(format!("\"{text}\": {why}"));
+        let (negative, body) = match text.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, text),
+        };
+        let (whole, frac) = body.split_once('.').unwrap_or((body, ""));
+        let digits = |t: &str| t.bytes().all(|b| b.is_ascii_digit());
+        if whole.is_empty() || !digits(whole) || !digits(frac) {
+            return Err(err("not a plain decimal number"));
+        }
+        if body.contains('.') && frac.is_empty() {
+            return Err(err("nothing after the decimal point"));
+        }
+        if frac.len() > 3 {
+            return Err(err("more than three decimals"));
+        }
+        let whole_value: i64 = match whole.parse() {
+            Ok(n) if n <= MAX_WHOLE => n,
+            _ => return Err(err(&format!("out of range (at most {MAX_WHOLE})"))),
+        };
+        let mut milli = whole_value * 1000;
+        if !frac.is_empty() {
+            let scale = 10_i64.pow(3 - frac.len() as u32);
+            milli += frac.parse::<i64>().map_err(|_| err("not a number"))? * scale;
+        }
+        Ok(Decimal(if negative { -milli } else { milli }))
     }
 }
 
@@ -124,17 +188,15 @@ impl Visitor<'_> for DecimalVisitor {
     }
 
     fn visit_f64<E: de::Error>(self, v: f64) -> Result<Decimal, E> {
-        if !v.is_finite() || v.abs() > MAX_WHOLE as f64 {
+        if !v.is_finite() {
             return Err(E::custom(format!("{v} is not a usable number")));
         }
-        let scaled = v * 1000.0;
-        let rounded = scaled.round();
-        // A literal with three decimals scaled by 1000 lands within a few
-        // billionths of a whole number; anything further has more decimals.
-        if (scaled - rounded).abs() > 1e-6 {
-            return Err(E::custom(format!("{v} has more than three decimals")));
-        }
-        Ok(Decimal(rounded as i64))
+        // `{}` prints the shortest text that reads back as the same `f64` and
+        // never an exponent: the text that was written, whenever it had at
+        // most 15 significant digits. The decimals are counted on that text.
+        format!("{v}")
+            .parse::<Decimal>()
+            .map_err(|e| E::custom(e.to_string()))
     }
 }
 
@@ -165,17 +227,42 @@ mod tests {
     #[test]
     fn refuses_what_it_cannot_hold_exactly() {
         assert!(
-            parse("0.0004")
-                .unwrap_err()
-                .contains("more than three decimals")
-        );
-        assert!(
             parse("1.2345")
                 .unwrap_err()
                 .contains("more than three decimals")
         );
         assert!(parse("99999999").unwrap_err().contains("out of range"));
         assert!(parse("1e30").is_err());
+    }
+
+    #[test]
+    fn the_decimals_are_counted_on_the_text() {
+        // The old float tolerance (1e-6 around a whole thousandth) let the
+        // first of these in.
+        for text in ["1.0000000001", "0.0004", "2.0001", "0.1234567"] {
+            let reader = parse(text).unwrap_err();
+            assert!(
+                reader.contains("more than three decimals"),
+                "{text}: {reader}"
+            );
+            assert!(text.parse::<Decimal>().is_err(), "{text}");
+        }
+        // A trailing zero is a fourth decimal too. The RON reader cannot see
+        // it (it hands over 1.0); the file scan does, see `Source::check_numbers`.
+        assert!("1.0000".parse::<Decimal>().is_err());
+        assert_eq!("12.345".parse::<Decimal>(), Ok(Decimal(12345)));
+        assert_eq!("0.001".parse::<Decimal>(), Ok(Decimal(1)));
+        assert_eq!("-0.5".parse::<Decimal>(), Ok(Decimal(-500)));
+        assert_eq!("7".parse::<Decimal>(), Ok(Decimal(7000)));
+        for bad in ["", ".5", "5.", "+1", "1e3", " 1", "1.2.3", "--1", "1,5"] {
+            assert!(bad.parse::<Decimal>().is_err(), "{bad:?}");
+        }
+        // Every value of the thousandths grid survives the trip through the
+        // reader: text to f64 to text.
+        for milli in -20_000..=20_000 {
+            let text = Decimal(milli).to_string();
+            assert_eq!(parse(&text), Ok(Decimal(milli)), "{text}");
+        }
     }
 
     #[test]

@@ -6,6 +6,11 @@
 //   damage                            hit points per hit, before armor (WP5.3)
 //   damage_type                       a name from unit_classes.ron
 //   projectile                        Straight, Arc, Guided or Falling (WP5.2)
+//   kind                              the permanent number of the weapon (what
+//                                     the simulation uses): never changed, never
+//                                     reused; records may stand in any order. A
+//                                     removed weapon leaves a tombstone in
+//                                     `retired_weapons` (below).
 //
 // Ranges (and min_range of the howitzer) are the design targets of
 // content/units.md. Everything marked `placeholder` is not in that file and is
@@ -14,33 +19,35 @@
 (
     weapons: [
         // Baseline infantry rifle.
-        (id: "rifle", range: 4, reload: 1, damage: 6, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        (kind: 0, id: "rifle", range: 4, reload: 1, damage: 6, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
         // Anti-armour rocket (rocket_trooper).
-        (id: "rocket", range: 5, reload: 2.5, damage: 45, damage_type: "rocket", projectile: Guided), // placeholder: reload, damage
+        (kind: 1, id: "rocket", range: 5, reload: 2.5, damage: 45, damage_type: "rocket", projectile: Guided), // placeholder: reload, damage
         // Sniper: infantry only (an armor-table matter, WP5.3).
-        (id: "long_rifle", range: 8, reload: 3, damage: 40, damage_type: "precision", projectile: Straight), // placeholder: reload, damage
-        (id: "pistol", range: 3, reload: 1, damage: 4, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
-        (id: "carbine", range: 3, reload: 0.8, damage: 5, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        (kind: 2, id: "long_rifle", range: 8, reload: 3, damage: 40, damage_type: "precision", projectile: Straight), // placeholder: reload, damage
+        (kind: 3, id: "pistol", range: 3, reload: 1, damage: 4, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        (kind: 4, id: "carbine", range: 3, reload: 0.8, damage: 5, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
         // Demolition team: destroys any structure on contact, so the range is
         // touching distance and the damage is more than any structure's hit points.
-        (id: "satchel_charge", range: 0.5, reload: 1, damage: 5000, damage_type: "demolition", projectile: Straight), // placeholder: range, reload, damage
+        (kind: 5, id: "satchel_charge", range: 0.5, reload: 1, damage: 5000, damage_type: "demolition", projectile: Straight), // placeholder: range, reload, damage
         // light_tank.
-        (id: "cannon", range: 5, reload: 2, damage: 35, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        (kind: 6, id: "cannon", range: 5, reload: 2, damage: 35, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
         // heavy_tank.
-        (id: "twin_cannon", range: 5, reload: 2, damage: 60, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        (kind: 7, id: "twin_cannon", range: 5, reload: 2, damage: 60, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
         // siege_artillery.
-        (id: "howitzer", range: 10, min_range: 3, reload: 5, damage: 90, damage_type: "shell", projectile: Arc, splash_radius: 1.5), // placeholder: reload, damage, splash
+        (kind: 8, id: "howitzer", range: 10, min_range: 3, reload: 5, damage: 90, damage_type: "shell", projectile: Arc, splash_radius: 1.5), // placeholder: reload, damage, splash
         // heavy_gun_team.
-        (id: "anti_tank_gun", range: 6, reload: 2.5, damage: 70, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        (kind: 9, id: "anti_tank_gun", range: 6, reload: 2.5, damage: 70, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
         // gunboat.
-        (id: "naval_cannon", range: 6, reload: 2, damage: 45, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        (kind: 10, id: "naval_cannon", range: 6, reload: 2, damage: 45, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
         // defence_tower: anti-infantry and light vehicles.
-        (id: "tower_gun", range: 6, reload: 0.8, damage: 8, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        (kind: 11, id: "tower_gun", range: 6, reload: 0.8, damage: 8, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
         // advanced_defences: anti-armour gun emplacement.
-        (id: "emplacement_gun", range: 7, reload: 2.5, damage: 80, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
+        (kind: 12, id: "emplacement_gun", range: 7, reload: 2.5, damage: 80, damage_type: "cannon", projectile: Straight), // placeholder: reload, damage
         // automated_gun (F2-M10 hub prototype defence).
-        (id: "automated_gun", range: 8, reload: 1, damage: 20, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
+        (kind: 13, id: "automated_gun", range: 8, reload: 1, damage: 20, damage_type: "bullet", projectile: Straight), // placeholder: reload, damage
         // unmanned_artillery (F2-M09): units.md gives no numbers.
-        (id: "battery_shell", range: 12, min_range: 3, reload: 6, damage: 80, damage_type: "shell", projectile: Arc, splash_radius: 1.5), // placeholder: all numbers
+        (kind: 14, id: "battery_shell", range: 12, min_range: 3, reload: 6, damage: 80, damage_type: "shell", projectile: Arc, splash_radius: 1.5), // placeholder: all numbers
     ],
+    // Tombstones of removed weapons, as (kind: <number>, name: "<old id>").
+    retired_weapons: [],
 )

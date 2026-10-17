@@ -3,11 +3,16 @@
 //! a test).
 //!
 //! Everything is already in the sim's own units. Distances and sizes are
-//! [`Fx`] cells, speeds are [`Fx`] cells per game second (the sim divides by 20
-//! with `sf_sim::per_tick`), times are whole ticks at 20 Hz and a turn rate is
-//! facing steps per tick. Names became indices: the kind of a unit is its
-//! position in `unit_defs.ron`, and a weapon, movement class, armor type or
-//! damage type is its position in its own list.
+//! [`Fx`] cells, times are whole ticks at 20 Hz and a turn rate is facing steps
+//! per tick. A speed comes twice: `speed` in cells per game second (for tools
+//! and display) and `speed_per_tick`, which the sim moves by. The per-tick value
+//! is rounded once from the exact decimal; dividing `speed` by 20 afterwards
+//! (`sf_sim::per_tick`) would round twice and is off by one raw unit for about
+//! 2.5 % of all speeds. Names became **kind numbers**, the permanent `kind`
+//! field of the records: of a unit, a weapon, a movement class, an armor type
+//! and a damage type. The lists are sorted by kind and the numbers can have
+//! gaps (tombstones), so look a number up with `UnitDefs::sim_unit` and
+//! `UnitDefs::sim_weapon` instead of indexing the slices.
 //!
 //! The types live here, in `sf_data`, rather than in `sf_sim`: `sf_sim` does not
 //! use them until WP3.2, and the dependency direction (`sf_sim` reading
@@ -24,6 +29,8 @@ use super::weapon::{Projectile, WeaponDef};
 /// A weapon for the simulation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SimWeaponDef {
+    /// The permanent number of the weapon.
+    pub kind: u16,
     /// Longest distance it can hit, in cells.
     pub range: Fx,
     /// Shortest distance it can hit, in cells (zero for none).
@@ -32,8 +39,8 @@ pub struct SimWeaponDef {
     pub reload_ticks: u32,
     /// Damage of one hit, before armor.
     pub damage: u32,
-    /// Index into the damage types of `unit_classes.ron`.
-    pub damage_type: u8,
+    /// Kind number of the damage type in `unit_classes.ron`.
+    pub damage_type: u16,
     /// How the projectile travels.
     pub projectile: Projectile,
     /// Splash radius in cells (zero for none).
@@ -90,7 +97,7 @@ pub struct SimFlags {
 /// A role for the simulation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SimUnitDef {
-    /// The kind number: the position of the role in `unit_defs.ron`.
+    /// The permanent kind number of the role (`kind` in `unit_defs.ron`).
     pub kind: u16,
     /// What sort of thing it is.
     pub category: Category,
@@ -102,17 +109,22 @@ pub struct SimUnitDef {
     pub build_ticks: u32,
     /// Hit points (zero: cannot be damaged).
     pub hp: u32,
-    /// Index into the armor types.
-    pub armor_type: u8,
+    /// Kind number of the armor type.
+    pub armor_type: u16,
     /// Power produced (positive) or used (negative).
     pub power: i32,
-    /// Index into the movement classes; `None` for things that never move.
-    pub movement_class: Option<u8>,
-    /// Speed in cells per game second.
+    /// Kind number of the movement class; `None` for things that never move.
+    pub movement_class: Option<u16>,
+    /// Speed in cells per game second (for tools and display).
     pub speed: Fx,
     /// Speed on water in cells per game second (equal to `speed` unless the
     /// role says otherwise).
     pub water_speed: Fx,
+    /// Distance per tick, rounded once from the exact decimal: what the
+    /// simulation moves by.
+    pub speed_per_tick: Fx,
+    /// `water_speed` per tick, rounded once.
+    pub water_speed_per_tick: Fx,
     /// Facing steps (of 256) per tick.
     pub turn_per_tick: u8,
     /// Diameter in cells (zero for structures).
@@ -121,7 +133,7 @@ pub struct SimUnitDef {
     pub footprint: Option<(u8, u8)>,
     /// Sight in cells.
     pub sight: Fx,
-    /// Indices into the weapon list.
+    /// Kind numbers of its weapons.
     pub weapons: Vec<u16>,
     /// Abilities.
     pub flags: SimFlags,
@@ -144,12 +156,13 @@ pub(crate) fn convert_weapons(
         .iter()
         .map(|w| {
             Ok(SimWeaponDef {
+                kind: w.kind,
                 range: w.range.to_fx(),
                 min_range: w.min_range.to_fx(),
                 reload_ticks: ticks(w.reload, &w.id)?,
                 damage: w.damage,
                 damage_type: classes
-                    .damage_index(&w.damage_type)
+                    .damage_kind(&w.damage_type)
                     .ok_or_else(|| format!("weapon {}: damage type", w.id))?,
                 projectile: w.projectile,
                 splash_radius: w.splash_radius.to_fx(),
@@ -167,14 +180,13 @@ pub(crate) fn convert_units(
     let kind_of = |id: &str| -> Result<u16, String> {
         units
             .iter()
-            .position(|u| u.id == id)
-            .and_then(|i| u16::try_from(i).ok())
+            .find(|u| u.id == id)
+            .map(|u| u.kind)
             .ok_or_else(|| format!("unknown unit {id}"))
     };
     units
         .iter()
-        .enumerate()
-        .map(|(i, u)| {
+        .map(|u| {
             let id = &u.id;
             let weapon_ids = u
                 .weapons
@@ -182,8 +194,8 @@ pub(crate) fn convert_units(
                 .map(|w| {
                     weapons
                         .iter()
-                        .position(|d| d.id == *w)
-                        .and_then(|k| u16::try_from(k).ok())
+                        .find(|d| d.id == *w)
+                        .map(|d| d.kind)
                         .ok_or_else(|| format!("unit {id}: weapon {w}"))
                 })
                 .collect::<Result<Vec<u16>, String>>()?;
@@ -192,25 +204,30 @@ pub(crate) fn convert_units(
                 .as_deref()
                 .map(|m| {
                     classes
-                        .movement_index(m)
+                        .movement_kind(m)
                         .ok_or_else(|| format!("unit {id}: movement class {m}"))
                 })
                 .transpose()?;
             let speed = u.speed.to_fx();
+            let speed_per_tick = u.speed.to_fx_per_tick();
             Ok(SimUnitDef {
-                kind: u16::try_from(i).map_err(|_| "too many units".to_string())?,
+                kind: u.kind,
                 category: u.category,
                 factions: u.factions.iter().fold(0, |m, f| m | f.bit()),
                 cost: u.cost,
                 build_ticks: ticks(u.build_seconds, id)?,
                 hp: u.hp,
                 armor_type: classes
-                    .armor_index(&u.armor)
+                    .armor_kind(&u.armor)
                     .ok_or_else(|| format!("unit {id}: armor type"))?,
                 power: u.power,
                 movement_class,
                 speed,
                 water_speed: u.water_speed.map_or(speed, Decimal::to_fx),
+                speed_per_tick,
+                water_speed_per_tick: u
+                    .water_speed
+                    .map_or(speed_per_tick, Decimal::to_fx_per_tick),
                 turn_per_tick: u.turn_rate,
                 size: u.size.to_fx(),
                 footprint: u.footprint.map(|f| (f.width, f.height)),

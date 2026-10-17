@@ -1,10 +1,12 @@
 //! Unit, structure and mission-object definitions (`assets/config/unit_defs.ron`).
 //!
-//! One record per role of `content/units.md`. The file lists them in a fixed
-//! order and that order is the **kind number** the simulation uses
-//! (`sf_sim::Kind`): new roles are appended at the end, never inserted, so that
-//! saves, replays and scenario files keep their meaning. `docs/rules/units.md`
-//! describes every field and its unit of measure.
+//! One record per role of `content/units.md`. Every record has a `kind`, its
+//! **permanent number**: the simulation (`sf_sim::Kind`), scenario files, saves
+//! and replays name the role by it. The number is chosen when the record is
+//! written, never changes, and does not depend on the record's place in the
+//! file. A removed role leaves a tombstone in `retired_units` so its number is
+//! never handed out again (see `kinds.rs`). `docs/rules/units.md` describes
+//! every field and its unit of measure.
 
 use std::path::Path;
 
@@ -13,6 +15,7 @@ use serde::Deserialize;
 use super::classes::{ClassTables, is_valid_name};
 use super::decimal::Decimal;
 use super::error::{DefError, Source};
+use super::kinds::{self, Live, Retired};
 use super::weapon::WeaponDef;
 
 /// Largest speed accepted, cells per second.
@@ -25,8 +28,10 @@ const MAX_FOOTPRINT: u8 = 16;
 const MAX_CELLS_MILLI: i64 = 64_000;
 /// Most weapons one unit may carry.
 const MAX_WEAPONS: usize = 4;
-/// Most unit definitions (the kind number is a `u16`).
+/// Most unit definitions.
 pub const MAX_UNITS: usize = 1024;
+/// Largest unit `kind`.
+pub const MAX_UNIT_KIND: u16 = 4095;
 
 /// Which side can use a role. A role can be open to more than one side;
 /// `Neutral` roles (civilians, mission objects) belong to no player.
@@ -186,6 +191,9 @@ pub struct Flags {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UnitDef {
+    /// Permanent number (what the simulation uses as `Kind`), unique among
+    /// units and tombstones; the position in the file does not matter.
+    pub kind: u16,
     /// Unique snake_case role name, exactly as in `content/units.md`.
     pub id: String,
     /// Which sides can use it.
@@ -252,6 +260,9 @@ pub struct UnitDef {
 #[serde(deny_unknown_fields)]
 struct UnitsFile {
     units: Vec<UnitDef>,
+    /// Tombstones of removed roles: their numbers are never reused.
+    #[serde(default)]
+    retired_units: Vec<Retired>,
 }
 
 /// Where a file reference is checked: with `Some(dir)` the file must exist
@@ -295,9 +306,10 @@ pub(crate) fn parse(
     classes: &ClassTables,
     weapons: &[WeaponDef],
     assets: Assets<'_>,
-) -> Result<Vec<UnitDef>, DefError> {
+) -> Result<(Vec<UnitDef>, Vec<Retired>), DefError> {
+    src.check_numbers()?;
     let file: UnitsFile = ron::from_str(src.text).map_err(|e| src.ron_error(&e))?;
-    let units = file.units;
+    let mut units = file.units;
     if units.is_empty() {
         return Err(src.error("the list of units is empty"));
     }
@@ -333,7 +345,16 @@ pub(crate) fn parse(
         };
         ctx.check()?;
     }
-    Ok(units)
+    let live: Vec<Live<'_>> = units
+        .iter()
+        .map(|u| Live {
+            kind: u.kind,
+            name: &u.id,
+        })
+        .collect();
+    kinds::check(src, "unit", "id", MAX_UNIT_KIND, &live, &file.retired_units)?;
+    units.sort_by_key(|u| u.kind);
+    Ok((units, file.retired_units))
 }
 
 /// Everything the checks of one record need.
@@ -464,7 +485,7 @@ impl Ctx<'_> {
                         "only Infantry, Vehicle and Vessel can have a movement class",
                     ));
                 }
-                if self.classes.movement_index(m).is_none() {
+                if self.classes.movement_kind(m).is_none() {
                     return Err(self.at(
                         m,
                         format!("unknown movement class \"{m}\" (not in unit_classes.ron)"),
@@ -501,7 +522,7 @@ impl Ctx<'_> {
 
     fn check_references(&self) -> Result<(), DefError> {
         let u = self.u;
-        if self.classes.armor_index(&u.armor).is_none() {
+        if self.classes.armor_kind(&u.armor).is_none() {
             return Err(self.at(
                 &u.armor,
                 format!(

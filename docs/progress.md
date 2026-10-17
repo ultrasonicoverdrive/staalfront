@@ -95,8 +95,8 @@ Status: in progress.
 - WP3.2 to WP3.6: open
 
 WP3.1 notes. The data is `assets/config/unit_classes.ron`, `weapon_defs.ron` and
-`unit_defs.ron`; the order of `unit_defs.ron` is the kind number, so roles are only
-appended. Tests compare every role with the stats, capacities and tech-tree factions of
+`unit_defs.ron`; every record has a permanent `kind` number (order in the file does not
+matter, removed records leave tombstones), so numbers are never reused. Tests compare every role with the stats, capacities and tech-tree factions of
 `content/units.md`. The simulation does not use the definitions yet and its checksums
 are unchanged. Fields, units of measure and the placeholders: `docs/rules/units.md`.
 
@@ -167,7 +167,8 @@ fixed, delete the entry in the same PR.
 12. **`kind % shapes` in `sf_game` is a stand-in.** The game maps the sim's entity kind
     to a placeholder shape and the owner to a player colour by modulo. Replace it
     with data-driven units. WP3.1 delivered the data half (`sf_data::units`, the kind
-    number of a role is its position in `assets/config/unit_defs.ron`); WP3.2 spawns
+    number of a role is the permanent `kind` written in its record in
+    `assets/config/unit_defs.ron`); WP3.2 spawns
     from it and removes the stand-in. WP2.1's `Place` takes the kind as an opaque number
     too and the demo does not use `Place`, so the stand-in is untouched.
 14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found

@@ -1,10 +1,12 @@
 // Movement classes, armor types and damage types (WP3.1). Read by
 // sf_data::units; unit_defs.ron and weapon_defs.ron refer to these names.
 //
-// A name's position in its list is its index in the simulation, so only ever
-// append to a list; never reorder or remove an entry that is in use.
+// `kind` is the permanent number of an entry (what the simulation uses): never
+// changed, never reused, unique within its list. Entries may stand in any order.
+// A removed entry leaves a tombstone, (kind: <number>, name: "<old name>"), in
+// the matching `retired_*` list at the end of the file.
 //
-// Each entry is a struct with just a `name` for now, so that the work packages
+// Each entry is a struct with just a `kind` and a `name` for now, so that the work packages
 // that give the tables meaning can add fields without changing the format:
 //
 //   * movement_classes, WP4.1: the terrain cost per terrain type name (a
@@ -18,28 +20,31 @@
 // armor and damage types below.
 (
     movement_classes: [
-        (name: "foot"),    // infantry
-        (name: "wheeled"), // trucks and light vehicles
-        (name: "tracked"), // tanks, artillery, harvesters
-        (name: "hover"),   // crosses land and water (the amphibious transport)
-        (name: "water"),   // vessels
-        (name: "air"),     // aircraft; no role uses it yet
+        (kind: 0, name: "foot"),    // infantry
+        (kind: 1, name: "wheeled"), // trucks and light vehicles
+        (kind: 2, name: "tracked"), // tanks, artillery, harvesters
+        (kind: 3, name: "hover"),   // crosses land and water (the amphibious transport)
+        (kind: 4, name: "water"),   // vessels
+        (kind: 5, name: "air"),     // aircraft; no role uses it yet
     ],
     // placeholder: the set of armor types is a first guess for WP5.3.
     armor_types: [
-        (name: "none"),      // cannot be damaged (ore field)
-        (name: "infantry"),
-        (name: "light"),     // light vehicles, vessels and small objects
-        (name: "heavy"),     // heavy vehicles
-        (name: "structure"),
+        (kind: 0, name: "none"),      // cannot be damaged (ore field)
+        (kind: 1, name: "infantry"),
+        (kind: 2, name: "light"),     // light vehicles, vessels and small objects
+        (kind: 3, name: "heavy"),     // heavy vehicles
+        (kind: 4, name: "structure"),
     ],
     // placeholder: the set of damage types is a first guess for WP5.3.
     damage_types: [
-        (name: "bullet"),     // small arms and machine guns
-        (name: "precision"),  // long rifle: infantry only (the armor table will say so)
-        (name: "rocket"),     // anti-armour rockets
-        (name: "cannon"),     // tank and gun shells
-        (name: "shell"),      // artillery
-        (name: "demolition"), // satchel charges
+        (kind: 0, name: "bullet"),     // small arms and machine guns
+        (kind: 1, name: "precision"),  // long rifle: infantry only (the armor table will say so)
+        (kind: 2, name: "rocket"),     // anti-armour rockets
+        (kind: 3, name: "cannon"),     // tank and gun shells
+        (kind: 4, name: "shell"),      // artillery
+        (kind: 5, name: "demolition"), // satchel charges
     ],
+    retired_movement_classes: [],
+    retired_armor_types: [],
+    retired_damage_types: [],
 )

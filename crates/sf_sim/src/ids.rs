@@ -8,13 +8,12 @@ use core::fmt;
 
 use sf_math::Fx;
 
-/// Simulation steps per second (PLAN.md decision B3). `sf_engine` runs its
-/// fixed-step loop at the same rate; the two crates do not depend on each
-/// other, so the number is repeated there on purpose.
-pub const TICKS_PER_SECOND: u32 = 20;
-
-/// Milliseconds of game time per tick: exactly `1000 / TICKS_PER_SECOND`.
-pub const TICK_MILLIS: u32 = 1000 / TICKS_PER_SECOND;
+// Simulation steps per second (PLAN.md decision B3) and the milliseconds of
+// game time per tick (`1000 / TICKS_PER_SECOND`). Defined in `sf_math` so that
+// `sf_data` can use them without depending on this crate; re-exported here.
+// `sf_engine` runs its fixed-step loop at the same rate; it does not depend on
+// `sf_math` for it, so the number is repeated there on purpose.
+pub use sf_math::{TICK_MILLIS, TICKS_PER_SECOND};
 
 /// The duration of one tick in seconds as a fixed-point number: one twentieth,
 /// rounded to the nearest raw unit (3277 of 65536, which is a hair more

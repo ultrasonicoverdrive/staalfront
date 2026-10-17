@@ -17,6 +17,7 @@
 //! | [`Rng`] | PCG32 with unbiased range helpers and serialisable state |
 //! | [`hash::Fnv1a64`] | explicit little-endian FNV-1a for state checksums |
 //! | [`CELL_METRES`] | the scale between a cell and the metres of the presentation (4) |
+//! | [`TICKS_PER_SECOND`], [`TICK_MILLIS`] | the 20 Hz tick (B3) |
 //! | `render_bridge` | the only float code: `Fx`/`Vec2` to and from single-precision floats; exists only with the `render` feature |
 //!
 //! # The number format
@@ -152,3 +153,13 @@ pub use vec2::Vec2;
 /// counted exactly (`Map::size_in_cells` in `sf_data`); the renderer's single-precision
 /// copy is `render_bridge::METRES_PER_CELL`.
 pub const CELL_METRES: u32 = 4;
+
+/// Simulation steps per second (PLAN.md decision B3). It lives here, next to
+/// the number format, because the simulation and the unit definitions in
+/// `sf_data` (durations in ticks, speed per tick) need the same 20 and neither
+/// depends on the other. `sf_sim` re-exports it. (`sf_engine` has its own copy,
+/// `SIM_HZ`, as it depends on neither.)
+pub const TICKS_PER_SECOND: u32 = 20;
+
+/// Milliseconds of game time per tick: exactly `1000 / TICKS_PER_SECOND`.
+pub const TICK_MILLIS: u32 = 1000 / TICKS_PER_SECOND;

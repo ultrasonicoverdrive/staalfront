@@ -12,6 +12,12 @@
 //! ([`UnitDefs::load`] reads the three; `units.ron` next to them is the
 //! unrelated placeholder look of WP1.6.)
 //!
+//! **Numbers are permanent.** Every unit, weapon, movement class, armor type and
+//! damage type has a `kind` number written into its record. The simulation,
+//! scenarios, saves and replays use that number; it never changes, the order of
+//! the records in the file is irrelevant, and a removed record leaves a
+//! tombstone (`retired_*`) so the number is never reused.
+//!
 //! Loading checks the files and reports the first problem as a [`DefError`]
 //! with the file and the line (`assets/config/unit_defs.ron:41:16: unit
 //! "light_tank": unknown weapon "cannon2" (not in weapon_defs.ron)`): ids are
@@ -31,29 +37,32 @@
 //!
 //! let defs = UnitDefs::embedded();
 //! let kind = defs.kind_of("light_tank").unwrap();
-//! let tank = &defs.sim_units()[usize::from(kind)];
+//! let tank = defs.sim_unit(kind).unwrap();
 //! assert_eq!(tank.hp, 400);
 //! assert_eq!(tank.speed, Fx::from_int(2)); // cells per game second
+//! assert_eq!(tank.speed_per_tick, Fx::from_ratio(1, 10)); // what the sim moves by
 //! ```
 
 mod classes;
 mod decimal;
 mod error;
+mod kinds;
 mod sim;
 mod unit;
 mod weapon;
 
 use std::path::Path;
 
-pub use classes::{ArmorType, ClassTables, DamageType, MovementClass};
+pub use classes::{ArmorType, ClassTables, DamageType, MAX_CLASS_KIND, MovementClass};
 pub use decimal::{Decimal, TICK_MILLIS, TICKS_PER_SECOND};
 pub use error::DefError;
+pub use kinds::Retired;
 pub use sim::{SimFlags, SimUnitDef, SimWeaponDef};
 pub use unit::{
-    Category, DeathBlast, Faction, Flags, Footprint, IconShape, MAX_UNITS, Model, ModelShape,
-    UnitDef,
+    Category, DeathBlast, Faction, Flags, Footprint, IconShape, MAX_UNIT_KIND, MAX_UNITS, Model,
+    ModelShape, UnitDef,
 };
-pub use weapon::{Projectile, WeaponDef};
+pub use weapon::{MAX_WEAPON_KIND, Projectile, WeaponDef};
 
 use error::Source;
 
@@ -118,6 +127,8 @@ pub struct UnitDefs {
     classes: ClassTables,
     weapons: Vec<WeaponDef>,
     units: Vec<UnitDef>,
+    retired_weapons: Vec<Retired>,
+    retired_units: Vec<Retired>,
     sim_weapons: Vec<SimWeaponDef>,
     sim_units: Vec<SimUnitDef>,
 }
@@ -137,8 +148,8 @@ impl UnitDefs {
         let units_src = Source::new(sources.units.name, sources.units.text);
 
         let classes = ClassTables::parse(classes_src)?;
-        let weapons = weapon::parse(weapons_src, &classes)?;
-        let units = unit::parse(
+        let (weapons, retired_weapons) = weapon::parse(weapons_src, &classes)?;
+        let (units, retired_units) = unit::parse(
             units_src,
             &classes,
             &weapons,
@@ -152,6 +163,8 @@ impl UnitDefs {
             classes,
             weapons,
             units,
+            retired_weapons,
+            retired_units,
             sim_weapons,
             sim_units,
         })
@@ -205,12 +218,12 @@ impl UnitDefs {
         &self.classes
     }
 
-    /// Every weapon, in file order.
+    /// Every weapon, sorted by `kind`.
     pub fn weapons(&self) -> &[WeaponDef] {
         &self.weapons
     }
 
-    /// Every role, in file order (the index is the kind number).
+    /// Every role, sorted by `kind` (not in file order: that does not matter).
     pub fn units(&self) -> &[UnitDef] {
         &self.units
     }
@@ -220,12 +233,17 @@ impl UnitDefs {
         self.units.iter().find(|u| u.id == id)
     }
 
+    /// The role with this kind number.
+    pub fn unit_by_kind(&self, kind: u16) -> Option<&UnitDef> {
+        self.units
+            .binary_search_by_key(&kind, |u| u.kind)
+            .ok()
+            .map(|i| &self.units[i])
+    }
+
     /// The kind number of the role with this id.
     pub fn kind_of(&self, id: &str) -> Option<u16> {
-        self.units
-            .iter()
-            .position(|u| u.id == id)
-            .and_then(|i| u16::try_from(i).ok())
+        self.unit(id).map(|u| u.kind)
     }
 
     /// The weapon with this id.
@@ -233,14 +251,49 @@ impl UnitDefs {
         self.weapons.iter().find(|w| w.id == id)
     }
 
-    /// The roles converted for the simulation; the index is the kind number.
+    /// The weapon with this kind number.
+    pub fn weapon_by_kind(&self, kind: u16) -> Option<&WeaponDef> {
+        self.weapons
+            .binary_search_by_key(&kind, |w| w.kind)
+            .ok()
+            .map(|i| &self.weapons[i])
+    }
+
+    /// Tombstones of removed roles: their numbers stay taken.
+    pub fn retired_units(&self) -> &[Retired] {
+        &self.retired_units
+    }
+
+    /// Tombstones of removed weapons.
+    pub fn retired_weapons(&self) -> &[Retired] {
+        &self.retired_weapons
+    }
+
+    /// The roles converted for the simulation, sorted by kind. The numbers can
+    /// have gaps: look a role up with [`UnitDefs::sim_unit`].
     pub fn sim_units(&self) -> &[SimUnitDef] {
         &self.sim_units
     }
 
-    /// The weapons converted for the simulation; the index is what
-    /// [`SimUnitDef::weapons`] holds.
+    /// The converted role with this kind number.
+    pub fn sim_unit(&self, kind: u16) -> Option<&SimUnitDef> {
+        self.sim_units
+            .binary_search_by_key(&kind, |u| u.kind)
+            .ok()
+            .map(|i| &self.sim_units[i])
+    }
+
+    /// The weapons converted for the simulation, sorted by kind.
     pub fn sim_weapons(&self) -> &[SimWeaponDef] {
         &self.sim_weapons
+    }
+
+    /// The converted weapon with this kind number (what
+    /// [`SimUnitDef::weapons`] holds).
+    pub fn sim_weapon(&self, kind: u16) -> Option<&SimWeaponDef> {
+        self.sim_weapons
+            .binary_search_by_key(&kind, |w| w.kind)
+            .ok()
+            .map(|i| &self.sim_weapons[i])
     }
 }

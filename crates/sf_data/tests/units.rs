@@ -90,14 +90,14 @@ fn shipped_definitions_load_and_every_reference_resolves() {
 fn all_six_movement_classes_exist() {
     let defs = shipped();
     for name in ["foot", "wheeled", "tracked", "hover", "water", "air"] {
-        assert!(defs.classes().movement_index(name).is_some(), "{name}");
+        assert!(defs.classes().movement_kind(name).is_some(), "{name}");
     }
 }
 
-/// The order of the roles is the kind number. This is the roster as WP3.1
-/// shipped it: new roles go after it, nothing moves. If this test fails because
-/// of a reorder, saves and scenarios that name a kind number would break.
-const ROSTER_ORDER: &[&str] = &[
+/// The kind numbers as WP3.1 shipped them: the role at position `n` has kind
+/// `n`. Numbers are permanent (`docs/rules/units.md`), so this table only ever
+/// grows at the end; a changed or reused number would break saves and scenarios.
+const SHIPPED_KINDS: &[&str] = &[
     "construction_center",
     "power_plant",
     "refinery",
@@ -144,14 +144,29 @@ const ROSTER_ORDER: &[&str] = &[
 ];
 
 #[test]
-fn kind_numbers_are_the_file_order() {
+fn kind_numbers_are_the_shipped_ones() {
     let defs = shipped();
-    assert!(defs.units().len() >= ROSTER_ORDER.len());
-    for (kind, id) in ROSTER_ORDER.iter().enumerate() {
-        assert_eq!(defs.units()[kind].id, *id, "kind {kind}");
-        assert_eq!(defs.kind_of(id), Some(kind as u16));
-        assert_eq!(usize::from(defs.sim_units()[kind].kind), kind);
+    for (kind, id) in SHIPPED_KINDS.iter().enumerate() {
+        assert_eq!(defs.kind_of(id), Some(kind as u16), "kind of {id}");
+        assert_eq!(defs.unit_by_kind(kind as u16).unwrap().id, *id);
+        assert_eq!(defs.sim_unit(kind as u16).unwrap().kind, kind as u16);
     }
+    // Weapons and the small tables keep their numbers too.
+    for (kind, id) in ["rifle", "rocket", "long_rifle", "pistol", "carbine"]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(defs.weapon(id).unwrap().kind, kind as u16, "{id}");
+    }
+    let classes = defs.classes();
+    for (kind, name) in ["foot", "wheeled", "tracked", "hover", "water", "air"]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(classes.movement_kind(name), Some(kind as u16), "{name}");
+    }
+    assert_eq!(classes.armor_kind("structure"), Some(4));
+    assert_eq!(classes.damage_kind("demolition"), Some(5));
 }
 
 #[test]
@@ -301,6 +316,27 @@ fn every_role_of_units_md_exists_in_the_defs() {
 }
 
 #[test]
+fn every_id_in_the_defs_is_a_role_of_units_md() {
+    // The reverse of the test above: a role deleted from units.md (or a typo in
+    // the defs) must fail here, not pass unnoticed.
+    let defs = shipped();
+    let roles = roster();
+    assert!(roles.len() >= 40, "found only {} roles", roles.len());
+    let extra: Vec<&str> = defs
+        .units()
+        .iter()
+        .map(|u| u.id.as_str())
+        .filter(|id| !roles.iter().any(|r| r == id))
+        .collect();
+    assert!(
+        extra.is_empty(),
+        "ids in the defs but not in units.md: {extra:?}"
+    );
+    // Same count, so no role is listed twice on either side.
+    assert_eq!(roles.len(), defs.units().len());
+}
+
+#[test]
 fn defs_carry_the_stats_of_units_md() {
     let defs = shipped();
     for row in role_rows() {
@@ -373,36 +409,76 @@ fn defs_carry_the_stats_of_units_md() {
                 "{role}: min range {min}"
             );
         }
-        // Capacities, radii and sight in the notes.
-        if let Some(n) = number_after(&all, "Carries ") {
-            assert_eq!(i64::from(u.flags.transports) * 1000, n, "{role} carries");
+        // Capacities and radii in the notes: both ways, so a flag that the notes
+        // do not mention fails too (a missing phrase reads as zero).
+        let milli_of = |phrase: &str| number_after(&all, phrase).unwrap_or(0);
+        assert_eq!(
+            i64::from(u.flags.transports) * 1000,
+            milli_of("Carries "),
+            "{role} carries"
+        );
+        assert_eq!(
+            i64::from(u.flags.transports_vehicles) * 1000,
+            milli_of("infantry or "),
+            "{role} carries vehicles"
+        );
+        assert_eq!(
+            i64::from(u.flags.garrison) * 1000,
+            milli_of("Garrison "),
+            "{role} garrison"
+        );
+        assert_eq!(
+            u.flags.build_radius.milli(),
+            milli_of("Build radius "),
+            "{role} build radius"
+        );
+        assert_eq!(
+            u.flags.heal_radius.milli(),
+            milli_of("Heals infantry in radius "),
+            "{role} heal radius"
+        );
+        assert_eq!(
+            u.flags.repair_radius.milli(),
+            milli_of("Repairs vehicles in radius "),
+            "{role} repair radius"
+        );
+        assert_eq!(
+            u.flags.death_blast.map_or(0, |b| b.radius.milli()),
+            milli_of("damages radius "),
+            "{role} blast radius"
+        );
+        // Sight is only stated for some roles; where it is, it must match.
+        for phrase in ["Sight ", "reveals "] {
+            if let Some(n) = number_after(&all, phrase) {
+                assert_eq!(u.sight.milli(), n, "{role} {phrase}");
+            }
         }
-        if let Some(n) = number_after(&all, "Garrison ") {
-            assert_eq!(i64::from(u.flags.garrison) * 1000, n, "{role} garrison");
-        }
-        if let Some(n) = number_after(&all, "Build radius ") {
-            assert_eq!(u.flags.build_radius.milli(), n, "{role} build radius");
-        }
-        if let Some(n) = number_after(&all, "Sight ") {
-            assert_eq!(u.sight.milli(), n, "{role} sight");
-        }
-        if let Some(n) = number_after(&all, "reveals ") {
-            assert_eq!(u.sight.milli(), n, "{role} reveals");
-        }
-        if let Some(n) = number_after(&all, "Heals infantry in radius ") {
-            assert_eq!(u.flags.heal_radius.milli(), n, "{role} heal radius");
-        }
-        if let Some(n) = number_after(&all, "Repairs vehicles in radius ") {
-            assert_eq!(u.flags.repair_radius.milli(), n, "{role} repair radius");
-        }
-        if let Some(n) = number_after(&all, "damages radius ") {
-            let blast = u
-                .flags
-                .death_blast
-                .unwrap_or_else(|| panic!("{role} blast"));
-            assert_eq!(blast.radius.milli(), n, "{role} blast radius");
-        }
+        // Relations between roles, in words: "Looks like X", "Comes with 1 X",
+        // "build X in the field". Both ways.
+        assert_eq!(
+            u.flags.disguise_as.as_deref(),
+            word_after(&all, "Looks like "),
+            "{role} disguise"
+        );
+        assert_eq!(
+            u.flags.comes_with.as_deref(),
+            word_after(&all, "Comes with 1 "),
+            "{role} comes with"
+        );
+        let builds: Vec<&str> = word_after(&all, "build ").into_iter().collect();
+        let defined: Vec<&str> = u.flags.builds.iter().map(String::as_str).collect();
+        assert_eq!(defined, builds, "{role} builds");
     }
+}
+
+/// The snake_case word that follows `prefix` somewhere in `text`.
+fn word_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let at = text.find(prefix)? + prefix.len();
+    let rest = &text[at..];
+    let end = rest
+        .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+        .unwrap_or(rest.len());
+    (end > 0).then(|| &rest[..end])
 }
 
 #[test]
@@ -459,7 +535,7 @@ fn factions_follow_the_tech_tree_of_units_md() {
 
 const EXTRA_UNIT: &str = r#"
         (
-            id: "hover_scout", factions: [Meridian], category: Vehicle,
+            kind: 43, id: "hover_scout", factions: [Meridian], category: Vehicle,
             cost: 450, build_seconds: 12, hp: 120, armor: "light",
             movement: "hover", speed: 3.5, water_speed: 3, turn_rate: 12, size: 0.9, sight: 9,
             weapons: ["rifle"],
@@ -482,17 +558,17 @@ fn a_role_added_to_the_file_needs_no_rust_change() {
     .expect("the file with one more unit loads");
     assert_eq!(defs.units().len(), base.units().len() + 1);
     let kind = defs.kind_of("hover_scout").unwrap();
-    assert_eq!(usize::from(kind), base.units().len());
+    assert_eq!(kind, 43);
     // Every earlier kind kept its number and its numbers.
     assert_eq!(&defs.sim_units()[..base.units().len()], base.sim_units());
-    let sim = &defs.sim_units()[usize::from(kind)];
+    let sim = defs.sim_unit(kind).unwrap();
     assert_eq!(sim.hp, 120);
     assert_eq!(sim.cost, Some(450));
     assert_eq!(sim.build_ticks, 240); // 12 s at 20 Hz
     assert_eq!(sim.speed, Fx::from_ratio(7, 2));
     assert_eq!(sim.water_speed, Fx::from_int(3));
     assert_eq!(sim.sight, Fx::from_int(9));
-    assert_eq!(sim.movement_class, defs.classes().movement_index("hover"));
+    assert_eq!(sim.movement_class, defs.classes().movement_kind("hover"));
     assert_eq!(sim.weapons, vec![0]); // "rifle" is the first weapon
     assert!(sim.available_to(Faction::Meridian));
     assert!(!sim.available_to(Faction::Veyran));
@@ -503,7 +579,7 @@ fn a_new_weapon_damage_type_and_movement_class_are_data_too() {
     let base = shipped();
     let extra = r#"
         (
-            id: "plasma_walker", factions: [Veyran], category: Vehicle,
+            kind: 43, id: "plasma_walker", factions: [Veyran], category: Vehicle,
             cost: 2000, build_seconds: 60, hp: 700, armor: "heavy",
             movement: "strider", speed: 0.9, turn_rate: 5, size: 1.6, sight: 8,
             weapons: ["plasma_lance"],
@@ -513,29 +589,31 @@ fn a_new_weapon_damage_type_and_movement_class_are_data_too() {
     let defs = load_with(
         |t| {
             t.replacen(
-                "(name: \"air\"),",
-                "(name: \"air\"), (name: \"strider\"),",
+                "(kind: 5, name: \"air\"),",
+                "(kind: 5, name: \"air\"), (kind: 6, name: \"strider\"),",
                 1,
             )
             .replacen(
-                "(name: \"demolition\"),",
-                "(name: \"demolition\"), (name: \"plasma\"),",
+                "(kind: 5, name: \"demolition\"),",
+                "(kind: 5, name: \"demolition\"), (kind: 6, name: \"plasma\"),",
                 1,
             )
         },
         |t| {
             with_extra(
                 t,
-                "        (id: \"plasma_lance\", range: 6, reload: 3, damage: 150, damage_type: \"plasma\", projectile: Falling, splash_radius: 2),\n",
+                "        (kind: 15, id: \"plasma_lance\", range: 6, reload: 3, damage: 150, damage_type: \"plasma\", projectile: Falling, splash_radius: 2),\n",
             )
         },
         |t| with_extra(t, extra),
     );
     let defs = defs.expect("new weapon, damage type and movement class load");
     let walker = defs.unit("plasma_walker").unwrap();
-    let sim = &defs.sim_units()[usize::from(defs.kind_of("plasma_walker").unwrap())];
+    let sim = defs
+        .sim_unit(defs.kind_of("plasma_walker").unwrap())
+        .unwrap();
     assert_eq!(sim.movement_class, Some(6));
-    let lance = &defs.sim_weapons()[usize::from(sim.weapons[0])];
+    let lance = defs.sim_weapon(sim.weapons[0]).unwrap();
     assert_eq!(lance.damage_type, 6);
     assert_eq!(lance.projectile, Projectile::Falling);
     assert_eq!(lance.reload_ticks, 60);
@@ -625,8 +703,26 @@ fn model_and_icon_files_must_exist_and_stay_inside_assets() {
 #[test]
 fn numbers_must_be_exact_and_in_range() {
     let e = replace_units("speed: 1.2,", "speed: 1.2345,").unwrap_err();
-    assert!(e.message.contains("more than three decimals"), "{e}");
+    assert!(e.message.contains("three decimals"), "{e}");
     assert!(e.line.is_some(), "a parse error carries its line: {e}");
+    // The decimals are counted on the text: these used to pass as 1.2 and 1.
+    let e = replace_units("speed: 1.2,", "speed: 1.2000000001,").unwrap_err();
+    assert!(e.message.contains("1.2000000001"), "{e}");
+    let text = EMBEDDED_UNITS.replacen("speed: 1.2,", "speed: 1.2000000001,", 1);
+    assert_eq!(e.line, Some(line_of(&text, "1.2000000001")), "{e}");
+    let e = replace_units("speed: 1.2,", "speed: 1.2000,").unwrap_err();
+    assert!(e.message.contains("three decimals"), "{e}");
+    let e = replace_units("speed: 1.2,", "speed: 12e-1,").unwrap_err();
+    assert!(e.message.contains("exponent"), "{e}");
+    // The same in the weapons file.
+    let e = load_with(
+        str::to_string,
+        |t| t.replacen("reload: 2.5,", "reload: 2.5000001,", 1),
+        str::to_string,
+    )
+    .unwrap_err();
+    assert!(e.message.contains("three decimals"), "{e}");
+    assert_eq!(e.file, "weapons.ron");
     let e = replace_units("build_seconds: 15,", "build_seconds: 15.02,").unwrap_err();
     assert!(e.message.contains("whole number of ticks"), "{e}");
     let e = replace_units("hp: 400,", "hp: 0,").unwrap_err();
@@ -670,7 +766,7 @@ fn a_missing_file_is_reported() {
 #[test]
 fn conversion_is_fixed_point_in_the_sims_units() {
     let defs = shipped();
-    let sim = |id: &str| &defs.sim_units()[usize::from(defs.kind_of(id).unwrap())];
+    let sim = |id: &str| defs.sim_unit(defs.kind_of(id).unwrap()).unwrap();
     let tank = sim("light_tank");
     assert_eq!(tank.speed, Fx::from_int(2));
     assert_eq!(tank.water_speed, tank.speed);
@@ -680,7 +776,7 @@ fn conversion_is_fixed_point_in_the_sims_units() {
     assert_eq!(tank.turn_per_tick, 10);
     assert_eq!(tank.size, Fx::from_ratio(6, 5));
     assert_eq!(tank.footprint, None);
-    let cannon = &defs.sim_weapons()[usize::from(tank.weapons[0])];
+    let cannon = defs.sim_weapon(tank.weapons[0]).unwrap();
     assert_eq!(cannon.range, Fx::from_int(5));
     assert_eq!(cannon.reload_ticks, 40); // 2 s
     assert_eq!(cannon.projectile, Projectile::Straight);
@@ -688,7 +784,7 @@ fn conversion_is_fixed_point_in_the_sims_units() {
     let amph = sim("amphibious_transport");
     assert_eq!(amph.speed, Fx::from_ratio(3, 2));
     assert_eq!(amph.water_speed, Fx::from_ratio(6, 5));
-    let howitzer = &defs.sim_weapons()[usize::from(sim("siege_artillery").weapons[0])];
+    let howitzer = defs.sim_weapon(sim("siege_artillery").weapons[0]).unwrap();
     assert_eq!(howitzer.min_range, Fx::from_int(3));
     assert_eq!(howitzer.range, Fx::from_int(10));
     assert_eq!(howitzer.projectile, Projectile::Arc);
@@ -715,17 +811,79 @@ fn every_mobile_unit_moves_at_least_one_raw_unit_per_tick() {
     let defs = shipped();
     for u in defs.sim_units() {
         if u.movement_class.is_some() {
-            let per_tick = sf_sim::per_tick(u.speed);
-            assert!(per_tick.raw() > 0, "kind {} stands still", u.kind);
+            assert!(u.speed_per_tick.raw() > 0, "kind {} stands still", u.kind);
+            assert!(u.water_speed_per_tick.raw() > 0);
             assert!(u.turn_per_tick >= 1);
+        } else {
+            assert_eq!(u.speed_per_tick, Fx::ZERO);
         }
     }
 }
 
+/// The exact rounding of `milli / 1000 / 20` cells to 1/65536, to nearest with
+/// ties away from zero, in plain integers (not the code under test).
+fn exact_per_tick_raw(milli: i64) -> i64 {
+    let numerator = milli * 65_536;
+    let denominator = 1000 * 20;
+    (2 * numerator + denominator) / (2 * denominator)
+}
+
 #[test]
-fn tick_constants_match_the_simulation() {
-    assert_eq!(sf_data::units::TICKS_PER_SECOND, sf_sim::TICKS_PER_SECOND);
-    assert_eq!(sf_data::units::TICK_MILLIS, i64::from(sf_sim::TICK_MILLIS));
+fn speed_per_tick_is_rounded_once() {
+    // heavy_tank, 1.1 cells per second: 3604.48 raw units per tick. Rounding
+    // 1.1 to Fx first (72090) and dividing by 20 gave 3605.
+    let defs = shipped();
+    let tank = defs.sim_unit(defs.kind_of("heavy_tank").unwrap()).unwrap();
+    assert_eq!(tank.speed_per_tick.raw(), 3604);
+    assert_eq!(Decimal::from_milli(1100).to_fx_per_tick().raw(), 3604);
+    assert_eq!(Decimal::from_milli(1100).to_fx().div_int(20).raw(), 3605);
+    // The amphibious transport: water speed per tick is rounded once too.
+    let amph = defs
+        .sim_unit(defs.kind_of("amphibious_transport").unwrap())
+        .unwrap();
+    assert_eq!(amph.speed_per_tick.raw(), exact_per_tick_raw(1500));
+    assert_eq!(amph.water_speed_per_tick.raw(), exact_per_tick_raw(1200));
+    // Roles without a water speed use the land speed for water.
+    assert_eq!(tank.water_speed_per_tick, tank.speed_per_tick);
+}
+
+#[test]
+fn speed_per_tick_equals_the_exact_rounding_for_every_speed() {
+    // Every speed the files may name: 0.001 to 20.000 cells per second.
+    let mut double_rounding_differs = 0;
+    for milli in 1..=20_000_i64 {
+        let d = Decimal::from_milli(milli);
+        let got = d.to_fx_per_tick().raw();
+        assert_eq!(got, exact_per_tick_raw(milli), "{d} cells per second");
+        if d.to_fx().div_int(20).raw() != got {
+            double_rounding_differs += 1;
+        }
+    }
+    // The test is meaningful: the two-step route is wrong for many speeds.
+    assert!(double_rounding_differs > 400, "{double_rounding_differs}");
+}
+
+#[test]
+fn shipped_speeds_per_tick_are_exact() {
+    let defs = shipped();
+    for (u, sim) in defs.units().iter().zip(defs.sim_units()) {
+        assert_eq!(
+            sim.speed_per_tick.raw(),
+            exact_per_tick_raw(u.speed.milli())
+        );
+        let water = u.water_speed.unwrap_or(u.speed);
+        assert_eq!(
+            sim.water_speed_per_tick.raw(),
+            exact_per_tick_raw(water.milli())
+        );
+    }
+}
+
+#[test]
+fn the_tick_constants_are_the_20_hz_of_sf_math() {
+    assert_eq!(sf_data::units::TICKS_PER_SECOND, sf_math::TICKS_PER_SECOND);
+    assert_eq!(sf_data::units::TICK_MILLIS, i64::from(sf_math::TICK_MILLIS));
+    assert_eq!(sf_math::TICKS_PER_SECOND, 20);
 }
 
 #[test]
@@ -734,4 +892,216 @@ fn the_conversion_module_names_no_float_type() {
     for banned in ["f32", "f64", "HashMap", "HashSet"] {
         assert!(!source.contains(banned), "sim.rs mentions {banned}");
     }
+}
+
+// ---- permanent numbers ---------------------------------------------------
+
+/// Reverses the order of the lines that start with `prefix`, keeping every
+/// other line (comments, list brackets) where it is. With `per_run`, each run of
+/// consecutive such lines is reversed on its own.
+fn reverse_lines(text: &str, prefix: &str, per_run: bool) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let marked: Vec<usize> = (0..lines.len())
+        .filter(|&i| lines[i].starts_with(prefix))
+        .collect();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for &i in &marked {
+        match groups.last_mut() {
+            Some(g) if per_run && g.last() == Some(&(i - 1)) => g.push(i),
+            Some(g) if !per_run => g.push(i),
+            _ => groups.push(vec![i]),
+        }
+    }
+    let mut out: Vec<&str> = lines.clone();
+    for g in groups {
+        for (slot, &from) in g.iter().zip(g.iter().rev()) {
+            out[*slot] = lines[from];
+        }
+    }
+    out.join("\n")
+}
+
+/// Puts the multi-line records of the unit file in another order: reversed,
+/// then rotated. Comments between the records are dropped.
+fn shuffle_unit_records(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut records: Vec<Vec<&str>> = Vec::new();
+    let mut current: Option<Vec<&str>> = None;
+    let (mut first, mut last_end) = (None, 0);
+    for (i, line) in lines.iter().enumerate() {
+        if *line == "        (" {
+            current = Some(vec![*line]);
+            first.get_or_insert(i);
+        } else if let Some(c) = current.as_mut() {
+            c.push(*line);
+            if *line == "        )," {
+                records.push(current.take().unwrap());
+                last_end = i + 1;
+            }
+        }
+    }
+    assert_eq!(records.len(), 43);
+    records.reverse();
+    records.rotate_left(7);
+    let mut out: Vec<&str> = lines[..first.unwrap()].to_vec();
+    for r in &records {
+        out.extend(r);
+    }
+    out.extend(&lines[last_end..]);
+    out.join("\n")
+}
+
+#[test]
+fn the_order_of_the_records_does_not_matter() {
+    let base = shipped();
+    let (c, w, u) = (
+        reverse_lines(&lf(EMBEDDED_CLASSES), "        (kind:", true),
+        reverse_lines(&lf(EMBEDDED_WEAPONS), "        (kind:", false),
+        shuffle_unit_records(&lf(EMBEDDED_UNITS)),
+    );
+    // The texts really are different ...
+    assert_ne!(c, lf(EMBEDDED_CLASSES));
+    assert_ne!(w, lf(EMBEDDED_WEAPONS));
+    assert_ne!(u, lf(EMBEDDED_UNITS));
+    // ... and give identical definitions and identical sim definitions.
+    let shuffled =
+        load_with(|_| c.clone(), |_| w.clone(), |_| u.clone()).expect("a shuffled file loads");
+    assert_eq!(shuffled.units(), base.units());
+    assert_eq!(shuffled.weapons(), base.weapons());
+    assert_eq!(shuffled.classes(), base.classes());
+    assert_eq!(shuffled.sim_units(), base.sim_units());
+    assert_eq!(shuffled.sim_weapons(), base.sim_weapons());
+    for u in base.units() {
+        assert_eq!(shuffled.kind_of(&u.id), Some(u.kind));
+    }
+}
+
+fn with_retired(retired: &str) -> Result<UnitDefs, sf_data::units::DefError> {
+    load_with(str::to_string, str::to_string, |t| {
+        t.replacen(
+            "retired_units: [],",
+            &format!("retired_units: [{retired}],"),
+            1,
+        )
+    })
+}
+
+#[test]
+fn duplicate_kinds_are_refused_in_every_file() {
+    // Units: radar (kind 5) takes the number of barracks (kind 3).
+    let e = replace_units("kind: 5, id: \"radar\"", "kind: 3, id: \"radar\"").unwrap_err();
+    assert!(
+        e.message.contains("kind 3 is already used by \"barracks\""),
+        "{e}"
+    );
+    assert!(e.line.is_some(), "{e}");
+    // Weapons.
+    let e = load_with(
+        str::to_string,
+        |t| t.replacen("(kind: 1, id: \"rocket\"", "(kind: 0, id: \"rocket\"", 1),
+        str::to_string,
+    )
+    .unwrap_err();
+    assert!(e.message.contains("already used by \"rifle\""), "{e}");
+    assert_eq!(e.file, "weapons.ron");
+    // Movement classes, armor types, damage types.
+    for (from, to, what) in [
+        (
+            "(kind: 1, name: \"wheeled\")",
+            "(kind: 0, name: \"wheeled\")",
+            "movement class",
+        ),
+        (
+            "(kind: 4, name: \"structure\")",
+            "(kind: 3, name: \"structure\")",
+            "armor type",
+        ),
+        (
+            "(kind: 5, name: \"demolition\")",
+            "(kind: 0, name: \"demolition\")",
+            "damage type",
+        ),
+    ] {
+        let e = load_with(|t| t.replacen(from, to, 1), str::to_string, str::to_string).unwrap_err();
+        assert!(e.message.contains("already used by"), "{what}: {e}");
+        assert!(e.message.contains(what), "{what}: {e}");
+        assert!(e.line.is_some(), "{what}: {e}");
+    }
+}
+
+#[test]
+fn a_missing_kind_is_refused() {
+    let e = replace_units("kind: 3, id: \"barracks\"", "id: \"barracks\"").unwrap_err();
+    assert!(e.message.contains("kind"), "{e}");
+    assert!(e.line.is_some(), "{e}");
+}
+
+#[test]
+fn a_tombstone_keeps_its_number_taken() {
+    // A tombstone for a number nobody uses is fine and is reported.
+    let defs = with_retired("(kind: 90, name: \"old_scout\")").expect("an unused number");
+    assert_eq!(defs.retired_units().len(), 1);
+    assert_eq!(defs.retired_units()[0].kind, 90);
+    assert!(defs.unit_by_kind(90).is_none());
+    assert!(defs.sim_unit(90).is_none());
+    // A live role on a retired number is refused ...
+    let e = with_retired("(kind: 5, name: \"old_radar\")").unwrap_err();
+    assert!(
+        e.message.contains("kind 5 was retired by \"old_radar\""),
+        "{e}"
+    );
+    // ... also a new role added later.
+    let extra = r#"
+        (
+            kind: 90, id: "new_scout", factions: [Meridian], category: Infantry,
+            hp: 20, armor: "infantry", movement: "foot", speed: 1, turn_rate: 16,
+            size: 0.4, sight: 6, model: Shape(Cone), strategic_icon: Triangle,
+        ),
+"#;
+    let e = load_with(str::to_string, str::to_string, |t| {
+        with_extra(t, extra).replacen(
+            "retired_units: [],",
+            "retired_units: [(kind: 90, name: \"old_scout\")],",
+            1,
+        )
+    })
+    .unwrap_err();
+    assert!(
+        e.message.contains("kind 90 was retired by \"old_scout\""),
+        "{e}"
+    );
+    assert!(e.line.is_some(), "{e}");
+    // The same tombstone number twice is refused.
+    let e = with_retired("(kind: 90, name: \"a\"), (kind: 90, name: \"b\")").unwrap_err();
+    assert!(e.message.contains("already retired"), "{e}");
+    // Tombstones of weapons and of the small tables.
+    let e = load_with(
+        str::to_string,
+        |t| {
+            t.replacen(
+                "retired_weapons: [],",
+                "retired_weapons: [(kind: 2, name: \"old_gun\")],",
+                1,
+            )
+        },
+        str::to_string,
+    )
+    .unwrap_err();
+    assert!(
+        e.message.contains("kind 2 was retired by \"old_gun\""),
+        "{e}"
+    );
+    let e = load_with(
+        |t| {
+            t.replacen(
+                "retired_armor_types: [],",
+                "retired_armor_types: [(kind: 2, name: \"old_armor\")],",
+                1,
+            )
+        },
+        str::to_string,
+        str::to_string,
+    )
+    .unwrap_err();
+    assert!(e.message.contains("retired by \"old_armor\""), "{e}");
 }

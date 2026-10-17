@@ -10,6 +10,10 @@ use serde::Deserialize;
 use super::classes::{ClassTables, is_valid_name};
 use super::decimal::Decimal;
 use super::error::{DefError, Source};
+use super::kinds::{self, Live, Retired};
+
+/// Largest weapon `kind`.
+pub const MAX_WEAPON_KIND: u16 = 4095;
 
 /// Longest range, minimum range and splash radius accepted, in cells.
 const MAX_CELLS: i64 = 64;
@@ -35,6 +39,9 @@ pub enum Projectile {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WeaponDef {
+    /// Permanent number (what the simulation uses), unique among weapons and
+    /// tombstones; the position in the file does not matter.
+    pub kind: u16,
     /// Unique snake_case id that units refer to.
     pub id: String,
     /// Longest distance it can hit, in cells.
@@ -62,12 +69,19 @@ pub struct WeaponDef {
 #[serde(deny_unknown_fields)]
 struct WeaponsFile {
     weapons: Vec<WeaponDef>,
+    /// Tombstones of removed weapons: their numbers are never reused.
+    #[serde(default)]
+    retired_weapons: Vec<Retired>,
 }
 
 /// Parses `weapon_defs.ron` and checks every weapon.
-pub(crate) fn parse(src: Source<'_>, classes: &ClassTables) -> Result<Vec<WeaponDef>, DefError> {
+pub(crate) fn parse(
+    src: Source<'_>,
+    classes: &ClassTables,
+) -> Result<(Vec<WeaponDef>, Vec<Retired>), DefError> {
+    src.check_numbers()?;
     let file: WeaponsFile = ron::from_str(src.text).map_err(|e| src.ron_error(&e))?;
-    let weapons = file.weapons;
+    let mut weapons = file.weapons;
     for (i, w) in weapons.iter().enumerate() {
         let id = w.id.as_str();
         let here =
@@ -121,7 +135,7 @@ pub(crate) fn parse(src: Source<'_>, classes: &ClassTables) -> Result<Vec<Weapon
         if w.damage == 0 || w.damage > MAX_DAMAGE {
             return Err(here(format!("damage must be 1 to {MAX_DAMAGE}")));
         }
-        if classes.damage_index(&w.damage_type).is_none() {
+        if classes.damage_kind(&w.damage_type).is_none() {
             return Err(src.error_in_record(
                 "id",
                 id,
@@ -136,5 +150,21 @@ pub(crate) fn parse(src: Source<'_>, classes: &ClassTables) -> Result<Vec<Weapon
     if weapons.is_empty() {
         return Err(src.error("the list of weapons is empty"));
     }
-    Ok(weapons)
+    let live: Vec<Live<'_>> = weapons
+        .iter()
+        .map(|w| Live {
+            kind: w.kind,
+            name: &w.id,
+        })
+        .collect();
+    kinds::check(
+        src,
+        "weapon",
+        "id",
+        MAX_WEAPON_KIND,
+        &live,
+        &file.retired_weapons,
+    )?;
+    weapons.sort_by_key(|w| w.kind);
+    Ok((weapons, file.retired_weapons))
 }

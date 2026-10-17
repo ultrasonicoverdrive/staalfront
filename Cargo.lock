@@ -2451,7 +2451,6 @@ dependencies = [
  "ron",
  "serde",
  "sf_math",
- "sf_sim",
 ]
 
 [[package]]
