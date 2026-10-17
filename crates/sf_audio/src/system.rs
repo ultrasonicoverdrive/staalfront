@@ -820,6 +820,14 @@ mod tests {
         std::fs::write(folder.join("BAD.wav"), b"RIFF junk").unwrap();
         // Header says more samples than the file holds: listed as broken.
         std::fs::write(folder.join("CUT.wav"), &wav::write(&pcm)[..100]).unwrap();
+        // Chunks before `data` that do not fit the 64 KiB scan window.
+        let plain = wav::write(&pcm);
+        let mut big = plain[..36].to_vec();
+        big.extend_from_slice(b"LIST");
+        big.extend_from_slice(&70_000u32.to_le_bytes());
+        big.resize(big.len() + 70_000, 0);
+        big.extend_from_slice(&plain[36..]);
+        std::fs::write(folder.join("BIGHDR.wav"), &big).unwrap();
         let mut s = mock_at(&d);
         s.enable_original_audio(&RaAudioConfig {
             enabled: true,
@@ -833,7 +841,17 @@ mod tests {
             .iter()
             .find(|a| a.label == "RedAlertSounds/SOUNDS.MIX (WAV folder)")
             .expect("WAV folder listed in the browser");
-        assert_eq!(wav_dir.entries.len(), 4);
+        assert_eq!(wav_dir.entries.len(), 5);
+        let bighdr = wav_dir
+            .entries
+            .iter()
+            .find(|e| e.path.ends_with("BIGHDR.wav"))
+            .unwrap();
+        assert!(
+            matches!(&bighdr.kind, EntryKind::Broken(m) if m == "WAV header larger than 64 KiB"),
+            "{:?}",
+            bighdr.kind
+        );
         for name in ["CLICK.AUD", "MOVE.AUD"] {
             let e = cat.find(name).unwrap();
             assert!(

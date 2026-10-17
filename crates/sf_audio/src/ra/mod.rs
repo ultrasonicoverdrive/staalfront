@@ -312,7 +312,7 @@ fn classify(path: &Path, offset: u64, size: u32, key: &RsaKey) -> EntryKind {
         } else {
             read_at(path, 0, size.min(WAV_HEADER_BYTES))
                 .map_err(|e| e.to_string())
-                .and_then(|b| wav::header(&b))
+                .and_then(|b| wav::header(&b, size as usize))
                 .and_then(|h| {
                     if h.data_start.saturating_add(h.data_len) > size as usize {
                         Err("WAV chunk runs past the end".to_string())

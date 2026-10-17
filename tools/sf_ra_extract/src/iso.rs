@@ -15,7 +15,9 @@
 //!
 //! Hostile images: every read is bounds-checked against the image size,
 //! directories are followed at most [`MAX_DEPTH`] deep and each directory
-//! extent once, at most [`MAX_ENTRIES`] records are listed and a directory
+//! extent once, at most [`MAX_ENTRIES`] records are listed, at most
+//! [`MAX_TOTAL_DIR_BYTES`] of directory extents are read in all (reaching
+//! either limit ends the whole listing with [`IsoError::Limit`]) and a directory
 //! extent larger than [`MAX_DIR_BYTES`] is refused. Errors, never panics.
 
 use std::collections::BTreeSet;
@@ -26,6 +28,25 @@ pub const SECTOR: u64 = 2048;
 pub const MAX_DEPTH: usize = 16;
 pub const MAX_ENTRIES: usize = 100_000;
 pub const MAX_DIR_BYTES: u32 = 4 * 1024 * 1024;
+/// All directory extents of one image together (a real disc has a few
+/// hundred KiB of directories).
+pub const MAX_TOTAL_DIR_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The caps of one listing; [`list_files`] uses the defaults above.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub max_entries: usize,
+    pub max_total_dir_bytes: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            max_entries: MAX_ENTRIES,
+            max_total_dir_bytes: MAX_TOTAL_DIR_BYTES,
+        }
+    }
+}
 /// Volume descriptors looked at before giving up on finding the primary one.
 const MAX_DESCRIPTORS: u64 = 64;
 
@@ -33,6 +54,8 @@ const MAX_DESCRIPTORS: u64 = 64;
 pub enum IsoError {
     Io(std::io::Error),
     Invalid(String),
+    /// A cap on the whole listing was reached; the walk stops.
+    Limit(String),
 }
 
 impl fmt::Display for IsoError {
@@ -40,6 +63,7 @@ impl fmt::Display for IsoError {
         match self {
             IsoError::Io(e) => write!(f, "ISO read error: {e}"),
             IsoError::Invalid(why) => write!(f, "invalid ISO 9660 image: {why}"),
+            IsoError::Limit(why) => write!(f, "ISO 9660 image too large to list: {why}"),
         }
     }
 }
@@ -114,6 +138,8 @@ struct Walker<'a, R> {
     image_len: u64,
     seen_dirs: BTreeSet<u32>,
     records: usize,
+    dir_bytes: u64,
+    limits: Limits,
     out: Listing,
 }
 
@@ -147,6 +173,13 @@ impl<R: Read + Seek> Walker<'_, R> {
         if size > MAX_DIR_BYTES {
             return Err(bad(format!("directory '{prefix}' of {size} bytes")));
         }
+        self.dir_bytes += u64::from(size);
+        if self.dir_bytes > self.limits.max_total_dir_bytes {
+            return Err(IsoError::Limit(format!(
+                "more than {} MiB of directories",
+                self.limits.max_total_dir_bytes / (1024 * 1024)
+            )));
+        }
         let data = self.read(u64::from(extent) * self.block, size)?;
         let block = self.block as usize;
         let mut at = 0usize;
@@ -158,8 +191,11 @@ impl<R: Read + Seek> Walker<'_, R> {
                 continue;
             }
             self.records += 1;
-            if self.records > MAX_ENTRIES {
-                return Err(bad(format!("more than {MAX_ENTRIES} directory records")));
+            if self.records > self.limits.max_entries {
+                return Err(IsoError::Limit(format!(
+                    "more than {} directory records",
+                    self.limits.max_entries
+                )));
             }
             let sector_end = ((at / block + 1) * block).min(data.len());
             let rec = record(&data[at..sector_end])?;
@@ -203,8 +239,11 @@ impl<R: Read + Seek> Walker<'_, R> {
             }
         }
         for (extent, size, path) in subdirs {
-            if let Err(e) = self.dir(extent, size, &path, depth + 1) {
-                self.out.skipped.push(format!("{path}: {e}"));
+            match self.dir(extent, size, &path, depth + 1) {
+                Ok(()) => {}
+                // A cap ends the whole walk; a damaged directory only itself.
+                Err(e @ IsoError::Limit(_)) => return Err(e),
+                Err(e) => self.out.skipped.push(format!("{path}: {e}")),
             }
         }
         Ok(())
@@ -213,6 +252,11 @@ impl<R: Read + Seek> Walker<'_, R> {
 
 /// List every regular file of the image, in directory order.
 pub fn list_files<R: Read + Seek>(r: &mut R) -> Result<Listing, IsoError> {
+    list_files_with(r, Limits::default())
+}
+
+/// [`list_files`] with explicit caps.
+pub fn list_files_with<R: Read + Seek>(r: &mut R, limits: Limits) -> Result<Listing, IsoError> {
     let image_len = r.seek(SeekFrom::End(0))?;
     let mut pvd = None;
     for i in 0..MAX_DESCRIPTORS {
@@ -250,6 +294,8 @@ pub fn list_files<R: Read + Seek>(r: &mut R) -> Result<Listing, IsoError> {
         image_len,
         seen_dirs: BTreeSet::new(),
         records: 0,
+        dir_bytes: 0,
+        limits,
         out: Listing::default(),
     };
     w.dir(root.extent, root.size, "", 0)?;
@@ -412,6 +458,66 @@ mod tests {
         let l2 = list_files(&mut Cursor::new(&m)).unwrap();
         assert_eq!(l2.files.len() + 1, l.files.len());
         assert_eq!(l2.skipped.len(), 1);
+    }
+
+    #[test]
+    fn the_record_cap_ends_the_whole_walk() {
+        let img = sample();
+        // 4 records in the root, 4 in INSTALL: a cap of 5 is hit inside the
+        // subdirectory, and that must fail the listing, not just that folder.
+        let limits = Limits {
+            max_entries: 5,
+            ..Limits::default()
+        };
+        let err = list_files_with(&mut Cursor::new(&img), limits).unwrap_err();
+        assert!(matches!(err, IsoError::Limit(_)), "{err}");
+        assert!(err.to_string().contains("5 directory records"), "{err}");
+        // Just enough records is fine.
+        let limits = Limits {
+            max_entries: 100,
+            ..Limits::default()
+        };
+        assert!(list_files_with(&mut Cursor::new(&img), limits).is_ok());
+    }
+
+    #[test]
+    fn many_directories_with_big_extents_fail_fast() {
+        // 40 sibling directories whose records all claim a 4 MiB extent, one
+        // sector apart so that a small image holds them all (they overlap,
+        // which a hostile image is free to do). Together they would be
+        // 160 MiB of directories.
+        let dirs: Vec<(String, Vec<u8>)> = (0..40)
+            .map(|i| (format!("D{i:02}/F.MIX"), vec![i as u8; 4]))
+            .collect();
+        let refs: Vec<(&str, &[u8])> = dirs.iter().map(|(p, d)| (p.as_str(), &d[..])).collect();
+        let mut img = write_iso(&refs);
+        let base = (img.len() / SECTOR as usize) as u32;
+        let big = MAX_DIR_BYTES;
+        img.resize(
+            (base as usize + (big / SECTOR as u32) as usize + 100) * SECTOR as usize,
+            0,
+        );
+        let root = 18 * SECTOR as usize;
+        let (mut at, mut n) = (root, 0u32);
+        while img[at] != 0 {
+            let len = usize::from(img[at]);
+            if img[at + 25] & 2 != 0 && img[at + 33] == b'D' {
+                img[at + 2..at + 6].copy_from_slice(&(base + n).to_le_bytes());
+                img[at + 10..at + 14].copy_from_slice(&big.to_le_bytes());
+                n += 1;
+            }
+            at += len;
+        }
+        assert_eq!(n, 40);
+        let started = std::time::Instant::now();
+        let err = list_files(&mut Cursor::new(&img)).unwrap_err();
+        assert!(matches!(err, IsoError::Limit(_)), "{err}");
+        assert!(err.to_string().contains("64 MiB of directories"), "{err}");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

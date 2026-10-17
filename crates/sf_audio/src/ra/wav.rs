@@ -64,12 +64,18 @@ impl Header {
 }
 
 /// Read the chunk headers of `b` up to the data chunk. `b` may be only the
-/// start of the file (the scanner reads a few KiB, not whole tracks); the
-/// data chunk's declared length is returned, not checked against `b`.
-pub fn header(b: &[u8]) -> Result<Header, String> {
+/// first bytes of a file of `file_len` bytes (the scanner reads a window of
+/// 64 KiB, not whole tracks); the data chunk's declared length is returned,
+/// not checked against `b`. If the chunks before the data chunk do not fit in
+/// `b` although the file goes on, the error says so ("WAV header larger than
+/// 64 KiB") instead of claiming the data chunk is missing. A whole file is
+/// `header(b, b.len())`.
+pub fn header(b: &[u8], file_len: usize) -> Result<Header, String> {
     if b.get(0..4) != Some(b"RIFF") || b.get(8..12) != Some(b"WAVE") {
         return Err("not a RIFF/WAVE file".into());
     }
+    let truncated = b.len() < file_len;
+    let window = || format!("WAV header larger than {} KiB", b.len() / 1024);
     let mut at = 12usize;
     let mut fmt: Option<(u16, u32)> = None;
     while let (Some(id), Some(len)) = (b.get(at..at + 4), u32_at(b, at + 4)) {
@@ -77,9 +83,13 @@ pub fn header(b: &[u8]) -> Result<Header, String> {
         let len = len as usize;
         match id {
             b"fmt " => {
-                let body = b
-                    .get(start..start.saturating_add(len))
-                    .ok_or("WAV chunk runs past the end")?;
+                let body = b.get(start..start.saturating_add(len)).ok_or_else(|| {
+                    if truncated && start.saturating_add(len) <= file_len {
+                        window()
+                    } else {
+                        "WAV chunk runs past the end".to_string()
+                    }
+                })?;
                 let tag = u16_at(body, 0).ok_or("short fmt chunk")?;
                 let channels = u16_at(body, 2).ok_or("short fmt chunk")?;
                 let rate = u32_at(body, 4).ok_or("short fmt chunk")?;
@@ -108,12 +118,18 @@ pub fn header(b: &[u8]) -> Result<Header, String> {
             .and_then(|e| e.checked_add(len & 1))
             .ok_or("WAV chunk runs past the end")?;
     }
-    Err("WAV has no data chunk".into())
+    if at > file_len {
+        Err("WAV chunk runs past the end".into())
+    } else if truncated && at < file_len {
+        Err(window())
+    } else {
+        Err("WAV has no data chunk".into())
+    }
 }
 
 /// Decode a 16-bit PCM WAV file.
 pub fn read(b: &[u8]) -> Result<Pcm, String> {
-    let h = header(b)?;
+    let h = header(b, b.len())?;
     let end = h
         .data_start
         .checked_add(h.data_len)
@@ -152,7 +168,7 @@ mod tests {
         }
         assert!(read(b"RIFF\xff\xff\xff\xffWAVEdata\xff\xff\xff\xff").is_err());
         // The header alone is enough for the scanner.
-        let h = header(&w[..44]).unwrap();
+        let h = header(&w[..44], w.len()).unwrap();
         assert_eq!(
             (h.channels, h.sample_rate, h.data_start, h.data_len),
             (2, 22050, 44, 12)
@@ -161,5 +177,51 @@ mod tests {
         let mut eight = w.clone();
         eight[34] = 8;
         assert!(read(&eight).is_err());
+    }
+
+    /// RIFF + `fmt ` + a `LIST` chunk of `pad` bytes + `data`.
+    fn with_list_chunk(pad: usize, samples: &[i16]) -> Vec<u8> {
+        let plain = write(&Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: samples.to_vec(),
+        });
+        let mut v = plain[..36].to_vec(); // RIFF header and fmt chunk
+        v.extend_from_slice(b"LIST");
+        v.extend_from_slice(&(pad as u32).to_le_bytes());
+        v.resize(v.len() + pad, 0);
+        v.extend_from_slice(&plain[36..]);
+        v
+    }
+
+    #[test]
+    fn a_header_beyond_the_scan_window_is_reported_as_such() {
+        const WINDOW: usize = 64 * 1024;
+        let w = with_list_chunk(70_000, &[1, 2, 3, 4]);
+        // Whole file: the big chunk is just skipped.
+        let pcm = read(&w).unwrap();
+        assert_eq!(pcm.samples, [1, 2, 3, 4]);
+        // Only the first 64 KiB seen: the data chunk lies beyond them.
+        let err = header(&w[..WINDOW], w.len()).unwrap_err();
+        assert_eq!(err, "WAV header larger than 64 KiB");
+        // A window that ends inside a chunk header or inside the fmt chunk.
+        for cut in [38, 40, 44] {
+            let err = header(&w[..cut], w.len()).unwrap_err();
+            assert!(err.contains("larger than"), "cut {cut}: {err}");
+        }
+        // A genuinely missing data chunk is still that, in a whole file and
+        // in a window that covers the whole file.
+        let none = &w[..36 + 8 + 70_000];
+        assert_eq!(
+            header(none, none.len()).unwrap_err(),
+            "WAV has no data chunk"
+        );
+        // A chunk that claims more than the file holds runs past the end.
+        let mut lie = w[..36 + 8 + 100].to_vec();
+        lie[40..44].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            header(&lie, lie.len()).unwrap_err(),
+            "WAV chunk runs past the end"
+        );
     }
 }

@@ -285,3 +285,107 @@ fn argument_parsing() {
     assert_eq!(wav_file_name(1, Some("A.JUV")), "A.JUV.wav");
     assert_eq!(wav_file_name(0xAB, None), "#000000AB.wav");
 }
+
+#[test]
+fn lexical_absolute_resolves_dots_without_touching_the_disk() {
+    let root = std::env::temp_dir().join("sf_lex");
+    let p = root.join("a").join("..").join("b").join(".").join("c");
+    assert_eq!(lexical_absolute(&p).unwrap(), root.join("b").join("c"));
+    // More `..` than there are folders stays at the root.
+    let deep = root.join("../".repeat(60)).join("x");
+    let got = lexical_absolute(&deep).unwrap();
+    assert!(got.is_absolute() && got.ends_with("x"), "{got:?}");
+    assert_eq!(got.parent(), got.ancestors().last(), "{got:?}");
+}
+
+#[test]
+fn dot_dot_cannot_walk_into_a_repository() {
+    let d = scratch("dotdot");
+    let (fx, key) = fixture();
+    let iso_path = d.join("ra.iso");
+    std::fs::write(&iso_path, &fx.iso).unwrap();
+    let repo = d.join("checkout");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    let nonexist = d.join("nonexist");
+    // `<tmp>/nonexist/../checkout/ra_out`: the operating system cannot resolve
+    // the `..` after a missing folder, a lexical check can.
+    let mut tries = vec![
+        nonexist.join("..").join("checkout").join("ra_out"),
+        nonexist.join("..").join(".").join("checkout"),
+    ];
+    // The reported shape: a long run of `..` past the root, then the path of
+    // the repository (Unix; a Windows path carries a drive letter).
+    if cfg!(unix) {
+        tries.push(PathBuf::from(format!(
+            "{}/{}{}/ra_out",
+            nonexist.display(),
+            "../".repeat(40),
+            repo.display().to_string().trim_start_matches('/')
+        )));
+    }
+    for out in tries {
+        assert!(git_repo_above(&out).is_some(), "{}", out.display());
+        for dry_run in [false, true] {
+            let mut a = args(&iso_path, &out);
+            a.dry_run = dry_run;
+            let err = run(&a, &key, &mut Vec::new()).unwrap_err();
+            assert!(err.contains("git repository"), "{err}");
+        }
+        assert!(!repo.join("ra_out").exists(), "{}", out.display());
+        assert!(!nonexist.exists());
+    }
+    std::fs::remove_dir_all(d).ok();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_into_a_repository_is_refused() {
+    let d = scratch("symlink");
+    let (fx, key) = fixture();
+    let iso_path = d.join("ra.iso");
+    std::fs::write(&iso_path, &fx.iso).unwrap();
+    let repo = d.join("checkout");
+    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    std::fs::create_dir_all(repo.join("sub")).unwrap();
+    let link = d.join("innocent");
+    std::os::unix::fs::symlink(repo.join("sub"), &link).unwrap();
+    for out in [
+        link.join("sounds"),
+        link.join("a").join("b"),
+        link.clone(),
+        link.join("a").join("..").join("sounds"),
+    ] {
+        let err = run(&args(&iso_path, &out), &key, &mut Vec::new()).unwrap_err();
+        assert!(err.contains("git repository"), "{err}");
+    }
+    assert_eq!(std::fs::read_dir(repo.join("sub")).unwrap().count(), 0);
+    std::fs::remove_dir_all(d).ok();
+}
+
+#[test]
+fn second_check_on_the_canonical_folder_removes_what_it_created() {
+    let d = scratch("second_check");
+    let (fx, key) = fixture();
+    let iso_path = d.join("ra.iso");
+    std::fs::write(&iso_path, &fx.iso).unwrap();
+    let out = d.join("a").join("b").join("c");
+    // A check that passes while the folder is missing and fails once it
+    // exists, as a symlink swapped in after the first check would.
+    let repo = d.join("somewhere");
+    let late = |p: &Path| p.exists().then(|| repo.clone());
+    let err = run_checked(&args(&iso_path, &out), &key, &mut Vec::new(), &late).unwrap_err();
+    assert!(err.contains("git repository"), "{err}");
+    assert!(!d.join("a").exists(), "created folders removed again");
+    // Only what was created is removed: an existing folder with a file in it
+    // stays, and so does the file.
+    let keep = d.join("keep");
+    std::fs::create_dir_all(&keep).unwrap();
+    std::fs::write(keep.join("mine.txt"), "x").unwrap();
+    assert!(create_out_dir(&keep.join("new"), &late).is_err());
+    assert!(!keep.join("new").exists());
+    assert!(keep.join("mine.txt").exists());
+    // And a clean path is created and returned canonical.
+    let ok = create_out_dir(&d.join("fresh").join("sub"), &|_: &Path| None).unwrap();
+    assert!(ok.is_dir() && ok.is_absolute());
+    std::fs::remove_dir_all(d).ok();
+}

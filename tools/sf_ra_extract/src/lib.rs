@@ -73,26 +73,103 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, Strin
     })
 }
 
+/// `path` made absolute, with `.` and `..` resolved lexically (no file system
+/// access, so it also works for folders that do not exist yet). A `..` at the
+/// root stays at the root. A symlink followed by `..` is not seen here; the
+/// canonical check ([`git_repo_above`], [`create_out_dir`]) covers that.
+pub fn lexical_absolute(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    let mut out = PathBuf::new();
+    for c in abs.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Some(out)
+}
+
 /// The repository root (the directory holding `.git`) if `out` is inside one.
-/// Checks the path as given and, through its nearest existing ancestor, with
-/// symlinks resolved.
+/// Looks at three spellings of the path, any of which may sit in a
+/// repository: the lexically normalised absolute path (so
+/// `nonexistent/../../repo/x` is seen for what it is), the path as given, and
+/// the symlink-resolved nearest existing ancestor with the rest of the
+/// normalised path appended.
 pub fn git_repo_above(out: &Path) -> Option<PathBuf> {
-    let abs = if out.is_absolute() {
+    let given = if out.is_absolute() {
         out.to_path_buf()
     } else {
         std::env::current_dir().ok()?.join(out)
     };
-    let mut candidates = vec![abs.clone()];
-    if let Some(existing) = abs.ancestors().find(|p| p.exists())
-        && let Ok(c) = existing.canonicalize()
-    {
-        candidates.push(c);
+    let mut candidates = vec![given];
+    if let Some(norm) = lexical_absolute(out) {
+        if let Some(existing) = norm.ancestors().find(|p| p.exists())
+            && let Ok(c) = existing.canonicalize()
+        {
+            let tail = norm.strip_prefix(existing).unwrap_or(Path::new(""));
+            candidates.push(c.join(tail));
+        }
+        candidates.push(norm);
     }
     candidates
         .iter()
         .flat_map(|c| c.ancestors())
         .find(|a| a.join(".git").exists())
         .map(Path::to_path_buf)
+}
+
+fn repo_refusal(out: &Path, repo: &Path) -> String {
+    format!(
+        "refusing to write to '{}': it is inside the git repository '{}'. \
+         Extracted Red Alert audio must never end up in a repository (B11); \
+         choose a folder outside it, e.g. C:\\Games\\RedAlertSounds or ~/RedAlertSounds.",
+        out.display(),
+        repo.display()
+    )
+}
+
+/// Create the output folder and return its canonical path. The repository
+/// check is done twice: before anything is created (on the normalised path),
+/// and again on the canonical path of the folder that now exists (symlinks
+/// resolved). If the second check fails, the folders created here are removed
+/// again (they are empty at that point) and nothing is written.
+/// `in_repo` is [`git_repo_above`] in production; tests inject their own.
+fn create_out_dir(
+    out: &Path,
+    in_repo: &dyn Fn(&Path) -> Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    let norm = lexical_absolute(out).ok_or("cannot resolve the --out folder")?;
+    if let Some(repo) = in_repo(&norm).or_else(|| in_repo(out)) {
+        return Err(repo_refusal(out, &repo));
+    }
+    // Folders that do not exist yet, deepest first, to undo on a refusal.
+    let created: Vec<PathBuf> = norm
+        .ancestors()
+        .take_while(|p| !p.exists())
+        .map(Path::to_path_buf)
+        .collect();
+    std::fs::create_dir_all(&norm).map_err(|e| format!("cannot create {}: {e}", norm.display()))?;
+    let canonical = norm
+        .canonicalize()
+        .map_err(|e| format!("cannot resolve {}: {e}", norm.display()))?;
+    if let Some(repo) = in_repo(&canonical) {
+        for dir in &created {
+            // `remove_dir` only removes empty folders.
+            let _ = std::fs::remove_dir(dir);
+        }
+        return Err(repo_refusal(out, &repo));
+    }
+    Ok(canonical)
 }
 
 /// Read a `--names` file: one name per line, blank lines ignored.
@@ -290,7 +367,12 @@ fn sources(input: &Path, s: &mut Summary) -> Vec<Source> {
 struct Extractor<'a> {
     key: &'a RsaKey,
     names: &'a BTreeMap<u32, String>,
-    out: &'a Path,
+    /// The output folder; after the first write the canonical, checked path.
+    out: PathBuf,
+    out_ready: bool,
+    in_repo: &'a dyn Fn(&Path) -> Option<PathBuf>,
+    /// Set when the output folder turned out to be inside a repository.
+    refusal: Option<String>,
     dry_run: bool,
     log: &'a mut dyn Write,
     s: Summary,
@@ -348,6 +430,9 @@ impl Extractor<'_> {
         };
         let mut used = BTreeSet::new();
         for e in &index.entries {
+            if self.refusal.is_some() {
+                return;
+            }
             if self.entries >= MAX_ENTRIES {
                 self.cap(&format!("{MAX_ENTRIES} entries"));
                 return;
@@ -432,6 +517,20 @@ impl Extractor<'_> {
                 pcm.duration_ms()
             );
         } else {
+            if !self.out_ready {
+                // The folder is created (and checked a second time, on its
+                // canonical path) only when there is something to write.
+                match create_out_dir(&self.out, self.in_repo) {
+                    Ok(canonical) => {
+                        self.out = canonical;
+                        self.out_ready = true;
+                    }
+                    Err(e) => {
+                        self.refusal = Some(e);
+                        return;
+                    }
+                }
+            }
             let path = self.out.join(&out_rel);
             let written = path
                 .parent()
@@ -453,14 +552,21 @@ impl Extractor<'_> {
 /// Run the extraction. `Err` only for a refusal or an unusable argument;
 /// everything else ends up in the [`Summary`].
 pub fn run(args: &Args, key: &RsaKey, log: &mut dyn Write) -> Result<Summary, String> {
-    if let Some(repo) = git_repo_above(&args.out) {
-        return Err(format!(
-            "refusing to write to '{}': it is inside the git repository '{}'. \
-             Extracted Red Alert audio must never end up in a repository (B11); \
-             choose a folder outside it, e.g. C:\\Games\\RedAlertSounds or ~/RedAlertSounds.",
-            args.out.display(),
-            repo.display()
-        ));
+    run_checked(args, key, log, &git_repo_above)
+}
+
+/// [`run`] with the repository check injected (tests use it to reach the
+/// second check, which the first one makes unreachable in practice).
+fn run_checked(
+    args: &Args,
+    key: &RsaKey,
+    log: &mut dyn Write,
+    in_repo: &dyn Fn(&Path) -> Option<PathBuf>,
+) -> Result<Summary, String> {
+    // First check, before anything is read or created.
+    let out = lexical_absolute(&args.out).ok_or("cannot resolve the --out folder")?;
+    if let Some(repo) = in_repo(&out).or_else(|| in_repo(&args.out)) {
+        return Err(repo_refusal(&args.out, &repo));
     }
     let names = match &args.names {
         Some(p) => read_names(p)?,
@@ -471,7 +577,10 @@ pub fn run(args: &Args, key: &RsaKey, log: &mut dyn Write) -> Result<Summary, St
     let mut x = Extractor {
         key,
         names: &names,
-        out: &args.out,
+        out,
+        out_ready: false,
+        in_repo,
+        refusal: None,
         dry_run: args.dry_run,
         log,
         s: summary,
@@ -482,6 +591,9 @@ pub fn run(args: &Args, key: &RsaKey, log: &mut dyn Write) -> Result<Summary, St
     };
     let mut used = BTreeSet::new();
     for src in srcs {
+        if x.refusal.is_some() {
+            break;
+        }
         let index = File::open(&src.file)
             .map_err(|e| e.to_string())
             .and_then(|mut f| {
@@ -498,7 +610,10 @@ pub fn run(args: &Args, key: &RsaKey, log: &mut dyn Write) -> Result<Summary, St
             Err(e) => x.s.problems.push(format!("{}: {e}", src.label)),
         }
     }
-    Ok(x.s)
+    match x.refusal {
+        Some(e) => Err(e),
+        None => Ok(x.s),
+    }
 }
 
 #[cfg(test)]

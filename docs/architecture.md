@@ -588,13 +588,19 @@ turns the player's own Red Alert CD image (`.iso`), disc/install directory or
 `.mix` into `<out>/<archive>/<name or #id>.wav` (16-bit PCM, `ra::wav`), using
 the `ra` readers and caps above plus its own ISO 9660 reader written from
 ECMA-119 (primary volume descriptor, directory records, file extents; no
-Joliet/Rock Ridge; bounded depth, record count and directory size; each
-directory extent once). Audio only: entries starting `FORM....WVQA` and loose
-`.vqa` files are counted and skipped, their sound is never decoded (decision
-Tijmen). No Red Alert name list is shipped (no public non-GPL list was
-found); names come from a player-supplied `--names` file hashed with
-`mix_id`, otherwise `#XXXXXXXX`. The tool refuses an output folder below a
-`.git` (B11). On the game side `ra::scan` lists every directory with `.wav`
+Joliet/Rock Ridge; bounded depth, record count and directory size, and 64 MiB
+of directory extents in total; reaching the record or total cap ends the whole
+listing with an error; each directory extent once). Audio only: entries
+starting `FORM....WVQA` and loose `.vqa` files are counted and skipped, their
+sound is never decoded (decision Tijmen). No Red Alert name list is shipped
+(no public non-GPL list has been identified and verified); names come from a
+player-supplied `--names` file hashed with `mix_id`, otherwise `#XXXXXXXX`.
+The tool refuses an output folder below a `.git` (B11), checked on the
+lexically normalised absolute path (`..` and `.` resolved, so
+`missing/../../repo/x` is seen), on the symlink-resolved nearest existing
+ancestor, and again on the canonical path once the folder is created; if that
+last check fails, the folders it created are removed again and nothing is
+written. On the game side `ra::scan` lists every directory with `.wav`
 files as an archive "<dir> (WAV folder)" (`EntryKind::Wav`), `wav_name` maps
 `CLICK.wav` to `CLICK.AUD` and `#1A2B3C4D.wav` to that id, and
 `Catalog::find` prefers a WAV entry over a MIX entry. The scan classifies a
