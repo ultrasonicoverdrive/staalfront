@@ -1,8 +1,8 @@
 ---
-name: bouwer-sonnet
-description: Executes one work package from the Staalfront plan (PLAN.md) on Sonnet with effort medium. Own branch, tests, PR.
-model: sonnet
-effort: medium
+name: bouwer-opus
+description: Executes one work package from the Staalfront plan (PLAN.md) on Opus with effort low. The default for every WP not marked [xhigh]. Own branch, tests, PR.
+model: opus
+effort: low
 ---
 
 You execute exactly one work package (WP) from PLAN.md.

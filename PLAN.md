@@ -5,7 +5,7 @@ close-up to the whole map and cartoon cutscenes. Inspired by the game rules of
 Command & Conquer: Red Alert, without its name, world, units or media.*
 
 Drawn up 14-10-2026. Source: `docs/red-alert-analysis.md` (functional analysis of
-the EA source code). Execution: Sonnet agents at effort medium (see §12).
+the EA source code). Execution: Opus agents at effort low, medium for the WPs marked [xhigh] (see §12).
 
 ---
 
@@ -22,7 +22,7 @@ the EA source code). Execution: Sonnet agents at effort medium (see §12).
 | B7 | Target platform v1 | Windows + Linux desktop. Web and macOS later. | Mouse + keyboard; an RTS on a phone is a different game. |
 | B8 | Language of the game | **English** (menus, UI texts, voices, subtitles); all game texts in language files, not in code | Decision Tijmen 14-10-2026. Language files keep translating possible later. |
 | B9 | Language of code and documentation | **English**: code, comments, docs, commit messages, PRs | Decision Tijmen 14-10-2026. |
-| B10 | Reference hardware | **Windows laptop with NVIDIA GTX 1050**, 1920×1080 | Decision Tijmen 14-10-2026. The fps requirements apply on this card; VRAM budget 2 GB (the smallest 1050 variant). |
+| B10 | Reference hardware | **Windows laptop with NVIDIA GTX 1650**, 1920×1080 | Decision Tijmen 14-10-2026, card corrected 15-10-2026 (the laptop has a GTX 1650, not a 1050). The fps requirements apply on this card; VRAM budget 2 GB kept (headroom below the 1650's 4 GB). |
 | B11 | Original Red Alert audio | **Optional, loaded at runtime from the player's own Red Alert files** (like OpenRA); never in the repo, a release or a CI artifact | Decision Tijmen 14-10-2026. EA released the code, not the media; the 2008 freeware download does not allow redistribution. Reading the player's own copy keeps the repo clean. Staalfront always works without it (CC0 sounds are the default). See WP11.7. |
 
 ---
@@ -137,7 +137,7 @@ Transition between model and icon with a short crossfade, not a hard swap.
 - Terrain in chunks with LOD and frustum culling.
 - Units via GPU instancing per model type.
 - Goal: **60 fps with 1,000 units** in view, zoomed out, on the
-  reference hardware (B10, GTX 1050); first measurement at the engine demo (phase 1, 5,000 units), final measurement in phase 16.
+  reference hardware (B10, GTX 1650); first measurement at the engine demo (phase 1, 5,000 units), final measurement in phase 16.
 
 ---
 
@@ -190,7 +190,7 @@ side by side: *sim* (1.3), *presentation* (1.4 → 1.5 → 1.6 → 1.7 → 1.8 �
 the last.
 
 **Done when (milestone M0 — engine demo):**
-- `sf_demo --bench` achieves on the reference laptop (GTX 1050, 1920×1080) **p99 frame time ≤ 16.7 ms (≥ 60 fps)** over the entire camera flight with 5,000 units in view, from close-up to the whole map;
+- `sf_demo --bench` achieves on the reference laptop (GTX 1650, 1920×1080) **p99 frame time ≤ 16.7 ms (≥ 60 fps)** over the entire camera flight with 5,000 units in view, from close-up to the whole map;
 - smooth zooming to the cursor without jolts, judged by Tijmen on the laptop;
 - headless: 10,000 ticks with 5,000 wanderers, checksum equal on Linux and Windows;
 - CI green on two OSes, including screenshot tests;
@@ -405,14 +405,15 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 ## 12. Execution with agents
 
 ### 12.1 Agent type
-Two agents, both in the repo (they travel to every environment), both model `sonnet`, same instructions:
+Two agents, both in the repo (they travel to every environment), both model `opus`, same instructions:
 
-- `.claude/agents/bouwer-sonnet.md` — effort `medium`: the default for every WP.
-- `.claude/agents/bouwer-sonnet-xhigh.md` — effort `xhigh`: for the hard WPs, marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
+- `.claude/agents/bouwer-opus.md` — effort `low`: the default for every WP not marked **[xhigh]**.
+- `.claude/agents/bouwer-opus-medium.md` — effort `medium`: for the hard WPs, marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
 
-Decision Tijmen 14-10-2026 (was `xhigh` for everything). Each agent executes one
-work package, works in its own git worktree/branch, opens a PR. If a medium WP
-fails review twice, the orchestrator reruns it on `bouwer-sonnet-xhigh`.
+Decision Tijmen 17-10-2026 (was Sonnet at medium, and Sonnet at xhigh for [xhigh]
+WPs, from 14-10-2026). Each agent executes one work package, works in its own git
+worktree/branch, opens a PR. If a WP fails review twice on `bouwer-opus`, the
+orchestrator reruns it on `bouwer-opus-medium`.
 
 Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
 
@@ -451,12 +452,12 @@ The project lives **only on GitHub**; nothing goes on the home server
   tests, determinism checksums, screenshot test via Mesa lavapipe) and delivers
   a playable build per PR as an artifact.
 - **Session's cloud container**: Rust (stable) and Mesa lavapipe (software Vulkan, no GPU) are present — enough for building, tests, headless and screenshot tests, **not** for fps measurements.
-- **Laptop (Windows, NVIDIA GTX 1050)** for playing and reviewing, and the reference machine for the fps requirement of M0; possibly also as
+- **Laptop (Windows, NVIDIA GTX 1650)** for playing and reviewing, and the reference machine for the fps requirement of M0; possibly also as
   build machine for agents when visual work has to happen locally.
 
 ## 14. First steps
 
 1. Link cloud agents to the GitHub repo (§13).
 2. Confirm decisions B1–B7.
-3. Agent type `bouwer-sonnet` active, start phase 0 (WP0.1 through WP0.3), then phase 1 (engine).
+3. Agent type `bouwer-opus` active (was `bouwer-sonnet` until 17-10-2026), start phase 0 (WP0.1 through WP0.3), then phase 1 (engine).
 4. At M0 (engine demo): benchmark on the laptop, view the zoom and tune the camera sensitivity together. Only then phase 2.

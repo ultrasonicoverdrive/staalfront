@@ -169,7 +169,7 @@ Perspective camera, fixed view direction (north up), logarithmic zoom toward the
 cursor, angle follows zoom (about 45 degrees close up to about 80 degrees far
 out). At strategic zoom units become screen-fixed icons in player color. Picking,
 drag selection and commands work at every zoom level. Target: 60 fps with 1,000
-units in view on the reference hardware (Windows laptop, GTX 1050, 1920x1080, B10);
+units in view on the reference hardware (Windows laptop, GTX 1650, 1920x1080, B10);
 first measurement at the engine demo (5,000 units), final measurement in phase 16.
 
 Implemented in `sf_render::camera` (WP1.5): zoom is a log-scale parameter in `0..=1`
