@@ -43,8 +43,9 @@ M0 status:
 - Headless 10,000 ticks with 5,000 wanderers, checksum equal on Linux and
   Windows: met (CI `headless-compare`, since PR #12).
 - Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
-  2026-10-15 (main at 8f64071, terrain LOD and ray-terrain picking in); judged before the 34-40 ms zoom-out hitches
-  of follow-up 14 were measured, so recheck once they are fixed).
+  2026-10-15 (main at 8f64071, terrain LOD and ray-terrain picking in).
+  Judged before the 34-40 ms zoom-out hitches of follow-up 14 were measured;
+  recheck once they are fixed.
 - p99 frame time <= 16.7 ms with 5,000 units in view: open, needs `sf_demo
   --bench` (WP1.14). First run on the laptop (2026-10-15, `sf_game --units
   5000 --auto-zoom`, DX12): steady 60 fps at vsync with all 5,000 units in
@@ -118,3 +119,11 @@ fixed, delete the entry in the same PR.
 15. **Vulkan hangs on the test laptop.** Adapter creation hung with Vulkan
     (NVIDIA GTX 1650, Windows); the game window now uses DX12 on Windows.
     `WGPU_BACKEND` overrides it, `SF_GPU_TRACE=1` prints each GPU startup step.
+16. **WARP crashes in parallel GPU tests on Windows.** `check (windows-latest)`
+    crashed with STATUS_ACCESS_VIOLATION (0xc0000005) twice on the same commit
+    (PR #18, run 39009873035), once in `debug_overlay` and once in
+    `camera_screenshot`, while main and every other run stayed green. Likely
+    cause: several tests create a DX12 WARP device at the same time. Mitigation:
+    CI runs the workspace tests with `--test-threads=1` on Windows. Root fix still
+    open: one shared device per test binary (or a lock in the screenshot helpers),
+    then drop the flag.
