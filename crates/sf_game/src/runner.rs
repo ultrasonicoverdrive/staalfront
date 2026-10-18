@@ -23,8 +23,8 @@ use sf_render::glb::{self, LoadedPack};
 use sf_render::scene::world_markers;
 use sf_render::{
     Blend, Camera, CameraConfig, CameraInput, DebugView, EyeView, FrameView, Frustum, GpuOptions,
-    Ground, InstanceStats, Instancer, LodConfig, ModelSet, Motion, Pick, PickQuery, PickVia,
-    RectQuery, Renderer, ScreenRect, Style, TerrainGround, TerrainStats, UnitId,
+    Ground, IconAtlas, InstanceStats, Instancer, LodConfig, ModelSet, Motion, Pick, PickQuery,
+    PickVia, RectQuery, Renderer, ScreenRect, Style, TerrainGround, TerrainStats, UnitId,
 };
 use sf_sim::{EntityView, World, WorldConfig};
 
@@ -165,6 +165,9 @@ pub struct Runner {
     total_ticks: u64,
     exit_after: Option<Duration>,
     renderer: Option<Renderer>,
+    /// The strategic icons (WP3.6), read from `assets/icons` at start and
+    /// uploaded once when the renderer exists.
+    icons: IconAtlas,
     audio: Option<AudioSystem>,
     /// Why the last sound-browser play failed (shown in the browser).
     ra_play_error: Option<String>,
@@ -273,9 +276,10 @@ impl Runner {
         // no terrain layer); nothing is drawn from them yet (WP2.2 to WP2.4).
         let world = crate::playfield::make_world(config, &map);
         let style = placeholder_style(Style::embedded());
+        let icons = load_icons();
         let start = match options.scene {
             Scene::Crowd => crowd_scene(world, &options, pack.as_ref(), cells),
-            Scene::Sandbox => sandbox_scene(world, &options, &style, cells),
+            Scene::Sandbox => sandbox_scene(world, &options, &style, &icons, cells),
         };
         let SceneStart {
             world,
@@ -335,6 +339,7 @@ impl Runner {
             total_ticks: 0,
             exit_after: options.exit_after,
             renderer: None,
+            icons,
             audio: None,
             ra_play_error: None,
             camera,
@@ -1192,6 +1197,8 @@ impl App for Runner {
                         .as_ref()
                         .map_or(String::new(), |n| format!(", NOTE: {n}"))
                 );
+                // The icon pictures, once.
+                renderer.set_icon_atlas(&self.icons);
                 renderer.set_terrain(&self.map);
                 renderer.set_terrain_lod(self.lod);
                 let ground = &self.ground;
@@ -1582,6 +1589,7 @@ fn sandbox_scene(
     mut world: World,
     options: &Options,
     style: &Style,
+    icons: &IconAtlas,
     cells: (u32, u32),
 ) -> SceneStart {
     let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
@@ -1606,10 +1614,10 @@ fn sandbox_scene(
             String::new()
         });
     let use_models = options.role_models && !models_ron.is_empty();
-    let roster =
-        Roster::build(&defs, style, &assets, &models_ron, use_models).unwrap_or_else(|e| {
+    let roster = Roster::build(&defs, style, icons, &assets, &models_ron, use_models)
+        .unwrap_or_else(|e| {
             eprintln!("sf_game: {e}; roles are drawn as shapes");
-            Roster::build(&defs, style, &assets, "", false).expect("shapes alone fit")
+            Roster::build(&defs, style, icons, &assets, "", false).expect("shapes alone fit")
         });
     for warning in &roster.warnings {
         eprintln!("sf_game: {warning}");
@@ -1636,6 +1644,17 @@ fn sandbox_scene(
         units,
         buildings: plan.structures,
     }
+}
+
+/// Read the icon set from `assets/icons`. What cannot be read is reported and
+/// the roles that wanted it are drawn as their base shapes.
+fn load_icons() -> IconAtlas {
+    let dir = sf_engine::AssetRoot::resolve().root().join("icons");
+    let icons = IconAtlas::load(&dir);
+    for warning in icons.warnings() {
+        eprintln!("sf_game: icons: {warning}");
+    }
+    icons
 }
 
 fn apply_pack(instancer: &mut Instancer, pack: Option<&LoadedPack>, base: Style) {
@@ -1731,7 +1750,7 @@ mod tests {
         let o = options(Preset::Game, "");
         assert_eq!(o.scene, Scene::Sandbox);
         let style = placeholder_style(Style::embedded());
-        let start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let start = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
         assert_eq!(start.world.unit_table().len(), 43);
         let (structures, units) = crate::sandbox::wanted(&UnitDefs::embedded());
         let all = (structures + units) as usize;
@@ -1740,7 +1759,7 @@ mod tests {
         assert_eq!(start.buildings, structures);
         let roster = start.looks.roster().expect("the sandbox has a roster");
         let shapes =
-            roster.style(&style).shape_count() + roster.pack().map_or(0, |p| p.models.len());
+            roster.style(&style).shape_count() + roster.pack().map_or(0, |p| p.set.models().len());
         for v in &start.views {
             assert!(v.has_stats);
             assert!(usize::from(start.looks.shape_of(v)) < shapes);
@@ -1750,7 +1769,7 @@ mod tests {
             assert_eq!(Some(v.hp), start.world.stats_of(v.id).map(|s| s.hp));
         }
         // The same start every time.
-        let again = sandbox_scene(world(128), &o, &style, (128, 128));
+        let again = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
         let (mut a, mut b) = (start.world, again.world);
         for _ in 0..30 {
             a.step();
@@ -1763,7 +1782,7 @@ mod tests {
     fn extra_placeholder_wanderers_join_the_sandbox_and_are_not_roles() {
         let o = options(Preset::Game, "--units 200");
         let style = placeholder_style(Style::embedded());
-        let mut start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let mut start = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
         let all = {
             let (a, b) = crate::sandbox::wanted(&UnitDefs::embedded());
             (a + b) as usize
@@ -1793,7 +1812,7 @@ mod tests {
     fn models_none_draws_the_roles_as_shapes() {
         let o = options(Preset::Game, "--models none");
         let style = placeholder_style(Style::embedded());
-        let start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let start = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
         let roster = start.looks.roster().unwrap();
         assert!(roster.pack().is_none());
         assert!(!start.views.is_empty());
@@ -1803,7 +1822,7 @@ mod tests {
     fn a_unit_can_still_be_spawned_into_the_sandbox_through_the_queue() {
         let o = options(Preset::Game, "");
         let style = placeholder_style(Style::embedded());
-        let mut start = sandbox_scene(world(128), &o, &style, (128, 128));
+        let mut start = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
         let tick = start.world.tick();
         let before = start.world.len();
         start

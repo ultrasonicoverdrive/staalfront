@@ -106,8 +106,8 @@ the file does not matter.
 | `sight` | cells; above 0 except for an Object |
 | `weapons` | up to four ids from `weapon_defs.ron` |
 | `model` | `Shape(Cube \| Cylinder \| Cone)`, a placeholder primitive of `units.ron`, or `Glb("<path under assets/>")`, a glTF file that must exist |
-| `strategic_icon` | `Square`, `Circle` or `Triangle`: the symbol at strategic zoom (WP1.9) |
-| `icon` | optional picture for the build menu (WP11.1, WP3.6): a PNG path under `assets/` that must exist |
+| `strategic_icon` | `Square`, `Circle`, `Triangle` or `HalfCircle`: the base shape at strategic zoom, one per kind of role (structure, infantry, vehicle, vessel); what the role is drawn as when it has no `icon` (WP1.9, WP3.6) |
+| `icon` | optional name of the role's strategic icon (WP3.6): a picture of the icon set in `assets/icons`, `a-z 0-9 _`, at most 48 characters; see [`icons.md`](icons.md). Only the spelling is checked in `sf_data`; a name the set does not have is a warning when the game loads and the role is drawn as its `strategic_icon`. (The build menu picture of WP11.1 will be a field of its own.) |
 | `flags` | abilities, below; every flag defaults to off |
 
 ### Flags
@@ -177,8 +177,8 @@ the checks after parsing):
   the shipped file; roles are named only as in `content/units.md`), and every
   `kind` is unique within its list and not retired;
 * every weapon, movement class, armor type, damage type, `builds`, `disguise_as` and
-  `comes_with` reference resolves; model and icon files exist and stay inside `assets/`
-  (no `..`, no absolute path);
+  `comes_with` reference resolves; model files exist and stay inside `assets/`
+  (no `..`, no absolute path); an `icon` is a plain name (not a path);
 * numbers are in range, durations are whole ticks, a Structure has a footprint and a
   mobile unit a movement class, a speed and a turn rate;
 * tests check both ways that the ids of the defs are exactly the roles of the tables in
@@ -252,8 +252,10 @@ definitions:
 * `model: Shape(...)` is that placeholder primitive, drawn **at the size of the role**: a
   structure is 4 m times its footprint on each side (and 3 m plus one metre per cell of
   its shorter side high), a unit or object as wide as its `size` in cells times 4 m.
-* `strategic_icon` is the symbol at strategic zoom. (`icon`, the build menu picture, is
-  WP3.6 and WP11.1.)
+* `strategic_icon` is the base shape at strategic zoom, the shape of the role's category
+  (a test keeps the shipped file to that); `icon` is the picture inside it (WP3.6, see
+  [`icons.md`](icons.md)). Roles that draw the same glTF file with different icons share
+  the loaded model (one shape each, one chain and one set of meshes).
 * A role whose model cannot be loaded, and every role when models are off
   (`sf_game --models none`), falls back to a primitive chosen by what it is: infantry a
   cylinder, a vehicle or vessel a cone, a structure or object a cube.

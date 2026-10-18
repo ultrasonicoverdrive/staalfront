@@ -1124,8 +1124,13 @@ pub struct PackModel {
 
 /// A pack loaded: the models in kind order with their icons.
 pub struct LoadedPack {
+    /// The models as loaded, each once.
     pub models: Vec<LoadedModel>,
-    pub icons: Vec<crate::icons::IconShape>,
+    /// The icon of each *shape* of [`LoadedPack::set`]; the same length as
+    /// `set.models()`. For a pack from `models.ron` that is one per model; a
+    /// roster (`sf_game`) may list a model under several icons (the same
+    /// meshes, one shape per icon).
+    pub icons: Vec<crate::icons::IconId>,
     pub set: ModelSet,
 }
 
@@ -1203,7 +1208,7 @@ pub fn load_pack(config: &str, name: &str, assets: &Path) -> Result<LoadedPack, 
     let set = model_set(&models, &spec.lod_px)
         .map_err(|e| GlbError::Invalid(format!("pack {name}: {e}")))?;
     Ok(LoadedPack {
-        icons: spec.models.iter().map(|m| m.icon).collect(),
+        icons: spec.models.iter().map(|m| m.icon.into()).collect(),
         models,
         set,
     })
@@ -1212,7 +1217,8 @@ pub fn load_pack(config: &str, name: &str, assets: &Path) -> Result<LoadedPack, 
 /// Load one `.glb` file by its path under `assets/` (WP3.2): the model of a
 /// unit definition. The file must lie in the directory (`dir`) of a pack in
 /// `models.ron`, which says how to read it (axes) and where its levels of
-/// detail switch; `icon` is the strategic icon the model's shape gets. The
+/// detail switch; `icon` is the strategic icon the model's shape gets (an atlas
+/// layer, see [`crate::icon_atlas::IconAtlas`]). The
 /// result is a pack of one model, so several of them can be joined with
 /// [`ModelSet::concat`] without the models having to be one pack's list.
 ///
@@ -1223,7 +1229,7 @@ pub fn load_pack(config: &str, name: &str, assets: &Path) -> Result<LoadedPack, 
 pub fn load_pack_model(
     config: &str,
     path: &str,
-    icon: crate::icons::IconShape,
+    icon: crate::icons::IconId,
     assets: &Path,
     fit: Option<(f32, f32)>,
 ) -> Result<LoadedPack, GlbError> {

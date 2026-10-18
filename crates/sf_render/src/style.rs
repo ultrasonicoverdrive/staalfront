@@ -6,7 +6,7 @@ use std::fmt;
 
 use serde::Deserialize;
 
-use crate::icons::{IconConfig, IconShape};
+use crate::icons::{IconConfig, IconId, IconShape};
 use crate::mesh::{MIN_SEGMENTS, SEGMENTS};
 use crate::model::MAX_LODS;
 use crate::scene::MeshKind;
@@ -77,8 +77,9 @@ pub struct Shape {
     pub mesh: MeshKind,
     /// `(along the facing, height, across)`.
     pub size: [f32; 3],
-    /// What the strategic icon looks like.
-    pub icon: IconShape,
+    /// The picture of the strategic icon: an atlas layer. The base shapes of
+    /// `units.ron` are layers 0 to 3; a roster gives roles their own pictures.
+    pub icon: IconId,
 }
 
 impl Shape {
@@ -170,7 +171,7 @@ impl Style {
                 .map(|s| Shape {
                     mesh: s.mesh,
                     size: [s.size.0, s.size.1, s.size.2],
-                    icon: s.icon,
+                    icon: s.icon.into(),
                 })
                 .collect(),
             lods: file.shapes.iter().map(|s| s.lods.clone()).collect(),
@@ -349,7 +350,7 @@ mod tests {
         let big = Shape {
             mesh: MeshKind::Cone,
             size: [6.0, 5.0, 6.0],
-            icon: IconShape::Circle,
+            icon: IconShape::Circle.into(),
         };
         let style = base.with_variants(&[(cone, big), (0, big)]).unwrap();
         assert_eq!(style.shape_count(), base.shape_count() + 2);
@@ -374,7 +375,7 @@ mod tests {
         let flat = Shape {
             mesh: MeshKind::Cube,
             size: [1.0, 0.0, 1.0],
-            icon: IconShape::Square,
+            icon: IconShape::Square.into(),
         };
         assert!(base.with_variants(&[(0, flat)]).is_err());
         let ok = Shape {
@@ -430,7 +431,7 @@ mod tests {
         let shapes: Vec<_> = s.shapes().iter().map(|s| s.icon).collect();
         assert_eq!(
             shapes,
-            [IconShape::Square, IconShape::Circle, IconShape::Triangle]
+            [IconShape::Square, IconShape::Circle, IconShape::Triangle].map(IconId::from)
         );
         assert!((0.0..1.0).contains(&s.lod_settings().hysteresis));
     }
@@ -444,7 +445,7 @@ mod tests {
         assert_eq!(*s.icons(), IconConfig::default());
         assert_eq!(s.lod_settings(), LodSettings::default());
         assert!(s.lod_specs(0).is_empty());
-        assert_eq!(s.shape(0).icon, IconShape::Square);
+        assert_eq!(s.shape(0).icon, IconShape::Square.into());
     }
 
     fn with_lods(mesh: &str, lods: &str) -> Result<Style, StyleError> {

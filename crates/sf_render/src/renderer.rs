@@ -10,7 +10,8 @@ use wgpu::util::DeviceExt;
 use crate::frustum::Frustum;
 use crate::gpu::{Gpu, GpuOptions, HeadlessSlot, RenderError};
 use crate::gpu_timer::GpuTimer;
-use crate::icons::{IconInstance, IconParams};
+use crate::icon_atlas::{ICON_SIDE, IconAtlas};
+use crate::icons::{IconConfig, IconInstance, IconParams};
 use crate::image::Rgba8;
 use crate::instancing::Instancer;
 use crate::lod::{LodConfig, LodView, TerrainConfig, TerrainStats};
@@ -146,8 +147,14 @@ pub struct Renderer {
     /// and one draw call. No depth test, drawn after the units.
     icon_pipeline: wgpu::RenderPipeline,
     icon_params: wgpu::Buffer,
+    /// Layout of the icon bind group: the uniform, the atlas and its sampler.
+    icon_layout: wgpu::BindGroupLayout,
     icon_bind_group: wgpu::BindGroup,
+    /// Layers of the icon atlas uploaded (at least the four base shapes).
+    icon_layers: u32,
     icon_indices: wgpu::Buffer,
+    /// What the frame is cleared to; the sky blue unless a test sets it.
+    background: wgpu::Color,
     icon_sizes: IconParams,
     icons: DynamicInstances,
     camera: PlaceholderCamera,
@@ -359,31 +366,45 @@ impl Renderer {
         // next to the shared globals.
         let icon_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("icon params layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
         });
         let icon_params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("icon params"),
-            size: std::mem::size_of::<[f32; 4]>() as u64,
+            size: std::mem::size_of::<[f32; 8]>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let icon_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("icon params bind group"),
-            layout: &icon_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: icon_params.as_entire_binding(),
-            }],
-        });
+        // Until a game loads its icons: the four plain shapes.
+        let base_atlas = IconAtlas::base();
+        let icon_bind_group =
+            icon_bind_group(device, &gpu.queue, &icon_layout, &icon_params, &base_atlas);
         let icon_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("icon pipeline layout"),
             bind_group_layouts: &[Some(&bind_group_layout), Some(&icon_layout)],
@@ -435,12 +456,12 @@ impl Renderer {
             model_revision: 0,
             icon_pipeline,
             icon_params,
+            icon_layout,
             icon_bind_group,
+            icon_layers: base_atlas.len() as u32,
             icon_indices,
-            icon_sizes: IconParams {
-                size_px: 14.0,
-                outline_px: 1.5,
-            },
+            background: CLEAR,
+            icon_sizes: IconConfig::default().params(1.0),
             icons: DynamicInstances::default(),
             camera,
             view_proj: None,
@@ -811,6 +832,40 @@ impl Renderer {
             .resize_with(self.meshes.len(), DynamicInstances::default);
     }
 
+    /// Upload the pictures of the strategic icons (WP3.6): one texture array,
+    /// once, when the game has loaded its icon directory. The icons of a frame
+    /// ([`IconInstance::icon`]) are layers of it. Until this is called the
+    /// renderer has the four plain base shapes, which is all the placeholder
+    /// shapes of `units.ron` need. Not for every frame: it creates a texture.
+    pub fn set_icon_atlas(&mut self, atlas: &IconAtlas) {
+        self.icon_bind_group = icon_bind_group(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &self.icon_layout,
+            &self.icon_params,
+            atlas,
+        );
+        self.icon_layers = atlas.len() as u32;
+    }
+
+    /// The colour the frame is cleared to (sRGB bytes), where no terrain or
+    /// model is drawn. For the contact sheet of the icons, which shows them on
+    /// flat terrain colours; the game draws terrain over all of it.
+    pub fn set_background(&mut self, srgb: [u8; 3]) {
+        let c = srgb.map(|b| f64::from(crate::style::srgb_to_linear(b)));
+        self.background = wgpu::Color {
+            r: c[0],
+            g: c[1],
+            b: c[2],
+            a: 1.0,
+        };
+    }
+
+    /// Layers of the icon atlas on the GPU.
+    pub fn icon_layers(&self) -> u32 {
+        self.icon_layers
+    }
+
     /// Replace the strategic icons of the frame: one instance buffer and one
     /// draw call, drawn over the scene without a depth test. `params` are the
     /// icon sizes in physical pixels (`Instancer::icon_params`). An empty
@@ -1003,12 +1058,9 @@ impl Renderer {
             .queue
             .write_buffer(&self.globals, 0, bytemuck::bytes_of(&globals));
         // Icons: viewport, icon side and outline width, all in pixels.
-        let icon = [
-            self.size.0 as f32,
-            self.size.1 as f32,
-            self.icon_sizes.size_px,
-            self.icon_sizes.outline_px,
-        ];
+        let icon = self
+            .icon_sizes
+            .uniform([self.size.0 as f32, self.size.1 as f32]);
         self.gpu
             .queue
             .write_buffer(&self.icon_params, 0, bytemuck::bytes_of(&icon));
@@ -1029,7 +1081,7 @@ impl Renderer {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(CLEAR),
+                    load: wgpu::LoadOp::Clear(self.background),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -1493,6 +1545,84 @@ fn build_pipeline(
         Some(e) => Err(e.to_string()),
         None => Ok(pipeline),
     }
+}
+
+/// The icon bind group for `atlas`: the parameter uniform, the atlas as a
+/// texture array (two 8-bit distance fields per texel, see
+/// [`crate::icon_atlas`]) and a linear, clamping sampler. The texture is
+/// created and filled here, once per atlas.
+fn icon_bind_group(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    params: &wgpu::Buffer,
+    atlas: &IconAtlas,
+) -> wgpu::BindGroup {
+    let layers = atlas.len() as u32;
+    let side = ICON_SIDE as u32;
+    let extent = wgpu::Extent3d {
+        width: side,
+        height: side,
+        depth_or_array_layers: layers,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("icon atlas"),
+        size: extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rg8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let mut texels = Vec::with_capacity(atlas.len() * crate::icon_atlas::LAYER_BYTES);
+    for layer in 0..atlas.len() {
+        texels.extend_from_slice(
+            atlas
+                .layer(crate::icons::IconId(layer as u16))
+                .expect("the atlas has this layer"),
+        );
+    }
+    queue.write_texture(
+        texture.as_image_copy(),
+        &texels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(side * 2),
+            rows_per_image: Some(side),
+        },
+        extent,
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("icon atlas sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("icon bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+        ],
+    })
 }
 
 /// The strategic icon pipeline: instance data only (the quad's corners come

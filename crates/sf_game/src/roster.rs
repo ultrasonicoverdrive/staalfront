@@ -4,8 +4,9 @@
 //! the data mapping from that number to a *shape* of the instancer, built from
 //! the definitions in `assets/config/unit_defs.ron` (`sf_data::units`): the
 //! `model` field says which placeholder primitive or which glTF file the role
-//! is drawn with, `strategic_icon` which symbol it gets at strategic zoom, and
-//! the role's `size` and `footprint` how big it is. It replaces the stand-in
+//! is drawn with, `icon` which picture of the icon set it gets at strategic zoom
+//! (WP3.6; the base shape `strategic_icon` when it has none or the set does not
+//! have it), and the role's `size` and `footprint` how big it is. It replaces the stand-in
 //! `kind % shapes` of the first demo (follow-up 12 of `docs/progress.md`).
 //!
 //! # Where the shapes come from
@@ -15,8 +16,9 @@
 //!
 //! * for `Model::Glb(path)`: the glTF file, loaded with the axes and switch
 //!   sizes of the model pack in `assets/config/models.ron` whose directory the
-//!   file lies in (`sf_render::glb::load_pack_model`), with the role's strategic
-//!   icon. A structure's model is scaled, the same in every direction, until it
+//!   file lies in (`sf_render::glb::load_pack_model`). Roles that draw the same
+//!   file with different icons share the loaded model: one shape each, one chain
+//!   and one set of meshes (`ModelSet::with_chains`). A structure's model is scaled, the same in every direction, until it
 //!   just fits its footprint of 4 m cells. A role whose file cannot be read, and every role when models are
 //!   turned off (`--models none`), takes the fallback below;
 //! * for `Model::Shape(s)`: that placeholder primitive;
@@ -48,16 +50,18 @@ use sf_math::render_bridge::{METRES_PER_CELL, cells_to_metres};
 use sf_render::glb::{LoadedPack, MODELS_CONFIG, load_pack_model};
 use sf_render::scene::MeshKind;
 use sf_render::style::Shape;
-use sf_render::{IconShape, ModelSet, Style};
+use sf_render::{IconAtlas, IconId, IconShape, ModelSet, Style};
 use sf_sim::Kind;
 
 /// Height of a placeholder structure in metres: this plus one metre per cell
 /// of its shorter side (so a 1 x 1 tower is 4 m, a 4 x 4 centre 7 m).
 const STRUCTURE_BASE_HEIGHT: f32 = 3.0;
 
-/// A glTF model as the roles ask for it: the file, the strategic icon and the
-/// footprint it is fitted to (a structure's model), each combination loaded once.
-type ModelKey = (String, u8, Option<(u8, u8)>);
+/// A glTF model as the roles ask for it: the file and the footprint it is
+/// fitted to (a structure's model), each combination loaded once. Roles with
+/// different icons that draw the same model share its meshes: one more shape
+/// of the style, the same chain (so no more draw calls and no more GPU memory).
+type ModelKey = (String, Option<(u8, u8)>);
 
 /// What a role is drawn with, before the shape numbers are fixed.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -66,10 +70,11 @@ enum Source {
     /// millimetres, so the key orders and compares exactly).
     Placeholder {
         base: u8,
-        icon: u8,
+        icon: IconId,
         size_mm: [i32; 3],
     },
-    /// The glTF model at this index of the loaded models.
+    /// The glTF model with this icon: an index into the roster's model
+    /// entries, each a loaded model and an icon.
     Model(usize),
 }
 
@@ -102,6 +107,7 @@ fn icon_of(icon: DataIcon) -> IconShape {
         DataIcon::Square => IconShape::Square,
         DataIcon::Circle => IconShape::Circle,
         DataIcon::Triangle => IconShape::Triangle,
+        DataIcon::HalfCircle => IconShape::HalfCircle,
     }
 }
 
@@ -133,28 +139,43 @@ impl Roster {
     /// placeholder shapes (cube, cylinder and cone at vehicle size).
     /// `assets` is the assets directory the model files lie under;
     /// `models_ron` the text of `assets/config/models.ron`. With `use_models`
-    /// false no file is read and every role is a primitive.
+    /// false no file is read and every role is a primitive. `icons` is the
+    /// loaded icon set: a role's `icon` is looked up in it, and a role without
+    /// one (or whose name the set does not have, which is a warning) gets the
+    /// plain base shape of its `strategic_icon`.
     ///
     /// Fails only if the roles need more than 255 shapes in all.
     pub fn build(
         defs: &UnitDefs,
         base: &Style,
+        icons: &IconAtlas,
         assets: &Path,
         models_ron: &str,
         use_models: bool,
     ) -> Result<Roster, String> {
         let mut warnings = Vec::new();
-        // glTF models in the order they are first needed; the same file with
-        // the same icon is one model.
+        // glTF models in the order they are first needed, each file (at a
+        // footprint) once; and the (model, icon) pairs the roles draw, the
+        // model *entries*, which become shapes.
         let mut models: Vec<LoadedPack> = Vec::new();
         let mut model_index: BTreeMap<ModelKey, Option<usize>> = BTreeMap::new();
+        let mut entries: Vec<(usize, IconId)> = Vec::new();
         let mut sources: BTreeMap<u16, Source> = BTreeMap::new();
 
         for def in defs.units() {
             let sim = defs
                 .sim_unit(def.kind)
                 .ok_or_else(|| format!("{}: no converted role", def.id))?;
-            let icon = icon_of(def.strategic_icon);
+            let shape = icon_of(def.strategic_icon);
+            let icon = icons.resolve(def.icon.as_deref(), shape);
+            if let Some(name) = &def.icon
+                && icons.lookup(name).is_none()
+            {
+                warnings.push(format!(
+                    "{}: icon \"{name}\" is not in the icon set; drawn as its base shape",
+                    def.id
+                ));
+            }
             let mut mesh = None;
             match &def.model {
                 Model::Shape(shape) => mesh = Some(mesh_of(*shape)),
@@ -167,9 +188,9 @@ impl Roster {
                             f32::from(h) * METRES_PER_CELL,
                         )
                     });
-                    let key = (path.clone(), icon.index() as u8, sim.footprint);
+                    let key = (path.clone(), sim.footprint);
                     let found = *model_index.entry(key).or_insert_with(|| {
-                        match load_pack_model(models_ron, path, icon, assets, fit) {
+                        match load_pack_model(models_ron, path, shape.into(), assets, fit) {
                             Ok(one) => {
                                 models.push(one);
                                 Some(models.len() - 1)
@@ -182,7 +203,14 @@ impl Roster {
                     });
                     match found {
                         Some(i) => {
-                            sources.insert(def.kind, Source::Model(i));
+                            let entry = entries
+                                .iter()
+                                .position(|e| *e == (i, icon))
+                                .unwrap_or_else(|| {
+                                    entries.push((i, icon));
+                                    entries.len() - 1
+                                });
+                            sources.insert(def.kind, Source::Model(entry));
                         }
                         None => mesh = Some(mesh_of(fallback_shape(def.category))),
                     }
@@ -217,17 +245,17 @@ impl Roster {
                     Shape {
                         mesh,
                         size: size_mm.map(|v| v as f32 / 1000.0),
-                        icon: IconShape::ALL[usize::from(*icon)],
+                        icon: *icon,
                     },
                 ));
             }
         }
         let base_count = base.shape_count();
         let model_base = base_count + variants.len();
-        if model_base + models.len() > 255 {
+        if model_base + entries.len() > 255 {
             return Err(format!(
                 "the roles need {} shapes, the instancer takes 255",
-                model_base + models.len()
+                model_base + entries.len()
             ));
         }
         let mut looks = BTreeMap::new();
@@ -249,16 +277,27 @@ impl Roster {
             );
         }
 
-        // The models as one pack: models, icons and one model set in order.
-        let pack = models.into_iter().reduce(|mut all, one| {
-            all.set = all
-                .set
-                .concat(&one.set)
-                .expect("a few models fit in a mesh table");
-            all.models.extend(one.models);
-            all.icons.extend(one.icons);
-            all
-        });
+        // The models as one pack: the loaded models in order, then one shape per
+        // entry: its model's chain (the meshes are shared) and its icon.
+        let pack = models
+            .into_iter()
+            .reduce(|mut all, one| {
+                all.set = all
+                    .set
+                    .concat(&one.set)
+                    .expect("a few models fit in a mesh table");
+                all.models.extend(one.models);
+                all
+            })
+            .map(|mut all| {
+                let chains: Vec<usize> = entries.iter().map(|e| e.0).collect();
+                all.set = all
+                    .set
+                    .with_chains(&chains)
+                    .expect("every entry is a loaded model");
+                all.icons = entries.iter().map(|e| e.1).collect();
+                all
+            });
         Ok(Roster {
             looks,
             variants,
@@ -317,7 +356,7 @@ fn placeholder(
     size: sf_math::Fx,
     footprint: Option<(u8, u8)>,
     mesh: MeshKind,
-    icon: IconShape,
+    icon: IconId,
     base: &Style,
 ) -> Source {
     let chain = base
@@ -346,7 +385,7 @@ fn placeholder(
     };
     Source::Placeholder {
         base: chain as u8,
-        icon: icon.index() as u8,
+        icon,
         size_mm: size.map(mm),
     }
 }
@@ -380,9 +419,23 @@ mod tests {
         }
     }
 
+    fn icons() -> IconAtlas {
+        let atlas = IconAtlas::load(&assets().join("icons"));
+        assert!(atlas.warnings().is_empty(), "{:?}", atlas.warnings());
+        atlas
+    }
+
     fn built(use_models: bool) -> (UnitDefs, Roster) {
         let defs = UnitDefs::embedded();
-        let roster = Roster::build(&defs, &base(), &assets(), &models_ron(), use_models).unwrap();
+        let roster = Roster::build(
+            &defs,
+            &base(),
+            &icons(),
+            &assets(),
+            &models_ron(),
+            use_models,
+        )
+        .unwrap();
         (defs, roster)
     }
 
@@ -417,13 +470,34 @@ mod tests {
                 def.id
             );
         }
-        // Two roles with the same file and icon share the model; one with a
-        // different footprint would not.
+        // Two roles with the same file and icon are one shape (the decoy has
+        // the tower's icon on purpose); with different icons they are two
+        // shapes that share one model: the same chain, so the same meshes.
         let shape = |id: &str| roster.look(Kind(defs.kind_of(id).unwrap())).unwrap().shape;
-        assert_eq!(shape("repair_truck"), shape("transport_truck"));
         assert_eq!(shape("defence_tower"), shape("decoy_emplacement"));
-        // Primitives of one size, icon and mesh are one shape too.
-        assert_eq!(shape("rifleman"), shape("engineer"));
+        assert_ne!(shape("repair_truck"), shape("transport_truck"));
+        let set = roster.model_set(&roster.style(&base())).unwrap();
+        let meshes = |id: &str| {
+            set.model(shape(id))
+                .meshes()
+                .map(|m| m.index())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(meshes("repair_truck"), meshes("transport_truck"));
+        assert!(!meshes("repair_truck").is_empty());
+        // More shapes than loaded models: the icons make shapes, the files
+        // are loaded (and their meshes uploaded) once.
+        let pack = roster.pack().unwrap();
+        assert!(pack.models.len() < pack.set.models().len());
+        assert_eq!(pack.icons.len(), pack.set.models().len());
+        // Primitives of one size and icon are one shape; with another icon
+        // they are another shape on the same primitive.
+        let style = full_style(&roster);
+        assert_ne!(shape("rifleman"), shape("engineer"));
+        assert_eq!(
+            style.shape(shape("rifleman")).mesh,
+            style.shape(shape("engineer")).mesh
+        );
         // The models come after the variants.
         let first_model = roster
             .looks()
@@ -474,12 +548,12 @@ mod tests {
         let empty = std::env::temp_dir().join(format!("sf_roster_empty_{}", std::process::id()));
         std::fs::create_dir_all(&empty).unwrap();
         let defs = UnitDefs::embedded();
-        let roster = Roster::build(&defs, &base(), &empty, &models_ron(), true);
+        let roster = Roster::build(&defs, &base(), &icons(), &empty, &models_ron(), true);
         std::fs::remove_dir_all(&empty).ok();
         let roster = roster.unwrap();
         assert!(roster.pack().is_none());
         assert!(roster.looks().all(|(_, l)| !l.model));
-        // One warning per file and icon, naming the first role that wanted it.
+        // One warning per file and footprint, naming the first role that wanted it.
         let glb_files = defs
             .units()
             .iter()
@@ -580,15 +654,89 @@ mod tests {
     }
 
     #[test]
-    fn every_role_gets_the_strategic_icon_of_its_definition() {
+    fn every_role_gets_the_icon_of_its_definition() {
+        let atlas = icons();
         for use_models in [true, false] {
             let (defs, roster) = built(use_models);
             let style = full_style(&roster);
             for def in defs.units() {
                 let shape = style.shape(roster.shape_of(Kind(def.kind)).unwrap());
-                assert_eq!(shape.icon, icon_of(def.strategic_icon), "{}", def.id);
+                // The picture the name gives, else the base shape.
+                let want = atlas.resolve(def.icon.as_deref(), icon_of(def.strategic_icon));
+                assert_eq!(shape.icon, want, "{}", def.id);
+                match &def.icon {
+                    // A role with an icon of its own is not a plain shape...
+                    Some(name) => {
+                        assert!(atlas.lookup(name).is_some(), "{}: {name}", def.id);
+                        if name != "civilian" {
+                            assert!(shape.icon.0 >= 4, "{}: {name}", def.id);
+                        }
+                    }
+                    // ...and one without gets the plain shape of its category.
+                    None => assert_eq!(
+                        shape.icon,
+                        IconId::from(icon_of(DataIcon::of_category(def.category))),
+                        "{}",
+                        def.id
+                    ),
+                }
             }
         }
+    }
+
+    /// Every role of the art brief has a picture of its own in the shipped
+    /// set, and the four roles that are not in it are drawn as base shapes.
+    #[test]
+    fn the_shipped_set_covers_every_role_of_the_art_brief() {
+        let defs = UnitDefs::embedded();
+        let atlas = icons();
+        let without: Vec<&str> = defs
+            .units()
+            .iter()
+            .filter(|d| d.icon.is_none())
+            .map(|d| d.id.as_str())
+            .collect();
+        assert_eq!(
+            without,
+            ["evidence_crate", "bridge_segment", "rail_spur", "ore_field"]
+        );
+        assert_eq!(defs.units().len() - without.len(), 39);
+        for d in defs.units() {
+            if let Some(name) = &d.icon {
+                assert!(atlas.lookup(name).is_some(), "{}: no icon {name}", d.id);
+            }
+        }
+    }
+
+    /// An icon name the set does not have is a warning, and the role is drawn
+    /// as the base shape of its category, whatever else is wrong.
+    #[test]
+    fn an_unknown_icon_falls_back_to_the_base_shape_and_says_so() {
+        let defs = UnitDefs::embedded();
+        let atlas = IconAtlas::base();
+        // The plain base atlas has no role pictures at all: every named icon
+        // is missing, so each role is its base shape and each has a warning.
+        let roster = Roster::build(&defs, &base(), &atlas, &assets(), "", false).unwrap();
+        let style = full_style(&roster);
+        let named = defs.units().iter().filter(|d| d.icon.is_some()).count();
+        assert_eq!(roster.warnings.len(), named, "{:?}", roster.warnings);
+        assert!(roster.warnings[0].contains("is not in the icon set"));
+        for def in defs.units() {
+            let shape = style.shape(roster.shape_of(Kind(def.kind)).unwrap());
+            assert_eq!(
+                shape.icon,
+                IconId::from(icon_of(def.strategic_icon)),
+                "{}",
+                def.id
+            );
+            assert!(shape.icon.0 < 4, "{}", def.id);
+        }
+        // The vessel falls back to the half-circle.
+        let gunboat = defs.kind_of("gunboat").unwrap();
+        assert_eq!(
+            style.shape(roster.shape_of(Kind(gunboat)).unwrap()).icon,
+            IconId::from(IconShape::HalfCircle)
+        );
     }
 
     #[test]

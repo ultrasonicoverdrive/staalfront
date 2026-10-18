@@ -22,6 +22,12 @@
 // armor type, the footprints of mission structures and the model/icon choices
 // (the testpack_v1 models stand in until real art, WP11.6; roles without a
 // model use a primitive shape).
+//
+// Strategic icons (WP3.6): `strategic_icon` is the base shape of the role's
+// category (Square structures, Circle infantry, Triangle vehicles, HalfCircle
+// vessels) and what it is drawn as without an `icon`; `icon` names the picture
+// in assets/icons (docs/rules/icons.md). The bridge, the rail spur, the
+// evidence crate and the ore field have no icon of their own: the base shape.
 (
     units: [
         // ---- Shared structures -------------------------------------------
@@ -30,6 +36,7 @@
             hp: 1500, armor: "structure", footprint: (width: 4, height: 4), sight: 10,
             flags: (build_radius: 8),
             model: Shape(Cube), strategic_icon: Square,
+            icon: "construction_center",
             // placeholder: sight, model. No cost: it is the base anchor, not bought.
         ),
         (
@@ -37,7 +44,7 @@
             cost: 300, build_seconds: 15, hp: 600, armor: "structure", power: 100,
             footprint: (width: 2, height: 3), sight: 5,
             model: Glb("testpack_v1/models/energiecentrale.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_energiecentrale_64.png",
+            icon: "power_plant",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -46,7 +53,7 @@
             footprint: (width: 3, height: 4), sight: 5,
             flags: (comes_with: "harvester"),
             model: Glb("testpack_v1/models/raffinaderij.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_raffinaderij_64.png",
+            icon: "refinery",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -54,6 +61,7 @@
             cost: 400, build_seconds: 20, hp: 700, armor: "structure", power: -20,
             footprint: (width: 2, height: 3), sight: 5,
             model: Shape(Cube), strategic_icon: Square,
+            icon: "barracks",
             // placeholder: build_seconds, sight, model.
         ),
         (
@@ -61,7 +69,7 @@
             cost: 1500, build_seconds: 50, hp: 1000, armor: "structure", power: -40,
             footprint: (width: 3, height: 4), sight: 5,
             model: Glb("testpack_v1/models/voertuigfabriek.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_voertuigfabriek_64.png",
+            icon: "vehicle_factory",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -70,6 +78,7 @@
             footprint: (width: 2, height: 2), sight: 12,
             flags: (minimap: true),
             model: Shape(Cube), strategic_icon: Square,
+            icon: "radar",
             // placeholder: build_seconds, model. Sight 12 is "reveals 12-cell radius".
         ),
         (
@@ -77,7 +86,7 @@
             cost: 500, build_seconds: 20, hp: 600, armor: "structure", power: -20,
             footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"],
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_verdedigingstoren_64.png",
+            icon: "defence_tower",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -85,6 +94,7 @@
             cost: 900, build_seconds: 35, hp: 800, armor: "structure", power: -40,
             footprint: (width: 2, height: 2), sight: 8, weapons: ["emplacement_gun"],
             model: Shape(Cube), strategic_icon: Square,
+            icon: "advanced_defences",
             // placeholder: build_seconds, sight, model.
         ),
         (
@@ -93,6 +103,7 @@
             footprint: (width: 4, height: 5), sight: 5,
             flags: (needs_water: true),
             model: Shape(Cube), strategic_icon: Square,
+            icon: "shipyard",
             // placeholder: build_seconds, sight, model.
         ),
         (
@@ -101,6 +112,7 @@
             footprint: (width: 1, height: 1), sight: 5,
             flags: (disguise_as: "defence_tower"),
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
+            icon: "decoy_emplacement",
             // placeholder: build_seconds, sight. It uses the tower's model on purpose.
         ),
         (
@@ -109,6 +121,7 @@
             footprint: (width: 2, height: 2), sight: 7,
             flags: (garrison: 5),
             model: Shape(Cube), strategic_icon: Square,
+            icon: "fortified_bunker",
             // placeholder: build_seconds, sight, model.
         ),
 
@@ -119,7 +132,7 @@
             movement: "tracked", speed: 1.2, turn_rate: 6, size: 1.5, sight: 4,
             flags: (harvests: true),
             model: Glb("testpack_v1/models/grondstofwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_grondstofwagen_64.png",
+            icon: "harvester",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -127,7 +140,8 @@
             cost: 100, build_seconds: 5, hp: 50, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["rifle"],
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "rifleman",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -135,7 +149,8 @@
             cost: 300, build_seconds: 12, hp: 45, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["rocket"],
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "rocket_trooper",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -143,7 +158,8 @@
             cost: 500, build_seconds: 15, hp: 25, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             flags: (can_capture: true, repairs_structures: true, places_charges: true),
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "engineer",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -152,8 +168,8 @@
             movement: "foot", speed: 1.3, turn_rate: 16, size: 0.4, sight: 8,
             weapons: ["pistol"],
             flags: (stealth_in_cover: true),
-            model: Glb("testpack_v1/models/verkenner.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_verkenner_64.png",
+            model: Glb("testpack_v1/models/verkenner.glb"), strategic_icon: Circle,
+            icon: "scout",
             // placeholder: build_seconds, turn_rate, size. Sight 8 is from units.md.
         ),
         (
@@ -161,7 +177,8 @@
             cost: 600, build_seconds: 20, hp: 40, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 9,
             weapons: ["long_rifle"],
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "sniper",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -169,7 +186,8 @@
             cost: 400, build_seconds: 12, hp: 40, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             flags: (heal_radius: 2),
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "medic",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -178,7 +196,8 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.5, sight: 5,
             weapons: ["satchel_charge"],
             flags: (consumed_on_use: true),
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "demolition_team",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -187,7 +206,7 @@
             movement: "tracked", speed: 2, turn_rate: 10, size: 1.2, sight: 6,
             weapons: ["cannon"],
             model: Glb("testpack_v1/models/lichte_tank.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_lichte_tank_64.png",
+            icon: "light_tank",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -196,7 +215,7 @@
             movement: "tracked", speed: 1.1, turn_rate: 6, size: 1.5, sight: 7,
             weapons: ["twin_cannon"],
             model: Glb("testpack_v1/models/zware_tank.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_zware_tank_64.png",
+            icon: "heavy_tank",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -205,7 +224,7 @@
             movement: "tracked", speed: 1, turn_rate: 5, size: 1.5, sight: 6,
             weapons: ["howitzer"],
             model: Glb("testpack_v1/models/mobiele_artillerie.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_mobiele_artillerie_64.png",
+            icon: "siege_artillery",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -214,7 +233,7 @@
             movement: "wheeled", speed: 1.8, turn_rate: 8, size: 1.3, sight: 5,
             flags: (repair_radius: 2),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
+            icon: "repair_truck",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -223,7 +242,7 @@
             movement: "wheeled", speed: 2.2, turn_rate: 8, size: 1.3, sight: 5,
             flags: (transports: 5),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
+            icon: "transport_truck",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -232,7 +251,7 @@
             movement: "wheeled", speed: 2.5, turn_rate: 10, size: 1.2, sight: 5,
             flags: (transports: 4),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
+            icon: "light_transport",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -241,6 +260,7 @@
             movement: "hover", speed: 1.5, water_speed: 1.2, turn_rate: 6, size: 1.5, sight: 5,
             flags: (transports: 5, transports_vehicles: 1),
             model: Shape(Cylinder), strategic_icon: Triangle,
+            icon: "amphibious_transport",
             // placeholder: build_seconds, armor, turn_rate, size, sight, model.
             // "Carries 5 infantry or 1 vehicle": the two capacities are alternatives.
         ),
@@ -250,7 +270,8 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["carbine"],
             flags: (can_capture: true, repairs_structures: true, places_charges: true, builds: ["fortified_bunker"]),
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "combat_engineer",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -259,7 +280,8 @@
             movement: "foot", speed: 0.6, turn_rate: 8, size: 0.6, sight: 6,
             weapons: ["anti_tank_gun"],
             flags: (deploys: true),
-            model: Shape(Cone), strategic_icon: Triangle,
+            model: Shape(Cone), strategic_icon: Circle,
+            icon: "heavy_gun_team",
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -267,7 +289,8 @@
             cost: 1200, build_seconds: 35, hp: 600, armor: "light",
             movement: "water", speed: 2, turn_rate: 4, size: 1.5, sight: 7,
             weapons: ["naval_cannon"],
-            model: Shape(Cylinder), strategic_icon: Circle,
+            model: Shape(Cylinder), strategic_icon: HalfCircle,
+            icon: "gunboat",
             // placeholder: build_seconds, armor, turn_rate, size, sight, model.
         ),
         (
@@ -275,6 +298,7 @@
             hp: 300, armor: "light",
             movement: "wheeled", speed: 1.2, turn_rate: 8, size: 1.3, sight: 5,
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
+            icon: "supply_truck",
             // placeholder: armor, turn_rate, size, sight. Mission object, not buildable.
         ),
         (
@@ -282,6 +306,7 @@
             hp: 25, armor: "infantry",
             movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
             model: Shape(Cone), strategic_icon: Circle,
+            icon: "civilian",
             // placeholder: turn_rate, size, sight, model.
         ),
         (
@@ -289,6 +314,7 @@
             hp: 25, armor: "infantry",
             movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
             model: Shape(Cone), strategic_icon: Circle,
+            icon: "technician",
             // placeholder: turn_rate, size, sight, model.
         ),
 
@@ -299,6 +325,7 @@
             kind: 32, id: "relay_transmitter", factions: [Neutral], category: Structure,
             hp: 400, armor: "structure", footprint: (width: 2, height: 2), sight: 5,
             model: Shape(Cube), strategic_icon: Square,
+            icon: "relay_transmitter",
             // placeholder: footprint, sight, model.
         ),
         (
@@ -306,12 +333,14 @@
             hp: 500, armor: "structure", footprint: (width: 2, height: 2), sight: 4,
             flags: (death_blast: (radius: 3, damage: 200)),
             model: Shape(Cylinder), strategic_icon: Square,
+            icon: "fuel_depot",
             // placeholder: footprint, sight, model, blast damage. "Explodes, damages radius 3."
         ),
         (
             kind: 34, id: "archive_building", factions: [Neutral], category: Structure,
             hp: 800, armor: "structure", footprint: (width: 3, height: 3), sight: 5,
             model: Shape(Cube), strategic_icon: Square,
+            icon: "archive_building",
             // placeholder: footprint, sight, model.
         ),
         (
@@ -325,7 +354,8 @@
             kind: 36, id: "ferry", factions: [Neutral], category: Vessel,
             hp: 600, armor: "light",
             movement: "water", speed: 0.2, turn_rate: 2, size: 3, sight: 4,
-            model: Shape(Cylinder), strategic_icon: Circle,
+            model: Shape(Cylinder), strategic_icon: HalfCircle,
+            icon: "ferry",
             // placeholder: armor, turn_rate, size, sight, model. Speed 0.2 is from units.md.
         ),
         (
@@ -346,12 +376,14 @@
             weapons: ["automated_gun"],
             flags: (fires_at_all: true),
             model: Shape(Cube), strategic_icon: Square,
+            icon: "automated_gun",
             // placeholder: footprint, sight, model. Range 8 is from units.md.
         ),
         (
             kind: 40, id: "generator", factions: [Neutral], category: Structure,
             hp: 400, armor: "structure", power: 50, footprint: (width: 1, height: 1), sight: 3,
             model: Shape(Cube), strategic_icon: Square,
+            icon: "generator",
             // placeholder: power, footprint, sight, model. "Backup power structure."
         ),
         (
@@ -359,6 +391,7 @@
             hp: 300, armor: "structure", footprint: (width: 2, height: 2), sight: 6,
             weapons: ["battery_shell"],
             model: Shape(Cube), strategic_icon: Square,
+            icon: "unmanned_artillery",
             // placeholder: footprint, sight, model, weapon. "Fires when uplink alive" is
             // mission logic (F2-M09), not a field.
         ),

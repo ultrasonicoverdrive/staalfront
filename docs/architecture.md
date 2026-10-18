@@ -32,6 +32,7 @@ fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows
 | `tools/sf_editor` | Map and mission editor. |
 | `tools/sf_headless` | Simulation without a screen: tests, balance, AI-vs-AI. |
 | `tools/sf_demo` | Engine demo and benchmark of milestone M0 (phase 1): the `sf_game` library with the demo's defaults. |
+| `tools/sf_icon_gen` | Writes the placeholder strategic icons (`assets/icons/*.png`, `icons.ron`) deterministically (WP3.6); depends on nothing but the `png` crate. `docs/rules/icons.md`. |
 
 ### Dependency directions
 

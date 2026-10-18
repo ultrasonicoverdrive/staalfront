@@ -825,11 +825,8 @@ impl Instancer {
     /// The icon sizes of the last build in physical pixels (the settings
     /// times the frame's UI scale).
     pub fn icon_params(&self) -> IconParams {
-        let scale = self.frame.map_or(1.0, |f| f.ui_scale);
-        IconParams {
-            size_px: self.icon_config.icon_px(scale),
-            outline_px: self.icon_config.outline_px * scale,
-        }
+        self.icon_config
+            .params(self.frame.map_or(1.0, |f| f.ui_scale))
     }
 
     /// The model/icon blend of the last build.

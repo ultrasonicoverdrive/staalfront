@@ -360,7 +360,7 @@ fn icons_sit_over_the_ground_with_the_shape_and_color_of_their_unit() {
             (icon.position[1] - (0.1 * x + lift)).abs() < 1e-4,
             "on the hill"
         );
-        assert_eq!(icon.shape_index(), style.shape(i as u8).icon.index());
+        assert_eq!(icon.icon(), style.shape(i as u8).icon);
         assert_eq!(icon.color[..3], style.linear([0, 1, 3][i]));
         assert!(!icon.highlighted());
     }
