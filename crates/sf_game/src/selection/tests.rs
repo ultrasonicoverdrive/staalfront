@@ -561,10 +561,10 @@ fn a_press_and_release_in_place_is_a_click() {
     p.press(at(100.0, 100.0));
     assert!(p.is_down());
     assert!(p.drag_rect().is_none());
-    p.moved(at(102.0, 101.0));
+    p.moved(at(102.0, 101.0), 1.0);
     assert!(p.drag_rect().is_none(), "a small wobble is not a drag");
     assert_eq!(
-        p.release(at(102.0, 101.0), 0),
+        p.release(at(102.0, 101.0), 0, 1.0),
         Some(Gesture::Click { double: false })
     );
     assert!(!p.is_down());
@@ -574,12 +574,12 @@ fn a_press_and_release_in_place_is_a_click() {
 fn moving_far_enough_makes_a_drag_with_the_rectangle_between_the_corners() {
     let mut p = Pointer::default();
     p.press(at(200.0, 150.0));
-    p.moved(at(120.0, 190.0));
+    p.moved(at(120.0, 190.0), 1.0);
     assert_eq!(
         p.drag_rect(),
         Some(ScreenRect::from_corners(at(120.0, 150.0), at(200.0, 190.0)))
     );
-    let g = p.release(at(100.0, 220.0), 0).unwrap();
+    let g = p.release(at(100.0, 220.0), 0, 1.0).unwrap();
     assert_eq!(
         g,
         Gesture::Drag(ScreenRect::from_corners(at(100.0, 150.0), at(200.0, 220.0)))
@@ -593,10 +593,10 @@ fn moving_far_enough_makes_a_drag_with_the_rectangle_between_the_corners() {
 fn a_drag_stays_a_drag_if_the_cursor_comes_back() {
     let mut p = Pointer::default();
     p.press(at(50.0, 50.0));
-    p.moved(at(90.0, 50.0));
-    p.moved(at(51.0, 50.0));
+    p.moved(at(90.0, 50.0), 1.0);
+    p.moved(at(51.0, 50.0), 1.0);
     assert!(matches!(
-        p.release(at(51.0, 50.0), 0),
+        p.release(at(51.0, 50.0), 0, 1.0),
         Some(Gesture::Drag(_))
     ));
 }
@@ -606,7 +606,7 @@ fn two_quick_close_clicks_are_a_double_click_and_a_third_starts_over() {
     let mut p = Pointer::default();
     let click = |p: &mut Pointer, x: f32, t: u64| {
         p.press(at(x, 80.0));
-        p.release(at(x, 80.0), t)
+        p.release(at(x, 80.0), t, 1.0)
     };
     assert_eq!(
         click(&mut p, 100.0, 1_000),
@@ -627,7 +627,7 @@ fn slow_or_distant_clicks_are_not_a_double_click() {
     let mut p = Pointer::default();
     let click = |p: &mut Pointer, x: f32, t: u64| {
         p.press(at(x, 80.0));
-        p.release(at(x, 80.0), t)
+        p.release(at(x, 80.0), t, 1.0)
     };
     click(&mut p, 100.0, 0);
     assert_eq!(
@@ -644,16 +644,16 @@ fn slow_or_distant_clicks_are_not_a_double_click() {
 fn a_drag_between_two_clicks_breaks_the_double_click() {
     let mut p = Pointer::default();
     p.press(at(100.0, 80.0));
-    p.release(at(100.0, 80.0), 0);
+    p.release(at(100.0, 80.0), 0, 1.0);
     p.press(at(100.0, 80.0));
-    p.moved(at(160.0, 120.0));
+    p.moved(at(160.0, 120.0), 1.0);
     assert!(matches!(
-        p.release(at(160.0, 120.0), 100),
+        p.release(at(160.0, 120.0), 100, 1.0),
         Some(Gesture::Drag(_))
     ));
     p.press(at(100.0, 80.0));
     assert_eq!(
-        p.release(at(100.0, 80.0), 200),
+        p.release(at(100.0, 80.0), 200, 1.0),
         Some(Gesture::Click { double: false })
     );
 }
@@ -661,8 +661,57 @@ fn a_drag_between_two_clicks_breaks_the_double_click() {
 #[test]
 fn a_release_without_a_tracked_press_is_nothing() {
     let mut p = Pointer::default();
-    assert_eq!(p.release(at(1.0, 1.0), 0), None);
+    assert_eq!(p.release(at(1.0, 1.0), 0, 1.0), None);
     p.press(at(1.0, 1.0));
     p.cancel();
-    assert_eq!(p.release(at(1.0, 1.0), 0), None);
+    assert_eq!(p.release(at(1.0, 1.0), 0, 1.0), None);
+}
+
+#[test]
+fn the_drag_threshold_scales_with_the_ui_scale() {
+    // 10 px is a drag at scale 1 (threshold 6) and 1.5 (9), a click at 2 (12).
+    for (scale, drags) in [(1.0, true), (1.5, true), (2.0, false), (3.0, false)] {
+        let mut p = Pointer::default();
+        p.press(at(100.0, 100.0));
+        p.moved(at(110.0, 100.0), scale);
+        assert_eq!(p.drag_rect().is_some(), drags, "scale {scale}");
+        let g = p.release(at(110.0, 100.0), 0, scale).unwrap();
+        assert_eq!(matches!(g, Gesture::Drag(_)), drags, "scale {scale}");
+    }
+    // Just under and just over the scaled threshold.
+    let scale = 2.0;
+    for (dx, drags) in [
+        (DRAG_MIN_PX * scale - 0.5, false),
+        (DRAG_MIN_PX * scale, true),
+    ] {
+        let mut p = Pointer::default();
+        p.press(at(0.0, 0.0));
+        p.moved(at(dx, 0.0), scale);
+        assert_eq!(p.drag_rect().is_some(), drags, "{dx} px at scale {scale}");
+    }
+}
+
+#[test]
+fn the_double_click_distance_scales_with_the_ui_scale() {
+    let click = |p: &mut Pointer, x: f32, t: u64, scale: f32| {
+        p.press(at(x, 80.0));
+        p.release(at(x, 80.0), t, scale)
+    };
+    // 14 px apart: too far at scale 1 (8), close enough at 2 (16).
+    for (scale, double) in [(1.0, false), (2.0, true)] {
+        let mut p = Pointer::default();
+        click(&mut p, 100.0, 0, scale);
+        assert_eq!(
+            click(&mut p, 114.0, 100, scale),
+            Some(Gesture::Click { double }),
+            "scale {scale}"
+        );
+    }
+    // And the edge: a hair more than the scaled distance does not count.
+    let mut p = Pointer::default();
+    click(&mut p, 100.0, 0, 2.0);
+    assert_eq!(
+        click(&mut p, 100.0 + DOUBLE_CLICK_PX * 2.0 + 0.1, 100, 2.0),
+        Some(Gesture::Click { double: false })
+    );
 }

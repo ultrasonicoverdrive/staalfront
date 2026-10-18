@@ -41,8 +41,12 @@ const MARGIN_PX: f32 = 2.5;
 const TRIANGLE_SCALE: f32 = 1.2;
 const HIGHLIGHT_BIT: u32 = 0x100u;
 const SELECTED_BIT: u32 = 0x200u;
-// Extra outline width of a selected icon, on top of the normal outline.
-const SELECTED_EXTRA_PX: f32 = 1.2;
+// Extra outline width on top of the normal outline, in pixels. A selected
+// icon (WP3.3) is clearly thicker than a hovered one, and hovering a selected
+// icon keeps the selected width and turns the outline yellow, so the four
+// states (none, hover, selected, selected + hover) all look different.
+const HOVER_EXTRA_PX: f32 = 0.5;
+const SELECTED_EXTRA_PX: f32 = 1.8;
 
 struct VertexIn {
     @builtin(vertex_index) vertex: u32,
@@ -167,15 +171,17 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     if (coverage <= 0.0) {
         discard;
     }
-    // The outline is a ring just inside the edge; a highlighted icon gets a
-    // thicker white one, a selected icon (WP3.3) a thicker one still.
-    var ring = select(icon.outline_px, icon.outline_px + 1.5, highlighted);
+    // The outline is a ring just inside the edge. Plain: dark. Hovered: a
+    // thin white one. Selected: a thicker white one. Selected and hovered:
+    // the selected width in yellow.
+    var ring = select(icon.outline_px, icon.outline_px + HOVER_EXTRA_PX, highlighted);
     ring = select(ring, icon.outline_px + SELECTED_EXTRA_PX, selected);
     let edge = clamp(d + ring + 0.5, 0.0, 1.0) * select(0.0, 1.0, ring > 0.01);
-    let outline = select(
+    var outline = select(
         vec3<f32>(0.02, 0.025, 0.035),
         vec3<f32>(1.0),
         highlighted || selected,
     );
+    outline = select(outline, vec3<f32>(1.0, 0.85, 0.2), highlighted && selected);
     return vec4<f32>(mix(in.color, outline, edge), coverage);
 }

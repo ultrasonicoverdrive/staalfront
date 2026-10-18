@@ -502,6 +502,7 @@ impl Runner {
         let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
         let cursor = ctx.input().cursor().map(|(x, y)| [x as f32, y as f32]);
         let now = self.now_ms();
+        let scale = self.hud.scale();
         if actions.pressed(Action::SelectClick)
             && !ui_busy
             && let Some(at) = cursor
@@ -509,7 +510,7 @@ impl Runner {
             self.pointer.press(at);
         }
         if let Some(at) = cursor {
-            self.pointer.moved(at);
+            self.pointer.moved(at, scale);
         }
         // A press and release inside one frame (a quick click on a slow
         // machine) shows as a pulse and never as held, so a button that is
@@ -519,7 +520,7 @@ impl Runner {
         {
             let additive = actions.held(Action::SelectAdd);
             let gesture = match cursor {
-                Some(at) => self.pointer.release(at, now),
+                Some(at) => self.pointer.release(at, now, scale),
                 None => {
                     self.pointer.cancel();
                     None

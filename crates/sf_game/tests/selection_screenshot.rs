@@ -80,6 +80,9 @@ struct Scene {
     /// Entities by owner: (id, is a unit that moves).
     own: Vec<(EntityId, bool)>,
     enemy: Vec<EntityId>,
+    /// The cursor, in pixels, if the next frame is drawn with the mouse over
+    /// the picture: the unit under it is highlighted as the game does.
+    hover: Option<[f32; 2]>,
 }
 
 impl Scene {
@@ -128,6 +131,7 @@ impl Scene {
             roster,
             own,
             enemy,
+            hover: None,
         }
     }
 
@@ -215,6 +219,13 @@ impl Scene {
         let vp = cam.view_proj();
         r.set_view_proj(vp);
         let blend = self.build(cam);
+        if let Some(cursor) = self.hover {
+            let query = sf_render::PickQuery::new(cursor, vp, [W as f32, H as f32])
+                .with_ground(&*self.ground);
+            if let Some(pick) = self.instancer.pick(&query) {
+                self.instancer.highlight(&pick);
+            }
+        }
         let mut ui = Ui::new(UiConfig::default());
         ui.begin_frame(UiInput::default(), (W, H), 1.0);
         ui.end_frame();
@@ -682,5 +693,102 @@ fn clicks_drags_and_double_clicks_pick_through_models_and_icons() {
             !sel.ids().contains(&far) && !sel.ids().contains(&enemy),
             "{name}"
         );
+    }
+}
+
+/// Counts the pixels in `rect` that changed from `base` and are white
+/// (`white`) or yellow (`!white`).
+fn outline_pixels(base: &Rgba8, img: &Rgba8, rect: ScreenRect, white: bool) -> usize {
+    let (x0, y0) = (rect.x0.max(0.0) as u32, rect.y0.max(0.0) as u32);
+    let (x1, y1) = ((rect.x1 as u32).min(W - 1), (rect.y1 as u32).min(H - 1));
+    let mut n = 0;
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let (p, b) = (img.pixel(x, y), base.pixel(x, y));
+            if p == b {
+                continue;
+            }
+            let is_white = p[0] > 225 && p[1] > 225 && p[2] > 225;
+            let is_yellow = p[0] > 225 && p[1] > 190 && p[2] < 160;
+            n += usize::from(if white { is_white } else { is_yellow });
+        }
+    }
+    n
+}
+
+/// The four states of an icon look different: no outline highlight, hovered
+/// (a thin white outline), selected (a clearly thicker white one) and
+/// selected + hovered (the selected width, in yellow). Hovering a selected
+/// icon must show something, not take the selected look away.
+#[test]
+fn an_icon_looks_different_plain_hovered_selected_and_both() {
+    let mut scene = Scene::new();
+    let mut r = renderer(&scene.map);
+    let cam = scene.camera(1.0, [128.0, 128.0]);
+    // A unit of ours alone in a corner of the map, so no other icon is near it.
+    let id = scene.spawn("rifleman", MERIDIAN, (8, 56));
+    let p = scene.screen(&cam, id);
+    // The icon is lifted off the ground point; the cursor aims at its middle.
+    let lift = scene.instancer.icon_config().lift;
+    let (centre, _) = {
+        let [x, z] = scene.metres(id);
+        let y = scene.ground.height(f64::from(x), f64::from(z)) as f32 + lift;
+        sf_render::pick::project_px(&cam.view_proj(), [x, y, z].into(), [W as f32, H as f32])
+            .unwrap()
+    };
+    let _ = p;
+    let region = box_at(centre, 11.0, 0.0);
+    let none = Selection::new(LOCAL_PLAYER);
+    let one = selection_of(&scene, &[id]);
+
+    scene.hover = None;
+    let (plain, _) = scene.shoot(&mut r, &cam, &none, None);
+    scene.hover = Some(centre);
+    let (hover, _) = scene.shoot(&mut r, &cam, &none, None);
+    scene.hover = None;
+    let (selected, _) = scene.shoot(&mut r, &cam, &one, None);
+    scene.hover = Some(centre);
+    let (both, _) = scene.shoot(&mut r, &cam, &one, None);
+    save("icon_plain.png", &plain);
+    save("icon_hover.png", &hover);
+    save("icon_selected.png", &selected);
+    save("icon_both.png", &both);
+
+    let white = |img: &Rgba8| outline_pixels(&plain, img, region, true);
+    let yellow = |img: &Rgba8| outline_pixels(&plain, img, region, false);
+    let (w_hover, w_sel, w_both) = (white(&hover), white(&selected), white(&both));
+    println!(
+        "white: hover {w_hover}, selected {w_sel}, both {w_both}; yellow: hover {}, selected {}, both {}",
+        yellow(&hover),
+        yellow(&selected),
+        yellow(&both)
+    );
+    // Hover alone: some white, no yellow.
+    assert!(w_hover >= 8, "the hover outline shows: {w_hover}");
+    assert_eq!(yellow(&hover), 0);
+    // Selected: clearly more white than the hover, still no yellow.
+    assert!(
+        w_sel * 10 >= w_hover * 14,
+        "selected {w_sel} is clearly thicker than hover {w_hover}"
+    );
+    assert_eq!(yellow(&selected), 0);
+    // Selected and hovered: yellow, at least as wide as selected (so the
+    // selected look is not lost) and clearly more than the hover's ring.
+    let y_both = yellow(&both);
+    assert!(
+        y_both * 10 >= w_sel * 8,
+        "yellow {y_both} vs selected white {w_sel}"
+    );
+    assert!(y_both > w_hover, "{y_both} vs {w_hover}");
+    assert!(
+        w_both < w_hover,
+        "the outline is yellow, not white: {w_both}"
+    );
+    // All four pictures differ from each other in the icon's region.
+    let pics = [&plain, &hover, &selected, &both];
+    for (i, a) in pics.iter().enumerate() {
+        for b in &pics[i + 1..] {
+            assert!(changed(a, b, region) > 0);
+        }
     }
 }

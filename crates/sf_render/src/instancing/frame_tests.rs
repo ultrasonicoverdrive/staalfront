@@ -1186,3 +1186,57 @@ fn the_selected_units_are_flagged_and_reported() {
     inst.mark_selected(|_| false, |_| panic!("nobody is selected"));
     assert!(inst.icon_instances().iter().all(|i| !i.selected()));
 }
+
+/// The icon quad the rectangle is tested against is the drawn one, so it grows
+/// with the UI scale: at scale 2 it is 28 px square.
+#[test]
+fn the_rectangle_test_of_an_icon_follows_the_ui_scale() {
+    let mut inst = instancer(&[still(0, 0, 3, (128.0, 128.0))]);
+    let cam = camera(1.0, (128.0, 128.0));
+    let touching = |scale: f32, inst: &mut Instancer, dx: f32| {
+        build(inst, &cam, 0.0, Blend::ICONS, scale, flat);
+        let c = icon_centre(&cam, inst, (128.0, 128.0), scale);
+        let rect =
+            ScreenRect::from_corners([c[0] + dx, c[1] - 1.0], [c[0] + dx + 500.0, c[1] + 1.0]);
+        found(inst, &cam, rect).len() == 1
+    };
+    let half = inst.icon_config().icon_px(1.0) * 0.5;
+    // At scale 1 the edge is `half` from the centre; a rectangle starting a
+    // hair beyond it misses, and starting at it hits.
+    assert!(touching(1.0, &mut inst, half));
+    assert!(!touching(1.0, &mut inst, half + 0.01));
+    // At scale 2 the same rectangles are inside the bigger quad; the edge moved out to twice that.
+    assert!(touching(2.0, &mut inst, half + 0.01));
+    assert!(touching(2.0, &mut inst, 2.0 * half));
+    assert!(!touching(2.0, &mut inst, 2.0 * half + 0.01));
+}
+
+/// A model's minimum click size (`icons.click_min_px`) is in logical pixels
+/// too: a rectangle beside a tiny model that misses at scale 1 hits at 2.
+#[test]
+fn the_rectangle_test_of_a_tiny_model_follows_the_ui_scale() {
+    let style = style_ron("(mesh: Cube, size: (0.2, 0.2, 0.2), icon: Square)", "");
+    let mut inst = instancer_with(style, &[still(0, 0, 4, (100.0, 100.0))]);
+    let cam = camera(0.6, (100.0, 100.0));
+    let c = project_px(&cam.view_proj(), Vec3::new(100.0, 0.1, 100.0), [W, H])
+        .unwrap()
+        .0;
+    let min = inst.icon_config().click_min_px;
+    // A rectangle whose near edge is 1.5 minimum-sizes from the centre.
+    let rect = ScreenRect::from_corners(
+        [c[0] + 0.75 * min, c[1] - 2.0],
+        [c[0] + 0.75 * min + 4.0, c[1] + 2.0],
+    );
+    build(&mut inst, &cam, 0.0, Blend::MODELS, 1.0, flat);
+    assert!(
+        found(&inst, &cam, rect).is_empty(),
+        "scale 1: the box is {min} px"
+    );
+    build(&mut inst, &cam, 0.0, Blend::MODELS, 2.0, flat);
+    assert_eq!(
+        found(&inst, &cam, rect).len(),
+        1,
+        "scale 2: the box is {} px",
+        2.0 * min
+    );
+}

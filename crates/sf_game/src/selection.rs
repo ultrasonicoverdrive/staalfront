@@ -36,16 +36,18 @@ use sf_sim::{EntityId, Kind, PlayerId, UnitClass, World};
 /// Number of control groups, on the keys 1 to 9.
 pub const GROUPS: usize = 9;
 
-/// A press that moves this far (physical pixels) before it is released is a
-/// drag, not a click.
+/// A press that moves this far before it is released is a drag, not a click.
+/// In logical pixels: [`Pointer`] multiplies it by the UI scale (the DPI factor
+/// times the `ui.ron` scale), so a drag needs the same hand movement on a
+/// high-DPI screen.
 pub const DRAG_MIN_PX: f32 = 6.0;
 
 /// Two clicks within this many milliseconds of each other are a double-click
 /// (when they are close enough, [`DOUBLE_CLICK_PX`]).
 pub const DOUBLE_CLICK_MS: u64 = 400;
 
-/// Two clicks within this many physical pixels of each other are a
-/// double-click (when they are quick enough, [`DOUBLE_CLICK_MS`]).
+/// Two clicks within this many logical pixels (times the UI scale) of each
+/// other are a double-click (when they are quick enough, [`DOUBLE_CLICK_MS`]).
 pub const DOUBLE_CLICK_PX: f32 = 8.0;
 
 /// Two taps of the same group key within this many milliseconds centre the
@@ -361,12 +363,13 @@ impl Pointer {
         });
     }
 
-    /// The cursor is at `at`. Once it has been [`DRAG_MIN_PX`] away from the
-    /// press the gesture is a drag, even if it comes back.
-    pub fn moved(&mut self, at: [f32; 2]) {
+    /// The cursor is at `at`. Once it has been [`DRAG_MIN_PX`] (times
+    /// `ui_scale`) away from the press the gesture is a drag, even if it
+    /// comes back.
+    pub fn moved(&mut self, at: [f32; 2], ui_scale: f32) {
         if let Some(d) = &mut self.down {
             d.now = at;
-            d.dragging |= distance(d.start, at) >= DRAG_MIN_PX;
+            d.dragging |= distance(d.start, at) >= DRAG_MIN_PX * ui_scale;
         }
     }
 
@@ -383,17 +386,20 @@ impl Pointer {
             .map(|d| ScreenRect::from_corners(d.start, d.now))
     }
 
-    /// The button went up at `at` at time `now_ms`. `None` if no press was
+    /// The button went up at `at` at time `now_ms`, with the UI scale as for
+    /// [`Pointer::moved`] (it also sets how far apart two clicks of a
+    /// double-click may be). `None` if no press was
     /// being tracked (it went down on the UI, or was [`cancelled`](Self::cancel)).
-    pub fn release(&mut self, at: [f32; 2], now_ms: u64) -> Option<Gesture> {
-        self.moved(at);
+    pub fn release(&mut self, at: [f32; 2], now_ms: u64, ui_scale: f32) -> Option<Gesture> {
+        self.moved(at, ui_scale);
         let d = self.down.take()?;
         if d.dragging {
             self.last_click = None;
             return Some(Gesture::Drag(ScreenRect::from_corners(d.start, at)));
         }
         let double = self.last_click.is_some_and(|(p, t)| {
-            now_ms.saturating_sub(t) <= DOUBLE_CLICK_MS && distance(p, at) <= DOUBLE_CLICK_PX
+            now_ms.saturating_sub(t) <= DOUBLE_CLICK_MS
+                && distance(p, at) <= DOUBLE_CLICK_PX * ui_scale
         });
         self.last_click = (!double).then_some((at, now_ms));
         Some(Gesture::Click { double })

@@ -51,7 +51,7 @@ asks the action, never a key):
 other with an order); the binding test in `sf_engine` allows exactly that pair and no
 other shared binding. The debug select-all on F2 of WP3.4 is gone.
 
-* **Click.** A press and release that moved less than `DRAG_MIN_PX` (6 px). The unit
+* **Click.** A press and release that moved less than `DRAG_MIN_PX` (6 logical px, times the UI scale). The unit
   under the cursor is the one `Instancer::pick` found in the frame that was drawn, so a
   click uses the same volume as the hover highlight: the model's oriented box through
   the cursor ray close up, the icon quad when zoomed out, the more visible of the two in
@@ -66,7 +66,7 @@ other shared binding. The debug select-all on F2 of WP3.4 is gone.
   click uses) while models are at least half of the picture, its icon quad beyond. Only
   own mobile units are taken. A drag that finds none empties the selection.
 * **Double-click.** Two clicks within `DOUBLE_CLICK_MS` (400 ms) and `DOUBLE_CLICK_PX`
-  (8 px). Takes every own mobile unit of the **same kind** whose picture touches the
+  (8 logical px, times the UI scale). Takes every own mobile unit of the **same kind** whose picture touches the
   screen (`pick_rect` over the whole viewport), plus the clicked one. On a structure, an
   enemy or bare ground it is the single click. A third quick click starts over, and a
   drag in between breaks the pair.
@@ -99,7 +99,7 @@ is unchanged.
 | Zoom | Own selected | Inspected |
 |---|---|---|
 | models (close, middle) | green ring on the ground around the unit, sized from its model's box (longer side times `RING_GROW`); a box outline around a structure; health bar above the model | the same in red (enemy) or amber (neutral) |
-| icons (strategic) | the icon gets `ICON_SELECTED` (a white outline thicker than the hover highlight, set by the icon shader) and a health bar above it | same, ring colours do not apply |
+| icons (strategic) | the icon gets `ICON_SELECTED` (a white outline clearly thicker than the thin white hover outline; hovering a selected icon turns it yellow; all set by the icon shader) and a health bar above it | same, ring colours do not apply |
 | cross-fade band | the ring is drawn as long as the model is; the bar follows the more visible representation | |
 
 The ring is the projection of a circle (28 segments) or a rectangle on the ground at the
@@ -115,12 +115,13 @@ Line widths and bars scale with the UI scale. The colours are constants in
 
 Frames of this (software renderer, from `selection_screenshot.rs`): `docs/screenshots/wp3.3/`:
 rings and bars close up, highlighted icons zoomed out, an inspected enemy, the drag rectangle.
+`icon-states.png`: one icon plain, hovered, selected, and selected + hovered (left to right).
 
 ## Tuning constants
 
-`DRAG_MIN_PX` 6, `DOUBLE_CLICK_MS` 400, `DOUBLE_CLICK_PX` 8, `DOUBLE_TAP_MS` 500
+`DRAG_MIN_PX` 6 and `DOUBLE_CLICK_PX` 8 (logical pixels: `Pointer` multiplies them by the UI scale), `DOUBLE_CLICK_MS` 400, `DOUBLE_TAP_MS` 500
 (`selection.rs`); `RING_GROW` 1.25, `RING_PX` 2.5, `BAR_*` (`selection_view.rs`);
-`SELECTED_EXTRA_PX` (`assets/shaders/icon.wgsl`). Placeholders for the feel rounds.
+`HOVER_EXTRA_PX` and `SELECTED_EXTRA_PX` (`assets/shaders/icon.wgsl`). Placeholders for the feel rounds.
 
 ## Decisions that were open
 
