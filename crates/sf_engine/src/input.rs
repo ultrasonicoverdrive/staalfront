@@ -31,10 +31,24 @@ pub enum Action {
     /// Plays the audio test sound (engine smoke test, not a game command).
     PlayTestSound,
     Quit,
+    /// Order the selected units to the cursor (right-click). A game action
+    /// named here so that it is rebindable like the rest (WP3.4).
+    OrderMove,
+    /// Held: orders are added to the queue instead of replacing the orders
+    /// (shift).
+    OrderQueue,
+    /// Stop the selected units.
+    OrderStop,
+    /// Scatter the selected units.
+    OrderScatter,
+    /// The selected units hold position.
+    OrderHold,
+    /// Temporary debug selection until WP3.3: select all own units in view.
+    DebugSelectAll,
 }
 
 impl Action {
-    pub const ALL: [Action; 13] = [
+    pub const ALL: [Action; 19] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -48,6 +62,12 @@ impl Action {
         Action::ToggleDebug,
         Action::PlayTestSound,
         Action::Quit,
+        Action::OrderMove,
+        Action::OrderQueue,
+        Action::OrderStop,
+        Action::OrderScatter,
+        Action::OrderHold,
+        Action::DebugSelectAll,
     ];
 }
 
@@ -405,6 +425,46 @@ mod tests {
             assert!(!b.for_action(a).is_empty(), "{a:?} has no binding");
         }
         assert_eq!(b.edge_margin, 4);
+    }
+
+    #[test]
+    fn builtin_binds_no_key_or_button_to_two_actions() {
+        let b = Bindings::builtin();
+        let mut seen: Vec<(Binding, Action)> = Vec::new();
+        for a in Action::ALL {
+            for binding in b.for_action(a) {
+                if let Some((_, other)) = seen.iter().find(|(x, _)| x == binding) {
+                    panic!("{binding:?} is bound to {other:?} and {a:?}");
+                }
+                seen.push((binding.clone(), a));
+            }
+        }
+    }
+
+    #[test]
+    fn the_order_keys_are_not_camera_keys() {
+        let b = Bindings::builtin();
+        for (action, key) in [
+            (Action::OrderStop, KeyCode::KeyC),
+            (Action::OrderScatter, KeyCode::KeyX),
+            (Action::OrderHold, KeyCode::KeyH),
+            (Action::DebugSelectAll, KeyCode::F2),
+        ] {
+            assert_eq!(b.for_action(action), [Binding::new(Trigger::Key(key))]);
+        }
+        let right = [Binding::new(Trigger::Mouse(MouseButton::Right))];
+        assert_eq!(b.for_action(Action::OrderMove), right);
+        // The camera still has WASD.
+        for key in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyD] {
+            assert!(
+                b.bindings
+                    .values()
+                    .flatten()
+                    .any(|x| x.trigger == Trigger::Key(key)),
+                "{key:?}"
+            );
+        }
+        assert_eq!(b.for_action(Action::OrderQueue).len(), 2);
     }
 
     #[test]

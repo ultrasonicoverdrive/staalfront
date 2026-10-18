@@ -113,8 +113,11 @@
 //! rejected with [`ScheduleError::PastTick`], and commands naming stale ids
 //! skip those ids. The set: [`Command::Spawn`], [`Command::Place`] (the
 //! placeholders), [`Command::SpawnUnit`], [`Command::PlaceStructure`] (from the
-//! unit table), [`Command::Despawn`], [`Command::SetWanderArea`] and
-//! [`Command::MoveTo`]. Pending commands are simulation state: they are in the checksum and survive a clone of the
+//! unit table), [`Command::Despawn`], [`Command::SetWanderArea`],
+//! [`Command::MoveTo`] and, since WP3.4, [`Command::Order`] and
+//! [`Command::Stop`] (see "Orders" below). Commands run by `(tick, player, player
+//! sequence)`; [`World::schedule_sequenced`] takes the sequence number the sender gave.
+//! Pending commands are simulation state: they are in the checksum and survive a clone of the
 //! world.
 //!
 //! # Checksum
@@ -209,9 +212,19 @@
 //! * `sf_math`'s float helpers sit behind its `render` feature, which this
 //!   crate does not enable: built on its own, `sf_sim` cannot name them.
 //!
+//! # Orders
+//!
+//! A unit has a current [`Order`] and a ring of [`ORDER_QUEUE_CAP`] queued ones.
+//! [`Command::Order`] replaces them or, queued, appends; [`Command::Stop`] clears
+//! them. The behaviour pass carries the order out: it steers at the next waypoint of
+//! the unit's route (today the straight line, `orders::next_waypoint`, which
+//! pathfinding replaces) and judges arrival against the destination. Attack,
+//! attack-move and guard are state and movement only: combat is phase five. The rules
+//! are in `docs/rules/orders.md`.
+//!
 //! # Not here yet
 //!
-//! Orders beyond `MoveTo` (WP3.4), pathfinding and collision (phase 4),
+//! Pathfinding and collision (phase 4), target acquisition and firing (phase 5),
 //! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
@@ -221,6 +234,7 @@ pub mod checksum;
 pub mod command;
 mod entities;
 pub mod ids;
+pub mod orders;
 pub mod snapshot;
 pub mod terrain;
 pub mod units;
@@ -230,6 +244,10 @@ pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
 pub use command::{Command, CommandQueue, ScheduleError};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
+};
+pub use orders::{
+    ARRIVE_TOLERANCE, GUARD_CLOSE, GUARD_LEASH, GuardTarget, ORDER_QUEUE_CAP, Order, SCATTER_MAX,
+    SCATTER_MIN, scatter_offset,
 };
 pub use snapshot::{EntityView, Snapshot};
 pub use terrain::{

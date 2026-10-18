@@ -21,5 +21,13 @@
         ToggleDebug: [(trigger: Key(F1))],
         PlayTestSound: [(trigger: Key(KeyT))],
         Quit: [(trigger: Key(Escape))],
+        // Orders (WP3.4). S stays a camera key (WASD pan), so stop is on C.
+        OrderMove: [(trigger: Mouse(Right))],
+        OrderQueue: [(trigger: Key(ShiftLeft)), (trigger: Key(ShiftRight))],
+        OrderStop: [(trigger: Key(KeyC))],
+        OrderScatter: [(trigger: Key(KeyX))],
+        OrderHold: [(trigger: Key(KeyH))],
+        // Temporary, until selection (WP3.3): select all own units in view.
+        DebugSelectAll: [(trigger: Key(F2))],
     },
 )

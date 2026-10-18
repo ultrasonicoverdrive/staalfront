@@ -190,8 +190,9 @@ the checks after parsing):
 ## Spawning (WP3.2)
 
 `sf_sim` knows a unit kind only through its **unit table**, `sf_sim::UnitTable`: for each
-kind number its hit points, movement class, speed per tick, turn rate, size and (for a
-structure) footprint. `sf_bridge::unit_table(&UnitDefs)` builds it from `UnitDefs::sim_units()` and the caller hands it to
+kind number its hit points, movement class, speed per tick, turn rate, size, (for a
+structure) footprint and, since WP3.4, the range of its first weapon (`weapon_range`, zero
+without a weapon; what an attack order walks to, `docs/rules/orders.md`). `sf_bridge::unit_table(&UnitDefs)` builds it from `UnitDefs::sim_units()` and the caller hands it to
 the world once, right after the world is made (`World::with_units`, as the terrain is
 handed over); a world cannot take it after it has started. The table is fixed for the
 whole game and a digest of it is in the checksum.
@@ -211,9 +212,9 @@ placed **all or nothing**. Unknown kinds are refused, never guessed at.
 **What the new entity has.** Hit points from the table (`World::hp_of`; zero for an object
 with `hp: 0`, which cannot be damaged; damage is phase 5), the owner, and the table entry
 (`World::stats_of`). A unit starts **idle** with a random facing from its own random
-stream; it moves only when ordered (`MoveTo`, WP3.4 adds the rest) and then by **its own**
+stream; it moves only when ordered (`docs/rules/orders.md`, WP3.4; the legacy `MoveTo` too) and then by **its own**
 speed per tick and turn rate, not the world's placeholder speed. A structure and an
-object start with facing zero and never move: `MoveTo` and `SetWanderArea` skip them.
+object start with facing zero and never move: orders, `MoveTo` and `SetWanderArea` skip them.
 Structures stand in the middle of their footprint (the anchor corner plus half the
 width and height).
 

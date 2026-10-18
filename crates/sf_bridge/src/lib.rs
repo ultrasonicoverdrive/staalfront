@@ -26,7 +26,8 @@ use sf_data::units::{SimUnitDef, UnitDefs};
 use sf_sim::{Footprint, Kind, UnitStats, UnitTable};
 
 /// What the rules read about one role, copied from its converted definition.
-pub fn unit_stats_of(role: &SimUnitDef) -> UnitStats {
+/// `defs` is where its first weapon is looked up (the reach of an attack order).
+pub fn unit_stats_of(defs: &UnitDefs, role: &SimUnitDef) -> UnitStats {
     UnitStats {
         kind: Kind(role.kind),
         hp: role.hp,
@@ -37,12 +38,21 @@ pub fn unit_stats_of(role: &SimUnitDef) -> UnitStats {
         footprint: role
             .footprint
             .map(|(width, height)| Footprint { width, height }),
+        weapon_range: role
+            .weapons
+            .first()
+            .and_then(|&kind| defs.sim_weapon(kind))
+            .map(|weapon| weapon.range)
+            .unwrap_or_default(),
     }
 }
 
 /// The stats of every role of `defs`, ascending by kind.
 pub fn unit_stats(defs: &UnitDefs) -> Vec<UnitStats> {
-    defs.sim_units().iter().map(unit_stats_of).collect()
+    defs.sim_units()
+        .iter()
+        .map(|role| unit_stats_of(defs, role))
+        .collect()
 }
 
 /// The simulation's unit table for `defs`, to hand to
@@ -73,6 +83,38 @@ mod tests {
             assert_eq!(stats.turn_per_tick, role.turn_per_tick);
             assert_eq!(stats.size, role.size);
             assert_eq!(stats.footprint.map(|f| (f.width, f.height)), role.footprint);
+        }
+    }
+
+    #[test]
+    fn the_reach_is_the_first_weapons_range() {
+        let defs = UnitDefs::embedded();
+        let table = unit_table(&defs).unwrap();
+        let reach = |id: &str| {
+            table
+                .get(Kind(defs.kind_of(id).unwrap()))
+                .unwrap()
+                .weapon_range
+        };
+        // The rifleman's rifle and the siege artillery's howitzer.
+        let weapon = |id: &str| {
+            defs.sim_weapon(defs.weapon(id).unwrap().kind)
+                .unwrap()
+                .range
+        };
+        assert_eq!(reach("rifleman"), weapon("rifle"));
+        assert_eq!(reach("siege_artillery"), weapon("howitzer"));
+        assert!(reach("rifleman") > reach("harvester"));
+        // No weapon, no reach.
+        assert_eq!(reach("harvester"), Default::default());
+        assert_eq!(reach("refinery"), Default::default());
+        for role in defs.sim_units() {
+            let first = role
+                .weapons
+                .first()
+                .map(|&k| defs.sim_weapon(k).unwrap().range)
+                .unwrap_or_default();
+            assert_eq!(table.get(Kind(role.kind)).unwrap().weapon_range, first);
         }
     }
 

@@ -17,6 +17,7 @@ use sf_data::units::UnitDefs;
 use sf_engine::winit::event::MouseButton;
 use sf_engine::{Action, App, Context, Resized, winit};
 use sf_math::Fx;
+use sf_math::render_bridge::{vec2_cells_to_metres, vec2_metres_to_cells};
 use sf_render::camera::DVec2;
 use sf_render::glb::{self, LoadedPack};
 use sf_render::scene::world_markers;
@@ -29,6 +30,7 @@ use sf_sim::{EntityView, World, WorldConfig};
 
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
+use crate::commands::{self, DebugSelection};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
@@ -216,6 +218,8 @@ pub struct Runner {
     /// Time spent in `fixed_update` since the last frame (the bench's CPU
     /// time counts the sim too).
     sim_since_frame: Duration,
+    /// The units F2 selected: a debug aid until real selection (WP3.3).
+    selection: DebugSelection,
     /// Set when the renderer could not start or a frame failed; `main` then
     /// exits with a non-zero code.
     failed: Arc<AtomicBool>,
@@ -358,8 +362,35 @@ impl Runner {
             bench,
             shots,
             sim_since_frame: Duration::ZERO,
+            selection: DebugSelection::default(),
             failed,
         }
+    }
+}
+
+/// An order in words, for the F1 panel: `idle`, `move (x, y)`, `attack 12v0`.
+fn order_text(order: sf_sim::Order, world: &World) -> String {
+    use sf_sim::{GuardTarget, Order};
+    let point = |p: sf_math::Vec2| {
+        let [x, y] = sf_math::render_bridge::vec2_to_f32(p);
+        format!("({x:.1}, {y:.1})")
+    };
+    let id_text = |id: sf_sim::EntityId| {
+        if world.is_alive(id) {
+            id.to_string()
+        } else {
+            format!("{id} (gone)")
+        }
+    };
+    match order {
+        Order::Idle => "idle".to_owned(),
+        Order::Move(p) => format!("move {}", point(p)),
+        Order::Attack(id) => format!("attack {}", id_text(id)),
+        Order::AttackMove(p) => format!("attack-move {}", point(p)),
+        Order::Guard(GuardTarget::Point(p)) => format!("guard {}", point(p)),
+        Order::Guard(GuardTarget::Entity(id)) => format!("guard {}", id_text(id)),
+        Order::Scatter => "scatter".to_owned(),
+        Order::HoldPosition => "hold position".to_owned(),
     }
 }
 
@@ -420,6 +451,59 @@ impl Runner {
             zoom_notches,
             cursor,
             drag: actions.held(Action::CameraDrag) && !ui_busy && !self.hud.middle_captured(),
+        }
+    }
+
+    /// The keys and clicks that give orders (WP3.4, [`crate::commands`]):
+    /// move, queue, stop, scatter, hold position and the temporary select-all.
+    /// Which key or button each is lives in `assets/config/input.ron`
+    /// (`OrderMove`, `OrderQueue`, `OrderStop`, `OrderScatter`, `OrderHold`,
+    /// `DebugSelectAll`). They only schedule commands for the next tick; the
+    /// simulation does the rest.
+    fn handle_orders(&mut self, ctx: &Context) {
+        let actions = ctx.actions();
+        let queued = actions.held(Action::OrderQueue);
+        if actions.pressed(Action::DebugSelectAll) {
+            // TEMPORARY (until WP3.3): everything of the local player that
+            // the camera sees.
+            let frustum = Frustum::from_view_proj(self.camera.view_proj());
+            let ground = &self.ground;
+            self.selection
+                .select_own_in_view(&self.world, commands::LOCAL_PLAYER, |cells| {
+                    let [x, z] = vec2_cells_to_metres(cells);
+                    let y = ground.height(f64::from(x), f64::from(z)) as f32;
+                    frustum.contains_point([x, y, z].into())
+                });
+            println!(
+                "selected {} units (temporary debug selection)",
+                self.selection.len()
+            );
+        }
+        let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
+        if actions.pressed(Action::OrderMove)
+            && !ui_busy
+            && let Some((x, y)) = ctx.input().cursor()
+            && let Some(ground) = self.camera.ground_point(DVec2::new(x, y))
+        {
+            let point = vec2_metres_to_cells([ground.x as f32, ground.y as f32]);
+            if let Some(command) = commands::move_command(&self.selection, point, queued) {
+                commands::issue(&mut self.world, command);
+            }
+        }
+        if actions.pressed(Action::OrderStop)
+            && let Some(command) = commands::stop_command(&self.selection)
+        {
+            commands::issue(&mut self.world, command);
+        }
+        if actions.pressed(Action::OrderScatter)
+            && let Some(command) = commands::scatter_command(&self.selection, queued)
+        {
+            commands::issue(&mut self.world, command);
+        }
+        if actions.pressed(Action::OrderHold)
+            && let Some(command) = commands::hold_command(&self.selection, queued)
+        {
+            commands::issue(&mut self.world, command);
         }
     }
 
@@ -589,6 +673,9 @@ impl Runner {
                     self.instancer.style().color_name(o).to_owned()
                 }),
                 distance: p.distance,
+                order: view
+                    .and_then(|v| self.world.order_of(v.id))
+                    .map_or_else(String::new, |o| order_text(o, &self.world)),
             }
         });
         let (above, below) = (icons.model_above_px * scale, icons.icon_below_px * scale);
@@ -1055,9 +1142,11 @@ impl App for Runner {
         self.shots_before_render();
         // Build the UI first (it may move the camera on a minimap click), then
         // let the camera read the input the UI left over.
+        self.selection.forget_the_dead(&self.world);
         let stats = HudStats {
             fps: self.fps_shown,
             units: self.world.len() as u32,
+            selected: self.selection.len() as u32,
             tick: self.total_ticks,
         };
         self.hud.frame(ctx, &mut self.camera, &self.views, stats);
@@ -1121,6 +1210,7 @@ impl App for Runner {
             self.terrain = renderer.terrain_stats();
             self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
+        self.handle_orders(ctx);
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {
             ctx.toggle_fullscreen();

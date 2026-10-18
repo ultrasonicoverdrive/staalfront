@@ -11,6 +11,7 @@ use sf_math::{Facing, Rng, Vec2};
 
 use crate::behavior::{Area, Behavior};
 use crate::ids::{Kind, PlayerId};
+use crate::orders::{Order, OrderQueue};
 use crate::terrain::NO_CELL;
 
 /// The `def` column value of an entity that has no entry in the unit table
@@ -73,6 +74,16 @@ pub(crate) struct Entities {
     /// Current hit points; zero for an entity without a table entry and for
     /// one that cannot be damaged. Hashed (it will change in phase 5).
     pub hp: Vec<u32>,
+    /// The current order (WP3.4); [`Order::Idle`] for everything that has none
+    /// (every legacy entity, every structure). Hashed in the orders section
+    /// while it is not idle.
+    pub order: Vec<Order>,
+    /// The orders behind the current one: a fixed-size ring per slot.
+    pub queue: Vec<OrderQueue>,
+    /// Whether a unit that guards an entity is walking toward it (as opposed
+    /// to standing near it). The switch of the guard's hysteresis; kept apart
+    /// from `target`, which is the route's waypoint. Hashed with the orders.
+    pub guard_walking: Vec<bool>,
 }
 
 impl Entities {
@@ -100,6 +111,9 @@ impl Entities {
         self.cell.push(NO_CELL);
         self.def.push(NO_DEF);
         self.hp.push(0);
+        self.order.push(Order::Idle);
+        self.queue.push(OrderQueue::EMPTY);
+        self.guard_walking.push(false);
         index
     }
 
@@ -121,6 +135,9 @@ impl Entities {
         self.cell[i] = NO_CELL;
         self.def[i] = row.def;
         self.hp[i] = row.hp;
+        self.order[i] = Order::Idle;
+        self.queue[i] = OrderQueue::EMPTY;
+        self.guard_walking[i] = false;
     }
 
     /// Frees slot `i`: marks it dead and resets every column to its neutral
@@ -141,5 +158,8 @@ impl Entities {
         self.cell[i] = NO_CELL;
         self.def[i] = NO_DEF;
         self.hp[i] = 0;
+        self.order[i] = Order::Idle;
+        self.queue[i] = OrderQueue::EMPTY;
+        self.guard_walking[i] = false;
     }
 }

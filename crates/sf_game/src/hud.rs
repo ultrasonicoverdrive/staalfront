@@ -42,6 +42,8 @@ const OWNER_DOTS: [Color; 4] = [
 pub struct HudStats {
     pub fps: u32,
     pub units: u32,
+    /// Units in the temporary debug selection (WP3.4; real selection is WP3.3).
+    pub selected: u32,
     pub tick: u64,
 }
 
@@ -128,15 +130,15 @@ impl Hud {
         ui.begin_frame(ui_input(ctx), (size.width, size.height), ctx.scale_factor());
 
         // Top bar: a label and a button.
-        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (420.0, 32.0));
+        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (520.0, 32.0));
         let text = ui.config().text;
         ui.text_in(
             bar,
             Anchor::Left,
             (12.0, 0.0),
             &format!(
-                "{} fps   {} units   tick {}",
-                stats.fps, stats.units, stats.tick
+                "{} fps   {} units   {} selected   tick {}",
+                stats.fps, stats.units, stats.selected, stats.tick
             ),
             text,
         );
