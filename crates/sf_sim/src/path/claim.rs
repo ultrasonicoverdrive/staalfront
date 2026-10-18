@@ -23,9 +23,16 @@
 //!   slot already held lies nearer the segment to it than the two bodies keep apart.
 //!   The crowd therefore fills from the middle outwards on the side the units come
 //!   from, and what is left for the last unit is not behind the others;
-//! * when none of the slots looked at is open it takes the nearest free one it can see,
-//!   and when it can see none the first free one. When all are taken (a group bigger
-//!   than [`MAX_SLOTS`](super::field::MAX_SLOTS)) it shares the slot its rank gives, as
+//! * when none of the slots looked at is open it takes the nearest free one it can see.
+//!   **A slot the unit cannot walk to straight is never taken** (the first round fell back to
+//!   the first free one): the margin reaches across rock, and a unit standing on the wrong
+//!   side of a wall took slots on the far side, held them against units that could walk to
+//!   them, and let go of them again as it moved; it takes none until it sees one (the
+//!   next tick it looks again, [`LOOKS_PER_TICK`] looks in all) and follows the field to
+//!   the gap meanwhile. Sight is the same test that sends it straight to its slot
+//!   (`los::thick_clear`), of the terrain alone, so it is cheap and does not depend on
+//!   the order the units are visited in. When no slot is free at all (a group bigger than
+//!   [`MAX_SLOTS`](super::field::MAX_SLOTS)) it shares the slot its rank gives, as
 //!   before, which is also where a unit goes before it has taken one.
 //!
 //! Units look in the order the world visits them, which is the order of their entity
@@ -67,6 +74,22 @@ pub(crate) const CLAIM_MARGIN: Fx = Fx::from_int(6);
 
 /// Units that may take a slot in one tick.
 pub(crate) const CLAIMS_PER_TICK: u32 = 16;
+
+/// Units that may look for a slot in one tick, whether they find one they can walk to or
+/// not: a unit that sees none (rock between it and the slots) looks again the next tick.
+pub(crate) const LOOKS_PER_TICK: u32 = 64;
+
+/// What a look for a slot came to.
+enum Pick {
+    /// The slot to take.
+    Slot(usize),
+    /// No slot is free at all (the group is bigger than the field has slots, or the
+    /// rest lie within a body of the slots held): the unit shares the slot its rank gives.
+    NoneFree,
+    /// Slots are free but the unit can walk to none of them straight: there is rock
+    /// between them. It takes none yet and looks again when it has moved.
+    NoneSeen,
+}
 
 /// The most cells along a side of the grid over the slots held (`HeldBuf`).
 const GRID_SIDE: i64 = 24;
@@ -295,19 +318,22 @@ impl Fields {
         let range = f.reach + CLAIM_MARGIN;
         if (e.pos[i] - centre_of(g, f.goal)).length_squared() > range.square()
             || self.claims_left == 0
+            || self.looks_left == 0
         {
             return;
         }
-        self.claims_left -= 1;
+        self.looks_left -= 1;
         let pick = self.choose(g, e, fi, i);
         let f = &mut self.entries[fi];
         let slot = match pick {
-            Some(k) => {
+            Pick::Slot(k) => {
                 f.taken[k] = i as u32;
                 k as u16
             }
-            None => Claim::SHARED,
+            Pick::NoneFree => Claim::SHARED,
+            Pick::NoneSeen => return,
         };
+        self.claims_left -= 1;
         e.crowd[i].claim = Claim {
             serial: f.serial,
             slot,
@@ -315,7 +341,7 @@ impl Fields {
     }
 
     /// The slot unit `i` should take: see the module documentation.
-    fn choose(&mut self, g: &ClassGraph, e: &Entities, fi: usize, i: usize) -> Option<usize> {
+    fn choose(&mut self, g: &ClassGraph, e: &Entities, fi: usize, i: usize) -> Pick {
         // The slots held by the group, of every class.
         let mut held = std::mem::take(&mut self.held);
         held.clear();
@@ -340,7 +366,7 @@ impl Fields {
         let f = &self.entries[fi];
         let from = e.pos[i];
         let mut nearest: Option<(Fx, usize)> = None;
-        let mut first_free: Option<usize> = None;
+        let mut any_free = false;
         let mut found = None;
         for (k, &p) in f.slots.iter().enumerate() {
             if f.held(e, k) {
@@ -350,7 +376,7 @@ impl Fields {
             if held.crowds(p) {
                 continue;
             }
-            first_free.get_or_insert(k);
+            any_free = true;
             if !(los::short_enough(from, p) && los::thick_clear(&g.grid, from, p).0) {
                 continue;
             }
@@ -366,7 +392,11 @@ impl Fields {
             }
         }
         self.held = held;
-        found.or(nearest.map(|(_, k)| k)).or(first_free)
+        match found.or(nearest.map(|(_, k)| k)) {
+            Some(k) => Pick::Slot(k),
+            None if any_free => Pick::NoneSeen,
+            None => Pick::NoneFree,
+        }
     }
 }
 

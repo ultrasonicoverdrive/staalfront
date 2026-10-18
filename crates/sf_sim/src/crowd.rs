@@ -225,6 +225,14 @@ const WAKE_RANGE: Fx = Fx::from_int(3);
 /// quarter of a cell the bound of the phase asks for.
 pub const HARD_OVERLAP: Fx = Fx::from_ratio(3, 16);
 
+/// How deep two settled bodies may rest in each other before the pass pushes them apart, in
+/// cells (WP4.4b): less than the sixteenth of a cell the end of a run may overlap by, more than
+/// the slack. `separate` only acts above [`HARD_OVERLAP`] and the passes only look at units that
+/// move or were pushed this tick, so a pair that came to rest between the two (a shove that
+/// squeezed an idle friend by [`COMPRESS`] beyond the slack, and then nothing touched either)
+/// stayed so for good.
+pub const REST_OVERLAP: Fx = Fx::from_ratio(3, 64);
+
 /// The most pairs `separate` takes in a tick: what is left is for the next.
 const DEEP_MAX: usize = 4096;
 
@@ -1370,6 +1378,11 @@ impl Work<'_, '_> {
             }
         }
         self.go_home(e);
+        let closed_up = !self.sc.moves.is_empty();
+        if closed_up {
+            self.sc.index.build(e, self.bodies);
+        }
+        self.ease_apart(e);
         // Idle units that nothing has touched for a while get their allowance back.
         for i in 0..self.bodies.len() {
             if self.bodies[i].role == Role::Idle {
@@ -1602,6 +1615,70 @@ impl Work<'_, '_> {
                     }
                 }
             }
+        }
+        for &(u, to, _) in &steps {
+            e.pos[u as usize] = to;
+        }
+        self.sc.moves = steps;
+    }
+
+    /// The deepest overlap of unit `u`, were it at `at`, with a body it may give way to
+    /// (`may_give_way`), in cells, and the direction away from that body. Equal depths
+    /// go to the body that comes first in the index, which does not depend on the order
+    /// the units are visited in.
+    fn deepest_to_give_way(&self, u: usize, at: Vec2) -> (Fx, Vec2) {
+        let mut best = (Fx::ZERO, Vec2::ZERO);
+        let (ru, su) = (self.bodies[u].radius, self.bodies[u].small);
+        for row in self.sc.index.stretches(at) {
+            for n in row {
+                if n.id as usize == u {
+                    continue;
+                }
+                let dmin = distance_between(ru, su, n.radius, n.small);
+                let diff = at - n.at;
+                if apart_on_an_axis(diff, dmin) || diff.length_squared() >= dmin.square() {
+                    continue;
+                }
+                let depth = dmin - diff.length();
+                if depth > best.0 && self.may_give_way(u, n.id as usize) {
+                    best = (depth, diff);
+                }
+            }
+        }
+        best
+    }
+
+    /// The settled units that rest deeper than [`REST_OVERLAP`] in a body they may give way
+    /// to step away from it, by half of what is over the slack (the other one, if it is a
+    /// settled unit too, does the same: they part in one tick; if it is not, the next
+    /// tick halves what is left, for as long as the unit is settling). A step is only taken
+    /// when it leaves the unit less deep in every body than it was, and where the terrain
+    /// allows. Every unit is judged against the positions the tick ended with and the
+    /// steps are written after, so the order does not matter; nothing here pushes a unit
+    /// that is being touched or overlapped by a mover, so it cannot start a fight with the
+    /// passes, and a unit that is not settling is not looked at.
+    fn ease_apart(&mut self, e: &mut Entities) {
+        let mut steps = std::mem::take(&mut self.sc.moves);
+        steps.clear();
+        for k in 0..self.sc.settling.len() {
+            let u = self.sc.settling[k] as usize;
+            if self.bodies[u].role != Role::Idle || self.sc.touched_flag[u] || self.sc.contact[u] {
+                continue;
+            }
+            let from = e.pos[u];
+            let (depth, away) = self.deepest_to_give_way(u, from);
+            if depth <= REST_OVERLAP || away.is_zero() {
+                continue;
+            }
+            let step = (depth - SLOP.div_int(2)).div_int(2);
+            let to = (from + away.with_length(step)).clamp(self.bounds.0, self.bounds.1);
+            if to == from
+                || !self.ground.may_step(self.bodies[u].class, from, to)
+                || self.deepest(u, to) >= depth
+            {
+                continue;
+            }
+            steps.push((u as u32, to, step));
         }
         for &(u, to, _) in &steps {
             e.pos[u as usize] = to;

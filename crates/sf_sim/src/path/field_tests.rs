@@ -1100,3 +1100,58 @@ fn a_rebuilt_field_has_no_holders_and_the_units_take_their_slots_again() {
     everyone_steers(&mut rig);
     assert!((0..3).all(|i| rig.p.claimed_point(&rig.e, i).is_some()));
 }
+
+#[test]
+fn a_unit_on_the_far_side_of_a_wall_takes_no_slot_until_it_can_walk_to_one() {
+    // A wall two cells thick across the whole map but for the top two rows, the goal east
+    // of it. The margin of a claim (six cells beyond the slots) reaches across it.
+    let mut grid: Vec<Vec<u8>> = (0..64).map(|_| vec![b'.'; 96]).collect();
+    for row in grid.iter_mut().skip(2) {
+        row[62] = b'#';
+        row[63] = b'#';
+    }
+    let rows: Vec<String> = grid
+        .into_iter()
+        .map(|r| String::from_utf8(r).unwrap())
+        .collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 2), (3, 2), (4, 2)]);
+    rig.order((66, 40));
+    rig.build();
+    let put = |rig: &mut Rig, i: usize, x: i64, y: i64| {
+        rig.e.pos[i] = Vec2::new(Fx::from_ratio(x, 100), Fx::from_ratio(y, 100));
+    };
+    // Unit 0 stands against the west face, five cells from the goal; the others east of it.
+    put(&mut rig, 0, 6150, 4050);
+    put(&mut rig, 1, 6650, 4350);
+    put(&mut rig, 2, 6650, 3750);
+    let steer_all = |rig: &mut Rig| {
+        for i in 0..3 {
+            let _ = rig.p.steer(&mut rig.e, i, mid(66, 40), Some(FOOT));
+        }
+    };
+    steer_all(&mut rig);
+    assert!(rig.p.claimed_point(&rig.e, 1).is_some());
+    assert!(rig.p.claimed_point(&rig.e, 2).is_some());
+    // It sees no slot, so it holds none, not even a shared one (that would stop it looking
+    // again), and it did not take a slot from the units that can walk to theirs.
+    assert_eq!(rig.p.claimed_point(&rig.e, 0), None);
+    assert_eq!(rig.e.crowd[0].claim, crate::crowd::Claim::default());
+    let held = rig
+        .field()
+        .taken
+        .iter()
+        .filter(|&&h| h != claim::NO_HOLDER)
+        .count();
+    assert_eq!(held, 2);
+    // Still no slot a few ticks on, while it stands there.
+    for _ in 0..5 {
+        rig.p.fields.tick();
+        steer_all(&mut rig);
+    }
+    assert_eq!(rig.p.claimed_point(&rig.e, 0), None);
+    // In sight of slots, it takes one.
+    put(&mut rig, 0, 6650, 4050);
+    rig.p.fields.tick();
+    steer_all(&mut rig);
+    assert!(rig.p.claimed_point(&rig.e, 0).is_some());
+}

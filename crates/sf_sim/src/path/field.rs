@@ -467,6 +467,9 @@ pub(crate) struct Fields {
     pub clock: u32,
     /// Slots units may still take this tick (`path/claim.rs`).
     pub claims_left: u32,
+    /// Looks at the free slots units may still make this tick, whether or not they end in
+    /// a claim (a unit that sees no free slot looks again the next tick).
+    pub looks_left: u32,
     /// The slots already taken by the group, gathered for one claim.
     pub held: claim::HeldBuf,
     /// Fields finished so far (and rebuilds).
@@ -488,6 +491,7 @@ impl Fields {
             next_order: 1,
             clock: 0,
             claims_left: claim::CLAIMS_PER_TICK,
+            looks_left: claim::LOOKS_PER_TICK,
             held: claim::HeldBuf::default(),
             built: 0,
             nodes_last_tick: 0,
@@ -641,6 +645,7 @@ impl Fields {
         self.clock = self.clock.wrapping_add(1);
         self.nodes_last_tick = 0;
         self.claims_left = claim::CLAIMS_PER_TICK;
+        self.looks_left = claim::LOOKS_PER_TICK;
         for i in 0..self.entries.len() {
             let f = &self.entries[i];
             if f.serial != 0 && self.clock.wrapping_sub(f.last_used) > IDLE_TICKS {

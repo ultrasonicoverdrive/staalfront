@@ -35,7 +35,9 @@
 //! place of the 90 riflemen** (the vehicles are wider than the cell they are placed on, so
 //! the block starts overlapped all through) at radii 1.25, 1.5 and 2.0, and **the goal one
 //! cell west** (79, 32) at 1.5, which put one unit past the disc (9.66 against 9.58) before the
-//! second round of WP4.4b. `Run::misses` also asks that no unit counted as arrived farther
+//! second round of WP4.4b. A third variant, **the kinds dealt out 7 places further on** at
+//! 1.25, ended with two settled units resting 0.072 of a cell in each other (against the 1/16 of
+//! the criterion) until the pass learnt to part them. `Run::misses` also asks that no unit counted as arrived farther
 //! out than the disc, or a cell and a half beyond its own slot: the slack of a crowd held up
 //! on its destination is bounded (`orders::crowd_arrival_radius`). `sweep_of_variants` (ignored:
 //! it takes minutes) runs 112 variants and prints one line each; the limits below are read off it.
@@ -58,18 +60,17 @@ const GOAL: (u32, u32) = (80, 32);
 const W: u32 = 96;
 const H: u32 = 64;
 
-/// The tick by which every unit has arrived. The last arrival measured over the 109 runs of
-/// `sweep_of_variants` in which everybody arrived (four radii, the 90-tank mix, seven goals,
-/// another seed) lies between 2,998 and 3,979, and the worst seen in any state of the code
-/// (the reviewer's sweep of the first round of WP4.4b) is 4,318. It depends on how the
-/// queue at the one-lane gap in the wall happens to fall: the gap passes a unit in about
-/// ten ticks, 195 of them take 1,950 ticks from the first at the gap, and the stalls of a
-/// queue add a thousand and more. So this is a bound with room (80 ticks above the worst
-/// seen, 420 above the sweep), not a prediction: the criterion is that everybody
-/// arrives, not when. A unit that has not arrived by it does not arrive later (the three
-/// stragglers of the sweep were still on the west face of the wall when their runs were
-/// lengthened to tick 9,000: they are stuck, not slow), so the limit separates nothing
-/// that a longer one would let through.
+/// The tick by which every unit has arrived. The last arrival measured over the 112 runs of
+/// `sweep_of_variants` (four radii, the block as it is and with 90 tanks, seven goals, two
+/// seeds; in all of them everybody arrives) lies between 2,974 and 4,176, and the worst seen
+/// in any state of the code (the reviewer's sweep of the first round of WP4.4b) is 4,318. It
+/// depends on how the queue at the one-lane gap in the wall happens to fall: the gap passes a
+/// unit in about ten ticks, 195 of them take 1,950 ticks from the first at the gap, and the
+/// stalls of a queue add a thousand and more. So this is a bound with room (82 ticks above
+/// the worst seen, 224 above the sweep), not a prediction: the criterion is that everybody
+/// arrives, not when. Before the second review round a unit could stay on the wall face for
+/// good in 3 of the 112 (it took slots on the far side of the wall); such a unit is stuck,
+/// not slow, and a longer limit would not have let it through.
 const ARRIVE_BY: u64 = 4400;
 
 /// The tick the crossing took when the units had no bodies (the slowest being a
@@ -347,6 +348,27 @@ fn scenario_variant(
     scenario
 }
 
+/// The same cells with the kinds dealt out `by` places further on: the unit placed on
+/// cell `n` gets the kind that cell `n + by` has in the shipped block (the mix is a
+/// repeating pattern, so this moves where the tanks and the hover craft stand).
+fn shift_kinds(scenario: &mut Scenario, by: usize) {
+    let kinds: Vec<u16> = scenario
+        .commands
+        .iter()
+        .filter_map(|c| match &c.command {
+            Action::SpawnUnit { kind, .. } => Some(*kind),
+            _ => None,
+        })
+        .collect();
+    let mut n = 0;
+    for c in &mut scenario.commands {
+        if let Action::SpawnUnit { kind, .. } = &mut c.command {
+            *kind = kinds[(n + by) % kinds.len()];
+            n += 1;
+        }
+    }
+}
+
 impl Run {
     fn last_arrival(&self) -> u64 {
         self.arrived.iter().flatten().max().copied().unwrap_or(0)
@@ -543,7 +565,16 @@ fn phase_four_holds_for(
     swap_foot_and_tanks: bool,
     goal: Option<(i32, i32)>,
 ) -> Run {
-    let r = run_scenario(&scenario_variant(hundredths, swap_foot_and_tanks, goal));
+    phase_four_holds_in(
+        what,
+        hundredths,
+        &scenario_variant(hundredths, swap_foot_and_tanks, goal),
+    )
+}
+
+/// Runs `scenario` (which has the wheeled radius `hundredths`) and asks for the criterion.
+fn phase_four_holds_in(what: &str, hundredths: i64, scenario: &Scenario) -> Run {
+    let r = run_scenario(scenario);
     eprintln!(
         "bridge_200{what} at a wheeled radius of {}.{:02} cells: {}",
         hundredths / 100,
@@ -603,6 +634,17 @@ fn phase_four_holds_with_ninety_tanks_at_a_wheeled_radius_of_2() {
     phase_four_holds_for(" with 90 tanks", 200, true, None);
 }
 
+/// The kinds of the block dealt out 7 places further on: the same cells, the tanks, transports and
+/// hover craft in other places. Two settled units resting between 1/16 and 3/16 of a cell apart
+/// (a tank beside a transport) were never pushed apart by the first round of WP4.4b: the end
+/// overlap was 0.072 against the 1/16 of the criterion.
+#[test]
+fn phase_four_holds_with_the_kinds_shifted_by_7_at_a_wheeled_radius_of_1_25() {
+    let mut scenario = scenario_variant(125, false, None);
+    shift_kinds(&mut scenario, 7);
+    phase_four_holds_in(" with the kinds shifted by 7", 125, &scenario);
+}
+
 /// The goal one cell west of the shipped one: the crowd's disc comes a cell nearer the wall.
 #[test]
 fn phase_four_holds_with_the_goal_one_cell_west_at_a_wheeled_radius_of_1_5() {
@@ -613,12 +655,9 @@ fn phase_four_holds_with_the_goal_one_cell_west_at_a_wheeled_radius_of_1_5() {
 /// seven goals (the shipped one and six a cell or two away), four wheeled radii and two
 /// seeds, 112 runs of about four seconds each. Prints one line for each (`cargo test
 /// --release -p sf_headless --test bridge_200 sweep_of_variants -- --ignored
-/// --nocapture`) and asserts nothing: a few runs end with a unit stuck against the wall
-/// on its way to the gap (the crowd presses it along the wall, away from the gap), in the
-/// block of WP4.4 as much as in this one, and that is a matter of the route through
-/// the gap (WP4.7), not of the arrival logic.
+/// --nocapture`) and asks that every run meets the criterion (`Run::misses`).
 #[test]
-#[ignore = "112 runs, about eight minutes"]
+#[ignore = "112 runs, about six minutes"]
 fn sweep_of_variants() {
     let goals: [Option<(i32, i32)>; 7] = [
         None,
@@ -629,6 +668,7 @@ fn sweep_of_variants() {
         Some((78, 32)),
         Some((80, 30)),
     ];
+    let mut failed: Vec<String> = Vec::new();
     for swap in [false, true] {
         for goal in goals {
             for hundredths in [125, 150, 175, 200] {
@@ -638,16 +678,26 @@ fn sweep_of_variants() {
                         scenario.seed ^= 0x55;
                     }
                     let r = run_scenario(&scenario);
+                    let misses = r.misses();
                     eprintln!(
                         "SWEEP tanks={swap} goal={goal:?} radius={hundredths} other_seed={other_seed}: \
-                         {} MISSES {:?}",
+                         {} MISSES {misses:?}",
                         r.summary(),
-                        r.misses()
                     );
+                    if !misses.is_empty() {
+                        failed.push(format!(
+                            "tanks={swap} goal={goal:?} radius={hundredths} other_seed={other_seed}: {misses:?}"
+                        ));
+                    }
                 }
             }
         }
     }
+    assert!(
+        failed.is_empty(),
+        "{} of 112 miss: {failed:#?}",
+        failed.len()
+    );
 }
 
 // --- the references: a plain search of the whole grid --------------------------------

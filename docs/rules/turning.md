@@ -252,13 +252,13 @@ everywhere**:
 
 | wheeled radius | result |
 |---|---|
-| 1.25 | passes; the last unit arrives on tick 3,492, the farthest ends 8.59 cells out (limit 9.58) |
-| 1.5 (ships) | passes; the last unit arrives on tick 3,593, the farthest ends 8.63 cells out |
-| 1.6 | passes; tick 3,858, the farthest 8.80 |
-| 1.75 | passes; tick 3,399, the farthest 8.73 |
-| 2.0 | passes; tick 3,408, the farthest 8.82 |
+| 1.25 | passes; the last unit arrives on tick 3,703, the farthest ends 8.96 cells out (limit 9.58) |
+| 1.5 (ships) | passes; the last unit arrives on tick 3,456, the farthest ends 8.29 cells out |
+| 1.6 | passes; tick 3,302, the farthest 8.64 |
+| 1.75 | passes; tick 3,491, the farthest 8.86 |
+| 2.0 | passes; tick 3,239, the farthest 8.42 |
 
-(Worst overlap in the run 0.17 to 0.19 at every radius; the first tick, on which the block of
+(Worst overlap in the run 0.19 at every radius; the first tick, on which the block of
 units is placed, is clean since the second review round, which also added the variants: 90 tanks in
 place of the riflemen at 1.25, 1.5 and 2.0, and the goal one cell west at 1.5.)
 

@@ -144,6 +144,20 @@ A unit that has just **stopped** (its order ended) is looked at once by the pass
 its allowance back: if it came to rest against a neighbour that cannot give way any more, it is
 the one that moves clear, not a pair that overlaps for good because nobody is pushing.
 
+* **Settled units that rest in each other are parted** (`ease_apart`, `REST_OVERLAP`). `separate`
+  only acts above 3/16 of a cell and the passes only look at units that move or were pushed this tick,
+  so two settled units that came to rest between 1/16 and 3/16 apart (a shove may squeeze an idle friend
+  by `COMPRESS` beyond the slack, and then nothing touches either) stayed so for good: in the block with
+  its kinds dealt out 7 places further on, at wheeled radius 1.25, the run ended with 0.072 of a cell
+  against the 1/16 of the criterion, which the first round of WP4.4b had met by luck. A settling unit that
+  nothing touches or overlaps and that rests deeper than 3/64 of a cell in a body it may give way to
+  steps away from it by half of what is over the slack (its neighbour, if it is settling too, does the
+  same, so the pair is parted in a tick; if not, the next tick halves what is left, for as long as the
+  unit is settling), where the terrain allows and only when that leaves it less deep in every body. All
+  judged against the positions the tick ended with and written after, so the order does not matter; the
+  step is not a push (it does not touch the other unit's allowance), a unit that closes up toward its
+  point stops where it overlaps nobody beyond the slack, and a unit stops settling after 40 calm ticks, so
+  it cannot oscillate. Run after `go_home`.
 * **Units placed on top of each other are separated on the tick they are placed** (`fresh`,
   `SPAWN_ROUNDS`). A scenario or a spawn puts units down one to a cell, and a body wider than a cell
   (a tank is 1.2 across) overlaps all its neighbours: 0.2 of a cell for tanks, 0.5 for a block of
@@ -225,9 +239,16 @@ crowd.
   * it takes the **first one it can walk to straight**: it sees it, and no slot already held lies
     nearer the line to it than the two bodies keep apart. The crowd fills from the middle outwards on
     the side the units come from, and what is left for the last one is never behind the others;
-  * when none of those looked at is open it takes the nearest it can see, and when it sees none the
-    first one that is free. When all are taken (a group bigger than 256) it shares the slot its rank
-    gives, as before; the slot its rank gives is also where it goes before it has taken one;
+  * when none of those looked at is open it takes the nearest it can see. **It never takes a slot it
+    cannot walk to straight**: the margin of six cells reaches across rock, and a unit on the wrong
+    side of a wall (against the west face of the wall of `bridge_200`, ten cells from the gap) took the
+    first free slot on the far side, held it against the units that could walk to it, let go of it as it
+    moved and took another, and stayed there; in 3 of 112 variants it never left the wall. Now it takes
+    none until it sees one (sight is `los::thick_clear` of the terrain, the test that sends it straight
+    to its slot, so it is cheap and does not depend on the order of the units), looks again the next
+    tick (at most 64 looks a tick, `LOOKS_PER_TICK`) and follows the field to the gap meanwhile. When no
+    slot is free at all (a group bigger than 256) it shares the slot its rank gives, as before; the
+    slot its rank gives is also where it goes before it has taken one;
   * the units look in the order of their entity ids, one at a time (a claim is a write the next unit
     sees), at most 16 in a tick. A list of ids in any order gives the same result;
   * "nearer to a slot held" and "no slot held nearer the line" are questions about every slot held
@@ -268,7 +289,7 @@ crowd.
   that cannot move rests until something touches it or moves next to it. Whoever stands where, the
   crowd ends as close to the point as its bodies allow, and a unit never ends far out because of how it
   was pushed on the way. (Without it the farthest unit of `bridge_200` ended up to 10.5 cells out at
-  several radii; with it 8.6 to 8.8 at the five radii of the tests.) The units walk to their slots all the same: this
+  several radii; with it 8.3 to 9.0 at the five radii of the tests.) The units walk to their slots all the same: this
   is the cleaning up after the walk, not a second destination.
 
 Why there is no stuck rule that declares a unit arrived wherever it stands: "stuck" is one of the
@@ -308,7 +329,11 @@ starts overlapped all through) overlapped by 0.27 of a cell on the first tick at
 "Units placed on top of each other"), and **the goal one cell west**, (79, 32), put one unit at 9.66
 cells at the radius that ships, against the 9.58 of the disc (the 1 % rule lets two past it). Tests
 `phase_four_holds_with_ninety_tanks_at_a_wheeled_radius_of_*` (1.25, 1.5 and 2.0) and
-`phase_four_holds_with_the_goal_one_cell_west_at_a_wheeled_radius_of_1_5` ask the same of them.
+`phase_four_holds_with_the_goal_one_cell_west_at_a_wheeled_radius_of_1_5` ask the same of them. The
+second review found a third: **the kinds dealt out 7 places further on** at radius 1.25 (a probe of the first
+round) ended with 0.072 of a cell of overlap, over the 1/16, and is the test
+`phase_four_holds_with_the_kinds_shifted_by_7_at_a_wheeled_radius_of_1_25` (see "Settled units that rest in
+each other are parted").
 
 ## Numbers
 
@@ -330,6 +355,8 @@ cells at the radius that ships, against the 9.58 of the disc (the 1 % rule lets 
 | slot spacing | the widest body (3/4 of it for infantry) + 1/16 | `slots::spacing_for` |
 | a unit takes its slot within | 6 cells of the outermost slot of its class | `claim::CLAIM_MARGIN` |
 | units that take a slot in a tick | 16 | `claim::CLAIMS_PER_TICK` |
+| units that look for a slot in a tick | 64 | `claim::LOOKS_PER_TICK` |
+| settled bodies may rest in each other by | 3/64 cell (else parted) | `REST_OVERLAP` |
 | cells along a side of the grid over the slots held | 24 | `claim::GRID_SIDE` |
 | a crowd held up counts as arrived no farther than | 1.3 times the radius of its disc (4 cells without a group) | `CROWD_ARRIVE_DISC`, `CROWD_ARRIVE_ALONE` |
 | rounds of `separate` on the tick units are placed | 64 | `SPAWN_ROUNDS` |
@@ -375,13 +402,15 @@ four frozen copies that carry the block):
 | `pathing` | `0x606eb6feeffa964c` | `0x398d625625dce5c1` | the radius only |
 | `pathing_256` | `0x7c4e31d024ed4cf9` | `0x016c2b5ef7c7e055` | the radius only |
 | `turning` | `0xb07ba8066dd59884` | `0xd894752d6d192f8d` | the radius only |
-| `bridge_200` | `0x03b3145755a9081e` | `0x381782548cc1782a` | the arrival logic and the radius |
-| `crowd_jam` | `0x3d8fab0ab9a564e6` | `0x09e9bf488ce69401` | the arrival logic and the radius |
+| `bridge_200` | `0x03b3145755a9081e` | `0x03971fcc3548fc0c` | the arrival logic and the radius |
+| `crowd_jam` | `0x3d8fab0ab9a564e6` | `0x69e7a06fe17a33e5` | the arrival logic and the radius |
 
 (The first round of WP4.4b pinned `bridge_200` at `0x831cd1eaff2b1307` and `crowd_jam` at
-`0x4ac3f990f7070f48`; the second round, the review of PR #55, moved these two again, by the separation
-of a block on the tick it is placed, the bound on the slack of a crowd held up, and the disc in the
-checksum of a unit. The other nine did not move a second time. The speed-ups of that round (the claim
+`0x4ac3f990f7070f48`; the second round, the review of PR #55, moved these two again (`0x381782548cc1782a`
+and `0x09e9bf488ce69401`), by the separation of a block on the tick it is placed, the bound on the slack of
+a crowd held up, and the disc in the checksum of a unit; the third, the parting of settled units that rest
+in each other and the rule that no slot is taken that the unit cannot walk to, moved them to the values in
+the table. The other nine did not move a second or a third time. The speed-ups of that round (the claim
 grid, the index read by rows, the cheap tests of the passes) change no checksum: all eleven scenarios
 give the same values before and after them.)
 
@@ -394,65 +423,65 @@ and `bridge_200.ron` runs 4,600 ticks instead of 3,800 (below).
 
 * **`bridge_200`** (re-pinned at WP4.4b): 200 units, 90 riflemen, 60 light tanks, 45 light
   transports, 5 hover craft, across a bridge three cells wide and six long and through a wall with a
-  gap five cells wide, at the shipped wheeled radius of 1.5 cells. **All arrive by tick 3,593 (180 s
+  gap five cells wide, at the shipped wheeled radius of 1.5 cells. **All arrive by tick 3,456 (173 s
   of game time; 106 s when the units went through each other).** The last unit crosses the river on tick
-  1,967. Is that plausible? The crowd is about 170 cells of bodies and crosses a gate three cells wide at
+  1,938. Is that plausible? The crowd is about 170 cells of bodies and crosses a gate three cells wide at
   the pace of the slowest class: 170 / (3 x 0.7) = 81 s for the crossing alone. The gap in the wall
   behind the bridge is the slower of the two: the field leads everybody to the same corner of it, so the
   traffic is little wider than one lane and passes about one unit in ten ticks. Nobody is stuck at the
-  end and nobody stood still for more than 84 ticks (4.2 s) with its order not done; 100 sidesteps and
+  end and nobody stood still for more than 165 ticks (8 s) with its order not done; 64 sidesteps and
   4 requests for a new route in all; **the worst overlap of two bodies in the whole run, the tick the
-  units are placed on included, is 0.17 of a cell (tick 3,156), and none beyond a sixteenth at the
-  end**; none is ever on ground its class cannot enter; the path service spent 29,083 nodes in all, the
-  budget held every tick. The units walk 1.28 times the best grid walk at the median. **None of the
-  200 ends further than 9.58 cells from the goal (the criterion: at most 2); the farthest is 8.63**,
-  107 of the 200 outside five cells.
+  units are placed on included, is 0.19 of a cell (tick 2,201), and none beyond a sixteenth at the
+  end** (0.031); none is ever on ground its class cannot enter; the path service spent 27,260 nodes in
+  all, the budget held every tick. The units walk 1.24 times the best grid walk at the median. **None of
+  the 200 ends further than 9.58 cells from the goal (the criterion: at most 2); the farthest is 8.29**,
+  109 of the 200 outside five cells.
   **The same run at every radius the review swept** (the tests `phase_four_holds_at_a_wheeled_radius_of_*`,
   release build; "last" is the tick the last unit arrives, "farthest" the farthest from the goal at
   the end, in cells, against the 9.58 of the criterion):
 
   | wheeled radius | last | farthest | worst overlap | longest stood still | sidesteps / new routes |
   |---|---|---|---|---|---|
-  | 1.25 | 3,492 | 8.59 | 0.18 | 124 | 101 / 6 |
-  | 1.5 (ships) | 3,593 | 8.63 | 0.17 | 84 | 100 / 4 |
-  | 1.6 | 3,858 | 8.80 | 0.19 | 38 | 114 / 10 |
-  | 1.75 | 3,399 | 8.73 | 0.18 | 91 | 103 / 8 |
-  | 2.0 | 3,408 | 8.82 | 0.18 | 100 | 109 / 7 |
+  | 1.25 | 3,703 | 8.96 | 0.19 | 42 | 122 / 5 |
+  | 1.5 (ships) | 3,456 | 8.29 | 0.19 | 165 | 64 / 4 |
+  | 1.6 | 3,302 | 8.64 | 0.19 | 88 | 85 / 3 |
+  | 1.75 | 3,491 | 8.86 | 0.19 | 39 | 102 / 7 |
+  | 2.0 | 3,239 | 8.42 | 0.19 | 37 | 101 / 5 |
 
-  **The variants the second review asked for** (tests `phase_four_holds_with_*`; the disc of the
-  tank-heavy block is 8.2 cells, so its limit is 10.65):
+  **The variants the reviews asked for** (tests `phase_four_holds_with_*`; the disc of the tank-heavy
+  block is 8.2 cells, so its limit is 10.65):
 
   | variant | last | farthest | worst overlap | longest stood still | sidesteps / new routes |
   |---|---|---|---|---|---|
-  | 90 tanks, radius 1.25 | 3,503 | 10.41 | 0.19 | 72 | 108 / 5 |
-  | 90 tanks, radius 1.5 | 3,502 | 10.20 | 0.19 | 72 | 120 / 9 |
-  | 90 tanks, radius 2.0 | 3,591 | 10.42 | 0.20 | 55 | 88 / 8 |
-  | goal (79, 32), radius 1.5 | 3,371 | 8.80 | 0.18 | 63 | 75 / 4 |
+  | 90 tanks, radius 1.25 | 3,536 | 9.91 | 0.19 | 91 | 85 / 8 |
+  | 90 tanks, radius 1.5 | 3,317 | 9.82 | 0.19 | 82 | 90 / 7 |
+  | 90 tanks, radius 2.0 | 3,520 | 10.33 | 0.19 | 170 | 105 / 9 |
+  | goal (79, 32), radius 1.5 | 3,679 | 9.27 | 0.19 | 62 | 106 / 4 |
+  | kinds shifted by 7, radius 1.25 | 3,469 | 8.68 | 0.19 | 47 | 111 / 4 |
 
-  The goal one cell west now ends 0.8 cells inside the limit (it ended 0.08 outside); the worst overlap
-  of the 90-tank block, which was 0.27 on the first tick, is 0.20 at the worst moment of the run.
+  The goal one cell west ends 0.3 cells inside the limit (it ended 0.08 outside in the first round); the
+  worst overlap of the 90-tank block, which was 0.27 on the first tick, is 0.19; the end overlap of the
+  shifted block, which was 0.072 in the second round, is 0.031.
 
   Before WP4.4b the same sweep (the reviewer's, on the code of WP4.5): 1.5 left 4 riflemen who never
   arrived, 1.6 left 9 and put 6 beyond 9.58 cells, 1.75 overlapped by 0.286, 2.0 left a hovercraft
-  stuck. **Why the limit is tick 4,400.** The scenario runs 4,600 ticks and the test asks that
-  everybody has arrived by 4,400. The last arrival of the 112 runs of `sweep_of_variants` (the block
-  as it is and with 90 tanks, seven goals, four radii, two seeds; `cargo test --release -p
-  sf_headless --test bridge_200 sweep_of_variants -- --ignored --nocapture`) lies between 2,998 and
-  3,979 in the 109 in which everybody arrived, and the worst seen in any state of the code is 4,318 (the
-  reviewer's sweep of the first round): it depends on how the queue at the gap falls, where one unit in
-  about ten ticks passes. The limit is 80 ticks above the worst ever seen and 420 above this sweep's. It
-  is a bound with room and not a prediction, and it does not need to be tighter: a unit that has not
-  arrived by 4,400 does not arrive later either. **What the sweep still finds.** In three of the 112 runs (the block as it is, goal (78, 32),
-  radius 2.0; 90 tanks, goal (79, 32), radius 1.5; 90 tanks, goal (78, 32), radius 2.0, other seed) one
-  unit has not arrived when the run ends, and in runs lengthened to tick 9,000 it still has not: it
-  stands on the west face of the wall, 7 to 11 cells north of the gap in rows 36 to 40, and the
-  crowd presses it along the wall. (The one that was followed, unit 22 of the first run, was a cell and
-  a half from the mouth of the gap at tick 2,700, went north along the wall from there, slowly, and took
-  and let go of slots on the far side of the wall as it went.) The code of the
-  first round has the same in three other runs of the same sweep, so it is not new, and it is a matter
-  of the route through the gap (WP4.7) and not of the arrival logic: it is not in the tests, and
-  the three requested variants are clean. The other 109 runs arrive between ticks 2,998 and 3,979; the worst
-  overlap of the sweep is 0.23, the worst at the end 0.06, and at most one unit ends outside the disc.
+  stuck. **The sweep.** `sweep_of_variants` (the block as it is and with 90 tanks, seven goals, four
+  radii, two seeds: 112 runs; `cargo test --release -p sf_headless --test bridge_200 sweep_of_variants
+  -- --ignored --nocapture`) asks `Run::misses` of every run, and **all 112 are clean**: everybody
+  arrives, between ticks 2,974 and 4,176; the worst overlap of the sweep is 0.24 (a mid-run moment,
+  against the quarter of a cell of the criterion), the worst at the end 0.031, and at most one unit
+  ends outside the disc (two are allowed). It was 109 clean in the second round: in three runs one unit
+  stayed on the west face of the wall for good (still there at tick 9,000), ten cells from the gap
+  in rows 36 to 40. It took the first free slot on the far side of the wall (the margin of a claim
+  reaches across rock and the first round fell back to a slot the unit could not see), held it against
+  the units that could walk to it, let go of it as it moved, and took another; it never left the
+  wall. Slots a unit cannot walk to straight are not taken any more (see "Arrival"), and those runs
+  arrive. **Why the limit is tick 4,400.** The scenario runs 4,600 ticks and the test asks that
+  everybody has arrived by 4,400. The last arrival depends on how the queue at the gap falls, where
+  one unit in about ten ticks passes; the worst seen in any state of the code is 4,318 (the reviewer's
+  sweep of the first round), the worst of the sweep 4,176. The limit is 82 ticks above the worst ever
+  seen and 224 above this sweep's: a bound with room, not a prediction, and a unit that has not arrived
+  by it was stuck, not slow.
 * **`crowd_jam`** (re-pinned at WP4.4b): two groups of 18 pass head-on through a three-cell gap eight
   cells long, 8 tanks go along a five-cell corridor past a heavy tank on `HoldPosition`. Every unit
   has done its order by tick 1,548; the groups are in the gap together on 469 ticks, the eastbound
@@ -462,7 +491,8 @@ and `bridge_200.ron` runs 4,600 ticks instead of 3,800 (below).
   cells of grass, in two dense blocks of 1,000 (riflemen and light tanks, a cell apiece) that start a
   cell apart and each get one group order (flowfields and arrival slots) to the point between them, so
   they run into each other for the whole run: 400 ticks, **84 to 88 ticks a second in a release build
-  (11.4 to 11.9 ms a tick, the slowest 17 ms, once 29 ms when the machine hiccuped), against the 20
+  (11.4 to 11.9 ms a tick, the slowest 17 ms, once 29 ms when the machine hiccuped; 79 to 83 after the
+  parting of settled units of the third round), against the 20
   the game needs and the 50 ms of a tick**. The same machine measured, in the same hour, the code of
   WP4.4 (before WP4.4b) at 85 to 98, and the first round of WP4.4b at 69 to 71 (14.1 to 14.5 ms, the
   slowest 18 to 27 ms). **Where the time went** (a profile by callgrind of the 400 ticks, then
@@ -523,13 +553,15 @@ and `bridge_200.ron` runs 4,600 ticks instead of 3,800 (below).
   criterion (nobody counted as arrived beyond the disc included); the radius is replaced in the
   movement table by a test-only knob; `phase_four_holds_with_ninety_tanks_at_a_wheeled_radius_of_*`
   (1.25, 1.5, 2.0) and `phase_four_holds_with_the_goal_one_cell_west_at_a_wheeled_radius_of_1_5`, the
-  variants of the block; `sweep_of_variants` (ignored), 112 variants, one line each.
+  variants of the block, and `..._with_the_kinds_shifted_by_7_...`; `sweep_of_variants` (ignored), 112
+  variants, one line each, all asked for the criterion.
 * `crates/sf_sim/tests/collision.rs`, "bodies placed on top of each other" (WP4.4b): a block of bodies a
   cell and a half wide, 3 by 3 up to 9 by 9, is within 3/16 of a cell on the tick it is placed, stays
   put afterwards, and ends in the same places whatever order the commands that place it are listed in.
 * `crates/sf_sim/src/path/claim.rs` (`tests`): the grid over the slots held answers as if every slot
   held were looked at, on thousands of random points and ways, with few and many slots, close together
-  and far apart, and with none. `crates/sf_sim/src/orders/tests.rs`: the slack of a crowd held up grows
+  and far apart, and with none. `crates/sf_sim/src/path/field_tests.rs`: a unit on the far side of a wall
+  takes no slot (not even a shared one) until it can walk to one. `crates/sf_sim/src/orders/tests.rs`: the slack of a crowd held up grows
   and is bounded by the disc, the slot and the base slack round it always count.
 * `crates/sf_sim/src/path/field_tests.rs`: the ring layout, a later class skipping an earlier class's
   slots, a stranded member recovering when the map changes and not keeping its field alive, an idle
