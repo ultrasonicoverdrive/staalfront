@@ -657,11 +657,11 @@ loader and `tools/sf_asset_check/tests/set_v3.rs` pins that the checker can
 judge all of them.
 
 Two things about the loader that a model must know: a mesh node **without
-children** is folded into its parent part, so a `turret` or `barrel` that is a
-plain mesh node cannot turn or tilt on its own (give it an empty node with the
-mesh as a child, as the test pack does; the checker's `engine-parts` rule); and
-the figures' `torso`, `head`, `arm_*`, `leg_*` nodes, being mesh leaves, merge
-into one `body` part per level.
+children** is folded into its parent part, except a node named `turret` or
+`barrel` (after the `_LOD<n>` suffix), which is always a part of its own with its
+joint, even as a plain mesh node, so `hull -> turret -> barrel` needs no empty
+frame nodes; and the figures' `torso`, `head`, `arm_*`, `leg_*` nodes, being mesh
+leaves, merge into one `body` part per level.
 
 ## 16. Original Red Alert audio (WP11.7, B11)
 

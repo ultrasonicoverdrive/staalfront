@@ -9,7 +9,7 @@ use std::path::Path;
 
 use glam::Vec3;
 use sf_data::units::UnitDefs;
-use sf_render::glb::{AxisConvention, LoadedLevel, load_glb};
+use sf_render::glb::{AxisConvention, load_glb};
 
 use crate::class::{
     Class, Classified, Faction, ModelName, TWO_FIGURE_ROLES, budget, classify, parse_file_name,
@@ -220,9 +220,6 @@ impl Run {
             .collect();
         if let Some(root0) = roots[0] {
             self.nodes(root0);
-            if let Some(level0) = model.as_ref().and_then(|m| m.levels.first()) {
-                self.engine_parts(root0, level0);
-            }
         }
         if geoms.is_empty() {
             return;
@@ -465,35 +462,6 @@ impl Run {
                     "vertices with a zero-length normal ({zero}); the lighting is undefined there"
                 ),
             );
-        }
-    }
-
-    /// The engine loader turns a node into a rigged part only if it has no
-    /// mesh or has children; a `turret` or `barrel` that is a plain mesh node
-    /// is folded into its parent and cannot turn or tilt on its own.
-    fn engine_parts(&mut self, root0: &LodRoot, level0: &LoadedLevel) {
-        let Some(class) = self.classified.as_ref().map(|c| c.class) else {
-            return;
-        };
-        if !matches!(class, Class::Vehicle | Class::Wreck) {
-            return;
-        }
-        for (name, motion) in [("turret", "turn"), ("barrel", "tilt")] {
-            let Some((node, _)) = root0.tree.find(name) else {
-                continue;
-            };
-            if node.has_mesh && !level0.parts.iter().any(|p| p.name == name) {
-                let message = format!(
-                    "{name} is a mesh node without children, so the engine loader merges it into \
-                     its parent and it cannot {motion} on its own (give it an empty node with the \
-                     mesh as a child)"
-                );
-                if class == Class::Vehicle {
-                    self.report.fail("engine-parts", message);
-                } else {
-                    self.report.warn("engine-parts", message);
-                }
-            }
         }
     }
 

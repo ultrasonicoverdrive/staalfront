@@ -8,6 +8,7 @@
 //! never handed out again (see `kinds.rs`). `docs/rules/units.md` describes
 //! every field and its unit of measure.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::Deserialize;
@@ -259,8 +260,15 @@ pub struct UnitDef {
     /// Ids from `weapon_defs.ron`, at most four.
     #[serde(default)]
     pub weapons: Vec<String>,
-    /// What it looks like up close.
+    /// What it looks like up close: for every owner without an entry in
+    /// [`UnitDef::models`], and the stand-in when a model cannot be used.
     pub model: Model,
+    /// Looks per faction, where a faction's units of this role are not drawn
+    /// with `model` (the infantry of set v3: `meridian_rifleman.glb` and
+    /// `veyran_rifleman.glb` for one role). Keys are factions of the role.
+    /// Presentation only: the simulation never sees it. Absent = none.
+    #[serde(default, deserialize_with = "faction_models")]
+    pub models: BTreeMap<Faction, Model>,
     /// The base shape at strategic zoom: what the role is drawn as when it
     /// has no `icon`, or when the icon is not in the icon set.
     pub strategic_icon: IconShape,
@@ -274,6 +282,54 @@ pub struct UnitDef {
     /// Abilities.
     #[serde(default)]
     pub flags: Flags,
+}
+
+/// The `models` map, refusing a faction that is listed twice (a plain map
+/// would keep the last one without a word).
+fn faction_models<'de, D>(deserializer: D) -> Result<BTreeMap<Faction, Model>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Error, MapAccess, Visitor};
+    struct Entries;
+    impl<'de> Visitor<'de> for Entries {
+        type Value = BTreeMap<Faction, Model>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a map from a faction to a model")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut models = BTreeMap::new();
+            while let Some((faction, model)) = map.next_entry::<Faction, Model>()? {
+                if models.insert(faction, model).is_some() {
+                    return Err(A::Error::custom(format!(
+                        "models: faction {faction:?} is listed twice"
+                    )));
+                }
+            }
+            Ok(models)
+        }
+    }
+    deserializer.deserialize_map(Entries)
+}
+
+impl UnitDef {
+    /// What a unit of this role owned by `faction` looks like: the model of
+    /// that faction if the role has one, otherwise the generic `model`.
+    /// `None` (an owner that is no known side) gets the generic one. The last
+    /// fallback, a primitive by category, is the renderer's.
+    pub fn model_for(&self, faction: Option<Faction>) -> &Model {
+        faction
+            .and_then(|f| self.models.get(&f))
+            .unwrap_or(&self.model)
+    }
+
+    /// Every model the role can be drawn with: the generic one, then one per
+    /// faction in faction order.
+    pub fn all_models(&self) -> impl Iterator<Item = &Model> {
+        std::iter::once(&self.model).chain(self.models.values())
+    }
 }
 
 /// The RON file.
@@ -300,6 +356,10 @@ fn valid_icon_name(name: &str) -> bool {
 #[derive(Copy, Clone)]
 pub(crate) struct Assets<'a> {
     pub dir: Option<&'a Path>,
+    /// The directories (`dir`) of the model packs of `config/models.ron`,
+    /// when that file is there: a glTF model must lie in one of them, or the
+    /// renderer has no axes for it. `None` = not checked.
+    pub packs: Option<&'a [String]>,
 }
 
 impl Assets<'_> {
@@ -326,6 +386,24 @@ impl Assets<'_> {
             return Err(format!("\"{rel}\" does not exist under {}", dir.display()));
         }
         Ok(())
+    }
+
+    /// `Ok` if `rel` lies in the directory of a model pack (when they are known).
+    fn check_pack(&self, rel: &str) -> Result<(), String> {
+        let Some(packs) = self.packs else {
+            return Ok(());
+        };
+        let inside = |dir: &String| {
+            rel.strip_prefix(dir.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+        };
+        if packs.iter().any(inside) {
+            return Ok(());
+        }
+        Err(format!(
+            "\"{rel}\" is in no model pack of models.ron (pack directories: {})",
+            packs.join(", ")
+        ))
     }
 }
 
@@ -575,10 +653,24 @@ impl Ctx<'_> {
                 return Err(self.at(w, format!("weapon \"{w}\" is listed twice")));
             }
         }
-        if let Model::Glb(path) = &u.model
-            && let Err(e) = self.assets.check(path, ".glb")
-        {
-            return Err(self.at(path, format!("model: {e}")));
+        let per_faction = u
+            .models
+            .iter()
+            .map(|(faction, model)| (format!("models {faction:?}"), model));
+        for (who, model) in std::iter::once(("model".to_owned(), &u.model)).chain(per_faction) {
+            if let Model::Glb(path) = model {
+                self.assets
+                    .check(path, ".glb")
+                    .and_then(|()| self.assets.check_pack(path))
+                    .map_err(|e| self.at(path, format!("{who}: {e}")))?;
+            }
+        }
+        for faction in u.models.keys() {
+            if !u.factions.contains(faction) {
+                return Err(self.here(format!(
+                    "models: {faction:?} is not one of the factions of this role"
+                )));
+            }
         }
         if let Some(name) = &u.icon
             && !valid_icon_name(name)

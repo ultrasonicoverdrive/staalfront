@@ -105,7 +105,8 @@ the file does not matter.
 | `footprint` | `(width: w, height: h)` in cells, 1 to 16; **required for and only for a Structure** |
 | `sight` | cells; above 0 except for an Object |
 | `weapons` | up to four ids from `weapon_defs.ron` |
-| `model` | `Shape(Cube \| Cylinder \| Cone)`, a placeholder primitive of `units.ron`, or `Glb("<path under assets/>")`, a glTF file that must exist |
+| `model` | `Shape(Cube \| Cylinder \| Cone)`, a placeholder primitive of `units.ron`, or `Glb("<path under assets/>")`, a glTF file that must exist and lie in a pack of `config/models.ron`. The generic look of the role (see "Models per faction") |
+| `models` | optional map from a faction to a model, `models: { Meridian: Glb("set_v3/meridian_rifleman.glb"), Veyran: Glb("set_v3/veyran_rifleman.glb") }`; the keys are factions of the role; each value is a model like `model` (see "Models per faction") |
 | `strategic_icon` | `Square`, `Circle`, `Triangle` or `HalfCircle`: the base shape at strategic zoom, one per kind of role (structure, infantry, vehicle, vessel); what the role is drawn as when it has no `icon` (WP1.9, WP3.6) |
 | `icon` | optional name of the role's strategic icon (WP3.6): a picture of the icon set in `assets/icons`, `a-z 0-9 _`, at most 48 characters; see [`icons.md`](icons.md). Only the spelling is checked in `sf_data`; a name the set does not have is a warning when the game loads and the role is drawn as its `strategic_icon`. (The build menu picture of WP11.1 will be a field of its own.) |
 | `flags` | abilities, below; every flag defaults to off |
@@ -242,7 +243,8 @@ without a table hashes exactly as before. See `sf_sim::checksum`.
 
 ## Drawing a role (WP3.2)
 
-`sf_game::roster::Roster` is the data mapping from a kind number to what the instancer
+`sf_game::roster::Roster` is the data mapping from a kind number (and, for a role with
+`models`, the faction of the unit's owner: `Roster::shape_for`) to what the instancer
 draws (it replaces the stand-in `kind % shapes` of the first demo). Built from the
 definitions:
 
@@ -263,6 +265,45 @@ definitions:
 The F1 panel names the hovered unit by its role id and shows its hit points (`light_tank
 18v0 (red) by model, 83.1 m, HP 400/400`); an entity that is not a role is `placeholder <kind>`
 without hit points.
+
+## Models per faction
+
+One role can look different for each faction: art set v3 has `meridian_rifleman.glb`
+and `veyran_rifleman.glb` for the single role `rifleman`. The role keeps one **kind**
+and one record; only how a unit is *drawn* depends on who owns it.
+
+* `model` is required and is the **generic** look.
+* `models` is optional and gives a faction its own look. It is a map from a faction
+  (`Meridian`, `Veyran`, `Neutral`) to a model (`Shape(..)` or `Glb("..")`, the same
+  as `model`). A key must be one of the role's `factions`, and a faction can be listed
+  only once.
+* **Fallback order** when a unit is drawn: the entry for the faction of its owner, then
+  the generic `model`, then the placeholder primitive of the role's category (infantry a
+  cylinder, a vehicle or vessel a cone, a structure or object a cube). A model file that
+  fails to load, and every `Glb` when models are turned off (`--models none`), drops to the
+  next step (with a warning for the first).
+* **Which faction owns a unit** is the game shell's business, not the simulation's:
+  `sf_game::roster::faction_of_owner` maps the sandbox's owner seats (0 Meridian, 1 Veyran,
+  2 Neutral); any other owner is drawn with the generic model.
+* Roles of one faction (the sniper, the medic, the civilian) simply name their file in
+  `model`; `models` is for roles that two factions share.
+* **Presentation only.** The simulation never sees a model: the unit table, the checksums
+  and every headless scenario (also the frozen `*_defs` copies in `assets/scenarios`) are
+  the same with or without `models`.
+
+**Validated when the definitions load:** every `Glb` (generic or per faction) is a plain
+relative path to an existing `.glb` under `assets/` that lies in the directory of a pack of
+`assets/config/models.ron` (the pack gives its axes and level-of-detail switches); a faction
+key that is not a faction, a faction listed twice, and a faction the role does not have are
+refused with the file and line. A `models.ron` that is not there (a tool with a partial assets
+directory) skips only the pack check.
+
+What is wired (art set v3, `assets/set_v3`): rifleman, rocket_trooper, engineer and scout with
+a model for Meridian and one for Veyran; sniper (Meridian), medic, combat_engineer and
+demolition_team (Veyran) and the neutral civilian and technician with their single model.
+`heavy_gun_team` has no model in the set yet. Decor (ore stages, rocks, trees) and wrecks are
+not unit roles and are not in `unit_defs.ron`; placing them on maps is later work (phase
+2.2/2.3, wrecks 5.5).
 
 ## Conversion for the simulation
 

@@ -696,6 +696,182 @@ fn model_files_must_exist_and_stay_inside_assets() {
     assert!(e.message.contains("should end with .glb"), "{e}");
 }
 
+/// Models per faction: a role keeps one generic `model` and may give a faction
+/// its own entry in `models`. Fallback: the faction's entry, then `model`.
+#[test]
+fn a_role_can_have_a_model_per_faction() {
+    use sf_data::units::Model;
+    let defs = shipped();
+    let get = |id: &str| defs.unit(id).unwrap();
+    let glb = |p: &str| Model::Glb(p.to_owned());
+
+    let rifleman = get("rifleman");
+    assert_eq!(
+        rifleman.model_for(Some(Faction::Meridian)),
+        &glb("set_v3/meridian_rifleman.glb")
+    );
+    assert_eq!(
+        rifleman.model_for(Some(Faction::Veyran)),
+        &glb("set_v3/veyran_rifleman.glb")
+    );
+    // No entry for Neutral, and an owner that is no known side: the generic model.
+    assert_eq!(rifleman.model_for(Some(Faction::Neutral)), &rifleman.model);
+    assert_eq!(rifleman.model_for(None), &rifleman.model);
+    assert_eq!(rifleman.all_models().count(), 3);
+
+    // A role with no `models` is drawn with `model` whoever owns it.
+    let sniper = get("sniper");
+    assert!(sniper.models.is_empty());
+    assert_eq!(sniper.model, glb("set_v3/meridian_sniper.glb"));
+    for faction in [Some(Faction::Meridian), Some(Faction::Veyran), None] {
+        assert_eq!(sniper.model_for(faction), &sniper.model);
+    }
+
+    // Every entry of every role is for a faction the role has.
+    for def in defs.units() {
+        for faction in def.models.keys() {
+            assert!(def.factions.contains(faction), "{}: {faction:?}", def.id);
+        }
+    }
+}
+
+#[test]
+fn models_per_faction_are_checked_like_the_generic_model() {
+    // A faction entry may be a primitive too.
+    let defs = replace_units(
+        "icon: \"sniper\",",
+        "models: {Meridian: Shape(Cube)},\n            icon: \"sniper\",",
+    )
+    .unwrap();
+    let sniper = defs.unit("sniper").unwrap();
+    assert_eq!(
+        sniper.model_for(Some(Faction::Meridian)),
+        &sf_data::units::Model::Shape(sf_data::units::ModelShape::Cube)
+    );
+
+    // A file that is not there.
+    let e = replace_units(
+        "set_v3/veyran_rifleman.glb",
+        "set_v3/veyran_rifleman_v9.glb",
+    )
+    .unwrap_err();
+    assert!(
+        e.message.contains("models Veyran") && e.message.contains("does not exist"),
+        "{e}"
+    );
+    assert!(e.line.is_some(), "{e}");
+    // A path that leaves assets/.
+    let e = replace_units("set_v3/veyran_rifleman.glb", "../veyran_rifleman.glb").unwrap_err();
+    assert!(e.message.contains("not a plain relative path"), "{e}");
+    // A faction that does not exist is a parse error with a line.
+    let e = replace_units(
+        "Veyran: Glb(\"set_v3/veyran_scout.glb\")",
+        "Pirates: Shape(Cube)",
+    )
+    .unwrap_err();
+    assert!(e.message.contains("Pirates"), "{e}");
+    assert!(e.line.is_some(), "{e}");
+    // A faction the role does not have (the sniper is Meridian's only).
+    let e = replace_units(
+        "icon: \"sniper\",",
+        "models: {Veyran: Shape(Cube)},\n            icon: \"sniper\",",
+    )
+    .unwrap_err();
+    assert!(
+        e.message.contains("not one of the factions of this role"),
+        "{e}"
+    );
+    assert!(e.line.is_some(), "{e}");
+    // The same faction twice is refused, not silently resolved.
+    let e = replace_units(
+        "icon: \"sniper\",",
+        "models: {Meridian: Shape(Cube), Meridian: Shape(Cone)},\n            icon: \"sniper\",",
+    )
+    .unwrap_err();
+    assert!(e.message.contains("listed twice"), "{e}");
+    assert!(e.line.is_some(), "{e}");
+}
+
+/// The text with every `Glb("...")` turned into a primitive.
+fn strip_glbs(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("Glb(\"") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at..];
+        let end = after.find("\")").unwrap() + 2;
+        out.push_str("Shape(Cube)");
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A glTF model must lie in a pack of `config/models.ron`, or the renderer has
+/// no axes to read it with: refused when the file is there to ask.
+#[test]
+fn a_glb_model_must_lie_in_a_model_pack() {
+    let root = std::env::temp_dir().join(format!("sf_data_packs_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let _cleanup = RemoveOnDrop(root.clone());
+    std::fs::create_dir_all(root.join("config")).unwrap();
+    std::fs::create_dir_all(root.join("pack_a")).unwrap();
+    std::fs::create_dir_all(root.join("loose")).unwrap();
+    std::fs::write(root.join("pack_a/a.glb"), b"x").unwrap();
+    std::fs::write(root.join("loose/b.glb"), b"x").unwrap();
+    std::fs::write(
+        root.join("config/models.ron"),
+        r#"(packs: {"a": (dir: "pack_a", axes: (front: PlusX, up: PlusY, metres_per_unit: 1.0), lod_px: [60.0], models: [])})"#,
+    )
+    .unwrap();
+    let load = |generic: &str, faction: &str| {
+        // The other roles' files are not in the temporary assets: they become primitives.
+        let units = strip_glbs(&lf(EMBEDDED_UNITS).replacen(
+            "model: Glb(\"set_v3/meridian_sniper.glb\")",
+            "model: @G@, models: {Meridian: @F@}",
+            1,
+        ))
+        .replace("@G@", &format!("Glb(\"{generic}\")"))
+        .replace("@F@", &format!("Glb(\"{faction}\")"));
+        let (c, w) = (lf(EMBEDDED_CLASSES), lf(EMBEDDED_WEAPONS));
+        let sources = DefSources {
+            classes: DefFile {
+                name: "classes.ron",
+                text: &c,
+            },
+            weapons: DefFile {
+                name: "weapons.ron",
+                text: &w,
+            },
+            units: DefFile {
+                name: "units.ron",
+                text: &units,
+            },
+        };
+        UnitDefs::from_sources(&sources, Some(&root))
+    };
+    load("pack_a/a.glb", "pack_a/a.glb").unwrap();
+    let e = load("loose/b.glb", "pack_a/a.glb").unwrap_err();
+    assert!(
+        e.message.contains("is in no model pack") && e.message.contains("pack_a"),
+        "{e}"
+    );
+    let e = load("pack_a/a.glb", "loose/b.glb").unwrap_err();
+    assert!(
+        e.message.contains("models Meridian") && e.message.contains("is in no model pack"),
+        "{e}"
+    );
+}
+
+/// Removes a directory when dropped, also when the test panics.
+struct RemoveOnDrop(PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// WP3.6: `icon` is a name in the icon set, not a path. Only the spelling is
 /// checked here (the renderer loads the set and falls back to the base shape
 /// for a name it does not have), so an unknown name is not an error.

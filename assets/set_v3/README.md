@@ -28,10 +28,12 @@ this note **unchanged** (in Dutch).
 - **Checking.** `cargo run -p sf_asset_check -- assets/set_v3` prints, per
   file, whether it meets the art brief. The findings of this delivery are in the
   pull request that added it; the models were not changed.
-- **Not wired in yet.** The models are not referenced from `unit_defs.ron` or
-  `roster.rs`. When they are, note that the set has **per-faction models for one
-  role** (`meridian_rifleman` and `veyran_rifleman`): the unit definitions have
-  one `model` per role today, so they need a per-faction model field.
+- **Wired in (18-10-2026).** The 14 infantry models are referenced from
+  `assets/config/unit_defs.ron`: roles with a model per faction (rifleman,
+  rocket_trooper, engineer, scout) use the optional `models` map, the others
+  their single `model` (see `docs/rules/units.md`, "Models per faction").
+  Decor (ore stages, rocks, trees) and the wrecks are not unit roles and are not
+  referenced yet: placing them on maps is a later WP (phase 2.2/2.3, wrecks 5.5).
 
 ---
 

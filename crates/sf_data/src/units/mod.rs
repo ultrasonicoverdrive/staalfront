@@ -22,8 +22,9 @@
 //! with the file and the line (`assets/config/unit_defs.ron:41:16: unit
 //! "light_tank": unknown weapon "cannon2" (not in weapon_defs.ron)`): ids are
 //! unique snake_case names, every weapon, movement class, armor type, damage
-//! type and referenced unit exists, model and icon files exist, numbers are in
-//! range, and a structure has a footprint while a mobile unit has a movement
+//! type and referenced unit exists, model and icon files exist (a glTF model
+//! also lies in a pack of `config/models.ron`, for the generic `model` and for
+//! each faction's entry of `models`), numbers are in range, and a structure has a footprint while a mobile unit has a movement
 //! class and a speed. Numbers with decimals are read as thousandths
 //! ([`Decimal`]) and never become floats; durations must be whole ticks.
 //!
@@ -72,6 +73,10 @@ pub const CLASSES_FILE: &str = "unit_classes.ron";
 pub const WEAPONS_FILE: &str = "weapon_defs.ron";
 /// See [`CLASSES_FILE`].
 pub const UNITS_FILE: &str = "unit_defs.ron";
+/// The model packs file, relative to the assets directory. Only the `dir` of
+/// each pack is read here (to check that a role's model lies in a pack);
+/// `sf_render` reads the rest.
+pub const MODELS_FILE: &str = "config/models.ron";
 
 /// The shipped `unit_classes.ron`, compiled in.
 pub const EMBEDDED_CLASSES: &str = include_str!("../../../../assets/config/unit_classes.ron");
@@ -120,6 +125,26 @@ impl DefSources<'static> {
     }
 }
 
+/// The directories of the packs in `models.ron` under `assets`; `None` if the
+/// file is not there (a tool with a partial assets directory).
+fn pack_dirs(assets: &Path) -> Result<Option<Vec<String>>, DefError> {
+    #[derive(serde::Deserialize)]
+    struct Packs {
+        packs: std::collections::BTreeMap<String, Dir>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Dir {
+        dir: String,
+    }
+    let path = assets.join(MODELS_FILE);
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Ok(None);
+    };
+    let file: Packs = ron::from_str(&text)
+        .map_err(|e| DefError::file(path.display().to_string(), format!("cannot parse: {e}")))?;
+    Ok(Some(file.packs.into_values().map(|d| d.dir).collect()))
+}
+
 /// The validated definitions: tables, weapons and roles, and their conversion
 /// for the simulation.
 #[derive(Clone, Debug)]
@@ -149,11 +174,15 @@ impl UnitDefs {
 
         let classes = ClassTables::parse(classes_src)?;
         let (weapons, retired_weapons) = weapon::parse(weapons_src, &classes)?;
+        let packs = assets_dir.map(pack_dirs).transpose()?.flatten();
         let (units, retired_units) = unit::parse(
             units_src,
             &classes,
             &weapons,
-            unit::Assets { dir: assets_dir },
+            unit::Assets {
+                dir: assets_dir,
+                packs: packs.as_deref(),
+            },
         )?;
         let sim_weapons = sim::convert_weapons(&weapons, &classes)
             .map_err(|e| units_src.error(format!("internal: converting weapons: {e}")))?;

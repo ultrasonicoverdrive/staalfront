@@ -23,6 +23,14 @@
 // (the testpack_v1 models stand in until real art, WP11.6; roles without a
 // model use a primitive shape).
 //
+// Models (docs/rules/units.md): `model` is what a role is drawn with; the
+// optional `models: { Meridian: Glb(..), Veyran: Glb(..) }` gives a faction
+// its own look for the same role (a unit is drawn with its owner's entry, else
+// with `model`, else with a primitive by category). Presentation only: the
+// simulation never sees it. The infantry of art set v3 (assets/set_v3) is wired
+// this way; decor (trees, rocks, ore stages, wrecks) is not a unit role and is
+// not listed here.
+//
 // Strategic icons (WP3.6): `strategic_icon` is the base shape of the role's
 // category (Square structures, Circle infantry, Triangle vehicles, HalfCircle
 // vessels) and what it is drawn as without an `icon`; `icon` names the picture
@@ -141,8 +149,12 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["rifle"],
             model: Shape(Cone), strategic_icon: Circle,
+            models: {
+                Meridian: Glb("set_v3/meridian_rifleman.glb"),
+                Veyran: Glb("set_v3/veyran_rifleman.glb"),
+            },
             icon: "rifleman",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 13, id: "rocket_trooper", factions: [Meridian, Veyran], category: Infantry,
@@ -150,8 +162,12 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["rocket"],
             model: Shape(Cone), strategic_icon: Circle,
+            models: {
+                Meridian: Glb("set_v3/meridian_rocket_trooper.glb"),
+                Veyran: Glb("set_v3/veyran_rocket_trooper.glb"),
+            },
             icon: "rocket_trooper",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 14, id: "engineer", factions: [Meridian, Veyran], category: Infantry,
@@ -159,8 +175,12 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             flags: (can_capture: true, repairs_structures: true, places_charges: true),
             model: Shape(Cone), strategic_icon: Circle,
+            models: {
+                Meridian: Glb("set_v3/meridian_engineer.glb"),
+                Veyran: Glb("set_v3/veyran_engineer.glb"),
+            },
             icon: "engineer",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 15, id: "scout", factions: [Meridian, Veyran], category: Infantry,
@@ -168,7 +188,11 @@
             movement: "foot", speed: 1.3, turn_rate: 16, size: 0.4, sight: 8,
             weapons: ["pistol"],
             flags: (stealth_in_cover: true),
-            model: Glb("testpack_v1/models/verkenner.glb"), strategic_icon: Circle,
+            model: Shape(Cone), strategic_icon: Circle,
+            models: {
+                Meridian: Glb("set_v3/meridian_scout.glb"),
+                Veyran: Glb("set_v3/veyran_scout.glb"),
+            },
             icon: "scout",
             // placeholder: build_seconds, turn_rate, size. Sight 8 is from units.md.
         ),
@@ -177,18 +201,18 @@
             cost: 600, build_seconds: 20, hp: 40, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 9,
             weapons: ["long_rifle"],
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v3/meridian_sniper.glb"), strategic_icon: Circle,
             icon: "sniper",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 17, id: "medic", factions: [Veyran], category: Infantry,
             cost: 400, build_seconds: 12, hp: 40, armor: "infantry",
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             flags: (heal_radius: 2),
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v3/veyran_medic.glb"), strategic_icon: Circle,
             icon: "medic",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 18, id: "demolition_team", factions: [Veyran], category: Infantry,
@@ -196,9 +220,9 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.5, sight: 5,
             weapons: ["satchel_charge"],
             flags: (consumed_on_use: true),
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v3/veyran_demolition_team.glb"), strategic_icon: Circle,
             icon: "demolition_team",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 19, id: "light_tank", factions: [Meridian, Veyran], category: Vehicle,
@@ -270,9 +294,9 @@
             movement: "foot", speed: 0.7, turn_rate: 16, size: 0.4, sight: 5,
             weapons: ["carbine"],
             flags: (can_capture: true, repairs_structures: true, places_charges: true, builds: ["fortified_bunker"]),
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v3/veyran_combat_engineer.glb"), strategic_icon: Circle,
             icon: "combat_engineer",
-            // placeholder: build_seconds, turn_rate, size, sight, model.
+            // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
             kind: 27, id: "heavy_gun_team", factions: [Veyran], category: Infantry,
@@ -305,17 +329,17 @@
             kind: 30, id: "civilian", factions: [Neutral], category: Infantry,
             hp: 25, armor: "infantry",
             movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v3/neutral_civilian.glb"), strategic_icon: Circle,
             icon: "civilian",
-            // placeholder: turn_rate, size, sight, model.
+            // placeholder: turn_rate, size, sight.
         ),
         (
             kind: 31, id: "technician", factions: [Neutral], category: Infantry,
             hp: 25, armor: "infantry",
             movement: "foot", speed: 0.6, turn_rate: 16, size: 0.4, sight: 4,
-            model: Shape(Cone), strategic_icon: Circle,
+            model: Glb("set_v3/neutral_technician.glb"), strategic_icon: Circle,
             icon: "technician",
-            // placeholder: turn_rate, size, sight, model.
+            // placeholder: turn_rate, size, sight.
         ),
 
         // ---- Enemy-only and mission objects ------------------------------

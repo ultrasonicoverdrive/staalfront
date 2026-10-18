@@ -9,13 +9,14 @@
 //! * the **sandbox** is made from the unit definitions: an entity the
 //!   simulation made from its unit table (`EntityView::has_stats`) is a role,
 //!   and the [`Roster`] maps its kind number to the model or primitive and the
-//!   strategic icon the definitions give it. Placeholder wanderers added with
+//!   strategic icon the definitions give it (the model of the owner's faction
+//!   when the role has one per faction). Placeholder wanderers added with
 //!   `--units` have no role and keep the population's mapping.
 
 use sf_sim::EntityView;
 
 use crate::population::Population;
-use crate::roster::Roster;
+use crate::roster::{Roster, faction_of_owner};
 
 /// The mapping from entities to shapes of the scene being shown.
 pub enum Looks {
@@ -38,7 +39,10 @@ impl Looks {
             Looks::Crowd(population) => population.shape_of(v.kind),
             Looks::Roster { roster, crowd } => {
                 if v.has_stats {
-                    roster.shape_of(v.kind).unwrap_or(0)
+                    // The model of the owner's faction, if the role has one.
+                    roster
+                        .shape_for(v.kind, faction_of_owner(v.owner.0))
+                        .unwrap_or(0)
                 } else {
                     crowd.shape_of(v.kind)
                 }

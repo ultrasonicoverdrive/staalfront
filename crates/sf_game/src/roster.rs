@@ -33,10 +33,23 @@
 //! primitive it comes from, so a cone far away still gets fewer facets. A
 //! vehicle's glTF model keeps the size it was authored in.
 //!
+//! # One role, a model per faction
+//!
+//! A role has one generic `model` and may have a `models` entry per faction
+//! (set v3: `meridian_rifleman.glb` and `veyran_rifleman.glb` are one role).
+//! Which one a unit is drawn with follows its **owner**: [`faction_of_owner`]
+//! maps the owner number to a faction (the sandbox's seats), and
+//! [`Roster::look_for`] picks the faction's entry if the role has one that
+//! loaded, else the generic model, else (the generic model is a glTF file that
+//! does not load, or models are off) the primitive of what the role is. This
+//! is presentation only: the simulation never sees a model, so no checksum
+//! depends on it.
+//!
 //! The shape numbers are: the style's own placeholder shapes first, then the
-//! size variants in order of the role numbers, then the glTF models in the same
-//! order. Roles are visited by ascending kind number, so the numbers do not
-//! depend on the order of the file.
+//! size variants in order of the role numbers (and, within a role, the generic
+//! look before the factions'), then the glTF models in the same order. Roles
+//! are visited by ascending kind number, so the numbers do not depend on the
+//! order of the file.
 //!
 //! Entities the simulation did not make from the definitions (the placeholder
 //! crowd of `--units`) have no role; they keep the first demo's mapping
@@ -45,13 +58,17 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use sf_data::units::{Category, IconShape as DataIcon, Model, ModelShape, UnitDefs};
+use sf_data::units::{
+    Category, Faction, IconShape as DataIcon, Model, ModelShape, UnitDef, UnitDefs,
+};
 use sf_math::render_bridge::{METRES_PER_CELL, cells_to_metres};
 use sf_render::glb::{LoadedPack, MODELS_CONFIG, load_pack_model};
 use sf_render::scene::MeshKind;
 use sf_render::style::Shape;
 use sf_render::{IconAtlas, IconId, IconShape, ModelSet, Style};
 use sf_sim::Kind;
+
+use crate::sandbox;
 
 /// Height of a placeholder structure in metres: this plus one metre per cell
 /// of its shorter side (so a 1 x 1 tower is 4 m, a 4 x 4 centre 7 m).
@@ -62,6 +79,10 @@ const STRUCTURE_BASE_HEIGHT: f32 = 3.0;
 /// different icons that draw the same model share its meshes: one more shape
 /// of the style, the same chain (so no more draw calls and no more GPU memory).
 type ModelKey = (String, Option<(u8, u8)>);
+
+/// Which look: a role, and the faction whose own model it is (`None` = the
+/// role's generic `model`).
+type LookKey = (u16, Option<Faction>);
 
 /// What a role is drawn with, before the shape numbers are fixed.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -92,7 +113,11 @@ pub struct RoleLook {
 /// The look of every role of a set of definitions, ready to be put on a
 /// [`Style`] and a model set. See the module documentation.
 pub struct Roster {
+    /// The generic look of every role: its `model`.
     looks: BTreeMap<u16, RoleLook>,
+    /// The looks that a faction's `models` entry gives a role, where it has one
+    /// that could be used.
+    faction_looks: BTreeMap<(u16, Faction), RoleLook>,
     /// The size variants appended after the style's own shapes, with the shape
     /// whose level-of-detail chain each keeps.
     variants: Vec<(u8, Shape)>,
@@ -100,6 +125,18 @@ pub struct Roster {
     pack: Option<LoadedPack>,
     /// Roles whose model could not be used and fell back to a primitive.
     pub warnings: Vec<String>,
+}
+
+/// The faction an owner number stands for: the seats of the sandbox
+/// ([`sandbox::MERIDIAN`], [`sandbox::VEYRAN`], [`sandbox::NEUTRAL`]); `None`
+/// for any other number, which is drawn with the generic model of its role.
+pub fn faction_of_owner(owner: u8) -> Option<Faction> {
+    match owner {
+        sandbox::MERIDIAN => Some(Faction::Meridian),
+        sandbox::VEYRAN => Some(Faction::Veyran),
+        sandbox::NEUTRAL => Some(Faction::Neutral),
+        _ => None,
+    }
 }
 
 fn icon_of(icon: DataIcon) -> IconShape {
@@ -134,6 +171,108 @@ fn mm(metres: f32) -> i32 {
     (metres * 1000.0).round() as i32
 }
 
+/// What `Roster::build` knows about the role whose models it is resolving.
+struct RoleCtx<'a> {
+    def: &'a UnitDef,
+    /// The role's `size`, for a primitive.
+    size: sf_math::Fx,
+    footprint: Option<(u8, u8)>,
+    /// The base shape of the role's strategic icon.
+    shape: IconShape,
+    /// The role's strategic icon.
+    icon: IconId,
+}
+
+/// The glTF files of a build: each loaded once, with the model entries (a
+/// loaded model and an icon) that the roles' shapes will be.
+struct Loader<'a> {
+    assets: &'a Path,
+    models_ron: &'a str,
+    use_models: bool,
+    /// glTF models in the order they are first needed, each file (at a
+    /// footprint) once.
+    models: Vec<LoadedPack>,
+    model_index: BTreeMap<ModelKey, Option<usize>>,
+    /// The (model, icon) pairs the roles draw: the model *entries*, which
+    /// become shapes.
+    entries: Vec<(usize, IconId)>,
+    warnings: Vec<String>,
+}
+
+impl Loader<'_> {
+    /// What `model` makes of the role: a primitive of the role's size, or its
+    /// glTF model. `None` for a glTF model that cannot be used (models are
+    /// off, or the file does not load: a warning in that case) and the caller
+    /// picks the next fallback. `faction` is only for the warning.
+    fn source(
+        &mut self,
+        role: &RoleCtx<'_>,
+        faction: Option<Faction>,
+        model: &Model,
+        base: &Style,
+    ) -> Option<Source> {
+        let path = match model {
+            Model::Shape(shape) => {
+                return Some(placeholder(
+                    role.size,
+                    role.footprint,
+                    mesh_of(*shape),
+                    role.icon,
+                    base,
+                ));
+            }
+            Model::Glb(path) if self.use_models => path,
+            Model::Glb(_) => return None,
+        };
+        // A structure's model is fitted to its footprint, so the same file
+        // under two footprints is two models.
+        let fit = role.footprint.map(|(w, h)| {
+            (
+                f32::from(w) * METRES_PER_CELL,
+                f32::from(h) * METRES_PER_CELL,
+            )
+        });
+        let key = (path.clone(), role.footprint);
+        let found = match self.model_index.get(&key) {
+            Some(found) => *found,
+            None => {
+                let loaded =
+                    load_pack_model(self.models_ron, path, role.shape.into(), self.assets, fit);
+                let found = match loaded {
+                    Ok(one) => {
+                        self.models.push(one);
+                        Some(self.models.len() - 1)
+                    }
+                    Err(e) => {
+                        let who = match faction {
+                            Some(f) => format!("{} ({f:?})", role.def.id),
+                            None => role.def.id.clone(),
+                        };
+                        let then = if faction.is_some() {
+                            "drawn with its generic model"
+                        } else {
+                            "drawn as a primitive"
+                        };
+                        self.warnings.push(format!("{who}: {e}; {then}"));
+                        None
+                    }
+                };
+                self.model_index.insert(key, found);
+                found
+            }
+        }?;
+        let entry = self
+            .entries
+            .iter()
+            .position(|e| *e == (found, role.icon))
+            .unwrap_or_else(|| {
+                self.entries.push((found, role.icon));
+                self.entries.len() - 1
+            });
+        Some(Source::Model(entry))
+    }
+}
+
 impl Roster {
     /// The looks of all roles of `defs` on `base`, the style of the
     /// placeholder shapes (cube, cylinder and cone at vehicle size).
@@ -153,14 +292,17 @@ impl Roster {
         models_ron: &str,
         use_models: bool,
     ) -> Result<Roster, String> {
-        let mut warnings = Vec::new();
-        // glTF models in the order they are first needed, each file (at a
-        // footprint) once; and the (model, icon) pairs the roles draw, the
-        // model *entries*, which become shapes.
-        let mut models: Vec<LoadedPack> = Vec::new();
-        let mut model_index: BTreeMap<ModelKey, Option<usize>> = BTreeMap::new();
-        let mut entries: Vec<(usize, IconId)> = Vec::new();
-        let mut sources: BTreeMap<u16, Source> = BTreeMap::new();
+        let mut loader = Loader {
+            assets,
+            models_ron,
+            use_models,
+            models: Vec::new(),
+            model_index: BTreeMap::new(),
+            entries: Vec::new(),
+            warnings: Vec::new(),
+        };
+        // What every role (and every faction's entry of a role) is drawn with.
+        let mut sources: BTreeMap<LookKey, Source> = BTreeMap::new();
 
         for def in defs.units() {
             let sim = defs
@@ -171,65 +313,48 @@ impl Roster {
             if let Some(name) = &def.icon
                 && icons.lookup(name).is_none()
             {
-                warnings.push(format!(
+                loader.warnings.push(format!(
                     "{}: icon \"{name}\" is not in the icon set; drawn as its base shape",
                     def.id
                 ));
             }
-            let mut mesh = None;
-            match &def.model {
-                Model::Shape(shape) => mesh = Some(mesh_of(*shape)),
-                Model::Glb(path) if use_models => {
-                    // A structure's model is fitted to its footprint, so the
-                    // same file under two footprints is two models.
-                    let fit = sim.footprint.map(|(w, h)| {
-                        (
-                            f32::from(w) * METRES_PER_CELL,
-                            f32::from(h) * METRES_PER_CELL,
-                        )
-                    });
-                    let key = (path.clone(), sim.footprint);
-                    let found = *model_index.entry(key).or_insert_with(|| {
-                        match load_pack_model(models_ron, path, shape.into(), assets, fit) {
-                            Ok(one) => {
-                                models.push(one);
-                                Some(models.len() - 1)
-                            }
-                            Err(e) => {
-                                warnings.push(format!("{}: {e}; drawn as a primitive", def.id));
-                                None
-                            }
-                        }
-                    });
-                    match found {
-                        Some(i) => {
-                            let entry = entries
-                                .iter()
-                                .position(|e| *e == (i, icon))
-                                .unwrap_or_else(|| {
-                                    entries.push((i, icon));
-                                    entries.len() - 1
-                                });
-                            sources.insert(def.kind, Source::Model(entry));
-                        }
-                        None => mesh = Some(mesh_of(fallback_shape(def.category))),
-                    }
+            let role = RoleCtx {
+                def,
+                size: sim.size,
+                footprint: sim.footprint,
+                shape,
+                icon,
+            };
+            // The generic model: always a look. What cannot be drawn as a
+            // model is the primitive of what the role is.
+            let generic = loader
+                .source(&role, None, &def.model, base)
+                .unwrap_or_else(|| {
+                    let mesh = mesh_of(fallback_shape(def.category));
+                    placeholder(sim.size, sim.footprint, mesh, icon, base)
+                });
+            sources.insert((def.kind, None), generic);
+            // A faction's own model: a look only if it can be used; otherwise
+            // that faction's units are drawn with the generic one.
+            for (faction, model) in &def.models {
+                if let Some(source) = loader.source(&role, Some(*faction), model, base) {
+                    sources.insert((def.kind, Some(*faction)), source);
                 }
-                Model::Glb(_) => mesh = Some(mesh_of(fallback_shape(def.category))),
-            }
-            if let Some(mesh) = mesh {
-                sources.insert(
-                    def.kind,
-                    placeholder(sim.size, sim.footprint, mesh, icon, base),
-                );
             }
         }
+        let Loader {
+            models,
+            entries,
+            warnings,
+            ..
+        } = loader;
 
         // Fix the numbers: the style's shapes, the variants, the models.
         let mut variants: Vec<(u8, Shape)> = Vec::new();
         let mut variant_at: BTreeMap<Source, usize> = BTreeMap::new();
-        let mut kinds_by_source: Vec<(u16, Source)> = sources.into_iter().collect();
-        kinds_by_source.sort_by_key(|(kind, _)| *kind);
+        // Ascending by kind and then faction, so the numbers do not depend on
+        // the order of the file.
+        let kinds_by_source: Vec<(LookKey, Source)> = sources.into_iter().collect();
         for (_, source) in &kinds_by_source {
             if let Source::Placeholder {
                 base: chain,
@@ -259,7 +384,8 @@ impl Roster {
             ));
         }
         let mut looks = BTreeMap::new();
-        for (kind, source) in kinds_by_source {
+        let mut faction_looks = BTreeMap::new();
+        for ((kind, faction), source) in kinds_by_source {
             let def = defs
                 .unit_by_kind(kind)
                 .ok_or_else(|| format!("kind {kind}: no definition"))?;
@@ -267,14 +393,19 @@ impl Roster {
                 Source::Placeholder { .. } => (base_count + variant_at[&source], false),
                 Source::Model(i) => (model_base + i, true),
             };
-            looks.insert(
-                kind,
-                RoleLook {
-                    id: def.id.clone(),
-                    shape: shape as u8,
-                    model,
-                },
-            );
+            let look = RoleLook {
+                id: def.id.clone(),
+                shape: shape as u8,
+                model,
+            };
+            match faction {
+                None => {
+                    looks.insert(kind, look);
+                }
+                Some(faction) => {
+                    faction_looks.insert((kind, faction), look);
+                }
+            }
         }
 
         // The models as one pack: the loaded models in order, then one shape per
@@ -300,21 +431,45 @@ impl Roster {
             });
         Ok(Roster {
             looks,
+            faction_looks,
             variants,
             pack,
             warnings,
         })
     }
 
-    /// The look of the role with this kind number.
+    /// The generic look of the role with this kind number (its `model`).
     pub fn look(&self, kind: Kind) -> Option<&RoleLook> {
         self.looks.get(&kind.0)
     }
 
-    /// The shape an entity of this kind is drawn as; `None` for a number that
-    /// is no role.
+    /// The look of a unit of this role owned by `faction`: the faction's own
+    /// model if the role has one that could be used, else the generic look.
+    /// `None` (an owner that is no known side) gets the generic look.
+    pub fn look_for(&self, kind: Kind, faction: Option<Faction>) -> Option<&RoleLook> {
+        faction
+            .and_then(|f| self.faction_looks.get(&(kind.0, f)))
+            .or_else(|| self.look(kind))
+    }
+
+    /// The shape an entity of this kind is drawn as, whoever owns it; `None`
+    /// for a number that is no role.
     pub fn shape_of(&self, kind: Kind) -> Option<u8> {
         self.look(kind).map(|l| l.shape)
+    }
+
+    /// The shape of a unit of this kind owned by `faction`
+    /// ([`Roster::look_for`]).
+    pub fn shape_for(&self, kind: Kind, faction: Option<Faction>) -> Option<u8> {
+        self.look_for(kind, faction).map(|l| l.shape)
+    }
+
+    /// The looks that factions' own models give roles, ascending by kind and
+    /// then faction.
+    pub fn faction_looks(&self) -> impl Iterator<Item = (Kind, Faction, &RoleLook)> {
+        self.faction_looks
+            .iter()
+            .map(|(&(k, f), l)| (Kind(k), f, l))
     }
 
     /// The id of the role (`light_tank`).
@@ -533,7 +688,7 @@ mod tests {
         assert_eq!(mesh("light_tank"), MeshKind::Cone);
         assert_eq!(mesh("power_plant"), MeshKind::Cube);
         assert_eq!(
-            mesh("scout"),
+            mesh("sniper"),
             MeshKind::Cylinder,
             "infantry with a glb file"
         );
@@ -557,12 +712,10 @@ mod tests {
         let glb_files = defs
             .units()
             .iter()
-            .filter(|d| matches!(d.model, Model::Glb(_)))
-            .map(|d| {
-                (
-                    format!("{:?}", d.model),
-                    d.footprint.map(|f| (f.width, f.height)),
-                )
+            .flat_map(|d| {
+                d.all_models()
+                    .filter(|m| matches!(m, Model::Glb(_)))
+                    .map(|m| (format!("{m:?}"), d.footprint.map(|f| (f.width, f.height))))
             })
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
@@ -575,7 +728,8 @@ mod tests {
             roster
                 .warnings
                 .iter()
-                .all(|w| w.contains("drawn as a primitive"))
+                .all(|w| w.contains("drawn as a primitive")
+                    || w.contains("drawn with its generic model"))
         );
     }
 
@@ -765,6 +919,152 @@ mod tests {
         let (_, b) = built(true);
         let numbers = |r: &Roster| r.looks().map(|(k, l)| (k.0, l.shape)).collect::<Vec<_>>();
         assert_eq!(numbers(&a), numbers(&b));
+    }
+
+    fn shape_in(roster: &Roster, defs: &UnitDefs, id: &str, f: Option<Faction>) -> u8 {
+        roster
+            .shape_for(Kind(defs.kind_of(id).unwrap()), f)
+            .unwrap_or_else(|| panic!("{id}"))
+    }
+
+    /// The meshes a shape is drawn with (what makes two models different).
+    fn meshes_of(roster: &Roster, shape: u8) -> Vec<usize> {
+        let set = roster.model_set(&roster.style(&base())).unwrap();
+        set.model(shape).meshes().map(|m| m.index()).collect()
+    }
+
+    /// Set v3 is wired in: a role with a model per faction is drawn with the
+    /// model of its owner's faction, and the others with the one they have.
+    #[test]
+    fn a_unit_is_drawn_with_the_model_of_its_owners_faction() {
+        let (defs, roster) = built(true);
+        assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
+        let (m, v, n) = (
+            Some(Faction::Meridian),
+            Some(Faction::Veyran),
+            Some(Faction::Neutral),
+        );
+        for id in ["rifleman", "rocket_trooper", "engineer", "scout"] {
+            let (sm, sv) = (
+                shape_in(&roster, &defs, id, m),
+                shape_in(&roster, &defs, id, v),
+            );
+            assert_ne!(sm, sv, "{id}: one model per faction");
+            let kind = Kind(defs.kind_of(id).unwrap());
+            assert!(roster.look_for(kind, m).unwrap().model, "{id}");
+            assert!(roster.look_for(kind, v).unwrap().model, "{id}");
+            assert_ne!(meshes_of(&roster, sm), meshes_of(&roster, sv), "{id}");
+            // Neutral and an owner that is no side: the generic model, a primitive.
+            let generic = roster.shape_of(kind).unwrap();
+            assert_eq!(shape_in(&roster, &defs, id, n), generic, "{id}");
+            assert_eq!(shape_in(&roster, &defs, id, None), generic, "{id}");
+            assert!(!roster.look(kind).unwrap().model, "{id}");
+        }
+        // A role of one faction has one model, whoever asks.
+        for id in [
+            "sniper",
+            "medic",
+            "combat_engineer",
+            "demolition_team",
+            "civilian",
+            "technician",
+        ] {
+            let kind = Kind(defs.kind_of(id).unwrap());
+            let own = roster.shape_of(kind).unwrap();
+            assert!(roster.look(kind).unwrap().model, "{id}: a glTF model");
+            for f in [m, v, n, None] {
+                assert_eq!(shape_in(&roster, &defs, id, f), own, "{id}");
+            }
+        }
+        // The vehicles and the buildings did not change.
+        let tank = shape_in(&roster, &defs, "light_tank", m);
+        assert_eq!(shape_in(&roster, &defs, "light_tank", v), tank);
+        // Every faction look is a role of the definitions, in the style, with
+        // the icon of the role.
+        let style = full_style(&roster);
+        let atlas = icons();
+        let mut seen = 0;
+        for (kind, faction, look) in roster.faction_looks() {
+            let def = defs.unit_by_kind(kind.0).unwrap();
+            assert!(def.factions.contains(&faction), "{}", def.id);
+            assert!(usize::from(look.shape) < style.shape_count());
+            let want = atlas.resolve(def.icon.as_deref(), icon_of(def.strategic_icon));
+            assert_eq!(style.shape(look.shape).icon, want, "{}", def.id);
+            seen += 1;
+        }
+        assert_eq!(seen, 8, "four roles, two factions");
+    }
+
+    /// With models off, or a faction's file missing, its units get the generic
+    /// look; a file that loads is still used by the other faction.
+    #[test]
+    fn a_faction_model_that_is_missing_falls_back_to_the_generic_one() {
+        let (defs, off) = built(false);
+        assert_eq!(off.faction_looks().count(), 0);
+        let rifleman = Kind(defs.kind_of("rifleman").unwrap());
+        for f in [Faction::Meridian, Faction::Veyran] {
+            assert_eq!(
+                off.shape_for(rifleman, Some(f)),
+                off.shape_of(rifleman),
+                "models off"
+            );
+        }
+
+        let dir = std::env::temp_dir().join(format!("sf_roster_faction_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("set_v3")).unwrap();
+        std::fs::copy(
+            assets().join("set_v3/veyran_rifleman.glb"),
+            dir.join("set_v3/veyran_rifleman.glb"),
+        )
+        .unwrap();
+        let roster = Roster::build(&defs, &base(), &icons(), &dir, &models_ron(), true);
+        std::fs::remove_dir_all(&dir).ok();
+        let roster = roster.unwrap();
+        let warning = roster
+            .warnings
+            .iter()
+            .find(|w| w.starts_with("rifleman (Meridian)"))
+            .unwrap_or_else(|| panic!("{:?}", roster.warnings));
+        assert!(
+            warning.contains("drawn with its generic model"),
+            "{warning}"
+        );
+        let generic = roster.shape_of(rifleman).unwrap();
+        assert_eq!(
+            roster.shape_for(rifleman, Some(Faction::Meridian)),
+            Some(generic)
+        );
+        let veyran = roster.look_for(rifleman, Some(Faction::Veyran)).unwrap();
+        assert!(veyran.model);
+        assert_ne!(veyran.shape, generic);
+        // A role whose only model is missing is a primitive of what it is.
+        let sniper = roster.look(Kind(defs.kind_of("sniper").unwrap())).unwrap();
+        assert!(!sniper.model);
+    }
+
+    /// The owner numbers of the sandbox are the factions it gives them, so
+    /// every unit it places is drawn with a model of a faction its role has.
+    #[test]
+    fn the_owners_of_the_sandbox_map_to_the_factions_it_gave_them() {
+        use sf_data::map::generate::generate_cells;
+        let defs = UnitDefs::embedded();
+        let map = generate_cells(256, 256, 1);
+        let config = sf_sim::WorldConfig::new(1).with_map_size(256, 256);
+        let mut world = crate::playfield::make_world(config, &map)
+            .with_units(sf_bridge::unit_table(&defs).unwrap())
+            .unwrap();
+        crate::sandbox::schedule(&mut world, &defs);
+        world.step();
+        let mut owners = std::collections::BTreeSet::new();
+        for v in world.snapshot().iter() {
+            let faction = faction_of_owner(v.owner.0).expect("a sandbox seat");
+            let def = defs.unit_by_kind(v.kind.0).unwrap();
+            assert!(def.factions.contains(&faction), "{} of {faction:?}", def.id);
+            owners.insert(v.owner.0);
+        }
+        assert_eq!(owners.len(), 3);
+        assert_eq!(faction_of_owner(3), None);
+        assert_eq!(faction_of_owner(255), None);
     }
 
     #[test]
