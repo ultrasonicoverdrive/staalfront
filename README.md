@@ -23,8 +23,9 @@ scripts/check-sim-determinism.sh   # rejects f32/f64/HashMap/HashSet in sf_sim
 `cargo run -p sf_game` starts the sandbox: units and structures of three sides on a
 generated map. Every key and button is an action in `assets/config/input.ron` and can be
 rebound there (the file reloads while the game runs in debug builds). They work at every
-zoom, on models and on strategic icons alike. Rules: `docs/rules/selection.md` and
-`docs/rules/orders.md`.
+zoom, on models and on strategic icons alike. Rules: `docs/rules/selection.md`,
+`docs/rules/orders.md` and `docs/rules/cursor.md`. **The cursor shows what a click will do**
+(and a right-click does exactly that).
 
 | Input | Does |
 |---|---|
@@ -39,8 +40,11 @@ zoom, on models and on strategic icons alike. Rules: `docs/rules/selection.md` a
 | click on an enemy or neutral unit | inspect it (ring and health bar; it never gets orders) |
 | ctrl + 1 .. 9 | assign the selection to a group |
 | 1 .. 9 | select that group; twice quickly also centres the camera on it |
-| right-click | move the selection there; with shift, queue the move |
+| right-click | the order the cursor shows: **move** on the ground, **attack** on an enemy (if a selected unit has a weapon), **guard** on one of your own; nothing on ground the units cannot enter (the cursor is a no-go sign) |
+| shift + right-click | the same order, queued behind the units' orders |
+| F + right-click (hold F) | attack-move: go there and fight on the way (needs a unit with a weapon; A is camera pan left) |
 | C, X, H | stop, scatter, hold position |
+| mouse at a screen edge | scrolls; the cursor shows the direction (8 arrows) |
 | F1, F11, Esc | debug panels, fullscreen, quit |
 
 ## Engine demo and benchmark (M0)

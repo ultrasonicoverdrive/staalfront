@@ -43,7 +43,10 @@
 //! the camera), a click on an enemy to inspect it; the feedback is in [`selection_view`].
 //! Selected units take orders (WP3.4, [`commands`]): right-click moves, shift-right-click
 //! queues, C stops, X scatters, H holds position (all rebindable actions of
-//! `assets/config/input.ron`).
+//! `assets/config/input.ron`). The cursor shows what a click will do (WP3.5,
+//! [`cursor`]): right-click gives exactly the order of the cursor, so it moves on the
+//! ground, attacks an enemy, guards one of your own, attack-moves with F held, and does
+//! nothing where the units cannot go.
 //! `--crowd` brings back the old scene of 2,000 placeholder wanderers, `--units
 //! N` adds N of them to the sandbox, `--models none` draws the roles as shapes.
 //! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).
@@ -93,6 +96,7 @@
 pub mod args;
 pub mod bench;
 pub mod commands;
+pub mod cursor;
 pub mod debug_ui;
 pub mod hud;
 pub mod looks;

@@ -17,6 +17,8 @@
 use std::collections::BTreeMap;
 use std::f64::consts::FRAC_1_SQRT_2;
 
+pub mod cursors;
+
 /// Side of an icon image in texels.
 pub const SIDE: usize = 64;
 
@@ -443,7 +445,7 @@ pub const ALIASES: &[(&str, &str)] = &[
     ("civilian", "base_circle"),
 ];
 
-fn coverage(sd: f64) -> f64 {
+pub(crate) fn coverage(sd: f64) -> f64 {
     (0.5 - sd).clamp(0.0, 1.0)
 }
 
@@ -471,11 +473,16 @@ pub fn render(spec: IconSpec) -> Vec<u8> {
     out
 }
 
-/// A PNG file (8-bit RGBA) of the pixels.
+/// A PNG file (8-bit RGBA) of the pixels of an icon.
 pub fn encode_png(rgba: &[u8]) -> Vec<u8> {
+    encode_png_sized(rgba, SIDE as u32)
+}
+
+/// A PNG file (8-bit RGBA) of a square image `side` texels across.
+pub fn encode_png_sized(rgba: &[u8], side: u32) -> Vec<u8> {
     let mut bytes = Vec::new();
     {
-        let mut encoder = png::Encoder::new(&mut bytes, SIDE as u32, SIDE as u32);
+        let mut encoder = png::Encoder::new(&mut bytes, side, side);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().expect("PNG header");
@@ -485,19 +492,24 @@ pub fn encode_png(rgba: &[u8]) -> Vec<u8> {
     bytes
 }
 
-/// The pixels of an 8-bit RGBA PNG.
+/// The pixels of an 8-bit RGBA PNG of an icon.
 pub fn decode_png(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    decode_png_sized(bytes, SIDE as u32)
+}
+
+/// The pixels of an 8-bit RGBA PNG that must be `side` x `side`.
+pub fn decode_png_sized(bytes: &[u8], side: u32) -> Result<Vec<u8>, String> {
     let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
         .read_info()
         .map_err(|e| e.to_string())?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or("PNG too large")?];
     let info = reader.next_frame(&mut buf).map_err(|e| e.to_string())?;
-    if (info.width, info.height) != (SIDE as u32, SIDE as u32)
+    if (info.width, info.height) != (side, side)
         || info.color_type != png::ColorType::Rgba
         || info.bit_depth != png::BitDepth::Eight
     {
         return Err(format!(
-            "expected a {SIDE}x{SIDE} 8-bit RGBA PNG, got {}x{} {:?}",
+            "expected a {side}x{side} 8-bit RGBA PNG, got {}x{} {:?}",
             info.width, info.height, info.color_type
         ));
     }

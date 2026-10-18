@@ -31,6 +31,7 @@ use sf_sim::{EntityView, World, WorldConfig};
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::commands;
+use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers, Passability};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
@@ -232,6 +233,21 @@ pub struct Runner {
     selection_view: SelectionView,
     /// Scratch for what a drag rectangle or a double-click finds.
     hits: Vec<UnitId>,
+    /// What is under the mouse this frame: the entity, the ground point and
+    /// the screen edges (WP3.5). One value feeds both the cursor and the
+    /// right-click, so they cannot disagree.
+    hover: Hover,
+    /// The cursor the mouse showed in the last frame.
+    cursor_kind: CursorKind,
+    /// Which cells each movement class may enter, for the no-go cursor.
+    passability: Passability,
+    /// The software cursors; `None` in the crowd scene (the engine demo and
+    /// its benchmark show no game cursor) and when the pictures could not be
+    /// read (the operating system's cursor stays).
+    cursor_art: Option<CursorArt>,
+    /// The operating system's cursor is hidden right now (only ever while
+    /// the software cursor is drawn).
+    os_cursor_hidden: bool,
     /// Set when the renderer could not start or a frame failed; `main` then
     /// exits with a non-zero code.
     failed: Arc<AtomicBool>,
@@ -331,6 +347,17 @@ impl Runner {
         if let Some((x, z)) = options.focus {
             camera.set_focus(DVec2::new(x, z));
         }
+        let assets_root = sf_engine::AssetRoot::resolve().root().to_path_buf();
+        let mut hud = Hud::new(&assets_root);
+        // The game cursor belongs to the sandbox, the scene with selection and
+        // orders; the benchmark and the engine demo's crowd show none.
+        let cursor_art = (options.scene == Scene::Sandbox && options.bench.is_none())
+            .then(|| CursorArt::load(&mut hud, &assets_root.join("ui/cursors")))
+            .and_then(|loaded| {
+                loaded
+                    .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
+                    .ok()
+            });
         Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -343,7 +370,7 @@ impl Runner {
             audio: None,
             ra_play_error: None,
             camera,
-            hud: Hud::new(sf_engine::AssetRoot::resolve().root()),
+            hud,
             fps_shown: 0,
             map,
             ground,
@@ -380,6 +407,11 @@ impl Runner {
             pointer: Pointer::default(),
             selection_view: SelectionView::default(),
             hits: Vec::new(),
+            hover: Hover::default(),
+            cursor_kind: CursorKind::Select,
+            passability: Passability::load(&assets_root),
+            cursor_art,
+            os_cursor_hidden: false,
             failed,
         }
     }
@@ -571,6 +603,53 @@ impl Runner {
         }
     }
 
+    /// What the mouse is over this frame, the cursor that goes with it and
+    /// its drawing (WP3.5, [`crate::cursor`]). `at` is the mouse in pixels
+    /// (`None` over the UI, an F1 panel or outside the window): the operating
+    /// system's cursor stays visible there and the software cursor is not
+    /// drawn. The hover is also what a right-click orders from
+    /// ([`Runner::handle_orders`]), so the picture and the click share one
+    /// decision.
+    fn update_cursor(&mut self, ctx: &Context, at: Option<(f32, f32)>) {
+        if self.bench.is_some() {
+            return;
+        }
+        self.hover = Hover {
+            entity: self
+                .hovered
+                .as_ref()
+                .map(|p| selection_view::entity_of(p.id)),
+            point: at
+                .and_then(|(x, y)| {
+                    self.camera
+                        .ground_point(DVec2::new(f64::from(x), f64::from(y)))
+                })
+                .map(|g| vec2_metres_to_cells([g.x as f32, g.y as f32])),
+            edges: ctx.actions().edges(),
+        };
+        self.cursor_kind = cursor::cursor_context(
+            &self.world,
+            &self.selection,
+            &self.hover,
+            Modifiers::from_actions(ctx.actions()),
+            &self.passability,
+        );
+        let drawn = match (&self.cursor_art, at) {
+            (Some(art), Some(pos)) => {
+                self.hud
+                    .draw_cursor(art.set(), art.sprite_of(self.cursor_kind), pos);
+                true
+            }
+            _ => false,
+        };
+        // The system cursor is hidden only while ours is drawn over the game
+        // view; over a panel, the minimap or outside the window it is back.
+        if drawn != self.os_cursor_hidden {
+            ctx.window().set_cursor_visible(!drawn);
+            self.os_cursor_hidden = drawn;
+        }
+    }
+
     /// The keys and clicks that give orders (WP3.4, [`crate::commands`]):
     /// move, queue, stop, scatter and hold position, to the selected units
     /// that can take them. Which key or button each is lives in
@@ -581,16 +660,20 @@ impl Runner {
         let actions = ctx.actions();
         let queued = actions.held(Action::OrderQueue);
         let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
+        // A right-click gives the order the cursor shows (WP3.5): the same
+        // `cursor_context` decides both. Over the UI there is no hover, so
+        // nothing is ordered.
         if actions.pressed(Action::OrderMove)
             && !ui_busy
-            && let Some((x, y)) = ctx.input().cursor()
-            && let Some(ground) = self.camera.ground_point(DVec2::new(x, y))
+            && let Some(command) = commands::right_click(
+                &self.world,
+                &self.selection,
+                &self.hover,
+                Modifiers::from_actions(actions),
+                &self.passability,
+            )
         {
-            let point = vec2_metres_to_cells([ground.x as f32, ground.y as f32]);
-            let ids = self.selection.orderable(&self.world);
-            if let Some(command) = commands::move_command(&ids, point, queued) {
-                commands::issue(&mut self.world, command);
-            }
+            commands::issue(&mut self.world, command);
         }
         if actions.pressed(Action::OrderStop) {
             let ids = self.selection.orderable(&self.world);
@@ -1315,6 +1398,7 @@ impl App for Runner {
             });
             self.build_units(alpha, cursor);
             self.mark_selection();
+            self.update_cursor(ctx, cursor);
             let started = Instant::now();
             if let Some(renderer) = &mut self.renderer {
                 renderer.upload_units(&self.instancer);
@@ -1456,7 +1540,11 @@ impl App for Runner {
         println!("asset changed: {}", path.display());
     }
 
-    fn on_exit(&mut self, _ctx: &mut Context) {
+    fn on_exit(&mut self, ctx: &mut Context) {
+        if self.os_cursor_hidden {
+            ctx.window().set_cursor_visible(true);
+            self.os_cursor_hidden = false;
+        }
         self.renderer = None; // release the surface before the window goes
         println!("exit after {} ticks", self.total_ticks);
         // Summary for the stress test (software rendering: no fps claim).

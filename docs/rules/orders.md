@@ -189,8 +189,9 @@ there, and the runner asks the action, never a key.
 
 | Action | Default | Command |
 |---|---|---|
-| `OrderMove` | right-click on the ground | `Order::Move` to the point for the selection |
-| `OrderQueue` | shift, held | queues the move, scatter or hold instead of replacing the orders |
+| `OrderMove` | right-click | the order the cursor shows (WP3.5, `docs/rules/cursor.md`): `Order::Move` on the ground, `Attack` on an enemy, `Guard` on one of your own, `AttackMove` with the modifier |
+| `OrderQueue` | shift, held | queues the order, scatter or hold instead of replacing the orders |
+| `OrderAttackMove` | F, held | a right-click on the ground attack-moves (WP3.5) |
 | `OrderStop` | C | `Stop` |
 | `OrderScatter` | X | `Order::Scatter` |
 | `OrderHold` | H | `Order::HoldPosition` |
@@ -199,8 +200,10 @@ The camera keeps WASD, the arrow keys and the screen edge, so stop is not on S (
 the engine checks that no key or button is bound to two actions, except the shift of
 `OrderQueue` and `SelectAdd`). The orders go to the selected own mobile units
 (`Selection::orderable`, `docs/rules/selection.md`; the temporary F2 select-all is gone). The top bar shows how
-many units are selected; the F1 panel shows the order of the hovered unit. Right-click
-picks no target (an attack by click is the cursor context of WP3.5).
+many units are selected; the F1 panel shows the order of the hovered unit. Right-click picks what
+the cursor shows (WP3.5): `cursor_context` decides the cursor and the order from the same inputs,
+so a click on an enemy is an `Attack`, on one of your own a `Guard`, on ground a `Move`
+(`docs/rules/cursor.md`). Ground that no selected unit can enter gives no order.
 
 ## Tuning constants
 

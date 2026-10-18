@@ -35,6 +35,9 @@
 //!   from a 52 KB subset of Inter (SIL OFL, `assets/fonts/`). There is no
 //!   text shaping, right-to-left or font fallback; that is enough for an
 //!   English UI with Dutch names and diacritics. See [`text`].
+//! * **Software cursors** in [`cursor`] (WP3.5): a set of pictures packed into
+//!   the atlas and drawn over everything by [`Ui::draw_cursor`]; which cursor
+//!   means what is the game's business.
 //! * **Minimap** in [`minimap`]: baked terrain texture, unit dots, the
 //!   camera's field-of-view frame, click/drag to move the camera.
 //!
@@ -43,6 +46,7 @@
 
 pub mod atlas;
 pub mod color;
+pub mod cursor;
 pub mod draw;
 pub mod gpu;
 pub mod layout;
@@ -53,6 +57,7 @@ pub mod ui;
 
 pub use atlas::{Atlas, AtlasRect};
 pub use color::{Color, UiConfig};
+pub use cursor::{CursorError, CursorSet, CursorSprite};
 pub use draw::{DrawList, Layer, Texture};
 pub use gpu::UiRenderer;
 pub use layout::{Anchor, Rect};
