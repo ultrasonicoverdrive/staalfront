@@ -37,6 +37,8 @@ Status: all work packages done; M0 waits for the benchmark run on the laptop.
 - WP1.12 `sf_ui` (quads, nine-slice, text, buttons, anchors, minimap): done (PR #14, 58d3eb9)
 - WP1.10 glTF models (loader, axes, part hierarchy, per-part merge, instancing hook): done (PR #22, 07b4cb7)
 - WP1.14 `sf_demo` (engine demo, 1 km map at B12 scale, `--bench` without vsync): done (PR #30)
+- WP1.15 The simulation on its own thread (an engine follow-up, not a numbered WP in PLAN.md; see
+  "WP1.15 notes" below): done (PR #53)
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
 
@@ -53,7 +55,9 @@ M0 status:
 - egui panels show frame time, draw calls and checksum live: met (F1, WP1.11).
 - p99 frame time <= 16.7 ms with 5,000 units in view over the whole camera
   flight: **pending Tijmen's laptop run** of `cargo run --release -p sf_demo --
-  --bench` (README, "Benchmark (M0)"). The benchmark exists, runs without vsync
+  --bench` (README, "Benchmark (M0)"), which has to be taken on the code of WP1.15
+  or later: the sim runs on its own thread there and is no longer in the frame,
+  so a number from before it is not comparable. The benchmark exists, runs without vsync
   in real fullscreen at 1920 x 1080 and writes `bench.json`; on lavapipe it only
   proves the path works (about 70 ms per frame, software rendering, no meaning
   for the GTX 1650). First laptop run before this WP (2026-10-15, `sf_game
@@ -428,6 +432,55 @@ met, smooth zoom judged on 2026-10-15, **p99 <= 16.7 ms on the GTX 1650: pending
 Tijmen's laptop run.** Phase 2 starts when that number is in and the zoom has
 been looked at again.
 
+## WP1.15 notes: the simulation on its own thread
+
+Why: the review of PR #52 measured 2,000 colliding units at 12.7 ms per tick on average and 22 ms at
+worst, stepped inside `fixed_update` on the main thread in the same frame as `render`: a hitch in
+every third frame at 60 Hz, against the M0 target (p99 <= 16.7 ms, PLAN.md section 2.4).
+
+What it is (`docs/architecture.md` section 18 has the full picture): `World` lives on a thread
+`sf-sim` (`sf_game::sim_thread`), with its own 20 Hz clock. The main thread sends `Command`s over an
+mpsc channel, stamped with the tick of the newest snapshot plus one (`INPUT_DELAY_TICKS`; the
+single-threaded game stamped the tick about to run, so an order now starts up to 50 ms later), and
+reads an immutable `SimSnapshot` (`sf_game::sim_snapshot`) that the sim thread publishes after
+each tick through one slot behind a mutex held for a pointer swap: per entity id and generation,
+kind, owner, previous and current position and facing, hit points and order, plus the unit table,
+the passability of every cell per movement class, the tick, the checksum and how the tick went.
+Everything that read `World` reads the snapshot now: selection, picking results, the cursor context,
+right-click orders, the selection rings and health bars, the HUD and minimap, the F1 panels. If the sim
+falls behind it never takes more than 1 + 3 ticks per 50 ms, restarts its clock when it is 20 ticks
+behind (the game slows, no tick is skipped), and the F1 panel says "sim behind"; rendering carries on
+with the newest snapshot. The picture is drawn 30 ms behind the sim (`INTERP_DELAY`) so a tick that
+takes up to that long does not show. std only, no new dependency; `sf_sim` is not touched.
+
+Tests (`crates/sf_game/tests/sim_thread.rs`, unit tests in the two modules): the shipped scenarios
+`orders`, `command_mix`, `units_spawn`, `terrain_256`, `pathing_256` and `crowd_jam` through the sim
+thread (commands over the channel, stepped one tick at a time) and through `sf_headless`, equal
+checksums after every tick and equal entities in every snapshot; a free-running sim with live
+commands replayed from its log in a single-threaded world; a frame loop against ticks of 150 ms
+(frames stay within a few ms); bounded catching up; a stall beyond the limit; late commands; the
+thread joining in every state. `crowd_perf`'s release bound for the slowest tick is 50 ms (the 20 Hz
+budget), as the review asked.
+
+Things to know:
+- **M0 numbers taken before this change are not comparable with numbers after it.** `frame_ms` and
+  `cpu_ms` no longer contain the sim; `bench.json` has `sim.tick_ms` (the sim thread's own time per
+  tick) next to them, plus `sim.behind_passes`, `sim.clock_resets`, `sim.late_commands`,
+  `sim.late_publishes`. **Tijmen's laptop bench has to run on this code** (README, "Benchmark").
+- The world's checksum includes the commands that wait for their tick, so a run is reproduced
+  from its command log only if each command also goes in at the tick it arrived at
+  (`LoggedCommand::arrived`). That is a real problem for lockstep, not a matter of a deadline: see
+  the open decision 27 below. A command that is moved to a later tick is always logged (requested
+  and effective tick, `SimHandle::moved_commands`); the full command log is off in the game.
+- Latency from click to visible movement: up to 50 ms input delay plus 30 ms `INTERP_DELAY`,
+  about 80 ms. Follow-up: an adaptive `INTERP_DELAY` that follows the measured lateness of the
+  snapshots (and so is smaller on a fast machine), once the laptop's `sim.late_publishes` is known.
+- The sleep jitter of Windows timers is not known on the laptop; `INTERP_DELAY` (30 ms) is a guess
+  made on Linux. If `sim.late_publishes` in the laptop's `bench.json` is not near zero, raise it or
+  make it follow the measured lateness.
+- `World::passable` looks at terrain only (not at structures), so the snapshot reads the ground once.
+  A unit test fails if that ever changes.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -507,7 +560,15 @@ fixed, delete the entry in the same PR.
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
-27. **Phase 4 is not done until WP4.4b makes `bridge_200` robust for wheeled radii 1.25 to 2.0.**
+27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen).**
+    `sf_sim::checksum` hashes the commands that wait for their tick, so two peers that receive the
+    same command for the same tick at different times get different checksums in between: a false
+    desync, which a command deadline does not remove. It changes a determinism rule (PLAN.md section
+    12.4), so it is not done in WP1.15. Options: (a) hand commands to `World::schedule` only just
+    before their tick, so the queue is empty whenever a checksum is taken; (b) leave the pending
+    commands out of the checksum (moves every pinned checksum that has commands waiting at a tick
+    end). Decide before WP14.1; see `docs/architecture.md` section 18.
+28. **Phase 4 is not done until WP4.4b makes `bridge_200` robust for wheeled radii 1.25 to 2.0.**
     With the turning rules of WP4.5 the scenario passes at 1.25 (last arrival tick 3,676 of 3,700) but
     fails at 1.5, 1.6, 1.75 and 2.0 (table in `docs/rules/turning.md`); the cause is the crowd and
     arrival logic of WP4.4, not the turning. Owner: WP4.4b.

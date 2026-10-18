@@ -93,6 +93,14 @@ resolution is not 1080p).
 command printed (`bench: ...`). The important numbers are `frame_ms.p99`,
 `gpu_ms` (or "n/a"), `display.actual`, `present.mode`, `criterion.caveats`, and
 under `hitches` the slowest frames with the instance buffers created in them.
+Since WP1.15 also `sim.tick_ms` (how long the simulation's ticks took on their
+own thread; the budget is 50 ms) and `sim.late_publishes` (ticks that were too
+late for the picture).
+
+**Run it on the current `main`.** The simulation used to be stepped inside the
+frame; since WP1.15 it runs on its own thread, so `frame_ms` no longer contains
+it. Numbers from a run before that change are not comparable with numbers after
+it, and the M0 number has to be taken with the new code.
 
 If it does not start, set `SF_GPU_TRACE` and run it again: it prints every GPU
 start-up step to stderr, so a hang shows where it sits. The game window uses

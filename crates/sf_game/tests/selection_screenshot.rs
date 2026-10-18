@@ -25,6 +25,7 @@ use sf_game::roster::Roster;
 use sf_game::sandbox::{self, MERIDIAN, VEYRAN};
 use sf_game::selection::Selection;
 use sf_game::selection_view::{FrameGeometry, SelectionView, draw_drag_rect};
+use sf_game::sim_snapshot::SimSnapshot;
 use sf_math::render_bridge::vec2_cells_to_metres;
 use sf_render::camera::DVec2;
 use sf_render::image::{self, Rgba8};
@@ -96,6 +97,11 @@ struct Scene {
 }
 
 impl Scene {
+    /// The world as the presentation reads it.
+    fn snap(&self) -> SimSnapshot {
+        SimSnapshot::capture(&self.world)
+    }
+
     fn new() -> Self {
         let map = generate_cells(CELLS, CELLS, 1);
         let ground = Arc::new(TerrainGround::new(&map));
@@ -259,13 +265,8 @@ impl Scene {
         };
         let mut layer = ui.world_layer();
         let mut view = SelectionView::default();
-        view.mark(
-            &mut self.instancer,
-            selection,
-            &self.world,
-            &frame,
-            &mut layer,
-        );
+        let snap = self.snap();
+        view.mark(&mut self.instancer, selection, &snap, &frame, &mut layer);
         if let Some(rect) = drag {
             draw_drag_rect(&mut layer, rect, 1.0);
         }
@@ -322,7 +323,7 @@ fn box_at(p: [f32; 2], half: f32, above: f32) -> ScreenRect {
 
 fn selection_of(scene: &Scene, ids: &[EntityId]) -> Selection {
     let mut selection = Selection::new(LOCAL_PLAYER);
-    selection.drag(&scene.world, ids, false);
+    selection.drag(&scene.snap(), ids, false);
     selection
 }
 
@@ -514,7 +515,7 @@ fn an_inspected_enemy_gets_a_red_ring() {
     let none = Selection::new(LOCAL_PLAYER);
     let (base, _) = scene.shoot(&mut r, &cam, &none, None);
     let mut selection = Selection::new(LOCAL_PLAYER);
-    selection.click(&scene.world, Some(enemy), false);
+    selection.click(&scene.snap(), Some(enemy), false);
     assert!(selection.is_empty() && selection.inspected() == Some(enemy));
     let (img, calls) = scene.shoot(&mut r, &cam, &selection, None);
     save("selection_inspect.png", &img);
@@ -639,7 +640,7 @@ fn clicks_drags_and_double_clicks_pick_through_models_and_icons() {
             "{name}: the click picks the unit under it"
         );
         let mut sel = local.clone();
-        sel.click(&scene.world, hit, false);
+        sel.click(&scene.snap(), hit, false);
         assert_eq!(sel.ids(), [same_a], "{name}");
         // Somewhere on the screen with nothing under it (a corner, say).
         let bare = [
@@ -652,7 +653,7 @@ fn clicks_drags_and_double_clicks_pick_through_models_and_icons() {
         .find(|&p| scene.instancer.pick(&query(p)).is_none())
         .expect("a corner of the screen is bare ground");
         let miss = scene.instancer.pick(&query(bare));
-        sel.click(&scene.world, miss.map(|p| entity(p.id)), false);
+        sel.click(&scene.snap(), miss.map(|p| entity(p.id)), false);
         assert!(sel.is_empty(), "{name}: bare ground deselects");
 
         // A double-click: the same kind, own, on the screen.
@@ -662,7 +663,7 @@ fn clicks_drags_and_double_clicks_pick_through_models_and_icons() {
             "{name}: the screen holds the enemy too"
         );
         let mut sel = local.clone();
-        sel.select_same_kind(&scene.world, hit, &in_view, false);
+        sel.select_same_kind(&scene.snap(), hit, &in_view, false);
         let mut expect = wanted.to_vec();
         if zoom > 0.5 {
             // The whole map is on the screen, so the far one counts too.
@@ -704,7 +705,7 @@ fn clicks_drags_and_double_clicks_pick_through_models_and_icons() {
         );
         let inside = rect_ids(rect);
         let mut sel = local.clone();
-        sel.drag(&scene.world, &inside, false);
+        sel.drag(&scene.snap(), &inside, false);
         assert!(
             sel.ids().contains(&same_a) && sel.ids().contains(&same_b),
             "{name}: both are in the rectangle: {:?} in {inside:?}",

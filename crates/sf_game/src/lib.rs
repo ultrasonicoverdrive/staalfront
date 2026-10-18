@@ -52,9 +52,16 @@
 //! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).
 //!
 //! **Units (WP1.6).** An `sf_sim` world with `--units N` wanderers is stepped
-//! by the engine's fixed 20 Hz tick and drawn instanced on top of the
-//! terrain, positions interpolated between the last two ticks with the
-//! engine's alpha, tile-culled against the camera frustum. The sim is 2D; the
+//! at 20 Hz and drawn instanced on top of the terrain, positions interpolated
+//! between the last two ticks, tile-culled against the camera frustum.
+//!
+//! **The simulation has a thread of its own (WP1.15).** The world is stepped by
+//! [`sim_thread`] with its own 20 Hz clock; the main thread sends it commands
+//! and draws from the [`sim_snapshot::SimSnapshot`] it publishes after each
+//! tick, so a slow tick (13 to 22 ms for 2,000 colliding units) never stalls a
+//! frame. If the sim cannot keep its clock the F1 panel says "sim behind" and
+//! the frames carry on (`--sim-delay-ms N` shows it). `docs/architecture.md`
+//! section 18 has the thread model. The sim is 2D; the
 //! height a unit stands on is looked up in the terrain for display only. Three
 //! placeholder shapes (cube, cylinder, cone) in four player colors; with
 //! `--models testpack` the glTF vehicles of the test pack join them and its
@@ -107,6 +114,8 @@ pub mod runner;
 pub mod sandbox;
 pub mod selection;
 pub mod selection_view;
+pub mod sim_snapshot;
+pub mod sim_thread;
 mod sound_browser;
 
 use std::sync::Arc;

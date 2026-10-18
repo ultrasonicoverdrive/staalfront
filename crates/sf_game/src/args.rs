@@ -99,6 +99,10 @@ pub struct Options {
     /// (the fix of follow-up 14); `--no-reserve` turns it off to reproduce
     /// the hitches.
     pub reserve: bool,
+    /// `--sim-delay-ms N`: every sim tick takes N ms longer, as a heavy one
+    /// would (WP1.15): to see the sim fall behind (the F1 panel says so) while
+    /// the frames stay smooth. Zero = off.
+    pub sim_delay: Duration,
     /// Flags that were given but could not be used.
     pub warnings: Vec<String>,
 }
@@ -134,6 +138,7 @@ impl Options {
             screen: ScreenMode::Windowed,
             present: Present::Vsync,
             reserve: true,
+            sim_delay: Duration::ZERO,
             warnings: Vec::new(),
         };
         let mut units_given = false;
@@ -286,6 +291,18 @@ impl Options {
                     }
                 }
                 "--no-reserve" => o.reserve = false,
+                "--sim-delay-ms" => {
+                    if let Some(v) = value(&mut o.warnings) {
+                        match v.parse::<u32>() {
+                            Ok(ms) if ms <= 10_000 => {
+                                o.sim_delay = Duration::from_millis(u64::from(ms));
+                            }
+                            _ => o
+                                .warnings
+                                .push(format!("--sim-delay-ms {v}: expected 0 to 10000")),
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -445,5 +462,16 @@ mod tests {
         assert_eq!(o.exit_after, Some(Duration::from_millis(1500)));
         assert_eq!(o.frame_cap, Some(30));
         assert!(o.warnings.is_empty());
+    }
+
+    #[test]
+    fn sim_delay_is_off_by_default_and_takes_milliseconds() {
+        assert_eq!(parse(Preset::Game, "").sim_delay, Duration::ZERO);
+        let o = parse(Preset::Game, "--sim-delay-ms 70");
+        assert_eq!(o.sim_delay, Duration::from_millis(70));
+        assert!(o.warnings.is_empty());
+        let bad = parse(Preset::Game, "--sim-delay-ms slow");
+        assert_eq!(bad.sim_delay, Duration::ZERO);
+        assert_eq!(bad.warnings.len(), 1);
     }
 }

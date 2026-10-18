@@ -90,11 +90,35 @@ pub struct PanelData {
     pub sim_tick: u64,
     pub checksum: Option<u64>,
     pub entities: usize,
+    /// The simulation thread (WP1.15): tick time and whether it keeps up.
+    pub sim: SimPanel,
     /// Original Red Alert audio (WP11.7): `None` = no audio system.
     pub ra_status: Option<sf_audio::RaStatus>,
     pub ra_catalog: Option<std::sync::Arc<sf_audio::ra::Catalog>>,
     /// Why the last sound-browser play failed.
     pub ra_play_error: Option<String>,
+}
+
+/// The simulation thread as the F1 panel shows it (WP1.15).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SimPanel {
+    /// How long the newest tick took, milliseconds.
+    pub tick_ms: f32,
+    /// The slowest of the last 20 ticks (one second), milliseconds.
+    pub slowest_ms: f32,
+    /// The sim is behind its 20 Hz clock now or was within the last second:
+    /// the picture keeps going on the newest snapshot.
+    pub behind: bool,
+    /// How far behind, milliseconds (of the newest snapshot).
+    pub lag_ms: f32,
+    /// Times the sim gave up catching up and restarted its clock.
+    pub clock_resets: u64,
+    /// Commands that came for a tick that had run already.
+    pub late_commands: u64,
+    /// Snapshots that were published after the picture needed them.
+    pub late_publishes: u64,
+    /// The thread has ended (it panicked, or was stopped).
+    pub stopped: bool,
 }
 
 /// What the panels edit.
@@ -336,6 +360,26 @@ fn simulation(ui: &mut egui::Ui, data: &PanelData) {
         None => ui.label("checksum -"),
     };
     ui.label(format!("{} entities", data.entities));
+    let sim = &data.sim;
+    ui.label(format!(
+        "sim thread: tick {:.1} ms, slowest of the last second {:.1} ms (budget 50)",
+        sim.tick_ms, sim.slowest_ms
+    ));
+    if sim.behind {
+        ui.colored_label(
+            egui::Color32::from_rgb(255, 170, 60),
+            format!("sim behind by {:.0} ms (frames carry on)", sim.lag_ms),
+        );
+    }
+    if sim.stopped {
+        ui.colored_label(egui::Color32::from_rgb(255, 90, 90), "sim thread stopped");
+    }
+    if sim.clock_resets + sim.late_commands + sim.late_publishes > 0 {
+        ui.label(format!(
+            "clock restarts {}, late commands {}, late snapshots {}",
+            sim.clock_resets, sim.late_commands, sim.late_publishes
+        ));
+    }
 }
 
 /// The camera tunables as sliders; `true` when one moved.
@@ -704,6 +748,50 @@ mod tests {
             "{texts:?}"
         );
         assert_eq!(hp_text(Some((0, 50))), "HP 0/50");
+    }
+
+    #[test]
+    fn the_panel_says_when_the_sim_is_behind() {
+        let ctx = egui::Context::default();
+        let mut state = PanelState::new(CameraConfig::default());
+        let mut data = sample_data();
+        // Keeping up: the tick time is there, no warning.
+        data.sim = SimPanel {
+            tick_ms: 13.2,
+            slowest_ms: 22.0,
+            ..SimPanel::default()
+        };
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("sim thread: tick 13.2 ms") && t.contains("22.0 ms")),
+            "{texts:?}"
+        );
+        assert!(!texts.iter().any(|t| t.contains("sim behind")), "{texts:?}");
+
+        // Behind: it says so, and that the frames carry on.
+        data.sim.behind = true;
+        data.sim.lag_ms = 120.0;
+        data.sim.clock_resets = 2;
+        data.sim.late_commands = 1;
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("sim behind by 120 ms") && t.contains("frames carry on")),
+            "{texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("clock restarts 2, late commands 1")),
+            "{texts:?}"
+        );
+
+        data.sim.stopped = true;
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(texts.iter().any(|t| t.contains("sim thread stopped")));
     }
 
     #[test]
