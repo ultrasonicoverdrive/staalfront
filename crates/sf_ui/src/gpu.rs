@@ -316,22 +316,32 @@ impl UiRenderer {
         }
 
         self.draw_calls = 0;
-        let list = ui.draw_list();
-        if list.is_empty() {
+        // The world layer (under the panels) and the panels share one vertex
+        // buffer and one index buffer: the world layer first, the panels
+        // after it, drawn with a base vertex so their indices need no
+        // rewriting.
+        let (under, list) = (ui.underlay(), ui.draw_list());
+        if list.is_empty() && under.is_empty() {
             return;
         }
-        let vbytes: &[u8] = bytemuck::cast_slice(&list.vertices);
-        let ibytes: &[u8] = bytemuck::cast_slice(&list.indices);
-        if vbytes.len() as u64 > self.vertex_capacity {
-            self.vertex_capacity = (vbytes.len() as u64).next_power_of_two();
+        let under_vbytes: &[u8] = bytemuck::cast_slice(&under.vertices);
+        let under_ibytes: &[u8] = bytemuck::cast_slice(&under.indices);
+        let list_vbytes: &[u8] = bytemuck::cast_slice(&list.vertices);
+        let list_ibytes: &[u8] = bytemuck::cast_slice(&list.indices);
+        let vlen = (under_vbytes.len() + list_vbytes.len()) as u64;
+        let ilen = (under_ibytes.len() + list_ibytes.len()) as u64;
+        if vlen > self.vertex_capacity {
+            self.vertex_capacity = vlen.next_power_of_two();
             self.vertices = buffer(device, wgpu::BufferUsages::VERTEX, self.vertex_capacity);
         }
-        if ibytes.len() as u64 > self.index_capacity {
-            self.index_capacity = (ibytes.len() as u64).next_power_of_two();
+        if ilen > self.index_capacity {
+            self.index_capacity = ilen.next_power_of_two();
             self.indices = buffer(device, wgpu::BufferUsages::INDEX, self.index_capacity);
         }
-        queue.write_buffer(&self.vertices, 0, vbytes);
-        queue.write_buffer(&self.indices, 0, ibytes);
+        queue.write_buffer(&self.vertices, 0, under_vbytes);
+        queue.write_buffer(&self.vertices, under_vbytes.len() as u64, list_vbytes);
+        queue.write_buffer(&self.indices, 0, under_ibytes);
+        queue.write_buffer(&self.indices, under_ibytes.len() as u64, list_ibytes);
 
         let mut pass = target
             .encoder
@@ -353,21 +363,32 @@ impl UiRenderer {
             });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.screen_group, &[]);
-        pass.set_vertex_buffer(0, self.vertices.slice(..vbytes.len() as u64));
-        pass.set_index_buffer(
-            self.indices.slice(..ibytes.len() as u64),
-            wgpu::IndexFormat::Uint32,
-        );
+        pass.set_vertex_buffer(0, self.vertices.slice(..vlen));
+        pass.set_index_buffer(self.indices.slice(..ilen), wgpu::IndexFormat::Uint32);
         let mut calls = 0;
-        for batch in &list.batches {
-            let bound = match batch.texture {
-                Texture::Atlas => self.atlas.as_ref(),
-                Texture::Minimap => self.minimap.as_ref(),
-            };
-            let Some(bound) = bound else { continue };
-            pass.set_bind_group(1, &bound.bind_group, &[]);
-            pass.draw_indexed(batch.start..batch.end, 0, 0..1);
-            calls += 1;
+        let parts = [
+            (under, 0_i32, 0_u32),
+            (
+                list,
+                under.vertices.len() as i32,
+                under.indices.len() as u32,
+            ),
+        ];
+        for (part, base_vertex, first_index) in parts {
+            for batch in &part.batches {
+                let bound = match batch.texture {
+                    Texture::Atlas => self.atlas.as_ref(),
+                    Texture::Minimap => self.minimap.as_ref(),
+                };
+                let Some(bound) = bound else { continue };
+                pass.set_bind_group(1, &bound.bind_group, &[]);
+                pass.draw_indexed(
+                    first_index + batch.start..first_index + batch.end,
+                    base_vertex,
+                    0..1,
+                );
+                calls += 1;
+            }
         }
         drop(pass);
         self.draw_calls = calls;

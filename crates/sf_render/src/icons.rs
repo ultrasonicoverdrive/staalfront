@@ -415,6 +415,11 @@ pub fn snap_icon_center(center: f32, size_px: f32) -> f32 {
 /// Bit in [`IconInstance::flags`]: draw the icon highlighted (white outline).
 pub const ICON_HIGHLIGHT: u32 = 1 << 8;
 
+/// Bit in [`IconInstance::flags`]: the unit is selected (WP3.3). The icon
+/// gets a thick bright outline, thicker than the hover highlight; both can
+/// be set at once.
+pub const ICON_SELECTED: u32 = 1 << 9;
+
 /// Per-icon GPU data. The anchor is in world space; the vertex shader
 /// projects it and offsets the quad's corners in pixels.
 #[repr(C)]
@@ -423,7 +428,8 @@ pub struct IconInstance {
     /// World position of the icon's centre (the unit's ground point lifted by
     /// [`IconConfig::lift`]).
     pub position: [f32; 3],
-    /// Low byte: [`IconShape::index`]. Bit 8: [`ICON_HIGHLIGHT`].
+    /// Low byte: [`IconShape::index`]. Bit 8: [`ICON_HIGHLIGHT`]. Bit 9:
+    /// [`ICON_SELECTED`].
     pub flags: u32,
     /// Linear RGB fill, and the **model weight** of the frame in `a`, the
     /// dissolve threshold (the icon is drawn where the model is not).
@@ -445,6 +451,10 @@ impl IconInstance {
 
     pub fn highlighted(&self) -> bool {
         self.flags & ICON_HIGHLIGHT != 0
+    }
+
+    pub fn selected(&self) -> bool {
+        self.flags & ICON_SELECTED != 0
     }
 }
 

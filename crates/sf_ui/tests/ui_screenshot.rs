@@ -437,3 +437,49 @@ fn minimap_draws_unit_dots_and_the_field_of_view_frame() {
         assert!(white, "side {i} of the field-of-view frame at ({sx}, {sy})");
     }
 }
+
+/// The world layer (WP3.3: the game's selection rings, bars and drag
+/// rectangle) is drawn under the panels: a solid fill that runs under a
+/// panel is hidden by it, outside the panel it shows in its own colour, and
+/// both are one draw call each.
+#[test]
+fn the_world_layer_is_drawn_under_the_panels() {
+    let mut r = renderer();
+    let mut ui = Ui::new(UiConfig::default());
+    ui.begin_frame(UiInput::default(), (W, H), 1.0);
+    let panel = ui.panel(Anchor::Center, (0.0, 0.0), (300.0, 120.0));
+    ui.end_frame();
+    // The fill is built after the panel, as the game does, and covers both
+    // the panel and the clear color beside it.
+    let fill = Color(250, 20, 20, 255);
+    let (outside, inside) = (
+        (panel.x - 30.0, panel.y + 60.0),
+        (panel.x + 40.0, panel.y + 60.0),
+    );
+    ui.world_layer()
+        .fill(Rect::new(panel.x - 60.0, panel.y + 20.0, 140.0, 80.0), fill);
+    let mut ur = UiRenderer::new(&r.gpu().device, r.color_format());
+    let img = r
+        .render_to_image_with(|t| ur.render(t, &mut ui))
+        .expect("render");
+    save("world_layer_under_panel.png", &img);
+    let (o, i) = (px(&img, outside.0, outside.1), px(&img, inside.0, inside.1));
+    assert!(
+        o[0] > 200 && o[1] < 80,
+        "the fill shows beside the panel: {o:?}"
+    );
+    assert!(
+        !(i[0] > 200 && i[1] < 80),
+        "the panel hides the fill under it: {i:?}"
+    );
+    assert_eq!(ur.draw_calls(), 2, "the world layer and the panels");
+    // With only a world layer there is one call.
+    ui.begin_frame(UiInput::default(), (W, H), 1.0);
+    ui.end_frame();
+    ui.world_layer()
+        .fill(Rect::new(10.0, 10.0, 50.0, 50.0), fill);
+    let _ = r
+        .render_to_image_with(|t| ur.render(t, &mut ui))
+        .expect("render");
+    assert_eq!(ur.draw_calls(), 1);
+}

@@ -211,6 +211,60 @@ impl DrawList {
     }
 }
 
+/// A drawing handle on a [`DrawList`] for the game's own overlays: solid
+/// rectangles, outlines and lines in window pixels, none of which blocks
+/// input. [`Ui::world_layer`](crate::Ui::world_layer) hands out the one that
+/// is drawn **under** the panels (selection rings, health bars and the drag
+/// rectangle of WP3.3 live there), so a panel never has a ring painted over
+/// it.
+pub struct Layer<'a> {
+    list: &'a mut DrawList,
+    white: (f32, f32),
+}
+
+impl<'a> Layer<'a> {
+    pub(crate) fn new(list: &'a mut DrawList, white: (f32, f32)) -> Self {
+        Self { list, white }
+    }
+
+    /// A solid rectangle.
+    pub fn fill(&mut self, rect: Rect, color: Color) {
+        self.list.rect(self.white, rect, color);
+    }
+
+    /// A rectangle outline of `thickness` pixels, drawn inside `rect`.
+    pub fn outline(&mut self, rect: Rect, thickness: f32, color: Color) {
+        self.list.outline(self.white, rect, thickness, color);
+    }
+
+    /// A line segment of `thickness` pixels.
+    pub fn line(&mut self, a: (f32, f32), b: (f32, f32), thickness: f32, color: Color) {
+        self.list.line(self.white, a, b, thickness, color);
+    }
+
+    /// Segments through `points`; with `closed` the last point joins the
+    /// first.
+    pub fn polyline(&mut self, points: &[[f32; 2]], closed: bool, thickness: f32, color: Color) {
+        for pair in points.windows(2) {
+            self.line(
+                (pair[0][0], pair[0][1]),
+                (pair[1][0], pair[1][1]),
+                thickness,
+                color,
+            );
+        }
+        if closed && points.len() > 2 {
+            let (a, b) = (points[points.len() - 1], points[0]);
+            self.line((a[0], a[1]), (b[0], b[1]), thickness, color);
+        }
+    }
+
+    /// Quads recorded in the whole list so far.
+    pub fn quad_count(&self) -> usize {
+        self.list.quad_count()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

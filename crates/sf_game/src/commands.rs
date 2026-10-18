@@ -1,16 +1,18 @@
 //! The first commands from the player (WP3.4): right-click moves, shift
-//! queues, S stops, X scatters. Orders are sim state (`docs/rules/orders.md`);
-//! this module only turns input into [`Command`]s and schedules them for the
-//! next tick. It never touches the world's state (PLAN.md section 1.2 and
-//! quality rule 1): the only thing it does to a [`World`] is
-//! [`World::schedule`].
+//! queues, C stops, X scatters, H holds. Orders are sim state
+//! (`docs/rules/orders.md`); this module only turns input into [`Command`]s
+//! and schedules them for the next tick. It never touches the world's state
+//! (PLAN.md section 1.2 and quality rule 1): the only thing it does to a
+//! [`World`] is [`World::schedule`].
 //!
-//! # Temporary selection
+//! # Whom the orders go to
 //!
-//! Real selection (click, drag, shift-add, groups) is WP3.3. Until then
-//! [`DebugSelection`] holds whatever **F2** picked: every mobile unit of the
-//! local player that is in view. It is a debug aid and goes when WP3.3 lands;
-//! nothing else depends on how it picks.
+//! To the units of [`Selection::orderable`](crate::selection::Selection::orderable):
+//! the local player's selected mobile units (WP3.3). Selection is
+//! presentation state in [`crate::selection`]; a unit that is only
+//! *inspected* (an enemy or a neutral one) is never in that list, so no order
+//! can reach it. The functions here take that list of ids and answer `None`
+//! for an empty one.
 //!
 //! # Keys
 //!
@@ -19,7 +21,6 @@
 //!
 //! | Action | Default | Command |
 //! |---|---|---|
-//! | `DebugSelectAll` | F2 | (temporary) select all own units in view |
 //! | `OrderMove` | right-click on the ground | `Order::Move` to the point |
 //! | `OrderQueue` | shift (held) | the move, scatter or hold is queued behind the unit's orders |
 //! | `OrderStop` | C | `Stop` |
@@ -27,7 +28,7 @@
 //! | `OrderHold` | H | `Order::HoldPosition` |
 //!
 //! The camera keeps WASD, the arrows and the screen edge; stop is not on S so
-//! the two never share a key.
+//! the two never share a key. Selecting is in [`crate::selection`].
 
 use sf_math::Vec2;
 use sf_sim::{Command, EntityId, Order, PlayerId, World};
@@ -38,84 +39,30 @@ use crate::sandbox::MERIDIAN;
 /// skirmish setup of a later phase.)
 pub const LOCAL_PLAYER: PlayerId = PlayerId(MERIDIAN);
 
-/// The units F2 selected. **Temporary** (WP3.3 replaces it with real
-/// selection).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DebugSelection {
-    ids: Vec<EntityId>,
-}
-
-impl DebugSelection {
-    /// The selected units, in slot order.
-    pub fn ids(&self) -> &[EntityId] {
-        &self.ids
-    }
-
-    /// How many are selected.
-    pub fn len(&self) -> usize {
-        self.ids.len()
-    }
-
-    /// True if nothing is selected.
-    pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
-    }
-
-    /// Selects every mobile unit of `owner` whose position (in cells) passes
-    /// `in_view`, replacing the selection. Only roles of the unit table count
-    /// (a unit that can move: not a structure, not an object, not a legacy
-    /// wanderer).
-    pub fn select_own_in_view(
-        &mut self,
-        world: &World,
-        owner: PlayerId,
-        in_view: impl Fn(Vec2) -> bool,
-    ) {
-        self.ids = world
-            .snapshot()
-            .iter()
-            .filter(|v| v.owner == owner && v.has_stats && in_view(v.pos))
-            .filter(|v| {
-                world
-                    .stats_of(v.id)
-                    .is_some_and(|s| s.movement_class.is_some())
-            })
-            .map(|v| v.id)
-            .collect();
-    }
-
-    /// Drops the units that are gone.
-    pub fn forget_the_dead(&mut self, world: &World) {
-        self.ids.retain(|&id| world.is_alive(id));
-    }
-}
-
 /// What a right-click on the ground at `point` (in cells) asks for; `None`
 /// with nothing selected. `queued` is the shift key.
-pub fn move_command(selection: &DebugSelection, point: Vec2, queued: bool) -> Option<Command> {
-    order_command(selection, Order::Move(point), queued)
+pub fn move_command(ids: &[EntityId], point: Vec2, queued: bool) -> Option<Command> {
+    order_command(ids, Order::Move(point), queued)
 }
 
 /// What the scatter key asks for; `None` with nothing selected.
-pub fn scatter_command(selection: &DebugSelection, queued: bool) -> Option<Command> {
-    order_command(selection, Order::Scatter, queued)
+pub fn scatter_command(ids: &[EntityId], queued: bool) -> Option<Command> {
+    order_command(ids, Order::Scatter, queued)
 }
 
 /// What the hold-position key asks for; `None` with nothing selected.
-pub fn hold_command(selection: &DebugSelection, queued: bool) -> Option<Command> {
-    order_command(selection, Order::HoldPosition, queued)
+pub fn hold_command(ids: &[EntityId], queued: bool) -> Option<Command> {
+    order_command(ids, Order::HoldPosition, queued)
 }
 
 /// What the stop key asks for; `None` with nothing selected.
-pub fn stop_command(selection: &DebugSelection) -> Option<Command> {
-    (!selection.is_empty()).then(|| Command::Stop {
-        ids: selection.ids().to_vec(),
-    })
+pub fn stop_command(ids: &[EntityId]) -> Option<Command> {
+    (!ids.is_empty()).then(|| Command::Stop { ids: ids.to_vec() })
 }
 
-fn order_command(selection: &DebugSelection, order: Order, queued: bool) -> Option<Command> {
-    (!selection.is_empty()).then(|| Command::Order {
-        ids: selection.ids().to_vec(),
+fn order_command(ids: &[EntityId], order: Order, queued: bool) -> Option<Command> {
+    (!ids.is_empty()).then(|| Command::Order {
+        ids: ids.to_vec(),
         order,
         queued,
     })
@@ -144,8 +91,8 @@ pub fn issue(world: &mut World, command: Command) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::selection::Selection;
     use sf_data::units::UnitDefs;
-    use sf_math::Fx;
     use sf_sim::{Kind, WorldConfig};
 
     fn world_with(units: &[(&str, u8, i32, i32)]) -> (World, Vec<EntityId>) {
@@ -174,70 +121,29 @@ mod tests {
         Vec2::from_ints(x, y)
     }
 
-    #[test]
-    fn f2_selects_own_mobile_units_in_view_only() {
-        let (world, ids) = world_with(&[
-            ("light_tank", 0, 10, 10),
-            ("rifleman", 0, 12, 10),
-            ("rifleman", 1, 14, 10),   // the other side
-            ("light_tank", 0, 50, 50), // out of view
-        ]);
-        let mut selection = DebugSelection::default();
-        selection.select_own_in_view(&world, LOCAL_PLAYER, |p| p.x < Fx::from_int(32));
-        assert_eq!(selection.ids(), &ids[..2]);
-        // Nothing in view, nothing selected.
-        selection.select_own_in_view(&world, LOCAL_PLAYER, |_| false);
-        assert!(selection.is_empty());
-    }
-
-    #[test]
-    fn structures_and_wanderers_are_never_selected() {
-        let defs = UnitDefs::embedded();
-        let table = sf_bridge::unit_table(&defs).unwrap();
-        let mut world = World::new(WorldConfig::new(5).with_map_size(64, 64))
-            .unwrap()
-            .with_units(table)
-            .unwrap();
-        let schedule = |world: &mut World, command| {
-            world.schedule(world.tick(), PlayerId(0), command).unwrap();
-        };
-        schedule(
-            &mut world,
-            Command::PlaceStructure {
-                kind: Kind(defs.kind_of("refinery").unwrap()),
-                cell: sf_sim::Cell::new(10, 10),
-                owner: PlayerId(0),
-            },
-        );
-        schedule(
-            &mut world,
-            Command::Spawn {
-                kind: Kind(1),
-                pos: pt(5, 5),
-                owner: PlayerId(0),
-            },
-        );
-        world.step();
-        let mut selection = DebugSelection::default();
-        selection.select_own_in_view(&world, LOCAL_PLAYER, |_| true);
-        assert!(selection.is_empty());
+    /// Everything of the local player selected, as a drag over the whole map
+    /// would.
+    fn all_own(world: &World, ids: &[EntityId]) -> Vec<EntityId> {
+        let mut selection = Selection::new(LOCAL_PLAYER);
+        selection.drag(world, ids, false);
+        selection.orderable(world)
     }
 
     #[test]
     fn right_click_issues_a_move_and_shift_queues_it() {
         let (mut world, ids) = world_with(&[("light_tank", 0, 10, 10), ("rifleman", 0, 12, 10)]);
-        let mut selection = DebugSelection::default();
-        selection.select_own_in_view(&world, LOCAL_PLAYER, |_| true);
+        let selected = all_own(&world, &ids);
+        assert_eq!(selected, ids);
         // The UI only builds and schedules commands: nothing has changed
         // until the tick runs them.
         let before = ids.iter().map(|&id| world.order_of(id)).collect::<Vec<_>>();
         issue(
             &mut world,
-            move_command(&selection, pt(30, 10), false).unwrap(),
+            move_command(&selected, pt(30, 10), false).unwrap(),
         );
         issue(
             &mut world,
-            move_command(&selection, pt(30, 20), true).unwrap(),
+            move_command(&selected, pt(30, 20), true).unwrap(),
         );
         assert_eq!(
             ids.iter().map(|&id| world.order_of(id)).collect::<Vec<_>>(),
@@ -257,23 +163,22 @@ mod tests {
     #[test]
     fn stop_scatter_and_hold_follow_the_selection() {
         let (mut world, ids) = world_with(&[("light_tank", 0, 10, 10), ("scout", 0, 12, 10)]);
-        let mut selection = DebugSelection::default();
-        assert!(stop_command(&selection).is_none());
-        assert!(move_command(&selection, pt(1, 1), false).is_none());
-        assert!(scatter_command(&selection, false).is_none());
-        assert!(hold_command(&selection, false).is_none());
-        selection.select_own_in_view(&world, LOCAL_PLAYER, |_| true);
-        issue(&mut world, scatter_command(&selection, false).unwrap());
+        assert!(stop_command(&[]).is_none());
+        assert!(move_command(&[], pt(1, 1), false).is_none());
+        assert!(scatter_command(&[], false).is_none());
+        assert!(hold_command(&[], false).is_none());
+        let selected = all_own(&world, &ids);
+        issue(&mut world, scatter_command(&selected, false).unwrap());
         world.step();
         for &id in &ids {
             assert!(matches!(world.order_of(id), Some(Order::Move(_))), "{id}");
         }
-        issue(&mut world, hold_command(&selection, false).unwrap());
+        issue(&mut world, hold_command(&selected, false).unwrap());
         world.step();
         for &id in &ids {
             assert_eq!(world.order_of(id), Some(Order::HoldPosition));
         }
-        issue(&mut world, stop_command(&selection).unwrap());
+        issue(&mut world, stop_command(&selected).unwrap());
         world.step();
         for &id in &ids {
             assert_eq!(world.order_of(id), Some(Order::Idle));
@@ -281,13 +186,18 @@ mod tests {
     }
 
     #[test]
-    fn the_dead_leave_the_selection() {
-        let (mut world, ids) = world_with(&[("light_tank", 0, 10, 10), ("scout", 0, 12, 10)]);
-        let mut selection = DebugSelection::default();
-        selection.select_own_in_view(&world, LOCAL_PLAYER, |_| true);
-        issue(&mut world, Command::Despawn { id: ids[0] });
-        world.step();
-        selection.forget_the_dead(&world);
-        assert_eq!(selection.ids(), &ids[1..]);
+    fn structures_and_other_sides_get_no_order_from_a_selection() {
+        let (world, ids) = world_with(&[
+            ("light_tank", 0, 10, 10),
+            ("rifleman", 1, 12, 10),
+            ("civilian", 2, 14, 10),
+        ]);
+        // A drag takes only own units; inspecting an enemy orders nothing.
+        let mut selection = Selection::new(LOCAL_PLAYER);
+        selection.drag(&world, &ids, false);
+        assert_eq!(selection.orderable(&world), &ids[..1]);
+        selection.click(&world, Some(ids[1]), false);
+        assert!(selection.orderable(&world).is_empty());
+        assert!(move_command(&selection.orderable(&world), pt(1, 1), false).is_none());
     }
 }

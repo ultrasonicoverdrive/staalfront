@@ -18,6 +18,31 @@ cargo test --workspace
 scripts/check-sim-determinism.sh   # rejects f32/f64/HashMap/HashSet in sf_sim
 ```
 
+## Controls (`sf_game`)
+
+`cargo run -p sf_game` starts the sandbox: units and structures of three sides on a
+generated map. Every key and button is an action in `assets/config/input.ron` and can be
+rebound there (the file reloads while the game runs in debug builds). They work at every
+zoom, on models and on strategic icons alike. Rules: `docs/rules/selection.md` and
+`docs/rules/orders.md`.
+
+| Input | Does |
+|---|---|
+| wheel | zoom toward the cursor |
+| W A S D / arrows / screen edge, middle mouse drag | pan, grab the ground |
+| click | select one of your units or structures |
+| drag a rectangle | select your units inside it (structures only by a click) |
+| shift + click | add the unit to the selection, or take it out again |
+| shift + drag, shift + double-click | add to the selection |
+| double-click | select your units of the same kind that are on the screen |
+| click on ground | deselect |
+| click on an enemy or neutral unit | inspect it (ring and health bar; it never gets orders) |
+| ctrl + 1 .. 9 | assign the selection to a group |
+| 1 .. 9 | select that group; twice quickly also centres the camera on it |
+| right-click | move the selection there; with shift, queue the move |
+| C, X, H | stop, scatter, hold position |
+| F1, F11, Esc | debug panels, fullscreen, quit |
+
 ## Engine demo and benchmark (M0)
 
 `sf_demo` is the engine demo: a 1,024 m map (256 x 256 cells of 4 m) with 5,000

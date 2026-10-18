@@ -96,7 +96,11 @@ Status: in progress.
   `Command::SpawnUnit` and `Command::PlaceStructure`, footprints in the occupancy grid,
   hit points and per-unit speed), the `units_spawn` scenario, a data-driven look per role
   in `sf_game` (`roster.rs`) and the `sf_game` sandbox: done
-- WP3.3: open
+- WP3.3 Selection (`sf_game::selection`: click, drag rectangle, shift add and toggle,
+  double-click for the same kind in view, control groups 1 to 9, inspecting an enemy, the dead
+  leaving by the generation check; `Instancer::pick_rect` and `mark_selected` in `sf_render`;
+  rings, selected icons, health bars and the drag rectangle on a new `sf_ui` world layer, one draw
+  call), `docs/rules/selection.md`: done
 - WP3.4 Commands as state (`sf_sim::orders`: idle, hold position, move, attack, attack-move,
   guard, stop, scatter, a bounded queue per unit, per-player command sequence numbers), the `orders`
   scenario, right-click / shift / S / X in `sf_game`, `docs/rules/orders.md`: done
@@ -131,9 +135,8 @@ unchanged, so `wander_5000`, `command_mix`, `terrain_256` and `units_spawn` are 
 the new state joins the checksum only while some unit has an order. Follow-up 4 is done:
 commands run by `(tick, player, player sequence)`, and `World::schedule_sequenced` takes the
 number the sender gave (the lockstep packet of WP14.1 only has to carry it). The `orders` scenario is pinned on Linux and Windows. In `sf_game`,
-F2 selects the own units in view (temporary until WP3.3), right-click moves, shift queues,
-C stops, X scatters, H holds position; all are actions in `input.ron`. Rules:
-`docs/rules/orders.md`.
+right-click moves, shift queues, C stops, X scatters, H holds position, all on the selection
+of WP3.3; all are actions in `input.ron`. Rules: `docs/rules/orders.md`.
 
 ## Phase 1 report (draft, WP1.14)
 

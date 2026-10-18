@@ -54,11 +54,13 @@ use sf_math::{Facing, Vec2};
 
 use crate::frustum::{Aabb, Frustum};
 use crate::icons::{
-    Blend, Dominant, ICON_HIGHLIGHT, IconConfig, IconInstance, IconParams, snap_icon_center,
+    Blend, Dominant, ICON_HIGHLIGHT, ICON_SELECTED, IconConfig, IconInstance, IconParams,
+    snap_icon_center,
 };
 use crate::model::{EyeView, MAX_LODS, MAX_PARTS, MeshId, ModelSet, PartAngles, pose_parts};
 use crate::pick::{
-    Pick, PickVia, UnitId, click_margin, click_reach, icon_hit, project_px, ray_hits_aabb, ray_obb,
+    Pick, PickVia, RectQuery, UnitId, click_margin, click_reach, icon_hit, project_px,
+    ray_hits_aabb, ray_obb, rect_hits_icon, rect_hits_model,
 };
 use crate::scene::{Instance, MeshKind};
 use crate::style::Style;
@@ -277,6 +279,23 @@ struct Drawn {
     extra_parts: u8,
     /// Index in the icon list.
     icon_index: u32,
+}
+
+/// A unit of the last frame as it was drawn, for the selection feedback
+/// (WP3.3): where it stands, how it is turned and the box of its model.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawnUnit {
+    pub id: UnitId,
+    /// The point on the ground under the middle of the model's box:
+    /// interpolated `x`, terrain height, `z`, in metres.
+    pub centre: [f32; 3],
+    /// Interpolated facing in 1/256 turns.
+    pub steps: f32,
+    /// The model's box: along the facing, height, across, in metres.
+    pub size: [f32; 3],
+    /// World position of the unit's icon (the ground point lifted by the
+    /// icon settings).
+    pub icon_anchor: [f32; 3],
 }
 
 /// The records of one visible tile.
@@ -959,6 +978,84 @@ impl Instancer {
             }
         }
         best
+    }
+
+    /// The units of the last frame whose picture shares a point with the
+    /// rectangle (the drag selection of WP3.3), appended to `out` in
+    /// ascending [`UnitId`] order. Which picture counts is decided as in
+    /// [`Instancer::pick`]: the model's box on the screen while models are at
+    /// least half of the picture, the icon's quad beyond. A box counts at
+    /// least `icons.click_min_px` wide and tall. Units outside the visible
+    /// tiles are not in the frame and are not found.
+    ///
+    /// `out` is cleared first and reused by the caller, so a drag does not
+    /// allocate once it has grown.
+    pub fn pick_rect(&self, query: &RectQuery, out: &mut Vec<UnitId>) {
+        out.clear();
+        let Some(frame) = self.frame else {
+            return;
+        };
+        let click_px = self.icon_config.click_min_px * frame.ui_scale;
+        let size = self.icon_config.icon_px(frame.ui_scale);
+        let lift = self.icon_config.lift;
+        let models = frame.blend.dominant() == Dominant::Model;
+        for rec in &self.records {
+            let hit = if models {
+                let geom = self.geom(rec.shape);
+                let pos = offset_point(Vec3::from(rec.pos), rec.steps, geom.offset);
+                rect_hits_model(
+                    &query.rect,
+                    &query.view_proj,
+                    query.viewport,
+                    pos,
+                    rec.steps,
+                    geom.size,
+                    click_px,
+                )
+            } else {
+                let anchor = Vec3::new(rec.pos[0], rec.pos[1] + lift, rec.pos[2]);
+                project_px(&query.view_proj, anchor, query.viewport).is_some_and(|(px, _)| {
+                    let centre = [snap_icon_center(px[0], size), snap_icon_center(px[1], size)];
+                    rect_hits_icon(&query.rect, centre, size)
+                })
+            };
+            if hit {
+                out.push(rec.id);
+            }
+        }
+        out.sort_unstable();
+    }
+
+    /// Mark the selected units of the last frame and report where they are
+    /// drawn: for every unit of the frame with `is_selected(id)`, its icon
+    /// gets [`ICON_SELECTED`] (before the icons are uploaded) and `visit`
+    /// receives its [`DrawnUnit`]. One pass over the frame's units, no
+    /// allocation.
+    pub fn mark_selected(
+        &mut self,
+        is_selected: impl Fn(UnitId) -> bool,
+        mut visit: impl FnMut(DrawnUnit),
+    ) {
+        let lift = self.icon_config.lift;
+        for i in 0..self.records.len() {
+            let rec = self.records[i];
+            if !is_selected(rec.id) {
+                continue;
+            }
+            if rec.icon_index != NO_INSTANCE
+                && let Some(icon) = self.icons.get_mut(rec.icon_index as usize)
+            {
+                icon.flags |= ICON_SELECTED;
+            }
+            let geom = self.geom(rec.shape);
+            visit(DrawnUnit {
+                id: rec.id,
+                centre: offset_point(Vec3::from(rec.pos), rec.steps, geom.offset).to_array(),
+                steps: rec.steps,
+                size: geom.size,
+                icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
+            });
+        }
     }
 
     /// Mark the picked unit in the instance lists of the last build (before
