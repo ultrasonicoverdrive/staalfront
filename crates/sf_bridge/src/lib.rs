@@ -28,6 +28,7 @@
 //! ```
 
 use sf_data::movement::MovementCosts;
+use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{SimUnitDef, TerrainCost, UnitDefs};
 use sf_sim::{
@@ -103,6 +104,13 @@ pub fn movement_table(costs: &MovementCosts) -> Result<MovementTable, String> {
     .map_err(|e| e.to_string())
 }
 
+/// The node budget of the path service per tick, from the settings of
+/// `sim.ron`, to hand to [`World::with_path_budget`](sf_sim::World::with_path_budget)
+/// (which refuses one below [`MIN_NODE_BUDGET`](sf_sim::MIN_NODE_BUDGET)).
+pub fn path_budget(settings: &SimSettings) -> u32 {
+    settings.path_node_budget
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -124,7 +132,7 @@ pub fn terrain_defs(types: &TerrainTypes, costs: &MovementCosts) -> Vec<TerrainD
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sf_sim::UnitClass;
+    use sf_sim::{UnitClass, World, WorldConfig};
 
     #[test]
     fn every_role_arrives_with_its_numbers() {
@@ -251,6 +259,29 @@ mod tests {
         }
         assert!(flags("grass").buildable && !flags("road").buildable);
         assert!(flags("ore").harvestable && !flags("grass").harvestable);
+    }
+
+    #[test]
+    fn the_shipped_path_budget_is_one_a_world_takes_and_the_simulations_default() {
+        let budget = path_budget(&SimSettings::embedded());
+        assert_eq!(budget, sf_sim::DEFAULT_NODE_BUDGET);
+        assert!(budget >= sf_sim::MIN_NODE_BUDGET);
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_path_budget(budget)
+                .is_ok()
+        );
+        // And a budget the world refuses comes back as its error, not a panic here.
+        let too_small = SimSettings {
+            path_node_budget: sf_sim::MIN_NODE_BUDGET - 1,
+        };
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_path_budget(path_budget(&too_small))
+                .is_err()
+        );
     }
 
     #[test]

@@ -387,7 +387,9 @@ fn aircraft_and_the_legacy_walkers_take_no_route() {
     );
     run(&mut w, 600);
     assert_eq!(w.route_of(soldier).unwrap().status, RouteStatus::None);
-    assert_eq!(cell(&w, soldier), Cell::new(29, 5));
+    // The hut placed above stands in row 5 (columns 26 to 28): the soldier
+    // stops at its edge, as it stops at the edge of the wall.
+    assert_eq!(cell(&w, soldier), Cell::new(25, 5));
 }
 
 #[test]
@@ -461,6 +463,84 @@ fn a_walker_on_its_way_is_sent_round_a_structure_placed_in_front_of_it() {
     assert!(seen.contains(&Cell::new(30, 23)) || seen.contains(&Cell::new(31, 23)));
 }
 
+/// The repro of the review of PR 50: a hunter chases a prey that keeps moving,
+/// so its route is asked for again and again; the request service is kept
+/// busy by 40 other units, so the hunter waits for each new route while it
+/// still follows the waypoints of the old one. A hut is placed in the gap of
+/// the wall in the meantime. The hunter must never stand in the hut.
+#[test]
+fn a_hunter_waiting_for_a_new_route_does_not_walk_through_a_structure_placed_meanwhile() {
+    let terrain = Terrain::from_layer(MAP.0, MAP.1, &layer(), &defs()).unwrap();
+    let mut w = World::with_terrain(config(), terrain)
+        .unwrap()
+        .with_units(table())
+        .unwrap()
+        .with_movement(costs())
+        .unwrap()
+        .with_path_budget(MIN_NODE_BUDGET)
+        .unwrap();
+    // The busy ones first: the lowest slot is served first.
+    let busy: Vec<EntityId> = (0..40)
+        .map(|k| spawn(&mut w, SOLDIER, 2 + (k % 8), 30 + (k / 8)))
+        .collect();
+    let hunter = spawn(&mut w, GUNMAN, 4, 21);
+    let prey = spawn(&mut w, SOLDIER, 20, 21);
+    command(
+        &mut w,
+        Command::Order {
+            ids: vec![hunter],
+            order: Order::Attack(prey),
+            queued: false,
+        },
+    );
+    order(&mut w, prey, (60, 21));
+    let hut = |c: Cell| (30..=32).contains(&c.x) && (20..=22).contains(&c.y);
+    let mut placed = false;
+    let mut waited_with_waypoints = 0;
+    for t in 0..400_u32 {
+        // Keep the service busy: new orders to far places every few ticks.
+        for (k, &id) in busy.iter().enumerate() {
+            if t >= 30 && (t + k as u32).is_multiple_of(10) {
+                let far = if (t / 10 + k as u32).is_multiple_of(2) {
+                    (58, 44)
+                } else {
+                    (3, 40)
+                };
+                order(&mut w, id, far);
+            }
+        }
+        let mut just_placed = false;
+        if !placed && cell(&w, hunter).x >= 22 && w.route_of(hunter).unwrap().waypoints > 0 {
+            place_hut(&mut w, 30, 20);
+            placed = true;
+            just_placed = true;
+        }
+        w.step();
+        if just_placed {
+            // The old waypoints lead to the gap: they are gone on the tick the
+            // map changed, not only when the hunter would step into the hut.
+            assert_eq!(w.route_of(hunter).unwrap().waypoints, 0);
+        }
+        if placed {
+            let view = w.route_of(hunter).unwrap();
+            if view.status == RouteStatus::Waiting || view.waypoints > 0 {
+                waited_with_waypoints += 1;
+            }
+            assert!(
+                !hut(cell(&w, hunter)),
+                "tick {t}: the hunter stands in the hut at {:?}",
+                cell(&w, hunter)
+            );
+        }
+    }
+    assert!(placed, "the hunter never got near the gap");
+    assert!(waited_with_waypoints > 0);
+    assert!(
+        w.is_occupied(Cell::new(31, 21)),
+        "the hut stands in the gap"
+    );
+}
+
 #[test]
 fn a_structure_far_from_a_route_does_not_disturb_it() {
     let mut w = world();
@@ -518,21 +598,25 @@ fn a_unit_walled_in_by_a_structure_stands_where_it_is_with_its_order() {
 }
 
 #[test]
-fn invalidating_a_sector_that_did_not_change_changes_no_plan() {
+fn structures_that_come_and_go_away_from_a_route_change_no_plan_and_a_unit_on_it_goes_on() {
+    // The graph is rebuilt by the tick when a structure is placed or removed, and
+    // there is no other way to make it: no public call changes it.
     let mut w = world();
+    let id = spawn(&mut w, SOLDIER, 5, 5);
     let plan = w.plan_route(WALKER, mid(5, 5), mid(55, 5)).unwrap();
-    for (x, y) in [(0, 0), (31, 21), (47, 10), (63, 47)] {
-        w.invalidate_sector(Cell::new(x, y));
+    for (x, y) in [(0, 40), (50, 42), (58, 44)] {
+        place_hut(&mut w, x, y);
+        w.step();
+        let hut = w.occupant_at(Cell::new(x, y)).unwrap();
+        command(&mut w, Command::Despawn { id: hut });
+        w.step();
     }
     assert_eq!(w.plan_route(WALKER, mid(5, 5), mid(55, 5)).unwrap(), plan);
-    assert!(w.path_stats().sectors_rebuilt >= 4);
-    // A cell off the map is nothing.
-    w.invalidate_sector(Cell::new(64, 48));
-    // A unit mid-route when its sector is rebuilt asks again and arrives.
-    let id = spawn(&mut w, SOLDIER, 5, 5);
+    assert!(w.path_stats().sectors_rebuilt >= 6);
+    // A unit mid-route when a hut is placed in its sector asks again and arrives.
     order(&mut w, id, (55, 5));
     run(&mut w, 60);
-    w.invalidate_sector(cell(&w, id));
+    place_hut(&mut w, 10, 10);
     walk(&mut w, id, 1500);
     assert_eq!(w.order_of(id), Some(Order::Idle));
     assert_eq!(cell(&w, id), Cell::new(55, 5));
@@ -872,9 +956,11 @@ fn crowd(seed: u64) -> (Vec<u64>, u32) {
 fn a_crowd_on_a_random_map_with_structures_comes_and_goes_without_stalling() {
     for seed in [1, 2, 3] {
         let (history, worst_wait) = crowd(seed);
-        // 30 units on the smallest budget: the queue is long, but not for ever.
+        // 30 units on the smallest budget, served strictly by id: the queue is
+        // long, and the last id waits longest when a hut sends many routes to be
+        // made again at once (measured: 130, 189 and 351 ticks), but not for ever.
         assert!(
-            worst_wait < 300,
+            worst_wait < 400,
             "seed {seed}: a unit waited {worst_wait} ticks"
         );
         // And the same run again is the same run.

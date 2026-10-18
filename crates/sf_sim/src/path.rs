@@ -9,7 +9,7 @@
 //!   borders between sectors and the **cost of crossing a sector** from portal
 //!   to portal form an abstract graph, built when the world is made and
 //!   rebuilt one sector (and its neighbours) at a time when a structure is
-//!   placed or destroyed ([`World::invalidate_sector`](crate::World::invalidate_sector));
+//!   placed or destroyed (by the tick, from inside the world: [`Pathing::refresh_cells`]);
 //! * a request runs A* over that graph, then refines the next one or two legs
 //!   cell by cell inside their sectors and pulls them taut with a line of
 //!   sight, and only does the next legs when the unit has used these up;
@@ -270,13 +270,17 @@ impl Pathing {
         if self.graphs.is_empty() || sectors.is_empty() {
             return;
         }
-        let ground = Ground { terrain, movement };
+        let ground = Ground {
+            terrain,
+            movement,
+            occupancy: Some(occupancy),
+        };
         for g in &mut self.graphs {
             for &s in sectors {
                 let (x0, y0, x1, y1) = g.sectors.rect(s);
                 for y in y0..y1 {
                     for x in x0..x1 {
-                        let speed = cell_speed(&ground, occupancy, g.class, x, y);
+                        let speed = cell_speed(&ground, g.class, x, y);
                         let i = g.grid.index(x, y);
                         g.grid.set(i, speed);
                     }
@@ -462,19 +466,31 @@ impl Pathing {
             }
             _ => {}
         }
-        // A change of the map since the route was made: is it in the way?
-        if route.epoch != self.epoch
-            && matches!(route.state, RouteState::Active | RouteState::Stranded)
+        // A change of the map since the route was made: is it in the way? A
+        // route that waits for a search (its destination moved) still follows
+        // its old waypoints, and one whose search is half done has the first
+        // legs of the new route on the ring: both are checked as well, against
+        // the epoch they were made in. One with no waypoints has nothing to
+        // walk through, and its search notices the change itself.
+        let (since, own_job) = match &self.job {
+            Some(j) if route.state == RouteState::Wanted && j.is_for(i as u32, route.ticket) => {
+                (j.epoch(), true)
+            }
+            _ => (route.epoch, false),
+        };
+        if since != self.epoch
+            && (matches!(route.state, RouteState::Active | RouteState::Stranded)
+                || (route.state == RouteState::Wanted && route.ring_len() > 0))
         {
             let pos = Pathing::cell_index(g, e.pos[i]);
-            if self.touched(g, &e.route[i], pos) {
+            if self.touched(g, &e.route[i], pos, since) {
                 self.next_ticket = self.next_ticket.wrapping_add(1);
                 let route = &mut e.route[i];
                 route.clear_plan();
                 route.state = RouteState::Wanted;
                 route.ticket = self.next_ticket;
                 self.scan = true;
-            } else {
+            } else if !own_job {
                 e.route[i].epoch = self.epoch;
             }
         }
@@ -554,14 +570,14 @@ impl Pathing {
     /// it to matter: some sector within one of a sector the route, the unit or
     /// the goal is in changed after the route was made. Line-of-sight segments
     /// are at most one sector long, so this covers everything they cross.
-    fn touched(&self, g: &ClassGraph, route: &Route, pos: u32) -> bool {
+    fn touched(&self, g: &ClassGraph, route: &Route, pos: u32, since: u32) -> bool {
         let mut near = |cell: u32| {
             let (x, y) = g.grid.xy(cell);
             let s = g.sectors.of_cell(x, y);
             let (sx, sy) = g.sectors.coords(s);
             for ny in sy.saturating_sub(1)..=(sy + 1).min(g.sectors.down - 1) {
                 for nx in sx.saturating_sub(1)..=(sx + 1).min(g.sectors.across - 1) {
-                    if self.sector_epoch[(ny * g.sectors.across + nx) as usize] > route.epoch {
+                    if self.sector_epoch[(ny * g.sectors.across + nx) as usize] > since {
                         return true;
                     }
                 }
@@ -618,6 +634,26 @@ impl Pathing {
             complete: route.complete,
             cautious: route.cautious,
         }
+    }
+
+    /// Whether a unit of `class` could walk the straight line from `from` to
+    /// `to` by the rules the path finder pulls routes taut with: no cell it
+    /// cannot enter (a structure included) within a quarter of a cell of the
+    /// line, and no longer than one sector. `false` for a class without a graph
+    /// or a point outside the map. Read only.
+    pub fn sight_clear(&self, class: u16, from: Vec2, to: Vec2) -> bool {
+        let Some(gi) = self.graph_index(class) else {
+            return false;
+        };
+        let g = &self.graphs[gi];
+        let inside = |p: Vec2| {
+            let (x, y) = p.cell();
+            x >= 0 && y >= 0 && (x as u32) < g.grid.width() && (y as u32) < g.grid.height()
+        };
+        inside(from)
+            && inside(to)
+            && los::short_enough(from, to)
+            && los::thick_clear(&g.grid, from, to).0
     }
 
     /// Plans a whole route for class `class` with no budget and no unit: the
@@ -708,13 +744,7 @@ impl Pathing {
 
 /// The speed of a cell for a class, in thousandths: zero where the class
 /// cannot go, and on a cell a structure occupies.
-fn cell_speed(ground: &Ground<'_>, occupancy: &Occupancy, class: u16, x: u32, y: u32) -> u16 {
-    if occupancy
-        .index(Cell::new(x, y))
-        .is_some_and(|i| occupancy.slot_at(i).is_some())
-    {
-        return 0;
-    }
+fn cell_speed(ground: &Ground<'_>, class: u16, x: u32, y: u32) -> u16 {
     match ground.cost(class, Cell::new(x, y)) {
         Cost::Speed(p) => p,
         Cost::Impassable => 0,
@@ -728,11 +758,15 @@ fn class_grid(
     movement: &MovementTable,
     occupancy: &Occupancy,
 ) -> Grid {
-    let ground = Ground { terrain, movement };
+    let ground = Ground {
+        terrain,
+        movement,
+        occupancy: Some(occupancy),
+    };
     let mut grid = Grid::new(terrain.width(), terrain.height());
     for y in 0..terrain.height() {
         for x in 0..terrain.width() {
-            let speed = cell_speed(&ground, occupancy, class, x, y);
+            let speed = cell_speed(&ground, class, x, y);
             let i = grid.index(x, y);
             grid.set(i, speed);
         }

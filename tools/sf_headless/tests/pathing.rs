@@ -3,13 +3,15 @@
 //! `pathing` (`assets/scenarios/pathing.ron`, map `assets/maps/pathing`): a
 //! maze of rock and water, a river with one bridge, an island that cannot be
 //! reached, a structure that closes a gap in a wall, and 24 requests at once.
-//! The tests check what the path finder promises, against a plain search of the
+//! The tests check what the path finder promises, against plain searches of the
 //! whole grid that they run themselves:
 //!
 //! * everything that can be reached is reached, and nothing that cannot is;
 //! * no unit ever ends a tick on ground its class cannot enter, or on a cell a
 //!   structure occupies;
-//! * the distance a unit walked is at most 1.1 times that of the best route;
+//! * the distance a unit walked is at most 1.1 times that of the best any-angle
+//!   route by the game's own line of sight (the walk is smoothed, so the reference
+//!   is too);
 //! * an unreachable goal ends in the reachable cell nearest to it, marked;
 //! * a structure placed on the route sends the unit another way, and taking it
 //!   away restores the routes exactly;
@@ -45,6 +47,9 @@ const BOAT_LAND: u32 = 9;
 const CROWD: std::ops::Range<u32> = 10..34;
 const STRUCTURE: EntityId = EntityId::new(34, 0);
 
+/// The tick by which every one of the 200 requests of `pathing_256` has its first
+/// waypoints, at the default budget: 25 % above what is measured.
+const SERVE_ALL_BY: u64 = 120;
 const PLACED_AT: u64 = 650;
 const REMOVED_AT: u64 = 1500;
 
@@ -67,7 +72,7 @@ fn class_of(world: &World, slot: u32) -> u16 {
     world.stats_of(id(slot)).unwrap().movement_class.unwrap()
 }
 
-// --- the reference: a plain search of the whole grid ------------------------------
+// --- the references: plain searches of the whole grid ----------------------------
 
 /// Which cells a class may be in, now: the terrain's answer, and for a class the
 /// path finder serves, not a cell a structure occupies.
@@ -148,6 +153,68 @@ fn distances(p: &Passable, from: Cell) -> Vec<i64> {
         }
     }
     dist
+}
+
+/// The shortest route a unit could walk by the rules of the game, from the
+/// middle of one cell to the middle of another, at any angle: Theta* over the
+/// cells (a node takes its parent's parent when that one sees it, by the thick
+/// line of sight the path finder smooths with, `World::sight_clear`) with the
+/// straight distance as the heuristic. Raw fixed point; `i64::MAX` if there is
+/// no way. The fair reference for a smoothed route: [`distances`] is the best
+/// walk along the grid, which cannot cut a corner.
+fn any_angle_best(world: &World, class: u16, p: &Passable, from: Cell, to: Cell) -> i64 {
+    use std::cmp::Reverse;
+    let w = p.w;
+    let at = |i: usize| mid(i as u32 % w, i as u32 / w);
+    let n = (p.w * p.h) as usize;
+    let (start, goal) = ((from.y * w + from.x) as usize, (to.y * w + to.x) as usize);
+    let mut dist = vec![i64::MAX; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut done = vec![false; n];
+    dist[start] = 0;
+    parent[start] = start;
+    let mut heap = BinaryHeap::new();
+    heap.push(Reverse((at(start).distance(at(goal)).raw(), start)));
+    while let Some(Reverse((_, s))) = heap.pop() {
+        if std::mem::replace(&mut done[s], true) {
+            continue;
+        }
+        if s == goal {
+            return dist[s];
+        }
+        let (x, y) = ((s as u32 % w) as i64, (s as u32 / w) as i64);
+        for (dx, dy) in [
+            (0, -1),
+            (1, 0),
+            (0, 1),
+            (-1, 0),
+            (1, -1),
+            (1, 1),
+            (-1, 1),
+            (-1, -1),
+        ] {
+            let (nx, ny) = (x + dx, y + dy);
+            if !p.at(nx, ny) || (dx != 0 && dy != 0 && !(p.at(nx, y) && p.at(x, ny))) {
+                continue;
+            }
+            let m = (ny as u32 * w + nx as u32) as usize;
+            if done[m] {
+                continue;
+            }
+            let q = parent[s];
+            let (via, d) = if q != s && world.sight_clear(class, at(q), at(m)) {
+                (q, dist[q] + at(q).distance(at(m)).raw())
+            } else {
+                (s, dist[s] + at(s).distance(at(m)).raw())
+            };
+            if d < dist[m] {
+                dist[m] = d;
+                parent[m] = via;
+                heap.push(Reverse((d + at(m).distance(at(goal)).raw(), m)));
+            }
+        }
+    }
+    i64::MAX
 }
 
 fn octile(a: Cell, b: Cell) -> i64 {
@@ -351,31 +418,41 @@ fn no_unit_ever_ends_a_tick_where_its_class_cannot_be() {
     }
 }
 
-/// How far each unit walked against the best walk of the whole grid.
+/// How far each unit walked against the best route there is, measured like with
+/// like: the walk of a unit is smoothed and at any angle, so the reference is the
+/// best any-angle route by the same line-of-sight rule ([`any_angle_best`]). The
+/// best walk along the grid is printed beside it: a walk that cuts corners is
+/// shorter than that.
 #[test]
 fn routes_are_at_most_ten_percent_longer_than_the_best() {
     let r = run();
-    let mut worst = 0;
+    let (mut worst, mut worst_grid) = (0, 0);
     // The terrain only: the structure of the scenario is not on these units'
     // way (the tank that it is on the way of is checked apart).
     for slot in
         (0..34_u32).filter(|s| ![ISLAND_FOOT, ISLAND_TANK, BOAT_LAND, HAUL_TANK].contains(s))
     {
-        let p = Passable::terrain_only(&r.world, class_of(&r.world, slot));
+        let class = class_of(&r.world, slot);
+        let p = Passable::terrain_only(&r.world, class);
         let (start, end) = (r.start_of(slot), r.end_of(slot));
-        let best = distances(&p, start)[(end.y * W + end.x) as usize];
+        let best = any_angle_best(&r.world, class, &p, start, end);
         assert_ne!(best, i64::MAX, "unit {slot} has no way");
+        let grid = distances(&p, start)[(end.y * W + end.x) as usize];
         let walked = r.walked[slot as usize];
         // The unit starts in the middle of its cell and ends within a tolerance of
         // the middle of the goal: a little under or over the cell-to-cell length.
         let ratio = walked * 1000 / best;
         worst = worst.max(ratio);
+        worst_grid = worst_grid.max(walked * 1000 / grid);
         assert!(
             walked * 10 <= best * 11,
-            "unit {slot}: walked {walked}, the best route is {best} ({ratio} per thousand)"
+            "unit {slot}: walked {walked}, the best any-angle route is {best} ({ratio} per thousand)"
         );
     }
-    eprintln!("pathing: the longest walk relative to the best is {worst} per thousand");
+    eprintln!(
+        "pathing: the longest walk relative to the best any-angle route is {worst} per thousand \
+         ({worst_grid} relative to the best walk along the grid)"
+    );
 }
 
 #[test]
@@ -648,5 +725,15 @@ fn two_hundred_requests_on_the_256_map_are_served_inside_the_budget() {
     );
     // The first request is served on the first tick it can be.
     assert_eq!(served[0], 2);
+    // The last of 200 single-unit requests gets its first waypoints within
+    // SERVE_ALL_BY ticks (measured: 96, about 600 jobs of 750 to 1,500 nodes
+    // against 4,096 nodes a tick). A group order this size is WP4.3's flowfield,
+    // not 200 searches (`docs/rules/pathfinding.md`); the limit is here so that a
+    // slowdown of the search shows as a failing test and not as a bigger number
+    // on a screen.
+    assert!(
+        last <= SERVE_ALL_BY,
+        "the last of 200 requests was served on tick {last}, the limit is {SERVE_ALL_BY}"
+    );
     assert!(last < scenario.ticks, "served within the run");
 }

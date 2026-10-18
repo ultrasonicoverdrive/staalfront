@@ -15,6 +15,7 @@
 
 use sf_data::map::Map;
 use sf_data::movement::MovementCosts;
+use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
 use sf_sim::{Terrain, TerrainDef, World, WorldConfig};
@@ -27,7 +28,8 @@ pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
 
 /// `world` with the terrain costs of the movement classes of `defs`, checked
 /// against the shipped terrain types (the types every map layer was checked
-/// against). Call it with the unit table, before the world starts.
+/// against), and the path service budget of the shipped `sim.ron`. Call it with
+/// the unit table, before the world starts.
 ///
 /// # Panics
 ///
@@ -39,9 +41,12 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
         MovementCosts::embedded()
     });
     let table = sf_bridge::movement_table(&costs).expect("the movement costs make a valid table");
+    let budget = sf_bridge::path_budget(&SimSettings::embedded());
     world
         .with_movement(table)
         .expect("a world that has not started takes its movement table")
+        .with_path_budget(budget)
+        .expect("the shipped path budget is one a world takes")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a

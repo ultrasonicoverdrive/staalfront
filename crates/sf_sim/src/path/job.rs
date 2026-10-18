@@ -280,6 +280,16 @@ impl Job {
         debug_assert!(nodes.len() <= ABS_CAP || route.truncated);
     }
 
+    /// Whether this is the job of the unit in `slot` for the request `ticket`.
+    pub fn is_for(&self, slot: u32, ticket: u32) -> bool {
+        self.slot == slot && self.ticket == ticket
+    }
+
+    /// The epoch of the graph the job began in.
+    pub fn epoch(&self) -> u32 {
+        self.epoch
+    }
+
     /// Works on the job while the budget lasts. `epoch` is the graph's epoch
     /// now; a job begun in another one is over.
     pub fn run(

@@ -223,7 +223,7 @@ fn the_pinned_arrival_ticks() {
         (ROCK, FOOT, 265),
         (ROCK, WHEELED, 102),
         (ROCK, TRACKED, 95),
-        (ROCK, HOVER, 137),
+        (ROCK, HOVER, 136),
     ];
     for (lane, class, tick) in table {
         assert_eq!(

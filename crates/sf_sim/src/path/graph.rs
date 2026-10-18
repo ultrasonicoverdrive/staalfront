@@ -7,8 +7,8 @@
 //! border positions where the cell on both sides can be entered. A run gets
 //! **portals**: a pair of cells facing each other, one in each sector. A short
 //! run (up to 5 positions) gets one, in the middle (the lower middle for an even
-//! run); a longer one gets one at each end, and from 12 positions a third in
-//! the middle. One portal per run is enough for connectivity: the cells of a
+//! run); one of 6 to 11 gets three, at both ends and in the middle, and from 12
+//! positions four, spread evenly. One portal per run is enough for connectivity: the cells of a
 //! run are all open and next to each other, so they reach each other along the
 //! border on either side, and a diagonal step across a border needs both its
 //! orthogonal cells open, which is a run position of its own. The extra portals
@@ -44,8 +44,8 @@
 //! their neighbours (whose portals on the shared border may have changed), and
 //! nothing else.
 
-use crate::path::grid::orth_cost;
 use crate::path::grid::{EAST, Grid, Heuristic, NORTH, SECTOR_SIZE, SOUTH, Sectors, opposite};
+use crate::path::grid::{FULL_SPEED, orth_cost};
 use crate::path::local::{Local, Query};
 
 /// Portal slots per side of a sector.
@@ -89,17 +89,37 @@ impl SectorGraph {
     }
 }
 
+/// The most portals one run gets.
+const MOST_PER_RUN: usize = 4;
+
 /// Where along a run of `len` crossable positions starting at `start` the
-/// portals go: the middle of a short run (up to 5), both ends of a longer one
-/// and, from 12 on, the middle as well. Never more than one portal for every two
-/// positions, so a side's 8 slots always suffice.
-fn portal_positions(start: u32, len: u32) -> ([u32; 3], usize) {
-    let last = start + len - 1;
-    match len {
-        0..=5 => ([start + (len - 1) / 2, 0, 0], 1),
-        6..=11 => ([start, last, 0], 2),
-        _ => ([start, start + (len - 1) / 2, last], 3),
+/// portals go: the middle of a short run (up to 5), both ends and the middle of
+/// one of 6 to 11, and four spread evenly (both ends included) from 12 on.
+/// Never more than one portal for every two positions, so a side's 8 slots
+/// always suffice.
+///
+/// The count matters for the quality of the routes: the abstract search picks
+/// the way round an obstacle from the cost of walking to the portals, and a
+/// portal far from the place where the best route crosses a border makes the
+/// wrong way look cheaper. Measured against the best any-angle route on 1,900
+/// random routes, two portals for a run of 6 to 11 and three from 12 on gave a
+/// worst case of 1150 per thousand of the best; these counts give 1075
+/// (`docs/rules/pathfinding.md`).
+fn portal_positions(start: u32, len: u32) -> ([u32; MOST_PER_RUN], usize) {
+    let mut out = [0; MOST_PER_RUN];
+    let count: u32 = match len {
+        0..=5 => 1,
+        6..=11 => 3,
+        _ => 4,
+    };
+    if count == 1 {
+        out[0] = start + (len - 1) / 2;
+        return (out, 1);
     }
+    for k in 0..count {
+        out[k as usize] = start + k * (len - 1) / (count - 1);
+    }
+    (out, count as usize)
 }
 
 /// The node number of a portal slot of a sector.
@@ -143,7 +163,10 @@ impl ClassGraph {
     /// Builds the graph of a grid.
     pub fn build(class: u16, grid: Grid, local: &mut Local) -> ClassGraph {
         let sectors = Sectors::new(grid.width(), grid.height());
-        let heur = Heuristic::from_best_speed(grid.max_speed());
+        // At least normal speed, as in `heuristic_in`: a unit standing in a
+        // blocked cell leaves it at normal speed, so no step is cheaper than
+        // the average of that and the best cell.
+        let heur = Heuristic::from_best_speed(grid.max_speed().max(FULL_SPEED));
         let mut graph = ClassGraph {
             class,
             grid,
@@ -388,25 +411,27 @@ mod tests {
     }
 
     #[test]
-    fn open_ground_gets_a_portal_at_both_ends_and_in_the_middle_of_every_border() {
+    fn open_ground_gets_four_portals_spread_along_every_full_border() {
         let mut local = Local::new();
         let g = ClassGraph::build(0, open(32, 32), &mut local);
         // Sector 0 is the top left: east and south borders only.
         let p = portals(&g, 0);
-        assert_eq!(p.len(), 6);
-        // East border at x = 15, rows 0..15: both ends and the lower middle.
+        assert_eq!(p.len(), 8);
+        // East border at x = 15, rows 0..15: four, spread from end to end.
         let east = EAST * SLOTS_PER_SIDE;
         assert_eq!(p[0], (east, (15, 0)));
-        assert_eq!(p[1], (east + 1, (15, 7)));
-        assert_eq!(p[2], (east + 2, (15, 15)));
+        assert_eq!(p[1], (east + 1, (15, 5)));
+        assert_eq!(p[2], (east + 2, (15, 10)));
+        assert_eq!(p[3], (east + 3, (15, 15)));
         // South border at y = 15: the same along the columns.
         let south = SOUTH * SLOTS_PER_SIDE;
-        assert_eq!(p[3], (south, (0, 15)));
-        assert_eq!(p[4], (south + 1, (7, 15)));
-        assert_eq!(p[5], (south + 2, (15, 15)));
+        assert_eq!(p[4], (south, (0, 15)));
+        assert_eq!(p[5], (south + 1, (5, 15)));
+        assert_eq!(p[6], (south + 2, (10, 15)));
+        assert_eq!(p[7], (south + 3, (15, 15)));
         // The other side of the east border is in sector 1, facing west.
         let q = portals(&g, 1);
-        assert!(q.contains(&(WEST * SLOTS_PER_SIDE + 1, (16, 7))));
+        assert!(q.contains(&(WEST * SLOTS_PER_SIDE + 1, (16, 5))));
         // The two portal nodes of a crossing agree on its cost.
         assert_eq!(
             g.sector[0].cross[east + 1],
@@ -415,13 +440,13 @@ mod tests {
     }
 
     #[test]
-    fn short_runs_get_one_portal_and_long_ones_two_or_three() {
-        assert_eq!(portal_positions(4, 1), ([4, 0, 0], 1));
-        assert_eq!(portal_positions(4, 5), ([6, 0, 0], 1));
-        assert_eq!(portal_positions(4, 6), ([4, 9, 0], 2));
-        assert_eq!(portal_positions(0, 11), ([0, 10, 0], 2));
-        assert_eq!(portal_positions(0, 12), ([0, 5, 11], 3));
-        assert_eq!(portal_positions(0, 16), ([0, 7, 15], 3));
+    fn short_runs_get_one_portal_and_long_ones_three_or_four() {
+        assert_eq!(portal_positions(4, 1), ([4, 0, 0, 0], 1));
+        assert_eq!(portal_positions(4, 5), ([6, 0, 0, 0], 1));
+        assert_eq!(portal_positions(4, 6), ([4, 6, 9, 0], 3));
+        assert_eq!(portal_positions(0, 11), ([0, 5, 10, 0], 3));
+        assert_eq!(portal_positions(0, 12), ([0, 3, 7, 11], 4));
+        assert_eq!(portal_positions(0, 16), ([0, 5, 10, 15], 4));
         // Never more than one portal for every two positions: eight slots do.
         for len in 1..=16_u32 {
             let (_, n) = portal_positions(0, len);
@@ -512,6 +537,39 @@ mod tests {
         g.rebuild(&[1], &mut local);
         let fresh = ClassGraph::build(0, g.grid.clone(), &mut local);
         assert_eq!(g, fresh);
+    }
+
+    #[test]
+    fn the_whole_map_heuristic_has_the_floor_of_normal_speed_and_never_overestimates() {
+        // A class whose fastest ground is slow (500): a unit standing in a
+        // blocked cell leaves it at normal speed, so the step out of it costs
+        // less than a step between two cells of the best ground.
+        let mut grid = Grid::new(20, 4);
+        for i in 0..20 * 4 {
+            grid.set(i, 500);
+        }
+        let start = grid.index(2, 1);
+        grid.set(start, 0);
+        let mut local = Local::new();
+        let g = ClassGraph::build(0, grid, &mut local);
+        let step_out = g.grid.step_cost(2, 1, 1, 0);
+        assert!(
+            g.heur.octile((2, 1), (3, 1)) <= u64::from(step_out),
+            "the heuristic {} is above the real step {step_out}",
+            g.heur.octile((2, 1), (3, 1))
+        );
+        // The same floor as the heuristic of a window.
+        assert_eq!(
+            g.heur.octile((0, 0), (9, 0)),
+            g.heuristic_in((0, 0, 20, 4)).octile((0, 0), (9, 0))
+        );
+        // And the floor is not a ceiling: faster ground still counts.
+        let mut fast = Grid::new(8, 8);
+        for i in 0..64 {
+            fast.set(i, 1500);
+        }
+        let g = ClassGraph::build(0, fast, &mut local);
+        assert!(g.heur.octile((0, 0), (4, 0)) < 4 * u64::from(crate::path::grid::COST_ONE));
     }
 
     #[test]

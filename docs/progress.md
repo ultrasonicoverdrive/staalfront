@@ -238,7 +238,7 @@ Status: in progress.
   `docs/rules/movement.md`: done
 - WP4.2 Hierarchical A* (sectors and portals) for single units (`sf_sim::path`: sectors of 16 by 16
   cells, portals on their borders, an abstract graph per terrain-bound movement class built when the
-  world is made and rebuilt one sector at a time by `World::invalidate_sector` when a structure is
+  world is made and rebuilt one sector at a time by the tick when a structure is
   placed or removed; abstract A*, lazy refinement inside the sectors, line-of-sight string pulling,
   a fixed-size ring of waypoints per unit; requests served in the order of the entity ids inside a
   node budget per tick; an unreachable goal ends in the nearest reachable cell and says so;
@@ -276,13 +276,13 @@ unreachable) instead of at the edge of it, and the lanes in the open each take o
 request). The scenario file's commands and its frozen definitions are the same; the asserts of
 `tools/sf_headless/tests/terrain_costs.rs` and of `crates/sf_sim/tests/movement.rs` that described
 "stops at the edge" were rewritten for the new rule, the legacy `MoveTo` keeps its test. Choices:
-a portal per short run and three on a run of twelve or more (quality showed in the tail of the
-distribution, not the median); a leg that crosses a border is searched over both sectors so the route
+one portal on a short run, three on a run of 6 to 11 and four from 12 on (measured against the
+best any-angle route: the tail of the distribution, not the median, decided it); a leg that crosses a border is searched over both sectors so the route
 crosses where it suits it; a thick line of sight of a quarter cell and a sector long; the budget is in
-nodes (cells expanded or looked at), 4,096 per tick by default; a structure on a unit's own cell with no
-free neighbour leaves it with nothing to reach (WP4.4's stuck unit). Measured: 352 random routes
-against a plain search of the grid, median 0.97 of the best walk along the grid, 99th percentile
-1.03, worst 1.10; `pathing_256`, 200 requests served after 85 ticks. Not done on purpose: flowfields,
+nodes (cells expanded or looked at), 4,096 per tick by default, in `assets/config/sim.ron`; a structure on a unit's own cell with no
+free neighbour leaves it with nothing to reach (WP4.4's stuck unit). Measured: about 1,100 random routes
+against the best any-angle route by the game's own line of sight, median 1.006, 99th percentile
+1.05, worst 1.075; `pathing_256`, 200 requests served after 96 ticks. Not done on purpose: flowfields,
 collision, replanning when a route is blocked or a target vanishes (the graph is kept right; a route
 is only asked for again when a change touches it), a cache for unreachable goals, uphill slowing.
 

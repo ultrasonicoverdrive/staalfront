@@ -36,7 +36,9 @@
 // tools/sf_headless/tests/pathing.rs asserts, from the committed map, that every
 // reachable unit arrives, that no unit ever ends a tick on ground its class
 // cannot enter, that the length each unit walked is at most 1.1 times the best
-// route a plain search of the whole grid finds, that the unreachable ones stand
+// any-angle route by the game's own line of sight (the walk is smoothed, so the
+// reference is too; the best walk along the grid is printed beside it), that the
+// unreachable ones stand
 // in the cell nearest to their goal, that the structure sends unit 4 through the
 // second gap, and that the work of the path service never exceeds its budget. CI
 // runs the scenario on Linux and Windows and requires the checksum in

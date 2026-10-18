@@ -478,18 +478,13 @@ impl World {
         self.pathing.plan(class, from, to)
     }
 
-    /// Reads the sector that contains `cell` again from the terrain and the
-    /// structures and rebuilds the portals and costs that depend on it and its
-    /// neighbours; routes through it are made again. The world does this
-    /// itself when a structure is placed or removed (the only things that
-    /// change what a cell allows); it is public for a change of the terrain
-    /// (a bridge destroyed) that a later work package makes. Does nothing for a
-    /// cell outside the map or in a world without pathfinding.
-    pub fn invalidate_sector(&mut self, cell: Cell) {
-        if let Some(sector) = self.pathing.sector_of(cell) {
-            self.pathing
-                .refresh_sectors(&self.terrain, &self.movement, &self.occupancy, &[sector]);
-        }
+    /// Whether a unit of `class` could walk the straight line between two
+    /// positions by the rules routes are pulled taut with (the thick line of
+    /// sight of `docs/rules/pathfinding.md`; structures count, mobile units do
+    /// not). `false` for a class without pathfinding or a position off the map.
+    /// Reads the world only; tests and tools use it to judge routes.
+    pub fn sight_clear(&self, class: u16, from: Vec2, to: Vec2) -> bool {
+        self.pathing.sight_clear(class, from, to)
     }
 
     /// How many cells are occupied.
@@ -616,6 +611,7 @@ impl World {
         let ground = Ground {
             terrain: &self.terrain,
             movement: &self.movement,
+            occupancy: Some(&self.occupancy),
         };
         behavior::advance_all(
             &mut self.entities,
@@ -643,6 +639,7 @@ impl World {
         Ground {
             terrain: &self.terrain,
             movement: &self.movement,
+            occupancy: None,
         }
     }
 

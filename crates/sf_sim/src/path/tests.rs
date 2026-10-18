@@ -289,43 +289,113 @@ fn a_bridge_is_the_only_way_across_a_river_for_foot_and_the_boat_goes_under_it()
     assert_eq!(boat.waypoints.last(), Some(&mid(22, 30)));
 }
 
-#[test]
-fn routes_stay_close_to_the_best_on_random_maps() {
-    let mut s: u64 = 0x2545_F491_4F6C_DD1D;
-    let mut next = move || {
+/// A deterministic generator for the quality tests.
+fn xorshift(seed: u64) -> impl FnMut() -> u64 {
+    let mut s = seed;
+    move || {
         s ^= s << 13;
         s ^= s >> 7;
         s ^= s << 17;
         s
+    }
+}
+
+/// A map of 70 by 55 cells with clumps of rock of three densities (by `round`),
+/// and its rock cells.
+fn random_rock_map(round: usize, next: &mut impl FnMut() -> u64) -> (Terrain, Vec<bool>) {
+    let (w, h) = (70_u32, 55_u32);
+    // Clumps of rock: a seed per cell, then each seed grows a few cells.
+    let mut rock = vec![false; (w * h) as usize];
+    let density = [18, 24, 30][round % 3];
+    for _ in 0..(w * h * density / 100 / 5) {
+        let (x, y) = (next() as u32 % w, next() as u32 % h);
+        let (cw, ch) = (1 + next() as u32 % 4, 1 + next() as u32 % 4);
+        for dy in 0..ch {
+            for dx in 0..cw {
+                if x + dx < w && y + dy < h {
+                    rock[((y + dy) * w + x + dx) as usize] = true;
+                }
+            }
+        }
+    }
+    let rows: Vec<String> = (0..h)
+        .map(|y| {
+            (0..w)
+                .map(|x| if rock[(y * w + x) as usize] { '#' } else { '.' })
+                .collect()
+        })
+        .collect();
+    let refs: Vec<&str> = rows.iter().map(String::as_str).collect();
+    (terrain(&refs), rock)
+}
+
+/// The shortest route a unit could walk by the rules of the game, from the
+/// middle of one cell to the middle of another: any angle, every segment clear
+/// by the thick line of sight and at most [`los::LOS_MAX_CELLS`] long (longer
+/// stretches are made of several, which costs nothing on a straight line).
+/// Theta*: A* over the cells in which a node may take its parent's parent when
+/// that one sees it, with the straight distance as the heuristic. `None` if
+/// the goal cannot be reached. In raw fixed point.
+fn any_angle_reference(grid: &Grid, from: (u32, u32), to: (u32, u32)) -> Option<i64> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    let w = grid.width();
+    let at = |i: usize| mid(i as u32 % w, i as u32 / w);
+    let sees = |a: usize, b: usize| {
+        let (p, q) = (at(a), at(b));
+        los::short_enough(p, q) && los::thick_clear(grid, p, q).0
     };
+    let n = (w * grid.height()) as usize;
+    let (start, goal) = ((from.1 * w + from.0) as usize, (to.1 * w + to.0) as usize);
+    let mut dist = vec![i64::MAX; n];
+    let mut parent = vec![usize::MAX; n];
+    let mut done = vec![false; n];
+    dist[start] = 0;
+    parent[start] = start;
+    let mut heap = BinaryHeap::new();
+    heap.push(Reverse((at(start).distance(at(goal)).raw(), start)));
+    while let Some(Reverse((_, s))) = heap.pop() {
+        if done[s] {
+            continue;
+        }
+        done[s] = true;
+        if s == goal {
+            return Some(dist[s]);
+        }
+        let (sx, sy) = (s as u32 % w, s as u32 / w);
+        for (dx, dy) in grid::DIRS {
+            if !grid.can_step(sx, sy, dx, dy) {
+                continue;
+            }
+            let m = ((i64::from(sy) + dy) as u32 * w + (i64::from(sx) + dx) as u32) as usize;
+            if done[m] {
+                continue;
+            }
+            let p = parent[s];
+            let (via, d) = if p != s && sees(p, m) {
+                (p, dist[p] + at(p).distance(at(m)).raw())
+            } else {
+                (s, dist[s] + at(s).distance(at(m)).raw())
+            };
+            if d < dist[m] {
+                dist[m] = d;
+                parent[m] = via;
+                heap.push(Reverse((d + at(m).distance(at(goal)).raw(), m)));
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn routes_stay_close_to_the_best_on_random_maps() {
+    let mut next = xorshift(0x2545_F491_4F6C_DD1D);
     // The ratio of the walked length to the best walk along the grid, per
     // thousand, of every route; unreachable pairs are checked for what they are.
     let mut ratios: Vec<i64> = Vec::new();
     for round in 0..22 {
-        let (w, h) = (70_u32, 55_u32);
-        // Clumps of rock: a seed per cell, then each seed grows a few cells.
-        let mut rock = vec![false; (w * h) as usize];
-        let density = [18, 24, 30][round % 3];
-        for _ in 0..(w * h * density / 100 / 5) {
-            let (x, y) = (next() as u32 % w, next() as u32 % h);
-            let (cw, ch) = (1 + next() as u32 % 4, 1 + next() as u32 % 4);
-            for dy in 0..ch {
-                for dx in 0..cw {
-                    if x + dx < w && y + dy < h {
-                        rock[((y + dy) * w + x + dx) as usize] = true;
-                    }
-                }
-            }
-        }
-        let rows: Vec<String> = (0..h)
-            .map(|y| {
-                (0..w)
-                    .map(|x| if rock[(y * w + x) as usize] { '#' } else { '.' })
-                    .collect()
-            })
-            .collect();
-        let refs: Vec<&str> = rows.iter().map(String::as_str).collect();
-        let t = terrain(&refs);
+        let (t, rock) = random_rock_map(round, &mut next);
+        let (w, h) = (t.width(), t.height());
         let p = pathing_for(&t);
         for _ in 0..40 {
             let a = (next() as u32 % w, next() as u32 % h);
@@ -355,15 +425,66 @@ fn routes_stay_close_to_the_best_on_random_maps() {
     ratios.sort_unstable();
     let n = ratios.len();
     assert!(n > 200, "{n} routes checked");
-    // A route that cuts corners is shorter than the best walk along the grid,
-    // so most are under a thousand. The few that are not are the ones where the
-    // abstract graph chose the wrong one of two ways around an obstacle, by a
-    // few cells. Measured on 1 200 routes the worst was 1103; the bound has
-    // room above that.
+    // This compares an any-angle walk with the best walk along the grid, which
+    // cannot cut corners: most routes are under a thousand, and the bound is no
+    // statement about the quality of the search. The test below is: it compares
+    // like with like.
     let (median, p95, worst) = (ratios[n / 2], ratios[n * 95 / 100], ratios[n - 1]);
     assert!(median <= 1000, "median {median}");
     assert!(p95 <= 1040, "95th percentile {p95}");
     assert!(worst <= 1150, "worst {worst}");
+}
+
+/// The quality of the search, measured like with like: the length of the route
+/// a unit walks (smoothed, any angle) against the best any-angle route there is
+/// by the same line-of-sight rule ([`any_angle_reference`]). Three seeds of 22
+/// maps each, about 1,100 routes of at least 20 cells.
+///
+/// Measured, per thousand of the best: median 1006, 99th percentile 1050, worst
+/// 1075; what is left over
+/// is the abstract search choosing the longer of two ways round an obstacle
+/// when the portals make them look alike; with fewer portals per run (two for a
+/// run of 6 to 11 positions, three from 12) the worst case was 1150 in all.
+#[test]
+fn routes_are_within_ten_percent_of_the_best_any_angle_route() {
+    let mut ratios: Vec<(i64, String)> = Vec::new();
+    for seed in [0x2545_F491_4F6C_DD1D_u64, 11, 12_345] {
+        let mut next = xorshift(seed);
+        for round in 0..22 {
+            let (t, rock) = random_rock_map(round, &mut next);
+            let (w, h) = (t.width(), t.height());
+            let p = pathing_for(&t);
+            let g = &p.graphs[p.graph_index(FOOT).unwrap()];
+            for _ in 0..40 {
+                let a = (next() as u32 % w, next() as u32 % h);
+                let b = (next() as u32 % w, next() as u32 % h);
+                if rock[(a.1 * w + a.0) as usize] || rock[(b.1 * w + b.0) as usize] {
+                    continue;
+                }
+                if a.0.abs_diff(b.0).max(a.1.abs_diff(b.1)) < 20 {
+                    continue;
+                }
+                let plan = p.plan(FOOT, mid(a.0, a.1), mid(b.0, b.1)).unwrap();
+                let Some(best) = any_angle_reference(&g.grid, a, b) else {
+                    assert!(plan.unreachable);
+                    continue;
+                };
+                let walked = length(mid(a.0, a.1), &plan.waypoints);
+                ratios.push((
+                    walked * 1000 / best,
+                    format!("seed {seed}, round {round}: {a:?} to {b:?}"),
+                ));
+            }
+        }
+    }
+    ratios.sort();
+    let n = ratios.len();
+    assert!(n > 900, "{n} routes checked");
+    let (median, p99) = (ratios[n / 2].0, ratios[n * 99 / 100].0);
+    let (worst, which) = ratios.last().cloned().unwrap();
+    assert!(median <= 1020, "median {median}");
+    assert!(p99 <= 1060, "99th percentile {p99}");
+    assert!(worst <= 1100, "worst {worst} ({which})");
 }
 
 #[test]

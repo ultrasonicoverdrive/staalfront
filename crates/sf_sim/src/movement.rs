@@ -44,7 +44,7 @@ use core::fmt;
 use sf_math::Fx;
 use sf_math::hash::Fnv1a64;
 
-use crate::terrain::{Cell, Terrain, TerrainId};
+use crate::terrain::{Cell, Occupancy, Terrain, TerrainId};
 
 /// Written first into the digest; bump when its layout changes.
 const DIGEST_TAG: &[u8] = b"sf_sim/movement/v1";
@@ -295,6 +295,10 @@ fn digest_of(entries: &[Entry]) -> u64 {
 pub(crate) struct Ground<'a> {
     pub terrain: &'a Terrain,
     pub movement: &'a MovementTable,
+    /// The structures. With it, a cell a structure covers is impassable for
+    /// every class that terrain restricts (the classes that are routed);
+    /// aircraft fly over. `None` where the caller asks about the terrain alone.
+    pub occupancy: Option<&'a Occupancy>,
 }
 
 impl Ground<'_> {
@@ -306,6 +310,14 @@ impl Ground<'_> {
         };
         if !self.terrain.has_layer() {
             return Cost::OPEN;
+        }
+        if let Some(occupancy) = self.occupancy
+            && occupancy
+                .index(cell)
+                .is_some_and(|i| occupancy.slot_at(i).is_some())
+            && self.movement.restricts(class)
+        {
+            return Cost::Impassable;
         }
         match self.movement.get(class, id) {
             None => Cost::OPEN,

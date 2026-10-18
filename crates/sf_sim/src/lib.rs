@@ -241,7 +241,7 @@
 //! A unit that walks an order and is bound by terrain asks for a **route** and follows
 //! it: hierarchical A* over sectors of [`SECTOR_SIZE`] cells and the portals between
 //! them, built when the world is made, rebuilt one sector at a time when a structure is
-//! placed or removed ([`World::invalidate_sector`]), refined lazily into a fixed-size
+//! placed or removed (by the tick itself), refined lazily into a fixed-size
 //! ring of waypoints pulled taut by a line of sight, and served inside a node budget
 //! per tick in the order of the entity ids ([`World::with_path_budget`],
 //! [`World::path_stats`]). A destination that cannot be reached ends the route in the

@@ -127,6 +127,11 @@ wanderers, and a destination that cannot be reached: the route then ends in the 
 nearest cell it can enter (`pathfinding.md`, "Unreachable goals"). Noticing that a route is blocked
 later is the replan (WP4.7). Details:
 
+* **Structures.** A cell a structure occupies is blocked for every class that terrain restricts (the
+  classes the path finder serves; aircraft fly over). A step into it is refused like a step into
+  rock, so a unit on a route that a structure was placed across stops at its edge, with its order
+  kept, even if its route has not noticed yet. A unit standing in such a cell leaves it at normal
+  speed.
 * **Corners.** A step that changes both column and row (a diagonal one) needs the two cells it
   cuts across to be passable as well, so a unit cannot slip through the corner where two blocked
   cells touch.

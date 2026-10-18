@@ -78,15 +78,19 @@ other, one in each sector (two nodes of the graph):
 | Length of the run | Portals |
 |---|---|
 | 1 to 5 | one, in the middle (the lower middle of an even run) |
-| 6 to 11 | one at each end |
-| 12 or more | one at each end and one in the middle |
+| 6 to 11 | three: both ends and the middle |
+| 12 or more | four, spread evenly from one end to the other |
 
 One portal per run is enough for connectivity (the cells of a run are all open and next to each
 other, and a diagonal step across a border needs its two orthogonal cells open, which is a run
 position of its own); a test checks on random maps that two cells are connected in the abstract
-graph exactly when they are on the grid. The extra portals on a long run are for quality: a route
-has to pass a portal, and the ends of a run are where an optimal route hugs the corner of an
-obstacle. A side's 8 slots are rewritten as a whole when its border changes, so a changed border
+graph exactly when they are on the grid. The extra portals on a long run are for quality: the
+abstract search chooses the way round an obstacle from the cost of walking to the portals, so a
+portal far from where the best route would cross makes the wrong way look cheaper, and the ends of
+a run are where an optimal route hugs the corner of an obstacle. The counts were chosen by
+measurement (below): two portals for a run of 6 to 11 and three from 12 on gave a worst case of
+1.15 of the best route, these give 1.08. Never more than one portal for every two positions of a
+run, so a side's 8 slots always suffice. A side's 8 slots are rewritten as a whole when its border changes, so a changed border
 never renumbers the nodes of another one.
 
 The **edges** of the graph:
@@ -101,12 +105,13 @@ that takes about 55 ms per class in a release build (`pathing_256`).
 
 ## Changes of the map
 
-`World::invalidate_sector(cell)` reads the sector of `cell` again from the terrain and the
-structures, rebuilds the portals on its four borders (both sides) and the edges of the sector and of
-its four neighbours (whose portals on the shared border may have changed), and nothing else. The
-world calls it itself, once per sector touched, when a structure is placed or despawned (the only
-things that change what a cell allows); it is public for a change of the terrain (a destroyed
-bridge) that a later work package makes. A test builds the graph again from scratch after a change
+When a structure is placed or despawned (the only things that change what a cell allows) the
+world reads the sectors of its footprint again from the terrain and the structures, rebuilds the
+portals on their borders (both sides) and the edges of those sectors and of their neighbours (whose
+portals on a shared border may have changed), and nothing else. This happens inside the tick, in
+the command that places or removes the structure, and nowhere else: there is no public call that
+changes the graph, because the graph is part of the hashed state (§5.1). A later change of the
+terrain (a destroyed bridge) gets its own command, which calls the same rebuild. A test builds the graph again from scratch after a change
 and compares: they are equal.
 
 The graph has an **epoch**, which a change counts up, and remembers the epoch of the last change of
@@ -114,7 +119,12 @@ each sector. A route is stamped with the epoch it was made in. When the epoch ha
 looks (once) at whether any sector **within one of** a sector its route, its position or its goal is
 in changed since: line-of-sight segments are at most a sector long, so that covers everything a
 route crosses. If so, the unit **asks for a new route from where it stands** (and waits for it); if
-not, it keeps its route. This is not WP4.7's replan: nothing notices a route made unwalkable by a
+not, it keeps its route. This holds for a route that waits for a new search as well: a unit
+whose destination moved (a chase) keeps following the waypoints it has until the new route is
+ready, and a map change that touches them drops them at once and the unit waits (a hunter used to
+walk through a structure placed meanwhile). As a second line of defence a step into a cell the
+unit's class cannot enter, **a cell a structure occupies included**, is refused like a step into
+rock: the unit stops at the edge (`movement.md`). This is not WP4.7's replan: nothing notices a route made unwalkable by a
 change this check did not cover, a target that disappears, or a better route that a removed
 structure now offers. The graph itself is always right.
 
@@ -141,11 +151,18 @@ budget, and none allocates.
    refines three legs and stops; **a refill** (the ring ran low) is the same stages from here on.
 
 A route found this way is not always the best: the graph is exact between portals, not between all
-cells. Measured on 352 random routes over rock-strewn 70 by 55 maps, against a plain Dijkstra of the
-whole grid, a route is shorter than the best walk along the grid (which cannot cut corners) at the
-median (0.966), at most 1.025 of it at the 99th percentile, and 1.103 at worst (the graph chose the
-wrong one of two ways round an obstacle by a few cells). The headless scenario `pathing` asserts at
-most 1.1 on its own maps.
+cells. **How good it is is measured against the right reference.** A unit walks at any angle (the
+route is pulled taut), so the best walk along the grid, which cannot cut a corner, is the wrong
+yardstick: a route that cuts corners is shorter than it, and a ratio under 1 against it says nothing
+about the search. The reference is the best **any-angle route by the game's own line-of-sight rule**:
+Theta* over the cells of the map with the same thick line of sight (`path/tests.rs`,
+`any_angle_reference`; the headless test `tools/sf_headless/tests/pathing.rs` has its own copy on
+`World::sight_clear`). On about 1,100 random routes of 20 cells or more over rock-strewn 70 by 55
+maps (three seeds) the walked length is **1.006 of it at the median, 1.05 at the 99th percentile
+and 1.075 at worst**; both tests assert at most 1.10. What is left is the abstract search choosing
+the longer of two ways round an obstacle when the portals make them look alike. Taking the grid-best
+path and pulling it taut with the same smoothing gives 1.00, so the loss is in the graph and not in
+the smoothing.
 
 ### Line of sight and string pulling
 
@@ -218,7 +235,11 @@ refused; a step refused on that stands the unit still, with its order kept.
 The path service runs once per tick after the commands and before the units move
 (`Pathing::serve`). It has a **budget of nodes**: 4,096 by default (`DEFAULT_NODE_BUDGET`), at least
 512 (`MIN_NODE_BUDGET`: a search of two sectors must fit); `World::with_path_budget(n)` and the
-scenario field `path_budget` set it, before the world starts. A node is one cell or portal
+scenario field `path_budget` set it, before the world starts. **The number is game data**:
+`assets/config/sim.ron` (`path_node_budget`, read by `sf_data::sim_settings`, handed over by
+`sf_bridge::path_budget`) is what the game gives its world. A world that is given none, which is what
+the tests and the frozen headless scenarios have, uses the simulation's default, the same number, so
+turning the knob in the file never moves their checksums. A node is one cell or portal
 expanded in a search, or one cell looked at in a line of sight. Nothing else counts.
 
 * Requests are served **in the order of the entity ids** (slot, lowest first), one job at a time:
@@ -232,9 +253,15 @@ expanded in a search, or one cell looked at in a line of sight. Nothing else cou
   budget (a test runs one on two budgets and compares the result; a scenario test runs it on two and
   compares where everyone ends). The budget is hashed with the routes.
 * Measured, `pathing_256`: 200 tanks on the playfield, all ordered on tick 1 to a different cell
-  some 300 cells away across two rivers: **all 200 had their first waypoints after 85 ticks** (4.3 s of
-  game time, 596 jobs in all with the refills) at the default budget. A first request costs 760
-  to 1,550 nodes for a route of 76 to 340 cells, a refill 100 to 650.
+  some 300 cells away across two rivers: **all 200 had their first waypoints after 96 ticks** (4.8 s of
+  game time, 603 jobs in all with the refills) at the default budget; the test limits it to 120.
+  A first request costs about a thousand nodes, a refill a few hundred.
+* **Large orders are not this service's job.** 200 units sent to 200 different cells is the worst
+  case for single-unit searches and still takes five seconds for the last one; a group sent to *one*
+  place is WP4.3's flowfield, one search for everybody, and that is how a group order is meant to be
+  handled. A cheap improvement for the meantime, not done here: units that start in the same sector
+  with the same goal cell can share one abstract path (only the first and last legs differ), which
+  would cut the work of a group order by most of the abstract searches.
 
 `World::route_of(id)` shows a unit's route: `None`, `Waiting` (asked, no waypoint yet), `Following`,
 `Stranded`; `World::path_stats()` shows the budget, the nodes the last tick and the busiest tick
@@ -263,7 +290,7 @@ stopping at them (see `progress.md`).
 * **Slope** (`movement.md`, "Slope: later").
 * **A cache for unreachable goals.** Each such order searches the whole connected part of the map
   (some thousand nodes). Fine for single orders, not for a crowd; WP4.3 gives a crowd one field.
-* **Terrain that changes** is a call of `invalidate_sector` after the change; no command does it yet.
+* **Terrain that changes** needs a command that rebuilds the sector from inside the tick; none exists yet.
 
 ## Where it is tested
 
@@ -272,14 +299,16 @@ stopping at them (see `progress.md`).
   (their positions, symmetric edges, a rebuilt sector equal to a fresh build), the abstract search
   (resuming equals running whole; connectivity equals the grid's on random maps), the route's
   storage, and whole routes against a plain search of the grid (`path/tests.rs`: straight in
-  open ground, through a gap, round an island, a bridge, 352 random routes, a job on two budgets).
+  open ground, through a gap, round an island, a bridge, random routes against the best any-angle
+  route, a job on two budgets).
 * `crates/sf_sim/tests/pathing.rs`: through the world: the tick of the request, an unreachable goal
   and its mark, stop and new orders, a queue, a structure placed on the way and taken away, one far
   away, one on the unit, the budget and the order of service, a unit removed while its route is made,
-  a clone mid-run, a chase over a bridge, a fast unit that turns slowly, a boat under a bridge.
+  a clone mid-run, a chase over a bridge, a fast unit that turns slowly, a boat under a bridge, and
+  a hunter that waits for a new route while a structure is placed in its way.
 * `tools/sf_headless/tests/pathing.rs` with `assets/scenarios/pathing.ron` (map
   `assets/maps/pathing`, made by `cargo run -p sf_headless --example gen_pathing_map`): a maze of
   rock and water, a river with one bridge, an island, a structure that closes a gap, 24 requests at
-  once; arrival, no cell it cannot be in, the length against the best of the whole grid, the nearest
+  once; arrival, no cell it cannot be in, the length against the best any-angle route, the nearest
   cell, the budget, the order of service. And `pathing_256.ron`, the load test. Both are pinned in
   `assets/scenarios/*.expected` and run on Linux and Windows in CI.
