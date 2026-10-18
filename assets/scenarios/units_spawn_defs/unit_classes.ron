@@ -1,10 +1,8 @@
-// FROZEN copy (see units_spawn.ron). The terrain costs below are the world as it
-// was when this scenario was pinned (WP3.2): terrain did not exist for a unit, so
-// every class moves at normal speed on every terrain type. Its two walkers
-// (a legacy MoveTo toward a rock cell, across a rock patch) would be stopped at
-// the rock by the real costs of assets/config/unit_classes.ron; that behaviour is
-// pinned by the terrain_costs scenario, not by this one, which tests the unit
-// table. Do not "fix" the costs here to match the shipped file.
+// FROZEN copy of assets/config/unit_classes.ron as it was at WP4.1 (see
+// units_spawn.ron), terrain costs included. A balance tweak of the shipped file
+// does not move this scenario. A new RULE does: terrain costs themselves were
+// new at WP4.1 and changed how the legacy MoveTo walkers of this scenario move
+// (they now stop at a rock patch), so its checksum was re-pinned once then.
 // Movement classes, armor types and damage types (WP3.1). Read by
 // sf_data::units; unit_defs.ron and weapon_defs.ron refer to these names.
 //
@@ -19,6 +17,10 @@
 // its own: 1000 is normal, 1200 a fifth faster, 500 half, between 100 and
 // 2000. A class that leaves a type out, or names one that does not exist, is
 // refused when the files are combined (sf_data::movement::MovementCosts).
+// `ground: true` marks the ground classes (foot, wheeled, tracked): a terrain
+// type that all of them can enter counts as open ground, which the simulation
+// keeps as a summary flag of the terrain (sf_sim::TerrainFlags::ground). Left
+// out it is false.
 // The rules, the full table and the bridge rule are in docs/rules/movement.md.
 //
 //   * armor_types and damage_types, WP5.3: the percentage of a damage type that
@@ -28,46 +30,56 @@
 // armor and damage types below.
 (
     movement_classes: [
-        (kind: 0, name: "foot", terrain_costs: [
+        // infantry: slowed by ore, quicker on a road; the climb onto rock is not
+        // something a rifleman does (rock is steep or high ground).
+        (kind: 0, name: "foot", ground: true, terrain_costs: [
             ("grass", Speed(1000)),
-            ("road", Speed(1000)),
-            ("water", Speed(1000)),
-            ("rock", Speed(1000)),
-            ("ore", Speed(1000)),
-            ("bridge", Speed(1000)),
+            ("road", Speed(1100)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(800)),
+            ("bridge", Speed(1100)),
         ]),
-        (kind: 1, name: "wheeled", terrain_costs: [
+        // trucks and light vehicles: the best on a road, the worst on rough ground.
+        (kind: 1, name: "wheeled", ground: true, terrain_costs: [
+            ("grass", Speed(800)),
+            ("road", Speed(1200)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(600)),
+            ("bridge", Speed(1200)),
+        ]),
+        // tanks, artillery, harvesters: steady on grass, a little quicker on a road.
+        (kind: 2, name: "tracked", ground: true, terrain_costs: [
             ("grass", Speed(1000)),
-            ("road", Speed(1000)),
-            ("water", Speed(1000)),
-            ("rock", Speed(1000)),
-            ("ore", Speed(1000)),
-            ("bridge", Speed(1000)),
+            ("road", Speed(1200)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(800)),
+            ("bridge", Speed(1200)),
         ]),
-        (kind: 2, name: "tracked", terrain_costs: [
-            ("grass", Speed(1000)),
-            ("road", Speed(1000)),
-            ("water", Speed(1000)),
-            ("rock", Speed(1000)),
-            ("ore", Speed(1000)),
-            ("bridge", Speed(1000)),
-        ]),
+        // crosses land and water (the amphibious transport). Its 800 on water is
+        // what the role's `water_speed` says (1.5 cells/s on land, 1.2 on water);
+        // a test keeps the two in step.
         (kind: 3, name: "hover", terrain_costs: [
             ("grass", Speed(1000)),
-            ("road", Speed(1000)),
-            ("water", Speed(1000)),
-            ("rock", Speed(1000)),
-            ("ore", Speed(1000)),
-            ("bridge", Speed(1000)),
+            ("road", Speed(1100)),
+            ("water", Speed(800)),
+            ("rock", Impassable),
+            ("ore", Speed(900)),
+            ("bridge", Speed(1100)),
         ]),
+        // vessels: water only. A bridge cell is a road OVER water, so a vessel
+        // passes under it (docs/rules/movement.md, "The bridge").
         (kind: 4, name: "water", terrain_costs: [
-            ("grass", Speed(1000)),
-            ("road", Speed(1000)),
+            ("grass", Impassable),
+            ("road", Impassable),
             ("water", Speed(1000)),
-            ("rock", Speed(1000)),
-            ("ore", Speed(1000)),
+            ("rock", Impassable),
+            ("ore", Impassable),
             ("bridge", Speed(1000)),
         ]),
+        // aircraft; no role uses it yet. Terrain does not matter: 1000 everywhere.
         (kind: 5, name: "air", terrain_costs: [
             ("grass", Speed(1000)),
             ("road", Speed(1000)),

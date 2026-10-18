@@ -680,9 +680,24 @@ fn a_wandering_unit_never_ends_a_tick_on_ground_it_cannot_enter() {
 
 // --- open ground changes nothing ---
 
-/// A world on the layer with the given movement table (none: open ground), a
-/// soldier on it and, if `ordered`, an order for him on the first tick.
-fn checksum_with(table: Option<MovementTable>, ordered: bool) -> u64 {
+/// What stands on the layer in `checksum_with`.
+#[derive(Copy, Clone)]
+enum Cast {
+    /// Nothing.
+    Empty,
+    /// A crate: a unit-table entity with no movement class.
+    Crate,
+    /// A soldier who stands still.
+    Standing,
+    /// A soldier with an order.
+    Ordered,
+    /// A soldier sent by the legacy `MoveTo`.
+    LegacyMove,
+}
+
+/// The checksum of a world on the layer with the given movement table (none:
+/// open ground) and `cast` on it.
+fn checksum_with(table: Option<MovementTable>, cast: Cast) -> u64 {
     let terrain = Terrain::from_layer(MAP.0, MAP.1, &layer(), &defs()).unwrap();
     let mut w = World::with_terrain(WorldConfig::new(7).with_map_size(MAP.0, MAP.1), terrain)
         .unwrap()
@@ -691,9 +706,31 @@ fn checksum_with(table: Option<MovementTable>, ordered: bool) -> u64 {
     if let Some(table) = table {
         w = w.with_movement(table).unwrap();
     }
-    let soldier = spawn(&mut w, SOLDIER, 1, 1);
-    if ordered {
-        order(&mut w, soldier, (3, 1));
+    match cast {
+        Cast::Empty => {}
+        Cast::Crate => {
+            spawn(&mut w, CRATE, 1, 1);
+        }
+        Cast::Standing => {
+            spawn(&mut w, SOLDIER, 1, 1);
+        }
+        Cast::Ordered => {
+            let soldier = spawn(&mut w, SOLDIER, 1, 1);
+            order(&mut w, soldier, (3, 1));
+        }
+        Cast::LegacyMove => {
+            let soldier = spawn(&mut w, SOLDIER, 1, 1);
+            let tick = w.tick();
+            w.schedule(
+                tick,
+                PlayerId(0),
+                Command::MoveTo {
+                    ids: vec![soldier],
+                    target: middle(3, 1),
+                },
+            )
+            .unwrap();
+        }
     }
     run(&mut w, 5);
     w.checksum()
@@ -722,23 +759,28 @@ fn on_open_ground_a_table_changes_nothing() {
 }
 
 #[test]
-fn the_table_joins_the_checksum_on_a_map_with_terrain_while_orders_are_given() {
-    // Nobody has an order: the table is not in the checksum (it rides with the
-    // orders section, which is what keeps the pinned scenarios where they were).
-    assert_eq!(
-        checksum_with(Some(costs()), false),
-        checksum_with(None, false)
-    );
-    // An order is given: the table is in the state.
-    assert_ne!(
-        checksum_with(Some(costs()), true),
-        checksum_with(None, true)
-    );
+fn the_table_joins_the_checksum_on_a_map_with_terrain_once_a_unit_has_a_class() {
+    // Nothing that has a movement class: the table is not in the checksum (so a
+    // pinned world without such a unit stays where it was).
+    for cast in [Cast::Empty, Cast::Crate] {
+        assert_eq!(
+            checksum_with(Some(costs()), cast),
+            checksum_with(None, cast)
+        );
+    }
+    // A unit with a class, whatever drives it, brings the table into the state:
+    // standing, ordered, or sent by the legacy MoveTo.
+    for cast in [Cast::Standing, Cast::Ordered, Cast::LegacyMove] {
+        assert_ne!(
+            checksum_with(Some(costs()), cast),
+            checksum_with(None, cast)
+        );
+    }
 }
 
 #[test]
 fn a_changed_cost_changes_the_checksum_and_the_order_of_the_classes_does_not() {
-    let base = checksum_with(Some(costs()), true);
+    let base = checksum_with(Some(costs()), Cast::Ordered);
     // Same classes, other order, each class's costs in another order.
     let mut classes: Vec<sf_sim::ClassCosts> = Vec::new();
     let ids = [GRASS, ROAD, WATER, ROCK, ORE, BRIDGE];
@@ -751,12 +793,12 @@ fn a_changed_cost_changes_the_checksum_and_the_order_of_the_classes_does_not() {
         classes.push(sf_sim::ClassCosts { class, costs: list });
     }
     let shuffled = MovementTable::new(classes.clone()).unwrap();
-    assert_eq!(checksum_with(Some(shuffled), true), base);
+    assert_eq!(checksum_with(Some(shuffled), Cast::Ordered), base);
     // A cost one thousandth different, on a terrain the soldier never touches:
     // the digest still sees it.
     classes[3].costs[5].1 = Cost::Speed(1001);
     let changed = MovementTable::new(classes).unwrap();
-    assert_ne!(checksum_with(Some(changed), true), base);
+    assert_ne!(checksum_with(Some(changed), Cast::Ordered), base);
 }
 
 #[test]

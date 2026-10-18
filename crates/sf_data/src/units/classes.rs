@@ -73,6 +73,13 @@ pub struct MovementClass {
     /// the file lists them (the order does not matter). A list and not a map so
     /// that a type written twice is an error and not silently the last one.
     pub terrain_costs: Vec<(String, TerrainCost)>,
+    /// Whether this is a **ground class**: one of the classes whose ability to
+    /// enter a terrain type makes it "open ground" for placement helpers and
+    /// for the `ground` summary the terrain digest keeps (`foot`, `wheeled` and
+    /// `tracked` in the shipped file). Defaults to false, so a file that does
+    /// not say keeps loading.
+    #[serde(default)]
+    pub ground: bool,
 }
 
 impl MovementClass {

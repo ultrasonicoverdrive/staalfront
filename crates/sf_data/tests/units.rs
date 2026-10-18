@@ -1056,8 +1056,8 @@ fn duplicate_kinds_are_refused_in_every_file() {
     // Movement classes, armor types, damage types.
     for (from, to, what) in [
         (
-            "(kind: 1, name: \"wheeled\", terrain_costs",
-            "(kind: 0, name: \"wheeled\", terrain_costs",
+            "(kind: 1, name: \"wheeled\", ground: true,",
+            "(kind: 0, name: \"wheeled\", ground: true,",
             "movement class",
         ),
         (

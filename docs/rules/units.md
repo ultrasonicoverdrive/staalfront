@@ -63,6 +63,8 @@ permanent" below) and a unique snake_case `name`.
   type out, or names one that does not exist, is refused when the files are combined
   (`sf_data::movement::MovementCosts`); the table, the bridge rule and the reasons are in
   [`movement.md`](movement.md). It replaced the three `passable` flags of `terrain_types.ron`.
+  A class may carry `ground: true` (foot, wheeled and tracked do): the ground classes, whose
+  ability to enter a terrain type makes it open ground (`movement.md`, "The checksum").
 * `armor_types`: none, infantry, light, heavy, structure. The set is a placeholder.
 * `damage_types`: bullet, precision, rocket, cannon, shell, demolition. The set is a
   placeholder. "Infantry only" for the sniper is the future armor table's job

@@ -375,11 +375,11 @@ pub fn sim_definitions(types: &TerrainTypes, costs: &MovementCosts) -> Vec<sf_si
 /// Reads the unit definitions in `<scenario directory>/<name>/` (the model and
 /// icon files they name are looked up under `<scenario directory>/..`, the
 /// assets directory) and turns them into the simulation's unit table and
-/// movement table.
+/// movement table, with the movement costs they came from.
 fn load_unit_defs(
     name: &str,
     scenario_file: &Path,
-) -> Result<(UnitTable, MovementTable), ScenarioError> {
+) -> Result<(UnitTable, MovementTable, MovementCosts), ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
         problems: vec![format!("unit_defs \"{name}\": {problem}")],
@@ -391,7 +391,7 @@ fn load_unit_defs(
     let costs = MovementCosts::from_defs(&defs, &TerrainTypes::embedded())
         .map_err(|e| invalid(e.to_string()))?;
     let movement = sf_bridge::movement_table(&costs).map_err(invalid)?;
-    Ok((units, movement))
+    Ok((units, movement, costs))
 }
 
 /// The middle of a cell, in cells: where an order sends a unit.
@@ -483,7 +483,27 @@ impl std::error::Error for ScenarioError {
 impl Scenario {
     /// Reads and validates a scenario file. A scenario without a `name` is
     /// named after the file.
+    ///
+    /// The terrain's `ground` summary (part of its digest) is derived from the
+    /// movement costs of the scenario's own definitions: the frozen copy named
+    /// by `unit_defs`, or, for a scenario without one, the shipped costs. So
+    /// editing the shipped `unit_classes.ron` moves only scenarios that run on
+    /// the shipped definitions.
     pub fn load(path: &Path) -> Result<Scenario, ScenarioError> {
+        Scenario::load_with(path, None)
+    }
+
+    /// [`Scenario::load`] with the costs standing in for the shipped ones
+    /// (`None`: the real shipped costs). It exists to test that a change to the
+    /// shipped costs leaves the scenarios with frozen definitions alone.
+    pub fn load_with_shipped_costs(
+        path: &Path,
+        shipped: &MovementCosts,
+    ) -> Result<Scenario, ScenarioError> {
+        Scenario::load_with(path, Some(shipped))
+    }
+
+    fn load_with(path: &Path, shipped: Option<&MovementCosts>) -> Result<Scenario, ScenarioError> {
         let text = std::fs::read_to_string(path).map_err(|source| ScenarioError::Io {
             path: path.to_path_buf(),
             source,
@@ -494,13 +514,21 @@ impl Scenario {
         {
             scenario.name = stem.to_string_lossy().into_owned();
         }
-        if let Some(name) = scenario.map_name.clone() {
-            scenario.terrain = Some(scenario.load_terrain(&name, path)?);
-        }
+        // The unit definitions first: their costs decide the terrain's summary.
+        let mut own_costs = None;
         if let Some(name) = scenario.unit_defs.clone() {
-            let (units, movement) = load_unit_defs(&name, path)?;
+            let (units, movement, costs) = load_unit_defs(&name, path)?;
             scenario.unit_table = Some(units);
             scenario.movement_table = Some(movement);
+            own_costs = Some(costs);
+        }
+        if let Some(name) = scenario.map_name.clone() {
+            let costs = match (own_costs, shipped) {
+                (Some(own), _) => own,
+                (None, Some(shipped)) => shipped.clone(),
+                (None, None) => MovementCosts::embedded(),
+            };
+            scenario.terrain = Some(scenario.load_terrain(&name, path, &costs)?);
         }
         Ok(scenario)
     }
@@ -508,7 +536,12 @@ impl Scenario {
     /// Reads the terrain layer of map `name`, which lives in
     /// `<scenario directory>/../maps/<name>`, checks that it is the scenario's
     /// map size and turns it into the simulation's [`Terrain`].
-    fn load_terrain(&self, name: &str, scenario_file: &Path) -> Result<Terrain, ScenarioError> {
+    fn load_terrain(
+        &self,
+        name: &str,
+        scenario_file: &Path,
+        costs: &MovementCosts,
+    ) -> Result<Terrain, ScenarioError> {
         let invalid = |problem: String| ScenarioError::Invalid {
             path: Some(scenario_file.to_path_buf()),
             problems: vec![format!("map_name \"{name}\": {problem}")],
@@ -531,10 +564,9 @@ impl Scenario {
                 layer.height()
             )));
         }
-        // The `ground` summary of the terrain types comes from the shipped
-        // costs, whatever `unit_defs` says: it is part of the terrain digest, and
-        // a frozen copy of the definitions must not move the terrain's.
-        let defs = sim_definitions(&TerrainTypes::embedded(), &MovementCosts::embedded());
+        // The `ground` summary of the terrain types is part of the terrain
+        // digest: it comes from the scenario's own costs (see `Scenario::load`).
+        let defs = sim_definitions(&TerrainTypes::embedded(), costs);
         Terrain::from_layer(width, height, layer.ids(), &defs).map_err(|e| invalid(e.to_string()))
     }
 

@@ -216,8 +216,8 @@ so a click on an enemy is an `Attack`, on one of your own a `Guard`, on ground a
 
 A unit made from the unit table moves at its speed times the cost of the cell it stands in and
 does not enter a cell its movement class cannot cross; the order, the queue and the arrival test
-are unchanged (`docs/rules/movement.md`). The `orders` scenario has no terrain layer and runs on a
-frozen copy of the definitions whose costs are all normal, so its checksum did not change.
+are unchanged (`docs/rules/movement.md`). The `orders` scenario has no terrain layer (every cell is open
+ground), so its checksum did not change; its frozen definitions carry the costs as shipped at WP4.1.
 
 ## Tuning constants
 

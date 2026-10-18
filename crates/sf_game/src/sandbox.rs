@@ -241,6 +241,9 @@ mod tests {
         let world = make_world(config, &map)
             .with_units(sf_bridge::unit_table(&defs).unwrap())
             .unwrap();
+        // With the movement costs, as the game runs it: the spawn refusal of
+        // WP4.1 (a unit on ground its class cannot enter) is then in play.
+        let world = crate::playfield::with_movement(world, &defs);
         (world, defs)
     }
 

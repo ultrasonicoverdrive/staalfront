@@ -33,9 +33,6 @@ use std::fmt;
 use crate::terrain::TerrainTypes;
 use crate::units::{ClassTables, TerrainCost, UnitDefs};
 
-/// The classes whose summary is [`MovementCosts::ground_passable`], by name.
-const GROUND_CLASSES: [&str; 3] = ["foot", "wheeled", "tracked"];
-
 /// Why the movement classes and the terrain types do not fit together.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MovementError {
@@ -81,6 +78,8 @@ pub struct ClassCosts {
     pub kind: u16,
     /// The class's name.
     pub name: String,
+    /// Whether the class is a ground class (`ground` in `unit_classes.ron`).
+    pub ground: bool,
     /// `(terrain type id, cost)`, one per terrain type, ascending by id.
     costs: Vec<(u8, TerrainCost)>,
     /// `(terrain type name, cost)` in the same order, for tools and tests.
@@ -151,6 +150,7 @@ impl MovementCosts {
             out.push(ClassCosts {
                 kind: class.kind,
                 name: class.name.clone(),
+                ground: class.ground,
                 costs,
                 names,
             });
@@ -201,15 +201,17 @@ impl MovementCosts {
         self.class(class).and_then(|c| c.cost_on(terrain))
     }
 
-    /// Whether every ground class (`foot`, `wheeled` and `tracked`, those that
-    /// the table has) can enter terrain type `terrain`: open ground in the
-    /// words of the early placement helpers, which the simulation still keeps
-    /// as a summary flag of the terrain (`sf_sim::TerrainFlags::ground`, part
-    /// of the terrain digest). Derived from the costs, never written by hand.
+    /// Whether every ground class (those marked `ground: true` in
+    /// `unit_classes.ron`; `foot`, `wheeled` and `tracked` as shipped) can enter
+    /// terrain type `terrain`: open ground in the words of the early placement
+    /// helpers, which the simulation still keeps as a summary flag of the
+    /// terrain (`sf_sim::TerrainFlags::ground`, part of the terrain digest).
+    /// Derived from the costs, never written by hand; true if no class is
+    /// marked.
     pub fn ground_passable(&self, terrain: u8) -> bool {
         self.classes
             .iter()
-            .filter(|c| GROUND_CLASSES.contains(&c.name.as_str()))
+            .filter(|c| c.ground)
             .all(|c| c.cost_on(terrain).is_some_and(TerrainCost::is_passable))
     }
 
@@ -300,15 +302,21 @@ mod tests {
     }
 
     #[test]
-    fn ground_passable_is_derived_from_the_three_ground_classes() {
+    fn ground_passable_is_derived_from_the_classes_marked_ground() {
         let c = classes(
-            "(kind: 0, name: \"foot\", terrain_costs: [(\"x\", Speed(1000)), (\"y\", Speed(500))]), \
-             (kind: 1, name: \"wheeled\", terrain_costs: [(\"x\", Speed(1000)), (\"y\", Impassable)]), \
-             (kind: 2, name: \"air\", terrain_costs: [(\"x\", Speed(1000)), (\"y\", Speed(1000))])",
+            "(kind: 0, name: \"a\", ground: true, terrain_costs: [(\"x\", Speed(1000)), (\"y\", Speed(500))]), \
+             (kind: 1, name: \"b\", ground: true, terrain_costs: [(\"x\", Speed(1000)), (\"y\", Impassable)]), \
+             (kind: 2, name: \"c\", terrain_costs: [(\"x\", Speed(1000)), (\"y\", Speed(1000))])",
         );
         let costs = MovementCosts::new(&c, &types(&["x", "y"])).unwrap();
         assert!(costs.ground_passable(0), "x: both ground classes enter");
-        assert!(!costs.ground_passable(2), "y: wheeled cannot");
+        assert!(!costs.ground_passable(2), "y: class b cannot");
         assert!(!costs.ground_passable(9), "not a terrain type");
+        // With no class marked there is no restriction known.
+        let none = classes(
+            "(kind: 0, name: \"a\", terrain_costs: [(\"x\", Impassable), (\"y\", Impassable)])",
+        );
+        let costs = MovementCosts::new(&none, &types(&["x", "y"])).unwrap();
+        assert!(costs.ground_passable(0));
     }
 }

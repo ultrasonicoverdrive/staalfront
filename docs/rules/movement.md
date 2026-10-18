@@ -57,7 +57,8 @@ The costs are a `terrain_costs` list **inside each movement class** of
   with it: a class that is retired takes its costs with it;
 * the **frozen copies** of the definitions that pinned scenarios run on (`*_defs/`) already hold
   `unit_classes.ron`, so freezing the costs there needs no new mechanism, and a balance change
-  cannot move a pinned checksum. (`terrain_costs_defs/` is such a copy for the new scenario.)
+  of the shipped costs cannot move a pinned checksum. (`terrain_costs_defs/` is such a copy for the
+  new scenario.)
 
 The terrain side is `assets/config/terrain_types.ron`: a type has an `id` (what map files store,
 never renumbered) and a unique name, plus only the two flags that are really the type's own,
@@ -186,26 +187,44 @@ layer would have no slope, so no golden would move.
 ## The checksum
 
 The terrain digest is what it was: the three passable bits it used to hash are now the single
-derived `TerrainFlags::ground` (the three ground classes can all enter the type), set by
-`sf_bridge::terrain_defs` from the shipped costs, never by hand. It is also the helper a
-placement routine wants ("a cell any ground unit may be put on"). The movement table has a
-digest of its own that joins the world checksum as section `M`, **written only on a map with a
-layer, with a table, while the orders section is written** (it rides with the orders the way the
-weapon reach does, see `sf_sim::checksum`). That is what keeps `terrain_256` (terrain, no table),
-`orders` (a table, no terrain) and `units_spawn` (terrain and a table, legacy `MoveTo` walks, no
-orders) at the values they were pinned with. Nothing is hidden by leaving it out: a different
-table changes what a spawn accepts or where the first unit that moves ends up, and so the state
-itself.
+derived `TerrainFlags::ground` (every ground class can enter the type), set by
+`sf_bridge::terrain_defs` from the movement costs, never by hand. Which classes are the ground
+classes is data: `ground: true` on the class in `unit_classes.ron` (foot, wheeled and tracked as
+shipped; false when left out; no class marked means no restriction). The flag is also the helper a
+placement routine wants ("a cell any ground unit may be put on").
 
-### The pinned scenarios and their frozen costs
+**Whose costs.** The headless runner derives the bits from the costs of the scenario's *own*
+definitions: the frozen copy named by `unit_defs`, or the shipped file for a scenario without
+one. So editing the shipped `unit_classes.ron` moves the scenarios that run on the shipped
+definitions (`terrain_256`) and none that run on a frozen copy (`units_spawn`, `orders`,
+`terrain_costs`); a test (`a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone`) closes
+a cost in the shipped data and checks exactly that.
 
-`units_spawn` and `orders` run on frozen copies of the unit definitions, and the copies now
-carry costs: **every class at 1000 on every type**, which is the world as it was when they were
-pinned, because terrain did not exist for a unit then. This is not cosmetic for `units_spawn`: its
-two walkers (a rifleman and a light tank sent by the old `MoveTo` to the cell (136, 90)) go
-across a patch of rock and the target is itself a rock cell, so under the shipped costs they
-would stop at the rock and the checksum would move. With the frozen costs it is byte-identical.
-What the shipped costs do to units is pinned by `terrain_costs` instead.
+The movement table has a digest of its own that joins the world checksum as section `M`, **written
+only on a map with a layer, with a table, while some live entity made from the unit table has a
+movement class**: whatever drives it (an order, the legacy `MoveTo`, a wander, standing still).
+`terrain_256` (terrain, no table), `orders` (a table, no terrain) and the wanderer scenarios have
+no such section and are unchanged.
+
+### The pinned scenarios, the frozen costs and the one re-pin
+
+**Terrain costs are a new rule**, and a new rule can move a pinned checksum. Frozen definitions
+protect a scenario against *balance tweaks* of the shipped files, not against new rules.
+`units_spawn` and `orders` run on frozen copies of the unit definitions; at WP4.1 their
+`unit_classes.ron` got the real costs, exactly as shipped then, frozen at those values. What that
+did:
+
+* `units_spawn` **moved once, on purpose**: `0x0576f4e3b9fcff04` became `0x6c369f42be150d6e`. Its two
+  legacy `MoveTo` walkers (a rifleman and a light tank sent to the cell (136, 90)) cross a rock
+  patch, and the target is itself a rock cell; they now stop at the rock instead of walking
+  through it (`tools/sf_headless/tests/units.rs` asserts where), and the world has the movement
+  section. Nothing else in the scenario changed.
+* `orders` did **not** move: it has no terrain layer, so every cell is open ground and the costs
+  cannot show.
+* `wander_5000`, `command_mix` and `terrain_256` did not move either: their wanderers are legacy
+  entities without a movement class, and `terrain_256` has no unit table.
+
+What the real costs do to units across all classes is pinned by `terrain_costs`.
 
 ## The `terrain_costs` scenario
 

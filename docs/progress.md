@@ -177,15 +177,17 @@ Status: in progress.
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
 derived `ground` summary (all three ground classes can enter) in the place of the three bits the
-terrain digest used to hash, so `terrain_256` and every other pinned map did not change, and the
-movement table's own digest rides with the orders section, so `orders` and `units_spawn` did not
-change either. **One thing worth a look:** `units_spawn`'s two walkers are sent by the old `MoveTo`
-across a rock patch to a rock cell, so under the shipped costs they would stop at the rock and the
-checksum would move. The frozen copy of the definitions that scenario runs on now carries
-all-normal costs (the world as it was when it was pinned: terrain did not exist for a unit), so the
-checksum is byte-identical; what the real costs do is pinned by `terrain_costs`. Same for `orders`
-(which has no terrain layer). A unit spawned on ground its class cannot enter is now refused. Slope
-(uphill slowing) waits, with reasons, for WP4.2 and WP4.3 (`movement.md`, "Slope: later"). Not
+terrain digest used to hash, so `terrain_256` and every other pinned map did not change; the
+classes that count are marked `ground: true` in the data, and the headless runner derives the bits
+from the costs of the scenario's own definitions (a frozen copy or, without one, the shipped file),
+so editing the shipped costs moves only scenarios on the shipped definitions. The movement table's
+own digest joins the checksum while a unit with a movement class is on a map with terrain.
+**Terrain costs are a new rule and `units_spawn` moved once, on purpose** (`0x0576f4e3b9fcff04` to
+`0x6c369f42be150d6e`): its two legacy `MoveTo` walkers cross a rock patch to a rock cell and now
+stop at the rock. Frozen definitions protect against balance tweaks, not against new rules, so the
+frozen copies carry the real costs as shipped at WP4.1 and the scenario was re-pinned. `orders`,
+`wander_5000`, `command_mix` and `terrain_256` are unchanged. A unit spawned on ground its class
+cannot enter is now refused. Slope (uphill slowing) waits, with reasons, for WP4.2 and WP4.3 (`movement.md`, "Slope: later"). Not
 done on purpose: pathfinding, collision, replanning a blocked route (a blocked move is a unit
 standing at the edge forever), reading a role's `water_speed` (the hover class's cost says it), and
 vessels in the `sf_game` sandbox.

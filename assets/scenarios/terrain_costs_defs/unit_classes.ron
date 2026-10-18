@@ -16,6 +16,10 @@
 // its own: 1000 is normal, 1200 a fifth faster, 500 half, between 100 and
 // 2000. A class that leaves a type out, or names one that does not exist, is
 // refused when the files are combined (sf_data::movement::MovementCosts).
+// `ground: true` marks the ground classes (foot, wheeled, tracked): a terrain
+// type that all of them can enter counts as open ground, which the simulation
+// keeps as a summary flag of the terrain (sf_sim::TerrainFlags::ground). Left
+// out it is false.
 // The rules, the full table and the bridge rule are in docs/rules/movement.md.
 //
 //   * armor_types and damage_types, WP5.3: the percentage of a damage type that
@@ -27,7 +31,7 @@
     movement_classes: [
         // infantry: slowed by ore, quicker on a road; the climb onto rock is not
         // something a rifleman does (rock is steep or high ground).
-        (kind: 0, name: "foot", terrain_costs: [
+        (kind: 0, name: "foot", ground: true, terrain_costs: [
             ("grass", Speed(1000)),
             ("road", Speed(1100)),
             ("water", Impassable),
@@ -36,7 +40,7 @@
             ("bridge", Speed(1100)),
         ]),
         // trucks and light vehicles: the best on a road, the worst on rough ground.
-        (kind: 1, name: "wheeled", terrain_costs: [
+        (kind: 1, name: "wheeled", ground: true, terrain_costs: [
             ("grass", Speed(800)),
             ("road", Speed(1200)),
             ("water", Impassable),
@@ -45,7 +49,7 @@
             ("bridge", Speed(1200)),
         ]),
         // tanks, artillery, harvesters: steady on grass, a little quicker on a road.
-        (kind: 2, name: "tracked", terrain_costs: [
+        (kind: 2, name: "tracked", ground: true, terrain_costs: [
             ("grass", Speed(1000)),
             ("road", Speed(1200)),
             ("water", Impassable),

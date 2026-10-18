@@ -189,6 +189,48 @@ fn the_rules_the_table_stands_for() {
 }
 
 #[test]
+fn the_ground_classes_are_marked_in_the_data() {
+    // `ground: true` in unit_classes.ron (not a list of names in Rust) says which
+    // classes make a terrain type open ground.
+    let costs = MovementCosts::embedded();
+    for class in costs.classes() {
+        let ground = matches!(class.name.as_str(), "foot" | "wheeled" | "tracked");
+        assert_eq!(class.ground, ground, "{}", class.name);
+    }
+    let types = TerrainTypes::embedded();
+    for (name, open) in [
+        ("grass", true),
+        ("road", true),
+        ("ore", true),
+        ("bridge", true),
+        ("water", false),
+        ("rock", false),
+    ] {
+        assert_eq!(
+            costs.ground_passable(types.id_of(name).unwrap()),
+            open,
+            "{name}"
+        );
+    }
+    // The flag is optional (false), so older files keep loading; marking another
+    // class changes the summary without a Rust change.
+    let marked =
+        load_classes(|t| t.replacen("name: \"hover\",", "name: \"hover\", ground: true,", 1))
+            .unwrap();
+    let costs = MovementCosts::from_defs(&marked, &types).unwrap();
+    assert!(costs.class_by_name("hover").unwrap().ground);
+    assert!(!costs.ground_passable(types.id_of("water").unwrap()));
+    assert!(!costs.ground_passable(types.id_of("rock").unwrap()));
+    let unmarked = load_classes(|t| t.replacen("ground: true, ", "", 3)).unwrap();
+    let costs = MovementCosts::from_defs(&unmarked, &types).unwrap();
+    assert!(costs.classes().iter().all(|c| !c.ground));
+    assert!(
+        costs.ground_passable(types.id_of("water").unwrap()),
+        "no class marked: no restriction"
+    );
+}
+
+#[test]
 fn the_hover_cost_on_water_is_the_amphibious_transports_water_speed() {
     // `water_speed` of the role (1.2 against 1.5 on land) and the hover class's
     // cost on water say the same thing; the simulation reads the cost, so the

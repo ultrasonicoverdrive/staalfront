@@ -21,7 +21,7 @@
 //! | occupancy (`O`), only while a cell is occupied | the number of occupied cells, then for each in ascending cell order: the cell index, the occupant's slot and its generation |
 //! | units (`U`), only with a unit table | the table's digest (every kind with its hit points, movement class, speed, turn rate, size and footprint), then the number of entities made from it and for each, in slot order: the slot and its current hit points |
 //! | orders (`D`), only while some entity has an order or a queue | the table's weapon reach digest, then the number of such entities and for each, in slot order: the slot, its current order, the guard's walk switch and its queued orders (WP3.4) |
-//! | movement (`M`), only with a terrain layer, a movement table **and** while the orders section is written | the table's digest: every movement class with its cost on every terrain type (WP4.1) |
+//! | movement (`M`), only with a terrain layer, a movement table **and** a live entity made from the unit table that has a movement class | the table's digest: every movement class with its cost on every terrain type (WP4.1) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -57,15 +57,15 @@
 //!
 //! The movement section (WP4.1) follows the same rule and is written last. The
 //! costs only matter on a map that has terrain (without a layer every cell is
-//! open ground whatever the table says), and the walk that reads them is the
-//! orders' (`next_waypoint`), so the section rides with the orders section like
-//! the weapon reach does: written only on a map with a layer, with a table, while
-//! some entity has an order or a queue. That keeps `orders` (a table, no
-//! terrain), `terrain_256` (terrain, no table) and `units_spawn` (terrain and a
-//! table, but legacy `MoveTo` walks and no orders) on the values they were
-//! pinned with. Nothing is lost where it is left out: a table that differed
-//! would change what a spawn accepts or the step of the first unit that moves,
-//! and so the state itself. The three passable flags of the terrain types are
+//! open ground whatever the table says) and for an entity that has a movement
+//! class, which is any mobile entity made from the unit table, whatever drives
+//! it (an order, the legacy `MoveTo`, a wander). So it is written only on a map
+//! with a layer, with a movement table, while some live entity made from the unit
+//! table has a movement class. That keeps `terrain_256` (terrain, no table),
+//! `orders` (a table, no terrain) and the wanderer scenarios on the values they
+//! were pinned with; `units_spawn` (terrain, a table, units with classes) gets
+//! the section, and its legacy walkers now obey the costs, which is why it was
+//! re-pinned once at WP4.1. The three passable flags of the terrain types are
 //! gone; their bits in the terrain digest are the derived
 //! `TerrainFlags::ground`, so that digest, and `terrain_256`, did not change.
 //!
@@ -314,9 +314,14 @@ impl World {
             }
         }
 
-        // Movement costs (WP4.1): only on a map with terrain, and with the
-        // orders, whose walk they decide.
-        if self.terrain.has_layer() && !self.movement.is_empty() && (0..slots).any(ordered) {
+        // Movement costs (WP4.1): only on a map with terrain, while some unit
+        // of the unit table has a movement class for them to apply to.
+        let classed = |i: usize| {
+            e.alive[i]
+                && e.def[i] != NO_DEF
+                && self.units.at(e.def[i] as usize).movement_class.is_some()
+        };
+        if self.terrain.has_layer() && !self.movement.is_empty() && (0..slots).any(classed) {
             h.write_u8(SECTION_MOVEMENT);
             h.write_u64(self.movement.digest());
         }
