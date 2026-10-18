@@ -244,7 +244,16 @@ Status: in progress.
   node budget per tick; an unreachable goal ends in the nearest reachable cell and says so;
   `Order::Move` and the other walking orders now follow routes; the `pathing` and `pathing_256`
   scenarios and the load test), `docs/rules/pathfinding.md`: done
-- WP4.3 to WP4.7: open
+- WP4.3 Flowfields for groups (`sf_sim::path`: one `Move`/`AttackMove` that sends at least
+  `flowfield_threshold` units of a class to one point, 8 as shipped in `sim.ron`, builds one field per
+  class instead of a route each: an integration field (Dijkstra from the goal with the routes' costs)
+  and a direction per cell with a fixed tie-break, over the sectors of the abstract corridor and
+  one ring of margin, built by a resumable job that shares the node budget with the routes; units
+  follow it to the farthest cell of the chain they can see and arrive spread over a spiral of
+  slots round the goal; a fixed pool of 8 fields with least-recently-used eviction and idle expiry;
+  a structure in the region makes a successor while the units go on with the old field where it is
+  still valid; the `bridge_200` scenario), `docs/rules/pathfinding.md`: done
+- WP4.4 to WP4.7: open
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -285,6 +294,30 @@ against the best any-angle route by the game's own line of sight, median 1.006, 
 1.05, worst 1.075; `pathing_256`, 200 requests served after 85 ticks. Not done on purpose: flowfields,
 collision, replanning when a route is blocked or a target vanishes (the graph is kept right; a route
 is only asked for again when a change touches it), a cache for unreachable goals, uphill slowing.
+
+WP4.3 notes. A group order is a `Move` or `AttackMove` to a point given to units that start it now;
+per movement class with at least `flowfield_threshold` of them one field is built and its units are
+members (not a guard of a point, which walks back to its exact post; not an order queued behind
+another; not a goal the class cannot enter, whose units are sent to the nearest reachable cell one by
+one as before). **`bridge_200`** (new, pinned `0x5db78c7d785670f0`): 90 riflemen, 60 light tanks,
+45 light transports and 5 amphibious transports cross a river with one bridge and a wall with a
+gap to a point 60 cells away on one order. Three fields are finished by tick 6, all 200 units are
+moving by tick 17 and have arrived by tick 2137 (107 s; the slowest is a rifleman at 0.7 cells a
+second), none ends outside 5 cells of the goal (the farthest is 3.95), none is ever on ground its
+class cannot enter, and the service spent 24,712 nodes in all, against 266,587 and 448 jobs for the
+same crowd routed one by one (every unit moving by tick 59). **Units overlap** at the goal and on
+the bridge until collision (WP4.4): the arrival slots are half a cell apart, closer than a vehicle
+is long, because 200 units one to a cell do not fit in five cells. **No golden moved.** `pathing`
+has a group order (24 transports to one cell) and sets `flowfield_threshold: Some(0)` to stay
+the test of the queue of single requests it is pinned on; on a flowfield its checksum would be
+`0xd2f0d2dcc39d0f9e` instead of `0x09f819e7bfeb22a2` (`tools/sf_headless/tests/flowfield.rs` runs
+that, the 24 arrive by tick 681 with a structure placed across their way). Choices: the region is
+the abstract corridor plus one ring of sectors (160 at most), not the map; a unit waits for its own
+cell to be integrated and leaves the field for a route of its own when the field cannot serve it;
+the checksum covers a field by a running hash of what was integrated, not its arrays. Not done on
+purpose: collision and pushing (WP4.4), formations and a shape that keeps (WP4.6), replanning a
+target that vanished (WP4.7), a substitute goal for a group sent to a cell its class cannot enter,
+queued group orders, uphill slowing.
 
 ## Phase 1 report (draft, WP1.14)
 

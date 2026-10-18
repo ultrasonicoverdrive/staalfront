@@ -192,8 +192,8 @@ yet. Reasons:
 * slowing is a property of a **step** (from one cell to the next), not of a cell, so it is not
   `cost(class, cell)`. Pathfinding (WP4.2) did not need it and did not take it: the cost of a
   step there is the average of the two cells' costs (`pathfinding.md`, "Costs"), the one place being
-  `Grid::step_cost` in `path/grid.rs`. Flowfields (WP4.3) are the other reader; the cost model
-  should be designed once, with them.
+  `Grid::step_cost` in `path/grid.rs`. Flowfields (WP4.3) are the other reader and took that function as
+  it is, so a slope would be one change that routes and fields both pick up.
 
 The seam is in place: `behavior::walk` is the one place that scales a step, `Ground::may_step`
 the one place that judges it, and a class record can gain an optional field (with a serde
@@ -271,9 +271,9 @@ runs on Linux and Windows in CI.
 
 ## Not here
 
-* **Flowfields** for groups (WP4.3). Single units are routed since WP4.2
-  (`docs/rules/pathfinding.md`); the legacy `MoveTo` and the wanderers are not.
-* **Collision and a stuck unit** (WP4.4), **replanning** a blocked route (WP4.7).
+* **Collision and a stuck unit** (WP4.4), **replanning** a blocked route (WP4.7). Single units are
+  routed since WP4.2 and groups sent to one place follow a flowfield since WP4.3
+  (`docs/rules/pathfinding.md`); the legacy `MoveTo` and the wanderers are not routed.
 * **Slope**, above.
 * **`water_speed` of a role** is not read by the simulation; the hover class's cost on water
   says it.

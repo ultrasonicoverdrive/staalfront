@@ -19,12 +19,21 @@
 //! The rules (costs, portals, tie-breaks, the budget, unreachable goals) are
 //! in `docs/rules/pathfinding.md`; the stages of a request are described in `path/job.rs`.
 //!
+//! A group of units sent to one place by one order does not ask for a route each
+//! (WP4.3): the world builds one **flowfield** for each class with at least a
+//! threshold of them, over the sectors of the abstract corridor (`path/field.rs`,
+//! built by a resumable job in `path/field_build.rs`, inside the same node budget),
+//! and the units follow it to their own arrival slot (`path/slots.rs`).
+//!
 //! What is *not* pathfinding here: aircraft and any class that terrain does
 //! not restrict walk the straight line, units are not obstacles (collision is
-//! WP4.4), and a route made unwalkable by a change is only re-asked when the
-//! change touches it (replanning is WP4.7).
+//! WP4.4: the members of a group overlap until then), and a route made unwalkable
+//! by a change is only re-asked when the change touches it (replanning is WP4.7).
 
 mod abstract_search;
+mod corridor;
+mod field;
+mod field_build;
 mod graph;
 mod grid;
 mod heap;
@@ -32,7 +41,10 @@ mod job;
 mod local;
 mod los;
 mod route;
+mod slots;
 
+#[cfg(test)]
+mod field_tests;
 #[cfg(test)]
 mod tests;
 
@@ -44,11 +56,16 @@ use crate::movement::{Cost, Ground, MovementTable};
 use crate::terrain::{Cell, Occupancy, Terrain};
 use crate::units::UnitTable;
 
+use field::Fields;
 use graph::{ClassGraph, node_sector};
 use grid::{Grid, Sectors};
 use job::{Job, Mode, Progress, Work};
 pub(crate) use route::{Route, RouteState, Routes};
 
+pub use field::{
+    DEFAULT_FLOWFIELD_THRESHOLD, FIELD_POOL, FIELD_SECTORS, IDLE_TICKS as FIELD_IDLE_TICKS,
+    MAX_SLOTS as MAX_FIELD_SLOTS,
+};
 pub use grid::SECTOR_SIZE;
 pub use route::{ABS_CAP, RING_CAP};
 
@@ -81,6 +98,13 @@ pub struct PathStats {
     pub waiting: u32,
     /// Sectors rebuilt so far (not counting the creation of the world).
     pub sectors_rebuilt: u64,
+    /// Nodes of the last tick that went to building flowfields (part of
+    /// `nodes_last_tick`).
+    pub field_nodes_last_tick: u32,
+    /// Flowfields in the pool now, finished or not.
+    pub fields_live: u32,
+    /// Flowfields finished so far, rebuilds included.
+    pub fields_built: u64,
 }
 
 /// Where a unit stands with its route, for the presentation and tests.
@@ -114,6 +138,10 @@ pub struct RouteView {
     pub complete: bool,
     /// Smoothing is off for this route (a step on it was refused).
     pub cautious: bool,
+    /// The unit follows the flowfield of its group (WP4.3) instead of a route
+    /// of its own. `waypoints` is then at most the one it steers at, and
+    /// `complete` is true.
+    pub field: bool,
 }
 
 /// A whole route, planned in one go with no budget: `World::plan_route`.
@@ -170,6 +198,8 @@ pub(crate) struct Pathing {
     next_slot: u32,
     /// Some route may be waiting for work: the service looks.
     scan: bool,
+    /// The flowfields of group orders (WP4.3).
+    fields: Fields,
     stats: PathStats,
 }
 
@@ -186,6 +216,7 @@ impl Pathing {
             next_ticket: 0,
             next_slot: 0,
             scan: false,
+            fields: Fields::new(DEFAULT_FLOWFIELD_THRESHOLD),
             stats: PathStats {
                 budget: DEFAULT_NODE_BUDGET,
                 ..PathStats::default()
@@ -201,10 +232,12 @@ impl Pathing {
         movement: &MovementTable,
         occupancy: &Occupancy,
         budget: u32,
+        flowfield_threshold: u32,
     ) -> Pathing {
         let mut p = Pathing::inactive();
         p.budget = budget;
         p.stats.budget = budget;
+        p.fields.threshold = flowfield_threshold;
         if !terrain.has_layer() {
             return p;
         }
@@ -232,6 +265,15 @@ impl Pathing {
 
     pub fn budget(&self) -> u32 {
         self.budget
+    }
+
+    /// Changes the flowfield threshold (before the world starts).
+    pub fn set_flowfield_threshold(&mut self, threshold: u32) {
+        self.fields.threshold = threshold;
+    }
+
+    pub fn flowfield_threshold(&self) -> u32 {
+        self.fields.threshold
     }
 
     pub fn stats(&self) -> PathStats {
@@ -299,6 +341,7 @@ impl Pathing {
         }
         self.stats.sectors_rebuilt += sectors.len() as u64;
         self.scan = true;
+        self.fields.changed(&self.graphs, sectors);
     }
 
     /// [`Pathing::refresh_sectors`] for the sectors the given cells are in.
@@ -324,17 +367,33 @@ impl Pathing {
     /// before the units move.
     pub fn serve(&mut self, e: &mut Entities, units: &UnitTable) {
         self.stats.nodes_last_tick = 0;
-        if self.graphs.is_empty() || (self.job.is_none() && !self.scan) {
+        self.stats.field_nodes_last_tick = 0;
+        self.fields.tick();
+        let fields_work = !self.graphs.is_empty() && self.fields.has_work();
+        if self.graphs.is_empty() || (self.job.is_none() && !self.scan && !fields_work) {
+            self.stats.fields_live = self.fields.live();
             return;
         }
         let mut rem = self.budget;
+        let routes_wait = self.job.is_some() || self.scan;
+        // The flowfield builder shares the budget: half of it while routes wait
+        // for theirs, all of it when nothing does. What it leaves is the routes'
+        // and what they leave is its (below), so a tick that has work for either
+        // spends its budget to the last node.
+        if fields_work {
+            let mut share = if routes_wait { rem / 2 } else { rem };
+            let given = share;
+            self.fields.advance(&self.graphs, e, &mut share);
+            rem -= given - share;
+        }
         // The slots looked at this tick, counted from `next_slot`: a pass
         // visits each slot once, so a unit that needs a refill again at once
         // waits for the next tick.
         let (start, mut looked) = (self.next_slot as usize, 0);
         loop {
-            // Everything is spent: the rest waits for the next tick.
-            if rem == 0 {
+            // No request waits, or everything is spent: the rest waits for the
+            // next tick.
+            if !routes_wait || rem == 0 {
                 break;
             }
             if self.job.is_none() {
@@ -348,7 +407,6 @@ impl Pathing {
             }
             let Some(job) = self.job.as_mut() else { break };
             let slot = job.slot as usize;
-            let before = rem;
             let progress = job.run(
                 &self.graphs[job.graph],
                 &mut self.work,
@@ -356,7 +414,6 @@ impl Pathing {
                 &mut rem,
                 self.epoch,
             );
-            self.stats.nodes_last_tick += before - rem;
             match progress {
                 Progress::Yield => break,
                 Progress::Done => {
@@ -377,6 +434,13 @@ impl Pathing {
                 }
             }
         }
+        if rem > 0 && self.fields.has_work() {
+            self.fields.advance(&self.graphs, e, &mut rem);
+        }
+        self.stats.nodes_last_tick = self.budget - rem;
+        self.stats.field_nodes_last_tick = self.fields.nodes_last_tick;
+        self.stats.fields_live = self.fields.live();
+        self.stats.fields_built = self.fields.built;
         self.stats.peak_nodes = self.stats.peak_nodes.max(self.stats.nodes_last_tick);
         self.stats.waiting = e
             .route
@@ -449,6 +513,15 @@ impl Pathing {
         destination: Vec2,
         class: Option<u16>,
     ) -> Steer {
+        // A member of a group with a flowfield follows that (WP4.3); one the
+        // field cannot serve (it is gone, or the unit's cell cannot reach the
+        // goal in it) is routed on its own from where it stands.
+        if e.route[i].field_serial != 0 {
+            match self.fields.follow(&self.graphs, e, i, self.epoch) {
+                Some(steer) => return steer,
+                None => e.route[i] = Route::IDLE,
+            }
+        }
         let Some(gi) = class.and_then(|c| self.graph_index(c)) else {
             return Steer::Go(destination, Aim::Destination);
         };
@@ -562,6 +635,18 @@ impl Pathing {
     /// ends: the unit stands where it is with its order kept.
     pub fn blocked(&mut self, e: &mut Entities, i: usize) {
         let route = &mut e.route[i];
+        if route.field_serial != 0 {
+            // A member of a field: the same two steps. The first refusal makes
+            // it go cell by cell, the second stands it still.
+            if route.cautious {
+                route.state = RouteState::Stranded;
+            } else {
+                route.cautious = true;
+                route.ring_clear();
+                route.final_leg = false;
+            }
+            return;
+        }
         if route.state == RouteState::Idle {
             return;
         }
@@ -629,6 +714,77 @@ impl Pathing {
         false
     }
 
+    // ---- group orders (WP4.3) ----------------------------------------------------
+
+    /// One `Command::Order` to walk to `destination` was just given to the
+    /// units in `started` (ascending slots, each once, each starting the order
+    /// now). For every movement class that has at least the threshold of them,
+    /// makes a flowfield and hands the units their places in it; the others stay
+    /// with their single routes. Classes go in ascending order and each takes
+    /// the stretch of the arrival spiral after the ones before it.
+    pub fn group_order(
+        &mut self,
+        e: &mut Entities,
+        units: &UnitTable,
+        started: &[usize],
+        destination: Vec2,
+    ) {
+        let threshold = self.fields.threshold as usize;
+        if threshold == 0 || self.graphs.is_empty() || started.len() < threshold {
+            return;
+        }
+        let mut base = 0_u32;
+        for gi in 0..self.graphs.len() {
+            let g = &self.graphs[gi];
+            let members: Vec<usize> = started
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    e.alive[i]
+                        && e.def[i] != NO_DEF
+                        && units.at(e.def[i] as usize).movement_class == Some(g.class)
+                })
+                .collect();
+            if members.len() < threshold {
+                continue;
+            }
+            let (gx, gy) = field::cell_of(g, destination);
+            // A goal the class cannot enter is every unit's own affair: each is
+            // sent to the reachable cell nearest to it.
+            if !g.grid.open(i64::from(gx), i64::from(gy)) {
+                continue;
+            }
+            let goal = g.grid.index(gx, gy);
+            let serial = self.fields.create(
+                gi,
+                goal,
+                base,
+                u32::try_from(members.len()).unwrap_or(u32::MAX),
+                g.sectors.count(),
+            );
+            for (rank, &i) in members.iter().enumerate() {
+                let route = &mut e.route[i];
+                *route = Route::IDLE;
+                route.state = RouteState::Active;
+                route.complete = true;
+                route.want = goal;
+                route.goal = goal;
+                route.frontier = goal;
+                route.epoch = self.epoch;
+                route.field_serial = serial;
+                route.field_rank = u16::try_from(rank).unwrap_or(u16::MAX);
+            }
+            base = base.saturating_add(members.len() as u32);
+        }
+    }
+
+    /// Where unit `i` stands when it has arrived, if it is a member of a group
+    /// whose field has handed out its slots: its own arrival slot. Arrival is
+    /// judged against this instead of the order's point.
+    pub fn arrival_point(&self, e: &Entities, i: usize) -> Option<Vec2> {
+        self.fields.arrival_point(e, i)
+    }
+
     // ---- reading ----------------------------------------------------------------
 
     /// A view of the route of unit `i`.
@@ -638,7 +794,12 @@ impl Pathing {
             RouteState::Idle => RouteStatus::None,
             RouteState::Stranded => RouteStatus::Stranded,
             RouteState::Wanted | RouteState::Active => {
-                if route.ring_len() == 0 && !route.complete {
+                let waits = if route.field_serial != 0 {
+                    !self.fields.ready_for(&self.graphs, e, i)
+                } else {
+                    route.ring_len() == 0 && !route.complete
+                };
+                if waits {
                     RouteStatus::Waiting
                 } else {
                     RouteStatus::Following
@@ -659,6 +820,7 @@ impl Pathing {
             waypoints: route.ring_len(),
             complete: route.complete,
             cautious: route.cautious,
+            field: route.field_serial != 0,
         }
     }
 
@@ -764,6 +926,16 @@ impl Pathing {
             h.write_u32(i as u32);
             route.write_hash(h);
         }
+    }
+
+    /// Whether the pool holds a flowfield (the checksum has a section then).
+    pub fn any_fields(&self) -> bool {
+        self.fields.any()
+    }
+
+    /// Writes the flowfield section of the checksum.
+    pub fn write_field_hash(&self, h: &mut Fnv1a64) {
+        self.fields.write_hash(h);
     }
 
     /// Whether any live unit has a route (the checksum has a section then).

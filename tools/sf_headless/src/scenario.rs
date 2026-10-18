@@ -113,6 +113,14 @@ pub struct Scenario {
     /// gets its route, never which. At least [`sf_sim::MIN_NODE_BUDGET`].
     #[serde(default)]
     pub path_budget: Option<u32>,
+    /// How many units of one movement class a single order must send to one
+    /// place for the world to build a flowfield for them (WP4.3,
+    /// `docs/rules/pathfinding.md`); the simulation's default
+    /// ([`sf_sim::DEFAULT_FLOWFIELD_THRESHOLD`], the number of `sim.ron`) when
+    /// left out. `Some(0)` turns flowfields off: every unit is routed on its
+    /// own. A scenario that is about the queue of single requests says so.
+    #[serde(default)]
+    pub flowfield_threshold: Option<u32>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -650,6 +658,13 @@ impl Scenario {
             }
         }
 
+        if self.flowfield_threshold == Some(1) {
+            p.push(
+                "flowfield_threshold 1 is not a group (use 0 to turn flowfields off, or 2 and up)"
+                    .to_string(),
+            );
+        }
+
         if let Some(budget) = self.path_budget
             && budget < sf_sim::MIN_NODE_BUDGET
         {
@@ -841,6 +856,11 @@ impl Scenario {
         if let Some(budget) = self.path_budget {
             world = world
                 .with_path_budget(budget)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(threshold) = self.flowfield_threshold {
+            world = world
+                .with_flowfield_threshold(threshold)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());

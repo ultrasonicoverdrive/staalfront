@@ -41,12 +41,16 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
         MovementCosts::embedded()
     });
     let table = sf_bridge::movement_table(&costs).expect("the movement costs make a valid table");
-    let budget = sf_bridge::path_budget(&SimSettings::embedded());
+    let settings = SimSettings::embedded();
+    let budget = sf_bridge::path_budget(&settings);
+    let threshold = sf_bridge::flowfield_threshold(&settings);
     world
         .with_movement(table)
         .expect("a world that has not started takes its movement table")
         .with_path_budget(budget)
         .expect("the shipped path budget is one a world takes")
+        .with_flowfield_threshold(threshold)
+        .expect("the shipped flowfield threshold is one a world takes")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a
@@ -189,5 +193,15 @@ mod tests {
         assert!(sim_terrain(&map).is_err());
         let err = make_world(config_for(&map), &map).unwrap_err();
         assert!(err.contains("terrain layer refused"), "{err}");
+    }
+
+    #[test]
+    fn the_sandbox_world_gets_the_path_budget_and_flowfield_threshold_of_sim_ron() {
+        let defs = sf_data::units::UnitDefs::embedded();
+        let world = with_movement(World::new(WorldConfig::new(1)).unwrap(), &defs);
+        let settings = SimSettings::embedded();
+        assert_eq!(world.path_stats().budget, settings.path_node_budget);
+        assert_eq!(world.flowfield_threshold(), settings.flowfield_threshold);
+        assert_eq!(settings.flowfield_threshold, 8, "the shipped value");
     }
 }

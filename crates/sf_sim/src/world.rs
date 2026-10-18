@@ -115,6 +115,9 @@ pub enum ConfigError {
     /// The path budget was given to a world that has already started, or is
     /// below [`MIN_NODE_BUDGET`](crate::MIN_NODE_BUDGET).
     PathBudget,
+    /// The flowfield threshold was given to a world that has already started,
+    /// or is one (a group has at least two units; zero turns flowfields off).
+    FlowfieldThreshold,
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -136,6 +139,9 @@ impl fmt::Display for ConfigError {
             ConfigError::UnitsAfterStart => "the unit table must be given before the world starts",
             ConfigError::PathBudget => {
                 "the path budget must be given before the world starts and be at least the minimum"
+            }
+            ConfigError::FlowfieldThreshold => {
+                "the flowfield threshold must be given before the world starts and be 0 or at least 2"
             }
             ConfigError::MovementAfterStart => {
                 "the movement table must be given before the world starts"
@@ -280,6 +286,7 @@ impl World {
             &self.movement,
             &self.occupancy,
             self.pathing.budget(),
+            self.pathing.flowfield_threshold(),
         );
         Ok(self)
     }
@@ -299,6 +306,26 @@ impl World {
             return Err(ConfigError::PathBudget);
         }
         self.pathing.set_budget(nodes);
+        Ok(self)
+    }
+
+    /// The same world with a different flowfield threshold: the number of units
+    /// of one movement class that a single order must send to one place for the
+    /// world to build one flowfield for them instead of routing each
+    /// (WP4.3, `docs/rules/pathfinding.md`). Zero turns flowfields off; one is
+    /// refused (a lone unit is no group). A world that is given none uses
+    /// [`DEFAULT_FLOWFIELD_THRESHOLD`](crate::DEFAULT_FLOWFIELD_THRESHOLD), the
+    /// number of the shipped `sim.ron`. Call it right after the world is made
+    /// ([`ConfigError::FlowfieldThreshold`] after it has started, or for one).
+    pub fn with_flowfield_threshold(mut self, threshold: u32) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || threshold == 1
+        {
+            return Err(ConfigError::FlowfieldThreshold);
+        }
+        self.pathing.set_flowfield_threshold(threshold);
         Ok(self)
     }
 
@@ -460,6 +487,10 @@ impl World {
     }
 
     /// What the path service did with its budget (WP4.2).
+    pub fn flowfield_threshold(&self) -> u32 {
+        self.pathing.flowfield_threshold()
+    }
+
     pub fn path_stats(&self) -> PathStats {
         self.pathing.stats()
     }
@@ -975,20 +1006,38 @@ impl World {
                     other => other,
                 };
                 let mut changed = false;
+                // The units that start walking to a point now: a group order
+                // gives them a flowfield (WP4.3) when there are enough of them.
+                let group_point = match order {
+                    Order::Move(p) | Order::AttackMove(p) => Some(p),
+                    _ => None,
+                };
+                let mut started: Vec<usize> = Vec::new();
                 for id in ids {
                     if let Some(i) = self.live_index(id)
                         && self.accepts_order(i, order)
-                        && orders::give(
+                    {
+                        let starts_now = !queued || self.entities.order[i] == Order::Idle;
+                        if orders::give(
                             &mut self.entities,
                             i,
                             order,
                             queued,
                             self.tick,
                             (pos_min, pos_max),
-                        )
-                    {
-                        changed = true;
+                        ) {
+                            changed = true;
+                            if starts_now && group_point.is_some() {
+                                started.push(i);
+                            }
+                        }
                     }
+                }
+                if let Some(point) = group_point {
+                    started.sort_unstable();
+                    started.dedup();
+                    self.pathing
+                        .group_order(&mut self.entities, &self.units, &started, point);
                 }
                 changed
             }

@@ -1,0 +1,245 @@
+// 200 mixed units cross one bridge to a goal area (WP4.3, the flowfields of
+// docs/rules/pathfinding.md; the "done when" of phase 4 in PLAN.md). The map is
+// assets/maps/bridge, a flat 96 by 64 cell map made by
+// `cargo run -p sf_headless --example gen_bridge_map -- assets/maps/bridge`:
+//
+//   x 0..43              x 44..49           x 50..95
+//   the west bank, rock  the river (water,  the east bank: rock outcrops either
+//   outcrops funnelling  every row) with    side of the bridge's mouth, a rock wall
+//   toward the bridge    ONE bridge, rows   (x 66..67, every row) with a gap in rows
+//                        31..33             36..40, then open ground
+//
+// The 200 units stand on a block of 20 by 10 cells (x 8..27, y 26..35), one to a cell,
+// in the order of the cells (rows first), and get ONE order on tick 1: go to (80, 32),
+// behind the wall's gap. The slots are the entity ids; the mix is a repeating
+// pattern of 13 and one hover craft every 40 cells (all at generation 0):
+//
+//   90 riflemen (foot)  60 light tanks (tracked)  45 light transports (wheeled)
+//    5 amphibious transports (hover)
+//
+// Foot, tracked and wheeled are each at least the flowfield threshold (8), so
+// the order gives three fields, one per class; the five hover craft are below it and
+// are routed one by one (and swim across the river). Without collision (WP4.4)
+// the units overlap on the bridge and at the goal; that is expected for now.
+//
+// tools/sf_headless/tests/bridge_200.rs asserts that all of them arrive, how long
+// it takes, that at most 1 % end outside 5 cells of the goal, that no unit ever
+// ends a tick on ground its class cannot enter, and that the path service never
+// spends more than its budget in a tick. CI runs the scenario on Linux and
+// Windows and requires the checksum in bridge_200.expected. `unit_defs` is the
+// frozen copy of the definitions `pathing` uses, so a rebalance of assets/config/
+// does not move the checksum.
+
+Scenario(
+    name: "bridge_200",
+    seed: 0x7E44_0044,
+    map: (width: 96, height: 64),
+    map_name: Some("bridge"),
+    unit_defs: Some("pathing_defs"),
+    ticks: 2400,
+    commands: [
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 26))), // slot 0: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 26))), // slot 1: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 26))), // slot 2: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (11, 26))), // slot 3: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 26))), // slot 4: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (13, 26))), // slot 5: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (14, 26))), // slot 6: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 26))), // slot 7: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (16, 26))), // slot 8: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 26))), // slot 9: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 26))), // slot 10: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 26))), // slot 11: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 26))), // slot 12: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 26))), // slot 13: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 26))), // slot 14: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (23, 26))), // slot 15: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (24, 26))), // slot 16: rifleman
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (25, 26))), // slot 17: amphibious
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 26))), // slot 18: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 26))), // slot 19: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 27))), // slot 20: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 27))), // slot 21: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (10, 27))), // slot 22: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (11, 27))), // slot 23: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (12, 27))), // slot 24: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 27))), // slot 25: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (14, 27))), // slot 26: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (15, 27))), // slot 27: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (16, 27))), // slot 28: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 27))), // slot 29: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 27))), // slot 30: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 27))), // slot 31: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 27))), // slot 32: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (21, 27))), // slot 33: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 27))), // slot 34: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (23, 27))), // slot 35: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (24, 27))), // slot 36: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (25, 27))), // slot 37: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 27))), // slot 38: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 27))), // slot 39: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 28))), // slot 40: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 28))), // slot 41: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 28))), // slot 42: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (11, 28))), // slot 43: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 28))), // slot 44: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (13, 28))), // slot 45: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (14, 28))), // slot 46: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 28))), // slot 47: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (16, 28))), // slot 48: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 28))), // slot 49: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 28))), // slot 50: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 28))), // slot 51: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 28))), // slot 52: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 28))), // slot 53: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 28))), // slot 54: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (23, 28))), // slot 55: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (24, 28))), // slot 56: rifleman
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (25, 28))), // slot 57: amphibious
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 28))), // slot 58: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 28))), // slot 59: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 29))), // slot 60: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 29))), // slot 61: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (10, 29))), // slot 62: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (11, 29))), // slot 63: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (12, 29))), // slot 64: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 29))), // slot 65: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (14, 29))), // slot 66: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (15, 29))), // slot 67: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (16, 29))), // slot 68: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 29))), // slot 69: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 29))), // slot 70: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 29))), // slot 71: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 29))), // slot 72: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (21, 29))), // slot 73: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 29))), // slot 74: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (23, 29))), // slot 75: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (24, 29))), // slot 76: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (25, 29))), // slot 77: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 29))), // slot 78: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 29))), // slot 79: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 30))), // slot 80: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 30))), // slot 81: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 30))), // slot 82: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (11, 30))), // slot 83: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 30))), // slot 84: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (13, 30))), // slot 85: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (14, 30))), // slot 86: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 30))), // slot 87: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (16, 30))), // slot 88: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 30))), // slot 89: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 30))), // slot 90: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 30))), // slot 91: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 30))), // slot 92: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 30))), // slot 93: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 30))), // slot 94: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (23, 30))), // slot 95: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (24, 30))), // slot 96: rifleman
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (25, 30))), // slot 97: amphibious
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 30))), // slot 98: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 30))), // slot 99: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 31))), // slot 100: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 31))), // slot 101: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (10, 31))), // slot 102: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (11, 31))), // slot 103: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (12, 31))), // slot 104: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 31))), // slot 105: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (14, 31))), // slot 106: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (15, 31))), // slot 107: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (16, 31))), // slot 108: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 31))), // slot 109: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 31))), // slot 110: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 31))), // slot 111: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 31))), // slot 112: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (21, 31))), // slot 113: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 31))), // slot 114: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (23, 31))), // slot 115: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (24, 31))), // slot 116: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (25, 31))), // slot 117: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 31))), // slot 118: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 31))), // slot 119: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 32))), // slot 120: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 32))), // slot 121: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 32))), // slot 122: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (11, 32))), // slot 123: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 32))), // slot 124: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (13, 32))), // slot 125: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (14, 32))), // slot 126: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 32))), // slot 127: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (16, 32))), // slot 128: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 32))), // slot 129: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 32))), // slot 130: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 32))), // slot 131: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 32))), // slot 132: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 32))), // slot 133: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 32))), // slot 134: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (23, 32))), // slot 135: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (24, 32))), // slot 136: rifleman
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (25, 32))), // slot 137: amphibious
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 32))), // slot 138: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 32))), // slot 139: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 33))), // slot 140: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 33))), // slot 141: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (10, 33))), // slot 142: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (11, 33))), // slot 143: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (12, 33))), // slot 144: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 33))), // slot 145: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (14, 33))), // slot 146: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (15, 33))), // slot 147: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (16, 33))), // slot 148: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 33))), // slot 149: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 33))), // slot 150: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 33))), // slot 151: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 33))), // slot 152: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (21, 33))), // slot 153: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 33))), // slot 154: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (23, 33))), // slot 155: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (24, 33))), // slot 156: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (25, 33))), // slot 157: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 33))), // slot 158: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 33))), // slot 159: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 34))), // slot 160: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 34))), // slot 161: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 34))), // slot 162: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (11, 34))), // slot 163: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 34))), // slot 164: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (13, 34))), // slot 165: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (14, 34))), // slot 166: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 34))), // slot 167: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (16, 34))), // slot 168: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 34))), // slot 169: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 34))), // slot 170: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 34))), // slot 171: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 34))), // slot 172: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 34))), // slot 173: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 34))), // slot 174: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (23, 34))), // slot 175: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (24, 34))), // slot 176: rifleman
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (25, 34))), // slot 177: amphibious
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 34))), // slot 178: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 34))), // slot 179: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 35))), // slot 180: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 35))), // slot 181: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (10, 35))), // slot 182: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (11, 35))), // slot 183: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (12, 35))), // slot 184: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 35))), // slot 185: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (14, 35))), // slot 186: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (15, 35))), // slot 187: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (16, 35))), // slot 188: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 35))), // slot 189: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (18, 35))), // slot 190: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (19, 35))), // slot 191: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (20, 35))), // slot 192: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (21, 35))), // slot 193: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (22, 35))), // slot 194: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (23, 35))), // slot 195: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (24, 35))), // slot 196: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (25, 35))), // slot 197: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 35))), // slot 198: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (27, 35))), // slot 199: rifleman
+
+        // --- tick 1: one order for everybody ---
+        (tick: 1, command: OrderMove(ids: [Range(0, 200)], target: (80, 32))),
+    ],
+)

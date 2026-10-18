@@ -365,7 +365,10 @@ fn go_to(
     ground: &Ground<'_>,
     path: &mut Pathing,
 ) -> bool {
-    if (destination - e.pos[i]).length_squared() <= stop_at.square() {
+    // A member of a group with a flowfield stops at its own arrival slot, not
+    // at the order's point (WP4.3).
+    let arrival = path.arrival_point(e, i).unwrap_or(destination);
+    if (arrival - e.pos[i]).length_squared() <= stop_at.square() {
         e.target[i] = None;
         e.route.reset(i);
         return true;

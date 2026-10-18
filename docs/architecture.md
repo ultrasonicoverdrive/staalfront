@@ -434,6 +434,12 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   search work per tick (`World::with_path_budget`); `pathing.ron` (a maze, a bridge, an island, a
   structure that closes a gap) and `pathing_256.ron` (200 requests on the playfield) run on the
   frozen definitions `pathing_defs/`.
+- **Flowfield threshold (WP4.3):** the optional scenario field `flowfield_threshold: Some(n)` is how
+  many units of one class a single order must send to one place to get a flowfield instead of a route
+  each (`World::with_flowfield_threshold`; the default is the 8 of `sim.ron`, `Some(0)` turns fields
+  off). `pathing.ron` sets `Some(0)` to stay a test of the queue of single requests;
+  `bridge_200.ron` (200 mixed units across one bridge on one order, map `assets/maps/bridge`) runs on
+  the defaults and is the test of the fields.
 - **Unit scenarios (WP3.2):** `unit_defs: Some("<dir>")` makes the world with the
   definitions in `assets/scenarios/<dir>/` (a frozen copy of the three files, so a
   balance change does not move a pinned checksum) as its unit table; the actions `SpawnUnit(kind, owner, cell)` and
@@ -441,7 +447,7 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   footprint from the definitions (and, since WP4.1, the movement costs of the classes). `units_spawn.ron` spawns every role of its frozen copy once;
   `tests/shipped_roles.rs` spawns every role of the shipped file, placed automatically, without a checksum.
 - **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
-  `command_mix`, `terrain_256`, `units_spawn`, `orders`, `terrain_costs`, `pathing` and `pathing_256` in release mode on Linux and Windows against the committed
+  `command_mix`, `terrain_256`, `units_spawn`, `orders`, `terrain_costs`, `pathing`, `pathing_256` and `bridge_200` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

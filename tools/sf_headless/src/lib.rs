@@ -37,6 +37,7 @@
 //! | `map_name` | `Some("playfield256")`: the world is made on the terrain layer of `assets/maps/<name>/` (next to the scenario's directory); its size in cells must equal `map`. Without it every cell is open ground. |
 //! | `unit_defs` | `Some("units_spawn_defs")`: the world is made with the unit definitions in `assets/scenarios/<name>/` (`unit_classes.ron`, `weapon_defs.ron`, `unit_defs.ron`; a frozen copy, so balance changes do not move a pinned checksum) as its unit table, which `SpawnUnit` and `PlaceStructure` need (WP3.2). Read by `Scenario::load`, like `map_name`. |
 //! | `path_budget` | `Some(2048)`: the nodes of path search work the world may do in one tick (WP4.2, `docs/rules/pathfinding.md`); the simulation's default when left out, at least `MIN_NODE_BUDGET`. It decides when a unit gets its route, never which. |
+//! | `flowfield_threshold` | `Some(8)`: how many units of one movement class a single order must send to one place for the world to build a flowfield for them instead of routing each (WP4.3, `docs/rules/pathfinding.md`); the simulation's default (the number of `sim.ron`) when left out. `Some(0)` turns flowfields off; `Some(1)` is refused. |
 //! | `ticks` | Length of the run, at least 1. |
 //! | `spawns` | Groups of entities: `tick` (default 0), `player` (default 0; the issuer, which orders commands within a tick), `count`, `kinds`, `owners` (cycled: entity `i` gets `kinds[i % len]`), `area` (`(min: (x, y), max: (x, y))`, cells, max exclusive). |
 //! | `commands` | Timed commands: `tick`, `player` (default 0), `command`. |

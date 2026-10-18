@@ -93,8 +93,16 @@ its own (`guard_walking`), so the route could take `target` over.
   order, the queue behind it and the arrival test stay as they are, as they did when the unit stood
   at the edge of a river at WP4.1; ending such an order ("gives up", "stands as near as it gets")
   is WP4.4's outcome and WP4.7's replan.
-* **WP4.3** adds the flowfield step for groups to the same seam; **WP4.7** recomputes the route when
-  it is blocked or the target has vanished, the order staying.
+* **WP4.3** adds the flowfield step for groups to the same seam: when one `Move` or `AttackMove` to a
+  point sends at least `flowfield_threshold` units of a class somewhere (8 as shipped), those units
+  do not ask for routes; they are **members of one flowfield** (`docs/rules/pathfinding.md`,
+  "Flowfields for groups"), `Pathing::steer` returns their waypoint from it, and they wait where
+  they stand until the field has integrated their cell. A member has its own **arrival slot** around the
+  destination, and **arrival is judged against the slot** (`go_to`), not against the order's point, so
+  that 200 units do not pile up on one spot; the order still ends as for any move. A member whose
+  field is gone, or cannot serve it, is routed on its own. A guard of a point is not a group order (it walks
+  back to its exact post). **WP4.7** recomputes the route when it is blocked or the target has vanished, the
+  order staying.
 * **Terrain (WP4.1).** `walk` returns whether the unit arrived, is on its way, or was blocked by
   terrain; `go_to` counts only an arrival, and a blocked step on a route makes the unit ask for a
   cell-by-cell route (a second refusal leaves it standing, order kept). The speed of a step is

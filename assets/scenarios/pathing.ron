@@ -46,12 +46,20 @@
 //
 // `unit_defs` is a FROZEN copy of the definitions (the terrain_costs ones), so a
 // rebalance of assets/config/ does not move the checksum.
+//
+// `flowfield_threshold: Some(0)`: the 24 light transports of slots 10..33 get one
+// order to one place, which since WP4.3 would be a group order with a flowfield
+// (docs/rules/pathfinding.md, "Flowfields for groups"). This scenario is about the
+// queue and the budget of single requests, which that crowd is the test of, and
+// its checksum is pinned on that: flowfields are off here. The same crowd on the
+// same map WITH the flowfield is run by tools/sf_headless/tests/flowfield.rs.
 Scenario(
     name: "pathing",
     seed: 0x7E44_0042,
     map: (width: 96, height: 64),
     map_name: Some("pathing"),
     unit_defs: Some("pathing_defs"),
+    flowfield_threshold: Some(0),
     ticks: 2600,
     commands: [
         (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 4))), // slot 0: tank, the maze

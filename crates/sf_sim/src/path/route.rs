@@ -87,6 +87,16 @@ pub(crate) struct Route {
     /// The cell the refined route ends in: the last waypoint of the ring, or
     /// where the unit started when the ring is empty.
     pub frontier: u32,
+    /// The flowfield this unit follows (WP4.3): the serial of its group's
+    /// field, zero for a unit that is routed on its own. A member keeps the
+    /// state `Active` and `complete`, so the service never plans a route for it;
+    /// the ring then holds at most the one waypoint it steers at.
+    pub field_serial: u32,
+    /// The unit's place among the members of its group, by ascending entity
+    /// id: which arrival slot is its own.
+    pub field_rank: u16,
+    /// A field member whose next step is straight on to its arrival slot.
+    pub final_leg: bool,
     ring: [u32; RING_CAP],
     ring_head: u8,
     ring_len: u8,
@@ -107,6 +117,9 @@ impl PartialEq for Route {
             && self.want == o.want
             && self.goal == o.goal
             && self.frontier == o.frontier
+            && self.field_serial == o.field_serial
+            && self.field_rank == o.field_rank
+            && self.final_leg == o.final_leg
             && self.ring_len() == o.ring_len()
             && (0..self.ring_len()).all(|k| self.ring_get(k) == o.ring_get(k))
             && self.abs_len() == o.abs_len()
@@ -129,6 +142,9 @@ impl Route {
         want: 0,
         goal: 0,
         frontier: 0,
+        field_serial: 0,
+        field_rank: 0,
+        final_leg: false,
         ring: [0; RING_CAP],
         ring_head: 0,
         ring_len: 0,
@@ -259,6 +275,14 @@ impl Route {
         h.write_u8(self.abs_len);
         for k in 0..self.abs_len() {
             h.write_u32(self.abs_get(k).unwrap_or(0));
+        }
+        // A flowfield member (WP4.3). Nothing is written for the others, so a
+        // world that never made a field hashes as before.
+        if self.field_serial != 0 {
+            h.write_u8(0xF1);
+            h.write_u32(self.field_serial);
+            h.write_u32(u32::from(self.field_rank));
+            h.write_u8(u8::from(self.final_leg));
         }
     }
 }

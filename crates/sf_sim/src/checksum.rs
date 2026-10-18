@@ -78,6 +78,14 @@
 //! not hashed: they follow from the terrain and the occupancy, which are, and the epoch
 //! says how often they changed.
 //!
+//! The flowfield section (WP4.3, `L`) comes last and is written only while the pool holds a
+//! field, which only a group order of at least the threshold makes: the threshold, the clock
+//! that ages the fields, every field (identity, state, region, arrival slots, how many cells
+//! are integrated and a running hash of them in the order they were) and the build in flight.
+//! A unit that follows a field also has its group and rank in its route. The arrays of costs
+//! and directions are not hashed whole (they would be hashed every tick); the running hash
+//! covers each cell as it is integrated.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -118,6 +126,7 @@ const SECTION_UNITS: u8 = b'U';
 const SECTION_ORDERS: u8 = b'D';
 const SECTION_MOVEMENT: u8 = b'M';
 const SECTION_PATHS: u8 = b'P';
+const SECTION_FIELDS: u8 = b'L';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -343,6 +352,12 @@ impl World {
         if self.pathing.any_route(e) {
             h.write_u8(SECTION_PATHS);
             self.pathing.write_hash(&mut h, e);
+        }
+
+        // Flowfields (WP4.3): only while the pool holds one.
+        if self.pathing.any_fields() {
+            h.write_u8(SECTION_FIELDS);
+            self.pathing.write_field_hash(&mut h);
         }
 
         h.finish()
