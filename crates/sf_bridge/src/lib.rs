@@ -111,6 +111,13 @@ pub fn path_budget(settings: &SimSettings) -> u32 {
     settings.path_node_budget
 }
 
+/// The flowfield threshold from the settings of `sim.ron`, to hand to
+/// [`World::with_flowfield_threshold`](sf_sim::World::with_flowfield_threshold)
+/// (which refuses one).
+pub fn flowfield_threshold(settings: &SimSettings) -> u32 {
+    settings.flowfield_threshold
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -275,11 +282,30 @@ mod tests {
         // And a budget the world refuses comes back as its error, not a panic here.
         let too_small = SimSettings {
             path_node_budget: sf_sim::MIN_NODE_BUDGET - 1,
+            flowfield_threshold: 8,
         };
         assert!(
             World::new(WorldConfig::new(1))
                 .unwrap()
                 .with_path_budget(path_budget(&too_small))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_shipped_flowfield_threshold_is_one_a_world_takes_and_the_simulations_default() {
+        let threshold = flowfield_threshold(&SimSettings::embedded());
+        assert_eq!(threshold, sf_sim::DEFAULT_FLOWFIELD_THRESHOLD);
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_flowfield_threshold(threshold)
+            .unwrap();
+        assert_eq!(world.flowfield_threshold(), threshold);
+        // One is no group; the world says so instead of the bridge deciding.
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_flowfield_threshold(1)
                 .is_err()
         );
     }

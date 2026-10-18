@@ -1,12 +1,16 @@
-# Pathfinding for single units
+# Pathfinding: single units, and groups on flowfields
 
-Work package WP4.2 (PLAN.md phase 4). Code: `crates/sf_sim/src/path.rs` (the service and the
+Work packages WP4.2 and WP4.3 (PLAN.md phase 4). This page is WP4.2, hierarchical A* for single units,
+and, from **"Flowfields for groups"** on (WP4.3), the handling of an order that sends many units to
+one place. Code: `crates/sf_sim/src/path.rs` (the service and the
 unit's side of it) and `crates/sf_sim/src/path/` (`grid`, `graph`, `local`, `abstract_search`, `los`,
-`route`, `job`, `heap`). Scenarios: `assets/scenarios/pathing.ron` and `pathing_256.ron`. Idea:
+`route`, `job`, `heap`; WP4.3: `field`, `field_build`, `corridor`, `slots`). Scenarios:
+`assets/scenarios/pathing.ron`, `pathing_256.ron` and (WP4.3) `bridge_200.ron`. Idea:
 `docs/red-alert-analysis.md` section 6 (the destination is where a unit wants to be, the route is
 how it gets there, and the route can be made again). The algorithm is hierarchical A* from the
-general literature (sectors, portals, an abstract graph, refinement inside sectors), written from
-scratch.
+general literature (sectors, portals, an abstract graph, refinement inside sectors); the flowfield
+is the integration field and vector field of the same literature, restricted to the sectors of the
+abstract corridor; both are written from scratch.
 
 A unit with an order to move **asks for a route** to the order's destination and **follows it**
 waypoint by waypoint. The order keeps the destination; the route is a separate record of the unit
@@ -240,7 +244,8 @@ scenario field `path_budget` set it, before the world starts. **The number is ga
 `sf_bridge::path_budget`) is what the game gives its world. A world that is given none, which is what
 the tests and the frozen headless scenarios have, uses the simulation's default, the same number, so
 turning the knob in the file never moves their checksums. A node is one cell or portal
-expanded in a search, or one cell looked at in a line of sight. Nothing else counts.
+expanded in a search, or one cell looked at in a line of sight; building a flowfield (WP4.3) spends
+the same nodes, from the same budget (below). Nothing else counts.
 
 * Requests are served **going round the entity ids**, one job at a time: the job in flight finishes
   (over several ticks if it must) before the next starts, and the next is the first unit with work
@@ -271,10 +276,11 @@ expanded in a search, or one cell looked at in a line of sight. Nothing else cou
   A first request costs about a thousand nodes, a refill a few hundred.
 * **Large orders are not this service's job.** 200 units sent to 200 different cells is the worst
   case for single-unit searches and still takes five seconds for the last one; a group sent to *one*
-  place is WP4.3's flowfield, one search for everybody, and that is how a group order is meant to be
-  handled. A cheap improvement for the meantime, not done here: units that start in the same sector
-  with the same goal cell can share one abstract path (only the first and last legs differ), which
-  would cut the work of a group order by most of the abstract searches.
+  place gets a flowfield (WP4.3, "Flowfields for groups" below): one build for the class instead of a
+  search each, inside the same budget. What stays with this service is an order below the threshold,
+  orders to many different places, and the units a field cannot serve. (A cheap improvement that is
+  still not done: units that start in the same sector with the same goal cell could share one
+  abstract path.)
 
 `World::route_of(id)` shows a unit's route: `None`, `Waiting` (asked, no waypoint yet), `Following`,
 `Stranded`; `World::path_stats()` shows the budget, the nodes the last tick and the busiest tick
@@ -292,17 +298,210 @@ routed a unit hashes as before: `wander_5000`, `command_mix`, `terrain_256`, `un
 `terrain_costs` moved, on purpose, because its orders now find their way round things instead of
 stopping at them (see `progress.md`).
 
+## Flowfields for groups (WP4.3)
+
+Code: `crates/sf_sim/src/path/field.rs` (the pool, a field, following it), `field_build.rs` (the
+builder), `corridor.rs` (the abstract search that finds the region), `slots.rs` (the arrival slots).
+Data: `flowfield_threshold` in `assets/config/sim.ron`. Scenario: `bridge_200`.
+
+A group sent to *one* place does not need a search each. When one order sends enough units of a class
+to one point, the world builds **one flowfield** for the class: the cost of the cheapest walk to the
+goal from every cell of a region, and from it a direction in every cell. The units sample the
+direction of the cell they stand in. 200 units cost three fields, not 195 routes.
+
+### When a unit gets a field
+
+A `Command::Order` is a **group order** when it is `Order::Move` or `Order::AttackMove` to a point and
+is given to units that start it now (not queued behind an order they are carrying out; queued on an
+idle unit starts now). Of the units that took the order, those of a movement class that terrain
+restricts (the classes that have a graph: foot, wheeled, tracked, hover and water as shipped) are
+counted **per class**; every class with **at least `flowfield_threshold` units** gets one field,
+built for the class (its costs, its impassable terrain), and its units are its members. Mixed
+classes give one field each, built one after the other; a class with fewer units than the threshold
+is routed one by one as before. The units of the classes are ranked among their own class by entity
+id.
+
+The threshold is **game data**: `flowfield_threshold` in `assets/config/sim.ron`, 8 as shipped
+(`sf_data::sim_settings`, handed over by `sf_bridge::flowfield_threshold` to
+`World::with_flowfield_threshold`). `0` turns flowfields off, `1` is refused (a lone unit is no
+group), the most is 1,000. A world that is given none uses the simulation's default
+(`DEFAULT_FLOWFIELD_THRESHOLD`, the same 8), and the headless scenarios set it with the field
+`flowfield_threshold: Some(n)`.
+
+Not group orders (the units are routed one by one, as before): a **guard** of a point (a guard walks
+back to its post, which is a point; arrival slots would send it off them again), an attack or a
+guard of an entity (the destination moves), a scatter, an order queued behind another (it starts
+later, from wherever the unit is, and is routed then), a group of one class below the threshold, and
+a **goal the class cannot enter** (rock for a tank, water for a rifleman): each unit is sent to the
+reachable cell nearest to it by the rule of "Unreachable goals" above, which costs one search each,
+the case for which a cache would be the answer, still open.
+
+### The field
+
+A field covers a **region**: the sectors on the abstract corridor between where the group stands and
+the goal, with one ring of sectors round them, at most `FIELD_SECTORS` (160) sectors (that is 40,960
+cells; 5 bytes a cell). Not the whole map: on the 96 by 64 map of `bridge_200` a field is about 3,500
+cells.
+
+* The **corridor** is found on the abstract graph with the costs of the single routes: a Dijkstra from
+  the goal over the portals of the goal's sector, stopped as soon as it has reached a portal of every
+  sector a member stands in; the sectors on the paths back from those portals are the corridor. A
+  corridor longer than `FIELD_SECTORS` sectors (a maze that visits every sector of a 256 by 192 map)
+  gets no field and its units are routed one by one. A margin that does not fit is cut short, in
+  ascending sector order.
+* The **integration field** is a Dijkstra from the goal cell over the cells of the region, with the
+  costs of the class (`Grid::step_cost`, 4096 per cell at normal speed, integers; the same cost model
+  as the single routes, which is the one place a slope would be added). A step is allowed in the
+  direction a unit would take it: from the neighbour to the cell, by the rule of `Grid::can_step`
+  (the cell can be entered, a diagonal step needs both cells it cuts across). A cell that cannot be
+  entered, a structure's, still gets a cost when a step from it is allowed, so a unit that has a
+  structure placed on it can walk out; no step goes in.
+* The **direction** of a cell is one of the eight neighbours, or "goal": the neighbour that gives the
+  cost, the step to which is allowed. Ties go to the first in the order **north, east, south, west,
+  north-east, south-east, south-west, north-west** (the order the searches try the neighbours in),
+  so the field does not depend on the order cells were integrated in. The direction is chosen when
+  the cell is integrated.
+* The cells nearest the goal are integrated first. A unit can follow the field as soon as **its own
+  cell** is integrated (the partial field): everything downhill of it is integrated already, because
+  the cost falls at every step. Until then it waits where it stands, deterministically. In
+  `bridge_200` the first unit of each class moves within 6 ticks of the order and all 200 within 17
+  (the slowest to turn).
+
+### The build, inside the budget
+
+A field is made by a **resumable job** in stages, each of which spends from the tick's node budget
+and can stop where the budget runs out: gather the sectors the members stand in (one node pays for 16
+slots looked at); the cost from the goal to the portals of its sector (`Local::advance`); the corridor
+(one node per portal); marking the paths (one node per portal); the region (a fixed charge, a 32nd of
+the sectors of the map); the arrival slots (the cells their lines of sight look at); the integration
+(one node per cell). The result is the same whatever the slices (a test builds one field on budgets
+of 61 and 1,000,000 nodes and compares every cell).
+
+One field is built at a time, the oldest first. **The budget is shared with the routes**: while
+single requests wait the builder gets **half** of each tick's budget (the routes keep serving
+round the entity ids with the other half, `next_slot` and the order of service are as before); a
+tick with no request waiting gives it all; what the routes leave over goes to the builder, and what the
+builder leaves over to the routes. A tick still spends its whole budget when anything waits (a test
+asserts at least three quarters on every such tick at the smallest budget) and never more than it
+(`PathStats::nodes_last_tick`, which counts both; `field_nodes_last_tick` is the builder's part).
+
+### Following a field
+
+A member, each time it needs a new waypoint (when the one it had is reached, or the map changed):
+
+1. If the **slot** of the unit (below) is in sight (a thick line of sight of at most 16 cells, the
+   rule of "Line of sight and string pulling"), it steers straight at the slot and keeps doing so.
+2. Otherwise it follows the chain of directions from its cell for at most 16 cells, as long as the
+   grid still allows each step, and steers at the **farthest cell of the chain it can see**;
+   when it can see none, the next cell. Nothing is looked at that is not in the grid as it is now.
+3. A step refused on the way (the straight line grazed a corner the margin did not cover) makes it go
+   cell by cell, and a second refusal leaves it standing with its order kept, as for a single route.
+
+The waypoint is the one cell in the unit's ring; `World::waypoint_of` shows it; `route_of` has
+`field: true`, `complete: true`.
+
+A member **leaves the field** for a route of its own (the unit asks for it where it stands, as a
+unit with a new order does) when the field is gone (evicted, or its group had no units left when it
+was to be built), when its cell is not in the region, or when its cell cannot reach the goal in the
+field (a unit on an island). It is then served by the single-route service and goes to the reachable
+cell nearest to the goal, with the marks of "Unreachable goals", exactly as before.
+
+### Arrival slots
+
+The goal is an area. If 200 units all aimed at the middle of the goal cell they would pile up on one
+point, so each member has its own **slot**: a point on a lattice around the goal, handed out in a
+spiral, **by rank** (the unit's place among its class in ascending entity id order).
+
+* The lattice has four points to a cell, half a cell apart and a quarter of a cell in from the cell's
+  sides (`path/slots.rs`). The spiral orders them by distance from the middle of the goal cell, ties
+  by row then column: the group fills a disc, 200 units to a radius of about four cells (measured in
+  `bridge_200`: the farthest ends 3.95 cells from the goal), inside the five cells (20 m) of phase 4's
+  "done when".
+* A point is a slot when the line from the middle of the goal cell to it is clear by the thick line of
+  sight (so its cell can be entered): a unit that has followed the field down to the goal can always
+  walk straight on to its slot. The lattice is the same for every class but each field keeps only
+  the points valid for its class, scanning from an offset (the number of units of the classes
+  before it in the same order), so the classes of one order take different stretches of the spiral.
+* A group with more units than `MAX_FIELD_SLOTS` (256) shares the slots round again; a goal with too
+  few valid points in range does the same.
+* Arrival is judged against the **slot**, not the order's point: the unit has arrived when it is
+  within the tolerance of its slot (`orders::go_to`, `Pathing::arrival_point`), and its order ends
+  (or the next one in the queue starts) as for any move.
+* Half a cell is closer than a vehicle is long: **until collision (WP4.4) the units overlap**, at the
+  goal and on the way (in `bridge_200` as many as 36 are on the three-cell-wide bridge at once, and 10
+  pairs end closer than a quarter of a cell). The spacing is one constant (`SPACING_QUARTERS`) to
+  revisit with WP4.4 and the formations of WP4.6.
+
+### The pool
+
+`FIELD_POOL` (8) fields are kept. A new group order takes a free entry, or else the **least recently
+used** field (the one whose members asked it for a direction longest ago; ties to the lowest entry),
+and the units of the field that went find it gone and are routed on their own from where they stand. A
+field that no unit has asked for in `FIELD_IDLE_TICKS` (400, 20 s) is dropped: the group has arrived
+or has been given other orders. Field memory is made when a field is: at most
+`FIELD_POOL * FIELD_SECTORS * 256` cells of 5 bytes (about 1.6 MB), and the builder's scratch space
+(a heap over the cells of the largest region, the arrays of the corridor search) once, when the first
+field is built.
+
+### Changes of the map
+
+A structure placed or removed in a sector **next to or inside** the region of a field (a corner step
+looks one cell over a border) makes a **successor**: the same group, the next version, built from
+scratch in another entry (the group's units are found again by their route, so the successor is made
+for where they are now). Until it is finished the units go on with the old field **only where it is
+still valid**: the chain of directions is cut at the first step the grid does not allow now, and the
+unit steers at the farthest visible cell short of it; at the edge it waits for the successor. They
+never step into a blocked cell, and the movement guard of "A step refused" still applies. When the
+successor is finished it replaces the old field and the old entry is freed. A field that is being
+built when the map changes under it starts again. A change far from the region leaves the field alone.
+A group that has no unit left when the successor is to be built is dropped.
+
+### The checksum
+
+A section `L`, written only while the pool holds a field: the threshold, the clock that ages the
+fields, every field (its group, version, state, region, slots, how many cells are integrated and a
+**running hash** of the cells in the order they were integrated, instead of the arrays, which would
+be hashed every tick) and the build in flight. A member also has its group and rank in its route
+(section `P`). A world that never made a field hashes as before, so `wander_5000`, `command_mix`,
+`terrain_256`, `units_spawn`, `orders`, `terrain_costs` and `pathing_256` did not move.
+
+**`pathing` has a group order** (24 light transports to one cell) and would move: its checksum on
+a flowfield is `0xd2f0d2dcc39d0f9e`, pinned without one `0x09f819e7bfeb22a2`. It stays pinned on the
+single-route queue, which that crowd is the test of, with `flowfield_threshold: Some(0)` in the file;
+`tools/sf_headless/tests/flowfield.rs` runs the same scenario with the shipped threshold (the 24 arrive
+round their goal by tick 681, never on ground they cannot enter, while a structure is placed
+across their way at tick 650 and the field is built again).
+
+### Measured: `bridge_200`
+
+200 units on a 96 by 64 map: 90 riflemen, 60 light tanks, 45 light transports and 5 amphibious
+transports (below the threshold: five routes of their own) are ordered across a river with one bridge
+and a wall with a gap behind it to a point 60 cells away. Three fields (foot, wheeled, tracked) are
+finished on ticks 3, 5 and 6; the first unit of each class moves by tick 6, all 200 by tick 17; the
+slowest (a rifleman at 0.7 cells a second) arrives on tick 2137 (107 s of game time), none ends
+outside 5 cells of the goal (the farthest 3.95), none is ever on ground its class cannot enter, and no
+unit walked more than 0.98 of the grid-best walk plus five cells. The path service spent 24,712
+nodes in all, 10 jobs of single routes (the five hover craft). The same crowd with flowfields off
+spends 266,587 nodes in 448 jobs and has every unit moving only by tick 59. The scenario's
+checksum is in `bridge_200.expected` and runs on Linux and Windows in CI.
+
 ## Not here
 
-* **Flowfields for groups** (WP4.3), **collision, pushing and a stuck unit** (WP4.4: a unit that a
+* **Collision, pushing and a stuck unit** (WP4.4: a unit that a
   structure is placed on the middle of, with no free neighbour, can reach nothing and stands with
-  its order), **turning before driving and turrets** (WP4.5), **formations** (WP4.6), **replanning**
-  when a route is blocked or a target disappears (WP4.7).
+  its order; the units of a group overlap until then), **turning before driving and turrets**
+  (WP4.5), **formations** (WP4.6: arrival slots are a spiral, not a shape; the slowest does not set
+  the pace), **replanning** when a route is blocked or a target disappears (WP4.7: a field is
+  rebuilt when a structure changes its region, but a target that vanishes or a better route that a
+  removed structure offers is not looked for).
 * **Diagonal crossings of a border** (a corner) are not portals; every connection is found through
   an orthogonal one.
 * **Slope** (`movement.md`, "Slope: later").
 * **A cache for unreachable goals.** Each such order searches the whole connected part of the map
-  (some thousand nodes). Fine for single orders, not for a crowd; WP4.3 gives a crowd one field.
+  (some thousand nodes). Fine for single orders, not for a crowd; a flowfield does not help here (a
+  group order to a cell its class cannot enter gets no field, "Flowfields for groups"), so a crowd
+  sent to the middle of a lake is that many searches. A substitute goal found once for the group
+  would be the answer.
 * **Terrain that changes** needs a command that rebuilds the sector from inside the tick; none exists yet.
 
 ## Where it is tested
@@ -325,3 +524,18 @@ stopping at them (see `progress.md`).
   once; arrival, no cell it cannot be in, the length against the best any-angle route, the nearest
   cell, the budget, the order of service. And `pathing_256.ron`, the load test. Both are pinned in
   `assets/scenarios/*.expected` and run on Linux and Windows in CI.
+* WP4.3: `crates/sf_sim/src/path/field_tests.rs` (the integration against a plain Dijkstra over the
+  region, every direction downhill with the tie-break, slices of the budget, the region as the
+  corridor and one ring, units cut off from the goal, a goal that cannot be entered, a corridor
+  that is too long, slots in sight of the goal and inside five cells, following the chain and the
+  refused step, the pool's least recently used and the idle expiry, a structure making a successor,
+  the old field followed only where valid, a build begun again); `crates/sf_sim/src/path/slots.rs`
+  and `corridor.rs` (their own); `crates/sf_sim/tests/flowfield.rs` (through the world: the threshold
+  and its data, which orders make a group, mixed classes, a member cut off, a goal in a lake,
+  the budget shared with single routes, the budget deciding when and not where, more groups than
+  the pool, expiry, a structure placed across the way with nobody stepping into it, a reproducible
+  run and a clone); `tools/sf_headless/tests/bridge_200.rs` with `assets/scenarios/bridge_200.ron`
+  (map `assets/maps/bridge`, made by `cargo run -p sf_headless --example gen_bridge_map`): all 200
+  arrive, at most 1 % outside 5 cells, never on ground the class cannot enter, the budget, the
+  start within a few ticks, the length of the walks, and the same crowd without fields;
+  `tools/sf_headless/tests/flowfield.rs` (the crowd of `pathing` on a field).

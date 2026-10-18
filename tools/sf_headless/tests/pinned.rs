@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing` and `pathing_256`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256` and `bridge_200`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -44,6 +44,7 @@ const TERRAIN_COSTS_EXPECTED: &str =
     include_str!("../../../assets/scenarios/terrain_costs.expected");
 const PATHING_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing.expected");
 const PATHING_256_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing_256.expected");
+const BRIDGE_200_EXPECTED: &str = include_str!("../../../assets/scenarios/bridge_200.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -119,6 +120,14 @@ fn pathing_256_matches_the_pinned_checksum() {
     check("pathing_256", PATHING_256_EXPECTED);
 }
 
+/// 200 mixed units cross one bridge to a goal area on one order, on flowfields
+/// (WP4.3). A new scenario: pinned when it was added; no other value moved
+/// (`pathing` runs with flowfields off, see its header).
+#[test]
+fn bridge_200_matches_the_pinned_checksum() {
+    check("bridge_200", BRIDGE_200_EXPECTED);
+}
+
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
 /// a debug build; `cargo test --release -p sf_headless` runs it, and CI runs
 /// it through the binary on both operating systems.
@@ -186,6 +195,10 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
         final_checksum("pathing_256", &altered),
         pinned(PATHING_256_EXPECTED)
     );
+    assert_eq!(
+        final_checksum("bridge_200", &altered),
+        pinned(BRIDGE_200_EXPECTED)
+    );
     assert_eq!(final_checksum("orders", &altered), pinned(ORDERS_EXPECTED));
     // The scenario on the shipped definitions (no `unit_defs`) does move: the
     // test would prove nothing if the change reached nobody.
@@ -210,6 +223,7 @@ fn the_expected_files_hold_one_bare_checksum() {
         TERRAIN_COSTS_EXPECTED,
         PATHING_EXPECTED,
         PATHING_256_EXPECTED,
+        BRIDGE_200_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");

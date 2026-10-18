@@ -7,17 +7,17 @@ use super::*;
 use crate::movement::ClassCosts;
 use crate::terrain::{TerrainDef, TerrainFlags, TerrainId};
 
-const GRASS: TerrainId = TerrainId(0);
-const ROAD: TerrainId = TerrainId(1);
-const WATER: TerrainId = TerrainId(2);
-const ROCK: TerrainId = TerrainId(3);
-const BRIDGE: TerrainId = TerrainId(5);
+pub(super) const GRASS: TerrainId = TerrainId(0);
+pub(super) const ROAD: TerrainId = TerrainId(1);
+pub(super) const WATER: TerrainId = TerrainId(2);
+pub(super) const ROCK: TerrainId = TerrainId(3);
+pub(super) const BRIDGE: TerrainId = TerrainId(5);
 
-const FOOT: u16 = 0;
+pub(super) const FOOT: u16 = 0;
 const BOAT: u16 = 1;
 const FLYER: u16 = 2;
 
-fn defs() -> Vec<TerrainDef> {
+pub(super) fn defs() -> Vec<TerrainDef> {
     let open = TerrainDef {
         id: GRASS,
         flags: TerrainFlags::OPEN,
@@ -48,7 +48,7 @@ fn defs() -> Vec<TerrainDef> {
     ]
 }
 
-fn movement() -> MovementTable {
+pub(super) fn movement() -> MovementTable {
     let x = Cost::Impassable;
     let s = Cost::Speed;
     let class = |class, list: [Cost; 6]| ClassCosts {
@@ -68,7 +68,7 @@ fn movement() -> MovementTable {
 }
 
 /// A map from rows of text: `.` grass, `r` road, `~` water, `#` rock, `=` bridge.
-fn terrain(rows: &[&str]) -> Terrain {
+pub(super) fn terrain(rows: &[&str]) -> Terrain {
     let (w, h) = (rows[0].len() as u32, rows.len() as u32);
     let ids: Vec<u8> = rows
         .iter()
@@ -87,10 +87,16 @@ fn terrain(rows: &[&str]) -> Terrain {
 
 fn pathing_for(terrain: &Terrain) -> Pathing {
     let occupancy = Occupancy::new(terrain.width(), terrain.height());
-    Pathing::build(terrain, &movement(), &occupancy, DEFAULT_NODE_BUDGET)
+    Pathing::build(
+        terrain,
+        &movement(),
+        &occupancy,
+        DEFAULT_NODE_BUDGET,
+        DEFAULT_FLOWFIELD_THRESHOLD,
+    )
 }
 
-fn mid(x: u32, y: u32) -> Vec2 {
+pub(super) fn mid(x: u32, y: u32) -> Vec2 {
     Vec2::new(
         Fx::from_i64(i64::from(x)) + Fx::HALF,
         Fx::from_i64(i64::from(y)) + Fx::HALF,

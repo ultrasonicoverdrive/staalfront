@@ -249,9 +249,21 @@
 //! and the wanderers walk the straight line as before. The rules are in
 //! `docs/rules/pathfinding.md`; the module is [`path`].
 //!
+//! # Flowfields for groups
+//!
+//! A single [`Command::Order`] that walks at least a threshold of units of one movement
+//! class to one point ([`World::with_flowfield_threshold`], 8 as shipped in `sim.ron`) gets
+//! one **flowfield** for the class instead of a route each: the cost to the goal and a
+//! direction in every cell of the sectors on the abstract corridor between the group and the
+//! goal, built by a resumable job inside the same node budget as the routes, followed by the
+//! units to the farthest visible cell down the chain of directions, and a spiral of arrival
+//! slots round the goal so that the group spreads. A fixed pool of fields with least recently
+//! used eviction; a structure in the region builds the field again while the units go on with
+//! the old one where it is valid. The rules are in `docs/rules/pathfinding.md`.
+//!
 //! # Not here yet
 //!
-//! Collision, flowfields for groups and replanning (the rest of phase 4), target
+//! Collision and replanning (the rest of phase 4), target
 //! acquisition and firing (phase 5),
 //! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
@@ -283,8 +295,9 @@ pub use orders::{
     SCATTER_MIN, scatter_offset,
 };
 pub use path::{
-    ABS_CAP, DEFAULT_NODE_BUDGET, MIN_NODE_BUDGET, PathStats, PlannedRoute, RING_CAP, RouteStatus,
-    RouteView, SECTOR_SIZE,
+    ABS_CAP, DEFAULT_FLOWFIELD_THRESHOLD, DEFAULT_NODE_BUDGET, FIELD_IDLE_TICKS, FIELD_POOL,
+    FIELD_SECTORS, MAX_FIELD_SLOTS, MIN_NODE_BUDGET, PathStats, PlannedRoute, RING_CAP,
+    RouteStatus, RouteView, SECTOR_SIZE,
 };
 pub use snapshot::{EntityView, Snapshot};
 pub use terrain::{
