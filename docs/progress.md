@@ -38,7 +38,7 @@ Status: all work packages done; M0 waits for the benchmark run on the laptop.
 - WP1.10 glTF models (loader, axes, part hierarchy, per-part merge, instancing hook): done (PR #22, 07b4cb7)
 - WP1.14 `sf_demo` (engine demo, 1 km map at B12 scale, `--bench` without vsync): done (PR #30)
 - WP1.15 The simulation on its own thread (an engine follow-up, not a numbered WP in PLAN.md; see
-  "WP1.15 notes" below): done
+  "WP1.15 notes" below): done (PR #53)
 
 Done when: milestone M0 (engine demo), the list under "Done when" in PLAN.md §3, phase 1.
 
