@@ -58,19 +58,18 @@ pub fn sim_terrain(map: &Map) -> Result<Option<Terrain>, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The world a map starts: on its terrain layer if it has one. A layer the
-/// simulation refuses is reported and left out (the world then has open ground
-/// everywhere) rather than stopping the game.
-pub fn make_world(config: WorldConfig, map: &Map) -> World {
-    match sim_terrain(map) {
-        Ok(Some(terrain)) => match World::with_terrain(config, terrain) {
-            Ok(world) => return world,
-            Err(e) => eprintln!("terrain: {e}; starting on open ground"),
-        },
-        Ok(None) => {}
-        Err(e) => eprintln!("terrain: {e}; starting on open ground"),
+/// The world a map starts: on its terrain layer if it has one, on open ground
+/// if it has none. A layer the simulation refuses is an error: the map was made
+/// with another terrain table (or is corrupt), and a game that quietly started
+/// on open ground would let units cross water and build on rock. The caller
+/// reports it and stops (`sf_game` exits with status 1).
+pub fn make_world(config: WorldConfig, map: &Map) -> Result<World, String> {
+    match sim_terrain(map).map_err(|e| format!("terrain layer refused: {e}"))? {
+        Some(terrain) => {
+            World::with_terrain(config, terrain).map_err(|e| format!("terrain layer refused: {e}"))
+        }
+        None => World::new(config).map_err(|e| format!("map size refused: {e}")),
     }
-    World::new(config).expect("the map size is valid for a world")
 }
 
 #[cfg(test)]
@@ -88,7 +87,7 @@ mod tests {
     #[test]
     fn a_generated_map_hands_its_terrain_to_the_sim() {
         let map = generate_cells(32, 24, 3);
-        let world = make_world(config_for(&map), &map);
+        let world = make_world(config_for(&map), &map).unwrap();
         assert!(world.terrain().has_layer());
         assert_eq!(world.map_size(), (32, 24));
         let layer = map.terrain().unwrap();
@@ -117,7 +116,7 @@ mod tests {
     fn the_committed_test_map_starts_a_world_with_terrain() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/maps/test64");
         let map = Map::load(&dir).unwrap();
-        let world = make_world(config_for(&map), &map);
+        let world = make_world(config_for(&map), &map).unwrap();
         assert_eq!(world.map_size(), (16, 16));
         assert!(world.terrain().has_layer());
     }
@@ -134,7 +133,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sim_terrain(&bare), Ok(None));
-        let world = make_world(config_for(&bare), &bare);
+        let world = make_world(config_for(&bare), &bare).unwrap();
         assert!(!world.terrain().has_layer());
         assert_eq!(world.map_size(), (4, 4));
         // Same as the world sf_game made before WP2.1.
@@ -160,13 +159,18 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         let map = loaded.unwrap();
         assert!(map.terrain().is_none());
-        assert!(!make_world(config_for(&map), &map).terrain().has_layer());
+        assert!(
+            !make_world(config_for(&map), &map)
+                .unwrap()
+                .terrain()
+                .has_layer()
+        );
     }
 
     #[test]
-    fn a_layer_the_sim_refuses_is_left_out_not_fatal() {
+    fn a_layer_the_sim_refuses_is_an_error_not_open_ground() {
         // A layer with an id the shipped table does not know can only come
-        // from a map made with another table; the game still starts.
+        // from a map made with another table; the game does not start on it.
         let bare = Map::from_parts(8, 8, 1.0, vec!["a".into()], vec![0; 81], vec![0; 64]).unwrap();
         let layer = TerrainLayer::new(2, 2, vec![0, 1, 77, 0]).unwrap();
         let mut custom = TerrainTypes::embedded().iter().cloned().collect::<Vec<_>>();
@@ -178,7 +182,7 @@ mod tests {
             .with_terrain(layer, &TerrainTypes::new(custom).unwrap())
             .unwrap();
         assert!(sim_terrain(&map).is_err());
-        let world = make_world(config_for(&map), &map);
-        assert!(!world.terrain().has_layer());
+        let err = make_world(config_for(&map), &map).unwrap_err();
+        assert!(err.contains("terrain layer refused"), "{err}");
     }
 }
