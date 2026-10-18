@@ -40,7 +40,7 @@
             ("bridge", Speed(1100)),
         ]),
         // trucks and light vehicles: the best on a road, the worst on rough ground.
-        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.25, pivot_permille: 250), terrain_costs: [
+        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250), terrain_costs: [
             ("grass", Speed(800)),
             ("road", Speed(1200)),
             ("water", Impassable),

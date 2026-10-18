@@ -182,8 +182,8 @@ fn a_wheeled_vehicle_has_to_move_to_turn_and_swings_round_in_an_arc() {
         );
     }
     // It turns by what a circle of its minimum radius allows for the distance it covers
-    // and never at its turn rate: at most 4 steps a tick here (0.125 cells a tick, 1.25
-    // cells of radius: 4.07), and at least 3 while it is far off its heading.
+    // and never at its turn rate: at most 4 steps a tick here (0.125 cells a tick, 1.5
+    // cells of radius: 3.4), and at least 3 while it is far off its heading.
     let rate = r.world.stats_of(W1).unwrap().turn_per_tick;
     let allowed = (step.raw() * 40_744 / profile.min_radius.raw()) / 1000 + 1;
     let mut seen_most = 0;

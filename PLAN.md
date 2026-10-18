@@ -228,6 +228,7 @@ The first gameplay work: the map gets meaning for the game.
 - WP4.3 **[xhigh]** Flowfields for groups toward one goal.
 - WP4.4 **[xhigh]** Local avoidance and collisions (units push, wait, detour); stuck unit to a free neighbor cell (analysis §6).
 - WP4.5 Turn before driving for vehicles, turrets turn separately from the hull.
+- WP4.4b **[xhigh]** Robust group arrival (follow-up of the WP4.5 review): the "done when" below holds for every wheeled turning radius from 1.25 to 2.0 cells, not by chance; the shipped radius becomes a realistic 1.5.
 - WP4.6 Formations (group keeps shape, slowest sets the pace).
 - WP4.7 Replan on blocked route or disappeared target; destination ≠ route.
 

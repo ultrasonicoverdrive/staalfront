@@ -43,7 +43,7 @@ Scenario(
     map: (width: 96, height: 64),
     map_name: Some("bridge"),
     unit_defs: Some("pathing_defs"),
-    ticks: 3800,
+    ticks: 4600,
     commands: [
         (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 26))), // slot 0: rifleman
         (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 26))), // slot 1: light tank

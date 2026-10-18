@@ -1,4 +1,4 @@
-//! The `bridge_200` scenario (WP4.3, WP4.4, `docs/rules/pathfinding.md`,
+//! The `bridge_200` scenario (WP4.3, WP4.4, WP4.4b, `docs/rules/pathfinding.md`,
 //! `docs/rules/collision.md`): 200 mixed units cross one bridge to a goal area on one
 //! order.
 //!
@@ -6,8 +6,9 @@
 //! arrive, none is stuck at the end, the bodies do not overlap beyond the slack, none
 //! is ever on ground its class cannot enter, and the path service stays inside its
 //! budget while it builds the fields. The crossing is a real bottleneck now (the
-//! bridge is three cells wide and the crowd is wider than that): it takes about twice
-//! as long as it did when the units went through each other.
+//! bridge is three cells wide and the crowd is wider than that, and so is the gap in
+//! the wall behind it): it takes about twice as long as it did when the units went
+//! through each other.
 //!
 //! **Five cells cannot hold this crowd.** The phase asked for at most 1 % of the units
 //! outside 5 cells (20 m) of the goal, written when units were points. With bodies of
@@ -22,6 +23,14 @@
 //! also prints how many are outside five cells. See `docs/rules/collision.md`,
 //! "Arrival".
 //!
+//! **The criterion does not depend on the turning radius of the wheeled class** (WP4.4b).
+//! After WP4.5 it held at 1.25 cells and failed at 1.5, 1.6, 1.75 and 2.0, which showed
+//! that it had held by the luck of the crowd, not by the arrival logic. The tests named
+//! `phase_four_holds_at_a_wheeled_radius_of_*` run the scenario with the radius replaced
+//! (`scenario_with_wheeled_radius`, a test-only knob: the frozen definitions keep the
+//! shipped radius) and ask `Run::misses` for every way the run falls short of the
+//! criterion, one case for each radius the reviewers swept. The shipped radius is 1.5.
+//!
 //! The same crowd without flowfields (`flowfield_threshold: Some(0)`) is run as
 //! the comparison: 195 single requests instead of three fields.
 
@@ -33,15 +42,18 @@ use std::sync::OnceLock;
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
 use sf_math::{Fx, Vec2};
-use sf_sim::{Cell, EntityId, Order, World};
+use sf_sim::{Cell, EntityId, Order, TurnMode, World};
 
 const UNITS: u32 = 200;
 const GOAL: (u32, u32) = (80, 32);
 const W: u32 = 96;
 const H: u32 = 64;
 
-/// The tick by which every unit has arrived (measured: 3,375 with bodies).
-const ARRIVE_BY: u64 = 3700;
+/// The tick by which every unit has arrived. The measured last arrival is between 3,200
+/// and 3,800 for the radii the sweep tried (it depends on how the queue at the gap in the
+/// wall happens to fall), so this is a bound with room, not a prediction: the criterion
+/// is that everybody arrives, not when.
+const ARRIVE_BY: u64 = 4400;
 
 /// The tick the crossing took when the units had no bodies (the slowest being a
 /// rifleman at 0.7 cells a second, 60 cells and a bridge away).
@@ -249,6 +261,20 @@ fn run() -> &'static Run {
     RUN.get_or_init(|| run_scenario(&Scenario::load(&scenario_path("bridge_200.ron")).unwrap()))
 }
 
+/// The scenario with the turning radius of the wheeled class replaced by
+/// `hundredths` of a cell (150 is 1.5 cells). A test-only knob: the frozen
+/// definitions keep the shipped radius, and the movement table the scenario was
+/// loaded with is rebuilt with that one profile changed.
+fn scenario_with_wheeled_radius(hundredths: i64) -> Scenario {
+    let mut scenario = Scenario::load(&scenario_path("bridge_200.ron")).unwrap();
+    let table = scenario.movement_table.take().unwrap();
+    let mut profile = table.turning(WHEELED);
+    assert_eq!(profile.mode, TurnMode::Arc, "the wheeled class is an arc");
+    profile.min_radius = Fx::from_ratio(hundredths, 100);
+    scenario.movement_table = Some(table.with_turning(vec![(WHEELED, profile)]).unwrap());
+    scenario
+}
+
 impl Run {
     fn last_arrival(&self) -> u64 {
         self.arrived.iter().flatten().max().copied().unwrap_or(0)
@@ -274,6 +300,171 @@ impl Run {
             .sum();
         (area / std::f64::consts::PI).sqrt()
     }
+}
+
+impl Run {
+    /// The worst overlap of two bodies at the end, in raw fixed point.
+    fn worst_end_overlap(&self) -> i64 {
+        let mut worst = 0;
+        for a in 0..UNITS {
+            for b in a + 1..UNITS {
+                let (ra, rb) = (
+                    self.world.collision_radius_of(id(a)).unwrap(),
+                    self.world.collision_radius_of(id(b)).unwrap(),
+                );
+                let d = (self.world.get(id(a)).unwrap().pos - self.world.get(id(b)).unwrap().pos)
+                    .length();
+                worst = worst.max((keep(ra, rb) - d).raw());
+            }
+        }
+        worst
+    }
+
+    fn farthest(&self) -> Fx {
+        (0..UNITS)
+            .map(|s| (self.world.get(id(s)).unwrap().pos - goal()).length())
+            .max()
+            .unwrap()
+    }
+
+    /// Every way this run misses the "done when" of phase 4 (PLAN.md), one line
+    /// each; empty when it meets it. All arrive and none is stuck; at most 1 %
+    /// end further than 1.3 times the packing radius; no overlap beyond a quarter
+    /// of a cell on the way or a sixteenth at the end; nobody on ground its class
+    /// cannot enter; nobody stood still for half a minute with its order not done.
+    fn misses(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let never: Vec<u32> = (0..UNITS)
+            .filter(|&s| self.arrived[s as usize].is_none())
+            .collect();
+        if !never.is_empty() {
+            out.push(format!("{} never arrive: {never:?}", never.len()));
+        }
+        let last = self.last_arrival();
+        if last > ARRIVE_BY {
+            out.push(format!(
+                "the last arrival is on tick {last}, after {ARRIVE_BY}"
+            ));
+        }
+        let stuck: Vec<u32> = (0..UNITS)
+            .filter(|&s| {
+                let u = id(s);
+                self.world.stuck_ticks_of(u) != Some(0)
+                    || self.world.replan_requested(u) != Some(false)
+                    || self.world.order_of(u) != Some(Order::Idle)
+            })
+            .collect();
+        if !stuck.is_empty() {
+            out.push(format!(
+                "{} stuck or still walking at the end: {stuck:?}",
+                stuck.len()
+            ));
+        }
+        if self.longest_still > 600 {
+            out.push(format!(
+                "a unit stood still for {} ticks",
+                self.longest_still
+            ));
+        }
+        let limit = Fx::from_ratio((self.packing_radius() * 1.3 * 1000.0) as i64, 1000);
+        let outside = self.outside(limit);
+        if outside.len() * 100 > UNITS as usize {
+            out.push(format!(
+                "{} end outside {limit:?} cells: {outside:?}",
+                outside.len()
+            ));
+        }
+        if self.worst_overlap.0 > ORTH / 4 {
+            out.push(format!(
+                "overlap {:.3} cells at tick {}",
+                self.worst_overlap.0 as f64 / ORTH as f64,
+                self.worst_overlap.1
+            ));
+        }
+        let end = self.worst_end_overlap();
+        if end > ORTH / 16 {
+            out.push(format!(
+                "overlap {:.3} cells at the end",
+                end as f64 / ORTH as f64
+            ));
+        }
+        if !self.bad_cells.is_empty() {
+            out.push(format!(
+                "{} ticks on ground the class cannot enter",
+                self.bad_cells.len()
+            ));
+        }
+        out
+    }
+
+    /// One line of numbers for a sweep.
+    fn summary(&self) -> String {
+        let stats = self.world.crowd_stats();
+        let limit = Fx::from_ratio((self.packing_radius() * 1.3 * 1000.0) as i64, 1000);
+        format!(
+            "last arrival {}, outside {:?}: {}, farthest {:?}, worst overlap {:.3} (tick {}), end \
+             overlap {:.3}, longest still {}, sidesteps {}, replans {}, shoves {}",
+            self.last_arrival(),
+            limit,
+            self.outside(limit).len(),
+            self.farthest(),
+            self.worst_overlap.0 as f64 / ORTH as f64,
+            self.worst_overlap.1,
+            self.worst_end_overlap() as f64 / ORTH as f64,
+            self.longest_still,
+            stats.sidesteps,
+            stats.replans,
+            stats.shoves,
+        )
+    }
+}
+
+// --- the criterion at every wheeled radius ---------------------------------------------
+
+/// A case: the scenario with the wheeled turning radius replaced, run, and every way
+/// it falls short of the criterion reported at once.
+fn phase_four_holds_at(hundredths: i64) -> Run {
+    let r = run_scenario(&scenario_with_wheeled_radius(hundredths));
+    eprintln!(
+        "bridge_200 at a wheeled radius of {}.{:02} cells: {}",
+        hundredths / 100,
+        hundredths % 100,
+        r.summary()
+    );
+    let misses = r.misses();
+    assert!(
+        misses.is_empty(),
+        "wheeled radius {hundredths}/100 cells: {misses:?}"
+    );
+    r
+}
+
+#[test]
+fn phase_four_holds_at_a_wheeled_radius_of_1_25() {
+    phase_four_holds_at(125);
+}
+
+/// The shipped radius: the run with the radius replaced by the one it already has is
+/// the shipped run, bit for bit (the knob changes nothing else).
+#[test]
+fn phase_four_holds_at_a_wheeled_radius_of_1_5_and_it_is_the_shipped_run() {
+    let r = phase_four_holds_at(150);
+    assert_eq!(r.history, run().history);
+}
+
+#[test]
+fn phase_four_holds_at_a_wheeled_radius_of_1_6() {
+    phase_four_holds_at(160);
+}
+
+#[test]
+fn phase_four_holds_at_a_wheeled_radius_of_1_75() {
+    phase_four_holds_at(175);
+}
+
+#[test]
+fn phase_four_holds_at_a_wheeled_radius_of_2() {
+    phase_four_holds_at(200);
 }
 
 // --- the references: a plain search of the whole grid --------------------------------

@@ -176,6 +176,56 @@ pub const SHOVE_LIMIT: Fx = Fx::from_int(3);
 /// Ticks an idle unit must be left alone before its push allowance is back.
 pub const SHOVE_CALM: u8 = 40;
 
+/// How far an idle unit may be shoved into another idle unit that could give way,
+/// beyond the slack, in cells (WP4.4b): a chain of shoved units must not squeeze
+/// together more than this, so the crowd stays inside the overlap bound whatever
+/// presses on it. A shove that would go further is refused and the mover waits.
+pub const COMPRESS: Fx = Fx::from_ratio(1, 8);
+
+/// The deepest a mover may end a tick in another body, in cells (WP4.4b). The
+/// pushes usually bring a pair apart, but a mover pressed into a crowd that cannot
+/// give way (everybody round it is squeezed too) is not pushed out in six passes.
+/// Such a mover goes back to where it was at the start of the tick, as far as that is
+/// less deep, and waits. This keeps the bodies inside the overlap bound whatever
+/// walks into the crowd.
+pub const MOVER_OVERLAP: Fx = Fx::from_ratio(3, 16);
+
+/// Ticks a settled unit must be left alone before it closes up.
+pub const HOME_WAIT: u8 = 20;
+
+/// How far a settled unit closes up toward the point in a tick, in cells: slower
+/// than anything that walks, so that it never catches up with a unit that is
+/// shoving it.
+pub const HOME_STEP: Fx = Fx::from_ratio(1, 16);
+
+/// A settled unit this near the point its group was sent to has closed up.
+pub const HOME_EPS: Fx = Fx::from_ratio(1, 16);
+
+/// How far across a settled unit may slide when straight at the point is taken: the
+/// sideways part of the direction against the part toward the point, so that the
+/// unit turns away from the point by about 35, 63, 76 and 83 degrees. Every one of
+/// them still brings it nearer.
+pub const HOME_SLIDE: [Fx; 4] = [
+    Fx::from_ratio(7, 10),
+    Fx::from_int(2),
+    Fx::from_int(4),
+    Fx::from_int(8),
+];
+
+/// A resting unit this near a unit that moved gets another try, in cells.
+const WAKE_RANGE: Fx = Fx::from_int(3);
+
+/// The deepest two bodies may end a tick in each other, in cells (WP4.4b): what the
+/// pushes and the allowances leave beyond it is pushed apart by `separate`. Below the
+/// quarter of a cell the bound of the phase asks for.
+pub const HARD_OVERLAP: Fx = Fx::from_ratio(3, 16);
+
+/// The most pairs `separate` takes in a tick: what is left is for the next.
+const DEEP_MAX: usize = 4096;
+
+/// The most `separate` moves a unit, in cells.
+pub const SEPARATE_CAP: Fx = Fx::from_ratio(1, 4);
+
 /// A unit that has come this near a new best distance to its waypoint has made
 /// progress.
 pub const PROGRESS_EPS: Fx = Fx::from_ratio(1, 32);
@@ -217,6 +267,25 @@ const W_MOVER: i64 = 12;
 /// A sidestep in progress: the spot and the ticks left to get there.
 pub(crate) type Sidestep = (Vec2, u8);
 
+/// The arrival slot a member of a group has taken (WP4.4b, `collision.md`,
+/// "Arrival"): the field it follows and the place in that field's slots. It is
+/// kept while the unit stands on its slot after the order is done, and let go
+/// when the unit gets a new order (`orders::begin`) or is removed. Not part of
+/// "at rest": it is hashed with the field's table of holders.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+pub(crate) struct Claim {
+    /// The serial of the field; zero for no claim.
+    pub serial: u32,
+    /// The place in the field's slots, or [`Claim::SHARED`] when every slot was
+    /// taken and the unit stands on the one its rank shares.
+    pub slot: u16,
+}
+
+impl Claim {
+    /// No slot of its own was left.
+    pub const SHARED: u16 = u16::MAX;
+}
+
 /// What a unit remembers about being in a crowd. The first group lives from tick to
 /// tick and is hashed while it is not at rest; the second is scratch within one
 /// tick: set while the unit carries out its order, read by the crowd pass, and
@@ -243,6 +312,28 @@ pub(crate) struct CrowdState {
     /// does a blocked unit count as arrived for being crowded out of its spot. A
     /// unit stuck in a queue of other walkers has not arrived.
     pub idle_hit: bool,
+    /// Ticks the unit has been held up by units that have arrived, all told (a new
+    /// waypoint does not start it again): the longer it presses on the crowd that
+    /// stands on its destination, the farther from it it counts as arrived
+    /// (`orders::go_to`). Cleared by the next order.
+    pub pressed: u16,
+    /// The arrival slot the unit has taken.
+    pub claim: Claim,
+    /// Where the unit gravitates once it has arrived: the point its group was sent
+    /// to. A settled unit that has been left alone (`HOME_WAIT`) closes up toward it
+    /// as far as the way is free, so a crowd that was spread by what pushed through
+    /// it gathers again. Set when the order of a group member ends, cleared by the
+    /// next order.
+    pub home: Option<Vec2>,
+    /// Ticks since this settled unit was last touched or overlapped.
+    pub home_wait: u8,
+    /// The settled unit cannot close up any further: it is left alone until something
+    /// touches it or moves next to it.
+    pub home_rest: bool,
+    /// The unit has just stopped (its order ended): the crowd pass looks at it once,
+    /// so that a unit that came to rest overlapping a neighbour is pushed clear of it
+    /// instead of staying so for good. Set by `orders`, cleared by the pass.
+    pub settle: bool,
     // ---- scratch within a tick ----
     /// The order walked this tick (a waypoint to steer at).
     pub walking: bool,
@@ -260,13 +351,16 @@ impl CrowdState {
             && self.side.is_none()
             && self.shoved == Fx::ZERO
             && self.calm == 0
+            && self.pressed == 0
             && !self.replan
             && !self.idle_hit
+            && self.home.is_none()
     }
 
     /// The order changed or ended: forget the progress.
     pub(crate) fn reset_progress(&mut self) {
         self.quiet = 0;
+        self.pressed = 0;
         self.attempts = 0;
         self.best = Fx::ZERO;
         self.mark = None;
@@ -279,6 +373,10 @@ impl CrowdState {
 
     pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_u32(u32::from(self.quiet) | u32::from(self.attempts) << 16);
+        if self.pressed > 0 {
+            h.write_u8(0xC3);
+            h.write_u32(u32::from(self.pressed));
+        }
         if self.quiet > 0 {
             h.write_fx(self.best);
             match self.mark {
@@ -300,6 +398,18 @@ impl CrowdState {
         h.write_fx(self.shoved);
         h.write_u8(self.calm);
         h.write_u8(u8::from(self.replan) | u8::from(self.idle_hit) << 1);
+        // Nothing for a unit that never took a slot, so a world without groups
+        // hashes as before.
+        if self.claim.serial != 0 {
+            h.write_u8(0xC1);
+            h.write_u32(self.claim.serial);
+            h.write_u32(u32::from(self.claim.slot));
+        }
+        if let Some(home) = self.home {
+            h.write_u8(0xC2 | u8::from(self.home_rest) << 1);
+            h.write_vec2(home);
+            h.write_u8(self.home_wait);
+        }
     }
 }
 
@@ -500,6 +610,9 @@ struct Scratch {
     touched_flag: Vec<bool>,
     /// Idle units a body overlapped this tick, pushed or not: they are not calm.
     contact: Vec<bool>,
+    /// Bodies that overlapped another beyond the slack in some pass of this tick,
+    /// pushed or not: the ones the checks after the passes look at.
+    lapped: Vec<bool>,
     /// Movers that an idle friend was in the way of this tick.
     idle_hit: Vec<bool>,
     /// Movers that gave way to one ahead of them going the same way this tick: a
@@ -507,6 +620,8 @@ struct Scratch {
     in_line: Vec<bool>,
     /// The neighbours of the unit being looked at.
     near: Vec<u32>,
+    /// Pairs of bodies that overlap too deeply (`separate`).
+    deep: Vec<(u32, u32)>,
     /// The moves of one pass, written after all are decided.
     moves: Vec<(u32, Vec2, Fx)>,
     /// The idle units whose push was refused in one pass.
@@ -528,6 +643,7 @@ impl Scratch {
             self.step_len.resize(slots, Fx::ZERO);
             self.touched_flag.resize(slots, false);
             self.contact.resize(slots, false);
+            self.lapped.resize(slots, false);
             self.idle_hit.resize(slots, false);
             self.in_line.resize(slots, false);
         }
@@ -656,8 +772,25 @@ impl Crowd {
             }
             if body.role == Role::Mover {
                 self.scratch.movers.push(i as u32);
-            } else if body.role == Role::Idle && e.crowd[i].shoved > Fx::ZERO {
+            } else if body.role == Role::Idle
+                && (e.crowd[i].shoved > Fx::ZERO
+                    || e.crowd[i].settle
+                    || (!e.crowd[i].home_rest
+                        && e.crowd[i]
+                            .home
+                            .is_some_and(|h| (h - e.pos[i]).length_squared() > HOME_EPS.square())))
+            {
                 self.scratch.settling.push(i as u32);
+            }
+            if e.crowd[i].settle {
+                // A unit that has just stopped has its whole allowance back: if it
+                // came to rest against a neighbour that cannot give way any more, it is
+                // the one that moves clear.
+                if body.role == Role::Idle {
+                    e.crowd[i].shoved = Fx::ZERO;
+                    e.crowd[i].calm = 0;
+                }
+                e.crowd[i].settle = false;
             }
         }
         self.stats.peak_bodies = self.stats.peak_bodies.max(count);
@@ -709,6 +842,7 @@ impl Work<'_, '_> {
         for i in 0..self.bodies.len() {
             self.sc.touched_flag[i] = false;
             self.sc.contact[i] = false;
+            self.sc.lapped[i] = false;
             self.sc.idle_hit[i] = false;
             self.sc.in_line[i] = false;
             self.sc.frozen[i] = false;
@@ -832,6 +966,8 @@ impl Work<'_, '_> {
             return false;
         }
         let pen = dmin - dist - SLOP.div_int(2);
+        self.sc.lapped[u] = true;
+        self.sc.lapped[v] = true;
         // An idle unit that a mover overlaps is not left alone, whether or not it can
         // give way.
         if self.bodies[v].role == Role::Mover {
@@ -1020,10 +1156,12 @@ impl Work<'_, '_> {
             let immovable = self.bodies[v].role == Role::Hold
                 || self.bodies[v].owner != self.bodies[u].owner
                 || (self.bodies[v].role == Role::Idle && self.sc.frozen[v]);
-            if !immovable {
+            // A body that can give way may be pressed on a little, not squeezed.
+            let leeway = if immovable { Fx::ZERO } else { COMPRESS };
+            if !immovable && self.bodies[v].role == Role::Mover {
                 continue;
             }
-            let dmin = min_distance(&self.bodies[u], &self.bodies[v]) - SLOP;
+            let dmin = min_distance(&self.bodies[u], &self.bodies[v]) - SLOP - leeway;
             if (to - e.pos[v]).length_squared() < dmin.square() {
                 return true;
             }
@@ -1037,6 +1175,13 @@ impl Work<'_, '_> {
         let cfg = self.cfg;
         // The index of the final positions, for the free spots.
         self.sc.index.build(e, self.bodies);
+        let held = self.hold_back(e);
+        if held {
+            self.sc.index.build(e, self.bodies);
+        }
+        if self.separate(e) {
+            self.sc.index.build(e, self.bodies);
+        }
         for k in 0..self.sc.movers.len() {
             let u = self.sc.movers[k] as usize;
             let c = &mut e.crowd[u];
@@ -1061,6 +1206,9 @@ impl Work<'_, '_> {
                         // in front is the one that is stuck, if anybody is.
                     } else {
                         c.quiet = c.quiet.saturating_add(1);
+                        if self.sc.idle_hit[u] {
+                            c.pressed = c.pressed.saturating_add(1);
+                        }
                     }
                 }
             } else if c.stranded {
@@ -1079,12 +1227,16 @@ impl Work<'_, '_> {
                 } else {
                     c.attempts += 1;
                     self.stats.sidesteps += 1;
+                    // The slot it was going to is walled off: it takes another one
+                    // when it can (WP4.4b, `path/claim.rs`).
+                    c.claim = Claim::default();
                     let spot = self.free_spot(e, u);
                     let c = &mut e.crowd[u];
                     c.side = spot.map(|s| (s, SIDESTEP_TICKS));
                 }
             }
         }
+        self.go_home(e);
         // Idle units that nothing has touched for a while get their allowance back.
         for i in 0..self.bodies.len() {
             if self.bodies[i].role == Role::Idle {
@@ -1102,6 +1254,264 @@ impl Work<'_, '_> {
                 }
             }
         }
+    }
+
+    /// Whether unit `a` may be moved by the hard separation for the sake of body `b`:
+    /// not a unit holding position, and a unit with no order not by an enemy (the
+    /// rules of "Who gives way" hold to the end).
+    fn may_give_way(&self, a: usize, b: usize) -> bool {
+        let (ba, bb) = (&self.bodies[a], &self.bodies[b]);
+        match ba.role {
+            Role::None | Role::Hold => false,
+            Role::Idle => bb.role != Role::None && ba.owner == bb.owner,
+            Role::Mover => bb.role != Role::None,
+        }
+    }
+
+    /// The last resort for the overlap bound: two bodies of the units this tick has
+    /// touched that still overlap by more than [`HARD_OVERLAP`] (the passes ran out, or
+    /// the allowance of the units pressed together was used up) are pushed apart by
+    /// the excess, a quarter of a cell at most for each, to where the terrain allows. A
+    /// unit holding position is never moved: the other takes it all. Every unit is
+    /// judged against the same positions and the moves are written after, so the order
+    /// does not matter. True if any unit was moved.
+    fn separate(&mut self, e: &mut Entities) -> bool {
+        // The units the tick touched: movers, settling, pushed.
+        self.sc.epoch = self.sc.epoch.wrapping_add(1).max(1);
+        let epoch = self.sc.epoch;
+        self.sc.active.clear();
+        self.sc.dirty.clear();
+        for k in 0..self.sc.movers.len() {
+            let u = self.sc.movers[k];
+            self.sc.active.push(u);
+            self.sc.active_mark[u as usize] = epoch;
+        }
+        for list in [0, 1] {
+            let len = if list == 0 {
+                self.sc.settling.len()
+            } else {
+                self.sc.touched.len()
+            };
+            for k in 0..len {
+                let u = if list == 0 {
+                    self.sc.settling[k]
+                } else {
+                    self.sc.touched[k]
+                };
+                if self.sc.active_mark[u as usize] != epoch {
+                    self.sc.active.push(u);
+                    self.sc.active_mark[u as usize] = epoch;
+                }
+            }
+        }
+        // The sums use their own epoch.
+        let sum = epoch.wrapping_add(1).max(1);
+        self.sc.epoch = sum;
+        // The pairs that are too deep, found without writing anything.
+        let mut deep = std::mem::take(&mut self.sc.deep);
+        deep.clear();
+        for k in 0..self.sc.active.len() {
+            let u = self.sc.active[k] as usize;
+            if !self.sc.lapped[u] {
+                continue;
+            }
+            let pu = e.pos[u];
+            for v in self.sc.index.near(pu) {
+                let v = v as usize;
+                if v == u {
+                    continue;
+                }
+                let diff = pu - e.pos[v];
+                let dmin = min_distance(&self.bodies[u], &self.bodies[v]);
+                // Almost every pair is clear of it: no square root for those.
+                if diff.length_squared() >= (dmin - HARD_OVERLAP).square() {
+                    continue;
+                }
+                if self.may_give_way(u, v) && deep.len() < DEEP_MAX {
+                    deep.push((u as u32, v as u32));
+                }
+            }
+        }
+        for &(u, v) in &deep {
+            let (u, v) = (u as usize, v as usize);
+            let diff = e.pos[u] - e.pos[v];
+            let dist = diff.length();
+            if dist.is_zero() {
+                continue;
+            }
+            let dmin = min_distance(&self.bodies[u], &self.bodies[v]);
+            let excess = dmin - dist - HARD_OVERLAP + SLOP;
+            // The other moves as well, when it is one of the units looked at and may
+            // move.
+            let shares = self.sc.active_mark[v] == epoch && self.may_give_way(v, u);
+            let mine = if shares { excess.div_int(2) } else { excess };
+            self.add(u, diff.with_length(mine), mine, sum);
+        }
+        self.sc.deep = deep;
+        let dirty = std::mem::take(&mut self.sc.dirty);
+        let mut moves = std::mem::take(&mut self.sc.moves);
+        moves.clear();
+        for &u in &dirty {
+            let u = u as usize;
+            let from = e.pos[u];
+            let to = (from + self.sc.delta[u].clamp_length(SEPARATE_CAP))
+                .clamp(self.bounds.0, self.bounds.1);
+            if to != from && self.ground.may_step(self.bodies[u].class, from, to) {
+                moves.push((u as u32, to, Fx::ZERO));
+            }
+        }
+        for &(u, to, _) in &moves {
+            e.pos[u as usize] = to;
+        }
+        let any = !moves.is_empty();
+        self.sc.dirty = dirty;
+        self.sc.moves = moves;
+        any
+    }
+
+    /// The settled units that have been left alone for [`HOME_WAIT`] ticks close up
+    /// toward the point their group was sent to: [`HOME_STEP`] a tick, straight at it
+    /// or, when that is taken, a half turn to either side of straight (still nearer
+    /// it), to a spot that overlaps no body beyond the slack. A unit that cannot move
+    /// rests until something touches it or moves next to it. So the crowd that was
+    /// spread by what pushed through it gathers again, whoever stands where; each step
+    /// brings a unit nearer the point, so it always ends. Every unit is judged against
+    /// the positions the tick ended with and the steps are written after, so the order
+    /// does not matter.
+    fn go_home(&mut self, e: &mut Entities) {
+        let mut steps = std::mem::take(&mut self.sc.moves);
+        steps.clear();
+        for k in 0..self.sc.settling.len() {
+            let u = self.sc.settling[k] as usize;
+            if self.bodies[u].role != Role::Idle {
+                continue;
+            }
+            let Some(home) = e.crowd[u].home else {
+                continue;
+            };
+            if self.sc.touched_flag[u] || self.sc.contact[u] {
+                e.crowd[u].home_wait = 0;
+                e.crowd[u].home_rest = false;
+                continue;
+            }
+            if e.crowd[u].home_rest {
+                continue;
+            }
+            if e.crowd[u].home_wait < HOME_WAIT {
+                e.crowd[u].home_wait += 1;
+                continue;
+            }
+            let from = e.pos[u];
+            let off = home - from;
+            if off.length_squared() <= HOME_EPS.square() {
+                continue;
+            }
+            let ahead = off.normalize_or_zero();
+            let side = ahead.perp();
+            // Straight, then turned away from it by more and more to one side and
+            // the other (each still brings the unit nearer the point).
+            let tries = [
+                ahead,
+                ahead + side.scale(HOME_SLIDE[0]),
+                ahead - side.scale(HOME_SLIDE[0]),
+                ahead + side.scale(HOME_SLIDE[1]),
+                ahead - side.scale(HOME_SLIDE[1]),
+                ahead + side.scale(HOME_SLIDE[2]),
+                ahead - side.scale(HOME_SLIDE[2]),
+                ahead + side.scale(HOME_SLIDE[3]),
+                ahead - side.scale(HOME_SLIDE[3]),
+            ];
+            let mut moved = false;
+            for dir in tries {
+                let to = from + dir.with_length(HOME_STEP.min(off.length()));
+                if to != to.clamp(self.bounds.0, self.bounds.1)
+                    || !self.ground.may_step(self.bodies[u].class, from, to)
+                {
+                    continue;
+                }
+                let free = self.sc.index.near(to).all(|v| {
+                    let v = v as usize;
+                    if v == u {
+                        return true;
+                    }
+                    let dmin = min_distance(&self.bodies[u], &self.bodies[v]) - SLOP.div_int(2);
+                    (to - e.pos[v]).length_squared() >= dmin.square()
+                });
+                if free {
+                    steps.push((u as u32, to, HOME_STEP));
+                    moved = true;
+                    break;
+                }
+            }
+            if !moved {
+                e.crowd[u].home_rest = true;
+            }
+        }
+        // A unit that moved may have made room: the settled units next to its old and
+        // new place try again.
+        for &(u, to, _) in &steps {
+            let u = u as usize;
+            let was = e.pos[u];
+            for at in [was, to] {
+                for v in self.sc.index.near(at) {
+                    let v = v as usize;
+                    if v != u
+                        && e.crowd[v].home_rest
+                        && (e.pos[v] - was).length_squared() <= WAKE_RANGE.square()
+                    {
+                        e.crowd[v].home_rest = false;
+                        e.crowd[v].home_wait = HOME_WAIT;
+                    }
+                }
+            }
+        }
+        for &(u, to, _) in &steps {
+            e.pos[u as usize] = to;
+        }
+        self.sc.moves = steps;
+    }
+
+    /// The deepest overlap of unit `u`, were it at `at`, with any other body, in
+    /// cells (zero when it overlaps none).
+    fn deepest(&self, e: &Entities, u: usize, at: Vec2) -> Fx {
+        let mut deepest = Fx::ZERO;
+        for v in self.sc.index.near(at) {
+            let v = v as usize;
+            if v == u {
+                continue;
+            }
+            let dmin = min_distance(&self.bodies[u], &self.bodies[v]);
+            if (at - e.pos[v]).length_squared() < dmin.square() {
+                deepest = deepest.max(dmin - (at - e.pos[v]).length());
+            }
+        }
+        deepest
+    }
+
+    /// Sends back the movers that the pushes left deeper in another body than
+    /// [`MOVER_OVERLAP`]: to where they began the tick, when that is less deep.
+    /// Every mover is judged against the same positions and the moves are written
+    /// after, so the order of the movers does not matter. True if any went back.
+    fn hold_back(&mut self, e: &mut Entities) -> bool {
+        let mut back = std::mem::take(&mut self.sc.moves);
+        back.clear();
+        for k in 0..self.sc.movers.len() {
+            let u = self.sc.movers[k] as usize;
+            let before = e.prev_pos[u];
+            if before == e.pos[u] || !self.sc.lapped[u] {
+                continue;
+            }
+            let here = self.deepest(e, u, e.pos[u]);
+            if here > MOVER_OVERLAP && self.deepest(e, u, before) < here {
+                back.push((u as u32, before, here));
+            }
+        }
+        let any = !back.is_empty();
+        for &(u, before, _) in &back {
+            e.pos[u as usize] = before;
+        }
+        self.sc.moves = back;
+        any
     }
 
     /// A free spot next to unit `u`: the middle of a neighbouring cell its class may

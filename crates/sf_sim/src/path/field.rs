@@ -38,6 +38,8 @@
 use sf_math::hash::Fnv1a64;
 use sf_math::{Fx, Vec2};
 
+use crate::crowd::Claim;
+use crate::path::claim;
 use crate::path::graph::ClassGraph;
 use crate::path::grid::{DIRS, SECTOR_SIZE, Sectors};
 use crate::path::los;
@@ -174,6 +176,12 @@ pub(crate) struct Field {
     pub dir: Vec<u8>,
     /// The arrival slots: points around the goal, in the order of the ranks.
     pub slots: Vec<Vec2>,
+    /// Who has taken each slot (WP4.4b, `path/claim.rs`): the entity index of
+    /// the unit, or [`claim::NO_HOLDER`]. As long as `slots`; a taken slot only
+    /// counts while the unit's own claim says so.
+    pub taken: Vec<u32>,
+    /// How far the slots reach from the goal, in cells: the farthest of them.
+    pub reach: Fx,
     /// Cells integrated.
     pub finalized: u32,
     /// A running hash of what was integrated, in the order it was: what the
@@ -217,6 +225,8 @@ impl Field {
             cost: Vec::new(),
             dir: Vec::new(),
             slots: Vec::new(),
+            taken: Vec::new(),
+            reach: Fx::ZERO,
             finalized: 0,
             digest: Fnv1a64::new(),
         }
@@ -231,6 +241,8 @@ impl Field {
         self.cost.clear();
         self.dir.clear();
         self.slots.clear();
+        self.taken.clear();
+        self.reach = Fx::ZERO;
         self.finalized = 0;
         self.digest = Fnv1a64::new();
     }
@@ -301,6 +313,23 @@ impl Field {
             return None;
         }
         Some(self.slots[usize::from(rank) % self.slots.len()])
+    }
+
+    /// The arrival slot of unit `i`: the one it has taken (`path/claim.rs`), or,
+    /// before it has taken one and when none was left for it, the one its rank
+    /// gives.
+    pub(crate) fn slot_of(&self, e: &Entities, i: usize) -> Option<Vec2> {
+        if !self.slots_ready || self.slots.is_empty() {
+            return None;
+        }
+        let c = e.crowd[i].claim;
+        if c.serial == self.serial
+            && c.slot != Claim::SHARED
+            && self.taken.get(usize::from(c.slot)) == Some(&(i as u32))
+        {
+            return Some(self.slots[usize::from(c.slot)]);
+        }
+        self.slot_for(e.route[i].field_rank)
     }
 
     /// Whether a change in `sector` can alter the field: the sector or one of
@@ -436,6 +465,10 @@ pub(crate) struct Fields {
     pub next_order: u32,
     /// Counts ticks, to age the fields.
     pub clock: u32,
+    /// Slots units may still take this tick (`path/claim.rs`).
+    pub claims_left: u32,
+    /// The slots already taken by the group, gathered for one claim.
+    pub held: claim::HeldBuf,
     /// Fields finished so far (and rebuilds).
     pub built: u64,
     /// Nodes the builder spent in the last tick.
@@ -454,6 +487,8 @@ impl Fields {
             next_born: 1,
             next_order: 1,
             clock: 0,
+            claims_left: claim::CLAIMS_PER_TICK,
+            held: claim::HeldBuf::default(),
             built: 0,
             nodes_last_tick: 0,
         }
@@ -605,6 +640,7 @@ impl Fields {
     pub(crate) fn tick(&mut self) {
         self.clock = self.clock.wrapping_add(1);
         self.nodes_last_tick = 0;
+        self.claims_left = claim::CLAIMS_PER_TICK;
         for i in 0..self.entries.len() {
             let f = &self.entries[i];
             if f.serial != 0 && self.clock.wrapping_sub(f.last_used) > IDLE_TICKS {
@@ -671,6 +707,8 @@ impl Fields {
         if e.route[i].state != RouteState::Stranded {
             self.touch(serial);
         }
+        // A unit that has come near takes its arrival slot (WP4.4b).
+        self.claim_if_due(graphs, e, fi, i);
         let f = &self.entries[fi];
         let g = &graphs[f.graph];
         if !f.region_ready {
@@ -687,6 +725,7 @@ impl Fields {
                 Some(Steer::Wait)
             };
         }
+        let slot = f.slot_of(e, i);
         let route = &mut e.route[i];
         // A change of the map since the leg was chosen: choose it again. This
         // comes before the stranded check: a refusal that stranded the unit may
@@ -705,7 +744,6 @@ impl Fields {
         if route.state == RouteState::Stranded {
             return Some(Steer::Stranded);
         }
-        let slot = f.slot_for(route.field_rank);
         if route.final_leg {
             if let Some(s) = slot {
                 return Some(Steer::Go(s, Aim::Destination));
@@ -784,7 +822,7 @@ impl Fields {
             return None;
         }
         let f = &self.entries[self.find(r.field_serial)?];
-        f.slot_for(r.field_rank)
+        f.slot_of(e, i)
     }
 
     /// Whether the unit in slot `i` is being moved by its field: the field is
@@ -835,6 +873,14 @@ impl Fields {
             h.write_u32(f.slots.len() as u32);
             for &p in &f.slots {
                 h.write_vec2(p);
+            }
+            // Who holds which slot (WP4.4b): only the slots that are held, so a
+            // field nobody has claimed in hashes by its slots alone.
+            for (k, &holder) in f.taken.iter().enumerate() {
+                if holder != claim::NO_HOLDER {
+                    h.write_u32(k as u32);
+                    h.write_u32(holder);
+                }
             }
             h.write_u32(f.finalized);
             h.write_u64(f.digest.finish());

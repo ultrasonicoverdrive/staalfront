@@ -33,6 +33,7 @@
 //! re-asked when the change touches it (replanning is WP4.7).
 
 mod abstract_search;
+mod claim;
 mod corridor;
 mod field;
 mod field_build;
@@ -859,6 +860,12 @@ impl Pathing {
     /// judged against this instead of the order's point.
     pub fn arrival_point(&self, e: &Entities, i: usize) -> Option<Vec2> {
         self.fields.arrival_point(e, i)
+    }
+
+    /// The slot unit `i` has taken for itself, while its field lives: see
+    /// [`World::claimed_slot_of`](crate::World::claimed_slot_of).
+    pub fn claimed_point(&self, e: &Entities, i: usize) -> Option<Vec2> {
+        self.fields.claimed_point(e, i)
     }
 
     // ---- reading ----------------------------------------------------------------

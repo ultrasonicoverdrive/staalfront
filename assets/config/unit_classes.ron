@@ -39,7 +39,7 @@
 (
     movement_classes: [
         // Turning (WP4.5): a person turns at once (Instant); a tank pivots on its tracks; the
-        // others have to move to turn (Arc): a wheeled vehicle in a 1.25-cell radius (5 m), a
+        // others have to move to turn (Arc): a wheeled vehicle in a 1.5-cell radius (6 m), a
         // hovercraft in 2 cells with thrusters that turn it half as fast on the spot, a vessel
         // in 4 cells with a rudder that barely turns it at a standstill. They all drive once
         // they are within 16 steps (22 degrees) of where they are going, the margin that routes
@@ -56,7 +56,7 @@
             ("bridge", Speed(1100)),
         ]),
         // trucks and light vehicles: the best on a road, the worst on rough ground.
-        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.25, pivot_permille: 250), terrain_costs: [
+        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250), terrain_costs: [
             ("grass", Speed(800)),
             ("road", Speed(1200)),
             ("water", Impassable),
