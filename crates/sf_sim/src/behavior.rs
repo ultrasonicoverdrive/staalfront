@@ -2,7 +2,9 @@
 //! use.
 //!
 //! This is engine-level scaffolding so that thousands of entities move without
-//! any gameplay. Collision arrives in phase 4 and replaces `advance_all`.
+//! any gameplay. Collision (WP4.4, [`crate::crowd`]) is a pass of its own after
+//! `advance_all`: every unit takes its step here first and the bodies that
+//! overlap are pushed apart afterwards.
 //! Terrain (WP4.1) reaches only entities made from the unit table that have a
 //! movement class: see "Terrain" below. The wanderers of the legacy `Spawn`
 //! command know no terrain at all.
@@ -165,6 +167,13 @@ pub(crate) struct Motion {
     /// The movement class of the entity, if it has one (WP4.1): only an entity
     /// made from the unit table has, and only that one is bound by terrain.
     pub class: Option<u16>,
+    /// Ticks of being blocked after which a unit within `CROWD_ARRIVE` of its
+    /// destination counts as arrived (WP4.4); zero when collisions are off.
+    pub crowd_wait: u16,
+    /// A step that terrain refuses slides along the obstacle instead (WP4.4): the
+    /// crowd pushes units off the line a route was smoothed along. Off for the
+    /// legacy walks, which stand at the edge.
+    pub slide: bool,
 }
 
 impl Motion {
@@ -207,6 +216,8 @@ pub(crate) fn advance_all(
             continue;
         }
         let m = &world_motion.of_entity(e.def[i], units);
+        // The legacy walks do not slide: they stand at the edge (`docs/rules/movement.md`).
+        let legacy = &Motion { slide: false, ..*m };
         match e.behavior[i] {
             Behavior::Idle => {}
             Behavior::Wander => {
@@ -219,21 +230,28 @@ pub(crate) fn advance_all(
                     }
                 };
                 // Arrived, or blocked by terrain: either way a new target.
-                if walk(e, i, target, m, ground) != Walk::Moving {
+                if walk(e, i, target, legacy, ground) != Walk::Moving {
                     e.target[i] = None;
                 }
             }
             Behavior::MoveTo => match e.target[i] {
                 Some(target) => {
                     // A blocked move keeps its target and stands at the edge.
-                    if walk(e, i, target, m, ground) == Walk::Arrived {
+                    if walk(e, i, target, legacy, ground) == Walk::Arrived {
                         e.target[i] = None;
                         e.behavior[i] = Behavior::Idle;
                     }
                 }
                 None => e.behavior[i] = Behavior::Idle,
             },
-            Behavior::Ordered => orders::run(e, i, m, units, ground, path, tick),
+            Behavior::Ordered => {
+                // The flags the order sets for the crowd pass are for this tick only.
+                let c = &mut e.crowd[i];
+                c.walking = false;
+                c.refused = false;
+                c.stranded = false;
+                orders::run(e, i, m, units, ground, path, tick);
+            }
         }
     }
 }
@@ -290,6 +308,23 @@ pub(crate) fn walk(
     if let Some(class) = m.class
         && !ground.may_step(class, pos, next)
     {
+        // A unit that has been pushed off its route slides along what it grazed, by
+        // the longer part of its step first, instead of being refused (WP4.4).
+        if m.slide && !arrived {
+            let (along_x, along_y) = (Vec2::new(next.x, pos.y), Vec2::new(pos.x, next.y));
+            let want = next - pos;
+            let (first, second) = if want.x.abs() >= want.y.abs() {
+                (along_x, along_y)
+            } else {
+                (along_y, along_x)
+            };
+            for slid in [first, second] {
+                if slid != pos && ground.may_step(class, pos, slid) {
+                    e.pos[i] = slid;
+                    return Walk::Moving;
+                }
+            }
+        }
         return Walk::Blocked;
     }
     e.pos[i] = next;

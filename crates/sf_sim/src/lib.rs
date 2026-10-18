@@ -261,9 +261,23 @@
 //! used eviction; a structure in the region builds the field again while the units go on with
 //! the old one where it is valid. The rules are in `docs/rules/pathfinding.md`.
 //!
+//! # Collisions
+//!
+//! A unit made from the unit table has a body, a disc with half the `size` of its
+//! definition for a radius. After the units have taken their steps ([`behavior`]),
+//! the crowd pass ([`crowd`]) pushes overlapping bodies apart in a few passes over
+//! a spatial index, the same whatever order the units are visited in: units that
+//! move the same way follow, ones that meet head-on slip to their own right, a unit
+//! that has waited detours, an idle friend is shoved aside (a little, and never
+//! into rock) and a unit holding position never is. A unit that does not get closer
+//! to where it is going steps to a free neighbouring spot and, if that does not
+//! help, asks for a new route ([`World::replan_requested`], the hook of WP4.7).
+//! [`World::with_collision`] turns it off or tunes it; the rules are in
+//! `docs/rules/collision.md`.
+//!
 //! # Not here yet
 //!
-//! Collision and replanning (the rest of phase 4), target
+//! Replanning (the rest of phase 4), target
 //! acquisition and firing (phase 5),
 //! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
@@ -272,6 +286,7 @@
 pub mod behavior;
 pub mod checksum;
 pub mod command;
+pub mod crowd;
 mod entities;
 pub mod ids;
 pub mod movement;
@@ -284,6 +299,9 @@ pub mod world;
 
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
 pub use command::{Command, CommandQueue, ScheduleError};
+pub use crowd::{
+    CollisionConfig, CrowdStats, DEFAULT_STUCK_ATTEMPTS, DEFAULT_STUCK_TICKS, DEFAULT_WAIT_TICKS,
+};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
 };

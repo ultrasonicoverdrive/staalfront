@@ -59,6 +59,16 @@
 //! behind it waits, until a new order replaces it. Noticing that a route is
 //! blocked later is the replan's (WP4.7).
 //!
+//! # Crowds (WP4.4)
+//!
+//! The walk of an order is the unit's own step; the bodies of the units are dealt
+//! with afterwards by the crowd pass ([`crate::crowd`]). Two things happen here,
+//! in [`go_to`], because they change what the order does: a unit that is blocked
+//! by units that have arrived, near where it is going, counts as **arrived**
+//! (the crowd is standing on its spot), and a unit that is **stuck** replaces its
+//! walk for a few ticks by a step to a free neighbouring spot. A new order, or the
+//! end of one, forgets all of it (`CrowdState::reset_progress`).
+//!
 //! # What phase 5 fills in
 //!
 //! There is no combat here. [`would_acquire_targets_here`] is called every
@@ -74,6 +84,7 @@
 use sf_math::{Facing, Fx, Vec2};
 
 use crate::behavior::{Motion, Walk, walk};
+use crate::crowd::{CROWD_ARRIVE, CROWD_ARRIVE_STEP, WAYPOINT_CROWD};
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Tick};
 use crate::movement::Ground;
@@ -302,6 +313,7 @@ pub(crate) fn begin(e: &mut Entities, i: usize, order: Order, tick: Tick, bounds
     e.order[i] = order;
     e.target[i] = None;
     e.guard_walking[i] = false;
+    e.crowd[i].reset_progress();
     e.route.reset(i);
     e.behavior[i] = if order == Order::Idle {
         crate::behavior::Behavior::Idle
@@ -336,6 +348,7 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
     e.queue[i] = OrderQueue::EMPTY;
     e.target[i] = None;
     e.guard_walking[i] = false;
+    e.crowd[i].reset_progress();
     e.route.reset(i);
     e.behavior[i] = crate::behavior::Behavior::Idle;
 }
@@ -368,18 +381,70 @@ fn go_to(
     // A member of a group with a flowfield stops at its own arrival slot, not
     // at the order's point (WP4.3).
     let arrival = path.arrival_point(e, i).unwrap_or(destination);
-    if (arrival - e.pos[i]).length_squared() <= stop_at.square() {
+    let off = (arrival - e.pos[i]).length_squared();
+    if off <= stop_at.square() {
         e.target[i] = None;
         e.route.reset(i);
         return true;
     }
-    match path.steer(e, i, destination, m.class) {
-        Steer::Wait | Steer::Stranded => {
+    // A crowd stands on the spot (WP4.4): a unit that has been blocked for a while by
+    // units that have arrived (an idle friend was in its way last tick), within a cell
+    // and a half of where it is going, has arrived, and two cells more
+    // for each sidestep it has tried since. A member of a group (it is going to its
+    // slot, which lies some distance from the order's point) has arrived as soon as
+    // it is as near the point as its slot is, plus the same: the crowd has filled
+    // the ground between. Only for a plain move, not for a reach.
+    if m.crowd_wait > 0
+        && stop_at <= ARRIVE_TOLERANCE
+        && e.crowd[i].quiet >= m.crowd_wait
+        && e.crowd[i].idle_hit
+    {
+        let slack = CROWD_ARRIVE + CROWD_ARRIVE_STEP.mul_int(i64::from(e.crowd[i].attempts));
+        let ring = (arrival - destination).length();
+        if (destination - e.pos[i]).length_squared() <= (ring + slack).square() {
             e.target[i] = None;
+            e.route.reset(i);
+            return true;
+        }
+    }
+    // A sidestep to a free neighbouring spot (WP4.4) replaces the walk for a few
+    // ticks.
+    if let Some((spot, left)) = e.crowd[i].side {
+        e.target[i] = Some(spot);
+        let walked = walk(e, i, spot, m, ground);
+        e.crowd[i].side = (walked == Walk::Moving && left > 1).then_some((spot, left - 1));
+        return false;
+    }
+    match path.steer(e, i, destination, m.class) {
+        Steer::Wait => {
+            e.target[i] = None;
+            false
+        }
+        Steer::Stranded => {
+            e.target[i] = None;
+            // A route that ends short because the goal cannot be reached is
+            // waiting for WP4.7; one that was stranded by a refused step is stuck.
+            e.crowd[i].stranded = !e.route[i].unreachable;
             false
         }
         Steer::Go(waypoint, aim) => {
             e.target[i] = Some(waypoint);
+            // A unit that has been blocked for a while within a cell of a waypoint of
+            // its route takes it as reached (WP4.4): the waypoints are the middles of
+            // cells and bodies are as wide as one, so the unit in front is standing
+            // on it and the rest would wait for it to leave. Only when the route has
+            // another waypoint to go on to: the one a flowfield gives is chosen again
+            // from where the unit stands, and would be this one.
+            if aim == Aim::Waypoint
+                && m.crowd_wait > 0
+                && e.crowd[i].quiet >= m.crowd_wait
+                && e.route[i].ring_len() >= 2
+                && (waypoint - e.pos[i]).length_squared() <= WAYPOINT_CROWD.square()
+            {
+                path.reached(e, i);
+                return false;
+            }
+            e.crowd[i].walking = true;
             match walk(e, i, waypoint, m, ground) {
                 Walk::Arrived if aim == Aim::Destination => {
                     e.target[i] = None;
@@ -391,6 +456,7 @@ fn go_to(
                 }
                 Walk::Moving => false,
                 Walk::Blocked => {
+                    e.crowd[i].refused = true;
                     path.blocked(e, i);
                     false
                 }

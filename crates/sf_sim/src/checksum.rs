@@ -23,6 +23,8 @@
 //! | orders (`D`), only while some entity has an order or a queue | the table's weapon reach digest, then the number of such entities and for each, in slot order: the slot, its current order, the guard's walk switch and its queued orders (WP3.4) |
 //! | movement (`M`), only with a terrain layer, a movement table **and** a live entity made from the unit table that has a movement class | the table's digest: every movement class with its cost on every terrain type (WP4.1) |
 //! | paths (`P`), only while the world has pathfinding and some live entity has a route | the path budget and the epoch of the graphs, the job in flight, and for each entity with a route, in slot order: its state, flags, cells, ring of waypoints and portal path (WP4.2) |
+//! | flowfields (`L`), only while the pool holds a field | the pool and the build in flight (WP4.3; since WP4.4 each field also has its group order, its ring, the spacing and the inner radius of its slots) |
+//! | crowd (`K`), only while some live unit remembers being blocked, sidestepping, shoved or crowded | the collision settings, then each such unit in slot order: how long it has not come closer to its waypoint, its sidestep attempts and the best distance seen, a sidestep in progress, how far it has been shoved and for how long left alone, whether it has asked for a new route (WP4.4) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -86,6 +88,14 @@
 //! and directions are not hashed whole (they would be hashed every tick); the running hash
 //! covers each cell as it is integrated.
 //!
+//! The crowd section (WP4.4, `K`) comes last. A unit that never met a crowd (it was
+//! never blocked for a tick, never shoved) is at rest and not in it, so a world
+//! where nobody collides hashes as before, and a world with collision turned off
+//! never has the section: the pinned wanderer scenarios, `units_spawn`,
+//! `terrain_costs` and `pathing` (collision off in the file) did not move. The
+//! scratch of a tick (which units walked, which were refused) is not state and is
+//! not hashed.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -109,6 +119,7 @@ use sf_math::{Rng, Vec2};
 
 use crate::behavior::Area;
 use crate::command::Command;
+use crate::crowd;
 use crate::entities::NO_DEF;
 use crate::orders::Order;
 use crate::world::World;
@@ -127,6 +138,7 @@ const SECTION_ORDERS: u8 = b'D';
 const SECTION_MOVEMENT: u8 = b'M';
 const SECTION_PATHS: u8 = b'P';
 const SECTION_FIELDS: u8 = b'L';
+const SECTION_CROWD: u8 = b'K';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -358,6 +370,13 @@ impl World {
         if self.pathing.any_fields() {
             h.write_u8(SECTION_FIELDS);
             self.pathing.write_field_hash(&mut h);
+        }
+
+        // The crowd (WP4.4): only while some live unit remembers being blocked,
+        // sidestepping or pushed, so a world that never met a crowd hashes as before.
+        if crowd::any_state(e) {
+            h.write_u8(SECTION_CROWD);
+            crowd::write_hash(&mut h, &self.crowd.config, e);
         }
 
         h.finish()

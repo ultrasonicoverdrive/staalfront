@@ -10,6 +10,7 @@
 use sf_math::{Facing, Rng, Vec2};
 
 use crate::behavior::{Area, Behavior};
+use crate::crowd::CrowdState;
 use crate::ids::{Kind, PlayerId};
 use crate::orders::{Order, OrderQueue};
 use crate::path::Routes;
@@ -90,6 +91,10 @@ pub(crate) struct Entities {
     /// than the other columns (a slot beyond its end has none). Hashed in the
     /// paths section while the world has pathfinding and some unit has a route.
     pub route: Routes,
+    /// What the unit remembers about being in a crowd (WP4.4): how long it has
+    /// been unable to get on, its sidesteps, how far it has been pushed. At rest
+    /// for every unit that never met one; hashed while it is not.
+    pub crowd: Vec<CrowdState>,
 }
 
 impl Entities {
@@ -120,6 +125,7 @@ impl Entities {
         self.order.push(Order::Idle);
         self.queue.push(OrderQueue::EMPTY);
         self.guard_walking.push(false);
+        self.crowd.push(CrowdState::default());
         index
     }
 
@@ -144,6 +150,7 @@ impl Entities {
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
+        self.crowd[i] = CrowdState::default();
         self.route.reset(i);
     }
 
@@ -168,6 +175,7 @@ impl Entities {
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
+        self.crowd[i] = CrowdState::default();
         self.route.reset(i);
     }
 }

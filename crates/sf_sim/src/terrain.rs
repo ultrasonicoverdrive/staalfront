@@ -39,8 +39,9 @@
 //! Only the tick changes it (quality rule 1): the cell is claimed when a
 //! [`Command::Place`](crate::Command::Place) spawns a structure and released
 //! when that entity is despawned. Everything public here is a read-only query.
-//! **Wanderers do not occupy cells**: thousands of them share a cell, and
-//! collision comes in phase four. Only entities created by `Place` do.
+//! **Units do not occupy cells**: they have bodies of their own (WP4.4,
+//! `crate::crowd`), and the legacy wanderers none, so thousands of them share a
+//! cell. Only structures (`Place`, `PlaceStructure`) do.
 
 use core::fmt;
 

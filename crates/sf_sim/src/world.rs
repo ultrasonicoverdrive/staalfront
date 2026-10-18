@@ -6,6 +6,7 @@ use sf_math::{Facing, Fx, Rng, Vec2};
 
 use crate::behavior::{self, Area, Behavior, Motion};
 use crate::command::{Command, CommandQueue, ScheduleError};
+use crate::crowd::{CollisionConfig, Crowd, CrowdStats};
 use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
@@ -118,6 +119,9 @@ pub enum ConfigError {
     /// The flowfield threshold was given to a world that has already started,
     /// or is one (a group has at least two units; zero turns flowfields off).
     FlowfieldThreshold,
+    /// The collision settings were given to a world that has already started, or
+    /// are not valid ([`CollisionConfig::is_valid`](crate::CollisionConfig::is_valid)).
+    Collision,
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -142,6 +146,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::FlowfieldThreshold => {
                 "the flowfield threshold must be given before the world starts and be 0 or at least 2"
+            }
+            ConfigError::Collision => {
+                "the collision settings must be given before the world starts and be valid"
             }
             ConfigError::MovementAfterStart => {
                 "the movement table must be given before the world starts"
@@ -197,6 +204,9 @@ pub struct World {
     /// movement class that terrain restricts, the job being served and the
     /// budget. Empty (inactive) on a world without terrain or movement table.
     pub(crate) pathing: Pathing,
+    /// The collision pass (WP4.4): the settings, the bodies of the unit kinds, the
+    /// scratch memory.
+    pub(crate) crowd: Crowd,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -262,6 +272,8 @@ impl World {
             return Err(ConfigError::UnitsAfterStart);
         }
         self.units = units;
+        self.crowd
+            .set_tables(&self.units, &self.movement, self.map_size());
         Ok(self)
     }
 
@@ -288,6 +300,28 @@ impl World {
             self.pathing.budget(),
             self.pathing.flowfield_threshold(),
         );
+        self.crowd
+            .set_tables(&self.units, &self.movement, self.map_size());
+        Ok(self)
+    }
+
+    /// The same world with other collision settings (WP4.4,
+    /// `docs/rules/collision.md`): whether bodies collide at all, how many ticks a
+    /// blocked unit waits before it detours, how many without progress make it
+    /// step to a free neighbouring spot, and how many such steps before it asks
+    /// for a new route. A world that is given none uses
+    /// [`CollisionConfig::DEFAULT`](crate::CollisionConfig::DEFAULT), the numbers
+    /// of the shipped `sim.ron`. Call it right after the world is made
+    /// ([`ConfigError::Collision`] after it has started, or for invalid numbers).
+    pub fn with_collision(mut self, config: CollisionConfig) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !config.is_valid()
+        {
+            return Err(ConfigError::Collision);
+        }
+        self.crowd.config = config;
         Ok(self)
     }
 
@@ -330,6 +364,12 @@ impl World {
     }
 
     fn with_parts(config: WorldConfig, terrain: Terrain) -> World {
+        let mut crowd = Crowd::new();
+        crowd.set_tables(
+            &UnitTable::empty(),
+            &MovementTable::empty(),
+            (config.width, config.height),
+        );
         World {
             config,
             tick: Tick::ZERO,
@@ -342,6 +382,7 @@ impl World {
             units: UnitTable::empty(),
             movement: MovementTable::empty(),
             pathing: Pathing::inactive(),
+            crowd,
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -476,6 +517,14 @@ impl World {
         self.entities.target[i]
     }
 
+    /// The arrival slot of a unit that follows a flowfield (WP4.3, WP4.4): the point
+    /// it stands on when it has arrived, once the field has picked its slots.
+    /// `None` for any other unit.
+    pub fn arrival_slot_of(&self, id: EntityId) -> Option<Vec2> {
+        let i = self.live_index(id)?;
+        self.pathing.arrival_point(&self.entities, i)
+    }
+
     /// The route of a unit (WP4.2): whether it follows waypoints, waits for
     /// them or stands at the end of its route, and whether its destination
     /// could be reached; `None` for a stale id. A unit without a walking
@@ -489,6 +538,44 @@ impl World {
     /// What the path service did with its budget (WP4.2).
     pub fn flowfield_threshold(&self) -> u32 {
         self.pathing.flowfield_threshold()
+    }
+
+    /// The collision settings of the world (WP4.4).
+    pub fn collision_config(&self) -> CollisionConfig {
+        self.crowd.config
+    }
+
+    /// What the crowd pass did so far.
+    pub fn crowd_stats(&self) -> CrowdStats {
+        self.crowd.stats
+    }
+
+    /// The radius of the body of entity `id`, in cells: half the `size` of its
+    /// definition. `None` for an entity that is not a unit of the table or whose
+    /// kind does not collide (aircraft, structures, objects).
+    pub fn collision_radius_of(&self, id: EntityId) -> Option<Fx> {
+        let i = self.live_index(id)?;
+        let def = self.entities.def[i];
+        if def == NO_DEF {
+            return None;
+        }
+        let r = self.crowd.radius_of_def(def as usize);
+        (r > Fx::ZERO).then_some(r)
+    }
+
+    /// Whether the unit has asked for a new route because sidesteps did not get it
+    /// out of a crowd (the WP4.7 hook, `docs/rules/collision.md`). It stays set
+    /// until the unit's order changes or ends.
+    pub fn replan_requested(&self, id: EntityId) -> Option<bool> {
+        let i = self.live_index(id)?;
+        Some(self.entities.crowd[i].replan)
+    }
+
+    /// Ticks the unit has gone without coming closer to its waypoint (zero for a
+    /// unit that is getting on, or has no waypoint).
+    pub fn stuck_ticks_of(&self, id: EntityId) -> Option<u32> {
+        let i = self.live_index(id)?;
+        Some(u32::from(self.entities.crowd[i].quiet))
     }
 
     pub fn path_stats(&self) -> PathStats {
@@ -619,8 +706,10 @@ impl World {
     /// In order: (1) every command scheduled for this tick runs, in
     /// `(player, insertion)` order; (2) every live entity runs its behaviour,
     /// in ascending slot order, after recording its previous position and
-    /// facing; (3) the tick counter advances; (4) the checksum of the new state
-    /// is computed and appended to the history.
+    /// facing (the path service has served its requests just before); (3) the
+    /// crowd pass pushes overlapping bodies apart and looks after the units that
+    /// do not get on (WP4.4); (4) the tick counter advances; (5) the checksum of
+    /// the new state is computed and appended to the history.
     pub fn step(&mut self) -> StepReport {
         let tick = self.tick;
 
@@ -651,6 +740,14 @@ impl World {
             &ground,
             &mut self.pathing,
             tick,
+        );
+        // Then the bodies are pushed apart, head-on units steer, and units that do
+        // not get on are looked after (WP4.4).
+        self.crowd.resolve(
+            &mut self.entities,
+            &ground,
+            (motion.pos_min, motion.pos_max),
+            &mut self.pathing,
         );
 
         self.tick = tick.next();
@@ -684,6 +781,12 @@ impl World {
             pos_min,
             pos_max,
             class: None,
+            crowd_wait: if self.crowd.config.enabled {
+                self.crowd.config.wait_ticks
+            } else {
+                0
+            },
+            slide: self.crowd.config.enabled,
         }
     }
 

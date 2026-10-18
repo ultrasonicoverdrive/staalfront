@@ -92,7 +92,8 @@ its own (`guard_walking`), so the route could take `target` over.
   it, and `World::route_of(id)` says `unreachable` and `Stranded` until the order is replaced. The
   order, the queue behind it and the arrival test stay as they are, as they did when the unit stood
   at the edge of a river at WP4.1; ending such an order ("gives up", "stands as near as it gets")
-  is WP4.4's outcome and WP4.7's replan.
+  is WP4.7's replan (WP4.4's crowd pass leaves such a unit alone: standing at the nearest cell is not
+  being stuck).
 * **WP4.3** adds the flowfield step for groups to the same seam: when one `Move` or `AttackMove` to a
   point sends at least `flowfield_threshold` units of a class somewhere (8 as shipped), those units
   do not ask for routes; they are **members of one flowfield** (`docs/rules/pathfinding.md`,
@@ -107,7 +108,16 @@ its own (`guard_walking`), so the route could take `target` over.
   terrain; `go_to` counts only an arrival, and a blocked step on a route makes the unit ask for a
   cell-by-cell route (a second refusal leaves it standing, order kept). The speed of a step is
   the unit's speed per tick times the multiplier of the cell it stands in.
-* **WP4.4** adds collisions.
+* **WP4.4** adds collisions (`docs/rules/collision.md`): the walk is the unit's own step, and the
+  bodies of the units are pushed apart afterwards by the crowd pass. Two things happen in `go_to`
+  because they change what an order does: a unit that has been blocked for `wait_ticks` by units that
+  have arrived (an idle friend overlapped it last tick), within a cell and a half of its slot or its
+  destination (two cells more for each sidestep it tried), **counts as arrived**: the crowd is standing
+  on its spot; and a unit that has gone `stuck_ticks` without coming closer to its waypoint **steps to a
+  free neighbouring spot** for a few ticks instead of walking, and after `stuck_attempts` such steps
+  asks for a new route (`World::replan_requested`, the hook of WP4.7). A unit on `HoldPosition` is
+  never pushed; an idle unit is pushed aside by a friendly mover, a little and never into rock or a
+  structure. A new order, or the end of one, forgets the progress and the sidestep.
 * **WP4.5** makes the turn-before-drive and the separate turret part of the same step
   (`walk`); the present rule is: turn at the unit's turn rate and drive only when the
   facing is within `ALIGN_TOLERANCE` (16 of 256 steps) of the wanted direction.

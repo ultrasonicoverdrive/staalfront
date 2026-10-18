@@ -8,34 +8,42 @@
 //! going outwards in a spiral, by rank (the unit's place among the group's
 //! members in ascending entity id order).
 //!
-//! The lattice has four points to a cell, half a cell apart, a quarter of a
-//! cell in from the cell's sides (a point on a cell's edge would be a point two
-//! cells share, and a point near an edge is near the neighbour's rock). The
-//! spiral orders the points by their distance from the middle of the goal cell,
-//! ties by row and then column, so the group fills a disc: 200 units need a
-//! radius of about four cells, inside the five the phase asks for. Half a
-//! cell is closer than a vehicle is long; units overlap until collision
-//! (WP4.4) and formations (WP4.6) give them room, and the spacing is the one
-//! constant to revisit then ([`SPACING_QUARTERS`]).
+//! Since WP4.4 the units have bodies (`docs/rules/collision.md`), so the lattice
+//! is made for the bodies it holds. Each class of the order has a **spacing**: the
+//! smallest distance its bodies keep from each other, plus a sixteenth of a cell
+//! ([`spacing_for`]). A square lattice of that spacing has one slot for every
+//! `spacing * spacing` of ground, and the spiral orders its points by their
+//! distance from the middle of the goal cell, ties by row and then column, so the
+//! group fills a disc. The classes of one order take **rings**, the fastest
+//! first (it arrives first, and the slower ones then walk to the rim without
+//! crossing it): a class starts where the area of the classes before it ends
+//! ([`outer_radius`]). Whether two classes' slots overlap at a ring's edge, or
+//! where blocked points were left out, is decided when the later field is built,
+//! which skips every point too near a slot of an earlier one
+//! (`path/field_build.rs`).
 //!
 //! A point is a **slot** for a class when its cell can be entered and the line
 //! from the middle of the goal cell to it is clear by the thick line of sight
 //! (`path/los.rs`): a unit that has followed the field down to the goal can
-//! always walk straight on to its slot. The lattice is the same for every
-//! class, but which points are valid differs (a bridge cell is open ground for
-//! a tank and water to a boat), so each field filters its own, starting its
-//! scan at an offset so that the classes of one order take different stretches
-//! of the spiral instead of all starting in the middle.
+//! always walk straight on to its slot. The lattice is the same shape for every
+//! class but which points are valid differs (a bridge cell is open ground for a
+//! tank and water to a boat), so each field keeps only its own.
 
 use sf_math::{Fx, Vec2};
 
 /// Lattice points on each side of the middle, in each direction: the table is
-/// `2 * HALF_WIDTH` points wide and high.
-pub(crate) const HALF_WIDTH: i32 = 12;
+/// `2 * HALF_WIDTH` points wide and high. Forty spacings reach 14 cells at the
+/// spacing of infantry and more than 50 at the spacing of a tank, far enough for
+/// the 256 slots a field hands out.
+pub(crate) const HALF_WIDTH: i32 = 40;
 
-/// The distance between two lattice points, in quarters of a cell. Two quarters:
-/// half a cell.
-pub(crate) const SPACING_QUARTERS: i32 = 2;
+/// Room left between two bodies at their slots, in cells: a sixteenth, so that a
+/// unit standing on its slot is not pushed by its neighbours.
+pub(crate) const GAP: Fx = Fx::from_ratio(1, 16);
+
+/// Slots further from the goal than this many cells are not used: the line of
+/// sight that checks them is at most one sector long.
+pub(crate) const MAX_RADIUS: Fx = Fx::from_int(15);
 
 /// A lattice point as a pair of integers `(a, b)`: it lies `(a + 1/2)` spacings
 /// east and `(b + 1/2)` spacings south of the middle of the goal cell.
@@ -58,16 +66,55 @@ pub(crate) fn spiral() -> Vec<Point> {
         .collect()
 }
 
-/// The position of a lattice point around the middle of a goal cell.
-pub(crate) fn position(centre: Vec2, p: Point) -> Vec2 {
-    // (a + 1/2) spacings of SPACING_QUARTERS/4 cells each, that is (2a + 1) * SPACING_QUARTERS / 8 cells.
-    let to = |k: i8| {
-        Fx::from_ratio(
-            i64::from(2 * i32::from(k) + 1) * i64::from(SPACING_QUARTERS),
-            8,
-        )
-    };
+/// The position of a lattice point around the middle of a goal cell, for a
+/// lattice of `spacing` cells.
+pub(crate) fn position(centre: Vec2, p: Point, spacing: Fx) -> Vec2 {
+    // (a + 1/2) spacings: (2a + 1) * spacing / 2 cells.
+    let to = |k: i8| spacing.mul_int(2 * i64::from(k) + 1).div_int(2);
     Vec2::new(centre.x + to(p.0), centre.y + to(p.1))
+}
+
+/// The squared distance of a point from the middle in units of half a spacing:
+/// what the spiral is ordered by.
+pub(crate) fn d2(p: Point) -> i32 {
+    let (x, y) = (2 * i32::from(p.0) + 1, 2 * i32::from(p.1) + 1);
+    x * x + y * y
+}
+
+/// The spacing of the slots for bodies of this size: the smallest distance two of
+/// them keep (infantry-sized bodies stand closer, `crowd::SOFT_*`) and a
+/// [`GAP`]. `max_size` is the biggest diameter in the class's group.
+pub(crate) fn spacing_for(max_size: Fx) -> Fx {
+    let body = if max_size <= crate::crowd::SOFT_SIZE {
+        max_size
+            .mul_int(crate::crowd::SOFT_NUM)
+            .div_int(crate::crowd::SOFT_DEN)
+    } else {
+        max_size
+    };
+    body + GAP
+}
+
+/// Where the spiral of a lattice of `spacing` cells reaches `inner` cells from
+/// the middle: the index of the first point at least that far.
+pub(crate) fn first_beyond(spiral: &[Point], inner: Fx, spacing: Fx) -> usize {
+    if inner <= Fx::ZERO || spacing <= Fx::ZERO {
+        return 0;
+    }
+    // Half spacings from the middle.
+    let t = inner.mul_int(2).saturating_div(spacing);
+    let t2 = t.square();
+    spiral.partition_point(|&p| Fx::from_int(d2(p)) < t2)
+}
+
+/// The radius at which `members` bodies on a lattice of `spacing` cells end if
+/// they start `inner` cells out: the area of the disc grows by one lattice cell
+/// for each of them.
+pub(crate) fn outer_radius(inner: Fx, members: u32, spacing: Fx) -> Fx {
+    let area = spacing.square().mul_int(i64::from(members));
+    // Divided by pi (355/113 is exact enough for a radius that is only planned).
+    let disc = area.mul_int(113).div_int(355);
+    (inner.square() + disc).sqrt()
 }
 
 #[cfg(test)]
@@ -78,31 +125,28 @@ mod tests {
     fn the_spiral_goes_outwards_and_covers_the_table_once() {
         let s = spiral();
         assert_eq!(s.len(), (4 * HALF_WIDTH * HALF_WIDTH) as usize);
-        let d2 = |p: &Point| {
-            let (x, y) = (2 * i32::from(p.0) + 1, 2 * i32::from(p.1) + 1);
-            x * x + y * y
-        };
-        assert!(s.windows(2).all(|w| d2(&w[0]) <= d2(&w[1])));
+        assert!(s.windows(2).all(|w| d2(w[0]) <= d2(w[1])));
         let mut sorted = s.clone();
         sorted.sort_unstable();
         sorted.dedup();
         assert_eq!(sorted.len(), s.len(), "no point twice");
-        // The first four are the quarter points of the goal cell itself.
+        // The first four are the quarter points of the goal cell itself (at a
+        // spacing of half a cell).
         let centre = Vec2::from_ints(10, 10);
-        let first: Vec<Vec2> = s[..4].iter().map(|&p| position(centre, p)).collect();
-        for p in first {
-            assert_eq!((p.x - centre.x).abs(), Fx::from_ratio(1, 4));
-            assert_eq!((p.y - centre.y).abs(), Fx::from_ratio(1, 4));
+        for &p in &s[..4] {
+            let q = position(centre, p, Fx::HALF);
+            assert_eq!((q.x - centre.x).abs(), Fx::from_ratio(1, 4));
+            assert_eq!((q.y - centre.y).abs(), Fx::from_ratio(1, 4));
         }
     }
 
     #[test]
-    fn four_points_to_a_cell_half_a_cell_apart() {
+    fn four_points_to_a_cell_at_half_a_cell() {
         let centre = Vec2::new(Fx::from_ratio(21, 2), Fx::from_ratio(21, 2)); // middle of cell (10, 10)
         let s = spiral();
         let mut in_cell = 0;
         for &p in &s {
-            let q = position(centre, p);
+            let q = position(centre, p, Fx::HALF);
             if q.cell() == (10, 10) {
                 in_cell += 1;
                 // A quarter or three quarters in: never on an edge.
@@ -114,12 +158,55 @@ mod tests {
     }
 
     #[test]
-    fn two_hundred_slots_fit_inside_five_cells() {
-        let centre = Vec2::new(Fx::from_ratio(1, 2), Fx::from_ratio(1, 2));
+    fn neighbouring_points_are_one_spacing_apart() {
+        let centre = Vec2::from_ints(30, 30);
+        let spacing = Fx::from_ratio(13, 10);
+        let a = position(centre, (3, 4), spacing);
+        let b = position(centre, (4, 4), spacing);
+        let c = position(centre, (3, 5), spacing);
+        assert_eq!((b - a).length(), spacing);
+        assert_eq!((c - a).length(), spacing);
+    }
+
+    #[test]
+    fn the_spacing_is_what_the_bodies_keep_and_a_gap() {
+        // A tank: its whole diameter. A rifleman: three quarters of it.
+        assert_eq!(
+            spacing_for(Fx::from_ratio(6, 5)),
+            Fx::from_ratio(6, 5) + GAP
+        );
+        assert_eq!(
+            spacing_for(Fx::from_ratio(2, 5)),
+            Fx::from_ratio(3, 10) + GAP
+        );
+    }
+
+    #[test]
+    fn a_ring_starts_where_the_inner_radius_is() {
         let s = spiral();
-        let far = position(centre, s[199]);
-        let d = (far - centre).length();
-        assert!(d < Fx::from_int(5), "{d:?}");
-        assert!(d > Fx::from_int(3), "{d:?}");
+        let spacing = Fx::from_ratio(13, 10);
+        assert_eq!(first_beyond(&s, Fx::ZERO, spacing), 0);
+        let k = first_beyond(&s, Fx::from_int(5), spacing);
+        let near = position(Vec2::ZERO, s[k], spacing).length();
+        let before = position(Vec2::ZERO, s[k - 1], spacing).length();
+        assert!(near >= Fx::from_int(5) - Fx::from_ratio(1, 100), "{near:?}");
+        assert!(before < Fx::from_int(5), "{before:?}");
+    }
+
+    #[test]
+    fn a_group_of_two_hundred_infantry_fits_inside_five_cells_and_a_hundred_tanks_do_not() {
+        let r = outer_radius(Fx::ZERO, 200, spacing_for(Fx::from_ratio(2, 5)));
+        assert!(r < Fx::from_int(5), "{r:?}");
+        let tanks = outer_radius(Fx::ZERO, 100, spacing_for(Fx::from_ratio(6, 5)));
+        assert!(tanks > Fx::from_int(5), "{tanks:?}");
+    }
+
+    #[test]
+    fn planned_rings_follow_each_other() {
+        let spacing = spacing_for(Fx::from_ratio(6, 5));
+        let a = outer_radius(Fx::ZERO, 45, spacing);
+        let b = outer_radius(a, 60, spacing);
+        assert!(a > Fx::from_int(4) && a < Fx::from_int(6), "{a:?}");
+        assert!(b > a && b < Fx::from_int(9), "{b:?}");
     }
 }

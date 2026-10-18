@@ -1,0 +1,102 @@
+// Two groups pass head-on through a narrow gap, and a unit holding position stands in a
+// corridor while others route round it (WP4.4, docs/rules/collision.md). The map is
+// assets/maps/crowd_jam, a flat 64 by 40 cell map made by
+// `cargo run -p sf_headless --example gen_crowd_jam_map -- assets/maps/crowd_jam`:
+//
+//   x 0..26         x 27..34              x 35..63
+//   the west room   a wall of rock, every the east room; in it a corridor (x 40..58,
+//   (open ground)   row, with a gap in    rows 30..34, five cells wide) between two
+//                   rows 18..20 (three    walls of rock
+//                   cells wide, eight
+//                   long)
+//
+// Who does what (entity ids are the slots in the order of the spawns, all at generation
+// 0, all owner 0 so that they are friends and may push each other aside; the unit
+// definitions are the frozen copy of the pathing scenario):
+//
+//   slots 0..9    A: 10 riflemen   west room -> (56, 24) in the east room, through the gap
+//   slots 10..17  A: 8 light tanks the same
+//   slots 18..27  B: 10 riflemen   east room -> (8, 24) in the west room, through the gap,
+//   slots 28..35  B: 8 light tanks the other way: the two groups meet head-on in it
+//   slots 36..43  C: 8 light tanks along the corridor of the east room to (60, 32)
+//   slot 44       the holder, a heavy tank, on HoldPosition in the middle of the corridor
+//
+// A, B and C are each one order, so each class of each group gets a flowfield
+// (docs/rules/pathfinding.md); the 36 units of A and B follow the fields into the gap
+// from both ends and have to keep right to get by each other; the 8 tanks of C go round
+// the holder, in a corridor that has room for two lanes beside it.
+//
+// tools/sf_headless/tests/crowd_jam.rs asserts that every unit of the three groups ends
+// its order, near where it was sent, that the holder never moves a hair, that nobody ends
+// a tick on ground its class cannot enter, that bodies do not overlap beyond the slack at
+// the end and that no unit stays stuck. CI runs the scenario on Linux and Windows and
+// requires the checksum in crowd_jam.expected.
+//
+// `unit_defs` is the frozen copy of the definitions `pathing` uses, so a rebalance of
+// assets/config/ does not move the checksum.
+
+Scenario(
+    name: "crowd_jam",
+    seed: 0x7E44_0044,
+    map: (width: 64, height: 40),
+    map_name: Some("crowd_jam"),
+    unit_defs: Some("pathing_defs"),
+    ticks: 3000,
+    commands: [
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (4, 17))), // slot 0: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (5, 17))), // slot 1: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 17))), // slot 2: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (7, 17))), // slot 3: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 17))), // slot 4: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (4, 18))), // slot 5: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (5, 18))), // slot 6: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 18))), // slot 7: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (7, 18))), // slot 8: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 18))), // slot 9: A rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 15))), // slot 10: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (11, 15))), // slot 11: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 15))), // slot 12: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 15))), // slot 13: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 22))), // slot 14: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (11, 22))), // slot 15: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (13, 22))), // slot 16: A light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 22))), // slot 17: A light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (59, 17))), // slot 18: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (58, 17))), // slot 19: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (57, 17))), // slot 20: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (56, 17))), // slot 21: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (55, 17))), // slot 22: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (59, 18))), // slot 23: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (58, 18))), // slot 24: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (57, 18))), // slot 25: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (56, 18))), // slot 26: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (55, 18))), // slot 27: B rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 15))), // slot 28: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (52, 15))), // slot 29: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (50, 15))), // slot 30: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 15))), // slot 31: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 22))), // slot 32: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (52, 22))), // slot 33: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (50, 22))), // slot 34: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 22))), // slot 35: B light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 30))), // slot 36: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 31))), // slot 37: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 32))), // slot 38: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 33))), // slot 39: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (38, 30))), // slot 40: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (38, 31))), // slot 41: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (38, 32))), // slot 42: C light tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (38, 33))), // slot 43: C light tank
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 0, cell: (49, 32))), // slot 44: the holder, a heavy tank
+
+        // --- tick 1: three orders and a hold ---
+        // A: the west room to the east room, through the gap.
+        (tick: 1, command: OrderMove(ids: [Range(0, 18)], target: (56, 24))),
+        // B: the east room to the west room, through the gap, the other way.
+        (tick: 1, command: OrderMove(ids: [Range(18, 36)], target: (8, 24))),
+        // C: along the corridor of the east room, past the holder.
+        (tick: 1, command: OrderMove(ids: [Range(36, 44)], target: (60, 32))),
+        // The holder stands in the middle of the corridor and does not move.
+        (tick: 1, command: OrderHold(ids: [Id(44, 0)])),
+    ],
+)

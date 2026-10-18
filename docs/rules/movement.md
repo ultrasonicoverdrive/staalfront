@@ -100,7 +100,9 @@ uses it how*:
 * air flies over, as over everything.
 
 A unit on a bridge cell is just in the cell: there is no layering, so a vessel and a tank can be
-in the same cell at the same time (units occupy no cell until phase 4's collision, WP4.4).
+in the same cell at the same time. (Units occupy no cell; since WP4.4 they have **bodies**, and a
+vessel passing under a bridge collides with what crosses it: layers are not decided yet,
+`collision.md`, "Not here".)
 Because "under" only means anything over water, **a map must put a bridge cell over water**; a
 bridge painted over dry land would let a vessel cross the land through it. The generator does
 this; the editor (phase 10) is where it gets checked. A bridge that can be destroyed (missions
@@ -271,9 +273,12 @@ runs on Linux and Windows in CI.
 
 ## Not here
 
-* **Collision and a stuck unit** (WP4.4), **replanning** a blocked route (WP4.7). Single units are
-  routed since WP4.2 and groups sent to one place follow a flowfield since WP4.3
-  (`docs/rules/pathfinding.md`); the legacy `MoveTo` and the wanderers are not routed.
+* **Replanning** a blocked route (WP4.7). Collision and a stuck unit are WP4.4
+  (`docs/rules/collision.md`: bodies, pushing, a unit that steps to a free neighbouring spot and asks
+  for a new route; a step the terrain refuses now **slides** along what it grazed for a unit that walks
+  an order, so a unit the crowd pushed off its route is not refused; the legacy walks still stand at
+  the edge). Single units are routed since WP4.2 and groups sent to one place follow a flowfield since
+  WP4.3 (`docs/rules/pathfinding.md`); the legacy `MoveTo` and the wanderers are not routed.
 * **Slope**, above.
 * **`water_speed` of a role** is not read by the simulation; the hover class's cost on water
   says it.

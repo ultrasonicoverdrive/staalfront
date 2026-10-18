@@ -39,12 +39,19 @@
 // lane (grass, road, ore, bridge, water, rock), in each lane foot, wheeled,
 // tracked, hover: slots 0..23 (slot = 4 * lane + class); the gunboats 24 and 25;
 // the survey_drone 26. Owners: 0 Meridian, 1 Veyran.
+//
+// `collision: Some(false)`: the four units of a lane are SPAWNED ON ONE CELL and walk
+// side by side, and the test asserts exact arrival ticks and positions. That is a
+// test of the terrain costs; bodies (WP4.4, docs/rules/collision.md) would push the
+// four apart and move every number. Collision has its own scenarios (bridge_200,
+// crowd_jam). The checksum is the one pinned at WP4.2.
 Scenario(
     name: "terrain_costs",
     seed: 0x7E44_0041,
     map: (width: 40, height: 20),
     map_name: Some("terrain_costs"),
     unit_defs: Some("terrain_costs_defs"),
+    collision: Some(false),
     ticks: 900,
     commands: [
         // --- the grass lane, row 2: from 2 to 17 ---

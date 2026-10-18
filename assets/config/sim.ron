@@ -1,6 +1,6 @@
-// Settings of the simulation itself (WP4.2, WP4.3), as opposed to the definitions of
+// Settings of the simulation itself (WP4.2, WP4.3, WP4.4), as opposed to the definitions of
 // its units. Read by sf_data::sim_settings; sf_bridge hands them to the world.
-// The rules they belong to are in docs/rules/pathfinding.md.
+// The rules they belong to are in docs/rules/pathfinding.md and docs/rules/collision.md.
 //
 // path_node_budget: how many nodes of path search work the simulation may do in
 // one tick, for all units together. Every search step that expands a cell or a
@@ -21,7 +21,27 @@
 // on its own); 1 is not a group and is refused; at most 1000.
 // Tests and scenarios that do not give one use the simulation's own default, which is
 // the same number.
+//
+// collision (WP4.4): whether units have bodies. A body is a disc of half the unit's `size`
+// (unit_defs.ron); bodies are pushed apart, units that meet head-on keep right, a unit
+// holding position is never pushed. false lets units pass through each other, as before WP4.4.
+//
+// wait_ticks: a unit that has not come closer to where it is going for this many ticks
+// detours round what is in its way (a unit holding position, a unit coming the other way).
+// 20 ticks are a second. At least 1.
+//
+// stuck_ticks: a unit that has not come closer for this many ticks steps to a free
+// neighbouring spot. More than wait_ticks, at most 1000.
+//
+// stuck_attempts: after this many such steps in a row it asks for a new route (the hook of
+// WP4.7). At least 1.
+// Tests and scenarios that do not give them use the simulation's own defaults, which are
+// the same numbers.
 (
     path_node_budget: 4096,
     flowfield_threshold: 8,
+    collision: true,
+    wait_ticks: 6,
+    stuck_ticks: 60,
+    stuck_attempts: 3,
 )

@@ -118,6 +118,18 @@ pub fn flowfield_threshold(settings: &SimSettings) -> u32 {
     settings.flowfield_threshold
 }
 
+/// The collision settings from the settings of `sim.ron`, to hand to
+/// [`World::with_collision`](sf_sim::World::with_collision) (which refuses a
+/// combination that does not fit; `sf_data` has checked the same rules).
+pub fn collision_config(settings: &SimSettings) -> sf_sim::CollisionConfig {
+    sf_sim::CollisionConfig {
+        enabled: settings.collision,
+        wait_ticks: settings.wait_ticks,
+        stuck_ticks: settings.stuck_ticks,
+        stuck_attempts: settings.stuck_attempts,
+    }
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -282,7 +294,7 @@ mod tests {
         // And a budget the world refuses comes back as its error, not a panic here.
         let too_small = SimSettings {
             path_node_budget: sf_sim::MIN_NODE_BUDGET - 1,
-            flowfield_threshold: 8,
+            ..SimSettings::embedded()
         };
         assert!(
             World::new(WorldConfig::new(1))
@@ -306,6 +318,28 @@ mod tests {
             World::new(WorldConfig::new(1))
                 .unwrap()
                 .with_flowfield_threshold(1)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_shipped_collision_settings_are_the_simulations_defaults_and_a_world_takes_them() {
+        let config = collision_config(&SimSettings::embedded());
+        assert_eq!(config, sf_sim::CollisionConfig::DEFAULT);
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_collision(config)
+            .unwrap();
+        assert_eq!(world.collision_config(), config);
+        // A combination that does not fit comes back as the world's error.
+        let bad = sf_sim::CollisionConfig {
+            wait_ticks: 0,
+            ..config
+        };
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_collision(bad)
                 .is_err()
         );
     }

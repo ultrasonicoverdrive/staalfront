@@ -74,7 +74,8 @@ pub struct UnitStats {
     pub speed_per_tick: Fx,
     /// Facing steps (of 256) per tick. Nonzero for a mobile kind.
     pub turn_per_tick: u8,
-    /// Diameter in cells (zero for a structure); collision comes in phase four.
+    /// Diameter in cells (zero for a structure): the body of a unit is a disc of half
+    /// of it for a radius (WP4.4, `docs/rules/collision.md`).
     pub size: Fx,
     /// The cells a structure covers; `None` for everything that is not a
     /// structure.

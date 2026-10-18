@@ -1,21 +1,27 @@
 //! Settings of the simulation (WP4.2): the numbers a designer turns that are
 //! not a property of one unit, in `assets/config/sim.ron`.
 //!
-//! Today that is the node budget of the path service per tick (WP4.2) and the
+//! Today that is the node budget of the path service per tick (WP4.2), the
 //! flowfield threshold (WP4.3): how many units of one class a single order must
-//! send to one place to get a flowfield. Game data is in RON and not in code
+//! send to one place to get a flowfield, and the collision settings (WP4.4):
+//! whether bodies collide, how long a blocked unit waits before it detours, how
+//! long without progress makes it step to a free neighbouring spot, and how
+//! many such steps before it asks for a new route. Game data is in RON and not in code
 //! (PLAN.md section 5, rule 6), so the numbers live in the file; the simulation
 //! keeps its own defaults (the same numbers) for worlds that are given none,
 //! which is what the tests and the frozen headless scenarios use, so that
 //! turning a knob in the file never moves their checksums.
-//! `sf_bridge::path_budget` and `sf_bridge::flowfield_threshold` hand the values
-//! to the world, which checks them against its minimums.
+//! `sf_bridge::path_budget`, `sf_bridge::flowfield_threshold` and
+//! `sf_bridge::collision_config` hand the values to the world, which checks them
+//! against its minimums.
 //!
 //! ```
 //! use sf_data::sim_settings::SimSettings;
 //!
 //! assert_eq!(SimSettings::embedded().path_node_budget, 4096);
 //! assert_eq!(SimSettings::embedded().flowfield_threshold, 8);
+//! assert!(SimSettings::embedded().collision);
+//! assert_eq!(SimSettings::embedded().stuck_ticks, 60);
 //! ```
 
 use std::fmt;
@@ -33,6 +39,26 @@ pub const MAX_PATH_NODE_BUDGET: u32 = 1_000_000;
 /// typing mistake.
 pub const MAX_FLOWFIELD_THRESHOLD: u32 = 1000;
 
+/// The most ticks a unit may be given before it is called stuck: a bound against
+/// a typing mistake (fifty seconds).
+pub const MAX_STUCK_TICKS: u16 = 1000;
+
+fn default_collision() -> bool {
+    true
+}
+
+fn default_wait_ticks() -> u16 {
+    6
+}
+
+fn default_stuck_ticks() -> u16 {
+    60
+}
+
+fn default_stuck_attempts() -> u8 {
+    3
+}
+
 /// The settings of the simulation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,6 +68,19 @@ pub struct SimSettings {
     /// Units of one movement class that one order must send to one place for a
     /// flowfield; zero turns flowfields off.
     pub flowfield_threshold: u32,
+    /// Whether bodies collide (WP4.4); false lets units pass through each other.
+    #[serde(default = "default_collision")]
+    pub collision: bool,
+    /// Ticks a unit that cannot get on waits before it detours.
+    #[serde(default = "default_wait_ticks")]
+    pub wait_ticks: u16,
+    /// Ticks without progress after which a unit steps to a free neighbouring
+    /// spot.
+    #[serde(default = "default_stuck_ticks")]
+    pub stuck_ticks: u16,
+    /// Such steps in a row after which it asks for a new route.
+    #[serde(default = "default_stuck_attempts")]
+    pub stuck_attempts: u8,
 }
 
 /// Why a settings file was refused.
@@ -54,6 +93,17 @@ pub enum SimSettingsError {
     /// `flowfield_threshold` is one (a lone unit is no group) or above
     /// [`MAX_FLOWFIELD_THRESHOLD`].
     FlowfieldThreshold(u32),
+    /// The collision numbers are not a valid combination: at least one tick to
+    /// wait, a stuck limit above it and at most [`MAX_STUCK_TICKS`], and at
+    /// least one attempt.
+    Collision {
+        /// `wait_ticks`.
+        wait: u16,
+        /// `stuck_ticks`.
+        stuck: u16,
+        /// `stuck_attempts`.
+        attempts: u8,
+    },
 }
 
 impl fmt::Display for SimSettingsError {
@@ -67,6 +117,16 @@ impl fmt::Display for SimSettingsError {
             Self::FlowfieldThreshold(n) => write!(
                 f,
                 "sim.ron: flowfield_threshold {n} is not 0 (off) or between 2 and {MAX_FLOWFIELD_THRESHOLD}"
+            ),
+            Self::Collision {
+                wait,
+                stuck,
+                attempts,
+            } => write!(
+                f,
+                "sim.ron: wait_ticks {wait}, stuck_ticks {stuck} and stuck_attempts {attempts} do not fit: \
+                 wait_ticks is at least 1, stuck_ticks is above it and at most {MAX_STUCK_TICKS}, \
+                 stuck_attempts is at least 1"
             ),
         }
     }
@@ -88,6 +148,17 @@ impl SimSettings {
             return Err(SimSettingsError::FlowfieldThreshold(
                 settings.flowfield_threshold,
             ));
+        }
+        if settings.wait_ticks < 1
+            || settings.stuck_ticks <= settings.wait_ticks
+            || settings.stuck_ticks > MAX_STUCK_TICKS
+            || settings.stuck_attempts < 1
+        {
+            return Err(SimSettingsError::Collision {
+                wait: settings.wait_ticks,
+                stuck: settings.stuck_ticks,
+                attempts: settings.stuck_attempts,
+            });
         }
         Ok(settings)
     }
@@ -140,6 +211,25 @@ mod tests {
             SimSettings::from_ron("(path_node_budget: 4096)"),
             Err(SimSettingsError::Ron(_))
         ));
+    }
+
+    #[test]
+    fn the_collision_settings_have_defaults_and_are_checked() {
+        let s = SimSettings::from_ron("(path_node_budget: 4096, flowfield_threshold: 8)").unwrap();
+        assert!(s.collision);
+        assert_eq!((s.wait_ticks, s.stuck_ticks, s.stuck_attempts), (6, 60, 3));
+        let with = |wait: u16, stuck: u16, attempts: u8| {
+            SimSettings::from_ron(&format!(
+                "(path_node_budget: 4096, flowfield_threshold: 8, collision: false, \
+                 wait_ticks: {wait}, stuck_ticks: {stuck}, stuck_attempts: {attempts})"
+            ))
+        };
+        assert!(!with(1, 2, 1).unwrap().collision, "can be turned off");
+        assert!(with(0, 40, 3).is_err(), "at least a tick to wait");
+        assert!(with(40, 40, 3).is_err(), "stuck comes after waiting");
+        assert!(with(6, 1001, 3).is_err(), "bounded");
+        assert!(with(6, 1000, 3).is_ok());
+        assert!(with(6, 40, 0).is_err(), "at least one attempt");
     }
 
     #[test]

@@ -9,7 +9,9 @@ use std::collections::{BTreeMap, BinaryHeap};
 
 use sf_math::{Facing, Fx, Rng, Vec2};
 
-use super::field::{Field, FieldState, Fields, GOAL, IDLE_TICKS, LOOKAHEAD, MAX_SLOTS, UNSET};
+use super::field::{
+    Field, FieldState, Fields, GOAL, IDLE_TICKS, LOOKAHEAD, Layout, MAX_SLOTS, UNSET,
+};
 use super::grid::DIRS;
 use super::tests::{FOOT, mid, movement, terrain};
 use super::*;
@@ -533,19 +535,81 @@ fn a_group_bigger_than_the_slots_shares_them_round() {
 }
 
 #[test]
-fn the_second_class_of_an_order_starts_further_out_in_the_spiral() {
+fn a_group_order_gives_each_class_a_ring_and_the_slots_are_spaced_for_the_bodies() {
+    // 40 riflemen in one class: a spacing of three tenths and a sixteenth, the
+    // innermost ring.
     let rows: Vec<String> = (0..32).map(|_| ".".repeat(64)).collect();
-    let mut rig = Rig::new(&as_refs(&rows), &[(1, 1), (2, 1), (3, 1)]);
+    let at: Vec<(u32, u32)> = (0..40).map(|k| (1 + k % 10, 1 + k / 10)).collect();
+    let mut rig = Rig::new(&as_refs(&rows), &at);
     rig.order((40, 20));
-    let first = rig.p.fields.entries[0].slot_base;
-    // The same order, as the next class of it.
-    let serial = rig
+    let layout = rig.p.fields.entries[0].layout;
+    assert_eq!(layout.rank, 0);
+    assert_eq!(layout.inner, Fx::ZERO);
+    assert_eq!(
+        layout.spacing,
+        Fx::from_ratio(3, 10) + super::slots::GAP,
+        "three quarters of a rifleman's width and a gap"
+    );
+    assert_ne!(layout.order, 0);
+    rig.build();
+    let f = rig.field();
+    // No two slots are closer than the spacing.
+    for (a, &p) in f.slots.iter().enumerate() {
+        for &q in &f.slots[a + 1..] {
+            assert!((p - q).length() >= f.layout.spacing - Fx::from_ratio(1, 1000));
+        }
+    }
+}
+
+#[test]
+fn the_ring_of_a_later_class_begins_where_the_earlier_ones_end_and_skips_their_slots() {
+    // Two fields of one order (the second is the next class's): the later one
+    // starts further out, and its points that are too near a slot of the earlier
+    // one, or are the same point, are left out, though they are in sight.
+    let rows: Vec<String> = (0..48).map(|_| ".".repeat(64)).collect();
+    let at: Vec<(u32, u32)> = (0..12).map(|k| (1 + k % 6, 1 + k / 6)).collect();
+    let mut rig = Rig::new(&as_refs(&rows), &at);
+    rig.order((40, 24));
+    rig.build();
+    let first = rig.field().clone();
+    let order = first.layout.order;
+    let wide = super::slots::spacing_for(Fx::from_ratio(12, 10));
+    // The next class of the same order: no inner radius at all, so that it would
+    // start in the middle and run into the first one's slots if nothing stopped it.
+    let sectors = rig.graph().sectors.count();
+    let serial = rig.p.fields.create(
+        0,
+        first.goal,
+        Layout {
+            order,
+            rank: 1,
+            spacing: wide,
+            inner: Fx::ZERO,
+        },
+        12,
+        sectors,
+    );
+    assert_ne!(serial, 0);
+    // The units follow the second field now (it needs members to be built).
+    for i in 0..12 {
+        rig.e.route[i].field_serial = serial;
+    }
+    rig.build();
+    let second = rig
         .p
         .fields
-        .create(0, rig.p.fields.entries[0].goal, 3, 3, 8);
-    assert_ne!(serial, 0);
-    let second = rig.p.fields.entries[1].slot_base;
-    assert_eq!((first, second), (0, 3));
+        .entries
+        .iter()
+        .find(|f| f.serial == serial)
+        .unwrap();
+    assert_eq!(second.slots.len(), 12);
+    for &p in &second.slots {
+        assert!(!first.slots.contains(&p), "one point in two classes");
+        for &q in &first.slots {
+            let apart = (first.layout.spacing + wide).div_int(2) - super::slots::GAP;
+            assert!((p - q).length() >= apart, "{p:?} too near {q:?}");
+        }
+    }
 }
 
 // --- following ---
@@ -631,11 +695,11 @@ fn a_refused_step_goes_cell_by_cell_and_a_second_one_strands_the_unit() {
 fn the_least_recently_used_field_goes_when_the_pool_is_full_ties_to_the_lowest() {
     let mut fields = Fields::new(8);
     let serials: Vec<u32> = (0..super::FIELD_POOL)
-        .map(|k| fields.create(0, k as u32, 0, 8, 4))
+        .map(|k| fields.create(0, k as u32, Layout::ALONE, 8, 4))
         .collect();
     assert_eq!(fields.live() as usize, super::FIELD_POOL);
     // All made at the same tick: the first goes.
-    let ninth = fields.create(0, 99, 0, 8, 4);
+    let ninth = fields.create(0, 99, Layout::ALONE, 8, 4);
     assert!(fields.find(serials[0]).is_none());
     assert!(fields.find(ninth).is_some());
     for &s in &serials[1..] {
@@ -648,7 +712,7 @@ fn the_least_recently_used_field_goes_when_the_pool_is_full_ties_to_the_lowest()
     }
     fields.touch(serials[1]);
     fields.touch(ninth);
-    let tenth = fields.create(0, 100, 0, 8, 4);
+    let tenth = fields.create(0, 100, Layout::ALONE, 8, 4);
     assert!(fields.find(serials[1]).is_some(), "used lately");
     assert!(fields.find(serials[2]).is_none(), "the oldest unused");
     assert!(fields.find(tenth).is_some());
@@ -658,8 +722,8 @@ fn the_least_recently_used_field_goes_when_the_pool_is_full_ties_to_the_lowest()
 #[test]
 fn a_field_nobody_uses_expires_and_one_in_use_does_not() {
     let mut fields = Fields::new(8);
-    let idle = fields.create(0, 1, 0, 8, 4);
-    let busy = fields.create(0, 2, 0, 8, 4);
+    let idle = fields.create(0, 1, Layout::ALONE, 8, 4);
+    let busy = fields.create(0, 2, Layout::ALONE, 8, 4);
     for _ in 0..IDLE_TICKS {
         fields.tick();
         fields.touch(busy);
@@ -669,6 +733,91 @@ fn a_field_nobody_uses_expires_and_one_in_use_does_not() {
     fields.touch(busy);
     assert!(fields.find(idle).is_none());
     assert!(fields.find(busy).is_some());
+}
+
+#[test]
+fn a_field_that_is_being_built_expires_too_when_nobody_asks_for_it() {
+    // The documented rule (the comment of `Fields::tick`): the build in flight is
+    // dropped like any other field that nobody has asked for in IDLE_TICKS, and the
+    // builder is free for the queue.
+    let mut fields = Fields::new(8);
+    let building = fields.create(0, 1, Layout::ALONE, 8, 4);
+    let queued = fields.create(0, 2, Layout::ALONE, 8, 4);
+    fields.touch(queued);
+    // Start the first build by hand, as `advance` does.
+    let entry = fields.find(building).unwrap();
+    fields.entries[entry].state = FieldState::Building;
+    fields.cur = Some(super::field::Cur::new(entry, fields.entries[entry].born));
+    for _ in 0..=IDLE_TICKS {
+        fields.tick();
+        fields.touch(queued);
+    }
+    assert!(fields.find(building).is_none(), "dropped");
+    assert!(
+        fields.cur.is_none(),
+        "and the build in flight ended with it"
+    );
+    assert!(fields.find(queued).is_some(), "the one in use stays");
+}
+
+#[test]
+fn a_stranded_member_gets_another_try_when_the_map_changes_and_does_not_keep_its_field_alive() {
+    let rows: Vec<String> = (0..48).map(|_| ".".repeat(96)).collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 20), (2, 21), (3, 20)]);
+    rig.order((90, 20));
+    rig.build();
+    let serial = rig.e.route[0].field_serial;
+    // Two refused steps strand unit 0 (the second goes cell by cell).
+    assert!(matches!(
+        rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT)),
+        Steer::Go(..)
+    ));
+    rig.p.blocked(&mut rig.e, 0);
+    assert!(matches!(
+        rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT)),
+        Steer::Go(..)
+    ));
+    rig.p.blocked(&mut rig.e, 0);
+    assert_eq!(
+        rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT)),
+        Steer::Stranded
+    );
+    // It stays stranded while nothing changes...
+    assert_eq!(
+        rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT)),
+        Steer::Stranded
+    );
+    // ...and a change of the map, anywhere, gives it another go: the epoch moved on,
+    // so the leg is chosen again, smoothing allowed (this used to be checked after
+    // the stranded state, which therefore never ended).
+    place(&mut rig, &[(80, 2)], 3);
+    assert!(
+        matches!(
+            rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT)),
+            Steer::Go(..)
+        ),
+        "it is on the move again"
+    );
+    assert!(!rig.e.route[0].cautious);
+    // A stranded member does not touch its field: with every member stranded the
+    // field expires after IDLE_TICKS and the members are routed on their own.
+    rig.p.blocked(&mut rig.e, 0);
+    rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT));
+    rig.p.blocked(&mut rig.e, 0);
+    // Only unit 0 is a member now, and it is stranded.
+    rig.e.route[1] = super::Route::IDLE;
+    rig.e.route[2] = super::Route::IDLE;
+    assert_eq!(rig.e.route[0].state, super::RouteState::Stranded);
+    for _ in 0..=IDLE_TICKS + 1 {
+        rig.serve();
+        let _ = rig.p.steer(&mut rig.e, 0, mid(90, 20), Some(FOOT));
+    }
+    assert!(
+        rig.p.fields.find(serial).is_none(),
+        "the field of a stranded member expired"
+    );
+    // And the member found it gone and is routed on its own from where it stands.
+    assert_eq!(rig.e.route[0].field_serial, 0);
 }
 
 // --- a change of the map ---

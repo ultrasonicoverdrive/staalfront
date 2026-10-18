@@ -53,6 +53,13 @@
 // queue and the budget of single requests, which that crowd is the test of, and
 // its checksum is pinned on that: flowfields are off here. The same crowd on the
 // same map WITH the flowfield is run by tools/sf_headless/tests/flowfield.rs.
+//
+// `collision: Some(false)`: the units 5, 6 and 7 start one cell apart and are sent to
+// the SAME unreachable goal, and the test asserts that each stands in the middle of
+// its nearest shore cell, and the 24 transports start in a column one cell apart.
+// This is a test of routes and of the queue; bodies (WP4.4,
+// docs/rules/collision.md) would push those units apart and move the positions
+// asserted. Collision has its own scenarios (bridge_200, crowd_jam).
 Scenario(
     name: "pathing",
     seed: 0x7E44_0042,
@@ -60,6 +67,7 @@ Scenario(
     map_name: Some("pathing"),
     unit_defs: Some("pathing_defs"),
     flowfield_threshold: Some(0),
+    collision: Some(false),
     ticks: 2600,
     commands: [
         (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 4))), // slot 0: tank, the maze

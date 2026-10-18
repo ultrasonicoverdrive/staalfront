@@ -106,7 +106,7 @@ the file does not matter.
 | `speed` | cells per game second, above 0 up to 20; only with a `movement`. On terrain a unit never moves more than 17.5 cells per second (`movement.md`), so a speed above that is capped; no role comes near |
 | `water_speed` | cells per second on water, if different from `speed` (the amphibious transport) |
 | `turn_rate` | facing steps per tick, at least 1; only with a `movement` |
-| `size` | diameter in cells for collision and selection (not for structures) |
+| `size` | diameter in cells for collision and selection (not for structures). Since WP4.4 the body of a unit is a disc of half of it for a radius; two bodies of 0.75 cells or less (infantry) keep three quarters of the sum of their radii, all others the whole sum (`collision.md`). Aircraft (a class that no terrain stops) have no body |
 | `footprint` | `(width: w, height: h)` in cells, 1 to 16; **required for and only for a Structure** |
 | `sight` | cells; above 0 except for an Object |
 | `weapons` | up to four ids from `weapon_defs.ron` |
@@ -228,8 +228,8 @@ width and height).
 of `docs/rules/terrain.md`; `World::occupant_at` answers with the structure for each of
 them, `World::cell_of` with the anchor and `World::footprint_of` with the size. Despawning
 it frees all its cells in the same command. **A mobile unit (and an object) occupies no
-cell**, the same as the wanderers of WP2.1: units share cells until collision arrives in
-phase 4. The one rule that touches them is that a unit never **appears** inside a
+cell**, the same as the wanderers of WP2.1: units share cells (since WP4.4 they have bodies that
+push each other apart instead, `collision.md`). The one rule that touches them is that a unit never **appears** inside a
 structure (`SpawnUnit` on an occupied cell is refused). Since WP4.1 it is also refused on terrain its movement class cannot
 enter (a rifleman is not put into the river, a gunboat not onto grass; `movement.md`); on a
 world without a terrain layer or without a movement table every cell is open ground and only the

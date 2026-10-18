@@ -44,6 +44,7 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
     let settings = SimSettings::embedded();
     let budget = sf_bridge::path_budget(&settings);
     let threshold = sf_bridge::flowfield_threshold(&settings);
+    let collision = sf_bridge::collision_config(&settings);
     world
         .with_movement(table)
         .expect("a world that has not started takes its movement table")
@@ -51,6 +52,8 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
         .expect("the shipped path budget is one a world takes")
         .with_flowfield_threshold(threshold)
         .expect("the shipped flowfield threshold is one a world takes")
+        .with_collision(collision)
+        .expect("the shipped collision settings are ones a world takes")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a
@@ -203,5 +206,14 @@ mod tests {
         assert_eq!(world.path_stats().budget, settings.path_node_budget);
         assert_eq!(world.flowfield_threshold(), settings.flowfield_threshold);
         assert_eq!(settings.flowfield_threshold, 8, "the shipped value");
+        // And the collision settings (WP4.4).
+        assert_eq!(
+            world.collision_config(),
+            sf_bridge::collision_config(&settings)
+        );
+        assert!(
+            world.collision_config().enabled,
+            "bodies collide in the game"
+        );
     }
 }
