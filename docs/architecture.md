@@ -858,13 +858,35 @@ it, 50 ms later than in the single-threaded game at worst (which stamped the
 tick about to run). The lockstep semantics are the world's, unchanged: commands
 of one tick run in `(player, sequence)` order. A command that still arrives for a
 tick that has run (the main thread read an old snapshot while the sim caught up)
-is scheduled for the next tick instead and counted (`late_commands`, F1); the run
-is then no longer "the commands as stamped", which is why the sim thread can keep
-a log of what ran when (`SimConfig::record_commands`, `LoggedCommand`).
-*The world's checksum includes the commands that wait for their tick*, so two
-runs have equal checksums only if every command also arrived at the same tick;
-`LoggedCommand::arrived` is that tick. Lockstep multiplayer (phase 14) has the
-same property and will need a deadline by which commands are in.
+is scheduled for the next tick instead, counted (`late_commands`, F1), printed
+to stderr and always logged with the tick that was asked for and the tick it ran
+at (`SimHandle::moved_commands`, the last 1,000; an entry only for a moved
+command, so it is cheap and bounded, and the game keeps it). The run is then no
+longer "the commands as stamped". The full log (`SimConfig::record_commands`:
+every command, `LoggedCommand`) grows with the session, so it is off in the game
+and on in the tests.
+
+**Open decision for phase 14 (lockstep), owner Tijmen: pending commands are in
+the world checksum.** The checksum hashes the commands that wait for their tick
+(`sf_sim::checksum`, the queue section). So two peers that receive the same
+command, for the same tick, at *different times* have different checksums in
+the ticks between its arrival and its execution: a false desync. A deadline by
+which commands must be in does not fix that (arrival times still differ by
+network jitter). Two ways out; both change a determinism rule (PLAN.md section
+12.4) and so need approval, and neither is done here:
+(a) hand a command to `World::schedule` only just before its tick (the queue
+is then empty at every checksum, but the net layer must hold commands back and
+the sim thread's channel has to do the same); or
+(b) leave the pending commands out of the checksum (a golden-moving change to
+`sf_sim`: every pinned checksum that has commands waiting at a tick end would
+change).
+`LoggedCommand::arrived` records when each command went in, which is what a
+single-threaded replay needs today to reproduce the checksums.
+
+**Latency.** From the click to visible movement: up to one tick of input delay
+(50 ms, `INPUT_DELAY_TICKS`) plus `INTERP_DELAY` (30 ms), about 80 ms, on top of
+the frame the click is handled in. Not a problem for an RTS; an adaptive delay
+is a follow-up (`docs/progress.md`).
 
 **The snapshot** (`SimSnapshot`) is everything the main thread asks of the world:
 
@@ -923,8 +945,10 @@ longer used by the game.
 `Shutdown` and joins the thread; the longest wait is the tick that is running.
 `stop()` returns what the thread leaves (`SimExit`: ticks, the full checksum
 history, the command log, whether it panicked). A sim thread that panicked is
-noticed by the runner (`SimHandle::is_running`) and ends the program with a
-failure exit code.
+noticed by the runner (`SimHandle::is_running`), which joins it, prints the
+panic message (kept in `SimExit::panic_message`) and ends the program with a
+failure exit code. `SimConfig::panic_at` is the test hook that makes it
+happen.
 
 **Determinism, and how it is tested.** The thread only calls `World::schedule`
 and `World::step`, in the order it received things. `SimConfig::manual()` makes
@@ -937,7 +961,11 @@ and every entity of every snapshot. The same file runs the thread on its own
 clock with commands sent live and replays its command log in a single-threaded
 world (equal checksums), measures a frame loop against a sim whose ticks take
 150 ms (the frames do not notice), checks that catching up is bounded and that
-a stall beyond the limit restarts the clock, and that the thread joins in every
+a stall beyond the limit restarts the clock, that a moved command is logged
+without the full log, that a panicking sim thread is noticed with its message
+kept, that `Runner` holds no `World` and steps nothing (a source check of
+`runner.rs`: the frame-loop test only drives a `SimHandle` and could not notice
+the stepping moving back into the frame), and that the thread joins in every
 state (running, never started, stepped, in the middle of a 400 ms tick, stopped
 twice).
 

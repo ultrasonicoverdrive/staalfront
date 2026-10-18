@@ -29,10 +29,15 @@
 //! in `(player, sequence)` order whatever the threads did. One exception, and
 //! it is not silent: a command that arrives for a tick the sim has already run
 //! (the main thread read an old snapshot while the sim caught up) is
-//! scheduled for the next tick instead and counted
-//! ([`SimCounters::late_commands`], shown in the F1 panel). With a recorded
-//! command log ([`SimConfig::record_commands`]) the tick it really ran at is
-//! known, so the run can be replayed.
+//! scheduled for the next tick instead, counted
+//! ([`SimCounters::late_commands`], shown in the F1 panel), printed to stderr
+//! and **always logged** with the tick that was asked for and the tick it ran
+//! at ([`SimHandle::moved_commands`], the last [`MOVED_LOG_CAP`] of them; the
+//! game keeps this log, one entry only for a command that was moved, so it is
+//! cheap and bounded). The full command log ([`SimConfig::record_commands`],
+//! every command with the tick it ran at, so that a run can be replayed) is
+//! off in the game, where it would grow with the length of the session, and on
+//! in the tests.
 //!
 //! # Time, and what happens when the sim is slow
 //!
@@ -121,6 +126,9 @@ const CHECKPOINT_EVERY: u64 = 100;
 /// The most per-tick times kept (about 2.7 hours of game time).
 const TICK_TIMES_CAP: usize = 200_000;
 
+/// The most moved commands kept ([`SimHandle::moved_commands`]).
+pub const MOVED_LOG_CAP: usize = 1000;
+
 /// Old snapshots the sim thread keeps for reuse.
 const RETIRED_KEPT: usize = 3;
 
@@ -154,6 +162,9 @@ pub struct SimConfig {
     /// Sleep this long once, in the step of this tick number: one hitch, for
     /// the tests of catching up.
     pub hitch: Option<(u64, Duration)>,
+    /// Panic in the step of this tick number: the test hook for a sim thread
+    /// that dies.
+    pub panic_at: Option<u64>,
     /// Keep every command with the tick it really ran at ([`SimExit::commands`]).
     pub record_commands: bool,
 }
@@ -169,6 +180,7 @@ impl SimConfig {
             max_lag_ticks: MAX_LAG_TICKS,
             extra_tick_time: Duration::ZERO,
             hitch: None,
+            panic_at: None,
             record_commands: false,
         }
     }
@@ -219,6 +231,8 @@ pub struct SimExit {
     pub commands: Vec<LoggedCommand>,
     /// The thread ended by panicking; the rest is empty.
     pub panicked: bool,
+    /// What the thread panicked with (the panic's message), when it did.
+    pub panic_message: Option<String>,
 }
 
 /// Counters of the sim thread, readable at any time.
@@ -271,6 +285,8 @@ struct Shared {
     late_commands: AtomicU64,
     late_publishes: AtomicU64,
     max_pass_ticks: AtomicU64,
+    /// Commands that were moved to a later tick, the last [`MOVED_LOG_CAP`].
+    moved: Mutex<Vec<LoggedCommand>>,
 }
 
 /// A lock that a panic elsewhere does not poison for good: the data behind
@@ -307,6 +323,7 @@ impl SimHandle {
             late_commands: AtomicU64::new(0),
             late_publishes: AtomicU64::new(0),
             max_pass_ticks: AtomicU64::new(0),
+            moved: Mutex::new(Vec::new()),
         });
         let (tx, rx) = mpsc::channel();
         let period = config.period;
@@ -411,6 +428,14 @@ impl SimHandle {
             .collect()
     }
 
+    /// The commands that were moved to a later tick because theirs had run
+    /// (the last [`MOVED_LOG_CAP`]), each with the tick that was asked for
+    /// and the tick it ran at. Always kept, whatever
+    /// [`SimConfig::record_commands`] says.
+    pub fn moved_commands(&self) -> Vec<LoggedCommand> {
+        lock(&self.shared.moved).clone()
+    }
+
     /// `(ticks run, checksum)` after every 100th tick.
     pub fn checkpoints(&self) -> Vec<(u64, u64)> {
         lock(&self.shared.checkpoints).clone()
@@ -427,13 +452,30 @@ impl SimHandle {
         if let Some(join) = self.join.take() {
             // Ignored when the thread is already gone.
             let _ = self.tx.send(Msg::Shutdown);
-            self.exit = Some(join.join().unwrap_or_else(|_| SimExit {
-                panicked: true,
-                ..SimExit::default()
+            self.exit = Some(join.join().unwrap_or_else(|payload| {
+                // Keep what it panicked with and say so: the default panic
+                // hook printed it on the sim thread, this puts it where the
+                // game's own messages are.
+                let message = panic_text(payload.as_ref());
+                eprintln!("sf_game: the simulation thread panicked: {message}");
+                SimExit {
+                    panicked: true,
+                    panic_message: Some(message),
+                    ..SimExit::default()
+                }
             }));
         }
         self.exit.get_or_insert_with(SimExit::default)
     }
+}
+
+/// The text of a panic payload (`panic!("..")` gives a `&str` or a `String`).
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "(not a text)".to_owned())
 }
 
 impl Drop for SimHandle {
@@ -489,6 +531,7 @@ impl Sim {
             checksums: self.world.checksum_history().to_vec(),
             commands: std::mem::take(&mut self.log),
             panicked: false,
+            panic_message: None,
         }
     }
 
@@ -601,20 +644,35 @@ impl Sim {
     fn schedule(&mut self, tick: Tick, player: PlayerId, command: Command) {
         let now = self.world.tick();
         let effective = tick.max(now);
-        if effective != tick {
+        let moved = effective != tick;
+        if moved {
             self.shared.late_commands.fetch_add(1, Ordering::Relaxed);
         }
-        let logged = self.config.record_commands.then(|| command.clone());
+        let logged = (self.config.record_commands || moved).then(|| command.clone());
         match self.world.schedule(effective, player, command) {
             Ok(()) => {
                 if let Some(command) = logged {
-                    self.log.push(LoggedCommand {
+                    let entry = LoggedCommand {
                         requested: tick,
                         effective,
                         arrived: now,
                         player,
                         command,
-                    });
+                    };
+                    if moved {
+                        eprintln!(
+                            "sf_game: sim: a command for tick {tick} came after it had run; \
+                             it runs in tick {effective}"
+                        );
+                        let mut kept = lock(&self.shared.moved);
+                        if kept.len() >= MOVED_LOG_CAP {
+                            kept.remove(0);
+                        }
+                        kept.push(entry.clone());
+                    }
+                    if self.config.record_commands {
+                        self.log.push(entry);
+                    }
                 }
             }
             Err(e) => eprintln!("sf_game: sim: command refused: {e}"),
@@ -626,6 +684,9 @@ impl Sim {
         let began = Instant::now();
         let number = self.world.tick().0;
         let report = self.world.step();
+        if self.config.panic_at == Some(number) {
+            panic!("sim thread test hook: panic in tick {number}");
+        }
         if !self.config.extra_tick_time.is_zero() {
             thread::sleep(self.config.extra_tick_time);
         }

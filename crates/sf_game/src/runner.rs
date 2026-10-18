@@ -1464,7 +1464,13 @@ impl App for Runner {
         self.pull_snapshot(now);
         let alpha = interpolation_alpha(now, self.snap.pace(), self.sim.period());
         if !self.sim.is_running() {
-            eprintln!("sf_game: the simulation thread stopped; leaving");
+            // `stop` joins the finished thread and prints its panic message,
+            // if it had one.
+            let exit = self.sim.stop();
+            eprintln!(
+                "sf_game: the simulation thread stopped{}; leaving",
+                if exit.panicked { " (it panicked)" } else { "" }
+            );
             self.failed.store(true, Ordering::Relaxed);
             ctx.request_exit();
         }
@@ -1698,6 +1704,15 @@ impl App for Runner {
             tick_ms.describe(WARMUP_FRAMES / 3)
         );
         let counters = self.sim.counters();
+        let moved = self.sim.moved_commands();
+        println!(
+            "summary: {} commands were moved to a later tick (asked for, ran at): {:?}",
+            moved.len(),
+            moved
+                .iter()
+                .map(|m| (m.requested.0, m.effective.0))
+                .collect::<Vec<_>>()
+        );
         println!(
             "summary: sim thread behind {} passes, clock restarts {}, late commands {}, \
              late snapshots {}",

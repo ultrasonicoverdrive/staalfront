@@ -535,6 +535,122 @@ fn a_command_for_a_past_tick_runs_next_and_is_counted() {
     assert_eq!(exit.commands[0].effective, Tick(5));
 }
 
+/// The game runs with the full command log off. A command that is moved to a
+/// later tick is logged anyway, with the tick asked for and the tick it ran at.
+#[test]
+fn a_moved_command_is_logged_without_the_full_log() {
+    let _serial = one_at_a_time();
+    let mut sim = SimHandle::spawn(light_world(), SimConfig::manual()).unwrap();
+    sim.advance(5);
+    let snap = sim.wait_for_tick(Tick(5), WAIT).unwrap();
+    let id = snap.views()[0].id;
+    let order = |at| Command::Order {
+        ids: vec![id],
+        order: Order::Move(at),
+        queued: false,
+    };
+    // One in time (tick 6), one late (tick 2).
+    sim.send_at(Tick(6), PlayerId(0), order(Vec2::from_ints(3, 3)));
+    sim.send_at(Tick(2), PlayerId(0), order(Vec2::from_ints(1, 1)));
+    sim.advance(2);
+    sim.wait_for_tick(Tick(7), WAIT).unwrap();
+    let moved = sim.moved_commands();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].requested, Tick(2));
+    assert_eq!(moved[0].effective, Tick(5));
+    assert_eq!(moved[0].player, PlayerId(0));
+    assert_eq!(moved[0].command, order(Vec2::from_ints(1, 1)));
+    let exit = sim.stop();
+    assert!(exit.commands.is_empty(), "the full log was not asked for");
+}
+
+/// A sim thread that dies is noticed, joined, and says why.
+#[test]
+fn a_panicking_sim_thread_is_noticed_and_its_message_kept() {
+    let _serial = one_at_a_time();
+    let mut sim = SimHandle::spawn(
+        light_world(),
+        SimConfig {
+            panic_at: Some(3),
+            ..SimConfig::manual()
+        },
+    )
+    .unwrap();
+    assert!(sim.is_running());
+    sim.advance(10);
+    // The thread ends in tick 3; wait for it rather than for a snapshot.
+    let began = Instant::now();
+    while sim.is_running() {
+        assert!(began.elapsed() < Duration::from_secs(10), "it never ended");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!sim.is_running());
+    // The snapshots up to the last published tick stay readable, and sending
+    // to a dead sim neither panics nor blocks.
+    assert_eq!(sim.latest().tick(), Tick(3));
+    sim.send(PlayerId(0), Command::Stop { ids: Vec::new() });
+    let exit = sim.stop().clone();
+    assert!(exit.panicked);
+    let message = exit.panic_message.expect("the panic message is kept");
+    assert!(message.contains("panic in tick 3"), "{message}");
+    assert!(!sim.is_running());
+    assert_eq!(sim.stop().panic_message.as_deref(), Some(message.as_str()));
+}
+
+/// What keeps the stepping out of the main thread. `Runner` has no `World`
+/// (it holds the `SimHandle` and a snapshot), the engine's `fixed_update`
+/// does nothing, and nothing in the `App` impl steps a world. If someone moves
+/// the stepping back, one of these fails; the frame-loop test above could not
+/// notice that, because it only drives a `SimHandle`.
+#[test]
+fn the_runner_holds_no_world_and_steps_nothing() {
+    let source =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runner.rs"))
+            .expect("runner.rs");
+    let source = source.split("#[cfg(test)]\nmod tests {").next().unwrap();
+    let block = |start: &str| -> String {
+        let at = source
+            .find(start)
+            .unwrap_or_else(|| panic!("{start} not found"));
+        let rest = &source[at..];
+        rest[..rest.find("\n}\n").expect("the block ends")].to_owned()
+    };
+    // The struct: a handle and a snapshot, no world.
+    let runner = block("pub struct Runner {");
+    assert!(
+        runner.contains("sim: SimHandle"),
+        "the runner holds the sim handle"
+    );
+    assert!(runner.contains("snap: Arc<SimSnapshot>"));
+    assert!(
+        !runner
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|w| w == "World"),
+        "Runner has a World field again:\n{runner}"
+    );
+    // The engine's fixed step is not where the sim runs.
+    assert!(
+        source.contains("fn fixed_update(&mut self, _ctx: &mut Context, _tick: u64) {}"),
+        "fixed_update must stay empty: the sim steps on its own thread"
+    );
+    // The App impl (fixed_update, render, ...) never steps a world.
+    let app = block("impl App for Runner {");
+    assert!(
+        !app.contains(".step()"),
+        "the App impl steps a world:\n{app}"
+    );
+    assert!(!app.contains("World"), "the App impl names a World");
+    // Only the scene builders, before the thread exists, step a world here.
+    let outside_scenes = source
+        .split("/// Draw the units with the placeholder shapes")
+        .next()
+        .unwrap();
+    assert!(
+        !outside_scenes.contains(".step()"),
+        "stepping outside the scene builders"
+    );
+}
+
 /// The pieces of the snapshot the cursor reads agree with the world they were
 /// taken from.
 #[test]

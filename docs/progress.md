@@ -441,7 +441,12 @@ Things to know:
   `sim.late_publishes`. **Tijmen's laptop bench has to run on this code** (README, "Benchmark").
 - The world's checksum includes the commands that wait for their tick, so a run is reproduced
   from its command log only if each command also goes in at the tick it arrived at
-  (`LoggedCommand::arrived`). Lockstep (phase 14) will need a deadline for commands; not decided here.
+  (`LoggedCommand::arrived`). That is a real problem for lockstep, not a matter of a deadline: see
+  the open decision 27 below. A command that is moved to a later tick is always logged (requested
+  and effective tick, `SimHandle::moved_commands`); the full command log is off in the game.
+- Latency from click to visible movement: up to 50 ms input delay plus 30 ms `INTERP_DELAY`,
+  about 80 ms. Follow-up: an adaptive `INTERP_DELAY` that follows the measured lateness of the
+  snapshots (and so is smaller on a fast machine), once the laptop's `sim.late_publishes` is known.
 - The sleep jitter of Windows timers is not known on the laptop; `INTERP_DELAY` (30 ms) is a guess
   made on Linux. If `sim.late_publishes` in the laptop's `bench.json` is not near zero, raise it or
   make it follow the measured lateness.
@@ -527,3 +532,11 @@ fixed, delete the entry in the same PR.
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
+27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen).**
+    `sf_sim::checksum` hashes the commands that wait for their tick, so two peers that receive the
+    same command for the same tick at different times get different checksums in between: a false
+    desync, which a command deadline does not remove. It changes a determinism rule (PLAN.md section
+    12.4), so it is not done in WP1.15. Options: (a) hand commands to `World::schedule` only just
+    before their tick, so the queue is empty whenever a checksum is taken; (b) leave the pending
+    commands out of the checksum (moves every pinned checksum that has commands waiting at a tick
+    end). Decide before WP14.1; see `docs/architecture.md` section 18.
