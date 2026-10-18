@@ -606,7 +606,9 @@ fn a_panicking_sim_thread_is_noticed_and_its_message_kept() {
 fn the_runner_holds_no_world_and_steps_nothing() {
     let source =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runner.rs"))
-            .expect("runner.rs");
+            .expect("runner.rs")
+            // A Windows checkout has CRLF line ends.
+            .replace("\r\n", "\n");
     let source = source.split("#[cfg(test)]\nmod tests {").next().unwrap();
     let block = |start: &str| -> String {
         let at = source
