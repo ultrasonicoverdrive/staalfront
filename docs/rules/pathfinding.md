@@ -234,7 +234,7 @@ refused; a step refused on that stands the unit still, with its order kept.
 
 The path service runs once per tick after the commands and before the units move
 (`Pathing::serve`). It has a **budget of nodes**: 4,096 by default (`DEFAULT_NODE_BUDGET`), at least
-512 (`MIN_NODE_BUDGET`: a search of two sectors must fit); `World::with_path_budget(n)` and the
+512 (`MIN_NODE_BUDGET`: a line of sight, 60 nodes at most, must fit with room to spare); `World::with_path_budget(n)` and the
 scenario field `path_budget` set it, before the world starts. **The number is game data**:
 `assets/config/sim.ron` (`path_node_budget`, read by `sf_data::sim_settings`, handed over by
 `sf_bridge::path_budget`) is what the game gives its world. A world that is given none, which is what
@@ -242,18 +242,31 @@ the tests and the frozen headless scenarios have, uses the simulation's default,
 turning the knob in the file never moves their checksums. A node is one cell or portal
 expanded in a search, or one cell looked at in a line of sight. Nothing else counts.
 
-* Requests are served **in the order of the entity ids** (slot, lowest first), one job at a time:
-  the job in flight finishes (over several ticks if it must) before the next starts. A unit whose
-  request is not served yet **waits where it stands**, deterministically.
-* A stage that does a whole local search starts only if the tick has the cells of its area left; the
-  abstract search and the smoothing stop between expansions and lines of sight (each of which has its
-  size known before it starts) and resume next tick. **A tick never spends more than the budget**
-  (`World::path_stats().nodes_last_tick`, asserted every tick by the headless tests).
+* Requests are served **going round the entity ids**, one job at a time: the job in flight finishes
+  (over several ticks if it must) before the next starts, and the next is the first unit with work
+  from the slot after the one the last job was started for (`next_slot`, hashed), once round at most
+  per tick. Requests asked in the same tick are therefore served in the order of the ids; a request
+  asked later waits for the lap, never for the whole queue twice, and the highest ids do not always
+  come last (service used to restart from the lowest id every tick: with 30 units and the smallest
+  budget the last waited 351 ticks, now 36). A unit whose request is not served yet **waits where it
+  stands**, deterministically.
+* **A tick spends its budget to the last node whenever a request waits, and never more.** Every
+  stage stops where the budget runs out and goes on next tick: the abstract search between two
+  expansions, a **local search between two cells** (`Local::begin` and `Local::advance`; a sector
+  search is no longer all-or-nothing, which used to leave up to a whole search's worth of budget
+  unspent while a later, smaller request could have used it), the smoothing and the direct sight
+  between two lines of sight. A line of sight is the one atom, at most 60 nodes, so what a tick can
+  leave unspent while someone waits is under that (an eighth of the smallest budget). A test
+  asserts at least 80 % use on every tick of the crowd with requests waiting (measured at least 88 %).
+  The state of the half-done search is the scratch space of the one job in flight, and the budget
+  is the only thing that cuts a search, so the result is the same whatever the slices (tested on
+  slices of 1 to 1,000 cells and on whole jobs at 61 and 512 nodes). **A tick never spends more than
+  the budget** (`World::path_stats().nodes_last_tick`, asserted every tick by the headless tests).
 * **The budget decides when a unit gets its route, not which**: a job finishes the same way on any
   budget (a test runs one on two budgets and compares the result; a scenario test runs it on two and
   compares where everyone ends). The budget is hashed with the routes.
 * Measured, `pathing_256`: 200 tanks on the playfield, all ordered on tick 1 to a different cell
-  some 300 cells away across two rivers: **all 200 had their first waypoints after 96 ticks** (4.8 s of
+  some 300 cells away across two rivers: **all 200 had their first waypoints after 85 ticks** (4.3 s of
   game time, 603 jobs in all with the refills) at the default budget; the test limits it to 120.
   A first request costs about a thousand nodes, a refill a few hundred.
 * **Large orders are not this service's job.** 200 units sent to 200 different cells is the worst

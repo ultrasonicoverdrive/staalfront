@@ -56,8 +56,9 @@ pub use route::{ABS_CAP, RING_CAP};
 /// expanded in the searches, plus cells looked at in lines of sight.
 pub const DEFAULT_NODE_BUDGET: u32 = 4096;
 
-/// The smallest budget a world accepts: a search of a whole sector must fit in
-/// one tick, or a request could never finish.
+/// The smallest budget a world accepts. A line of sight (60 nodes at most) is
+/// the one step the service cannot cut, so it must fit in a tick or a request
+/// could never finish; the minimum leaves room to make progress besides.
 pub const MIN_NODE_BUDGET: u32 = 512;
 
 /// A destination that moves further than this many cells from the cell a
@@ -164,6 +165,9 @@ pub(crate) struct Pathing {
     sector_epoch: Vec<u32>,
     budget: u32,
     next_ticket: u32,
+    /// Where the service looks for the next request: the slot after the one
+    /// it started last. Hashed.
+    next_slot: u32,
     /// Some route may be waiting for work: the service looks.
     scan: bool,
     stats: PathStats,
@@ -180,6 +184,7 @@ impl Pathing {
             sector_epoch: Vec::new(),
             budget: DEFAULT_NODE_BUDGET,
             next_ticket: 0,
+            next_slot: 0,
             scan: false,
             stats: PathStats {
                 budget: DEFAULT_NODE_BUDGET,
@@ -312,19 +317,28 @@ impl Pathing {
 
     // ---- the service ----------------------------------------------------------
 
-    /// Serves the requests of this tick, lowest slot first, until the budget is
-    /// spent. Called once per tick after the commands and before the units
-    /// move.
+    /// Serves the requests of this tick until the budget is spent, going round
+    /// the slots from the one after the last request that was started (the
+    /// lowest slot first when nothing was served yet), so that the highest ids
+    /// do not always come last. Called once per tick after the commands and
+    /// before the units move.
     pub fn serve(&mut self, e: &mut Entities, units: &UnitTable) {
         self.stats.nodes_last_tick = 0;
         if self.graphs.is_empty() || (self.job.is_none() && !self.scan) {
             return;
         }
         let mut rem = self.budget;
-        let mut cursor = 0;
+        // The slots looked at this tick, counted from `next_slot`: a pass
+        // visits each slot once, so a unit that needs a refill again at once
+        // waits for the next tick.
+        let (start, mut looked) = (self.next_slot as usize, 0);
         loop {
+            // Everything is spent: the rest waits for the next tick.
+            if rem == 0 {
+                break;
+            }
             if self.job.is_none() {
-                match self.next_job(e, units, &mut cursor) {
+                match self.next_job(e, units, start, &mut looked) {
                     Some(job) => self.job = Some(job),
                     None => {
                         self.scan = false;
@@ -357,8 +371,9 @@ impl Pathing {
                     route.clear_plan();
                     route.state = RouteState::Wanted;
                     route.ticket = ticket;
-                    // The cursor is past this unit: it is tried again next tick,
-                    // and a route that cannot be made does not hold up the others.
+                    // Looked at again on the next pass, and a route that cannot
+                    // be made does not hold up the others.
+                    self.scan = true;
                 }
             }
         }
@@ -370,12 +385,22 @@ impl Pathing {
             .count() as u32;
     }
 
-    /// The lowest slot from `cursor` on that has work waiting.
-    fn next_job(&mut self, e: &Entities, units: &UnitTable, cursor: &mut usize) -> Option<Job> {
+    /// The first slot with work waiting, looking from slot `start` (where the
+    /// tick began) round the ring of slots, `looked` of them already this tick. The slot after the one
+    /// it picks is where the next look starts, so that service goes on after the
+    /// last request started instead of from the lowest id every tick.
+    fn next_job(
+        &mut self,
+        e: &Entities,
+        units: &UnitTable,
+        start: usize,
+        looked: &mut usize,
+    ) -> Option<Job> {
         // Slots beyond the routes' vector have never asked for one.
-        while *cursor < e.route.len().min(e.len()) {
-            let i = *cursor;
-            *cursor += 1;
+        let n = e.route.len().min(e.len());
+        while *looked < n {
+            let i = (start + *looked) % n;
+            *looked += 1;
             if !e.alive[i] || e.def[i] == NO_DEF {
                 continue;
             }
@@ -398,6 +423,7 @@ impl Pathing {
             else {
                 continue;
             };
+            self.next_slot = ((i + 1) % n) as u32;
             return Some(Job::new(
                 i as u32,
                 route.ticket,
@@ -721,10 +747,14 @@ impl Pathing {
         h.write_u32(self.budget);
         h.write_u32(self.epoch);
         h.write_u32(self.next_ticket);
+        h.write_u32(self.next_slot);
         match &self.job {
             Some(job) => {
                 h.write_u8(1);
                 job.write_hash(h);
+                if job.is_searching() {
+                    h.write_u32(self.work.local.expanded());
+                }
             }
             None => h.write_u8(0),
         }

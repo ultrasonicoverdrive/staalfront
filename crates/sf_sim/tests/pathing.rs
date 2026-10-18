@@ -931,6 +931,18 @@ fn crowd(seed: u64) -> (Vec<u64>, u32) {
             .filter(|id| world.footprint_of(*id).is_some())
             .collect();
         assert!(world.path_stats().nodes_last_tick <= MIN_NODE_BUDGET);
+        // Whenever a request is left waiting, the tick's budget was spent: what a
+        // tick leaves unused is at most one line of sight, which is not cut in two.
+        let stats = world.path_stats();
+        if stats.waiting > 0 {
+            assert!(
+                u64::from(stats.nodes_last_tick) * 100 >= u64::from(MIN_NODE_BUDGET) * 80,
+                "seed {seed}, tick {t}: {} units waiting and only {} of {} nodes used",
+                stats.waiting,
+                stats.nodes_last_tick,
+                MIN_NODE_BUDGET
+            );
+        }
         for (k, id) in units.iter().enumerate() {
             let class = world.stats_of(*id).unwrap().movement_class.unwrap();
             let c = cell(&world, *id);
@@ -956,11 +968,12 @@ fn crowd(seed: u64) -> (Vec<u64>, u32) {
 fn a_crowd_on_a_random_map_with_structures_comes_and_goes_without_stalling() {
     for seed in [1, 2, 3] {
         let (history, worst_wait) = crowd(seed);
-        // 30 units on the smallest budget, served strictly by id: the queue is
-        // long, and the last id waits longest when a hut sends many routes to be
-        // made again at once (measured: 130, 189 and 351 ticks), but not for ever.
+        // 30 units on the smallest budget: service goes round the slots, so
+        // nobody waits for the whole queue twice, and the budget is spent to the
+        // line of sight while anyone waits. Measured: 32, 33 and 36 ticks (the
+        // strict-id queue before this gave 130, 189 and 351).
         assert!(
-            worst_wait < 400,
+            worst_wait < 60,
             "seed {seed}: a unit waited {worst_wait} ticks"
         );
         // And the same run again is the same run.

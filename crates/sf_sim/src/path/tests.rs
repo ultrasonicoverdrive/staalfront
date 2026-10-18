@@ -528,6 +528,11 @@ fn a_job_finishes_the_same_whatever_the_budget() {
     assert_eq!(calls_whole, 1);
     assert!(calls_sliced > 1, "the budget must have mattered");
     assert_eq!(whole, sliced);
+    // A budget a line of sight just fits in (60 nodes at most) cuts the local
+    // searches themselves in slices.
+    let (tiny, calls_tiny) = run(61);
+    assert!(calls_tiny > calls_sliced * 3, "{calls_tiny} calls");
+    assert_eq!(whole, tiny);
     assert!(whole.ring_len() > 0 && !whole.unreachable);
 }
 

@@ -726,7 +726,7 @@ fn two_hundred_requests_on_the_256_map_are_served_inside_the_budget() {
     // The first request is served on the first tick it can be.
     assert_eq!(served[0], 2);
     // The last of 200 single-unit requests gets its first waypoints within
-    // SERVE_ALL_BY ticks (measured: 96, about 600 jobs of 750 to 1,500 nodes
+    // SERVE_ALL_BY ticks (measured: 85, about 600 jobs of 750 to 1,500 nodes
     // against 4,096 nodes a tick). A group order this size is WP4.3's flowfield,
     // not 200 searches (`docs/rules/pathfinding.md`); the limit is here so that a
     // slowdown of the search shows as a failing test and not as a bigger number

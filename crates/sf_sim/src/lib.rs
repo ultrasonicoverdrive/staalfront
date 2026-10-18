@@ -243,7 +243,7 @@
 //! them, built when the world is made, rebuilt one sector at a time when a structure is
 //! placed or removed (by the tick itself), refined lazily into a fixed-size
 //! ring of waypoints pulled taut by a line of sight, and served inside a node budget
-//! per tick in the order of the entity ids ([`World::with_path_budget`],
+//! per tick, going round the entity ids ([`World::with_path_budget`],
 //! [`World::path_stats`]). A destination that cannot be reached ends the route in the
 //! nearest cell that can, marked in [`World::route_of`]. Aircraft, the legacy `MoveTo`
 //! and the wanderers walk the straight line as before. The rules are in

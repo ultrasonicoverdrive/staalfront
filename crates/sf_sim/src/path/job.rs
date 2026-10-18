@@ -20,11 +20,13 @@
 //!   This is also the whole of a **refill** (the ring ran low), which skips the
 //!   stages before it.
 //!
-//! A stage that needs a whole local search (a sector, or two, so at most 512
-//! cells) starts only if the tick has that much budget left; the abstract
-//! search and the smoothing stop between expansions and lines of sight and
-//! resume next tick. The work a tick does therefore never exceeds the budget,
-//! and a request is finished the same way whatever the budget (only later).
+//! Every stage can stop wherever the tick's budget runs out and go on next
+//! tick: the abstract search and the local searches between two expansions
+//! (`Local::advance`), the smoothing and the direct line of sight between two
+//! lines of sight (a line of sight is atomic and costs at most 60 nodes). A
+//! tick's budget is therefore spent to the last node whenever a request is
+//! waiting, never exceeded, and a request is finished the same way whatever the
+//! budget (only later).
 
 use sf_math::{Fx, Vec2};
 
@@ -32,8 +34,9 @@ use crate::path::abstract_search::{AbstractSearch, Step};
 use crate::path::graph::{
     ClassGraph, NO_PORTAL, SLOTS, SLOTS_PER_SIDE, node, node_sector, node_slot,
 };
+use crate::path::grid::Heuristic;
 use crate::path::grid::INF;
-use crate::path::local::{Local, Query, Rect, cells_in, union};
+use crate::path::local::{Local, Outcome, Query, Rect, union};
 use crate::path::los;
 use crate::path::route::{ABS_CAP, RING_CAP, Route, RouteState};
 
@@ -160,6 +163,12 @@ pub(crate) struct Job {
     sm_hi: usize,
     sm_active: bool,
     sm_far_tried: bool,
+    /// A local search was begun and is not over (it goes on next call).
+    searching: bool,
+    /// The nearest-cell stage: 0 while the search around the portal is to be
+    /// done (or there is none), 1 once it is, with its candidate in `near_node`.
+    near_stage: u8,
+    near_node: Option<((u64, u64, u32), u32)>,
 }
 
 /// What the next leg of a route is.
@@ -220,7 +229,39 @@ impl Job {
             sm_hi: 0,
             sm_active: false,
             sm_far_tried: false,
+            searching: false,
+            near_stage: 0,
+            near_node: None,
         }
+    }
+
+    /// Whether a local search of this job is begun and not over.
+    pub fn is_searching(&self) -> bool {
+        self.searching
+    }
+
+    /// One slice of a local search: begins it if it was not begun, expands as
+    /// many cells as the budget allows and charges them. `None` when the budget
+    /// ran out first; call again with the same query next tick.
+    fn local_search(
+        &mut self,
+        local: &mut Local,
+        g: &ClassGraph,
+        heur: &Heuristic,
+        q: &Query<'_>,
+        rem: &mut u32,
+    ) -> Option<Outcome> {
+        if !self.searching {
+            local.begin(&g.grid, heur, q);
+            self.searching = true;
+        }
+        let before = local.expanded();
+        let done = local.advance(&g.grid, heur, q, *rem);
+        *rem -= local.expanded() - before;
+        if done.is_some() {
+            self.searching = false;
+        }
+        done
     }
 
     /// What the checksum sees of a job in flight.
@@ -242,6 +283,17 @@ impl Job {
         h.write_u32(self.sm_lo as u32);
         h.write_u32(self.sm_hi as u32);
         h.write_u8(u8::from(self.sm_active) | u8::from(self.sm_far_tried) << 1);
+        h.write_u8(u8::from(self.searching) | self.near_stage << 1);
+        match self.near_node {
+            Some(((a, b, c), cell)) => {
+                h.write_u8(1);
+                h.write_u64(a);
+                h.write_u64(b);
+                h.write_u32(c);
+                h.write_u32(cell);
+            }
+            None => h.write_u8(0),
+        }
     }
 
     /// The cell of a position, kept on the map.
@@ -259,12 +311,6 @@ impl Job {
     fn sector_of(g: &ClassGraph, cell: u32) -> u32 {
         let (x, y) = g.grid.xy(cell);
         g.sectors.of_cell(x, y)
-    }
-
-    /// The number of cells of the sector, the most a local search there
-    /// expands.
-    fn cells_of(g: &ClassGraph, sector: u32) -> u32 {
-        cells_in(g.sectors.rect(sector))
     }
 
     /// Puts the nodes of `nodes` in the route's abstract path, as many as fit.
@@ -437,9 +483,6 @@ impl Job {
     ) -> Option<Progress> {
         let (sx, sy) = g.grid.xy(self.start_cell);
         let s = g.sectors.of_cell(sx, sy);
-        if *rem < Job::cells_of(g, s) {
-            return Some(Progress::Yield);
-        }
         let rect = g.sectors.rect(s);
         let goal = route.want;
         let (gx, gy) = g.grid.xy(goal);
@@ -457,18 +500,17 @@ impl Job {
                 n += 1;
             }
         }
-        let out = w.local.search(
-            &g.grid,
-            &g.heuristic_in(rect),
-            &Query {
-                rect,
-                src: (sx, sy),
-                goal: same.then_some((gx, gy)),
-                toward: None,
-                wanted: &wanted[..n],
-            },
-        );
-        *rem -= out.expanded;
+        let query = Query {
+            rect,
+            src: (sx, sy),
+            goal: same.then_some((gx, gy)),
+            toward: None,
+            wanted: &wanted[..n],
+        };
+        let Some(out) = self.local_search(&mut w.local, g, &g.heuristic_in(rect), &query, rem)
+        else {
+            return Some(Progress::Yield);
+        };
         if same && out.reached {
             w.cells.clear();
             w.local.path(&g.grid, rect, (gx, gy), &mut w.cells);
@@ -509,9 +551,6 @@ impl Job {
         let gs = g.sectors.of_cell(gx, gy);
         w.goal_links.clear();
         if g.grid.open(i64::from(gx), i64::from(gy)) {
-            if *rem < Job::cells_of(g, gs) {
-                return Some(Progress::Yield);
-            }
             let rect = g.sectors.rect(gs);
             let mut wanted = [0_u16; SLOTS];
             let mut n = 0;
@@ -523,18 +562,19 @@ impl Job {
                     n += 1;
                 }
             }
-            let out = w.local.search(
-                &g.grid,
-                &g.heur,
-                &Query {
-                    rect,
-                    src: (gx, gy),
-                    goal: None,
-                    toward: None,
-                    wanted: &wanted[..n],
-                },
-            );
-            *rem -= out.expanded;
+            let query = Query {
+                rect,
+                src: (gx, gy),
+                goal: None,
+                toward: None,
+                wanted: &wanted[..n],
+            };
+            if self
+                .local_search(&mut w.local, g, &g.heur, &query, rem)
+                .is_none()
+            {
+                return Some(Progress::Yield);
+            }
             for k in 0..SLOTS {
                 let p = g.sector[gs as usize].portal[k];
                 if p == NO_PORTAL {
@@ -596,48 +636,44 @@ impl Job {
         let best_node = w.search.nearest();
         let (sx, sy) = g.grid.xy(self.start_cell);
         let start_sector = g.sectors.of_cell(sx, sy);
-        // Both searches or neither, so that a yield never repeats one.
-        let need = Job::cells_of(g, start_sector)
-            + best_node.map_or(0, |(_, _, n)| Job::cells_of(g, node_sector(n)));
-        if *rem < need {
-            return Some(Progress::Yield);
-        }
-        // Each candidate: (heuristic, cost to reach it, cell) and the cell.
-        let mut by_node: Option<((u64, u64, u32), u32)> = None;
-        if let Some((_, cost, n)) = best_node {
-            let s = node_sector(n);
-            let (x, y) = g.grid.xy(Job::portal(g, n));
-            let out = w.local.search(
-                &g.grid,
-                &g.heur,
-                &Query {
+        // First the search round the portal the abstract search got nearest
+        // with, then the one in the start sector; either may take several
+        // ticks, and the first one's candidate is kept in the job meanwhile.
+        if self.near_stage == 0 {
+            if let Some((_, cost, n)) = best_node {
+                let s = node_sector(n);
+                let (x, y) = g.grid.xy(Job::portal(g, n));
+                let query = Query {
                     rect: g.sectors.rect(s),
                     src: (x, y),
                     goal: None,
                     toward: Some(goal_xy),
                     wanted: &[],
-                },
-            );
-            *rem -= out.expanded;
-            if let Some((cx, cy)) = out.nearest {
-                let cell = g.grid.index(cx, cy);
-                let total = cost + u64::from(out.nearest_cost);
-                by_node = Some(((g.heur.octile((cx, cy), goal_xy), total, cell), cell));
+                };
+                let Some(out) = self.local_search(&mut w.local, g, &g.heur, &query, rem) else {
+                    return Some(Progress::Yield);
+                };
+                if let Some((cx, cy)) = out.nearest {
+                    let cell = g.grid.index(cx, cy);
+                    let total = cost + u64::from(out.nearest_cost);
+                    self.near_node = Some(((g.heur.octile((cx, cy), goal_xy), total, cell), cell));
+                }
             }
+            self.near_stage = 1;
         }
         // The nearest cell of the start sector itself.
-        let out = w.local.search(
-            &g.grid,
-            &g.heur,
-            &Query {
-                rect: g.sectors.rect(start_sector),
-                src: (sx, sy),
-                goal: None,
-                toward: Some(goal_xy),
-                wanted: &[],
-            },
-        );
-        *rem -= out.expanded;
+        let query = Query {
+            rect: g.sectors.rect(start_sector),
+            src: (sx, sy),
+            goal: None,
+            toward: Some(goal_xy),
+            wanted: &[],
+        };
+        let Some(out) = self.local_search(&mut w.local, g, &g.heur, &query, rem) else {
+            return Some(Progress::Yield);
+        };
+        self.near_stage = 0;
+        let by_node = self.near_node.take();
         let by_start = out.nearest.map(|(cx, cy)| {
             let cell = g.grid.index(cx, cy);
             (
@@ -806,23 +842,20 @@ impl Job {
                 } => (rect, target, pop, stop_in),
             };
             if !self.leg_ready {
-                if *rem < cells_in(rect) {
-                    return Some(Progress::Yield);
-                }
                 let (fx, fy) = g.grid.xy(route.frontier);
                 let (tx, ty) = g.grid.xy(target);
-                let out = w.local.search(
-                    &g.grid,
-                    &g.heuristic_in(rect),
-                    &Query {
-                        rect,
-                        src: (fx, fy),
-                        goal: Some((tx, ty)),
-                        toward: None,
-                        wanted: &[],
-                    },
-                );
-                *rem -= out.expanded;
+                let query = Query {
+                    rect,
+                    src: (fx, fy),
+                    goal: Some((tx, ty)),
+                    toward: None,
+                    wanted: &[],
+                };
+                let Some(out) =
+                    self.local_search(&mut w.local, g, &g.heuristic_in(rect), &query, rem)
+                else {
+                    return Some(Progress::Yield);
+                };
                 if !out.reached {
                     // The graph said there is a way and the grid says no.
                     return Some(Progress::Replan);

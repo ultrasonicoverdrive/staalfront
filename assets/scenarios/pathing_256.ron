@@ -5,12 +5,12 @@
 // third cell with no rock or water next to it) and all get the order, on tick 1,
 // to go to a different cell of the south-east corner (x and y 186 to 251, picked
 // the same way). The routes are some 300 cells long and cross the rivers; every
-// unit has to be served by the path service, lowest slot first, inside its budget
+// unit has to be served by the path service, going round the slots from the lowest, inside its budget
 // of nodes per tick.
 //
 // tools/sf_headless/tests/pathing.rs runs it, asserts that the service never
-// spends more than its budget in a tick, that the requests are served in the
-// order of the entity ids, and prints how many ticks it took to serve them all.
+// spends more than its budget in a tick, that the requests (all asked in the
+// same tick) are served in the order of the entity ids, and prints how many ticks it took to serve them all.
 // CI runs it on Linux and Windows and requires the checksum in
 // pathing_256.expected. The unit definitions are the frozen ones of `pathing`.
 //

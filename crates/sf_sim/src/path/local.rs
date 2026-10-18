@@ -7,6 +7,13 @@
 //! 512, so a search expands at most that many cells; the arrays are fixed size
 //! and nothing is allocated. Cells are numbered inside the rectangle, `(y -
 //! y0) * width + (x - x0)`.
+//!
+//! A search can be **resumed**: [`Local::begin`] sets it up and
+//! [`Local::advance`] expands at most a given number of cells, and can be
+//! called again for the next ones with the same query until it returns the
+//! outcome. The path service uses that to spend a tick's budget to the last
+//! node instead of leaving what a whole search does not fit in; the result is
+//! the same whatever the slices ([`Local::search`] is one slice).
 
 use crate::path::grid::{DIRS, Grid, Heuristic, INF, SECTOR_SIZE};
 use crate::path::heap::IndexedHeap;
@@ -67,6 +74,29 @@ pub(crate) struct Outcome {
     pub nearest_cost: u32,
 }
 
+/// Where a search that was begun has got to.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct Run {
+    /// Cells expanded so far.
+    expanded: u32,
+    /// Wanted cells not yet expanded.
+    still_wanted: u32,
+    /// The best key of a cell near `toward` so far.
+    nearest_key: Option<(u64, u32, u32)>,
+    nearest: Option<(u32, u32)>,
+    nearest_cost: u32,
+}
+
+impl Run {
+    const NEW: Run = Run {
+        expanded: 0,
+        still_wanted: 0,
+        nearest_key: None,
+        nearest: None,
+        nearest_cost: 0,
+    };
+}
+
 /// The arrays of a local search, reused for every search.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct Local {
@@ -75,6 +105,7 @@ pub(crate) struct Local {
     parent: [u16; WINDOW_CELLS],
     wanted: [bool; WINDOW_CELLS],
     heap: IndexedHeap,
+    run: Run,
 }
 
 impl Local {
@@ -84,7 +115,13 @@ impl Local {
             parent: [NO_PARENT; WINDOW_CELLS],
             wanted: [false; WINDOW_CELLS],
             heap: IndexedHeap::new(WINDOW_CELLS),
+            run: Run::NEW,
         }
+    }
+
+    /// Cells the search begun last has expanded so far.
+    pub fn expanded(&self) -> u32 {
+        self.run.expanded
     }
 
     /// The number of a map cell inside the rectangle `rect`.
@@ -103,56 +140,77 @@ impl Local {
         )
     }
 
-    /// Runs the search. Afterwards [`Local::dist`] holds the costs and
+    /// Runs the whole search. Afterwards [`Local::dist`] holds the costs and
     /// [`Local::path`] can read the way back from any cell it reached.
     pub fn search(&mut self, grid: &Grid, heur: &Heuristic, q: &Query<'_>) -> Outcome {
+        self.begin(grid, heur, q);
+        self.advance(grid, heur, q, u32::MAX)
+            .expect("a search with no limit ends")
+    }
+
+    /// Sets a search up without expanding anything: the start is on the heap.
+    /// Whatever search was begun before is forgotten.
+    pub fn begin(&mut self, _grid: &Grid, heur: &Heuristic, q: &Query<'_>) {
         let used = cells_in(q.rect) as usize;
         self.dist[..used].fill(INF);
         self.parent[..used].fill(NO_PARENT);
+        // A search that was dropped half way left its marks.
+        self.wanted.fill(false);
         self.heap.clear();
-        let rect = q.rect;
+        self.run = Run::NEW;
         // Two portals can be the same cell (the corner of a sector): count it once.
-        let mut still_wanted = 0;
         for &w in q.wanted {
             if !self.wanted[usize::from(w)] {
                 self.wanted[usize::from(w)] = true;
-                still_wanted += 1;
+                self.run.still_wanted += 1;
             }
         }
-
-        let h = |x: u32, y: u32| q.goal.map_or(0, |g| heur.octile((x, y), g));
-        let start = usize::from(Local::number(rect, q.src.0, q.src.1));
+        let h = q.goal.map_or(0, |g| heur.octile(q.src, g));
+        let start = usize::from(Local::number(q.rect, q.src.0, q.src.1));
         self.dist[start] = 0;
-        self.heap
-            .push_or_lower(start as u32, (h(q.src.0, q.src.1), h(q.src.0, q.src.1)));
+        self.heap.push_or_lower(start as u32, (h, h));
+    }
 
-        let mut out = Outcome {
-            expanded: 0,
-            reached: false,
-            nearest: None,
-            nearest_cost: 0,
-        };
-        let mut nearest_key: Option<(u64, u32, u32)> = None;
-        while let Some(top) = self.heap.pop() {
+    /// Expands at most `limit` more cells of the search begun with the same
+    /// query. `Some` when it is over (the goal reached, every wanted cell
+    /// expanded or nothing left), with `expanded` counting from the start of
+    /// the search; `None` when the limit was hit first.
+    pub fn advance(
+        &mut self,
+        grid: &Grid,
+        heur: &Heuristic,
+        q: &Query<'_>,
+        limit: u32,
+    ) -> Option<Outcome> {
+        let rect = q.rect;
+        let h = |x: u32, y: u32| q.goal.map_or(0, |g| heur.octile((x, y), g));
+        let mut used = 0;
+        let mut reached = false;
+        while !self.heap.is_empty() {
+            if used >= limit {
+                return None;
+            }
+            let Some(top) = self.heap.pop() else { break };
+            used += 1;
             let at = top as usize;
             let (x, y) = Local::cell(rect, at as u16);
-            out.expanded += 1;
+            self.run.expanded += 1;
             if let Some(t) = q.toward {
                 let key = (heur.octile((x, y), t), self.dist[at], grid.index(x, y));
-                if nearest_key.is_none_or(|best| key < best) {
-                    nearest_key = Some(key);
-                    out.nearest = Some((x, y));
-                    out.nearest_cost = self.dist[at];
+                if self.run.nearest_key.is_none_or(|best| key < best) {
+                    self.run.nearest_key = Some(key);
+                    self.run.nearest = Some((x, y));
+                    self.run.nearest_cost = self.dist[at];
                 }
             }
             if q.goal == Some((x, y)) {
-                out.reached = true;
+                reached = true;
                 break;
             }
             if self.wanted[at] {
                 self.wanted[at] = false;
-                still_wanted -= 1;
-                if still_wanted == 0 {
+                self.run.still_wanted -= 1;
+                if self.run.still_wanted == 0 {
                     break;
                 }
             }
@@ -183,7 +241,12 @@ impl Local {
         for &w in q.wanted {
             self.wanted[usize::from(w)] = false;
         }
-        out
+        Some(Outcome {
+            expanded: self.run.expanded,
+            reached,
+            nearest: self.run.nearest,
+            nearest_cost: self.run.nearest_cost,
+        })
     }
 
     /// The cells from the start to `to` (both included), as map cell indices,
@@ -311,6 +374,53 @@ mod tests {
         // Three cells straight out from the goal, above the wall (the cell left
         // of the wall is as near; the lower cell number wins the tie).
         assert_eq!(out.nearest, Some((12, 9)));
+    }
+
+    #[test]
+    fn a_search_in_slices_ends_as_the_whole_search_does() {
+        let mut g = open_grid(32, 16);
+        for y in 0..12 {
+            let i = g.index(8, y);
+            g.set(i, 0);
+        }
+        let rect = (0, 0, 32, 16);
+        let wanted = [Local::number(rect, 20, 3), Local::number(rect, 25, 15)];
+        let query = |goal, toward| Query {
+            rect,
+            src: (2, 2),
+            goal,
+            toward,
+            wanted: &wanted,
+        };
+        for (goal, toward) in [
+            (None, None),
+            (Some((30, 2)), None),
+            (Some((9, 5)), Some((9, 5))),
+        ] {
+            let q = query(goal, toward);
+            let mut whole = Local::new();
+            let expected = whole.search(&g, &heur(), &q);
+            for slice in [1_u32, 7, 40, 1000] {
+                let mut sliced = Local::new();
+                sliced.begin(&g, &heur(), &q);
+                let mut calls = 0;
+                let out = loop {
+                    calls += 1;
+                    let before = sliced.expanded();
+                    let done = sliced.advance(&g, &heur(), &q, slice);
+                    assert!(sliced.expanded() - before <= slice);
+                    if let Some(out) = done {
+                        break out;
+                    }
+                };
+                assert_eq!(out, expected, "slice {slice}");
+                assert_eq!(sliced.dist, whole.dist, "slice {slice}");
+                assert!(
+                    slice >= 1000 || calls > 1,
+                    "slice {slice} must have mattered"
+                );
+            }
+        }
     }
 
     #[test]

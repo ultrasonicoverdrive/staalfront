@@ -240,7 +240,7 @@ Status: in progress.
   cells, portals on their borders, an abstract graph per terrain-bound movement class built when the
   world is made and rebuilt one sector at a time by the tick when a structure is
   placed or removed; abstract A*, lazy refinement inside the sectors, line-of-sight string pulling,
-  a fixed-size ring of waypoints per unit; requests served in the order of the entity ids inside a
+  a fixed-size ring of waypoints per unit; requests served going round the entity ids inside a
   node budget per tick; an unreachable goal ends in the nearest reachable cell and says so;
   `Order::Move` and the other walking orders now follow routes; the `pathing` and `pathing_256`
   scenarios and the load test), `docs/rules/pathfinding.md`: done
@@ -282,7 +282,7 @@ crosses where it suits it; a thick line of sight of a quarter cell and a sector 
 nodes (cells expanded or looked at), 4,096 per tick by default, in `assets/config/sim.ron`; a structure on a unit's own cell with no
 free neighbour leaves it with nothing to reach (WP4.4's stuck unit). Measured: about 1,100 random routes
 against the best any-angle route by the game's own line of sight, median 1.006, 99th percentile
-1.05, worst 1.075; `pathing_256`, 200 requests served after 96 ticks. Not done on purpose: flowfields,
+1.05, worst 1.075; `pathing_256`, 200 requests served after 85 ticks. Not done on purpose: flowfields,
 collision, replanning when a route is blocked or a target vanishes (the graph is kept right; a route
 is only asked for again when a change touches it), a cache for unreachable goals, uphill slowing.
 

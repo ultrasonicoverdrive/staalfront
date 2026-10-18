@@ -162,8 +162,8 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   (`sf_sim::orders`, `docs/rules/orders.md`); `Command::Order` and `Command::Stop` set
   them, the behavior pass carries them out. The order holds the destination; the route is a
   separate record of the unit (WP4.2, `sf_sim::path`, `docs/rules/pathfinding.md`): hierarchical
-  A* over 16 x 16 cell sectors and their portals, served inside a node budget per tick in the
-  order of the entity ids, followed as a ring of waypoints.
+  A* over 16 x 16 cell sectors and their portals, served inside a node budget per tick,
+  going round the entity ids, followed as a ring of waypoints.
 - **Checksum:** FNV-1a over the full state in a canonical order after every tick,
   with the history kept for the headless runner. The previous position and facing
   (render interpolation only) are the one deliberate exclusion.

@@ -232,7 +232,7 @@ fn the_pinned_arrival_ticks() {
             "lane {lane} class {class}"
         );
     }
-    assert_eq!(r.arrived(BOAT_DOWN), Some(182));
+    assert_eq!(r.arrived(BOAT_DOWN), Some(181));
     assert_eq!(r.arrived(BOAT_BANK), None);
     assert_eq!(r.arrived(DRONE), Some(234), "aircraft ask for no route");
 }

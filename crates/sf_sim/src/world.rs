@@ -604,7 +604,7 @@ impl World {
         }
 
         // The path service first: it gives the requests of units that asked
-        // earlier their routes (within the budget), lowest slot first.
+        // earlier their routes (within the budget), going round the slots.
         self.pathing.serve(&mut self.entities, &self.units);
 
         let motion = self.motion();
