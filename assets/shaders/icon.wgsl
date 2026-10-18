@@ -40,6 +40,9 @@ const MARGIN_PX: f32 = 2.5;
 // as the square and the circle.
 const TRIANGLE_SCALE: f32 = 1.2;
 const HIGHLIGHT_BIT: u32 = 0x100u;
+const SELECTED_BIT: u32 = 0x200u;
+// Extra outline width of a selected icon, on top of the normal outline.
+const SELECTED_EXTRA_PX: f32 = 1.2;
 
 struct VertexIn {
     @builtin(vertex_index) vertex: u32,
@@ -158,15 +161,21 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     let highlighted = (in.flags & HIGHLIGHT_BIT) != 0u;
+    let selected = (in.flags & SELECTED_BIT) != 0u;
     let d = sd_shape(in.flags & 0xffu, in.local, icon.size_px * 0.5);
     let coverage = clamp(0.5 - d, 0.0, 1.0);
     if (coverage <= 0.0) {
         discard;
     }
     // The outline is a ring just inside the edge; a highlighted icon gets a
-    // thicker white one.
-    let ring = select(icon.outline_px, icon.outline_px + 1.5, highlighted);
+    // thicker white one, a selected icon (WP3.3) a thicker one still.
+    var ring = select(icon.outline_px, icon.outline_px + 1.5, highlighted);
+    ring = select(ring, icon.outline_px + SELECTED_EXTRA_PX, selected);
     let edge = clamp(d + ring + 0.5, 0.0, 1.0) * select(0.0, 1.0, ring > 0.01);
-    let outline = select(vec3<f32>(0.02, 0.025, 0.035), vec3<f32>(1.0), highlighted);
+    let outline = select(
+        vec3<f32>(0.02, 0.025, 0.035),
+        vec3<f32>(1.0),
+        highlighted || selected,
+    );
     return vec4<f32>(mix(in.color, outline, edge), coverage);
 }

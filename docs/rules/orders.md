@@ -189,7 +189,6 @@ there, and the runner asks the action, never a key.
 
 | Action | Default | Command |
 |---|---|---|
-| `DebugSelectAll` | F2 | **Temporary** (until WP3.3 selection): select every mobile unit of the local player (Meridian) in view |
 | `OrderMove` | right-click on the ground | `Order::Move` to the point for the selection |
 | `OrderQueue` | shift, held | queues the move, scatter or hold instead of replacing the orders |
 | `OrderStop` | C | `Stop` |
@@ -197,7 +196,9 @@ there, and the runner asks the action, never a key.
 | `OrderHold` | H | `Order::HoldPosition` |
 
 The camera keeps WASD, the arrow keys and the screen edge, so stop is not on S (a test of
-the engine checks that no key or button is bound to two actions). The top bar shows how
+the engine checks that no key or button is bound to two actions, except the shift of
+`OrderQueue` and `SelectAdd`). The orders go to the selected own mobile units
+(`Selection::orderable`, `docs/rules/selection.md`; the temporary F2 select-all is gone). The top bar shows how
 many units are selected; the F1 panel shows the order of the hovered unit. Right-click
 picks no target (an attack by click is the cursor context of WP3.5).
 
@@ -220,5 +221,5 @@ rounds (phase 15), in `crates/sf_sim/src/orders.rs`.
   scenario with the states and positions asserted at the ticks that matter; the checksum
   is in `orders.expected` (checked by `pinned.rs` and, on Linux and Windows, by CI). It
   runs on a frozen copy of the definitions (`orders_defs/`), like `units_spawn`.
-* `crates/sf_game/src/commands.rs`: the selection, and that a right-click, shift, S and X
-  become the right commands and nothing changes before the tick runs them.
+* `crates/sf_game/src/commands.rs`: that a right-click, shift, C, X and H become the right
+  commands for the selected units only and nothing changes before the tick runs them.

@@ -17,25 +17,27 @@ use sf_data::units::UnitDefs;
 use sf_engine::winit::event::MouseButton;
 use sf_engine::{Action, App, Context, Resized, winit};
 use sf_math::Fx;
-use sf_math::render_bridge::{vec2_cells_to_metres, vec2_metres_to_cells};
+use sf_math::render_bridge::{METRES_PER_CELL, vec2_metres_to_cells};
 use sf_render::camera::DVec2;
 use sf_render::glb::{self, LoadedPack};
 use sf_render::scene::world_markers;
 use sf_render::{
     Blend, Camera, CameraConfig, CameraInput, DebugView, EyeView, FrameView, Frustum, GpuOptions,
     Ground, InstanceStats, Instancer, LodConfig, ModelSet, Motion, Pick, PickQuery, PickVia,
-    Renderer, Style, TerrainGround, TerrainStats, UnitId,
+    RectQuery, Renderer, ScreenRect, Style, TerrainGround, TerrainStats, UnitId,
 };
 use sf_sim::{EntityView, World, WorldConfig};
 
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
-use crate::commands::{self, DebugSelection};
+use crate::commands;
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::population::Population;
 use crate::roster::{self, Roster};
+use crate::selection::{Gesture, Pointer, Recall, Selection};
+use crate::selection_view::{self, FrameGeometry, SelectionView};
 
 /// Walking speed of the demo's units: 1.5 cells a second, 6 m/s (22 km/h),
 /// a believable tank. The sim's default of 4 cells a second was a walking
@@ -199,8 +201,8 @@ pub struct Runner {
     tick_ms: Samples,
     last_frame: Option<Instant>,
     auto_zoom: bool,
-    /// The unit under the cursor in the last frame (hover only: a click
-    /// does nothing yet), highlighted in the picture and named in the F1 panel.
+    /// The unit under the cursor in the last frame, highlighted in the
+    /// picture and named in the F1 panel; a click selects it.
     hovered: Option<Pick>,
     /// Model/icon state of the last frame, for the F1 panel.
     unit_view: UnitView,
@@ -218,8 +220,15 @@ pub struct Runner {
     /// Time spent in `fixed_update` since the last frame (the bench's CPU
     /// time counts the sim too).
     sim_since_frame: Duration,
-    /// The units F2 selected: a debug aid until real selection (WP3.3).
-    selection: DebugSelection,
+    /// The selected units, the inspected one and the control groups (WP3.3):
+    /// presentation state that only ever produces orders.
+    selection: Selection,
+    /// The select button's click and drag recogniser.
+    pointer: Pointer,
+    /// Rings, health bars and the drag rectangle.
+    selection_view: SelectionView,
+    /// Scratch for what a drag rectangle or a double-click finds.
+    hits: Vec<UnitId>,
     /// Set when the renderer could not start or a frame failed; `main` then
     /// exits with a non-zero code.
     failed: Arc<AtomicBool>,
@@ -362,7 +371,10 @@ impl Runner {
             bench,
             shots,
             sim_since_frame: Duration::ZERO,
-            selection: DebugSelection::default(),
+            selection: Selection::new(commands::LOCAL_PLAYER),
+            pointer: Pointer::default(),
+            selection_view: SelectionView::default(),
+            hits: Vec::new(),
             failed,
         }
     }
@@ -454,31 +466,114 @@ impl Runner {
         }
     }
 
+    /// Milliseconds since the app started: the clock of double-clicks and
+    /// double taps.
+    fn now_ms(&self) -> u64 {
+        self.started.map_or(0, |s| {
+            s.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+        })
+    }
+
+    /// The entities whose picture touches `rect` in the frame just drawn.
+    fn entities_in(&mut self, rect: ScreenRect) -> Vec<sf_sim::EntityId> {
+        let (width, height) = self.viewport;
+        let query = RectQuery {
+            rect,
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+        };
+        self.instancer.pick_rect(&query, &mut self.hits);
+        self.hits
+            .iter()
+            .map(|&id| selection_view::entity_of(id))
+            .collect()
+    }
+
+    /// The select button and the group keys (WP3.3, [`crate::selection`]).
+    /// A click picks the unit under the cursor (`hovered`, the picture's own
+    /// answer for models and icons), a drag takes what the rectangle touches,
+    /// a double-click what is of the same kind on the screen; shift adds or
+    /// toggles; the number keys recall control groups and control + number
+    /// assigns them. Which key or button each is lives in
+    /// `assets/config/input.ron` (`SelectClick`, `SelectAdd`, `GroupAssign`,
+    /// `Group1` to `Group9`). Selecting changes nothing in the world.
+    fn handle_selection(&mut self, ctx: &Context) {
+        let actions = ctx.actions();
+        let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
+        let cursor = ctx.input().cursor().map(|(x, y)| [x as f32, y as f32]);
+        let now = self.now_ms();
+        if actions.pressed(Action::SelectClick)
+            && !ui_busy
+            && let Some(at) = cursor
+        {
+            self.pointer.press(at);
+        }
+        if let Some(at) = cursor {
+            self.pointer.moved(at);
+        }
+        // A press and release inside one frame (a quick click on a slow
+        // machine) shows as a pulse and never as held, so a button that is
+        // not held while a press is being tracked counts as released.
+        if actions.released(Action::SelectClick)
+            || (self.pointer.is_down() && !actions.held(Action::SelectClick))
+        {
+            let additive = actions.held(Action::SelectAdd);
+            let gesture = match cursor {
+                Some(at) => self.pointer.release(at, now),
+                None => {
+                    self.pointer.cancel();
+                    None
+                }
+            };
+            let hit = self
+                .hovered
+                .as_ref()
+                .map(|p| selection_view::entity_of(p.id));
+            match gesture {
+                Some(Gesture::Click { double: false }) => {
+                    self.selection.click(&self.world, hit, additive);
+                }
+                Some(Gesture::Click { double: true }) => {
+                    let (width, height) = self.viewport;
+                    let screen = ScreenRect::viewport([width as f32, height as f32]);
+                    let in_view = self.entities_in(screen);
+                    self.selection
+                        .select_same_kind(&self.world, hit, &in_view, additive);
+                }
+                Some(Gesture::Drag(rect)) => {
+                    let found = self.entities_in(rect);
+                    self.selection.drag(&self.world, &found, additive);
+                }
+                None => {}
+            }
+        }
+        let assign = actions.held(Action::GroupAssign);
+        for (n, action) in Action::GROUPS.into_iter().enumerate() {
+            if !actions.pressed(action) {
+                continue;
+            }
+            if assign {
+                self.selection.assign_group(n);
+                println!("group {}: {} units", n + 1, self.selection.group(n).len());
+            } else if let Recall::Centre([x, y]) = self.selection.recall_group(&self.world, n, now)
+            {
+                self.camera.set_focus(DVec2::new(
+                    f64::from(x * METRES_PER_CELL),
+                    f64::from(y * METRES_PER_CELL),
+                ));
+            }
+        }
+    }
+
     /// The keys and clicks that give orders (WP3.4, [`crate::commands`]):
-    /// move, queue, stop, scatter, hold position and the temporary select-all.
-    /// Which key or button each is lives in `assets/config/input.ron`
-    /// (`OrderMove`, `OrderQueue`, `OrderStop`, `OrderScatter`, `OrderHold`,
-    /// `DebugSelectAll`). They only schedule commands for the next tick; the
-    /// simulation does the rest.
+    /// move, queue, stop, scatter and hold position, to the selected units
+    /// that can take them. Which key or button each is lives in
+    /// `assets/config/input.ron` (`OrderMove`, `OrderQueue`, `OrderStop`,
+    /// `OrderScatter`, `OrderHold`). They only schedule commands for the next
+    /// tick; the simulation does the rest.
     fn handle_orders(&mut self, ctx: &Context) {
         let actions = ctx.actions();
         let queued = actions.held(Action::OrderQueue);
-        if actions.pressed(Action::DebugSelectAll) {
-            // TEMPORARY (until WP3.3): everything of the local player that
-            // the camera sees.
-            let frustum = Frustum::from_view_proj(self.camera.view_proj());
-            let ground = &self.ground;
-            self.selection
-                .select_own_in_view(&self.world, commands::LOCAL_PLAYER, |cells| {
-                    let [x, z] = vec2_cells_to_metres(cells);
-                    let y = ground.height(f64::from(x), f64::from(z)) as f32;
-                    frustum.contains_point([x, y, z].into())
-                });
-            println!(
-                "selected {} units (temporary debug selection)",
-                self.selection.len()
-            );
-        }
         let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
         if actions.pressed(Action::OrderMove)
             && !ui_busy
@@ -486,24 +581,28 @@ impl Runner {
             && let Some(ground) = self.camera.ground_point(DVec2::new(x, y))
         {
             let point = vec2_metres_to_cells([ground.x as f32, ground.y as f32]);
-            if let Some(command) = commands::move_command(&self.selection, point, queued) {
+            let ids = self.selection.orderable(&self.world);
+            if let Some(command) = commands::move_command(&ids, point, queued) {
                 commands::issue(&mut self.world, command);
             }
         }
-        if actions.pressed(Action::OrderStop)
-            && let Some(command) = commands::stop_command(&self.selection)
-        {
-            commands::issue(&mut self.world, command);
+        if actions.pressed(Action::OrderStop) {
+            let ids = self.selection.orderable(&self.world);
+            if let Some(command) = commands::stop_command(&ids) {
+                commands::issue(&mut self.world, command);
+            }
         }
-        if actions.pressed(Action::OrderScatter)
-            && let Some(command) = commands::scatter_command(&self.selection, queued)
-        {
-            commands::issue(&mut self.world, command);
+        if actions.pressed(Action::OrderScatter) {
+            let ids = self.selection.orderable(&self.world);
+            if let Some(command) = commands::scatter_command(&ids, queued) {
+                commands::issue(&mut self.world, command);
+            }
         }
-        if actions.pressed(Action::OrderHold)
-            && let Some(command) = commands::hold_command(&self.selection, queued)
-        {
-            commands::issue(&mut self.world, command);
+        if actions.pressed(Action::OrderHold) {
+            let ids = self.selection.orderable(&self.world);
+            if let Some(command) = commands::hold_command(&ids, queued) {
+                commands::issue(&mut self.world, command);
+            }
         }
     }
 
@@ -605,7 +704,7 @@ impl Runner {
 impl Runner {
     /// Build this frame's models and icons (level of detail per unit, the
     /// cross-fade by zoom), pick the unit under the cursor in what was built
-    /// and highlight it. A click does nothing with it yet.
+    /// and highlight it. A click on it selects it ([`Runner::handle_selection`]).
     fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>) {
         let view_proj = self.camera.view_proj();
         let (width, height) = self.viewport;
@@ -699,6 +798,37 @@ impl Runner {
             ui_scale: scale,
             hovered,
         };
+    }
+
+    /// The selection feedback of this frame (WP3.3): the selected icons get
+    /// their outline (before the icons are uploaded), and the rings, health
+    /// bars and drag rectangle go on the UI's world layer. With nothing
+    /// selected and no drag it does nothing.
+    fn mark_selection(&mut self) {
+        let dragging = self.pointer.drag_rect();
+        if self.selection.is_empty() && self.selection.inspected().is_none() && dragging.is_none() {
+            return;
+        }
+        let (width, height) = self.viewport;
+        let scale = self.hud.scale();
+        let frame = FrameGeometry {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: scale,
+            blend: self.instancer.blend(),
+            icon_px: self.instancer.icon_params().size_px,
+        };
+        let mut layer = self.hud.world_layer();
+        self.selection_view.mark(
+            &mut self.instancer,
+            &self.selection,
+            &self.world,
+            &frame,
+            &mut layer,
+        );
+        if let Some(rect) = dragging {
+            selection_view::draw_drag_rect(&mut layer, rect, scale);
+        }
     }
 
     /// Debug builds: `assets/config/units.ron` changed on disk. A broken
@@ -1147,6 +1277,7 @@ impl App for Runner {
             fps: self.fps_shown,
             units: self.world.len() as u32,
             selected: self.selection.len() as u32,
+            inspecting: self.selection.inspected().is_some(),
             tick: self.total_ticks,
         };
         self.hud.frame(ctx, &mut self.camera, &self.views, stats);
@@ -1175,6 +1306,7 @@ impl App for Runner {
                     .map(|(x, y)| (x as f32, y as f32))
             });
             self.build_units(alpha, cursor);
+            self.mark_selection();
             let started = Instant::now();
             if let Some(renderer) = &mut self.renderer {
                 renderer.upload_units(&self.instancer);
@@ -1210,6 +1342,7 @@ impl App for Runner {
             self.terrain = renderer.terrain_stats();
             self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
+        self.handle_selection(ctx);
         self.handle_orders(ctx);
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {

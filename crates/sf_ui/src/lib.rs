@@ -15,12 +15,15 @@
 //!   test feeds [`UiInput`] frames and reads responses. Retained mode would
 //!   pay off for animated or very large menus; nothing here prevents adding
 //!   it on top of the same draw list later.
-//! * **One pipeline, two draw calls.** Every primitive is a tinted textured
+//! * **One pipeline, a few draw calls.** Every primitive is a tinted textured
 //!   quad ([`DrawList`]). Solid rectangles sample a white texel, text samples
 //!   glyph coverage, panels and buttons use a procedural nine-slice skin; all
 //!   of that lives in one dynamically packed atlas ([`Atlas`]). The minimap
 //!   is the second texture. [`UiRenderer`] records one pass on top of the
-//!   scene through `sf_render::Renderer::render_with`.
+//!   scene through `sf_render::Renderer::render_with`. The game can also draw
+//!   on a **world layer** ([`Ui::world_layer`]) that is drawn first, under the
+//!   panels (selection rings, health bars, the drag rectangle of WP3.3): one
+//!   more draw call, however much is on it.
 //! * **Layout** is nine anchors plus offsets, relative to the window or to
 //!   another rectangle ([`layout`]). Sizes and offsets are logical pixels; the
 //!   effective scale is the `scale` setting (`assets/config/ui.ron`) times the
@@ -50,7 +53,7 @@ pub mod ui;
 
 pub use atlas::{Atlas, AtlasRect};
 pub use color::{Color, UiConfig};
-pub use draw::{DrawList, Texture};
+pub use draw::{DrawList, Layer, Texture};
 pub use gpu::UiRenderer;
 pub use layout::{Anchor, Rect};
 pub use minimap::{Minimap, MinimapGeometry, MinimapImage, clip_to_rect, fov_polygon, fov_quad};
