@@ -203,7 +203,7 @@ role of the unit table placed by faction. Nothing moves until it is ordered. At 
 - **Order**: right-click does what the cursor shows (move, attack, guard, or nothing on
   ground the units cannot enter); shift+right-click queues (up to 8); F+right-click is
   attack-move; C stops, X scatters, H holds position. The cursor changes with the
-  context (24 placeholder cursors, 8 scroll arrows at the screen edges).
+  context (16 placeholder cursors and 8 scroll arrows at the screen edges).
 - Options: `--crowd` (the old 2,000 wanderers), `--units N`, `--models none`,
   `--map-cells N`, `--shots <dir>` (screenshots; `--hover x,y` draws the cursor there).
   Every key is an action in `assets/config/input.ron`.
