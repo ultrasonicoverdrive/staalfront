@@ -151,8 +151,13 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   generation goes up, its index goes on a LIFO free list. Iteration is always
   ascending slot index, so a despawn never reorders anything.
 - **Tick:** `World::step()` runs exactly one 20 Hz tick: commands scheduled for
-  that tick (ordered by player, then insertion; a past tick is rejected), then the
-  behaviors, then the checksum.
+  that tick (ordered by `(player, player sequence)`: a player's own counter, or the
+  number its sender gave the command; a past tick is rejected), then the behaviors,
+  then the checksum.
+- **Orders (WP3.4):** a unit has a current order and a fixed ring of queued ones
+  (`sf_sim::orders`, `docs/rules/orders.md`); `Command::Order` and `Command::Stop` set
+  them, the behavior pass carries them out. The order holds the destination, the
+  route (today the straight line) is a separate step phase 4 replaces.
 - **Checksum:** FNV-1a over the full state in a canonical order after every tick,
   with the history kept for the headless runner. The previous position and facing
   (render interpolation only) are the one deliberate exclusion.
@@ -401,7 +406,7 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
 
 - **Scenario** (`assets/scenarios/*.ron`): world seed, map size, run length,
   spawn groups (count, kinds and owners cycled, area) and an optional list of
-  timed commands (`SetWanderArea`, `MoveTo`, `Despawn`, entities named by id).
+  timed commands (`SetWanderArea`, `MoveTo`, `Despawn`, the orders of WP3.4, entities named by id).
   Unknown fields and scenarios that cannot run (`ticks: 0`, a command after the
   last tick, an area outside the map, ...) are reported with the file name and every
   problem found. Everything is scheduled before tick 0, like a replay; the spawn

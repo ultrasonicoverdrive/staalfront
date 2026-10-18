@@ -7,6 +7,7 @@ Phases 0 and 1 contain no gameplay; game rules start in phase 2 (PLAN.md §3).
 |---|---|---|
 | [`terrain.md`](terrain.md) | Terrain types and what they allow, the map's terrain layer, occupancy and the `Place` command. Flags are placeholders until movement (WP4.1). | WP2.1 |
 | [`units.md`](units.md) | Unit, structure and weapon definitions: files, every field and its unit of measure, flags, what is validated, the conversion for the sim. Stats are the design targets of `content/units.md`; the rest are placeholders. | WP3.1 |
+| [`orders.md`](orders.md) | Orders as unit state: stand still (idle), move, attack, attack-move, guard, stop and scatter, the shift queue, arrival tolerance, destination versus route, what phases 4 and 5 replace, command sequence numbers. | WP3.4 |
 
 > **Proposal (not decided):** layout of this directory. One markdown file per rule
 > area (for example movement, armor and damage, power, economy, vision). Per rule:

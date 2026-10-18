@@ -44,6 +44,9 @@ pub struct HoveredUnit {
     pub player: String,
     /// Distance in metres along the cursor ray (model) or from the eye (icon).
     pub distance: f32,
+    /// Its current order in words (`idle`, `move (12.5, 3.5)`, `attack 12v0`);
+    /// empty for an entity that is not a unit of the definitions.
+    pub order: String,
 }
 
 /// The model/icon state of the frame, for the panel.
@@ -298,16 +301,23 @@ fn unit_levels(ui: &mut egui::Ui, data: &PanelData) {
         u.model_above_px, u.models_until, u.icon_below_px, u.icons_from, u.ui_scale
     ));
     match &u.hovered {
-        Some(h) => ui.label(format!(
-            "hovering: {} {} ({}) by {}, {:.1} m, {}",
-            h.kind,
-            h.id,
-            h.player,
-            h.via,
-            h.distance,
-            hp_text(h.hp)
-        )),
-        None => ui.label("hovering: none"),
+        Some(h) => {
+            ui.label(format!(
+                "hovering: {} {} ({}) by {}, {:.1} m, {}",
+                h.kind,
+                h.id,
+                h.player,
+                h.via,
+                h.distance,
+                hp_text(h.hp)
+            ));
+            if !h.order.is_empty() {
+                ui.label(format!("order: {}", h.order));
+            }
+        }
+        None => {
+            ui.label("hovering: none");
+        }
     };
 }
 
@@ -585,6 +595,7 @@ mod tests {
                     via: "model",
                     player: "blue".into(),
                     distance: 41.25,
+                    order: "move (12.5, 3.5)".into(),
                 }),
             },
             sim_tick: 1234,

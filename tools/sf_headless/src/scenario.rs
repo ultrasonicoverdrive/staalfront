@@ -45,8 +45,9 @@ use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
-    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, Kind, MAX_ENTITIES, MAX_MAP_SIDE, PlayerId,
-    Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitTable, World, WorldConfig,
+    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind, MAX_ENTITIES, MAX_MAP_SIDE,
+    Order, PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitTable, World,
+    WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -214,6 +215,75 @@ pub enum Action {
         /// The target cell `(x, y)`, inside the map.
         target: (i32, i32),
     },
+    /// `Command::Order` with `Order::Move`: go to the middle of `target` (WP3.4).
+    /// With `queued` the order is added behind the unit's others.
+    OrderMove {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// The cell `(x, y)`, inside the map.
+        target: (i32, i32),
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
+    /// `Command::Order` with `Order::AttackMove`: go to the middle of `target`,
+    /// engaging on the way (the engaging is phase 5).
+    OrderAttackMove {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// The cell `(x, y)`, inside the map.
+        target: (i32, i32),
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
+    /// `Command::Order` with `Order::Attack`: go for the entity `target` until
+    /// it is in weapon reach.
+    OrderAttack {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// The target, as `(index, generation)`.
+        target: (u32, u32),
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
+    /// `Command::Order` with `Order::Guard` of a spot: go to the middle of
+    /// `target` and stay.
+    OrderGuardPoint {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// The cell `(x, y)`, inside the map.
+        target: (i32, i32),
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
+    /// `Command::Order` with `Order::Guard` of an entity: follow it and stay
+    /// near it.
+    OrderGuardEntity {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// The watched entity, as `(index, generation)`.
+        target: (u32, u32),
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
+    /// `Command::Order` with `Order::Scatter`: a short step in a deterministic
+    /// direction.
+    OrderScatter {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
+    /// `Command::Stop`: clear the order and the queue; the units stand still.
+    Stop {
+        /// The units.
+        ids: Vec<IdSpec>,
+    },
     /// `Command::Despawn` for each id.
     Despawn {
         /// The entities.
@@ -309,6 +379,14 @@ fn load_unit_table(name: &str, scenario_file: &Path) -> Result<UnitTable, Scenar
     let defs = UnitDefs::load(&scenarios.join(name), &scenarios.join(".."))
         .map_err(|e| invalid(e.to_string()))?;
     sf_bridge::unit_table(&defs).map_err(invalid)
+}
+
+/// The middle of a cell, in cells: where an order sends a unit.
+fn cell_middle(cell: (i32, i32)) -> Vec2 {
+    Vec2::new(
+        Fx::from_int(cell.0) + Fx::HALF,
+        Fx::from_int(cell.1) + Fx::HALF,
+    )
 }
 
 fn expand(ids: &[IdSpec]) -> Vec<EntityId> {
@@ -589,6 +667,36 @@ impl Scenario {
                         ));
                     }
                 }
+                Action::OrderMove { ids, target, .. }
+                | Action::OrderAttackMove { ids, target, .. }
+                | Action::OrderGuardPoint { ids, target, .. } => {
+                    id_problems(&at, ids, &mut p);
+                    if map_ok
+                        && (target.0 < 0
+                            || target.1 < 0
+                            || i64::from(target.0) >= i64::from(width)
+                            || i64::from(target.1) >= i64::from(height))
+                    {
+                        p.push(format!(
+                            "{at}: target ({}, {}) lies outside the {width}x{height} map",
+                            target.0, target.1
+                        ));
+                    }
+                }
+                Action::OrderAttack { ids, target, .. }
+                | Action::OrderGuardEntity { ids, target, .. } => {
+                    id_problems(&at, ids, &mut p);
+                    if target.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: target ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            target.0
+                        ));
+                    }
+                }
+                Action::OrderScatter { ids, .. } | Action::Stop { ids } => {
+                    id_problems(&at, ids, &mut p);
+                }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
                 Action::Place { cell, .. }
                 | Action::SpawnUnit { cell, .. }
@@ -695,6 +803,54 @@ impl Scenario {
                     };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }
+                Action::OrderMove {
+                    ids,
+                    target,
+                    queued,
+                } => {
+                    let order = Order::Move(cell_middle(*target));
+                    schedule_order(&mut world, tick, player, ids, order, *queued)?;
+                }
+                Action::OrderAttackMove {
+                    ids,
+                    target,
+                    queued,
+                } => {
+                    let order = Order::AttackMove(cell_middle(*target));
+                    schedule_order(&mut world, tick, player, ids, order, *queued)?;
+                }
+                Action::OrderAttack {
+                    ids,
+                    target,
+                    queued,
+                } => {
+                    let order = Order::Attack(EntityId::new(target.0, target.1));
+                    schedule_order(&mut world, tick, player, ids, order, *queued)?;
+                }
+                Action::OrderGuardPoint {
+                    ids,
+                    target,
+                    queued,
+                } => {
+                    let order = Order::Guard(GuardTarget::Point(cell_middle(*target)));
+                    schedule_order(&mut world, tick, player, ids, order, *queued)?;
+                }
+                Action::OrderGuardEntity {
+                    ids,
+                    target,
+                    queued,
+                } => {
+                    let order =
+                        Order::Guard(GuardTarget::Entity(EntityId::new(target.0, target.1)));
+                    schedule_order(&mut world, tick, player, ids, order, *queued)?;
+                }
+                Action::OrderScatter { ids, queued } => {
+                    schedule_order(&mut world, tick, player, ids, Order::Scatter, *queued)?;
+                }
+                Action::Stop { ids } => {
+                    let command = Command::Stop { ids: expand(ids) };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
                 Action::Despawn { ids } => {
                     for id in expand(ids) {
                         world
@@ -733,6 +889,25 @@ impl Scenario {
         }
         Ok(world)
     }
+}
+
+/// Schedules one `Command::Order` for all `ids`.
+fn schedule_order(
+    world: &mut World,
+    tick: Tick,
+    player: PlayerId,
+    ids: &[IdSpec],
+    order: Order,
+    queued: bool,
+) -> Result<(), ScenarioError> {
+    let command = Command::Order {
+        ids: expand(ids),
+        order,
+        queued,
+    };
+    world
+        .schedule(tick, player, command)
+        .map_err(|e| ScenarioError::Sim(e.to_string()))
 }
 
 fn id_problems(at: &str, ids: &[IdSpec], out: &mut Vec<String>) {

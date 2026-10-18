@@ -8,6 +8,7 @@ use crate::behavior::{self, Area, Behavior, Motion};
 use crate::command::{Command, CommandQueue, ScheduleError};
 use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
+use crate::orders::{self, GuardTarget, Order};
 use crate::snapshot::{EntityView, Snapshot};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
@@ -177,7 +178,7 @@ impl fmt::Debug for World {
 
 /// A SplitMix64-style finalizer: spreads nearby inputs over all 64 bits, so
 /// consecutive spawn numbers give unrelated generator seeds.
-const fn mix64(mut z: u64) -> u64 {
+pub(crate) const fn mix64(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
@@ -322,6 +323,30 @@ impl World {
         (self.entities.def[i] != NO_DEF).then(|| self.entities.hp[i])
     }
 
+    /// The current order of a unit (WP3.4); `None` for a stale id. A unit
+    /// with no order, and everything that cannot be ordered, has
+    /// [`Order::Idle`]. An order that was a scatter reads as the
+    /// [`Order::Move`] it turned into.
+    pub fn order_of(&self, id: EntityId) -> Option<Order> {
+        let i = self.live_index(id)?;
+        Some(self.entities.order[i])
+    }
+
+    /// The orders waiting behind the current one, front first; `None` for a
+    /// stale id. At most [`ORDER_QUEUE_CAP`](crate::ORDER_QUEUE_CAP).
+    pub fn queued_orders_of(&self, id: EntityId) -> Option<Vec<Order>> {
+        let i = self.live_index(id)?;
+        Some(self.entities.queue[i].iter().collect())
+    }
+
+    /// The point a unit is steering at right now (the next waypoint of its
+    /// route, today the destination itself); `None` for a stale id and for a
+    /// unit that is not walking.
+    pub fn waypoint_of(&self, id: EntityId) -> Option<Vec2> {
+        let i = self.live_index(id)?;
+        self.entities.target[i]
+    }
+
     /// How many cells are occupied.
     pub fn occupied_cells(&self) -> usize {
         self.occupancy.count()
@@ -399,6 +424,23 @@ impl World {
         self.queue.schedule(self.tick, tick, player, command)
     }
 
+    /// Like [`World::schedule`], for a command that carries the sequence
+    /// number its sender gave it (WP3.4). Commands run by `(tick, player,
+    /// sequence)`, so two machines that receive the same commands in
+    /// different orders still run them in the same order. Refused for a
+    /// `tick` that has run, and when the player already has a command for
+    /// that tick under that number ([`ScheduleError::DuplicateSequence`]).
+    pub fn schedule_sequenced(
+        &mut self,
+        tick: Tick,
+        player: PlayerId,
+        sequence: u64,
+        command: Command,
+    ) -> Result<(), ScheduleError> {
+        self.queue
+            .schedule_sequenced(self.tick, tick, player, sequence, command)
+    }
+
     // ---- the tick ---------------------------------------------------------
 
     /// Runs exactly one tick and returns what happened.
@@ -422,7 +464,7 @@ impl World {
         }
 
         let motion = self.motion();
-        behavior::advance_all(&mut self.entities, &motion, &self.units);
+        behavior::advance_all(&mut self.entities, &motion, &self.units, tick);
 
         self.tick = tick.next();
         let checksum = self.checksum();
@@ -701,6 +743,32 @@ impl World {
                 .is_some_and(|s| s.class() != UnitClass::Mobile)
     }
 
+    /// Whether unit `i` can take `order` (WP3.4): it can move, and the order
+    /// makes sense for it. `Idle` is not an order to give.
+    fn accepts_order(&self, i: usize, order: Order) -> bool {
+        if self.is_immobile(i) {
+            return false;
+        }
+        let def = self.entities.def[i];
+        if self.motion().of_entity(def, &self.units).step <= Fx::ZERO {
+            return false;
+        }
+        let itself = EntityId::new(i as u32, self.entities.generation[i]);
+        match order {
+            Order::Idle => false,
+            Order::Move(_) | Order::AttackMove(_) | Order::Scatter => true,
+            Order::Guard(GuardTarget::Point(_)) => true,
+            Order::Guard(GuardTarget::Entity(watched)) => {
+                watched != itself && self.live_index(watched).is_some()
+            }
+            Order::Attack(victim) => {
+                victim != itself
+                    && self.live_index(victim).is_some()
+                    && orders::weapon_range_of(&self.entities, i, &self.units) > Fx::ZERO
+            }
+        }
+    }
+
     /// Runs one command. True if it changed anything.
     fn apply(&mut self, command: Command) -> bool {
         match command {
@@ -711,6 +779,46 @@ impl World {
                 self.place_structure(kind, cell, owner).is_some()
             }
             Command::Despawn { id } => self.despawn(id),
+            Command::Order { ids, order, queued } => {
+                let (pos_min, pos_max) = self.pos_range();
+                let order = match order {
+                    Order::Move(p) => Order::Move(p.clamp(pos_min, pos_max)),
+                    Order::AttackMove(p) => Order::AttackMove(p.clamp(pos_min, pos_max)),
+                    Order::Guard(GuardTarget::Point(p)) => {
+                        Order::Guard(GuardTarget::Point(p.clamp(pos_min, pos_max)))
+                    }
+                    other => other,
+                };
+                let mut changed = false;
+                for id in ids {
+                    if let Some(i) = self.live_index(id)
+                        && self.accepts_order(i, order)
+                        && orders::give(
+                            &mut self.entities,
+                            i,
+                            order,
+                            queued,
+                            self.tick,
+                            (pos_min, pos_max),
+                        )
+                    {
+                        changed = true;
+                    }
+                }
+                changed
+            }
+            Command::Stop { ids } => {
+                let mut changed = false;
+                for id in ids {
+                    if let Some(i) = self.live_index(id)
+                        && !self.is_immobile(i)
+                    {
+                        orders::clear(&mut self.entities, i);
+                        changed = true;
+                    }
+                }
+                changed
+            }
             Command::SetWanderArea { ids, area } => {
                 let area = area.clamped_to(self.bounds());
                 let mut changed = false;
@@ -718,6 +826,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::clear(&mut self.entities, i);
                         self.entities.area[i] = area;
                         self.entities.behavior[i] = Behavior::Wander;
                         self.entities.target[i] = None;
@@ -734,6 +843,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::clear(&mut self.entities, i);
                         self.entities.behavior[i] = Behavior::MoveTo;
                         self.entities.target[i] = Some(target);
                         changed = true;

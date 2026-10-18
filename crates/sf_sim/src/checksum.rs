@@ -20,6 +20,7 @@
 //! | terrain (`T`), only with a terrain layer | the terrain's digest: size, type definitions and the type of every cell, hashed once when the world is made |
 //! | occupancy (`O`), only while a cell is occupied | the number of occupied cells, then for each in ascending cell order: the cell index, the occupant's slot and its generation |
 //! | units (`U`), only with a unit table | the table's digest (every kind with its hit points, movement class, speed, turn rate, size and footprint), then the number of entities made from it and for each, in slot order: the slot and its current hit points |
+//! | orders (`D`), only while some entity has an order or a queue | the table's weapon reach digest, then the number of such entities and for each, in slot order: the slot, its current order and its queued orders (WP3.4) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -47,6 +48,12 @@
 //! slots in the units section tell a table entity from a legacy one of the
 //! same kind number.
 //!
+//! The orders section (WP3.4) follows the same rule: it is written only while at
+//! least one live entity has an order other than idle or a queued order, so a
+//! world that never received an order hashes as before. The weapon reach of the
+//! unit table is hashed there and not in the table's digest, which the pinned
+//! `units_spawn` scenario fixes. The new `Behavior::Ordered` has the tag three.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -71,6 +78,7 @@ use sf_math::{Rng, Vec2};
 use crate::behavior::Area;
 use crate::command::Command;
 use crate::entities::NO_DEF;
+use crate::orders::Order;
 use crate::world::World;
 
 /// Written first. Bump the number when the layout of the hashed bytes changes.
@@ -83,6 +91,7 @@ const SECTION_QUEUE: u8 = b'Q';
 const SECTION_TERRAIN: u8 = b'T';
 const SECTION_OCCUPANCY: u8 = b'O';
 const SECTION_UNITS: u8 = b'U';
+const SECTION_ORDERS: u8 = b'D';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -136,6 +145,24 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
             h.write_u32(cell.x);
             h.write_u32(cell.y);
             h.write_u8(owner.0);
+        }
+        Command::Order { ids, order, queued } => {
+            h.write_u8(8);
+            h.write_u64(len64(ids.len()));
+            for id in ids {
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
+            order.write_hash(h);
+            h.write_u8(u8::from(*queued));
+        }
+        Command::Stop { ids } => {
+            h.write_u8(9);
+            h.write_u64(len64(ids.len()));
+            for id in ids {
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
         }
         Command::Despawn { id } => {
             h.write_u8(2);
@@ -247,6 +274,26 @@ impl World {
             for i in made {
                 h.write_u32(i as u32);
                 h.write_u32(e.hp[i]);
+            }
+        }
+
+        // Orders (WP3.4): the weapon reach of the unit table (what an attack
+        // order walks to), then every entity that has an order or a queue.
+        // Written only while at least one does, so every world that never
+        // received an order hashes as before.
+        let ordered =
+            |i: usize| e.alive[i] && (e.order[i] != Order::Idle || !e.queue[i].is_empty());
+        if (0..slots).any(ordered) {
+            h.write_u8(SECTION_ORDERS);
+            h.write_u64(self.units.reach_digest());
+            h.write_u64(len64((0..slots).filter(|&i| ordered(i)).count()));
+            for i in (0..slots).filter(|&i| ordered(i)) {
+                h.write_u32(i as u32);
+                e.order[i].write_hash(&mut h);
+                h.write_u8(e.queue[i].len() as u8);
+                for queued in e.queue[i].iter() {
+                    queued.write_hash(&mut h);
+                }
             }
         }
 

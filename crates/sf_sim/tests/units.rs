@@ -32,6 +32,7 @@ fn table() -> UnitTable {
         turn_per_tick: turn,
         size: Fx::from_ratio(size_tenths, 10),
         footprint: None,
+        weapon_range: Fx::from_int(4),
     };
     let structure = |kind: Kind, hp, w, h| UnitStats {
         kind,
@@ -44,6 +45,7 @@ fn table() -> UnitTable {
             width: w,
             height: h,
         }),
+        weapon_range: Fx::ZERO,
     };
     let object = |kind: Kind, hp| UnitStats {
         footprint: None,

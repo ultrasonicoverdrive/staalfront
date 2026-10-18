@@ -36,6 +36,9 @@ use crate::ids::Kind;
 /// Written first into the digest; bump when its layout changes.
 const DIGEST_TAG: &[u8] = b"sf_sim/units/v1";
 
+/// Written first into the weapon range digest.
+const REACH_DIGEST_TAG: &[u8] = b"sf_sim/units/reach/v1";
+
 /// The cells a structure covers: `width` along x, `height` along y, both at
 /// least one.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -75,6 +78,12 @@ pub struct UnitStats {
     /// The cells a structure covers; `None` for everything that is not a
     /// structure.
     pub footprint: Option<Footprint>,
+    /// The range of the first weapon, in cells; zero for a kind without a
+    /// weapon. How near an `Attack` order brings the unit to its target
+    /// (WP3.4). Left out of [`UnitTable::digest`], which the pinned
+    /// `units_spawn` scenario fixes; the checksum hashes it with the orders
+    /// ([`UnitTable::reach_digest`]).
+    pub weapon_range: Fx,
 }
 
 /// What sort of thing a kind is, derived from its fields.
@@ -146,6 +155,8 @@ pub struct UnitTable {
     stats: Vec<UnitStats>,
     /// Hash of everything above; zero when empty.
     digest: u64,
+    /// Hash of every kind's weapon range; zero when empty.
+    reach_digest: u64,
 }
 
 impl fmt::Debug for UnitTable {
@@ -190,12 +201,16 @@ impl UnitTable {
                 return Err(UnitTableError::EmptyFootprint(s.kind));
             }
         }
-        let digest = if stats.is_empty() {
-            0
+        let (digest, reach_digest) = if stats.is_empty() {
+            (0, 0)
         } else {
-            digest_of(&stats)
+            (digest_of(&stats), reach_digest_of(&stats))
         };
-        Ok(UnitTable { stats, digest })
+        Ok(UnitTable {
+            stats,
+            digest,
+            reach_digest,
+        })
     }
 
     /// True if there are no kinds.
@@ -222,6 +237,13 @@ impl UnitTable {
     /// checksum.
     pub fn digest(&self) -> u64 {
         self.digest
+    }
+
+    /// A hash of the weapon range of every kind; zero for an empty table. It
+    /// joins the world checksum together with the orders, which are what
+    /// depend on it.
+    pub fn reach_digest(&self) -> u64 {
+        self.reach_digest
     }
 
     /// The position of `kind` in the sorted list: what an entity stores.
@@ -264,6 +286,16 @@ fn digest_of(stats: &[UnitStats]) -> u64 {
     h.finish()
 }
 
+fn reach_digest_of(stats: &[UnitStats]) -> u64 {
+    let mut h = Fnv1a64::new();
+    h.write_bytes(REACH_DIGEST_TAG);
+    for s in stats {
+        h.write_bytes(&s.kind.0.to_le_bytes());
+        h.write_fx(s.weapon_range);
+    }
+    h.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +309,7 @@ mod tests {
             turn_per_tick: 8,
             size: Fx::from_ratio(2, 5),
             footprint: None,
+            weapon_range: Fx::from_int(4),
         }
     }
 
@@ -292,6 +325,7 @@ mod tests {
                 width: w,
                 height: h,
             }),
+            weapon_range: Fx::ZERO,
         }
     }
 

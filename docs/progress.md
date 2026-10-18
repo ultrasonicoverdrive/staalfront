@@ -96,7 +96,11 @@ Status: in progress.
   `Command::SpawnUnit` and `Command::PlaceStructure`, footprints in the occupancy grid,
   hit points and per-unit speed), the `units_spawn` scenario, a data-driven look per role
   in `sf_game` (`roster.rs`) and the `sf_game` sandbox: done
-- WP3.3 to WP3.6: open
+- WP3.3: open
+- WP3.4 Commands as state (`sf_sim::orders`: idle, move, attack, attack-move, guard, stop,
+  scatter, a bounded queue per unit, per-player command sequence numbers), the `orders`
+  scenario, right-click / shift / S / X in `sf_game`, `docs/rules/orders.md`: done
+- WP3.5, WP3.6: open
 
 WP3.1 notes. The data is `assets/config/unit_classes.ron`, `weapon_defs.ron` and
 `unit_defs.ron`; every record has a permanent `kind` number (order in the file does not
@@ -114,6 +118,22 @@ and the sf_sim goldens are byte-identical. A mobile unit occupies no cell; a str
 occupies its whole footprint, all or nothing. `sf_game` starts in a sandbox (a few units and
 structures of each side, `--crowd` brings the old 2,000 wanderers back); `sf_demo` and its
 benchmark are the crowd scene, untouched. Rules: `docs/rules/units.md`.
+
+WP3.4 notes. A unit has a current order and a ring of eight queued ones in its own
+columns; `Command::Order { ids, order, queued }` and `Command::Stop { ids }` set them, a new
+behaviour `Ordered` carries them out with the same steering step as the wanderers (no
+pathfinding, no avoidance: those are WP4.2 and WP4.4). The order holds the destination; the
+point the unit steers at is a separate waypoint that phase 4 replaces. Attack, attack-move
+and guard are state and movement only (approach to weapon reach, follow a moving target, idle
+or the next queued order when the target dies); acquiring targets and firing are phase 5, with
+the hook `orders::would_acquire_targets_here` marking the place. The old `MoveTo` is
+unchanged, so `wander_5000`, `command_mix`, `terrain_256` and `units_spawn` are byte-identical:
+the new state joins the checksum only while some unit has an order. Follow-up 4 is done:
+commands run by `(tick, player, player sequence)`, and `World::schedule_sequenced` takes the
+number the sender gave (the lockstep packet of WP14.1 only has to carry it). The `orders` scenario is pinned on Linux and Windows. In `sf_game`,
+F2 selects the own units in view (temporary until WP3.3), right-click moves, shift queues,
+S stops (and does not pan while units are selected), X scatters. Rules:
+`docs/rules/orders.md`.
 
 ## Phase 1 report (draft, WP1.14)
 
@@ -150,11 +170,6 @@ Findings from the phase 1 work packages that are not fixed yet. Each is meant fo
 the work package named in it (or the first one that touches the code); when one is
 fixed, delete the entry in the same PR.
 
-4. **The command insertion sequence is machine-local.** `CommandQueue` orders a
-   tick's commands by `(player, insertion sequence)`; the sequence is a counter of
-   the local queue. A lockstep package (WP14.1) must carry a per-player sequence
-   number in the command packet and schedule with it, so that two machines order a
-   player's commands identically no matter how packets arrive.
 5. **Release clippy runs on Linux only in CI.** The step
    `cargo clippy --workspace --release --all-targets -- -D warnings` is guarded with
    `if: runner.os == 'Linux'`, so a lint that appears only in release mode on
