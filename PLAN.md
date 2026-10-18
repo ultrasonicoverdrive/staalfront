@@ -282,7 +282,7 @@ Layered (analysis §12, §22G):
 - WP10.5 Campaign structure: mission sequence, briefing (cartoon), choices.
 
 ### Phase 11 — Presentation and UI
-- WP11.1 Sidebar à la classic RTS: build tabs, queue, money, power bar.
+- WP11.1 Sidebar à la classic RTS: build tabs, queue, money, power bar. The build menu needs its own picture field in `unit_defs.ron`, separate from `icon` (since WP3.6 `icon` is the name of the strategic map icon).
 - WP11.2 Voice responses on selecting, moving, attacking (analysis §15), with a brake against spam.
 - WP11.3 Sound: positional, volume by zoom (farther away = quieter and less).
 - WP11.4 Music: dynamic (calm/combat).

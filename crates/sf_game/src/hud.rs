@@ -42,6 +42,11 @@ const OWNER_DOTS: [Color; 4] = [
 pub struct HudStats {
     pub fps: u32,
     pub units: u32,
+    /// Own units selected (WP3.3).
+    pub selected: u32,
+    /// A unit of someone else is being inspected (and nothing of ours is
+    /// selected).
+    pub inspecting: bool,
     pub tick: u64,
 }
 
@@ -128,15 +133,22 @@ impl Hud {
         ui.begin_frame(ui_input(ctx), (size.width, size.height), ctx.scale_factor());
 
         // Top bar: a label and a button.
-        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (420.0, 32.0));
+        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (520.0, 32.0));
         let text = ui.config().text;
         ui.text_in(
             bar,
             Anchor::Left,
             (12.0, 0.0),
             &format!(
-                "{} fps   {} units   tick {}",
-                stats.fps, stats.units, stats.tick
+                "{} fps   {} units   {}   tick {}",
+                stats.fps,
+                stats.units,
+                if stats.inspecting {
+                    "inspecting".to_owned()
+                } else {
+                    format!("{} selected", stats.selected)
+                },
+                stats.tick
             ),
             text,
         );
@@ -202,6 +214,25 @@ impl Hud {
     /// The middle button went down on the UI and is still held.
     pub fn middle_captured(&self) -> bool {
         self.ui.button_captured(MouseButton::Middle)
+    }
+
+    /// The layer for what the game draws over the scene but under the panels
+    /// (selection rings, health bars, the drag rectangle). Valid after
+    /// [`Hud::frame`], which clears it.
+    pub fn world_layer(&mut self) -> sf_ui::Layer<'_> {
+        self.ui.world_layer()
+    }
+
+    /// Packs the cursor pictures of `dir` into the UI's atlas (WP3.5).
+    pub fn load_cursors(&mut self, dir: &Path) -> Result<sf_ui::CursorSet, sf_ui::CursorError> {
+        sf_ui::CursorSet::load(dir, self.ui.atlas_mut())
+    }
+
+    /// Draws cursor `index` of `set` with its hotspot at `at` (physical
+    /// pixels) over everything, panels included. Valid after [`Hud::frame`],
+    /// which clears the list; call it last, before [`Hud::draw`].
+    pub fn draw_cursor(&mut self, set: &sf_ui::CursorSet, index: usize, at: (f32, f32)) {
+        self.ui.draw_cursor(set, index, at);
     }
 
     /// Render the scene and the UI on top.

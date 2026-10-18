@@ -268,6 +268,146 @@ pub fn click_reach(distance: f32, eye: &EyeView, min_px: f32) -> f32 {
     click_margin(0.0, distance, eye.focal_px, min_px)
 }
 
+/// A rectangle on the screen in physical pixels, origin top left: the drag
+/// selection of WP3.3. `x0 <= x1` and `y0 <= y1` always hold.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ScreenRect {
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+}
+
+impl ScreenRect {
+    /// The rectangle with these two opposite corners, whichever way the drag
+    /// went.
+    pub fn from_corners(a: [f32; 2], b: [f32; 2]) -> Self {
+        Self {
+            x0: a[0].min(b[0]),
+            y0: a[1].min(b[1]),
+            x1: a[0].max(b[0]),
+            y1: a[1].max(b[1]),
+        }
+    }
+
+    /// The whole viewport.
+    pub fn viewport(size: [f32; 2]) -> Self {
+        Self::from_corners([0.0, 0.0], size)
+    }
+
+    pub fn width(&self) -> f32 {
+        self.x1 - self.x0
+    }
+
+    pub fn height(&self) -> f32 {
+        self.y1 - self.y0
+    }
+
+    /// Whether the point is inside; the boundary counts as inside.
+    pub fn contains(&self, p: [f32; 2]) -> bool {
+        p[0] >= self.x0 && p[0] <= self.x1 && p[1] >= self.y0 && p[1] <= self.y1
+    }
+
+    /// Whether the two rectangles share a point; touching edges count.
+    pub fn overlaps(&self, other: &ScreenRect) -> bool {
+        self.x0 <= other.x1 && other.x0 <= self.x1 && self.y0 <= other.y1 && other.y0 <= self.y1
+    }
+
+    /// The rectangle grown to at least `min_px` wide and tall around its
+    /// centre.
+    pub fn at_least(&self, min_px: f32) -> Self {
+        let (cx, cy) = (0.5 * (self.x0 + self.x1), 0.5 * (self.y0 + self.y1));
+        let (hw, hh) = (
+            (0.5 * self.width()).max(0.5 * min_px),
+            (0.5 * self.height()).max(0.5 * min_px),
+        );
+        Self {
+            x0: cx - hw,
+            y0: cy - hh,
+            x1: cx + hw,
+            y1: cy + hh,
+        }
+    }
+}
+
+/// What to pick in a drag: the rectangle and the view of the frame that was
+/// drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RectQuery {
+    pub rect: ScreenRect,
+    /// The view-projection the frame was drawn with.
+    pub view_proj: Mat4,
+    /// Viewport size in physical pixels.
+    pub viewport: [f32; 2],
+}
+
+/// Whether the icon quad centred at `center` (already snapped, as the shader
+/// draws it) of side `size_px` shares a point with `rect`; touching counts.
+pub fn rect_hits_icon(rect: &ScreenRect, center: [f32; 2], size_px: f32) -> bool {
+    let half = 0.5 * size_px;
+    rect.overlaps(&ScreenRect {
+        x0: center[0] - half,
+        y0: center[1] - half,
+        x1: center[0] + half,
+        y1: center[1] + half,
+    })
+}
+
+/// The screen rectangle that covers a model's box: the eight corners of the
+/// box of a unit standing at `pos` facing `steps` (as in [`ray_obb`]), with
+/// the footprint and height of `size`, projected. A corner behind the camera
+/// is left out; `None` if every corner is.
+pub fn model_screen_rect(
+    view_proj: &Mat4,
+    viewport: [f32; 2],
+    pos: Vec3,
+    steps: f32,
+    size: [f32; 3],
+) -> Option<ScreenRect> {
+    let (s, c) = (steps * (TAU / 256.0)).sin_cos();
+    // The inverse of `to_local` in `ray_obb`.
+    let to_world = |l: Vec3| pos + Vec3::new(l.x * c - l.z * s, l.y, l.x * s + l.z * c);
+    let (hx, hz) = (0.5 * size[0], 0.5 * size[2]);
+    let mut rect: Option<ScreenRect> = None;
+    for corner in 0..8_u8 {
+        let local = Vec3::new(
+            if corner & 1 == 0 { -hx } else { hx },
+            if corner & 2 == 0 { 0.0 } else { size[1] },
+            if corner & 4 == 0 { -hz } else { hz },
+        );
+        let Some((p, _)) = project_px(view_proj, to_world(local), viewport) else {
+            continue;
+        };
+        rect = Some(match rect {
+            None => ScreenRect::from_corners(p, p),
+            Some(r) => ScreenRect {
+                x0: r.x0.min(p[0]),
+                y0: r.y0.min(p[1]),
+                x1: r.x1.max(p[0]),
+                y1: r.y1.max(p[1]),
+            },
+        });
+    }
+    rect
+}
+
+/// Whether a model's box, on the screen, shares a point with `rect`. The
+/// box counts at least `min_px` wide and tall (the click size of a small
+/// model, `icons.click_min_px`), so a unit too far away to see well can still
+/// be dragged over.
+pub fn rect_hits_model(
+    rect: &ScreenRect,
+    view_proj: &Mat4,
+    viewport: [f32; 2],
+    pos: Vec3,
+    steps: f32,
+    size: [f32; 3],
+    min_px: f32,
+) -> bool {
+    model_screen_rect(view_proj, viewport, pos, steps, size)
+        .is_some_and(|r| rect.overlaps(&r.at_least(min_px)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,5 +603,111 @@ mod tests {
         let eye = cam.eye();
         let behind = Vec3::new(eye.x as f32, eye.y as f32 + 100.0, eye.z as f32 + 400.0);
         assert!(project_px(&vp, behind, [1280.0, 720.0]).is_none());
+    }
+
+    #[test]
+    fn a_screen_rect_is_normalised_and_overlaps_inclusively() {
+        let r = ScreenRect::from_corners([30.0, 40.0], [10.0, 5.0]);
+        assert_eq!((r.x0, r.y0, r.x1, r.y1), (10.0, 5.0, 30.0, 40.0));
+        assert_eq!((r.width(), r.height()), (20.0, 35.0));
+        assert!(r.contains([10.0, 40.0]) && !r.contains([9.9, 20.0]));
+        let touching = ScreenRect::from_corners([30.0, 0.0], [50.0, 100.0]);
+        assert!(
+            r.overlaps(&touching) && touching.overlaps(&r),
+            "edges touch"
+        );
+        let apart = ScreenRect::from_corners([30.01, 0.0], [50.0, 100.0]);
+        assert!(!r.overlaps(&apart));
+        // A degenerate rectangle (a point) still overlaps what it is inside.
+        let point = ScreenRect::from_corners([20.0, 20.0], [20.0, 20.0]);
+        assert!(r.overlaps(&point));
+        assert_eq!(
+            ScreenRect::viewport([640.0, 360.0]),
+            ScreenRect::from_corners([0.0, 0.0], [640.0, 360.0])
+        );
+    }
+
+    #[test]
+    fn at_least_grows_a_small_rectangle_around_its_centre_only() {
+        let small = ScreenRect::from_corners([10.0, 10.0], [14.0, 12.0]);
+        let g = small.at_least(20.0);
+        assert_eq!((g.width(), g.height()), (20.0, 20.0));
+        assert_eq!((g.x0 + g.x1) * 0.5, 12.0);
+        assert_eq!((g.y0 + g.y1) * 0.5, 11.0);
+        let big = ScreenRect::from_corners([0.0, 0.0], [50.0, 40.0]);
+        assert_eq!(big.at_least(20.0), big);
+    }
+
+    #[test]
+    fn an_icon_quad_is_hit_by_a_rectangle_that_touches_it() {
+        let rect = ScreenRect::from_corners([100.0, 100.0], [150.0, 150.0]);
+        // Quad of 14 px: its edge is 7 px from the centre.
+        assert!(rect_hits_icon(&rect, [125.0, 125.0], 14.0), "inside");
+        assert!(rect_hits_icon(&rect, [157.0, 125.0], 14.0), "touching");
+        assert!(!rect_hits_icon(&rect, [157.1, 125.0], 14.0), "a hair off");
+        assert!(
+            rect_hits_icon(&rect, [93.0, 93.0], 14.0),
+            "corner to corner"
+        );
+        assert!(!rect_hits_icon(&rect, [92.9, 93.0], 14.0));
+        assert!(
+            rect_hits_icon(&rect, [125.0, 125.0], 400.0),
+            "quad covers the rectangle"
+        );
+    }
+
+    #[test]
+    fn a_model_box_projects_to_a_rectangle_that_covers_its_corners() {
+        let cam = camera(0.3);
+        let vp = cam.view_proj();
+        let viewport = [1280.0, 720.0];
+        let pos = Vec3::new(104.0, 0.0, 117.0);
+        let size = [4.0, 2.0, 2.0];
+        let r = model_screen_rect(&vp, viewport, pos, 0.0, size).unwrap();
+        for (x, y, z) in [
+            (-2.0, 0.0, -1.0),
+            (2.0, 2.0, 1.0),
+            (2.0, 0.0, -1.0),
+            (-2.0, 2.0, 1.0),
+        ] {
+            let (p, _) = project_px(&vp, pos + Vec3::new(x, y, z), viewport).unwrap();
+            assert!(r.contains(p), "{p:?} in {r:?}");
+        }
+        // A quarter turn swaps the footprint's sides: the box is a different shape.
+        let turned = model_screen_rect(&vp, viewport, pos, 64.0, size).unwrap();
+        assert_ne!((r.width(), r.height()), (turned.width(), turned.height()));
+        // Turning it around gives the same rectangle (the box is symmetric).
+        let half = model_screen_rect(&vp, viewport, pos, 128.0, size).unwrap();
+        assert!((half.x0 - r.x0).abs() < 1e-3 && (half.y1 - r.y1).abs() < 1e-3);
+        // Behind the camera there is nothing to cover.
+        let eye = cam.eye();
+        let behind = Vec3::new(eye.x as f32, eye.y as f32 + 100.0, eye.z as f32 + 400.0);
+        assert!(model_screen_rect(&vp, viewport, behind, 0.0, size).is_none());
+    }
+
+    #[test]
+    fn a_model_is_hit_by_a_rectangle_over_its_box_not_beside_it() {
+        let cam = camera(0.3);
+        let vp = cam.view_proj();
+        let viewport = [1280.0, 720.0];
+        let pos = Vec3::new(104.0, 0.0, 117.0);
+        let size = [4.0, 2.0, 2.0];
+        let box_rect = model_screen_rect(&vp, viewport, pos, 0.0, size).unwrap();
+        let inside = ScreenRect::from_corners(
+            [box_rect.x0 + 1.0, box_rect.y0 + 1.0],
+            [box_rect.x0 + 3.0, box_rect.y0 + 3.0],
+        );
+        assert!(rect_hits_model(&inside, &vp, viewport, pos, 0.0, size, 0.0));
+        let beside = ScreenRect::from_corners(
+            [box_rect.x1 + 40.0, box_rect.y0],
+            [box_rect.x1 + 80.0, box_rect.y1],
+        );
+        assert!(!rect_hits_model(
+            &beside, &vp, viewport, pos, 0.0, size, 0.0
+        ));
+        // The minimum size reaches the rectangle beside it.
+        assert!(rect_hits_model(
+            &beside, &vp, viewport, pos, 0.0, size, 400.0
+        ));
     }
 }

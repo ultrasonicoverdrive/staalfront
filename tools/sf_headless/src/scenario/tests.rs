@@ -69,7 +69,7 @@ fn spawn_and_command_defaults() {
 #[test]
 fn the_shipped_scenarios_are_valid() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenarios");
-    for name in ["wander_5000", "command_mix", "terrain_256"] {
+    for name in ["wander_5000", "command_mix", "terrain_256", "units_spawn"] {
         let s = Scenario::load(&dir.join(format!("{name}.ron"))).unwrap();
         assert_eq!(s.name, name);
     }
@@ -529,4 +529,87 @@ fn a_map_that_does_not_fit_the_scenario_is_reported_with_the_file() {
     let e = load("missing");
     assert!(e.contains("missing") && e.contains("cannot read"), "{e}");
     std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn the_order_actions_are_checked_like_the_other_commands() {
+    // Targets are cells inside the map; the last cell is fine.
+    for action in ["OrderMove", "OrderAttackMove", "OrderGuardPoint"] {
+        let p = problems(&with_command(&format!(
+            "(tick: 1, command: {action}(ids: [Id(0, 0)], target: (16, 3)))"
+        )));
+        assert!(has(&p, "target (16, 3) lies outside"), "{action}: {p:?}");
+        let p = problems(&with_command(&format!(
+            "(tick: 1, command: {action}(ids: [], target: (3, 3)))"
+        )));
+        assert!(has(&p, "ids must not be empty"), "{action}: {p:?}");
+        parse(&with_command(&format!(
+            "(tick: 1, command: {action}(ids: [Id(0, 0)], target: (15, 15), queued: true))"
+        )))
+        .unwrap();
+    }
+    // An entity target is a slot below the entity limit.
+    for action in ["OrderAttack", "OrderGuardEntity"] {
+        let p = problems(&with_command(&format!(
+            "(tick: 1, command: {action}(ids: [Id(0, 0)], target: (2000000, 0)))"
+        )));
+        assert!(has(&p, "is not a valid slot"), "{action}: {p:?}");
+        parse(&with_command(&format!(
+            "(tick: 1, command: {action}(ids: [Id(0, 0)], target: (3, 0)))"
+        )))
+        .unwrap();
+    }
+    let p = problems(&with_command("(tick: 1, command: Stop(ids: []))"));
+    assert!(has(&p, "ids must not be empty"), "{p:?}");
+    let p = problems(&with_command("(tick: 1, command: OrderScatter(ids: []))"));
+    assert!(has(&p, "ids must not be empty"), "{p:?}");
+    let p = problems(&with_command("(tick: 1, command: OrderHold(ids: []))"));
+    assert!(has(&p, "ids must not be empty"), "{p:?}");
+    parse(&with_command(
+        "(tick: 1, command: OrderHold(ids: [Id(0, 0)], queued: true))",
+    ))
+    .unwrap();
+    // `queued` is optional and a field that does not exist is an error.
+    parse(&with_command(
+        "(tick: 1, command: OrderScatter(ids: [Id(0, 0)]))",
+    ))
+    .unwrap();
+    let e = syntax_error(&with_command(
+        "(tick: 1, command: OrderScatter(ids: [Id(0, 0)], urgent: true))",
+    ));
+    assert!(e.contains("urgent"), "{e}");
+}
+
+#[test]
+fn the_order_actions_become_order_commands_for_the_cells_middle() {
+    let s = parse(&with_command(
+        "(tick: 2, player: 1, command: OrderMove(ids: [Range(0, 3)], target: (5, 6), queued: true))",
+    ))
+    .unwrap();
+    let world = s.build_world().unwrap();
+    let pending: Vec<_> = world
+        .pending_commands()
+        .iter()
+        .filter(|(tick, _, _)| *tick == Tick(2))
+        .collect();
+    assert_eq!(pending.len(), 1);
+    let (_, player, command) = pending[0];
+    assert_eq!(player, PlayerId(1));
+    assert_eq!(
+        *command,
+        Command::Order {
+            ids: (0..3).map(|i| EntityId::new(i, 0)).collect(),
+            order: Order::Move(Vec2::new(
+                Fx::from_int(5) + Fx::HALF,
+                Fx::from_int(6) + Fx::HALF
+            )),
+            queued: true,
+        }
+    );
+    let s = parse(&with_command("(tick: 2, command: Stop(ids: [Id(4, 0)]))")).unwrap();
+    let world = s.build_world().unwrap();
+    assert!(world.pending_commands().iter().any(|(_, _, c)| *c
+        == Command::Stop {
+            ids: vec![EntityId::new(4, 0)]
+        }));
 }

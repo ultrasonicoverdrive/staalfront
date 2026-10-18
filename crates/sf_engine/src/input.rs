@@ -31,10 +31,60 @@ pub enum Action {
     /// Plays the audio test sound (engine smoke test, not a game command).
     PlayTestSound,
     Quit,
+    /// Order the selected units to the cursor (right-click). A game action
+    /// named here so that it is rebindable like the rest (WP3.4).
+    OrderMove,
+    /// Held: orders are added to the queue instead of replacing the orders
+    /// (shift).
+    OrderQueue,
+    /// Stop the selected units.
+    OrderStop,
+    /// Scatter the selected units.
+    OrderScatter,
+    /// The selected units hold position.
+    OrderHold,
+    /// Held: a right-click on the ground is an attack-move instead of a plain
+    /// move (WP3.5). A held modifier like [`Action::OrderQueue`], not a key
+    /// that waits for the next click, so the cursor can show it while it is
+    /// held. Not on A: A is the camera's pan left.
+    OrderAttackMove,
+    /// Left button: click selects, drag draws the selection rectangle,
+    /// double-click selects the units of the same kind in view (WP3.3).
+    SelectClick,
+    /// Held: a click toggles the unit in the selection and a drag or
+    /// double-click adds to it instead of replacing it (shift).
+    SelectAdd,
+    /// Held: a group key assigns the selection to the group instead of
+    /// recalling it (ctrl).
+    GroupAssign,
+    /// Recall control group 1 (with [`Action::GroupAssign`] held: assign it);
+    /// a double tap centres the camera on it.
+    Group1,
+    Group2,
+    Group3,
+    Group4,
+    Group5,
+    Group6,
+    Group7,
+    Group8,
+    Group9,
 }
 
 impl Action {
-    pub const ALL: [Action; 13] = [
+    /// The nine control-group actions, in order: `GROUPS[0]` is group 1.
+    pub const GROUPS: [Action; 9] = [
+        Action::Group1,
+        Action::Group2,
+        Action::Group3,
+        Action::Group4,
+        Action::Group5,
+        Action::Group6,
+        Action::Group7,
+        Action::Group8,
+        Action::Group9,
+    ];
+
+    pub const ALL: [Action; 31] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -48,6 +98,24 @@ impl Action {
         Action::ToggleDebug,
         Action::PlayTestSound,
         Action::Quit,
+        Action::OrderMove,
+        Action::OrderQueue,
+        Action::OrderStop,
+        Action::OrderScatter,
+        Action::OrderHold,
+        Action::OrderAttackMove,
+        Action::SelectClick,
+        Action::SelectAdd,
+        Action::GroupAssign,
+        Action::Group1,
+        Action::Group2,
+        Action::Group3,
+        Action::Group4,
+        Action::Group5,
+        Action::Group6,
+        Action::Group7,
+        Action::Group8,
+        Action::Group9,
     ];
 }
 
@@ -336,12 +404,26 @@ impl InputState {
     }
 }
 
+/// Which screen edges the cursor is scrolling this frame: the edge triggers
+/// of the bindings that are bound to some action and active (the cursor is in
+/// the band, the window has the focus, the binding's modifiers are down).
+/// A key that pans the camera does not count: this is about the cursor, so
+/// the game can show which way the screen is scrolling (WP3.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Edges {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
+}
+
 /// Which actions are held / pressed / released this frame.
 #[derive(Clone, Debug, Default)]
 pub struct ActionState {
     held: BTreeSet<Action>,
     pressed: BTreeSet<Action>,
     released: BTreeSet<Action>,
+    edges: Edges,
 }
 
 impl ActionState {
@@ -350,6 +432,7 @@ impl ActionState {
         let previous = std::mem::take(&mut self.held);
         self.pressed.clear();
         self.released.clear();
+        self.edges = Edges::default();
         for (&action, list) in &bindings.bindings {
             let mut held = false;
             let mut pulse = false;
@@ -357,6 +440,15 @@ impl ActionState {
                 let (h, p) = input.binding_state(b, bindings.edge_margin);
                 held |= h;
                 pulse |= p;
+                if h {
+                    match b.trigger {
+                        Trigger::EdgeLeft => self.edges.left = true,
+                        Trigger::EdgeRight => self.edges.right = true,
+                        Trigger::EdgeTop => self.edges.top = true,
+                        Trigger::EdgeBottom => self.edges.bottom = true,
+                        _ => {}
+                    }
+                }
             }
             if held {
                 self.held.insert(action);
@@ -373,6 +465,10 @@ impl ActionState {
 
     pub fn held(&self, a: Action) -> bool {
         self.held.contains(&a)
+    }
+    /// The screen edges the cursor is scrolling right now.
+    pub fn edges(&self) -> Edges {
+        self.edges
     }
     pub fn pressed(&self, a: Action) -> bool {
         self.pressed.contains(&a)
@@ -405,6 +501,98 @@ mod tests {
             assert!(!b.for_action(a).is_empty(), "{a:?} has no binding");
         }
         assert_eq!(b.edge_margin, 4);
+    }
+
+    /// Two held modifiers that are read in different places may share a key:
+    /// shift queues an order (read with an order) and adds to a selection
+    /// (read with a click).
+    const SHARED: [(Action, Action); 1] = [(Action::OrderQueue, Action::SelectAdd)];
+
+    #[test]
+    fn builtin_binds_no_key_or_button_to_two_actions() {
+        let b = Bindings::builtin();
+        let mut seen: Vec<(Binding, Action)> = Vec::new();
+        for a in Action::ALL {
+            for binding in b.for_action(a) {
+                if let Some((_, other)) = seen.iter().find(|(x, _)| x == binding) {
+                    assert!(
+                        SHARED.contains(&(*other, a)) || SHARED.contains(&(a, *other)),
+                        "{binding:?} is bound to {other:?} and {a:?}"
+                    );
+                }
+                seen.push((binding.clone(), a));
+            }
+        }
+    }
+
+    #[test]
+    fn the_selection_bindings_are_actions() {
+        let b = Bindings::builtin();
+        assert_eq!(
+            b.for_action(Action::SelectClick),
+            [Binding::new(Trigger::Mouse(MouseButton::Left))]
+        );
+        // The modifiers are actions too, so they can be rebound.
+        assert_eq!(
+            b.for_action(Action::SelectAdd),
+            b.for_action(Action::OrderQueue)
+        );
+        assert_eq!(b.for_action(Action::GroupAssign).len(), 2);
+        for (n, action) in Action::GROUPS.into_iter().enumerate() {
+            let digit = [
+                KeyCode::Digit1,
+                KeyCode::Digit2,
+                KeyCode::Digit3,
+                KeyCode::Digit4,
+                KeyCode::Digit5,
+                KeyCode::Digit6,
+                KeyCode::Digit7,
+                KeyCode::Digit8,
+                KeyCode::Digit9,
+            ][n];
+            assert!(
+                b.for_action(action)
+                    .contains(&Binding::new(Trigger::Key(digit))),
+                "{action:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_group_key_with_control_held_is_pressed_and_assign_is_held() {
+        let b = Bindings::builtin();
+        let mut input = sized();
+        input.key_event(KeyCode::ControlLeft, ElementState::Pressed, false);
+        input.key_event(KeyCode::Digit3, ElementState::Pressed, false);
+        let s = eval(&input, &b);
+        assert!(s.held(Action::GroupAssign));
+        assert!(s.pressed(Action::Group3));
+        assert!(!s.pressed(Action::Group4));
+    }
+
+    #[test]
+    fn the_order_keys_are_not_camera_keys() {
+        let b = Bindings::builtin();
+        for (action, key) in [
+            (Action::OrderStop, KeyCode::KeyC),
+            (Action::OrderScatter, KeyCode::KeyX),
+            (Action::OrderHold, KeyCode::KeyH),
+        ] {
+            assert_eq!(b.for_action(action), [Binding::new(Trigger::Key(key))]);
+        }
+        let right = [Binding::new(Trigger::Mouse(MouseButton::Right))];
+        assert_eq!(b.for_action(Action::OrderMove), right);
+        // The camera still has WASD.
+        for key in [KeyCode::KeyW, KeyCode::KeyA, KeyCode::KeyS, KeyCode::KeyD] {
+            assert!(
+                b.bindings
+                    .values()
+                    .flatten()
+                    .any(|x| x.trigger == Trigger::Key(key)),
+                "{key:?}"
+            );
+        }
+        assert_eq!(b.for_action(Action::OrderQueue).len(), 2);
     }
 
     #[test]
@@ -574,6 +762,59 @@ mod tests {
         assert!(eval(&i, &b).held(Action::CameraPanLeft));
         i.cursor_moved(4.0, 300.0);
         assert!(!eval(&i, &b).held(Action::CameraPanLeft));
+    }
+
+    #[test]
+    fn the_edges_are_the_cursor_and_never_a_pan_key() {
+        let b = Bindings::builtin();
+        // A pan key held in the middle of the screen: panning, but no edge.
+        let mut i = sized();
+        i.cursor_moved(400.0, 300.0);
+        i.key_event(KeyCode::KeyA, ElementState::Pressed, false);
+        let s = eval(&i, &b);
+        assert!(s.held(Action::CameraPanLeft));
+        assert_eq!(s.edges(), Edges::default());
+        // The corner is two edges at once (the diagonal scroll cursors).
+        let mut i = sized();
+        i.cursor_moved(799.0, 0.0);
+        assert_eq!(
+            eval(&i, &b).edges(),
+            Edges {
+                right: true,
+                top: true,
+                ..Edges::default()
+            }
+        );
+        let mut i = sized();
+        i.cursor_moved(0.0, 300.0);
+        assert_eq!(
+            eval(&i, &b).edges(),
+            Edges {
+                left: true,
+                ..Edges::default()
+            }
+        );
+        // An edge nobody bound scrolls nothing, so it is not shown either.
+        let none = Bindings::from_ron_str("(bindings: {})").unwrap();
+        assert_eq!(eval(&i, &none).edges(), Edges::default());
+        // Outside the window or without the focus: no edge.
+        i.cursor_left();
+        assert_eq!(eval(&i, &b).edges(), Edges::default());
+    }
+
+    #[test]
+    fn the_attack_move_modifier_is_a_free_key_and_not_a_camera_key() {
+        let b = Bindings::builtin();
+        assert_eq!(
+            b.for_action(Action::OrderAttackMove),
+            [Binding::new(Trigger::Key(KeyCode::KeyF))]
+        );
+        // Held, like the queue modifier, so the cursor can show it.
+        let mut i = sized();
+        i.key_event(KeyCode::KeyF, ElementState::Pressed, false);
+        let s = eval(&i, &b);
+        assert!(s.held(Action::OrderAttackMove));
+        assert!(!s.held(Action::CameraPanLeft));
     }
 
     #[test]

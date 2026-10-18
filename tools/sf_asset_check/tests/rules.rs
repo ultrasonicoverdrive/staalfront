@@ -448,16 +448,38 @@ fn a_wreck_needs_a_hull_and_empty_fx_nodes() {
 
 #[test]
 fn turret_hangs_under_hull_and_barrel_under_turret() {
-    // The delivered heavy wreck has its turret beside the hull, not under it.
+    // A wreck's turret may lie off the hull, directly under the root (the
+    // delivered heavy wreck): allowed, like a missing turret.
     let mut m = wreck("neutral_wreck_heavy_vehicle");
     for lod in 0..3 {
         let turret = m.part_mut(lod, "turret").clone();
         m.remove_part(lod, "turret");
         m.lods[lod].parts.push(turret);
     }
-    let r = check("neutral_wreck_heavy_vehicle.glb", &m);
+    assert_clean(&check("neutral_wreck_heavy_vehicle.glb", &m));
+
+    // A living vehicle's turret must hang under the hull.
+    let mut t = tank("veyran_light_tank", 0.30);
+    for lod in 0..3 {
+        t.remove_part(lod, "turret");
+        t.lods[lod]
+            .parts
+            .push(Part::new("turret").child(Part::new("barrel")));
+    }
+    let r = check("veyran_light_tank.glb", &t);
     assert!(r.failed("nodes"));
     assert!(messages(&r, "nodes").contains("turret hangs under the root"));
+
+    // A barrel must hang under the turret, also on a wreck.
+    let mut w = wreck("neutral_wreck_medium_vehicle");
+    for lod in 0..3 {
+        let barrel = w.part_mut(lod, "barrel").clone();
+        w.remove_part(lod, "barrel");
+        w.part_mut(lod, "hull").children.push(barrel);
+    }
+    let r = check("neutral_wreck_medium_vehicle.glb", &w);
+    assert!(r.failed("nodes"));
+    assert!(messages(&r, "nodes").contains("barrel hangs under hull"));
 }
 
 #[test]

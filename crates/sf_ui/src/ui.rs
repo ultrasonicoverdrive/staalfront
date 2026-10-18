@@ -27,7 +27,7 @@
 
 use crate::atlas::Atlas;
 use crate::color::{Color, UiConfig};
-use crate::draw::{DrawList, Texture, Uv};
+use crate::draw::{DrawList, Layer, Texture, Uv};
 use crate::layout::{Anchor, Rect, place, place_physical};
 use crate::skin::{BORDER, Skin};
 use crate::text::{Font, GlyphCache};
@@ -110,6 +110,8 @@ pub struct Ui {
     glyphs: GlyphCache,
     pub(crate) skin: Skin,
     pub(crate) list: DrawList,
+    /// What the game draws under the panels ([`Ui::world_layer`]).
+    under: DrawList,
     scale: f32,
     screen: Rect,
     pub(crate) input: UiInput,
@@ -135,6 +137,7 @@ impl Ui {
             glyphs: GlyphCache::default(),
             skin,
             list: DrawList::default(),
+            under: DrawList::default(),
             scale: 1.0,
             screen: Rect::default(),
             input: UiInput::default(),
@@ -170,6 +173,21 @@ impl Ui {
         &self.list
     }
 
+    /// The draw list of the world layer: drawn before (under) the panels of
+    /// [`Ui::draw_list`].
+    pub fn underlay(&self) -> &DrawList {
+        &self.under
+    }
+
+    /// Draw on the world layer: shapes the game places over the scene but
+    /// under the panels (WP3.3: selection rings, health bars, the drag
+    /// rectangle). Cleared by [`Ui::begin_frame`]; may be used after
+    /// [`Ui::end_frame`], so the game can draw what depends on this frame's
+    /// camera after the UI was built. Does not block input.
+    pub fn world_layer(&mut self) -> Layer<'_> {
+        Layer::new(&mut self.under, self.skin.white)
+    }
+
     pub fn atlas(&self) -> &Atlas {
         &self.atlas
     }
@@ -189,6 +207,7 @@ impl Ui {
     /// the window's scale factor.
     pub fn begin_frame(&mut self, input: UiInput, screen: (u32, u32), dpi: f64) {
         self.list.clear();
+        self.under.clear();
         self.blockers.clear();
         self.input = input;
         self.scale = self.cfg.effective_scale(dpi);

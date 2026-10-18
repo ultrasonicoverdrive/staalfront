@@ -1,0 +1,45 @@
+icons_14px.png: columns are the pictures below, left to right; rows are the four
+player colours (red, blue, yellow, magenta) on green, sand, grey and snow
+(top to bottom). Real size: 14 px icons in 18 px cells.
+
+ 1  base_square
+ 2  base_circle = civilian
+ 3  base_triangle
+ 4  base_halfcircle
+ 5  advanced_defences
+ 6  amphibious_transport
+ 7  archive_building
+ 8  automated_gun
+ 9  barracks
+10  combat_engineer
+11  construction_center
+12  decoy_emplacement = defence_tower
+13  demolition_team
+14  engineer
+15  ferry
+16  fortified_bunker
+17  fuel_depot
+18  generator
+19  gunboat
+20  harvester
+21  heavy_gun_team
+22  heavy_tank
+23  light_tank
+24  light_transport
+25  medic
+26  power_plant
+27  radar
+28  refinery
+29  relay_transmitter
+30  repair_truck
+31  rifleman
+32  rocket_trooper
+33  scout
+34  shipyard
+35  siege_artillery
+36  sniper
+37  supply_truck
+38  technician
+39  transport_truck
+40  unmanned_artillery
+41  vehicle_factory

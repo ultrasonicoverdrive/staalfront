@@ -20,7 +20,7 @@
 //! | `team`, `team-share` | `team` present for faction models, absent for neutral ones; 20 to 40 % of the top-down view of LOD0 (LOD1/2: warn) | fail |
 //! | `ground` | lowest point `Y = 0` within 5 cm, warn to 30 cm, then fail; a vessel: the waterline is inside the hull | warn / fail |
 //! | `orientation` | vehicles and wrecks longer along X than Z; infantry higher than wide | fail |
-//! | `nodes`, `fx-nodes` | infantry `torso head arm_l arm_r leg_l leg_r` (`_2` for two figures); vehicles and wrecks `hull` -> `turret` -> `barrel`; wrecks empty `fx_smoke_*` and `fx_fire_*` | fail |
+//! | `nodes`, `fx-nodes` | infantry `torso head arm_l arm_r leg_l leg_r` (`_2` for two figures); vehicles and wrecks `hull` -> `turret` -> `barrel` (a wreck may lack its turret or have it lying off the hull, directly under the root); wrecks empty `fx_smoke_*` and `fx_fire_*` | fail |
 //! | `origin`, `footprint` | the origin under the middle of the footprint; an ore field fits one 4 m cell | warn |
 //!
 //! The geometry (triangles, bounds, team flag, top-down view) comes from the

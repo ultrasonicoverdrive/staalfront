@@ -1,0 +1,17 @@
+[package]
+name = "sf_icon_gen"
+description = "Generates the placeholder strategic icons (assets/icons/*.png) deterministically."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary: `src/lib.rs` draws the icons (testable), `src/main.rs`
+# writes or checks the files. The PNG encoder is the `png` crate that sf_render
+# and sf_data already use (same version, so the lockfile gains no crate).
+[dependencies]
+png = "0.18.1"

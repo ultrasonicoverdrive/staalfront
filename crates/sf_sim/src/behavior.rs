@@ -36,7 +36,10 @@
 
 use sf_math::{Fx, Rng, Vec2};
 
-use crate::entities::Entities;
+use crate::entities::{Entities, NO_DEF};
+use crate::ids::Tick;
+use crate::orders;
+use crate::units::UnitTable;
 
 /// What an entity does each tick.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -47,6 +50,9 @@ pub enum Behavior {
     Wander,
     /// Walks to one target, then becomes [`Behavior::Idle`].
     MoveTo,
+    /// Follows its current order and queue (WP3.4, [`crate::orders`]). Idle
+    /// exactly when the order is [`Order::Idle`](crate::Order::Idle).
+    Ordered,
 }
 
 impl Behavior {
@@ -57,6 +63,7 @@ impl Behavior {
             Behavior::Idle => 0,
             Behavior::Wander => 1,
             Behavior::MoveTo => 2,
+            Behavior::Ordered => 3,
         }
     }
 }
@@ -142,9 +149,27 @@ pub(crate) struct Motion {
     pub pos_max: Vec2,
 }
 
+impl Motion {
+    /// The motion of one entity: the world's own speed and turn rate for an
+    /// entity without a unit table entry, the entry's speed per tick and turn
+    /// rate for a unit made from one (WP3.2).
+    pub(crate) fn of_entity(&self, def: u32, units: &UnitTable) -> Motion {
+        if def == NO_DEF {
+            return *self;
+        }
+        let stats = units.at(def as usize);
+        Motion {
+            step: stats.speed_per_tick,
+            step_sq: stats.speed_per_tick.square(),
+            turn_per_tick: stats.turn_per_tick,
+            ..*self
+        }
+    }
+}
+
 /// Runs one tick of behaviour for every live entity, in ascending slot
 /// order. Also records the previous position and facing for interpolation.
-pub(crate) fn advance_all(e: &mut Entities, m: &Motion) {
+pub(crate) fn advance_all(e: &mut Entities, world_motion: &Motion, units: &UnitTable, tick: Tick) {
     let slots = e.len();
     for i in 0..slots {
         if !e.alive[i] {
@@ -152,6 +177,10 @@ pub(crate) fn advance_all(e: &mut Entities, m: &Motion) {
         }
         e.prev_pos[i] = e.pos[i];
         e.prev_facing[i] = e.facing[i];
+        if e.behavior[i] == Behavior::Idle {
+            continue;
+        }
+        let m = &world_motion.of_entity(e.def[i], units);
         match e.behavior[i] {
             Behavior::Idle => {}
             Behavior::Wander => {
@@ -176,12 +205,13 @@ pub(crate) fn advance_all(e: &mut Entities, m: &Motion) {
                 }
                 None => e.behavior[i] = Behavior::Idle,
             },
+            Behavior::Ordered => orders::run(e, i, m, units, tick),
         }
     }
 }
 
 /// One tick of walking entity `i` toward `target`. True if it arrived.
-fn walk(e: &mut Entities, i: usize, target: Vec2, m: &Motion) -> bool {
+pub(crate) fn walk(e: &mut Entities, i: usize, target: Vec2, m: &Motion) -> bool {
     let pos = e.pos[i];
     let delta = target - pos;
     if delta.length_squared() <= m.step_sq {
@@ -249,5 +279,6 @@ mod tests {
         assert_eq!(Behavior::Idle.tag(), 0);
         assert_eq!(Behavior::Wander.tag(), 1);
         assert_eq!(Behavior::MoveTo.tag(), 2);
+        assert_eq!(Behavior::Ordered.tag(), 3);
     }
 }

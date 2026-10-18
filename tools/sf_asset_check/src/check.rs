@@ -696,8 +696,12 @@ impl Run {
         }
         let turret = tree.find("turret");
         let barrel = tree.find("barrel");
+        // A wreck's turret may lie off the hull (blown off), directly under
+        // the root; a living vehicle's turret must hang under the hull.
+        let lying_off = class == Class::Wreck && turret.is_some_and(|(_, p)| p.is_none());
         if let Some((_, parent)) = turret
             && parent != Some("hull")
+            && !lying_off
         {
             self.report.fail(
                 "nodes",

@@ -9,9 +9,10 @@
 //! on.
 //!
 //! The world contains one placeholder behaviour, "wander", so thousands of
-//! entities move around without any gameplay. There are no unit types, no
-//! collision and no combat yet. Since WP2.1 the map has a terrain type and an
-//! occupant per cell (see "Terrain and occupancy" below).
+//! entities move around without any gameplay. There is no collision and no
+//! combat yet. Since WP2.1 the map has a terrain type and an occupant per
+//! cell (see "Terrain and occupancy" below); since WP3.2 a world can spawn
+//! units and structures with the stats of a unit table (see "Units" below).
 //!
 //! ```
 //! use sf_math::Vec2;
@@ -65,8 +66,9 @@
 //!
 //! Entities live in one struct-of-arrays store with a column per property:
 //! generation, live flag, kind, owner, position, previous position, facing,
-//! previous facing, behaviour, target, wander area, a random stream and the
-//! cell a structure occupies (none for a wanderer). An
+//! previous facing, behaviour, target, wander area, a random stream, the
+//! cell a structure occupies (none for a wanderer or a unit), and for an entity
+//! made from the unit table its table entry and its hit points. An
 //! entity is a slot number, nothing more; the columns are plain `Vec`s walked
 //! in index order, which is cache friendly and the only iteration order the
 //! simulation ever uses.
@@ -109,9 +111,13 @@
 //! ordering rules: commands run at the start of their tick by
 //! `(tick, player, insertion)`, a command for an already executed tick is
 //! rejected with [`ScheduleError::PastTick`], and commands naming stale ids
-//! skip those ids. The minimal set: [`Command::Spawn`], [`Command::Place`],
-//! [`Command::Despawn`], [`Command::SetWanderArea`] and [`Command::MoveTo`]. Pending commands are
-//! simulation state: they are in the checksum and survive a clone of the
+//! skip those ids. The set: [`Command::Spawn`], [`Command::Place`] (the
+//! placeholders), [`Command::SpawnUnit`], [`Command::PlaceStructure`] (from the
+//! unit table), [`Command::Despawn`], [`Command::SetWanderArea`],
+//! [`Command::MoveTo`] and, since WP3.4, [`Command::Order`] and
+//! [`Command::Stop`] (see "Orders" below). Commands run by `(tick, player, player
+//! sequence)`; [`World::schedule_sequenced`] takes the sequence number the sender gave.
+//! Pending commands are simulation state: they are in the checksum and survive a clone of the
 //! world.
 //!
 //! # Checksum
@@ -169,6 +175,21 @@
 //! assert!(world.occupant_at(Cell::new(2, 0)).is_none());
 //! ```
 //!
+//! # Units
+//!
+//! [`World::with_units`] takes a [`UnitTable`]: for each unit kind its hit
+//! points, movement class, speed per tick, turn rate, size and footprint,
+//! which the caller copies out of the `sf_data` definitions (the simulation
+//! does not depend on `sf_data`). [`Command::SpawnUnit`] makes a mobile unit
+//! or an object, [`Command::PlaceStructure`] a building on its footprint; both
+//! refuse a kind the table does not know, and the structure is refused unless
+//! every cell of its footprint is on the map, buildable and free. A mobile unit
+//! occupies no cell. A unit moves by its own speed per tick and turn rate
+//! instead of the world's placeholder speed. The legacy [`Command::Spawn`] and
+//! [`Command::Place`] ignore the table: their kind is an opaque number, so the
+//! wanderer scenarios and their checksums stay as they were. The rules are in
+//! `docs/rules/units.md`.
+//!
 //! # Presentation
 //!
 //! [`World::snapshot`] gives a read-only [`Snapshot`] of every live entity
@@ -191,10 +212,20 @@
 //! * `sf_math`'s float helpers sit behind its `render` feature, which this
 //!   crate does not enable: built on its own, `sf_sim` cannot name them.
 //!
+//! # Orders
+//!
+//! A unit has a current [`Order`] and a ring of [`ORDER_QUEUE_CAP`] queued ones.
+//! [`Command::Order`] replaces them or, queued, appends; [`Command::Stop`] clears
+//! them. The behaviour pass carries the order out: it steers at the next waypoint of
+//! the unit's route (today the straight line, `orders::next_waypoint`, which
+//! pathfinding replaces) and judges arrival against the destination. Attack,
+//! attack-move and guard are state and movement only: combat is phase five. The rules
+//! are in `docs/rules/orders.md`.
+//!
 //! # Not here yet
 //!
-//! Unit definitions (phase 3), pathfinding
-//! and collision (phase 4), health, weapons and projectiles (phase 5), and
+//! Pathfinding and collision (phase 4), target acquisition and firing (phase 5),
+//! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
 
@@ -203,8 +234,10 @@ pub mod checksum;
 pub mod command;
 mod entities;
 pub mod ids;
+pub mod orders;
 pub mod snapshot;
 pub mod terrain;
+pub mod units;
 pub mod world;
 
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
@@ -212,10 +245,15 @@ pub use command::{Command, CommandQueue, ScheduleError};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
 };
+pub use orders::{
+    ARRIVE_TOLERANCE, GUARD_CLOSE, GUARD_LEASH, GuardTarget, ORDER_QUEUE_CAP, Order, SCATTER_MAX,
+    SCATTER_MIN, scatter_offset,
+};
 pub use snapshot::{EntityView, Snapshot};
 pub use terrain::{
     Cell, NO_OCCUPANT, Occupancy, Terrain, TerrainDef, TerrainError, TerrainFlags, TerrainId,
 };
+pub use units::{Footprint, UnitClass, UnitStats, UnitTable, UnitTableError};
 pub use world::{
     ConfigError, DEFAULT_MAP_SIDE, DEFAULT_SPEED, DEFAULT_TURN_PER_TICK, MAX_ENTITIES,
     MAX_MAP_SIDE, StepReport, World, WorldConfig,

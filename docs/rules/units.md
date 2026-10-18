@@ -1,9 +1,10 @@
 # Unit, structure and weapon definitions
 
-Work package WP3.1 (PLAN.md phase 3). The data is the design targets of
+Work packages WP3.1 and WP3.2 (PLAN.md phase 3). The data is the design targets of
 `content/units.md`, the canonical roster; the values it does not state are
 **placeholders** until the balance rounds (phase 15), marked `placeholder` in the
-RON files.
+RON files. WP3.1 made the definitions; WP3.2 spawns units and structures from them in
+the simulation and draws them (see "Spawning" and "Drawing a role" below).
 
 Quality rule 6 applies: game data is RON, and **adding a unit is a new record in
 `assets/config/unit_defs.ron` and no Rust change.** A test appends a unit to the
@@ -21,8 +22,9 @@ shipped file and loads it (`crates/sf_data/tests/units.rs`).
 demo, WP1.6.)
 
 `UnitDefs::load(config_dir, assets_dir)` reads the three files and checks them;
-`UnitDefs::embedded()` is the same data compiled in. Nothing in `sf_sim` reads the
-definitions yet: WP3.2 spawns units from them.
+`UnitDefs::embedded()` is the same data compiled in. `sf_sim` does not depend on
+`sf_data`: the small crate `sf_bridge` copies the fields the rules read into a
+`sf_sim::UnitTable` (see "Spawning"), for both the game and the headless runner.
 
 ## Units of measure
 
@@ -104,8 +106,8 @@ the file does not matter.
 | `sight` | cells; above 0 except for an Object |
 | `weapons` | up to four ids from `weapon_defs.ron` |
 | `model` | `Shape(Cube \| Cylinder \| Cone)`, a placeholder primitive of `units.ron`, or `Glb("<path under assets/>")`, a glTF file that must exist |
-| `strategic_icon` | `Square`, `Circle` or `Triangle`: the symbol at strategic zoom (WP1.9) |
-| `icon` | optional picture for the build menu (WP11.1, WP3.6): a PNG path under `assets/` that must exist |
+| `strategic_icon` | `Square`, `Circle`, `Triangle` or `HalfCircle`: the base shape at strategic zoom, one per kind of role (structure, infantry, vehicle, vessel); what the role is drawn as when it has no `icon` (WP1.9, WP3.6) |
+| `icon` | optional name of the role's strategic icon (WP3.6): a picture of the icon set in `assets/icons`, `a-z 0-9 _`, at most 48 characters; see [`icons.md`](icons.md). Only the spelling is checked in `sf_data`; a name the set does not have is a warning when the game loads and the role is drawn as its `strategic_icon`. (The build menu picture of WP11.1 will be a field of its own.) |
 | `flags` | abilities, below; every flag defaults to off |
 
 ### Flags
@@ -175,8 +177,8 @@ the checks after parsing):
   the shipped file; roles are named only as in `content/units.md`), and every
   `kind` is unique within its list and not retired;
 * every weapon, movement class, armor type, damage type, `builds`, `disguise_as` and
-  `comes_with` reference resolves; model and icon files exist and stay inside `assets/`
-  (no `..`, no absolute path);
+  `comes_with` reference resolves; model files exist and stay inside `assets/`
+  (no `..`, no absolute path); an `icon` is a plain name (not a path);
 * numbers are in range, durations are whole ticks, a Structure has a footprint and a
   mobile unit a movement class, a speed and a turn rate;
 * tests check both ways that the ids of the defs are exactly the roles of the tables in
@@ -185,17 +187,106 @@ the checks after parsing):
   "looks like", "comes with" and "build ... in the field" match what its notes say;
   sight where it states one.
 
+## Spawning (WP3.2)
+
+`sf_sim` knows a unit kind only through its **unit table**, `sf_sim::UnitTable`: for each
+kind number its hit points, movement class, speed per tick, turn rate, size, (for a
+structure) footprint and, since WP3.4, the range of its first weapon (`weapon_range`, zero
+without a weapon; what an attack order walks to, `docs/rules/orders.md`). `sf_bridge::unit_table(&UnitDefs)` builds it from `UnitDefs::sim_units()` and the caller hands it to
+the world once, right after the world is made (`World::with_units`, as the terrain is
+handed over); a world cannot take it after it has started. The table is fixed for the
+whole game and a digest of it is in the checksum.
+
+What a kind is follows from its data: **mobile** (it has a movement class: infantry, a
+vehicle, a vessel), **structure** (it has a footprint) or **object** (neither: a crate,
+an ore field). Two commands create them, through the command queue like everything else:
+
+| Command | Makes | Where | Ignored (counts as a command that changed nothing) when |
+|---|---|---|---|
+| `SpawnUnit { kind, pos, owner }` | a mobile unit or an object | at `pos`, in cells | the table has no such kind; the kind is a structure; `pos` is outside the map or on a cell a structure occupies; the entity limit is reached |
+| `PlaceStructure { kind, cell, owner }` | a structure | its footprint **anchored** on `cell`: the cell with the smallest x and y, the footprint extending east and south | the table has no such kind; the kind is not a structure; any cell of the footprint is outside the map, not `buildable` (`docs/rules/terrain.md`) or already occupied; the entity limit is reached |
+
+A refused command creates nothing: no entity, no occupied cell, no slot. A structure is
+placed **all or nothing**. Unknown kinds are refused, never guessed at.
+
+**What the new entity has.** Hit points from the table (`World::hp_of`; zero for an object
+with `hp: 0`, which cannot be damaged; damage is phase 5), the owner, and the table entry
+(`World::stats_of`). A unit starts **idle** with a random facing from its own random
+stream; it moves only when ordered (`docs/rules/orders.md`, WP3.4; the legacy `MoveTo` too) and then by **its own**
+speed per tick and turn rate, not the world's placeholder speed. A structure and an
+object start with facing zero and never move: orders, `MoveTo` and `SetWanderArea` skip them.
+Structures stand in the middle of their footprint (the anchor corner plus half the
+width and height).
+
+**Occupancy.** A structure occupies **every cell of its footprint** in the occupancy grid
+of `docs/rules/terrain.md`; `World::occupant_at` answers with the structure for each of
+them, `World::cell_of` with the anchor and `World::footprint_of` with the size. Despawning
+it frees all its cells in the same command. **A mobile unit (and an object) occupies no
+cell**, the same as the wanderers of WP2.1: units share cells until collision arrives in
+phase 4. The one rule that touches them is that a unit never **appears** inside a
+structure (`SpawnUnit` on an occupied cell is refused). A unit is also not refused on terrain it
+cannot cross (a rifleman may be spawned into water): which terrain each movement class
+crosses is WP4.1's, and until then only the map edge and structures stop a spawn.
+
+**The older commands stay.** `Spawn` (a wandering placeholder, its kind an opaque number)
+and `Place` (a one-cell structure of an opaque kind) do not look at the table: they have
+no hit points, no footprint and the world's own speed, and they are what the scenarios
+`wander_5000`, `command_mix` and `terrain_256` use, so those checksums did not change.
+A kind number can therefore mean two things in one world (a legacy wanderer of kind 1
+next to a `power_plant`, kind 1): the simulation tells them apart (`EntityView::has_stats`)
+and the presentation does the same. They go when scenarios are converted to roles.
+
+**Checksum.** With a table the checksum gets one more section after the occupancy: the
+table's digest, then for every entity made from it the slot and its hit points. A world
+without a table hashes exactly as before. See `sf_sim::checksum`.
+
+## Drawing a role (WP3.2)
+
+`sf_game::roster::Roster` is the data mapping from a kind number to what the instancer
+draws (it replaces the stand-in `kind % shapes` of the first demo). Built from the
+definitions:
+
+* `model: Glb(path)` is loaded with the axes and level-switch sizes of the pack in
+  `assets/config/models.ron` whose directory the path lies in; a structure's model is
+  scaled, the same in every direction, until it just fits its footprint of 4 m cells.
+* `model: Shape(...)` is that placeholder primitive, drawn **at the size of the role**: a
+  structure is 4 m times its footprint on each side (and 3 m plus one metre per cell of
+  its shorter side high), a unit or object as wide as its `size` in cells times 4 m.
+* `strategic_icon` is the base shape at strategic zoom, the shape of the role's category
+  (a test keeps the shipped file to that); `icon` is the picture inside it (WP3.6, see
+  [`icons.md`](icons.md)). Roles that draw the same glTF file with different icons share
+  the loaded model (one shape each, one chain and one set of meshes).
+* A role whose model cannot be loaded, and every role when models are off
+  (`sf_game --models none`), falls back to a primitive chosen by what it is: infantry a
+  cylinder, a vehicle or vessel a cone, a structure or object a cube.
+
+The F1 panel names the hovered unit by its role id and shows its hit points (`light_tank
+18v0 (red) by model, 83.1 m, HP 400/400`); an entity that is not a role is `placeholder <kind>`
+without hit points.
+
 ## Conversion for the simulation
 
 `UnitDefs::sim_units()` and `sim_weapons()` give `SimUnitDef` and `SimWeaponDef`:
 integers and `sf_math::Fx` in the sim's own units (distances in cells, speed in cells
 per second and per tick, times in ticks, names as kind numbers, a faction mask). No
-float type crosses (a test checks the conversion module). They live in `sf_data` until
-WP3.2 settles how `sf_sim` takes them. The 20 Hz constants (`TICKS_PER_SECOND`,
+float type crosses (a test checks the conversion module). They stay in `sf_data`;
+`sf_sim` takes its own `UnitStats` (see "Spawning"). The 20 Hz constants (`TICKS_PER_SECOND`,
 `TICK_MILLIS`) are in `sf_math`, which `sf_sim` re-exports and `sf_data` uses, so the
 two crates need no dependency on each other.
 
 ## Where it is tested
+
+WP3.2: `crates/sf_sim/tests/units.rs` (stats at birth, footprints, refusals, per-unit speed,
+legacy commands, checksum), `assets/scenarios/units_spawn.ron` with
+`tools/sf_headless/tests/units.rs` (every role of the shipped file spawned on the 256 x 256
+playfield, hit points, footprint occupancy and refusals asserted, the checksum pinned on
+Linux and Windows by CI; it reads a **frozen copy** of the definitions,
+`assets/scenarios/units_spawn_defs/`, so a balance change does not force a re-pin),
+`tools/sf_headless/tests/shipped_roles.rs` (every role of the shipped files placed
+automatically and accepted, no checksum), and in `sf_game` the roster (`roster.rs`), the sandbox
+(`sandbox.rs`) and the scenes (`runner.rs`).
+
+WP3.1:
 
 `crates/sf_data/tests/units.rs`: the shipped data loads and every reference resolves;
 the roster (both ways), stats and factions against `content/units.md`; the structure

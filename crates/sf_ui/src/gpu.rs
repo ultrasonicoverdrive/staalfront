@@ -32,6 +32,10 @@ struct ScreenUniform {
 struct Bound {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
+    /// The same texture read as sRGB colour ([`Texture::Sprites`]); only the
+    /// atlas has one, and only for an sRGB target (any other target takes the
+    /// texels as they are, which is what the plain bind group gives).
+    colour_group: Option<wgpu::BindGroup>,
 }
 
 /// Draws a [`Ui`] into a frame.
@@ -201,7 +205,12 @@ impl UiRenderer {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
+        colour_view: bool,
     ) -> Bound {
+        // The atlas is data in `Rgba8Unorm`; a second, sRGB view of it lets the
+        // colour pictures of the cursors be decoded by the hardware.
+        let srgb_view = [wgpu::TextureFormat::Rgba8UnormSrgb];
+        let view_formats: &[wgpu::TextureFormat] = if colour_view { &srgb_view } else { &[] };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -214,26 +223,35 @@ impl UiRenderer {
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            view_formats,
         });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: &self.texture_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
+        let group = |view: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &self.texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            })
+        };
+        let bind_group = group(&texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let colour_group = (colour_view && self.srgb).then(|| {
+            group(&texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+                ..Default::default()
+            }))
         });
         Bound {
             texture,
             bind_group,
+            colour_group,
         }
     }
 
@@ -250,7 +268,14 @@ impl UiRenderer {
         } else {
             wgpu::TextureFormat::Rgba8Unorm
         };
-        let bound = self.bound(device, "ui minimap", image.width, image.height, format);
+        let bound = self.bound(
+            device,
+            "ui minimap",
+            image.width,
+            image.height,
+            format,
+            false,
+        );
         queue.write_texture(
             bound.texture.as_image_copy(),
             &image.rgba,
@@ -291,6 +316,7 @@ impl UiRenderer {
                 ATLAS_WIDTH,
                 atlas_height,
                 wgpu::TextureFormat::Rgba8Unorm,
+                true,
             ));
             self.atlas_height = atlas_height;
             self.atlas_revision = u64::MAX;
@@ -316,22 +342,32 @@ impl UiRenderer {
         }
 
         self.draw_calls = 0;
-        let list = ui.draw_list();
-        if list.is_empty() {
+        // The world layer (under the panels) and the panels share one vertex
+        // buffer and one index buffer: the world layer first, the panels
+        // after it, drawn with a base vertex so their indices need no
+        // rewriting.
+        let (under, list) = (ui.underlay(), ui.draw_list());
+        if list.is_empty() && under.is_empty() {
             return;
         }
-        let vbytes: &[u8] = bytemuck::cast_slice(&list.vertices);
-        let ibytes: &[u8] = bytemuck::cast_slice(&list.indices);
-        if vbytes.len() as u64 > self.vertex_capacity {
-            self.vertex_capacity = (vbytes.len() as u64).next_power_of_two();
+        let under_vbytes: &[u8] = bytemuck::cast_slice(&under.vertices);
+        let under_ibytes: &[u8] = bytemuck::cast_slice(&under.indices);
+        let list_vbytes: &[u8] = bytemuck::cast_slice(&list.vertices);
+        let list_ibytes: &[u8] = bytemuck::cast_slice(&list.indices);
+        let vlen = (under_vbytes.len() + list_vbytes.len()) as u64;
+        let ilen = (under_ibytes.len() + list_ibytes.len()) as u64;
+        if vlen > self.vertex_capacity {
+            self.vertex_capacity = vlen.next_power_of_two();
             self.vertices = buffer(device, wgpu::BufferUsages::VERTEX, self.vertex_capacity);
         }
-        if ibytes.len() as u64 > self.index_capacity {
-            self.index_capacity = (ibytes.len() as u64).next_power_of_two();
+        if ilen > self.index_capacity {
+            self.index_capacity = ilen.next_power_of_two();
             self.indices = buffer(device, wgpu::BufferUsages::INDEX, self.index_capacity);
         }
-        queue.write_buffer(&self.vertices, 0, vbytes);
-        queue.write_buffer(&self.indices, 0, ibytes);
+        queue.write_buffer(&self.vertices, 0, under_vbytes);
+        queue.write_buffer(&self.vertices, under_vbytes.len() as u64, list_vbytes);
+        queue.write_buffer(&self.indices, 0, under_ibytes);
+        queue.write_buffer(&self.indices, under_ibytes.len() as u64, list_ibytes);
 
         let mut pass = target
             .encoder
@@ -353,21 +389,37 @@ impl UiRenderer {
             });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.screen_group, &[]);
-        pass.set_vertex_buffer(0, self.vertices.slice(..vbytes.len() as u64));
-        pass.set_index_buffer(
-            self.indices.slice(..ibytes.len() as u64),
-            wgpu::IndexFormat::Uint32,
-        );
+        pass.set_vertex_buffer(0, self.vertices.slice(..vlen));
+        pass.set_index_buffer(self.indices.slice(..ilen), wgpu::IndexFormat::Uint32);
         let mut calls = 0;
-        for batch in &list.batches {
-            let bound = match batch.texture {
-                Texture::Atlas => self.atlas.as_ref(),
-                Texture::Minimap => self.minimap.as_ref(),
-            };
-            let Some(bound) = bound else { continue };
-            pass.set_bind_group(1, &bound.bind_group, &[]);
-            pass.draw_indexed(batch.start..batch.end, 0, 0..1);
-            calls += 1;
+        let parts = [
+            (under, 0_i32, 0_u32),
+            (
+                list,
+                under.vertices.len() as i32,
+                under.indices.len() as u32,
+            ),
+        ];
+        for (part, base_vertex, first_index) in parts {
+            for batch in &part.batches {
+                let (bound, colour) = match batch.texture {
+                    Texture::Atlas => (self.atlas.as_ref(), false),
+                    Texture::Sprites => (self.atlas.as_ref(), true),
+                    Texture::Minimap => (self.minimap.as_ref(), false),
+                };
+                let Some(bound) = bound else { continue };
+                let group = match (&bound.colour_group, colour) {
+                    (Some(group), true) => group,
+                    _ => &bound.bind_group,
+                };
+                pass.set_bind_group(1, group, &[]);
+                pass.draw_indexed(
+                    first_index + batch.start..first_index + batch.end,
+                    base_vertex,
+                    0..1,
+                );
+                calls += 1;
+            }
         }
         drop(pass);
         self.draw_calls = calls;

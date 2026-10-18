@@ -14,7 +14,8 @@
         (name: "magenta", srgb: (200, 60, 210)),
     ],
     shapes: [
-        // `icon` is the strategic-zoom symbol (Square, Circle or Triangle).
+        // `icon` is the strategic-zoom symbol (the plain base shape: Square,
+        // Circle, Triangle or HalfCircle).
         // `lods` is the level-of-detail chain, finest first: a level is used
         // while the model's projected bounding diameter is at least `min_px`
         // pixels, the last level says 0 and takes everything smaller.
@@ -59,6 +60,10 @@
         size_px: 14.0,
         // Dark outline inside the icon's edge.
         outline_px: 1.5,
+        // Width of the light outline outside the icon when it is hovered and
+        // when it is selected (they scale with the UI scale, like everything here).
+        hover_out_px: 1.0,
+        selected_out_px: 2.5,
         // Height of the icon's anchor over the ground, metres.
         lift: 0.5,
         // Smallest size of a model's click volume on the screen.

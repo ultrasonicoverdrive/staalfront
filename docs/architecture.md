@@ -20,6 +20,7 @@ fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows
 | `sf_math` | Fixed-point numbers, vectors, angles (256 directions), deterministic RNG. |
 | `sf_sim` | The complete game simulation. No GPU, no I/O, no clock. |
 | `sf_data` | Unit/building/weapon definitions (RON), validation, loading. |
+| `sf_bridge` | Copies the unit definitions of `sf_data` into the unit table of `sf_sim` (WP3.2): the one place that sees both, shared by `sf_game` and `sf_headless`. |
 | `sf_ai` | Computer opponent. Talks to `sf_sim` only via commands. |
 | `sf_engine` | Main loop, window, input, time, assets. No game rules. |
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
@@ -32,6 +33,7 @@ fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows
 | `tools/sf_headless` | Simulation without a screen: tests, balance, AI-vs-AI. |
 | `tools/sf_demo` | Engine demo and benchmark of milestone M0 (phase 1): the `sf_game` library with the demo's defaults. |
 | `tools/sf_asset_check` | Checks delivered `.glb` models against the art brief (LODs, budgets, materials, team colour, bounds, node names); see section 15. |
+| `tools/sf_icon_gen` | Writes the placeholder strategic icons (`assets/icons/*.png`, `icons.ron`) deterministically (WP3.6); depends on nothing but the `png` crate. `docs/rules/icons.md`. |
 
 ### Dependency directions
 
@@ -46,6 +48,8 @@ WP1.11 (checked against every `Cargo.toml`). It will go stale as crates gain dep
 graph TD
   sf_sim --> sf_math
   sf_data --> sf_math
+  sf_bridge --> sf_sim
+  sf_bridge --> sf_data
   sf_ai --> sf_math
   sf_ai --> sf_sim
   sf_render --> sf_math
@@ -57,6 +61,7 @@ graph TD
   sf_game --> sf_math
   sf_game --> sf_sim
   sf_game --> sf_data
+  sf_game --> sf_bridge
   sf_game --> sf_ai
   sf_game --> sf_engine
   sf_game --> sf_render
@@ -70,6 +75,7 @@ graph TD
   sf_headless[tools/sf_headless] --> sf_math
   sf_headless --> sf_sim
   sf_headless --> sf_data
+  sf_headless --> sf_bridge
   sf_headless --> sf_ai
   sf_demo[tools/sf_demo] --> sf_game
   sf_editor[tools/sf_editor] --> sf_math
@@ -149,8 +155,13 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   generation goes up, its index goes on a LIFO free list. Iteration is always
   ascending slot index, so a despawn never reorders anything.
 - **Tick:** `World::step()` runs exactly one 20 Hz tick: commands scheduled for
-  that tick (ordered by player, then insertion; a past tick is rejected), then the
-  behaviors, then the checksum.
+  that tick (ordered by `(player, player sequence)`: a player's own counter, or the
+  number its sender gave the command; a past tick is rejected), then the behaviors,
+  then the checksum.
+- **Orders (WP3.4):** a unit has a current order and a fixed ring of queued ones
+  (`sf_sim::orders`, `docs/rules/orders.md`); `Command::Order` and `Command::Stop` set
+  them, the behavior pass carries them out. The order holds the destination, the
+  route (today the straight line) is a separate step phase 4 replaces.
 - **Checksum:** FNV-1a over the full state in a canonical order after every tick,
   with the history kept for the headless runner. The previous position and facing
   (render interpolation only) are the one deliberate exclusion.
@@ -276,7 +287,8 @@ laptop. Never on the home server (B6, PLAN.md §13).
   floats. The permanent `kind` number written in a record (not its place in the file) is
   its `sf_sim::Kind`; removed records leave tombstones. The 20 Hz constants live in
   `sf_math`, so `sf_data` needs no dependency on `sf_sim`. `sf_sim` does not read the
-  definitions yet (WP3.2). Fields and units: `docs/rules/units.md`.
+  definitions: its own `UnitTable` is filled from them by `sf_bridge` (WP3.2), a small
+  crate that depends on both and is shared by `sf_game` and `sf_headless`. Fields and units: `docs/rules/units.md`.
 - **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
   central-difference normals from the global heightmap (so shared border
   vertices are bit-identical at equal levels), diagonals by global cell parity
@@ -398,7 +410,7 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
 
 - **Scenario** (`assets/scenarios/*.ron`): world seed, map size, run length,
   spawn groups (count, kinds and owners cycled, area) and an optional list of
-  timed commands (`SetWanderArea`, `MoveTo`, `Despawn`, entities named by id).
+  timed commands (`SetWanderArea`, `MoveTo`, `Despawn`, the orders of WP3.4, entities named by id).
   Unknown fields and scenarios that cannot run (`ticks: 0`, a command after the
   last tick, an area outside the map, ...) are reported with the file name and every
   problem found. Everything is scheduled before tick 0, like a replay; the spawn
@@ -415,8 +427,14 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   terrain layer of `assets/maps/<name>/`, and the action `Place(kind, owner, cell)`
   puts a structure on a cell. The map is read by `Scenario::load` only, never while a
   run goes. `terrain_256.ron` is the 256 x 256 cell playfield with structures.
+- **Unit scenarios (WP3.2):** `unit_defs: Some("<dir>")` makes the world with the
+  definitions in `assets/scenarios/<dir>/` (a frozen copy of the three files, so a
+  balance change does not move a pinned checksum) as its unit table; the actions `SpawnUnit(kind, owner, cell)` and
+  `PlaceStructure(kind, owner, cell)` then create a unit or a structure with its
+  footprint from the definitions. `units_spawn.ron` spawns every role of its frozen copy once;
+  `tests/shipped_roles.rs` spawns every role of the shipped file, placed automatically, without a checksum.
 - **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
-  `command_mix` and `terrain_256` in release mode on Linux and Windows against the committed
+  `command_mix`, `terrain_256` and `units_spawn` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

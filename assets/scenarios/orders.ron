@@ -1,0 +1,125 @@
+// Orders as state (WP3.4, docs/rules/orders.md): every order type (move, attack,
+// attack-move, guard, hold position, scatter), a shift queue that is full and
+// refuses a ninth order, stop, an attack on a target that walks away, an attack
+// on a target that dies and a guarded entity that dies, on a 64 by 64 cell open
+// map.
+// CI runs it on Linux and Windows and requires the checksum in orders.expected;
+// tools/sf_headless/tests/orders.rs asserts the states and positions along the way.
+//
+// `unit_defs` names a FROZEN copy of the definitions (like units_spawn): a
+// balance change in assets/config/ does not move this checksum. Kinds are the
+// permanent numbers of the records. Owners: 0 Meridian, 1 Veyran, 2 neutral.
+//
+// Entity ids, all at generation 0, in the order the spawns are written (the
+// commands of one tick run in file order):
+//    0  power_plant (kind 1, structure 2x3)   owner 1   cell (50, 10)
+//    1  light_tank A (19)       owner 0   cell (4, 4)    shift queue of three moves
+//    2  light_tank B (19)       owner 0   cell (4, 8)    attacks W, which walks away
+//    3  rifleman R1 (12)        owner 0   cell (4, 12)   attack-move
+//    4  rifleman R2 (12)        owner 0   cell (6, 12)   guards a post, a queued move
+//                                                        waits behind the guard, then Stop
+//    5  scout S (15)            owner 0   cell (4, 16)   scatter, then a queued move, then Stop
+//    6  repair_truck T (22)     owner 0   cell (4, 20)   unarmed: cannot attack; guards A
+//    7  heavy_tank H (20)       owner 0   cell (4, 24)   attacks F, then a queued move
+//    8  rifleman W (12)         owner 1   cell (40, 30)  the walking target
+//    9  rifleman F (12)         owner 1   cell (30, 40)  the target that dies (tick 700)
+//   10  evidence_crate (35)     owner 2   cell (20, 20)  an object: cannot be ordered
+//   11  scout G (15)            owner 0   cell (10, 50)  scatters, and scatters again, queued
+//   12  scout K (15)            owner 0   cell (30, 60)  a move and eight queued moves; a ninth is refused
+//   13  rifleman L (12)         owner 0   cell (50, 50)  walks, holds position (a queued move waits), then moves
+//   14  rifleman M (12)         owner 0   cell (8, 34)   guards N, which dies; a queued move takes over
+//   15  rifleman N (12)         owner 0   cell (12, 34)  the guarded entity (despawned at tick 350)
+Scenario(
+    name: "orders",
+    seed: 0x0A1D_E250,
+    map: (width: 64, height: 64),
+    unit_defs: Some("orders_defs"),
+    ticks: 1_600,
+    commands: [
+        // --- the cast, at tick 0 ---
+        (tick: 0, command: PlaceStructure(kind: 1, owner: 1, cell: (50, 10))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 4))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 8))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (4, 12))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 12))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 0, cell: (4, 16))),
+        (tick: 0, command: SpawnUnit(kind: 22, owner: 0, cell: (4, 20))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 0, cell: (4, 24))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (40, 30))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (30, 40))),
+        (tick: 0, command: SpawnUnit(kind: 35, owner: 2, cell: (20, 20))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 0, cell: (10, 50))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 0, cell: (30, 60))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (50, 50))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 34))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (12, 34))),
+
+        // --- tick 10: the shift queue, and what refuses ---
+        // A: a replacing move, then two queued ones (shift-click).
+        (tick: 10, command: OrderMove(ids: [Id(1, 0)], target: (24, 4))),
+        (tick: 10, command: OrderMove(ids: [Id(1, 0)], target: (24, 16), queued: true)),
+        (tick: 10, command: OrderMove(ids: [Id(1, 0)], target: (8, 16), queued: true)),
+        // The structure and the object cannot move: the command changes nothing.
+        (tick: 10, command: OrderMove(ids: [Id(0, 0), Id(10, 0)], target: (1, 1))),
+        // The truck has no weapon: no attack. (Ignored.)
+        (tick: 10, command: OrderAttack(ids: [Id(6, 0)], target: (8, 0))),
+        // W walks away to the south-east, slowly.
+        (tick: 10, command: OrderMove(ids: [Id(8, 0)], target: (58, 58))),
+        // B goes for W and keeps following it.
+        (tick: 12, command: OrderAttack(ids: [Id(2, 0)], target: (8, 0))),
+
+        // --- tick 20: attack-move, guard ---
+        (tick: 20, command: OrderAttackMove(ids: [Id(3, 0)], target: (24, 12))),
+        (tick: 20, command: OrderGuardPoint(ids: [Id(4, 0)], target: (8, 14))),
+        // H goes for F, then (queued) drives on to a spot.
+        (tick: 20, command: OrderAttack(ids: [Id(7, 0)], target: (9, 0))),
+        (tick: 20, command: OrderMove(ids: [Id(7, 0)], target: (12, 44), queued: true)),
+
+        // --- tick 30: scatter and a queued move; the truck guards tank A ---
+        (tick: 30, command: OrderScatter(ids: [Id(5, 0)])),
+        (tick: 30, command: OrderMove(ids: [Id(5, 0)], target: (30, 20), queued: true)),
+        (tick: 40, command: OrderGuardEntity(ids: [Id(6, 0)], target: (1, 0))),
+        // G scatters, then (queued) scatters again from where it stands.
+        (tick: 30, command: OrderScatter(ids: [Id(11, 0)])),
+        (tick: 130, command: OrderScatter(ids: [Id(11, 0)], queued: true)),
+        (tick: 130, command: OrderScatter(ids: [Id(11, 0)], queued: true)),
+
+        // --- tick 200: a full queue. K gets a move and eight queued moves (the
+        // queue holds eight); a ninth queued order is refused and the command
+        // counts as ignored. ---
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (32, 60))),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (34, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (36, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (38, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (40, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (42, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (44, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (46, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (48, 60), queued: true)),
+        (tick: 200, command: OrderMove(ids: [Id(12, 0)], target: (50, 60), queued: true)),
+
+        // --- hold position: L walks, holds at tick 60 (a queued move waits behind
+        // the hold, as it would not behind idle), a plain move ends the hold ---
+        (tick: 20, command: OrderMove(ids: [Id(13, 0)], target: (60, 50))),
+        (tick: 60, command: OrderHold(ids: [Id(13, 0)])),
+        (tick: 100, command: OrderMove(ids: [Id(13, 0)], target: (50, 40), queued: true)),
+        (tick: 300, command: OrderMove(ids: [Id(13, 0)], target: (56, 44))),
+
+        // --- a guard whose entity dies: N walks east, M follows; N is despawned at
+        // tick 350 and M's queued move takes over ---
+        (tick: 20, command: OrderMove(ids: [Id(15, 0)], target: (30, 34))),
+        (tick: 20, command: OrderGuardEntity(ids: [Id(14, 0)], target: (15, 0))),
+        (tick: 20, command: OrderMove(ids: [Id(14, 0)], target: (6, 40), queued: true)),
+        (tick: 350, command: Despawn(ids: [Id(15, 0)])),
+
+        // --- tick 250: stop ---
+        (tick: 250, command: Stop(ids: [Id(5, 0)])),
+
+        // --- tick 600: a queued move behind the point guard waits; tick 900: Stop clears it ---
+        (tick: 600, command: OrderMove(ids: [Id(4, 0)], target: (8, 40), queued: true)),
+        (tick: 900, command: Stop(ids: [Id(4, 0)])),
+
+        // --- tick 700: the target dies ---
+        (tick: 700, command: Despawn(ids: [Id(9, 0)])),
+    ],
+)

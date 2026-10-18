@@ -2441,6 +2441,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sf_bridge"
+version = "0.1.0"
+dependencies = [
+ "sf_data",
+ "sf_sim",
+]
+
+[[package]]
 name = "sf_cutscene"
 version = "0.1.0"
 dependencies = [
@@ -2499,6 +2507,7 @@ dependencies = [
  "serde_json",
  "sf_ai",
  "sf_audio",
+ "sf_bridge",
  "sf_cutscene",
  "sf_data",
  "sf_engine",
@@ -2516,9 +2525,17 @@ dependencies = [
  "ron",
  "serde",
  "sf_ai",
+ "sf_bridge",
  "sf_data",
  "sf_math",
  "sf_sim",
+]
+
+[[package]]
+name = "sf_icon_gen"
+version = "0.1.0"
+dependencies = [
+ "png",
 ]
 
 [[package]]

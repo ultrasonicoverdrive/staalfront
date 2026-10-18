@@ -1,0 +1,119 @@
+// Units and structures from the definitions (WP3.2): every role of the
+// definitions in assets/scenarios/units_spawn_defs/ is spawned once on the
+// 256 by 256 cell playfield (assets/maps/playfield256), a few commands are
+// refused on purpose, a structure is despawned and its cells are built on
+// again, and two units walk.
+// CI runs it on Linux and Windows and requires the checksum in
+// units_spawn.expected; tools/sf_headless/tests/units.rs asserts the hit
+// points, the footprints in the occupancy grid and the refusals. There are no
+// wanderers: the legacy Spawn does not know the definitions.
+//
+// `unit_defs` names a directory next to this file with a FROZEN copy of
+// unit_classes.ron, weapon_defs.ron and unit_defs.ron (as they were when the
+// scenario was written). The world's unit table, and so the checksum, comes
+// from the copy: a balance change in assets/config/ does not move this
+// checksum. Do not edit the copy to rebalance; change it only to change what
+// this scenario tests, and re-pin units_spawn.expected. That every role of the
+// SHIPPED definitions can be spawned is tested without a checksum, by
+// tools/sf_headless/tests/shipped_roles.rs.
+//
+// `unit_defs` is read by the loader (Scenario::load), like map_name. Kinds are
+// the permanent numbers of the records. Owners: 0 Meridian, 1 Veyran, 2 neutral
+// (a role of both factions belongs to Meridian here).
+//
+// Entity ids: the 19 structures take slots 0 to 18 in the order written below,
+// the 24 units and objects slots 19 to 42; refused commands create nothing and
+// spend no slot. The barracks (slot 3) is despawned at tick 50 and built again
+// by Veyran at tick 60 on the same anchor: slot 3, generation 1.
+//
+// Structures stand in a row on grass west of the river, anchored at the cell
+// written; units stand on grass east of it (the gunboat and the ferry in the
+// river). Everything is read from the committed terrain layer.
+Scenario(
+    name: "units_spawn",
+    seed: 0x5EED_0032,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("units_spawn_defs"),
+    ticks: 400,
+    commands: [
+        // --- structures, at tick 0 (slots 0 to 18) ---
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (8, 60))), // construction_center 4x4
+        (tick: 0, command: PlaceStructure(kind: 1, owner: 0, cell: (24, 60))), // power_plant 2x3
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (28, 60))), // refinery 3x4
+        (tick: 0, command: PlaceStructure(kind: 3, owner: 0, cell: (32, 60))), // barracks 2x3
+        (tick: 0, command: PlaceStructure(kind: 4, owner: 0, cell: (36, 60))), // vehicle_factory 3x4
+        (tick: 0, command: PlaceStructure(kind: 5, owner: 0, cell: (40, 60))), // radar 2x2
+        (tick: 0, command: PlaceStructure(kind: 6, owner: 0, cell: (44, 60))), // defence_tower 1x1
+        (tick: 0, command: PlaceStructure(kind: 7, owner: 0, cell: (46, 60))), // advanced_defences 2x2
+        (tick: 0, command: PlaceStructure(kind: 8, owner: 0, cell: (50, 60))), // shipyard 4x5
+        (tick: 0, command: PlaceStructure(kind: 9, owner: 0, cell: (56, 60))), // decoy_emplacement 1x1
+        (tick: 0, command: PlaceStructure(kind: 10, owner: 1, cell: (58, 60))), // fortified_bunker 2x2
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 2, cell: (62, 60))), // relay_transmitter 2x2
+        (tick: 0, command: PlaceStructure(kind: 33, owner: 2, cell: (72, 60))), // fuel_depot 2x2
+        (tick: 0, command: PlaceStructure(kind: 34, owner: 2, cell: (76, 60))), // archive_building 3x3
+        (tick: 0, command: PlaceStructure(kind: 37, owner: 2, cell: (66, 60))), // bridge_segment 1x1
+        (tick: 0, command: PlaceStructure(kind: 38, owner: 2, cell: (80, 60))), // rail_spur 1x1
+        (tick: 0, command: PlaceStructure(kind: 39, owner: 2, cell: (82, 60))), // automated_gun 1x1
+        (tick: 0, command: PlaceStructure(kind: 40, owner: 2, cell: (84, 60))), // generator 1x1
+        (tick: 0, command: PlaceStructure(kind: 41, owner: 2, cell: (86, 60))), // unmanned_artillery 2x2
+        // --- units and objects, at tick 0 (slots 19 to 42) ---
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (134, 60))), // harvester
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (142, 60))), // rifleman
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 0, cell: (146, 60))), // rocket_trooper
+        (tick: 0, command: SpawnUnit(kind: 14, owner: 0, cell: (150, 60))), // engineer
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 0, cell: (154, 60))), // scout
+        (tick: 0, command: SpawnUnit(kind: 16, owner: 0, cell: (158, 60))), // sniper
+        (tick: 0, command: SpawnUnit(kind: 17, owner: 1, cell: (162, 60))), // medic
+        (tick: 0, command: SpawnUnit(kind: 18, owner: 1, cell: (166, 60))), // demolition_team
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (130, 64))), // light_tank
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 0, cell: (134, 64))), // heavy_tank
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (138, 64))), // siege_artillery
+        (tick: 0, command: SpawnUnit(kind: 22, owner: 0, cell: (142, 64))), // repair_truck
+        (tick: 0, command: SpawnUnit(kind: 23, owner: 1, cell: (146, 64))), // transport_truck
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (150, 64))), // light_transport
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (154, 64))), // amphibious_transport
+        (tick: 0, command: SpawnUnit(kind: 26, owner: 1, cell: (158, 64))), // combat_engineer
+        (tick: 0, command: SpawnUnit(kind: 27, owner: 1, cell: (162, 64))), // heavy_gun_team
+        (tick: 0, command: SpawnUnit(kind: 28, owner: 1, cell: (130, 122))), // gunboat
+        (tick: 0, command: SpawnUnit(kind: 29, owner: 2, cell: (130, 68))), // supply_truck
+        (tick: 0, command: SpawnUnit(kind: 30, owner: 2, cell: (134, 68))), // civilian
+        (tick: 0, command: SpawnUnit(kind: 31, owner: 2, cell: (138, 68))), // technician
+        (tick: 0, command: SpawnUnit(kind: 35, owner: 2, cell: (142, 68))), // evidence_crate
+        (tick: 0, command: SpawnUnit(kind: 36, owner: 2, cell: (128, 124))), // ferry
+        (tick: 0, command: SpawnUnit(kind: 42, owner: 2, cell: (158, 68))), // ore_field
+
+        // --- refusals, at tick 1: none of them creates anything ---
+        // A kind the definitions do not have.
+        (tick: 1, command: PlaceStructure(kind: 99, owner: 0, cell: (100, 100))),
+        (tick: 1, command: SpawnUnit(kind: 99, owner: 0, cell: (100, 104))),
+        // A structure through SpawnUnit; a unit and an object through PlaceStructure.
+        (tick: 1, command: SpawnUnit(kind: 0, owner: 0, cell: (100, 108))),
+        (tick: 1, command: PlaceStructure(kind: 12, owner: 0, cell: (100, 112))),
+        (tick: 1, command: PlaceStructure(kind: 35, owner: 2, cell: (100, 116))),
+        // Footprints that touch cells which are not buildable: a power plant
+        // (2 x 3) over road, bridge and water, and a tower on the ore field.
+        (tick: 1, command: PlaceStructure(kind: 1, owner: 0, cell: (125, 125))),
+        (tick: 1, command: PlaceStructure(kind: 6, owner: 0, cell: (199, 0))),
+        // Footprints that overlap the construction center (slot 0, 8..12 x 60..64) ...
+        (tick: 1, command: PlaceStructure(kind: 1, owner: 1, cell: (11, 62))),
+        (tick: 1, command: PlaceStructure(kind: 6, owner: 1, cell: (8, 60))),
+        // ... or run off the east and south edges of the map.
+        (tick: 1, command: PlaceStructure(kind: 1, owner: 0, cell: (255, 100))),
+        (tick: 1, command: PlaceStructure(kind: 1, owner: 0, cell: (100, 254))),
+        // A unit may not appear inside a structure.
+        (tick: 1, command: SpawnUnit(kind: 12, owner: 1, cell: (9, 61))),
+        // A structure does not move.
+        (tick: 1, command: MoveTo(ids: [Id(0, 0)], target: (20, 20))),
+
+        // --- two units walk, each at its own speed ---
+        // The rifleman (slot 20) and the light tank (slot 27) to the same cell.
+        (tick: 10, command: MoveTo(ids: [Id(20, 0), Id(27, 0)], target: (136, 90))),
+
+        // --- a structure goes away and its cells are free again ---
+        (tick: 50, command: Despawn(ids: [Id(3, 0)])),
+        (tick: 60, player: 1, command: PlaceStructure(kind: 3, owner: 1, cell: (32, 60))),
+        // The first construction center is still there: refused.
+        (tick: 70, player: 1, command: PlaceStructure(kind: 0, owner: 1, cell: (8, 60))),
+    ],
+)

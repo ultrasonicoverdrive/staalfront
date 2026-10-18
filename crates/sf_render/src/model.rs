@@ -530,6 +530,19 @@ impl ModelSet {
         ModelSet::new(extra, models).ok()
     }
 
+    /// A set with the same meshes whose shape `i` is the chain `chains[i]` of
+    /// this one: chains can be left out, repeated or reordered. A model that
+    /// two roles draw with different icons is one chain listed twice (one shape
+    /// per icon, the meshes uploaded and drawn once). `None` if an index is out
+    /// of range or the list is empty.
+    pub fn with_chains(&self, chains: &[usize]) -> Option<ModelSet> {
+        let models = chains
+            .iter()
+            .map(|&i| self.models.get(i).cloned())
+            .collect::<Option<Vec<_>>>()?;
+        ModelSet::new(self.extra.clone(), models).ok()
+    }
+
     /// Changes whenever a different set is built; the renderer compares it to
     /// know when to upload the extra meshes again.
     pub fn revision(&self) -> u64 {

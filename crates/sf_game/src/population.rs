@@ -13,8 +13,8 @@
 //! same checksums.
 
 use sf_math::{Fx, Rng, Vec2};
-use sf_render::IconShape;
 use sf_render::glb::LoadedPack;
+use sf_render::{IconId, IconShape};
 use sf_sim::{Command, EntityView, Kind, PlayerId, Tick, World};
 
 /// Placeholder shapes of `units.ron` (cube, cylinder, cone).
@@ -59,7 +59,7 @@ impl Population {
             .collect();
         if let Some(pack) = pack {
             for (i, icon) in pack.icons.iter().enumerate() {
-                let building = *icon == IconShape::Square;
+                let building = *icon == IconId::from(IconShape::Square);
                 kinds.push(KindSpec {
                     shape: (PLACEHOLDER_SHAPES as usize + i).min(255) as u8,
                     mobile: !building,

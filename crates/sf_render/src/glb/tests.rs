@@ -410,14 +410,102 @@ fn the_test_pack_is_one_model_set_with_one_mesh_per_part_per_level() {
     }
     let style = pack.style(&crate::Style::embedded()).unwrap();
     assert_eq!(style.shape_count(), 14);
-    assert_eq!(style.shape(0).icon, crate::IconShape::Triangle);
-    assert_eq!(style.shape(13).icon, crate::IconShape::Square);
+    assert_eq!(style.shape(0).icon, crate::IconShape::Triangle.into());
+    assert_eq!(style.shape(13).icon, crate::IconShape::Square.into());
     // The scout is about 4 m long (manifest `rompmaat_m`), the factory 14 m.
     assert!((style.shape(0).size[0] - 4.0).abs() < 0.6);
     assert!((style.shape(12).size[0] - 14.0).abs() < 0.6);
     // Unknown pack: a clear error.
     let e = load_pack(&config, "nope", &assets()).err().unwrap();
     assert!(e.to_string().contains("testpack"), "{e}");
+}
+
+#[test]
+fn a_scaled_model_is_the_same_model_in_other_units() {
+    let config = std::fs::read_to_string(assets().join(MODELS_CONFIG)).unwrap();
+    let pack = load_pack(&config, "testpack", &assets()).unwrap();
+    // The tank has a hull, a turret that turns and a barrel that tilts.
+    let tank = &pack.models[2];
+    let big = tank.scaled(2.0);
+    assert_eq!(big.levels.len(), tank.levels.len());
+    let (a, b) = (bounds_of(tank), bounds_of(&big));
+    assert!(
+        close(b.min, a.min * 2.0) && close(b.max, a.max * 2.0),
+        "{a:?} {b:?}"
+    );
+    assert!((b.reach - 2.0 * a.reach).abs() < 1e-3);
+    // Rotations are untouched, only the translations scale.
+    for (p, q) in tank.levels[0].parts.iter().zip(&big.levels[0].parts) {
+        assert_eq!(p.joint, q.joint);
+        assert_eq!(p.parent, q.parent);
+        assert!(close(
+            q.rest.w_axis.truncate(),
+            p.rest.w_axis.truncate() * 2.0
+        ));
+        assert!(close(q.rest.x_axis.truncate(), p.rest.x_axis.truncate()));
+        assert_eq!(p.mesh.indices, q.mesh.indices);
+    }
+    assert_eq!(tank.scaled(1.0), *tank);
+}
+
+#[test]
+fn one_model_loads_by_its_path_and_can_be_fitted_to_a_box() {
+    let config = std::fs::read_to_string(assets().join(MODELS_CONFIG)).unwrap();
+    let path = "testpack_v1/models/raffinaderij.glb";
+    let icon = crate::IconId::from(crate::IconShape::Square);
+    let plain = load_pack_model(&config, path, icon, &assets(), None).unwrap();
+    assert_eq!((plain.models.len(), plain.icons.len()), (1, 1));
+    assert_eq!(plain.icons[0], icon);
+    assert_eq!(plain.set.models().len(), 1);
+    // The levels switch where the pack says.
+    assert_eq!(plain.set.models()[0].switch_px(), &[60.0, 30.0]);
+    let b = bounds_of(&plain.models[0]);
+    let (x, z) = (b.max.x - b.min.x, b.max.z - b.min.z);
+    // Fitted to a box twice as wide as long: the tighter side sets the scale.
+    let fitted = load_pack_model(
+        &config,
+        path,
+        icon,
+        &assets(),
+        Some((2.0 * x, 2.0 * z * 0.5)),
+    )
+    .unwrap();
+    let f = bounds_of(&fitted.models[0]);
+    let (fx, fz) = (f.max.x - f.min.x, f.max.z - f.min.z);
+    assert!(
+        (fz - z).abs() < 1e-3 && (fx - x).abs() < 1e-3,
+        "scale 1: {fx} x {fz}"
+    );
+    let fitted = load_pack_model(&config, path, icon, &assets(), Some((2.0 * x, 4.0 * z))).unwrap();
+    let f = bounds_of(&fitted.models[0]);
+    assert!(((f.max.x - f.min.x) - 2.0 * x).abs() < 1e-3);
+    // Never more than four times as big or a quarter of the size.
+    let tiny = load_pack_model(&config, path, icon, &assets(), Some((0.001, 0.001))).unwrap();
+    let t = bounds_of(&tiny.models[0]);
+    assert!(((t.max.x - t.min.x) - 0.25 * x).abs() < 1e-3);
+
+    // A path outside every pack directory, a missing file and a broken
+    // models.ron are errors, not panics.
+    let e = load_pack_model(&config, "elsewhere/x.glb", icon, &assets(), None)
+        .err()
+        .unwrap();
+    assert!(e.to_string().contains("no model pack"), "{e}");
+    let e = load_pack_model(
+        &config,
+        "testpack_v1/models/nope.glb",
+        icon,
+        &assets(),
+        None,
+    )
+    .err()
+    .unwrap();
+    assert!(matches!(e, GlbError::Io(_)), "{e}");
+    assert!(load_pack_model("(", path, icon, &assets(), None).is_err());
+    // The directory must match whole path parts.
+    let e = load_pack_model(&config, "testpack_v1x/models/a.glb", icon, &assets(), None)
+        .err()
+        .unwrap();
+    assert!(e.to_string().contains("no model pack"), "{e}");
 }
 
 fn minimal(version: &str, extra: &str) -> Vec<u8> {

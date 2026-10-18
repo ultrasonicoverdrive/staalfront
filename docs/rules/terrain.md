@@ -73,7 +73,10 @@ bit-exact on every platform; pinned by `crates/sf_data/tests/golden.rs`):
 ## Occupancy
 
 Every cell has at most one **occupant**, an entity. Only structures occupy cells;
-wanderers do not (thousands share a cell, and collision is phase 4).
+wanderers and units do not (thousands share a cell, and collision is phase 4). A
+structure from the unit definitions (WP3.2, `Command::PlaceStructure`) occupies every cell
+of its footprint; `docs/rules/units.md` has those rules. What follows is the one-cell
+`Command::Place` of WP2.1, which the scenarios still use.
 
 `Command::Place { kind, cell, owner }` (scenario: `Place(kind: .., owner: .., cell: (x, y))`)
 creates a structure. In this order, the command is **ignored** (it counts as a

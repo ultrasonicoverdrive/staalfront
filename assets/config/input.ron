@@ -21,5 +21,35 @@
         ToggleDebug: [(trigger: Key(F1))],
         PlayTestSound: [(trigger: Key(KeyT))],
         Quit: [(trigger: Key(Escape))],
+        // Orders (WP3.4). S stays a camera key (WASD pan), so stop is on C.
+        OrderMove: [(trigger: Mouse(Right))],
+        OrderQueue: [(trigger: Key(ShiftLeft)), (trigger: Key(ShiftRight))],
+        OrderStop: [(trigger: Key(KeyC))],
+        OrderScatter: [(trigger: Key(KeyX))],
+        OrderHold: [(trigger: Key(KeyH))],
+        // Held: a right-click on the ground attack-moves instead of moving
+        // (WP3.5). A is the camera's pan left, so the modifier is F.
+        OrderAttackMove: [(trigger: Key(KeyF))],
+        // Selection (WP3.3). SelectClick: a click selects, a drag draws the
+        // selection rectangle (own mobile units in it), a double-click
+        // selects the units of the same kind in view. SelectAdd (held): a
+        // click toggles the unit in the selection, a drag or a double-click
+        // adds to it. It shares shift with OrderQueue on purpose: one is read
+        // with a click, the other with an order.
+        SelectClick: [(trigger: Mouse(Left))],
+        SelectAdd: [(trigger: Key(ShiftLeft)), (trigger: Key(ShiftRight))],
+        // Control groups. GroupAssign (held) + a number assigns the selection
+        // to that group; the number alone recalls it; a double tap of the
+        // number also centres the camera on the group.
+        GroupAssign: [(trigger: Key(ControlLeft)), (trigger: Key(ControlRight))],
+        Group1: [(trigger: Key(Digit1)), (trigger: Key(Numpad1))],
+        Group2: [(trigger: Key(Digit2)), (trigger: Key(Numpad2))],
+        Group3: [(trigger: Key(Digit3)), (trigger: Key(Numpad3))],
+        Group4: [(trigger: Key(Digit4)), (trigger: Key(Numpad4))],
+        Group5: [(trigger: Key(Digit5)), (trigger: Key(Numpad5))],
+        Group6: [(trigger: Key(Digit6)), (trigger: Key(Numpad6))],
+        Group7: [(trigger: Key(Digit7)), (trigger: Key(Numpad7))],
+        Group8: [(trigger: Key(Digit8)), (trigger: Key(Numpad8))],
+        Group9: [(trigger: Key(Digit9)), (trigger: Key(Numpad9))],
     },
 )

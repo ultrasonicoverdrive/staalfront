@@ -4,6 +4,7 @@ members = [
     "crates/sf_math",
     "crates/sf_sim",
     "crates/sf_data",
+    "crates/sf_bridge",
     "crates/sf_ai",
     "crates/sf_engine",
     "crates/sf_render",
@@ -17,6 +18,7 @@ members = [
     "tools/sf_demo",
     "tools/sf_ra_extract",
     "tools/sf_asset_check",
+    "tools/sf_icon_gen",
 ]
 
 [workspace.package]

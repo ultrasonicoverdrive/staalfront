@@ -87,9 +87,14 @@ pub fn write_png(path: &Path, image: &Rgba8) -> Result<(), ImageError> {
     Ok(())
 }
 
-/// Read a PNG; 8-bit RGBA and RGB are accepted.
+/// Read a PNG; 8-bit RGBA, RGB, grey and grey with alpha are accepted.
 pub fn read_png(path: &Path) -> Result<Rgba8, ImageError> {
-    let bytes = fs::read(path)?;
+    decode_png(&fs::read(path)?)
+}
+
+/// Decode the bytes of a PNG; 8-bit RGBA, RGB, grey and grey with alpha are
+/// accepted.
+pub fn decode_png(bytes: &[u8]) -> Result<Rgba8, ImageError> {
     let decoder = png::Decoder::new(Cursor::new(bytes));
     let mut reader = decoder
         .read_info()
@@ -108,6 +113,11 @@ pub fn read_png(path: &Path) -> Result<Rgba8, ImageError> {
             .chunks_exact(3)
             .flat_map(|p| [p[0], p[1], p[2], 255])
             .collect(),
+        png::ColorType::GrayscaleAlpha => buf
+            .chunks_exact(2)
+            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .collect(),
+        png::ColorType::Grayscale => buf.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         other => {
             return Err(ImageError::Format(format!(
                 "unsupported PNG color type {other:?}"
