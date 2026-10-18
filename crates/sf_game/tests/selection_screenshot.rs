@@ -800,8 +800,10 @@ fn an_icon_looks_different_plain_hovered_selected_and_both() {
         "the plain icon is on the screen: {} core pixels",
         core.len()
     );
-    // The fill colour: the middle of the plain icon.
-    let fill = plain.pixel(centre[0] as u32, centre[1] as u32 + 2);
+    // The fill colour: Meridian's. (Not the middle of the icon: the rifleman's
+    // sign, a dark dot, is there since WP3.6.)
+    let owner = sf_render::Style::embedded().srgb(0);
+    let fill = [owner[0], owner[1], owner[2], 255];
     assert!(
         fill[0] > 150 && fill[1] < 110,
         "a red (Meridian) fill: {fill:?}"

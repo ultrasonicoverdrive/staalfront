@@ -3,11 +3,13 @@
 //
 // The vertex shader projects the unit's world anchor and lays a square around
 // it in *pixels*: the art box (`box_px`, 1.2 times the icon size `size_px`)
-// plus a margin for the outline of a hovered or selected icon, so the icon is
-// the same size at every zoom. The centre is snapped to the pixel grid so that
+// plus a margin for the outline of the icon's state (`ceil(reach) + 1`, so a
+// plain icon has one pixel and a selected one its outline width and one), so
+// the icon is the same size at every zoom and a plain icon, the common case,
+// is the smallest quad. The centre is snapped to the pixel grid so that
 // the edges of the shape fall on pixel boundaries. Every length arrives in
 // physical pixels, already multiplied by the UI scale (icons.rs,
-// IconConfig::params), the margin and the outline widths included.
+// IconConfig::params), the outline widths included; the margin follows them.
 //
 // The picture is a layer of the icon atlas (`icon_atlas.rs`): two signed
 // distance fields made from the 64 x 64 PNG, R for the silhouette and G for the
@@ -45,8 +47,6 @@ struct IconParams {
     // Width of the outline outside the shape: hovered, selected.
     hover_px: f32,
     selected_px: f32,
-    // Room around the art box in the quad, for the outline and the antialiasing.
-    margin_px: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -65,6 +65,16 @@ const SELECTED_BIT: u32 = 0x200u;
 const LAYER_SHIFT: u32 = 16u;
 // The rim and the sign.
 const DARK: vec3<f32> = vec3<f32>(0.02, 0.025, 0.035);
+
+// How far the outline of an icon with these flags reaches outside its shape
+// (0: none). Hovered: thin and white. Selected (WP3.3): clearly thicker, white.
+// Selected and hovered: the selected width in yellow, so the four states all
+// look different and the fill never shrinks. IconParams::reach in icons.rs.
+fn outline_reach(flags: u32) -> f32 {
+    var reach = select(0.0, icon.hover_px, (flags & HIGHLIGHT_BIT) != 0u);
+    reach = select(reach, icon.selected_px, (flags & SELECTED_BIT) != 0u);
+    return reach;
+}
 
 struct VertexIn {
     @builtin(vertex_index) vertex: u32,
@@ -113,7 +123,8 @@ fn vs_main(in: VertexIn) -> VertexOut {
     // odd sides on a pixel centre.
     let even = (i32(floor(icon.size_px + 0.5)) & 1) == 0;
     let snapped = select(floor(centre) + vec2<f32>(0.5), floor(centre + vec2<f32>(0.5)), even);
-    let half = icon.box_px * 0.5 + icon.margin_px;
+    // IconParams::quad_half: the art box, the outline rounded up, one pixel.
+    let half = icon.box_px * 0.5 + ceil(outline_reach(in.flags)) + 1.0;
     let local = corner * half;
     let px = snapped + vec2<f32>(local.x, -local.y);
     out.clip = vec4<f32>(
@@ -145,6 +156,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let highlighted = (in.flags & HIGHLIGHT_BIT) != 0u;
     let selected = (in.flags & SELECTED_BIT) != 0u;
+    let reach = outline_reach(in.flags);
+
+    // Beyond the art box the picture is not there, only the outline can be: past
+    // its reach (and the antialiased half pixel) there is nothing to draw, and
+    // the atlas is not read. For a plain icon that is the whole margin.
+    let beyond = max(abs(in.local) - vec2<f32>(icon.box_px * 0.5), vec2<f32>(0.0));
+    let outside = length(beyond);
+    if (outside > reach + 0.5) {
+        discard;
+    }
 
     // The picture: distances to the edge of the silhouette and of the sign, in
     // texels, negative inside, then in screen pixels. Beyond the art box the
@@ -156,18 +177,12 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let layer = select(wanted, 0u, wanted >= textureNumLayers(atlas));
     let uv = vec2<f32>(in.local.x / icon.box_px + 0.5, 0.5 - in.local.y / icon.box_px);
     let field = textureSampleLevel(atlas, atlas_sampler, uv, layer, 0.0).rg;
-    let beyond = max(abs(in.local) - vec2<f32>(icon.box_px * 0.5), vec2<f32>(0.0));
     let px_per_texel = icon.box_px / ATLAS_SIDE;
     let to_px = 2.0 * SDF_SPREAD * px_per_texel;
-    let d = (0.5 - field.r) * to_px + length(beyond);
-    let d_sign = (0.5 - field.g) * to_px + length(beyond);
+    let d = (0.5 - field.r) * to_px + outside;
+    let d_sign = (0.5 - field.g) * to_px + outside;
 
-    // How far the outer outline reaches beyond the shape (0: none). Hovered:
-    // thin and white. Selected (WP3.3): clearly thicker, white. Selected and
-    // hovered: the selected width in yellow, so the four states all look
-    // different and the fill never shrinks.
-    var reach = select(0.0, icon.hover_px, highlighted);
-    reach = select(reach, icon.selected_px, selected);
+    // The outer outline (reach above) covers up to `reach` beyond the edge.
     let coverage = clamp(0.5 - (d - reach), 0.0, 1.0);
     if (coverage <= 0.0) {
         discard;

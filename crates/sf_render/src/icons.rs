@@ -261,7 +261,6 @@ impl IconConfig {
             box_px: size_px * ART_BOX,
             hover_px,
             selected_px,
-            margin_px: quad_margin(hover_px.max(selected_px)),
         }
     }
 
@@ -485,10 +484,12 @@ pub fn snap_icon_center(center: f32, size_px: f32) -> f32 {
 
 /// Room in physical pixels the icon quad leaves around its art box for an
 /// outline that reaches `outline_reach` px outside the shape: the outline
-/// itself, rounded up, and two pixels for its antialiased edge and for the
-/// shape's own (the art box is not pixel aligned).
+/// rounded up and one pixel for the antialiased edge. (The pictures keep a
+/// texel off the border of the art box, so the shape's own edge needs no more.)
+/// A plain icon (reach 0) has one pixel, which also bounds its fragments:
+/// `icon.wgsl` takes this per icon from its flags.
 pub fn quad_margin(outline_reach: f32) -> f32 {
-    outline_reach.max(0.0).ceil() + 2.0
+    outline_reach.max(0.0).ceil() + 1.0
 }
 
 /// Bit position of the atlas layer in [`IconInstance::flags`] (bits 16 to 31).
@@ -560,8 +561,6 @@ pub struct IconParams {
     pub hover_px: f32,
     /// Width of the selection outline outside the shape.
     pub selected_px: f32,
-    /// Room around the art box in the drawn quad ([`quad_margin`]).
-    pub margin_px: f32,
 }
 
 impl IconParams {
@@ -576,13 +575,29 @@ impl IconParams {
             self.box_px,
             self.hover_px,
             self.selected_px,
-            self.margin_px,
+            0.0,
         ]
     }
 
-    /// Half the side of the drawn quad: the art box and the margin.
-    pub fn quad_half(&self) -> f32 {
-        self.box_px * 0.5 + self.margin_px
+    /// How far the outline of an icon with these flags reaches outside its
+    /// shape: the selected width, else the hover width, else none (selected
+    /// wins, as in the shader).
+    pub fn reach(&self, flags: u32) -> f32 {
+        if flags & ICON_SELECTED != 0 {
+            self.selected_px
+        } else if flags & ICON_HIGHLIGHT != 0 {
+            self.hover_px
+        } else {
+            0.0
+        }
+    }
+
+    /// Half the side of the drawn quad of an icon with these flags: the art
+    /// box and the margin for its outline ([`quad_margin`]). The shader
+    /// computes the same from the flags, so a plain icon is not drawn on the
+    /// room that only a selected one needs.
+    pub fn quad_half(&self, flags: u32) -> f32 {
+        self.box_px * 0.5 + quad_margin(self.reach(flags))
     }
 }
 
@@ -964,16 +979,33 @@ mod tests {
             assert!((p.hover_px - c.hover_out_px * scale).abs() < 1e-5);
             assert!((p.selected_px - c.selected_out_px * scale).abs() < 1e-5);
             assert!((p.box_px - p.size_px * ART_BOX).abs() < 1e-4);
-            // The outline, then two pixels for the antialiased edges.
-            assert!(p.margin_px >= p.selected_px + 2.0, "scale {scale}: {p:?}");
-            assert!(p.margin_px >= p.hover_px + 2.0);
-            // The art box and the margin hold the click quad and the outline.
-            assert!(p.quad_half() >= p.size_px * 0.5 + p.selected_px + 2.0);
+            // The outline rounded up, then a pixel for the antialiased edge.
+            for flags in [
+                0,
+                ICON_HIGHLIGHT,
+                ICON_SELECTED,
+                ICON_HIGHLIGHT | ICON_SELECTED,
+            ] {
+                let reach = p.reach(flags);
+                assert!(p.quad_half(flags) >= p.box_px * 0.5 + reach.ceil() + 1.0);
+                // The art box and the margin hold the click quad and the outline.
+                assert!(p.quad_half(flags) >= p.size_px * 0.5 + reach + 1.0);
+            }
+            assert_eq!(p.reach(0), 0.0);
+            assert_eq!(p.reach(ICON_HIGHLIGHT), p.hover_px);
+            assert_eq!(p.reach(ICON_SELECTED | ICON_HIGHLIGHT), p.selected_px);
+            // A plain icon's quad is the art box and one pixel, the smallest.
+            assert_eq!(p.quad_half(0), p.box_px * 0.5 + 1.0);
+            assert!(p.quad_half(0) < p.quad_half(ICON_SELECTED));
         }
         // At scale 2 the old fixed 4 px margin was smaller than the outline
         // (5 px) plus the triangle's overshoot; the new one grows with it.
-        assert!(c.params(2.0).margin_px > 4.0 + 1.0);
-        assert!(c.params(2.0).margin_px > c.params(1.0).margin_px);
+        let (one, two) = (c.params(1.0), c.params(2.0));
+        assert!(two.quad_half(ICON_SELECTED) - two.box_px * 0.5 > 4.0 + 1.0);
+        assert!(
+            two.quad_half(ICON_SELECTED) - two.box_px * 0.5
+                > one.quad_half(ICON_SELECTED) - one.box_px * 0.5
+        );
     }
 
     #[test]
@@ -1001,8 +1033,7 @@ mod tests {
                 "outline_px",
                 "box_px",
                 "hover_px",
-                "selected_px",
-                "margin_px"
+                "selected_px"
             ]
         );
     }

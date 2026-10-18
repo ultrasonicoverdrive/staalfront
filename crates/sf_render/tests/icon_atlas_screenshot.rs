@@ -42,9 +42,12 @@ use sf_render::{
 /// of the shipped set is printed by the test and recorded in
 /// `docs/rules/icons.md`; this is what an artist's replacement set has to
 /// keep to as well.
-const MIN_DIFFERING_PIXELS: usize = 10;
+const MIN_DIFFERING_PIXELS: usize = 16;
 /// A channel difference (of 255) from which two pixels are different.
 const PIXEL_DIFFERENCE: u8 = 40;
+/// Every sign has a connected dark part of at least this many pixels (of the
+/// 196), so it is a shape and not antialiasing specks.
+const MIN_SIGN_PIXELS: usize = 6;
 
 /// One cell of a sheet: the 14 px icon with two pixels around it.
 const CELL: u32 = 18;
@@ -372,6 +375,121 @@ fn every_icon_is_distinguishable_at_14_px_and_the_contact_sheet() {
     }
 }
 
+/// A sign is a solid shape at 14 px, not specks of antialiasing: drawn without
+/// the engine's rim (so that only the sign is dark), the largest connected part
+/// of dark pixels of every picture that has a sign is at least
+/// [`MIN_SIGN_PIXELS`] pixels, in each player colour. The smallest is printed.
+#[test]
+fn every_sign_is_a_solid_blob_at_14_px() {
+    let atlas = atlas();
+    let style = Style::embedded();
+    let pics = pictures(&atlas);
+    let size = (pics.len() as u32 * CELL, 4 * CELL);
+    let mut r = renderer(size.0, size.1);
+    r.set_icon_atlas(&atlas);
+    // No rim: the sign is the only dark.
+    let params = IconParams {
+        outline_px: 0.0,
+        ..style.icons().params(1.0)
+    };
+    let mut placed = Vec::new();
+    for player in 0..4u8 {
+        for (i, (_, id)) in pics.iter().enumerate() {
+            placed.push(Placed {
+                icon: *id,
+                rgb: style.linear(player),
+                at: (
+                    (i as u32 * CELL + CELL / 2) as f32,
+                    (u32::from(player) * CELL + CELL / 2) as f32,
+                ),
+                flags: 0,
+            });
+        }
+    }
+    let img = draw_icons(&mut r, size, [122, 120, 116], &placed, params);
+    let mut smallest = (usize::MAX, String::new(), 0);
+    let mut per_icon: Vec<(usize, String)> = Vec::new();
+    for (i, (name, _)) in pics.iter().enumerate() {
+        let mut icon_min = usize::MAX;
+        let plain = name.starts_with("base_") || name.contains("civilian");
+        for player in 0..4u32 {
+            let tile = crop(&img, i as u32 * CELL + 2, player * CELL + 2, 14, 14);
+            // Dark: well below the player's colour in some channel.
+            let fill = style.srgb(player as u8);
+            let is_dark =
+                |p: &[u8; 4]| (0..3).any(|k| p[k] < fill[k].saturating_sub(100) && p[k] < 110);
+            let on: Vec<bool> = tile.iter().map(|p| p[3] == 255 && is_dark(p)).collect();
+            let blob = largest_blob(&on, 14);
+            if plain {
+                assert_eq!(blob, 0, "{name} is a plain shape but has dark pixels");
+            } else {
+                icon_min = icon_min.min(blob);
+                if blob < smallest.0 {
+                    smallest = (blob, name.clone(), player as usize);
+                }
+            }
+        }
+        if icon_min != usize::MAX {
+            per_icon.push((icon_min, name.clone()));
+        }
+    }
+    per_icon.sort();
+    println!(
+        "smallest signs (connected dark pixels): {:?}",
+        &per_icon[..per_icon.len().min(10)]
+    );
+    println!(
+        "smallest sign: {} with {} connected dark pixels in {} (the minimum asked is {MIN_SIGN_PIXELS})",
+        smallest.1,
+        smallest.0,
+        style.color_name(smallest.2 as u8)
+    );
+    assert!(
+        smallest.0 >= MIN_SIGN_PIXELS,
+        "the sign of {} is only {} connected pixels at 14 px",
+        smallest.1,
+        smallest.0
+    );
+}
+
+/// The size of the largest 4-connected group of set cells in a `side` wide grid.
+fn largest_blob(on: &[bool], side: usize) -> usize {
+    let mut seen = vec![false; on.len()];
+    let mut best = 0;
+    for start in 0..on.len() {
+        if !on[start] || seen[start] {
+            continue;
+        }
+        let (mut stack, mut n) = (vec![start], 0);
+        seen[start] = true;
+        while let Some(i) = stack.pop() {
+            n += 1;
+            let (x, y) = (i % side, i / side);
+            let mut next = Vec::new();
+            if x > 0 {
+                next.push(i - 1);
+            }
+            if x + 1 < side {
+                next.push(i + 1);
+            }
+            if y > 0 {
+                next.push(i - side);
+            }
+            if i + side < on.len() {
+                next.push(i + side);
+            }
+            for j in next {
+                if on[j] && !seen[j] {
+                    seen[j] = true;
+                    stack.push(j);
+                }
+            }
+        }
+        best = best.max(n);
+    }
+    best
+}
+
 /// With `SF_SAVE_SHOTS=<dir>`: `icons_14px.png` (real size, the four terrains
 /// one above the other, four player colours per terrain, one picture per
 /// column), `icons_14px_x4.png` (four times as big, nearest neighbour) and
@@ -444,13 +562,14 @@ fn the_outline_of_every_shape_fits_the_quad_at_every_ui_scale() {
     for scale in [1.0_f32, 1.25, 1.5, 2.0, 3.0] {
         let params = style.icons().params(scale);
         let centre = (80.0_f32, 80.0_f32);
-        let half = params.quad_half();
         let snapped = (
             snap_icon_center(centre.0, params.size_px),
             snap_icon_center(centre.1, params.size_px),
         );
         for shape in IconShape::ALL {
             for (state, flag) in flags {
+                // The quad of this state: its own outline and a pixel.
+                let half = params.quad_half(flag);
                 let img = draw_icons(
                     &mut r,
                     (w, h),
@@ -477,7 +596,7 @@ fn the_outline_of_every_shape_fits_the_quad_at_every_ui_scale() {
                             .abs()
                             .max((y as f32 + 0.5 - snapped.1).abs());
                         assert!(
-                            d < half - 1.0,
+                            d < half - 0.5,
                             "{shape:?} {state} at scale {scale}: a pixel at {x},{y} is drawn \
                              {d} px from the centre, the quad ends at {half}"
                         );

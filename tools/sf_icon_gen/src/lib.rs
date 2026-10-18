@@ -173,34 +173,36 @@ impl Base {
 fn wrench() -> Sdf {
     let s = FRAC_1_SQRT_2;
     let head = sub(
-        sub(circle(7.0, 7.0, 8.5), circle(7.0, 7.0, 4.0)),
-        obox(12.0, 12.0, 6.0, 3.4, s, s),
+        sub(circle(7.0, 7.0, 10.0), circle(7.0, 7.0, 4.4)),
+        obox(13.0, 13.0, 7.0, 3.6, s, s),
     );
-    union(vec![bar(-13.0, -13.0, 3.0, 3.0, 3.4), head])
+    union(vec![bar(-13.0, -13.0, 3.0, 3.0, 4.6), head])
+}
+
+/// A shovel, blade down to the right, handle up to the left (the engineer's tool).
+fn shovel() -> Sdf {
+    let s = FRAC_1_SQRT_2;
+    union(vec![
+        bar(-14.0, 14.0, 2.0, -2.0, 3.6),
+        obox(8.0, -8.0, 9.0, 8.0, s, -s),
+    ])
 }
 
 fn bolt() -> Sdf {
     polygon(&[
-        (5.0, 19.0),
-        (-10.0, -2.0),
-        (-1.0, -2.0),
-        (-5.0, -19.0),
-        (10.0, 3.0),
-        (3.0, 3.0),
+        (7.0, 19.0),
+        (-12.0, -2.0),
+        (-1.5, -2.0),
+        (-7.0, -19.0),
+        (12.0, 4.0),
+        (2.5, 4.0),
     ])
 }
 
 fn wave() -> Sdf {
     union(vec![
-        inter(ring(-8.0, 0.0, 8.5, 3.0), half_plane(0.0, -1.0, 0.0)),
-        inter(ring(8.0, 0.0, 8.5, 3.0), half_plane(0.0, 1.0, 0.0)),
-    ])
-}
-
-fn plus(cx: f64, cy: f64, arm: f64, half: f64) -> Sdf {
-    union(vec![
-        bar(cx - arm, cy, cx + arm, cy, half),
-        bar(cx, cy - arm, cx, cy + arm, half),
+        inter(ring(-9.5, 0.0, 11.0, 3.0), half_plane(0.0, -1.0, 0.0)),
+        inter(ring(9.5, 0.0, 11.0, 3.0), half_plane(0.0, 1.0, 0.0)),
     ])
 }
 
@@ -211,14 +213,14 @@ fn sight(cx: f64, cy: f64, outer: f64, inner: f64) -> Sdf {
 fn gear() -> Sdf {
     let s = FRAC_1_SQRT_2;
     let spokes = union(vec![
-        bar(-16.0, 0.0, 16.0, 0.0, 3.4),
-        bar(0.0, -16.0, 0.0, 16.0, 3.4),
-        bar(-16.0 * s, -16.0 * s, 16.0 * s, 16.0 * s, 3.4),
-        bar(-16.0 * s, 16.0 * s, 16.0 * s, -16.0 * s, 3.4),
+        bar(-17.0, 0.0, 17.0, 0.0, 4.2),
+        bar(0.0, -17.0, 0.0, 17.0, 4.2),
+        bar(-17.0 * s, -17.0 * s, 17.0 * s, 17.0 * s, 4.2),
+        bar(-17.0 * s, 17.0 * s, 17.0 * s, -17.0 * s, 4.2),
     ]);
     sub(
-        union(vec![spokes, circle(0.0, 0.0, 10.5)]),
-        circle(0.0, 0.0, 4.6),
+        union(vec![spokes, circle(0.0, 0.0, 12.0)]),
+        circle(0.0, 0.0, 4.2),
     )
 }
 
@@ -242,11 +244,7 @@ fn radar() -> Sdf {
             half_plane(0.0, -1.0, 10.0),
         )
     };
-    union(vec![
-        quadrant(14.5, 9.0),
-        quadrant(23.0, 17.5),
-        circle(-10.0, -10.0, 4.6),
-    ])
+    union(vec![quadrant(23.0, 12.0), circle(-10.0, -10.0, 6.4)])
 }
 
 fn eye() -> Sdf {
@@ -256,8 +254,8 @@ fn eye() -> Sdf {
         inter(circle(0.0, -c, r), circle(0.0, c, r))
     };
     union(vec![
-        sub(almond(19.0, 10.0), almond(14.0, 5.5)),
-        circle(0.0, 0.0, 4.4),
+        sub(almond(20.0, 11.0), almond(13.0, 4.5)),
+        circle(0.0, 0.0, 5.6),
     ])
 }
 
@@ -273,80 +271,83 @@ fn sign(name: &str) -> Option<Sdf> {
     let s = FRAC_1_SQRT_2;
     Some(match name {
         // ---- infantry (circle) ----
-        "rifleman" => circle(0.0, 0.0, 7.5),
-        "rocket_trooper" => bar(-13.0, -13.0, 13.0, 13.0, 3.6),
-        "engineer" => plus(0.0, 0.0, 14.0, 3.5),
+        "rifleman" => circle(0.0, 0.0, 10.5),
+        "rocket_trooper" => bar(-13.0, -13.0, 13.0, 13.0, 5.6),
+        "engineer" => shovel(),
         "scout" => eye(),
         "sniper" => union(vec![
-            ring(0.0, 0.0, 14.5, 10.5),
-            bar(-19.0, 0.0, -6.0, 0.0, 2.0),
-            bar(6.0, 0.0, 19.0, 0.0, 2.0),
-            bar(0.0, -19.0, 0.0, -6.0, 2.0),
-            bar(0.0, 6.0, 0.0, 19.0, 2.0),
+            ring(0.0, 0.0, 16.0, 9.5),
+            bar(-19.0, 0.0, -5.0, 0.0, 3.2),
+            bar(5.0, 0.0, 19.0, 0.0, 3.2),
+            bar(0.0, -19.0, 0.0, -5.0, 3.2),
+            bar(0.0, 5.0, 0.0, 19.0, 3.2),
         ]),
         "medic" => union(vec![
-            bar(-14.0, 8.0, 14.0, 8.0, 3.3),
-            bar(-14.0, -8.0, 14.0, -8.0, 3.3),
+            bar(-15.0, 8.5, 15.0, 8.5, 4.4),
+            bar(-15.0, -8.5, 15.0, -8.5, 4.4),
         ]),
         "demolition_team" => union(vec![
             bar(0.0, -15.0, 0.0, 15.0, 2.9),
             bar(-13.0, -7.5, 13.0, 7.5, 2.9),
             bar(-13.0, 7.5, 13.0, -7.5, 2.9),
         ]),
-        "combat_engineer" => union(vec![plus(-5.0, 5.0, 11.0, 3.0), circle(10.0, -10.0, 4.2)]),
+        "combat_engineer" => union(vec![
+            place(shovel(), 0.8, -3.0, -3.0),
+            circle(11.0, 11.0, 5.2),
+        ]),
         "heavy_gun_team" => union(vec![
             bar(-15.0, 10.0, 15.0, 10.0, 3.5),
             bar(0.0, 10.0, 0.0, -16.0, 3.5),
         ]),
         "technician" => wrench(),
         // ---- vehicles (triangle) ----
-        "harvester" => obox(0.0, -8.0, 9.5, 9.5, s, s),
-        "light_tank" => rect(0.0, -9.0, 4.5, 11.0),
+        "harvester" => obox(0.0, -8.0, 10.5, 10.5, s, s),
+        "light_tank" => rect(0.0, -8.0, 7.0, 13.0),
         "heavy_tank" => union(vec![
             rect(-8.0, -11.0, 3.8, 9.0),
             rect(8.0, -11.0, 3.8, 9.0),
         ]),
-        "siege_artillery" => inter(ring(0.0, -18.0, 18.0, 9.0), half_plane(0.0, -1.0, 18.0)),
-        "repair_truck" => place(wrench(), 0.95, 0.0, -9.0),
-        "light_transport" => rect(0.0, -12.0, 6.5, 4.6),
-        "transport_truck" => rect(0.0, -12.0, 18.0, 4.6),
-        "amphibious_transport" => place(wave(), 0.9, 0.0, -13.0),
-        "supply_truck" => sub(rect(0.0, -13.0, 9.5, 9.5), rect(0.0, -13.0, 4.6, 4.6)),
+        "siege_artillery" => inter(ring(0.0, -19.0, 19.0, 7.5), half_plane(0.0, -1.0, 19.0)),
+        "repair_truck" => place(wrench(), 1.0, -1.0, -9.0),
+        "light_transport" => rect(0.0, -12.0, 12.0, 6.5),
+        "transport_truck" => rect(0.0, -6.0, 19.0, 4.8),
+        "amphibious_transport" => place(wave(), 1.0, 0.0, -10.0),
+        "supply_truck" => sub(rect(0.0, -12.0, 11.0, 9.5), rect(0.0, -12.0, 5.0, 3.8)),
         // ---- vessels (half-circle) ----
-        "gunboat" => rect(0.0, -1.0, 4.2, 11.0),
+        "gunboat" => rect(0.0, -1.0, 7.0, 12.0),
         "ferry" => rect(0.0, 1.0, 19.0, 4.4),
         // ---- structures (square) ----
         "construction_center" => hammer(),
         "power_plant" => bolt(),
         "refinery" => obox(0.0, 0.0, 12.0, 12.0, s, s),
-        "barracks" => circle(0.0, 0.0, 8.5),
+        "barracks" => circle(0.0, 0.0, 10.5),
         "vehicle_factory" => gear(),
         "radar" => radar(),
-        "defence_tower" => sight(0.0, 0.0, 17.0, 11.5),
+        "defence_tower" => sight(0.0, 0.0, 15.0, 5.0),
         "advanced_defences" => union(vec![
-            sight(-10.0, 0.0, 9.2, 5.0),
-            sight(10.0, 0.0, 9.2, 5.0),
+            sight(-10.5, 0.0, 11.0, 3.2),
+            sight(10.5, 0.0, 11.0, 3.2),
         ]),
         "shipyard" => place(wave(), 1.1, 0.0, 0.0),
         "fortified_bunker" => union(vec![
             sight(0.0, 5.0, 12.0, 7.5),
             rect(0.0, -19.0, 30.0, 6.0),
         ]),
-        "automated_gun" => union(vec![sight(0.0, 0.0, 15.5, 10.5), circle(0.0, 0.0, 4.4)]),
+        "automated_gun" => union(vec![sight(0.0, 0.0, 18.5, 9.5), circle(0.0, 0.0, 4.6)]),
         "unmanned_artillery" => union(vec![
-            inter(ring(0.0, -8.0, 17.0, 11.0), half_plane(0.0, -1.0, 8.0)),
-            circle(0.0, -14.0, 4.6),
+            inter(ring(0.0, -8.0, 19.0, 10.0), half_plane(0.0, -1.0, 8.0)),
+            circle(0.0, -14.0, 5.6),
         ]),
+        // A mast with antenna arms (a Y or psi): the stem and a cup open upwards.
         "relay_transmitter" => union(vec![
-            bar(0.0, -19.0, 0.0, 12.0, 2.8),
-            bar(-10.0, 5.0, 10.0, 5.0, 2.4),
-            circle(0.0, 15.0, 3.6),
+            bar(0.0, -19.0, 0.0, 9.0, 3.4),
+            inter(ring(0.0, 4.0, 16.0, 9.0), half_plane(0.0, 1.0, 4.0)),
+            bar(-12.5, 4.0, -12.5, 17.0, 3.4),
+            bar(12.5, 4.0, 12.5, 17.0, 3.4),
         ]),
         "fuel_depot" => drop_sign(),
-        "generator" => union(vec![
-            ring(0.0, 0.0, 19.0, 14.5),
-            place(bolt(), 0.5, 0.0, 0.0),
-        ]),
+        // A heavy dark disc with the bolt cut out of it: solid at 14 px.
+        "generator" => sub(circle(0.0, 0.0, 18.5), place(bolt(), 0.78, 0.0, 0.0)),
         "archive_building" => union(vec![
             bar(-15.0, 11.0, 15.0, 11.0, 3.0),
             bar(-15.0, 0.0, 15.0, 0.0, 3.0),

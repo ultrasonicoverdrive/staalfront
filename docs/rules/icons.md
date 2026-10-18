@@ -28,11 +28,12 @@ unit; the sign inside shows what it is. The base shape is the kind of role:
 The placeholder signs (`tools/sf_icon_gen`; the names are the role ids of
 `assets/config/unit_defs.ron`):
 
-* **circle:** rifleman dot, rocket_trooper diagonal stripe, engineer plus, scout eye,
-  sniper crosshair, medic two horizontal bars (never a cross), demolition_team asterisk,
-  combat_engineer plus with a dot, heavy_gun_team T, civilian empty, technician wrench;
+* **circle:** rifleman dot, rocket_trooper diagonal stripe, engineer shovel (a tool sign;
+  not a plus, which reads as a medical cross), scout eye, sniper crosshair, medic two
+  horizontal bars (never a cross), demolition_team asterisk, combat_engineer shovel with a
+  dot, heavy_gun_team T, civilian empty, technician wrench;
 * **triangle:** harvester diamond, light_tank one stripe, heavy_tank two stripes,
-  siege_artillery arc, repair_truck wrench, light_transport short bar, transport_truck
+  siege_artillery thick arc, repair_truck wrench, light_transport short bar, transport_truck
   long bar, amphibious_transport wave, supply_truck small empty square;
 * **half-circle:** gunboat vertical stripe, ferry long horizontal bar;
 * **square:** construction_center hammer, power_plant lightning bolt, refinery diamond,
@@ -41,7 +42,9 @@ The placeholder signs (`tools/sf_icon_gen`; the names are the role ids of
   **decoy_emplacement the same picture as the defence tower** (so it fools the enemy),
   fortified_bunker sight with a thick bottom edge, automated_gun sight with a dot,
   unmanned_artillery arch with a dot, relay_transmitter mast, fuel_depot drop,
-  generator bolt in a ring, archive_building three lines.
+  generator bolt cut out of a solid disc (a ring with a small bolt broke up into specks at
+  14 px), archive_building three lines. relay_transmitter is a mast with antenna arms (a
+  Y or psi; a mast with a crossbar read as a dagger).
 
 Notes on the placeholders: the brief gave radar and unmanned_artillery the same sign
 ("arc with dot"); they differ here (radar: two quarter arcs spreading from a dot in the
@@ -76,8 +79,8 @@ circle (`base_circle`), both by an entry of `icons.ron`.
   texels thick** (a pixel and a half) to survive, details smaller than 8 texels vanish.
   The picture has to work in all four player colours and on green, sand, grey and snow
   terrain (the contact sheet below).
-* **Distinguishable.** At 14 px every pair of icons must differ in at least 10 of the 196
-  pixels in every player colour (below).
+* **Distinguishable.** At 14 px every pair of icons must differ in at least 16 of the 196
+  pixels in every player colour, and a sign must be a solid blob (below).
 
 Do not use anything from another game (PLAN.md section 12.4): every icon needs a licence
 line in `assets/LICENSES.md`.
@@ -134,15 +137,18 @@ call**, which the benchmark and the tests check.
 
 **UI scale (the WP3.3 review follow-up).** Every length is in physical pixels and scales with
 the UI scale: the icon size, the rim, both outline widths and the room the quad leaves
-around the art box (`IconConfig::params`). The margin is `ceil(widest outline) + 2` px
-(the outline, plus one pixel for its antialiased edge and one for the art box not being
-pixel aligned), so the quad always holds the outline: before WP3.6 the margin was 4 px
+around the art box (`IconConfig::params`). The margin is `ceil(outline) + 1` px, taken
+**per icon from its state** (`IconParams::quad_half(flags)`, and the shader from the flags): the
+outline of that state rounded up and one pixel for its antialiased edge, so a plain icon, the
+common case, has the smallest quad (the art box and one pixel) and a selected one has room for
+its outline. Fragments beyond the art box and past the outline's reach are discarded before
+the atlas is read (they cannot be part of the picture). Before WP3.6 the margin was 4 px
 whatever the scale, and at UI scale 2 the corners of a selected triangle (which reach
 past the click quad) were cut off. The click quad itself is still `size_px` square
 (`pick.rs` is unchanged); the triangle's corners reach 1.2 times as far as the square's.
 The test `the_outline_of_every_shape_fits_the_quad_at_every_ui_scale` draws every base shape in
-every state at scales 1, 1.25, 1.5, 2 and 3 and fails if a pixel of the outline lies on the border
-ring of the quad (it fails with the old fixed margin).
+every state at scales 1, 1.25, 1.5, 2 and 3 and fails if a pixel of the outline lies in the outermost
+row of that state's quad (it fails with the old fixed margin).
 
 ## Distinguishability at 14 px
 
@@ -152,14 +158,20 @@ through the real renderer at the real 14 px, in the four player colours (red, bl
 yellow, magenta) on green, sand, grey and snow, and counts for every pair the pixels of
 the 14 x 14 tiles that differ (a colour channel more than 40 of 255 apart). A pair's score
 is its smallest count over the 16 colour and terrain combinations. **The score of every
-pair must be at least `MIN_DIFFERING_PIXELS` = 10** (of 196, 5 %). Placeholders
-reach 12 at the closest pair (a plain triangle and the light transport's short bar, a plain
-triangle and the light tank's stripe, the plain half-circle and the gunboat, rifleman and the
-plain circle, ...), so the margin is thin on purpose: signs of the triangle and of
-the half-circle are what the 14 px have little room for. The test prints the twelve closest
+pair must be at least `MIN_DIFFERING_PIXELS` = 16** (of 196, 8 %). Placeholders
+reach 17 at the closest pair (barracks and power_plant; then 18 for a plain triangle and the
+heavy tank, the heavy tank and the light transport, ...): signs of the triangle and of the
+half-circle are what the 14 px have little room for. The test prints the twelve closest
 pairs (`cargo test -p sf_render --test icon_atlas_screenshot -- --nocapture`). The plain
 base shapes are pictures too, so a sign has to differ from the shape it sits in; that is
 why `civilian` is the plain circle and nothing may be "almost empty".
+
+**A sign is a solid blob, not specks** (`every_sign_is_a_solid_blob_at_14_px`): drawn without
+the rim at 14 px, the largest connected group of dark pixels (a pixel at least about half
+sign) of every picture with a sign is at least `MIN_SIGN_PIXELS` = 6 of the 196, in every
+player colour (the smallest: power_plant, 6, then amphibious_transport 7 and several with 8).
+Thin lines and rings under about 9 texels (two pixels) fail this: the first placeholders'
+crosshair, bolt in a ring and diagonal stripes did.
 
 The contact sheet is `docs/screenshots/wp3.6/icons_14px.png` (real size: one column per
 picture, the legend in `icons_14px.txt`, rows are the four player colours, the four blocks
@@ -204,3 +216,7 @@ every time, on every machine: f64 arithmetic with only `+ - * /` and `sqrt`, whi
 * The half-circle is a bowl (flat deck up), the triangle apex up.
 * `civilian` and `decoy_emplacement` are aliases, not files, so that a pair of identical
   pictures never has to be excepted from the distinguishability rule.
+* No reduced distance-field level is baked for 14 px: the field is a distance, so one level is exact at
+  every size, and the specks of the first placeholders were a sign-design problem (now tested), not an
+  aliasing one. The shader cost is kept at the level of `main` instead by the per-state quad and the early
+  discard (`sf_demo --bench` on lavapipe, median of 3: overview GPU p50 77.2 ms on main, 77.6 ms here).
