@@ -13,10 +13,14 @@
 //! outside 5 cells (20 m) of the goal, written when units were points. With bodies of
 //! the shipped sizes (`size` of the definitions: a tank is 1.2 cells across) the 110
 //! vehicles need about 150 cells of ground and a disc of five cells has 78, so about
-//! half of them must stand further out however well they are packed. The test asserts
-//! the packing instead: at most 1 % further out than 1.4 times the radius of a disc
-//! that holds all the bodies (`packing_radius`), and prints how many are outside five
-//! cells. See `docs/rules/collision.md`, "Arrival".
+//! half of them must stand further out however well they are packed. By the
+//! orchestrator decision of 18-10-2026 (PLAN.md, phase 4) the criterion is: all
+//! arrive, none stuck; at most 1 % end further from the goal than 1.3 times the radius
+//! of a disc whose area is the sum of the units' `spacing * spacing` (`packing_radius`,
+//! 7.37 cells here); no two bodies overlap by more than a quarter of a cell during the
+//! run (every tick after the first step; see `worst_overlap`) or 1/16 of a cell at the end. The test
+//! also prints how many are outside five cells. See `docs/rules/collision.md`,
+//! "Arrival".
 //!
 //! The same crowd without flowfields (`flowfield_threshold: Some(0)`) is run as
 //! the comparison: 195 single requests instead of three fields.
@@ -88,9 +92,11 @@ struct Run {
     cautious: usize,
     history: Vec<u64>,
     budget: u32,
-    /// The worst overlap of two bodies seen from the 200th tick on (every tenth
-    /// tick), in raw fixed point, and when. The first ticks are left out: the units
-    /// are spawned one to a cell and the tanks are wider than that.
+    /// The worst overlap of two bodies at the end of any tick of the run (the
+    /// first step on), in raw fixed point, and when. The state the scenario spawns
+    /// them in is not part of the run: the units are placed one to a cell and the
+    /// tanks are wider than that (0.35 of a cell over at tick 0, before the crowd
+    /// pass has had a tick).
     worst_overlap: (i64, u64),
     /// The longest a unit stood (moved less than a hundredth of a cell a tick) with
     /// its order not done, in ticks.
@@ -215,7 +221,7 @@ fn run_scenario(scenario: &Scenario) -> Run {
         if r.all_across.is_none() && across.iter().all(|&a| a) {
             r.all_across = Some(tick);
         }
-        if tick >= 200 && tick.is_multiple_of(10) {
+        if tick >= 1 {
             for a in 0..UNITS as usize {
                 for b in a + 1..UNITS as usize {
                     let (pa, pb) = (positions[a], positions[b]);
@@ -397,7 +403,7 @@ fn nobody_is_stuck_at_the_end_or_stood_still_for_long_on_the_way() {
 fn at_most_one_percent_end_outside_the_disc_that_holds_the_bodies() {
     let r = run();
     let packing = r.packing_radius();
-    let limit = Fx::from_ratio((packing * 1.4 * 1000.0) as i64, 1000);
+    let limit = Fx::from_ratio((packing * 1.3 * 1000.0) as i64, 1000);
     let outside = r.outside(limit);
     let farthest = (0..UNITS)
         .map(|s| (r.world.get(id(s)).unwrap().pos - goal()).length())
@@ -409,7 +415,7 @@ fn at_most_one_percent_end_outside_the_disc_that_holds_the_bodies() {
          bodies; the farthest {:?} cells; at most {} on the bridge at once, at most {} stepping \
          cell by cell at once",
         outside.len(),
-        packing * 1.4,
+        packing * 1.3,
         r.outside(Fx::from_int(5)).len(),
         farthest,
         r.on_bridge,
@@ -424,7 +430,7 @@ fn at_most_one_percent_end_outside_the_disc_that_holds_the_bodies() {
     assert!(
         outside.len() * 100 <= UNITS as usize,
         "outside {:.1} cells: {outside:?}",
-        packing * 1.4
+        packing * 1.3
     );
 }
 
@@ -433,14 +439,14 @@ fn bodies_do_not_overlap_beyond_the_slack_on_the_way_or_at_the_end() {
     let r = run();
     let (worst, at) = r.worst_overlap;
     eprintln!(
-        "bridge_200: the worst overlap of two bodies from tick 200 on is {:.3} cells (tick {at})",
+        "bridge_200: the worst overlap of two bodies in the run is {:.3} cells (tick {at})",
         worst as f64 / ORTH as f64
     );
-    // The slack is a thirty-second; a packed crowd squeezed against the crowd that has
-    // arrived goes over it for a
-    // moment (measured: 0.2 of a cell, a sixth of a tank).
-    assert!(worst < ORTH / 4, "worst overlap {worst} at tick {at}");
-    // And at the end the crowd has settled.
+    // The phase's bound: never more than a quarter of a cell during the run. (The
+    // slack is a thirty-second; a packed crowd squeezed against the crowd that has
+    // arrived goes over it for a moment.)
+    assert!(worst <= ORTH / 4, "worst overlap {worst} at tick {at}");
+    // And at the end the crowd has settled: at most a sixteenth of a cell.
     let end = r.history.len() as u64;
     let mut worst_end = 0;
     for a in 0..UNITS {
@@ -454,7 +460,7 @@ fn bodies_do_not_overlap_beyond_the_slack_on_the_way_or_at_the_end() {
         }
     }
     assert!(
-        worst_end < ORTH / 16,
+        worst_end <= ORTH / 16,
         "at tick {end} two bodies overlap by {worst_end}"
     );
 }

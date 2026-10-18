@@ -699,6 +699,54 @@ fn the_outcome_does_not_depend_on_the_order_the_units_were_spawned_in() {
     assert_eq!(crowd_run(&shuffled, 500), base);
 }
 
+/// One group order (flowfields, arrival slots) over the same units, with the ids
+/// listed in the given order: where everybody ends and which slot each was given.
+fn group_run(list: &[usize], ticks: u64) -> (Vec<Vec2>, Vec<Option<Vec2>>, u64) {
+    let mut w = rock_world(|x, y| x == 41 && (18..=22).contains(&y));
+    let ids: Vec<EntityId> = (0..24)
+        .map(|k| {
+            let kind = [RIFLE, TANK, TANK, SLOW][k % 4];
+            spawn(
+                &mut w,
+                kind,
+                0,
+                cells(4 + (k % 6) as i32 * 2, 8 + (k / 6) as i32 * 3),
+            )
+        })
+        .collect();
+    let listed: Vec<EntityId> = list.iter().map(|&k| ids[k]).collect();
+    go(&mut w, &listed, cells(40, 20));
+    // The slots are read while the units are on their way (a unit that has arrived
+    // no longer follows the field).
+    run(&mut w, 60);
+    let slots: Vec<Option<Vec2>> = ids.iter().map(|&id| w.arrival_slot_of(id)).collect();
+    run(&mut w, ticks - 60);
+    (
+        ids.iter().map(|&id| pos(&w, id)).collect(),
+        slots,
+        w.checksum(),
+    )
+}
+
+#[test]
+fn a_group_order_gives_the_same_result_whatever_order_the_ids_are_listed_in() {
+    let n = 24;
+    let forward: Vec<usize> = (0..n).collect();
+    let reversed: Vec<usize> = (0..n).rev().collect();
+    // 7 is coprime to 24, so the multiplication is a permutation.
+    let shuffled: Vec<usize> = (0..n).map(|k| (k * 7 + 3) % n).collect();
+    let base = group_run(&forward, 900);
+    // The order really made a group: everybody was given a slot, and they are
+    // different slots.
+    assert!(base.1.iter().all(Option::is_some), "{:?}", base.1);
+    let mut distinct: Vec<Vec2> = base.1.iter().flatten().copied().collect();
+    distinct.sort_by_key(|p| (p.x, p.y));
+    distinct.dedup();
+    assert_eq!(distinct.len(), n);
+    assert_eq!(group_run(&reversed, 900), base);
+    assert_eq!(group_run(&shuffled, 900), base);
+}
+
 #[test]
 fn the_same_world_run_twice_gives_the_same_checksums_and_a_clone_goes_on_alike() {
     let build = || {
@@ -846,9 +894,9 @@ fn the_slots_of_two_classes_in_one_order_are_all_different_and_a_body_apart() {
     for (k, &(a, pa)) in slots.iter().enumerate() {
         for &(b, pb) in &slots[k + 1..] {
             assert_ne!(pa, pb, "{a:?} and {b:?} have one slot");
-            // Two classes keep a body apart (an eighth of a cell less, for the
-            // spacing of the rings meeting).
-            let need = keep(&w, a, b) - fx(1, 8);
+            // Two units keep a body apart at their slots: the sum of their radii
+            // (or three quarters of it for two infantry), whatever the classes.
+            let need = keep(&w, a, b);
             assert!(
                 (pa - pb).length() >= need,
                 "{a:?} {b:?}: slots {pa:?} {pb:?} are closer than {need:?}"

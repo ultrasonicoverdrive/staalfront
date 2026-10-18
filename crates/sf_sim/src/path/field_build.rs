@@ -449,8 +449,10 @@ fn pick_slots(
         }
         *rem -= compare;
         let crowded = taken.iter().any(|&(q, other)| {
-            let apart = (spacing + other).div_int(2) - slots::GAP;
-            (p - q).length_squared() < apart.square()
+            // The bodies of the two classes would overlap closer than the sum of
+            // their radii (WP4.4 review: `(s1 + s2) / 2 - GAP` was short of it
+            // for infantry beside a tank).
+            (p - q).length_squared() < slots::keep_apart(spacing, other).square()
         });
         c.cursor += 1;
         if crowded {

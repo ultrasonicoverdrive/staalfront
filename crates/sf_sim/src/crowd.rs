@@ -44,9 +44,15 @@
 //! (may it go there?) against the same snapshot, and only when all are judged are
 //! the moves written. So the result does not depend on the order the units, the
 //! pairs or the buckets are visited in; `tests/collision.rs` spawns one crowd in
-//! three orders and compares where every unit ends. The one place an id is used is
+//! three orders and compares where every unit ends. A group order given with the
+//! same ids listed in another order gives the same result as well (the world sorts
+//! the ids by slot before it makes the groups). The one place a slot index is used is
 //! two bodies on exactly the same point, where something has to say which way each
-//! goes.
+//! goes: units that start on exactly the same point are **split by slot index** (a
+//! hash of the two indices picks the direction, the lower slot goes that way and the
+//! higher the opposite). Since a slot index is the spawn order, a crowd that is
+//! spawned on one point can end differently when it is spawned in another order;
+//! units that start apart cannot.
 //!
 //! # Memory and time
 //!

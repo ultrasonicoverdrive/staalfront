@@ -102,12 +102,18 @@ function of the two units alone, each share rounded on its own, so it does not m
 is looked at first, and integer addition does not care in which order the pairs come. Every unit is
 then judged (may it go there?) against the same snapshot, and only when all are judged are the moves
 written. So the result does not depend on the order the units, the pairs or the buckets are visited
-in. The one place an entity id is used is two bodies on exactly the same point, where something has to
-say which way each goes.
+in. The one place a slot index is used is two bodies on exactly the same point, where something has to
+say which way each goes: units that start on exactly the same point are **split by slot index** (a hash
+of the two indices picks the direction; the lower slot goes that way, the higher the opposite). A slot
+index is the spawn order, so a crowd spawned on one single point can end differently when it is spawned
+in another order; units that start apart cannot. A group order lists its ids in any order: the world
+sorts them by slot before it makes the groups, so the same ids give the same result.
 
 `crates/sf_sim/tests/collision.rs` proves it by spawning one crowd of 28 mixed units (two sides,
 friends and enemies, fast and slow, some against the stream) in three orders (forward, reversed, a
-fixed shuffle) and comparing where every unit ends: the same, unit for unit. It also runs the same
+fixed shuffle) and comparing where every unit ends: the same, unit for unit. A second test gives one
+group order (flowfields, arrival slots) to 24 units with the ids listed forward, reversed and
+shuffled, and compares the final positions, the slots and the checksum. It also runs the same
 meeting twice with the two units' roles exchanged, and a clone of a world mid-run.
 
 ## Wait, detour, stuck
@@ -160,9 +166,10 @@ A crowd sent to one point cannot all stand on it. Two things make the end of a m
   on its slot is not pushed by its neighbours. The classes of one order take **rings**, the fastest
   first (it arrives first, and the slower ones then walk to the rim without crossing it): a class
   starts where the area of the classes before it ends (a lattice point is one `spacing * spacing` of
-  ground), and the field of a later class skips every point that is the same as, or too near, a slot
-  of an earlier class of the same order, so that no two classes share a slot even when blocked points
-  were left out of the earlier one. (WP4.3 handed out stretches of one spiral by counting units; with
+  ground), and the field of a later class skips every point that is the same as, or nearer than the
+  sum of the two bodies' radii to, a slot of an earlier class of the same order (`slots::keep_apart`:
+  0.8 of a cell for infantry beside a tank, not the 0.75 of the two spacings less the gap), so that no
+  two classes share a slot even when blocked points were left out of the earlier one. (WP4.3 handed out stretches of one spiral by counting units; with
   rock beside the goal the stretches ran into each other.)
 * **A crowd stands on the spot.** A unit that has been blocked for `wait_ticks` by a friend that has
   arrived (an idle friendly body overlapped it last tick), within a cell and a half of its slot, has
@@ -173,16 +180,16 @@ A crowd sent to one point cannot all stand on it. Two things make the end of a m
 
 ### Five cells cannot hold 200 bodies
 
-PLAN.md's "done when" for phase 4 asks for at most 1 % of the units outside 5 cells (20 m) of the goal.
-That was written when units were points. With bodies of the shipped sizes it cannot hold for
+PLAN.md's "done when" for phase 4 used to ask for at most 1 % of the units outside 5 cells (20 m) of
+the goal. That was written when units were points. With bodies of the shipped sizes it cannot hold for
 `bridge_200`: the 110 vehicles of the mix (a tank is 1.2 cells across) need about 150 cells of
 ground, even on the square lattice the slots use, and a disc of five cells has 78. About half the
 vehicles must stand further out however well they are packed, and 200 units need a disc of **7.4
-cells** (the radius whose area is one `spacing * spacing` for every unit). What `bridge_200` asserts
-instead is that at most 1 % end further than 1.4 times that radius (10.3 cells). It measures **139
-of 200 outside five cells, none outside 9.5**. A hundred riflemen do fit in five cells and a hundred
-tanks do not (`tests/collision.rs`). If five cells is to stay the criterion the units must be
-smaller or the mix lighter; that is a decision for the plan, not for this page.
+cells** (the radius whose area is one `spacing * spacing` for every unit). The orchestrator decided on
+18-10-2026 that the criterion is now: all arrive, none stuck; at most 1 % end further from the goal
+than **1.3 times that radius**; no two bodies overlap by more than a quarter of a cell during the run
+or 1/16 of a cell at the end (PLAN.md, phase 4). `bridge_200` asserts exactly that. A hundred
+riflemen do fit in five cells and a hundred tanks do not (`tests/collision.rs`).
 
 ## Numbers
 
@@ -228,26 +235,33 @@ field also hashes its group order, its ring, its spacing and its inner radius.
 
 * **`bridge_200`** (re-pinned): 200 units, 90 riflemen, 60 light tanks, 45 light transports, 5 hover
   craft, across a bridge three cells wide and six long and through a wall with a gap. **All arrive by
-  tick 3,375 (169 s of game time; 107 s when the units went through each other).** The last unit
+  tick 3,526 (176 s of game time; 107 s when the units went through each other).** The last unit
   crosses the river on tick 1,976. Is that plausible? The crowd is about 170 cells of bodies and
   crosses a gate three cells wide at the pace of the slowest class (0.7 cells a second, and nobody
-  overtakes on a bridge a tank wide): 170 / (3 x 0.7) = 81 s; it took 84 s from the first unit on the
-  bridge to the last off it (at most 30 on it at once), and the slowest riflemen then walk 30 cells to
-  the goal. Nobody is stuck at the end and nobody stood still for more than 73 ticks (3.7 s) with
-  its order not done; 76 sidesteps and 4 requests for a new route in all; at most 0.2 of a cell of overlap at the worst moment (squeezed against the crowd that
-  has arrived) and none beyond a sixteenth at the end; none is ever on ground its class cannot enter;
-  the path service spent 27,232 nodes in all, the budget held every tick. The units walk 1.2 times
-  the best grid walk at the median.
+  overtakes on a bridge a tank wide): 170 / (3 x 0.7) = 81 s for the crossing alone (at most 30 on
+  the bridge at once), and the slowest riflemen then walk 30 cells to the goal and wait for the ring
+  slots of the classes before them to fill. Nobody is stuck at the end and nobody stood still for
+  more than 73 ticks (3.7 s) with its order not done; 91 sidesteps and 6 requests for a new route in
+  all; at most 0.22 of a cell of overlap at the worst moment of the run (checked on every tick; squeezed
+  against the crowd that has arrived) and none beyond a sixteenth at the end; none is ever on ground its
+  class cannot enter; the path service spent 28,429 nodes in all, the budget held every tick. The units
+  walk 1.2 times the best grid walk at the median. 140 of the 200 end outside five cells of the goal and
+  the farthest 9.55, inside the 9.58 of the criterion (1.3 x 7.37).
 * **`crowd_jam`** (new): two groups of 18 pass head-on through a three-cell gap eight cells long, 8
   tanks go along a five-cell corridor past a heavy tank on `HoldPosition`. Every unit has done its
   order by tick 1,598; the groups are in the gap together on 471 ticks, the eastbound units keep to the
   south half of it and the westbound to the north half; the holder never moves a hair; one sidestep
   in all; at most 0.06 of a cell of overlap.
 * **Performance** (`tools/sf_headless/tests/crowd_perf.rs`): 2,000 units with bodies on 256 by 256
-  cells, two halves walking through each other, 300 ticks: 522 ticks a second in a release build
-  (1.9 ms a tick, the slowest 3.7 ms; 69 ticks a second in a debug build), against the 20 the game
-  needs. The wanderers of the
-  `sf_demo` benchmark are not bodies and are not touched.
+  cells of grass, in two dense blocks of 1,000 (riflemen and light tanks, a cell apiece) that start a
+  cell apart and each get one group order (flowfields and arrival slots) to the point between them, so
+  they run into each other for the whole run: 400 ticks, **79 ticks a second in a release build
+  (12.7 ms a tick, the slowest 19.5 ms), 11 in a debug build (93 ms a tick, the slowest 163 ms)**,
+  against the 20 the game needs. The test asserts that the blocks really met: 56,000 idle units
+  shoved aside in all, 213 sidesteps, and up to 137 pairs of bodies from the two blocks overlapping at
+  once. (An earlier version of this test started the halves 138 cells apart; they never met in its
+  300 ticks and its 522 ticks a second were the cost of a crowd that does not collide.) The
+  wanderers of the `sf_demo` benchmark are not bodies and are not touched.
 * `pathing_256`: the 200 tanks, each sent to its own goal 300 cells away across two rivers, all
   arrive (by about tick 6,300).
 

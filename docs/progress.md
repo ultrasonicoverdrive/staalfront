@@ -329,17 +329,24 @@ purpose: collision and pushing (WP4.4), formations and a shape that keeps (WP4.6
 target that vanished (WP4.7), a substitute goal for a group sent to a cell its class cannot enter,
 queued group orders, uphill slowing.
 
-WP4.4 notes. **`bridge_200` re-pinned** (`0x5db78c7d785670f0` to `0x3cbf8e8c2fe9f78b`): with bodies the
-bridge is a real bottleneck; all 200 units arrive by tick 3,375 (169 s, against 107 s when they went
+WP4.4 notes. **`bridge_200` re-pinned** (`0x5db78c7d785670f0` to `0x3cbf8e8c2fe9f78b`, and after the
+review of PR #52 to `0xa55348bf0b519c50`, see below): with bodies the
+bridge is a real bottleneck; all 200 units arrive by tick 3,526 (176 s, against 107 s when they went
 through each other; the crowd is about 170 cells of bodies and crosses a gate three cells wide at the
 pace of the slowest class, 170 / (3 x 0.7) = 81 s, and the last crossing was on tick 1,976), nobody is
-stuck at the end (76 sidesteps and 4 requests for a new route in all), the worst overlap on the way is
-0.2 of a cell and there is none beyond a sixteenth at the end. **The "done when" of the phase cannot hold
-as written**: at most 1 % of the units outside 5 cells (20 m) of the goal was written for points; the
-110 vehicles of the mix need about 150 cells of ground and a disc of five cells has 78, so 139 of the 200
-end outside it (none outside 9.5) and the test asserts 1 % beyond 1.4 times the radius of the disc that
-holds the bodies (7.4 cells) instead (`collision.md`, "Five cells cannot hold 200 bodies"). That is a
-decision for the plan: smaller sizes or a lighter mix keep the criterion. `crowd_jam` (new, pinned
+stuck at the end (91 sidesteps and 6 requests for a new route in all), the worst overlap on any tick of
+the run is 0.22 of a cell and there is none beyond a sixteenth at the end. **The "done when" of the
+phase was changed** (orchestrator decision of 18-10-2026, PLAN.md): at most 1 % of the units outside 5
+cells (20 m) of the goal was written for points; the 110 vehicles of the mix need about 150 cells of
+ground and a disc of five cells has 78, so 140 of the 200 end outside it (the farthest 9.55). The
+criterion is now at most 1 % beyond 1.3 times the radius of the disc that holds the bodies (7.37
+cells, so 9.58), no overlap beyond a quarter of a cell during the run and none beyond 1/16 at the end
+(`collision.md`, "Five cells cannot hold 200 bodies"). **Review of PR #52:** the slots of two classes
+of one order are now at least the sum of the radii apart (`slots::keep_apart`; the old
+`(s1 + s2) / 2 - GAP` was 0.05 of a cell short for infantry beside a tank, which moved the `bridge_200`
+checksum); the perf test now makes two dense blocks, a cell apart, meet (the old halves started 138
+cells apart and never touched); a group order with the ids listed in another order gives the same
+result. `crowd_jam` (new, pinned
 `0xd5e9d6e45a14b0ef`): two groups of 18 head-on through a three-cell gap, 8 tanks past a unit on hold in
 a five-cell corridor; every order is done by tick 1,598, the holder never moves, one sidestep.
 **Re-pinned, with the reason:** `orders` (`0xbdcd8bcd753b5829` to `0x38b6882e777306bb`: its units have
@@ -348,7 +355,8 @@ bodies, the ones sent to the same point no longer stand on it together) and `pat
 they all arrive). **Not moved:** `wander_5000`, `command_mix`, `terrain_256` and `units_spawn` (legacy walks
 and wanderers are not bodies) and, with `collision: Some(false)` in their files because they start
 units side by side or share goals and assert exact positions, `terrain_costs` and `pathing`. 2,000 units
-with bodies run at 522 ticks a second in release (69 in debug). **Choices:** idle-versus-mover pushes
+with bodies, in two dense blocks that run into each other, run at 79 ticks a second in release (the
+slowest tick 19.5 ms; 11 in debug). **Choices:** idle-versus-mover pushes
 give the idle friend the whole share while it can move and none once it cannot (it is then a wall for
 the pass); a waiting unit is "in line" and not stuck behind one that goes the same way; a step the
 terrain refuses slides along the obstacle (for walks of an order only, so the legacy stand-at-the-edge

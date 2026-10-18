@@ -511,7 +511,7 @@ a few requests for a new route from the crowd pass), against 704,918 nodes in 1,
 routed one by one (every unit moving by tick 53). **Before WP4.4** (units without bodies) the slowest, a
 rifleman at 0.7 cells a second, arrived on tick 2,137 (107 s of game time), none ended outside 5 cells
 of the goal (the farthest 3.95) and as many as 36 units were on the bridge at once, overlapping. **With
-bodies** all arrive by tick 3,375 (169 s) and the farthest ends 9.5 cells from the goal: the bridge is a
+bodies** all arrive by tick 3,526 (176 s) and the farthest ends 9.55 cells from the goal: the bridge is a
 real bottleneck and the group needs a disc of 7.4 cells (`collision.md`). The checksum is in
 `bridge_200.expected` and runs on Linux and Windows in CI.
 

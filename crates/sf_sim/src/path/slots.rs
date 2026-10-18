@@ -95,6 +95,36 @@ pub(crate) fn spacing_for(max_size: Fx) -> Fx {
     body + GAP
 }
 
+/// The least distance the bodies of two classes keep, for the lattices of the two
+/// spacings (the widest body of each): the sum of their radii, or three quarters
+/// of it when both are infantry-sized (`crowd::min_distance`). Slots of two classes
+/// closer than this would have a unit standing in the other's way.
+///
+/// The width is recovered from the spacing: a body of at most [`SOFT_SIZE`]
+/// has `SOFT_NUM/SOFT_DEN` of its width plus the gap as spacing, which is below
+/// every spacing of a wider body, so the two cannot be mixed up. Rounded up, so
+/// the result is never short of the true sum.
+///
+/// [`SOFT_SIZE`]: crate::crowd::SOFT_SIZE
+pub(crate) fn keep_apart(spacing_a: Fx, spacing_b: Fx) -> Fx {
+    use crate::crowd::{SOFT_DEN, SOFT_NUM, SOFT_SIZE};
+    let soft_limit = SOFT_SIZE.mul_int(SOFT_NUM).div_int(SOFT_DEN);
+    let body = |spacing: Fx| spacing - GAP;
+    let small = |spacing: Fx| body(spacing) <= soft_limit;
+    let width = |spacing: Fx| {
+        if small(spacing) {
+            body(spacing).mul_int(SOFT_DEN).div_int(SOFT_NUM) + Fx::from_raw(1)
+        } else {
+            body(spacing)
+        }
+    };
+    if small(spacing_a) && small(spacing_b) {
+        (body(spacing_a) + body(spacing_b)).div_int(2) + Fx::from_raw(1)
+    } else {
+        (width(spacing_a) + width(spacing_b)).div_int(2)
+    }
+}
+
 /// Where the spiral of a lattice of `spacing` cells reaches `inner` cells from
 /// the middle: the index of the first point at least that far.
 pub(crate) fn first_beyond(spiral: &[Point], inner: Fx, spacing: Fx) -> usize {
@@ -155,6 +185,25 @@ mod tests {
             }
         }
         assert_eq!(in_cell, 4);
+    }
+
+    #[test]
+    fn classes_keep_the_sum_of_their_radii_apart_and_infantry_pairs_three_quarters() {
+        let foot = spacing_for(Fx::from_ratio(2, 5)); // two fifths across
+        let tank = spacing_for(Fx::from_ratio(6, 5)); // six fifths across
+        let near = |got: Fx, want: Fx| {
+            assert!(got >= want, "{got:?} is short of {want:?}");
+            assert!(
+                got - want <= Fx::from_ratio(1, 1000),
+                "{got:?} is far over {want:?}"
+            );
+        };
+        // Infantry beside a tank: a fifth plus three fifths, not three quarters of it.
+        near(keep_apart(foot, tank), Fx::from_ratio(4, 5));
+        near(keep_apart(tank, foot), Fx::from_ratio(4, 5));
+        // Two tanks: a full width. Two infantry bodies: three quarters of one.
+        near(keep_apart(tank, tank), Fx::from_ratio(6, 5));
+        near(keep_apart(foot, foot), Fx::from_ratio(3, 10));
     }
 
     #[test]

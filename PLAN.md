@@ -231,7 +231,9 @@ The first gameplay work: the map gets meaning for the game.
 - WP4.6 Formations (group keeps shape, slowest sets the pace).
 - WP4.7 Replan on blocked route or disappeared target; destination ≠ route.
 
-**Done when:** 200 units cross a bridge without getting stuck in a headless scenario (≤ 1% end up outside 5 cells, i.e. 20 m, of the goal).
+**Done when:** 200 units cross a bridge in a headless scenario: all arrive, none stuck; ≤ 1 % end further from the goal than 1.3× the radius of a disc whose area is the sum of the units' spacing² (bodies on a square lattice); no two bodies overlap by more than ¼ cell during the run or 1/16 cell at the end.
+
+_Note: this replaces "≤ 1 % outside 5 cells (20 m)" by the orchestrator decision of 18-10-2026, because bodies make 5 cells physically impossible (the packing radius for `bridge_200` is 7.37 cells)._
 
 ### Phase 5 — Combat
 - WP5.1 Weapons and bullet types as data: range, reload time, damage, damage type, projectile type.
