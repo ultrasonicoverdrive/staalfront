@@ -253,7 +253,17 @@ Status: in progress.
   slots round the goal; a fixed pool of 8 fields with least-recently-used eviction and idle expiry;
   a structure in the region makes a successor while the units go on with the old field where it is
   still valid; the `bridge_200` scenario), `docs/rules/pathfinding.md`: done
-- WP4.4 to WP4.7: open
+- WP4.4 Local avoidance and collisions (`sf_sim::crowd`: a unit made from the unit table has a body, a
+  disc of half its `size`, three quarters of the sum of the radii between two infantry-sized ones; after
+  the units have taken their steps a crowd pass over a deterministic spatial grid pushes overlapping
+  bodies apart in six passes that read one snapshot, so the result does not depend on the order the
+  units are visited in; units moving the same way follow, units meeting head-on keep right, a unit that
+  has waited detours, an idle friend is shoved aside a little and never into rock or a structure, a unit
+  on `HoldPosition` never; a unit that does not get closer for `stuck_ticks` steps to a free neighbouring
+  spot and after `stuck_attempts` of those asks for a new route, the hook of WP4.7; the arrival slots of
+  WP4.3 are spaced for the bodies, in rings, one class after the other; the `crowd_jam` scenario and a
+  2,000-unit performance check; the #51 follow-ups), `docs/rules/collision.md`: done
+- WP4.5 to WP4.7: open
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -318,6 +328,48 @@ the checksum covers a field by a running hash of what was integrated, not its ar
 purpose: collision and pushing (WP4.4), formations and a shape that keeps (WP4.6), replanning a
 target that vanished (WP4.7), a substitute goal for a group sent to a cell its class cannot enter,
 queued group orders, uphill slowing.
+
+WP4.4 notes. **`bridge_200` re-pinned** (`0x5db78c7d785670f0` to `0x3cbf8e8c2fe9f78b`, and after the
+review of PR #52 to `0xa55348bf0b519c50`, see below): with bodies the
+bridge is a real bottleneck; all 200 units arrive by tick 3,526 (176 s, against 107 s when they went
+through each other; the crowd is about 170 cells of bodies and crosses a gate three cells wide at the
+pace of the slowest class, 170 / (3 x 0.7) = 81 s, and the last crossing was on tick 1,976), nobody is
+stuck at the end (91 sidesteps and 6 requests for a new route in all), the worst overlap on any tick of
+the run is 0.22 of a cell and there is none beyond a sixteenth at the end. **The "done when" of the
+phase was changed** (orchestrator decision of 18-10-2026, PLAN.md): at most 1 % of the units outside 5
+cells (20 m) of the goal was written for points; the 110 vehicles of the mix need about 150 cells of
+ground and a disc of five cells has 78, so 140 of the 200 end outside it (the farthest 9.55). The
+criterion is now at most 1 % beyond 1.3 times the radius of the disc that holds the bodies (7.37
+cells, so 9.58), no overlap beyond a quarter of a cell during the run and none beyond 1/16 at the end
+(`collision.md`, "Five cells cannot hold 200 bodies"). **Review of PR #52:** the slots of two classes
+of one order are now at least the sum of the radii apart (`slots::keep_apart`; the old
+`(s1 + s2) / 2 - GAP` was 0.05 of a cell short for infantry beside a tank, which moved the `bridge_200`
+checksum); the perf test now makes two dense blocks, a cell apart, meet (the old halves started 138
+cells apart and never touched); a group order with the ids listed in another order gives the same
+result. `crowd_jam` (new, pinned
+`0xd5e9d6e45a14b0ef`): two groups of 18 head-on through a three-cell gap, 8 tanks past a unit on hold in
+a five-cell corridor; every order is done by tick 1,598, the holder never moves, one sidestep.
+**Re-pinned, with the reason:** `orders` (`0xbdcd8bcd753b5829` to `0x38b6882e777306bb`: its units have
+bodies, the ones sent to the same point no longer stand on it together) and `pathing_256`
+(`0xa52ecf79cfd7b1ea` to `0x78acbca87df9a5f0`: 200 tanks push each other apart where their ways cross;
+they all arrive). **Not moved:** `wander_5000`, `command_mix`, `terrain_256` and `units_spawn` (legacy walks
+and wanderers are not bodies) and, with `collision: Some(false)` in their files because they start
+units side by side or share goals and assert exact positions, `terrain_costs` and `pathing`. 2,000 units
+with bodies, in two dense blocks that run into each other, run at 79 ticks a second in release (the
+slowest tick 19.5 ms; 11 in debug). **Choices:** idle-versus-mover pushes
+give the idle friend the whole share while it can move and none once it cannot (it is then a wall for
+the pass); a waiting unit is "in line" and not stuck behind one that goes the same way; a step the
+terrain refuses slides along the obstacle (for walks of an order only, so the legacy stand-at-the-edge
+scenarios are as they were); a unit that is blocked near a waypoint of its route takes it as reached; a
+unit blocked by arrived friends near its slot, or as near the goal as its slot, has arrived.
+**#51 follow-ups fixed:** a stranded flowfield member recovers when the map changes and no longer keeps
+its field alive; the slots of the classes of one order are unique and a body apart (rings, later classes
+skip earlier slots; WP4.3's counted stretches overlapped when goal spots were blocked); the comment of
+`Fields::tick` now says what the code does (the build in flight expires too); the slot spacing is the
+width of the widest body. **Not done on purpose:** layers (a vessel under a bridge collides with traffic
+on it), turning and animation of a pushed unit (WP4.5), formations (WP4.6), the replan itself (WP4.7;
+the request and the mark are here), dynamic slot assignment (the last units arrive about 20 s after the
+last crossing, walking through the crowd), crushing.
 
 ## Phase 1 report (draft, WP1.14)
 

@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256` and `bridge_200`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200` and `crowd_jam`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -45,6 +45,7 @@ const TERRAIN_COSTS_EXPECTED: &str =
 const PATHING_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing.expected");
 const PATHING_256_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing_256.expected");
 const BRIDGE_200_EXPECTED: &str = include_str!("../../../assets/scenarios/bridge_200.expected");
+const CROWD_JAM_EXPECTED: &str = include_str!("../../../assets/scenarios/crowd_jam.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -90,7 +91,9 @@ fn units_spawn_matches_the_pinned_checksum() {
 
 /// Every order type, a shift queue, stop, scatter, an attack on a moving target
 /// and one on a target that dies (WP3.4). A new scenario: its value was pinned
-/// when it was added; the other four did not change.
+/// when it was added; the other four did not change. **Re-pinned at WP4.4**
+/// (`0xbdcd8bcd753b5829` to the value in the file): its units have bodies now and
+/// the ones sent to the same point no longer stand on it together.
 #[test]
 fn orders_matches_the_pinned_checksum() {
     check("orders", ORDERS_EXPECTED);
@@ -114,18 +117,29 @@ fn pathing_matches_the_pinned_checksum() {
 }
 
 /// 200 path requests on the 256 by 256 playfield (WP4.2). A new scenario: pinned when
-/// it was added.
+/// it was added. **Re-pinned at WP4.4** (`0xa52ecf79cfd7b1ea` to the value in the
+/// file): the 200 tanks have bodies now and push each other apart where their ways cross.
 #[test]
 fn pathing_256_matches_the_pinned_checksum() {
     check("pathing_256", PATHING_256_EXPECTED);
 }
 
 /// 200 mixed units cross one bridge to a goal area on one order, on flowfields
-/// (WP4.3). A new scenario: pinned when it was added; no other value moved
-/// (`pathing` runs with flowfields off, see its header).
+/// (WP4.3). A new scenario: pinned when it was added (`0x5db78c7d785670f0`; `pathing`
+/// runs with flowfields off, see its header). **Re-pinned at WP4.4** (to the value in
+/// the file): the units have bodies, the bridge is a bottleneck and the arrival
+/// slots are spaced for them, so the crossing takes about twice as long.
 #[test]
 fn bridge_200_matches_the_pinned_checksum() {
     check("bridge_200", BRIDGE_200_EXPECTED);
+}
+
+/// Two groups pass head-on through a narrow gap, and a unit holding position stands
+/// in a corridor while others route round it (WP4.4). A new scenario: pinned when it
+/// was added.
+#[test]
+fn crowd_jam_matches_the_pinned_checksum() {
+    check("crowd_jam", CROWD_JAM_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
@@ -198,6 +212,10 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
     assert_eq!(
         final_checksum("bridge_200", &altered),
         pinned(BRIDGE_200_EXPECTED)
+    );
+    assert_eq!(
+        final_checksum("crowd_jam", &altered),
+        pinned(CROWD_JAM_EXPECTED)
     );
     assert_eq!(final_checksum("orders", &altered), pinned(ORDERS_EXPECTED));
     // The scenario on the shipped definitions (no `unit_defs`) does move: the

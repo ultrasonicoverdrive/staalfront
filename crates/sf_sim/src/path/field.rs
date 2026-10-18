@@ -108,6 +108,32 @@ impl FieldState {
     }
 }
 
+/// Where a field's arrival slots lie (WP4.4, `path/slots.rs`): which group order it
+/// belongs to, its place among the classes of that order, the spacing of its
+/// lattice and the radius at which its ring begins.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct Layout {
+    /// The group order the field belongs to; the classes of one `Command::Order`
+    /// share it.
+    pub order: u32,
+    /// The ring of the class: zero is the innermost (the fastest class).
+    pub rank: u8,
+    /// The distance between two slots, in cells.
+    pub spacing: Fx,
+    /// The distance from the goal at which the ring begins, in cells.
+    pub inner: Fx,
+}
+
+impl Layout {
+    /// A field with no neighbours: one ring from the middle, at half a cell.
+    pub(crate) const ALONE: Layout = Layout {
+        order: 0,
+        rank: 0,
+        spacing: Fx::HALF,
+        inner: Fx::ZERO,
+    };
+}
+
 /// One flowfield: the identity of the order it serves and the data of its
 /// region.
 #[derive(Clone, PartialEq, Eq)]
@@ -125,9 +151,9 @@ pub(crate) struct Field {
     pub graph: usize,
     /// The goal cell, as a row-major index of the map.
     pub goal: u32,
-    /// Where in the spiral this field's slots begin (the units of the lower
-    /// classes of the same order come first).
-    pub slot_base: u32,
+    /// How the slots of this field lie among those of the other classes of the
+    /// same order (WP4.4).
+    pub layout: Layout,
     /// How many units the field was made for: the slots it hands out.
     pub members: u32,
     /// The tick (of the pool's clock) a unit last asked it for a direction.
@@ -181,7 +207,7 @@ impl Field {
             state: FieldState::Queued,
             graph: 0,
             goal: 0,
-            slot_base: 0,
+            layout: Layout::ALONE,
             members: 0,
             last_used: 0,
             region_ready: false,
@@ -406,6 +432,8 @@ pub(crate) struct Fields {
     pub spiral: Vec<slots::Point>,
     next_serial: u32,
     next_born: u32,
+    /// Counts the group orders that made fields (WP4.4).
+    pub next_order: u32,
     /// Counts ticks, to age the fields.
     pub clock: u32,
     /// Fields finished so far (and rebuilds).
@@ -424,6 +452,7 @@ impl Fields {
             spiral: slots::spiral(),
             next_serial: 1,
             next_born: 1,
+            next_order: 1,
             clock: 0,
             built: 0,
             nodes_last_tick: 0,
@@ -509,7 +538,7 @@ impl Fields {
         &mut self,
         graph: usize,
         goal: u32,
-        slot_base: u32,
+        layout: Layout,
         members: u32,
         sector_count: usize,
     ) -> u32 {
@@ -526,10 +555,17 @@ impl Fields {
         f.state = FieldState::Queued;
         f.graph = graph;
         f.goal = goal;
-        f.slot_base = slot_base;
+        f.layout = layout;
         f.members = members;
         f.last_used = now;
         serial
+    }
+
+    /// The number of a new group order: its classes' fields share it.
+    pub(crate) fn new_order(&mut self) -> u32 {
+        let o = self.next_order;
+        self.next_order = self.next_order.wrapping_add(1).max(1);
+        o
     }
 
     fn take_born(&mut self) -> u32 {
@@ -542,7 +578,7 @@ impl Fields {
     fn make_successor(&mut self, of: usize, sector_count: usize) {
         let (serial, version, graph, goal, base, members) = {
             let f = &self.entries[of];
-            (f.serial, f.version, f.graph, f.goal, f.slot_base, f.members)
+            (f.serial, f.version, f.graph, f.goal, f.layout, f.members)
         };
         let i = self.alloc(serial, sector_count);
         let born = self.take_born();
@@ -555,13 +591,17 @@ impl Fields {
         f.state = FieldState::Queued;
         f.graph = graph;
         f.goal = goal;
-        f.slot_base = base;
+        f.layout = base;
         f.members = members;
         f.last_used = now;
     }
 
     /// Ages the fields by one tick and drops those nobody has asked for in
-    /// [`IDLE_TICKS`] (except the one being built).
+    /// [`IDLE_TICKS`], the one being built included: a unit that waits for its
+    /// cell to be integrated asks every tick (`follow` touches the field before it
+    /// answers `Wait`), so a build that nobody has asked for in all that time has
+    /// no members left that want it, and dropping it frees the builder for the
+    /// queue (`free_entry` ends the build in flight).
     pub(crate) fn tick(&mut self) {
         self.clock = self.clock.wrapping_add(1);
         self.nodes_last_tick = 0;
@@ -625,7 +665,12 @@ impl Fields {
     ) -> Option<Steer> {
         let serial = e.route[i].field_serial;
         let fi = self.find(serial)?;
-        self.touch(serial);
+        // A stranded member does not keep its field alive: if every member that
+        // is left is stranded the field expires, they find it gone and are
+        // routed on their own (or the crowd pass asks for that earlier).
+        if e.route[i].state != RouteState::Stranded {
+            self.touch(serial);
+        }
         let f = &self.entries[fi];
         let g = &graphs[f.graph];
         if !f.region_ready {
@@ -643,14 +688,22 @@ impl Fields {
             };
         }
         let route = &mut e.route[i];
-        if route.state == RouteState::Stranded {
-            return Some(Steer::Stranded);
-        }
-        // A change of the map since the leg was chosen: choose it again.
+        // A change of the map since the leg was chosen: choose it again. This
+        // comes before the stranded check: a refusal that stranded the unit may
+        // be what the change took away, so the unit gets another try (smoothing
+        // allowed again). A unit stranded with nothing changed stays so until
+        // the crowd pass or the field's expiry gets it out.
         if route.epoch != epoch {
             route.ring_clear();
             route.final_leg = false;
             route.epoch = epoch;
+            if route.state == RouteState::Stranded {
+                route.state = RouteState::Active;
+                route.cautious = false;
+            }
+        }
+        if route.state == RouteState::Stranded {
+            return Some(Steer::Stranded);
         }
         let slot = f.slot_for(route.field_rank);
         if route.final_leg {
@@ -659,10 +712,8 @@ impl Fields {
             }
             route.final_leg = false;
         }
-        if let Some(c) = route.ring_front() {
-            return Some(Steer::Go(centre_of(g, c), Aim::Waypoint));
-        }
-        // Straight on to the slot when it can be seen.
+        // Straight on to the slot when it can be seen: before the waypoints of the
+        // ring, which lead to the goal's middle, where a crowd would be standing.
         if (!route.cautious || d == GOAL)
             && let Some(s) = slot
             && los::short_enough(pos, s)
@@ -670,6 +721,21 @@ impl Fields {
         {
             route.final_leg = true;
             return Some(Steer::Go(s, Aim::Destination));
+        }
+        // A waypoint the unit has been pushed past (the crowd pass moves bodies,
+        // WP4.4) is behind it: its cost to the goal is higher than the cost of the
+        // cell the unit is in. It is dropped and the leg chosen again, instead of
+        // the unit walking back for it.
+        if let Some(c) = route.ring_front() {
+            let (wx, wy) = g.grid.xy(c);
+            let behind = f
+                .index(&g.sectors, wx, wy)
+                .is_some_and(|k| f.cost[k] > f.cost[idx]);
+            if behind {
+                route.ring_clear();
+            } else {
+                return Some(Steer::Go(centre_of(g, c), Aim::Waypoint));
+            }
         }
         // The chain of cells down the directions, as far as the grid still
         // allows the steps.
@@ -740,6 +806,7 @@ impl Fields {
         h.write_u32(self.threshold);
         h.write_u32(self.next_serial);
         h.write_u32(self.next_born);
+        h.write_u32(self.next_order);
         h.write_u32(self.clock);
         h.write_u64(self.built);
         h.write_u32(self.live());
@@ -754,7 +821,10 @@ impl Fields {
             h.write_u8(f.state.tag());
             h.write_u32(f.graph as u32);
             h.write_u32(f.goal);
-            h.write_u32(f.slot_base);
+            h.write_u32(f.layout.order);
+            h.write_u8(f.layout.rank);
+            h.write_fx(f.layout.spacing);
+            h.write_fx(f.layout.inner);
             h.write_u32(f.members);
             h.write_u32(f.last_used);
             h.write_u8(u8::from(f.region_ready) | u8::from(f.slots_ready) << 1);

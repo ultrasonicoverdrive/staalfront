@@ -19,14 +19,21 @@
 //
 // Foot, tracked and wheeled are each at least the flowfield threshold (8), so
 // the order gives three fields, one per class; the five hover craft are below it and
-// are routed one by one (and swim across the river). Without collision (WP4.4)
-// the units overlap on the bridge and at the goal; that is expected for now.
+// are routed one by one (and swim across the river). Since WP4.4 the units have
+// bodies (docs/rules/collision.md): they cannot walk through each other, the bridge
+// is a real bottleneck (three cells wide, six long), and the group fills a disc
+// round the goal as big as its bodies need (the arrival slots are spaced for them,
+// each class in a ring, the fastest innermost). That disc is bigger than the five
+// cells the phase asked for before units had bodies: the 110 vehicles alone need
+// about 150 cells of ground, a disc of five cells has 78.
 //
 // tools/sf_headless/tests/bridge_200.rs asserts that all of them arrive, how long
-// it takes, that at most 1 % end outside 5 cells of the goal, that no unit ever
-// ends a tick on ground its class cannot enter, and that the path service never
-// spends more than its budget in a tick. CI runs the scenario on Linux and
-// Windows and requires the checksum in bridge_200.expected. `unit_defs` is the
+// it takes (about 176 s of game time; 107 s when the units went through each other),
+// that at most 1 % end further than 1.3 times the radius of a disc that holds their
+// bodies, that nobody is stuck at the end, that bodies do not overlap beyond the slack,
+// that no unit ever ends a tick on ground its class cannot enter, and that the path
+// service never spends more than its budget in a tick. CI runs the scenario on Linux
+// and Windows and requires the checksum in bridge_200.expected. `unit_defs` is the
 // frozen copy of the definitions `pathing` uses, so a rebalance of assets/config/
 // does not move the checksum.
 
@@ -36,7 +43,7 @@ Scenario(
     map: (width: 96, height: 64),
     map_name: Some("bridge"),
     unit_defs: Some("pathing_defs"),
-    ticks: 2400,
+    ticks: 3800,
     commands: [
         (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 26))), // slot 0: rifleman
         (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 26))), // slot 1: light tank

@@ -2,7 +2,8 @@
 
 Work packages WP4.2 and WP4.3 (PLAN.md phase 4). This page is WP4.2, hierarchical A* for single units,
 and, from **"Flowfields for groups"** on (WP4.3), the handling of an order that sends many units to
-one place. Code: `crates/sf_sim/src/path.rs` (the service and the
+one place. WP4.4 (`docs/rules/collision.md`) gave the units bodies; where it changes what is written
+here it is said in place (the arrival slots, how a member follows its field, a stranded member). Code: `crates/sf_sim/src/path.rs` (the service and the
 unit's side of it) and `crates/sf_sim/src/path/` (`grid`, `graph`, `local`, `abstract_search`, `los`,
 `route`, `job`, `heap`; WP4.3: `field`, `field_build`, `corridor`, `slots`). Scenarios:
 `assets/scenarios/pathing.ron`, `pathing_256.ron` and (WP4.3) `bridge_200.ron`. Idea:
@@ -31,7 +32,10 @@ for each such class when it is made (`World::with_movement`, on a map with a ter
 * A world without a terrain layer or without a movement table is open ground: no graphs, no
   routes. That is why `orders` (no terrain) did not move.
 
-**Mobile units are not obstacles here** (collision is WP4.4). **Structures are**: a cell a structure
+**Mobile units are not obstacles to a route or a field**: they are bodies that the crowd pass of
+WP4.4 pushes apart (`docs/rules/collision.md`); a route is made for the terrain and the structures, and
+a unit that the crowd keeps from following it asks for a new one (`Pathing::request_replan`).
+**Structures are**: a cell a structure
 occupies is blocked for every routed class (a structure stands on buildable ground, which a boat
 never meets, but a hover craft does).
 
@@ -195,7 +199,8 @@ that was nearest. The unit walks there, stands in the middle of that cell and **
 so**: `World::route_of(id)` has `unreachable: true`, `status: Stranded`, `goal: Some(that cell)`.
 That is the mark in the order state: it lives in the unit's route record next to its order, and goes
 when the order is replaced. **The order is kept**, with its queue, as WP4.1's stop at the edge kept it
-(`movement.md`); ending it ("gives up", "stands as near as it gets") is WP4.4 and WP4.7. A search for
+(`movement.md`); ending it ("gives up", "stands as near as it gets") is WP4.7's (WP4.4's crowd pass leaves
+such a unit alone, `collision.md`). A search for
 an unreachable goal explores the whole connected part of the map, so a crowd of such orders is
 expensive (below, "Not here").
 
@@ -391,11 +396,20 @@ A member, each time it needs a new waypoint (when the one it had is reached, or 
 
 1. If the **slot** of the unit (below) is in sight (a thick line of sight of at most 16 cells, the
    rule of "Line of sight and string pulling"), it steers straight at the slot and keeps doing so.
+   (Since WP4.4 this comes **before** the waypoint in the ring: the ring leads to the middle of the goal
+   cell, where a crowd is standing.)
 2. Otherwise it follows the chain of directions from its cell for at most 16 cells, as long as the
    grid still allows each step, and steers at the **farthest cell of the chain it can see**;
    when it can see none, the next cell. Nothing is looked at that is not in the grid as it is now.
+   A waypoint that the unit has been **pushed past** (WP4.4: its cost to the goal is higher than that
+   of the cell the unit is in) is dropped and the leg chosen again, instead of the unit walking back
+   for it.
 3. A step refused on the way (the straight line grazed a corner the margin did not cover) makes it go
    cell by cell, and a second refusal leaves it standing with its order kept, as for a single route.
+   (With bodies the unit first slides along what it grazed, `collision.md`.) A **stranded** member
+   does not keep its field alive, and gets another try when the map changes (the epoch moves on: the
+   leg is chosen again, smoothing allowed) or when the crowd pass asks for a new route; if every member
+   is stranded the field expires and they are routed on their own.
 
 The waypoint is the one cell in the unit's ring; `World::waypoint_of` shows it; `route_of` has
 `field: true`, `complete: true`.
@@ -412,25 +426,36 @@ The goal is an area. If 200 units all aimed at the middle of the goal cell they 
 point, so each member has its own **slot**: a point on a lattice around the goal, handed out in a
 spiral, **by rank** (the unit's place among its class in ascending entity id order).
 
-* The lattice has four points to a cell, half a cell apart and a quarter of a cell in from the cell's
-  sides (`path/slots.rs`). The spiral orders them by distance from the middle of the goal cell, ties
-  by row then column: the group fills a disc, 200 units to a radius of about four cells (measured in
-  `bridge_200`: the farthest ends 3.95 cells from the goal), inside the five cells (20 m) of phase 4's
-  "done when".
+Since WP4.4 the lattice is made for the bodies it holds (`path/slots.rs`, `docs/rules/collision.md`,
+"Arrival"):
+
+* The lattice is **square**, its **spacing** the distance the widest body of the class keeps from its
+  neighbours (the whole sum of the radii, three quarters of it for infantry-sized bodies) plus a
+  sixteenth of a cell: 0.36 cells for riflemen, 1.26 for light tanks. A point is `(a + 1/2)` spacings
+  east and `(b + 1/2)` south of the middle of the goal cell (never on one, so the middle is free).
+  The spiral orders the points by their distance from the middle, ties by row then column, so the
+  group fills a disc.
+* The classes of one order take **rings**, the fastest first: each field has the **group order** it
+  belongs to (`Layout::order`), its place in it (`rank`), its spacing and the radius at which its ring
+  begins (`inner`, the outer radius the area of the classes before it comes to: one `spacing * spacing`
+  for every unit, divided by pi). The classes are made in that order and built oldest first. When
+  the slots of a later class are picked, every point that is the same as, or nearer than a body's
+  distance to, a slot of an earlier class of the same order is **left out**, so that two classes never
+  share a slot even when blocked points were left out of the earlier one (WP4.3 counted units to give
+  each class a stretch of one spiral, and with rock beside the goal the stretches ran into each other).
 * A point is a slot when the line from the middle of the goal cell to it is clear by the thick line of
   sight (so its cell can be entered): a unit that has followed the field down to the goal can always
-  walk straight on to its slot. The lattice is the same for every class but each field keeps only
-  the points valid for its class, scanning from an offset (the number of units of the classes
-  before it in the same order), so the classes of one order take different stretches of the spiral.
+  walk straight on to its slot. Points further than 15 cells (a line of sight is at most a sector
+  long) are not used. The table has 40 spacings each way, 14 cells at the spacing of infantry.
 * A group with more units than `MAX_FIELD_SLOTS` (256) shares the slots round again; a goal with too
   few valid points in range does the same.
 * Arrival is judged against the **slot**, not the order's point: the unit has arrived when it is
-  within the tolerance of its slot (`orders::go_to`, `Pathing::arrival_point`), and its order ends
-  (or the next one in the queue starts) as for any move.
-* Half a cell is closer than a vehicle is long: **until collision (WP4.4) the units overlap**, at the
-  goal and on the way (in `bridge_200` as many as 36 are on the three-cell-wide bridge at once, and 10
-  pairs end closer than a quarter of a cell). The spacing is one constant (`SPACING_QUARTERS`) to
-  revisit with WP4.4 and the formations of WP4.6.
+  within the tolerance of its slot (`orders::go_to`, `Pathing::arrival_point`), or, in a crowd, as
+  `collision.md` says, and its order ends (or the next one in the queue starts) as for any move.
+
+200 units of the `bridge_200` mix fill a disc of 7.4 cells round the goal, not the 4 cells of the
+half-cell lattice of WP4.3 (which let the bodies overlap), and **not the five cells** of phase 4's "done
+when": see `collision.md`, "Five cells cannot hold 200 bodies".
 
 ### The pool
 
@@ -438,7 +463,9 @@ spiral, **by rank** (the unit's place among its class in ascending entity id ord
 used** field (the one whose members asked it for a direction longest ago; ties to the lowest entry),
 and the units of the field that went find it gone and are routed on their own from where they stand. A
 field that no unit has asked for in `FIELD_IDLE_TICKS` (400, 20 s) is dropped: the group has arrived
-or has been given other orders. Field memory is made when a field is: at most
+or has been given other orders. The field being built is no exception (a unit that waits for its cell
+to be integrated asks every tick, so a build nobody has asked for has no member that wants it; the build
+ends and the builder is free for the queue). A stranded member does not ask. Field memory is made when a field is: at most
 `FIELD_POOL * FIELD_SECTORS * 256` cells of 5 bytes (about 1.6 MB), and the builder's scratch space
 (a heap over the cells of the largest region, the arrays of the corridor search) once, when the first
 field is built.
@@ -462,7 +489,8 @@ A section `L`, written only while the pool holds a field: the threshold, the clo
 fields, every field (its group, version, state, region, slots, how many cells are integrated and a
 **running hash** of the cells in the order they were integrated, instead of the arrays, which would
 be hashed every tick) and the build in flight. A member also has its group and rank in its route
-(section `P`). A world that never made a field hashes as before, so `wander_5000`, `command_mix`,
+(section `P`). Since WP4.4 each field also hashes its group order, its ring, the spacing of its lattice
+and the radius where it begins. A world that never made a field hashes as before, so `wander_5000`, `command_mix`,
 `terrain_256`, `units_spawn`, `orders`, `terrain_costs` and `pathing_256` did not move.
 
 **`pathing` has a group order** (24 light transports to one cell) and would move: its checksum on
@@ -477,20 +505,20 @@ across their way at tick 650 and the field is built again).
 200 units on a 96 by 64 map: 90 riflemen, 60 light tanks, 45 light transports and 5 amphibious
 transports (below the threshold: five routes of their own) are ordered across a river with one bridge
 and a wall with a gap behind it to a point 60 cells away. Three fields (foot, wheeled, tracked) are
-finished on ticks 3, 5 and 6; the first unit of each class moves by tick 6, all 200 by tick 17; the
-slowest (a rifleman at 0.7 cells a second) arrives on tick 2137 (107 s of game time), none ends
-outside 5 cells of the goal (the farthest 3.95), none is ever on ground its class cannot enter, and no
-unit walked more than 0.98 of the grid-best walk plus five cells. The path service spent 24,712
-nodes in all, 10 jobs of single routes (the five hover craft). The same crowd with flowfields off
-spends 266,587 nodes in 448 jobs and has every unit moving only by tick 59. The scenario's
-checksum is in `bridge_200.expected` and runs on Linux and Windows in CI.
+finished on ticks 3, 5 and 7; the first unit of each class moves by tick 1, all 200 by tick 13.
+The path service spends 27,232 nodes in all and 11 jobs of single routes (the five hover craft and
+a few requests for a new route from the crowd pass), against 704,918 nodes in 1,191 jobs for the same crowd
+routed one by one (every unit moving by tick 53). **Before WP4.4** (units without bodies) the slowest, a
+rifleman at 0.7 cells a second, arrived on tick 2,137 (107 s of game time), none ended outside 5 cells
+of the goal (the farthest 3.95) and as many as 36 units were on the bridge at once, overlapping. **With
+bodies** all arrive by tick 3,526 (176 s) and the farthest ends 9.55 cells from the goal: the bridge is a
+real bottleneck and the group needs a disc of 7.4 cells (`collision.md`). The checksum is in
+`bridge_200.expected` and runs on Linux and Windows in CI.
 
 ## Not here
 
-* **Collision, pushing and a stuck unit** (WP4.4: a unit that a
-  structure is placed on the middle of, with no free neighbour, can reach nothing and stands with
-  its order; the units of a group overlap until then), **turning before driving and turrets**
-  (WP4.5), **formations** (WP4.6: arrival slots are a spiral, not a shape; the slowest does not set
+* **Collision, pushing and a stuck unit** are WP4.4 and done (`docs/rules/collision.md`). **Turning
+  before driving and turrets** (WP4.5), **formations** (WP4.6: arrival slots are a spiral, not a shape; the slowest does not set
   the pace), **replanning** when a route is blocked or a target disappears (WP4.7: a field is
   rebuilt when a structure changes its region, but a target that vanishes or a better route that a
   removed structure offers is not looked for).
@@ -534,7 +562,9 @@ checksum is in `bridge_200.expected` and runs on Linux and Windows in CI.
   and its data, which orders make a group, mixed classes, a member cut off, a goal in a lake,
   the budget shared with single routes, the budget deciding when and not where, more groups than
   the pool, expiry, a structure placed across the way with nobody stepping into it, a reproducible
-  run and a clone); `tools/sf_headless/tests/bridge_200.rs` with `assets/scenarios/bridge_200.ron`
+  run and a clone); WP4.4 added to `field_tests.rs` the ring layout, a later class skipping an earlier
+  class's slots, a stranded member recovering and not keeping its field alive, and an idle field
+  expiring while it is built; `tools/sf_headless/tests/bridge_200.rs` with `assets/scenarios/bridge_200.ron`
   (map `assets/maps/bridge`, made by `cargo run -p sf_headless --example gen_bridge_map`): all 200
   arrive, at most 1 % outside 5 cells, never on ground the class cannot enter, the budget, the
   start within a few ticks, the length of the walks, and the same crowd without fields;

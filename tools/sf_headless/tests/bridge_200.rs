@@ -1,12 +1,26 @@
-//! The `bridge_200` scenario (WP4.3, `docs/rules/pathfinding.md`, "Flowfields for
-//! groups"): 200 mixed units cross one bridge to a goal area on one order.
+//! The `bridge_200` scenario (WP4.3, WP4.4, `docs/rules/pathfinding.md`,
+//! `docs/rules/collision.md`): 200 mixed units cross one bridge to a goal area on one
+//! order.
 //!
-//! This is the "done when" of phase 4 in PLAN.md, as far as it can be before
-//! collision (WP4.4): all of them arrive, at most 1 % end outside 5 cells (20 m)
-//! of the goal, none is ever on ground its class cannot enter, and the path
-//! service stays inside its budget while it builds the fields. The units overlap
-//! on the bridge and at the goal; that is expected until WP4.4, and the test
-//! prints how much instead of asserting it away.
+//! This is the "done when" of phase 4 in PLAN.md, with bodies (WP4.4): all of them
+//! arrive, none is stuck at the end, the bodies do not overlap beyond the slack, none
+//! is ever on ground its class cannot enter, and the path service stays inside its
+//! budget while it builds the fields. The crossing is a real bottleneck now (the
+//! bridge is three cells wide and the crowd is wider than that): it takes about twice
+//! as long as it did when the units went through each other.
+//!
+//! **Five cells cannot hold this crowd.** The phase asked for at most 1 % of the units
+//! outside 5 cells (20 m) of the goal, written when units were points. With bodies of
+//! the shipped sizes (`size` of the definitions: a tank is 1.2 cells across) the 110
+//! vehicles need about 150 cells of ground and a disc of five cells has 78, so about
+//! half of them must stand further out however well they are packed. By the
+//! orchestrator decision of 18-10-2026 (PLAN.md, phase 4) the criterion is: all
+//! arrive, none stuck; at most 1 % end further from the goal than 1.3 times the radius
+//! of a disc whose area is the sum of the units' `spacing * spacing` (`packing_radius`,
+//! 7.37 cells here); no two bodies overlap by more than a quarter of a cell during the
+//! run (every tick after the first step; see `worst_overlap`) or 1/16 of a cell at the end. The test
+//! also prints how many are outside five cells. See `docs/rules/collision.md`,
+//! "Arrival".
 //!
 //! The same crowd without flowfields (`flowfield_threshold: Some(0)`) is run as
 //! the comparison: 195 single requests instead of three fields.
@@ -14,6 +28,7 @@
 mod common;
 
 use std::collections::BinaryHeap;
+use std::sync::OnceLock;
 
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
@@ -25,9 +40,12 @@ const GOAL: (u32, u32) = (80, 32);
 const W: u32 = 96;
 const H: u32 = 64;
 
-/// The tick by which every unit has arrived (measured: 2,137 for the slowest, a
-/// rifleman at 0.7 cells a second, about 60 cells and a bridge away).
-const ARRIVE_BY: u64 = 2400;
+/// The tick by which every unit has arrived (measured: 3,375 with bodies).
+const ARRIVE_BY: u64 = 3700;
+
+/// The tick the crossing took when the units had no bodies (the slowest being a
+/// rifleman at 0.7 cells a second, 60 cells and a bridge away).
+const WITHOUT_BODIES: u64 = 2137;
 
 /// The classes, as the permanent kind numbers of `unit_classes.ron`.
 const FOOT: u16 = 0;
@@ -74,6 +92,28 @@ struct Run {
     cautious: usize,
     history: Vec<u64>,
     budget: u32,
+    /// The worst overlap of two bodies at the end of any tick of the run (the
+    /// first step on), in raw fixed point, and when. The state the scenario spawns
+    /// them in is not part of the run: the units are placed one to a cell and the
+    /// tanks are wider than that (0.35 of a cell over at tick 0, before the crowd
+    /// pass has had a tick).
+    worst_overlap: (i64, u64),
+    /// The longest a unit stood (moved less than a hundredth of a cell a tick) with
+    /// its order not done, in ticks.
+    longest_still: u32,
+    /// The tick by which every unit had crossed the river.
+    all_across: Option<u64>,
+}
+
+/// The least distance the bodies of two units keep, the rule of
+/// `docs/rules/collision.md`.
+fn keep(ra: Fx, rb: Fx) -> Fx {
+    let small = |r: Fx| r <= Fx::from_ratio(3, 8);
+    if small(ra) && small(rb) {
+        (ra + rb).mul_int(3).div_int(4)
+    } else {
+        ra + rb
+    }
 }
 
 fn run_scenario(scenario: &Scenario) -> Run {
@@ -95,9 +135,15 @@ fn run_scenario(scenario: &Scenario) -> Run {
         cautious: 0,
         history: Vec::new(),
         budget,
+        worst_overlap: (0, 0),
+        longest_still: 0,
+        all_across: None,
     };
     let mut last: Vec<Vec2> = Vec::new();
     let mut moved = vec![false; UNITS as usize];
+    let mut still = vec![0_u32; UNITS as usize];
+    let mut across = vec![false; UNITS as usize];
+    let mut radius: Vec<Fx> = Vec::new();
     for _ in 0..scenario.ticks {
         let report = world.step();
         r.history.push(report.checksum);
@@ -117,27 +163,45 @@ fn run_scenario(scenario: &Scenario) -> Run {
         if r.start.is_empty() && world.len() == UNITS as usize {
             r.start = (0..UNITS).map(|s| world.get(id(s)).unwrap().pos).collect();
             last = r.start.clone();
+            radius = (0..UNITS)
+                .map(|s| world.collision_radius_of(id(s)).unwrap())
+                .collect();
         }
         let mut on_bridge = 0;
         let mut cautious = 0;
+        let mut positions: Vec<Vec2> = Vec::with_capacity(UNITS as usize);
         for s in 0..UNITS {
             let unit = id(s);
             let pos = world.get(unit).unwrap().pos;
+            positions.push(pos);
             let class = world.stats_of(unit).unwrap().movement_class.unwrap();
             let cell = world.cell_at(pos).unwrap();
             if !world.passable(class, cell) {
                 r.bad_cells.push((tick, s, cell));
             }
             if !last.is_empty() {
-                r.walked[s as usize] += last[s as usize].distance(pos).raw();
-                last[s as usize] = pos;
+                let step = last[s as usize].distance(pos);
+                r.walked[s as usize] += step.raw();
                 if pos != r.start[s as usize] {
                     moved[s as usize] = true;
                     r.class_first_move[usize::from(class)].get_or_insert(tick);
                 }
+                // Standing still with something left to do.
+                if r.arrived[s as usize].is_none() && tick >= 20 {
+                    if step < Fx::from_ratio(1, 100) {
+                        still[s as usize] += 1;
+                        r.longest_still = r.longest_still.max(still[s as usize]);
+                    } else {
+                        still[s as usize] = 0;
+                    }
+                }
+                last[s as usize] = pos;
             }
             if (44..=49).contains(&cell.x) && (31..=33).contains(&cell.y) {
                 on_bridge += 1;
+            }
+            if cell.x >= 50 {
+                across[s as usize] = true;
             }
             if world.route_of(unit).is_some_and(|v| v.cautious) {
                 cautious += 1;
@@ -154,13 +218,35 @@ fn run_scenario(scenario: &Scenario) -> Run {
         if r.all_moving.is_none() && !last.is_empty() && moved.iter().all(|&m| m) {
             r.all_moving = Some(tick);
         }
+        if r.all_across.is_none() && across.iter().all(|&a| a) {
+            r.all_across = Some(tick);
+        }
+        if tick >= 1 {
+            for a in 0..UNITS as usize {
+                for b in a + 1..UNITS as usize {
+                    let (pa, pb) = (positions[a], positions[b]);
+                    if (pa.x - pb.x).abs() > Fx::from_int(2)
+                        || (pa.y - pb.y).abs() > Fx::from_int(2)
+                    {
+                        continue;
+                    }
+                    let overlap = (keep(radius[a], radius[b]) - pa.distance(pb)).raw();
+                    if overlap > r.worst_overlap.0 {
+                        r.worst_overlap = (overlap, tick);
+                    }
+                }
+            }
+        }
     }
     r.world = world;
     r
 }
 
-fn run() -> Run {
-    run_scenario(&Scenario::load(&scenario_path("bridge_200.ron")).unwrap())
+/// The shared run of the shipped scenario: it is long, so the tests that only read
+/// it share one.
+fn run() -> &'static Run {
+    static RUN: OnceLock<Run> = OnceLock::new();
+    RUN.get_or_init(|| run_scenario(&Scenario::load(&scenario_path("bridge_200.ron")).unwrap()))
 }
 
 impl Run {
@@ -168,28 +254,25 @@ impl Run {
         self.arrived.iter().flatten().max().copied().unwrap_or(0)
     }
 
-    fn outside_five_cells(&self) -> Vec<u32> {
+    fn outside(&self, cells: Fx) -> Vec<u32> {
         (0..UNITS)
-            .filter(|&s| (self.world.get(id(s)).unwrap().pos - goal()).length() > Fx::from_int(5))
+            .filter(|&s| (self.world.get(id(s)).unwrap().pos - goal()).length() > cells)
             .collect()
     }
 
-    /// Pairs of units closer than a quarter of a cell at the end: the overlap
-    /// that collision (WP4.4) will have to resolve.
-    fn overlapping_pairs(&self) -> usize {
-        let pos: Vec<Vec2> = (0..UNITS)
-            .map(|s| self.world.get(id(s)).unwrap().pos)
-            .collect();
-        let near = Fx::from_ratio(1, 4);
-        let mut pairs = 0;
-        for a in 0..pos.len() {
-            for b in a + 1..pos.len() {
-                if (pos[a] - pos[b]).length() < near {
-                    pairs += 1;
-                }
-            }
-        }
-        pairs
+    /// The radius of a disc with the area of all the bodies as they are packed on a
+    /// square lattice (one `distance * distance` of ground to each, the distance
+    /// being what its body keeps from its neighbours), in cells, as a float for the
+    /// comparison only.
+    fn packing_radius(&self) -> f64 {
+        let area: f64 = (0..UNITS)
+            .map(|s| {
+                let r = self.world.collision_radius_of(id(s)).unwrap();
+                let d = keep(r, r).raw() as f64 / ORTH as f64;
+                d * d
+            })
+            .sum();
+        (area / std::f64::consts::PI).sqrt()
     }
 }
 
@@ -247,7 +330,7 @@ fn grid_distances(world: &World, class: u16) -> Vec<i64> {
 // --- the tests -------------------------------------------------------------------------
 
 #[test]
-fn all_two_hundred_units_arrive_within_the_limit() {
+fn all_two_hundred_units_arrive_within_the_limit_and_the_bridge_is_a_real_bottleneck() {
     let r = run();
     let n = r.arrived.iter().flatten().count();
     assert_eq!(n, UNITS as usize, "units that never arrived: {:?}", {
@@ -256,12 +339,18 @@ fn all_two_hundred_units_arrive_within_the_limit() {
             .collect::<Vec<_>>()
     });
     let last = r.last_arrival();
+    let stats = r.world.crowd_stats();
     eprintln!(
-        "bridge_200: all {UNITS} arrived by tick {last} ({} s of game time); \
-         first move per class (foot, wheeled, tracked, hover) {:?}, every unit moving by tick {:?}; \
-         fields finished on ticks {:?}; the path service spent at most {} nodes in a tick \
-         ({} of them on fields) of {}, {} in all, {} jobs of single routes",
+        "bridge_200: all {UNITS} arrived by tick {last} ({} s of game time; {} s when the units \
+         had no bodies), the last crossed the river on tick {:?}; first move per class (foot, \
+         wheeled, tracked, hover) {:?}, every unit moving by tick {:?}; fields finished on ticks \
+         {:?}; the path service spent at most {} nodes in a tick ({} of them on fields) of {}, \
+         {} in all, {} jobs of single routes; the crowd pass: {} ticks with a push, {} idle units \
+         shoved, {} sidesteps, {} requests for a new route; longest a unit stood still with its \
+         order not done: {} ticks",
         last / 20,
+        WITHOUT_BODIES / 20,
+        r.all_across,
         r.class_first_move,
         r.all_moving,
         r.field_done,
@@ -269,9 +358,19 @@ fn all_two_hundred_units_arrive_within_the_limit() {
         r.peak_field_nodes,
         r.budget,
         r.total_nodes,
-        r.world.path_stats().jobs_done
+        r.world.path_stats().jobs_done,
+        stats.busy_ticks,
+        stats.shoves,
+        stats.sidesteps,
+        stats.replans,
+        r.longest_still,
     );
     assert!(last <= ARRIVE_BY, "the last unit arrived on tick {last}");
+    // The bridge is three cells wide; the crowd that crosses it has to queue.
+    assert!(
+        last > WITHOUT_BODIES,
+        "with bodies the crossing is slower than without: {last}"
+    );
     for s in 0..UNITS {
         assert_eq!(r.world.order_of(id(s)), Some(Order::Idle));
         assert!(!r.world.route_of(id(s)).unwrap().field, "route over");
@@ -279,26 +378,90 @@ fn all_two_hundred_units_arrive_within_the_limit() {
 }
 
 #[test]
-fn at_most_one_percent_end_outside_five_cells_of_the_goal() {
+fn nobody_is_stuck_at_the_end_or_stood_still_for_long_on_the_way() {
     let r = run();
-    let outside = r.outside_five_cells();
+    for s in 0..UNITS {
+        let unit = id(s);
+        assert_eq!(
+            r.world.stuck_ticks_of(unit),
+            Some(0),
+            "unit {s} has not come closer for a while at the end"
+        );
+        assert_eq!(r.world.replan_requested(unit), Some(false), "unit {s}");
+        assert_eq!(r.world.order_of(unit), Some(Order::Idle), "unit {s}");
+    }
+    // In a queue for a bridge three cells wide a unit may stand a while (the
+    // measured longest is printed above); nobody stands for half a minute.
+    assert!(
+        r.longest_still <= 600,
+        "a unit stood still for {} ticks with its order not done",
+        r.longest_still
+    );
+}
+
+#[test]
+fn at_most_one_percent_end_outside_the_disc_that_holds_the_bodies() {
+    let r = run();
+    let packing = r.packing_radius();
+    let limit = Fx::from_ratio((packing * 1.3 * 1000.0) as i64, 1000);
+    let outside = r.outside(limit);
     let farthest = (0..UNITS)
         .map(|s| (r.world.get(id(s)).unwrap().pos - goal()).length())
         .max()
         .unwrap();
     eprintln!(
-        "bridge_200: {} of {UNITS} outside 5 cells of the goal; the farthest {:?} cells; \
-         {} pairs of units closer than a quarter of a cell (collision is WP4.4), \
-         at most {} on the bridge at once, at most {} stepping cell by cell at once",
+        "bridge_200: the bodies fill a disc of {packing:.1} cells; {} of {UNITS} are outside \
+         {:.1} cells of the goal, {} outside the 5 cells the phase asked for before units had \
+         bodies; the farthest {:?} cells; at most {} on the bridge at once, at most {} stepping \
+         cell by cell at once",
         outside.len(),
+        packing * 1.3,
+        r.outside(Fx::from_int(5)).len(),
         farthest,
-        r.overlapping_pairs(),
         r.on_bridge,
         r.cautious
     );
+    // Five cells could not hold them (see the module documentation)...
+    assert!(
+        packing > 5.0,
+        "the bodies of 200 units of these sizes fill a disc of {packing:.1} cells"
+    );
+    // ...but the group is gathered round the goal.
     assert!(
         outside.len() * 100 <= UNITS as usize,
-        "outside five cells: {outside:?}"
+        "outside {:.1} cells: {outside:?}",
+        packing * 1.3
+    );
+}
+
+#[test]
+fn bodies_do_not_overlap_beyond_the_slack_on_the_way_or_at_the_end() {
+    let r = run();
+    let (worst, at) = r.worst_overlap;
+    eprintln!(
+        "bridge_200: the worst overlap of two bodies in the run is {:.3} cells (tick {at})",
+        worst as f64 / ORTH as f64
+    );
+    // The phase's bound: never more than a quarter of a cell during the run. (The
+    // slack is a thirty-second; a packed crowd squeezed against the crowd that has
+    // arrived goes over it for a moment.)
+    assert!(worst <= ORTH / 4, "worst overlap {worst} at tick {at}");
+    // And at the end the crowd has settled: at most a sixteenth of a cell.
+    let end = r.history.len() as u64;
+    let mut worst_end = 0;
+    for a in 0..UNITS {
+        for b in a + 1..UNITS {
+            let (ra, rb) = (
+                r.world.collision_radius_of(id(a)).unwrap(),
+                r.world.collision_radius_of(id(b)).unwrap(),
+            );
+            let d = (r.world.get(id(a)).unwrap().pos - r.world.get(id(b)).unwrap().pos).length();
+            worst_end = worst_end.max((keep(ra, rb) - d).raw());
+        }
+    }
+    assert!(
+        worst_end <= ORTH / 16,
+        "at tick {end} two bodies overlap by {worst_end}"
     );
 }
 
@@ -326,7 +489,7 @@ fn the_groups_start_within_a_few_ticks_and_the_budget_holds_while_the_fields_are
         let first = r.class_first_move[usize::from(class)].unwrap();
         assert!(first <= 12, "class {class} moved first on tick {first}");
     }
-    assert!(r.all_moving.unwrap() <= 30, "{:?}", r.all_moving);
+    assert!(r.all_moving.unwrap() <= 40, "{:?}", r.all_moving);
     assert!(
         *r.field_done.last().unwrap() <= 12,
         "fields done: {:?}",
@@ -335,9 +498,10 @@ fn the_groups_start_within_a_few_ticks_and_the_budget_holds_while_the_fields_are
     // The budget held every tick (asserted in the run); the builder used it.
     assert!(r.peak_field_nodes > 0 && r.peak_nodes <= r.budget);
     // Not one route of its own for the 195 units of a field: the five hover craft
-    // are all that was asked of the single-route service.
+    // are all that was asked of the single-route service (and the crowd pass asking
+    // again for a few that were stuck).
     assert!(
-        stats.jobs_done < 40,
+        stats.jobs_done < 40 + r.world.crowd_stats().replans,
         "{} jobs for the five hover craft",
         stats.jobs_done
     );
@@ -347,32 +511,43 @@ fn the_groups_start_within_a_few_ticks_and_the_budget_holds_while_the_fields_are
 fn the_units_take_about_the_shortest_way() {
     let r = run();
     let by_class = [FOOT, WHEELED, TRACKED, HOVER].map(|c| (c, grid_distances(&r.world, c)));
-    let mut worst = 0.0_f64;
+    // How much longer than the grid-best walk each unit walked.
+    let mut ratios: Vec<(f64, u32, u16)> = Vec::new();
     for s in 0..UNITS {
         let class = r.world.stats_of(id(s)).unwrap().movement_class.unwrap();
         let dist = &by_class.iter().find(|(c, _)| *c == class).unwrap().1;
         let start = r.world.cell_at(r.start[s as usize]).unwrap();
         let best = dist[(start.y * W + start.x) as usize];
         assert_ne!(best, i64::MAX);
-        // The walk may end up to five cells from the goal's middle, in a slot, so
-        // a little less or more than the walk to the middle.
-        let slack = 5 * ORTH;
-        let walked = r.walked[s as usize];
-        assert!(
-            walked <= best * 115 / 100 + slack,
-            "unit {s} (class {class}) walked {} cells, the grid-best is {}",
-            walked as f64 / ORTH as f64,
-            best as f64 / ORTH as f64
-        );
-        worst = worst.max(walked as f64 / (best + slack) as f64);
+        ratios.push((r.walked[s as usize] as f64 / best as f64, s, class));
     }
-    eprintln!("bridge_200: longest walk is {worst:.3} of the grid-best walk plus five cells");
+    ratios.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let median = ratios[ratios.len() / 2].0;
+    eprintln!(
+        "bridge_200: the walks are {median:.2} of the grid-best walk at the median, the longest \
+         {:.2} (unit {}, class {}), {:.2} at the 95th percentile",
+        ratios[0].0,
+        ratios[0].1,
+        ratios[0].2,
+        ratios[ratios.len() / 20].0
+    );
+    // A crowd walks further than a single unit (measured: 1.2 at the median): it is pushed, it waits, it goes round
+    // and sidesteps, and a body shuffling in a queue adds up. Not twice as far at
+    // the median, and not three times as far for anybody.
+    assert!(median < 1.5, "median {median:.2}");
+    assert!(
+        ratios[0].0 < 3.0,
+        "unit {} (class {}) walked {:.2} times the grid-best",
+        ratios[0].1,
+        ratios[0].2,
+        ratios[0].0
+    );
 }
 
 #[test]
 fn the_run_is_reproducible() {
     let a = run();
-    let b = run();
+    let b = run_scenario(&Scenario::load(&scenario_path("bridge_200.ron")).unwrap());
     assert_eq!(a.history, b.history);
 }
 

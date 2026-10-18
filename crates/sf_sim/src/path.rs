@@ -26,9 +26,11 @@
 //! and the units follow it to their own arrival slot (`path/slots.rs`).
 //!
 //! What is *not* pathfinding here: aircraft and any class that terrain does
-//! not restrict walk the straight line, units are not obstacles (collision is
-//! WP4.4: the members of a group overlap until then), and a route made unwalkable
-//! by a change is only re-asked when the change touches it (replanning is WP4.7).
+//! not restrict walk the straight line, routes and fields do not know the other
+//! units (they are bodies that the crowd pass of WP4.4 pushes apart, `crate::crowd`;
+//! a unit that is stuck in a crowd asks for a new route through
+//! [`Pathing::request_replan`]), and a route made unwalkable by a change is only
+//! re-asked when the change touches it (replanning is WP4.7).
 
 mod abstract_search;
 mod corridor;
@@ -56,7 +58,7 @@ use crate::movement::{Cost, Ground, MovementTable};
 use crate::terrain::{Cell, Occupancy, Terrain};
 use crate::units::UnitTable;
 
-use field::Fields;
+use field::{Fields, Layout};
 use graph::{ClassGraph, node_sector};
 use grid::{Grid, Sectors};
 use job::{Job, Mode, Progress, Work};
@@ -662,6 +664,39 @@ impl Pathing {
         self.scan = true;
     }
 
+    /// The unit is stuck in a crowd and the sidesteps did not help (WP4.4): asks
+    /// again for what it follows, from where it stands. This is the hook WP4.7
+    /// builds the replan on (it will add the reasons and the costs of the other
+    /// units); until then it is the existing request path, nothing more.
+    ///
+    /// * A member of a flowfield stays on the field, forgets the leg it chose
+    ///   (the ring, the straight run to the slot) and recovers from `Stranded`:
+    ///   it chooses again from the cell it stands in, smoothing allowed.
+    /// * A unit with a route of its own gets a new search from where it stands, and
+    ///   goes on along the waypoints it has until that is ready.
+    pub fn request_replan(&mut self, e: &mut Entities, i: usize) {
+        let route = &mut e.route[i];
+        if route.field_serial != 0 {
+            route.ring_clear();
+            route.final_leg = false;
+            route.cautious = false;
+            if route.state == RouteState::Stranded {
+                route.state = RouteState::Active;
+            }
+            return;
+        }
+        if route.state == RouteState::Idle {
+            return;
+        }
+        // The unit keeps following the waypoints it has until the new route is
+        // ready, as when its destination moves: standing still to wait for a search
+        // would only make the crowd more stuck.
+        self.next_ticket = self.next_ticket.wrapping_add(1);
+        route.state = RouteState::Wanted;
+        route.ticket = self.next_ticket;
+        self.scan = true;
+    }
+
     fn cell_index(g: &ClassGraph, pos: Vec2) -> u32 {
         let (x, y) = pos.cell();
         let x = (x.max(0) as u32).min(g.grid.width() - 1);
@@ -720,8 +755,12 @@ impl Pathing {
     /// units in `started` (ascending slots, each once, each starting the order
     /// now). For every movement class that has at least the threshold of them,
     /// makes a flowfield and hands the units their places in it; the others stay
-    /// with their single routes. Classes go in ascending order and each takes
-    /// the stretch of the arrival spiral after the ones before it.
+    /// with their single routes.
+    ///
+    /// The classes of the order take **rings** round the goal (WP4.4,
+    /// `path/slots.rs`), the fastest first (ties to the lower class): a class's
+    /// slots lie on a lattice whose spacing is what its biggest body needs, and
+    /// begin where the area of the classes before it ends.
     pub fn group_order(
         &mut self,
         e: &mut Entities,
@@ -733,7 +772,15 @@ impl Pathing {
         if threshold == 0 || self.graphs.is_empty() || started.len() < threshold {
             return;
         }
-        let mut base = 0_u32;
+        // The classes that get a field: their members, the widest body, whether
+        // all are small, and the fastest speed.
+        struct Class {
+            gi: usize,
+            members: Vec<usize>,
+            widest: Fx,
+            speed: Fx,
+        }
+        let mut classes: Vec<Class> = Vec::new();
         for gi in 0..self.graphs.len() {
             let g = &self.graphs[gi];
             let members: Vec<usize> = started
@@ -754,15 +801,44 @@ impl Pathing {
             if !g.grid.open(i64::from(gx), i64::from(gy)) {
                 continue;
             }
-            let goal = g.grid.index(gx, gy);
-            let serial = self.fields.create(
+            let stats = |i: usize| units.at(e.def[i] as usize);
+            let widest = members
+                .iter()
+                .map(|&i| stats(i).size)
+                .max()
+                .unwrap_or(Fx::ONE);
+            let speed = members
+                .iter()
+                .map(|&i| stats(i).speed_per_tick)
+                .max()
+                .unwrap_or(Fx::ZERO);
+            classes.push(Class {
                 gi,
-                goal,
-                base,
-                u32::try_from(members.len()).unwrap_or(u32::MAX),
-                g.sectors.count(),
-            );
-            for (rank, &i) in members.iter().enumerate() {
+                members,
+                widest,
+                speed,
+            });
+        }
+        // The fastest takes the innermost ring: it arrives first.
+        classes.sort_by_key(|c| (core::cmp::Reverse(c.speed), c.gi));
+        let order = self.fields.new_order();
+        let mut inner = Fx::ZERO;
+        for (rank, class) in classes.iter().enumerate() {
+            let g = &self.graphs[class.gi];
+            let (gx, gy) = field::cell_of(g, destination);
+            let goal = g.grid.index(gx, gy);
+            let spacing = slots::spacing_for(class.widest);
+            let count = u32::try_from(class.members.len()).unwrap_or(u32::MAX);
+            let layout = Layout {
+                order,
+                rank: u8::try_from(rank).unwrap_or(u8::MAX),
+                spacing,
+                inner,
+            };
+            let serial = self
+                .fields
+                .create(class.gi, goal, layout, count, g.sectors.count());
+            for (rank, &i) in class.members.iter().enumerate() {
                 let route = &mut e.route[i];
                 *route = Route::IDLE;
                 route.state = RouteState::Active;
@@ -774,7 +850,7 @@ impl Pathing {
                 route.field_serial = serial;
                 route.field_rank = u16::try_from(rank).unwrap_or(u16::MAX);
             }
-            base = base.saturating_add(members.len() as u32);
+            inner = slots::outer_radius(inner, count.min(field::MAX_SLOTS as u32), spacing);
         }
     }
 

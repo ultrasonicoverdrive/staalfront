@@ -1,0 +1,15 @@
+(
+    width: 256,
+    height: 160,
+    height_scale: 8.0,
+    materials: [
+        "grass",
+        "dirt",
+        "rock",
+        "sand",
+        "dark_ground",
+    ],
+    heightmap: "height.png",
+    material_map: "materials.png",
+    terrain_map: Some("terrain.png"),
+)

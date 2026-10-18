@@ -121,6 +121,13 @@ pub struct Scenario {
     /// own. A scenario that is about the queue of single requests says so.
     #[serde(default)]
     pub flowfield_threshold: Option<u32>,
+    /// Whether bodies collide (WP4.4, `docs/rules/collision.md`); the
+    /// simulation's default (on, as `sim.ron` ships it) when left out.
+    /// `Some(false)` lets units pass through each other, as before WP4.4: for a
+    /// scenario that pins routes or terrain costs with exact positions and has
+    /// units that start side by side or share a goal.
+    #[serde(default)]
+    pub collision: Option<bool>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -861,6 +868,14 @@ impl Scenario {
         if let Some(threshold) = self.flowfield_threshold {
             world = world
                 .with_flowfield_threshold(threshold)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(enabled) = self.collision {
+            world = world
+                .with_collision(sf_sim::CollisionConfig {
+                    enabled,
+                    ..sf_sim::CollisionConfig::DEFAULT
+                })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());

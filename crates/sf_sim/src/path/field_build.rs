@@ -26,6 +26,7 @@
 //! The scratch memory (the searches' arrays) is made when the first field is.
 
 use sf_math::hash::Fnv1a64;
+use sf_math::{Fx, Vec2};
 
 use crate::entities::Entities;
 use crate::path::corridor::{Corridor, Reach};
@@ -46,6 +47,9 @@ const GATHER_PER_NODE: usize = 16;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct Scratch {
     pub local: Local,
+    /// The slots of the earlier classes of the order being picked for: the points
+    /// and the spacing of their lattice.
+    taken: Vec<(Vec2, Fx)>,
     corridor: Corridor,
     /// Per portal node: the generation of the walk that marked it.
     walked: Vec<u32>,
@@ -66,6 +70,7 @@ impl Scratch {
         let sectors = g.sectors.count();
         Scratch {
             local: Local::new(),
+            taken: Vec::new(),
             corridor: Corridor::new(sectors),
             walked: vec![0; sectors * SLOTS],
             walk_generation: 0,
@@ -118,6 +123,27 @@ impl Fields {
                 continue;
             }
             let entry = c.entry;
+            // The slots of the earlier classes of this order, for the stage that
+            // picks the slots of this one (WP4.4): no two classes share a point
+            // or stand closer than their bodies allow.
+            if c.stage == Stage::Slots && !c.started {
+                let (order, rank) = (entries[entry].layout.order, entries[entry].layout.rank);
+                let g = &graphs[entries[entry].graph];
+                let s = scratch.get_or_insert_with(|| Box::new(Scratch::new(g)));
+                s.taken.clear();
+                for (j, o) in entries.iter().enumerate() {
+                    if j != entry
+                        && order != 0
+                        && o.serial != 0
+                        && o.slots_ready
+                        && o.layout.order == order
+                        && o.layout.rank < rank
+                    {
+                        s.taken
+                            .extend(o.slots.iter().map(|&p| (p, o.layout.spacing)));
+                    }
+                }
+            }
             let f = &mut entries[entry];
             let g = &graphs[f.graph];
             let s = scratch.get_or_insert_with(|| Box::new(Scratch::new(g)));
@@ -127,7 +153,7 @@ impl Fields {
                 Stage::Corridor => corridor(c, s, g, rem),
                 Stage::Collect => collect(c, s, g, rem),
                 Stage::Region => region(f, c, s, g, rem),
-                Stage::Slots => pick_slots(f, c, g, spiral, rem),
+                Stage::Slots => pick_slots(f, c, g, spiral, &s.taken, rem),
                 Stage::Integrate => integrate(f, c, s, g, rem),
             };
             match flow {
@@ -384,31 +410,56 @@ fn region(f: &mut Field, c: &mut Cur, s: &mut Scratch, g: &ClassGraph, rem: &mut
 }
 
 /// Stage six of the build.
+///
+/// The slots are the points of the field's lattice, scanned outwards from the radius
+/// where its ring begins (`Layout::inner`), that are in sight of the goal and not too
+/// near a slot of an earlier class of the same order (`taken`: the point and the
+/// spacing of its lattice). The scan stops when there are as many slots as members
+/// or the points are further than [`slots::MAX_RADIUS`] from the goal; units beyond
+/// the slots there are share them round again.
 fn pick_slots(
     f: &mut Field,
     c: &mut Cur,
     g: &ClassGraph,
     spiral: &[slots::Point],
+    taken: &[(Vec2, Fx)],
     rem: &mut u32,
 ) -> Flow {
     let (gx, gy) = g.grid.xy(f.goal);
     let centre = centre_xy(gx, gy);
+    let spacing = f.layout.spacing;
     if !c.started {
         f.slots.clear();
         c.started = true;
-        c.cursor = 0;
+        c.cursor = slots::first_beyond(spiral, f.layout.inner, spacing);
     }
     let want = (f.members as usize).min(MAX_SLOTS);
     let len = spiral.len();
-    let base = f.slot_base as usize % len;
+    // One node pays for 32 comparisons with the earlier classes' slots.
+    let compare = (taken.len() / 32) as u32;
     while f.slots.len() < want && c.cursor < len {
-        let p = slots::position(centre, spiral[(base + c.cursor) % len]);
-        if *rem < los::bound(centre, p) {
+        let p = slots::position(centre, spiral[c.cursor], spacing);
+        if (p - centre).length() > slots::MAX_RADIUS {
+            // The spiral goes outwards: everything after this is further.
+            c.cursor = len;
+            break;
+        }
+        if *rem < los::bound(centre, p) + compare {
             return Flow::Yield;
+        }
+        *rem -= compare;
+        let crowded = taken.iter().any(|&(q, other)| {
+            // The bodies of the two classes would overlap closer than the sum of
+            // their radii (WP4.4 review: `(s1 + s2) / 2 - GAP` was short of it
+            // for infantry beside a tank).
+            (p - q).length_squared() < slots::keep_apart(spacing, other).square()
+        });
+        c.cursor += 1;
+        if crowded {
+            continue;
         }
         let (clear, used) = los::thick_clear(&g.grid, centre, p);
         *rem -= used.min(*rem);
-        c.cursor += 1;
         if clear {
             f.slots.push(p);
         }
