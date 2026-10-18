@@ -1,0 +1,114 @@
+// Terrain costs per movement class (WP4.1, docs/rules/movement.md): units of
+// every class cross road, grass, ore and a river at a bridge, and are stopped by
+// rock and water. The map is assets/maps/terrain_costs (a hand-drawn 40 by 20 cell
+// map of straight lanes, made by `cargo run -p sf_data --example gen_costs_map`):
+//
+//   rows 0..19   x 0..19 grass   x 20..23 river (water)   x 24..39 grass
+//   row 4        road in x 0..19            row 6   ore in x 0..19
+//   row 8        the river is a BRIDGE      rows 12 and 16   rock in x 30..31
+//
+// Every unit gets one Move order at tick 1 and walks east in a straight line (the
+// route is the straight line until WP4.2):
+//
+//   lane    row  from -> to     what it shows
+//   grass    2    2 -> 17       15 cells of grass: the unit's own speed
+//   road     4    2 -> 17       the same 15 cells on a road: faster
+//   ore      6    2 -> 17       on ore: slower
+//   bridge   8   17 -> 27       over the river on the bridge: land crosses it
+//   water   10   14 -> 27       straight into the river: land stops at the bank
+//                               (x < 20), the hover class crosses at half speed
+//   rock    12   26 -> 35       into a rock wall (x 30..31): everyone stops at it
+//
+// in four lanes' worth of classes: foot (rifleman), wheeled (light_transport),
+// tracked (light_tank) and hover (amphibious_transport). Then
+//
+//   gunboat (water class), down the river x 21 from row 1 to row 18, under the
+//   bridge cell (21, 8): it arrives; a second one asked to go west from the river
+//   onto the bank (21,14) -> (10,14) stops in the river's west edge cell (20, 14);
+//   survey_drone (air class), row 16 from x 2 to x 37, over the river and the rock
+//   wall: it arrives.
+//
+// `unit_defs` is a FROZEN copy of the definitions with the terrain costs as they
+// are at WP4.1 (and one aircraft, the survey_drone, kind 43: no shipped role
+// flies); a rebalance of assets/config/ does not move this scenario's checksum.
+// CI runs it on Linux and Windows and requires the checksum in
+// terrain_costs.expected; tools/sf_headless/tests/terrain_costs.rs asserts the
+// arrival ticks, the positions and the blocked states along the way.
+//
+// Entity ids, all at generation 0, in the order the spawns are written: lane by
+// lane (grass, road, ore, bridge, water, rock), in each lane foot, wheeled,
+// tracked, hover: slots 0..23 (slot = 4 * lane + class); the gunboats 24 and 25;
+// the survey_drone 26. Owners: 0 Meridian, 1 Veyran.
+Scenario(
+    name: "terrain_costs",
+    seed: 0x7E44_0041,
+    map: (width: 40, height: 20),
+    map_name: Some("terrain_costs"),
+    unit_defs: Some("terrain_costs_defs"),
+    ticks: 900,
+    commands: [
+        // --- the grass lane, row 2: from 2 to 17 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (2, 2))), // slot 0: foot (rifleman)
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (2, 2))), // slot 1: wheeled (light_transport)
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (2, 2))), // slot 2: tracked (light_tank)
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (2, 2))), // slot 3: hover (amphibious_transport)
+        // --- the road lane, row 4: from 2 to 17 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (2, 4))), // slot 4: foot (rifleman)
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (2, 4))), // slot 5: wheeled (light_transport)
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (2, 4))), // slot 6: tracked (light_tank)
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (2, 4))), // slot 7: hover (amphibious_transport)
+        // --- the ore lane, row 6: from 2 to 17 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (2, 6))), // slot 8: foot (rifleman)
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (2, 6))), // slot 9: wheeled (light_transport)
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (2, 6))), // slot 10: tracked (light_tank)
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (2, 6))), // slot 11: hover (amphibious_transport)
+        // --- the bridge lane, row 8: from 17 to 27 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (17, 8))), // slot 12: foot (rifleman)
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (17, 8))), // slot 13: wheeled (light_transport)
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (17, 8))), // slot 14: tracked (light_tank)
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (17, 8))), // slot 15: hover (amphibious_transport)
+        // --- the water lane, row 10: from 14 to 27 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (14, 10))), // slot 16: foot (rifleman)
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (14, 10))), // slot 17: wheeled (light_transport)
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (14, 10))), // slot 18: tracked (light_tank)
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (14, 10))), // slot 19: hover (amphibious_transport)
+        // --- the rock lane, row 12: from 26 to 35 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (26, 12))), // slot 20: foot (rifleman)
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (26, 12))), // slot 21: wheeled (light_transport)
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (26, 12))), // slot 22: tracked (light_tank)
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (26, 12))), // slot 23: hover (amphibious_transport)
+        // --- vessel and aircraft ---
+        (tick: 0, command: SpawnUnit(kind: 28, owner: 1, cell: (21, 1))), // slot 24: gunboat, down the river
+        (tick: 0, command: SpawnUnit(kind: 28, owner: 1, cell: (21, 14))), // slot 25: gunboat, toward the bank
+        (tick: 0, command: SpawnUnit(kind: 43, owner: 0, cell: (2, 16))), // slot 26: survey_drone
+
+        // --- tick 1: every unit gets its order ---
+        (tick: 1, command: OrderMove(ids: [Id(0, 0)], target: (17, 2))), // grass foot
+        (tick: 1, command: OrderMove(ids: [Id(1, 0)], target: (17, 2))), // grass wheeled
+        (tick: 1, command: OrderMove(ids: [Id(2, 0)], target: (17, 2))), // grass tracked
+        (tick: 1, command: OrderMove(ids: [Id(3, 0)], target: (17, 2))), // grass hover
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (17, 4))), // road foot
+        (tick: 1, command: OrderMove(ids: [Id(5, 0)], target: (17, 4))), // road wheeled
+        (tick: 1, command: OrderMove(ids: [Id(6, 0)], target: (17, 4))), // road tracked
+        (tick: 1, command: OrderMove(ids: [Id(7, 0)], target: (17, 4))), // road hover
+        (tick: 1, command: OrderMove(ids: [Id(8, 0)], target: (17, 6))), // ore foot
+        (tick: 1, command: OrderMove(ids: [Id(9, 0)], target: (17, 6))), // ore wheeled
+        (tick: 1, command: OrderMove(ids: [Id(10, 0)], target: (17, 6))), // ore tracked
+        (tick: 1, command: OrderMove(ids: [Id(11, 0)], target: (17, 6))), // ore hover
+        (tick: 1, command: OrderMove(ids: [Id(12, 0)], target: (27, 8))), // bridge foot
+        (tick: 1, command: OrderMove(ids: [Id(13, 0)], target: (27, 8))), // bridge wheeled
+        (tick: 1, command: OrderMove(ids: [Id(14, 0)], target: (27, 8))), // bridge tracked
+        (tick: 1, command: OrderMove(ids: [Id(15, 0)], target: (27, 8))), // bridge hover
+        (tick: 1, command: OrderMove(ids: [Id(16, 0)], target: (27, 10))), // water foot
+        (tick: 1, command: OrderMove(ids: [Id(17, 0)], target: (27, 10))), // water wheeled
+        (tick: 1, command: OrderMove(ids: [Id(18, 0)], target: (27, 10))), // water tracked
+        (tick: 1, command: OrderMove(ids: [Id(19, 0)], target: (27, 10))), // water hover
+        (tick: 1, command: OrderMove(ids: [Id(20, 0)], target: (35, 12))), // rock foot
+        (tick: 1, command: OrderMove(ids: [Id(21, 0)], target: (35, 12))), // rock wheeled
+        (tick: 1, command: OrderMove(ids: [Id(22, 0)], target: (35, 12))), // rock tracked
+        (tick: 1, command: OrderMove(ids: [Id(23, 0)], target: (35, 12))), // rock hover
+        (tick: 1, command: OrderMove(ids: [Id(24, 0)], target: (21, 18))),
+        (tick: 1, command: OrderMove(ids: [Id(25, 0)], target: (10, 14))),
+        (tick: 1, command: OrderMove(ids: [Id(26, 0)], target: (37, 16))),
+    ],
+)

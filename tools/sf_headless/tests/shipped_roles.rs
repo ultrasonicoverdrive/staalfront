@@ -88,7 +88,7 @@ fn place_everything(world: &mut World, defs: &UnitDefs) {
                             world.terrain_at(Cell::new(x as u32, y as u32))
                                 == Some(sf_sim::TerrainId(water))
                         } else {
-                            flags(world, x, y).is_some_and(|f| f.foot && f.wheeled && f.tracked)
+                            flags(world, x, y).is_some_and(|f| f.ground)
                         }
                 })
                 .unwrap_or_else(|| panic!("{}: no cell for it", def.id));

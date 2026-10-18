@@ -31,7 +31,7 @@ use sf_sim::{EntityView, World, WorldConfig};
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::commands;
-use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers, Passability};
+use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
@@ -239,8 +239,6 @@ pub struct Runner {
     hover: Hover,
     /// The cursor the mouse showed in the last frame.
     cursor_kind: CursorKind,
-    /// Which cells each movement class may enter, for the no-go cursor.
-    passability: Passability,
     /// The software cursors; `None` in the crowd scene (the engine demo and
     /// its benchmark show no game cursor) and when the pictures could not be
     /// read (the operating system's cursor stays).
@@ -409,7 +407,6 @@ impl Runner {
             hits: Vec::new(),
             hover: Hover::default(),
             cursor_kind: CursorKind::Select,
-            passability: Passability::load(&assets_root),
             cursor_art,
             os_cursor_hidden: false,
             failed,
@@ -632,7 +629,6 @@ impl Runner {
             &self.selection,
             &self.hover,
             Modifiers::from_actions(ctx.actions()),
-            &self.passability,
         );
         let drawn = match (&self.cursor_art, at) {
             (Some(art), Some(pos)) => {
@@ -670,7 +666,6 @@ impl Runner {
                 &self.selection,
                 &self.hover,
                 Modifiers::from_actions(actions),
-                &self.passability,
             )
         {
             commands::issue(&mut self.world, command);
@@ -1693,6 +1688,7 @@ fn sandbox_scene(
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
     }
+    world = crate::playfield::with_movement(world, &defs);
     let models_ron =
         std::fs::read_to_string(assets.join(roster::MODELS_FILE)).unwrap_or_else(|e| {
             eprintln!(

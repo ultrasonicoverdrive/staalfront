@@ -8,26 +8,40 @@
 //!
 //! The presentation does not use the terrain types yet: materials per type are
 //! WP2.2, the minimap WP2.3 and the grid overlay WP2.4.
+//!
+//! Which cells a unit may enter is the simulation's (WP4.1): the movement costs
+//! of the unit definitions are handed over with the unit table
+//! ([`with_movement`]), and the cursor asks the world, like the units do.
 
 use sf_data::map::Map;
+use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
-use sf_sim::{Terrain, TerrainDef, TerrainFlags, TerrainId, World, WorldConfig};
+use sf_data::units::UnitDefs;
+use sf_sim::{Terrain, TerrainDef, World, WorldConfig};
 
-/// The simulation's table of terrain types: ids and flags, no names.
+/// The simulation's table of terrain types: ids and flags, no names. The
+/// `ground` summary is derived from the shipped movement costs.
 pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
-    types
-        .iter()
-        .map(|t| TerrainDef {
-            id: TerrainId(t.id),
-            flags: TerrainFlags {
-                foot: t.passable.foot,
-                wheeled: t.passable.wheeled,
-                tracked: t.passable.tracked,
-                buildable: t.buildable,
-                harvestable: t.harvestable,
-            },
-        })
-        .collect()
+    sf_bridge::terrain_defs(types, &MovementCosts::embedded())
+}
+
+/// `world` with the terrain costs of the movement classes of `defs`, checked
+/// against the shipped terrain types (the types every map layer was checked
+/// against). Call it with the unit table, before the world starts.
+///
+/// # Panics
+///
+/// If `defs` leave out a terrain type of the shipped table or the world has
+/// started; the sandbox, its one caller, has neither.
+pub fn with_movement(world: World, defs: &UnitDefs) -> World {
+    let costs = MovementCosts::from_defs(defs, &TerrainTypes::embedded()).unwrap_or_else(|e| {
+        eprintln!("sf_game: {e}; using the movement costs compiled in");
+        MovementCosts::embedded()
+    });
+    let table = sf_bridge::movement_table(&costs).expect("the movement costs make a valid table");
+    world
+        .with_movement(table)
+        .expect("a world that has not started takes its movement table")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a
@@ -64,7 +78,7 @@ mod tests {
     use super::*;
     use sf_data::map::generate::generate_cells;
     use sf_data::terrain::TerrainLayer;
-    use sf_sim::Cell;
+    use sf_sim::{Cell, TerrainId};
 
     fn config_for(map: &Map) -> WorldConfig {
         let cells = map.size_in_cells();
@@ -95,7 +109,7 @@ mod tests {
                 .unwrap()
         };
         assert!(flags("grass").buildable && !flags("water").buildable);
-        assert!(!flags("water").foot && flags("bridge").tracked);
+        assert!(!flags("water").ground && flags("bridge").ground);
         assert!(flags("ore").harvestable);
     }
 

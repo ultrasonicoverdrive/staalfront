@@ -7,9 +7,12 @@
 //! water, rock, ore, bridge) and an optional per-cell layer of them in a map.
 //! WP3.1 adds the unit, structure and weapon definitions ([`units`]): RON
 //! files with validation that names the file and line, and their conversion
-//! to fixed-point numbers for the simulation.
+//! to fixed-point numbers for the simulation. WP4.1 adds the terrain cost of
+//! each movement class ([`movement`]): the classes of `unit_classes.ron` put
+//! together with the terrain types and checked against each other.
 
 pub mod map;
+pub mod movement;
 pub mod terrain;
 pub mod units;
 

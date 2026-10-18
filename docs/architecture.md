@@ -266,8 +266,9 @@ laptop. Never on the home server (B6, PLAN.md §13).
   hashes in `crates/sf_data/tests/golden.rs`);
   `cargo run -p sf_data --example gen_map -- <dir> [w] [h] [seed]` writes one.
 - **Terrain types per gameplay cell (WP2.1).** `sf_data::terrain` has the table of
-  terrain types (`assets/config/terrain_types.ron`: id, name, passable per movement
-  class, buildable, harvestable) and `TerrainLayer`, one type id per 4 m cell. A map
+  terrain types (`assets/config/terrain_types.ron`: id, name, buildable, harvestable;
+  which movement classes cross a type and how fast is the cost table of the classes in
+  `unit_classes.ron`, `sf_data::movement`, WP4.1) and `TerrainLayer`, one type id per 4 m cell. A map
   may carry the layer as `terrain.png` (`terrain_map` in `map.ron`: 8-bit grayscale,
   one pixel per gameplay cell, ids checked against the table, file name checked with
   the same rules as the other files); `generate` emits water, rock, ore, a road and
@@ -428,10 +429,10 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   definitions in `assets/scenarios/<dir>/` (a frozen copy of the three files, so a
   balance change does not move a pinned checksum) as its unit table; the actions `SpawnUnit(kind, owner, cell)` and
   `PlaceStructure(kind, owner, cell)` then create a unit or a structure with its
-  footprint from the definitions. `units_spawn.ron` spawns every role of its frozen copy once;
+  footprint from the definitions (and, since WP4.1, the movement costs of the classes). `units_spawn.ron` spawns every role of its frozen copy once;
   `tests/shipped_roles.rs` spawns every role of the shipped file, placed automatically, without a checksum.
 - **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
-  `command_mix`, `terrain_256` and `units_spawn` in release mode on Linux and Windows against the committed
+  `command_mix`, `terrain_256`, `units_spawn`, `orders` and `terrain_costs` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

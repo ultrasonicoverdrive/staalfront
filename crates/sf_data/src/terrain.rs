@@ -8,21 +8,22 @@
 //! * [`TerrainTypes`]: the table of terrain types, game data in RON
 //!   (`assets/config/terrain_types.ron`). Each type has a numeric `id` (what
 //!   map files store), a `name` (what tools and the generator use) and flags:
-//!   which movement classes can cross it, whether a building may stand on it
-//!   and whether it can be harvested. Adding a type is a data change.
+//!   whether a building may stand on it and whether it can be harvested.
+//!   Adding a type is a data change. Which movement classes can cross a type,
+//!   and how fast, is not a property of the type: it is the cost table of the
+//!   movement classes (`unit_classes.ron`, [`crate::movement`]).
 //! * [`TerrainLayer`]: one type id per gameplay cell of one map, row-major.
 //!
-//! The flags are placeholders until the work packages that read them (movement
-//! WP4.1, building placement, the economy); `docs/rules/terrain.md` says what
-//! they mean for the game. Nothing here is simulation code: the simulation
-//! gets plain numbers handed over by `sf_game` or `sf_headless`.
+//! `docs/rules/terrain.md` says what the flags mean for the game. Nothing here
+//! is simulation code: the simulation gets plain numbers handed over by
+//! `sf_game` or `sf_headless` (through `sf_bridge`).
 //!
 //! ```
 //! use sf_data::terrain::TerrainTypes;
 //!
 //! let types = TerrainTypes::embedded();
 //! let water = types.id_of("water").unwrap();
-//! assert!(!types.get(water).unwrap().passable.foot);
+//! assert!(!types.get(water).unwrap().buildable);
 //! assert!(types.get(types.id_of("grass").unwrap()).unwrap().buildable);
 //! ```
 
@@ -35,19 +36,6 @@ use serde::{Deserialize, Serialize};
 /// The file is `assets/config/terrain_types.ron`.
 pub const EMBEDDED_TERRAIN_TYPES: &str = include_str!("../../../assets/config/terrain_types.ron");
 
-/// Which movement classes can cross a terrain type. Placeholders until
-/// WP4.1 defines the movement classes.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Passable {
-    /// Infantry.
-    pub foot: bool,
-    /// Wheeled vehicles.
-    pub wheeled: bool,
-    /// Tracked vehicles.
-    pub tracked: bool,
-}
-
 /// One terrain type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -56,8 +44,6 @@ pub struct TerrainType {
     pub id: u8,
     /// A short unique name (`"grass"`), for tools and the generator.
     pub name: String,
-    /// Which movement classes can cross it.
-    pub passable: Passable,
     /// Whether a building (or any structure the sim `Place`s) may stand on it.
     pub buildable: bool,
     /// Whether harvesters can take resources from it.
@@ -271,11 +257,6 @@ mod tests {
         TerrainType {
             id,
             name: name.into(),
-            passable: Passable {
-                foot: true,
-                wheeled: true,
-                tracked: true,
-            },
             buildable: true,
             harvestable: false,
         }
@@ -308,16 +289,18 @@ mod tests {
     fn the_shipped_flags_make_sense() {
         let types = TerrainTypes::embedded();
         let t = |name: &str| types.get(types.id_of(name).unwrap()).unwrap().clone();
-        assert!(t("grass").buildable && t("grass").passable.tracked);
-        assert!(!t("road").buildable && t("road").passable.wheeled);
-        for blocked in ["water", "rock"] {
-            let p = t(blocked).passable;
-            assert!(!p.foot && !p.wheeled && !p.tracked, "{blocked}");
-            assert!(!t(blocked).buildable, "{blocked}");
+        // Only grass is buildable; only ore is harvestable.
+        for (name, buildable) in [
+            ("grass", true),
+            ("road", false),
+            ("water", false),
+            ("rock", false),
+            ("ore", false),
+            ("bridge", false),
+        ] {
+            assert_eq!(t(name).buildable, buildable, "{name}");
         }
-        assert!(t("ore").harvestable && t("ore").passable.foot);
-        assert!(t("bridge").passable.tracked && !t("bridge").buildable);
-        // Only ore is harvestable.
+        assert!(t("ore").harvestable);
         assert_eq!(types.iter().filter(|t| t.harvestable).count(), 1);
     }
 
@@ -344,15 +327,22 @@ mod tests {
             TerrainTypes::from_ron("(types: [)"),
             Err(TerrainTypesError::Ron(_))
         ));
-        let extra = "(types: [(id: 0, name: \"a\", passable: (foot: true, wheeled: true, \
-                     tracked: true), buildable: true, harvestable: false, speed: 3)])";
+        let extra = "(types: [(id: 0, name: \"a\", buildable: true, harvestable: false, \
+                     speed: 3)])";
+        // The placeholder passable flags of WP2.1 are gone: the movement
+        // classes carry the costs.
+        let old = "(types: [(id: 0, name: \"a\", passable: (foot: true, wheeled: true, \
+                   tracked: true), buildable: true, harvestable: false)])";
+        assert!(matches!(
+            TerrainTypes::from_ron(old),
+            Err(TerrainTypesError::Ron(_))
+        ));
         assert!(matches!(
             TerrainTypes::from_ron(extra),
             Err(TerrainTypesError::Ron(_))
         ));
         // A flag that is left out is an error too: no silent default.
-        let missing = "(types: [(id: 0, name: \"a\", passable: (foot: true, wheeled: true, \
-                       tracked: true), buildable: true)])";
+        let missing = "(types: [(id: 0, name: \"a\", buildable: true)])";
         assert!(matches!(
             TerrainTypes::from_ron(missing),
             Err(TerrainTypesError::Ron(_))

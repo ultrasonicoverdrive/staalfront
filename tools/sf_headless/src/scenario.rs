@@ -41,13 +41,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sf_data::map::Map;
+use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
     Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind, MAX_ENTITIES, MAX_MAP_SIDE,
-    Order, PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, Tick, UnitTable, World,
-    WorldConfig,
+    MovementTable, Order, PlayerId, Terrain, Tick, UnitTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -100,6 +100,14 @@ pub struct Scenario {
     /// world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
     pub unit_table: Option<UnitTable>,
+    /// The terrain costs of the movement classes in the same definitions
+    /// (WP4.1, `unit_classes.ron` of the `unit_defs` directory), handed to the
+    /// world with the unit table. Not part of the file. A scenario without
+    /// `unit_defs` has none: its units, if any, walk on open ground. A frozen
+    /// copy of the definitions freezes the costs too.
+    #[serde(skip)]
+    pub movement_table: Option<MovementTable>,
+
     /// How many ticks to run; at least 1.
     pub ticks: u64,
     /// Groups of entities to create.
@@ -357,28 +365,21 @@ impl IdSpec {
 }
 
 /// The simulation's table of terrain types from the data table: the ids and
-/// the flags, no names. (`sf_game` does the same when it starts a map; the
-/// data crate cannot name the simulation's types, so each consumer converts.)
-pub fn sim_definitions(types: &TerrainTypes) -> Vec<TerrainDef> {
-    types
-        .iter()
-        .map(|t| TerrainDef {
-            id: TerrainId(t.id),
-            flags: TerrainFlags {
-                foot: t.passable.foot,
-                wheeled: t.passable.wheeled,
-                tracked: t.passable.tracked,
-                buildable: t.buildable,
-                harvestable: t.harvestable,
-            },
-        })
-        .collect()
+/// the flags, no names. The `ground` summary is derived from `costs`. (`sf_game`
+/// does the same when it starts a map; the data crate cannot name the
+/// simulation's types, so `sf_bridge` converts for both.)
+pub fn sim_definitions(types: &TerrainTypes, costs: &MovementCosts) -> Vec<sf_sim::TerrainDef> {
+    sf_bridge::terrain_defs(types, costs)
 }
 
 /// Reads the unit definitions in `<scenario directory>/<name>/` (the model and
 /// icon files they name are looked up under `<scenario directory>/..`, the
-/// assets directory) and turns them into the simulation's unit table.
-fn load_unit_table(name: &str, scenario_file: &Path) -> Result<UnitTable, ScenarioError> {
+/// assets directory) and turns them into the simulation's unit table and
+/// movement table.
+fn load_unit_defs(
+    name: &str,
+    scenario_file: &Path,
+) -> Result<(UnitTable, MovementTable), ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
         problems: vec![format!("unit_defs \"{name}\": {problem}")],
@@ -386,7 +387,11 @@ fn load_unit_table(name: &str, scenario_file: &Path) -> Result<UnitTable, Scenar
     let scenarios = scenario_file.parent().unwrap_or(Path::new(""));
     let defs = UnitDefs::load(&scenarios.join(name), &scenarios.join(".."))
         .map_err(|e| invalid(e.to_string()))?;
-    sf_bridge::unit_table(&defs).map_err(invalid)
+    let units = sf_bridge::unit_table(&defs).map_err(invalid)?;
+    let costs = MovementCosts::from_defs(&defs, &TerrainTypes::embedded())
+        .map_err(|e| invalid(e.to_string()))?;
+    let movement = sf_bridge::movement_table(&costs).map_err(invalid)?;
+    Ok((units, movement))
 }
 
 /// The middle of a cell, in cells: where an order sends a unit.
@@ -493,7 +498,9 @@ impl Scenario {
             scenario.terrain = Some(scenario.load_terrain(&name, path)?);
         }
         if let Some(name) = scenario.unit_defs.clone() {
-            scenario.unit_table = Some(load_unit_table(&name, path)?);
+            let (units, movement) = load_unit_defs(&name, path)?;
+            scenario.unit_table = Some(units);
+            scenario.movement_table = Some(movement);
         }
         Ok(scenario)
     }
@@ -524,7 +531,10 @@ impl Scenario {
                 layer.height()
             )));
         }
-        let defs = sim_definitions(&TerrainTypes::embedded());
+        // The `ground` summary of the terrain types comes from the shipped
+        // costs, whatever `unit_defs` says: it is part of the terrain digest, and
+        // a frozen copy of the definitions must not move the terrain's.
+        let defs = sim_definitions(&TerrainTypes::embedded(), &MovementCosts::embedded());
         Terrain::from_layer(width, height, layer.ids(), &defs).map_err(|e| invalid(e.to_string()))
     }
 
@@ -775,6 +785,11 @@ impl Scenario {
             world = world
                 .with_units(table)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+            if let Some(movement) = self.movement_table.clone() {
+                world = world
+                    .with_movement(movement)
+                    .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+            }
         }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
 

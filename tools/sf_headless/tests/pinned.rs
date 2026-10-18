@@ -18,7 +18,8 @@
 //! ```
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
-//! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn` and `orders`. A change in `sf_sim` also moves
+//! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders` and
+//! `terrain_costs`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -34,6 +35,8 @@ const COMMAND_MIX_EXPECTED: &str = include_str!("../../../assets/scenarios/comma
 const TERRAIN_256_EXPECTED: &str = include_str!("../../../assets/scenarios/terrain_256.expected");
 const UNITS_SPAWN_EXPECTED: &str = include_str!("../../../assets/scenarios/units_spawn.expected");
 const ORDERS_EXPECTED: &str = include_str!("../../../assets/scenarios/orders.expected");
+const TERRAIN_COSTS_EXPECTED: &str =
+    include_str!("../../../assets/scenarios/terrain_costs.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -85,6 +88,14 @@ fn orders_matches_the_pinned_checksum() {
     check("orders", ORDERS_EXPECTED);
 }
 
+/// Units of every movement class across road, grass, ore and a bridged river,
+/// stopped by rock and water (WP4.1). A new scenario: its value was pinned when it
+/// was added; the other five did not change.
+#[test]
+fn terrain_costs_matches_the_pinned_checksum() {
+    check("terrain_costs", TERRAIN_COSTS_EXPECTED);
+}
+
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
 /// a debug build; `cargo test --release -p sf_headless` runs it, and CI runs
 /// it through the binary on both operating systems.
@@ -102,6 +113,7 @@ fn the_expected_files_hold_one_bare_checksum() {
         TERRAIN_256_EXPECTED,
         UNITS_SPAWN_EXPECTED,
         ORDERS_EXPECTED,
+        TERRAIN_COSTS_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");

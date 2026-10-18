@@ -8,6 +8,7 @@ use crate::behavior::{self, Area, Behavior, Motion};
 use crate::command::{Command, CommandQueue, ScheduleError};
 use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
+use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
 use crate::snapshot::{EntityView, Snapshot};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
@@ -107,6 +108,17 @@ pub enum ConfigError {
     /// ran, an entity exists or a command is pending). The table is part of
     /// how the world is made.
     UnitsAfterStart,
+    /// The movement table was given to a world that has already started, for
+    /// the same reason.
+    MovementAfterStart,
+    /// The movement table has no cost for a terrain type of the map: a class
+    /// would not know what to do on such a cell.
+    MovementGap {
+        /// The movement class.
+        class: u16,
+        /// The terrain type it leaves out.
+        terrain: TerrainId,
+    },
 }
 
 impl fmt::Display for ConfigError {
@@ -118,6 +130,12 @@ impl fmt::Display for ConfigError {
             ConfigError::NoTurning => "the turn rate per tick is zero",
             ConfigError::TerrainSize => "the terrain layer is not the size of the map",
             ConfigError::UnitsAfterStart => "the unit table must be given before the world starts",
+            ConfigError::MovementAfterStart => {
+                "the movement table must be given before the world starts"
+            }
+            ConfigError::MovementGap { .. } => {
+                "a movement class has no cost for a terrain type of the map"
+            }
         })
     }
 }
@@ -158,6 +176,10 @@ pub struct World {
     /// What the simulation knows about each unit kind (WP3.2). Fixed at
     /// creation; empty for a world without data-driven units.
     pub(crate) units: UnitTable,
+    /// What each movement class does on each terrain type (WP4.1). Fixed at
+    /// creation; empty for a world without movement classes, which is open
+    /// ground for everyone.
+    pub(crate) movement: MovementTable,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -226,6 +248,25 @@ impl World {
         Ok(self)
     }
 
+    /// The same world with the terrain costs of the movement classes (WP4.1,
+    /// [`MovementTable`]). Call it right after the world is made, before
+    /// anything is scheduled ([`ConfigError::MovementAfterStart`] otherwise).
+    /// On a world with a terrain layer every class has to list every terrain
+    /// type of the map ([`ConfigError::MovementGap`] otherwise); a world
+    /// without a layer is open ground and takes any table.
+    pub fn with_movement(mut self, movement: MovementTable) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
+            return Err(ConfigError::MovementAfterStart);
+        }
+        if self.terrain.has_layer()
+            && let Some((class, terrain)) = movement.first_gap(self.terrain.defined_ids())
+        {
+            return Err(ConfigError::MovementGap { class, terrain });
+        }
+        self.movement = movement;
+        Ok(self)
+    }
+
     fn with_parts(config: WorldConfig, terrain: Terrain) -> World {
         World {
             config,
@@ -237,6 +278,7 @@ impl World {
             occupancy: Occupancy::new(config.width, config.height),
             terrain,
             units: UnitTable::empty(),
+            movement: MovementTable::empty(),
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -305,6 +347,29 @@ impl World {
     /// units).
     pub fn unit_table(&self) -> &UnitTable {
         &self.units
+    }
+
+    /// The movement table the world was made with (empty without movement
+    /// classes).
+    pub fn movement_table(&self) -> &MovementTable {
+        &self.movement
+    }
+
+    /// What movement class `class` (a permanent kind number, as in
+    /// [`UnitStats::movement_class`]) does on `cell` (WP4.1): [`Cost::Impassable`],
+    /// or [`Cost::Speed`] with the thousandths of its own speed a unit moves at
+    /// there. A cell outside the map is impassable; a world without a terrain
+    /// layer, a world without a movement table and a class the table does not
+    /// have are open ground, [`Cost::OPEN`]. The movement itself asks this same
+    /// question, so the answer is what a unit will do. Read-only.
+    pub fn cost(&self, class: u16, cell: Cell) -> Cost {
+        self.ground().cost(class, cell)
+    }
+
+    /// Whether a unit of movement class `class` may enter `cell`: `cost` is
+    /// not impassable.
+    pub fn passable(&self, class: u16, cell: Cell) -> bool {
+        self.cost(class, cell).is_passable()
     }
 
     /// The table entry an entity was spawned from; `None` for a stale id and
@@ -464,7 +529,11 @@ impl World {
         }
 
         let motion = self.motion();
-        behavior::advance_all(&mut self.entities, &motion, &self.units, tick);
+        let ground = Ground {
+            terrain: &self.terrain,
+            movement: &self.movement,
+        };
+        behavior::advance_all(&mut self.entities, &motion, &self.units, &ground, tick);
 
         self.tick = tick.next();
         let checksum = self.checksum();
@@ -479,6 +548,13 @@ impl World {
 
     // ---- internals --------------------------------------------------------
 
+    fn ground(&self) -> Ground<'_> {
+        Ground {
+            terrain: &self.terrain,
+            movement: &self.movement,
+        }
+    }
+
     fn motion(&self) -> Motion {
         let step = per_tick(self.config.speed);
         let (pos_min, pos_max) = self.pos_range();
@@ -488,6 +564,7 @@ impl World {
             turn_per_tick: self.config.turn_per_tick,
             pos_min,
             pos_max,
+            class: None,
         }
     }
 
@@ -698,7 +775,8 @@ impl World {
     /// Spawns a mobile unit or an object from the unit table at `pos`. `None`
     /// (nothing happens) for a kind the table does not define, for a
     /// structure (that is [`Command::PlaceStructure`]), for a position outside
-    /// the map or on a cell a structure occupies, and at the entity limit.
+    /// the map or on a cell a structure occupies, for a mobile unit on a cell
+    /// its movement class cannot enter (WP4.1), and at the entity limit.
     /// The unit occupies no cell and starts idle, a mobile one with a random
     /// facing, an object with facing zero.
     fn spawn_unit(&mut self, kind: Kind, pos: Vec2, owner: PlayerId) -> Option<EntityId> {
@@ -709,6 +787,11 @@ impl World {
         }
         let cell = self.cell_at(pos)?;
         if self.is_occupied(cell) {
+            return None;
+        }
+        if let Some(class) = stats.movement_class
+            && !self.passable(class, cell)
+        {
             return None;
         }
         let birth = Birth {

@@ -103,15 +103,16 @@ fn the_named_cells_have_the_types_the_scenario_relies_on() {
     for (x, y) in [(126, 126), (126, 127), (125, 126), (47, 0), (199, 0)] {
         assert!(!buildable(x, y), "({x}, {y})");
     }
-    // Water and rock block every movement class, a bridge and a road do not.
+    // Water and rock are not open ground for the ground classes, a bridge and
+    // a road are: the `ground` summary of the terrain, derived from the movement
+    // costs (docs/rules/movement.md). It is also what keeps this scenario's
+    // terrain digest, and so its checksum, what it was before WP4.1.
     let flags = |name: &str| world.terrain().flags_of(id_of(name)).unwrap();
     for blocked in ["water", "rock"] {
-        let f = flags(blocked);
-        assert!(!f.foot && !f.wheeled && !f.tracked, "{blocked}");
+        assert!(!flags(blocked).ground, "{blocked}");
     }
     for open in ["road", "bridge", "grass", "ore"] {
-        let f = flags(open);
-        assert!(f.foot && f.wheeled && f.tracked, "{open}");
+        assert!(flags(open).ground, "{open}");
     }
     assert!(flags("ore").harvestable && !flags("grass").harvestable);
 }

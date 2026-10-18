@@ -16,8 +16,9 @@
 //! open ground nearest to the front of its base, on a lattice of two cells.
 //! The same map always gives the same sandbox.
 //!
-//! Vessels are left out: nothing tells open water from rock yet (WP4.1), so
-//! there is nowhere sure to put a gunboat.
+//! Vessels are left out: they need water to stand on, and the sandbox does not
+//! look for any (the sim could now answer, `World::passable`, WP4.1; a vessel
+//! in the sandbox is a change of its own).
 
 use std::collections::BTreeSet;
 
@@ -220,9 +221,10 @@ fn buildable(world: &World, x: i32, y: i32) -> bool {
     flags_at(world, x, y).is_some_and(|f| f.buildable)
 }
 
-/// Passable for every kind of ground unit: foot, wheeled and tracked.
+/// Passable for every kind of ground unit: foot, wheeled and tracked (the
+/// `ground` summary of the terrain, derived from the movement costs).
 fn open_ground(world: &World, x: i32, y: i32) -> bool {
-    flags_at(world, x, y).is_some_and(|f| f.foot && f.wheeled && f.tracked)
+    flags_at(world, x, y).is_some_and(|f| f.ground)
 }
 
 #[cfg(test)]

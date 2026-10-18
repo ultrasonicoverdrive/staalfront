@@ -64,11 +64,9 @@ fn table() -> UnitTable {
 
 fn defs() -> Vec<TerrainDef> {
     let blocked = TerrainFlags {
-        foot: false,
-        wheeled: false,
-        tracked: false,
         buildable: false,
         harvestable: false,
+        ground: false,
     };
     vec![
         TerrainDef {

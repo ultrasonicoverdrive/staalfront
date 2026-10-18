@@ -53,7 +53,10 @@ mod weapon;
 
 use std::path::Path;
 
-pub use classes::{ArmorType, ClassTables, DamageType, MAX_CLASS_KIND, MovementClass};
+pub use classes::{
+    ArmorType, ClassTables, DamageType, MAX_CLASS_KIND, MAX_COST_PERMILLE, MIN_COST_PERMILLE,
+    MovementClass, TerrainCost,
+};
 pub use decimal::{Decimal, TICK_MILLIS, TICKS_PER_SECOND};
 pub use error::DefError;
 pub use kinds::Retired;

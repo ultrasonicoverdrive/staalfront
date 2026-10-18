@@ -45,6 +45,16 @@
 //! test and the queue stay as they are. Arrival is always judged against the
 //! destination, never against the waypoint.
 //!
+//! # Terrain (WP4.1)
+//!
+//! The walk toward the waypoint is bound by the unit's movement class
+//! ([`crate::movement`]): it goes at the speed of the cell it stands in and
+//! does not enter a cell the class cannot cross. A straight line that runs
+//! into such a cell leaves the unit **standing at its edge with the order
+//! kept**: nothing ends the order and the queue behind it waits, until a new
+//! order replaces it. Going around is pathfinding's (WP4.2), noticing that the
+//! route is blocked is the replan's (WP4.7).
+//!
 //! # What phase 5 fills in
 //!
 //! There is no combat here. [`would_acquire_targets_here`] is called every
@@ -59,9 +69,10 @@
 
 use sf_math::{Facing, Fx, Vec2};
 
-use crate::behavior::{Motion, walk};
+use crate::behavior::{Motion, Walk, walk};
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Tick};
+use crate::movement::Ground;
 use crate::units::{UnitClass, UnitTable};
 use crate::world::mix64;
 
@@ -343,14 +354,23 @@ fn finish(e: &mut Entities, i: usize, tick: Tick, bounds: (Vec2, Vec2)) {
 /// One tick of walking toward `destination` until within `stop_at` of it.
 /// True when the unit has arrived. Steers at the route's next waypoint and
 /// keeps it in the `target` column; arrival is judged against the destination.
-fn go_to(e: &mut Entities, i: usize, destination: Vec2, stop_at: Fx, m: &Motion) -> bool {
+/// A walk that terrain blocks is not an arrival: the unit stays, the waypoint
+/// stays, and the next tick tries again.
+fn go_to(
+    e: &mut Entities,
+    i: usize,
+    destination: Vec2,
+    stop_at: Fx,
+    m: &Motion,
+    ground: &Ground<'_>,
+) -> bool {
     if (destination - e.pos[i]).length_squared() <= stop_at.square() {
         e.target[i] = None;
         return true;
     }
     let waypoint = next_waypoint(e, i, destination);
     e.target[i] = Some(waypoint);
-    let reached = walk(e, i, waypoint, m);
+    let reached = walk(e, i, waypoint, m, ground) == Walk::Arrived;
     if reached && waypoint == destination {
         e.target[i] = None;
         return true;
@@ -360,7 +380,14 @@ fn go_to(e: &mut Entities, i: usize, destination: Vec2, stop_at: Fx, m: &Motion)
 
 /// Runs one tick of the current order of unit `i`, which has
 /// `Behavior::Ordered`. `m` is the unit's own motion.
-pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tick: Tick) {
+pub(crate) fn run(
+    e: &mut Entities,
+    i: usize,
+    m: &Motion,
+    units: &UnitTable,
+    ground: &Ground<'_>,
+    tick: Tick,
+) {
     let bounds = (m.pos_min, m.pos_max);
     match e.order[i] {
         // Not reachable through the invariant (a unit with no order is idle),
@@ -369,13 +396,13 @@ pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tic
         // Never moves. Phase 5 may fire from here, never chase.
         Order::HoldPosition => would_acquire_targets_here(e, i),
         Order::Move(destination) => {
-            if go_to(e, i, destination, ARRIVE_TOLERANCE, m) {
+            if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground) {
                 finish(e, i, tick, bounds);
             }
         }
         Order::AttackMove(destination) => {
             would_acquire_targets_here(e, i);
-            if go_to(e, i, destination, ARRIVE_TOLERANCE, m) {
+            if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground) {
                 finish(e, i, tick, bounds);
             }
         }
@@ -383,7 +410,7 @@ pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tic
             would_acquire_targets_here(e, i);
             // Never ends by itself; a unit that has been moved off its post
             // walks back.
-            go_to(e, i, post, ARRIVE_TOLERANCE, m);
+            go_to(e, i, post, ARRIVE_TOLERANCE, m, ground);
         }
         Order::Guard(GuardTarget::Entity(watched)) => {
             let Some(j) = live_slot(e, watched) else {
@@ -399,7 +426,7 @@ pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tic
             let start = if e.guard_walking[i] { close } else { leash };
             if (e.pos[j] - e.pos[i]).length_squared() > start.square() {
                 let at = e.pos[j];
-                let arrived = go_to(e, i, at, close, m);
+                let arrived = go_to(e, i, at, close, m, ground);
                 e.guard_walking[i] = !arrived;
             } else {
                 e.guard_walking[i] = false;
@@ -413,7 +440,7 @@ pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tic
             };
             let reach = weapon_range_of(e, i, units) + radius_of(e, j, units);
             let at = e.pos[j];
-            if go_to(e, i, at, reach, m)
+            if go_to(e, i, at, reach, m, ground)
                 && let Some(wanted) = (at - e.pos[i]).facing()
             {
                 // In reach: face the target. Firing comes in phase five.

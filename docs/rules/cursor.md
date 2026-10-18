@@ -11,7 +11,7 @@ The cursor shows **what a click will do**, and a right-click does exactly that.
 
 ## One source of truth
 
-`cursor_context(world, selection, hover, modifiers, passability) -> CursorKind` is a pure
+`cursor_context(world, selection, hover, modifiers) -> CursorKind` is a pure
 function: the same inputs give the same answer, nothing is changed, nothing is
 allocated, and no window or GPU is needed to test it. The runner calls it once a frame to
 choose the picture, and `commands::right_click` calls the same function to decide the
@@ -37,7 +37,7 @@ Inputs:
 * **selection**: the selected units that can take an order (`Selection::orderable`, the own
   mobile ones; a selected structure counts for nothing, armed or not) and whether any of them
   has a weapon (`UnitStats::weapon_range` > 0).
-* **terrain**: `World::terrain()` and `Passability`, below.
+* **terrain**: `World::passable(class, cell)`, below.
 
 ## The decision table
 
@@ -88,23 +88,18 @@ Notes on the rows:
 * **Stale hover.** An id whose entity is gone (or whose slot now holds another) is bare ground
   (the generation check, `selection::facts`).
 
-### What can enter what (`Passability`)
+### What can enter what
 
-The sim does not read the terrain flags of WP2.1 yet (path finding is WP4.2), so the game
-reads them for the cursor, per movement class (`assets/config/unit_classes.ron`, matched by
-**name**) and terrain type (`terrain_types.ron`):
-
-| Class | May enter a cell when |
-|---|---|
-| `foot`, `wheeled`, `tracked` | the terrain's flag of that name is set (grass, road, ore and bridge; not water, not rock) |
-| `hover` (the amphibious transport) | any of those three flags is set, or the cell is **water** |
-| `water` (vessels) | the cell is **water** |
-| `air` | any cell on the map |
-| a class this reading does not know, or none | any cell on the map (never block what is not understood) |
-
-Water is the terrain type named `water`, because the flags alone cannot tell it from rock
-(both are impassable on foot). When WP4.1 gives the classes terrain costs, `Passability` is
-replaced by what the sim states and this table follows it.
+Since WP4.1 the cursor does not read terrain flags of its own: it asks the simulation. A
+selected unit **can go** to a cell when `World::passable(class, cell)` says its movement class
+may enter it, the very table the units move by (`movement.md`: foot, wheeled and tracked cross
+grass, road, ore and bridge; hover also water; vessels water and bridge; aircraft anything on
+the map). A unit with no class, and a class the table does not have, could go anywhere on the
+map (never block what is not understood); a cell off the map is nobody's. The old `Passability`
+and `Mobility` of WP3.5, which read the flags by class name, are gone, and so is the
+`Passability` argument of `cursor_context` and `commands::right_click`: the world is the one
+source of truth, so the picture, the click and the walk cannot disagree
+(`the_cursor_asks_the_sims_cost_table_and_nothing_else` sweeps every class over land, river and rock).
 
 ## The cursors
 
