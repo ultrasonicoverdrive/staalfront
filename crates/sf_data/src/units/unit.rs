@@ -95,15 +95,32 @@ pub enum ModelShape {
     Cone,
 }
 
-/// The symbol drawn at strategic zoom (the three shapes of `units.ron`).
+/// The base shape of a role's strategic icon: what it is drawn as when it has
+/// no icon of its own (or the icon is missing), one per kind of role
+/// (PLAN.md section 2.2).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
 pub enum IconShape {
     /// Square (structures).
     Square,
-    /// Circle.
+    /// Circle (infantry).
     Circle,
     /// Triangle (vehicles).
     Triangle,
+    /// Half-circle, a bowl (vessels).
+    HalfCircle,
+}
+
+impl IconShape {
+    /// The base shape the art brief gives a category: structures and objects a
+    /// square, infantry a circle, vehicles a triangle, vessels a half-circle.
+    pub fn of_category(category: Category) -> IconShape {
+        match category {
+            Category::Structure | Category::Object => IconShape::Square,
+            Category::Infantry => IconShape::Circle,
+            Category::Vehicle => IconShape::Triangle,
+            Category::Vessel => IconShape::HalfCircle,
+        }
+    }
 }
 
 /// What a role looks like up close.
@@ -244,10 +261,14 @@ pub struct UnitDef {
     pub weapons: Vec<String>,
     /// What it looks like up close.
     pub model: Model,
-    /// The symbol at strategic zoom.
+    /// The base shape at strategic zoom: what the role is drawn as when it
+    /// has no `icon`, or when the icon is not in the icon set.
     pub strategic_icon: IconShape,
-    /// The picture in the build menu, a PNG path relative to `assets/`; the
-    /// file must exist.
+    /// The name of the role's strategic icon (WP3.6): a picture of the icon set
+    /// in `assets/icons` (`assets/icons/icons.ron` names the files; without an
+    /// entry the file is `<name>.png`). Only the spelling is checked here
+    /// (`a-z 0-9 _`); the renderer loads the set and falls back to
+    /// `strategic_icon` for a name it does not have.
     #[serde(default)]
     pub icon: Option<String>,
     /// Abilities.
@@ -263,6 +284,15 @@ struct UnitsFile {
     /// Tombstones of removed roles: their numbers are never reused.
     #[serde(default)]
     retired_units: Vec<Retired>,
+}
+
+/// An icon name: 1 to 48 of `a-z 0-9 _` (the same rule as the icon atlas in
+/// `sf_render`, which cannot be named from here).
+fn valid_icon_name(name: &str) -> bool {
+    (1..=48).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
 /// Where a file reference is checked: with `Some(dir)` the file must exist
@@ -550,10 +580,13 @@ impl Ctx<'_> {
         {
             return Err(self.at(path, format!("model: {e}")));
         }
-        if let Some(path) = &u.icon
-            && let Err(e) = self.assets.check(path, ".png")
+        if let Some(name) = &u.icon
+            && !valid_icon_name(name)
         {
-            return Err(self.at(path, format!("icon: {e}")));
+            return Err(self.at(
+                name,
+                format!("icon \"{name}\": a name is 1 to 48 of a-z 0-9 _ (not a file path)"),
+            ));
         }
         Ok(())
     }

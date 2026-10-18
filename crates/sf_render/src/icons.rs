@@ -6,14 +6,21 @@
 //! [`crate::renderer`] and `assets/shaders/icon.wgsl`.
 //!
 //! # What an icon is
-//! A flat shape (square, circle or triangle, one per unit shape) filled with
-//! the player's colour and outlined, drawn as one screen-aligned quad of a
-//! **constant pixel size** around the unit's projected position. The size is
-//! `size_px` in logical pixels times the UI scale (the window's DPI factor
-//! times `ui.ron`'s `scale`), so it neither grows nor shrinks with the zoom.
-//! The shape is a signed distance function in the fragment shader (procedural:
-//! crisp at any scale, no atlas). All icons of a frame are one instanced draw
-//! call.
+//! A flat picture (a base shape, square, circle, triangle or half-circle, with a
+//! sign inside it) filled with the player's colour and outlined, drawn as one
+//! screen-aligned quad of a **constant pixel size** around the unit's projected
+//! position. The size is `size_px` in logical pixels times the UI scale (the
+//! window's DPI factor times `ui.ron`'s `scale`), so it neither grows nor
+//! shrinks with the zoom.
+//!
+//! The pictures are data (WP3.6): 64 x 64 PNGs under `assets/icons`, loaded into
+//! an [`IconAtlas`](crate::icon_atlas::IconAtlas) (a texture array, uploaded
+//! once) and chosen per unit by an [`IconId`], the layer. The four base
+//! shapes are layers 0 to 3 ([`IconShape`]); a role without an icon of its own
+//! (or whose icon is missing) gets its base shape. The atlas stores a signed
+//! distance field made from each PNG, so the edge, the outline and the sign are
+//! crisp at any scale, as the procedural shapes of WP1.9 were. All icons of a
+//! frame are one instanced draw call.
 //!
 //! # When icons take over
 //! The trigger is the **apparent size of a reference unit at the camera
@@ -82,26 +89,57 @@
 use bytemuck::{Pod, Zeroable};
 use serde::Deserialize;
 
-/// The silhouette of a unit's icon.
+/// The silhouette of a unit's icon: the plain base shape, which is also what
+/// a role gets when its own icon is missing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 pub enum IconShape {
-    /// Buildings, and the placeholder cube.
+    /// Structures, and the placeholder cube.
     #[default]
     Square,
-    /// The placeholder cylinder.
+    /// Infantry, and the placeholder cylinder.
     Circle,
     /// Vehicles, and the placeholder cone.
     Triangle,
+    /// Vessels: a bowl, flat deck up.
+    HalfCircle,
 }
 
 impl IconShape {
-    pub const ALL: [IconShape; 3] = [IconShape::Square, IconShape::Circle, IconShape::Triangle];
+    pub const ALL: [IconShape; 4] = [
+        IconShape::Square,
+        IconShape::Circle,
+        IconShape::Triangle,
+        IconShape::HalfCircle,
+    ];
 
-    /// The number the shader switches on.
+    /// The atlas layer of the plain shape (the first four layers).
     pub fn index(self) -> u32 {
         self as u32
     }
 }
+
+/// A picture in the icon atlas: its layer. The plain base shapes are layers 0
+/// to 3, so an [`IconShape`] converts to an id without an atlas at hand.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct IconId(pub u16);
+
+impl IconId {
+    /// The layer of the atlas texture array.
+    pub fn layer(self) -> u32 {
+        u32::from(self.0)
+    }
+}
+
+impl From<IconShape> for IconId {
+    fn from(shape: IconShape) -> Self {
+        Self(shape.index() as u16)
+    }
+}
+
+/// Side of the icon's art box as a multiple of the icon size: the 64 x 64
+/// image is drawn this much larger than `size_px`, so the triangle (wider than
+/// the click quad) and the square (the quad itself) both fit.
+pub const ART_BOX: f32 = 1.2;
 
 /// Icon and cross-fade settings (the `icons` section of `assets/config/units.ron`).
 /// Sizes are logical pixels unless the name says metres.
@@ -121,6 +159,10 @@ pub struct IconConfig {
     pub size_px: f32,
     /// Width of the dark outline inside the shape's edge.
     pub outline_px: f32,
+    /// Width of the white outline outside the shape of a hovered icon.
+    pub hover_out_px: f32,
+    /// Width of the outline outside the shape of a selected icon (WP3.3).
+    pub selected_out_px: f32,
     /// How far above the ground the icon's anchor sits, in metres.
     pub lift: f32,
     /// Smallest size a model's click volume takes on the screen: a model
@@ -137,6 +179,8 @@ impl Default for IconConfig {
             icon_below_px: 14.0,
             size_px: 14.0,
             outline_px: 1.5,
+            hover_out_px: 1.0,
+            selected_out_px: 2.5,
             lift: 0.5,
             click_min_px: 14.0,
         }
@@ -167,6 +211,14 @@ impl IconConfig {
         {
             return Err("icons.outline_px must be between 0 and a quarter of icons.size_px");
         }
+        if !(self.hover_out_px.is_finite() && (0.0..=self.size_px).contains(&self.hover_out_px)) {
+            return Err("icons.hover_out_px must be between 0 and icons.size_px");
+        }
+        if !(self.selected_out_px.is_finite()
+            && (0.0..=self.size_px).contains(&self.selected_out_px))
+        {
+            return Err("icons.selected_out_px must be between 0 and icons.size_px");
+        }
         if !self.lift.is_finite() || self.lift < 0.0 {
             return Err("icons.lift must not be negative");
         }
@@ -192,6 +244,24 @@ impl IconConfig {
     /// Side of the icon quad in whole physical pixels (at least 1).
     pub fn icon_px(&self, ui_scale: f32) -> f32 {
         (self.size_px * ui_scale).round().max(1.0)
+    }
+
+    /// Everything the icon pass needs in physical pixels at this UI scale:
+    /// the sizes, the outline widths and the room the quad leaves around the
+    /// art box. **Every length scales with the UI scale**, the outline widths
+    /// and the margin included (the WP3.3 review found a fixed 4 px margin
+    /// cutting off the outline of a selected triangle at scale 2).
+    pub fn params(&self, ui_scale: f32) -> IconParams {
+        let size_px = self.icon_px(ui_scale);
+        let hover_px = self.hover_out_px * ui_scale;
+        let selected_px = self.selected_out_px * ui_scale;
+        IconParams {
+            size_px,
+            outline_px: self.outline_px * ui_scale,
+            box_px: size_px * ART_BOX,
+            hover_px,
+            selected_px,
+        }
     }
 
     /// The model/icon weights when the reference unit appears `reference_px`
@@ -412,6 +482,19 @@ pub fn snap_icon_center(center: f32, size_px: f32) -> f32 {
     }
 }
 
+/// Room in physical pixels the icon quad leaves around its art box for an
+/// outline that reaches `outline_reach` px outside the shape: the outline
+/// rounded up and one pixel for the antialiased edge. (The pictures keep a
+/// texel off the border of the art box, so the shape's own edge needs no more.)
+/// A plain icon (reach 0) has one pixel, which also bounds its fragments:
+/// `icon.wgsl` takes this per icon from its flags.
+pub fn quad_margin(outline_reach: f32) -> f32 {
+    outline_reach.max(0.0).ceil() + 1.0
+}
+
+/// Bit position of the atlas layer in [`IconInstance::flags`] (bits 16 to 31).
+pub const ICON_LAYER_SHIFT: u32 = 16;
+
 /// Bit in [`IconInstance::flags`]: draw the icon highlighted (the hover: a
 /// thin white outline **outside** the shape, so the player colour keeps its
 /// area).
@@ -433,8 +516,8 @@ pub struct IconInstance {
     /// World position of the icon's centre (the unit's ground point lifted by
     /// [`IconConfig::lift`]).
     pub position: [f32; 3],
-    /// Low byte: [`IconShape::index`]. Bit 8: [`ICON_HIGHLIGHT`]. Bit 9:
-    /// [`ICON_SELECTED`].
+    /// Bit 8: [`ICON_HIGHLIGHT`]. Bit 9: [`ICON_SELECTED`]. Bits 16 to 31:
+    /// the atlas layer ([`IconId`]).
     pub flags: u32,
     /// Linear RGB fill, and the **model weight** of the frame in `a`, the
     /// dissolve threshold (the icon is drawn where the model is not).
@@ -442,16 +525,17 @@ pub struct IconInstance {
 }
 
 impl IconInstance {
-    pub fn new(position: [f32; 3], shape: IconShape, rgb: [f32; 3], blend: Blend) -> Self {
+    pub fn new(position: [f32; 3], icon: IconId, rgb: [f32; 3], blend: Blend) -> Self {
         Self {
             position,
-            flags: shape.index(),
+            flags: icon.layer() << ICON_LAYER_SHIFT,
             color: [rgb[0], rgb[1], rgb[2], blend.model()],
         }
     }
 
-    pub fn shape_index(&self) -> u32 {
-        self.flags & 0xff
+    /// The picture of the icon.
+    pub fn icon(&self) -> IconId {
+        IconId((self.flags >> ICON_LAYER_SHIFT) as u16)
     }
 
     pub fn highlighted(&self) -> bool {
@@ -463,13 +547,58 @@ impl IconInstance {
     }
 }
 
-/// Per-frame icon uniforms: sizes in physical pixels.
+/// Per-frame icon uniforms: sizes in physical pixels ([`IconConfig::params`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IconParams {
-    /// Side of the icon quad.
+    /// Side of the icon's click quad (the nominal size).
     pub size_px: f32,
-    /// Outline width.
+    /// Width of the dark rim inside the shape's edge.
     pub outline_px: f32,
+    /// Side of the art box the 64 x 64 picture is drawn in: [`ART_BOX`] times
+    /// `size_px`.
+    pub box_px: f32,
+    /// Width of the hover outline outside the shape.
+    pub hover_px: f32,
+    /// Width of the selection outline outside the shape.
+    pub selected_px: f32,
+}
+
+impl IconParams {
+    /// The uniform buffer, as `icon.wgsl`'s `IconParams` reads it after the
+    /// viewport size.
+    pub fn uniform(&self, viewport: [f32; 2]) -> [f32; 8] {
+        [
+            viewport[0],
+            viewport[1],
+            self.size_px,
+            self.outline_px,
+            self.box_px,
+            self.hover_px,
+            self.selected_px,
+            0.0,
+        ]
+    }
+
+    /// How far the outline of an icon with these flags reaches outside its
+    /// shape: the selected width, else the hover width, else none (selected
+    /// wins, as in the shader).
+    pub fn reach(&self, flags: u32) -> f32 {
+        if flags & ICON_SELECTED != 0 {
+            self.selected_px
+        } else if flags & ICON_HIGHLIGHT != 0 {
+            self.hover_px
+        } else {
+            0.0
+        }
+    }
+
+    /// Half the side of the drawn quad of an icon with these flags: the art
+    /// box and the margin for its outline ([`quad_margin`]). The shader
+    /// computes the same from the flags, so a plain icon is not drawn on the
+    /// room that only a selected one needs.
+    pub fn quad_half(&self, flags: u32) -> f32 {
+        self.box_px * 0.5 + quad_margin(self.reach(flags))
+    }
 }
 
 #[cfg(test)]
@@ -537,6 +666,18 @@ mod tests {
                 ..ok
             },
             IconConfig { lift: -1.0, ..ok },
+            IconConfig {
+                hover_out_px: -0.5,
+                ..ok
+            },
+            IconConfig {
+                selected_out_px: 40.0,
+                ..ok
+            },
+            IconConfig {
+                selected_out_px: f32::NAN,
+                ..ok
+            },
             IconConfig {
                 model_above_px: f32::NAN,
                 ..ok
@@ -795,11 +936,11 @@ mod tests {
         assert_eq!(std::mem::size_of::<IconInstance>(), 32);
         let i = IconInstance::new(
             [1.0, 2.0, 3.0],
-            IconShape::Triangle,
+            IconShape::Triangle.into(),
             [0.1, 0.2, 0.3],
             Blend::from_model_weight(0.25),
         );
-        assert_eq!(i.shape_index(), 2);
+        assert_eq!(i.icon(), IconId(2));
         assert!(!i.highlighted());
         assert_eq!(i.color, [0.1, 0.2, 0.3, 0.25]);
         let h = IconInstance {
@@ -807,6 +948,93 @@ mod tests {
             ..i
         };
         assert!(h.highlighted());
-        assert_eq!(h.shape_index(), 2);
+        assert_eq!(h.icon(), IconId(2));
+        // The layer, the highlight and the selection do not overlap, for any layer.
+        let far = IconInstance::new([0.0; 3], IconId(u16::MAX), [0.0; 3], Blend::ICONS);
+        assert_eq!(far.icon(), IconId(u16::MAX));
+        assert_eq!(far.flags & (ICON_HIGHLIGHT | ICON_SELECTED), 0);
+    }
+
+    #[test]
+    fn the_base_shapes_are_the_first_layers() {
+        for (i, shape) in IconShape::ALL.iter().enumerate() {
+            assert_eq!(IconId::from(*shape), IconId(i as u16));
+            assert_eq!(shape.index() as usize, i);
+        }
+    }
+
+    /// Every length of the icon pass scales with the UI scale, and the margin
+    /// always has room for the widest outline (the WP3.3 review: a fixed 4 px
+    /// margin cut off a selected triangle's outline at scale 2).
+    #[test]
+    fn the_params_scale_with_the_ui_scale_and_the_margin_holds_the_outline() {
+        let c = IconConfig::default();
+        let one = c.params(1.0);
+        assert_eq!(one.size_px, 14.0);
+        assert!((one.box_px - 14.0 * ART_BOX).abs() < 1e-4);
+        for scale in [1.0_f32, 1.25, 1.5, 2.0, 3.0] {
+            let p = c.params(scale);
+            assert_eq!(p.size_px, (14.0 * scale).round());
+            assert!((p.outline_px - c.outline_px * scale).abs() < 1e-5);
+            assert!((p.hover_px - c.hover_out_px * scale).abs() < 1e-5);
+            assert!((p.selected_px - c.selected_out_px * scale).abs() < 1e-5);
+            assert!((p.box_px - p.size_px * ART_BOX).abs() < 1e-4);
+            // The outline rounded up, then a pixel for the antialiased edge.
+            for flags in [
+                0,
+                ICON_HIGHLIGHT,
+                ICON_SELECTED,
+                ICON_HIGHLIGHT | ICON_SELECTED,
+            ] {
+                let reach = p.reach(flags);
+                assert!(p.quad_half(flags) >= p.box_px * 0.5 + reach.ceil() + 1.0);
+                // The art box and the margin hold the click quad and the outline.
+                assert!(p.quad_half(flags) >= p.size_px * 0.5 + reach + 1.0);
+            }
+            assert_eq!(p.reach(0), 0.0);
+            assert_eq!(p.reach(ICON_HIGHLIGHT), p.hover_px);
+            assert_eq!(p.reach(ICON_SELECTED | ICON_HIGHLIGHT), p.selected_px);
+            // A plain icon's quad is the art box and one pixel, the smallest.
+            assert_eq!(p.quad_half(0), p.box_px * 0.5 + 1.0);
+            assert!(p.quad_half(0) < p.quad_half(ICON_SELECTED));
+        }
+        // At scale 2 the old fixed 4 px margin was smaller than the outline
+        // (5 px) plus the triangle's overshoot; the new one grows with it.
+        let (one, two) = (c.params(1.0), c.params(2.0));
+        assert!(two.quad_half(ICON_SELECTED) - two.box_px * 0.5 > 4.0 + 1.0);
+        assert!(
+            two.quad_half(ICON_SELECTED) - two.box_px * 0.5
+                > one.quad_half(ICON_SELECTED) - one.box_px * 0.5
+        );
+    }
+
+    #[test]
+    fn the_uniform_matches_the_shader_layout() {
+        let u = IconConfig::default().params(2.0).uniform([640.0, 360.0]);
+        assert_eq!(&u[..4], &[640.0, 360.0, 28.0, 3.0]);
+        assert_eq!(u.len(), 8);
+        // The shader declares the same eight floats in the same order.
+        let shader = include_str!("../../../assets/shaders/icon.wgsl");
+        let start = shader.find("struct IconParams").unwrap();
+        let body = &shader[start..start + shader[start..].find("};").unwrap()];
+        let names: Vec<&str> = body
+            .lines()
+            .filter_map(|l| {
+                l.trim()
+                    .strip_suffix(": f32,")
+                    .or(l.trim().strip_suffix(": vec2<f32>,"))
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "viewport",
+                "size_px",
+                "outline_px",
+                "box_px",
+                "hover_px",
+                "selected_px"
+            ]
+        );
     }
 }

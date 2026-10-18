@@ -678,7 +678,7 @@ fn unresolved_references_are_refused() {
 }
 
 #[test]
-fn model_and_icon_files_must_exist_and_stay_inside_assets() {
+fn model_files_must_exist_and_stay_inside_assets() {
     let e = replace_units(
         "testpack_v1/models/lichte_tank.glb",
         "testpack_v1/models/no_such_tank.glb",
@@ -686,11 +686,7 @@ fn model_and_icon_files_must_exist_and_stay_inside_assets() {
     .unwrap_err();
     assert!(e.message.contains("does not exist"), "{e}");
     assert!(e.line.is_some());
-    let e = replace_units(
-        "testpack_v1/icons/icon_lichte_tank_64.png",
-        "../Cargo.toml.png",
-    )
-    .unwrap_err();
+    let e = replace_units("testpack_v1/models/lichte_tank.glb", "../Cargo.toml.glb").unwrap_err();
     assert!(e.message.contains("not a plain relative path"), "{e}");
     let e = replace_units(
         "testpack_v1/models/lichte_tank.glb",
@@ -698,6 +694,54 @@ fn model_and_icon_files_must_exist_and_stay_inside_assets() {
     )
     .unwrap_err();
     assert!(e.message.contains("should end with .glb"), "{e}");
+}
+
+/// WP3.6: `icon` is a name in the icon set, not a path. Only the spelling is
+/// checked here (the renderer loads the set and falls back to the base shape
+/// for a name it does not have), so an unknown name is not an error.
+#[test]
+fn icon_is_a_name_and_a_path_is_refused() {
+    let defs = shipped();
+    let tank = defs.units().iter().find(|u| u.id == "light_tank").unwrap();
+    assert_eq!(tank.icon.as_deref(), Some("light_tank"));
+    // A name that no icon file has is fine here.
+    replace_units("icon: \"light_tank\"", "icon: \"no_such_icon_yet\"").unwrap();
+    for bad in [
+        "testpack_v1/icons/icon_lichte_tank_64.png",
+        "../x",
+        "Light_Tank",
+        "light tank",
+        "light_tank.png",
+        "",
+    ] {
+        let e = replace_units("icon: \"light_tank\"", &format!("icon: \"{bad}\"")).unwrap_err();
+        assert!(e.message.contains("a-z 0-9 _"), "{bad:?}: {e}");
+        assert!(e.line.is_some(), "{bad:?}: {e}");
+    }
+    let long = "x".repeat(49);
+    let e = replace_units("icon: \"light_tank\"", &format!("icon: \"{long}\"")).unwrap_err();
+    assert!(e.message.contains("1 to 48"), "{e}");
+}
+
+/// Every shipped role's base shape is the one of its category (infantry a
+/// circle, vessels a half-circle, and so on), so the fallback of a missing
+/// icon is the base shape by category.
+#[test]
+fn the_base_shape_of_every_shipped_role_is_that_of_its_category() {
+    use sf_data::units::{Category, IconShape};
+    for u in shipped().units() {
+        assert_eq!(
+            u.strategic_icon,
+            IconShape::of_category(u.category),
+            "{} ({:?})",
+            u.id,
+            u.category
+        );
+    }
+    assert_eq!(
+        IconShape::of_category(Category::Vessel),
+        IconShape::HalfCircle
+    );
 }
 
 #[test]

@@ -60,7 +60,17 @@ fn renderer(map: &Map) -> Renderer {
     println!("adapter: {}", r.adapter_summary());
     r.set_scene(&[]);
     r.set_terrain(map);
+    // The roles' pictures: the roster below resolves their icon names in this set.
+    r.set_icon_atlas(&icon_set());
     r
+}
+
+fn icon_set() -> sf_render::IconAtlas {
+    let atlas = sf_render::IconAtlas::load(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons"),
+    );
+    assert!(atlas.warnings().is_empty(), "{:?}", atlas.warnings());
+    atlas
 }
 
 fn save(name: &str, img: &Rgba8) {
@@ -100,7 +110,7 @@ impl Scene {
         assert!(plan.units > 0 && plan.structures > 0);
         let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets");
         let base = Style::embedded().scaled(3.0);
-        let roster = Roster::build(&defs, &base, &assets, "", false).unwrap();
+        let roster = Roster::build(&defs, &base, &icon_set(), &assets, "", false).unwrap();
         let mut instancer = Instancer::new(
             roster.style(&base),
             (map.width() as f32, map.height() as f32),
@@ -790,8 +800,10 @@ fn an_icon_looks_different_plain_hovered_selected_and_both() {
         "the plain icon is on the screen: {} core pixels",
         core.len()
     );
-    // The fill colour: the middle of the plain icon.
-    let fill = plain.pixel(centre[0] as u32, centre[1] as u32 + 2);
+    // The fill colour: Meridian's. (Not the middle of the icon: the rifleman's
+    // sign, a dark dot, is there since WP3.6.)
+    let owner = sf_render::Style::embedded().srgb(0);
+    let fill = [owner[0], owner[1], owner[2], 255];
     assert!(
         fill[0] > 150 && fill[1] < 110,
         "a red (Meridian) fill: {fill:?}"

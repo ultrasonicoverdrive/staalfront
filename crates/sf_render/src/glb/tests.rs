@@ -410,8 +410,8 @@ fn the_test_pack_is_one_model_set_with_one_mesh_per_part_per_level() {
     }
     let style = pack.style(&crate::Style::embedded()).unwrap();
     assert_eq!(style.shape_count(), 14);
-    assert_eq!(style.shape(0).icon, crate::IconShape::Triangle);
-    assert_eq!(style.shape(13).icon, crate::IconShape::Square);
+    assert_eq!(style.shape(0).icon, crate::IconShape::Triangle.into());
+    assert_eq!(style.shape(13).icon, crate::IconShape::Square.into());
     // The scout is about 4 m long (manifest `rompmaat_m`), the factory 14 m.
     assert!((style.shape(0).size[0] - 4.0).abs() < 0.6);
     assert!((style.shape(12).size[0] - 14.0).abs() < 0.6);
@@ -452,7 +452,7 @@ fn a_scaled_model_is_the_same_model_in_other_units() {
 fn one_model_loads_by_its_path_and_can_be_fitted_to_a_box() {
     let config = std::fs::read_to_string(assets().join(MODELS_CONFIG)).unwrap();
     let path = "testpack_v1/models/raffinaderij.glb";
-    let icon = crate::IconShape::Square;
+    let icon = crate::IconId::from(crate::IconShape::Square);
     let plain = load_pack_model(&config, path, icon, &assets(), None).unwrap();
     assert_eq!((plain.models.len(), plain.icons.len()), (1, 1));
     assert_eq!(plain.icons[0], icon);

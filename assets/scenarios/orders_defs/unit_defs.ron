@@ -37,7 +37,6 @@
             cost: 300, build_seconds: 15, hp: 600, armor: "structure", power: 100,
             footprint: (width: 2, height: 3), sight: 5,
             model: Glb("testpack_v1/models/energiecentrale.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_energiecentrale_64.png",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -46,7 +45,6 @@
             footprint: (width: 3, height: 4), sight: 5,
             flags: (comes_with: "harvester"),
             model: Glb("testpack_v1/models/raffinaderij.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_raffinaderij_64.png",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -61,7 +59,6 @@
             cost: 1500, build_seconds: 50, hp: 1000, armor: "structure", power: -40,
             footprint: (width: 3, height: 4), sight: 5,
             model: Glb("testpack_v1/models/voertuigfabriek.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_voertuigfabriek_64.png",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -77,7 +74,6 @@
             cost: 500, build_seconds: 20, hp: 600, armor: "structure", power: -20,
             footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"],
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
-            icon: "testpack_v1/icons/icon_verdedigingstoren_64.png",
             // placeholder: build_seconds, sight.
         ),
         (
@@ -119,7 +115,6 @@
             movement: "tracked", speed: 1.2, turn_rate: 6, size: 1.5, sight: 4,
             flags: (harvests: true),
             model: Glb("testpack_v1/models/grondstofwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_grondstofwagen_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -153,7 +148,6 @@
             weapons: ["pistol"],
             flags: (stealth_in_cover: true),
             model: Glb("testpack_v1/models/verkenner.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_verkenner_64.png",
             // placeholder: build_seconds, turn_rate, size. Sight 8 is from units.md.
         ),
         (
@@ -187,7 +181,6 @@
             movement: "tracked", speed: 2, turn_rate: 10, size: 1.2, sight: 6,
             weapons: ["cannon"],
             model: Glb("testpack_v1/models/lichte_tank.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_lichte_tank_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -196,7 +189,6 @@
             movement: "tracked", speed: 1.1, turn_rate: 6, size: 1.5, sight: 7,
             weapons: ["twin_cannon"],
             model: Glb("testpack_v1/models/zware_tank.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_zware_tank_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -205,7 +197,6 @@
             movement: "tracked", speed: 1, turn_rate: 5, size: 1.5, sight: 6,
             weapons: ["howitzer"],
             model: Glb("testpack_v1/models/mobiele_artillerie.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_mobiele_artillerie_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -214,7 +205,6 @@
             movement: "wheeled", speed: 1.8, turn_rate: 8, size: 1.3, sight: 5,
             flags: (repair_radius: 2),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -223,7 +213,6 @@
             movement: "wheeled", speed: 2.2, turn_rate: 8, size: 1.3, sight: 5,
             flags: (transports: 5),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -232,7 +221,6 @@
             movement: "wheeled", speed: 2.5, turn_rate: 10, size: 1.2, sight: 5,
             flags: (transports: 4),
             model: Glb("testpack_v1/models/pantserwagen.glb"), strategic_icon: Triangle,
-            icon: "testpack_v1/icons/icon_pantserwagen_64.png",
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (

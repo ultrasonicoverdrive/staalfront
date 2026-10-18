@@ -104,7 +104,12 @@ Status: in progress.
 - WP3.4 Commands as state (`sf_sim::orders`: idle, hold position, move, attack, attack-move,
   guard, stop, scatter, a bounded queue per unit, per-player command sequence numbers), the `orders`
   scenario, right-click / shift / S / X in `sf_game`, `docs/rules/orders.md`: done
-- WP3.5, WP3.6: open
+- WP3.6 Icons per unit type (`sf_render::icon_atlas`: a texture array of signed distance fields
+  made from `assets/icons/*.png`, uploaded once, one draw call as before; the roster gives each
+  role its icon, the base shape by category as the fallback; the placeholder set of 41 pictures
+  from `tools/sf_icon_gen`; the quad margin and the outline widths now scale with the UI scale),
+  `docs/rules/icons.md`: done
+- WP3.5: open
 
 WP3.1 notes. The data is `assets/config/unit_classes.ron`, `weapon_defs.ron` and
 `unit_defs.ron`; every record has a permanent `kind` number (order in the file does not

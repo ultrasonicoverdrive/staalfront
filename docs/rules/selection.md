@@ -110,7 +110,9 @@ of full hit points, amber above 30 %, red below; an entity with no hit points to
 or the icon (far), between 26 and 120 logical pixels. The drag rectangle is a translucent
 green fill with a bright outline.
 
-Line widths and bars scale with the UI scale. The colours are constants in
+Line widths and bars scale with the UI scale, and so (WP3.6, the review follow-up of this WP) do the
+outline widths of hovered and selected icons and the room the icon's quad leaves for them: at UI scale 2 the
+fixed 4 px margin used to cut off the outline of a selected triangle (`docs/rules/icons.md`). The colours are constants in
 `selection_view.rs`; they are placeholders until the art pass (phase 11).
 
 Frames of this (software renderer, from `selection_screenshot.rs`): `docs/screenshots/wp3.3/`:
@@ -121,7 +123,8 @@ rings and bars close up, highlighted icons zoomed out, an inspected enemy, the d
 
 `DRAG_MIN_PX` 6 and `DOUBLE_CLICK_PX` 8 (logical pixels: `Pointer` multiplies them by the UI scale), `DOUBLE_CLICK_MS` 400, `DOUBLE_TAP_MS` 500
 (`selection.rs`); `RING_GROW` 1.25, `RING_PX` 2.5, `BAR_*` (`selection_view.rs`);
-`HOVER_OUT_PX` and `SELECTED_OUT_PX` (`assets/shaders/icon.wgsl`). Placeholders for the feel rounds.
+`icons.hover_out_px` and `icons.selected_out_px` (`assets/config/units.ron`, logical pixels; since WP3.6 they
+scale with the UI scale and are no longer constants of `icon.wgsl`). Placeholders for the feel rounds.
 
 ## Decisions that were open
 
