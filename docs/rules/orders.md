@@ -18,7 +18,7 @@ hashed in the checksum and independent of the click that made them.
 | `Idle` | has no order: it is what a unit has when nothing was ordered, and `Stop` puts it there. Phase 5 lets an idle unit react (return fire, auto-acquire). | never by itself; any other order replaces it |
 | `HoldPosition` | stands still **on purpose** and never moves, not to chase and not to get closer. Phase 5 may fire from it at what is in range, but it never moves by itself. | never by itself; a queued order behind it waits (an idle unit would start it at once) until the hold is replaced or stopped |
 | `Move(point)` | goes to the point | it is within `ARRIVE_TOLERANCE` (an eighth of a cell, half a metre) of the point |
-| `Attack(entity)` | goes toward the entity until it is within the reach of its first weapon, then stands and turns to face it | the target is gone: dead, despawned, or an id whose slot now holds another entity (generation check) |
+| `Attack(entity)` | goes toward the entity until it is within the reach of its first weapon, then stands and turns to face it (a unit with a turret turns the turret, from the tick of the order, and leaves the hull; `turning.md`) | the target is gone: dead, despawned, or an id whose slot now holds another entity (generation check) |
 | `AttackMove(point)` | goes to the point; on the way it would engage what it meets (phase 5) | it is within `ARRIVE_TOLERANCE` of the point |
 | `Guard(point)` | goes to the point and stays; walks back if it is ever moved off | never by itself: a queued order behind it waits until the guard is replaced or stopped |
 | `Guard(entity)` | follows the entity and stays near it | the entity is gone |
@@ -118,9 +118,13 @@ its own (`guard_walking`), so the route could take `target` over.
   asks for a new route (`World::replan_requested`, the hook of WP4.7). A unit on `HoldPosition` is
   never pushed; an idle unit is pushed aside by a friendly mover, a little and never into rock or a
   structure. A new order, or the end of one, forgets the progress and the sidestep.
-* **WP4.5** makes the turn-before-drive and the separate turret part of the same step
-  (`walk`); the present rule is: turn at the unit's turn rate and drive only when the
-  facing is within `ALIGN_TOLERANCE` (16 of 256 steps) of the wanted direction.
+* **Turning (WP4.5).** The step turns the hull before the unit drives, the way its movement class
+  does (`turning.md`): infantry at once, tanks on the spot at their turn rate and driving once the
+  heading is within the class's drive tolerance (16 of 256 steps as shipped, `ALIGN_TOLERANCE` for the
+  legacy walks), wheeled vehicles, hovercraft and vessels in an arc, only while they move. A
+  waypoint that is not the last counts as reached a quarter of a cell short for the arc classes.
+  A unit with a turret has a turret facing of its own that follows an attack order's victim, or the
+  aim of `Command::AimTurret`, or the hull.
 
 Steering is the same step as the legacy `Wander` and `MoveTo` (`behavior::walk`): at
 the unit's own `speed_per_tick` and turn rate from the unit table. A unit within one step

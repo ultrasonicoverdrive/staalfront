@@ -58,7 +58,9 @@
 //! queued: ..`, the middle of the cell), `OrderAttack` and `OrderGuardEntity` (`target:
 //! (index, generation)`), `OrderScatter(ids: .., queued: ..)`, `OrderHold(ids: .., queued: ..)` and `Stop(ids: ..)`;
 //! `queued` (default `false`) appends to the unit's queue instead of replacing its
-//! orders. Entities are named by id: `Id(index, generation)` or
+//! orders. `AimTurret(ids: .., target: Some((index, generation)))` (WP4.5,
+//! `docs/rules/turning.md`) points the turrets of the units at an entity, and without a
+//! target (`AimTurret(ids: ..)`) lets them go back to the hull. Entities are named by id: `Id(index, generation)` or
 //! `Range(from, to)` (slots `from..to` at generation 0; in a world without
 //! despawns the entities spawned `from`-th to `to`-th, in execution order).
 //!

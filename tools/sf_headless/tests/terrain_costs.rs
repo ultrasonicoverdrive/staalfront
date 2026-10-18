@@ -21,7 +21,7 @@ mod common;
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
 use sf_math::{Fx, Vec2};
-use sf_sim::{Cell, Cost, EntityId, Order, RouteStatus, World, per_tick, scale_step};
+use sf_sim::{Cell, Cost, EntityId, Order, RouteStatus, TurnMode, World, per_tick, scale_step};
 
 const GRASS: usize = 0;
 const ROAD: usize = 1;
@@ -132,11 +132,43 @@ impl Run {
         n as u64
     }
 
-    /// The most ticks a unit can spend turning toward its goal first: half a
-    /// turn at its turn rate.
+    /// How the class of a unit turns.
+    fn profile_of(&self, id: EntityId) -> sf_sim::Turning {
+        let class = self.world.stats_of(id).unwrap().movement_class.unwrap();
+        self.world.movement_table().turning(class)
+    }
+
+    /// The best multiplier any terrain gives the class of a unit.
+    fn fastest_permille(&self, id: EntityId) -> u16 {
+        let class = self.world.stats_of(id).unwrap().movement_class.unwrap();
+        (0..=255_u8)
+            .filter_map(|t| self.world.movement_table().get(class, sf_sim::TerrainId(t)))
+            .flatten()
+            .map(|cost| cost.permille())
+            .max()
+            .unwrap()
+    }
+
+    /// The most ticks a unit can spend turning toward its goal first (WP4.5): none
+    /// to speak of for a unit that turns at once, half a turn at its turn rate for
+    /// one that pivots, and for one that has to move to turn the swing: a half
+    /// circle and the way back to the line, about six radii of path, and a turn on
+    /// the spot at its pivot share besides.
     fn turning(&self, id: EntityId) -> u64 {
-        let turn = u64::from(self.world.stats_of(id).unwrap().turn_per_tick);
-        128_u64.div_ceil(turn)
+        let stats = self.world.stats_of(id).unwrap();
+        let class = stats.movement_class.unwrap();
+        let profile = self.world.movement_table().turning(class);
+        let turn = u64::from(stats.turn_per_tick);
+        match profile.mode {
+            TurnMode::Instant => 1,
+            TurnMode::Pivot => 128_u64.div_ceil(turn),
+            TurnMode::Arc => {
+                let step = stats.speed_per_tick.raw();
+                let swing = (profile.min_radius.mul_int(6).raw() + step - 1) / step;
+                let pivot = 128_000_u64.div_ceil(turn * u64::from(profile.pivot_permille));
+                swing as u64 + pivot
+            }
+        }
     }
 }
 
@@ -152,6 +184,13 @@ fn a_straight_run_takes_the_ticks_the_cost_table_says() {
             let id = unit(lane, class);
             let permille = r.permille_at(id, Cell::new(2, 2 * lane as u32 + 2));
             let want = r.straight_ticks(id, permille, 15);
+            // A unit that has to move to turn swings out of its one-cell lane and
+            // may run a stretch on the faster ground beside it (WP4.5): its least
+            // time is that of the fastest terrain its class has.
+            let least = match r.profile_of(id).mode {
+                TurnMode::Arc => r.straight_ticks(id, r.fastest_permille(id), 15),
+                _ => want,
+            };
             let got = r
                 .arrived(id)
                 .unwrap_or_else(|| panic!("{id:?} never arrived"));
@@ -159,7 +198,7 @@ fn a_straight_run_takes_the_ticks_the_cost_table_says() {
             // tick and steps from tick 2; it may first have to turn. (The route
             // of a run of fifteen cells in the open is one waypoint: the goal.)
             assert!(
-                got > want && got <= want + r.turning(id) + 2,
+                got > least && got <= want + r.turning(id) + 2,
                 "lane {lane} class {class}: arrived on tick {got}, a straight run of {want} \
                  steps at {permille} permille after the tick of the request, plus at most {} \
                  ticks of turning",
@@ -172,7 +211,10 @@ fn a_straight_run_takes_the_ticks_the_cost_table_says() {
 #[test]
 fn road_is_faster_than_grass_and_ore_slower() {
     let r = run();
-    for class in [FOOT, WHEELED, TRACKED, HOVER] {
+    // Not the hover craft: its arrival ticks include a swing whose length depends on
+    // the heading it was spawned with (WP4.5), more than the road gains on the grass.
+    // Its speed on each terrain is checked from the cells it crossed, below.
+    for class in [FOOT, WHEELED, TRACKED] {
         let ticks = |lane| r.arrived(unit(lane, class)).unwrap();
         assert!(
             ticks(ROAD) < ticks(GRASS) && ticks(GRASS) < ticks(ORE),
@@ -194,36 +236,40 @@ fn road_is_faster_than_grass_and_ore_slower() {
 #[test]
 fn the_pinned_arrival_ticks() {
     // The same runs as numbers: a change here is a change of the movement
-    // rules, the cost table or the speeds, and so is deliberate. At WP4.2 the
+    // rules, the cost table or the speeds, and so is deliberate. At WP4.5 the
+    // turning rules moved them: infantry turn at once, wheeled vehicles, hover
+    // craft and the gunboat have to move to turn, so the ticks of a unit that
+    // starts facing the wrong way now include the swing (they differ from lane
+    // to lane because each unit is spawned with a heading of its own). At WP4.2 the
     // lanes of open ground, the bridge and the hover craft in the water lane
     // each got one tick (the request for the route); the land classes in the
     // water lane and everyone in the rock lane take a route round the obstacle.
     let r = run();
     let table: [(usize, usize, u64); 24] = [
-        (GRASS, FOOT, 433),
-        (GRASS, WHEELED, 157),
+        (GRASS, FOOT, 427),
+        (GRASS, WHEELED, 158),
         (GRASS, TRACKED, 155),
-        (GRASS, HOVER, 205),
-        (ROAD, FOOT, 392),
-        (ROAD, WHEELED, 103),
+        (GRASS, HOVER, 207),
+        (ROAD, FOOT, 389),
+        (ROAD, WHEELED, 102),
         (ROAD, TRACKED, 133),
-        (ROAD, HOVER, 198),
-        (ORE, FOOT, 538),
-        (ORE, WHEELED, 208),
+        (ROAD, HOVER, 261),
+        (ORE, FOOT, 534),
+        (ORE, WHEELED, 183),
         (ORE, TRACKED, 197),
-        (ORE, HOVER, 232),
-        (BRIDGE, FOOT, 280),
-        (BRIDGE, WHEELED, 95),
+        (ORE, HOVER, 222),
+        (BRIDGE, FOOT, 274),
+        (BRIDGE, WHEELED, 182),
         (BRIDGE, TRACKED, 95),
-        (BRIDGE, HOVER, 129),
-        (WATER, FOOT, 406),
-        (WATER, WHEELED, 143),
+        (BRIDGE, HOVER, 130),
+        (WATER, FOOT, 404),
+        (WATER, WHEELED, 176),
         (WATER, TRACKED, 152),
-        (WATER, HOVER, 198),
+        (WATER, HOVER, 223),
         (ROCK, FOOT, 265),
-        (ROCK, WHEELED, 102),
+        (ROCK, WHEELED, 109),
         (ROCK, TRACKED, 95),
-        (ROCK, HOVER, 136),
+        (ROCK, HOVER, 182),
     ];
     for (lane, class, tick) in table {
         assert_eq!(
@@ -232,7 +278,7 @@ fn the_pinned_arrival_ticks() {
             "lane {lane} class {class}"
         );
     }
-    assert_eq!(r.arrived(BOAT_DOWN), Some(181));
+    assert_eq!(r.arrived(BOAT_DOWN), Some(227));
     assert_eq!(r.arrived(BOAT_BANK), None);
     assert_eq!(r.arrived(DRONE), Some(234), "aircraft ask for no route");
 }
@@ -262,7 +308,11 @@ fn a_vessel_passes_under_the_bridge_and_stops_at_the_nearest_water() {
     // Down the river from row 1 to row 18, through the bridge cell (21, 8).
     assert_eq!(r.world.order_of(BOAT_DOWN), Some(Order::Idle));
     assert_eq!(r.cell(BOAT_DOWN), Cell::new(21, 18));
-    assert!(r.cells[BOAT_DOWN.index() as usize].contains(&Cell::new(21, 8)));
+    // It passes under the bridge (columns 20 to 23 of row 8). A vessel has to move
+    // to turn (WP4.5) and swings from side to side of the four-cell river, so which
+    // of the four bridge cells it goes under is not fixed.
+    let seen = &r.cells[BOAT_DOWN.index() as usize];
+    assert!((20..=23).any(|x| seen.contains(&Cell::new(x, 8))));
     // Asked to go onto the bank, it cannot: the route leads to the water cell
     // nearest the spot, the river's edge cell (20, 14), where it stands in the
     // middle of the cell with its order kept and the mark that the destination

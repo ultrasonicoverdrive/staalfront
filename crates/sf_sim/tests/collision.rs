@@ -43,6 +43,7 @@ fn table() -> UnitTable {
         size: Fx::from_ratio(size_tenths, 10),
         footprint: None,
         weapon_range: Fx::ZERO,
+        turret_per_tick: 0,
     };
     UnitTable::new(vec![
         mobile(RIFLE, WALKER, 14, 4),
@@ -61,6 +62,7 @@ fn table() -> UnitTable {
                 height: 2,
             }),
             weapon_range: Fx::ZERO,
+            turret_per_tick: 0,
         },
         mobile(BIG, TRACKED, 12, 15),
         mobile(SPRINT, WALKER, 40, 4),

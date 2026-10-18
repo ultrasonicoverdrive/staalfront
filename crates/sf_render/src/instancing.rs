@@ -92,6 +92,15 @@ pub struct Motion {
     pos: [f32; 2],
     prev_facing: u8,
     facing: u8,
+    /// The turret's facing in the world (not relative to the hull), previous and
+    /// current tick, in 1/256 turns, for a unit whose simulation has a turret
+    /// (WP4.5); `None` for the rest, whose turret part (if any) keeps the
+    /// instancer's demo aim.
+    turret: Option<(u8, u8)>,
+    /// The barrel's pitch in radians (positive = muzzle up). Presentation only:
+    /// the simulation has no say in it yet, so it is zero unless the caller sets
+    /// it; this is the hook for the ballistics of phase 5.
+    barrel_pitch: f32,
 }
 
 impl Motion {
@@ -115,7 +124,39 @@ impl Motion {
             pos: vec2_cells_to_metres(pos),
             prev_facing: prev_facing.raw(),
             facing: facing.raw(),
+            turret: None,
+            barrel_pitch: 0.0,
         }
+    }
+
+    /// The same motion for a unit whose turret turns apart from the hull (WP4.5):
+    /// the turret's facing in the world at the end of the previous and of the
+    /// current tick. The renderer drives the yaw joint of the model's `turret`
+    /// part from it, interpolated between the ticks.
+    pub fn with_turret(mut self, prev_facing: Facing, facing: Facing) -> Self {
+        self.turret = Some((prev_facing.raw(), facing.raw()));
+        self
+    }
+
+    /// The same motion with the pitch of the barrel, in radians (the hook for the
+    /// barrel's elevation; the simulation does not decide it yet).
+    pub fn with_barrel_pitch(mut self, radians: f32) -> Self {
+        self.barrel_pitch = radians;
+        self
+    }
+
+    /// The turret's angle relative to the hull, in radians, at fraction `alpha` of
+    /// the way from the previous to the current tick: the turret's facing and the
+    /// hull's facing are both interpolated the shortest way, then subtracted.
+    /// `None` for a unit without a simulated turret. Positive turns the turret's
+    /// front from the hull's front toward `+z`, the sense of the facings.
+    pub fn turret_yaw(&self, alpha: f32) -> Option<f32> {
+        let (prev, cur) = self.turret?;
+        let a = alpha.clamp(0.0, 1.0);
+        let turn = Facing::new(prev).signed_diff(Facing::new(cur));
+        let turret_steps = f32::from(prev) + f32::from(turn) * a;
+        let (_, hull_steps) = self.at(a);
+        Some((turret_steps - hull_steps) * (TAU / 256.0))
     }
 
     /// The same motion with the handle that picking returns for it (the
@@ -742,7 +783,15 @@ impl Instancer {
                     } else {
                         // Hull, turret, barrel: one instance in each part's list.
                         let mut world = [Mat4::IDENTITY; MAX_PARTS];
-                        let angles = aim_angles(x, z, steps, self.aim);
+                        // A turret the simulation turns is drawn at its angle; any other
+                        // turret part follows the demo aim (if there is one).
+                        let angles = match m.turret_yaw(view.alpha) {
+                            Some(yaw) => PartAngles {
+                                yaw,
+                                pitch: m.barrel_pitch,
+                            },
+                            None => aim_angles(x, z, steps, self.aim),
+                        };
                         pose_parts(Mat4::from_cols_array_2d(&unit), parts, angles, &mut world);
                         for (i, part) in parts.iter().enumerate().take(MAX_PARTS) {
                             // A part kept only as the frame of its children

@@ -174,7 +174,9 @@ the smoothing.
 
 ### Line of sight and string pulling
 
-A unit turns at its own rate and moves while up to 16 facing steps off its heading, so it strays
+A unit turns at its own rate and moves while up to 16 facing steps off its heading (the drive
+tolerance of every shipped movement class since WP4.5, `turning.md`; the class's turning rule decides how it
+gets there), so it strays
 from the line to a waypoint by a fraction of a cell near a corner. A line of sight that only asks
 "does the line touch a blocked cell" would let a route graze a corner and the unit would be refused a
 step. So the test is **thick**: a segment is clear when no blocked cell (and no cell outside the map)

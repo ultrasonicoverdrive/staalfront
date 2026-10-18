@@ -12,7 +12,8 @@
 //
 // Units of measure: distances, sizes and sight in cells (1 cell = 4 m, B12);
 // speed in cells per game second (20 ticks); build_seconds in game seconds;
-// turn_rate in facing steps (256 per full turn) per tick; cost in credits;
+// turn_rate in facing steps (256 per full turn) per tick; turret_rate (optional, vehicles with a
+// glTF `turret` part) the same for the turret, which turns apart from the hull (WP4.5); cost in credits;
 // power in power units (+ produces, - uses); hp abstract.
 //
 // What content/units.md states is used as is: roles, cost, power, hp, speed,
@@ -227,7 +228,7 @@
         (
             kind: 19, id: "light_tank", factions: [Meridian, Veyran], category: Vehicle,
             cost: 700, build_seconds: 20, hp: 400, armor: "light",
-            movement: "tracked", speed: 2, turn_rate: 10, size: 1.2, sight: 6,
+            movement: "tracked", speed: 2, turn_rate: 10, turret_rate: 12, size: 1.2, sight: 6,
             weapons: ["cannon"],
             model: Glb("testpack_v1/models/lichte_tank.glb"), strategic_icon: Triangle,
             icon: "light_tank",
@@ -236,7 +237,7 @@
         (
             kind: 20, id: "heavy_tank", factions: [Meridian, Veyran], category: Vehicle,
             cost: 1400, build_seconds: 40, hp: 900, armor: "heavy",
-            movement: "tracked", speed: 1.1, turn_rate: 6, size: 1.5, sight: 7,
+            movement: "tracked", speed: 1.1, turn_rate: 6, turret_rate: 8, size: 1.5, sight: 7,
             weapons: ["twin_cannon"],
             model: Glb("testpack_v1/models/zware_tank.glb"), strategic_icon: Triangle,
             icon: "heavy_tank",
@@ -245,7 +246,7 @@
         (
             kind: 21, id: "siege_artillery", factions: [Meridian, Veyran], category: Vehicle,
             cost: 1600, build_seconds: 45, hp: 300, armor: "light",
-            movement: "tracked", speed: 1, turn_rate: 5, size: 1.5, sight: 6,
+            movement: "tracked", speed: 1, turn_rate: 5, turret_rate: 6, size: 1.5, sight: 6,
             weapons: ["howitzer"],
             model: Glb("testpack_v1/models/mobiele_artillerie.glb"), strategic_icon: Triangle,
             icon: "siege_artillery",

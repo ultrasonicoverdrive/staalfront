@@ -88,6 +88,7 @@ mod tests {
             facing: Facing::default(),
             has_stats,
             hp: 0,
+            turret: None,
         }
     }
 

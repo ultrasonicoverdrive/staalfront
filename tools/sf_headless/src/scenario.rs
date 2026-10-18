@@ -321,6 +321,16 @@ pub enum Action {
         /// The units.
         ids: Vec<IdSpec>,
     },
+    /// `Command::AimTurret` (WP4.5): the turrets of the units follow `target`,
+    /// an entity as `(index, generation)`, or, with no target, go back to
+    /// hull-forward. The hull and the order are not touched.
+    AimTurret {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// What the turrets aim at; none lets them return to the hull.
+        #[serde(default)]
+        target: Option<(u32, u32)>,
+    },
     /// `Command::Despawn` for each id.
     Despawn {
         /// The entities.
@@ -781,6 +791,17 @@ impl Scenario {
                         ));
                     }
                 }
+                Action::AimTurret { ids, target } => {
+                    id_problems(&at, ids, &mut p);
+                    if let Some((slot, _)) = target
+                        && *slot >= MAX_ENTITIES
+                    {
+                        p.push(format!(
+                            "{at}: target ({slot}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)"
+                        ));
+                    }
+                }
                 Action::OrderScatter { ids, .. }
                 | Action::OrderHold { ids, .. }
                 | Action::Stop { ids } => {
@@ -964,6 +985,13 @@ impl Scenario {
                 }
                 Action::Stop { ids } => {
                     let command = Command::Stop { ids: expand(ids) };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::AimTurret { ids, target } => {
+                    let command = Command::AimTurret {
+                        ids: expand(ids),
+                        target: target.map(|(index, generation)| EntityId::new(index, generation)),
+                    };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }
                 Action::Despawn { ids } => {

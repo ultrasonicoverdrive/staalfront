@@ -12,11 +12,14 @@
 //!   (names, duplicates, range); that **every class has a cost for every
 //!   terrain type** needs the terrain table too and is checked by
 //!   [`crate::movement::MovementCosts`].
+//! * **Turning** (WP4.5): how the class turns its hull, a `turning` block per
+//!   movement class ([`TurningDef`]; `docs/rules/turning.md`).
 //! * **Armor types** and **damage types** (WP5.3): the damage-times-armor
 //!   percentage table and the splash falloff.
 
 use serde::Deserialize;
 
+use super::decimal::Decimal;
 use super::error::{DefError, Source};
 use super::kinds::{self, Live, Retired};
 
@@ -60,6 +63,57 @@ impl TerrainCost {
     }
 }
 
+/// The longest drive tolerance a class may have, in facing steps: a quarter turn.
+pub const MAX_DRIVE_TOLERANCE: u8 = 64;
+
+/// The smallest turning radius of an arc class, in thousandths of a cell.
+pub const MIN_ARC_RADIUS_MILLI: i64 = 250;
+
+/// The largest turning radius of an arc class, in thousandths of a cell.
+pub const MAX_ARC_RADIUS_MILLI: i64 = 32_000;
+
+/// How a movement class turns the hull of its units (WP4.5).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum TurnMode {
+    /// Turns in place at its turn rate, drives when it is within the tolerance.
+    Pivot,
+    /// Has to move to turn, in an arc of at least `min_radius`.
+    Arc,
+    /// The heading snaps onto the wanted one.
+    Instant,
+}
+
+/// The `turning` block of a movement class (WP4.5, `docs/rules/turning.md`).
+/// Every field has a default, and the defaults are the walk as it was before
+/// WP4.5: pivot, drive within 16 steps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TurningDef {
+    /// How the hull turns.
+    pub mode: TurnMode,
+    /// The heading error, in facing steps (256 to a turn), up to which the unit
+    /// drives; above it, it turns first (`Pivot`) or arcs (`Arc`). Not used by
+    /// `Instant`. At most [`MAX_DRIVE_TOLERANCE`].
+    pub drive_tolerance: u8,
+    /// `Arc` only: the smallest radius of a turn, in cells.
+    pub min_radius: Decimal,
+    /// `Arc` only: the share of the unit's turn rate, in thousandths, that it
+    /// has when it has to turn on the spot (a stand-in for backing and turning);
+    /// 1 to 1000. Must be 1000 for the other modes.
+    pub pivot_permille: u16,
+}
+
+impl Default for TurningDef {
+    fn default() -> TurningDef {
+        TurningDef {
+            mode: TurnMode::Pivot,
+            drive_tolerance: 16,
+            min_radius: Decimal::ZERO,
+            pivot_permille: 1000,
+        }
+    }
+}
+
 /// How a unit moves: which terrain it can use and how fast. Foot, wheeled,
 /// tracked, hover, water or air in the shipped table.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -80,6 +134,10 @@ pub struct MovementClass {
     /// not say keeps loading.
     #[serde(default)]
     pub ground: bool,
+    /// How the class turns its hull (WP4.5); left out it is the walk as it was
+    /// before: pivot, drive within 16 steps.
+    #[serde(default)]
+    pub turning: TurningDef,
 }
 
 impl MovementClass {
@@ -178,6 +236,7 @@ impl ClassTables {
         )?;
         for class in &file.movement_classes {
             check_costs(src, class)?;
+            check_turning(src, class)?;
         }
         file.movement_classes.sort_by_key(|c| c.kind);
         file.armor_types.sort_by_key(|c| c.kind);
@@ -259,6 +318,50 @@ fn check_costs(src: Source<'_>, class: &MovementClass) -> Result<(), DefError> {
                  {MIN_COST_PERMILLE} and {MAX_COST_PERMILLE} thousandths (use Impassable to forbid it)",
                 class.name
             )));
+        }
+    }
+    Ok(())
+}
+
+/// The checks of one class's `turning` block (WP4.5).
+fn check_turning(src: Source<'_>, class: &MovementClass) -> Result<(), DefError> {
+    let t = &class.turning;
+    let here = |message: String| {
+        src.error_at_record(
+            "name",
+            &class.name,
+            0,
+            format!("movement class \"{}\": turning: {message}", class.name),
+        )
+    };
+    if t.drive_tolerance > MAX_DRIVE_TOLERANCE {
+        return Err(here(format!(
+            "drive_tolerance {} must be at most {MAX_DRIVE_TOLERANCE} steps (a quarter turn)",
+            t.drive_tolerance
+        )));
+    }
+    if t.pivot_permille == 0 || t.pivot_permille > 1000 {
+        return Err(here(format!(
+            "pivot_permille {} must be between 1 and 1000",
+            t.pivot_permille
+        )));
+    }
+    match t.mode {
+        TurnMode::Arc => {
+            if !(MIN_ARC_RADIUS_MILLI..=MAX_ARC_RADIUS_MILLI).contains(&t.min_radius.milli()) {
+                return Err(here(format!(
+                    "an Arc needs a min_radius between 0.25 and 32 cells, got {}",
+                    t.min_radius
+                )));
+            }
+        }
+        TurnMode::Pivot | TurnMode::Instant => {
+            if !t.min_radius.is_zero() {
+                return Err(here("min_radius is for mode Arc only".into()));
+            }
+            if t.pivot_permille != 1000 {
+                return Err(here("pivot_permille is for mode Arc only".into()));
+            }
         }
     }
     Ok(())

@@ -13,7 +13,7 @@ use sf_data::movement::{MovementCosts, MovementError};
 use sf_data::terrain::{TerrainType, TerrainTypes};
 use sf_data::units::{
     ClassTables, DefFile, DefSources, EMBEDDED_CLASSES, EMBEDDED_UNITS, EMBEDDED_WEAPONS,
-    TerrainCost, UnitDefs,
+    TerrainCost, TurnMode, UnitDefs,
 };
 
 use TerrainCost::{Impassable, Speed};
@@ -411,4 +411,80 @@ fn the_costs_of_a_class_are_part_of_the_class() {
     assert_eq!(Speed(1200).permille(), 1200);
     assert_eq!(Impassable.permille(), 0);
     assert!(Speed(100).is_passable() && !Impassable.is_passable());
+}
+
+// ---- how a class turns (WP4.5) ---------------------------------------------
+
+#[test]
+fn the_shipped_classes_turn_as_the_rules_say() {
+    let defs = UnitDefs::embedded();
+    let turning = |name: &str| {
+        let kind = defs.classes().movement_kind(name).unwrap();
+        defs.classes().movement_class(kind).unwrap().turning
+    };
+    // Infantry turn at once; tanks pivot; everything else has to move to turn.
+    assert_eq!(turning("foot").mode, TurnMode::Instant);
+    assert_eq!(turning("tracked").mode, TurnMode::Pivot);
+    for name in ["wheeled", "hover", "water"] {
+        let t = turning(name);
+        assert_eq!(t.mode, TurnMode::Arc, "{name}");
+        assert!(t.min_radius.milli() >= 250, "{name}: a radius");
+        assert!((1..=1000).contains(&t.pivot_permille), "{name}");
+    }
+    // A class that says nothing turns as the walk did before WP4.5: pivot, 16 steps.
+    let air = turning("air");
+    assert_eq!((air.mode, air.drive_tolerance), (TurnMode::Pivot, 16));
+    // The numbers are the bridge's to copy, in cells and steps.
+    let costs = MovementCosts::embedded();
+    assert_eq!(
+        costs.class_by_name("wheeled").unwrap().turning,
+        turning("wheeled")
+    );
+}
+
+#[test]
+fn a_bad_turning_block_is_refused_with_the_file_and_the_line() {
+    let line_of =
+        |text: &str, needle: &str| 1 + text[..text.find(needle).unwrap()].matches('\n').count();
+    let text = classes_text();
+    let tracked = "turning: (mode: Pivot, drive_tolerance: 16)";
+    assert!(text.contains(tracked), "test setup");
+    let with = |block: &str| load_classes(|t| t.replacen(tracked, block, 1));
+    // The block may be partly written: the rest is the old walk.
+    assert!(with("turning: (mode: Pivot)").is_ok());
+    assert!(with("turning: (drive_tolerance: 8)").is_ok());
+    assert!(with("turning: (mode: Arc, min_radius: 1.25, pivot_permille: 400)").is_ok());
+    for (bad, why) in [
+        ("turning: (mode: Pivot, drive_tolerance: 65)", "at most 64"),
+        ("turning: (mode: Arc)", "min_radius between"),
+        (
+            "turning: (mode: Arc, min_radius: 0.2)",
+            "min_radius between",
+        ),
+        ("turning: (mode: Arc, min_radius: 33)", "min_radius between"),
+        (
+            "turning: (mode: Arc, min_radius: 2, pivot_permille: 0)",
+            "pivot_permille 0",
+        ),
+        (
+            "turning: (mode: Arc, min_radius: 2, pivot_permille: 1001)",
+            "pivot_permille 1001",
+        ),
+        ("turning: (mode: Pivot, min_radius: 2)", "for mode Arc only"),
+        (
+            "turning: (mode: Instant, pivot_permille: 500)",
+            "for mode Arc only",
+        ),
+        ("turning: (mode: Slide)", "Slide"),
+        ("turning: (speed: 3)", "speed"),
+    ] {
+        let e = with(bad).unwrap_err();
+        assert!(e.message.contains(why), "{bad}: {e}");
+        assert_eq!(e.file, "classes.ron", "{bad}");
+        assert!(e.line.is_some(), "{bad}: {e}");
+    }
+    // A check on the class names the class, on the line of its record.
+    let e = with("turning: (mode: Pivot, drive_tolerance: 65)").unwrap_err();
+    assert!(e.message.contains("\"tracked\""), "{e}");
+    assert_eq!(e.line, Some(line_of(&text, "name: \"tracked\"")), "{e}");
 }

@@ -1,0 +1,60 @@
+// Turning the hull and the turret (WP4.5, docs/rules/turning.md), on a 64 by 40 cell open map
+// (no terrain layer: every route is the straight line, so the headings are plain geometry).
+// CI runs it on Linux and Windows and requires the checksum in turning.expected;
+// tools/sf_headless/tests/turning.rs asserts the headings and positions along the way.
+//
+// `unit_defs` names a FROZEN copy of the definitions (turning_defs/): the turning profile of
+// every movement class and the turret rates of the two tanks are the ones this scenario's
+// headings stand on, so a rebalance of assets/config/ does not move this checksum.
+// Owners: 0 Meridian, 1 Veyran.
+//
+// Entity ids, all at generation 0, in the order the spawns are written:
+//    0  light_tank T1 (19, tracked)   owner 0  cell (8, 8)    drives east, then is ordered BEHIND itself:
+//                                                             pivots in place, then drives
+//    1  light_transport W1 (24, wheeled) owner 0 cell (8, 16) drives east, then is ordered to a spot behind
+//                                                             and to the side: swings round in an arc
+//    2  rifleman I1 (12, foot)        owner 0  cell (8, 24)   turns at once, twice (the second time by a half turn)
+//    3  heavy_tank T2 (20, tracked, turret)  owner 0  cell (6, 36)  drives east along row 36 while its turret
+//                                                             follows W2; at tick 600 the turret is let go
+//    4  light_transport W2 (24)       owner 0  cell (50, 26)  the moving target: drives west along row 26
+//    5  light_tank T3 (19, tracked, turret)  owner 0 cell (40, 8)  attacks V: the turret aims at it from the
+//                                                             tick of the order, ahead of the hull
+//    6  rifleman V (12)               owner 1  cell (56, 14)  the victim, standing still
+//
+// Timeline: tick 1 the first orders and the aim; tick 250 T1, W1 and I1 are sent back (T1 and I1 behind
+// themselves, W1 behind and to the side); tick 600 T2's turret is told to return to the hull.
+
+Scenario(
+    name: "turning",
+    seed: 0x7E45_0045,
+    map: (width: 64, height: 40),
+    unit_defs: Some("turning_defs"),
+    ticks: 1_000,
+    commands: [
+        // --- the cast, at tick 0 ---
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 8))),
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 16))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 24))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 0, cell: (6, 36))),
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (50, 26))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (40, 8))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (56, 14))),
+
+        // --- tick 1: everyone sets off east (or toward the victim); the turret follows W2 ---
+        (tick: 1, command: OrderMove(ids: [Id(0, 0)], target: (24, 8))),
+        (tick: 1, command: OrderMove(ids: [Id(1, 0)], target: (24, 16))),
+        (tick: 1, command: OrderMove(ids: [Id(2, 0)], target: (14, 24))),
+        (tick: 1, command: OrderMove(ids: [Id(3, 0)], target: (50, 36))),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (10, 26))),
+        (tick: 1, command: OrderAttack(ids: [Id(5, 0)], target: (6, 0))),
+        (tick: 1, command: AimTurret(ids: [Id(3, 0)], target: Some((4, 0)))),
+
+        // --- tick 250: back the way they came (all three have arrived by now, facing east) ---
+        (tick: 250, command: OrderMove(ids: [Id(0, 0)], target: (6, 8))),
+        (tick: 250, command: OrderMove(ids: [Id(1, 0)], target: (14, 12))),
+        (tick: 250, command: OrderMove(ids: [Id(2, 0)], target: (8, 24))),
+
+        // --- tick 600: T2's turret returns to hull-forward ---
+        (tick: 600, command: AimTurret(ids: [Id(3, 0)])),
+    ],
+)

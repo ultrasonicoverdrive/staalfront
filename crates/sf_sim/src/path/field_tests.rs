@@ -32,6 +32,7 @@ fn units() -> UnitTable {
         size: Fx::from_ratio(4, 10),
         footprint: None,
         weapon_range: Fx::ZERO,
+        turret_per_tick: 0,
     }])
     .unwrap()
 }

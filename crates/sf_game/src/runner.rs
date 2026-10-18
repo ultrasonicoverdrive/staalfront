@@ -458,7 +458,7 @@ fn order_text(order: sf_sim::Order, world: &World) -> String {
 /// A sim entity as the instancer wants it. The positions are in cells;
 /// `Motion::from_fixed` is where they become metres (B12).
 fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
-    Motion::from_fixed(
+    let motion = Motion::from_fixed(
         looks.shape_of(v),
         v.owner.0,
         v.prev_pos,
@@ -466,7 +466,12 @@ fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
         v.prev_facing,
         v.facing,
     )
-    .with_id(UnitId::from_parts(v.id.index(), v.id.generation()))
+    .with_id(UnitId::from_parts(v.id.index(), v.id.generation()));
+    // A turret the simulation turns (WP4.5) drives the model's turret part.
+    match v.turret {
+        Some(t) => motion.with_turret(t.prev_facing, t.facing),
+        None => motion,
+    }
 }
 
 impl Runner {

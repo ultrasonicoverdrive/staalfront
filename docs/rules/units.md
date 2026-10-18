@@ -32,7 +32,7 @@ demo, WP1.6.)
 |---|---|---|
 | distance, range, radius, size, sight | **cells** (1 cell = 4 m, B12) | `Fx::ONE` is one cell |
 | speed | **cells per game second** | 1 cell/s = 4 m/s; per tick it is 1/20 of that |
-| turn rate | **facing steps per tick** | 256 steps per full turn, so 8 per tick is 225 degrees per second |
+| turn rate, turret rate | **facing steps per tick** | 256 steps per full turn, so 8 per tick is 225 degrees per second |
 | `build_seconds`, `reload` | **game seconds** | must be a whole number of 20 Hz ticks (a multiple of 0.05) |
 | cost | credits | |
 | hit points, damage | abstract | |
@@ -64,7 +64,11 @@ permanent" below) and a unique snake_case `name`.
   (`sf_data::movement::MovementCosts`); the table, the bridge rule and the reasons are in
   [`movement.md`](movement.md). It replaced the three `passable` flags of `terrain_types.ron`.
   A class may carry `ground: true` (foot, wheeled and tracked do): the ground classes, whose
-  ability to enter a terrain type makes it open ground (`movement.md`, "The checksum").
+  ability to enter a terrain type makes it open ground (`movement.md`, "The checksum"). Since
+  WP4.5 a class may also carry a `turning` block: how its units turn the hull
+  (`turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.25, pivot_permille: 250)`; mode `Pivot`,
+  `Arc` or `Instant`; every field defaults to the old walk, `Pivot` and 16 steps); the modes, the
+  numbers and what is checked are in [`turning.md`](turning.md).
 * `armor_types`: none, infantry, light, heavy, structure. The set is a placeholder.
 * `damage_types`: bullet, precision, rocket, cannon, shell, demolition. The set is a
   placeholder. "Infantry only" for the sniper is the future armor table's job
@@ -105,7 +109,8 @@ the file does not matter.
 | `movement` | a movement class; required for Infantry, Vehicle and Vessel, absent for the rest |
 | `speed` | cells per game second, above 0 up to 20; only with a `movement`. On terrain a unit never moves more than 17.5 cells per second (`movement.md`), so a speed above that is capped; no role comes near |
 | `water_speed` | cells per second on water, if different from `speed` (the amphibious transport) |
-| `turn_rate` | facing steps per tick, at least 1; only with a `movement` |
+| `turn_rate` | facing steps per tick, at least 1; only with a `movement`. How the hull turns with it depends on the class (`turning.md`): a class that turns at once does not use it |
+| `turret_rate` | facing steps per tick the **turret** turns, for a role with a turret that turns apart from the hull (WP4.5; the glTF `turret` part's yaw joint); zero or absent means none; only with a `movement`. Shipped for the light tank (12), the heavy tank (8) and the siege artillery (6) |
 | `size` | diameter in cells for collision and selection (not for structures). Since WP4.4 the body of a unit is a disc of half of it for a radius; two bodies of 0.75 cells or less (infantry) keep three quarters of the sum of their radii, all others the whole sum (`collision.md`). Aircraft (a class that no terrain stops) have no body |
 | `footprint` | `(width: w, height: h)` in cells, 1 to 16; **required for and only for a Structure** |
 | `sight` | cells; above 0 except for an Object |
@@ -197,7 +202,8 @@ the checks after parsing):
 
 `sf_sim` knows a unit kind only through its **unit table**, `sf_sim::UnitTable`: for each
 kind number its hit points, movement class, speed per tick, turn rate, size, (for a
-structure) footprint and, since WP3.4, the range of its first weapon (`weapon_range`, zero
+structure) footprint, since WP4.5 the turn rate of its turret (`turret_per_tick`, zero for none;
+hashed in the turning section, not in the table's digest) and, since WP3.4, the range of its first weapon (`weapon_range`, zero
 without a weapon; what an attack order walks to, `docs/rules/orders.md`). `sf_bridge::unit_table(&UnitDefs)` builds it from `UnitDefs::sim_units()` and the caller hands it to
 the world once, right after the world is made (`World::with_units`, as the terrain is
 handed over); a world cannot take it after it has started. The table is fixed for the

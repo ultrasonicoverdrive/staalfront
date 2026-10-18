@@ -104,6 +104,7 @@ fn table() -> UnitTable {
         size: Fx::from_ratio(4, 10),
         footprint: None,
         weapon_range: Fx::from_int(range as i32),
+        turret_per_tick: 0,
     };
     UnitTable::new(vec![
         mobile(SOLDIER, WALKER, 30, 255, 0),
@@ -126,6 +127,7 @@ fn table() -> UnitTable {
                 height: 3,
             }),
             weapon_range: Fx::ZERO,
+            turret_per_tick: 0,
         },
     ])
     .unwrap()

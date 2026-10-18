@@ -126,6 +126,21 @@ pub enum Command {
         /// The units.
         ids: Vec<EntityId>,
     },
+    /// Point the turrets of the units at an entity, or let them go back to the
+    /// hull (WP4.5, `docs/rules/turning.md`): with `target: Some(id)` the turret of
+    /// every unit that has one turns toward that entity and keeps following it
+    /// wherever it goes, until it is gone, until another `AimTurret` says
+    /// otherwise or until a [`Command::Stop`]; with `None` it returns to
+    /// hull-forward. It does not touch the hull or the order: a tank can drive
+    /// one way and aim another. A target that is gone or is the unit itself is
+    /// `None`. Skips what has no turret; the command counts as ignored when no
+    /// unit took it.
+    AimTurret {
+        /// The units.
+        ids: Vec<EntityId>,
+        /// What the turrets aim at.
+        target: Option<EntityId>,
+    },
     /// Remove an entity.
     Despawn {
         /// The entity.

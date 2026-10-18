@@ -581,6 +581,45 @@ fn the_order_actions_are_checked_like_the_other_commands() {
 }
 
 #[test]
+fn aim_turret_is_checked_and_becomes_the_command() {
+    let p = problems(&with_command("(tick: 1, command: AimTurret(ids: []))"));
+    assert!(has(&p, "ids must not be empty"), "{p:?}");
+    let p = problems(&with_command(
+        "(tick: 1, command: AimTurret(ids: [Id(0, 0)], target: Some((4294967295, 0))))",
+    ));
+    assert!(has(&p, "is not a valid slot"), "{p:?}");
+    let s = parse(&with_command(
+        "(tick: 2, command: AimTurret(ids: [Range(0, 2)], target: Some((7, 1))))",
+    ))
+    .unwrap();
+    let world = s.build_world().unwrap();
+    let aims: Vec<_> = world
+        .pending_commands()
+        .iter()
+        .filter(|(tick, _, _)| *tick == Tick(2))
+        .collect();
+    assert_eq!(aims.len(), 1);
+    assert_eq!(
+        *aims[0].2,
+        Command::AimTurret {
+            ids: vec![EntityId::new(0, 0), EntityId::new(1, 0)],
+            target: Some(EntityId::new(7, 1)),
+        }
+    );
+    // No target lets the turret go.
+    let s = parse(&with_command(
+        "(tick: 2, command: AimTurret(ids: [Id(0, 0)]))",
+    ))
+    .unwrap();
+    let world = s.build_world().unwrap();
+    let released = world
+        .pending_commands()
+        .iter()
+        .any(|(_, _, c)| matches!(c, Command::AimTurret { target: None, .. }));
+    assert!(released);
+}
+
+#[test]
 fn the_order_actions_become_order_commands_for_the_cells_middle() {
     let s = parse(&with_command(
         "(tick: 2, player: 1, command: OrderMove(ids: [Range(0, 3)], target: (5, 6), queued: true))",

@@ -30,10 +30,10 @@
 use sf_data::movement::MovementCosts;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
-use sf_data::units::{SimUnitDef, TerrainCost, UnitDefs};
+use sf_data::units::{SimUnitDef, TerrainCost, TurnMode, TurningDef, UnitDefs};
 use sf_sim::{
     ClassCosts, Cost, Footprint, Kind, MovementTable, TerrainDef, TerrainFlags, TerrainId,
-    UnitStats, UnitTable,
+    TurnMode as SimTurnMode, Turning, UnitStats, UnitTable,
 };
 
 /// What the rules read about one role, copied from its converted definition.
@@ -55,6 +55,7 @@ pub fn unit_stats_of(defs: &UnitDefs, role: &SimUnitDef) -> UnitStats {
             .and_then(|&kind| defs.sim_weapon(kind))
             .map(|weapon| weapon.range)
             .unwrap_or_default(),
+        turret_per_tick: role.turret_per_tick,
     }
 }
 
@@ -82,10 +83,25 @@ pub fn sim_cost(cost: TerrainCost) -> Cost {
     }
 }
 
+/// One turning profile of the data, as the simulation has it (WP4.5).
+pub fn sim_turning(def: &TurningDef) -> Turning {
+    Turning {
+        mode: match def.mode {
+            TurnMode::Pivot => SimTurnMode::Pivot,
+            TurnMode::Arc => SimTurnMode::Arc,
+            TurnMode::Instant => SimTurnMode::Instant,
+        },
+        drive_tolerance: def.drive_tolerance,
+        min_radius: def.min_radius.to_fx(),
+        pivot_permille: def.pivot_permille,
+    }
+}
+
 /// The simulation's movement table for `costs`, to hand to
-/// [`World::with_movement`](sf_sim::World::with_movement). Fails with the
-/// simulation's reason if the table is refused (the data's own checks rule
-/// that out for any costs that were built).
+/// [`World::with_movement`](sf_sim::World::with_movement): the terrain costs
+/// and, since WP4.5, how each class turns. Fails with the simulation's reason
+/// if the table is refused (the data's own checks rule that out for any costs
+/// that were built).
 pub fn movement_table(costs: &MovementCosts) -> Result<MovementTable, String> {
     MovementTable::new(
         costs
@@ -101,6 +117,15 @@ pub fn movement_table(costs: &MovementCosts) -> Result<MovementTable, String> {
             })
             .collect(),
     )
+    .and_then(|table| {
+        table.with_turning(
+            costs
+                .classes()
+                .iter()
+                .map(|class| (class.kind, sim_turning(&class.turning)))
+                .collect(),
+        )
+    })
     .map_err(|e| e.to_string())
 }
 
@@ -166,6 +191,7 @@ mod tests {
             assert_eq!(stats.movement_class, role.movement_class);
             assert_eq!(stats.speed_per_tick, role.speed_per_tick);
             assert_eq!(stats.turn_per_tick, role.turn_per_tick);
+            assert_eq!(stats.turret_per_tick, role.turret_per_tick);
             assert_eq!(stats.size, role.size);
             assert_eq!(stats.footprint.map(|f| (f.width, f.height)), role.footprint);
         }
@@ -236,6 +262,29 @@ mod tests {
         }
         // Built from the same data, in any order, it is the same table.
         assert_eq!(table, movement_table(&MovementCosts::embedded()).unwrap());
+    }
+
+    #[test]
+    fn every_class_arrives_with_the_way_it_turns() {
+        let defs = UnitDefs::embedded();
+        let costs = MovementCosts::from_defs(&defs, &TerrainTypes::embedded()).unwrap();
+        let table = movement_table(&costs).unwrap();
+        let by_name = |name: &str| table.turning(defs.classes().movement_kind(name).unwrap());
+        // Infantry turn at once, tanks pivot, wheeled vehicles must move to turn.
+        assert_eq!(by_name("foot").mode, SimTurnMode::Instant);
+        assert_eq!(by_name("tracked").mode, SimTurnMode::Pivot);
+        let wheeled = by_name("wheeled");
+        assert_eq!(wheeled.mode, SimTurnMode::Arc);
+        // The radius is the data's, in cells, as fixed point.
+        let data = defs.classes().movement_class(1).unwrap().turning;
+        assert_eq!(wheeled.min_radius, data.min_radius.to_fx());
+        assert_eq!(wheeled.pivot_permille, data.pivot_permille);
+        assert_eq!(wheeled.drive_tolerance, data.drive_tolerance);
+        // Every class of the data has its profile, and it is a valid one.
+        for class in &defs.classes().movement_classes {
+            assert_eq!(table.turning(class.kind), sim_turning(&class.turning));
+            assert_eq!(table.turning(class.kind).check(), Ok(()));
+        }
     }
 
     #[test]

@@ -263,7 +263,18 @@ Status: in progress.
   spot and after `stuck_attempts` of those asks for a new route, the hook of WP4.7; the arrival slots of
   WP4.3 are spaced for the bodies, in rings, one class after the other; the `crowd_jam` scenario and a
   2,000-unit performance check; the #51 follow-ups), `docs/rules/collision.md`: done
-- WP4.5 to WP4.7: open
+- WP4.5 Turning (`sf_sim::turning`, `turret`: every movement class has a turning profile in
+  `unit_classes.ron`; infantry turn at once, tracked units pivot in place and drive within a
+  tolerance of 16 steps, wheeled, hover and water have to move to turn, in an arc of a smallest radius
+  carried in thousandths of a step, with a turn on the spot at a share of the turn rate for a target
+  inside the turning circle; the shortest way round with the fixed tie at 128; a unit with a
+  `turret_rate` has a turret facing of its own that follows `Command::AimTurret` or an attack order's
+  victim or the hull, is interpolated for the renderer's `turret` yaw joint and is in a new checksum
+  section; pushes of the crowd bypass the turn constraint, driven steps do not; the `turning` scenario,
+  a screenshot test of a tank with its turret turned off its hull; the pinned `orders`,
+  `terrain_costs`, `pathing`, `pathing_256`, `bridge_200` and `crowd_jam` re-pinned once),
+  `docs/rules/turning.md`: done
+- WP4.6 and WP4.7: open
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -370,6 +381,22 @@ width of the widest body. **Not done on purpose:** layers (a vessel under a brid
 on it), turning and animation of a pushed unit (WP4.5), formations (WP4.6), the replan itself (WP4.7;
 the request and the mark are here), dynamic slot assignment (the last units arrive about 20 s after the
 last crossing, walking through the crowd), crushing.
+
+WP4.5 notes. **Re-pinned once**: `orders`, `terrain_costs`, `pathing`, `pathing_256`, `bridge_200` and
+`crowd_jam` (old and new values in `docs/rules/turning.md`); `wander_5000`, `command_mix`,
+`terrain_256` and `units_spawn` did not move (the first three have no class; the frozen definitions of
+`units_spawn` have no `turning` block and a class that says nothing turns as the walk always did).
+**`bridge_200` still meets the criterion of phase 4, with thin margins**: all 200 arrive by tick 3,676
+(183 s; 3,526 before: 150 ticks slower), 1 of 200 ends beyond 1.3 times the packing radius (the
+allowance is 2; the farthest 9.72 against 9.58), the worst overlap is 0.19 of a cell, nobody is stuck.
+The wheeled turning radius (1.25 cells) was picked from the radii that kept those numbers; at 1.75
+the overlap test failed (0.29). Choices: the drive tolerance of every shipped class is 16 steps, the
+margin the route smoothing stands on (a hover class at 32 drove into rock); a unit that has to move to
+turn counts a waypoint reached a quarter of a cell short; a pushed unit slides without turning;
+a unit with a turret leaves its hull alone when it is in reach of an attack target and the turret
+turns. The hover highlight of `--shots` (known issue 21, which names WP4.5 as owner) is not part of
+this work package and was not touched. Not done on purpose: reversing, turret limits, the barrel's
+elevation (a hook in the renderer), formations (WP4.6), replanning (WP4.7).
 
 ## Phase 1 report (draft, WP1.14)
 

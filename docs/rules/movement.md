@@ -9,7 +9,9 @@ checks whether the next cell is accessible; the destination is not the route) an
 unit class: permitted terrain types).
 
 Since WP4.2 an order to move **finds its way** round what the class cannot cross
-(`docs/rules/pathfinding.md`); this page is about what the terrain allows and what a step costs, and
+(`docs/rules/pathfinding.md`), and since WP4.5 a unit **turns before it drives**, in a way that
+depends on its class (`docs/rules/turning.md`: infantry at once, tanks on the spot, wheeled
+vehicles, hovercraft and vessels in arcs); this page is about what the terrain allows and what a step costs, and
 about the legacy walks (`MoveTo`, wandering) that still go in a straight line and stop at the edge.
 
 A **movement class** says which terrain a unit can use and how fast it moves on it. The terrain
@@ -269,7 +271,18 @@ only: no shipped role flies yet) crosses river and rock. Until WP4.2 the units s
 and the wall stopped at the edge. `tools/sf_headless/tests/terrain_costs.rs` asserts the arrival
 ticks, against the cost table and as pinned numbers, the positions, the routes and that no unit
 ever ends a tick on ground its class cannot enter. The checksum is in `terrain_costs.expected` and
-runs on Linux and Windows in CI.
+runs on Linux and Windows in CI. Since WP4.5 the pinned arrival ticks include the turning of each
+class (`turning.md`): they differ from lane to lane for the classes that have to move to turn, because
+each unit is spawned with a heading of its own.
+
+## Turning
+
+A movement class also says how its units turn the hull before and while they drive: the `turning`
+block of the class in `unit_classes.ron` (mode `Instant`, `Pivot` or `Arc`, the heading error
+a unit may drive with, and for an arc its smallest radius and its turn on the spot). It is not
+a cost and has no effect on which cell a unit may enter, so it is described in
+[`turning.md`](turning.md); the movement table carries it (`MovementTable::turning`) and its digest
+holds the profiles that are not the old walk.
 
 ## Not here
 

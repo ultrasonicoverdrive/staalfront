@@ -56,6 +56,8 @@
 //!   order;
 //! * for every live entity in ascending slot order: remember the previous
 //!   position and facing, then run its behaviour;
+//! * resolve the bodies of the units (the crowd pass, WP4.4) and turn the
+//!   turrets (WP4.5);
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!
@@ -117,7 +119,8 @@
 //! placeholders), [`Command::SpawnUnit`], [`Command::PlaceStructure`] (from the
 //! unit table), [`Command::Despawn`], [`Command::SetWanderArea`],
 //! [`Command::MoveTo`] and, since WP3.4, [`Command::Order`] and
-//! [`Command::Stop`] (see "Orders" below). Commands run by `(tick, player, player
+//! [`Command::Stop`] (see "Orders" below) and, since WP4.5, [`Command::AimTurret`]
+//! (see "Turning and turrets" below). Commands run by `(tick, player, player
 //! sequence)`; [`World::schedule_sequenced`] takes the sequence number the sender gave.
 //! Pending commands are simulation state: they are in the checksum and survive a clone of the
 //! world.
@@ -261,6 +264,19 @@
 //! used eviction; a structure in the region builds the field again while the units go on with
 //! the old one where it is valid. The rules are in `docs/rules/pathfinding.md`.
 //!
+//! # Turning and turrets
+//!
+//! Every movement class has a [`Turning`] profile (in the [`MovementTable`], `sf_data`'s `turning` block
+//! of `unit_classes.ron`), and a walk turns the hull by it before and while it drives: infantry
+//! at once ([`TurnMode::Instant`]), tracked units on the spot, driving within a tolerance
+//! ([`TurnMode::Pivot`]), wheeled, hover and water units only while they move, in an arc of a
+//! smallest radius, with a turn on the spot for a target inside the turning circle
+//! ([`TurnMode::Arc`]). The shortest way round is always the one taken, the tie at half a
+//! turn goes the decreasing way. A unit with a `turret_rate` has a turret facing of its own
+//! ([`EntityView::turret`], [`World::turret_of`]): an absolute direction that follows
+//! [`Command::AimTurret`], the victim of an attack order or the hull, at the turret's rate. The rules
+//! are in `docs/rules/turning.md`; the modules are [`turning`] and the private `turret`.
+//!
 //! # Collisions
 //!
 //! A unit made from the unit table has a body, a disc with half the `size` of its
@@ -294,6 +310,8 @@ pub mod orders;
 pub mod path;
 pub mod snapshot;
 pub mod terrain;
+pub mod turning;
+mod turret;
 pub mod units;
 pub mod world;
 
@@ -317,9 +335,12 @@ pub use path::{
     FIELD_SECTORS, MAX_FIELD_SLOTS, MIN_NODE_BUDGET, PathStats, PlannedRoute, RING_CAP,
     RouteStatus, RouteView, SECTOR_SIZE,
 };
-pub use snapshot::{EntityView, Snapshot};
+pub use snapshot::{EntityView, Snapshot, TurretView};
 pub use terrain::{
     Cell, NO_OCCUPANT, Occupancy, Terrain, TerrainDef, TerrainError, TerrainFlags, TerrainId,
+};
+pub use turning::{
+    DEFAULT_DRIVE_TOLERANCE, MAX_DRIVE_TOLERANCE, MIN_ARC_RADIUS, TurnMode, Turning, TurningError,
 };
 pub use units::{Footprint, UnitClass, UnitStats, UnitTable, UnitTableError};
 pub use world::{

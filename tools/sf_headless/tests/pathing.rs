@@ -27,7 +27,7 @@ use std::collections::BinaryHeap;
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
 use sf_math::{Fx, Vec2};
-use sf_sim::{Cell, EntityId, Order, RouteStatus, World};
+use sf_sim::{Cell, EntityId, Order, RouteStatus, TurnMode, World};
 
 const TRACKED: u16 = 2;
 
@@ -444,9 +444,14 @@ fn routes_are_at_most_ten_percent_longer_than_the_best() {
         let ratio = walked * 1000 / best;
         worst = worst.max(ratio);
         worst_grid = worst_grid.max(walked * 1000 / grid);
+        // A unit that has to move to turn (WP4.5) swings wide round the corners of a
+        // route and may not get as close to the line as one that pivots: a quarter
+        // more than the best route, a tenth for the others.
+        let arc = r.world.movement_table().turning(class).mode == TurnMode::Arc;
+        let allowed = if arc { 125 } else { 110 };
         assert!(
-            walked * 10 <= best * 11,
-            "unit {slot}: walked {walked}, the best any-angle route is {best} ({ratio} per thousand)"
+            walked * 100 <= best * allowed,
+            "unit {slot}: walked {walked}, the best any-angle route is {best} ({ratio} per thousand, at most {allowed}0 allowed)"
         );
     }
     eprintln!(

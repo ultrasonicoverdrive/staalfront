@@ -11,7 +11,7 @@ use sf_math::{Facing, Rng, Vec2};
 
 use crate::behavior::{Area, Behavior};
 use crate::crowd::CrowdState;
-use crate::ids::{Kind, PlayerId};
+use crate::ids::{EntityId, Kind, PlayerId};
 use crate::orders::{Order, OrderQueue};
 use crate::path::Routes;
 use crate::terrain::NO_CELL;
@@ -95,6 +95,21 @@ pub(crate) struct Entities {
     /// been unable to get on, its sidesteps, how far it has been pushed. At rest
     /// for every unit that never met one; hashed while it is not.
     pub crowd: Vec<CrowdState>,
+    /// The fraction of a facing step a unit that turns in an arc has not yet
+    /// turned, in thousandths (WP4.5); zero for everything else. Hashed in the
+    /// turning section while it is not zero.
+    pub turn_carry: Vec<u16>,
+    /// The facing of the turret in the world (not relative to the hull), for a
+    /// unit with a turret (WP4.5); the hull's facing for everything else, which
+    /// nothing reads. Hashed in the turning section for a unit with a turret.
+    pub turret: Vec<Facing>,
+    /// The turret's facing one tick earlier, for render interpolation. Derived
+    /// data; not part of the checksum.
+    pub prev_turret: Vec<Facing>,
+    /// What the turret has been told to aim at, besides an attack order
+    /// (`Command::AimTurret`; phase 5 target selection will set it too). Hashed
+    /// with the turret.
+    pub turret_target: Vec<Option<EntityId>>,
 }
 
 impl Entities {
@@ -126,6 +141,10 @@ impl Entities {
         self.queue.push(OrderQueue::EMPTY);
         self.guard_walking.push(false);
         self.crowd.push(CrowdState::default());
+        self.turn_carry.push(0);
+        self.turret.push(Facing::default());
+        self.prev_turret.push(Facing::default());
+        self.turret_target.push(None);
         index
     }
 
@@ -151,6 +170,10 @@ impl Entities {
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
         self.crowd[i] = CrowdState::default();
+        self.turn_carry[i] = 0;
+        self.turret[i] = row.facing;
+        self.prev_turret[i] = row.facing;
+        self.turret_target[i] = None;
         self.route.reset(i);
     }
 
@@ -176,6 +199,10 @@ impl Entities {
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
         self.crowd[i] = CrowdState::default();
+        self.turn_carry[i] = 0;
+        self.turret[i] = Facing::default();
+        self.prev_turret[i] = Facing::default();
+        self.turret_target[i] = None;
         self.route.reset(i);
     }
 }
