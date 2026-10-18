@@ -43,12 +43,43 @@ pub enum Action {
     OrderScatter,
     /// The selected units hold position.
     OrderHold,
-    /// Temporary debug selection until WP3.3: select all own units in view.
-    DebugSelectAll,
+    /// Left button: click selects, drag draws the selection rectangle,
+    /// double-click selects the units of the same kind in view (WP3.3).
+    SelectClick,
+    /// Held: a click toggles the unit in the selection and a drag or
+    /// double-click adds to it instead of replacing it (shift).
+    SelectAdd,
+    /// Held: a group key assigns the selection to the group instead of
+    /// recalling it (ctrl).
+    GroupAssign,
+    /// Recall control group 1 (with [`Action::GroupAssign`] held: assign it);
+    /// a double tap centres the camera on it.
+    Group1,
+    Group2,
+    Group3,
+    Group4,
+    Group5,
+    Group6,
+    Group7,
+    Group8,
+    Group9,
 }
 
 impl Action {
-    pub const ALL: [Action; 19] = [
+    /// The nine control-group actions, in order: `GROUPS[0]` is group 1.
+    pub const GROUPS: [Action; 9] = [
+        Action::Group1,
+        Action::Group2,
+        Action::Group3,
+        Action::Group4,
+        Action::Group5,
+        Action::Group6,
+        Action::Group7,
+        Action::Group8,
+        Action::Group9,
+    ];
+
+    pub const ALL: [Action; 30] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -67,7 +98,18 @@ impl Action {
         Action::OrderStop,
         Action::OrderScatter,
         Action::OrderHold,
-        Action::DebugSelectAll,
+        Action::SelectClick,
+        Action::SelectAdd,
+        Action::GroupAssign,
+        Action::Group1,
+        Action::Group2,
+        Action::Group3,
+        Action::Group4,
+        Action::Group5,
+        Action::Group6,
+        Action::Group7,
+        Action::Group8,
+        Action::Group9,
     ];
 }
 
@@ -427,6 +469,11 @@ mod tests {
         assert_eq!(b.edge_margin, 4);
     }
 
+    /// Two held modifiers that are read in different places may share a key:
+    /// shift queues an order (read with an order) and adds to a selection
+    /// (read with a click).
+    const SHARED: [(Action, Action); 1] = [(Action::OrderQueue, Action::SelectAdd)];
+
     #[test]
     fn builtin_binds_no_key_or_button_to_two_actions() {
         let b = Bindings::builtin();
@@ -434,11 +481,59 @@ mod tests {
         for a in Action::ALL {
             for binding in b.for_action(a) {
                 if let Some((_, other)) = seen.iter().find(|(x, _)| x == binding) {
-                    panic!("{binding:?} is bound to {other:?} and {a:?}");
+                    assert!(
+                        SHARED.contains(&(*other, a)) || SHARED.contains(&(a, *other)),
+                        "{binding:?} is bound to {other:?} and {a:?}"
+                    );
                 }
                 seen.push((binding.clone(), a));
             }
         }
+    }
+
+    #[test]
+    fn the_selection_bindings_are_actions() {
+        let b = Bindings::builtin();
+        assert_eq!(
+            b.for_action(Action::SelectClick),
+            [Binding::new(Trigger::Mouse(MouseButton::Left))]
+        );
+        // The modifiers are actions too, so they can be rebound.
+        assert_eq!(
+            b.for_action(Action::SelectAdd),
+            b.for_action(Action::OrderQueue)
+        );
+        assert_eq!(b.for_action(Action::GroupAssign).len(), 2);
+        for (n, action) in Action::GROUPS.into_iter().enumerate() {
+            let digit = [
+                KeyCode::Digit1,
+                KeyCode::Digit2,
+                KeyCode::Digit3,
+                KeyCode::Digit4,
+                KeyCode::Digit5,
+                KeyCode::Digit6,
+                KeyCode::Digit7,
+                KeyCode::Digit8,
+                KeyCode::Digit9,
+            ][n];
+            assert!(
+                b.for_action(action)
+                    .contains(&Binding::new(Trigger::Key(digit))),
+                "{action:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_group_key_with_control_held_is_pressed_and_assign_is_held() {
+        let b = Bindings::builtin();
+        let mut input = sized();
+        input.key_event(KeyCode::ControlLeft, ElementState::Pressed, false);
+        input.key_event(KeyCode::Digit3, ElementState::Pressed, false);
+        let s = eval(&input, &b);
+        assert!(s.held(Action::GroupAssign));
+        assert!(s.pressed(Action::Group3));
+        assert!(!s.pressed(Action::Group4));
     }
 
     #[test]
@@ -448,7 +543,6 @@ mod tests {
             (Action::OrderStop, KeyCode::KeyC),
             (Action::OrderScatter, KeyCode::KeyX),
             (Action::OrderHold, KeyCode::KeyH),
-            (Action::DebugSelectAll, KeyCode::F2),
         ] {
             assert_eq!(b.for_action(action), [Binding::new(Trigger::Key(key))]);
         }

@@ -62,15 +62,17 @@ mod terrain_gpu;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
 pub use frustum::{Aabb, Frustum, Visibility};
+/// Re-exported so the game can name the `Mat4` and `Vec3` of the camera and the picking without a second dependency.
+pub use glam;
 pub use gpu::{Gpu, GpuOptions, Present, RenderError};
 pub use ground::{FlatGround, Ground, TerrainGround};
 pub use icons::{Blend, IconConfig, IconShape, ViewBand};
 pub use image::{Rgba8, Tolerance};
-pub use instancing::{FrameView, InstanceStats, Instancer, Motion};
+pub use instancing::{DrawnUnit, FrameView, InstanceStats, Instancer, Motion};
 pub use lod::{LodConfig, TerrainConfig, TerrainStats};
 pub use model::{EyeView, MeshId, ModelLods, ModelSet};
 pub use overlay::OverlayFrame;
-pub use pick::{Pick, PickQuery, PickRay, PickVia, UnitId};
+pub use pick::{Pick, PickQuery, PickRay, PickVia, RectQuery, ScreenRect, UnitId};
 pub use renderer::{
     AllocStats, DebugView, DrawStats, EMBEDDED_SHADER, FrameTarget, PresentInfo, Renderer,
 };

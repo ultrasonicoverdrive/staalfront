@@ -37,10 +37,13 @@
 //! through the command queue ([`sandbox`]); each role is drawn with the model
 //! or placeholder shape and the strategic icon its definition names, structures
 //! at their footprint of 4 m cells ([`roster`], [`looks`]); the F1 panel names the
-//! hovered unit and shows its hit points and its order. Units take orders (WP3.4,
-//! [`commands`]): F2 selects every own unit in view (temporary, until selection
-//! is WP3.3), right-click moves, shift-right-click queues, C stops, X scatters, H holds
-//! position (all rebindable actions of `assets/config/input.ron`).
+//! hovered unit and shows its hit points and its order. Units are selected (WP3.3,
+//! [`selection`]): click, drag a rectangle, shift to add or toggle, double-click for the
+//! same kind in view, control + 1-9 to assign a group, 1-9 to recall it (twice to centre
+//! the camera), a click on an enemy to inspect it; the feedback is in [`selection_view`].
+//! Selected units take orders (WP3.4, [`commands`]): right-click moves, shift-right-click
+//! queues, C stops, X scatters, H holds position (all rebindable actions of
+//! `assets/config/input.ron`).
 //! `--crowd` brings back the old scene of 2,000 placeholder wanderers, `--units
 //! N` adds N of them to the sandbox, `--models none` draws the roles as shapes.
 //! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).
@@ -98,6 +101,8 @@ pub mod population;
 pub mod roster;
 pub mod runner;
 pub mod sandbox;
+pub mod selection;
+pub mod selection_view;
 mod sound_browser;
 
 use std::sync::Arc;

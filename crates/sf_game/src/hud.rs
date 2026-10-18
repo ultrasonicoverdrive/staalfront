@@ -42,8 +42,11 @@ const OWNER_DOTS: [Color; 4] = [
 pub struct HudStats {
     pub fps: u32,
     pub units: u32,
-    /// Units in the temporary debug selection (WP3.4; real selection is WP3.3).
+    /// Own units selected (WP3.3).
     pub selected: u32,
+    /// A unit of someone else is being inspected (and nothing of ours is
+    /// selected).
+    pub inspecting: bool,
     pub tick: u64,
 }
 
@@ -137,8 +140,15 @@ impl Hud {
             Anchor::Left,
             (12.0, 0.0),
             &format!(
-                "{} fps   {} units   {} selected   tick {}",
-                stats.fps, stats.units, stats.selected, stats.tick
+                "{} fps   {} units   {}   tick {}",
+                stats.fps,
+                stats.units,
+                if stats.inspecting {
+                    "inspecting".to_owned()
+                } else {
+                    format!("{} selected", stats.selected)
+                },
+                stats.tick
             ),
             text,
         );
@@ -204,6 +214,13 @@ impl Hud {
     /// The middle button went down on the UI and is still held.
     pub fn middle_captured(&self) -> bool {
         self.ui.button_captured(MouseButton::Middle)
+    }
+
+    /// The layer for what the game draws over the scene but under the panels
+    /// (selection rings, health bars, the drag rectangle). Valid after
+    /// [`Hud::frame`], which clears it.
+    pub fn world_layer(&mut self) -> sf_ui::Layer<'_> {
+        self.ui.world_layer()
     }
 
     /// Render the scene and the UI on top.

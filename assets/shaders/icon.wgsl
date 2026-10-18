@@ -5,8 +5,10 @@
 // *pixels*, so the icon is the same size at every zoom. The centre is snapped
 // to the pixel grid so that the edges of the shape fall on pixel boundaries.
 // The fragment shader draws the shape (square, circle or triangle) as a signed
-// distance function: player colour inside, a dark outline along the edge
-// (white when highlighted), one pixel of antialiasing.
+// distance function: player colour inside, a dark rim just inside the edge,
+// one pixel of antialiasing. Hover and selection (WP3.3) add a light outline
+// *outside* the shape, so the player colour keeps the same area in every
+// state.
 //
 // Cross-fade to the models: the alpha of the instance color is the model's
 // weight `w`. The model (scene.wgsl) keeps the pixels whose 8x8 Bayer dither
@@ -32,14 +34,21 @@ struct IconParams {
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(0) var<uniform> icon: IconParams;
 
-// Extra room around the quad so the antialiased edge and the highlight ring
-// are not cut off.
-const MARGIN_PX: f32 = 2.5;
+// Extra room around the quad so the antialiased edge and the outer outline of
+// a hovered or selected icon (up to SELECTED_OUT_PX) are not cut off.
+const MARGIN_PX: f32 = 4.0;
 // The triangle is wider than the quad's side (its base reaches a pixel or two
 // outside the click quad, inside the margin) so that it weighs about as much
 // as the square and the circle.
 const TRIANGLE_SCALE: f32 = 1.2;
 const HIGHLIGHT_BIT: u32 = 0x100u;
+const SELECTED_BIT: u32 = 0x200u;
+// Width in pixels of the outline drawn outside the shape. Hovered: thin and
+// white. Selected (WP3.3): clearly thicker, white. Selected and hovered: the
+// selected width in yellow, so the four states (none, hover, selected,
+// selected + hover) all look different and the fill never shrinks.
+const HOVER_OUT_PX: f32 = 1.0;
+const SELECTED_OUT_PX: f32 = 2.5;
 
 struct VertexIn {
     @builtin(vertex_index) vertex: u32,
@@ -158,15 +167,27 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         discard;
     }
     let highlighted = (in.flags & HIGHLIGHT_BIT) != 0u;
+    let selected = (in.flags & SELECTED_BIT) != 0u;
     let d = sd_shape(in.flags & 0xffu, in.local, icon.size_px * 0.5);
-    let coverage = clamp(0.5 - d, 0.0, 1.0);
+    // How far the outer outline reaches beyond the shape (0: none).
+    var reach = select(0.0, HOVER_OUT_PX, highlighted);
+    reach = select(reach, SELECTED_OUT_PX, selected);
+    let coverage = clamp(0.5 - (d - reach), 0.0, 1.0);
     if (coverage <= 0.0) {
         discard;
     }
-    // The outline is a ring just inside the edge; a highlighted icon gets a
-    // thicker white one.
-    let ring = select(icon.outline_px, icon.outline_px + 1.5, highlighted);
-    let edge = clamp(d + ring + 0.5, 0.0, 1.0) * select(0.0, 1.0, ring > 0.01);
-    let outline = select(vec3<f32>(0.02, 0.025, 0.035), vec3<f32>(1.0), highlighted);
-    return vec4<f32>(mix(in.color, outline, edge), coverage);
+    // Inside the shape: the player colour with the dark rim just inside the
+    // edge, the same in every state.
+    let rim = clamp(d + icon.outline_px + 0.5, 0.0, 1.0)
+        * select(0.0, 1.0, icon.outline_px > 0.01);
+    let inside = mix(in.color, vec3<f32>(0.02, 0.025, 0.035), rim);
+    if (reach <= 0.0) {
+        return vec4<f32>(inside, coverage);
+    }
+    // Outside the shape: the light outline, yellow when both hovered and
+    // selected. The shape's own antialiased edge blends into it.
+    var outline = vec3<f32>(1.0);
+    outline = select(outline, vec3<f32>(1.0, 0.85, 0.2), highlighted && selected);
+    let shape_cover = clamp(0.5 - d, 0.0, 1.0);
+    return vec4<f32>(mix(outline, inside, shape_cover), coverage);
 }
