@@ -251,12 +251,22 @@ The "done when" of phase 4 (PLAN.md) holds with the turning rules; run on the fi
 * **The margins are thin and the outcome moves with small changes** (the criterion was met by 0.03 of
   a cell before WP4.5, and the rim of a crowd that ends by pushing idle friends aside, `collision.md`,
   "Arrival", wanders by a few tenths of a cell with anything that changes the order in which units
-  arrive). The wheeled radius is the knob that was tried, one cell and a quarter to two (the hover
-  class at 2): at 1.25 (the one that ships), 1.5 and 2 every assertion of the test held, at 1.75 the
-  worst overlap was 0.29 and the test failed. With 1.5 two units, which is exactly the allowance, ended
-  outside the disc and the last arrived on tick 3,869. The radius is data: the shipped 1.25 cells (5 m)
-  is a placeholder for the balance rounds, picked from the radii that kept the criteria with a margin,
-  not a claim that it is the right turning circle of a truck.
+  arrive). The wheeled radius is the knob that was tried (the hover class stayed at 2). The review
+  swept it on the final code:
+
+  | wheeled radius | result |
+  |---|---|
+  | 1.25 (ships) | passes; the last unit arrives on tick 3,676 of the 3,700 limit |
+  | 1.5 | 4 riflemen never arrive |
+  | 1.6 | 9 never arrive and 6 end outside 9.58 cells |
+  | 1.7 to 1.8 | pass |
+  | 1.75 | worst overlap 0.286, above the quarter cell |
+  | 2.0 | a hovercraft gets stuck |
+
+  The shipped 1.25 cells (5 m) is **a value that passes the test, not a claim about real trucks**; it
+  is data, for the balance rounds. The failures at the other radii do not come from the turning rules
+  but from the crowd and arrival logic of WP4.4 (`collision.md`, "Arrival"); a separate WP4.4b is to
+  make `bridge_200` robust for them.
 
 ## The `turning` scenario
 
@@ -283,6 +293,8 @@ CI runs it on Linux and Windows against `turning.expected`.
 
 * **Formations and the pace of a group** (WP4.6): a group still goes at the pace of its own units.
 * **Replanning** (WP4.7): a unit that circles because of a corner it cannot take is not replanned.
+* **Fog and visibility**: turret targeting has no fog or visibility check yet; a turret follows any
+  target it is told to, seen or not.
 * **Reversing.** A wheeled vehicle never drives backward; the turn on the spot is a stand-in.
 * **Slope**, **crushing**, **turret limits** (a turret turns all the way round) and **the barrel's
   elevation** are not decided; phase 5 aims with the turret, not with the hull.

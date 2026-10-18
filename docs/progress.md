@@ -389,8 +389,9 @@ WP4.5 notes. **Re-pinned once**: `orders`, `terrain_costs`, `pathing`, `pathing_
 **`bridge_200` still meets the criterion of phase 4, with thin margins**: all 200 arrive by tick 3,676
 (183 s; 3,526 before: 150 ticks slower), 1 of 200 ends beyond 1.3 times the packing radius (the
 allowance is 2; the farthest 9.72 against 9.58), the worst overlap is 0.19 of a cell, nobody is stuck.
-The wheeled turning radius (1.25 cells) was picked from the radii that kept those numbers; at 1.75
-the overlap test failed (0.29). Choices: the drive tolerance of every shipped class is 16 steps, the
+The wheeled turning radius (1.25 cells) is a value that passes the test, not a claim about real trucks;
+the review's sweep found 1.5 (4 riflemen never arrive), 1.6 (9 never arrive), 1.75 (overlap 0.286) and
+2.0 (a hovercraft stuck) failing, from the crowd and arrival logic of WP4.4 (table in `turning.md`). Choices: the drive tolerance of every shipped class is 16 steps, the
 margin the route smoothing stands on (a hover class at 32 drove into rock); a unit that has to move to
 turn counts a waypoint reached a quarter of a cell short; a pushed unit slides without turning;
 a unit with a turret leaves its hull alone when it is in reach of an attack target and the turret
@@ -506,3 +507,7 @@ fixed, delete the entry in the same PR.
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
+27. **Phase 4 is not done until WP4.4b makes `bridge_200` robust for wheeled radii 1.25 to 2.0.**
+    With the turning rules of WP4.5 the scenario passes at 1.25 (last arrival tick 3,676 of 3,700) but
+    fails at 1.5, 1.6, 1.75 and 2.0 (table in `docs/rules/turning.md`); the cause is the crowd and
+    arrival logic of WP4.4, not the turning. Owner: WP4.4b.
