@@ -219,8 +219,8 @@
 //! A unit has a current [`Order`] and a ring of [`ORDER_QUEUE_CAP`] queued ones.
 //! [`Command::Order`] replaces them or, queued, appends; [`Command::Stop`] clears
 //! them. The behaviour pass carries the order out: it steers at the next waypoint of
-//! the unit's route (today the straight line, `orders::next_waypoint`, which
-//! pathfinding replaces) and judges arrival against the destination. Attack,
+//! the unit's route (`path::Pathing::steer`; the straight line for a unit that terrain
+//! does not bind) and judges arrival against the destination. Attack,
 //! attack-move and guard are state and movement only: combat is phase five. The rules
 //! are in `docs/rules/orders.md`.
 //!
@@ -236,9 +236,23 @@
 //! [`movement`]). Wanderers and worlds without a layer or without a table are
 //! open ground and behave, and checksum, exactly as before.
 //!
+//! # Pathfinding
+//!
+//! A unit that walks an order and is bound by terrain asks for a **route** and follows
+//! it: hierarchical A* over sectors of [`SECTOR_SIZE`] cells and the portals between
+//! them, built when the world is made, rebuilt one sector at a time when a structure is
+//! placed or removed ([`World::invalidate_sector`]), refined lazily into a fixed-size
+//! ring of waypoints pulled taut by a line of sight, and served inside a node budget
+//! per tick in the order of the entity ids ([`World::with_path_budget`],
+//! [`World::path_stats`]). A destination that cannot be reached ends the route in the
+//! nearest cell that can, marked in [`World::route_of`]. Aircraft, the legacy `MoveTo`
+//! and the wanderers walk the straight line as before. The rules are in
+//! `docs/rules/pathfinding.md`; the module is [`path`].
+//!
 //! # Not here yet
 //!
-//! Pathfinding and collision (phase 4), target acquisition and firing (phase 5),
+//! Collision, flowfields for groups and replanning (the rest of phase 4), target
+//! acquisition and firing (phase 5),
 //! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
@@ -250,6 +264,7 @@ mod entities;
 pub mod ids;
 pub mod movement;
 pub mod orders;
+pub mod path;
 pub mod snapshot;
 pub mod terrain;
 pub mod units;
@@ -266,6 +281,10 @@ pub use movement::{
 pub use orders::{
     ARRIVE_TOLERANCE, GUARD_CLOSE, GUARD_LEASH, GuardTarget, ORDER_QUEUE_CAP, Order, SCATTER_MAX,
     SCATTER_MIN, scatter_offset,
+};
+pub use path::{
+    ABS_CAP, DEFAULT_NODE_BUDGET, MIN_NODE_BUDGET, PathStats, PlannedRoute, RING_CAP, RouteStatus,
+    RouteView, SECTOR_SIZE,
 };
 pub use snapshot::{EntityView, Snapshot};
 pub use terrain::{

@@ -53,6 +53,7 @@ use crate::entities::{Entities, NO_DEF};
 use crate::ids::Tick;
 use crate::movement::{Ground, scale_step};
 use crate::orders;
+use crate::path::Pathing;
 use crate::units::UnitTable;
 
 /// What an entity does each tick.
@@ -192,6 +193,7 @@ pub(crate) fn advance_all(
     world_motion: &Motion,
     units: &UnitTable,
     ground: &Ground<'_>,
+    path: &mut Pathing,
     tick: Tick,
 ) {
     let slots = e.len();
@@ -231,7 +233,7 @@ pub(crate) fn advance_all(
                 }
                 None => e.behavior[i] = Behavior::Idle,
             },
-            Behavior::Ordered => orders::run(e, i, m, units, ground, tick),
+            Behavior::Ordered => orders::run(e, i, m, units, ground, path, tick),
         }
     }
 }

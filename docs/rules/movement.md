@@ -8,6 +8,10 @@ Work package WP4.1 (PLAN.md phase 4). Code: `crates/sf_data/src/units/classes.rs
 checks whether the next cell is accessible; the destination is not the route) and section 7 (per
 unit class: permitted terrain types).
 
+Since WP4.2 an order to move **finds its way** round what the class cannot cross
+(`docs/rules/pathfinding.md`); this page is about what the terrain allows and what a step costs, and
+about the legacy walks (`MoveTo`, wandering) that still go in a straight line and stop at the edge.
+
 A **movement class** says which terrain a unit can use and how fast it moves on it. The terrain
 says what a cell *is* (`docs/rules/terrain.md`); the class says what a unit can do there. Every
 class has a **cost for every terrain type**: it cannot enter ("impassable"), or it moves at a
@@ -115,16 +119,21 @@ no cell can be jumped over.
 A step is **refused** when it would end in another cell that the class cannot enter. The unit
 then keeps its position, it has still turned toward its waypoint, and **its order is kept**: it
 stands at the edge (less than one step short of it) and tries again on the next tick, forever.
-Nothing ends the order and the queue behind it waits; a new order replaces it. Going around the
-obstacle is pathfinding (WP4.2), noticing that the route is blocked is the replan (WP4.7); until
-then a straight line into a river simply ends at the bank. Details:
+Nothing ends the order and the queue behind it waits; a new order replaces it. A unit that walks an
+**order** (`Move`, `AttackMove`, `Guard`, `Attack`) is routed round the obstacle (WP4.2) and is
+refused a step only when its smoothed route grazed a corner, which makes it ask for a cell-by-cell
+route; the straight line into a river that ends at the bank is now the **legacy** `MoveTo` and the
+wanderers, and a destination that cannot be reached: the route then ends in the middle of the
+nearest cell it can enter (`pathfinding.md`, "Unreachable goals"). Noticing that a route is blocked
+later is the replan (WP4.7). Details:
 
 * **Corners.** A step that changes both column and row (a diagonal one) needs the two cells it
   cuts across to be passable as well, so a unit cannot slip through the corner where two blocked
   cells touch.
 * **Snapping.** A unit within one step of its waypoint lands on it. That is a step like any other
   and is refused if the cell it lands in is blocked, so a destination inside water or rock is
-  approached and never reached. (Within the arrival tolerance of an eighth of a cell a unit has
+  approached and never reached (for the legacy `MoveTo`; a routed unit never has such a waypoint:
+  its route ends in the nearest cell it can enter). (Within the arrival tolerance of an eighth of a cell a unit has
   arrived without a step, see `orders.md`; that is why only a unit faster than 2.5 cells per
   second can show the refusal at all.)
 * **Standing in a cell it could not enter** (nothing puts a unit there today): it moves at normal
@@ -176,8 +185,10 @@ yet. Reasons:
   guarantee that it is bit-exact. That is a design of its own, and vision (phase 8) is the other
   reader and wants a say;
 * slowing is a property of a **step** (from one cell to the next), not of a cell, so it is not
-  `cost(class, cell)`. Pathfinding (WP4.2) and flowfields (WP4.3) are the readers that decide
-  how it enters a route's cost; the cost model should be designed once, with them.
+  `cost(class, cell)`. Pathfinding (WP4.2) did not need it and did not take it: the cost of a
+  step there is the average of the two cells' costs (`pathfinding.md`, "Costs"), the one place being
+  `Grid::step_cost` in `path/grid.rs`. Flowfields (WP4.3) are the other reader; the cost model
+  should be designed once, with them.
 
 The seam is in place: `behavior::walk` is the one place that scales a step, `Ground::may_step`
 the one place that judges it, and a class record can gain an optional field (with a serde
@@ -226,23 +237,37 @@ did:
 
 What the real costs do to units across all classes is pinned by `terrain_costs`.
 
+**WP4.2 moved `terrain_costs` once, on purpose**: `0x8c43b875a877488c` became
+`0xe98b2eed90616d3f`. Its units are given `Order::Move`, which now finds its way: the land classes
+sent into the river take the bridge, everybody goes round the rock wall, and the gunboat sent onto
+the bank ends in the middle of its nearest water cell instead of standing at the edge of the
+bank; every unit of a terrain-bound class waits one tick for its route, so the arrival ticks of the
+lanes in the open grew by one (the drone, which asks for no route, is unchanged). The scenario
+file's commands are the same and the frozen definitions are the same; the old checksum was a
+different behaviour, not a different scenario. `units_spawn`, `orders`, `wander_5000`,
+`command_mix` and `terrain_256` did not move: `units_spawn` has only legacy `MoveTo` walkers and
+`orders` has no terrain.
+
 ## The `terrain_costs` scenario
 
 `assets/scenarios/terrain_costs.ron` on the map `assets/maps/terrain_costs` (40 by 20 cells,
 straight lanes, made by `cargo run -p sf_data --example gen_costs_map`): a rifleman, a light
 transport, a light tank and an amphibious transport each cross 15 cells of grass, of road and of
-ore, cross the river on the bridge, walk into the river (the first three stop at the bank, the
-hover craft crosses at four fifths of its speed) and into a rock wall (all four stop); a gunboat
-goes down the river and under the bridge, another is stopped by the bank; a survey drone (the
-only unit of the air class, present in the frozen copy only: no shipped role flies yet) crosses
-river and rock. `tools/sf_headless/tests/terrain_costs.rs` asserts the arrival ticks, against the
-cost table and as pinned numbers, the positions, the blocked states and that no unit ever ends a
-tick on ground its class cannot enter. The checksum is in `terrain_costs.expected` and runs on
-Linux and Windows in CI.
+ore, cross the river on the bridge, are sent to the far bank along a lane that runs into the river
+(the first three go up to the bridge and come back down, the hover craft crosses the water at four
+fifths of its speed) and are sent through a rock wall (all four go round it); a gunboat goes down
+the river and under the bridge, another is sent onto the bank and ends in the middle of the water
+cell nearest to it; a survey drone (the only unit of the air class, present in the frozen copy
+only: no shipped role flies yet) crosses river and rock. Until WP4.2 the units sent at the water
+and the wall stopped at the edge. `tools/sf_headless/tests/terrain_costs.rs` asserts the arrival
+ticks, against the cost table and as pinned numbers, the positions, the routes and that no unit
+ever ends a tick on ground its class cannot enter. The checksum is in `terrain_costs.expected` and
+runs on Linux and Windows in CI.
 
 ## Not here
 
-* **Pathfinding** (WP4.2 and WP4.3): a blocked straight line is a unit standing at the edge.
+* **Flowfields** for groups (WP4.3). Single units are routed since WP4.2
+  (`docs/rules/pathfinding.md`); the legacy `MoveTo` and the wanderers are not.
 * **Collision and a stuck unit** (WP4.4), **replanning** a blocked route (WP4.7).
 * **Slope**, above.
 * **`water_speed` of a role** is not read by the simulation; the hover class's cost on water
@@ -255,10 +280,11 @@ Linux and Windows in CI.
 
 * `crates/sf_sim/src/movement/tests.rs`: the table (order independence, digest, refusals), the
   step scaling, the cost rules in order, the corner rule.
-* `crates/sf_sim/tests/movement.rs`: the queries, the speed of each cell, standing at the edge
-  with the order and the queue kept, the snap refusal, who crosses what, the spawn rule,
-  wanderers that still cross everything, a wanderer that never ends a tick on a blocked cell,
-  and what is and is not in the checksum.
+* `crates/sf_sim/tests/movement.rs`: the queries, the speed of each cell, a move that goes over
+  the bridge, a destination that cannot be reached (the order and the queue kept), who crosses
+  what, the corner rule for the legacy walk and for a route, the spawn rule, wanderers that still
+  cross everything, a wanderer that never ends a tick on a blocked cell, and what is and is not in
+  the checksum. `tests/pathing.rs` has the rest of WP4.2.
 * `crates/sf_data/tests/movement.rs`: the shipped table complete and pinned, the rules it stands
   for, permanent kind numbers, refusals with file and line, a class and a terrain type added as
   data only. `crates/sf_data/src/movement.rs`: the combining, in unit tests.

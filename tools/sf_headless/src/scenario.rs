@@ -107,6 +107,12 @@ pub struct Scenario {
     /// copy of the definitions freezes the costs too.
     #[serde(skip)]
     pub movement_table: Option<MovementTable>,
+    /// The nodes of path search work the world may do in one tick (WP4.2,
+    /// `docs/rules/pathfinding.md`); the simulation's default
+    /// ([`sf_sim::DEFAULT_NODE_BUDGET`]) when left out. It decides when a unit
+    /// gets its route, never which. At least [`sf_sim::MIN_NODE_BUDGET`].
+    #[serde(default)]
+    pub path_budget: Option<u32>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -644,6 +650,15 @@ impl Scenario {
             }
         }
 
+        if let Some(budget) = self.path_budget
+            && budget < sf_sim::MIN_NODE_BUDGET
+        {
+            p.push(format!(
+                "path_budget {budget} is below the minimum of {}",
+                sf_sim::MIN_NODE_BUDGET
+            ));
+        }
+
         // A tick at or after `ticks` never runs. Not checked when `ticks` is
         // itself wrong (everything would be reported).
         let tick_problem = |at: &str, tick: u64| -> Option<String> {
@@ -822,6 +837,11 @@ impl Scenario {
                     .with_movement(movement)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
             }
+        }
+        if let Some(budget) = self.path_budget {
+            world = world
+                .with_path_budget(budget)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
 

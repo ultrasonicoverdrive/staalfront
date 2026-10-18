@@ -1,13 +1,17 @@
 //! Movement classes and terrain costs (WP4.1), through the public API: the
-//! `cost`/`passable` queries, the speed a cell gives, a unit stopping at the
-//! edge of a cell it cannot enter with its order kept, the corner rule, the
-//! spawn refusal, wanderers that still ignore terrain, and the checksum.
+//! `cost`/`passable` queries, the speed a cell gives, the corner rule, the
+//! spawn refusal, wanderers that still ignore terrain, and the checksum. Since
+//! WP4.2 an order to move finds its way around what a class cannot cross
+//! (`tests/pathing.rs` has the routes themselves); here it shows as a unit
+//! that goes over the bridge, or stands at the nearest cell it can reach with
+//! its order kept when the destination cannot be reached. The legacy `MoveTo`
+//! still walks the straight line and stands at the edge.
 
 use sf_math::{Fx, Vec2};
 use sf_sim::{
     Cell, Command, ConfigError, Cost, EntityId, Kind, MAX_STEP, MovementTable, Order, PlayerId,
-    Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats, UnitTable, World, WorldConfig,
-    per_tick, scale_step,
+    RouteStatus, Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats, UnitTable, World,
+    WorldConfig, per_tick, scale_step,
 };
 
 const GRASS: TerrainId = TerrainId(0);
@@ -176,6 +180,13 @@ fn order(w: &mut World, id: EntityId, to: (i32, i32)) {
     .unwrap();
 }
 
+/// Gives the order and runs the tick in which the unit asks for its route, so
+/// that the next tick is the first in which it moves.
+fn order_and_ask(w: &mut World, id: EntityId, to: (i32, i32)) {
+    order(w, id, to);
+    w.step();
+}
+
 fn pos(w: &World, id: EntityId) -> Vec2 {
     w.get(id).unwrap().pos
 }
@@ -291,7 +302,7 @@ fn a_unit_moves_at_its_speed_times_the_multiplier_of_the_cell_it_stands_in() {
         let mut w = world();
         let id = spawn(&mut w, SOLDIER, x, y);
         // East, within the same strip of terrain: three ticks only.
-        order(&mut w, id, (x + 1, y));
+        order_and_ask(&mut w, id, (x + 1, y));
         let want = scale_step(step, permille).raw();
         for (k, got) in strides(&mut w, id, 3).into_iter().enumerate() {
             // The facing is a table lookup, a hair off a perfect east.
@@ -311,7 +322,7 @@ fn the_multiplier_is_the_cell_the_unit_is_in_when_the_step_starts() {
     let mut w = world();
     // On the last road cell (column 7), heading into ore (column 8) and beyond.
     let id = spawn(&mut w, SOLDIER, 7, 2);
-    order(&mut w, id, (11, 2));
+    order_and_ask(&mut w, id, (11, 2));
     let step = per_tick(Fx::from_int(2));
     let (road, ore) = (scale_step(step, 1500).raw(), scale_step(step, 500).raw());
     let mut seen = Vec::new();
@@ -338,42 +349,66 @@ fn the_multiplier_is_the_cell_the_unit_is_in_when_the_step_starts() {
 // --- stopping at the edge ---
 
 #[test]
-fn a_move_into_water_stops_at_the_edge_and_keeps_the_order() {
+fn a_move_across_the_river_goes_over_the_bridge() {
     let mut w = world();
     let id = spawn(&mut w, SOLDIER, 10, 2);
-    let goal = middle(16, 2);
     order(&mut w, id, (16, 2));
-    run(&mut w, 300);
-    // Standing in the last grass cell before the river (columns 12 to 14), less
-    // than one step from its edge.
-    assert_eq!(cell(&w, id), Cell::new(11, 2));
-    let step = per_tick(Fx::from_int(2));
-    let edge = Fx::from_int(12);
+    let mut seen = Vec::new();
+    for _ in 0..600 {
+        w.step();
+        seen.push(cell(&w, id));
+        if w.order_of(id) == Some(Order::Idle) {
+            break;
+        }
+    }
+    assert_eq!(w.order_of(id), Some(Order::Idle), "it arrived");
+    assert_eq!(cell(&w, id), Cell::new(16, 2));
+    // The only way over the river (columns 12 to 14) is the bridge in row 5.
+    assert!(seen.contains(&Cell::new(13, 5)), "over the bridge");
     assert!(
-        edge - pos(&w, id).x <= step,
-        "x = {:?}, more than a step short of the edge",
-        pos(&w, id).x
+        seen.iter().all(|&c| w.passable(WALKER, c)),
+        "never in the water"
     );
-    // The order is kept, and so is the waypoint.
+    // The route is gone with the order.
+    assert_eq!(w.route_of(id).unwrap().status, RouteStatus::None);
+}
+
+#[test]
+fn a_destination_that_cannot_be_reached_ends_the_route_at_the_nearest_cell() {
+    let mut w = world();
+    let id = spawn(&mut w, SOLDIER, 10, 2);
+    // The middle of the river: no way to it.
+    let goal = middle(13, 2);
+    order(&mut w, id, (13, 2));
+    run(&mut w, 300);
+    // It stands in the cell of the bank nearest the spot, and says so.
+    assert_eq!(cell(&w, id), Cell::new(11, 2));
+    let route = w.route_of(id).unwrap();
+    assert_eq!(route.status, RouteStatus::Stranded);
+    assert!(route.unreachable);
+    assert_eq!(route.goal, Some(Cell::new(11, 2)));
+    // The order is kept; the unit stands in the middle of the cell, still.
     assert_eq!(w.order_of(id), Some(Order::Move(goal)));
-    assert_eq!(w.waypoint_of(id), Some(goal));
-    // It does not creep: 100 more ticks change nothing.
+    assert_eq!(w.waypoint_of(id), None);
+    assert_eq!(pos(&w, id), middle(11, 2));
     let before = pos(&w, id);
     run(&mut w, 100);
-    assert_eq!(pos(&w, id), before);
-    // A new order replaces it and the unit goes.
+    assert_eq!(pos(&w, id), before, "it does not creep");
+    // A new order replaces it, and the mark with it.
     order(&mut w, id, (10, 8));
     run(&mut w, 300);
     assert_eq!(w.order_of(id), Some(Order::Idle));
     assert_eq!(cell(&w, id), Cell::new(10, 8));
+    assert!(!w.route_of(id).unwrap().unreachable);
 }
 
 #[test]
-fn a_blocked_move_holds_back_the_queue_behind_it() {
+fn a_move_that_cannot_finish_holds_back_the_queue_behind_it() {
     let mut w = world();
     let id = spawn(&mut w, SOLDIER, 10, 2);
     let tick = w.tick();
-    for (to, queued) in [((16, 2), false), ((10, 8), true)] {
+    // The middle of the river first, then a spot on the bank.
+    for (to, queued) in [((13, 2), false), ((10, 8), true)] {
         w.schedule(
             tick,
             PlayerId(0),
@@ -387,7 +422,7 @@ fn a_blocked_move_holds_back_the_queue_behind_it() {
     }
     run(&mut w, 300);
     assert_eq!(cell(&w, id), Cell::new(11, 2));
-    assert_eq!(w.order_of(id), Some(Order::Move(middle(16, 2))));
+    assert_eq!(w.order_of(id), Some(Order::Move(middle(13, 2))));
     assert_eq!(
         w.queued_orders_of(id).unwrap(),
         [Order::Move(middle(10, 8))]
@@ -399,6 +434,7 @@ fn a_blocked_move_holds_back_the_queue_behind_it() {
     run(&mut w, 5);
     assert_eq!(w.order_of(id), Some(Order::Idle));
     assert!(w.queued_orders_of(id).unwrap().is_empty());
+    assert_eq!(w.route_of(id).unwrap().status, RouteStatus::None);
 }
 
 #[test]
@@ -410,14 +446,15 @@ fn a_destination_inside_blocked_ground_is_approached_but_never_reached() {
     run(&mut w, 300);
     assert_eq!(cell(&w, id), Cell::new(17, 2));
     assert_eq!(w.order_of(id), Some(Order::Move(middle(18, 2))));
+    assert!(w.route_of(id).unwrap().unreachable);
 }
 
 #[test]
 fn a_unit_does_not_snap_onto_a_spot_in_blocked_ground() {
-    // A unit that is within one step of its destination lands on it. A walker
-    // fast enough to do that from outside the arrival tolerance (an eighth of a
-    // cell) stands at the edge of the rock, and the spot just inside it is a
-    // step like any other: refused.
+    // A unit that is within one step of its destination lands on it. The route
+    // of a destination inside the rock ends in the middle of the nearest cell
+    // the unit can enter, so a fast walker never has the spot within a step to
+    // land on, and the first point of the rock is not approached closer.
     let mut w = world();
     let id = spawn(&mut w, SPRINTER, 16, 2);
     order(&mut w, id, (18, 2));
@@ -426,13 +463,8 @@ fn a_unit_does_not_snap_onto_a_spot_in_blocked_ground() {
     let before = pos(&w, id);
     // The first point of the rock, on the row the unit stands on.
     let goal = Vec2::new(Fx::from_int(18), before.y);
-    let step = per_tick(Fx::from_int(6));
-    let distance = (goal - before).length_squared();
-    assert!(distance <= step.square(), "within one step");
-    assert!(
-        distance > Fx::from_ratio(1, 8).square(),
-        "outside the tolerance"
-    );
+    // Half a cell away: outside the arrival tolerance.
+    assert!((goal - before).length_squared() > Fx::from_ratio(1, 8).square());
     let tick = w.tick();
     w.schedule(
         tick,
@@ -444,9 +476,12 @@ fn a_unit_does_not_snap_onto_a_spot_in_blocked_ground() {
         },
     )
     .unwrap();
-    run(&mut w, 50);
-    assert_eq!(pos(&w, id), before);
+    for _ in 0..50 {
+        w.step();
+        assert_eq!(cell(&w, id), Cell::new(17, 2), "never in the rock");
+    }
     assert_eq!(w.order_of(id), Some(Order::Move(goal)));
+    assert!(w.route_of(id).unwrap().unreachable);
 }
 
 #[test]
@@ -494,6 +529,8 @@ fn land_is_blocked_by_water_and_rock_and_a_boat_by_land() {
     order(&mut w, soldier, (13, 7)); // into the river
     order(&mut w, boat, (10, 7)); // onto the bank
     run(&mut w, 300);
+    // Each stands in the cell of its own ground nearest the spot, in the
+    // middle of it, and the orders are kept.
     assert_eq!(cell(&w, soldier), Cell::new(11, 7));
     assert_eq!(
         cell(&w, boat),
@@ -502,12 +539,15 @@ fn land_is_blocked_by_water_and_rock_and_a_boat_by_land() {
     );
     assert!(matches!(w.order_of(soldier), Some(Order::Move(_))));
     assert!(matches!(w.order_of(boat), Some(Order::Move(_))));
+    assert!(w.route_of(soldier).unwrap().unreachable);
+    assert!(w.route_of(boat).unwrap().unreachable);
 
     let mut w = world();
     let soldier = spawn(&mut w, SOLDIER, 16, 3);
     order(&mut w, soldier, (21, 3)); // through the rock in columns 18 and 19
     run(&mut w, 400);
     assert_eq!(cell(&w, soldier), Cell::new(17, 3));
+    assert!(w.route_of(soldier).unwrap().unreachable);
 }
 
 #[test]
@@ -528,7 +568,7 @@ fn air_crosses_everything_and_hover_crosses_water_at_half_speed() {
     // In the river it goes at half its speed.
     let mut w = world();
     let ferry = spawn(&mut w, AMPHIBIAN, 13, 8);
-    order(&mut w, ferry, (13, 9));
+    order_and_ask(&mut w, ferry, (13, 9));
     let step = per_tick(Fx::from_int(2));
     let before = pos(&w, ferry).y.raw();
     w.step();
@@ -557,18 +597,50 @@ fn a_diagonal_step_does_not_slip_between_two_blocked_cells() {
             .with_movement(costs())
             .unwrap()
     };
+    let move_to = |w: &mut World, id: EntityId| {
+        let tick = w.tick();
+        w.schedule(
+            tick,
+            PlayerId(0),
+            Command::MoveTo {
+                ids: vec![id],
+                target: middle(6, 6),
+            },
+        )
+        .unwrap();
+    };
+    // The legacy walk goes in a straight line, into the closed corner, and is
+    // refused the step.
     let mut w = make(&ids);
     let id = spawn(&mut w, SOLDIER, 3, 3);
-    order(&mut w, id, (6, 6));
+    move_to(&mut w, id);
     run(&mut w, 300);
     assert_eq!(cell(&w, id), Cell::new(3, 3), "the corner is closed");
 
-    // With neither cell blocked, the same walk arrives.
+    // A route goes round it: it arrives and never steps across the corner.
+    let mut w = make(&ids);
+    let id = spawn(&mut w, SOLDIER, 3, 3);
+    order(&mut w, id, (6, 6));
+    let mut last = cell(&w, id);
+    for _ in 0..300 {
+        w.step();
+        let now = cell(&w, id);
+        assert!(
+            !((last == Cell::new(3, 3) && now == Cell::new(4, 4))
+                || (last == Cell::new(4, 4) && now == Cell::new(3, 3))),
+            "stepped across the closed corner"
+        );
+        last = now;
+    }
+    assert_eq!(cell(&w, id), Cell::new(6, 6));
+    assert_eq!(w.order_of(id), Some(Order::Idle));
+
+    // With neither cell blocked, the legacy walk arrives too.
     ids[4 * 8 + 3] = GRASS.0;
     ids[3 * 8 + 4] = GRASS.0;
     let mut w = make(&ids);
     let id = spawn(&mut w, SOLDIER, 3, 3);
-    order(&mut w, id, (6, 6));
+    move_to(&mut w, id);
     run(&mut w, 300);
     assert_eq!(cell(&w, id), Cell::new(6, 6));
 }

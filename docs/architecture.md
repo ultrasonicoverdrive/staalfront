@@ -160,8 +160,10 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   then the checksum.
 - **Orders (WP3.4):** a unit has a current order and a fixed ring of queued ones
   (`sf_sim::orders`, `docs/rules/orders.md`); `Command::Order` and `Command::Stop` set
-  them, the behavior pass carries them out. The order holds the destination, the
-  route (today the straight line) is a separate step phase 4 replaces.
+  them, the behavior pass carries them out. The order holds the destination; the route is a
+  separate record of the unit (WP4.2, `sf_sim::path`, `docs/rules/pathfinding.md`): hierarchical
+  A* over 16 x 16 cell sectors and their portals, served inside a node budget per tick in the
+  order of the entity ids, followed as a ring of waypoints.
 - **Checksum:** FNV-1a over the full state in a canonical order after every tick,
   with the history kept for the headless runner. The previous position and facing
   (render interpolation only) are the one deliberate exclusion.
@@ -428,6 +430,10 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   terrain layer of `assets/maps/<name>/`, and the action `Place(kind, owner, cell)`
   puts a structure on a cell. The map is read by `Scenario::load` only, never while a
   run goes. `terrain_256.ron` is the 256 x 256 cell playfield with structures.
+- **Path budget (WP4.2):** the optional scenario field `path_budget: Some(n)` sets the nodes of path
+  search work per tick (`World::with_path_budget`); `pathing.ron` (a maze, a bridge, an island, a
+  structure that closes a gap) and `pathing_256.ron` (200 requests on the playfield) run on the
+  frozen definitions `pathing_defs/`.
 - **Unit scenarios (WP3.2):** `unit_defs: Some("<dir>")` makes the world with the
   definitions in `assets/scenarios/<dir>/` (a frozen copy of the three files, so a
   balance change does not move a pinned checksum) as its unit table; the actions `SpawnUnit(kind, owner, cell)` and
@@ -435,7 +441,7 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   footprint from the definitions (and, since WP4.1, the movement costs of the classes). `units_spawn.ron` spawns every role of its frozen copy once;
   `tests/shipped_roles.rs` spawns every role of the shipped file, placed automatically, without a checksum.
 - **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
-  `command_mix`, `terrain_256`, `units_spawn`, `orders` and `terrain_costs` in release mode on Linux and Windows against the committed
+  `command_mix`, `terrain_256`, `units_spawn`, `orders`, `terrain_costs`, `pathing` and `pathing_256` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

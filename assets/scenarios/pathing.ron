@@ -1,0 +1,107 @@
+// Hierarchical path finding for single units (WP4.2, docs/rules/pathfinding.md).
+// The map is assets/maps/pathing, a hand-drawn 96 by 64 cell map made by
+// `cargo run -p sf_headless --example gen_pathing_map -- assets/maps/pathing`:
+//
+//   x 0..43              x 44..49              x 50..95
+//   a rock-bound room    the river (water,     the east bank: a lake (x 58..88,
+//   in the north-west    every row) with ONE   y 6..26) with an island in it
+//   (x 1..38, y 1..27):  bridge in row 40      (x 68..76, y 13..19), and a rock
+//   a serpentine of 4                          wall (x 70..71, y 27..63, from the
+//   walls, rock, water,                        lake to the edge of the map) with
+//   rock, water, with a                        two gaps: rows 44..47 and 56..59
+//   door at (38, 25)
+//
+// Who does what (entity ids are the slots in the order of the spawns, all at
+// generation 0; owners: 0 Meridian, 1 Veyran):
+//
+//   slot  unit                  from        to          shows
+//    0    light_tank (tracked)  (4, 4)      (41, 25)    the maze: snakes through all four walls
+//    1    amphibious (hover)    (4, 5)      (41, 25)    the same, straight through the water walls
+//    2    rifleman (foot)       (36, 58)    (60, 58)    the river has one bridge, row 40
+//    3    light_transport       (36, 60)    (60, 60)    ... wheeled takes it too
+//    4    light_tank (tracked)  (6, 50)     (90, 46)    the bridge, then the wall's first gap,
+//                                                       which a structure closes at tick 650
+//    5    rifleman (foot)       (54, 30)    (72, 17)    the island: UNREACHABLE on foot, so
+//    6    light_tank (tracked)  (54, 31)    (72, 17)    on tracks; both end on the nearest shore
+//    7    amphibious (hover)    (54, 32)    (72, 17)    the hover craft reaches it
+//    8    gunboat (water)       (46, 2)     (46, 60)    down the river, under the bridge
+//    9    gunboat (water)       (46, 10)    (30, 50)    onto land: unreachable, nearest water
+//   10-33 light_transport x 24  (10, 31)    (60, 62)    24 requests at once: the queue and the budget
+//   34    construction_center   anchor (72, 44), 4 x 4  placed at tick 650 right outside the first
+//                                                       gap of the wall, so that its cells are
+//                                                       blocked and the sector is rebuilt; it is
+//                                                       despawned at tick 1500 and the gap is open
+//                                                       again
+//
+// tools/sf_headless/tests/pathing.rs asserts, from the committed map, that every
+// reachable unit arrives, that no unit ever ends a tick on ground its class
+// cannot enter, that the length each unit walked is at most 1.1 times the best
+// route a plain search of the whole grid finds, that the unreachable ones stand
+// in the cell nearest to their goal, that the structure sends unit 4 through the
+// second gap, and that the work of the path service never exceeds its budget. CI
+// runs the scenario on Linux and Windows and requires the checksum in
+// pathing.expected.
+//
+// `unit_defs` is a FROZEN copy of the definitions (the terrain_costs ones), so a
+// rebalance of assets/config/ does not move the checksum.
+Scenario(
+    name: "pathing",
+    seed: 0x7E44_0042,
+    map: (width: 96, height: 64),
+    map_name: Some("pathing"),
+    unit_defs: Some("pathing_defs"),
+    ticks: 2600,
+    commands: [
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 4))), // slot 0: tank, the maze
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 0, cell: (4, 5))), // slot 1: hover, the maze
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (36, 58))), // slot 2: foot, the bridge
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (36, 60))), // slot 3: wheeled, the bridge
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (6, 50))), // slot 4: tank, the bridge and the wall
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (54, 30))), // slot 5: foot, the island
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (54, 31))), // slot 6: tank, the island
+        (tick: 0, command: SpawnUnit(kind: 25, owner: 1, cell: (54, 32))), // slot 7: hover, the island
+        (tick: 0, command: SpawnUnit(kind: 28, owner: 1, cell: (46, 2))), // slot 8: gunboat, down the river
+        (tick: 0, command: SpawnUnit(kind: 28, owner: 1, cell: (46, 10))), // slot 9: gunboat, onto land
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 10: crowd 0
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 11: crowd 1
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 12: crowd 2
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 13: crowd 3
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 14: crowd 4
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 15: crowd 5
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 16: crowd 6
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 17: crowd 7
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 18: crowd 8
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 19: crowd 9
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 20: crowd 10
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 21: crowd 11
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 22: crowd 12
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 23: crowd 13
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 24: crowd 14
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 25: crowd 15
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 26: crowd 16
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 27: crowd 17
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 28: crowd 18
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 29: crowd 19
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 30: crowd 20
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 31: crowd 21
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 32: crowd 22
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (10, 31))), // slot 33: crowd 23
+
+        // --- tick 1: every unit gets its order ---
+        (tick: 1, command: OrderMove(ids: [Id(0, 0)], target: (41, 25))),
+        (tick: 1, command: OrderMove(ids: [Id(1, 0)], target: (41, 25))),
+        (tick: 1, command: OrderMove(ids: [Id(2, 0)], target: (60, 58))),
+        (tick: 1, command: OrderMove(ids: [Id(3, 0)], target: (60, 60))),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (90, 46))),
+        (tick: 1, command: OrderMove(ids: [Id(5, 0)], target: (72, 17))),
+        (tick: 1, command: OrderMove(ids: [Id(6, 0)], target: (72, 17))),
+        (tick: 1, command: OrderMove(ids: [Id(7, 0)], target: (72, 17))),
+        (tick: 1, command: OrderMove(ids: [Id(8, 0)], target: (46, 60))),
+        (tick: 1, command: OrderMove(ids: [Id(9, 0)], target: (30, 50))),
+        (tick: 1, command: OrderMove(ids: [Range(10, 34)], target: (60, 62))),
+
+        // --- a structure in front of the wall's first gap, and its removal ---
+        (tick: 650, command: PlaceStructure(kind: 0, owner: 1, cell: (72, 44))), // slot 34
+        (tick: 1500, command: Despawn(ids: [Id(34, 0)])),
+    ],
+)

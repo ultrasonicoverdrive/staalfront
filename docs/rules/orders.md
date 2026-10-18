@@ -68,30 +68,36 @@ no growth. A constant, not data, because it sizes the storage of every slot.
 ## Destination and route
 
 The order holds the **destination**: where the unit wants to be (a point, or the live
-position of an entity). The **route** is how it gets there and is not part of the
-order. The unit keeps the point it steers at, the next **waypoint**, in its `target`
-column (`World::waypoint_of`), and `orders::next_waypoint` is the only function that
-decides it. Today the route is the straight line, so the waypoint is the destination;
-no pathfinding and no avoidance. Since WP4.1 the **terrain** can stop the walk: a unit does not
-enter a cell its movement class cannot cross, and stands at the edge with the order kept
-(`docs/rules/movement.md`). Nothing else reads `target`: the
-guard's walk-or-wait switch has a column of its own (`guard_walking`), so the route can
-take `target` over.
+position of an entity). The **route** is how it gets there and is not part of the order: it is a
+record of the unit of its own (`Entities::route`, a fixed-size ring of waypoints and the portals of
+the way still to refine; `docs/rules/pathfinding.md`), reset whenever the order changes or ends. The
+unit keeps the point it steers at, the next **waypoint**, in its `target` column
+(`World::waypoint_of`), and `Pathing::steer` (`crates/sf_sim/src/path.rs`) is the only function that
+decides it; `orders::go_to` calls it once a tick. Arrival is judged against the destination, never
+against the waypoint. Nothing else reads `target`: the guard's walk-or-wait switch has a column of
+its own (`guard_walking`), so the route could take `target` over.
 
-* **Phase 4 (WP4.2, WP4.3)** replaces `next_waypoint` (A* path, flowfield step); its
-  signature changes then, to take the terrain and the route the unit keeps (today it
-  takes the entities and the destination and ignores them). Its one caller, `go_to`,
-  stays. The
-  order, the queue, the arrival test and the target-follow logic stay as they are:
-  arrival is always judged against the destination, never against the waypoint. A blocked
-  route or a vanished target is WP4.7's replan: it recomputes the route, the order stays.
-* **Terrain (WP4.1).** `walk` returns whether the unit arrived, is on its way, or was blocked
-  by terrain; `go_to` counts only an arrival. A blocked unit keeps its order and its queue,
-  forever, until a new order replaces them; ending such an order ("gives up", "as near as it
-  gets") is WP4.4's outcome and WP4.7's replan. The speed of a step is the unit's speed per
-  tick times the multiplier of the cell it stands in.
-* **WP4.4** adds collisions; a unit that cannot reach its destination then needs an
-  outcome ("gives up after N ticks" or "stands as near as it gets") that ends the order.
+* **Since WP4.2** a unit of a movement class that terrain restricts (everything but aircraft) that
+  walks an order asks for a route on the first tick of the walk and **stands still until it has one**
+  (one tick at least: the request is served at the start of the next). The route goes round what
+  the class cannot cross and the structures, through the waypoints of the ring; while there is a
+  waypoint `waypoint_of` is it, when the ring is empty and the route complete the destination
+  itself. Aircraft, the legacy `MoveTo` and the wanderers steer straight at the destination, and
+  `waypoint_of` is the destination, as before. A destination that moves (an attack, a guard of an
+  entity) by more than 3 cells from the cell the route was asked for makes the unit ask again.
+* **A destination that cannot be reached** (blocked ground, or cut off) is not an error and does not
+  end the order: the route leads to the reachable cell nearest to it, the unit stands in the middle of
+  it, and `World::route_of(id)` says `unreachable` and `Stranded` until the order is replaced. The
+  order, the queue behind it and the arrival test stay as they are, as they did when the unit stood
+  at the edge of a river at WP4.1; ending such an order ("gives up", "stands as near as it gets")
+  is WP4.4's outcome and WP4.7's replan.
+* **WP4.3** adds the flowfield step for groups to the same seam; **WP4.7** recomputes the route when
+  it is blocked or the target has vanished, the order staying.
+* **Terrain (WP4.1).** `walk` returns whether the unit arrived, is on its way, or was blocked by
+  terrain; `go_to` counts only an arrival, and a blocked step on a route makes the unit ask for a
+  cell-by-cell route (a second refusal leaves it standing, order kept). The speed of a step is
+  the unit's speed per tick times the multiplier of the cell it stands in.
+* **WP4.4** adds collisions.
 * **WP4.5** makes the turn-before-drive and the separate turret part of the same step
   (`walk`); the present rule is: turn at the unit's turn rate and drive only when the
   facing is within `ALIGN_TOLERANCE` (16 of 256 steps) of the wanted direction.
@@ -216,8 +222,10 @@ so a click on an enemy is an `Attack`, on one of your own a `Guard`, on ground a
 
 A unit made from the unit table moves at its speed times the cost of the cell it stands in and
 does not enter a cell its movement class cannot cross; the order, the queue and the arrival test
-are unchanged (`docs/rules/movement.md`). The `orders` scenario has no terrain layer (every cell is open
-ground), so its checksum did not change; its frozen definitions carry the costs as shipped at WP4.1.
+are unchanged (`docs/rules/movement.md`), and the route round what it cannot cross is
+`docs/rules/pathfinding.md`. The `orders` scenario has no terrain layer (every cell is open
+ground, and no unit is routed), so its checksum did not change at WP4.1 or WP4.2; its frozen
+definitions carry the costs as shipped at WP4.1.
 
 ## Tuning constants
 

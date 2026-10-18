@@ -10,6 +10,7 @@ use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
+use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, RouteView};
 use crate::snapshot::{EntityView, Snapshot};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
@@ -111,6 +112,9 @@ pub enum ConfigError {
     /// The movement table was given to a world that has already started, for
     /// the same reason.
     MovementAfterStart,
+    /// The path budget was given to a world that has already started, or is
+    /// below [`MIN_NODE_BUDGET`](crate::MIN_NODE_BUDGET).
+    PathBudget,
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -130,6 +134,9 @@ impl fmt::Display for ConfigError {
             ConfigError::NoTurning => "the turn rate per tick is zero",
             ConfigError::TerrainSize => "the terrain layer is not the size of the map",
             ConfigError::UnitsAfterStart => "the unit table must be given before the world starts",
+            ConfigError::PathBudget => {
+                "the path budget must be given before the world starts and be at least the minimum"
+            }
             ConfigError::MovementAfterStart => {
                 "the movement table must be given before the world starts"
             }
@@ -180,6 +187,10 @@ pub struct World {
     /// creation; empty for a world without movement classes, which is open
     /// ground for everyone.
     pub(crate) movement: MovementTable,
+    /// The sectors, portals and routes (WP4.2): the abstract graph of every
+    /// movement class that terrain restricts, the job being served and the
+    /// budget. Empty (inactive) on a world without terrain or movement table.
+    pub(crate) pathing: Pathing,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -264,6 +275,30 @@ impl World {
             return Err(ConfigError::MovementGap { class, terrain });
         }
         self.movement = movement;
+        self.pathing = Pathing::build(
+            &self.terrain,
+            &self.movement,
+            &self.occupancy,
+            self.pathing.budget(),
+        );
+        Ok(self)
+    }
+
+    /// The same world with a different path budget: the nodes of search work it
+    /// may do in one tick ([`DEFAULT_NODE_BUDGET`](crate::DEFAULT_NODE_BUDGET)
+    /// otherwise). Call it right after the world is made
+    /// ([`ConfigError::PathBudget`] after it has started, or below
+    /// [`MIN_NODE_BUDGET`](crate::MIN_NODE_BUDGET)). It decides when a unit gets
+    /// its route, never which route.
+    pub fn with_path_budget(mut self, nodes: u32) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || nodes < MIN_NODE_BUDGET
+        {
+            return Err(ConfigError::PathBudget);
+        }
+        self.pathing.set_budget(nodes);
         Ok(self)
     }
 
@@ -279,6 +314,7 @@ impl World {
             terrain,
             units: UnitTable::empty(),
             movement: MovementTable::empty(),
+            pathing: Pathing::inactive(),
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -404,12 +440,56 @@ impl World {
         Some(self.entities.queue[i].iter().collect())
     }
 
-    /// The point a unit is steering at right now (the next waypoint of its
-    /// route, today the destination itself); `None` for a stale id and for a
-    /// unit that is not walking.
+    /// The point a unit is steering at right now: the next waypoint of its
+    /// route, and once the route is done (or for a unit that is not routed) the
+    /// destination itself. `None` for a stale id, for a unit that is not walking
+    /// and for one that waits for its route or stands at the end of it.
     pub fn waypoint_of(&self, id: EntityId) -> Option<Vec2> {
         let i = self.live_index(id)?;
         self.entities.target[i]
+    }
+
+    /// The route of a unit (WP4.2): whether it follows waypoints, waits for
+    /// them or stands at the end of its route, and whether its destination
+    /// could be reached; `None` for a stale id. A unit without a walking
+    /// order, a class that terrain does not restrict and a world without
+    /// pathfinding all read as no route.
+    pub fn route_of(&self, id: EntityId) -> Option<RouteView> {
+        let i = self.live_index(id)?;
+        Some(self.pathing.view(&self.entities, i))
+    }
+
+    /// What the path service did with its budget (WP4.2).
+    pub fn path_stats(&self) -> PathStats {
+        self.pathing.stats()
+    }
+
+    /// Whether routes are found for movement class `class`: the world has
+    /// terrain and a movement table, and some terrain type stops the class.
+    pub fn paths_class(&self, class: u16) -> bool {
+        self.pathing.paths_class(class)
+    }
+
+    /// Plans the whole route of a unit of `class` from `from` to `to` in one
+    /// go, with no budget and no unit: the waypoints it would take, in order.
+    /// `None` for a class without pathfinding or a point outside the map. It
+    /// changes nothing in the world.
+    pub fn plan_route(&self, class: u16, from: Vec2, to: Vec2) -> Option<PlannedRoute> {
+        self.pathing.plan(class, from, to)
+    }
+
+    /// Reads the sector that contains `cell` again from the terrain and the
+    /// structures and rebuilds the portals and costs that depend on it and its
+    /// neighbours; routes through it are made again. The world does this
+    /// itself when a structure is placed or removed (the only things that
+    /// change what a cell allows); it is public for a change of the terrain
+    /// (a bridge destroyed) that a later work package makes. Does nothing for a
+    /// cell outside the map or in a world without pathfinding.
+    pub fn invalidate_sector(&mut self, cell: Cell) {
+        if let Some(sector) = self.pathing.sector_of(cell) {
+            self.pathing
+                .refresh_sectors(&self.terrain, &self.movement, &self.occupancy, &[sector]);
+        }
     }
 
     /// How many cells are occupied.
@@ -528,12 +608,23 @@ impl World {
             }
         }
 
+        // The path service first: it gives the requests of units that asked
+        // earlier their routes (within the budget), lowest slot first.
+        self.pathing.serve(&mut self.entities, &self.units);
+
         let motion = self.motion();
         let ground = Ground {
             terrain: &self.terrain,
             movement: &self.movement,
         };
-        behavior::advance_all(&mut self.entities, &motion, &self.units, &ground, tick);
+        behavior::advance_all(
+            &mut self.entities,
+            &motion,
+            &self.units,
+            &ground,
+            &mut self.pathing,
+            tick,
+        );
 
         self.tick = tick.next();
         let checksum = self.checksum();
@@ -692,6 +783,13 @@ impl World {
                     self.occupancy.release(index);
                 }
             }
+            // The cells are free again: the routes and portals around them.
+            self.pathing.refresh_cells(
+                &self.terrain,
+                &self.movement,
+                &self.occupancy,
+                footprint_cells(anchor, footprint),
+            );
         }
         self.entities.clear(i);
         if let Some(next) = self.entities.generation[i].checked_add(1) {
@@ -769,6 +867,13 @@ impl World {
             debug_assert!(claimed, "the cells were free a moment ago");
         }
         self.entities.cell[id.index() as usize] = anchor_index;
+        // The cells are taken: ground units can no longer cross them.
+        self.pathing.refresh_cells(
+            &self.terrain,
+            &self.movement,
+            &self.occupancy,
+            footprint_cells(anchor, footprint),
+        );
         Some(id)
     }
 

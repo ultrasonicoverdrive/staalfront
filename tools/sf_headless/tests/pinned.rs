@@ -18,8 +18,8 @@
 //! ```
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
-//! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders` and
-//! `terrain_costs`. A change in `sf_sim` also moves
+//! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
+//! `terrain_costs`, `pathing` and `pathing_256`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -42,6 +42,8 @@ const UNITS_SPAWN_EXPECTED: &str = include_str!("../../../assets/scenarios/units
 const ORDERS_EXPECTED: &str = include_str!("../../../assets/scenarios/orders.expected");
 const TERRAIN_COSTS_EXPECTED: &str =
     include_str!("../../../assets/scenarios/terrain_costs.expected");
+const PATHING_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing.expected");
+const PATHING_256_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing_256.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -94,11 +96,27 @@ fn orders_matches_the_pinned_checksum() {
 }
 
 /// Units of every movement class across road, grass, ore and a bridged river,
-/// stopped by rock and water (WP4.1). A new scenario: its value was pinned when it
-/// was added; the other five did not change.
+/// stopped by rock and water (WP4.1). Pinned when it was added; **re-pinned once at
+/// WP4.2** (`0x8c43b875a877488c` to the value in the file), because its `Move`
+/// orders now find their way round the river and the rock instead of stopping at
+/// them (`docs/rules/movement.md`). The other five did not change.
 #[test]
 fn terrain_costs_matches_the_pinned_checksum() {
     check("terrain_costs", TERRAIN_COSTS_EXPECTED);
+}
+
+/// Hierarchical path finding (WP4.2): a maze, a bridge, an island, a structure that
+/// closes a gap, a crowd. A new scenario: pinned when it was added.
+#[test]
+fn pathing_matches_the_pinned_checksum() {
+    check("pathing", PATHING_EXPECTED);
+}
+
+/// 200 path requests on the 256 by 256 playfield (WP4.2). A new scenario: pinned when
+/// it was added.
+#[test]
+fn pathing_256_matches_the_pinned_checksum() {
+    check("pathing_256", PATHING_256_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
@@ -149,7 +167,8 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
             .final_checksum
     };
     let pinned = |text: &str| parse_checksum(text).unwrap();
-    // Frozen definitions (units_spawn and terrain_costs have a terrain layer):
+    // Frozen definitions (units_spawn, terrain_costs and the pathing scenarios have a
+    // terrain layer):
     // the pinned value, whatever the shipped costs are.
     assert_eq!(
         final_checksum("units_spawn", &altered),
@@ -158,6 +177,14 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
     assert_eq!(
         final_checksum("terrain_costs", &altered),
         pinned(TERRAIN_COSTS_EXPECTED)
+    );
+    assert_eq!(
+        final_checksum("pathing", &altered),
+        pinned(PATHING_EXPECTED)
+    );
+    assert_eq!(
+        final_checksum("pathing_256", &altered),
+        pinned(PATHING_256_EXPECTED)
     );
     assert_eq!(final_checksum("orders", &altered), pinned(ORDERS_EXPECTED));
     // The scenario on the shipped definitions (no `unit_defs`) does move: the
@@ -181,6 +208,8 @@ fn the_expected_files_hold_one_bare_checksum() {
         UNITS_SPAWN_EXPECTED,
         ORDERS_EXPECTED,
         TERRAIN_COSTS_EXPECTED,
+        PATHING_EXPECTED,
+        PATHING_256_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");
