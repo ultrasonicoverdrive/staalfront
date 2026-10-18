@@ -118,9 +118,8 @@ fn the_mesh_nodes_of_a_figure_merge_into_one_part() {
 #[test]
 fn a_wreck_keeps_its_turret_as_a_part_that_turns() {
     // `hull` has a mesh and a child, `turret` too: both become rigged parts.
-    // The `barrel` of these wrecks is a mesh node without children, which the
-    // loader folds into the turret (no separate part to tilt); the checker
-    // reports that as `engine-parts`.
+    // The `barrel` of these wrecks is a mesh node without children; being
+    // named `barrel` it is a part of its own too, under the turret, and tilts.
     for file in [
         "neutral_wreck_medium_vehicle.glb",
         "neutral_wreck_vessel.glb",
@@ -137,10 +136,9 @@ fn a_wreck_keeps_its_turret_as_a_part_that_turns() {
             let (hull, turret) = (by_name("hull"), by_name("turret"));
             assert_eq!(level.parts[turret].parent, Some(hull), "{file}");
             assert_eq!(level.parts[turret].joint, Joint::Yaw, "{file}");
-            assert!(
-                level.parts.iter().all(|p| p.name != "barrel"),
-                "{file}: the barrel was folded into the turret"
-            );
+            let barrel = by_name("barrel");
+            assert_eq!(level.parts[barrel].parent, Some(turret), "{file}");
+            assert_eq!(level.parts[barrel].joint, Joint::Pitch, "{file}");
         }
     }
 }

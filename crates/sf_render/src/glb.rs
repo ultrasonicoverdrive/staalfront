@@ -27,7 +27,9 @@
 //! without a mesh, or with children, is a **part** (`hull_LOD0`, `turret_LOD0`,
 //! `barrel_LOD0`); a mesh node without children (`hull_steel_LOD0`, ...) is
 //! merged into the nearest part above it with its transform relative to that
-//! part. So a part split per material becomes **one** vertex/index buffer
+//! part. The exception is a node named `turret` or `barrel` (after the LOD
+//! suffix): it is always a part, even as a childless mesh node, because it
+//! has to turn or tilt on its own. So a part split per material becomes **one** vertex/index buffer
 //! with the material as a per-vertex colour ([`crate::mesh::Vertex`]): the
 //! material named `team` gets team weight 1 (the player colour), every other
 //! material its base colour factor. `_LOD<n>` suffixes are stripped from part
@@ -216,6 +218,12 @@ pub fn split_lod_suffix(name: &str) -> (&str, Option<u32>) {
 /// `name` without a trailing `_LOD<digits>`.
 pub fn strip_lod_suffix(name: &str) -> &str {
     split_lod_suffix(name).0
+}
+
+/// A part name that carries a joint (`turret` yaws, `barrel` pitches), after
+/// the LOD suffix is stripped. Such a node is always a part of its own.
+fn is_joint_name(name: &str) -> bool {
+    matches!(name, "turret" | "barrel")
 }
 
 /// Read and load a `.glb` file.
@@ -491,7 +499,12 @@ impl Level {
         depth: usize,
     ) -> Result<(), GlbError> {
         self.enter(node, depth)?;
-        let is_part = node.mesh().is_none() || node.children().next().is_some();
+        // A node without a mesh or with children is a part (a frame). So is
+        // a turret or barrel, even a childless mesh node: it has to turn or
+        // tilt on its own, and folding it into its parent would lose that.
+        let is_part = node.mesh().is_none()
+            || node.children().next().is_some()
+            || is_joint_name(strip_lod_suffix(node.name().unwrap_or("")));
         if is_part {
             let at = self.add_part(node, parent, to_parent)?;
             self.merge_node(node, at, Mat4::IDENTITY, blob)?;

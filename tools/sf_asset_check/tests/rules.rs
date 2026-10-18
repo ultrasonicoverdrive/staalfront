@@ -499,22 +499,30 @@ fn a_wreck_may_lose_its_turret_but_a_vehicle_keeps_the_nodes() {
 }
 
 #[test]
-fn a_turret_or_barrel_that_is_a_plain_mesh_node_cannot_move_in_the_engine() {
-    // A tank whose turret has a mesh and no children: the loader folds it into the hull.
+fn a_turret_or_barrel_that_is_a_plain_mesh_node_is_fine() {
+    // The engine loader makes a node named turret or barrel a rigged part
+    // whatever it holds, so a childless mesh node needs no empty frame node
+    // around it (the old `engine-parts` rule is gone).
     let mut t = tank("veyran_light_tank", 0.30);
     for lod in 0..3 {
         t.remove_part(lod, "turret");
-        t.part_mut(lod, "hull").children.push(
-            Part::new("turret")
-                .at([0.0, 1.0, 0.0])
-                .boxed([-0.5, 0.0, -0.5], [0.5, 0.3, 0.5]),
+        // A turret that is a mesh and carries a barrel that is a plain mesh.
+        let mut turret = Part::new("turret")
+            .at([0.0, 1.0, 0.0])
+            .boxed([-0.5, 0.0, -0.5], [0.5, 0.3, 0.5]);
+        turret.children.push(
+            Part::new("barrel")
+                .at([0.3, 0.2, 0.0])
+                .boxed([0.0, -0.05, -0.05], [1.0, 0.05, 0.05]),
         );
+        t.part_mut(lod, "hull").children.push(turret);
     }
     let r = check("veyran_light_tank.glb", &t);
-    assert!(r.failed("engine-parts"), "{:#?}", r.findings);
-    assert!(messages(&r, "engine-parts").contains("cannot turn"));
+    assert!(!r.has("engine-parts"), "{:#?}", r.findings);
+    assert!(!r.failed("nodes"), "{:#?}", r.findings);
+    assert_clean(&r);
 
-    // The same for the barrel of a wreck is only a warning: a wreck does not aim.
+    // The same for the barrel of a wreck.
     let mut w = wreck("neutral_wreck_medium_vehicle");
     for lod in 0..3 {
         *w.part_mut(lod, "barrel") = Part::new("barrel")
@@ -522,12 +530,8 @@ fn a_turret_or_barrel_that_is_a_plain_mesh_node_cannot_move_in_the_engine() {
             .at([0.5, 0.15, 0.0]);
     }
     let r = check("neutral_wreck_medium_vehicle.glb", &w);
-    assert!(
-        r.has("engine-parts") && !r.failed("engine-parts"),
-        "{:#?}",
-        r.findings
-    );
-    assert!(messages(&r, "engine-parts").contains("cannot tilt"));
+    assert!(!r.has("engine-parts"), "{:#?}", r.findings);
+    assert_clean(&r);
 }
 
 #[test]

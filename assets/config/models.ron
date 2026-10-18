@@ -39,7 +39,9 @@
         // already (front +X, up +Y, metres) with three LODs each. Infantry
         // wander (Circle); decor and wrecks stand still (Square: in
         // `sf_game` a Square icon makes a model a fixed object near the base
-        // centre). Not wired into `unit_defs.ron` yet.
+        // centre). The infantry is wired into `unit_defs.ron` (`model` /
+        // `models` per faction, docs/rules/units.md); the decor and the wrecks
+        // are not unit roles and wait for the map WPs.
         "set_v3": (
             dir: "set_v3",
             axes: (front: PlusX, up: PlusY, metres_per_unit: 1.0),

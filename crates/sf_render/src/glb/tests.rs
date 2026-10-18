@@ -365,6 +365,108 @@ fn the_turret_and_barrel_transforms_chain() {
     );
 }
 
+/// A tank whose turret and barrel are plain mesh nodes: `hull` (one mesh
+/// child) -> `turret` (mesh, carrying the barrel when `turret_has_barrel`) ->
+/// `barrel` (a childless mesh node). Names get the `_LOD0` suffix.
+fn mesh_turret_scene(turret_has_barrel: bool) -> Scene {
+    let quad = || {
+        writer::box_faces([0.0; 3], [1.0; 3], [0; 6])
+            .into_iter()
+            .next()
+            .unwrap()
+    };
+    let node = |name: &str, translation: [f32; 3], prim: Option<writer::Prim>| writer::Node {
+        name: name.into(),
+        translation,
+        prim,
+        ..writer::Node::default()
+    };
+    let mut nodes = vec![
+        node("tank_LOD0", [0.0; 3], None),
+        node("hull_LOD0", [0.0; 3], None),
+        node("hull_plate_LOD0", [0.0; 3], Some(quad())),
+        node("turret_LOD0", [0.0, 1.0, 0.0], Some(quad())),
+        node("barrel_LOD0", [0.3, 0.2, 0.0], Some(quad())),
+    ];
+    nodes[0].children = vec![1];
+    nodes[1].children = vec![2, 3];
+    if turret_has_barrel {
+        nodes[3].children = vec![4];
+    } else {
+        // The barrel beside the turret, under the hull.
+        nodes[1].children.push(4);
+    }
+    Scene {
+        materials: vec![("steel".into(), writer::STEEL)],
+        nodes,
+        roots: vec![0],
+        version: "2.0".into(),
+        extra_json: String::new(),
+    }
+}
+
+#[test]
+fn a_childless_mesh_turret_or_barrel_is_a_part_with_its_joint() {
+    let axes = AxisConvention::ENGINE;
+    // hull -> turret -> barrel, the barrel a childless mesh node.
+    let model = load_glb(&writer::write(&mesh_turret_scene(true)), &axes).unwrap();
+    let parts = &model.levels[0].parts;
+    let names: Vec<&str> = parts.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["hull", "turret", "barrel"]);
+    assert_eq!(parts[0].joint, Joint::Fixed);
+    assert_eq!(parts[1].joint, Joint::Yaw);
+    assert_eq!(parts[2].joint, Joint::Pitch);
+    assert_eq!(parts[1].parent, Some(0));
+    assert_eq!(parts[2].parent, Some(1), "the barrel hangs on the turret");
+    // Each keeps its own mesh: one face of two triangles.
+    for part in parts {
+        assert_eq!(part.mesh.indices.len(), 6, "{}", part.name);
+    }
+    // The barrel tilts about its own pivot, the turret yaws it along.
+    let set = model_set(std::slice::from_ref(&model), &[]).unwrap();
+    let rig = set.model(0).parts(0);
+    let mut world = [Mat4::IDENTITY; MAX_PARTS];
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let tip = Vec3::new(0.8, 0.0, 0.0);
+    pose_parts(
+        Mat4::IDENTITY,
+        rig,
+        PartAngles {
+            yaw: 0.0,
+            pitch: quarter,
+        },
+        &mut world,
+    );
+    assert!(close(
+        world[2].transform_point3(tip),
+        Vec3::new(0.3, 2.0, 0.0)
+    ));
+    pose_parts(
+        Mat4::IDENTITY,
+        rig,
+        PartAngles {
+            yaw: quarter,
+            pitch: 0.0,
+        },
+        &mut world,
+    );
+    assert!(close(
+        world[2].transform_point3(tip),
+        Vec3::new(0.0, 1.2, 1.1)
+    ));
+
+    // A childless mesh turret (no barrel below it) is a yawing part too, and
+    // the hull keeps only its own plate.
+    let model = load_glb(&writer::write(&mesh_turret_scene(false)), &axes).unwrap();
+    let parts = &model.levels[0].parts;
+    let names: Vec<&str> = parts.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["hull", "turret", "barrel"]);
+    assert_eq!(parts[1].joint, Joint::Yaw);
+    assert_eq!(parts[2].joint, Joint::Pitch);
+    assert_eq!(parts[2].parent, Some(0));
+    assert_eq!(parts[0].mesh.indices.len(), 6);
+}
+
 #[test]
 fn bounds_cover_the_finest_level_and_the_reach_any_pose() {
     let bytes = writer::write(&writer::orientation(&AxisConvention::ENGINE));
