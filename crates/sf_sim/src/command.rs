@@ -170,6 +170,17 @@ pub enum ScheduleError {
         /// The sequence number that is taken.
         sequence: u64,
     },
+    /// The sequence number was `u64::MAX`. That number is reserved: a
+    /// player's counter stands on it when the numbers are used up, so a
+    /// command carrying it could never be told apart from "no number left".
+    ReservedSequence,
+    /// The player's counter has no number left to give (it stands on
+    /// `u64::MAX`, because a sender brought a number just below it). Refused
+    /// instead of reusing a number: a reused key would overwrite a command.
+    SequenceExhausted {
+        /// The player.
+        player: PlayerId,
+    },
 }
 
 impl fmt::Display for ScheduleError {
@@ -188,6 +199,16 @@ impl fmt::Display for ScheduleError {
                 "player {} already has a command with sequence number {sequence} for tick {tick}",
                 player.0
             ),
+            ScheduleError::ReservedSequence => {
+                write!(
+                    f,
+                    "sequence number {} is reserved and cannot be used",
+                    u64::MAX
+                )
+            }
+            ScheduleError::SequenceExhausted { player } => {
+                write!(f, "player {} has used up its sequence numbers", player.0)
+            }
         }
     }
 }
@@ -256,17 +277,32 @@ impl CommandQueue {
         }
         let counter = self.next_seq.entry(player).or_insert(0);
         let seq = *counter;
-        *counter = seq.saturating_add(1);
-        self.pending.insert((tick, player, seq), command);
+        if seq == u64::MAX {
+            return Err(ScheduleError::SequenceExhausted { player });
+        }
+        let key = (tick, player, seq);
+        // Never overwrite: a command that is already there stays.
+        if self.pending.contains_key(&key) {
+            return Err(ScheduleError::DuplicateSequence {
+                tick,
+                player,
+                sequence: seq,
+            });
+        }
+        *counter = seq + 1;
+        self.pending.insert(key, command);
         Ok(())
     }
 
     /// Like [`CommandQueue::schedule`], for a command that carries the
     /// sequence number its sender gave it (WP3.4; the lockstep package of
     /// WP14.1 will carry it in the packet). The command runs by
-    /// `(tick, player, sequence)`, wherever and whenever it arrived. Fails if
-    /// `tick` is before `now`, or if the player already has a pending command
-    /// for that tick under that number.
+    /// `(tick, player, sequence)`, wherever and whenever it arrived. Numbers
+    /// need not be consecutive: gaps are allowed and the commands still run in
+    /// number order (that none is missing is for the network layer to check).
+    /// Fails if `tick` is before `now`, if the number is `u64::MAX` (reserved)
+    /// or if the player already has a pending command for that tick under that
+    /// number. A refused command changes nothing.
     pub fn schedule_sequenced(
         &mut self,
         now: Tick,
@@ -281,6 +317,9 @@ impl CommandQueue {
                 current: now,
             });
         }
+        if sequence == u64::MAX {
+            return Err(ScheduleError::ReservedSequence);
+        }
         let key = (tick, player, sequence);
         if self.pending.contains_key(&key) {
             return Err(ScheduleError::DuplicateSequence {
@@ -289,8 +328,9 @@ impl CommandQueue {
                 sequence,
             });
         }
+        // `sequence` is below `u64::MAX`, so the sum cannot overflow.
         let counter = self.next_seq.entry(player).or_insert(0);
-        *counter = (*counter).max(sequence.saturating_add(1));
+        *counter = (*counter).max(sequence + 1);
         self.pending.insert(key, command);
         Ok(())
     }
@@ -487,6 +527,70 @@ mod tests {
         assert_eq!(
             drain(&mut q, Tick(4)),
             vec![(0, despawn(1)), (1, despawn(4))]
+        );
+    }
+
+    #[test]
+    fn the_reserved_number_is_refused_and_nothing_is_overwritten() {
+        let mut q = CommandQueue::new();
+        // u64::MAX is refused outright and changes nothing.
+        assert_eq!(
+            q.schedule_sequenced(Tick(0), Tick(1), PlayerId(0), u64::MAX, despawn(1)),
+            Err(ScheduleError::ReservedSequence)
+        );
+        assert!(q.is_empty());
+        // The highest usable number leaves the counter on u64::MAX: the next
+        // unnumbered command is refused instead of reusing a key.
+        q.schedule_sequenced(Tick(0), Tick(1), PlayerId(0), u64::MAX - 1, despawn(2))
+            .unwrap();
+        for tick in [1, 2] {
+            assert_eq!(
+                q.schedule(Tick(0), Tick(tick), PlayerId(0), despawn(3)),
+                Err(ScheduleError::SequenceExhausted {
+                    player: PlayerId(0)
+                })
+            );
+        }
+        assert_eq!(q.len(), 1);
+        assert_eq!(drain(&mut q, Tick(1)), vec![(0, despawn(2))]);
+        // Other players are not affected.
+        q.schedule(Tick(0), Tick(1), PlayerId(1), despawn(4))
+            .unwrap();
+        assert!(
+            ScheduleError::ReservedSequence
+                .to_string()
+                .contains("reserved")
+        );
+        assert!(
+            ScheduleError::SequenceExhausted {
+                player: PlayerId(0)
+            }
+            .to_string()
+            .contains("used up")
+        );
+    }
+
+    #[test]
+    fn schedule_never_overwrites_an_existing_key() {
+        let mut q = CommandQueue::new();
+        // A sender's number 0 for tick 3 is there; the local counter is also on 0
+        // before it has seen the number, but raising it keeps them apart.
+        q.schedule_sequenced(Tick(0), Tick(3), PlayerId(0), 0, despawn(10))
+            .unwrap();
+        q.schedule(Tick(0), Tick(3), PlayerId(0), despawn(11))
+            .unwrap();
+        assert_eq!(
+            drain(&mut q, Tick(3)),
+            vec![(0, despawn(10)), (0, despawn(11))]
+        );
+        // Gaps are allowed and the numbers still decide the order.
+        q.schedule_sequenced(Tick(4), Tick(5), PlayerId(0), 900, despawn(12))
+            .unwrap();
+        q.schedule_sequenced(Tick(4), Tick(5), PlayerId(0), 7, despawn(13))
+            .unwrap();
+        assert_eq!(
+            drain(&mut q, Tick(5)),
+            vec![(0, despawn(13)), (0, despawn(12))]
         );
     }
 

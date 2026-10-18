@@ -279,6 +279,14 @@ pub enum Action {
         #[serde(default)]
         queued: bool,
     },
+    /// `Command::Order` with `Order::HoldPosition`: stand still on purpose.
+    OrderHold {
+        /// The units.
+        ids: Vec<IdSpec>,
+        /// Append to the queue instead of replacing the orders.
+        #[serde(default)]
+        queued: bool,
+    },
     /// `Command::Stop`: clear the order and the queue; the units stand still.
     Stop {
         /// The units.
@@ -694,7 +702,9 @@ impl Scenario {
                         ));
                     }
                 }
-                Action::OrderScatter { ids, .. } | Action::Stop { ids } => {
+                Action::OrderScatter { ids, .. }
+                | Action::OrderHold { ids, .. }
+                | Action::Stop { ids } => {
                     id_problems(&at, ids, &mut p);
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
@@ -846,6 +856,9 @@ impl Scenario {
                 }
                 Action::OrderScatter { ids, queued } => {
                     schedule_order(&mut world, tick, player, ids, Order::Scatter, *queued)?;
+                }
+                Action::OrderHold { ids, queued } => {
+                    schedule_order(&mut world, tick, player, ids, Order::HoldPosition, *queued)?;
                 }
                 Action::Stop { ids } => {
                     let command = Command::Stop { ids: expand(ids) };

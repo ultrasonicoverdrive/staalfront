@@ -15,14 +15,15 @@ hashed in the checksum and independent of the click that made them.
 
 | Order | The unit... | Ends when |
 |---|---|---|
-| `Idle` | stands still. **Stand still is idle**: it is what a unit has when it has no order, and `Stop` puts it there. | never by itself; any other order replaces it |
+| `Idle` | has no order: it is what a unit has when nothing was ordered, and `Stop` puts it there. Phase 5 lets an idle unit react (return fire, auto-acquire). | never by itself; any other order replaces it |
+| `HoldPosition` | stands still **on purpose** and never moves, not to chase and not to get closer. Phase 5 may fire from it at what is in range, but it never moves by itself. | never by itself; a queued order behind it waits (an idle unit would start it at once) until the hold is replaced or stopped |
 | `Move(point)` | goes to the point | it is within `ARRIVE_TOLERANCE` (an eighth of a cell, half a metre) of the point |
 | `Attack(entity)` | goes toward the entity until it is within the reach of its first weapon, then stands and turns to face it | the target is gone: dead, despawned, or an id whose slot now holds another entity (generation check) |
 | `AttackMove(point)` | goes to the point; on the way it would engage what it meets (phase 5) | it is within `ARRIVE_TOLERANCE` of the point |
 | `Guard(point)` | goes to the point and stays; walks back if it is ever moved off | never by itself: a queued order behind it waits until the guard is replaced or stopped |
 | `Guard(entity)` | follows the entity and stays near it | the entity is gone |
 | `Scatter` | takes a short step in a deterministic direction | it is a `Move` as soon as it starts (below) |
-| `Stop` (a command) | clears the current order and the queue; the unit stands where it is (a wandering placeholder stops wandering too) | not an order: the unit is `Idle` afterwards |
+| `Stop` (a command) | clears the current order and the queue; the unit stands where it is, idle (a wandering placeholder stops wandering too) | not an order: the unit is `Idle` afterwards |
 
 A point is in cells (`Fx::ONE` = 4 m, B12) and is clamped into the map when the command
 runs. In a scenario file and in the game a point is the middle of a cell.
@@ -71,9 +72,14 @@ position of an entity). The **route** is how it gets there and is not part of th
 order. The unit keeps the point it steers at, the next **waypoint**, in its `target`
 column (`World::waypoint_of`), and `orders::next_waypoint` is the only function that
 decides it. Today the route is the straight line, so the waypoint is the destination;
-no pathfinding, no avoidance, nothing blocks a unit.
+no pathfinding, no avoidance, nothing blocks a unit. Nothing else reads `target`: the
+guard's walk-or-wait switch has a column of its own (`guard_walking`), so the route can
+take `target` over.
 
-* **Phase 4 (WP4.2, WP4.3)** replaces `next_waypoint` (A* path, flowfield step). The
+* **Phase 4 (WP4.2, WP4.3)** replaces `next_waypoint` (A* path, flowfield step); its
+  signature changes then, to take the terrain and the route the unit keeps (today it
+  takes the entities and the destination and ignores them). Its one caller, `go_to`,
+  stays. The
   order, the queue, the arrival test and the target-follow logic stay as they are:
   arrival is always judged against the destination, never against the waypoint. A blocked
   route or a vanished target is WP4.7's replan: it recomputes the route, the order stays.
@@ -145,13 +151,18 @@ own counter:
 
 * `World::schedule(tick, player, command)` numbers the command with the next number of
   that player (each player counts from zero). Nothing changes for the callers of before:
-  a player's commands run in the order they were scheduled.
+  a player's commands run in the order they were scheduled. A counter that has no number
+  left is refused (`ScheduleError::SequenceExhausted`), never reused.
 * `World::schedule_sequenced(tick, player, sequence, command)` takes the number the
   sender gave the command. Two machines that receive the same commands in different
   orders run them in the same order, because the order is the numbers', not the arrival's.
   A number already used by that player for that tick is refused
-  (`ScheduleError::DuplicateSequence`, the first stays). An unnumbered command scheduled
-  afterwards gets a number past every one the player brought along.
+  (`ScheduleError::DuplicateSequence`, the first stays; a key is never overwritten), and
+  so is `u64::MAX`, which is reserved (`ScheduleError::ReservedSequence`). An unnumbered
+  command scheduled afterwards gets a number past every one the player brought along.
+* **Gaps are allowed.** Numbers need not be consecutive: commands with the numbers 2, 7
+  and 900 run in that order and nothing waits for the missing ones. Checking that no
+  number is missing is the network layer's job (WP14.1), not the queue's.
 
 Queues compare equal by commands in execution order; the numbers are not hashed (the order
 is). `crates/sf_sim/tests/orders.rs` (`two_machines_agree_whatever_order_the_commands_arrive_in`)
@@ -161,11 +172,11 @@ runs one script in three arrival orders and compares the checksum histories.
 
 A world that never received an order hashes exactly as before: `wander_5000`,
 `command_mix`, `terrain_256`, `units_spawn` and the sf_sim goldens did not change.
-`Behavior::Ordered` is tag 3. The orders add one section `D` after the others, written
+`Behavior::Ordered` is tag 3 and `HoldPosition` is order tag 7. The orders add one section `D` after the others, written
 only while some live entity has an order or a queue: the **weapon reach digest** of the
 unit table (`UnitTable::reach_digest`; kept out of `UnitTable::digest` so the pinned
 `units_spawn` value stands), the number of such entities, and for each its slot, current
-order and queue. Pending `Order` and `Stop` commands are hashed with the other pending
+order, the guard's walk switch and queue. Pending `Order` and `Stop` commands are hashed with the other pending
 commands (tags 8 and 9).
 
 ## The game (`sf_game`)
@@ -173,18 +184,22 @@ commands (tags 8 and 9).
 `crates/sf_game/src/commands.rs`. The UI only builds commands and calls `World::schedule`
 for the next tick; it never changes the world.
 
-| Input | Command |
-|---|---|
-| F2 | **Temporary** (until WP3.3 selection): select every mobile unit of the local player (Meridian) in view |
-| right-click on the ground | `Order::Move` to the point for the selection |
-| shift + right-click | the same, queued |
-| S | `Stop` |
-| X (shift: queued) | `Order::Scatter` |
+Every key and button is an action in `assets/config/input.ron`, so each is rebindable
+there, and the runner asks the action, never a key.
 
-S is also the camera's pan-down key (WASD). While units are selected S stops them and does
-not pan; the arrow keys and the screen edge still pan down. The top bar shows how many
-units are selected; the F1 panel shows the order of the hovered unit. Right-click picks no
-target (an attack by click is the cursor context of WP3.5).
+| Action | Default | Command |
+|---|---|---|
+| `DebugSelectAll` | F2 | **Temporary** (until WP3.3 selection): select every mobile unit of the local player (Meridian) in view |
+| `OrderMove` | right-click on the ground | `Order::Move` to the point for the selection |
+| `OrderQueue` | shift, held | queues the move, scatter or hold instead of replacing the orders |
+| `OrderStop` | C | `Stop` |
+| `OrderScatter` | X | `Order::Scatter` |
+| `OrderHold` | H | `Order::HoldPosition` |
+
+The camera keeps WASD, the arrow keys and the screen edge, so stop is not on S (a test of
+the engine checks that no key or button is bound to two actions). The top bar shows how
+many units are selected; the F1 panel shows the order of the hovered unit. Right-click
+picks no target (an attack by click is the cursor context of WP3.5).
 
 ## Tuning constants
 

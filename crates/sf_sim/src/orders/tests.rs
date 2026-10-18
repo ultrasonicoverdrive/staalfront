@@ -69,6 +69,7 @@ fn every_order_hashes_differently_and_stably() {
         Order::Guard(GuardTarget::Point(p)),
         Order::Guard(GuardTarget::Entity(id)),
         Order::Scatter,
+        Order::HoldPosition,
     ];
     let hashes: Vec<u64> = orders
         .iter()

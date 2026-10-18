@@ -14,16 +14,20 @@
 //!
 //! # Keys
 //!
-//! | Input | Command |
-//! |---|---|
-//! | F2 | (temporary) select all own units in view |
-//! | right-click on the ground | `Order::Move` to the point |
-//! | shift + right-click | the same, queued behind the unit's orders |
-//! | S | `Stop` |
-//! | X | `Order::Scatter` (shift: queued) |
+//! Every key and button is an action of `assets/config/input.ron`, so each can
+//! be rebound there; the runner asks the actions, never a key. The defaults:
 //!
-//! S is also a camera pan key (WASD). While units are selected, S stops them
-//! and does not pan; the arrow keys and the screen edge still do.
+//! | Action | Default | Command |
+//! |---|---|---|
+//! | `DebugSelectAll` | F2 | (temporary) select all own units in view |
+//! | `OrderMove` | right-click on the ground | `Order::Move` to the point |
+//! | `OrderQueue` | shift (held) | the move, scatter or hold is queued behind the unit's orders |
+//! | `OrderStop` | C | `Stop` |
+//! | `OrderScatter` | X | `Order::Scatter` |
+//! | `OrderHold` | H | `Order::HoldPosition` |
+//!
+//! The camera keeps WASD, the arrows and the screen edge; stop is not on S so
+//! the two never share a key.
 
 use sf_math::Vec2;
 use sf_sim::{Command, EntityId, Order, PlayerId, World};
@@ -95,6 +99,11 @@ pub fn move_command(selection: &DebugSelection, point: Vec2, queued: bool) -> Op
 /// What the scatter key asks for; `None` with nothing selected.
 pub fn scatter_command(selection: &DebugSelection, queued: bool) -> Option<Command> {
     order_command(selection, Order::Scatter, queued)
+}
+
+/// What the hold-position key asks for; `None` with nothing selected.
+pub fn hold_command(selection: &DebugSelection, queued: bool) -> Option<Command> {
+    order_command(selection, Order::HoldPosition, queued)
 }
 
 /// What the stop key asks for; `None` with nothing selected.
@@ -246,17 +255,23 @@ mod tests {
     }
 
     #[test]
-    fn stop_and_scatter_follow_the_selection() {
+    fn stop_scatter_and_hold_follow_the_selection() {
         let (mut world, ids) = world_with(&[("light_tank", 0, 10, 10), ("scout", 0, 12, 10)]);
         let mut selection = DebugSelection::default();
         assert!(stop_command(&selection).is_none());
         assert!(move_command(&selection, pt(1, 1), false).is_none());
         assert!(scatter_command(&selection, false).is_none());
+        assert!(hold_command(&selection, false).is_none());
         selection.select_own_in_view(&world, LOCAL_PLAYER, |_| true);
         issue(&mut world, scatter_command(&selection, false).unwrap());
         world.step();
         for &id in &ids {
             assert!(matches!(world.order_of(id), Some(Order::Move(_))), "{id}");
+        }
+        issue(&mut world, hold_command(&selection, false).unwrap());
+        world.step();
+        for &id in &ids {
+            assert_eq!(world.order_of(id), Some(Order::HoldPosition));
         }
         issue(&mut world, stop_command(&selection).unwrap());
         world.step();

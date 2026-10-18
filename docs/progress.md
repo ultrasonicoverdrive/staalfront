@@ -97,8 +97,8 @@ Status: in progress.
   hit points and per-unit speed), the `units_spawn` scenario, a data-driven look per role
   in `sf_game` (`roster.rs`) and the `sf_game` sandbox: done
 - WP3.3: open
-- WP3.4 Commands as state (`sf_sim::orders`: idle, move, attack, attack-move, guard, stop,
-  scatter, a bounded queue per unit, per-player command sequence numbers), the `orders`
+- WP3.4 Commands as state (`sf_sim::orders`: idle, hold position, move, attack, attack-move,
+  guard, stop, scatter, a bounded queue per unit, per-player command sequence numbers), the `orders`
   scenario, right-click / shift / S / X in `sf_game`, `docs/rules/orders.md`: done
 - WP3.5, WP3.6: open
 
@@ -132,7 +132,7 @@ the new state joins the checksum only while some unit has an order. Follow-up 4 
 commands run by `(tick, player, player sequence)`, and `World::schedule_sequenced` takes the
 number the sender gave (the lockstep packet of WP14.1 only has to carry it). The `orders` scenario is pinned on Linux and Windows. In `sf_game`,
 F2 selects the own units in view (temporary until WP3.3), right-click moves, shift queues,
-S stops (and does not pan while units are selected), X scatters. Rules:
+C stops, X scatters, H holds position; all are actions in `input.ron`. Rules:
 `docs/rules/orders.md`.
 
 ## Phase 1 report (draft, WP1.14)

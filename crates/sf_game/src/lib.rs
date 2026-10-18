@@ -39,7 +39,8 @@
 //! at their footprint of 4 m cells ([`roster`], [`looks`]); the F1 panel names the
 //! hovered unit and shows its hit points and its order. Units take orders (WP3.4,
 //! [`commands`]): F2 selects every own unit in view (temporary, until selection
-//! is WP3.3), right-click moves, shift-right-click queues, S stops, X scatters.
+//! is WP3.3), right-click moves, shift-right-click queues, C stops, X scatters, H holds
+//! position (all rebindable actions of `assets/config/input.ron`).
 //! `--crowd` brings back the old scene of 2,000 placeholder wanderers, `--units
 //! N` adds N of them to the sandbox, `--models none` draws the roles as shapes.
 //! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).

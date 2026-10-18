@@ -563,6 +563,12 @@ fn the_order_actions_are_checked_like_the_other_commands() {
     assert!(has(&p, "ids must not be empty"), "{p:?}");
     let p = problems(&with_command("(tick: 1, command: OrderScatter(ids: []))"));
     assert!(has(&p, "ids must not be empty"), "{p:?}");
+    let p = problems(&with_command("(tick: 1, command: OrderHold(ids: []))"));
+    assert!(has(&p, "ids must not be empty"), "{p:?}");
+    parse(&with_command(
+        "(tick: 1, command: OrderHold(ids: [Id(0, 0)], queued: true))",
+    ))
+    .unwrap();
     // `queued` is optional and a field that does not exist is an error.
     parse(&with_command(
         "(tick: 1, command: OrderScatter(ids: [Id(0, 0)]))",

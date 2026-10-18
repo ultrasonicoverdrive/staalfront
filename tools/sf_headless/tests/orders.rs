@@ -12,8 +12,8 @@ use common::scenario_path;
 use sf_headless::scenario::Scenario;
 use sf_math::{Fx, Vec2};
 use sf_sim::{
-    ARRIVE_TOLERANCE, EntityId, GUARD_CLOSE, GuardTarget, Order, SCATTER_MAX, StepReport, Tick,
-    World, scatter_offset,
+    ARRIVE_TOLERANCE, EntityId, GUARD_CLOSE, GUARD_LEASH, GuardTarget, Order, SCATTER_MAX,
+    StepReport, Tick, World, scatter_offset,
 };
 
 const PLANT: EntityId = EntityId::new(0, 0);
@@ -28,6 +28,10 @@ const W: EntityId = EntityId::new(8, 0);
 const F: EntityId = EntityId::new(9, 0);
 const CRATE: EntityId = EntityId::new(10, 0);
 const G: EntityId = EntityId::new(11, 0);
+const K: EntityId = EntityId::new(12, 0);
+const L: EntityId = EntityId::new(13, 0);
+const M: EntityId = EntityId::new(14, 0);
+const N: EntityId = EntityId::new(15, 0);
 
 fn scenario() -> Scenario {
     Scenario::load(&scenario_path("orders.ron")).unwrap()
@@ -85,12 +89,17 @@ fn the_scenario_is_the_cast_it_says() {
     assert_eq!(s.unit_defs.as_deref(), Some("orders_defs"));
     let mut r = Run::new();
     let w = r.to(1);
-    assert_eq!(w.len(), 12);
+    assert_eq!(w.len(), 16);
     // The kinds as the scenario's comment lists them (the frozen definitions).
-    let kinds: Vec<u16> = (0..12)
+    let kinds: Vec<u16> = (0..16)
         .map(|i| w.get(EntityId::new(i, 0)).unwrap().kind.0)
         .collect();
-    assert_eq!(kinds, vec![1, 19, 19, 12, 12, 15, 22, 20, 12, 12, 35, 15]);
+    assert_eq!(
+        kinds,
+        vec![
+            1, 19, 19, 12, 12, 15, 22, 20, 12, 12, 35, 15, 15, 12, 12, 12
+        ]
+    );
     // The structure and the object cannot be ordered, ever.
     assert!(w.stats_of(PLANT).unwrap().footprint.is_some());
     assert!(w.stats_of(CRATE).unwrap().movement_class.is_none());
@@ -113,13 +122,13 @@ fn commands_arrive_as_state_on_their_tick_and_refusals_are_counted() {
     assert_eq!(order(w, T), Order::Idle);
     let report = r.reports[10];
     assert_eq!((report.commands_executed, report.commands_ignored), (4, 2));
-    // Tick 0 spawned the twelve of the cast and refused nothing.
+    // Tick 0 spawned the sixteen of the cast and refused nothing.
     assert_eq!(
         (
             r.reports[0].commands_executed,
             r.reports[0].commands_ignored
         ),
-        (12, 0)
+        (16, 0)
     );
     assert!(
         r.reports[1..10]
@@ -337,4 +346,64 @@ fn the_run_is_reproducible() {
         r.world.checksum_history().to_vec()
     };
     assert_eq!(run(), run());
+}
+
+#[test]
+fn a_ninth_order_is_refused_by_a_full_queue() {
+    let mut r = Run::new();
+    // Tick 200: one replacing move and eight queued ones fill the queue; the
+    // tenth command, the ninth order, is refused and counts as ignored.
+    let w = r.to(201);
+    assert_eq!(order(w, K), Order::Move(mid(32, 60)));
+    let queued: Vec<Order> = (0..8).map(|k| Order::Move(mid(34 + 2 * k, 60))).collect();
+    assert_eq!(queue(w, K), queued);
+    let report = r.reports[200];
+    assert_eq!((report.commands_executed, report.commands_ignored), (9, 1));
+    // The refused order (50, 60) is never visited: K ends at the eighth queued
+    // spot and stands there.
+    let end = r.to(1_600);
+    assert_eq!(order(end, K), Order::Idle);
+    assert!(pos(end, K).distance(mid(48, 60)) <= ARRIVE_TOLERANCE);
+}
+
+#[test]
+fn hold_position_blocks_a_queued_move_until_a_plain_move_replaces_it() {
+    let mut r = Run::new();
+    let w = r.to(61);
+    assert_eq!(order(w, L), Order::HoldPosition);
+    let held_at = pos(w, L);
+    assert_ne!(held_at, mid(50, 50));
+    // A queued move waits behind the hold (it would start at once behind idle).
+    let w = r.to(299);
+    assert_eq!(order(w, L), Order::HoldPosition);
+    assert_eq!(queue(w, L), vec![Order::Move(mid(50, 40))]);
+    assert_eq!(pos(w, L), held_at);
+    // A plain move at tick 300 ends the hold and drops the queue.
+    let w = r.to(301);
+    assert_eq!(order(w, L), Order::Move(mid(56, 44)));
+    assert!(queue(w, L).is_empty());
+    let end = r.to(1_600);
+    assert_eq!(order(end, L), Order::Idle);
+    assert!(pos(end, L).distance(mid(56, 44)) <= ARRIVE_TOLERANCE);
+}
+
+#[test]
+fn a_guard_whose_entity_dies_goes_on_with_the_queue() {
+    let mut r = Run::new();
+    // M follows N, which walks east.
+    let w = r.to(300);
+    assert_eq!(order(w, M), Order::Guard(GuardTarget::Entity(N)));
+    assert_eq!(queue(w, M), vec![Order::Move(mid(6, 40))]);
+    assert!(pos(w, M).x > Fx::from_int(9), "{:?}", pos(w, M));
+    let radius = Fx::from_ratio(1, 5);
+    assert!(dist(w, M, N) <= GUARD_CLOSE + GUARD_LEASH + radius);
+    // N is despawned at the start of tick 350; M's guard ends in that tick and
+    // the queued move takes over.
+    let w = r.to(351);
+    assert!(!w.is_alive(N));
+    assert_eq!(order(w, M), Order::Move(mid(6, 40)));
+    assert!(queue(w, M).is_empty());
+    let end = r.to(1_600);
+    assert_eq!(order(end, M), Order::Idle);
+    assert!(pos(end, M).distance(mid(6, 40)) <= ARRIVE_TOLERANCE);
 }

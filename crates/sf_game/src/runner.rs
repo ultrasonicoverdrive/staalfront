@@ -14,9 +14,7 @@ use sf_audio::ra::{AudioConfig, RaAudioConfig};
 use sf_audio::{AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate_cells};
 use sf_data::units::UnitDefs;
-use sf_engine::input::{DEFAULT_EDGE_MARGIN, Modifier, Trigger};
 use sf_engine::winit::event::MouseButton;
-use sf_engine::winit::keyboard::KeyCode;
 use sf_engine::{Action, App, Context, Resized, winit};
 use sf_math::Fx;
 use sf_math::render_bridge::{vec2_cells_to_metres, vec2_metres_to_cells};
@@ -392,6 +390,7 @@ fn order_text(order: sf_sim::Order, world: &World) -> String {
         Order::Guard(GuardTarget::Point(p)) => format!("guard {}", point(p)),
         Order::Guard(GuardTarget::Entity(id)) => format!("guard {}", id_text(id)),
         Order::Scatter => "scatter".to_owned(),
+        Order::HoldPosition => "hold position".to_owned(),
     }
 }
 
@@ -440,21 +439,13 @@ impl Runner {
         // A slider being dragged owns the pointer: its position (even at the
         // screen edge) must not pan the camera.
         let ui_busy = self.debug.using_pointer();
-        // S is also the stop key (WP3.4): with units selected it does not pan.
-        // The arrow key and the screen edge, which pan down as well, still do.
-        let input = ctx.input();
-        let s_is_stop = !self.selection.is_empty()
-            && input.key_down(KeyCode::KeyS)
-            && !input.key_down(KeyCode::ArrowDown)
-            && !input.at_edge(Trigger::EdgeBottom, DEFAULT_EDGE_MARGIN);
-        let pan_down = f64::from(i8::from(actions.held(Action::CameraPanDown) && !s_is_stop));
         CameraInput {
             pan: if ui_busy {
                 DVec2::ZERO
             } else {
                 DVec2::new(
                     axis(Action::CameraPanRight, Action::CameraPanLeft),
-                    f64::from(i8::from(actions.held(Action::CameraPanUp))) - pan_down,
+                    axis(Action::CameraPanUp, Action::CameraPanDown),
                 )
             },
             zoom_notches,
@@ -463,14 +454,16 @@ impl Runner {
         }
     }
 
-    /// The keys and clicks that give orders (WP3.4, [`crate::commands`]): F2
-    /// selects (temporary), right-click moves, shift queues, S stops, X
-    /// scatters. They only schedule commands for the next tick; the
+    /// The keys and clicks that give orders (WP3.4, [`crate::commands`]):
+    /// move, queue, stop, scatter, hold position and the temporary select-all.
+    /// Which key or button each is lives in `assets/config/input.ron`
+    /// (`OrderMove`, `OrderQueue`, `OrderStop`, `OrderScatter`, `OrderHold`,
+    /// `DebugSelectAll`). They only schedule commands for the next tick; the
     /// simulation does the rest.
     fn handle_orders(&mut self, ctx: &Context) {
-        let input = ctx.input();
-        let shift = input.modifier_down(Modifier::Shift);
-        if input.key_pressed(KeyCode::F2) {
+        let actions = ctx.actions();
+        let queued = actions.held(Action::OrderQueue);
+        if actions.pressed(Action::DebugSelectAll) {
             // TEMPORARY (until WP3.3): everything of the local player that
             // the camera sees.
             let frustum = Frustum::from_view_proj(self.camera.view_proj());
@@ -482,28 +475,33 @@ impl Runner {
                     frustum.contains_point([x, y, z].into())
                 });
             println!(
-                "selected {} units (F2, temporary debug selection)",
+                "selected {} units (temporary debug selection)",
                 self.selection.len()
             );
         }
         let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
-        if input.button_pressed(MouseButton::Right)
+        if actions.pressed(Action::OrderMove)
             && !ui_busy
-            && let Some((x, y)) = input.cursor()
+            && let Some((x, y)) = ctx.input().cursor()
             && let Some(ground) = self.camera.ground_point(DVec2::new(x, y))
         {
             let point = vec2_metres_to_cells([ground.x as f32, ground.y as f32]);
-            if let Some(command) = commands::move_command(&self.selection, point, shift) {
+            if let Some(command) = commands::move_command(&self.selection, point, queued) {
                 commands::issue(&mut self.world, command);
             }
         }
-        if input.key_pressed(KeyCode::KeyS)
+        if actions.pressed(Action::OrderStop)
             && let Some(command) = commands::stop_command(&self.selection)
         {
             commands::issue(&mut self.world, command);
         }
-        if input.key_pressed(KeyCode::KeyX)
-            && let Some(command) = commands::scatter_command(&self.selection, shift)
+        if actions.pressed(Action::OrderScatter)
+            && let Some(command) = commands::scatter_command(&self.selection, queued)
+        {
+            commands::issue(&mut self.world, command);
+        }
+        if actions.pressed(Action::OrderHold)
+            && let Some(command) = commands::hold_command(&self.selection, queued)
         {
             commands::issue(&mut self.world, command);
         }

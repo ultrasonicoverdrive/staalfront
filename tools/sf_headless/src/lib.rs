@@ -53,7 +53,7 @@
 //! kind or the wrong sort of kind. The orders of WP3.4 (`docs/rules/orders.md`)
 //! are `OrderMove`, `OrderAttackMove` and `OrderGuardPoint` (`ids: .., target: (x, y),
 //! queued: ..`, the middle of the cell), `OrderAttack` and `OrderGuardEntity` (`target:
-//! (index, generation)`), `OrderScatter(ids: .., queued: ..)` and `Stop(ids: ..)`;
+//! (index, generation)`), `OrderScatter(ids: .., queued: ..)`, `OrderHold(ids: .., queued: ..)` and `Stop(ids: ..)`;
 //! `queued` (default `false`) appends to the unit's queue instead of replacing its
 //! orders. Entities are named by id: `Id(index, generation)` or
 //! `Range(from, to)` (slots `from..to` at generation 0; in a world without

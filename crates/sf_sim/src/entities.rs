@@ -80,6 +80,10 @@ pub(crate) struct Entities {
     pub order: Vec<Order>,
     /// The orders behind the current one: a fixed-size ring per slot.
     pub queue: Vec<OrderQueue>,
+    /// Whether a unit that guards an entity is walking toward it (as opposed
+    /// to standing near it). The switch of the guard's hysteresis; kept apart
+    /// from `target`, which is the route's waypoint. Hashed with the orders.
+    pub guard_walking: Vec<bool>,
 }
 
 impl Entities {
@@ -109,6 +113,7 @@ impl Entities {
         self.hp.push(0);
         self.order.push(Order::Idle);
         self.queue.push(OrderQueue::EMPTY);
+        self.guard_walking.push(false);
         index
     }
 
@@ -132,6 +137,7 @@ impl Entities {
         self.hp[i] = row.hp;
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
+        self.guard_walking[i] = false;
     }
 
     /// Frees slot `i`: marks it dead and resets every column to its neutral
@@ -154,5 +160,6 @@ impl Entities {
         self.hp[i] = 0;
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
+        self.guard_walking[i] = false;
     }
 }

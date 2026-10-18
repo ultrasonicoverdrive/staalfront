@@ -11,7 +11,8 @@
 //!
 //! | Order | The unit... | Ends when |
 //! |---|---|---|
-//! | [`Order::Idle`] | stands still (stand still *is* idle; the command that puts a unit there is `Stop`) | never; any other order replaces it |
+//! | [`Order::Idle`] | has no order (the command that puts a unit there is `Stop`) | never; any other order replaces it |
+//! | [`Order::HoldPosition`] | stands still on purpose and never moves | never by itself; it blocks the queue behind it |
 //! | [`Order::Move`] | goes to a point | it is within [`ARRIVE_TOLERANCE`] of the point |
 //! | [`Order::Attack`] | goes toward an entity until it is within its first weapon's reach, then faces it | the target is gone (dead, despawned, stale id) |
 //! | [`Order::AttackMove`] | goes to a point and would engage what it meets on the way | it is within [`ARRIVE_TOLERANCE`] of the point |
@@ -100,8 +101,13 @@ pub enum GuardTarget {
 /// One order. See the [module documentation](self) for what each does.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Order {
-    /// No order: stands still.
+    /// No order. Phase 5 lets an idle unit react (return fire, auto-acquire).
     Idle,
+    /// Stand still on purpose: the unit never moves, not to chase and not to
+    /// get closer. Phase 5 may fire from it at what is in range, but it never
+    /// moves by itself. It never ends by itself and a queued order behind it
+    /// waits until it is replaced or stopped.
+    HoldPosition,
     /// Go to a point, in cells.
     Move(Vec2),
     /// Go for an entity until it is in weapon reach.
@@ -142,6 +148,7 @@ impl Order {
                 h.write_u32(id.generation());
             }
             Order::Scatter => h.write_u8(6),
+            Order::HoldPosition => h.write_u8(7),
         }
     }
 }
@@ -229,7 +236,9 @@ pub fn scatter_offset(id: EntityId, tick: Tick) -> Vec2 {
 
 /// The point the unit steers at to get toward `destination`: the next
 /// waypoint of its route. A straight line today, so the destination itself.
-/// This is the one function pathfinding (WP4.2) replaces.
+/// This is the one function pathfinding (WP4.2) replaces; it will then also
+/// take the terrain and the route it keeps (its signature changes, its caller
+/// `go_to` does not).
 pub(crate) fn next_waypoint(_e: &Entities, _i: usize, destination: Vec2) -> Vec2 {
     destination
 }
@@ -285,6 +294,7 @@ pub(crate) fn begin(e: &mut Entities, i: usize, order: Order, tick: Tick, bounds
     };
     e.order[i] = order;
     e.target[i] = None;
+    e.guard_walking[i] = false;
     e.behavior[i] = if order == Order::Idle {
         crate::behavior::Behavior::Idle
     } else {
@@ -317,6 +327,7 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
     e.order[i] = Order::Idle;
     e.queue[i] = OrderQueue::EMPTY;
     e.target[i] = None;
+    e.guard_walking[i] = false;
     e.behavior[i] = crate::behavior::Behavior::Idle;
 }
 
@@ -355,6 +366,8 @@ pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tic
         // Not reachable through the invariant (a unit with no order is idle),
         // but a stray one settles instead of looping.
         Order::Idle | Order::Scatter => clear(e, i),
+        // Never moves. Phase 5 may fire from here, never chase.
+        Order::HoldPosition => would_acquire_targets_here(e, i),
         Order::Move(destination) => {
             if go_to(e, i, destination, ARRIVE_TOLERANCE, m) {
                 finish(e, i, tick, bounds);
@@ -381,12 +394,15 @@ pub(crate) fn run(e: &mut Entities, i: usize, m: &Motion, units: &UnitTable, tic
             let radius = radius_of(e, j, units);
             let (close, leash) = (GUARD_CLOSE + radius, GUARD_LEASH + radius);
             // Hysteresis: a walking guard walks on until it is close; a
-            // standing one waits until it is far.
-            let start = if e.target[i].is_some() { close } else { leash };
+            // standing one waits until it is far. The switch is its own
+            // field, not the waypoint, which the route will take over.
+            let start = if e.guard_walking[i] { close } else { leash };
             if (e.pos[j] - e.pos[i]).length_squared() > start.square() {
                 let at = e.pos[j];
-                go_to(e, i, at, close, m);
+                let arrived = go_to(e, i, at, close, m);
+                e.guard_walking[i] = !arrived;
             } else {
+                e.guard_walking[i] = false;
                 e.target[i] = None;
             }
         }

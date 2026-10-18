@@ -652,6 +652,63 @@ fn an_entity_guard_follows_at_a_distance_and_ends_with_the_entity() {
     assert_eq!(w.order_of(guard), Some(Order::Idle));
 }
 
+// ---- hold position ----------------------------------------------------------
+
+#[test]
+fn hold_position_never_moves_and_is_not_idle() {
+    let mut w = world();
+    let u = spawn(&mut w, TANK, 5, 5);
+    tick_with(&mut w, vec![order(&[u], Order::Move(pt(40, 5)), false)]);
+    run(&mut w, 20);
+    let at = pos(&w, u);
+    assert_ne!(at, pt(5, 5));
+    let (done, ignored) = tick_with(&mut w, vec![order(&[u], Order::HoldPosition, false)]);
+    assert_eq!((done, ignored), (1, 0));
+    assert_eq!(w.order_of(u), Some(Order::HoldPosition));
+    assert_eq!(w.waypoint_of(u), None);
+    // It stands where the order found it, however long.
+    run(&mut w, 100);
+    assert_eq!(pos(&w, u), at);
+    // Unlike an idle unit, it does not start a queued order: the hold blocks it.
+    tick_with(&mut w, vec![order(&[u], Order::Move(pt(1, 1)), true)]);
+    assert_eq!(w.order_of(u), Some(Order::HoldPosition));
+    assert_eq!(w.queued_orders_of(u), Some(vec![Order::Move(pt(1, 1))]));
+    run(&mut w, 100);
+    assert_eq!(pos(&w, u), at);
+    // A replacing order ends it; stop leaves it idle.
+    tick_with(&mut w, vec![order(&[u], Order::Move(pt(1, 1)), false)]);
+    assert_eq!(w.order_of(u), Some(Order::Move(pt(1, 1))));
+    tick_with(
+        &mut w,
+        vec![order(&[u], Order::HoldPosition, false), stop(&[u])],
+    );
+    assert_eq!(w.order_of(u), Some(Order::Idle));
+    // An idle unit given a queued order starts it at once (hold is not that).
+    let (done, _) = tick_with(&mut w, vec![order(&[u], Order::Move(pt(9, 9)), true)]);
+    assert_eq!(done, 1);
+    assert_eq!(w.order_of(u), Some(Order::Move(pt(9, 9))));
+}
+
+#[test]
+fn only_units_can_hold_position() {
+    let mut w = world();
+    tick_with(
+        &mut w,
+        vec![Command::PlaceStructure {
+            kind: HOUSE,
+            cell: Cell::new(20, 20),
+            owner: PlayerId(0),
+        }],
+    );
+    let house = EntityId::new(0, 0);
+    let truck = spawn(&mut w, TRUCK, 5, 5);
+    let (done, ignored) = tick_with(&mut w, vec![order(&[house], Order::HoldPosition, false)]);
+    assert_eq!((done, ignored), (0, 1));
+    // An unarmed unit may hold too.
+    let (done, _) = tick_with(&mut w, vec![order(&[truck], Order::HoldPosition, false)]);
+    assert_eq!(done, 1);
+}
+
 // ---- scatter -----------------------------------------------------------------
 
 #[test]

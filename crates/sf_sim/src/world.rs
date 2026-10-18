@@ -756,7 +756,7 @@ impl World {
         let itself = EntityId::new(i as u32, self.entities.generation[i]);
         match order {
             Order::Idle => false,
-            Order::Move(_) | Order::AttackMove(_) | Order::Scatter => true,
+            Order::Move(_) | Order::AttackMove(_) | Order::Scatter | Order::HoldPosition => true,
             Order::Guard(GuardTarget::Point(_)) => true,
             Order::Guard(GuardTarget::Entity(watched)) => {
                 watched != itself && self.live_index(watched).is_some()

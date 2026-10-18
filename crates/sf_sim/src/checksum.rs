@@ -20,7 +20,7 @@
 //! | terrain (`T`), only with a terrain layer | the terrain's digest: size, type definitions and the type of every cell, hashed once when the world is made |
 //! | occupancy (`O`), only while a cell is occupied | the number of occupied cells, then for each in ascending cell order: the cell index, the occupant's slot and its generation |
 //! | units (`U`), only with a unit table | the table's digest (every kind with its hit points, movement class, speed, turn rate, size and footprint), then the number of entities made from it and for each, in slot order: the slot and its current hit points |
-//! | orders (`D`), only while some entity has an order or a queue | the table's weapon reach digest, then the number of such entities and for each, in slot order: the slot, its current order and its queued orders (WP3.4) |
+//! | orders (`D`), only while some entity has an order or a queue | the table's weapon reach digest, then the number of such entities and for each, in slot order: the slot, its current order, the guard's walk switch and its queued orders (WP3.4) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -290,6 +290,7 @@ impl World {
             for i in (0..slots).filter(|&i| ordered(i)) {
                 h.write_u32(i as u32);
                 e.order[i].write_hash(&mut h);
+                h.write_u8(u8::from(e.guard_walking[i]));
                 h.write_u8(e.queue[i].len() as u8);
                 for queued in e.queue[i].iter() {
                     queued.write_hash(&mut h);
