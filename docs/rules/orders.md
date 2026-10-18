@@ -49,7 +49,9 @@ rule", `command.rs`); the game only ever commands the local player's own units, 
 lockstep package (WP14.1) is where a peer's commands get validated.
 
 Legacy wanderers (`Command::Spawn`) have no unit table entry and no weapon: they can be
-ordered to move, attack-move and guard, at the world's own speed, and cannot attack.
+ordered to move, attack-move, guard, scatter and **hold position**, at the world's own
+speed, and cannot attack. (`HoldPosition` is not for table units only: `accepts_order`
+takes it for every mobile entity that has a step.)
 
 ## The queue
 

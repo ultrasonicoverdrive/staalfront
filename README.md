@@ -5,7 +5,10 @@ Staalfront is a real-time strategy game in Rust, built on its own thin engine
 The simulation (`sf_sim`) never touches the GPU, floats, the clock or I/O.
 
 The full plan, architecture and quality rules are in [PLAN.md](PLAN.md).
-Project status: phase 0 (workspace and CI); there is no gameplay yet.
+Project status: phases 0 and 3 are done (foundation; units, selection, orders); phase 1 (engine)
+is done except the M0 laptop benchmark; of phase 2 only WP2.1 (terrain types) is in, WP2.2-2.4
+wait for that benchmark; phase 4 (movement) is under way. `cargo run --release -p sf_game` opens the sandbox you can
+select and order units in; see [docs/progress.md](docs/progress.md) for the state per phase.
 
 ## Build and test
 

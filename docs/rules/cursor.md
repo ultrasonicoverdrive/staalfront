@@ -156,7 +156,9 @@ in the game).
   cursor, and the cursor never says "scrolling" when the camera is not.
 * **Only in the sandbox.** The engine demo's crowd (`sf_demo`) and every benchmark run draw no
   game cursor, so the benchmark scene and its numbers are unchanged; `--hover x,y` (the fixed
-  mouse for screenshots) draws one at that spot.
+  mouse for screenshots) draws one at that spot. A plain `--shots` run draws **no** game
+  cursor, so the pictures do not depend on where the X pointer happens to be; only
+  `--shots --hover x,y` shows it.
 
 ## Keys
 

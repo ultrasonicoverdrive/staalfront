@@ -160,7 +160,13 @@ pub fn run(preset: Preset) -> i32 {
         ..EngineConfig::default()
     };
     let failed = Arc::new(AtomicBool::new(false));
-    let app = runner::Runner::new(options, map, lod, pack, failed.clone());
+    let app = match runner::Runner::new(options, map, lod, pack, failed.clone()) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("{name}: {e}");
+            return 1;
+        }
+    };
     if let Err(e) = sf_engine::run(config, app) {
         eprintln!("{name}: {e}");
         return 1;

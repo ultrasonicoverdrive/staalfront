@@ -278,7 +278,7 @@ impl Runner {
         lod: LodConfig,
         pack: Option<LoadedPack>,
         failed: Arc<AtomicBool>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let now = Instant::now();
         // B12: the sim counts cells, the map and everything drawn metres.
         let cells = map.size_in_cells();
@@ -287,8 +287,9 @@ impl Runner {
             ..WorldConfig::new(1).with_map_size(cells.0, cells.1)
         };
         // WP2.1: the map's terrain types go to the sim (open ground if it has
-        // no terrain layer); nothing is drawn from them yet (WP2.2 to WP2.4).
-        let world = crate::playfield::make_world(config, &map);
+        // no terrain layer; a layer the sim refuses stops the start); nothing
+        // is drawn from them yet (WP2.2 to WP2.4).
+        let world = crate::playfield::make_world(config, &map)?;
         let style = placeholder_style(Style::embedded());
         let icons = load_icons();
         let start = match options.scene {
@@ -356,7 +357,7 @@ impl Runner {
                     .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
                     .ok()
             });
-        Self {
+        Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
             ticks: 0,
@@ -410,8 +411,22 @@ impl Runner {
             cursor_art,
             os_cursor_hidden: false,
             failed,
-        }
+        })
     }
+}
+
+/// Where the game cursor is drawn this frame, if anywhere. A `--shots` run
+/// takes its pictures with whatever the X pointer happens to be doing, so it
+/// draws the cursor only where `--hover x,y` puts it (`hover`); without that
+/// the screenshots would depend on the pointer. Outside a `--shots` run it is
+/// `frame_cursor`: the `--hover` position or the pointer (`None` over the UI,
+/// a panel or outside the window).
+fn game_cursor_at(
+    shots: bool,
+    hover: Option<(f32, f32)>,
+    frame_cursor: Option<(f32, f32)>,
+) -> Option<(f32, f32)> {
+    if shots { hover } else { frame_cursor }
 }
 
 /// An order in words, for the F1 panel: `idle`, `move (x, y)`, `attack 12v0`.
@@ -1393,7 +1408,8 @@ impl App for Runner {
             });
             self.build_units(alpha, cursor);
             self.mark_selection();
-            self.update_cursor(ctx, cursor);
+            let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
+            self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
             if let Some(renderer) = &mut self.renderer {
                 renderer.upload_units(&self.instancer);
@@ -1781,6 +1797,20 @@ mod tests {
     use sf_data::map::generate::generate_cells;
     use sf_sim::{Command, Kind, PlayerId, Tick};
 
+    #[test]
+    fn screenshots_draw_the_game_cursor_only_where_hover_puts_it() {
+        let pointer = Some((300.0, 200.0));
+        let hover = Some((10.0, 20.0));
+        // `--shots` alone: the X pointer must not show up in the pictures.
+        assert_eq!(game_cursor_at(true, None, pointer), None);
+        // `--shots --hover`: the frame's cursor is the hover position.
+        assert_eq!(game_cursor_at(true, hover, hover), hover);
+        // Playing: the pointer, or the hover position when one was given.
+        assert_eq!(game_cursor_at(false, None, pointer), pointer);
+        assert_eq!(game_cursor_at(false, hover, hover), hover);
+        assert_eq!(game_cursor_at(false, None, None), None);
+    }
+
     fn options(preset: Preset, line: &str) -> Options {
         Options::parse(preset, line.split_whitespace().map(str::to_owned))
     }
@@ -1791,7 +1821,7 @@ mod tests {
             speed: DEMO_SPEED,
             ..WorldConfig::new(1).with_map_size(cells, cells)
         };
-        crate::playfield::make_world(config, &map)
+        crate::playfield::make_world(config, &map).expect("a generated map starts a world")
     }
 
     /// The engine demo's scene is what it was before WP3.2: the crowd, made
