@@ -9,8 +9,9 @@
 //!   on. A health bar floats over the model.
 //! * **Strategic (icons):** the icon of a selected unit is highlighted by the
 //!   icon shader (`Instancer::mark_selected` sets the flag; a white outline
-//!   clearly thicker than the thin white hover outline, yellow while a
-//!   selected icon is hovered), and the health bar sits above the icon. In the cross-fade the ring is drawn as long as the model
+//!   drawn outside the icon, clearly thicker than the thin white hover
+//!   outline, yellow while a selected icon is hovered; the owner's colour
+//!   inside keeps its size), and the health bar sits above the icon. In the cross-fade the ring is drawn as long as the model
 //!   is, and the bar goes with the representation that is more visible.
 //! * **The drag rectangle** is a translucent fill with an outline.
 //!

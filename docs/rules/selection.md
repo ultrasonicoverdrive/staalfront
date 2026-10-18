@@ -99,7 +99,7 @@ is unchanged.
 | Zoom | Own selected | Inspected |
 |---|---|---|
 | models (close, middle) | green ring on the ground around the unit, sized from its model's box (longer side times `RING_GROW`); a box outline around a structure; health bar above the model | the same in red (enemy) or amber (neutral) |
-| icons (strategic) | the icon gets `ICON_SELECTED` (a white outline clearly thicker than the thin white hover outline; hovering a selected icon turns it yellow; all set by the icon shader) and a health bar above it | same, ring colours do not apply |
+| icons (strategic) | the icon gets `ICON_SELECTED` (a white outline drawn **outside** the icon, clearly thicker than the thin white hover outline; hovering a selected icon turns it yellow; all set by the icon shader, which grows the quad for it, so the owner's colour keeps the same area in every state and the plain icon is unchanged) and a health bar above it | same, ring colours do not apply |
 | cross-fade band | the ring is drawn as long as the model is; the bar follows the more visible representation | |
 
 The ring is the projection of a circle (28 segments) or a rectangle on the ground at the
@@ -115,13 +115,13 @@ Line widths and bars scale with the UI scale. The colours are constants in
 
 Frames of this (software renderer, from `selection_screenshot.rs`): `docs/screenshots/wp3.3/`:
 rings and bars close up, highlighted icons zoomed out, an inspected enemy, the drag rectangle.
-`icon-states.png`: one icon plain, hovered, selected, and selected + hovered (left to right).
+`icon-states.png` (real pixel size) and `icon-states-x4.png`: one icon plain, hovered, selected, and selected + hovered (left to right); the owner's colour keeps its area in all four.
 
 ## Tuning constants
 
 `DRAG_MIN_PX` 6 and `DOUBLE_CLICK_PX` 8 (logical pixels: `Pointer` multiplies them by the UI scale), `DOUBLE_CLICK_MS` 400, `DOUBLE_TAP_MS` 500
 (`selection.rs`); `RING_GROW` 1.25, `RING_PX` 2.5, `BAR_*` (`selection_view.rs`);
-`HOVER_EXTRA_PX` and `SELECTED_EXTRA_PX` (`assets/shaders/icon.wgsl`). Placeholders for the feel rounds.
+`HOVER_OUT_PX` and `SELECTED_OUT_PX` (`assets/shaders/icon.wgsl`). Placeholders for the feel rounds.
 
 ## Decisions that were open
 

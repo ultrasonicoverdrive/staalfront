@@ -413,13 +413,16 @@ pub fn snap_icon_center(center: f32, size_px: f32) -> f32 {
 }
 
 /// Bit in [`IconInstance::flags`]: draw the icon highlighted (the hover: a
-/// thin white outline).
+/// thin white outline **outside** the shape, so the player colour keeps its
+/// area).
 pub const ICON_HIGHLIGHT: u32 = 1 << 8;
 
 /// Bit in [`IconInstance::flags`]: the unit is selected (WP3.3). The icon
-/// gets a white outline clearly thicker than the hover highlight. With both
-/// bits set (hovering a selected icon) the outline keeps the selected width
-/// and turns yellow, so none, hover, selected and both look different.
+/// gets a white outline outside the shape, clearly thicker than the hover
+/// highlight. With both bits set (hovering a selected icon) the outline keeps
+/// the selected width and turns yellow, so none, hover, selected and both look
+/// different, and the fill in the owner's colour is the same size in all of
+/// them.
 pub const ICON_SELECTED: u32 = 1 << 9;
 
 /// Per-icon GPU data. The anchor is in world space; the vertex shader
