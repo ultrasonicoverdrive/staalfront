@@ -3,17 +3,18 @@
 //! `docs/rules/cursor.md`.
 //!
 //! **One source of truth.** [`cursor_context`] is a pure function of what is
-//! selected, what is under the mouse, the held modifiers and the world, whose
-//! movement costs (`World::passable`, WP4.1) it asks which cells a class may
-//! enter: the same table the units move by. The
+//! selected, what is under the mouse, the held modifiers and the world as the
+//! sim thread last published it ([`SimSnapshot`], WP1.15), whose movement costs
+//! (`SimSnapshot::passable`, the world's `passable` of WP4.1) it asks which
+//! cells a class may enter: the same table the units move by. The
 //! picture of the cursor is chosen from its answer, and so is the order of a
 //! right-click: [`order_for`] turns the answer into an `Order`, and
 //! [`crate::commands::right_click`] is the only thing that schedules it. A
 //! cursor that says Attack and a click that moves cannot happen, because
 //! nothing else decides.
 //!
-//! Like [`crate::selection`], this is presentation: it reads the world and
-//! never changes it, and no window, GPU or clock is needed to test it. The
+//! Like [`crate::selection`], this is presentation: it reads the snapshot and
+//! never changes the world, and no window, GPU or clock is needed to test it. The
 //! picking (which entity is under the mouse, by model close up and by icon
 //! zoomed out, PLAN.md section 2.3) happens in `sf_render`; its answer is
 //! handed in as [`Hover`], so the context is the same at every zoom.
@@ -26,11 +27,12 @@ use std::path::Path;
 
 use sf_engine::{ActionState, Edges};
 use sf_math::Vec2;
-use sf_sim::{Cell, EntityId, GuardTarget, Order, World};
+use sf_sim::{Cell, EntityId, GuardTarget, Order};
 use sf_ui::CursorSet;
 
 use crate::sandbox::NEUTRAL;
 use crate::selection::{Selection, facts};
+use crate::sim_snapshot::SimSnapshot;
 
 /// What the mouse looks like. The first eight are what [`cursor_context`] can
 /// answer today; the scroll cursors belong to the screen edges; the last eight
@@ -293,7 +295,7 @@ pub fn scroll_cursor(edges: Edges) -> Option<CursorKind> {
 /// ([`Selection::orderable`]), so a selected structure, armed or not, counts
 /// for nothing here.
 pub fn cursor_context(
-    world: &World,
+    world: &SimSnapshot,
     selection: &Selection,
     hover: &Hover,
     modifiers: Modifiers,

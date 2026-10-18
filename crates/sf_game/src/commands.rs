@@ -1,9 +1,11 @@
 //! The first commands from the player (WP3.4): right-click moves, shift
 //! queues, C stops, X scatters, H holds. Orders are sim state
 //! (`docs/rules/orders.md`); this module only turns input into [`Command`]s
-//! and schedules them for the next tick. It never touches the world's state
-//! (PLAN.md section 1.2 and quality rule 1): the only thing it does to a
-//! [`World`] is [`World::schedule`].
+//! and sends them to the simulation (WP1.15: it runs on its own thread, so
+//! [`issue`] stamps the command for the tick after the newest snapshot's and
+//! puts it on the sim thread's channel, [`SimHandle::send`]). It never touches
+//! the world's state (PLAN.md section 1.2 and quality rule 1): the only thing
+//! the world ever does with the command is `World::schedule`.
 //!
 //! # Whom the orders go to
 //!
@@ -32,11 +34,13 @@
 //! the two never share a key. Selecting is in [`crate::selection`].
 
 use sf_math::Vec2;
-use sf_sim::{Command, EntityId, Order, PlayerId, World};
+use sf_sim::{Command, EntityId, Order, PlayerId};
 
 use crate::cursor::{self, Hover, Modifiers};
 use crate::sandbox::MERIDIAN;
 use crate::selection::Selection;
+use crate::sim_snapshot::SimSnapshot;
+use crate::sim_thread::SimHandle;
 
 /// The seat of the player at this keyboard: Meridian. (Seats come with the
 /// skirmish setup of a later phase.)
@@ -48,7 +52,7 @@ pub const LOCAL_PLAYER: PlayerId = PlayerId(MERIDIAN);
 /// picture and the click cannot disagree. `None` when the cursor promises no
 /// order (Select, Inspect, NoGo, over the UI) or nothing can take one.
 pub fn right_click(
-    world: &World,
+    world: &SimSnapshot,
     selection: &Selection,
     hover: &Hover,
     modifiers: Modifiers,
@@ -88,23 +92,23 @@ fn order_command(ids: &[EntityId], order: Order, queued: bool) -> Option<Command
     })
 }
 
-/// Schedules `command` from the local player for the tick that runs next.
-/// The simulation runs it at the start of that tick; nothing changes before.
+/// Sends `command` from the local player to the simulation for the tick after
+/// the newest snapshot's ([`crate::sim_thread::INPUT_DELAY_TICKS`]). The
+/// simulation runs it at the start of that tick; nothing changes before.
 /// Says what it asked for on the console, as the other game events do.
-pub fn issue(world: &mut World, command: Command) {
-    let tick = world.tick();
-    match &command {
-        Command::Order { ids, order, queued } => println!(
-            "order for tick {tick}: {order:?} for {} units{}",
+pub fn issue(sim: &SimHandle, command: Command) {
+    let summary = match &command {
+        Command::Order { ids, order, queued } => Some(format!(
+            "{order:?} for {} units{}",
             ids.len(),
             if *queued { " (queued)" } else { "" }
-        ),
-        Command::Stop { ids } => println!("order for tick {tick}: Stop for {} units", ids.len()),
-        _ => {}
-    }
-    if let Err(e) = world.schedule(tick, LOCAL_PLAYER, command) {
-        // Cannot happen: the next tick is never in the past.
-        eprintln!("sf_game: command refused: {e}");
+        )),
+        Command::Stop { ids } => Some(format!("Stop for {} units", ids.len())),
+        _ => None,
+    };
+    let tick = sim.send(LOCAL_PLAYER, command);
+    if let Some(summary) = summary {
+        println!("order for tick {tick}: {summary}");
     }
 }
 
@@ -113,7 +117,9 @@ mod tests {
     use super::*;
     use crate::selection::Selection;
     use sf_data::units::UnitDefs;
-    use sf_sim::{Kind, WorldConfig};
+    use sf_sim::{Kind, World, WorldConfig};
+
+    use crate::sim_thread::SimConfig;
 
     fn world_with(units: &[(&str, u8, i32, i32)]) -> (World, Vec<EntityId>) {
         let defs = UnitDefs::embedded();
@@ -144,9 +150,16 @@ mod tests {
     /// Everything of the local player selected, as a drag over the whole map
     /// would.
     fn all_own(world: &World, ids: &[EntityId]) -> Vec<EntityId> {
+        let snapshot = SimSnapshot::capture(world);
         let mut selection = Selection::new(LOCAL_PLAYER);
-        selection.drag(world, ids, false);
-        selection.orderable(world)
+        selection.drag(&snapshot, ids, false);
+        selection.orderable(&snapshot)
+    }
+
+    /// What `issue` asks of the world once the command has crossed to the sim
+    /// thread: `World::schedule` for the next tick.
+    fn issue_to(world: &mut World, command: Command) {
+        world.schedule(world.tick(), LOCAL_PLAYER, command).unwrap();
     }
 
     #[test]
@@ -157,11 +170,11 @@ mod tests {
         // The UI only builds and schedules commands: nothing has changed
         // until the tick runs them.
         let before = ids.iter().map(|&id| world.order_of(id)).collect::<Vec<_>>();
-        issue(
+        issue_to(
             &mut world,
             move_command(&selected, pt(30, 10), false).unwrap(),
         );
-        issue(
+        issue_to(
             &mut world,
             move_command(&selected, pt(30, 20), true).unwrap(),
         );
@@ -188,17 +201,17 @@ mod tests {
         assert!(scatter_command(&[], false).is_none());
         assert!(hold_command(&[], false).is_none());
         let selected = all_own(&world, &ids);
-        issue(&mut world, scatter_command(&selected, false).unwrap());
+        issue_to(&mut world, scatter_command(&selected, false).unwrap());
         world.step();
         for &id in &ids {
             assert!(matches!(world.order_of(id), Some(Order::Move(_))), "{id}");
         }
-        issue(&mut world, hold_command(&selected, false).unwrap());
+        issue_to(&mut world, hold_command(&selected, false).unwrap());
         world.step();
         for &id in &ids {
             assert_eq!(world.order_of(id), Some(Order::HoldPosition));
         }
-        issue(&mut world, stop_command(&selected).unwrap());
+        issue_to(&mut world, stop_command(&selected).unwrap());
         world.step();
         for &id in &ids {
             assert_eq!(world.order_of(id), Some(Order::Idle));
@@ -213,11 +226,44 @@ mod tests {
             ("civilian", 2, 14, 10),
         ]);
         // A drag takes only own units; inspecting an enemy orders nothing.
+        let world = SimSnapshot::capture(&world);
         let mut selection = Selection::new(LOCAL_PLAYER);
         selection.drag(&world, &ids, false);
         assert_eq!(selection.orderable(&world), &ids[..1]);
         selection.click(&world, Some(ids[1]), false);
         assert!(selection.orderable(&world).is_empty());
         assert!(move_command(&selection.orderable(&world), pt(1, 1), false).is_none());
+    }
+
+    /// The path of a real click: `issue` stamps the command for the tick after
+    /// the newest snapshot's, the sim thread schedules it, and the next
+    /// snapshot shows the order. Nothing shows before the tick runs.
+    #[test]
+    fn issue_reaches_the_world_through_the_sim_thread() {
+        let (world, ids) = world_with(&[("light_tank", 0, 10, 10), ("rifleman", 0, 12, 10)]);
+        let mut sim = SimHandle::spawn(world, SimConfig::manual()).unwrap();
+        let before = sim.latest();
+        let selected = {
+            let mut selection = Selection::new(LOCAL_PLAYER);
+            selection.drag(&before, &ids, false);
+            selection.orderable(&before)
+        };
+        assert_eq!(selected, ids);
+        issue(&sim, move_command(&selected, pt(30, 10), false).unwrap());
+        // Still the old picture until the tick has run.
+        assert_eq!(sim.latest().tick(), before.tick());
+        // The tick the snapshot shows is next; the command is for the one after.
+        sim.advance(2);
+        let after = sim
+            .wait_for_tick(
+                before.tick().saturating_add(2),
+                std::time::Duration::from_secs(10),
+            )
+            .expect("the ticks ran");
+        for &id in &ids {
+            assert_eq!(after.order_of(id), Some(Order::Move(pt(30, 10))), "{id}");
+        }
+        assert_eq!(sim.counters().late_commands, 0);
+        sim.stop();
     }
 }

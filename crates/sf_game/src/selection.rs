@@ -22,7 +22,7 @@
 //!   [`Selection::select_same_kind`]), the control groups
 //!   ([`Selection::assign_group`], [`Selection::recall_group`]) and the
 //!   cleanup of the dead ([`Selection::forget_the_dead`], by the generation
-//!   check of [`World::is_alive`]).
+//!   check of [`SimSnapshot::is_alive`]).
 //!
 //! Ownership decides what a unit may do: only the local player's units can
 //! be in [`Selection::ids`] and so only they get orders. A unit of anyone
@@ -31,7 +31,9 @@
 //! receives an order.
 
 use sf_render::ScreenRect;
-use sf_sim::{EntityId, Kind, PlayerId, UnitClass, World};
+use sf_sim::{EntityId, Kind, PlayerId, UnitClass};
+
+use crate::sim_snapshot::SimSnapshot;
 
 /// Number of control groups, on the keys 1 to 9.
 pub const GROUPS: usize = 9;
@@ -70,7 +72,7 @@ pub struct Facts {
 /// The [`Facts`] of a live entity; `None` for a stale id (dead, or its slot
 /// holds another entity: the generation check) and for an entity without a
 /// unit-table entry.
-pub fn facts(world: &World, id: EntityId) -> Option<Facts> {
+pub fn facts(world: &SimSnapshot, id: EntityId) -> Option<Facts> {
     let stats = world.stats_of(id)?;
     let view = world.get(id)?;
     Some(Facts {
@@ -152,13 +154,16 @@ impl Selection {
     /// The selected units that can take an order: the mobile ones. A
     /// selected structure is not in it, and neither is anything inspected.
     /// This is the only list orders are made from.
-    pub fn orderable(&self, world: &World) -> Vec<EntityId> {
+    pub fn orderable(&self, world: &SimSnapshot) -> Vec<EntityId> {
         self.orderable_iter(world).collect()
     }
 
     /// [`Selection::orderable`] without making a list: what the cursor asks
     /// every frame (WP3.5).
-    pub fn orderable_iter<'a>(&'a self, world: &'a World) -> impl Iterator<Item = EntityId> + 'a {
+    pub fn orderable_iter<'a>(
+        &'a self,
+        world: &'a SimSnapshot,
+    ) -> impl Iterator<Item = EntityId> + 'a {
         self.own
             .iter()
             .copied()
@@ -201,7 +206,7 @@ impl Selection {
     /// * Bare ground (or anything that cannot be selected) empties the
     ///   selection; with `additive` it changes nothing, so a slip of the
     ///   finger does not lose it.
-    pub fn click(&mut self, world: &World, hit: Option<EntityId>, additive: bool) {
+    pub fn click(&mut self, world: &SimSnapshot, hit: Option<EntityId>, additive: bool) {
         let Some((id, f)) = hit.and_then(|id| facts(world, id).map(|f| (id, f))) else {
             if !additive {
                 self.clear();
@@ -228,7 +233,7 @@ impl Selection {
     /// are only ever selected one at a time.
     pub fn select_same_kind(
         &mut self,
-        world: &World,
+        world: &SimSnapshot,
         hit: Option<EntityId>,
         in_view: &[EntityId],
         additive: bool,
@@ -253,7 +258,7 @@ impl Selection {
     /// to it with `additive`. Structures, and anything of someone else, are
     /// never taken by a drag. A drag that finds nothing empties the
     /// selection, or with `additive` changes nothing.
-    pub fn drag(&mut self, world: &World, in_rect: &[EntityId], additive: bool) {
+    pub fn drag(&mut self, world: &SimSnapshot, in_rect: &[EntityId], additive: bool) {
         let units: Vec<EntityId> = in_rect
             .iter()
             .copied()
@@ -291,7 +296,7 @@ impl Selection {
     /// number within [`DOUBLE_TAP_MS`] answers [`Recall::Centre`] with the
     /// middle of the group, for the camera. A group with no living member
     /// changes nothing.
-    pub fn recall_group(&mut self, world: &World, n: usize, now_ms: u64) -> Recall {
+    pub fn recall_group(&mut self, world: &SimSnapshot, n: usize, now_ms: u64) -> Recall {
         if n >= GROUPS {
             return Recall::Empty;
         }
@@ -314,9 +319,9 @@ impl Selection {
 
     /// Drops what is gone: every dead entity (and every id whose slot now
     /// holds another entity, by the generation check of
-    /// [`World::is_alive`]) leaves the selection, the inspected unit and the
+    /// [`SimSnapshot::is_alive`]) leaves the selection, the inspected unit and the
     /// groups. Call it once a frame.
-    pub fn forget_the_dead(&mut self, world: &World) {
+    pub fn forget_the_dead(&mut self, world: &SimSnapshot) {
         self.own.retain(|&id| world.is_alive(id));
         if self.inspected.is_some_and(|id| !world.is_alive(id)) {
             self.inspected = None;
@@ -328,7 +333,7 @@ impl Selection {
 }
 
 /// The middle of the entities' positions in cells; `None` if none is alive.
-fn middle_of(world: &World, ids: &[EntityId]) -> Option<[f32; 2]> {
+fn middle_of(world: &SimSnapshot, ids: &[EntityId]) -> Option<[f32; 2]> {
     let (mut sum, mut n) = ([0.0_f32; 2], 0.0_f32);
     for v in ids.iter().filter_map(|&id| world.get(id)) {
         let [x, y] = sf_math::render_bridge::vec2_to_f32(v.pos);

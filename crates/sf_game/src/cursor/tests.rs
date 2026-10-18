@@ -8,10 +8,11 @@ use super::*;
 use crate::commands::{self, LOCAL_PLAYER};
 use crate::playfield;
 use crate::sandbox::{MERIDIAN, NEUTRAL, VEYRAN};
+use crate::sim_snapshot::SimSnapshot;
 use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
-use sf_sim::{Command, Kind, PlayerId, Terrain, WorldConfig};
+use sf_sim::{Command, Kind, PlayerId, Terrain, World, WorldConfig};
 
 const W: u32 = 64;
 const SIZE: u32 = 64;
@@ -33,6 +34,11 @@ struct Scene {
 }
 
 impl Scene {
+    /// The world as the presentation reads it.
+    fn snap(&self) -> SimSnapshot {
+        SimSnapshot::capture(&self.world)
+    }
+
     fn new() -> Self {
         let defs = UnitDefs::embedded();
         let types = TerrainTypes::embedded();
@@ -99,20 +105,20 @@ impl Scene {
     }
 
     fn with(&self, sel: &Selection, hover: &Hover, mods: Modifiers) -> CursorKind {
-        cursor_context(&self.world, sel, hover, mods)
+        cursor_context(&self.snap(), sel, hover, mods)
     }
 
     /// Selects `ids` as a drag would: own mobile units.
     fn drag(&self, ids: &[EntityId]) -> Selection {
         let mut sel = Selection::new(LOCAL_PLAYER);
-        sel.drag(&self.world, ids, false);
+        sel.drag(&self.snap(), ids, false);
         sel
     }
 
     /// Selects one entity as a click would (own structures too).
     fn click(&self, id: EntityId) -> Selection {
         let mut sel = Selection::new(LOCAL_PLAYER);
-        sel.click(&self.world, Some(id), false);
+        sel.click(&self.snap(), Some(id), false);
         sel
     }
 }
@@ -238,7 +244,7 @@ fn attack_move_needs_a_weapon_in_the_selection() {
     // Unarmed units would only walk: the cursor says move, and the order is a move.
     let unarmed = s.drag(&[harvester]);
     assert_eq!(s.with(&unarmed, &ground, FIGHT), CursorKind::Move);
-    let command = commands::right_click(&s.world, &unarmed, &ground, FIGHT);
+    let command = commands::right_click(&s.snap(), &unarmed, &ground, FIGHT);
     assert!(matches!(
         command,
         Some(Command::Order {
@@ -472,7 +478,7 @@ fn selected_structures_take_no_orders_so_the_cursor_only_selects_and_inspects() 
     let own = s.unit("light_tank", MERIDIAN, 12, 10);
     for sel in [s.click(plant), s.click(tower)] {
         assert_eq!(sel.len(), 1);
-        assert!(sel.orderable(&s.world).is_empty());
+        assert!(sel.orderable(&s.snap()).is_empty());
         // Over the own structure (even the one selected): select.
         assert_eq!(
             s.cursor(&sel, &Hover::over(plant, Cell::new(5, 30))),
@@ -497,7 +503,7 @@ fn structures_in_a_mixed_selection_are_ignored_by_the_cursor() {
     let plant = s.structure("power_plant", MERIDIAN, 5, 30);
     let enemy = s.unit("rifleman", VEYRAN, 50, 10);
     let mut sel = s.click(plant);
-    sel.click(&s.world, Some(tank), true);
+    sel.click(&s.snap(), Some(tank), true);
     assert_eq!(sel.len(), 2);
     assert_eq!(s.cursor(&sel, &Hover::ground(LAND)), CursorKind::Move);
     assert_eq!(s.cursor(&sel, &Hover::ground(RIVER)), CursorKind::NoGo);
@@ -512,7 +518,7 @@ fn structures_in_a_mixed_selection_are_ignored_by_the_cursor() {
     );
     // An inspected enemy does not count as a selected unit.
     let mut looking = Selection::new(LOCAL_PLAYER);
-    looking.click(&s.world, Some(enemy), false);
+    looking.click(&s.snap(), Some(enemy), false);
     assert_eq!(looking.inspected(), Some(enemy));
     assert_eq!(s.cursor(&looking, &Hover::ground(LAND)), CursorKind::Select);
 }
@@ -708,18 +714,18 @@ fn a_right_click_gives_exactly_the_order_the_cursor_shows() {
                 for attack_move in [false, true] {
                     let mods = Modifiers { queue, attack_move };
                     let kind = s.with(sel, hover, mods);
-                    let command = commands::right_click(&s.world, sel, hover, mods);
+                    let command = commands::right_click(&s.snap(), sel, hover, mods);
                     let expected = order_for(kind, hover);
                     let ctx = format!("{kind:?} for {hover:?} {mods:?}: {}", what(&command));
                     match (&command, expected) {
                         (None, None) => {}
                         // No units to give it to: no command, whatever the cursor.
-                        (None, Some(_)) => assert!(sel.orderable(&s.world).is_empty(), "{ctx}"),
+                        (None, Some(_)) => assert!(sel.orderable(&s.snap()).is_empty(), "{ctx}"),
                         (Some(Command::Order { ids, order, queued }), Some(want)) => {
                             assert_eq!(*order, want, "{ctx}");
                             assert_eq!(*queued, is_queued(kind, mods), "{ctx}");
                             // The order goes to the units that can take it, all of them.
-                            assert_eq!(*ids, sel.orderable(&s.world), "{ctx}");
+                            assert_eq!(*ids, sel.orderable(&s.snap()), "{ctx}");
                             orders += 1;
                         }
                         (Some(_), _) => panic!("a click that is not the cursor's: {ctx}"),
@@ -743,9 +749,11 @@ fn each_cursor_gives_its_order_and_the_sim_carries_it_out() {
     let at_rifle = Hover::over(rifle, Cell::new(14, 10));
     let point = ground.point.unwrap();
     let go = |s: &mut Scene, hover: &Hover, mods: Modifiers| {
-        let command = commands::right_click(&s.world, &sel, hover, mods)
+        let command = commands::right_click(&s.snap(), &sel, hover, mods)
             .expect("the cursor promised an order");
-        commands::issue(&mut s.world, command);
+        s.world
+            .schedule(s.world.tick(), LOCAL_PLAYER, command)
+            .unwrap();
         s.world.step();
     };
     go(&mut s, &ground, Modifiers::default());
@@ -772,7 +780,7 @@ fn each_cursor_gives_its_order_and_the_sim_carries_it_out() {
     // A no-go and a select give nothing, and the world has nothing to run.
     let before = s.world.pending_commands().len();
     for hover in [Hover::ground(RIVER), Hover::default()] {
-        assert!(commands::right_click(&s.world, &sel, &hover, Modifiers::default()).is_none());
+        assert!(commands::right_click(&s.snap(), &sel, &hover, Modifiers::default()).is_none());
     }
     assert_eq!(s.world.pending_commands().len(), before);
 }
@@ -783,7 +791,7 @@ fn nothing_selected_means_a_right_click_does_nothing_even_over_an_enemy() {
     let enemy = s.unit("rifleman", VEYRAN, 50, 10);
     let hover = Hover::over(enemy, Cell::new(50, 10));
     assert_eq!(s.cursor(&nobody(), &hover), CursorKind::Inspect);
-    assert!(commands::right_click(&s.world, &nobody(), &hover, Modifiers::default()).is_none());
+    assert!(commands::right_click(&s.snap(), &nobody(), &hover, Modifiers::default()).is_none());
 }
 
 // ---- the pictures ----------------------------------------------------------------------

@@ -6,9 +6,10 @@
 
 use super::*;
 use crate::sandbox::{MERIDIAN, NEUTRAL, VEYRAN};
+use crate::sim_snapshot::SimSnapshot;
 use sf_data::units::UnitDefs;
 use sf_math::Vec2;
-use sf_sim::{Cell, Command, Order, WorldConfig};
+use sf_sim::{Cell, Command, Order, World, WorldConfig};
 
 const ME: PlayerId = PlayerId(MERIDIAN);
 
@@ -18,6 +19,11 @@ struct Scene {
 }
 
 impl Scene {
+    /// The world as the presentation reads it.
+    fn snap(&self) -> SimSnapshot {
+        SimSnapshot::capture(&self.world)
+    }
+
     fn new() -> Self {
         let defs = UnitDefs::embedded();
         let table = sf_bridge::unit_table(&defs).unwrap();
@@ -89,9 +95,9 @@ fn a_click_selects_one_own_unit_and_replaces_the_selection() {
         s.unit("rifleman", 0, 12, 10),
     );
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
+    sel.click(&s.snap(), Some(a), false);
     assert_eq!(sel.ids(), [a]);
-    sel.click(&s.world, Some(b), false);
+    sel.click(&s.snap(), Some(b), false);
     assert_eq!(sel.ids(), [b]);
 }
 
@@ -100,14 +106,14 @@ fn a_click_on_bare_ground_deselects_and_a_shift_click_on_it_does_not() {
     let mut s = Scene::new();
     let a = s.unit("light_tank", 0, 10, 10);
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
-    sel.click(&s.world, None, true);
+    sel.click(&s.snap(), Some(a), false);
+    sel.click(&s.snap(), None, true);
     assert_eq!(
         sel.ids(),
         [a],
         "a shift-click that missed keeps the selection"
     );
-    sel.click(&s.world, None, false);
+    sel.click(&s.snap(), None, false);
     assert!(sel.is_empty());
     assert!(sel.inspected().is_none());
 }
@@ -121,14 +127,14 @@ fn shift_toggles_a_unit_in_the_selection() {
         s.unit("scout", 0, 14, 10),
     );
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
-    sel.click(&s.world, Some(b), true);
-    sel.click(&s.world, Some(c), true);
+    sel.click(&s.snap(), Some(a), false);
+    sel.click(&s.snap(), Some(b), true);
+    sel.click(&s.snap(), Some(c), true);
     assert_eq!(sel.ids(), [a, b, c]);
-    sel.click(&s.world, Some(b), true);
+    sel.click(&s.snap(), Some(b), true);
     assert_eq!(sel.ids(), [a, c], "a second shift-click takes it out again");
-    sel.click(&s.world, Some(a), true);
-    sel.click(&s.world, Some(c), true);
+    sel.click(&s.snap(), Some(a), true);
+    sel.click(&s.snap(), Some(c), true);
     assert!(sel.is_empty());
 }
 
@@ -140,10 +146,10 @@ fn the_selection_is_ordered_by_id_however_it_was_built() {
         s.unit("rifleman", 0, 12, 10),
     );
     let (mut one, mut two) = (selection(), selection());
-    one.click(&s.world, Some(a), false);
-    one.click(&s.world, Some(b), true);
-    two.click(&s.world, Some(b), false);
-    two.click(&s.world, Some(a), true);
+    one.click(&s.snap(), Some(a), false);
+    one.click(&s.snap(), Some(b), true);
+    two.click(&s.snap(), Some(b), false);
+    two.click(&s.snap(), Some(a), true);
     assert_eq!(one.ids(), two.ids());
 }
 
@@ -154,34 +160,34 @@ fn an_enemy_or_neutral_unit_can_be_inspected_but_never_ordered() {
     let enemy = s.unit("light_tank", VEYRAN, 30, 10);
     let neutral = s.unit("civilian", NEUTRAL, 20, 20);
     let mut sel = selection();
-    sel.click(&s.world, Some(own), false);
+    sel.click(&s.snap(), Some(own), false);
 
-    sel.click(&s.world, Some(enemy), false);
+    sel.click(&s.snap(), Some(enemy), false);
     assert_eq!(sel.inspected(), Some(enemy));
     assert!(sel.is_empty(), "inspecting replaces the selection");
     assert!(sel.is_marked(enemy));
     assert!(
-        sel.orderable(&s.world).is_empty(),
+        sel.orderable(&s.snap()).is_empty(),
         "no order ever goes to it"
     );
     assert!(
-        crate::commands::move_command(&sel.orderable(&s.world), Vec2::from_ints(1, 1), false)
+        crate::commands::move_command(&sel.orderable(&s.snap()), Vec2::from_ints(1, 1), false)
             .is_none()
     );
 
-    sel.click(&s.world, Some(neutral), false);
+    sel.click(&s.snap(), Some(neutral), false);
     assert_eq!(sel.inspected(), Some(neutral));
     assert!(!sel.is_marked(enemy));
-    assert!(sel.orderable(&s.world).is_empty());
+    assert!(sel.orderable(&s.snap()).is_empty());
 
     // Shift cannot add it to a selection, and the own unit is back with a click.
-    sel.click(&s.world, Some(own), false);
-    sel.click(&s.world, Some(enemy), true);
+    sel.click(&s.snap(), Some(own), false);
+    sel.click(&s.snap(), Some(enemy), true);
     assert_eq!(sel.ids(), [own]);
     assert!(sel.inspected().is_none());
     // A shift-click on an own unit while inspecting leaves the inspection.
-    sel.click(&s.world, Some(enemy), false);
-    sel.click(&s.world, Some(own), true);
+    sel.click(&s.snap(), Some(enemy), false);
+    sel.click(&s.snap(), Some(own), true);
     assert_eq!(sel.ids(), [own]);
     assert!(sel.inspected().is_none());
 }
@@ -192,13 +198,13 @@ fn a_structure_is_selected_by_a_click_but_takes_no_order() {
     let tank = s.unit("light_tank", 0, 10, 10);
     let barracks = s.structure("barracks", 0, 20, 20);
     let mut sel = selection();
-    sel.click(&s.world, Some(barracks), false);
+    sel.click(&s.snap(), Some(barracks), false);
     assert_eq!(sel.ids(), [barracks]);
-    assert!(sel.orderable(&s.world).is_empty());
-    sel.click(&s.world, Some(tank), true);
+    assert!(sel.orderable(&s.snap()).is_empty());
+    sel.click(&s.snap(), Some(tank), true);
     assert_eq!(sel.ids().len(), 2);
     assert_eq!(
-        sel.orderable(&s.world),
+        sel.orderable(&s.snap()),
         [tank],
         "orders go to the unit only"
     );
@@ -215,7 +221,7 @@ fn a_drag_takes_own_mobile_units_and_leaves_structures_and_enemies() {
     let enemy = s.unit("light_tank", VEYRAN, 14, 10);
     let neutral = s.unit("civilian", NEUTRAL, 16, 10);
     let mut sel = selection();
-    sel.drag(&s.world, &[a, b, barracks, enemy, neutral], false);
+    sel.drag(&s.snap(), &[a, b, barracks, enemy, neutral], false);
     assert_eq!(sel.ids(), [a, b]);
     assert!(sel.inspected().is_none());
 }
@@ -229,12 +235,12 @@ fn a_shift_drag_adds_and_a_plain_drag_replaces() {
         s.unit("scout", 0, 14, 10),
     );
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
-    sel.drag(&s.world, &[b, c], true);
+    sel.click(&s.snap(), Some(a), false);
+    sel.drag(&s.snap(), &[b, c], true);
     assert_eq!(sel.ids(), [a, b, c]);
-    sel.drag(&s.world, &[a, b], true);
+    sel.drag(&s.snap(), &[a, b], true);
     assert_eq!(sel.ids(), [a, b, c], "a shift drag never takes a unit out");
-    sel.drag(&s.world, &[c], false);
+    sel.drag(&s.snap(), &[c], false);
     assert_eq!(sel.ids(), [c]);
 }
 
@@ -244,12 +250,12 @@ fn a_drag_that_finds_nothing_deselects_unless_shift_is_held() {
     let a = s.unit("light_tank", 0, 10, 10);
     let barracks = s.structure("barracks", 0, 20, 20);
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
-    sel.drag(&s.world, &[], true);
+    sel.click(&s.snap(), Some(a), false);
+    sel.drag(&s.snap(), &[], true);
     assert_eq!(sel.ids(), [a]);
-    sel.drag(&s.world, &[barracks], true);
+    sel.drag(&s.snap(), &[barracks], true);
     assert_eq!(sel.ids(), [a], "a structure in the rectangle is not taken");
-    sel.drag(&s.world, &[barracks], false);
+    sel.drag(&s.snap(), &[barracks], false);
     assert!(sel.is_empty());
 }
 
@@ -261,8 +267,8 @@ fn a_drag_ends_an_inspection() {
         s.unit("rifleman", VEYRAN, 40, 10),
     );
     let mut sel = selection();
-    sel.click(&s.world, Some(enemy), false);
-    sel.drag(&s.world, &[a], false);
+    sel.click(&s.snap(), Some(enemy), false);
+    sel.drag(&s.snap(), &[a], false);
     assert_eq!(sel.ids(), [a]);
     assert!(sel.inspected().is_none());
 }
@@ -278,11 +284,11 @@ fn a_double_click_takes_own_units_of_that_kind_in_view() {
     let in_view = [t1, t2, rifle, enemy_tank];
     let _ = t_far;
     let mut sel = selection();
-    sel.select_same_kind(&s.world, Some(t1), &in_view, false);
+    sel.select_same_kind(&s.snap(), Some(t1), &in_view, false);
     assert_eq!(sel.ids(), [t1, t2]);
     // The clicked unit counts even if the view list missed it.
     let mut sel = selection();
-    sel.select_same_kind(&s.world, Some(rifle), &[], false);
+    sel.select_same_kind(&s.snap(), Some(rifle), &[], false);
     assert_eq!(sel.ids(), [rifle]);
 }
 
@@ -295,8 +301,8 @@ fn a_shift_double_click_adds_the_kind_to_the_selection() {
     );
     let rifle = s.unit("rifleman", 0, 14, 10);
     let mut sel = selection();
-    sel.click(&s.world, Some(rifle), false);
-    sel.select_same_kind(&s.world, Some(t1), &[t1, t2, rifle], true);
+    sel.click(&s.snap(), Some(rifle), false);
+    sel.select_same_kind(&s.snap(), Some(t1), &[t1, t2, rifle], true);
     assert_eq!(sel.ids(), [t1, t2, rifle]);
 }
 
@@ -310,16 +316,16 @@ fn a_double_click_on_a_structure_or_an_enemy_is_a_single_click() {
     let enemy = s.unit("light_tank", VEYRAN, 16, 10);
     let enemy2 = s.unit("light_tank", VEYRAN, 18, 10);
     let mut sel = selection();
-    sel.select_same_kind(&s.world, Some(b1), &[b1, b2], false);
+    sel.select_same_kind(&s.snap(), Some(b1), &[b1, b2], false);
     assert_eq!(
         sel.ids(),
         [b1],
         "structures are only selected one at a time"
     );
-    sel.select_same_kind(&s.world, Some(enemy), &[enemy, enemy2], false);
+    sel.select_same_kind(&s.snap(), Some(enemy), &[enemy, enemy2], false);
     assert_eq!(sel.inspected(), Some(enemy));
     assert!(sel.is_empty());
-    sel.select_same_kind(&s.world, None, &[], false);
+    sel.select_same_kind(&s.snap(), None, &[], false);
     assert!(sel.inspected().is_none());
 }
 
@@ -332,17 +338,17 @@ fn groups_are_assigned_and_recalled() {
         s.unit("scout", 0, 14, 10),
     );
     let mut sel = selection();
-    sel.drag(&s.world, &[a, b], false);
+    sel.drag(&s.snap(), &[a, b], false);
     sel.assign_group(0);
-    sel.click(&s.world, Some(c), false);
+    sel.click(&s.snap(), Some(c), false);
     sel.assign_group(1);
     assert_eq!(sel.group(0), [a, b]);
     assert_eq!(sel.group(1), [c]);
 
     sel.clear();
-    assert_eq!(sel.recall_group(&s.world, 0, 1_000), Recall::Selected);
+    assert_eq!(sel.recall_group(&s.snap(), 0, 1_000), Recall::Selected);
     assert_eq!(sel.ids(), [a, b]);
-    assert_eq!(sel.recall_group(&s.world, 1, 5_000), Recall::Selected);
+    assert_eq!(sel.recall_group(&s.snap(), 1, 5_000), Recall::Selected);
     assert_eq!(sel.ids(), [c]);
 }
 
@@ -354,14 +360,14 @@ fn a_unit_is_in_one_group_at_a_time() {
         s.unit("rifleman", 0, 12, 10),
     );
     let mut sel = selection();
-    sel.drag(&s.world, &[a, b], false);
+    sel.drag(&s.snap(), &[a, b], false);
     sel.assign_group(0);
-    sel.click(&s.world, Some(b), false);
+    sel.click(&s.snap(), Some(b), false);
     sel.assign_group(2);
     assert_eq!(sel.group(0), [a], "b left group 1 for group 3");
     assert_eq!(sel.group(2), [b]);
     // Assigning again replaces the group's members.
-    sel.click(&s.world, Some(a), false);
+    sel.click(&s.snap(), Some(a), false);
     sel.assign_group(2);
     assert_eq!(sel.group(2), [a]);
     assert!(sel.group(0).is_empty());
@@ -379,12 +385,12 @@ fn a_double_tap_centres_on_the_group_and_a_slow_one_does_not() {
         s.unit("rifleman", 0, 20, 30),
     );
     let mut sel = selection();
-    sel.drag(&s.world, &[a, b], false);
+    sel.drag(&s.snap(), &[a, b], false);
     sel.assign_group(3);
     sel.clear();
 
-    assert_eq!(sel.recall_group(&s.world, 3, 10_000), Recall::Selected);
-    let Recall::Centre([x, y]) = sel.recall_group(&s.world, 3, 10_000 + DOUBLE_TAP_MS) else {
+    assert_eq!(sel.recall_group(&s.snap(), 3, 10_000), Recall::Selected);
+    let Recall::Centre([x, y]) = sel.recall_group(&s.snap(), 3, 10_000 + DOUBLE_TAP_MS) else {
         panic!("the second tap in time centres the camera");
     };
     // The middle of (10, 10) and (20, 30), in cells (units stand on a cell middle or its corner).
@@ -392,21 +398,21 @@ fn a_double_tap_centres_on_the_group_and_a_slow_one_does_not() {
     assert_eq!(sel.ids(), [a, b]);
     // A third tap is a new first tap.
     assert_eq!(
-        sel.recall_group(&s.world, 3, 10_100 + DOUBLE_TAP_MS),
+        sel.recall_group(&s.snap(), 3, 10_100 + DOUBLE_TAP_MS),
         Recall::Selected
     );
 
     // Too slow, or another number in between.
-    assert_eq!(sel.recall_group(&s.world, 3, 20_000), Recall::Selected);
+    assert_eq!(sel.recall_group(&s.snap(), 3, 20_000), Recall::Selected);
     assert_eq!(
-        sel.recall_group(&s.world, 3, 20_000 + DOUBLE_TAP_MS + 1),
+        sel.recall_group(&s.snap(), 3, 20_000 + DOUBLE_TAP_MS + 1),
         Recall::Selected
     );
-    sel.click(&s.world, Some(a), false);
+    sel.click(&s.snap(), Some(a), false);
     sel.assign_group(4);
-    assert_eq!(sel.recall_group(&s.world, 3, 30_000), Recall::Selected);
-    assert_eq!(sel.recall_group(&s.world, 4, 30_100), Recall::Selected);
-    assert_eq!(sel.recall_group(&s.world, 3, 30_200), Recall::Selected);
+    assert_eq!(sel.recall_group(&s.snap(), 3, 30_000), Recall::Selected);
+    assert_eq!(sel.recall_group(&s.snap(), 4, 30_100), Recall::Selected);
+    assert_eq!(sel.recall_group(&s.snap(), 3, 30_200), Recall::Selected);
 }
 
 #[test]
@@ -414,10 +420,10 @@ fn an_empty_group_leaves_the_selection_alone() {
     let mut s = Scene::new();
     let a = s.unit("light_tank", 0, 10, 10);
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
-    assert_eq!(sel.recall_group(&s.world, 5, 0), Recall::Empty);
+    sel.click(&s.snap(), Some(a), false);
+    assert_eq!(sel.recall_group(&s.snap(), 5, 0), Recall::Empty);
     assert_eq!(sel.ids(), [a]);
-    assert_eq!(sel.recall_group(&s.world, GROUPS, 0), Recall::Empty);
+    assert_eq!(sel.recall_group(&s.snap(), GROUPS, 0), Recall::Empty);
     assert!(sel.group(GROUPS).is_empty());
 }
 
@@ -429,10 +435,10 @@ fn recalling_a_group_ends_an_inspection() {
         s.unit("light_tank", VEYRAN, 40, 10),
     );
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
+    sel.click(&s.snap(), Some(a), false);
     sel.assign_group(0);
-    sel.click(&s.world, Some(enemy), false);
-    sel.recall_group(&s.world, 0, 0);
+    sel.click(&s.snap(), Some(enemy), false);
+    sel.recall_group(&s.snap(), 0, 0);
     assert_eq!(sel.ids(), [a]);
     assert!(sel.inspected().is_none());
 }
@@ -446,16 +452,16 @@ fn the_dead_leave_the_selection_the_groups_and_the_inspection() {
     );
     let enemy = s.unit("light_tank", VEYRAN, 40, 10);
     let mut sel = selection();
-    sel.drag(&s.world, &[a, b], false);
+    sel.drag(&s.snap(), &[a, b], false);
     sel.assign_group(0);
     s.kill(a);
-    sel.forget_the_dead(&s.world);
+    sel.forget_the_dead(&s.snap());
     assert_eq!(sel.ids(), [b]);
     assert_eq!(sel.group(0), [b]);
 
-    sel.click(&s.world, Some(enemy), false);
+    sel.click(&s.snap(), Some(enemy), false);
     s.kill(enemy);
-    sel.forget_the_dead(&s.world);
+    sel.forget_the_dead(&s.snap());
     assert!(sel.inspected().is_none());
     assert!(!sel.is_marked(enemy));
 }
@@ -465,7 +471,7 @@ fn a_new_unit_in_a_dead_unit_slot_is_not_selected() {
     let mut s = Scene::new();
     let a = s.unit("light_tank", 0, 10, 10);
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
+    sel.click(&s.snap(), Some(a), false);
     sel.assign_group(0);
     s.kill(a);
     // The freed slot is reused by the next spawn, under a new generation.
@@ -473,13 +479,13 @@ fn a_new_unit_in_a_dead_unit_slot_is_not_selected() {
     assert_eq!(reborn.index(), a.index(), "the slot was reused");
     assert_ne!(reborn.generation(), a.generation());
     assert!(!sel.is_marked(reborn));
-    sel.forget_the_dead(&s.world);
+    sel.forget_the_dead(&s.snap());
     assert!(
         sel.is_empty(),
         "the old id is stale, whatever lives in its slot now"
     );
     assert!(sel.group(0).is_empty());
-    assert_eq!(sel.recall_group(&s.world, 0, 0), Recall::Empty);
+    assert_eq!(sel.recall_group(&s.snap(), 0, 0), Recall::Empty);
 }
 
 #[test]
@@ -493,11 +499,11 @@ fn a_selection_never_changes_the_world_and_its_orders_are_commands() {
     let enemy = s.unit("light_tank", VEYRAN, 40, 10);
     let checksum = s.world.checksum_history().to_vec();
     let mut sel = selection();
-    sel.click(&s.world, Some(a), false);
-    sel.click(&s.world, Some(b), true);
+    sel.click(&s.snap(), Some(a), false);
+    sel.click(&s.snap(), Some(b), true);
     sel.assign_group(0);
-    sel.click(&s.world, Some(enemy), false);
-    sel.recall_group(&s.world, 0, 0);
+    sel.click(&s.snap(), Some(enemy), false);
+    sel.recall_group(&s.snap(), 0, 0);
     assert_eq!(
         s.world.checksum_history(),
         checksum,
@@ -505,11 +511,12 @@ fn a_selection_never_changes_the_world_and_its_orders_are_commands() {
     );
     assert!(s.world.pending_commands().is_empty(), "nor a command");
 
-    let ids = sel.orderable(&s.world);
-    commands::issue(
-        &mut s.world,
-        commands::move_command(&ids, Vec2::from_ints(30, 30), false).unwrap(),
-    );
+    let ids = sel.orderable(&s.snap());
+    // What `issue` does once the command has crossed to the sim thread.
+    let command = commands::move_command(&ids, Vec2::from_ints(30, 30), false).unwrap();
+    s.world
+        .schedule(s.world.tick(), commands::LOCAL_PLAYER, command)
+        .unwrap();
     assert_eq!(
         s.world.order_of(a),
         Some(Order::Idle),
@@ -543,9 +550,9 @@ fn placeholder_wanderers_cannot_be_selected() {
         0,
     );
     let mut sel = selection();
-    sel.click(&s.world, Some(id), false);
+    sel.click(&s.snap(), Some(id), false);
     assert!(sel.is_empty());
-    sel.drag(&s.world, &[id], false);
+    sel.drag(&s.snap(), &[id], false);
     assert!(sel.is_empty());
 }
 

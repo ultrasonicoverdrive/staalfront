@@ -135,6 +135,11 @@ input -> Command(tick N) -> sf_sim tick (20 Hz) -> world state + checksum
                      sf_render interpolates (refresh rate)
 ```
 
+In the game the middle of this picture is a thread of its own since WP1.15:
+the world is stepped on the sim thread and the rest reads the snapshot it
+publishes (section 18). `sf_headless` and the tests call `World::step`
+directly and stay single-threaded.
+
 ## 4. Entity storage
 
 Game objects are entities in an **own struct-of-arrays storage with generation
@@ -462,7 +467,8 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
 F1 (action `ToggleDebug` in `assets/config/input.ron`) toggles two egui
 windows: *Performance* (frame time graph of the last 300 frames with avg / p99 /
 max, draw calls and instances per mesh kind, terrain chunks drawn, sim tick and
-checksum in hex) and *Camera & view* (the live `CameraConfig` tunables: zoom
+checksum in hex, and since WP1.15 the sim thread's tick time and an orange
+"sim behind by N ms" while it cannot keep its clock) and *Camera & view* (the live `CameraConfig` tunables: zoom
 step per notch, zoom and pan damping, pan speed, near and far pitch, reset; the
 LOD colouring and cell grid toggles). Off by default (`--debug-ui` opens it for
 screenshots; `--debug-grid` and `--debug-lod` preset the toggles).
@@ -789,8 +795,9 @@ start pose are flown but not recorded. The run defaults to true fullscreen at
 else the best exclusive video mode of that size, else borderless with a note)
 and to no vsync (`Present::Uncapped`: `Immediate`, else `Mailbox`, else `Fifo`
 with a note). Per frame it records the wall time between frames, the CPU time
-(sim ticks plus the frame callback minus the wait for the swap chain), the
-parts of it (build, upload, render), units in view, draw calls, triangles and
+(the frame callback minus the wait for the swap chain; the sim ticks were part of
+it until WP1.15, now they run on the sim thread and are reported next to it as
+`sim_ms`), the parts of it (build, upload, render), units in view, draw calls, triangles and
 the instance buffers created during the frame; GPU time comes from two
 timestamp queries around the frame's commands (`sf_render::gpu_timer`, read back
 without waiting, a few frames late; "n/a" when the adapter has none). The
@@ -811,3 +818,164 @@ buffers during the zoom. `Renderer::reserve_units` allocates every buffer at the
 largest size its entities can need (`Instancer::mesh_capacity`) at load; the
 bench reports `buffer_allocs` per frame and phase, and `--no-reserve` brings
 the old behaviour back to compare.
+
+## 18. The simulation thread (WP1.15)
+
+*Why.* A tick of 2,000 colliding units costs 12.7 ms on average and 22 ms at worst
+(review of WP4.4). Stepped inside the frame, that is a hitch in every third frame
+at 60 Hz and the end of the M0 target (p99 frame time <= 16.7 ms) in any big
+fight. So `World::step` runs on its own thread and a slow tick can no longer
+stall a frame. The code is `crates/sf_game/src/sim_thread.rs` (thread, channel,
+clock) and `sim_snapshot.rs` (what the main thread reads); `sf_sim` is
+untouched, it still has no threads, no clock and no I/O.
+
+```
+ main thread (winit loop)                          sim thread "sf-sim"
+ ------------------------                          -------------------
+ input, selection, orders                          owns the World
+   commands::issue                                   loop: wait until tick n is due
+     SimHandle::send(player, cmd)                           (recv_timeout on the channel)
+       stamp = newest snapshot's tick + 1  ---- mpsc ---> World::schedule(stamp, ..)
+ render                                                    World::step()        20 Hz
+   SimHandle::latest()  <---- one slot, a mutex ---- publish(SimSnapshot)
+   interpolation_alpha(now, snapshot.pace)           (a buffer taken back from the
+   instancer / HUD / cursor / F1 read the snapshot    snapshots nobody holds any more)
+```
+
+**Who touches what.** Only the sim thread touches the `World`. The main thread
+has a `SimHandle` (the sending end of the channel, the slot, counters) and reads
+`SimSnapshot`s. Nothing is shared mutably: a snapshot is immutable once
+published, and the mutex around the slot is held for the swap of one pointer
+(`Arc<SimSnapshot>`), by either side, never while a snapshot is built or read.
+`std` only (`thread`, `mpsc`, `Mutex`, `Condvar`); no new dependency.
+
+**Commands.** `commands::issue` calls `SimHandle::send`, which stamps the command
+with the tick of the newest snapshot plus `INPUT_DELAY_TICKS` (1) and puts it on
+the channel; the sim thread hands it to `World::schedule` with that tick, in the
+order it was sent. The snapshot's tick is the next one to run and may be running
+right now, so the delay is one tick: an order runs at the start of the tick after
+it, 50 ms later than in the single-threaded game at worst (which stamped the
+tick about to run). The lockstep semantics are the world's, unchanged: commands
+of one tick run in `(player, sequence)` order. A command that still arrives for a
+tick that has run (the main thread read an old snapshot while the sim caught up)
+is scheduled for the next tick instead, counted (`late_commands`, F1), printed
+to stderr and always logged with the tick that was asked for and the tick it ran
+at (`SimHandle::moved_commands`, the last 1,000; an entry only for a moved
+command, so it is cheap and bounded, and the game keeps it). The run is then no
+longer "the commands as stamped". The full log (`SimConfig::record_commands`:
+every command, `LoggedCommand`) grows with the session, so it is off in the game
+and on in the tests.
+
+**Open decision for phase 14 (lockstep), owner Tijmen: pending commands are in
+the world checksum.** The checksum hashes the commands that wait for their tick
+(`sf_sim::checksum`, the queue section). So two peers that receive the same
+command, for the same tick, at *different times* have different checksums in
+the ticks between its arrival and its execution: a false desync. A deadline by
+which commands must be in does not fix that (arrival times still differ by
+network jitter). Two ways out; both change a determinism rule (PLAN.md section
+12.4) and so need approval, and neither is done here:
+(a) hand a command to `World::schedule` only just before its tick (the queue
+is then empty at every checksum, but the net layer must hold commands back and
+the sim thread's channel has to do the same); or
+(b) leave the pending commands out of the checksum (a golden-moving change to
+`sf_sim`: every pinned checksum that has commands waiting at a tick end would
+change).
+`LoggedCommand::arrived` records when each command went in, which is what a
+single-threaded replay needs today to reproduce the checksums.
+
+**Latency.** From the click to visible movement: up to one tick of input delay
+(50 ms, `INPUT_DELAY_TICKS`) plus `INTERP_DELAY` (30 ms), about 80 ms, on top of
+the frame the click is handled in. Not a problem for an RTS; an adaptive delay
+is a follow-up (`docs/progress.md`).
+
+**The snapshot** (`SimSnapshot`) is everything the main thread asks of the world:
+
+| What | Used by |
+|---|---|
+| every live entity as an `EntityView` (id and generation, kind, owner, previous and current position and facing, hit points), ascending slot order | instancer (`update_tick`), HUD minimap dots, selection, picking results, health bars |
+| the current `Order` of every entity | the hovered unit in the F1 panel |
+| the unit table (shared, read once) and `get` / `is_alive` / `stats_of` / `order_of` with the names of the `World` methods | `selection`, `cursor`, `commands::right_click`, `selection_view`, F1 |
+| passability of every cell for every movement class (shared, read once: `World::passable` looks at terrain only) and `cell_at` | the cursor context (NoGo) |
+| tick, the checksum after it, map size | F1 panel, HUD tick, benchmark |
+| `Pace`: when the last tick was due, how long it took, how far behind the clock the sim was | interpolation, F1 "sim behind" |
+
+`selection`, `cursor`, `commands` and `selection_view` take `&SimSnapshot` where
+they took `&World`. The runner takes one snapshot per frame (`Runner::pull_snapshot`
+at the top of `render`) and everything in the frame reads that one, so a frame is
+consistent. The cutscene crates and the editor never read the world.
+
+**Buffers.** The sim thread builds the next snapshot in a buffer it takes back
+from the ones it has published and nobody holds (`Arc` strong count 1), and
+publishes it by swapping it into the slot: in steady state nothing is
+allocated, and 5,000 entities are about 0.4 MB per tick. Each snapshot has the
+previous and the current state of every entity (the sim stores both), so the
+renderer interpolates inside the newest snapshot; a frame between two publishes
+draws the same snapshot with a larger alpha. The runner hands a new snapshot to
+the instancer once (`Instancer::update_tick`, as `fixed_update` did).
+
+**The sim's clock and "behind".** The thread has its own clock: tick `n` is due at
+`start + n * 50 ms`, absolute, so there is no drift; it sleeps on the command
+channel until then (a command wakes it, never makes it step early) and starts
+only when the runner says so (`SimHandle::start`, after the window and the
+renderer exist). When a tick overruns, the thread catches up with at most
+`MAX_CATCH_UP_TICKS` (3) extra ticks in one pass and then waits out the rest of
+that 50 ms interval: never more than `1 + 3` ticks per wall interval. When it is
+more than `MAX_LAG_TICKS` (20) behind it gives up catching up and restarts its
+clock from now: the game then runs slower than the wall clock, **no tick is
+skipped** (that would break lockstep), and the restart is counted
+(`clock_resets`). Rendering never waits for any of this: it draws the newest
+snapshot every frame, and the F1 panel shows "sim behind by N ms (frames carry
+on)" while the newest snapshot says the sim was behind (and for a second after).
+`--sim-delay-ms N` makes every tick N ms slower, to look at exactly that.
+
+**Interpolation.** `interpolation_alpha(now, pace)` is `(now - due - INTERP_DELAY)
+/ 50 ms`, clamped to `0..=1`. A snapshot's last tick was due at `pace.due`; its
+result is shown from `INTERP_DELAY` (30 ms) later for one tick. Before that the
+picture is still finishing the tick before (the previous snapshot at alpha 1),
+so a snapshot that is published within 30 ms of its due time starts at 0 exactly
+where the old one ended: no stutter. The 30 ms are the budget of a tick (13 ms
+average and 22 ms worst for 2,000 colliding units, plus the operating system's
+sleep jitter); the price is a picture that is 30 ms behind the sim. A snapshot
+that comes later stalls the picture for the difference and counts as a
+`late_publish` (F1, `bench.json`). When the sim is behind, alpha holds at 1: the
+picture does not extrapolate. The engine's own alpha and `fixed_update` are no
+longer used by the game.
+
+**Shutdown.** Dropping the `SimHandle` (the runner, on window close) sends
+`Shutdown` and joins the thread; the longest wait is the tick that is running.
+`stop()` returns what the thread leaves (`SimExit`: ticks, the full checksum
+history, the command log, whether it panicked). A sim thread that panicked is
+noticed by the runner (`SimHandle::is_running`), which joins it, prints the
+panic message (kept in `SimExit::panic_message`) and ends the program with a
+failure exit code. `SimConfig::panic_at` is the test hook that makes it
+happen.
+
+**Determinism, and how it is tested.** The thread only calls `World::schedule`
+and `World::step`, in the order it received things. `SimConfig::manual()` makes
+the world step only when told to (`SimHandle::advance`), one snapshot per tick;
+`crates/sf_game/tests/sim_thread.rs` uses it to run the shipped scenarios
+(`orders`, `command_mix`, `units_spawn`, `terrain_256`, `pathing_256`,
+`crowd_jam`) through the sim thread, with their commands sent over the channel,
+and through `sf_headless::run::run`, and compares the checksum after every tick
+and every entity of every snapshot. The same file runs the thread on its own
+clock with commands sent live and replays its command log in a single-threaded
+world (equal checksums), measures a frame loop against a sim whose ticks take
+150 ms (the frames do not notice), checks that catching up is bounded and that
+a stall beyond the limit restarts the clock, that a moved command is logged
+without the full log, that a panicking sim thread is noticed with its message
+kept, that `Runner` holds no `World` and steps nothing (a source check of
+`runner.rs`: the frame-loop test only drives a `SimHandle` and could not notice
+the stepping moving back into the frame), and that the thread joins in every
+state (running, never started, stepped, in the middle of a 400 ms tick, stopped
+twice).
+
+**Benchmark.** `bench.json` keeps every field and gains `sim.tick_ms` (the
+sim thread's own time per tick over the measured flight: count, avg, p50, p95,
+p99, max), `sim.behind_passes`, `sim.clock_resets`, `sim.late_commands`,
+`sim.late_publishes`, `sim.extra_tick_ms` and `sim.thread`. `frame_ms` and
+`cpu_ms` no longer contain the sim: the main thread's per-tick conversion for
+the instancer is in them, the `step` is not. The per-frame `sim_ms` is the time
+the sim thread spent in ticks that finished since the previous frame. **Numbers
+taken before WP1.15 are not comparable with numbers taken after it** (the sim
+ran inside the frame before, and a hitch every third frame was part of p99).
+
