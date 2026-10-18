@@ -1,7 +1,7 @@
 # Terrain types and occupancy
 
-Work package WP2.1 (PLAN.md phase 2). Rules in our own words; the flags below are
-**placeholders** until the work packages named in the last column read them.
+Work package WP2.1 (PLAN.md phase 2); WP4.1 moved the movement half of the types out
+(`movement.md`). Rules in our own words.
 
 ## The grid
 
@@ -15,33 +15,35 @@ side); the game rules in this page are per cell. A sim position is in cells
 
 A terrain type is data: `assets/config/terrain_types.ron` lists each type with an
 `id` (the number a map file stores, never renumbered once a map uses it), a unique
-`name` and flags. Adding a type is a data change; nothing in Rust names a type except
-the map generator, which looks the six below up by name.
+`name` and two flags of its own. Adding a type is a data change; nothing in Rust names a type except
+the map generator, which looks the six below up by name. **Who can cross a type, and how fast,
+is not a flag of the type**: it is the cost table of the movement classes, with one entry per
+class for every type here (`docs/rules/movement.md`; since WP4.1 it replaced the three
+`passable` flags this file used to have).
 
-| id | name | foot | wheeled | tracked | buildable | harvestable | Meaning |
-|---|---|---|---|---|---|---|---|
-| 0 | grass | yes | yes | yes | **yes** | no | Open ground; the only terrain a structure may stand on. |
-| 1 | road | yes | yes | yes | no | no | Open ground that is kept free of buildings so that it stays a road. |
-| 2 | water | no | no | no | no | no | River and lake: nothing crosses it. |
-| 3 | rock | no | no | no | no | no | Steep or high ground: nothing crosses it. |
-| 4 | ore | yes | yes | yes | no | **yes** | Open ground with resources on it; kept free of buildings so that harvesters can reach it. |
-| 5 | bridge | yes | yes | yes | no | no | A road over water: crossable, not buildable. |
+| id | name | buildable | harvestable | Meaning |
+|---|---|---|---|---|
+| 0 | grass | **yes** | no | Open ground; the only terrain a structure may stand on. |
+| 1 | road | no | no | Open ground that is kept free of buildings so that it stays a road. Quicker to cross than grass for the ground classes. |
+| 2 | water | no | no | River and lake: foot, wheeled and tracked units cannot cross it; hover craft and vessels can. |
+| 3 | rock | no | no | Steep or high ground: nothing on the ground or the water crosses it, only aircraft. |
+| 4 | ore | no | **yes** | Open ground with resources on it; kept free of buildings so that harvesters can reach it. Slower to cross than grass. |
+| 5 | bridge | no | no | A road over water: land crosses it, vessels pass under it, not buildable (`movement.md`, "The bridge"). |
 
 What the flags mean, and who reads them:
 
-* `passable` per movement class (foot = infantry, wheeled, tracked): whether a unit of
-  that class may enter the cell. **Nothing reads it yet**; movement classes and path
-  finding arrive in WP4.1. Today's wanderers walk over water and rock (they have no
-  collision), and the `terrain_256` scenario checks that they still do, so existing
-  behaviour does not change.
 * `buildable`: whether a structure may stand on the cell. Read by `Command::Place`
-  (below); WP6.x building placement will read it too.
+  (below) and `Command::PlaceStructure`; WP6.x building placement will read it too.
 * `harvestable`: whether harvesters can take resources from the cell. Nothing reads it
   yet (phase 7).
 
-The values are our placeholders, not taken from any other game. Whether tracked
-vehicles should cross rock, or infantry water, is decided when WP4.1 defines the
-movement classes.
+Which cells a unit may enter and its speed there: `World::cost(class, cell)` and
+`World::passable(class, cell)` (`movement.md`). The sim's `TerrainFlags` also has a derived
+`ground` summary (all three ground classes can enter the type), computed from the costs and
+not written by hand; it is in the terrain digest in the bits the old passable flags had, so
+the checksum of every map that existed before WP4.1 is unchanged.
+
+The values are our placeholders, not taken from any other game.
 
 ## A map's terrain layer
 
@@ -54,7 +56,7 @@ define, and a file name that could leave the map directory (the same rules as th
 height and material files). A map without the line has no layer and loads as before.
 
 A world made on a map without a layer has **open ground** everywhere: every cell is
-type 0 with the flags passable for all three classes and buildable, not harvestable.
+type 0, buildable, not harvestable, and every movement class moves on it at normal speed.
 
 ## Generated maps
 

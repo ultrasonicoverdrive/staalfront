@@ -66,7 +66,8 @@ pub struct UnitStats {
     /// Hit points a new entity starts with; zero means it cannot be damaged.
     pub hp: u32,
     /// Kind number of the movement class; `None` for a structure or an
-    /// object. Terrain costs per class are WP4.1.
+    /// object. The class decides which cells the unit may enter and how fast
+    /// it moves there ([`crate::movement`], WP4.1).
     pub movement_class: Option<u16>,
     /// Distance per tick, rounded once from the exact decimal. Nonzero for a
     /// mobile kind.

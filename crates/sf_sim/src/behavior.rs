@@ -2,8 +2,10 @@
 //! use.
 //!
 //! This is engine-level scaffolding so that thousands of entities move without
-//! any gameplay. There are no movement classes, no terrain and no collision
-//! here; those arrive in phase 4 and replace `advance_all`.
+//! any gameplay. Collision arrives in phase 4 and replaces `advance_all`.
+//! Terrain (WP4.1) reaches only entities made from the unit table that have a
+//! movement class: see "Terrain" below. The wanderers of the legacy `Spawn`
+//! command know no terrain at all.
 //!
 //! # The motion model
 //!
@@ -29,6 +31,17 @@
 //! guaranteed. The length of a step is the configured speed per tick times
 //! the table vector's length, which is one to within about three parts in a hundred thousand.
 //!
+//! # Terrain (WP4.1)
+//!
+//! An entity with a movement class moves at its speed per tick times the
+//! multiplier of the cell it stands in, and a step that would end in a cell it
+//! may not enter is not taken ([`crate::movement`] has the exact rules): the
+//! entity keeps its position and, having turned toward the waypoint, stays
+//! there until the order changes. That is [`Walk::Blocked`]; the caller decides
+//! what a blocked walk means (a wanderer draws a new target, a move keeps its
+//! target, an order keeps the order). An entity without a movement class takes
+//! exactly the steps it always took.
+//!
 //! Wander adds one rule: with no target, draw one inside the entity's own
 //! [`Area`] from the entity's own random stream (x first, then y). On arrival
 //! the target is cleared and the next tick draws a new one. `MoveTo` has a
@@ -38,6 +51,7 @@ use sf_math::{Fx, Rng, Vec2};
 
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::Tick;
+use crate::movement::{Ground, scale_step};
 use crate::orders;
 use crate::units::UnitTable;
 
@@ -147,6 +161,9 @@ pub(crate) struct Motion {
     pub pos_min: Vec2,
     /// Largest valid position (one raw unit inside the far edge of the map).
     pub pos_max: Vec2,
+    /// The movement class of the entity, if it has one (WP4.1): only an entity
+    /// made from the unit table has, and only that one is bound by terrain.
+    pub class: Option<u16>,
 }
 
 impl Motion {
@@ -162,6 +179,7 @@ impl Motion {
             step: stats.speed_per_tick,
             step_sq: stats.speed_per_tick.square(),
             turn_per_tick: stats.turn_per_tick,
+            class: stats.movement_class,
             ..*self
         }
     }
@@ -169,7 +187,13 @@ impl Motion {
 
 /// Runs one tick of behaviour for every live entity, in ascending slot
 /// order. Also records the previous position and facing for interpolation.
-pub(crate) fn advance_all(e: &mut Entities, world_motion: &Motion, units: &UnitTable, tick: Tick) {
+pub(crate) fn advance_all(
+    e: &mut Entities,
+    world_motion: &Motion,
+    units: &UnitTable,
+    ground: &Ground<'_>,
+    tick: Tick,
+) {
     let slots = e.len();
     for i in 0..slots {
         if !e.alive[i] {
@@ -192,44 +216,82 @@ pub(crate) fn advance_all(e: &mut Entities, world_motion: &Motion, units: &UnitT
                         t
                     }
                 };
-                if walk(e, i, target, m) {
+                // Arrived, or blocked by terrain: either way a new target.
+                if walk(e, i, target, m, ground) != Walk::Moving {
                     e.target[i] = None;
                 }
             }
             Behavior::MoveTo => match e.target[i] {
                 Some(target) => {
-                    if walk(e, i, target, m) {
+                    // A blocked move keeps its target and stands at the edge.
+                    if walk(e, i, target, m, ground) == Walk::Arrived {
                         e.target[i] = None;
                         e.behavior[i] = Behavior::Idle;
                     }
                 }
                 None => e.behavior[i] = Behavior::Idle,
             },
-            Behavior::Ordered => orders::run(e, i, m, units, tick),
+            Behavior::Ordered => orders::run(e, i, m, units, ground, tick),
         }
     }
 }
 
-/// One tick of walking entity `i` toward `target`. True if it arrived.
-pub(crate) fn walk(e: &mut Entities, i: usize, target: Vec2, m: &Motion) -> bool {
+/// How one tick of walking went.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) enum Walk {
+    /// The entity is on the target.
+    Arrived,
+    /// It is on its way: it moved, or turned toward the target.
+    Moving,
+    /// The step it wanted would end in a cell its movement class may not
+    /// enter. It did not move (it did turn).
+    Blocked,
+}
+
+/// One tick of walking entity `i` toward `target`.
+pub(crate) fn walk(
+    e: &mut Entities,
+    i: usize,
+    target: Vec2,
+    m: &Motion,
+    ground: &Ground<'_>,
+) -> Walk {
     let pos = e.pos[i];
-    let delta = target - pos;
-    if delta.length_squared() <= m.step_sq {
-        e.pos[i] = target;
-        return true;
-    }
-    // `delta` is not the zero vector here: its squared length is above
-    // `step_sq`, which is not negative.
-    let Some(wanted) = delta.facing() else {
-        e.pos[i] = target;
-        return true;
+    // An entity with a movement class goes at the speed of the cell it stands
+    // in; any other at the speed it always had.
+    let (step, step_sq) = match m.class {
+        Some(class) => {
+            let step = scale_step(m.step, ground.permille_at(class, pos));
+            (step, step.square())
+        }
+        None => (m.step, m.step_sq),
     };
-    let facing = e.facing[i].turn_toward(wanted, m.turn_per_tick);
-    e.facing[i] = facing;
-    if facing.abs_diff(wanted) <= ALIGN_TOLERANCE {
-        e.pos[i] = (pos + Vec2::from_facing(facing, m.step)).clamp(m.pos_min, m.pos_max);
+    let delta = target - pos;
+    let (next, arrived) = if delta.length_squared() <= step_sq {
+        (target, true)
+    } else {
+        // `delta` is not the zero vector here: its squared length is above
+        // `step_sq`, which is not negative.
+        match delta.facing() {
+            None => (target, true),
+            Some(wanted) => {
+                let facing = e.facing[i].turn_toward(wanted, m.turn_per_tick);
+                e.facing[i] = facing;
+                if facing.abs_diff(wanted) > ALIGN_TOLERANCE {
+                    return Walk::Moving;
+                }
+                let next = (pos + Vec2::from_facing(facing, step)).clamp(m.pos_min, m.pos_max);
+                (next, false)
+            }
+        }
+    };
+    if let Some(class) = m.class
+        && !ground.may_step(class, pos, next)
+    {
+        return Walk::Blocked;
     }
-    false
+    e.pos[i] = next;
+    if arrived { Walk::Arrived } else { Walk::Moving }
 }
 
 #[cfg(test)]

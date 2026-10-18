@@ -588,9 +588,14 @@ fn a_new_weapon_damage_type_and_movement_class_are_data_too() {
 "#;
     let defs = load_with(
         |t| {
+            // A movement class is a record with its terrain costs: one cost for
+            // every terrain type (the walker climbs rock, slowly).
             t.replacen(
-                "(kind: 5, name: \"air\"),",
-                "(kind: 5, name: \"air\"), (kind: 6, name: \"strider\"),",
+                "    ],\n    // placeholder: the set of armor types",
+                "        (kind: 6, name: \"strider\", terrain_costs: [(\"grass\", Speed(1000)), \
+                 (\"road\", Speed(1000)), (\"water\", Impassable), (\"rock\", Speed(300)), \
+                 (\"ore\", Speed(1000)), (\"bridge\", Speed(1000))]),\n    ],\n    \
+                 // placeholder: the set of armor types",
                 1,
             )
             .replacen(
@@ -1051,8 +1056,8 @@ fn duplicate_kinds_are_refused_in_every_file() {
     // Movement classes, armor types, damage types.
     for (from, to, what) in [
         (
-            "(kind: 1, name: \"wheeled\")",
-            "(kind: 0, name: \"wheeled\")",
+            "(kind: 1, name: \"wheeled\", ground: true,",
+            "(kind: 0, name: \"wheeled\", ground: true,",
             "movement class",
         ),
         (

@@ -15,7 +15,7 @@ use common::scenario_path;
 use sf_data::units::UnitDefs;
 use sf_headless::scenario::{Scenario, ScenarioError};
 use sf_math::{Fx, Vec2};
-use sf_sim::{Cell, EntityId, Footprint, Kind, PlayerId, StepReport, UnitClass, World};
+use sf_sim::{Cell, EntityId, Footprint, Kind, PlayerId, StepReport, TerrainId, UnitClass, World};
 
 fn scenario() -> Scenario {
     Scenario::load(&scenario_path("units_spawn.ron")).unwrap()
@@ -276,21 +276,36 @@ fn a_structure_that_goes_away_frees_all_its_cells() {
 }
 
 #[test]
-fn units_walk_at_their_own_speed() {
+fn units_walk_at_their_own_speed_and_stop_at_the_rock() {
     let (world, _) = run(400);
     let defs = defs();
     let rifleman = id_of_kind(&world, defs.kind_of("rifleman").unwrap());
     let tank = id_of_kind(&world, defs.kind_of("light_tank").unwrap());
+    // Both are sent by the legacy MoveTo to the cell (136, 90), which is rock.
+    // Terrain costs (WP4.1) made that a new rule for them: neither enters rock,
+    // each stands at its edge with the move kept. (Before WP4.1 the tank, 2 cells
+    // a second, arrived and the rifleman, 0.7, was on the way.)
     let target = Vec2::from_ints(136, 90);
-    // The tank (2 cells a second) is there; the rifleman (0.7) is on the way.
-    assert_eq!(world.get(tank).unwrap().pos, target);
+    let rock = world.terrain_at(Cell::new(136, 90)).unwrap();
+    assert_eq!(rock, TerrainId(3), "the target cell is rock");
+    for id in [tank, rifleman] {
+        assert_eq!(world.waypoint_of(id), Some(target), "the move is kept");
+    }
+    // The tank is at the south edge of the rock cell, less than a step short.
+    let tank_pos = world.get(tank).unwrap().pos;
+    assert_eq!(world.cell_at(tank_pos), Some(Cell::new(135, 89)));
+    assert!(Fx::from_int(90) - tank_pos.y < sf_sim::per_tick(Fx::from_int(2)));
+    // The rifleman walked into a rock patch on the way (columns 138 to 141, rows
+    // 59 to 62) and stands at its east edge.
     let rifle = world.get(rifleman).unwrap();
-    assert_ne!(rifle.pos, target);
-    let start = Vec2::new(Fx::from_ratio(285, 2), Fx::from_ratio(121, 2));
-    assert!(
-        (target - rifle.pos).length_squared() < (target - start).length_squared(),
-        "it is closer to the target than where it started"
-    );
+    let cell = world.cell_at(rifle.pos).unwrap();
+    assert_eq!(cell, Cell::new(142, 62));
+    assert_eq!(world.terrain_at(Cell::new(141, 62)), Some(TerrainId(3)));
+    assert!(rifle.pos.x - Fx::from_int(142) < sf_sim::per_tick(Fx::from_ratio(7, 10)));
+    // Each walked at its own speed: the tank covered far more ground.
+    let start_tank = Vec2::new(Fx::from_ratio(277, 2), Fx::from_ratio(129, 2));
+    let start_rifle = Vec2::new(Fx::from_ratio(285, 2), Fx::from_ratio(121, 2));
+    assert!((tank_pos - start_tank).length_squared() > (rifle.pos - start_rifle).length_squared());
     // Everything else stands where it was put: nobody wanders.
     for v in world.snapshot().iter() {
         if v.id != rifleman && v.id != tank {

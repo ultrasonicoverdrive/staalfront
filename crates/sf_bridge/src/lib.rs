@@ -13,6 +13,11 @@
 //! rendering, and the game has no business linking a tool), and the other
 //! crates that see both sides (`sf_ai`) are about something else.
 //!
+//! Since WP4.1 it also carries the terrain half: [`movement_table`] copies the
+//! terrain cost of every movement class into a [`MovementTable`], and
+//! [`terrain_defs`] turns the terrain types into the simulation's definitions,
+//! with the one flag that is derived from those costs.
+//!
 //! ```
 //! use sf_data::units::UnitDefs;
 //! use sf_sim::{Kind, World, WorldConfig};
@@ -22,8 +27,13 @@
 //! assert!(world.unit_table().get(Kind(12)).is_some()); // the rifleman
 //! ```
 
-use sf_data::units::{SimUnitDef, UnitDefs};
-use sf_sim::{Footprint, Kind, UnitStats, UnitTable};
+use sf_data::movement::MovementCosts;
+use sf_data::terrain::TerrainTypes;
+use sf_data::units::{SimUnitDef, TerrainCost, UnitDefs};
+use sf_sim::{
+    ClassCosts, Cost, Footprint, Kind, MovementTable, TerrainDef, TerrainFlags, TerrainId,
+    UnitStats, UnitTable,
+};
 
 /// What the rules read about one role, copied from its converted definition.
 /// `defs` is where its first weapon is looked up (the reach of an attack order).
@@ -61,6 +71,54 @@ pub fn unit_stats(defs: &UnitDefs) -> Vec<UnitStats> {
 /// rule that out for any definitions that loaded).
 pub fn unit_table(defs: &UnitDefs) -> Result<UnitTable, String> {
     UnitTable::new(unit_stats(defs)).map_err(|e| e.to_string())
+}
+
+/// One cost of the data, as the simulation has it.
+pub fn sim_cost(cost: TerrainCost) -> Cost {
+    match cost {
+        TerrainCost::Impassable => Cost::Impassable,
+        TerrainCost::Speed(permille) => Cost::Speed(permille),
+    }
+}
+
+/// The simulation's movement table for `costs`, to hand to
+/// [`World::with_movement`](sf_sim::World::with_movement). Fails with the
+/// simulation's reason if the table is refused (the data's own checks rule
+/// that out for any costs that were built).
+pub fn movement_table(costs: &MovementCosts) -> Result<MovementTable, String> {
+    MovementTable::new(
+        costs
+            .classes()
+            .iter()
+            .map(|class| ClassCosts {
+                class: class.kind,
+                costs: class
+                    .costs()
+                    .iter()
+                    .map(|&(terrain, cost)| (TerrainId(terrain), sim_cost(cost)))
+                    .collect(),
+            })
+            .collect(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The simulation's table of terrain types: ids and flags, no names. The
+/// `ground` flag (open ground for foot, wheeled and tracked units) is derived
+/// from the movement costs; it is part of the terrain digest, see
+/// [`TerrainFlags::ground`].
+pub fn terrain_defs(types: &TerrainTypes, costs: &MovementCosts) -> Vec<TerrainDef> {
+    types
+        .iter()
+        .map(|t| TerrainDef {
+            id: TerrainId(t.id),
+            flags: TerrainFlags {
+                buildable: t.buildable,
+                harvestable: t.harvestable,
+                ground: costs.ground_passable(t.id),
+            },
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -128,6 +186,71 @@ mod tests {
         assert_eq!(class("refinery"), UnitClass::Structure);
         assert_eq!(class("evidence_crate"), UnitClass::Object);
         assert_eq!(class("ore_field"), UnitClass::Object);
+    }
+
+    #[test]
+    fn every_class_arrives_with_its_costs() {
+        let defs = UnitDefs::embedded();
+        let types = TerrainTypes::embedded();
+        let costs = MovementCosts::from_defs(&defs, &types).unwrap();
+        let table = movement_table(&costs).unwrap();
+        assert_eq!(table.len(), defs.classes().movement_classes.len());
+        for class in &defs.classes().movement_classes {
+            for t in types.iter() {
+                let want = sim_cost(class.cost_on(&t.name).unwrap());
+                assert_eq!(
+                    table.get(class.kind, TerrainId(t.id)),
+                    Some(Some(want)),
+                    "{} on {}",
+                    class.name,
+                    t.name
+                );
+            }
+        }
+        // Built from the same data, in any order, it is the same table.
+        assert_eq!(table, movement_table(&MovementCosts::embedded()).unwrap());
+    }
+
+    #[test]
+    fn every_unit_has_a_class_the_table_knows_and_the_unit_table_carries_it() {
+        let defs = UnitDefs::embedded();
+        let units = unit_table(&defs).unwrap();
+        let movement = movement_table(&MovementCosts::embedded()).unwrap();
+        let mut mobile = 0;
+        for role in defs.units() {
+            let stats = units.get(Kind(role.kind)).unwrap();
+            // The class of the stats is the class the definition names.
+            let named = role
+                .movement
+                .as_deref()
+                .map(|name| defs.classes().movement_kind(name).unwrap());
+            assert_eq!(stats.movement_class, named, "{}", role.id);
+            if let Some(class) = stats.movement_class {
+                mobile += 1;
+                assert!(movement.has_class(class), "{}: class {class}", role.id);
+            }
+        }
+        assert!(mobile > 10);
+    }
+
+    #[test]
+    fn the_terrain_flags_come_from_the_types_and_the_ground_flag_from_the_costs() {
+        let types = TerrainTypes::embedded();
+        let costs = MovementCosts::embedded();
+        let defs = terrain_defs(&types, &costs);
+        assert_eq!(defs.len(), types.len());
+        let flags = |name: &str| {
+            let id = types.id_of(name).unwrap();
+            defs.iter().find(|d| d.id.0 == id).unwrap().flags
+        };
+        for name in ["grass", "road", "ore", "bridge"] {
+            assert!(flags(name).ground, "{name}");
+        }
+        for name in ["water", "rock"] {
+            assert!(!flags(name).ground, "{name}");
+        }
+        assert!(flags("grass").buildable && !flags("road").buildable);
+        assert!(flags("ore").harvestable && !flags("grass").harvestable);
     }
 
     #[test]

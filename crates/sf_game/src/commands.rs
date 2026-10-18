@@ -34,7 +34,7 @@
 use sf_math::Vec2;
 use sf_sim::{Command, EntityId, Order, PlayerId, World};
 
-use crate::cursor::{self, Hover, Modifiers, Passability};
+use crate::cursor::{self, Hover, Modifiers};
 use crate::sandbox::MERIDIAN;
 use crate::selection::Selection;
 
@@ -52,9 +52,8 @@ pub fn right_click(
     selection: &Selection,
     hover: &Hover,
     modifiers: Modifiers,
-    passability: &Passability,
 ) -> Option<Command> {
-    let kind = cursor::cursor_context(world, selection, hover, modifiers, passability);
+    let kind = cursor::cursor_context(world, selection, hover, modifiers);
     let order = cursor::order_for(kind, hover)?;
     let ids = selection.orderable(world);
     order_command(&ids, order, cursor::is_queued(kind, modifiers))

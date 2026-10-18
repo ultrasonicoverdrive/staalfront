@@ -9,10 +9,11 @@
 //!
 //! [`Terrain`] is one byte per cell, row-major (`y * width + x`), plus a table
 //! of up to 256 type definitions ([`TerrainDef`]): the id of a type and its
-//! flags ([`TerrainFlags`]: which movement classes cross it, whether a
-//! structure may stand on it, whether it can be harvested). The simulation
-//! knows ids and flags only, never names; the names, and the RON file the
-//! table comes from, belong to `sf_data`. `sf_game` and `sf_headless` read the
+//! flags ([`TerrainFlags`]: whether a structure may stand on it, whether it can
+//! be harvested). Which movement classes cross a type, and how fast, is the
+//! movement table's ([`crate::movement`], WP4.1), not the type's. The
+//! simulation knows ids and flags only, never names; the names, and the RON
+//! file the table comes from, belong to `sf_data`. `sf_game` and `sf_headless` read the
 //! map and hand the numbers to [`World::with_terrain`](crate::World::with_terrain),
 //! so the simulation does no I/O.
 //!
@@ -72,42 +73,42 @@ impl fmt::Display for Cell {
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct TerrainId(pub u8);
 
-/// What a terrain type allows. The three `passable` flags are placeholders for
-/// the movement classes of WP4.1; nothing in the simulation reads them yet
-/// (wanderers walk anywhere). `buildable` is read by
-/// [`Command::Place`](crate::Command::Place), `harvestable` by nothing yet.
+/// What a terrain type allows. `buildable` is read by
+/// [`Command::Place`](crate::Command::Place) and
+/// [`Command::PlaceStructure`](crate::Command::PlaceStructure), `harvestable`
+/// by nothing yet (phase 7). Movement is not a flag: see [`crate::movement`].
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
 pub struct TerrainFlags {
-    /// Infantry can cross it.
-    pub foot: bool,
-    /// Wheeled vehicles can cross it.
-    pub wheeled: bool,
-    /// Tracked vehicles can cross it.
-    pub tracked: bool,
     /// A structure may stand on it.
     pub buildable: bool,
     /// Harvesters can take resources from it.
     pub harvestable: bool,
+    /// Open ground: all three ground movement classes (foot, wheeled, tracked)
+    /// can enter it. A summary **derived from the movement costs** by whoever
+    /// builds the definitions (`sf_bridge::terrain_defs`), never written by
+    /// hand, and not read by the movement rules, which use the movement table.
+    /// It is what a placement helper wants ("a cell any ground unit may be put
+    /// on") and it is part of the terrain digest, in the three bits that the
+    /// three passable flags of WP2.1 used, so the checksums pinned before
+    /// WP4.1 stay valid.
+    pub ground: bool,
 }
 
 impl TerrainFlags {
-    /// Open ground: passable for everything, buildable, not harvestable.
+    /// Open ground: ground units can enter it, buildable, not harvestable.
     pub const OPEN: TerrainFlags = TerrainFlags {
-        foot: true,
-        wheeled: true,
-        tracked: true,
         buildable: true,
         harvestable: false,
+        ground: true,
     };
 
-    /// The flags as one byte for the digest, one bit each in the order foot,
-    /// wheeled, tracked, buildable, harvestable.
+    /// The flags as one byte for the digest. The layout is the one WP2.1
+    /// pinned: bits 0 to 2 were foot, wheeled and tracked (all three are now
+    /// `ground`), bit 3 buildable, bit 4 harvestable.
     const fn bits(self) -> u8 {
-        (self.foot as u8)
-            | (self.wheeled as u8) << 1
-            | (self.tracked as u8) << 2
-            | (self.buildable as u8) << 3
-            | (self.harvestable as u8) << 4
+        ((self.ground as u8) * 0b111)
+            | ((self.buildable as u8) << 3)
+            | ((self.harvestable as u8) << 4)
     }
 }
 
@@ -286,6 +287,15 @@ impl Terrain {
         self.index(cell).map(|i| TerrainId(self.ids[i]))
     }
 
+    /// The ids of the terrain types the map defines, ascending.
+    pub fn defined_ids(&self) -> impl Iterator<Item = TerrainId> + Clone + '_ {
+        self.flags
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.is_some())
+            .map(|(id, _)| TerrainId(id as u8))
+    }
+
     /// What `id` allows; `None` for an id the map does not define.
     pub fn flags_of(&self, id: TerrainId) -> Option<TerrainFlags> {
         self.flags[usize::from(id.0)]
@@ -403,11 +413,9 @@ mod tests {
     const WATER: TerrainDef = TerrainDef {
         id: TerrainId(2),
         flags: TerrainFlags {
-            foot: false,
-            wheeled: false,
-            tracked: false,
             buildable: false,
             harvestable: false,
+            ground: false,
         },
     };
 
@@ -463,7 +471,7 @@ mod tests {
         let wide = Terrain::from_layer(4, 1, &[0, 0, 2, 0], &[GRASS, WATER]).unwrap();
         assert_ne!(base.digest(), wide.digest());
         let mut other_flags = WATER;
-        other_flags.flags.foot = true;
+        other_flags.flags.ground = true;
         let flagged = Terrain::from_layer(2, 2, &[0, 0, 2, 0], &[GRASS, other_flags]).unwrap();
         assert_ne!(base.digest(), flagged.digest());
     }

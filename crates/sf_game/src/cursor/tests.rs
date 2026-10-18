@@ -8,8 +8,10 @@ use super::*;
 use crate::commands::{self, LOCAL_PLAYER};
 use crate::playfield;
 use crate::sandbox::{MERIDIAN, NEUTRAL, VEYRAN};
+use sf_data::movement::MovementCosts;
+use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
-use sf_sim::{Command, Kind, PlayerId, WorldConfig};
+use sf_sim::{Command, Kind, PlayerId, Terrain, WorldConfig};
 
 const W: u32 = 64;
 const SIZE: u32 = 64;
@@ -28,13 +30,13 @@ const CLIFF: Cell = Cell::new(42, 10);
 struct Scene {
     world: World,
     defs: UnitDefs,
-    passability: Passability,
 }
 
 impl Scene {
     fn new() -> Self {
         let defs = UnitDefs::embedded();
         let types = TerrainTypes::embedded();
+        let costs = MovementCosts::embedded();
         let mut ids = vec![GRASS; (W * SIZE) as usize];
         for y in 0..SIZE {
             for x in 0..W {
@@ -46,18 +48,14 @@ impl Scene {
                 ids[(y * W + x) as usize] = id;
             }
         }
-        let terrain = Terrain::from_layer(W, SIZE, &ids, &playfield::sim_definitions(&types))
+        let terrain = Terrain::from_layer(W, SIZE, &ids, &sf_bridge::terrain_defs(&types, &costs))
             .expect("the layer is valid");
         let world = World::with_terrain(WorldConfig::new(7).with_map_size(W, SIZE), terrain)
             .unwrap()
             .with_units(sf_bridge::unit_table(&defs).unwrap())
             .unwrap();
-        let passability = Passability::new(defs.classes(), &types);
-        Scene {
-            world,
-            defs,
-            passability,
-        }
+        let world = playfield::with_movement(world, &defs);
+        Scene { world, defs }
     }
 
     fn made(&mut self, command: Command, owner: u8) -> EntityId {
@@ -101,7 +99,7 @@ impl Scene {
     }
 
     fn with(&self, sel: &Selection, hover: &Hover, mods: Modifiers) -> CursorKind {
-        cursor_context(&self.world, sel, hover, mods, &self.passability)
+        cursor_context(&self.world, sel, hover, mods)
     }
 
     /// Selects `ids` as a drag would: own mobile units.
@@ -137,7 +135,9 @@ fn the_roles_the_tests_use_are_armed_or_not_as_assumed() {
     let mut s = Scene::new();
     let armed = |s: &Scene, id| s.world.stats_of(id).unwrap().weapon_range > sf_math::Fx::ZERO;
     for role in ["light_tank", "rifleman", "scout", "gunboat"] {
-        let id = s.unit(role, MERIDIAN, 5, 5);
+        // A vessel is only spawned on water (WP4.1).
+        let (x, y) = if role == "gunboat" { (25, 5) } else { (5, 5) };
+        let id = s.unit(role, MERIDIAN, x, y);
         assert!(armed(&s, id), "{role} has a weapon");
     }
     for role in ["engineer", "harvester", "medic", "amphibious_transport"] {
@@ -238,7 +238,7 @@ fn attack_move_needs_a_weapon_in_the_selection() {
     // Unarmed units would only walk: the cursor says move, and the order is a move.
     let unarmed = s.drag(&[harvester]);
     assert_eq!(s.with(&unarmed, &ground, FIGHT), CursorKind::Move);
-    let command = commands::right_click(&s.world, &unarmed, &ground, FIGHT, &s.passability);
+    let command = commands::right_click(&s.world, &unarmed, &ground, FIGHT);
     assert!(matches!(
         command,
         Some(Command::Order {
@@ -373,12 +373,12 @@ fn ground_no_selected_unit_can_enter_is_no_go() {
 }
 
 #[test]
-fn every_movement_class_reads_its_own_flag() {
+fn every_movement_class_reads_its_own_costs() {
     let mut s = Scene::new();
     let foot = s.unit("rifleman", MERIDIAN, 5, 5);
     let tracked = s.unit("light_tank", MERIDIAN, 6, 5);
     let hover = s.unit("amphibious_transport", MERIDIAN, 7, 5);
-    let vessel = s.unit("gunboat", MERIDIAN, 8, 5);
+    let vessel = s.unit("gunboat", MERIDIAN, 25, 5);
     let (land, river, cliff) = (
         Hover::ground(LAND),
         Hover::ground(RIVER),
@@ -409,30 +409,56 @@ fn every_movement_class_reads_its_own_flag() {
 }
 
 #[test]
-fn a_class_the_game_does_not_know_may_go_anywhere_and_a_bridge_is_land() {
+fn the_cursor_asks_the_sims_cost_table_and_nothing_else() {
+    // One source of truth (WP4.1): every class on every cell of the scene says
+    // what `World::passable` says, which is what the units move by.
     let s = Scene::new();
-    let terrain = s.world.terrain();
-    // An unknown class and no class at all: never blocked by flags.
-    assert!(s.passability.can_enter(terrain, RIVER, Some(999)));
-    assert!(s.passability.can_enter(terrain, RIVER, None));
-    // A cell the map does not have: nobody.
-    assert!(!s.passability.can_enter(terrain, Cell::new(64, 0), None));
-    // The names of the data decide: foot, wheeled and tracked read their flags.
     let classes = s.defs.classes();
     let kind = |name: &str| classes.movement_kind(name).unwrap();
-    for name in ["foot", "wheeled", "tracked"] {
-        assert!(
-            s.passability.can_enter(terrain, LAND, Some(kind(name))),
-            "{name}"
-        );
-        assert!(
-            !s.passability.can_enter(terrain, RIVER, Some(kind(name))),
-            "{name}"
-        );
+    for class in &classes.movement_classes {
+        for cell in [LAND, RIVER, CLIFF] {
+            let mut scene = Scene::new();
+            // A unit of that class, in the middle of the land.
+            let role = s
+                .defs
+                .units()
+                .iter()
+                .find(|u| u.movement.as_deref() == Some(class.name.as_str()));
+            let Some(role) = role else { continue };
+            // A vessel is only spawned on water.
+            let (x, y) = if class.name == "water" {
+                (25, 5)
+            } else {
+                (5, 5)
+            };
+            let unit = scene.unit(&role.id, MERIDIAN, x, y);
+            let sel = scene.drag(&[unit]);
+            let want = if scene.world.passable(class.kind, cell) {
+                CursorKind::Move
+            } else {
+                CursorKind::NoGo
+            };
+            assert_eq!(
+                scene.cursor(&sel, &Hover::ground(cell)),
+                want,
+                "{} on {cell}",
+                class.name
+            );
+        }
     }
-    assert_eq!(s.passability.mobility(kind("hover")), Some(Mobility::Hover));
-    assert_eq!(s.passability.mobility(kind("air")), Some(Mobility::Air));
-    assert!(s.passability.can_enter(terrain, CLIFF, Some(kind("air"))));
+    // The data decides: foot, wheeled and tracked cross land, not the river;
+    // air crosses the rock.
+    for name in ["foot", "wheeled", "tracked"] {
+        assert!(s.world.passable(kind(name), LAND), "{name}");
+        assert!(!s.world.passable(kind(name), RIVER), "{name}");
+    }
+    assert!(s.world.passable(kind("hover"), RIVER) && !s.world.passable(kind("hover"), CLIFF));
+    assert!(s.world.passable(kind("water"), RIVER) && !s.world.passable(kind("water"), LAND));
+    assert!(s.world.passable(kind("air"), CLIFF));
+    // A class the data does not have is never blocked; a cell the map does not
+    // have is nobody's.
+    assert!(s.world.passable(999, RIVER));
+    assert!(!s.world.passable(kind("air"), Cell::new(64, 0)));
 }
 
 // ---- structures --------------------------------------------------------------
@@ -682,7 +708,7 @@ fn a_right_click_gives_exactly_the_order_the_cursor_shows() {
                 for attack_move in [false, true] {
                     let mods = Modifiers { queue, attack_move };
                     let kind = s.with(sel, hover, mods);
-                    let command = commands::right_click(&s.world, sel, hover, mods, &s.passability);
+                    let command = commands::right_click(&s.world, sel, hover, mods);
                     let expected = order_for(kind, hover);
                     let ctx = format!("{kind:?} for {hover:?} {mods:?}: {}", what(&command));
                     match (&command, expected) {
@@ -717,7 +743,7 @@ fn each_cursor_gives_its_order_and_the_sim_carries_it_out() {
     let at_rifle = Hover::over(rifle, Cell::new(14, 10));
     let point = ground.point.unwrap();
     let go = |s: &mut Scene, hover: &Hover, mods: Modifiers| {
-        let command = commands::right_click(&s.world, &sel, hover, mods, &s.passability)
+        let command = commands::right_click(&s.world, &sel, hover, mods)
             .expect("the cursor promised an order");
         commands::issue(&mut s.world, command);
         s.world.step();
@@ -746,10 +772,7 @@ fn each_cursor_gives_its_order_and_the_sim_carries_it_out() {
     // A no-go and a select give nothing, and the world has nothing to run.
     let before = s.world.pending_commands().len();
     for hover in [Hover::ground(RIVER), Hover::default()] {
-        assert!(
-            commands::right_click(&s.world, &sel, &hover, Modifiers::default(), &s.passability)
-                .is_none()
-        );
+        assert!(commands::right_click(&s.world, &sel, &hover, Modifiers::default()).is_none());
     }
     assert_eq!(s.world.pending_commands().len(), before);
 }
@@ -760,16 +783,7 @@ fn nothing_selected_means_a_right_click_does_nothing_even_over_an_enemy() {
     let enemy = s.unit("rifleman", VEYRAN, 50, 10);
     let hover = Hover::over(enemy, Cell::new(50, 10));
     assert_eq!(s.cursor(&nobody(), &hover), CursorKind::Inspect);
-    assert!(
-        commands::right_click(
-            &s.world,
-            &nobody(),
-            &hover,
-            Modifiers::default(),
-            &s.passability
-        )
-        .is_none()
-    );
+    assert!(commands::right_click(&s.world, &nobody(), &hover, Modifiers::default()).is_none());
 }
 
 // ---- the pictures ----------------------------------------------------------------------

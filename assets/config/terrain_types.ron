@@ -3,54 +3,51 @@
 // A map's terrain layer (`terrain.png`, one pixel per 4 m gameplay cell, B12)
 // holds the `id` of one of these types for every cell. The ids are what is
 // stored in map files, so never renumber a type that a map uses; add new ones
-// with a new id. The names are what the map generator and the tools use.
+// with a new id. The names are what the map generator, the tools and the cost
+// tables of unit_classes.ron use.
 //
-// The flags are placeholders until the work packages that give them meaning:
-// `passable` per movement class (foot, wheeled, tracked) is read by movement
-// in WP4.1, `buildable` by building placement (WP6.x, and already by the
-// sim's Place command), `harvestable` by the economy (phase 7). They are
-// documented in docs/rules/terrain.md.
+// A type has two flags of its own: `buildable` (read by building placement,
+// WP6.x, and already by the sim's Place command) and `harvestable` (read by
+// the economy, phase 7). Which movement classes can cross a type, and how
+// fast, is NOT a property of the type: it is the `terrain_costs` of each
+// movement class in unit_classes.ron (WP4.1), which has to name every type
+// here. The flags are documented in docs/rules/terrain.md, the costs in
+// docs/rules/movement.md.
 (
     types: [
         (
             id: 0,
             name: "grass",
-            passable: (foot: true, wheeled: true, tracked: true),
             buildable: true,
             harvestable: false,
         ),
         (
             id: 1,
             name: "road",
-            passable: (foot: true, wheeled: true, tracked: true),
             buildable: false,
             harvestable: false,
         ),
         (
             id: 2,
             name: "water",
-            passable: (foot: false, wheeled: false, tracked: false),
             buildable: false,
             harvestable: false,
         ),
         (
             id: 3,
             name: "rock",
-            passable: (foot: false, wheeled: false, tracked: false),
             buildable: false,
             harvestable: false,
         ),
         (
             id: 4,
             name: "ore",
-            passable: (foot: true, wheeled: true, tracked: true),
             buildable: false,
             harvestable: true,
         ),
         (
             id: 5,
             name: "bridge",
-            passable: (foot: true, wheeled: true, tracked: true),
             buildable: false,
             harvestable: false,
         ),

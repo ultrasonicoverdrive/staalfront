@@ -7,8 +7,11 @@
 //! meaning add their fields next to them:
 //!
 //! * **Movement classes** (WP4.1): the terrain cost of each terrain type
-//!   (`terrain_costs`), which replaces the three `passable` flags of
-//!   `terrain_types.ron`. Nothing about terrain costs is decided here.
+//!   (`terrain_costs`), which replaced the three `passable` flags of
+//!   `terrain_types.ron`. This module checks the list of one class on its own
+//!   (names, duplicates, range); that **every class has a cost for every
+//!   terrain type** needs the terrain table too and is checked by
+//!   [`crate::movement::MovementCosts`].
 //! * **Armor types** and **damage types** (WP5.3): the damage-times-armor
 //!   percentage table and the splash falloff.
 
@@ -24,8 +27,41 @@ const MAX_ENTRIES: usize = 64;
 /// a byte).
 pub const MAX_CLASS_KIND: u16 = 255;
 
-/// How a unit moves: which terrain it can use. Foot, wheeled, tracked, hover,
-/// water or air in the shipped table.
+/// The slowest speed multiplier a terrain may give, in permille (one tenth).
+pub const MIN_COST_PERMILLE: u16 = 100;
+
+/// The fastest speed multiplier a terrain may give, in permille (double).
+pub const MAX_COST_PERMILLE: u16 = 2000;
+
+/// What one movement class does on one terrain type (WP4.1): it cannot enter
+/// it, or it moves there at a fraction of its own speed.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+pub enum TerrainCost {
+    /// The class cannot enter a cell of this type.
+    Impassable,
+    /// The class moves at this many thousandths of its speed: `1000` is its
+    /// normal speed, `1200` a fifth faster, `500` half. Between
+    /// [`MIN_COST_PERMILLE`] and [`MAX_COST_PERMILLE`].
+    Speed(u16),
+}
+
+impl TerrainCost {
+    /// The multiplier in permille; zero for [`TerrainCost::Impassable`].
+    pub const fn permille(self) -> u16 {
+        match self {
+            TerrainCost::Impassable => 0,
+            TerrainCost::Speed(p) => p,
+        }
+    }
+
+    /// Whether a unit may enter.
+    pub const fn is_passable(self) -> bool {
+        !matches!(self, TerrainCost::Impassable)
+    }
+}
+
+/// How a unit moves: which terrain it can use and how fast. Foot, wheeled,
+/// tracked, hover, water or air in the shipped table.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MovementClass {
@@ -33,8 +69,27 @@ pub struct MovementClass {
     pub kind: u16,
     /// Unique snake_case name that units refer to.
     pub name: String,
-    // WP4.1: `terrain_costs` goes here (a cost per terrain type name, with
-    // `#[serde(default)]` so older files keep loading).
+    /// The cost of each terrain type, by the terrain type's name, in the order
+    /// the file lists them (the order does not matter). A list and not a map so
+    /// that a type written twice is an error and not silently the last one.
+    pub terrain_costs: Vec<(String, TerrainCost)>,
+    /// Whether this is a **ground class**: one of the classes whose ability to
+    /// enter a terrain type makes it "open ground" for placement helpers and
+    /// for the `ground` summary the terrain digest keeps (`foot`, `wheeled` and
+    /// `tracked` in the shipped file). Defaults to false, so a file that does
+    /// not say keeps loading.
+    #[serde(default)]
+    pub ground: bool,
+}
+
+impl MovementClass {
+    /// The cost on the terrain type called `terrain`.
+    pub fn cost_on(&self, terrain: &str) -> Option<TerrainCost> {
+        self.terrain_costs
+            .iter()
+            .find(|(name, _)| name == terrain)
+            .map(|&(_, cost)| cost)
+    }
 }
 
 /// What kind of protection a unit has against damage types.
@@ -93,6 +148,12 @@ pub struct ClassTables {
 }
 
 impl ClassTables {
+    /// Parses and validates the text of a `unit_classes.ron`; `file` is the
+    /// name that errors show.
+    pub fn from_ron(file: &str, text: &str) -> Result<Self, DefError> {
+        Self::parse(Source::new(file, text))
+    }
+
     /// Parses and validates the tables.
     pub(crate) fn parse(src: Source<'_>) -> Result<Self, DefError> {
         src.check_numbers()?;
@@ -115,6 +176,9 @@ impl ClassTables {
             &names(file.damage_types.iter().map(|c| (c.kind, &c.name))),
             &file.retired_damage_types,
         )?;
+        for class in &file.movement_classes {
+            check_costs(src, class)?;
+        }
         file.movement_classes.sort_by_key(|c| c.kind);
         file.armor_types.sort_by_key(|c| c.kind);
         file.damage_types.sort_by_key(|c| c.kind);
@@ -126,6 +190,14 @@ impl ClassTables {
             retired_armor_types: file.retired_armor_types,
             retired_damage_types: file.retired_damage_types,
         })
+    }
+
+    /// The movement class with this number.
+    pub fn movement_class(&self, kind: u16) -> Option<&MovementClass> {
+        self.movement_classes
+            .binary_search_by_key(&kind, |c| c.kind)
+            .ok()
+            .map(|i| &self.movement_classes[i])
     }
 
     /// The number of the movement class with this name.
@@ -160,6 +232,36 @@ pub(crate) fn is_valid_name(name: &str) -> bool {
     matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
         && name.len() <= 48
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// The checks of one class's `terrain_costs` that need nothing but the class:
+/// terrain names are snake_case and listed once, a speed is within range.
+fn check_costs(src: Source<'_>, class: &MovementClass) -> Result<(), DefError> {
+    let here = |message: String| src.error_at_record("name", &class.name, 0, message);
+    for (i, (terrain, cost)) in class.terrain_costs.iter().enumerate() {
+        if !is_valid_name(terrain) {
+            return Err(here(format!(
+                "movement class \"{}\": terrain name \"{terrain}\" is not snake_case (a-z, 0-9, _)",
+                class.name
+            )));
+        }
+        if class.terrain_costs[..i].iter().any(|(t, _)| t == terrain) {
+            return Err(here(format!(
+                "movement class \"{}\": terrain \"{terrain}\" is listed twice",
+                class.name
+            )));
+        }
+        if let TerrainCost::Speed(p) = *cost
+            && !(MIN_COST_PERMILLE..=MAX_COST_PERMILLE).contains(&p)
+        {
+            return Err(here(format!(
+                "movement class \"{}\": speed {p} on \"{terrain}\" must be between \
+                 {MIN_COST_PERMILLE} and {MAX_COST_PERMILLE} thousandths (use Impassable to forbid it)",
+                class.name
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn names<'a>(items: impl Iterator<Item = (u16, &'a String)>) -> Vec<(u16, &'a str)> {

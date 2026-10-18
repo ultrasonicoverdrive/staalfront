@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use super::generate::{generate, generate_cells, terrain_for};
 use super::tests::{ESCAPING_NAMES, cells_png, header, height_png};
 use super::*;
-use crate::terrain::{Passable, TerrainLayer, TerrainType, TerrainTypes};
+use crate::terrain::{TerrainLayer, TerrainType, TerrainTypes};
 
 /// A header for a 4 x 3 m map (a 1 x 1 cell playfield) with a terrain file.
 fn header_with_terrain(name: &str) -> String {
@@ -169,11 +169,6 @@ fn a_cell_with_an_unknown_terrain_id_is_refused_with_its_position() {
     types.push(TerrainType {
         id: 9,
         name: "lava".into(),
-        passable: Passable {
-            foot: false,
-            wheeled: false,
-            tracked: false,
-        },
         buildable: false,
         harvestable: false,
     });

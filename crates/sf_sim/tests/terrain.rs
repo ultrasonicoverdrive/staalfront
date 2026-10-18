@@ -14,11 +14,9 @@ const ROAD: TerrainId = TerrainId(1);
 const WATER: TerrainId = TerrainId(2);
 
 const BLOCKED: TerrainFlags = TerrainFlags {
-    foot: false,
-    wheeled: false,
-    tracked: false,
     buildable: false,
     harvestable: false,
+    ground: false,
 };
 
 fn defs() -> Vec<TerrainDef> {

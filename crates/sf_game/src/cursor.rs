@@ -3,7 +3,9 @@
 //! `docs/rules/cursor.md`.
 //!
 //! **One source of truth.** [`cursor_context`] is a pure function of what is
-//! selected, what is under the mouse, the held modifiers and the terrain. The
+//! selected, what is under the mouse, the held modifiers and the world, whose
+//! movement costs (`World::passable`, WP4.1) it asks which cells a class may
+//! enter: the same table the units move by. The
 //! picture of the cursor is chosen from its answer, and so is the order of a
 //! right-click: [`order_for`] turns the answer into an `Order`, and
 //! [`crate::commands::right_click`] is the only thing that schedules it. A
@@ -22,11 +24,9 @@
 
 use std::path::Path;
 
-use sf_data::terrain::TerrainTypes;
-use sf_data::units::ClassTables;
 use sf_engine::{ActionState, Edges};
 use sf_math::Vec2;
-use sf_sim::{Cell, EntityId, GuardTarget, Order, Terrain, World};
+use sf_sim::{Cell, EntityId, GuardTarget, Order, World};
 use sf_ui::CursorSet;
 
 use crate::sandbox::NEUTRAL;
@@ -236,115 +236,6 @@ impl Hover {
     }
 }
 
-/// How a movement class moves, for the terrain flags (WP2.1). The sim does
-/// not read the flags yet (path finding is phase 4), so this is the game's
-/// reading of them for the cursor, and it is conservative: a class it does not
-/// know may go anywhere.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mobility {
-    /// Infantry: the `foot` flag.
-    Foot,
-    /// Trucks and light vehicles: the `wheeled` flag.
-    Wheeled,
-    /// Tanks, artillery, harvesters: the `tracked` flag.
-    Tracked,
-    /// Land and water both (the amphibious transport): any land flag, or
-    /// water.
-    Hover,
-    /// Vessels: water only.
-    Water,
-    /// Aircraft: anywhere on the map.
-    Air,
-}
-
-impl Mobility {
-    fn from_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "foot" => Mobility::Foot,
-            "wheeled" => Mobility::Wheeled,
-            "tracked" => Mobility::Tracked,
-            "hover" => Mobility::Hover,
-            "water" => Mobility::Water,
-            "air" => Mobility::Air,
-            _ => return None,
-        })
-    }
-}
-
-/// Which cells a movement class may enter, from the terrain flags of the sim
-/// and the names of the classes and terrain types in the data.
-#[derive(Clone, Debug)]
-pub struct Passability {
-    /// `(movement class kind, mobility)`, sorted by kind.
-    classes: Vec<(u16, Mobility)>,
-    /// Whether a terrain id is water (the flags alone cannot tell water from
-    /// rock: both are impassable on foot).
-    water: [bool; 256],
-}
-
-impl Passability {
-    /// The classes of `classes` that this reading knows (by name), and the
-    /// terrain type called `water`.
-    pub fn new(classes: &ClassTables, types: &TerrainTypes) -> Self {
-        let mut list: Vec<(u16, Mobility)> = classes
-            .movement_classes
-            .iter()
-            .filter_map(|c| Mobility::from_name(&c.name).map(|m| (c.kind, m)))
-            .collect();
-        list.sort_by_key(|&(kind, _)| kind);
-        let mut water = [false; 256];
-        if let Some(id) = types.id_of("water") {
-            water[usize::from(id)] = true;
-        }
-        Self {
-            classes: list,
-            water,
-        }
-    }
-
-    /// The unit definitions and terrain types the game ships, from the files
-    /// in `assets` or, when they cannot be read, the copies compiled in (as
-    /// the sandbox does).
-    pub fn load(assets: &Path) -> Self {
-        let defs = sf_data::units::UnitDefs::load(&assets.join("config"), assets)
-            .unwrap_or_else(|_| sf_data::units::UnitDefs::embedded());
-        Self::new(defs.classes(), &TerrainTypes::embedded())
-    }
-
-    /// The mobility of a movement class kind; `None` for one this reading
-    /// does not know.
-    pub fn mobility(&self, class: u16) -> Option<Mobility> {
-        self.classes
-            .binary_search_by_key(&class, |&(kind, _)| kind)
-            .ok()
-            .map(|i| self.classes[i].1)
-    }
-
-    /// Whether a unit of movement class `class` (`None`: it has none, or the
-    /// class is unknown) may enter `cell`. A cell outside the map and a cell
-    /// of a type the map does not define can be entered by nobody.
-    pub fn can_enter(&self, terrain: &Terrain, cell: Cell, class: Option<u16>) -> bool {
-        let Some(id) = terrain.id_at(cell) else {
-            return false;
-        };
-        let Some(flags) = terrain.flags_of(id) else {
-            return false;
-        };
-        let Some(mobility) = class.and_then(|c| self.mobility(c)) else {
-            return true;
-        };
-        let water = self.water[usize::from(id.0)];
-        match mobility {
-            Mobility::Foot => flags.foot,
-            Mobility::Wheeled => flags.wheeled,
-            Mobility::Tracked => flags.tracked,
-            Mobility::Hover => flags.foot || flags.wheeled || flags.tracked || water,
-            Mobility::Water => water,
-            Mobility::Air => true,
-        }
-    }
-}
-
 /// Who an entity is to the player at this keyboard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Relation {
@@ -406,7 +297,6 @@ pub fn cursor_context(
     selection: &Selection,
     hover: &Hover,
     modifiers: Modifiers,
-    passability: &Passability,
 ) -> CursorKind {
     if let Some(scroll) = scroll_cursor(hover.edges) {
         return scroll;
@@ -447,9 +337,13 @@ pub fn cursor_context(
     let Some(cell) = world.cell_at(point) else {
         return CursorKind::NoGo;
     };
+    // A unit without a movement class (none of the orderable ones) could go
+    // anywhere on the map; the cell is on the map here.
     let can_go = selection.orderable_iter(world).any(|id| {
-        let class = world.stats_of(id).and_then(|s| s.movement_class);
-        passability.can_enter(world.terrain(), cell, class)
+        match world.stats_of(id).and_then(|s| s.movement_class) {
+            Some(class) => world.passable(class, cell),
+            None => true,
+        }
     });
     if !can_go {
         CursorKind::NoGo

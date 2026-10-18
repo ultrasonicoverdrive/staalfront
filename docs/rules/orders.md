@@ -72,7 +72,9 @@ position of an entity). The **route** is how it gets there and is not part of th
 order. The unit keeps the point it steers at, the next **waypoint**, in its `target`
 column (`World::waypoint_of`), and `orders::next_waypoint` is the only function that
 decides it. Today the route is the straight line, so the waypoint is the destination;
-no pathfinding, no avoidance, nothing blocks a unit. Nothing else reads `target`: the
+no pathfinding and no avoidance. Since WP4.1 the **terrain** can stop the walk: a unit does not
+enter a cell its movement class cannot cross, and stands at the edge with the order kept
+(`docs/rules/movement.md`). Nothing else reads `target`: the
 guard's walk-or-wait switch has a column of its own (`guard_walking`), so the route can
 take `target` over.
 
@@ -83,6 +85,11 @@ take `target` over.
   order, the queue, the arrival test and the target-follow logic stay as they are:
   arrival is always judged against the destination, never against the waypoint. A blocked
   route or a vanished target is WP4.7's replan: it recomputes the route, the order stays.
+* **Terrain (WP4.1).** `walk` returns whether the unit arrived, is on its way, or was blocked
+  by terrain; `go_to` counts only an arrival. A blocked unit keeps its order and its queue,
+  forever, until a new order replaces them; ending such an order ("gives up", "as near as it
+  gets") is WP4.4's outcome and WP4.7's replan. The speed of a step is the unit's speed per
+  tick times the multiplier of the cell it stands in.
 * **WP4.4** adds collisions; a unit that cannot reach its destination then needs an
   outcome ("gives up after N ticks" or "stands as near as it gets") that ends the order.
 * **WP4.5** makes the turn-before-drive and the separate turret part of the same step
@@ -204,6 +211,13 @@ many units are selected; the F1 panel shows the order of the hovered unit. Right
 the cursor shows (WP3.5): `cursor_context` decides the cursor and the order from the same inputs,
 so a click on an enemy is an `Attack`, on one of your own a `Guard`, on ground a `Move`
 (`docs/rules/cursor.md`). Ground that no selected unit can enter gives no order.
+
+## Terrain
+
+A unit made from the unit table moves at its speed times the cost of the cell it stands in and
+does not enter a cell its movement class cannot cross; the order, the queue and the arrival test
+are unchanged (`docs/rules/movement.md`). The `orders` scenario has no terrain layer (every cell is open
+ground), so its checksum did not change; its frozen definitions carry the costs as shipped at WP4.1.
 
 ## Tuning constants
 

@@ -12,7 +12,9 @@
 //! entities move around without any gameplay. There is no collision and no
 //! combat yet. Since WP2.1 the map has a terrain type and an occupant per
 //! cell (see "Terrain and occupancy" below); since WP3.2 a world can spawn
-//! units and structures with the stats of a unit table (see "Units" below).
+//! units and structures with the stats of a unit table (see "Units" below);
+//! since WP4.1 a unit's movement class decides which cells it may enter and
+//! how fast it moves there (see "Movement classes" below).
 //!
 //! ```
 //! use sf_math::Vec2;
@@ -222,6 +224,18 @@
 //! attack-move and guard are state and movement only: combat is phase five. The rules
 //! are in `docs/rules/orders.md`.
 //!
+//! # Movement classes
+//!
+//! The terrain says what a cell *is*; the movement class of a unit says what it
+//! can do there. [`World::with_movement`] takes a [`MovementTable`] (built by
+//! `sf_data`/`sf_bridge` from `unit_classes.ron`) with, for every class and
+//! terrain type, [`Cost::Impassable`] or a speed multiplier in thousandths.
+//! [`World::cost`] and [`World::passable`] are the read-only queries; a unit
+//! made from the unit table moves at its speed times the multiplier of the cell
+//! it stands in and stops at the edge of a cell it cannot enter (see
+//! [`movement`]). Wanderers and worlds without a layer or without a table are
+//! open ground and behave, and checksum, exactly as before.
+//!
 //! # Not here yet
 //!
 //! Pathfinding and collision (phase 4), target acquisition and firing (phase 5),
@@ -234,6 +248,7 @@ pub mod checksum;
 pub mod command;
 mod entities;
 pub mod ids;
+pub mod movement;
 pub mod orders;
 pub mod snapshot;
 pub mod terrain;
@@ -244,6 +259,9 @@ pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
 pub use command::{Command, CommandQueue, ScheduleError};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
+};
+pub use movement::{
+    ClassCosts, Cost, FULL_PERMILLE, MAX_STEP, MovementTable, MovementTableError, scale_step,
 };
 pub use orders::{
     ARRIVE_TOLERANCE, GUARD_CLOSE, GUARD_LEASH, GuardTarget, ORDER_QUEUE_CAP, Order, SCATTER_MAX,

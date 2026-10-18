@@ -56,10 +56,15 @@ Three lists of entries, each with a permanent `kind` number (0 to 255, see "Numb
 permanent" below) and a unique snake_case `name`.
 
 * `movement_classes`: foot, wheeled, tracked, hover, water, air. Hover crosses land and
-  water (the amphibious transport); no role uses air yet. **Terrain costs per movement
-  class are not defined here**: WP4.1 adds a `terrain_costs` field to each entry (and
-  replaces the three `passable` flags of `terrain_types.ron`, which has no hover, water
-  or air). Until then the movement class is only a name that units carry.
+  water (the amphibious transport); no role uses air yet. Since WP4.1 every entry has a
+  `terrain_costs` list: for **every** terrain type of `terrain_types.ron`, by name, either
+  `Impassable` or `Speed(n)`, the speed on it in thousandths of the unit's own (100 to 2000).
+  `terrain_costs: [("grass", Speed(1000)), ("water", Impassable), ...]`. A class that leaves a
+  type out, or names one that does not exist, is refused when the files are combined
+  (`sf_data::movement::MovementCosts`); the table, the bridge rule and the reasons are in
+  [`movement.md`](movement.md). It replaced the three `passable` flags of `terrain_types.ron`.
+  A class may carry `ground: true` (foot, wheeled and tracked do): the ground classes, whose
+  ability to enter a terrain type makes it open ground (`movement.md`, "The checksum").
 * `armor_types`: none, infantry, light, heavy, structure. The set is a placeholder.
 * `damage_types`: bullet, precision, rocket, cannon, shell, demolition. The set is a
   placeholder. "Infantry only" for the sniper is the future armor table's job
@@ -98,7 +103,7 @@ the file does not matter.
 | `armor` | a name from `unit_classes.ron` |
 | `power` | structures only; produced (+) or used (-) |
 | `movement` | a movement class; required for Infantry, Vehicle and Vessel, absent for the rest |
-| `speed` | cells per game second, above 0 up to 20; only with a `movement` |
+| `speed` | cells per game second, above 0 up to 20; only with a `movement`. On terrain a unit never moves more than 17.5 cells per second (`movement.md`), so a speed above that is capped; no role comes near |
 | `water_speed` | cells per second on water, if different from `speed` (the amphibious transport) |
 | `turn_rate` | facing steps per tick, at least 1; only with a `movement` |
 | `size` | diameter in cells for collision and selection (not for structures) |
@@ -203,7 +208,7 @@ an ore field). Two commands create them, through the command queue like everythi
 
 | Command | Makes | Where | Ignored (counts as a command that changed nothing) when |
 |---|---|---|---|
-| `SpawnUnit { kind, pos, owner }` | a mobile unit or an object | at `pos`, in cells | the table has no such kind; the kind is a structure; `pos` is outside the map or on a cell a structure occupies; the entity limit is reached |
+| `SpawnUnit { kind, pos, owner }` | a mobile unit or an object | at `pos`, in cells | the table has no such kind; the kind is a structure; `pos` is outside the map or on a cell a structure occupies; a mobile unit's movement class cannot enter the cell (`movement.md`); the entity limit is reached |
 | `PlaceStructure { kind, cell, owner }` | a structure | its footprint **anchored** on `cell`: the cell with the smallest x and y, the footprint extending east and south | the table has no such kind; the kind is not a structure; any cell of the footprint is outside the map, not `buildable` (`docs/rules/terrain.md`) or already occupied; the entity limit is reached |
 
 A refused command creates nothing: no entity, no occupied cell, no slot. A structure is
@@ -224,9 +229,10 @@ them, `World::cell_of` with the anchor and `World::footprint_of` with the size. 
 it frees all its cells in the same command. **A mobile unit (and an object) occupies no
 cell**, the same as the wanderers of WP2.1: units share cells until collision arrives in
 phase 4. The one rule that touches them is that a unit never **appears** inside a
-structure (`SpawnUnit` on an occupied cell is refused). A unit is also not refused on terrain it
-cannot cross (a rifleman may be spawned into water): which terrain each movement class
-crosses is WP4.1's, and until then only the map edge and structures stop a spawn.
+structure (`SpawnUnit` on an occupied cell is refused). Since WP4.1 it is also refused on terrain its movement class cannot
+enter (a rifleman is not put into the river, a gunboat not onto grass; `movement.md`); on a
+world without a terrain layer or without a movement table every cell is open ground and only the
+map edge and structures stop a spawn.
 
 **The older commands stay.** `Spawn` (a wandering placeholder, its kind an opaque number)
 and `Place` (a one-cell structure of an opaque kind) do not look at the table: they have
