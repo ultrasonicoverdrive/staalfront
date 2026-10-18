@@ -22,6 +22,7 @@
 //! | units (`U`), only with a unit table | the table's digest (every kind with its hit points, movement class, speed, turn rate, size and footprint), then the number of entities made from it and for each, in slot order: the slot and its current hit points |
 //! | orders (`D`), only while some entity has an order or a queue | the table's weapon reach digest, then the number of such entities and for each, in slot order: the slot, its current order, the guard's walk switch and its queued orders (WP3.4) |
 //! | movement (`M`), only with a terrain layer, a movement table **and** a live entity made from the unit table that has a movement class | the table's digest: every movement class with its cost on every terrain type (WP4.1) |
+//! | paths (`P`), only while the world has pathfinding and some live entity has a route | the path budget and the epoch of the graphs, the job in flight, and for each entity with a route, in slot order: its state, flags, cells, ring of waypoints and portal path (WP4.2) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -69,6 +70,14 @@
 //! gone; their bits in the terrain digest are the derived
 //! `TerrainFlags::ground`, so that digest, and `terrain_256`, did not change.
 //!
+//! The paths section (WP4.2) follows the same rule and is written after the movement
+//! section: only while some live unit has a route. A route exists only for a unit that
+//! walks an order and is bound by terrain on a map with terrain and a movement table, so
+//! every scenario without such a unit (the wanderers, `terrain_256`, `units_spawn` with its
+//! legacy walkers, `orders` on open ground) hashes as before. The graphs themselves are
+//! not hashed: they follow from the terrain and the occupancy, which are, and the epoch
+//! says how often they changed.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -108,6 +117,7 @@ const SECTION_OCCUPANCY: u8 = b'O';
 const SECTION_UNITS: u8 = b'U';
 const SECTION_ORDERS: u8 = b'D';
 const SECTION_MOVEMENT: u8 = b'M';
+const SECTION_PATHS: u8 = b'P';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -324,6 +334,15 @@ impl World {
         if self.terrain.has_layer() && !self.movement.is_empty() && (0..slots).any(classed) {
             h.write_u8(SECTION_MOVEMENT);
             h.write_u64(self.movement.digest());
+        }
+
+        // Routes (WP4.2): the budget, the epoch of the graphs, the job being
+        // served and every route that exists. Written only while the world has
+        // pathfinding and some unit has a route, so a world that never routed
+        // anything hashes as before.
+        if self.pathing.any_route(e) {
+            h.write_u8(SECTION_PATHS);
+            self.pathing.write_hash(&mut h, e);
         }
 
         h.finish()

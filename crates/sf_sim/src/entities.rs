@@ -12,6 +12,7 @@ use sf_math::{Facing, Rng, Vec2};
 use crate::behavior::{Area, Behavior};
 use crate::ids::{Kind, PlayerId};
 use crate::orders::{Order, OrderQueue};
+use crate::path::Routes;
 use crate::terrain::NO_CELL;
 
 /// The `def` column value of an entity that has no entry in the unit table
@@ -84,6 +85,11 @@ pub(crate) struct Entities {
     /// to standing near it). The switch of the guard's hysteresis; kept apart
     /// from `target`, which is the route's waypoint. Hashed with the orders.
     pub guard_walking: Vec<bool>,
+    /// The route of a unit that walks an order (WP4.2): the how of the order,
+    /// reset whenever the order changes. Idle for everything else, and shorter
+    /// than the other columns (a slot beyond its end has none). Hashed in the
+    /// paths section while the world has pathfinding and some unit has a route.
+    pub route: Routes,
 }
 
 impl Entities {
@@ -138,6 +144,7 @@ impl Entities {
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
+        self.route.reset(i);
     }
 
     /// Frees slot `i`: marks it dead and resets every column to its neutral
@@ -161,5 +168,6 @@ impl Entities {
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
+        self.route.reset(i);
     }
 }

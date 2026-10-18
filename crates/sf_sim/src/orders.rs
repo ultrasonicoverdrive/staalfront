@@ -37,23 +37,27 @@
 //! # Destination and route
 //!
 //! The order holds the *destination*: where the unit wants to be. The *route*
-//! is how it gets there, and it is not part of the order. The unit keeps the
-//! point it is steering at (the next waypoint) in its `target` column, and
-//! [`next_waypoint`] is the only place that decides it. Today the route is the
-//! straight line, so the waypoint is the destination itself; pathfinding
-//! (WP4.2) replaces `next_waypoint` and nothing else: the order, the arrival
-//! test and the queue stay as they are. Arrival is always judged against the
-//! destination, never against the waypoint.
+//! is how it gets there, and it is not part of the order: the unit has a
+//! [`Route`](crate::path) of its own (WP4.2), reset whenever its order changes or
+//! ends. The unit keeps the point it is steering at (the next waypoint) in its
+//! `target` column, and `Pathing::steer` is the only place that decides it. A
+//! unit that terrain binds asks for a route on the first tick of a walk, stands
+//! still until it has one, and then follows the waypoints of its ring; aircraft
+//! and the legacy walks steer straight at the destination. Arrival is always
+//! judged against the destination, never against the waypoint, and a destination
+//! that cannot be reached leaves the order as it is: the route ends in the
+//! nearest cell that can be reached and says so (`World::route_of`).
 //!
 //! # Terrain (WP4.1)
 //!
 //! The walk toward the waypoint is bound by the unit's movement class
 //! ([`crate::movement`]): it goes at the speed of the cell it stands in and
-//! does not enter a cell the class cannot cross. A straight line that runs
-//! into such a cell leaves the unit **standing at its edge with the order
-//! kept**: nothing ends the order and the queue behind it waits, until a new
-//! order replaces it. Going around is pathfinding's (WP4.2), noticing that the
-//! route is blocked is the replan's (WP4.7).
+//! does not enter a cell the class cannot cross. A routed unit goes round such
+//! cells; a step the terrain still refuses (a smoothed route that grazed a
+//! corner) makes it ask for a route cell by cell, and a refusal on that leaves
+//! it **standing with the order kept**: nothing ends the order and the queue
+//! behind it waits, until a new order replaces it. Noticing that a route is
+//! blocked later is the replan's (WP4.7).
 //!
 //! # What phase 5 fills in
 //!
@@ -73,6 +77,7 @@ use crate::behavior::{Motion, Walk, walk};
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Tick};
 use crate::movement::Ground;
+use crate::path::{Aim, Pathing, Steer};
 use crate::units::{UnitClass, UnitTable};
 use crate::world::mix64;
 
@@ -245,15 +250,6 @@ pub fn scatter_offset(id: EntityId, tick: Tick) -> Vec2 {
     Vec2::from_facing(facing, length)
 }
 
-/// The point the unit steers at to get toward `destination`: the next
-/// waypoint of its route. A straight line today, so the destination itself.
-/// This is the one function pathfinding (WP4.2) replaces; it will then also
-/// take the terrain and the route it keeps (its signature changes, its caller
-/// `go_to` does not).
-pub(crate) fn next_waypoint(_e: &Entities, _i: usize, destination: Vec2) -> Vec2 {
-    destination
-}
-
 /// The hook for target selection (phase 5). Called every tick for a unit that
 /// would look for a target: an attack-move on its way and a guard at its post.
 /// It does nothing yet.
@@ -306,6 +302,7 @@ pub(crate) fn begin(e: &mut Entities, i: usize, order: Order, tick: Tick, bounds
     e.order[i] = order;
     e.target[i] = None;
     e.guard_walking[i] = false;
+    e.route.reset(i);
     e.behavior[i] = if order == Order::Idle {
         crate::behavior::Behavior::Idle
     } else {
@@ -339,6 +336,7 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
     e.queue[i] = OrderQueue::EMPTY;
     e.target[i] = None;
     e.guard_walking[i] = false;
+    e.route.reset(i);
     e.behavior[i] = crate::behavior::Behavior::Idle;
 }
 
@@ -352,10 +350,12 @@ fn finish(e: &mut Entities, i: usize, tick: Tick, bounds: (Vec2, Vec2)) {
 }
 
 /// One tick of walking toward `destination` until within `stop_at` of it.
-/// True when the unit has arrived. Steers at the route's next waypoint and
-/// keeps it in the `target` column; arrival is judged against the destination.
-/// A walk that terrain blocks is not an arrival: the unit stays, the waypoint
-/// stays, and the next tick tries again.
+/// True when the unit has arrived. Steers at the next waypoint of the route
+/// ([`Pathing::steer`]) and keeps it in the `target` column; arrival is judged
+/// against the destination. A unit whose route is not there yet waits where it
+/// stands; one whose route ended short of the destination (it cannot be
+/// reached) stands at the end of it; neither is an arrival and the order is
+/// kept.
 fn go_to(
     e: &mut Entities,
     i: usize,
@@ -363,19 +363,37 @@ fn go_to(
     stop_at: Fx,
     m: &Motion,
     ground: &Ground<'_>,
+    path: &mut Pathing,
 ) -> bool {
     if (destination - e.pos[i]).length_squared() <= stop_at.square() {
         e.target[i] = None;
+        e.route.reset(i);
         return true;
     }
-    let waypoint = next_waypoint(e, i, destination);
-    e.target[i] = Some(waypoint);
-    let reached = walk(e, i, waypoint, m, ground) == Walk::Arrived;
-    if reached && waypoint == destination {
-        e.target[i] = None;
-        return true;
+    match path.steer(e, i, destination, m.class) {
+        Steer::Wait | Steer::Stranded => {
+            e.target[i] = None;
+            false
+        }
+        Steer::Go(waypoint, aim) => {
+            e.target[i] = Some(waypoint);
+            match walk(e, i, waypoint, m, ground) {
+                Walk::Arrived if aim == Aim::Destination => {
+                    e.target[i] = None;
+                    true
+                }
+                Walk::Arrived => {
+                    path.reached(e, i);
+                    false
+                }
+                Walk::Moving => false,
+                Walk::Blocked => {
+                    path.blocked(e, i);
+                    false
+                }
+            }
+        }
     }
-    false
 }
 
 /// Runs one tick of the current order of unit `i`, which has
@@ -386,6 +404,7 @@ pub(crate) fn run(
     m: &Motion,
     units: &UnitTable,
     ground: &Ground<'_>,
+    path: &mut Pathing,
     tick: Tick,
 ) {
     let bounds = (m.pos_min, m.pos_max);
@@ -396,13 +415,13 @@ pub(crate) fn run(
         // Never moves. Phase 5 may fire from here, never chase.
         Order::HoldPosition => would_acquire_targets_here(e, i),
         Order::Move(destination) => {
-            if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground) {
+            if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground, path) {
                 finish(e, i, tick, bounds);
             }
         }
         Order::AttackMove(destination) => {
             would_acquire_targets_here(e, i);
-            if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground) {
+            if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground, path) {
                 finish(e, i, tick, bounds);
             }
         }
@@ -410,7 +429,7 @@ pub(crate) fn run(
             would_acquire_targets_here(e, i);
             // Never ends by itself; a unit that has been moved off its post
             // walks back.
-            go_to(e, i, post, ARRIVE_TOLERANCE, m, ground);
+            go_to(e, i, post, ARRIVE_TOLERANCE, m, ground, path);
         }
         Order::Guard(GuardTarget::Entity(watched)) => {
             let Some(j) = live_slot(e, watched) else {
@@ -426,7 +445,7 @@ pub(crate) fn run(
             let start = if e.guard_walking[i] { close } else { leash };
             if (e.pos[j] - e.pos[i]).length_squared() > start.square() {
                 let at = e.pos[j];
-                let arrived = go_to(e, i, at, close, m, ground);
+                let arrived = go_to(e, i, at, close, m, ground, path);
                 e.guard_walking[i] = !arrived;
             } else {
                 e.guard_walking[i] = false;
@@ -440,7 +459,7 @@ pub(crate) fn run(
             };
             let reach = weapon_range_of(e, i, units) + radius_of(e, j, units);
             let at = e.pos[j];
-            if go_to(e, i, at, reach, m, ground)
+            if go_to(e, i, at, reach, m, ground, path)
                 && let Some(wanted) = (at - e.pos[i]).facing()
             {
                 // In reach: face the target. Firing comes in phase five.

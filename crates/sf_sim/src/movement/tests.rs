@@ -136,6 +136,7 @@ fn the_cost_of_a_cell_follows_the_rules_in_order() {
     let g = Ground {
         terrain: &terrain,
         movement: &table,
+        occupancy: None,
     };
     assert_eq!(g.cost(3, Cell::new(0, 0)), Cost::Speed(1000));
     assert_eq!(g.cost(3, Cell::new(2, 1)), Cost::Impassable);
@@ -149,6 +150,7 @@ fn the_cost_of_a_cell_follows_the_rules_in_order() {
     let g = Ground {
         terrain: &terrain,
         movement: &none,
+        occupancy: None,
     };
     assert_eq!(g.cost(3, Cell::new(2, 1)), Cost::OPEN);
     // No layer: open ground, whatever the table says.
@@ -156,6 +158,7 @@ fn the_cost_of_a_cell_follows_the_rules_in_order() {
     let g = Ground {
         terrain: &open,
         movement: &table,
+        occupancy: None,
     };
     assert_eq!(g.cost(3, Cell::new(2, 1)), Cost::OPEN);
     assert_eq!(g.cost(3, Cell::new(4, 1)), Cost::Impassable);
@@ -167,6 +170,7 @@ fn a_step_needs_a_passable_cell_and_does_not_cut_a_blocked_corner() {
     let g = Ground {
         terrain: &terrain,
         movement: &table,
+        occupancy: None,
     };
     // Within one cell: always.
     assert!(g.may_step(
@@ -190,11 +194,49 @@ fn a_step_needs_a_passable_cell_and_does_not_cut_a_blocked_corner() {
 }
 
 #[test]
+fn a_structure_stops_the_classes_terrain_restricts_and_not_aircraft() {
+    // 4 x 3 grass and water as above, a flyer that enters both, and a hut in
+    // (1, 0) and (1, 1).
+    let (terrain, _) = ground_parts();
+    let flyer = class(7, &[(GRASS, Cost::Speed(1000)), (WATER, Cost::Speed(1000))]);
+    let table = MovementTable::new(vec![walker(), flyer]).unwrap();
+    let mut occupancy = Occupancy::new(4, 3);
+    assert!(occupancy.claim(occupancy.index(Cell::new(1, 0)).unwrap(), 0));
+    assert!(occupancy.claim(occupancy.index(Cell::new(1, 1)).unwrap(), 0));
+    let g = Ground {
+        terrain: &terrain,
+        movement: &table,
+        occupancy: Some(&occupancy),
+    };
+    // The walker may not step into the hut, along the row or diagonally, and
+    // may not cut across its corner; a step elsewhere is as before.
+    assert_eq!(g.cost(3, Cell::new(1, 0)), Cost::Impassable);
+    assert!(!g.may_step(3, pos(0, 0), pos(1, 0)));
+    assert!(!g.may_step(3, pos(0, 1), pos(1, 1)));
+    assert!(!g.may_step(3, pos(0, 2), pos(1, 1)));
+    assert!(g.may_step(3, pos(0, 0), pos(0, 1)));
+    // A unit that already stands in the hut may stay in its own cell and
+    // walks out at normal speed.
+    assert!(g.may_step(3, pos(1, 0), pos(1, 0)));
+    assert_eq!(g.permille_at(3, pos(1, 0)), FULL_PERMILLE);
+    // The aircraft flies over it.
+    assert_eq!(g.cost(7, Cell::new(1, 0)), Cost::Speed(1000));
+    assert!(g.may_step(7, pos(0, 0), pos(1, 0)));
+    // Without the structures the cell is open grass.
+    let terrain_only = Ground {
+        occupancy: None,
+        ..g
+    };
+    assert_eq!(terrain_only.cost(3, Cell::new(1, 0)), Cost::Speed(1000));
+}
+
+#[test]
 fn a_unit_in_a_cell_it_could_not_enter_walks_out_at_normal_speed() {
     let (terrain, table) = ground_parts();
     let g = Ground {
         terrain: &terrain,
         movement: &table,
+        occupancy: None,
     };
     assert_eq!(g.permille_at(3, pos(0, 0)), 1000);
     assert_eq!(g.permille_at(3, pos(2, 1)), FULL_PERMILLE, "in the water");

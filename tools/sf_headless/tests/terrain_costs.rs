@@ -1,8 +1,15 @@
 //! The `terrain_costs` scenario (WP4.1, `docs/rules/movement.md`): units of
 //! every movement class cross road, grass, ore and a river at a bridge, and
-//! are blocked by rock and water. Arrival ticks, positions and the blocked
-//! states are asserted; the checksum is pinned in
+//! are kept from rock and water. Arrival ticks, positions and the states of the
+//! routes are asserted; the checksum is pinned in
 //! `assets/scenarios/terrain_costs.expected` (see `pinned.rs`).
+//!
+//! Since WP4.2 an order to move finds its way: the land classes cross the river
+//! on the bridge (also when they were sent straight at the water), everybody
+//! goes round the rock wall, and only the gunboat sent onto the bank, whose
+//! destination cannot be reached, stands at the nearest cell. Every unit with a
+//! terrain-bound class asks for its route on the tick of its order and moves
+//! from the next one, which is the one tick later than at WP4.1.
 //!
 //! The map, the lanes and the entity ids are written in
 //! `assets/scenarios/terrain_costs.ron`: slot = 4 * lane + class, lanes in the
@@ -14,7 +21,7 @@ mod common;
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
 use sf_math::{Fx, Vec2};
-use sf_sim::{Cell, Cost, EntityId, Order, World, per_tick, scale_step};
+use sf_sim::{Cell, Cost, EntityId, Order, RouteStatus, World, per_tick, scale_step};
 
 const GRASS: usize = 0;
 const ROAD: usize = 1;
@@ -115,8 +122,9 @@ impl Run {
     }
 
     /// Ticks it takes to cover `cells` cells at `permille`, to within the
-    /// arrival tolerance, if the unit does not have to turn first: the order is
-    /// given on tick 1 and the unit moves on that very tick.
+    /// arrival tolerance, if the unit does not have to turn first and has its
+    /// route (WP4.2: the order is given on tick 1, the unit asks for the route
+    /// on that tick and moves from tick 2).
     fn straight_ticks(&self, id: EntityId, permille: u16, cells: i32) -> u64 {
         let reach = Fx::from_int(cells) - sf_sim::ARRIVE_TOLERANCE;
         let step = self.step_of(id, permille);
@@ -147,13 +155,14 @@ fn a_straight_run_takes_the_ticks_the_cost_table_says() {
             let got = r
                 .arrived(id)
                 .unwrap_or_else(|| panic!("{id:?} never arrived"));
-            // The order is given on tick 1 and the unit steps on that tick; it
-            // may first have to turn.
-            let moving = got;
+            // The order is given on tick 1, the unit asks for its route on that
+            // tick and steps from tick 2; it may first have to turn. (The route
+            // of a run of fifteen cells in the open is one waypoint: the goal.)
             assert!(
-                moving >= want && moving <= want + r.turning(id) + 1,
+                got > want && got <= want + r.turning(id) + 2,
                 "lane {lane} class {class}: arrived on tick {got}, a straight run of {want} \
-                 steps at {permille} permille plus at most {} ticks of turning",
+                 steps at {permille} permille after the tick of the request, plus at most {} \
+                 ticks of turning",
                 r.turning(id)
             );
         }
@@ -185,25 +194,36 @@ fn road_is_faster_than_grass_and_ore_slower() {
 #[test]
 fn the_pinned_arrival_ticks() {
     // The same runs as numbers: a change here is a change of the movement
-    // rules, the cost table or the speeds, and so is deliberate.
+    // rules, the cost table or the speeds, and so is deliberate. At WP4.2 the
+    // lanes of open ground, the bridge and the hover craft in the water lane
+    // each got one tick (the request for the route); the land classes in the
+    // water lane and everyone in the rock lane take a route round the obstacle.
     let r = run();
-    let table: [(usize, usize, u64); 16] = [
-        (GRASS, FOOT, 432),
-        (GRASS, WHEELED, 156),
-        (GRASS, TRACKED, 154),
-        (GRASS, HOVER, 204),
-        (ROAD, FOOT, 391),
-        (ROAD, WHEELED, 102),
-        (ROAD, TRACKED, 132),
-        (ROAD, HOVER, 197),
-        (ORE, FOOT, 537),
-        (ORE, WHEELED, 207),
-        (ORE, TRACKED, 196),
-        (ORE, HOVER, 231),
-        (BRIDGE, FOOT, 279),
-        (BRIDGE, WHEELED, 94),
-        (BRIDGE, TRACKED, 94),
-        (BRIDGE, HOVER, 128),
+    let table: [(usize, usize, u64); 24] = [
+        (GRASS, FOOT, 433),
+        (GRASS, WHEELED, 157),
+        (GRASS, TRACKED, 155),
+        (GRASS, HOVER, 205),
+        (ROAD, FOOT, 392),
+        (ROAD, WHEELED, 103),
+        (ROAD, TRACKED, 133),
+        (ROAD, HOVER, 198),
+        (ORE, FOOT, 538),
+        (ORE, WHEELED, 208),
+        (ORE, TRACKED, 197),
+        (ORE, HOVER, 232),
+        (BRIDGE, FOOT, 280),
+        (BRIDGE, WHEELED, 95),
+        (BRIDGE, TRACKED, 95),
+        (BRIDGE, HOVER, 129),
+        (WATER, FOOT, 406),
+        (WATER, WHEELED, 143),
+        (WATER, TRACKED, 152),
+        (WATER, HOVER, 198),
+        (ROCK, FOOT, 265),
+        (ROCK, WHEELED, 102),
+        (ROCK, TRACKED, 95),
+        (ROCK, HOVER, 136),
     ];
     for (lane, class, tick) in table {
         assert_eq!(
@@ -212,9 +232,9 @@ fn the_pinned_arrival_ticks() {
             "lane {lane} class {class}"
         );
     }
-    assert_eq!(r.arrived(unit(WATER, HOVER)), Some(197));
-    assert_eq!(r.arrived(BOAT_DOWN), Some(179));
-    assert_eq!(r.arrived(DRONE), Some(234));
+    assert_eq!(r.arrived(BOAT_DOWN), Some(181));
+    assert_eq!(r.arrived(BOAT_BANK), None);
+    assert_eq!(r.arrived(DRONE), Some(234), "aircraft ask for no route");
 }
 
 // --- the bridge ---
@@ -237,45 +257,53 @@ fn land_crosses_the_river_on_the_bridge_and_stands_on_the_far_bank() {
 }
 
 #[test]
-fn a_vessel_passes_under_the_bridge_and_is_stopped_by_the_bank() {
+fn a_vessel_passes_under_the_bridge_and_stops_at_the_nearest_water() {
     let r = run();
     // Down the river from row 1 to row 18, through the bridge cell (21, 8).
     assert_eq!(r.world.order_of(BOAT_DOWN), Some(Order::Idle));
     assert_eq!(r.cell(BOAT_DOWN), Cell::new(21, 18));
     assert!(r.cells[BOAT_DOWN.index() as usize].contains(&Cell::new(21, 8)));
-    // Asked to go onto the bank, it stops in the river's edge cell, less than
-    // one step from the grass, with its order kept.
+    // Asked to go onto the bank, it cannot: the route leads to the water cell
+    // nearest the spot, the river's edge cell (20, 14), where it stands in the
+    // middle of the cell with its order kept and the mark that the destination
+    // cannot be reached.
     let goal = mid(10, 14);
     assert_eq!(r.world.order_of(BOAT_BANK), Some(Order::Move(goal)));
-    assert_eq!(r.world.waypoint_of(BOAT_BANK), Some(goal));
+    assert_eq!(r.world.waypoint_of(BOAT_BANK), None);
     assert_eq!(r.cell(BOAT_BANK), Cell::new(20, 14));
-    let step = r.step_of(BOAT_BANK, 1000);
-    assert!(r.pos(BOAT_BANK).x - Fx::from_int(20) < step);
+    assert_eq!(r.pos(BOAT_BANK), mid(20, 14));
+    let route = r.world.route_of(BOAT_BANK).unwrap();
+    assert_eq!(route.status, RouteStatus::Stranded);
+    assert!(route.unreachable);
+    assert_eq!(route.goal, Some(Cell::new(20, 14)));
 }
 
 // --- blocked by water and rock ---
 
 #[test]
-fn land_stops_at_the_river_bank_with_its_order_kept() {
+fn land_sent_at_the_water_takes_the_bridge() {
+    // Asked to go to the far bank along a lane that runs into the river, the
+    // land classes go up to the bridge in row 8, cross it, and come back down to
+    // the spot: the destination can be reached, so nobody stops at the bank.
     let r = run();
-    let goal = mid(27, 10);
-    let bank = Fx::from_int(20);
+    let goal = Cell::new(27, 10);
     for class in [FOOT, WHEELED, TRACKED] {
         let id = unit(WATER, class);
-        assert_eq!(r.arrived(id), None, "class {class} must not arrive");
-        assert_eq!(r.cell(id), Cell::new(19, 10), "class {class}");
-        let step = r.step_of(id, 1000);
+        assert!(r.arrived(id).is_some(), "class {class} must arrive");
+        assert_eq!(r.cell(id), goal, "class {class}");
+        assert_eq!(r.world.order_of(id), Some(Order::Idle), "class {class}");
+        let seen = &r.cells[id.index() as usize];
+        for x in 20..=23 {
+            assert!(
+                seen.contains(&Cell::new(x, 8)),
+                "class {class} never stood on the bridge cell ({x}, 8)"
+            );
+        }
+        // And it was never in the water of the river.
         assert!(
-            bank - r.pos(id).x <= step,
-            "class {class} stopped {:?} short of the bank",
-            bank - r.pos(id).x
+            seen.iter().all(|c| !(20..=23).contains(&c.x) || c.y == 8),
+            "class {class} left the bridge in the river"
         );
-        assert_eq!(
-            r.world.order_of(id),
-            Some(Order::Move(goal)),
-            "class {class}"
-        );
-        assert_eq!(r.world.waypoint_of(id), Some(goal), "class {class}");
     }
 }
 
@@ -313,22 +341,19 @@ fn hover_crosses_the_river_at_the_speed_of_the_water_cell() {
 }
 
 #[test]
-fn everyone_but_air_stops_at_the_rock_wall() {
+fn everyone_but_air_goes_round_the_rock_wall() {
     let r = run();
-    let goal = mid(35, 12);
-    let wall = Fx::from_int(30);
     for class in [FOOT, WHEELED, TRACKED, HOVER] {
         let id = unit(ROCK, class);
-        assert_eq!(r.arrived(id), None, "class {class} must not arrive");
-        assert_eq!(r.cell(id), Cell::new(29, 12), "class {class}");
+        assert!(r.arrived(id).is_some(), "class {class} must arrive");
+        assert_eq!(r.cell(id), Cell::new(35, 12), "class {class}");
+        assert_eq!(r.world.order_of(id), Some(Order::Idle), "class {class}");
+        // The wall is the two cells (30, 12) and (31, 12): it passed above or
+        // below them.
+        let seen = &r.cells[id.index() as usize];
         assert!(
-            wall - r.pos(id).x <= r.step_of(id, 1000),
-            "class {class} stopped short of the wall"
-        );
-        assert_eq!(
-            r.world.order_of(id),
-            Some(Order::Move(goal)),
-            "class {class}"
+            seen.iter().any(|c| (30..=31).contains(&c.x) && c.y != 12),
+            "class {class} did not go round the wall"
         );
     }
     // The drone flies over the river and the wall on row 16 and arrives.
@@ -340,28 +365,13 @@ fn everyone_but_air_stops_at_the_rock_wall() {
 }
 
 #[test]
-fn a_blocked_unit_stays_where_it_stopped() {
-    // Blocked, it does not creep, wander off or give up: the position at tick
-    // 500 is the position at the end, and so is every blocked unit's order.
+fn a_stranded_unit_stays_where_its_route_ended() {
+    // The gunboat whose destination cannot be reached does not creep, wander off
+    // or give up: the position at tick 500 is the position at the end, and the
+    // order is kept.
     let r = run();
-    let blocked: Vec<EntityId> = [FOOT, WHEELED, TRACKED]
-        .iter()
-        .map(|&c| unit(WATER, c))
-        .chain(
-            [FOOT, WHEELED, TRACKED, HOVER]
-                .iter()
-                .map(|&c| unit(ROCK, c)),
-        )
-        .chain([BOAT_BANK])
-        .collect();
-    for id in blocked {
-        assert_eq!(
-            r.at_500[id.index() as usize],
-            r.pos(id),
-            "{id:?} moved after tick 500"
-        );
-        assert!(matches!(r.world.order_of(id), Some(Order::Move(_))));
-    }
+    assert_eq!(r.at_500[BOAT_BANK.index() as usize], r.pos(BOAT_BANK));
+    assert!(matches!(r.world.order_of(BOAT_BANK), Some(Order::Move(_))));
     assert!(r.ticks > 500);
 }
 

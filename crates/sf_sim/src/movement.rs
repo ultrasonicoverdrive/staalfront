@@ -34,15 +34,17 @@
 //! passable for the class (and, for a diagonal step, so are the two cells it
 //! cuts across, so a unit cannot slip through the corner between two blocked
 //! cells). A refused step leaves the unit where it is, still facing its
-//! waypoint, with its order kept: it stands at the edge. Wanderers and anything
-//! else without a movement class ignore the terrain, as before.
+//! waypoint, with its order kept: it stands at the edge. A unit that walks an
+//! order is routed round such cells (WP4.2, [`crate::path`]); the legacy `MoveTo`
+//! stands at the edge. Wanderers and anything else without a movement class
+//! ignore the terrain, as before.
 
 use core::fmt;
 
 use sf_math::Fx;
 use sf_math::hash::Fnv1a64;
 
-use crate::terrain::{Cell, Terrain, TerrainId};
+use crate::terrain::{Cell, Occupancy, Terrain, TerrainId};
 
 /// Written first into the digest; bump when its layout changes.
 const DIGEST_TAG: &[u8] = b"sf_sim/movement/v1";
@@ -241,6 +243,19 @@ impl MovementTable {
             .map(|i| &self.entries[i])
     }
 
+    /// The classes of the table, ascending.
+    pub(crate) fn class_ids(&self) -> impl Iterator<Item = u16> + '_ {
+        self.entries.iter().map(|e| e.class)
+    }
+
+    /// Whether some terrain type stops the class: the class is bound by the
+    /// terrain, so it is a ground class that routes are found for. A class
+    /// that can enter every terrain type it lists (aircraft) is not.
+    pub(crate) fn restricts(&self, class: u16) -> bool {
+        self.entry(class)
+            .is_some_and(|e| e.costs.iter().any(|c| matches!(c, Some(Cost::Impassable))))
+    }
+
     /// The first terrain type of `defined` (ascending ids) that some class
     /// does not list: `(class, terrain)`.
     pub(crate) fn first_gap(
@@ -280,6 +295,10 @@ fn digest_of(entries: &[Entry]) -> u64 {
 pub(crate) struct Ground<'a> {
     pub terrain: &'a Terrain,
     pub movement: &'a MovementTable,
+    /// The structures. With it, a cell a structure covers is impassable for
+    /// every class that terrain restricts (the classes that are routed);
+    /// aircraft fly over. `None` where the caller asks about the terrain alone.
+    pub occupancy: Option<&'a Occupancy>,
 }
 
 impl Ground<'_> {
@@ -291,6 +310,14 @@ impl Ground<'_> {
         };
         if !self.terrain.has_layer() {
             return Cost::OPEN;
+        }
+        if let Some(occupancy) = self.occupancy
+            && occupancy
+                .index(cell)
+                .is_some_and(|i| occupancy.slot_at(i).is_some())
+            && self.movement.restricts(class)
+        {
+            return Cost::Impassable;
         }
         match self.movement.get(class, id) {
             None => Cost::OPEN,

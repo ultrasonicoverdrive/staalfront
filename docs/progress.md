@@ -236,7 +236,15 @@ Status: in progress.
   order kept; vessels pass under a bridge, land crosses it; the cursor's no-go reads the sim's table
   and `Passability` is gone; the `terrain_costs` scenario on a new hand-drawn map),
   `docs/rules/movement.md`: done
-- WP4.2 to WP4.7: open
+- WP4.2 Hierarchical A* (sectors and portals) for single units (`sf_sim::path`: sectors of 16 by 16
+  cells, portals on their borders, an abstract graph per terrain-bound movement class built when the
+  world is made and rebuilt one sector at a time by the tick when a structure is
+  placed or removed; abstract A*, lazy refinement inside the sectors, line-of-sight string pulling,
+  a fixed-size ring of waypoints per unit; requests served going round the entity ids inside a
+  node budget per tick; an unreachable goal ends in the nearest reachable cell and says so;
+  `Order::Move` and the other walking orders now follow routes; the `pathing` and `pathing_256`
+  scenarios and the load test), `docs/rules/pathfinding.md`: done
+- WP4.3 to WP4.7: open
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -251,10 +259,32 @@ own digest joins the checksum while a unit with a movement class is on a map wit
 stop at the rock. Frozen definitions protect against balance tweaks, not against new rules, so the
 frozen copies carry the real costs as shipped at WP4.1 and the scenario was re-pinned. `orders`,
 `wander_5000`, `command_mix` and `terrain_256` are unchanged. A unit spawned on ground its class
-cannot enter is now refused. Slope (uphill slowing) waits, with reasons, for WP4.2 and WP4.3 (`movement.md`, "Slope: later"). Not
+cannot enter is now refused. Slope (uphill slowing) waits, with reasons, for WP4.3 (`movement.md`, "Slope: later"; WP4.2 did not take it). Not
 done on purpose: pathfinding, collision, replanning a blocked route (a blocked move is a unit
 standing at the edge forever), reading a role's `water_speed` (the hover class's cost says it), and
 vessels in the `sf_game` sandbox.
+
+WP4.2 notes. A unit that walks an order and is bound by terrain asks for a route on the first tick
+and stands still until the service has made it (one tick at least); aircraft (a class that no
+terrain stops), the legacy `MoveTo` and the wanderers still walk the straight line, so
+`wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and `orders` did not move. **`terrain_costs`
+moved once, on purpose** (`0x8c43b875a877488c` to `0xe98b2eed90616d3f`): its `Move` orders now find
+their way. The units sent along the river lane take the bridge and come back down instead of
+stopping at the bank (the destination can be reached), everybody goes round the two-cell rock wall,
+the gunboat sent onto the bank ends in the middle of the water cell nearest to it (marked
+unreachable) instead of at the edge of it, and the lanes in the open each take one tick longer (the
+request). The scenario file's commands and its frozen definitions are the same; the asserts of
+`tools/sf_headless/tests/terrain_costs.rs` and of `crates/sf_sim/tests/movement.rs` that described
+"stops at the edge" were rewritten for the new rule, the legacy `MoveTo` keeps its test. Choices:
+one portal on a short run, three on a run of 6 to 11 and four from 12 on (measured against the
+best any-angle route: the tail of the distribution, not the median, decided it); a leg that crosses a border is searched over both sectors so the route
+crosses where it suits it; a thick line of sight of a quarter cell and a sector long; the budget is in
+nodes (cells expanded or looked at), 4,096 per tick by default, in `assets/config/sim.ron`; a structure on a unit's own cell with no
+free neighbour leaves it with nothing to reach (WP4.4's stuck unit). Measured: about 1,100 random routes
+against the best any-angle route by the game's own line of sight, median 1.006, 99th percentile
+1.05, worst 1.075; `pathing_256`, 200 requests served after 85 ticks. Not done on purpose: flowfields,
+collision, replanning when a route is blocked or a target vanishes (the graph is kept right; a route
+is only asked for again when a change touches it), a cache for unreachable goals, uphill slowing.
 
 ## Phase 1 report (draft, WP1.14)
 

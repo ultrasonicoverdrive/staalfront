@@ -1,0 +1,16 @@
+// Settings of the simulation itself (WP4.2), as opposed to the definitions of
+// its units. Read by sf_data::sim_settings; sf_bridge hands them to the world.
+// The rules they belong to are in docs/rules/pathfinding.md.
+//
+// path_node_budget: how many nodes of path search work the simulation may do in
+// one tick, for all units together. Every search step that expands a cell or a
+// portal counts one. A bigger budget gives units their routes sooner (a crowd
+// that is ordered at once is served in fewer ticks); it never changes which
+// route a unit gets. It costs time in every tick the service has work, so it is
+// the knob that trades the load of a big order against the frame time.
+// At least 512 (a line of sight, the one step that cannot be cut, needs up to 60).
+// Tests and scenarios that do not give a budget use the simulation's own
+// default, which is the same number.
+(
+    path_node_budget: 4096,
+)

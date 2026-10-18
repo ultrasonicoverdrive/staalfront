@@ -9,10 +9,13 @@
 //! files with validation that names the file and line, and their conversion
 //! to fixed-point numbers for the simulation. WP4.1 adds the terrain cost of
 //! each movement class ([`movement`]): the classes of `unit_classes.ron` put
-//! together with the terrain types and checked against each other.
+//! together with the terrain types and checked against each other. WP4.2 adds
+//! the settings of the simulation itself ([`sim_settings`], `sim.ron`): today the
+//! node budget of the path service.
 
 pub mod map;
 pub mod movement;
+pub mod sim_settings;
 pub mod terrain;
 pub mod units;
 

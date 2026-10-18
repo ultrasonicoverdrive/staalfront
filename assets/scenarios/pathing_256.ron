@@ -1,0 +1,429 @@
+// 200 path requests on the 256 by 256 cell playfield (WP4.2, the load test of
+// docs/rules/pathfinding.md). The map is assets/maps/playfield256: a flat 1,024 m
+// field with two rivers, rock blocks, ore, a road and a bridge. Two hundred light
+// tanks stand on a grid of cells in its north-west corner (x and y 6 to 63, every
+// third cell with no rock or water next to it) and all get the order, on tick 1,
+// to go to a different cell of the south-east corner (x and y 186 to 251, picked
+// the same way). The routes are some 300 cells long and cross the rivers; every
+// unit has to be served by the path service, going round the slots from the lowest, inside its budget
+// of nodes per tick.
+//
+// tools/sf_headless/tests/pathing.rs runs it, asserts that the service never
+// spends more than its budget in a tick, that the requests (all asked in the
+// same tick) are served in the order of the entity ids, and prints how many ticks it took to serve them all.
+// CI runs it on Linux and Windows and requires the checksum in
+// pathing_256.expected. The unit definitions are the frozen ones of `pathing`.
+//
+// Slots 0..200 are the tanks, in the order of the cells (rows first); the
+// order of slot `i` goes to the goal listed `i`-th below.
+Scenario(
+    name: "pathing_256",
+    seed: 0x7E44_0043,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("pathing_defs"),
+    ticks: 600,
+    commands: [
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 6))), // slot 0
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 6))), // slot 1
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 6))), // slot 2
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 6))), // slot 3
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (18, 6))), // slot 4
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 6))), // slot 5
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 6))), // slot 6
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 6))), // slot 7
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 6))), // slot 8
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 6))), // slot 9
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 6))), // slot 10
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 6))), // slot 11
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 6))), // slot 12
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 6))), // slot 13
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 6))), // slot 14
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 6))), // slot 15
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 6))), // slot 16
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 6))), // slot 17
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 6))), // slot 18
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 9))), // slot 19
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 9))), // slot 20
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 9))), // slot 21
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 9))), // slot 22
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 9))), // slot 23
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 9))), // slot 24
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 9))), // slot 25
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 9))), // slot 26
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 9))), // slot 27
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 9))), // slot 28
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 9))), // slot 29
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 9))), // slot 30
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 9))), // slot 31
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 9))), // slot 32
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 9))), // slot 33
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 9))), // slot 34
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 9))), // slot 35
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 12))), // slot 36
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 12))), // slot 37
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 12))), // slot 38
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 12))), // slot 39
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 12))), // slot 40
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 12))), // slot 41
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 12))), // slot 42
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 12))), // slot 43
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 12))), // slot 44
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 12))), // slot 45
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 12))), // slot 46
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 12))), // slot 47
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 12))), // slot 48
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 15))), // slot 49
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 15))), // slot 50
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 15))), // slot 51
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 15))), // slot 52
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (18, 15))), // slot 53
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 15))), // slot 54
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 15))), // slot 55
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 15))), // slot 56
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 15))), // slot 57
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 15))), // slot 58
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 18))), // slot 59
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 18))), // slot 60
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 18))), // slot 61
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 18))), // slot 62
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (18, 18))), // slot 63
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 18))), // slot 64
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 18))), // slot 65
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 18))), // slot 66
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 18))), // slot 67
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 18))), // slot 68
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 18))), // slot 69
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 18))), // slot 70
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 18))), // slot 71
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 21))), // slot 72
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 21))), // slot 73
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 21))), // slot 74
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 21))), // slot 75
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 21))), // slot 76
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 21))), // slot 77
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 21))), // slot 78
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 21))), // slot 79
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 21))), // slot 80
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 21))), // slot 81
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 21))), // slot 82
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 21))), // slot 83
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 21))), // slot 84
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 24))), // slot 85
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 24))), // slot 86
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 24))), // slot 87
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 24))), // slot 88
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 24))), // slot 89
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 24))), // slot 90
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 24))), // slot 91
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 24))), // slot 92
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 24))), // slot 93
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 24))), // slot 94
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 24))), // slot 95
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 24))), // slot 96
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 24))), // slot 97
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 24))), // slot 98
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 24))), // slot 99
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 24))), // slot 100
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 27))), // slot 101
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 27))), // slot 102
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 27))), // slot 103
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 27))), // slot 104
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 27))), // slot 105
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 27))), // slot 106
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 27))), // slot 107
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 27))), // slot 108
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 27))), // slot 109
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 27))), // slot 110
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 27))), // slot 111
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 27))), // slot 112
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 27))), // slot 113
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 27))), // slot 114
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 27))), // slot 115
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 27))), // slot 116
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 30))), // slot 117
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 30))), // slot 118
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 30))), // slot 119
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 30))), // slot 120
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 30))), // slot 121
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 30))), // slot 122
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 30))), // slot 123
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 30))), // slot 124
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 30))), // slot 125
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 30))), // slot 126
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 30))), // slot 127
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 30))), // slot 128
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 30))), // slot 129
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 30))), // slot 130
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 30))), // slot 131
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 30))), // slot 132
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 30))), // slot 133
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 30))), // slot 134
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 33))), // slot 135
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 33))), // slot 136
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 33))), // slot 137
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 33))), // slot 138
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 33))), // slot 139
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 33))), // slot 140
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 33))), // slot 141
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 33))), // slot 142
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 33))), // slot 143
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 33))), // slot 144
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 33))), // slot 145
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 33))), // slot 146
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 33))), // slot 147
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 33))), // slot 148
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 33))), // slot 149
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 33))), // slot 150
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 33))), // slot 151
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 36))), // slot 152
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 36))), // slot 153
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (18, 36))), // slot 154
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 36))), // slot 155
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 36))), // slot 156
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 36))), // slot 157
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 36))), // slot 158
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 36))), // slot 159
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 36))), // slot 160
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 36))), // slot 161
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 36))), // slot 162
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 36))), // slot 163
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 36))), // slot 164
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 36))), // slot 165
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 36))), // slot 166
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 36))), // slot 167
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 36))), // slot 168
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 36))), // slot 169
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 39))), // slot 170
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 39))), // slot 171
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 39))), // slot 172
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (15, 39))), // slot 173
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (18, 39))), // slot 174
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 39))), // slot 175
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (24, 39))), // slot 176
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (27, 39))), // slot 177
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 39))), // slot 178
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (33, 39))), // slot 179
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 39))), // slot 180
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 39))), // slot 181
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 39))), // slot 182
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 39))), // slot 183
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 39))), // slot 184
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 39))), // slot 185
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (54, 39))), // slot 186
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (57, 39))), // slot 187
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (60, 39))), // slot 188
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (63, 39))), // slot 189
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 42))), // slot 190
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 42))), // slot 191
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (12, 42))), // slot 192
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (21, 42))), // slot 193
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (30, 42))), // slot 194
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (39, 42))), // slot 195
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (42, 42))), // slot 196
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (45, 42))), // slot 197
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (48, 42))), // slot 198
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (51, 42))), // slot 199
+
+        (tick: 1, command: OrderMove(ids: [Id(0, 0)], target: (246, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(1, 0)], target: (249, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(2, 0)], target: (186, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(3, 0)], target: (189, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (192, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(5, 0)], target: (195, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(6, 0)], target: (198, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(7, 0)], target: (201, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(8, 0)], target: (204, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(9, 0)], target: (207, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(10, 0)], target: (210, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(11, 0)], target: (213, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(12, 0)], target: (216, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(13, 0)], target: (234, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(14, 0)], target: (237, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(15, 0)], target: (240, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(16, 0)], target: (243, 204))),
+        (tick: 1, command: OrderMove(ids: [Id(17, 0)], target: (186, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(18, 0)], target: (189, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(19, 0)], target: (192, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(20, 0)], target: (195, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(21, 0)], target: (204, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(22, 0)], target: (207, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(23, 0)], target: (210, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(24, 0)], target: (213, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(25, 0)], target: (216, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(26, 0)], target: (219, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(27, 0)], target: (222, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(28, 0)], target: (225, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(29, 0)], target: (234, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(30, 0)], target: (237, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(31, 0)], target: (240, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(32, 0)], target: (243, 207))),
+        (tick: 1, command: OrderMove(ids: [Id(33, 0)], target: (186, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(34, 0)], target: (189, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(35, 0)], target: (192, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(36, 0)], target: (195, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(37, 0)], target: (198, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(38, 0)], target: (201, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(39, 0)], target: (204, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(40, 0)], target: (207, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(41, 0)], target: (210, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(42, 0)], target: (213, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(43, 0)], target: (216, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(44, 0)], target: (219, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(45, 0)], target: (222, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(46, 0)], target: (234, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(47, 0)], target: (237, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(48, 0)], target: (240, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(49, 0)], target: (243, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(50, 0)], target: (246, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(51, 0)], target: (249, 210))),
+        (tick: 1, command: OrderMove(ids: [Id(52, 0)], target: (186, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(53, 0)], target: (189, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(54, 0)], target: (192, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(55, 0)], target: (201, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(56, 0)], target: (204, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(57, 0)], target: (213, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(58, 0)], target: (222, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(59, 0)], target: (231, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(60, 0)], target: (234, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(61, 0)], target: (237, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(62, 0)], target: (240, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(63, 0)], target: (243, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(64, 0)], target: (246, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(65, 0)], target: (249, 213))),
+        (tick: 1, command: OrderMove(ids: [Id(66, 0)], target: (186, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(67, 0)], target: (189, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(68, 0)], target: (210, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(69, 0)], target: (213, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(70, 0)], target: (231, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(71, 0)], target: (234, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(72, 0)], target: (237, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(73, 0)], target: (240, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(74, 0)], target: (243, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(75, 0)], target: (246, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(76, 0)], target: (249, 216))),
+        (tick: 1, command: OrderMove(ids: [Id(77, 0)], target: (207, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(78, 0)], target: (210, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(79, 0)], target: (213, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(80, 0)], target: (231, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(81, 0)], target: (234, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(82, 0)], target: (237, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(83, 0)], target: (240, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(84, 0)], target: (249, 219))),
+        (tick: 1, command: OrderMove(ids: [Id(85, 0)], target: (195, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(86, 0)], target: (198, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(87, 0)], target: (201, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(88, 0)], target: (204, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(89, 0)], target: (207, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(90, 0)], target: (210, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(91, 0)], target: (213, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(92, 0)], target: (216, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(93, 0)], target: (231, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(94, 0)], target: (234, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(95, 0)], target: (237, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(96, 0)], target: (240, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(97, 0)], target: (249, 222))),
+        (tick: 1, command: OrderMove(ids: [Id(98, 0)], target: (186, 225))),
+        (tick: 1, command: OrderMove(ids: [Id(99, 0)], target: (189, 225))),
+        (tick: 1, command: OrderMove(ids: [Id(100, 0)], target: (192, 225))),
+        (tick: 1, command: OrderMove(ids: [Id(101, 0)], target: (195, 225))),
+        (tick: 1, command: OrderMove(ids: [Id(102, 0)], target: (198, 225))),
+        (tick: 1, command: OrderMove(ids: [Id(103, 0)], target: (186, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(104, 0)], target: (189, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(105, 0)], target: (192, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(106, 0)], target: (195, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(107, 0)], target: (198, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(108, 0)], target: (201, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(109, 0)], target: (204, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(110, 0)], target: (207, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(111, 0)], target: (210, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(112, 0)], target: (213, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(113, 0)], target: (216, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(114, 0)], target: (219, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(115, 0)], target: (222, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(116, 0)], target: (225, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(117, 0)], target: (228, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(118, 0)], target: (231, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(119, 0)], target: (234, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(120, 0)], target: (237, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(121, 0)], target: (240, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(122, 0)], target: (243, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(123, 0)], target: (246, 186))),
+        (tick: 1, command: OrderMove(ids: [Id(124, 0)], target: (189, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(125, 0)], target: (192, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(126, 0)], target: (195, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(127, 0)], target: (198, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(128, 0)], target: (201, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(129, 0)], target: (204, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(130, 0)], target: (207, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(131, 0)], target: (210, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(132, 0)], target: (219, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(133, 0)], target: (222, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(134, 0)], target: (225, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(135, 0)], target: (228, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(136, 0)], target: (234, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(137, 0)], target: (237, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(138, 0)], target: (240, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(139, 0)], target: (243, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(140, 0)], target: (246, 189))),
+        (tick: 1, command: OrderMove(ids: [Id(141, 0)], target: (189, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(142, 0)], target: (192, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(143, 0)], target: (195, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(144, 0)], target: (198, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(145, 0)], target: (201, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(146, 0)], target: (204, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(147, 0)], target: (207, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(148, 0)], target: (210, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(149, 0)], target: (219, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(150, 0)], target: (222, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(151, 0)], target: (225, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(152, 0)], target: (228, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(153, 0)], target: (234, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(154, 0)], target: (237, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(155, 0)], target: (240, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(156, 0)], target: (243, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(157, 0)], target: (246, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(158, 0)], target: (249, 192))),
+        (tick: 1, command: OrderMove(ids: [Id(159, 0)], target: (189, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(160, 0)], target: (192, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(161, 0)], target: (195, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(162, 0)], target: (198, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(163, 0)], target: (210, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(164, 0)], target: (213, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(165, 0)], target: (216, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(166, 0)], target: (219, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(167, 0)], target: (222, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(168, 0)], target: (225, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(169, 0)], target: (228, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(170, 0)], target: (231, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(171, 0)], target: (234, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(172, 0)], target: (237, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(173, 0)], target: (246, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(174, 0)], target: (249, 195))),
+        (tick: 1, command: OrderMove(ids: [Id(175, 0)], target: (189, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(176, 0)], target: (192, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(177, 0)], target: (195, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(178, 0)], target: (198, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(179, 0)], target: (210, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(180, 0)], target: (213, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(181, 0)], target: (216, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(182, 0)], target: (219, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(183, 0)], target: (222, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(184, 0)], target: (225, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(185, 0)], target: (234, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(186, 0)], target: (237, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(187, 0)], target: (246, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(188, 0)], target: (249, 198))),
+        (tick: 1, command: OrderMove(ids: [Id(189, 0)], target: (186, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(190, 0)], target: (189, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(191, 0)], target: (192, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(192, 0)], target: (195, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(193, 0)], target: (198, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(194, 0)], target: (201, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(195, 0)], target: (210, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(196, 0)], target: (213, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(197, 0)], target: (216, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(198, 0)], target: (234, 201))),
+        (tick: 1, command: OrderMove(ids: [Id(199, 0)], target: (237, 201))),
+    ],
+)
