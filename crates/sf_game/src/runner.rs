@@ -1,9 +1,20 @@
 //! The application: [`Runner`] is the `sf_engine` app of both binaries.
 //!
-//! It owns the sim world, the camera, the instancer, the HUD and the F1
-//! panels, steps the sim in the engine's fixed tick, draws every frame and,
-//! depending on the options, flies the benchmark path ([`crate::bench`]) or
-//! takes the CI screenshots. See the crate docs for what each part does.
+//! It owns the handle of the sim thread, the camera, the instancer, the HUD
+//! and the F1 panels, draws every frame from the newest snapshot the sim
+//! thread published and, depending on the options, flies the benchmark path
+//! ([`crate::bench`]) or takes the CI screenshots. See the crate docs for what
+//! each part does.
+//!
+//! # The simulation is not here (WP1.15)
+//!
+//! The world lives on its own thread ([`crate::sim_thread`]). Everything in
+//! this file that used to read it reads a [`SimSnapshot`] instead, taken once
+//! per frame at the top of [`Runner::render`] (`self.snap`), and everything
+//! that used to change it sends a command ([`commands::issue`]). The engine's
+//! fixed step is not used: `fixed_update` does nothing, the sim thread has its
+//! own 20 Hz clock, and the interpolation factor comes from the snapshot
+//! ([`interpolation_alpha`]), not from the engine's accumulator.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,13 +43,15 @@ use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::commands;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
-use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, UnitDisplay, UnitView};
+use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::population::Population;
 use crate::roster::{self, Roster};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
 use crate::selection_view::{self, FrameGeometry, SelectionView};
+use crate::sim_snapshot::SimSnapshot;
+use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
 
 /// Walking speed of the demo's units: 1.5 cells a second, 6 m/s (22 km/h),
 /// a believable tank. The sim's default of 4 cells a second was a walking
@@ -147,6 +160,9 @@ struct BenchRun {
     gpu_note: Option<String>,
     gpu_enabled: bool,
     allocs_seen: u64,
+    /// The sim thread's counters when the warm-up ended: the report's sim
+    /// numbers cover the measured flight only.
+    sim_base: SimCounters,
 }
 
 /// State of the `--shots` run.
@@ -161,9 +177,9 @@ struct ShotRun {
 pub struct Runner {
     started: Option<Instant>,
     report_at: Instant,
+    /// Sim ticks seen in the last second (the difference of snapshot ticks).
     ticks: u32,
     frames: u32,
-    total_ticks: u64,
     exit_after: Option<Duration>,
     renderer: Option<Renderer>,
     /// The strategic icons (WP3.6), read from `assets/icons` at start and
@@ -180,7 +196,14 @@ pub struct Runner {
     /// The terrain as a ground: camera picking, units and sounds stand on it.
     ground: Arc<TerrainGround>,
     lod: LodConfig,
-    world: World,
+    /// The simulation's thread (WP1.15): commands go in, snapshots come out.
+    sim: SimHandle,
+    /// The newest snapshot of the sim, taken at the top of every frame; what
+    /// everything on the main thread reads instead of a world.
+    snap: Arc<SimSnapshot>,
+    /// When the last snapshot that showed the sim behind its clock arrived:
+    /// the F1 panel keeps saying "sim behind" for a second after.
+    behind_seen: Option<Instant>,
     instancer: Instancer,
     /// The glTF models the units are drawn with, after the placeholders.
     pack: Option<LoadedPack>,
@@ -189,7 +212,6 @@ pub struct Runner {
     buildings: u32,
     /// Map size in sim cells (B12): what the sim was created with.
     cells: (u32, u32),
-    views: Vec<EntityView>,
     units: u32,
     /// Latest instancing and draw counters, for the once-a-second line.
     stats: InstanceStats,
@@ -202,6 +224,8 @@ pub struct Runner {
     /// Recording, submitting and presenting the frame (waiting for the
     /// swap chain included).
     render_ms: Samples,
+    /// Converting and bucketing a new snapshot for the instancer, per
+    /// snapshot (this used to be the whole tick; the sim runs elsewhere now).
     tick_ms: Samples,
     last_frame: Option<Instant>,
     auto_zoom: bool,
@@ -221,9 +245,9 @@ pub struct Runner {
     options: Options,
     bench: Option<BenchRun>,
     shots: Option<ShotRun>,
-    /// Time spent in `fixed_update` since the last frame (the bench's CPU
-    /// time counts the sim too).
-    sim_since_frame: Duration,
+    /// The sim thread's total step time (microseconds) at the last frame: the
+    /// bench's `sim_ms` per frame is the difference.
+    sim_micros_seen: u64,
     /// The selected units, the inspected one and the control groups (WP3.3):
     /// presentation state that only ever produces orders.
     selection: Selection,
@@ -299,10 +323,23 @@ impl Runner {
         let SceneStart {
             world,
             looks,
-            views,
             units,
             buildings,
+            ..
         } = start;
+        // From here on the world belongs to the sim thread. Its clock stays
+        // held until the window and the renderer exist (`on_start`), so the
+        // units do not wander off while the GPU starts.
+        let sim = SimHandle::spawn(
+            world,
+            SimConfig {
+                start_paused: true,
+                extra_tick_time: options.sim_delay,
+                ..SimConfig::realtime()
+            },
+        )
+        .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
+        let snap = sim.latest();
 
         let map_metres = (map.width() as f32, map.height() as f32);
         let mut instancer = Instancer::new(style.clone(), map_metres);
@@ -310,7 +347,7 @@ impl Runner {
         if pack.is_some() || looks.roster().is_some_and(|r| r.pack().is_some()) {
             instancer.set_aim(Some([0.5 * map_metres.0, 0.5 * map_metres.1]));
         }
-        instancer.update_tick(views.iter().map(|v| motion_of(&looks, v)));
+        instancer.update_tick(snap.views().iter().map(|v| motion_of(&looks, v)));
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let camera_config = CameraConfig {
@@ -328,6 +365,7 @@ impl Runner {
             gpu_note: None,
             gpu_enabled: false,
             allocs_seen: 0,
+            sim_base: SimCounters::default(),
         });
         let shots = options.shots.clone().map(|dir| ShotRun {
             dir,
@@ -362,7 +400,6 @@ impl Runner {
             report_at: now + Duration::from_secs(1),
             ticks: 0,
             frames: 0,
-            total_ticks: 0,
             exit_after: options.exit_after,
             renderer: None,
             icons,
@@ -374,13 +411,14 @@ impl Runner {
             map,
             ground,
             lod,
-            world,
+            sim,
+            snap,
+            behind_seen: None,
             instancer,
             pack,
             looks,
             buildings,
             cells,
-            views,
             units,
             stats: InstanceStats::default(),
             terrain: TerrainStats::default(),
@@ -401,7 +439,7 @@ impl Runner {
             options,
             bench,
             shots,
-            sim_since_frame: Duration::ZERO,
+            sim_micros_seen: 0,
             selection: Selection::new(commands::LOCAL_PLAYER),
             pointer: Pointer::default(),
             selection_view: SelectionView::default(),
@@ -430,7 +468,7 @@ fn game_cursor_at(
 }
 
 /// An order in words, for the F1 panel: `idle`, `move (x, y)`, `attack 12v0`.
-fn order_text(order: sf_sim::Order, world: &World) -> String {
+fn order_text(order: sf_sim::Order, world: &SimSnapshot) -> String {
     use sf_sim::{GuardTarget, Order};
     let point = |p: sf_math::Vec2| {
         let [x, y] = sf_math::render_bridge::vec2_to_f32(p);
@@ -581,18 +619,18 @@ impl Runner {
                 .map(|p| selection_view::entity_of(p.id));
             match gesture {
                 Some(Gesture::Click { double: false }) => {
-                    self.selection.click(&self.world, hit, additive);
+                    self.selection.click(&self.snap, hit, additive);
                 }
                 Some(Gesture::Click { double: true }) => {
                     let (width, height) = self.viewport;
                     let screen = ScreenRect::viewport([width as f32, height as f32]);
                     let in_view = self.entities_in(screen);
                     self.selection
-                        .select_same_kind(&self.world, hit, &in_view, additive);
+                        .select_same_kind(&self.snap, hit, &in_view, additive);
                 }
                 Some(Gesture::Drag(rect)) => {
                     let found = self.entities_in(rect);
-                    self.selection.drag(&self.world, &found, additive);
+                    self.selection.drag(&self.snap, &found, additive);
                 }
                 None => {}
             }
@@ -605,8 +643,7 @@ impl Runner {
             if assign {
                 self.selection.assign_group(n);
                 println!("group {}: {} units", n + 1, self.selection.group(n).len());
-            } else if let Recall::Centre([x, y]) = self.selection.recall_group(&self.world, n, now)
-            {
+            } else if let Recall::Centre([x, y]) = self.selection.recall_group(&self.snap, n, now) {
                 self.camera.set_focus(DVec2::new(
                     f64::from(x * METRES_PER_CELL),
                     f64::from(y * METRES_PER_CELL),
@@ -640,7 +677,7 @@ impl Runner {
             edges: ctx.actions().edges(),
         };
         self.cursor_kind = cursor::cursor_context(
-            &self.world,
+            &self.snap,
             &self.selection,
             &self.hover,
             Modifiers::from_actions(ctx.actions()),
@@ -677,30 +714,30 @@ impl Runner {
         if actions.pressed(Action::OrderMove)
             && !ui_busy
             && let Some(command) = commands::right_click(
-                &self.world,
+                &self.snap,
                 &self.selection,
                 &self.hover,
                 Modifiers::from_actions(actions),
             )
         {
-            commands::issue(&mut self.world, command);
+            commands::issue(&self.sim, command);
         }
         if actions.pressed(Action::OrderStop) {
-            let ids = self.selection.orderable(&self.world);
+            let ids = self.selection.orderable(&self.snap);
             if let Some(command) = commands::stop_command(&ids) {
-                commands::issue(&mut self.world, command);
+                commands::issue(&self.sim, command);
             }
         }
         if actions.pressed(Action::OrderScatter) {
-            let ids = self.selection.orderable(&self.world);
+            let ids = self.selection.orderable(&self.snap);
             if let Some(command) = commands::scatter_command(&ids, queued) {
-                commands::issue(&mut self.world, command);
+                commands::issue(&self.sim, command);
             }
         }
         if actions.pressed(Action::OrderHold) {
-            let ids = self.selection.orderable(&self.world);
+            let ids = self.selection.orderable(&self.snap);
             if let Some(command) = commands::hold_command(&ids, queued) {
-                commands::issue(&mut self.world, command);
+                commands::issue(&self.sim, command);
             }
         }
     }
@@ -730,15 +767,65 @@ impl Runner {
                 .unwrap_or_default(),
             instances: self.stats,
             units: self.unit_view.clone(),
-            sim_tick: self.world.tick().0,
-            checksum: self.world.checksum_history().last().copied(),
-            entities: self.world.len(),
+            sim_tick: self.snap.tick().0,
+            checksum: self.snap.checksum(),
+            entities: self.snap.len(),
+            sim: self.sim_panel(),
             ra_status: self.audio.as_ref().map(AudioSystem::original_audio_status),
             ra_catalog: self
                 .audio
                 .as_ref()
                 .and_then(AudioSystem::original_audio_catalog),
             ra_play_error: self.ra_play_error.clone(),
+        }
+    }
+
+    /// The newest snapshot of the sim, once per frame (the only place the
+    /// main thread asks the sim thread for anything). A snapshot of a new
+    /// tick goes to the instancer, as `fixed_update` used to do; the same one
+    /// again (the sim is slower than the frames) changes nothing.
+    fn pull_snapshot(&mut self, now: Instant) {
+        let fresh = self.sim.latest();
+        if fresh.tick() == self.snap.tick() {
+            return;
+        }
+        let advanced = fresh.tick().0.saturating_sub(self.snap.tick().0);
+        self.ticks = self
+            .ticks
+            .saturating_add(u32::try_from(advanced).unwrap_or(u32::MAX));
+        self.snap = fresh;
+        if !self.snap.pace().lag.is_zero() {
+            self.behind_seen = Some(now);
+        }
+        // Once per tick the fixed-point positions (cells) are converted to f32
+        // metres and bucketed by map tile.
+        let started = Instant::now();
+        let looks = &self.looks;
+        self.instancer
+            .update_tick(self.snap.views().iter().map(|v| motion_of(looks, v)));
+        self.tick_ms.push(started.elapsed());
+    }
+
+    /// The sim thread's numbers for the F1 panel.
+    fn sim_panel(&self) -> SimPanel {
+        let counters = self.sim.counters();
+        let last = self.sim.tick_ms_since(
+            usize::try_from(counters.ticks)
+                .unwrap_or(usize::MAX)
+                .saturating_sub(20),
+        );
+        let pace = self.snap.pace();
+        SimPanel {
+            tick_ms: pace.step.as_secs_f32() * 1e3,
+            slowest_ms: last.iter().copied().fold(0.0, f64::max) as f32,
+            behind: self
+                .behind_seen
+                .is_some_and(|t| t.elapsed() < Duration::from_secs(1)),
+            lag_ms: pace.lag.as_secs_f32() * 1e3,
+            clock_resets: counters.clock_resets,
+            late_commands: counters.late_commands,
+            late_publishes: counters.late_publishes,
+            stopped: !self.sim.is_running(),
         }
     }
 
@@ -847,16 +934,13 @@ impl Runner {
         self.pick_ms.push(started.elapsed());
 
         let hovered = self.hovered.as_ref().map(|p| {
-            let view = self
-                .views
-                .iter()
-                .find(|v| v.id.index() == p.id.index() && v.id.generation() == p.id.generation());
+            let view = self.snap.get(selection_view::entity_of(p.id));
             let owner = view.map(|v| v.owner.0);
             // The role's name and its hit points (current and full) for an
             // entity the simulation made from the unit definitions.
-            let kind = view.map_or_else(String::new, |v| self.looks.name_of(v));
+            let kind = view.map_or_else(String::new, |v| self.looks.name_of(&v));
             let hp = view.filter(|v| v.has_stats).map(|v| {
-                let full = self.world.stats_of(v.id).map_or(v.hp, |s| s.hp);
+                let full = self.snap.stats_of(v.id).map_or(v.hp, |s| s.hp);
                 (v.hp, full)
             });
             HoveredUnit {
@@ -872,8 +956,8 @@ impl Runner {
                 }),
                 distance: p.distance,
                 order: view
-                    .and_then(|v| self.world.order_of(v.id))
-                    .map_or_else(String::new, |o| order_text(o, &self.world)),
+                    .and_then(|v| self.snap.order_of(v.id))
+                    .map_or_else(String::new, |o| order_text(o, &self.snap)),
             }
         });
         let (above, below) = (icons.model_above_px * scale, icons.icon_below_px * scale);
@@ -921,7 +1005,7 @@ impl Runner {
         self.selection_view.mark(
             &mut self.instancer,
             &self.selection,
-            &self.world,
+            &self.snap,
             &frame,
             &mut layer,
         );
@@ -1058,13 +1142,22 @@ impl Runner {
         };
         run.frame += 1;
         let gpu = renderer.take_gpu_frame_times();
-        let sim_ms = std::mem::take(&mut self.sim_since_frame).as_secs_f64() * 1e3;
+        // The sim runs on its own thread: its time is not part of the frame's
+        // CPU time, only reported next to it (the ticks that finished since the
+        // last frame).
+        let counters = self.sim.counters();
+        let sim_micros = counters.step_micros;
+        let sim_ms = sim_micros
+            .saturating_sub(std::mem::replace(&mut self.sim_micros_seen, sim_micros))
+            as f64
+            / 1e3;
         let wait = renderer.last_acquire_wait().as_secs_f64() * 1e3;
         let callback_ms = started.elapsed().as_secs_f64() * 1e3;
         let allocs = renderer.alloc_stats().instance_buffers;
         let stats = renderer.draw_stats();
         if run.frame <= bench::WARMUP_FRAMES {
             run.allocs_seen = allocs;
+            run.sim_base = counters;
             return;
         }
         // The interval to the previous frame's start (the first measured
@@ -1073,7 +1166,7 @@ impl Runner {
         let last = |s: &Samples| s.0.last().copied().unwrap_or(0.0);
         run.rec.push(FrameSample {
             frame_ms,
-            cpu_ms: (sim_ms + callback_ms - wait).max(0.0),
+            cpu_ms: (callback_ms - wait).max(0.0),
             build_ms: last(&self.build_ms),
             upload_ms: last(&self.upload_ms),
             render_ms: (last(&self.render_ms) - wait).max(0.0),
@@ -1103,11 +1196,7 @@ impl Runner {
         // The checksum after every 100th tick: `history[k]` is the world after
         // the (k + 1)-th tick, so the list reads "after N ticks".
         if let Some(run) = &mut self.bench {
-            let history = self.world.checksum_history();
-            run.rec.checksums = (100..=history.len())
-                .step_by(100)
-                .map(|n| (n as u64, history[n - 1]))
-                .collect();
+            run.rec.checksums = self.sim.checkpoints();
         }
         let Some(run) = &self.bench else { return };
         let Some(renderer) = &self.renderer else {
@@ -1187,7 +1276,19 @@ impl Runner {
             gpu_note: run.gpu_note.clone(),
             gpu_enabled: run.gpu_enabled,
             software_adapter: software,
-            ticks: self.world.tick().0,
+            ticks: self.snap.tick().0,
+            sim: {
+                let now = self.sim.counters();
+                let base = run.sim_base;
+                bench::SimRun {
+                    tick_ms: self.sim.tick_ms_since(base.ticks as usize),
+                    behind_passes: now.behind_passes - base.behind_passes,
+                    clock_resets: now.clock_resets - base.clock_resets,
+                    late_commands: now.late_commands - base.late_commands,
+                    late_publishes: now.late_publishes - base.late_publishes,
+                    extra_tick_ms: self.options.sim_delay.as_secs_f64() * 1e3,
+                }
+            },
         };
         let report = Report::build(&run.rec, facts);
         match std::fs::write(&run.opts.out, report.to_json()) {
@@ -1200,7 +1301,7 @@ impl Runner {
         if let Some(s) = &report.frame_ms {
             println!(
                 "bench: {} frames, frame ms p50 {:.2} p95 {:.2} p99 {:.2} max {:.2}; \
-                 cpu p99 {}; gpu {}; hitches > {} ms: {}",
+                 cpu p99 {}; gpu {}; sim tick ms {}; hitches > {} ms: {}",
                 s.samples,
                 s.p50,
                 s.p95,
@@ -1215,6 +1316,9 @@ impl Runner {
                     .stats
                     .as_ref()
                     .map_or("n/a".to_owned(), |g| format!("p99 {:.2}", g.p99)),
+                report.sim.tick_ms.as_ref().map_or("n/a".to_owned(), |t| {
+                    format!("p50 {:.2} p99 {:.2} max {:.2}", t.p50, t.p99, t.max)
+                }),
                 bench::HITCH_MS,
                 report.hitches.count,
             );
@@ -1343,27 +1447,27 @@ impl App for Runner {
                 ctx.request_exit();
             }
         }
+        // The window and the renderer exist: the sim's clock may run.
+        self.sim.start();
     }
 
-    fn fixed_update(&mut self, _ctx: &mut Context, _tick: u64) {
-        let started = Instant::now();
-        self.ticks += 1;
-        self.total_ticks += 1;
-        self.world.step();
-        // Hand the new state to the presentation: once per tick the fixed-point
-        // positions (cells) are converted to f32 metres and bucketed by map tile.
-        self.world.snapshot().collect_into(&mut self.views);
-        let looks = &self.looks;
-        self.instancer
-            .update_tick(self.views.iter().map(|v| motion_of(looks, v)));
-        let spent = started.elapsed();
-        self.tick_ms.push(spent);
-        self.sim_since_frame += spent;
-    }
+    /// Nothing: the simulation steps on its own thread, with its own 20 Hz
+    /// clock (WP1.15), and `render` takes whatever it has published.
+    fn fixed_update(&mut self, _ctx: &mut Context, _tick: u64) {}
 
-    fn render(&mut self, ctx: &mut Context, alpha: f32) {
+    fn render(&mut self, ctx: &mut Context, _engine_alpha: f32) {
         self.frames += 1;
         let now = Instant::now();
+        // The sim thread's newest snapshot is this frame's world. How far
+        // between its last two states the picture is comes from the sim's own
+        // clock, not from the engine's accumulator.
+        self.pull_snapshot(now);
+        let alpha = interpolation_alpha(now, self.snap.pace(), self.sim.period());
+        if !self.sim.is_running() {
+            eprintln!("sf_game: the simulation thread stopped; leaving");
+            self.failed.store(true, Ordering::Relaxed);
+            ctx.request_exit();
+        }
         let frame_dt = self.last_frame.replace(now).map(|t| now.duration_since(t));
         if let Some(d) = frame_dt {
             self.frame_ms.push(d);
@@ -1373,15 +1477,16 @@ impl App for Runner {
         self.shots_before_render();
         // Build the UI first (it may move the camera on a minimap click), then
         // let the camera read the input the UI left over.
-        self.selection.forget_the_dead(&self.world);
+        self.selection.forget_the_dead(&self.snap);
         let stats = HudStats {
             fps: self.fps_shown,
-            units: self.world.len() as u32,
+            units: self.snap.len() as u32,
             selected: self.selection.len() as u32,
             inspecting: self.selection.inspected().is_some(),
-            tick: self.total_ticks,
+            tick: self.snap.tick().0,
         };
-        self.hud.frame(ctx, &mut self.camera, &self.views, stats);
+        self.hud
+            .frame(ctx, &mut self.camera, self.snap.views(), stats);
         let scripted = self.scripted_pose(now);
         if let Some((zoom, focus, _)) = scripted {
             // The benchmark and the screenshots fly their own path; input is
@@ -1500,7 +1605,7 @@ impl App for Runner {
                      terrain {}/{} chunks {} tris, {} draw calls",
                     self.frames,
                     self.ticks,
-                    self.total_ticks,
+                    self.snap.tick().0,
                     f.avg.as_secs_f64() * 1e3,
                     f.p99.as_secs_f64() * 1e3,
                     f.max.as_secs_f64() * 1e3,
@@ -1557,12 +1662,15 @@ impl App for Runner {
             self.os_cursor_hidden = false;
         }
         self.renderer = None; // release the surface before the window goes
-        println!("exit after {} ticks", self.total_ticks);
+        // Stop the sim thread first: the summary reads its final numbers.
+        let exit = self.sim.stop().clone();
+        let tick_ms = Samples(self.sim.tick_ms_since(0));
+        println!("exit after {} ticks", exit.ticks);
         // Summary for the stress test (software rendering: no fps claim).
         println!(
             "summary: {} units requested, {} in the world, {} frames",
             self.units,
-            self.world.len(),
+            self.snap.len(),
             self.frame_ms.0.len() + 1,
         );
         println!(
@@ -1582,8 +1690,21 @@ impl App for Runner {
             self.upload_ms.describe(WARMUP_FRAMES)
         );
         println!(
-            "summary: per-tick convert+bucket ms {}",
+            "summary: per-snapshot convert+bucket ms (main thread) {}",
             self.tick_ms.describe(WARMUP_FRAMES / 3)
+        );
+        println!(
+            "summary: sim thread tick ms {}",
+            tick_ms.describe(WARMUP_FRAMES / 3)
+        );
+        let counters = self.sim.counters();
+        println!(
+            "summary: sim thread behind {} passes, clock restarts {}, late commands {}, \
+             late snapshots {}",
+            counters.behind_passes,
+            counters.clock_resets,
+            counters.late_commands,
+            counters.late_publishes
         );
         println!(
             "summary: last frame {} of {} instances visible ({} of {} tiles), \
@@ -1646,8 +1767,6 @@ fn apply_looks(
 struct SceneStart {
     world: World,
     looks: Looks,
-    /// The entities after tick 0.
-    views: Vec<EntityView>,
     /// Entities, as the scene counts them.
     units: u32,
     /// Buildings of the crowd's base.
@@ -1674,7 +1793,6 @@ fn crowd_scene(
     SceneStart {
         world,
         looks: Looks::Crowd(population),
-        views,
         units,
         buildings,
     }
@@ -1740,7 +1858,6 @@ fn sandbox_scene(
             roster: Box::new(roster),
             crowd,
         },
-        views,
         units,
         buildings: plan.structures,
     }
@@ -1811,6 +1928,11 @@ mod tests {
         assert_eq!(game_cursor_at(false, None, None), None);
     }
 
+    /// The entities of the scene after tick 0, in slot order.
+    fn views_of(world: &World) -> Vec<EntityView> {
+        world.snapshot().iter().collect()
+    }
+
     fn options(preset: Preset, line: &str) -> Options {
         Options::parse(preset, line.split_whitespace().map(str::to_owned))
     }
@@ -1837,7 +1959,7 @@ mod tests {
         assert!(start.world.unit_table().is_empty(), "no unit table");
         assert_eq!(start.units, 5000);
         assert!(start.buildings > 0);
-        assert!(start.views.iter().all(|v| !v.has_stats));
+        assert!(views_of(&start.world).iter().all(|v| !v.has_stats));
 
         // The same by hand, the way Runner::new did it before the scenes.
         let mut by_hand = world(64);
@@ -1847,6 +1969,7 @@ mod tests {
         by_hand.step();
         by_hand.snapshot().collect_into(&mut views);
         population.plant_buildings(&mut by_hand, &views);
+        let start_views = views_of(&start.world);
         let mut mine = start.world;
         for _ in 0..150 {
             mine.step();
@@ -1854,7 +1977,7 @@ mod tests {
         }
         assert_eq!(mine.checksum_history(), by_hand.checksum_history());
         // Entities keep the shapes the population gave them.
-        for v in &start.views {
+        for v in &start_views {
             assert_eq!(start.looks.shape_of(v), population.shape_of(v.kind));
         }
     }
@@ -1868,13 +1991,13 @@ mod tests {
         assert_eq!(start.world.unit_table().len(), 43);
         let (structures, units) = crate::sandbox::wanted(&UnitDefs::embedded());
         let all = (structures + units) as usize;
-        assert_eq!(start.views.len(), all);
+        assert_eq!(views_of(&start.world).len(), all);
         assert_eq!(start.units as usize, all);
         assert_eq!(start.buildings, structures);
         let roster = start.looks.roster().expect("the sandbox has a roster");
         let shapes =
             roster.style(&style).shape_count() + roster.pack().map_or(0, |p| p.set.models().len());
-        for v in &start.views {
+        for v in &views_of(&start.world) {
             assert!(v.has_stats);
             assert!(usize::from(start.looks.shape_of(v)) < shapes);
             let name = start.looks.name_of(v);
@@ -1901,9 +2024,10 @@ mod tests {
             let (a, b) = crate::sandbox::wanted(&UnitDefs::embedded());
             (a + b) as usize
         };
-        assert_eq!(start.views.len(), all + 200);
+        let views = views_of(&start.world);
+        assert_eq!(views.len(), all + 200);
         let (roles, crowd): (Vec<&EntityView>, Vec<&EntityView>) =
-            start.views.iter().partition(|v| v.has_stats);
+            views.iter().partition(|v| v.has_stats);
         assert_eq!((roles.len(), crowd.len()), (all, 200));
         // The wanderers keep the demo's shapes, whatever role shares their kind.
         for v in &crowd {
@@ -1912,12 +2036,12 @@ mod tests {
             assert_eq!(start.looks.name_of(v), format!("placeholder {}", v.kind.0));
         }
         // And they wander; the roles do not.
-        let before = start.views.clone();
+        let before = views_of(&start.world);
         for _ in 0..40 {
             start.world.step();
         }
-        start.world.snapshot().collect_into(&mut start.views);
-        for (a, b) in before.iter().zip(&start.views) {
+        let after = views_of(&start.world);
+        for (a, b) in before.iter().zip(&after) {
             assert_eq!(a.pos != b.pos, !a.has_stats, "{:?}", a.kind);
         }
     }
@@ -1929,7 +2053,7 @@ mod tests {
         let start = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
         let roster = start.looks.roster().unwrap();
         assert!(roster.pack().is_none());
-        assert!(!start.views.is_empty());
+        assert!(!views_of(&start.world).is_empty());
     }
 
     #[test]

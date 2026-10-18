@@ -28,11 +28,12 @@ use sf_render::glam::{Mat4, Vec3};
 use sf_render::icons::Dominant;
 use sf_render::pick::project_px;
 use sf_render::{Blend, DrawnUnit, Instancer, ScreenRect, UnitId};
-use sf_sim::{EntityId, UnitClass, World};
+use sf_sim::{EntityId, UnitClass};
 use sf_ui::{Color, Layer, Rect};
 
 use crate::sandbox::NEUTRAL;
 use crate::selection::{Selection, facts};
+use crate::sim_snapshot::SimSnapshot;
 
 /// Segments of a unit's ring.
 const RING_SEGMENTS: usize = 28;
@@ -161,7 +162,7 @@ impl SelectionView {
         &mut self,
         instancer: &mut Instancer,
         selection: &Selection,
-        world: &World,
+        world: &SimSnapshot,
         frame: &FrameGeometry,
         layer: &mut Layer<'_>,
     ) {
@@ -179,7 +180,7 @@ impl SelectionView {
         layer: &mut Layer<'_>,
         frame: &FrameGeometry,
         selection: &Selection,
-        world: &World,
+        world: &SimSnapshot,
         unit: DrawnUnit,
     ) {
         let id = entity_of(unit.id);

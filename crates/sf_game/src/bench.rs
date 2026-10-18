@@ -150,8 +150,9 @@ pub fn pose_at(progress: f64, map_metres: (f64, f64)) -> Pose {
 pub struct FrameSample {
     /// Wall time since the previous frame started.
     pub frame_ms: f64,
-    /// Time the CPU worked: sim ticks run since the last frame plus the
-    /// whole frame callback, without waiting for the display.
+    /// Time the main thread worked: the whole frame callback, without waiting
+    /// for the display. Since WP1.15 the sim runs on its own thread and is not
+    /// in it (before, the ticks run since the last frame were added).
     pub cpu_ms: f64,
     /// Building the instances (culling, levels of detail, icons, picking).
     pub build_ms: f64,
@@ -159,7 +160,8 @@ pub struct FrameSample {
     pub upload_ms: f64,
     /// Recording and submitting the frame and presenting it.
     pub render_ms: f64,
-    /// Sim steps since the last frame.
+    /// Time the sim thread spent in the ticks that finished since the last
+    /// frame. It runs in parallel with the frame; not part of `cpu_ms`.
     pub sim_ms: f64,
     pub units_in_view: u32,
     pub draw_calls: u32,
@@ -390,6 +392,23 @@ pub struct Hitch {
 
 #[derive(Serialize)]
 pub struct SimInfo {
+    /// The sim runs on its own thread (WP1.15): `frame_ms` and `cpu_ms` do not
+    /// contain it, and numbers from before that change are not comparable.
+    pub thread: bool,
+    pub note: &'static str,
+    /// How long each sim tick took on the sim thread during the measured
+    /// flight (the budget is 50 ms), including an artificial `--sim-delay-ms`.
+    pub tick_ms: Option<Stats>,
+    /// Passes of the sim thread that ended behind its 20 Hz clock.
+    pub behind_passes: u64,
+    /// Times the sim gave up catching up and restarted its clock.
+    pub clock_resets: u64,
+    /// Commands that arrived for a tick that had already run.
+    pub late_commands: u64,
+    /// Snapshots published after the picture needed them (a stall).
+    pub late_publishes: u64,
+    /// `--sim-delay-ms`: the artificial time added to every tick.
+    pub extra_tick_ms: f64,
     pub ticks: u64,
     pub final_checksum: Option<String>,
     /// After every 100th tick (`tick` = ticks run). Compare two machines at
@@ -409,6 +428,18 @@ pub fn hex(v: u64) -> String {
     format!("0x{v:016x}")
 }
 
+/// What the sim thread did during the measured flight.
+#[derive(Clone, Debug, Default)]
+pub struct SimRun {
+    /// The time of each tick, milliseconds.
+    pub tick_ms: Vec<f64>,
+    pub behind_passes: u64,
+    pub clock_resets: u64,
+    pub late_commands: u64,
+    pub late_publishes: u64,
+    pub extra_tick_ms: f64,
+}
+
 /// What the report needs from the run besides the samples.
 pub struct RunFacts {
     pub host: Host,
@@ -420,6 +451,7 @@ pub struct RunFacts {
     pub gpu_enabled: bool,
     pub software_adapter: bool,
     pub ticks: u64,
+    pub sim: SimRun,
 }
 
 impl Report {
@@ -510,6 +542,15 @@ impl Report {
         }
         let p99 = frame_ms.as_ref().map(|s| s.p99);
         let sim = SimInfo {
+            thread: true,
+            note: "the simulation runs on its own thread since WP1.15: frame_ms and cpu_ms \
+                   exclude it; runs from before that change are not comparable",
+            tick_ms: Stats::of(&facts.sim.tick_ms),
+            behind_passes: facts.sim.behind_passes,
+            clock_resets: facts.sim.clock_resets,
+            late_commands: facts.sim.late_commands,
+            late_publishes: facts.sim.late_publishes,
+            extra_tick_ms: round3(facts.sim.extra_tick_ms),
             ticks: facts.ticks,
             final_checksum: rec.checksums.last().map(|c| hex(c.1)),
             checksums: rec
@@ -683,6 +724,11 @@ mod tests {
             gpu_enabled: false,
             software_adapter: software,
             ticks: 1500,
+            sim: SimRun {
+                tick_ms: vec![4.0, 5.0, 6.0, 20.0],
+                late_publishes: 1,
+                ..SimRun::default()
+            },
         }
     }
 
@@ -731,6 +777,12 @@ mod tests {
         assert_eq!(v["frame_ms"]["p50"], 8.0);
         assert_eq!(v["display"]["actual"][0], 1920);
         assert_eq!(v["sim"]["final_checksum"], "0x0000000000000002");
+        // The sim thread's own per-tick time, next to the frames' (WP1.15).
+        assert_eq!(v["sim"]["thread"], true);
+        assert_eq!(v["sim"]["tick_ms"]["samples"], 4);
+        assert_eq!(v["sim"]["tick_ms"]["max"], 20.0);
+        assert_eq!(v["sim"]["late_publishes"], 1);
+        assert_eq!(v["sim"]["clock_resets"], 0);
         assert_eq!(v["hitches"]["count"], 1);
         assert_eq!(v["hitches"]["worst"][0]["frame"], 150);
         assert_eq!(v["hitches"]["worst"][0]["buffer_allocs"], 1);

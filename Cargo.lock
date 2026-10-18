@@ -2511,6 +2511,7 @@ dependencies = [
  "sf_cutscene",
  "sf_data",
  "sf_engine",
+ "sf_headless",
  "sf_math",
  "sf_net",
  "sf_render",

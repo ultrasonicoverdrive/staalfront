@@ -3,11 +3,12 @@
 //! checked by `tests/selection_screenshot.rs`.
 
 use super::*;
+use crate::sim_snapshot::SimSnapshot;
 use sf_data::units::UnitDefs;
 use sf_math::Vec2;
 use sf_render::camera::{Camera, CameraConfig, DVec2};
 use sf_render::{FrameView, Frustum, Motion, Style};
-use sf_sim::{Cell, Command, Kind, PlayerId, WorldConfig};
+use sf_sim::{Cell, Command, Kind, PlayerId, World, WorldConfig};
 use sf_ui::{Ui, UiConfig, UiInput};
 
 const W: f32 = 960.0;
@@ -147,6 +148,13 @@ struct Frame {
     ids: Vec<EntityId>,
 }
 
+impl Frame {
+    /// The world as the presentation reads it.
+    fn snap(&self) -> SimSnapshot {
+        SimSnapshot::capture(&self.world)
+    }
+}
+
 fn frame(zoom: f64, blend: Blend) -> Frame {
     let defs = UnitDefs::embedded();
     let table = sf_bridge::unit_table(&defs).unwrap();
@@ -238,10 +246,11 @@ fn quads_for(frame: &mut Frame, selection: &Selection) -> usize {
     ui.end_frame();
     let mut layer = ui.world_layer();
     let mut view = SelectionView::default();
+    let snap = frame.snap();
     view.mark(
         &mut frame.instancer,
         selection,
-        &frame.world,
+        &snap,
         &frame.geometry,
         &mut layer,
     );
@@ -263,7 +272,7 @@ fn with_nothing_selected_nothing_is_drawn_and_no_icon_is_marked() {
 fn a_selected_unit_gets_a_ring_a_bar_and_a_selected_icon() {
     let mut f = frame(0.2, Blend::from_model_weight(0.5));
     let mut selection = local();
-    selection.drag(&f.world, &f.ids, false);
+    selection.drag(&f.snap(), &f.ids, false);
     assert_eq!(selection.len(), 1, "the tank; the barracks is not dragged");
     let quads = quads_for(&mut f, &selection);
     // 28 segments of a ring, and a bar of three quads.
@@ -285,10 +294,10 @@ fn a_structure_gets_a_box_of_four_lines_and_a_bar() {
         .ids
         .iter()
         .copied()
-        .find(|&id| facts(&f.world, id).is_some_and(|x| x.class == UnitClass::Structure))
+        .find(|&id| facts(&f.snap(), id).is_some_and(|x| x.class == UnitClass::Structure))
         .unwrap();
     let mut selection = local();
-    selection.click(&f.world, Some(barracks), false);
+    selection.click(&f.snap(), Some(barracks), false);
     assert_eq!(quads_for(&mut f, &selection), 4 + 3);
 }
 
@@ -302,7 +311,7 @@ fn an_inspected_enemy_is_drawn_and_never_joins_the_selection() {
         .find(|&id| f.world.get(id).unwrap().owner.0 == 1)
         .unwrap();
     let mut selection = local();
-    selection.click(&f.world, Some(enemy), false);
+    selection.click(&f.snap(), Some(enemy), false);
     assert!(selection.is_empty());
     assert_eq!(quads_for(&mut f, &selection), RING_SEGMENTS + 3);
 }
@@ -318,7 +327,7 @@ fn an_ore_field_that_cannot_be_damaged_has_a_ring_but_no_bar() {
         .unwrap();
     assert_eq!(f.world.stats_of(crate_id).map(|s| s.hp), Some(0));
     let mut selection = local();
-    selection.click(&f.world, Some(crate_id), false);
+    selection.click(&f.snap(), Some(crate_id), false);
     assert_eq!(selection.inspected(), Some(crate_id));
     assert_eq!(quads_for(&mut f, &selection), RING_SEGMENTS);
 }
@@ -327,7 +336,7 @@ fn an_ore_field_that_cannot_be_damaged_has_a_ring_but_no_bar() {
 fn zoomed_out_the_ring_is_left_out_and_the_bar_sits_over_the_icon() {
     let mut f = frame(1.0, Blend::ICONS);
     let mut selection = local();
-    selection.drag(&f.world, &f.ids, false);
+    selection.drag(&f.snap(), &f.ids, false);
     assert_eq!(quads_for(&mut f, &selection), 3, "a bar, no ring");
 }
 
@@ -335,7 +344,7 @@ fn zoomed_out_the_ring_is_left_out_and_the_bar_sits_over_the_icon() {
 fn the_dead_are_not_drawn() {
     let mut f = frame(0.2, Blend::MODELS);
     let mut selection = local();
-    selection.drag(&f.world, &f.ids, false);
+    selection.drag(&f.snap(), &f.ids, false);
     let tank = selection.ids()[0];
     f.world
         .schedule(
@@ -348,7 +357,7 @@ fn the_dead_are_not_drawn() {
     // The frame the instancer drew still has the tank, but the world does not:
     // nothing is drawn for it, and the selection forgets it.
     assert_eq!(quads_for(&mut f, &selection), 0);
-    selection.forget_the_dead(&f.world);
+    selection.forget_the_dead(&f.snap());
     assert!(selection.is_empty());
 }
 
