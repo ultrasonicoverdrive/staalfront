@@ -178,6 +178,7 @@ be committed, shared or uploaded (B11).
 `sf_engine`, `sf_render`, `sf_ui`, `sf_audio`, `sf_cutscene`, `sf_net`) and
 `sf_game` (the game shell as a library, plus the development viewer binary);
 `tools/` holds `sf_editor`, `sf_headless`, `sf_demo` (the engine demo and
-benchmark, the same shell with the demo's defaults) and `sf_icon_gen` (writes the
-placeholder strategic icons in `assets/icons`).
+benchmark, the same shell with the demo's defaults), `sf_icon_gen` (writes the
+placeholder strategic icons in `assets/icons`) and `sf_asset_check` (checks
+delivered `.glb` models against the art brief).
 See PLAN.md section 1.1.

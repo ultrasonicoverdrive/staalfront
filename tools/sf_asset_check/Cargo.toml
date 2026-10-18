@@ -1,0 +1,29 @@
+[package]
+name = "sf_asset_check"
+description = "Checks delivered .glb models against the art brief: LODs, budgets, materials, team colour, bounds, node names."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary like sf_headless: `src/lib.rs` holds everything testable,
+# `src/main.rs` only forwards the process arguments. No new crate enters the
+# lockfile; each dependency below is already used by sf_render.
+[dependencies]
+# The engine's own loader (`sf_render::glb::load_glb`) judges what the engine
+# will see: geometry, bounds and the team flag per vertex. A file the loader
+# refuses is a failure of the check, so the two can never disagree.
+sf_render = { path = "../../crates/sf_render" }
+# The roles and their categories (infantry, vehicle, vessel, structure, object)
+# decide the budget class of a file; the compiled-in `unit_defs.ron` is used.
+sf_data = { path = "../../crates/sf_data" }
+# The loader hides what the check also needs: material names, empty `fx_*`
+# nodes and the node tree of every LOD root. Same crate, version and features
+# as sf_render (names + utils), so nothing new is compiled.
+gltf = { version = "1.4.1", default-features = false, features = ["names", "utils"] }
+# World transforms of the loaded parts (`Mat4`, `Vec3`); same version as sf_render.
+glam = "0.34.1"

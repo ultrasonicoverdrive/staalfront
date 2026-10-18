@@ -17,6 +17,7 @@ members = [
     "tools/sf_headless",
     "tools/sf_demo",
     "tools/sf_ra_extract",
+    "tools/sf_asset_check",
     "tools/sf_icon_gen",
 ]
 

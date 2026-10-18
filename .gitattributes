@@ -1,2 +1,4 @@
 # Golden screenshots must never be touched by line-ending conversion.
 *.png binary
+*.glb binary
+*.jpg binary
