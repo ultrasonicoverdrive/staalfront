@@ -32,7 +32,7 @@ fn main() -> ExitCode {
                         _ => false,
                     }
                 } else {
-                    on_disk == bytes
+                    sf_icon_gen::same_text(&on_disk, &bytes)
                 }
             });
             if !same {

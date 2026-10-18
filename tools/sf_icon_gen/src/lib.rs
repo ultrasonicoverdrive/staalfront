@@ -528,6 +528,18 @@ pub fn manifest() -> String {
     text
 }
 
+/// Whether two copies of a text file are the same apart from line endings (a
+/// Windows checkout may have turned `\n` into `\r\n`).
+pub fn same_text(a: &[u8], b: &[u8]) -> bool {
+    let strip = |t: &[u8]| {
+        t.iter()
+            .copied()
+            .filter(|&c| c != b'\r')
+            .collect::<Vec<_>>()
+    };
+    strip(a) == strip(b)
+}
+
 /// Every file of the set as `(file name, bytes)`: the PNGs and `icons.ron`.
 pub fn files() -> Vec<(String, Vec<u8>)> {
     let mut out: Vec<(String, Vec<u8>)> = icon_specs()
@@ -613,7 +625,7 @@ mod tests {
                     "{name} is out of date; run `cargo run -p sf_icon_gen`"
                 );
             } else {
-                assert_eq!(on_disk, bytes, "{name} is out of date");
+                assert!(same_text(&on_disk, &bytes), "{name} is out of date");
             }
         }
     }
