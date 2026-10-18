@@ -32,6 +32,10 @@ struct ScreenUniform {
 struct Bound {
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
+    /// The same texture read as sRGB colour ([`Texture::Sprites`]); only the
+    /// atlas has one, and only for an sRGB target (any other target takes the
+    /// texels as they are, which is what the plain bind group gives).
+    colour_group: Option<wgpu::BindGroup>,
 }
 
 /// Draws a [`Ui`] into a frame.
@@ -201,7 +205,12 @@ impl UiRenderer {
         width: u32,
         height: u32,
         format: wgpu::TextureFormat,
+        colour_view: bool,
     ) -> Bound {
+        // The atlas is data in `Rgba8Unorm`; a second, sRGB view of it lets the
+        // colour pictures of the cursors be decoded by the hardware.
+        let srgb_view = [wgpu::TextureFormat::Rgba8UnormSrgb];
+        let view_formats: &[wgpu::TextureFormat] = if colour_view { &srgb_view } else { &[] };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -214,26 +223,35 @@ impl UiRenderer {
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            view_formats,
         });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: &self.texture_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
+        let group = |view: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &self.texture_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            })
+        };
+        let bind_group = group(&texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let colour_group = (colour_view && self.srgb).then(|| {
+            group(&texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(wgpu::TextureFormat::Rgba8UnormSrgb),
+                ..Default::default()
+            }))
         });
         Bound {
             texture,
             bind_group,
+            colour_group,
         }
     }
 
@@ -250,7 +268,14 @@ impl UiRenderer {
         } else {
             wgpu::TextureFormat::Rgba8Unorm
         };
-        let bound = self.bound(device, "ui minimap", image.width, image.height, format);
+        let bound = self.bound(
+            device,
+            "ui minimap",
+            image.width,
+            image.height,
+            format,
+            false,
+        );
         queue.write_texture(
             bound.texture.as_image_copy(),
             &image.rgba,
@@ -291,6 +316,7 @@ impl UiRenderer {
                 ATLAS_WIDTH,
                 atlas_height,
                 wgpu::TextureFormat::Rgba8Unorm,
+                true,
             ));
             self.atlas_height = atlas_height;
             self.atlas_revision = u64::MAX;
@@ -376,12 +402,17 @@ impl UiRenderer {
         ];
         for (part, base_vertex, first_index) in parts {
             for batch in &part.batches {
-                let bound = match batch.texture {
-                    Texture::Atlas => self.atlas.as_ref(),
-                    Texture::Minimap => self.minimap.as_ref(),
+                let (bound, colour) = match batch.texture {
+                    Texture::Atlas => (self.atlas.as_ref(), false),
+                    Texture::Sprites => (self.atlas.as_ref(), true),
+                    Texture::Minimap => (self.minimap.as_ref(), false),
                 };
                 let Some(bound) = bound else { continue };
-                pass.set_bind_group(1, &bound.bind_group, &[]);
+                let group = match (&bound.colour_group, colour) {
+                    (Some(group), true) => group,
+                    _ => &bound.bind_group,
+                };
+                pass.set_bind_group(1, group, &[]);
                 pass.draw_indexed(
                     first_index + batch.start..first_index + batch.end,
                     base_vertex,

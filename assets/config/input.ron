@@ -27,6 +27,9 @@
         OrderStop: [(trigger: Key(KeyC))],
         OrderScatter: [(trigger: Key(KeyX))],
         OrderHold: [(trigger: Key(KeyH))],
+        // Held: a right-click on the ground attack-moves instead of moving
+        // (WP3.5). A is the camera's pan left, so the modifier is F.
+        OrderAttackMove: [(trigger: Key(KeyF))],
         // Selection (WP3.3). SelectClick: a click selects, a drag draws the
         // selection rectangle (own mobile units in it), a double-click
         // selects the units of the same kind in view. SelectAdd (held): a

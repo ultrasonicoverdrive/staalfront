@@ -153,11 +153,21 @@ impl Selection {
     /// selected structure is not in it, and neither is anything inspected.
     /// This is the only list orders are made from.
     pub fn orderable(&self, world: &World) -> Vec<EntityId> {
+        self.orderable_iter(world).collect()
+    }
+
+    /// [`Selection::orderable`] without making a list: what the cursor asks
+    /// every frame (WP3.5).
+    pub fn orderable_iter<'a>(&'a self, world: &'a World) -> impl Iterator<Item = EntityId> + 'a {
         self.own
             .iter()
             .copied()
             .filter(|&id| facts(world, id).is_some_and(|f| f.class == UnitClass::Mobile))
-            .collect()
+    }
+
+    /// The player at this keyboard: the owner of everything selected.
+    pub fn local(&self) -> PlayerId {
+        self.local
     }
 
     /// Empties the selection (the groups stay).

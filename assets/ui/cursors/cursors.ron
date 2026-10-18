@@ -1,0 +1,34 @@
+// The software cursors of the game (WP3.5), written by tools/sf_icon_gen
+// (`cargo run -p sf_icon_gen -- --cursors`) together with the PNGs.
+// size_px: logical pixels a 32 x 32 image is drawn at (times the UI scale).
+// hotspot: the pixel of the image that is the mouse position, in texels
+// from the top-left. See docs/rules/cursor.md.
+(
+    size_px: 32,
+    cursors: {
+        "attack": (file: "attack.png", hotspot: (16, 16)),
+        "attack_move": (file: "attack_move.png", hotspot: (13, 16)),
+        "capture": (file: "capture.png", hotspot: (16, 16)),
+        "deploy": (file: "deploy.png", hotspot: (16, 16)),
+        "enter": (file: "enter.png", hotspot: (16, 16)),
+        "guard": (file: "guard.png", hotspot: (16, 16)),
+        "harvest": (file: "harvest.png", hotspot: (16, 16)),
+        "infiltrate": (file: "infiltrate.png", hotspot: (16, 16)),
+        "inspect": (file: "inspect.png", hotspot: (14, 13)),
+        "move": (file: "move.png", hotspot: (16, 16)),
+        "no_go": (file: "no_go.png", hotspot: (16, 16)),
+        "place": (file: "place.png", hotspot: (16, 16)),
+        "queue": (file: "queue.png", hotspot: (16, 16)),
+        "repair": (file: "repair.png", hotspot: (16, 16)),
+        "scroll_e": (file: "scroll_e.png", hotspot: (16, 16)),
+        "scroll_n": (file: "scroll_n.png", hotspot: (16, 16)),
+        "scroll_ne": (file: "scroll_ne.png", hotspot: (16, 16)),
+        "scroll_nw": (file: "scroll_nw.png", hotspot: (16, 16)),
+        "scroll_s": (file: "scroll_s.png", hotspot: (16, 16)),
+        "scroll_se": (file: "scroll_se.png", hotspot: (16, 16)),
+        "scroll_sw": (file: "scroll_sw.png", hotspot: (16, 16)),
+        "scroll_w": (file: "scroll_w.png", hotspot: (16, 16)),
+        "select": (file: "select.png", hotspot: (7, 3)),
+        "sell": (file: "sell.png", hotspot: (16, 16)),
+    },
+)

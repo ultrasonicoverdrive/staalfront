@@ -21,6 +21,11 @@ use crate::skin::NineSlice;
 pub enum Texture {
     /// Glyphs and skin.
     Atlas,
+    /// The same atlas, read as **colour pictures** (WP3.5, the cursors): their
+    /// texels are sRGB colours, decoded to linear light by the GPU when the
+    /// target is an sRGB format. The glyphs and the skin are coverage and
+    /// shading, tinted by the vertex colour, and must not be decoded.
+    Sprites,
     /// The baked terrain image of the minimap.
     Minimap,
 }

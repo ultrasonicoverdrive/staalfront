@@ -223,6 +223,18 @@ impl Hud {
         self.ui.world_layer()
     }
 
+    /// Packs the cursor pictures of `dir` into the UI's atlas (WP3.5).
+    pub fn load_cursors(&mut self, dir: &Path) -> Result<sf_ui::CursorSet, sf_ui::CursorError> {
+        sf_ui::CursorSet::load(dir, self.ui.atlas_mut())
+    }
+
+    /// Draws cursor `index` of `set` with its hotspot at `at` (physical
+    /// pixels) over everything, panels included. Valid after [`Hud::frame`],
+    /// which clears the list; call it last, before [`Hud::draw`].
+    pub fn draw_cursor(&mut self, set: &sf_ui::CursorSet, index: usize, at: (f32, f32)) {
+        self.ui.draw_cursor(set, index, at);
+    }
+
     /// Render the scene and the UI on top.
     pub fn draw(&mut self, renderer: &mut Renderer) -> Result<(), RenderError> {
         match &mut self.gpu {

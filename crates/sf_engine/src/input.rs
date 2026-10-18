@@ -43,6 +43,11 @@ pub enum Action {
     OrderScatter,
     /// The selected units hold position.
     OrderHold,
+    /// Held: a right-click on the ground is an attack-move instead of a plain
+    /// move (WP3.5). A held modifier like [`Action::OrderQueue`], not a key
+    /// that waits for the next click, so the cursor can show it while it is
+    /// held. Not on A: A is the camera's pan left.
+    OrderAttackMove,
     /// Left button: click selects, drag draws the selection rectangle,
     /// double-click selects the units of the same kind in view (WP3.3).
     SelectClick,
@@ -79,7 +84,7 @@ impl Action {
         Action::Group9,
     ];
 
-    pub const ALL: [Action; 30] = [
+    pub const ALL: [Action; 31] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -98,6 +103,7 @@ impl Action {
         Action::OrderStop,
         Action::OrderScatter,
         Action::OrderHold,
+        Action::OrderAttackMove,
         Action::SelectClick,
         Action::SelectAdd,
         Action::GroupAssign,
@@ -398,12 +404,26 @@ impl InputState {
     }
 }
 
+/// Which screen edges the cursor is scrolling this frame: the edge triggers
+/// of the bindings that are bound to some action and active (the cursor is in
+/// the band, the window has the focus, the binding's modifiers are down).
+/// A key that pans the camera does not count: this is about the cursor, so
+/// the game can show which way the screen is scrolling (WP3.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Edges {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
+}
+
 /// Which actions are held / pressed / released this frame.
 #[derive(Clone, Debug, Default)]
 pub struct ActionState {
     held: BTreeSet<Action>,
     pressed: BTreeSet<Action>,
     released: BTreeSet<Action>,
+    edges: Edges,
 }
 
 impl ActionState {
@@ -412,6 +432,7 @@ impl ActionState {
         let previous = std::mem::take(&mut self.held);
         self.pressed.clear();
         self.released.clear();
+        self.edges = Edges::default();
         for (&action, list) in &bindings.bindings {
             let mut held = false;
             let mut pulse = false;
@@ -419,6 +440,15 @@ impl ActionState {
                 let (h, p) = input.binding_state(b, bindings.edge_margin);
                 held |= h;
                 pulse |= p;
+                if h {
+                    match b.trigger {
+                        Trigger::EdgeLeft => self.edges.left = true,
+                        Trigger::EdgeRight => self.edges.right = true,
+                        Trigger::EdgeTop => self.edges.top = true,
+                        Trigger::EdgeBottom => self.edges.bottom = true,
+                        _ => {}
+                    }
+                }
             }
             if held {
                 self.held.insert(action);
@@ -435,6 +465,10 @@ impl ActionState {
 
     pub fn held(&self, a: Action) -> bool {
         self.held.contains(&a)
+    }
+    /// The screen edges the cursor is scrolling right now.
+    pub fn edges(&self) -> Edges {
+        self.edges
     }
     pub fn pressed(&self, a: Action) -> bool {
         self.pressed.contains(&a)
@@ -728,6 +762,59 @@ mod tests {
         assert!(eval(&i, &b).held(Action::CameraPanLeft));
         i.cursor_moved(4.0, 300.0);
         assert!(!eval(&i, &b).held(Action::CameraPanLeft));
+    }
+
+    #[test]
+    fn the_edges_are_the_cursor_and_never_a_pan_key() {
+        let b = Bindings::builtin();
+        // A pan key held in the middle of the screen: panning, but no edge.
+        let mut i = sized();
+        i.cursor_moved(400.0, 300.0);
+        i.key_event(KeyCode::KeyA, ElementState::Pressed, false);
+        let s = eval(&i, &b);
+        assert!(s.held(Action::CameraPanLeft));
+        assert_eq!(s.edges(), Edges::default());
+        // The corner is two edges at once (the diagonal scroll cursors).
+        let mut i = sized();
+        i.cursor_moved(799.0, 0.0);
+        assert_eq!(
+            eval(&i, &b).edges(),
+            Edges {
+                right: true,
+                top: true,
+                ..Edges::default()
+            }
+        );
+        let mut i = sized();
+        i.cursor_moved(0.0, 300.0);
+        assert_eq!(
+            eval(&i, &b).edges(),
+            Edges {
+                left: true,
+                ..Edges::default()
+            }
+        );
+        // An edge nobody bound scrolls nothing, so it is not shown either.
+        let none = Bindings::from_ron_str("(bindings: {})").unwrap();
+        assert_eq!(eval(&i, &none).edges(), Edges::default());
+        // Outside the window or without the focus: no edge.
+        i.cursor_left();
+        assert_eq!(eval(&i, &b).edges(), Edges::default());
+    }
+
+    #[test]
+    fn the_attack_move_modifier_is_a_free_key_and_not_a_camera_key() {
+        let b = Bindings::builtin();
+        assert_eq!(
+            b.for_action(Action::OrderAttackMove),
+            [Binding::new(Trigger::Key(KeyCode::KeyF))]
+        );
+        // Held, like the queue modifier, so the cursor can show it.
+        let mut i = sized();
+        i.key_event(KeyCode::KeyF, ElementState::Pressed, false);
+        let s = eval(&i, &b);
+        assert!(s.held(Action::OrderAttackMove));
+        assert!(!s.held(Action::CameraPanLeft));
     }
 
     #[test]

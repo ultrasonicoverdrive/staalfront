@@ -21,8 +21,9 @@
 //!
 //! | Action | Default | Command |
 //! |---|---|---|
-//! | `OrderMove` | right-click on the ground | `Order::Move` to the point |
-//! | `OrderQueue` | shift (held) | the move, scatter or hold is queued behind the unit's orders |
+//! | `OrderMove` | right-click | the order the cursor shows ([`right_click`]): move, attack-move, attack or guard |
+//! | `OrderQueue` | shift (held) | the order is queued behind the unit's orders |
+//! | `OrderAttackMove` | F (held) | a right-click on the ground attack-moves |
 //! | `OrderStop` | C | `Stop` |
 //! | `OrderScatter` | X | `Order::Scatter` |
 //! | `OrderHold` | H | `Order::HoldPosition` |
@@ -33,11 +34,31 @@
 use sf_math::Vec2;
 use sf_sim::{Command, EntityId, Order, PlayerId, World};
 
+use crate::cursor::{self, Hover, Modifiers, Passability};
 use crate::sandbox::MERIDIAN;
+use crate::selection::Selection;
 
 /// The seat of the player at this keyboard: Meridian. (Seats come with the
 /// skirmish setup of a later phase.)
 pub const LOCAL_PLAYER: PlayerId = PlayerId(MERIDIAN);
+
+/// What a right-click asks for: **exactly the order the cursor shows**
+/// (WP3.5). The cursor is [`cursor::cursor_context`] and the order is
+/// [`cursor::order_for`] of its answer, so there is one decision and the
+/// picture and the click cannot disagree. `None` when the cursor promises no
+/// order (Select, Inspect, NoGo, over the UI) or nothing can take one.
+pub fn right_click(
+    world: &World,
+    selection: &Selection,
+    hover: &Hover,
+    modifiers: Modifiers,
+    passability: &Passability,
+) -> Option<Command> {
+    let kind = cursor::cursor_context(world, selection, hover, modifiers, passability);
+    let order = cursor::order_for(kind, hover)?;
+    let ids = selection.orderable(world);
+    order_command(&ids, order, cursor::is_queued(kind, modifiers))
+}
 
 /// What a right-click on the ground at `point` (in cells) asks for; `None`
 /// with nothing selected. `queued` is the shift key.
