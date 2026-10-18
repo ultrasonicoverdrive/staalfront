@@ -30,6 +30,7 @@ fn table() -> UnitTable {
             size: Fx::from_ratio(size_tenths, 10),
             footprint: None,
             weapon_range: Fx::from_int(range as i32),
+            turret_per_tick: 0,
         };
     UnitTable::new(vec![
         mobile(RIFLEMAN, 20, 16, 4, 4),
@@ -47,6 +48,7 @@ fn table() -> UnitTable {
                 height: 3,
             }),
             weapon_range: Fx::ZERO,
+            turret_per_tick: 0,
         },
         UnitStats {
             kind: CRATE,
@@ -57,6 +59,7 @@ fn table() -> UnitTable {
             size: Fx::ONE,
             footprint: None,
             weapon_range: Fx::ZERO,
+            turret_per_tick: 0,
         },
     ])
     .unwrap()

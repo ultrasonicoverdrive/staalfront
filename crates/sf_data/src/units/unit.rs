@@ -248,6 +248,12 @@ pub struct UnitDef {
     /// Facing steps (of 256 per full turn) it turns per tick.
     #[serde(default)]
     pub turn_rate: u8,
+    /// Facing steps (of 256 per full turn) per tick its turret turns, for a unit
+    /// with a turret that turns apart from the hull (WP4.5, the glTF `turret`
+    /// part's yaw joint); zero or absent means no turret. Only with a movement
+    /// class.
+    #[serde(default)]
+    pub turret_rate: u8,
     /// Diameter in cells (for collision and selection); not for structures.
     #[serde(default)]
     pub size: Decimal,
@@ -620,8 +626,14 @@ impl Ctx<'_> {
                 if u.category.mobile() {
                     return Err(self.here("an Infantry, Vehicle or Vessel needs a movement class"));
                 }
-                if !u.speed.is_zero() || u.water_speed.is_some() || u.turn_rate != 0 {
-                    return Err(self.here("speed, water_speed and turn_rate need a movement class"));
+                if !u.speed.is_zero()
+                    || u.water_speed.is_some()
+                    || u.turn_rate != 0
+                    || u.turret_rate != 0
+                {
+                    return Err(self.here(
+                        "speed, water_speed, turn_rate and turret_rate need a movement class",
+                    ));
                 }
             }
         }

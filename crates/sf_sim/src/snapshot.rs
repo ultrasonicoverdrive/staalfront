@@ -19,6 +19,17 @@ use sf_math::{Facing, Vec2};
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
 use crate::world::World;
 
+/// The turret of a unit as the presentation sees it (WP4.5): an absolute facing
+/// in the world, not relative to the hull. The renderer subtracts the hull's
+/// facing to get the angle of the turret's yaw joint.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct TurretView {
+    /// Facing at the end of the previous tick.
+    pub prev_facing: Facing,
+    /// Facing at the end of the current tick.
+    pub facing: Facing,
+}
+
 /// One live entity as the presentation sees it.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct EntityView {
@@ -46,6 +57,8 @@ pub struct EntityView {
     pub has_stats: bool,
     /// Current hit points; zero when `has_stats` is false.
     pub hp: u32,
+    /// The turret, for a unit that has one (WP4.5); `None` for everything else.
+    pub turret: Option<TurretView>,
 }
 
 /// A read-only view of every live entity, in ascending slot order.

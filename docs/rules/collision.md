@@ -246,7 +246,9 @@ field also hashes its group order, its ring, its spacing and its inner radius.
   against the crowd that has arrived) and none beyond a sixteenth at the end; none is ever on ground its
   class cannot enter; the path service spent 28,429 nodes in all, the budget held every tick. The units
   walk 1.2 times the best grid walk at the median. 140 of the 200 end outside five cells of the goal and
-  the farthest 9.55, inside the 9.58 of the criterion (1.3 x 7.37).
+  the farthest 9.55, inside the 9.58 of the criterion (1.3 x 7.37). (**Re-pinned and re-measured at WP4.5**,
+  when the hull turning rules came in: all arrive by tick 3,676, 1 of the 200 ends beyond 9.58 and the farthest
+  is 9.72, the worst overlap is 0.19; `turning.md`, "`bridge_200`, measured".)
 * **`crowd_jam`** (new): two groups of 18 pass head-on through a three-cell gap eight cells long, 8
   tanks go along a five-cell corridor past a heavy tank on `HoldPosition`. Every unit has done its
   order by tick 1,598; the groups are in the gap together on 471 ticks, the eastbound units keep to the
@@ -269,8 +271,10 @@ field also hashes its group order, its ring, its spacing and its inner radius.
 
 * **Layers**: a vessel under a bridge collides with what crosses it (above). A second layer needs a
   definition (which classes pass under which cells) and is a change of its own.
-* **Turning and the turret** (WP4.5): a pushed unit slides without turning, and the facing is the one
-  of the order's walk.
+* **Turning and the turret** (WP4.5, `turning.md`): a pushed unit still slides without turning (the pushes
+  are corrections of the position and bypass the turn constraint, by design), and the facing is the
+  one of the order's walk; what a unit drives itself in a crowd (a sidestep, a detour) goes through
+  the turning rules of its class.
 * **Formations** (WP4.6): slots are rings of a lattice, not a shape that keeps; the slowest does not
   set the pace; a group arrives in the order it can.
 * **Replanning** (WP4.7): the request exists and is marked; a replan that knows about blocked routes,

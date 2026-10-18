@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200` and `crowd_jam`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam` and `turning`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -46,6 +46,7 @@ const PATHING_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing.e
 const PATHING_256_EXPECTED: &str = include_str!("../../../assets/scenarios/pathing_256.expected");
 const BRIDGE_200_EXPECTED: &str = include_str!("../../../assets/scenarios/bridge_200.expected");
 const CROWD_JAM_EXPECTED: &str = include_str!("../../../assets/scenarios/crowd_jam.expected");
+const TURNING_EXPECTED: &str = include_str!("../../../assets/scenarios/turning.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -93,7 +94,9 @@ fn units_spawn_matches_the_pinned_checksum() {
 /// and one on a target that dies (WP3.4). A new scenario: its value was pinned
 /// when it was added; the other four did not change. **Re-pinned at WP4.4**
 /// (`0xbdcd8bcd753b5829` to the value in the file): its units have bodies now and
-/// the ones sent to the same point no longer stand on it together.
+/// the ones sent to the same point no longer stand on it together. **Re-pinned at
+/// WP4.5** (`0x38b6882e777306bb` to the value in the file): infantry turn at once,
+/// wheeled vehicles have to move to turn (`docs/rules/turning.md`).
 #[test]
 fn orders_matches_the_pinned_checksum() {
     check("orders", ORDERS_EXPECTED);
@@ -103,14 +106,16 @@ fn orders_matches_the_pinned_checksum() {
 /// stopped by rock and water (WP4.1). Pinned when it was added; **re-pinned once at
 /// WP4.2** (`0x8c43b875a877488c` to the value in the file), because its `Move`
 /// orders now find their way round the river and the rock instead of stopping at
-/// them (`docs/rules/movement.md`). The other five did not change.
+/// them (`docs/rules/movement.md`). **Re-pinned at WP4.5** (`0x2f74d916504df7cf` to the
+/// value in the file): the turning rules of the classes (`docs/rules/turning.md`).
 #[test]
 fn terrain_costs_matches_the_pinned_checksum() {
     check("terrain_costs", TERRAIN_COSTS_EXPECTED);
 }
 
 /// Hierarchical path finding (WP4.2): a maze, a bridge, an island, a structure that
-/// closes a gap, a crowd. A new scenario: pinned when it was added.
+/// closes a gap, a crowd. A new scenario: pinned when it was added. **Re-pinned at
+/// WP4.5** (`0x09f819e7bfeb22a2` to the value in the file): the turning rules.
 #[test]
 fn pathing_matches_the_pinned_checksum() {
     check("pathing", PATHING_EXPECTED);
@@ -119,6 +124,8 @@ fn pathing_matches_the_pinned_checksum() {
 /// 200 path requests on the 256 by 256 playfield (WP4.2). A new scenario: pinned when
 /// it was added. **Re-pinned at WP4.4** (`0xa52ecf79cfd7b1ea` to the value in the
 /// file): the 200 tanks have bodies now and push each other apart where their ways cross.
+/// **Re-pinned at WP4.5** (`0x78acbca87df9a5f0` to the value in the file): the turning
+/// rules.
 #[test]
 fn pathing_256_matches_the_pinned_checksum() {
     check("pathing_256", PATHING_256_EXPECTED);
@@ -128,7 +135,9 @@ fn pathing_256_matches_the_pinned_checksum() {
 /// (WP4.3). A new scenario: pinned when it was added (`0x5db78c7d785670f0`; `pathing`
 /// runs with flowfields off, see its header). **Re-pinned at WP4.4** (to the value in
 /// the file): the units have bodies, the bridge is a bottleneck and the arrival
-/// slots are spaced for them, so the crossing takes about twice as long.
+/// slots are spaced for them, so the crossing takes about twice as long. **Re-pinned at
+/// WP4.5** (`0xa55348bf0b519c50` to the value in the file):
+/// the turning rules, infantry turning at once and wheeled vehicles in arcs.
 #[test]
 fn bridge_200_matches_the_pinned_checksum() {
     check("bridge_200", BRIDGE_200_EXPECTED);
@@ -136,10 +145,20 @@ fn bridge_200_matches_the_pinned_checksum() {
 
 /// Two groups pass head-on through a narrow gap, and a unit holding position stands
 /// in a corridor while others route round it (WP4.4). A new scenario: pinned when it
-/// was added.
+/// was added. **Re-pinned at WP4.5** (`0xd5e9d6e45a14b0ef` to the value in the file): the
+/// turning rules.
 #[test]
 fn crowd_jam_matches_the_pinned_checksum() {
     check("crowd_jam", CROWD_JAM_EXPECTED);
+}
+
+/// The hull turns before it drives and the turret turns apart from it (WP4.5): a tank
+/// ordered behind itself pivots, a wheeled vehicle swings round in an arc, a rifleman
+/// turns at once, a turret follows a moving target while its hull drives on. A new
+/// scenario: pinned when it was added.
+#[test]
+fn turning_matches_the_pinned_checksum() {
+    check("turning", TURNING_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
@@ -217,6 +236,10 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
         final_checksum("crowd_jam", &altered),
         pinned(CROWD_JAM_EXPECTED)
     );
+    assert_eq!(
+        final_checksum("turning", &altered),
+        pinned(TURNING_EXPECTED)
+    );
     assert_eq!(final_checksum("orders", &altered), pinned(ORDERS_EXPECTED));
     // The scenario on the shipped definitions (no `unit_defs`) does move: the
     // test would prove nothing if the change reached nobody.
@@ -242,6 +265,8 @@ fn the_expected_files_hold_one_bare_checksum() {
         PATHING_EXPECTED,
         PATHING_256_EXPECTED,
         BRIDGE_200_EXPECTED,
+        CROWD_JAM_EXPECTED,
+        TURNING_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");

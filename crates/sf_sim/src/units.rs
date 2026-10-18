@@ -39,6 +39,9 @@ const DIGEST_TAG: &[u8] = b"sf_sim/units/v1";
 /// Written first into the weapon range digest.
 const REACH_DIGEST_TAG: &[u8] = b"sf_sim/units/reach/v1";
 
+/// Written first into the turret digest.
+const TURRET_DIGEST_TAG: &[u8] = b"sf_sim/units/turret/v1";
+
 /// The cells a structure covers: `width` along x, `height` along y, both at
 /// least one.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -86,6 +89,18 @@ pub struct UnitStats {
     /// `units_spawn` scenario fixes; the checksum hashes it with the orders
     /// ([`UnitTable::reach_digest`]).
     pub weapon_range: Fx,
+    /// Facing steps (of 256) per tick the turret turns; zero for a kind without
+    /// a turret (WP4.5, `docs/rules/turning.md`). Left out of
+    /// [`UnitTable::digest`] like the weapon range; the checksum hashes it in the
+    /// turning section ([`UnitTable::turret_digest`]).
+    pub turret_per_tick: u8,
+}
+
+impl UnitStats {
+    /// Whether the kind has a turret that turns apart from the hull.
+    pub const fn has_turret(&self) -> bool {
+        self.turret_per_tick > 0
+    }
 }
 
 /// What sort of thing a kind is, derived from its fields.
@@ -159,6 +174,8 @@ pub struct UnitTable {
     digest: u64,
     /// Hash of every kind's weapon range; zero when empty.
     reach_digest: u64,
+    /// Hash of every kind's turret turn rate; zero when empty.
+    turret_digest: u64,
 }
 
 impl fmt::Debug for UnitTable {
@@ -203,15 +220,20 @@ impl UnitTable {
                 return Err(UnitTableError::EmptyFootprint(s.kind));
             }
         }
-        let (digest, reach_digest) = if stats.is_empty() {
-            (0, 0)
+        let (digest, reach_digest, turret_digest) = if stats.is_empty() {
+            (0, 0, 0)
         } else {
-            (digest_of(&stats), reach_digest_of(&stats))
+            (
+                digest_of(&stats),
+                reach_digest_of(&stats),
+                turret_digest_of(&stats),
+            )
         };
         Ok(UnitTable {
             stats,
             digest,
             reach_digest,
+            turret_digest,
         })
     }
 
@@ -246,6 +268,13 @@ impl UnitTable {
     /// depend on it.
     pub fn reach_digest(&self) -> u64 {
         self.reach_digest
+    }
+
+    /// A hash of the turret turn rate of every kind; zero for an empty table.
+    /// It joins the world checksum in the turning section, which only a world
+    /// with a turret in it has.
+    pub fn turret_digest(&self) -> u64 {
+        self.turret_digest
     }
 
     /// The position of `kind` in the sorted list: what an entity stores.
@@ -298,6 +327,16 @@ fn reach_digest_of(stats: &[UnitStats]) -> u64 {
     h.finish()
 }
 
+fn turret_digest_of(stats: &[UnitStats]) -> u64 {
+    let mut h = Fnv1a64::new();
+    h.write_bytes(TURRET_DIGEST_TAG);
+    for s in stats {
+        h.write_bytes(&s.kind.0.to_le_bytes());
+        h.write_u8(s.turret_per_tick);
+    }
+    h.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,6 +351,7 @@ mod tests {
             size: Fx::from_ratio(2, 5),
             footprint: None,
             weapon_range: Fx::from_int(4),
+            turret_per_tick: 0,
         }
     }
 
@@ -328,6 +368,7 @@ mod tests {
                 height: h,
             }),
             weapon_range: Fx::ZERO,
+            turret_per_tick: 0,
         }
     }
 

@@ -18,6 +18,19 @@
 // out it is false.
 // The rules, the full table and the bridge rule are in docs/rules/movement.md.
 //
+// Movement classes (WP4.5) also say how their units turn the hull, in an optional
+// `turning` block (docs/rules/turning.md); left out, a class turns as the walk did
+// before: Pivot, drive_tolerance 16.
+//   mode             Pivot: turns in place at the unit's turn_rate, drives when its heading is
+//                    within drive_tolerance of the wanted one. Arc: has to move to turn, in an
+//                    arc of at least min_radius; a target inside its turning circles is reached
+//                    by a stand-in three-point turn on the spot at pivot_permille of the turn
+//                    rate. Instant: the heading snaps onto the wanted one.
+//   drive_tolerance  facing steps (256 to a turn), 0 to 64: the heading error up to which the
+//                    unit drives. Not used by Instant.
+//   min_radius       Arc only: cells, 0.25 to 32.
+//   pivot_permille   Arc only: 1 to 1000 (1000 = the full turn rate).
+//
 //   * armor_types and damage_types, WP5.3: the percentage of a damage type that
 //     an armor type takes (a damage table), and the splash falloff.
 //
@@ -25,9 +38,16 @@
 // armor and damage types below.
 (
     movement_classes: [
+        // Turning (WP4.5): a person turns at once (Instant); a tank pivots on its tracks; the
+        // others have to move to turn (Arc): a wheeled vehicle in a 1.25-cell radius (5 m), a
+        // hovercraft in 2 cells with thrusters that turn it half as fast on the spot, a vessel
+        // in 4 cells with a rudder that barely turns it at a standstill. They all drive once
+        // they are within 16 steps (22 degrees) of where they are going, the margin that routes
+        // are smoothed with (docs/rules/pathfinding.md); a target inside the turning circle is
+        // reached by a stand-in three-point turn on the spot.
         // infantry: slowed by ore, quicker on a road; the climb onto rock is not
         // something a rifleman does (rock is steep or high ground).
-        (kind: 0, name: "foot", ground: true, terrain_costs: [
+        (kind: 0, name: "foot", ground: true, turning: (mode: Instant), terrain_costs: [
             ("grass", Speed(1000)),
             ("road", Speed(1100)),
             ("water", Impassable),
@@ -36,7 +56,7 @@
             ("bridge", Speed(1100)),
         ]),
         // trucks and light vehicles: the best on a road, the worst on rough ground.
-        (kind: 1, name: "wheeled", ground: true, terrain_costs: [
+        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.25, pivot_permille: 250), terrain_costs: [
             ("grass", Speed(800)),
             ("road", Speed(1200)),
             ("water", Impassable),
@@ -45,7 +65,7 @@
             ("bridge", Speed(1200)),
         ]),
         // tanks, artillery, harvesters: steady on grass, a little quicker on a road.
-        (kind: 2, name: "tracked", ground: true, terrain_costs: [
+        (kind: 2, name: "tracked", ground: true, turning: (mode: Pivot, drive_tolerance: 16), terrain_costs: [
             ("grass", Speed(1000)),
             ("road", Speed(1200)),
             ("water", Impassable),
@@ -56,7 +76,7 @@
         // crosses land and water (the amphibious transport). Its 800 on water is
         // what the role's `water_speed` says (1.5 cells/s on land, 1.2 on water);
         // a test keeps the two in step.
-        (kind: 3, name: "hover", terrain_costs: [
+        (kind: 3, name: "hover", turning: (mode: Arc, drive_tolerance: 16, min_radius: 2, pivot_permille: 500), terrain_costs: [
             ("grass", Speed(1000)),
             ("road", Speed(1100)),
             ("water", Speed(800)),
@@ -66,7 +86,7 @@
         ]),
         // vessels: water only. A bridge cell is a road OVER water, so a vessel
         // passes under it (docs/rules/movement.md, "The bridge").
-        (kind: 4, name: "water", terrain_costs: [
+        (kind: 4, name: "water", turning: (mode: Arc, drive_tolerance: 16, min_radius: 4, pivot_permille: 125), terrain_costs: [
             ("grass", Impassable),
             ("road", Impassable),
             ("water", Speed(1000)),

@@ -1330,3 +1330,51 @@ fn a_tombstone_keeps_its_number_taken() {
     .unwrap_err();
     assert!(e.message.contains("retired by \"old_armor\""), "{e}");
 }
+
+// ---- the turret (WP4.5) -------------------------------------------------------
+
+#[test]
+fn tanks_and_artillery_have_a_turret_that_turns_apart_from_the_hull() {
+    let defs = shipped();
+    let rate = |id: &str| {
+        defs.sim_unit(defs.kind_of(id).unwrap())
+            .unwrap()
+            .turret_per_tick
+    };
+    assert_eq!(rate("light_tank"), 12);
+    assert_eq!(rate("heavy_tank"), 8);
+    assert_eq!(rate("siege_artillery"), 6);
+    // Everything else has none: infantry, trucks, structures.
+    for role in [
+        "rifleman",
+        "repair_truck",
+        "harvester",
+        "power_plant",
+        "gunboat",
+    ] {
+        assert_eq!(rate(role), 0, "{role}");
+    }
+}
+
+#[test]
+fn a_turret_needs_a_movement_class() {
+    // On a unit that moves, the field is just data.
+    let defs = replace_units(
+        "movement: \"tracked\", speed: 1, turn_rate: 5, turret_rate: 6,",
+        "movement: \"tracked\", speed: 1, turn_rate: 5, turret_rate: 7,",
+    )
+    .unwrap();
+    let kind = defs.kind_of("siege_artillery").unwrap();
+    assert_eq!(defs.sim_unit(kind).unwrap().turret_per_tick, 7);
+    // On a structure, which never moves, it is refused with the line.
+    let e = replace_units(
+        "hp: 600, armor: \"structure\", power: 100,",
+        "hp: 600, armor: \"structure\", power: 100, turret_rate: 4,",
+    )
+    .unwrap_err();
+    assert!(
+        e.message.contains("turret_rate need a movement class"),
+        "{e}"
+    );
+    assert!(e.line.is_some(), "{e}");
+}

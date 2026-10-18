@@ -12,8 +12,9 @@ use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, RouteView};
-use crate::snapshot::{EntityView, Snapshot};
+use crate::snapshot::{EntityView, Snapshot, TurretView};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
+use crate::turret;
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
 
 /// The most slots a world will ever allocate. A `Spawn` beyond it is ignored.
@@ -492,6 +493,21 @@ impl World {
         (self.entities.def[i] != NO_DEF).then(|| self.entities.hp[i])
     }
 
+    /// The turret facing of a unit that has one (WP4.5): an absolute direction
+    /// in the world. `None` for a stale id and for a unit without a turret.
+    pub fn turret_of(&self, id: EntityId) -> Option<Facing> {
+        let i = self.live_index(id)?;
+        turret::has_turret(&self.entities, i, &self.units).then(|| self.entities.turret[i])
+    }
+
+    /// What the turret of a unit is told to aim at (`Command::AimTurret`);
+    /// `None` for a stale id, for a unit without a turret and when nothing is
+    /// set. An attack order aims the turret too, without being set here.
+    pub fn turret_target_of(&self, id: EntityId) -> Option<EntityId> {
+        let i = self.live_index(id)?;
+        self.entities.turret_target[i]
+    }
+
     /// The current order of a unit (WP3.4); `None` for a stale id. A unit
     /// with no order, and everything that cannot be ordered, has
     /// [`Order::Idle`]. An order that was a scatter reads as the
@@ -749,6 +765,8 @@ impl World {
             (motion.pos_min, motion.pos_max),
             &mut self.pathing,
         );
+        // The turrets turn toward their targets, from where the hulls ended (WP4.5).
+        turret::update_all(&mut self.entities, &self.units);
 
         self.tick = tick.next();
         let checksum = self.checksum();
@@ -824,6 +842,13 @@ impl World {
             facing: e.facing[i],
             has_stats: e.def[i] != NO_DEF,
             hp: e.hp[i],
+            turret: self
+                .stats_at(i)
+                .is_some_and(UnitStats::has_turret)
+                .then_some(TurretView {
+                    prev_facing: e.prev_turret[i],
+                    facing: e.turret[i],
+                }),
         }
     }
 
@@ -1151,6 +1176,20 @@ impl World {
                         && !self.is_immobile(i)
                     {
                         orders::clear(&mut self.entities, i);
+                        self.entities.turret_target[i] = None;
+                        changed = true;
+                    }
+                }
+                changed
+            }
+            Command::AimTurret { ids, target } => {
+                let mut changed = false;
+                for id in ids {
+                    if let Some(i) = self.live_index(id)
+                        && turret::has_turret(&self.entities, i, &self.units)
+                    {
+                        self.entities.turret_target[i] =
+                            target.filter(|&t| t != id && self.live_index(t).is_some());
                         changed = true;
                     }
                 }

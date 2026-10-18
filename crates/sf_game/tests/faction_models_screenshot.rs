@@ -1,4 +1,8 @@
-//! Screenshot test for the per-faction infantry models of art set v3
+//! Screenshot tests of roles drawn with their glTF models through the real renderer: the
+//! per-faction infantry models of art set v3 and, since WP4.5, a tank whose turret the
+//! simulation has turned off its hull.
+//!
+//! The first: the per-faction infantry models of art set v3
 //! (`models:` in `assets/config/unit_defs.ron`), through the real renderer on a
 //! software adapter (Mesa lavapipe / DX12 WARP): Meridian and Veyran
 //! infantry side by side at close zoom, drawn with the glTF files the
@@ -132,10 +136,16 @@ impl Scene {
     /// A unit of `role` for `owner` at a place given in half cells (2 m), made
     /// the way the game does.
     fn spawn(&mut self, role: &str, owner: u8, half_cells: (i32, i32)) -> EntityId {
+        let at = Vec2::from_ints(half_cells.0, half_cells.1).div_int(2);
+        self.spawn_at(role, owner, at)
+    }
+
+    /// A unit of `role` for `owner` at a point in cells.
+    fn spawn_at(&mut self, role: &str, owner: u8, at: Vec2) -> EntityId {
         let before: Vec<EntityId> = self.world.snapshot().iter().map(|v| v.id).collect();
         let command = Command::SpawnUnit {
             kind: self.kind(role),
-            pos: Vec2::from_ints(half_cells.0, half_cells.1).div_int(2),
+            pos: at,
             owner: PlayerId(owner),
         };
         let tick = self.world.tick();
@@ -185,8 +195,20 @@ impl Scene {
                 let shape = roster
                     .shape_for(v.kind, sf_game::roster::faction_of_owner(v.owner.0))
                     .unwrap_or(0);
-                Motion::from_fixed(shape, v.owner.0, v.prev_pos, v.pos, v.prev_facing, v.facing)
-                    .with_id(UnitId::from_parts(v.id.index(), v.id.generation()))
+                let motion = Motion::from_fixed(
+                    shape,
+                    v.owner.0,
+                    v.prev_pos,
+                    v.pos,
+                    v.prev_facing,
+                    v.facing,
+                )
+                .with_id(UnitId::from_parts(v.id.index(), v.id.generation()));
+                // A turret the simulation turns drives the model's turret part (WP4.5).
+                match v.turret {
+                    Some(t) => motion.with_turret(t.prev_facing, t.facing),
+                    None => motion,
+                }
             })
             .collect::<Vec<_>>();
         self.instancer.update_tick(motions);
@@ -462,4 +484,100 @@ fn the_infantry_of_set_v3_stands_upright_in_a_row_per_role() {
     }
     println!("figures in view: {seen} of {}", figures.len());
     assert!(seen >= 8, "the camera sees most of the set: {seen}");
+}
+
+/// WP4.5: a tank whose turret has been turned a quarter turn off its hull by the
+/// simulation, next to one whose turret is on its hull. The picture changes where the
+/// first one's turret was, and not where the second's was; and what the simulation says
+/// (the turret's facing against the hull's) is what is drawn.
+#[test]
+fn a_tank_with_its_turret_turned_off_the_hull() {
+    let mut scene = Scene::new();
+    let mut r = renderer(&scene.map);
+    let turned = scene.spawn("light_tank", MERIDIAN, (60, 64));
+    let aligned = scene.spawn("light_tank", MERIDIAN, (68, 64));
+    scene.walk_east(&[turned, aligned], 2);
+    // Both hulls face east (+x, facing 0) after the drive.
+    for id in [turned, aligned] {
+        let facing = scene.world.get(id).unwrap().facing.raw();
+        assert!(
+            facing <= 2 || facing >= 254,
+            "{id}: hull facing {facing}, east is 0"
+        );
+    }
+    // A target a few cells south of the first tank (south is +y: facing 64).
+    let pos = scene.world.get(turned).unwrap().pos;
+    let target = scene.spawn_at("rifleman", VEYRAN, pos + Vec2::from_ints(0, 6));
+    let aim = |world: &mut World, target: Option<EntityId>| {
+        let tick = world.tick();
+        world
+            .schedule(
+                tick,
+                PlayerId(MERIDIAN),
+                Command::AimTurret {
+                    ids: vec![turned],
+                    target,
+                },
+            )
+            .unwrap();
+        for _ in 0..20 {
+            world.step();
+        }
+    };
+    let relative = |scene: &Scene, id| {
+        let v = scene.world.get(id).unwrap();
+        v.facing
+            .signed_diff(v.turret.expect("a tank has a turret").facing)
+    };
+
+    aim(&mut scene.world, None);
+    assert_eq!(relative(&scene, turned), 0, "the turret is on the hull");
+    let focus = {
+        let (a, b) = (scene.metres(turned), scene.metres(aligned));
+        [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0 + 4.0]
+    };
+    let cam = scene.camera(0.012, focus);
+    scene.sync(true);
+    let on_hull = scene.shoot(&mut r, &cam);
+    save("tank_turret_on_hull.png", &on_hull);
+
+    aim(&mut scene.world, Some(target));
+    // A quarter turn round to the south, 64 steps (the tank is within a step or two
+    // of due east and the target of due south).
+    let off = relative(&scene, turned);
+    assert!(
+        (62..=66).contains(&off),
+        "the turret is {off} steps off the hull"
+    );
+    assert_eq!(relative(&scene, aligned), 0);
+    assert_eq!(
+        scene.world.get(turned).unwrap().facing,
+        scene.world.get(aligned).unwrap().facing,
+        "the hulls did not turn"
+    );
+    scene.sync(true);
+    let turned_off = scene.shoot(&mut r, &cam);
+    save("tank_turret_turned.png", &turned_off);
+
+    let (pt, pa) = (scene.screen(&cam, turned), scene.screen(&cam, aligned));
+    for p in [pt, pa] {
+        assert!(
+            p[0] > 60.0 && p[0] < W as f32 - 60.0 && p[1] > 100.0 && p[1] < H as f32 - 20.0,
+            "the camera sees both tanks: {p:?}"
+        );
+    }
+    let (bt, ba) = (crop(pt, 60.0, 60.0), crop(pa, 60.0, 60.0));
+    let (moved, still) = (
+        changed(&on_hull, &turned_off, bt),
+        changed(&on_hull, &turned_off, ba),
+    );
+    println!("pixels that changed: turned tank {moved}, aligned tank {still}");
+    assert!(
+        moved > 400,
+        "the turned tank's picture changed by {moved} pixels"
+    );
+    assert!(
+        still < 40,
+        "the aligned tank's picture changed by {still} pixels"
+    );
 }

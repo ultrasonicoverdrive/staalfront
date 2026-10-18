@@ -45,9 +45,13 @@ use sf_math::Fx;
 use sf_math::hash::Fnv1a64;
 
 use crate::terrain::{Cell, Occupancy, Terrain, TerrainId};
+use crate::turning::{Turning, TurningError};
 
 /// Written first into the digest; bump when its layout changes.
 const DIGEST_TAG: &[u8] = b"sf_sim/movement/v1";
+
+/// Written before the turning profiles in the digest.
+const TURNING_TAG: &[u8] = b"sf_sim/movement/turning/v1";
 
 /// The multiplier of normal speed: `1000` thousandths.
 pub const FULL_PERMILLE: u16 = 1000;
@@ -113,6 +117,17 @@ pub enum MovementTableError {
         /// The terrain type.
         terrain: TerrainId,
     },
+    /// A turning profile for a class the table does not have (WP4.5).
+    UnknownTurningClass(u16),
+    /// Two turning profiles for the same class.
+    DuplicateTurning(u16),
+    /// A turning profile whose numbers do not hang together.
+    BadTurning {
+        /// The class.
+        class: u16,
+        /// What is wrong.
+        problem: TurningError,
+    },
 }
 
 impl fmt::Display for MovementTableError {
@@ -129,6 +144,18 @@ impl fmt::Display for MovementTableError {
                 "movement class {class} has speed 0 on terrain type {} (use Impassable)",
                 terrain.0
             ),
+            Self::UnknownTurningClass(class) => {
+                write!(
+                    f,
+                    "a turning profile for movement class {class}, which the table does not have"
+                )
+            }
+            Self::DuplicateTurning(class) => {
+                write!(f, "movement class {class} has two turning profiles")
+            }
+            Self::BadTurning { class, problem } => {
+                write!(f, "movement class {class}: turning: {problem}")
+            }
         }
     }
 }
@@ -140,6 +167,8 @@ impl std::error::Error for MovementTableError {}
 struct Entry {
     class: u16,
     costs: Box<[Option<Cost>; 256]>,
+    /// How the class turns its hull (WP4.5); [`Turning::LEGACY`] unless given.
+    turning: Turning,
 }
 
 /// The cost of every movement class on every terrain type. Immutable once
@@ -199,6 +228,7 @@ impl MovementTable {
             entries.push(Entry {
                 class: c.class,
                 costs,
+                turning: Turning::LEGACY,
             });
         }
         let digest = if entries.is_empty() {
@@ -207,6 +237,42 @@ impl MovementTable {
             digest_of(&entries)
         };
         Ok(MovementTable { entries, digest })
+    }
+
+    /// The same table with turning profiles for some of its classes (WP4.5,
+    /// `docs/rules/turning.md`). A class that is not listed keeps
+    /// [`Turning::LEGACY`], the walk as it was before; the digest changes only
+    /// for a class whose profile is not that one.
+    pub fn with_turning(
+        mut self,
+        profiles: Vec<(u16, Turning)>,
+    ) -> Result<MovementTable, MovementTableError> {
+        let mut seen: Vec<u16> = Vec::with_capacity(profiles.len());
+        for (class, turning) in profiles {
+            let Ok(at) = self.entries.binary_search_by_key(&class, |e| e.class) else {
+                return Err(MovementTableError::UnknownTurningClass(class));
+            };
+            if seen.contains(&class) {
+                return Err(MovementTableError::DuplicateTurning(class));
+            }
+            turning
+                .check()
+                .map_err(|problem| MovementTableError::BadTurning { class, problem })?;
+            seen.push(class);
+            self.entries[at].turning = turning;
+        }
+        self.digest = if self.entries.is_empty() {
+            0
+        } else {
+            digest_of(&self.entries)
+        };
+        Ok(self)
+    }
+
+    /// How the class turns its hull. A class the table does not have turns as
+    /// [`Turning::LEGACY`].
+    pub fn turning(&self, class: u16) -> Turning {
+        self.entry(class).map_or(Turning::LEGACY, |e| e.turning)
     }
 
     /// True if there are no classes.
@@ -284,6 +350,17 @@ fn digest_of(entries: &[Entry]) -> u64 {
                 h.write_u8(id as u8);
                 h.write_bytes(&cost.permille().to_le_bytes());
             }
+        }
+    }
+    // Turning (WP4.5): only the classes that turn otherwise than the walk always
+    // did, and after everything above, so a table without them hashes as before.
+    let custom = entries.iter().filter(|e| e.turning != Turning::LEGACY);
+    if custom.clone().next().is_some() {
+        h.write_bytes(TURNING_TAG);
+        h.write_u64(u64::try_from(custom.clone().count()).unwrap_or(u64::MAX));
+        for e in custom {
+            h.write_bytes(&e.class.to_le_bytes());
+            e.turning.write_hash(&mut h);
         }
     }
     h.finish()

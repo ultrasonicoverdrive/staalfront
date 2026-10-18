@@ -69,6 +69,16 @@
 //! walk for a few ticks by a step to a free neighbouring spot. A new order, or the
 //! end of one, forgets all of it (`CrowdState::reset_progress`).
 //!
+//! # Turning (WP4.5)
+//!
+//! The walk toward the waypoint turns the hull the way the unit's movement class does
+//! ([`crate::turning`]): infantry at once, tanks on the spot, wheeled vehicles, hovercraft and
+//! vessels only while they move. A waypoint that is not the last counts as reached a quarter of a
+//! cell short for the classes that have to move to turn, which cannot land within a step of a
+//! point off their line. An [`Order::Attack`] in reach turns the hull of a unit without a turret
+//! toward the victim, and leaves the hull of a unit with one to the turret
+//! ([`crate::turret`]), which aims at the victim from the tick of the order.
+//!
 //! # What phase 5 fills in
 //!
 //! There is no combat here. [`would_acquire_targets_here`] is called every
@@ -89,6 +99,8 @@ use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Tick};
 use crate::movement::Ground;
 use crate::path::{Aim, Pathing, Steer};
+use crate::turning::{self, Turning};
+use crate::turret;
 use crate::units::{UnitClass, UnitTable};
 use crate::world::mix64;
 
@@ -267,7 +279,7 @@ pub fn scatter_offset(id: EntityId, tick: Tick) -> Vec2 {
 pub(crate) fn would_acquire_targets_here(_e: &Entities, _i: usize) {}
 
 /// True if slot `j` holds the entity `id` names.
-fn live_slot(e: &Entities, id: EntityId) -> Option<usize> {
+pub(crate) fn live_slot(e: &Entities, id: EntityId) -> Option<usize> {
     let j = id.index() as usize;
     (e.alive.get(j) == Some(&true) && e.generation[j] == id.generation()).then_some(j)
 }
@@ -444,6 +456,20 @@ fn go_to(
                 path.reached(e, i);
                 return false;
             }
+            // A unit that has to move to turn cannot be told to land within a step of a
+            // waypoint that lies off its line (it would circle it): a waypoint is a point
+            // to pass, and it counts as reached a quarter of a cell short, the margin the
+            // routes are smoothed with (WP4.5). Not the last waypoint of the ring (see above).
+            if aim == Aim::Waypoint
+                && e.route[i].ring_len() >= 2
+                && m.class.is_some_and(|class| {
+                    ground.movement.turning(class).mode == turning::TurnMode::Arc
+                })
+                && (waypoint - e.pos[i]).length_squared() <= turning::ARC_CAPTURE.square()
+            {
+                path.reached(e, i);
+                return false;
+            }
             e.crowd[i].walking = true;
             match walk(e, i, waypoint, m, ground) {
                 Walk::Arrived if aim == Aim::Destination => {
@@ -530,9 +556,23 @@ pub(crate) fn run(
             let at = e.pos[j];
             if go_to(e, i, at, reach, m, ground, path)
                 && let Some(wanted) = (at - e.pos[i]).facing()
+                && !turret::has_turret(e, i, units)
             {
-                // In reach: face the target. Firing comes in phase five.
-                e.facing[i] = e.facing[i].turn_toward(wanted, m.turn_per_tick);
+                // In reach: face the target the way the class turns on the spot
+                // (WP4.5). A unit with a turret leaves that to the turret and
+                // keeps its hull as it is. Firing comes in phase five.
+                let turning = m
+                    .class
+                    .map_or(Turning::LEGACY, |class| ground.movement.turning(class));
+                let (facing, carry) = turning::turn_in_place(
+                    &turning,
+                    e.facing[i],
+                    e.turn_carry[i],
+                    wanted,
+                    m.turn_per_tick,
+                );
+                e.facing[i] = facing;
+                e.turn_carry[i] = carry;
             }
         }
     }

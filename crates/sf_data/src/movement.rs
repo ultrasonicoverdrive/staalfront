@@ -31,7 +31,7 @@
 use std::fmt;
 
 use crate::terrain::TerrainTypes;
-use crate::units::{ClassTables, TerrainCost, UnitDefs};
+use crate::units::{ClassTables, TerrainCost, TurningDef, UnitDefs};
 
 /// Why the movement classes and the terrain types do not fit together.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,6 +80,8 @@ pub struct ClassCosts {
     pub name: String,
     /// Whether the class is a ground class (`ground` in `unit_classes.ron`).
     pub ground: bool,
+    /// How the class turns its hull (`turning` in `unit_classes.ron`, WP4.5).
+    pub turning: TurningDef,
     /// `(terrain type id, cost)`, one per terrain type, ascending by id.
     costs: Vec<(u8, TerrainCost)>,
     /// `(terrain type name, cost)` in the same order, for tools and tests.
@@ -151,6 +153,7 @@ impl MovementCosts {
                 kind: class.kind,
                 name: class.name.clone(),
                 ground: class.ground,
+                turning: class.turning,
                 costs,
                 names,
             });

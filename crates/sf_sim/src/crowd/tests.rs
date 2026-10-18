@@ -29,6 +29,7 @@ fn stats(kind: u16, class: Option<u16>, size_tenths: i64) -> UnitStats {
         size: Fx::from_ratio(size_tenths, 10),
         footprint: None,
         weapon_range: Fx::ZERO,
+        turret_per_tick: 0,
     }
 }
 

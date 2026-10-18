@@ -180,6 +180,55 @@ fn turrets_turn_towards_the_aim_point_and_highlight_tints_every_part() {
     }
 }
 
+/// A tank whose turret the simulation turns (WP4.5): the `turret` part's yaw joint is the
+/// turret's facing in the world minus the hull's, interpolated between the ticks, and the
+/// demo aim point does not touch it.
+#[test]
+fn a_simulated_turret_drives_the_yaw_joint_interpolated_between_ticks() {
+    let at = (100.0, 100.0);
+    let turret_axes = |hull: (u8, u8), turret: (u8, u8), alpha: f32| {
+        let p = Vec2::new(metres_to_cells(at.0), metres_to_cells(at.1));
+        let motion = Motion::from_fixed(3, 0, p, p, Facing::new(hull.0), Facing::new(hull.1))
+            .with_turret(Facing::new(turret.0), Facing::new(turret.1))
+            .with_id(UnitId::from_parts(1, 0));
+        let mut inst = with_pack(&[motion]);
+        // An aim point that would send the turret the other way, were it listened to.
+        inst.set_aim(Some([at.0 - 50.0, at.1]));
+        let frustum = Frustum::from_view_proj(camera(0.0, (100.0, 100.0)).view_proj());
+        inst.build_frame(&FrameView::models_only(&frustum, alpha), |_, _| 0.0);
+        let chain = inst.models().model(3).clone();
+        let parts = chain.parts(0);
+        let x_axis = |m: [[f32; 4]; 4]| Vec3::new(m[0][0], m[0][1], m[0][2]);
+        (
+            x_axis(inst.mesh_instances(parts[0].mesh)[0].model),
+            x_axis(inst.mesh_instances(parts[1].mesh)[0].model),
+        )
+    };
+    let near = |a: Vec3, b: Vec3| (a - b).length() < 1e-4;
+    // Hull facing +X, turret a quarter turn round to +Z: at the end of the tick.
+    let (hull, turret) = turret_axes((0, 0), (0, 64), 1.0);
+    assert!(
+        near(hull, Vec3::X) && near(turret, Vec3::Z),
+        "{hull} {turret}"
+    );
+    // At the start of the tick it is still on the hull, and half way it is half way.
+    let (_, turret) = turret_axes((0, 0), (0, 64), 0.0);
+    assert!(near(turret, Vec3::X), "{turret}");
+    let (_, turret) = turret_axes((0, 0), (0, 64), 0.5);
+    let half = std::f32::consts::FRAC_1_SQRT_2;
+    assert!(near(turret, Vec3::new(half, 0.0, half)), "{turret}");
+    // The turret's facing is the world's, not the hull's: the hull turns a quarter
+    // while the turret stays on +X, and the part turns back against the hull.
+    let (hull, turret) = turret_axes((0, 64), (0, 0), 1.0);
+    assert!(
+        near(hull, Vec3::Z) && near(turret, Vec3::X),
+        "{hull} {turret}"
+    );
+    // The shortest way round the wrap: 250 to 6 passes 0 half way, not 128.
+    let (_, turret) = turret_axes((0, 0), (250, 6), 0.5);
+    assert!(near(turret, Vec3::X), "{turret}");
+}
+
 /// The WP1.10 numbers: 5,000 test-pack units at close, mid and strategic
 /// zoom. Run with `cargo test --release -p sf_render testpack_5000 -- --nocapture`.
 #[test]

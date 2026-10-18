@@ -18,11 +18,16 @@
 //!   *arrived*.
 //! * Otherwise it turns toward the target: the facing closest to the
 //!   direction of the target is found with [`sf_math::Facing::from_vec2`] and
-//!   the entity turns toward it by at most `turn_per_tick` steps.
-//! * Once its facing is within [`ALIGN_TOLERANCE`] steps of that direction
-//!   (a bit over 22 degrees) it moves one step along its facing, which is a
-//!   table lookup (`Vec2::from_facing`) and needs no square root or
-//!   division. Until then it turns on the spot.
+//!   the entity turns toward it the way its movement class turns
+//!   ([`crate::turning`], WP4.5): a tracked unit by at most `turn_per_tick`
+//!   steps, on the spot; a wheeled one only while it moves, in an arc; infantry
+//!   at once. An entity without a class turns as a tracked one does, with the
+//!   tolerance below.
+//! * Once its facing is within the class's drive tolerance of that direction
+//!   ([`ALIGN_TOLERANCE`], a bit over 22 degrees, for the legacy walks) it moves
+//!   one step along its facing, which is a table lookup (`Vec2::from_facing`)
+//!   and needs no square root or division. Until then it turns on the spot (or,
+//!   for an arc, drives round).
 //! * The new position is clamped into the map.
 //!
 //! Because the facing is re-aimed at the target every tick, the path is a
@@ -56,6 +61,7 @@ use crate::ids::Tick;
 use crate::movement::{Ground, scale_step};
 use crate::orders;
 use crate::path::Pathing;
+use crate::turning::{self, Mover, TurnMode, Turning};
 use crate::units::UnitTable;
 
 /// What an entity does each tick.
@@ -287,6 +293,13 @@ pub(crate) fn walk(
         None => (m.step, m.step_sq),
     };
     let delta = target - pos;
+    // What the hull does before the unit drives (WP4.5): the class's turning
+    // profile; an entity without a class turns as the walk always did.
+    let turning = m
+        .class
+        .map_or(Turning::LEGACY, |class| ground.movement.turning(class));
+    // The heading before this tick's turn, kept for an arc that is refused.
+    let mut steered = None;
     let (next, arrived) = if delta.length_squared() <= step_sq {
         (target, true)
     } else {
@@ -295,12 +308,22 @@ pub(crate) fn walk(
         match delta.facing() {
             None => (target, true),
             Some(wanted) => {
-                let facing = e.facing[i].turn_toward(wanted, m.turn_per_tick);
-                e.facing[i] = facing;
-                if facing.abs_diff(wanted) > ALIGN_TOLERANCE {
+                let unit = Mover {
+                    pos,
+                    facing: e.facing[i],
+                    carry: e.turn_carry[i],
+                    step,
+                    turn_per_tick: m.turn_per_tick,
+                };
+                let heading = turning::steer(&turning, &unit, wanted, target);
+                e.facing[i] = heading.facing;
+                e.turn_carry[i] = heading.carry;
+                if !heading.drive {
                     return Walk::Moving;
                 }
-                let next = (pos + Vec2::from_facing(facing, step)).clamp(m.pos_min, m.pos_max);
+                steered = Some((unit, wanted));
+                let next =
+                    (pos + Vec2::from_facing(heading.facing, step)).clamp(m.pos_min, m.pos_max);
                 (next, false)
             }
         }
@@ -308,6 +331,20 @@ pub(crate) fn walk(
     if let Some(class) = m.class
         && !ground.may_step(class, pos, next)
     {
+        // A unit that has to move to turn cannot arc into a cell it may not enter,
+        // and one that stands against rock with its nose off the way would never get
+        // round: it turns on the spot instead, at its pivot share of the turn rate
+        // (the stand-in for backing and turning), until it is on its heading.
+        if let Some((unit, wanted)) = steered
+            && turning.mode == TurnMode::Arc
+            && unit.facing != wanted
+        {
+            let (facing, carry) =
+                turning::turn_in_place(&turning, unit.facing, unit.carry, wanted, m.turn_per_tick);
+            e.facing[i] = facing;
+            e.turn_carry[i] = carry;
+            return Walk::Moving;
+        }
         // A unit that has been pushed off its route slides along what it grazed, by
         // the longer part of its step first, instead of being refused (WP4.4).
         if m.slide && !arrived {

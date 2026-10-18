@@ -25,6 +25,7 @@
 //! | paths (`P`), only while the world has pathfinding and some live entity has a route | the path budget and the epoch of the graphs, the job in flight, and for each entity with a route, in slot order: its state, flags, cells, ring of waypoints and portal path (WP4.2) |
 //! | flowfields (`L`), only while the pool holds a field | the pool and the build in flight (WP4.3; since WP4.4 each field also has its group order, its ring, the spacing and the inner radius of its slots) |
 //! | crowd (`K`), only while some live unit remembers being blocked, sidestepping, shoved or crowded | the collision settings, then each such unit in slot order: how long it has not come closer to its waypoint, its sidestep attempts and the best distance seen, a sidestep in progress, how far it has been shoved and for how long left alone, whether it has asked for a new route (WP4.4) |
+//! | turning (`R`), only while some live unit has a turret or an unfinished arc turn | the turret rates of the unit table and the movement table's digest, then each such unit in slot order: the thousandths of a step it has yet to turn and, for a turret, its facing and its target (WP4.5) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -96,6 +97,15 @@
 //! scratch of a tick (which units walked, which were refused) is not state and is
 //! not hashed.
 //!
+//! The turning section (WP4.5, `R`) comes last and is written only while some live
+//! unit has a turret or an unfinished arc turn: the turret rates of the unit table,
+//! the movement table's digest (which holds the turning profiles of the classes),
+//! and for each such unit, in slot order, the fraction of a step it has yet to
+//! turn, and for a turret its facing and what it aims at. `prev_turret` is derived
+//! like `prev_facing` and is not hashed. The hull turning itself needs no section:
+//! the facing is in the slots, and a class that turns as the walk always did (a
+//! table without turning profiles) leaves every checksum alone.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -139,6 +149,7 @@ const SECTION_MOVEMENT: u8 = b'M';
 const SECTION_PATHS: u8 = b'P';
 const SECTION_FIELDS: u8 = b'L';
 const SECTION_CROWD: u8 = b'K';
+const SECTION_TURNING: u8 = b'R';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -154,6 +165,17 @@ fn write_option_vec2(h: &mut Fnv1a64, v: Option<Vec2>) {
         Some(v) => {
             h.write_u8(1);
             h.write_vec2(v);
+        }
+        None => h.write_u8(0),
+    }
+}
+
+fn write_option_id(h: &mut Fnv1a64, id: Option<crate::ids::EntityId>) {
+    match id {
+        Some(id) => {
+            h.write_u8(1);
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
         }
         None => h.write_u8(0),
     }
@@ -210,6 +232,15 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
                 h.write_u32(id.index());
                 h.write_u32(id.generation());
             }
+        }
+        Command::AimTurret { ids, target } => {
+            h.write_u8(10);
+            h.write_u64(len64(ids.len()));
+            for id in ids {
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
+            write_option_id(h, *target);
         }
         Command::Despawn { id } => {
             h.write_u8(2);
@@ -377,6 +408,32 @@ impl World {
         if crowd::any_state(e) {
             h.write_u8(SECTION_CROWD);
             crowd::write_hash(&mut h, &self.crowd.config, e);
+        }
+
+        // Turning (WP4.5): the turret of every unit that has one and the unfinished
+        // turn of every unit that turns in an arc. Only while one exists, so a
+        // world without turrets and arcs hashes as before.
+        let turning_state = |i: usize| {
+            e.alive[i]
+                && (e.turn_carry[i] != 0
+                    || (e.def[i] != NO_DEF && self.units.at(e.def[i] as usize).has_turret()))
+        };
+        if (0..slots).any(turning_state) {
+            h.write_u8(SECTION_TURNING);
+            h.write_u64(self.units.turret_digest());
+            h.write_u64(self.movement.digest());
+            h.write_u64(len64((0..slots).filter(|&i| turning_state(i)).count()));
+            for i in (0..slots).filter(|&i| turning_state(i)) {
+                h.write_u32(i as u32);
+                h.write_bytes(&e.turn_carry[i].to_le_bytes());
+                let has_turret =
+                    e.def[i] != NO_DEF && self.units.at(e.def[i] as usize).has_turret();
+                h.write_u8(u8::from(has_turret));
+                if has_turret {
+                    h.write_facing(e.turret[i]);
+                    write_option_id(&mut h, e.turret_target[i]);
+                }
+            }
         }
 
         h.finish()

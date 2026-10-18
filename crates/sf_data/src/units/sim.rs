@@ -128,6 +128,9 @@ pub struct SimUnitDef {
     pub water_speed_per_tick: Fx,
     /// Facing steps (of 256) per tick.
     pub turn_per_tick: u8,
+    /// Facing steps (of 256) per tick the turret turns; zero for a unit without
+    /// a turret that turns apart from the hull.
+    pub turret_per_tick: u8,
     /// Diameter in cells (zero for structures).
     pub size: Fx,
     /// Footprint `(width, height)` in cells; structures only.
@@ -230,6 +233,7 @@ pub(crate) fn convert_units(
                     .water_speed
                     .map_or(speed_per_tick, Decimal::to_fx_per_tick),
                 turn_per_tick: u.turn_rate,
+                turret_per_tick: u.turret_rate,
                 size: u.size.to_fx(),
                 footprint: u.footprint.map(|f| (f.width, f.height)),
                 sight: u.sight.to_fx(),
