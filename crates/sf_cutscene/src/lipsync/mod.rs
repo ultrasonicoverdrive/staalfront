@@ -64,6 +64,14 @@ impl MouthCues {
         if cues.windows(2).all(|w| w[0].start_ms < w[1].start_ms) {
             MouthCues { cues }
         } else {
+            // The parsers and the flap never get here (about 40,000 fuzzed
+            // mutations in the PR #36 review). In a debug build a caller that
+            // does is a bug to find; a release build still repairs the series
+            // instead of panicking.
+            debug_assert!(
+                false,
+                "MouthCues::from_sorted got cues that are not strictly increasing"
+            );
             MouthCues::new(cues)
         }
     }

@@ -60,6 +60,8 @@ staalfront/
 │  ├─ sf_math      fixed-point numbers, vectors, angles, deterministic RNG
 │  ├─ sf_sim       the complete game simulation — no GPU, no I/O, no clock
 │  ├─ sf_data      unit/building/weapon definitions (RON), validation, loading
+│  ├─ sf_bridge    copies the sf_data definitions into the sf_sim tables (unit stats, terrain,
+│  │               movement costs) at world creation; sf_sim and sf_data may not know each other
 │  ├─ sf_ai        computer opponent, talks to sf_sim only via commands
 │  ├─ sf_engine    main loop, window, input, time, assets (no game rules)
 │  ├─ sf_render    wgpu: terrain, models, camera, zoom, effects, LOD
@@ -71,7 +73,10 @@ staalfront/
 ├─ tools/
 │  ├─ sf_editor    map and mission editor
 │  ├─ sf_headless  simulation without a screen: tests, balance, AI-vs-AI
-│  └─ sf_demo      engine demo and benchmark (phase 1)
+│  ├─ sf_demo      engine demo and benchmark (phase 1)
+│  ├─ sf_asset_check  checks delivered .glb models against the art brief (§10)
+│  ├─ sf_icon_gen  writes the placeholder icons and cursors (assets/icons, assets/ui/cursors)
+│  └─ sf_ra_extract  turns the player's own Red Alert sounds into WAV (runs only on their machine)
 ├─ assets/  data/  docs/
 ```
 

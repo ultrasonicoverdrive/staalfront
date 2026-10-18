@@ -210,6 +210,75 @@ fn a_layer_must_be_an_8_bit_grayscale_png() {
     assert!(matches!(err, MapError::Png { .. }), "{err}");
 }
 
+/// A 2 x 2 PNG in the given colour type and bit depth, with a palette when
+/// `indexed`. `rows` are the packed sample bytes of the whole image (two rows
+/// of one byte each, since two samples of at most 4 bits fit in one byte).
+fn small_png(color: png::ColorType, depth: png::BitDepth, rows: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, 2, 2);
+    encoder.set_color(color);
+    encoder.set_depth(depth);
+    if color == png::ColorType::Indexed {
+        // Six grey entries, one per terrain id; the palette makes the file a
+        // picture a paint program would happily save, which is the trap.
+        let palette: Vec<u8> = (0..6u8).flat_map(|i| [i * 40, i * 40, i * 40]).collect();
+        encoder.set_palette(palette);
+    }
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(rows).unwrap();
+    writer.finish().unwrap();
+    out
+}
+
+/// A layer a paint program saved with a palette (indexed colour) or with fewer
+/// than 8 bits is refused, not misread: the sample value would be a palette
+/// index or a packed pair of cells, both of which look like valid terrain ids.
+#[test]
+fn a_paletted_or_4_bit_layer_is_refused_not_misread() {
+    // 2 x 2 pixels at 4 bits: one byte per row (two samples of 4 bits each).
+    let four_bit = small_png(
+        png::ColorType::Grayscale,
+        png::BitDepth::Four,
+        &[0x01, 0x23],
+    );
+    // 2 x 2 pixels at 8 bits palette index: two bytes per row.
+    let paletted = small_png(png::ColorType::Indexed, png::BitDepth::Eight, &[0, 1, 2, 3]);
+    // Same palette picture at 4 bits, the form most paint programs write.
+    let paletted_4 = small_png(png::ColorType::Indexed, png::BitDepth::Four, &[0x01, 0x23]);
+    // The same four cells as a plain 8-bit grayscale PNG load: the refusals
+    // below are about the file kind, not the size or the ids.
+    let plain = encode_gray("t.png", &[0, 1, 2, 3], png::BitDepth::Eight, (2, 2)).unwrap();
+    assert!(parse_two_by_two(&plain).is_ok());
+    for (what, bytes, expected) in [
+        ("4-bit grayscale", four_bit, "got 4-bit"),
+        ("paletted 8-bit", paletted, "Indexed"),
+        ("paletted 4-bit", paletted_4, "Indexed"),
+    ] {
+        let err = parse_two_by_two(&bytes).unwrap_err();
+        let text = err.to_string();
+        assert!(
+            matches!(err, MapError::Image { .. })
+                && text.contains("8-bit grayscale PNG")
+                && text.contains(expected)
+                && text.contains("t.png"),
+            "{what}: {text}"
+        );
+    }
+}
+
+/// An 8 x 8 m map (2 x 2 cells) with `terrain` as its `t.png`.
+fn parse_two_by_two(terrain: &[u8]) -> Result<Map, MapError> {
+    let text = "(width: 8, height: 8, height_scale: 4.0, materials: [\"a\"], \
+                heightmap: \"h.png\", material_map: \"m.png\", terrain_map: Some(\"t.png\"))";
+    Map::parse_with(
+        text,
+        &height_png(9, 9),
+        &cells_png(8, 8, 0),
+        Some(terrain),
+        &TerrainTypes::embedded(),
+    )
+}
+
 #[test]
 fn the_header_and_the_given_bytes_must_agree_about_the_layer() {
     // Named but not given: `parse` cannot read files.

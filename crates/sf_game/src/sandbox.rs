@@ -69,6 +69,16 @@ const SIDES: [Side; 3] = [
     },
 ];
 
+/// The faction that sits at `owner`'s seat in the sandbox, from [`SIDES`] (the
+/// one table of seats); `None` for any other owner number. The roster uses it
+/// to pick the model of a unit by its owner.
+pub fn faction_of_owner(owner: u8) -> Option<Faction> {
+    SIDES
+        .iter()
+        .find(|side| side.owner == owner)
+        .map(|side| side.faction)
+}
+
 /// Whether `side` gets this role: its faction is among the role's, and it is
 /// not a vessel.
 fn belongs_to(def: &UnitDef, side: &Side) -> bool {
@@ -234,11 +244,25 @@ mod tests {
     use sf_data::map::generate::generate_cells;
     use sf_sim::WorldConfig;
 
+    #[test]
+    fn every_seat_of_the_table_has_its_faction_and_no_other_owner_has_one() {
+        for side in &SIDES {
+            assert_eq!(faction_of_owner(side.owner), Some(side.faction));
+        }
+        let seats: Vec<u8> = SIDES.iter().map(|s| s.owner).collect();
+        for owner in 0..=u8::MAX {
+            if !seats.contains(&owner) {
+                assert_eq!(faction_of_owner(owner), None, "owner {owner}");
+            }
+        }
+    }
+
     fn world_for(cells: u32, seed: u32) -> (World, UnitDefs) {
         let defs = UnitDefs::embedded();
         let map = generate_cells(cells, cells, seed);
         let config = WorldConfig::new(1).with_map_size(cells, cells);
         let world = make_world(config, &map)
+            .unwrap()
             .with_units(sf_bridge::unit_table(&defs).unwrap())
             .unwrap();
         // With the movement costs, as the game runs it: the spawn refusal of

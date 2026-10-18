@@ -131,12 +131,7 @@ pub struct Roster {
 /// ([`sandbox::MERIDIAN`], [`sandbox::VEYRAN`], [`sandbox::NEUTRAL`]); `None`
 /// for any other number, which is drawn with the generic model of its role.
 pub fn faction_of_owner(owner: u8) -> Option<Faction> {
-    match owner {
-        sandbox::MERIDIAN => Some(Faction::Meridian),
-        sandbox::VEYRAN => Some(Faction::Veyran),
-        sandbox::NEUTRAL => Some(Faction::Neutral),
-        _ => None,
-    }
+    sandbox::faction_of_owner(owner)
 }
 
 fn icon_of(icon: DataIcon) -> IconShape {
@@ -1051,6 +1046,7 @@ mod tests {
         let map = generate_cells(256, 256, 1);
         let config = sf_sim::WorldConfig::new(1).with_map_size(256, 256);
         let mut world = crate::playfield::make_world(config, &map)
+            .unwrap()
             .with_units(sf_bridge::unit_table(&defs).unwrap())
             .unwrap();
         crate::sandbox::schedule(&mut world, &defs);
