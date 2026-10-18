@@ -292,7 +292,11 @@ and WP4.7 (replan) are in as well.
   radius is a realistic 1.5 cells (6 m) in the shipped data and the frozen copies; `bridge_200` runs 4,600
   ticks and has one test for each wheeled radius of the review sweep; `bridge_200` and `crowd_jam`
   re-pinned, `orders`, `terrain_costs`, `pathing`, `pathing_256` and `turning` re-pinned for the radius
-  alone), `docs/rules/collision.md`, `docs/rules/turning.md`: done
+  alone; second round after the review of PR #55: a block of units is separated on the tick it is
+  placed, the slack of a crowd held up on its destination is bounded by the disc of the group, the
+  slots held are looked up in a grid, the crowd pass is back at the speed of WP4.4, and `bridge_200`
+  gains the 90-tank block and the goal one cell west as tests), `docs/rules/collision.md`,
+  `docs/rules/turning.md`: done
 - WP4.6 and WP4.7: open
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
@@ -427,25 +431,55 @@ were pressed together stayed overlapped because nobody was moving them. Now a un
 comes within six cells of the outermost slot of its class: the first one nearest the goal that no
 held slot of any class lies near and that it can walk to straight; a stuck unit lets go and takes
 another; a unit pressing on a crowd that stands on its destination (the five hover craft are single
-walkers) counts as arrived farther out the longer it has pressed; a unit that has just stopped is
+walkers) counts as arrived farther out the longer it has pressed, up to 1.3 times the radius of the
+disc the group's bodies fill; a unit that has just stopped is
 pushed clear if it came to rest against a neighbour; a settled crowd (unit left alone for a second)
 closes up toward the point it was sent to, a sixteenth of a cell a tick, straight at it or slid up to
 83 degrees away from straight; and the overlap bound holds whatever presses (`COMPRESS`,
-`MOVER_OVERLAP`, `HARD_OVERLAP`). The wheeled radius is 1.5 cells. **Tested:** one `bridge_200` test for
-each of 1.25, 1.5, 1.6, 1.75 and 2.0 with the radius replaced in the movement table (all pass, last
-arrival tick 3,396 to 3,587, farthest 8.1 to 9.5 cells against 9.58, worst overlap 0.19 at the spawn
-tick); in probes, when the work was done, also every radius from 1.05 to 3.0 (25 values), hover radii 1
-to 4, the turn on the spot at 60 and 1000 thousandths, and four other mixes of the block: all pass.
-`crowd_perf`: 66 ticks a second in release (15.2 ms a tick, the slowest 27.4 ms) against 87 (11.5, 19.2)
-before. **Re-pinned once:** `bridge_200` (`0x03b3145755a9081e` to `0x831cd1eaff2b1307`) and `crowd_jam`
-(`0x3d8fab0ab9a564e6` to `0x4ac3f990f7070f48`) by the arrival logic and the radius; `orders`
-(`0x0dcb52425f1adc60` to `0xf8fbe06cc8a51962`), `terrain_costs` (`0xdc9d5c4a65a60508` to
-`0xacd34a784a0fd0be`), `pathing` (`0x606eb6feeffa964c` to `0x398d625625dce5c1`), `pathing_256`
-(`0x7c4e31d024ed4cf9` to `0x016c2b5ef7c7e055`) and `turning` (`0xb07ba8066dd59884` to
-`0xd894752d6d192f8d`) by the radius alone (with 1.25 put back they give their old values);
-`wander_5000`, `command_mix`, `terrain_256` and `units_spawn` did not move. **Choices:** the scenario
-runs 4,600 ticks and the test limit is tick 4,400 (the last arrival is 3,200 to 4,200 over the radii
-and mixes tried: the gap in the wall behind the bridge passes about one unit in ten ticks, and the
+`MOVER_OVERLAP`, `HARD_OVERLAP`), the tick the units are placed on included. The wheeled radius is 1.5
+cells. **Tested:** one `bridge_200` test for each of 1.25, 1.5, 1.6, 1.75 and 2.0 with the radius
+replaced in the movement table (all pass, last arrival tick 3,399 to 3,858, farthest 8.6 to 8.8 cells
+against 9.58, worst overlap 0.17 to 0.19), three for a block of 90 tanks in place of the 90 riflemen
+(1.25, 1.5 and 2.0: farthest 10.2 to 10.4 against 10.65, worst overlap 0.20) and one for the goal one
+cell west at 1.5 (farthest 8.80; it was 9.66 in the first round, over the limit); in probes, when the
+first round was done, also every radius from 1.05 to 3.0 (25 values), hover radii 1 to 4, the turn on
+the spot at 60 and 1000 thousandths, and four other mixes of the block: all pass. A sweep of 112
+variants (`sweep_of_variants`, ignored) is clean in 109 and leaves a unit stuck against the west face of
+the wall in three, as the code of the first round does in three others (not the arrival logic: the
+route through the gap).
+**Review round 2 (PR #55).** (1) A block of 90 tanks overlapped by 0.27 on the first tick at every
+radius: a unit placed this tick (`CrowdState::fresh`) now makes the pass run `separate` again and again,
+up to 64 times, until it moves nobody, so a block placed on a grid is within 3/16 of a cell on the tick
+it is placed; the 9 by 9 block of bodies a cell and a half wide is a test. (2) The slack of a crowd held
+up on its destination grew without end: it is bounded by 1.3 times the radius of the disc of the group
+(every member knows it: `CrowdState::disc`, worked out when the group order is given, so it outlives the
+fields; 4 cells for a unit ordered with too few others to be a group), and the cell and a half round a
+unit's own slot counts whatever the disc (`orders::crowd_arrival_radius`); the test asks that nobody
+counted as arrived beyond that. (3) The arrival docs said 3,200 to 4,200; the sweep says 2,998 to 3,979
+(the reviewer saw 4,318 in the first round), the limit stays at 4,400 and is justified in
+`bridge_200.rs` and `collision.md`. (4) `LOOK`, 400 against at most 256 slots, never limited anything
+and is gone. (5) The cost of a claim: the slots held are sorted into a grid for the claim (exactly the
+answers of looking at every one, tested against that), a few thousand steps where it was up to 65,000
+for every class; but a profile of `crowd_perf` (callgrind, then timers) showed the claims were under one
+per cent of it, and the time was in the neighbour loops of the passes and of the checks WP4.4b added:
+the index now hands out a row of three buckets as one stretch and keeps position and body beside each
+slot, most neighbours are dropped by their distance along one axis, the weights are worked out only for
+a pair that overlaps, and the two checks are skipped on a tick whose last pass found nothing
+overlapping. None of it changes a checksum. `crowd_perf`: **84 to 88 ticks a second** in release
+(11.4 to 11.9 ms a tick, the slowest 17 ms once 29 ms) against 69 to 71 (14.1 to 14.5 ms, the slowest
+18 to 27 ms) in the first round, and 85 to 98 for WP4.4 measured in the same hour. (6) The margin of the
+goal one cell west is 0.8 cells instead of -0.08; it and the 90-tank block are tests.
+**Re-pinned** (old to new, once per round): after the first round `bridge_200`
+(`0x03b3145755a9081e` to `0x831cd1eaff2b1307`) and `crowd_jam` (`0x3d8fab0ab9a564e6` to
+`0x4ac3f990f7070f48`) by the arrival logic and the radius; `orders` (`0x0dcb52425f1adc60` to
+`0xf8fbe06cc8a51962`), `terrain_costs` (`0xdc9d5c4a65a60508` to `0xacd34a784a0fd0be`), `pathing`
+(`0x606eb6feeffa964c` to `0x398d625625dce5c1`), `pathing_256` (`0x7c4e31d024ed4cf9` to
+`0x016c2b5ef7c7e055`) and `turning` (`0xb07ba8066dd59884` to `0xd894752d6d192f8d`) by the radius alone
+(with 1.25 put back they give their old values); after the second `bridge_200`
+(`0x831cd1eaff2b1307` to `0x381782548cc1782a`) and `crowd_jam` (`0x4ac3f990f7070f48` to
+`0x09e9bf488ce69401`); `wander_5000`, `command_mix`, `terrain_256` and `units_spawn` did not move,
+nor did the other five in the second round. **Choices:** the scenario runs 4,600 ticks and the test
+limit is tick 4,400 (the gap in the wall behind the bridge passes about one unit in ten ticks, and the
 criterion is that everybody arrives, not when); a claim is kept after the order ends and let go at the
 next order; at most 16 units take a slot in a tick (the cost of a crowd that arrives at once). **Tried
 and not kept**, so nobody tries them again: slots beyond the ring for a class whose ring is walled off
@@ -454,12 +488,13 @@ arrival order (an elongated blob toward the entrance, about half the packing den
 obstacles that a mover goes round first and shoves only after waiting (pile-ups, overlap 0.5); a
 smaller shove allowance of 1.5 to 2 cells (movers could not get through; units never arrived and
 many ended outside the disc); the settled units walking back to their own slots instead of closing up (their slots
-were taken by the units that had been pushed in). **Not done on purpose:** formations (WP4.6, which
-will replace the rings), the replan (WP4.7), a better route through the gap of `bridge_200` (the field
-leads everybody to the same corner: it is the bottleneck of the scenario and a pathing matter), and
-slots for a class below the threshold of 8 for a flowfield (the five hover craft are single walkers
-with no slot among the crowd; they rely on the arrival slack that grows with the time they have pressed
-on it).
+were taken by the units that had been pushed in); a bound on the slack by the disc of the fields alive
+(the fields are gone by the time the last single walkers press on the crowd). **Not done on purpose:**
+formations (WP4.6, which will replace the rings), the replan (WP4.7), a better route through the gap of
+`bridge_200` (the field leads everybody to the same corner: it is the bottleneck of the scenario and a
+pathing matter, and the cause of the stragglers of the sweep), and slots for a class below the
+threshold of 8 for a flowfield (the five hover craft are single walkers with no slot among the crowd;
+they rely on the arrival slack that grows with the time they have pressed on it, within the bound).
 
 ## Phase 1 report (draft, WP1.14)
 

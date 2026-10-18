@@ -169,7 +169,11 @@ impl Entities {
         self.order[i] = Order::Idle;
         self.queue[i] = OrderQueue::EMPTY;
         self.guard_walking[i] = false;
-        self.crowd[i] = CrowdState::default();
+        self.crowd[i] = CrowdState {
+            settle: true,
+            fresh: true,
+            ..CrowdState::default()
+        };
         self.turn_carry[i] = 0;
         self.turret[i] = row.facing;
         self.prev_turret[i] = row.facing;

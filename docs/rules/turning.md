@@ -252,17 +252,21 @@ everywhere**:
 
 | wheeled radius | result |
 |---|---|
-| 1.25 | passes; the last unit arrives on tick 3,475 |
-| 1.5 (ships) | passes; the last unit arrives on tick 3,411, the farthest ends 9.08 cells out (limit 9.58) |
-| 1.6 | passes; tick 3,409 |
-| 1.75 | passes; tick 3,396, worst overlap 0.19 (the spawn tick; none higher in the run) |
-| 2.0 | passes; tick 3,587 |
+| 1.25 | passes; the last unit arrives on tick 3,492, the farthest ends 8.59 cells out (limit 9.58) |
+| 1.5 (ships) | passes; the last unit arrives on tick 3,593, the farthest ends 8.63 cells out |
+| 1.6 | passes; tick 3,858, the farthest 8.80 |
+| 1.75 | passes; tick 3,399, the farthest 8.73 |
+| 2.0 | passes; tick 3,408, the farthest 8.82 |
+
+(Worst overlap in the run 0.17 to 0.19 at every radius; the first tick, on which the block of
+units is placed, is clean since the second review round, which also added the variants: 90 tanks in
+place of the riflemen at 1.25, 1.5 and 2.0, and the goal one cell west at 1.5.)
 
 There is one test for each of those radii (`phase_four_holds_at_a_wheeled_radius_of_*` in
 `tools/sf_headless/tests/bridge_200.rs`, which replaces the radius in the movement table with a
 test-only knob and asks for every way the run misses the criterion at once); the full numbers of the
-run and the wider sweeps (1.05 to 3.0, the hover class, the turn on the spot, other mixes of the block)
-are in `collision.md`, "Measured".
+run and the wider sweeps (112 variants of the block: `sweep_of_variants`) are in `collision.md`,
+"Measured".
 
 **The shipped radius is now 1.5 cells (6 m)**, a realistic truck, and it is data, for the balance
 rounds: since the criterion no longer depends on it, changing it is no longer a risk to phase 4. The

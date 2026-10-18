@@ -59,8 +59,13 @@
 //! The scratch arrays are sized by the number of slots and reused; a uniform grid of
 //! buckets, at least as wide as the biggest pair distance, is rebuilt by a counting
 //! sort in slot order before each pass. A pass looks at the nine buckets round each
-//! active unit. [`PASSES`] passes at most, and none when nothing overlaps; nothing
-//! at all when no unit walks an order and no idle unit is still settling.
+//! active unit, as three stretches (the buckets of a row are one after the other), and
+//! the position and size of every body is copied into the index, so that looking at a
+//! neighbour is a read of what lies next to the last one; the cost of a tick is the
+//! number of neighbours looked at, and most are told apart by the distance along one
+//! axis (`apart_on_an_axis`) before any product of wide numbers. [`PASSES`] passes at
+//! most, and none when nothing overlaps; nothing at all when no unit walks an order
+//! and no idle unit is still settling.
 
 use sf_math::hash::Fnv1a64;
 use sf_math::{Facing, Fx, Vec2};
@@ -226,6 +231,14 @@ const DEEP_MAX: usize = 4096;
 /// The most `separate` moves a unit, in cells.
 pub const SEPARATE_CAP: Fx = Fx::from_ratio(1, 4);
 
+/// How many times `separate` runs on the tick units are placed (WP4.4b): the units of a
+/// scenario or a spawn are put down on a grid of cells, and bodies wider than a cell
+/// overlap their neighbours all through the block. One round only moves the units at
+/// the edge of it, since the pushes of a neighbour on each side cancel; the next
+/// brings the layer inside it, and so on, so the block spreads out until it is within
+/// [`HARD_OVERLAP`] on the tick it is placed. Later ticks run it once.
+const SPAWN_ROUNDS: usize = 64;
+
 /// A unit that has come this near a new best distance to its waypoint has made
 /// progress.
 pub const PROGRESS_EPS: Fx = Fx::from_ratio(1, 32);
@@ -248,6 +261,17 @@ pub const CROWD_ARRIVE: Fx = Fx::from_ratio(3, 2);
 /// Each sidestep a unit has tried without getting anywhere widens that radius by
 /// this many cells: a crowd sent to one point has no room for everybody on it.
 pub const CROWD_ARRIVE_STEP: Fx = Fx::from_int(2);
+
+/// A crowd held up on its destination counts as arrived no farther out than this part
+/// (13 tenths) of the radius of the disc its bodies fill (`Pathing::group_disc`): the
+/// slack that grows with each sidestep must not let a unit count as arrived at any
+/// distance. The unit's own slot, and the slack of [`CROWD_ARRIVE`] round it, always
+/// count.
+pub const CROWD_ARRIVE_DISC: Fx = Fx::from_ratio(13, 10);
+
+/// The same bound for a group that has no field to measure a disc by (fewer than the
+/// units that get one): a few bodies fill little ground, in cells.
+pub const CROWD_ARRIVE_ALONE: Fx = Fx::from_int(4);
 
 /// A unit that has been blocked for a while and is within this many cells of a
 /// waypoint of its route takes the waypoint as reached.
@@ -330,10 +354,19 @@ pub(crate) struct CrowdState {
     /// The settled unit cannot close up any further: it is left alone until something
     /// touches it or moves next to it.
     pub home_rest: bool,
+    /// The radius of the disc the bodies of the group the unit was ordered with fill,
+    /// in cells: zero for a unit that was not ordered with enough others to be a group
+    /// (`Pathing::group_order`). Bounds how far out the slack of a crowd held up on its
+    /// destination lets the unit count as arrived (`orders::go_to`). Cleared by the next
+    /// order.
+    pub disc: Fx,
     /// The unit has just stopped (its order ended): the crowd pass looks at it once,
     /// so that a unit that came to rest overlapping a neighbour is pushed clear of it
     /// instead of staying so for good. Set by `orders`, cleared by the pass.
     pub settle: bool,
+    /// The unit was placed this tick (set by `Entities::fill`, cleared by the pass,
+    /// which then separates the whole block of units placed with it, `SPAWN_ROUNDS`).
+    pub fresh: bool,
     // ---- scratch within a tick ----
     /// The order walked this tick (a waypoint to steer at).
     pub walking: bool,
@@ -404,6 +437,10 @@ impl CrowdState {
             h.write_u8(0xC1);
             h.write_u32(self.claim.serial);
             h.write_u32(u32::from(self.claim.slot));
+        }
+        if self.disc != Fx::ZERO {
+            h.write_u8(0xC4);
+            h.write_fx(self.disc);
         }
         if let Some(home) = self.home {
             h.write_u8(0xC2 | u8::from(self.home_rest) << 1);
@@ -501,8 +538,14 @@ impl Body {
 
 /// The smallest distance between the middles of two bodies.
 fn min_distance(a: &Body, b: &Body) -> Fx {
-    let sum = a.radius + b.radius;
-    if a.small && b.small {
+    distance_between(a.radius, a.small, b.radius, b.small)
+}
+
+/// [`min_distance`] from the radii and the sizes of the two bodies.
+#[inline(always)]
+fn distance_between(ra: Fx, small_a: bool, rb: Fx, small_b: bool) -> Fx {
+    let sum = ra + rb;
+    if small_a && small_b {
         sum.mul_int(SOFT_NUM).div_int(SOFT_DEN)
     } else {
         sum
@@ -523,6 +566,31 @@ struct Index {
     start: Vec<u32>,
     fill: Vec<u32>,
     items: Vec<u32>,
+    /// What the passes ask of every neighbour, in the order of `items`: copied into the
+    /// index so that a stretch of a bucket row is read in one go instead of by a
+    /// lookup of the position and the body of each slot (the cost of a pass is the
+    /// number of neighbours it looks at). Valid as long as the index is: it is built
+    /// from the positions at that moment.
+    packed: Vec<Near>,
+}
+
+/// A body as the index holds it: its slot, its position and what its distance to
+/// another body depends on.
+#[derive(Copy, Clone, Debug)]
+struct Near {
+    id: u32,
+    small: bool,
+    radius: Fx,
+    at: Vec2,
+}
+
+impl Near {
+    const EMPTY: Near = Near {
+        id: 0,
+        small: false,
+        radius: Fx::ZERO,
+        at: Vec2::ZERO,
+    };
 }
 
 impl Index {
@@ -558,29 +626,57 @@ impl Index {
         self.fill.copy_from_slice(&self.start[..n]);
         self.items.clear();
         self.items.resize(count, 0);
+        self.packed.clear();
+        self.packed.resize(count, Near::EMPTY);
         for (i, b) in bodies.iter().enumerate() {
             if b.role != Role::None {
                 let (bx, by) = self.bucket(e.pos[i]);
                 let at = (by * self.across + bx) as usize;
-                self.items[self.fill[at] as usize] = i as u32;
+                let place = self.fill[at] as usize;
+                self.items[place] = i as u32;
+                self.packed[place] = Near {
+                    id: i as u32,
+                    small: b.small,
+                    radius: b.radius,
+                    at: e.pos[i],
+                };
                 self.fill[at] += 1;
             }
         }
     }
 
-    /// The participants in the nine buckets round `p`, ascending within a bucket.
-    fn near(&self, p: Vec2) -> impl Iterator<Item = u32> + '_ {
+    /// The participants in the nine buckets round `p`, as up to three stretches, one for
+    /// each row of buckets and ascending within a bucket. The buckets of a row lie one
+    /// after the other in `items`, so the three of a row are one stretch of it, in the
+    /// same order as taking them one by one.
+    fn rows(&self, p: Vec2) -> impl Iterator<Item = &[u32]> + '_ {
         let (bx, by) = self.bucket(p);
         let (x0, x1) = (bx.saturating_sub(1), (bx + 1).min(self.across - 1));
         let (y0, y1) = (by.saturating_sub(1), (by + 1).min(self.down - 1));
-        (y0..=y1).flat_map(move |y| {
-            (x0..=x1).flat_map(move |x| {
-                let b = (y * self.across + x) as usize;
-                self.items[self.start[b] as usize..self.start[b + 1] as usize]
-                    .iter()
-                    .copied()
-            })
+        (y0..=y1).map(move |y| {
+            let row = (y * self.across) as usize;
+            let from = self.start[row + x0 as usize] as usize;
+            let to = self.start[row + x1 as usize + 1] as usize;
+            &self.items[from..to]
         })
+    }
+
+    /// [`Index::rows`] with the position and the body of each participant.
+    fn stretches(&self, p: Vec2) -> impl Iterator<Item = &[Near]> + '_ {
+        let (bx, by) = self.bucket(p);
+        let (x0, x1) = (bx.saturating_sub(1), (bx + 1).min(self.across - 1));
+        let (y0, y1) = (by.saturating_sub(1), (by + 1).min(self.down - 1));
+        (y0..=y1).map(move |y| {
+            let row = (y * self.across) as usize;
+            let from = self.start[row + x0 as usize] as usize;
+            let to = self.start[row + x1 as usize + 1] as usize;
+            &self.packed[from..to]
+        })
+    }
+
+    /// The participants in the nine buckets round `p`, ascending within a bucket.
+    fn near(&self, p: Vec2) -> impl Iterator<Item = u32> + '_ {
+        self.rows(p).flat_map(|row| row.iter().copied())
     }
 }
 
@@ -613,6 +709,12 @@ struct Scratch {
     /// Bodies that overlapped another beyond the slack in some pass of this tick,
     /// pushed or not: the ones the checks after the passes look at.
     lapped: Vec<bool>,
+    /// A unit with a body was placed this tick.
+    fresh: bool,
+    /// The passes ended because a look at every pair found none overlapping beyond the
+    /// slack: nothing has moved since, so no pair is deeper than the bounds of
+    /// `hold_back` and `separate` and they are not run.
+    passes_clear: bool,
     /// Movers that an idle friend was in the way of this tick.
     idle_hit: Vec<bool>,
     /// Movers that gave way to one ahead of them going the same way this tick: a
@@ -648,11 +750,24 @@ impl Scratch {
             self.in_line.resize(slots, false);
         }
         self.movers.clear();
+        self.fresh = false;
+        self.passes_clear = false;
         self.settling.clear();
         self.active.clear();
         self.dirty.clear();
         self.touched.clear();
     }
+}
+
+/// Whether two bodies `diff` apart are clear of each other, told by the cheap test: at
+/// least `dmin` apart along an axis. Exact for what it says (the squared distance of such
+/// a pair is at least `dmin` squared, whatever the rounding), so every pair it answers
+/// is one the squared test would have answered the same; the pairs it does not answer
+/// are looked at by the full test. Almost all the neighbours of a body in the nine
+/// buckets round it are clear this way, without a multiplication of wide numbers.
+#[inline(always)]
+fn apart_on_an_axis(diff: Vec2, dmin: Fx) -> bool {
+    diff.x.abs() >= dmin || diff.y.abs() >= dmin
 }
 
 /// The crowd pass of a world: its settings, the shapes of the unit kinds, the
@@ -792,6 +907,10 @@ impl Crowd {
                 }
                 e.crowd[i].settle = false;
             }
+            if e.crowd[i].fresh {
+                e.crowd[i].fresh = false;
+                self.scratch.fresh |= body.role != Role::None;
+            }
         }
         self.stats.peak_bodies = self.stats.peak_bodies.max(count);
         if self.scratch.movers.is_empty() && self.scratch.settling.is_empty() {
@@ -923,13 +1042,19 @@ impl Work<'_, '_> {
                 // are written. A pair of two active units is done from the lower.
                 let mut near = std::mem::take(&mut self.sc.near);
                 near.clear();
-                for v in self.sc.index.near(pu) {
-                    if v as usize == u
-                        || (self.sc.active_mark[v as usize] == epoch && (v as usize) < u)
-                    {
-                        continue;
+                let (ru, su) = (self.bodies[u].radius, self.bodies[u].small);
+                for row in self.sc.index.stretches(pu) {
+                    for n in row {
+                        let vi = n.id as usize;
+                        if vi == u || (self.sc.active_mark[vi] == epoch && vi < u) {
+                            continue;
+                        }
+                        let dmin = distance_between(ru, su, n.radius, n.small);
+                        if apart_on_an_axis(pu - n.at, dmin) {
+                            continue;
+                        }
+                        near.push(n.id);
                     }
-                    near.push(v);
                 }
                 for &v in &near {
                     if self.pair(e, u, v as usize, pass, epoch) {
@@ -939,6 +1064,7 @@ impl Work<'_, '_> {
                 self.sc.near = near;
             }
             if contacts == 0 {
+                self.sc.passes_clear = true;
                 break;
             }
             busy = true;
@@ -955,16 +1081,16 @@ impl Work<'_, '_> {
         let (bu, bv) = (&self.bodies[u], &self.bodies[v]);
         let dmin = min_distance(bu, bv);
         let diff = e.pos[u] - e.pos[v];
-        if diff.length_squared() >= dmin.square() {
+        if apart_on_an_axis(diff, dmin) || diff.length_squared() >= dmin.square() {
             return false;
         }
-        let (mut wu, mut wv) = (self.weight(u, v), self.weight(v, u));
         let dist = diff.length();
         // Overlapping means closer than the slack allows; the push brings the
         // pair to half the slack, so the next look finds nothing to do.
         if dist + SLOP >= dmin {
             return false;
         }
+        let (mut wu, mut wv) = (self.weight(u, v), self.weight(v, u));
         let pen = dmin - dist - SLOP.div_int(2);
         self.sc.lapped[u] = true;
         self.sc.lapped[v] = true;
@@ -1175,11 +1301,18 @@ impl Work<'_, '_> {
         let cfg = self.cfg;
         // The index of the final positions, for the free spots.
         self.sc.index.build(e, self.bodies);
-        let held = self.hold_back(e);
-        if held {
+        // When the last pass found no pair overlapping beyond the slack nothing has moved
+        // since, so no mover is deeper than `MOVER_OVERLAP` and no pair than
+        // `HARD_OVERLAP` (both are more than the slack): the two checks have nothing to find.
+        let looked = !self.sc.passes_clear || self.sc.fresh;
+        if looked && self.hold_back(e) {
             self.sc.index.build(e, self.bodies);
         }
-        if self.separate(e) {
+        let rounds = if self.sc.fresh { SPAWN_ROUNDS } else { 1 };
+        for _ in 0..rounds {
+            if !looked || !self.separate(e) {
+                break;
+            }
             self.sc.index.build(e, self.bodies);
         }
         for k in 0..self.sc.movers.len() {
@@ -1316,19 +1449,23 @@ impl Work<'_, '_> {
                 continue;
             }
             let pu = e.pos[u];
-            for v in self.sc.index.near(pu) {
-                let v = v as usize;
-                if v == u {
-                    continue;
-                }
-                let diff = pu - e.pos[v];
-                let dmin = min_distance(&self.bodies[u], &self.bodies[v]);
-                // Almost every pair is clear of it: no square root for those.
-                if diff.length_squared() >= (dmin - HARD_OVERLAP).square() {
-                    continue;
-                }
-                if self.may_give_way(u, v) && deep.len() < DEEP_MAX {
-                    deep.push((u as u32, v as u32));
+            let (ru, su) = (self.bodies[u].radius, self.bodies[u].small);
+            for row in self.sc.index.stretches(pu) {
+                for n in row {
+                    let v = n.id as usize;
+                    if v == u {
+                        continue;
+                    }
+                    let diff = pu - n.at;
+                    let deep_at = distance_between(ru, su, n.radius, n.small) - HARD_OVERLAP;
+                    // Almost every pair is clear of it: no square root for those.
+                    if apart_on_an_axis(diff, deep_at) || diff.length_squared() >= deep_at.square()
+                    {
+                        continue;
+                    }
+                    if self.may_give_way(u, v) && deep.len() < DEEP_MAX {
+                        deep.push((u as u32, v as u32));
+                    }
                 }
             }
         }
@@ -1435,7 +1572,8 @@ impl Work<'_, '_> {
                         return true;
                     }
                     let dmin = min_distance(&self.bodies[u], &self.bodies[v]) - SLOP.div_int(2);
-                    (to - e.pos[v]).length_squared() >= dmin.square()
+                    let diff = to - e.pos[v];
+                    apart_on_an_axis(diff, dmin) || diff.length_squared() >= dmin.square()
                 });
                 if free {
                     steps.push((u as u32, to, HOME_STEP));
@@ -1473,16 +1611,19 @@ impl Work<'_, '_> {
 
     /// The deepest overlap of unit `u`, were it at `at`, with any other body, in
     /// cells (zero when it overlaps none).
-    fn deepest(&self, e: &Entities, u: usize, at: Vec2) -> Fx {
+    fn deepest(&self, u: usize, at: Vec2) -> Fx {
         let mut deepest = Fx::ZERO;
-        for v in self.sc.index.near(at) {
-            let v = v as usize;
-            if v == u {
-                continue;
-            }
-            let dmin = min_distance(&self.bodies[u], &self.bodies[v]);
-            if (at - e.pos[v]).length_squared() < dmin.square() {
-                deepest = deepest.max(dmin - (at - e.pos[v]).length());
+        let (ru, su) = (self.bodies[u].radius, self.bodies[u].small);
+        for row in self.sc.index.stretches(at) {
+            for n in row {
+                if n.id as usize == u {
+                    continue;
+                }
+                let dmin = distance_between(ru, su, n.radius, n.small);
+                let diff = at - n.at;
+                if !apart_on_an_axis(diff, dmin) && diff.length_squared() < dmin.square() {
+                    deepest = deepest.max(dmin - diff.length());
+                }
             }
         }
         deepest
@@ -1501,8 +1642,8 @@ impl Work<'_, '_> {
             if before == e.pos[u] || !self.sc.lapped[u] {
                 continue;
             }
-            let here = self.deepest(e, u, e.pos[u]);
-            if here > MOVER_OVERLAP && self.deepest(e, u, before) < here {
+            let here = self.deepest(u, e.pos[u]);
+            if here > MOVER_OVERLAP && self.deepest(u, before) < here {
                 back.push((u as u32, before, here));
             }
         }

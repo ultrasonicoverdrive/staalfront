@@ -773,6 +773,20 @@ impl Pathing {
         if threshold == 0 || self.graphs.is_empty() || started.len() < threshold {
             return;
         }
+        // The disc the bodies of the group fill, for the bound on how far out a crowd
+        // held up on its destination counts as arrived (`orders::go_to`): one
+        // `spacing * spacing` of ground to each body. Every member knows it, whether or
+        // not its class gets a field, and it outlives the fields.
+        let mut area = Fx::ZERO;
+        for &i in started {
+            if e.alive[i] && e.def[i] != NO_DEF {
+                area += slots::spacing_for(units.at(e.def[i] as usize).size).square();
+            }
+        }
+        let disc = area.mul_div(Fx::from_int(113), Fx::from_int(355)).sqrt();
+        for &i in started {
+            e.crowd[i].disc = disc;
+        }
         // The classes that get a field: their members, the widest body, whether
         // all are small, and the fastest speed.
         struct Class {

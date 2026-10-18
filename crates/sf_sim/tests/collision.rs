@@ -940,6 +940,94 @@ fn a_group_of_a_hundred_riflemen_fits_five_cells_and_a_hundred_tanks_need_far_mo
     );
 }
 
+// --- bodies placed on top of each other (WP4.4b) ---
+
+/// Places `n` by `n` units of `kind` one cell apart, all on the same tick, and steps once.
+fn place_block(w: &mut World, kind: Kind, n: i32) -> Vec<EntityId> {
+    let tick = w.tick();
+    let first = w.slot_count() as u32;
+    let mut ids = Vec::new();
+    for k in 0..n * n {
+        ids.push(EntityId::new(first + k as u32, 0));
+        w.schedule(
+            tick,
+            PlayerId(0),
+            Command::SpawnUnit {
+                kind,
+                pos: cells(10 + k % n, 10 + k / n),
+                owner: PlayerId(0),
+            },
+        )
+        .unwrap();
+    }
+    w.step();
+    ids
+}
+
+#[test]
+fn a_block_of_wide_bodies_placed_a_cell_apart_is_clear_of_overlap_on_the_tick_it_is_placed() {
+    // A body one and a half cells wide on every cell: each overlaps its neighbours by half
+    // a cell, and the pushes of a neighbour on each side cancel, so only the edge of the
+    // block gives way in a round. The block spreads until it is within the bound of the
+    // crowd pass (three sixteenths of a cell) before the first tick is over.
+    for n in [3, 6, 9] {
+        let mut w = open_world();
+        let ids = place_block(&mut w, BIG, n);
+        let worst = worst_overlap(&w, &ids);
+        assert!(
+            worst <= fx(3, 16),
+            "a block of {n} by {n} overlaps by {worst:?} on the tick it is placed"
+        );
+    }
+}
+
+#[test]
+fn a_block_that_was_cleared_stays_where_it_is_and_units_placed_later_do_not_move_it() {
+    let mut w = open_world();
+    let ids = place_block(&mut w, BIG, 5);
+    let after: Vec<Vec2> = ids.iter().map(|&id| pos(&w, id)).collect();
+    // Nobody is touching it: it stays put, tick after tick...
+    run(&mut w, 30);
+    assert_eq!(after, ids.iter().map(|&id| pos(&w, id)).collect::<Vec<_>>());
+    // ...and a unit placed far away on a later tick disturbs nobody.
+    let far = spawn(&mut w, BIG, 0, cells(40, 40));
+    assert_eq!(pos(&w, far), cells(40, 40));
+    assert_eq!(after, ids.iter().map(|&id| pos(&w, id)).collect::<Vec<_>>());
+}
+
+#[test]
+fn what_is_placed_on_the_tick_does_not_depend_on_the_order_the_commands_are_listed_in() {
+    let run_block = |reverse: bool| {
+        let mut w = open_world();
+        let tick = w.tick();
+        let first = w.slot_count() as u32;
+        let mut order: Vec<i32> = (0..25).collect();
+        if reverse {
+            order.reverse();
+        }
+        for k in order {
+            w.schedule(
+                tick,
+                PlayerId(0),
+                Command::SpawnUnit {
+                    kind: BIG,
+                    pos: cells(10 + k % 5, 10 + k / 5),
+                    owner: PlayerId(0),
+                },
+            )
+            .unwrap();
+        }
+        w.step();
+        let mut places: Vec<Vec2> = (0..25u32)
+            .map(|k| pos(&w, EntityId::new(first + k, 0)))
+            .collect();
+        places.sort_by_key(|p| (p.x.raw(), p.y.raw()));
+        places
+    };
+    // The set of places the block ends in is the same.
+    assert_eq!(run_block(false), run_block(true));
+}
+
 // --- the arrival logic of a group (WP4.4b) ---
 
 /// A world with terrain (so that group orders make flowfields and slots) and one

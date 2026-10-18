@@ -19,9 +19,10 @@
 //! arrive, none stuck; at most 1 % end further from the goal than 1.3 times the radius
 //! of a disc whose area is the sum of the units' `spacing * spacing` (`packing_radius`,
 //! 7.37 cells here); no two bodies overlap by more than a quarter of a cell during the
-//! run (every tick after the first step; see `worst_overlap`) or 1/16 of a cell at the end. The test
-//! also prints how many are outside five cells. See `docs/rules/collision.md`,
-//! "Arrival".
+//! run (every tick from the first on, the tick the units are placed on included: the crowd
+//! pass clears the overlap of a block placed on a grid on that tick, `SPAWN_ROUNDS`) or 1/16
+//! of a cell at the end. The test also prints how many are outside five cells. See
+//! `docs/rules/collision.md`, "Arrival".
 //!
 //! **The criterion does not depend on the turning radius of the wheeled class** (WP4.4b).
 //! After WP4.5 it held at 1.25 cells and failed at 1.5, 1.6, 1.75 and 2.0, which showed
@@ -30,6 +31,14 @@
 //! (`scenario_with_wheeled_radius`, a test-only knob: the frozen definitions keep the
 //! shipped radius) and ask `Run::misses` for every way the run falls short of the
 //! criterion, one case for each radius the reviewers swept. The shipped radius is 1.5.
+//! The same is asked of two variants of the block (`scenario_variant`): **90 tanks in
+//! place of the 90 riflemen** (the vehicles are wider than the cell they are placed on, so
+//! the block starts overlapped all through) at radii 1.25, 1.5 and 2.0, and **the goal one
+//! cell west** (79, 32) at 1.5, which put one unit past the disc (9.66 against 9.58) before the
+//! second round of WP4.4b. `Run::misses` also asks that no unit counted as arrived farther
+//! out than the disc, or a cell and a half beyond its own slot: the slack of a crowd held up
+//! on its destination is bounded (`orders::crowd_arrival_radius`). `sweep_of_variants` (ignored:
+//! it takes minutes) runs 112 variants and prints one line each; the limits below are read off it.
 //!
 //! The same crowd without flowfields (`flowfield_threshold: Some(0)`) is run as
 //! the comparison: 195 single requests instead of three fields.
@@ -40,7 +49,7 @@ use std::collections::BinaryHeap;
 use std::sync::OnceLock;
 
 use common::scenario_path;
-use sf_headless::scenario::Scenario;
+use sf_headless::scenario::{Action, Scenario};
 use sf_math::{Fx, Vec2};
 use sf_sim::{Cell, EntityId, Order, TurnMode, World};
 
@@ -49,10 +58,18 @@ const GOAL: (u32, u32) = (80, 32);
 const W: u32 = 96;
 const H: u32 = 64;
 
-/// The tick by which every unit has arrived. The measured last arrival is between 3,200
-/// and 3,800 for the radii the sweep tried (it depends on how the queue at the gap in the
-/// wall happens to fall), so this is a bound with room, not a prediction: the criterion
-/// is that everybody arrives, not when.
+/// The tick by which every unit has arrived. The last arrival measured over the 109 runs of
+/// `sweep_of_variants` in which everybody arrived (four radii, the 90-tank mix, seven goals,
+/// another seed) lies between 2,998 and 3,979, and the worst seen in any state of the code
+/// (the reviewer's sweep of the first round of WP4.4b) is 4,318. It depends on how the
+/// queue at the one-lane gap in the wall happens to fall: the gap passes a unit in about
+/// ten ticks, 195 of them take 1,950 ticks from the first at the gap, and the stalls of a
+/// queue add a thousand and more. So this is a bound with room (80 ticks above the worst
+/// seen, 420 above the sweep), not a prediction: the criterion is that everybody
+/// arrives, not when. A unit that has not arrived by it does not arrive later (the three
+/// stragglers of the sweep were still on the west face of the wall when their runs were
+/// lengthened to tick 9,000: they are stuck, not slow), so the limit separates nothing
+/// that a longer one would let through.
 const ARRIVE_BY: u64 = 4400;
 
 /// The tick the crossing took when the units had no bodies (the slowest being a
@@ -69,16 +86,31 @@ fn id(slot: u32) -> EntityId {
     EntityId::new(slot, 0)
 }
 
-fn goal() -> Vec2 {
+/// The middle of the cell the scenario's order sends everybody to.
+fn goal_of(scenario: &Scenario) -> Vec2 {
+    let (x, y) = scenario
+        .commands
+        .iter()
+        .find_map(|c| match &c.command {
+            Action::OrderMove { target, .. } => Some(*target),
+            _ => None,
+        })
+        .expect("the scenario sends the crowd somewhere");
     Vec2::new(
-        Fx::from_i64(i64::from(GOAL.0)) + Fx::HALF,
-        Fx::from_i64(i64::from(GOAL.1)) + Fx::HALF,
+        Fx::from_i64(i64::from(x)) + Fx::HALF,
+        Fx::from_i64(i64::from(y)) + Fx::HALF,
     )
 }
 
 /// What a run of the scenario saw.
 struct Run {
     world: World,
+    /// Where the crowd was sent.
+    goal: Vec2,
+    /// How far from the goal each unit was on the tick its order ended (zero until then),
+    /// and how far its own arrival slot lies from it (none: it held no slot).
+    arrival_distance: Vec<Fx>,
+    arrival_slot: Vec<Option<Fx>>,
     /// The number of the tick on which each unit's order ended.
     arrived: Vec<Option<u64>>,
     /// The first tick any unit of each class had moved, by class number.
@@ -105,10 +137,10 @@ struct Run {
     history: Vec<u64>,
     budget: u32,
     /// The worst overlap of two bodies at the end of any tick of the run (the
-    /// first step on), in raw fixed point, and when. The state the scenario spawns
-    /// them in is not part of the run: the units are placed one to a cell and the
-    /// tanks are wider than that (0.35 of a cell over at tick 0, before the crowd
-    /// pass has had a tick).
+    /// first step on, the one the units are placed in), in raw fixed point, and when.
+    /// The units are placed one to a cell and the tanks are wider than that (0.35 of a
+    /// cell over, a block of tanks a half more); the crowd pass separates the block on
+    /// the tick it is placed (`SPAWN_ROUNDS`), so that tick is already clean.
     worst_overlap: (i64, u64),
     /// The longest a unit stood (moved less than a hundredth of a cell a tick) with
     /// its order not done, in ticks.
@@ -131,8 +163,12 @@ fn keep(ra: Fx, rb: Fx) -> Fx {
 fn run_scenario(scenario: &Scenario) -> Run {
     let mut world = scenario.build_world().unwrap();
     let budget = world.path_stats().budget;
+    let goal = goal_of(scenario);
     let mut r = Run {
         world: world.clone(),
+        goal,
+        arrival_distance: vec![Fx::ZERO; UNITS as usize],
+        arrival_slot: vec![None; UNITS as usize],
         arrived: vec![None; UNITS as usize],
         class_first_move: [None; 4],
         all_moving: None,
@@ -223,6 +259,9 @@ fn run_scenario(scenario: &Scenario) -> Run {
                 && world.order_of(unit) == Some(Order::Idle)
             {
                 r.arrived[s as usize] = Some(tick);
+                r.arrival_distance[s as usize] = (pos - goal).length();
+                r.arrival_slot[s as usize] =
+                    world.claimed_slot_of(unit).map(|p| (p - goal).length());
             }
         }
         r.on_bridge = r.on_bridge.max(on_bridge);
@@ -275,6 +314,39 @@ fn scenario_with_wheeled_radius(hundredths: i64) -> Scenario {
     scenario
 }
 
+/// The rifleman and the light tank of the block (permanent kind numbers).
+const RIFLEMAN: u16 = 12;
+const LIGHT_TANK: u16 = 19;
+
+/// A variant of the block: the scenario with the wheeled radius replaced and, when asked,
+/// the riflemen and the light tanks swapped (the 90 riflemen become 90 tanks, which
+/// are wider than the cell they are placed on) and/or the goal moved.
+fn scenario_variant(
+    hundredths: i64,
+    swap_foot_and_tanks: bool,
+    goal: Option<(i32, i32)>,
+) -> Scenario {
+    let mut scenario = scenario_with_wheeled_radius(hundredths);
+    for c in &mut scenario.commands {
+        match &mut c.command {
+            Action::SpawnUnit { kind, .. } if swap_foot_and_tanks => {
+                if *kind == RIFLEMAN {
+                    *kind = LIGHT_TANK;
+                } else if *kind == LIGHT_TANK {
+                    *kind = RIFLEMAN;
+                }
+            }
+            Action::OrderMove { target, .. } => {
+                if let Some(g) = goal {
+                    *target = g;
+                }
+            }
+            _ => {}
+        }
+    }
+    scenario
+}
+
 impl Run {
     fn last_arrival(&self) -> u64 {
         self.arrived.iter().flatten().max().copied().unwrap_or(0)
@@ -282,7 +354,7 @@ impl Run {
 
     fn outside(&self, cells: Fx) -> Vec<u32> {
         (0..UNITS)
-            .filter(|&s| (self.world.get(id(s)).unwrap().pos - goal()).length() > cells)
+            .filter(|&s| (self.world.get(id(s)).unwrap().pos - self.goal).length() > cells)
             .collect()
     }
 
@@ -295,6 +367,20 @@ impl Run {
             .map(|s| {
                 let r = self.world.collision_radius_of(id(s)).unwrap();
                 let d = keep(r, r).raw() as f64 / ORTH as f64;
+                d * d
+            })
+            .sum();
+        (area / std::f64::consts::PI).sqrt()
+    }
+
+    /// [`Run::packing_radius`] with the spacing of the slots in place of the distance the
+    /// bodies keep: a sixteenth of a cell more for each (`slots::GAP`), which is what the
+    /// sim measures the disc of a group by.
+    fn slot_radius(&self) -> f64 {
+        let area: f64 = (0..UNITS)
+            .map(|s| {
+                let r = self.world.collision_radius_of(id(s)).unwrap();
+                let d = keep(r, r).raw() as f64 / ORTH as f64 + 1.0 / 16.0;
                 d * d
             })
             .sum();
@@ -322,7 +408,7 @@ impl Run {
 
     fn farthest(&self) -> Fx {
         (0..UNITS)
-            .map(|s| (self.world.get(id(s)).unwrap().pos - goal()).length())
+            .map(|s| (self.world.get(id(s)).unwrap().pos - self.goal).length())
             .max()
             .unwrap()
     }
@@ -381,6 +467,27 @@ impl Run {
                 self.worst_overlap.1
             ));
         }
+        // Nobody counts as arrived farther out than 1.3 times the disc the group's slots
+        // fill, apart from the cell and a half round its own slot that has always counted
+        // (`CROWD_ARRIVE`): the slack of a crowd held up on its destination is bounded
+        // (`orders::crowd_arrival_radius`). The disc is that of the spacings of the slots
+        // (a body and a sixteenth), a little wider than the one of the bodies above.
+        let round_the_slot = Fx::from_ratio(3, 2);
+        let slots_limit = Fx::from_ratio((self.slot_radius() * 1.3 * 1000.0) as i64, 1000);
+        let far: Vec<u32> = (0..UNITS)
+            .filter(|&s| {
+                let allowed = self.arrival_slot[s as usize]
+                    .map_or(slots_limit, |slot| slots_limit.max(slot + round_the_slot));
+                self.arrival_distance[s as usize] > allowed
+            })
+            .collect();
+        if !far.is_empty() {
+            out.push(format!(
+                "{} counted as arrived outside {slots_limit:?} cells (or a cell and a half beyond \
+                 their slots): {far:?}",
+                far.len()
+            ));
+        }
         let end = self.worst_end_overlap();
         if end > ORTH / 16 {
             out.push(format!(
@@ -402,12 +509,14 @@ impl Run {
         let stats = self.world.crowd_stats();
         let limit = Fx::from_ratio((self.packing_radius() * 1.3 * 1000.0) as i64, 1000);
         format!(
-            "last arrival {}, outside {:?}: {}, farthest {:?}, worst overlap {:.3} (tick {}), end \
-             overlap {:.3}, longest still {}, sidesteps {}, replans {}, shoves {}",
+            "last arrival {}, outside {:?}: {}, farthest {:?}, farthest when arrived {:?}, worst \
+             overlap {:.3} (tick {}), end overlap {:.3}, longest still {}, sidesteps {}, \
+             replans {}, shoves {}",
             self.last_arrival(),
             limit,
             self.outside(limit).len(),
             self.farthest(),
+            self.arrival_distance.iter().max().unwrap(),
             self.worst_overlap.0 as f64 / ORTH as f64,
             self.worst_overlap.1,
             self.worst_end_overlap() as f64 / ORTH as f64,
@@ -424,9 +533,19 @@ impl Run {
 /// A case: the scenario with the wheeled turning radius replaced, run, and every way
 /// it falls short of the criterion reported at once.
 fn phase_four_holds_at(hundredths: i64) -> Run {
-    let r = run_scenario(&scenario_with_wheeled_radius(hundredths));
+    phase_four_holds_for("", hundredths, false, None)
+}
+
+/// [`phase_four_holds_at`] for a variant of the block (see [`scenario_variant`]).
+fn phase_four_holds_for(
+    what: &str,
+    hundredths: i64,
+    swap_foot_and_tanks: bool,
+    goal: Option<(i32, i32)>,
+) -> Run {
+    let r = run_scenario(&scenario_variant(hundredths, swap_foot_and_tanks, goal));
     eprintln!(
-        "bridge_200 at a wheeled radius of {}.{:02} cells: {}",
+        "bridge_200{what} at a wheeled radius of {}.{:02} cells: {}",
         hundredths / 100,
         hundredths % 100,
         r.summary()
@@ -434,7 +553,7 @@ fn phase_four_holds_at(hundredths: i64) -> Run {
     let misses = r.misses();
     assert!(
         misses.is_empty(),
-        "wheeled radius {hundredths}/100 cells: {misses:?}"
+        "{what} wheeled radius {hundredths}/100 cells: {misses:?}"
     );
     r
 }
@@ -465,6 +584,70 @@ fn phase_four_holds_at_a_wheeled_radius_of_1_75() {
 #[test]
 fn phase_four_holds_at_a_wheeled_radius_of_2() {
     phase_four_holds_at(200);
+}
+
+/// The 90 riflemen are 90 tanks and the 60 tanks are 60 riflemen: a block that starts
+/// overlapped all through (a tank is 1.2 cells across, placed one to a cell).
+#[test]
+fn phase_four_holds_with_ninety_tanks_at_a_wheeled_radius_of_1_25() {
+    phase_four_holds_for(" with 90 tanks", 125, true, None);
+}
+
+#[test]
+fn phase_four_holds_with_ninety_tanks_at_a_wheeled_radius_of_1_5() {
+    phase_four_holds_for(" with 90 tanks", 150, true, None);
+}
+
+#[test]
+fn phase_four_holds_with_ninety_tanks_at_a_wheeled_radius_of_2() {
+    phase_four_holds_for(" with 90 tanks", 200, true, None);
+}
+
+/// The goal one cell west of the shipped one: the crowd's disc comes a cell nearer the wall.
+#[test]
+fn phase_four_holds_with_the_goal_one_cell_west_at_a_wheeled_radius_of_1_5() {
+    phase_four_holds_for(" with the goal at (79, 32)", 150, false, Some((79, 32)));
+}
+
+/// The sweep the limits of this file were read off: the block as it is and with 90 tanks,
+/// seven goals (the shipped one and six a cell or two away), four wheeled radii and two
+/// seeds, 112 runs of about four seconds each. Prints one line for each (`cargo test
+/// --release -p sf_headless --test bridge_200 sweep_of_variants -- --ignored
+/// --nocapture`) and asserts nothing: a few runs end with a unit stuck against the wall
+/// on its way to the gap (the crowd presses it along the wall, away from the gap), in the
+/// block of WP4.4 as much as in this one, and that is a matter of the route through
+/// the gap (WP4.7), not of the arrival logic.
+#[test]
+#[ignore = "112 runs, about eight minutes"]
+fn sweep_of_variants() {
+    let goals: [Option<(i32, i32)>; 7] = [
+        None,
+        Some((79, 32)),
+        Some((81, 32)),
+        Some((80, 31)),
+        Some((80, 33)),
+        Some((78, 32)),
+        Some((80, 30)),
+    ];
+    for swap in [false, true] {
+        for goal in goals {
+            for hundredths in [125, 150, 175, 200] {
+                for other_seed in [false, true] {
+                    let mut scenario = scenario_variant(hundredths, swap, goal);
+                    if other_seed {
+                        scenario.seed ^= 0x55;
+                    }
+                    let r = run_scenario(&scenario);
+                    eprintln!(
+                        "SWEEP tanks={swap} goal={goal:?} radius={hundredths} other_seed={other_seed}: \
+                         {} MISSES {:?}",
+                        r.summary(),
+                        r.misses()
+                    );
+                }
+            }
+        }
+    }
 }
 
 // --- the references: a plain search of the whole grid --------------------------------
@@ -597,7 +780,7 @@ fn at_most_one_percent_end_outside_the_disc_that_holds_the_bodies() {
     let limit = Fx::from_ratio((packing * 1.3 * 1000.0) as i64, 1000);
     let outside = r.outside(limit);
     let farthest = (0..UNITS)
-        .map(|s| (r.world.get(id(s)).unwrap().pos - goal()).length())
+        .map(|s| (r.world.get(id(s)).unwrap().pos - r.goal).length())
         .max()
         .unwrap();
     eprintln!(

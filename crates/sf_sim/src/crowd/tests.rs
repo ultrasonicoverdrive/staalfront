@@ -296,3 +296,28 @@ fn a_slot_taken_is_in_the_hash_but_does_not_keep_the_crowd_pass_awake() {
     // A unit that took none hashes as it did before WP4.4b.
     assert_eq!(hash(&rest), hash(&CrowdState::default()));
 }
+
+#[test]
+fn the_disc_of_a_group_is_in_the_hash_but_does_not_keep_the_crowd_pass_awake() {
+    let hash = |c: &CrowdState| {
+        let mut h = Fnv1a64::new();
+        c.write_hash(&mut h);
+        h.finish()
+    };
+    let disc = |r: i64| CrowdState {
+        disc: Fx::from_int(r as i32),
+        ..CrowdState::default()
+    };
+    // Like the slot, it is state that later arrivals depend on and no reason to stay awake.
+    assert!(disc(5).at_rest());
+    assert_ne!(hash(&CrowdState::default()), hash(&disc(5)));
+    assert_ne!(hash(&disc(5)), hash(&disc(6)));
+    // A new order forgets it (`orders::begin`), and a unit without one hashes as before.
+    assert_eq!(
+        hash(&CrowdState::default()),
+        hash(&CrowdState {
+            disc: Fx::ZERO,
+            ..disc(5)
+        })
+    );
+}
