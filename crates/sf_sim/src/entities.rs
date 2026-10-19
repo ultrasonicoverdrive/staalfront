@@ -16,6 +16,7 @@ use crate::ids::{EntityId, Kind, PlayerId};
 use crate::orders::{Order, OrderQueue};
 use crate::path::Routes;
 use crate::terrain::NO_CELL;
+use crate::weapons::{REST, WeaponState};
 
 /// The `def` column value of an entity that has no entry in the unit table
 /// (every legacy `Spawn` wanderer and `Place` structure).
@@ -114,6 +115,9 @@ pub(crate) struct Entities {
     /// The formation the unit marches in, and where it stands in it (WP4.6); none for
     /// everything that is not part of one. Hashed in the formation section.
     pub form: Vec<Member>,
+    /// The reload and the running burst of each weapon slot (WP5.1); at rest for
+    /// everything that has not fired. Hashed in the weapons section while some slot is not.
+    pub weapon: Vec<WeaponState>,
 }
 
 impl Entities {
@@ -150,6 +154,7 @@ impl Entities {
         self.prev_turret.push(Facing::default());
         self.turret_target.push(None);
         self.form.push(Member::NONE);
+        self.weapon.push(REST);
         index
     }
 
@@ -184,6 +189,7 @@ impl Entities {
         self.prev_turret[i] = row.facing;
         self.turret_target[i] = None;
         self.form[i] = Member::NONE;
+        self.weapon[i] = REST;
         self.route.reset(i);
     }
 
@@ -214,6 +220,7 @@ impl Entities {
         self.prev_turret[i] = Facing::default();
         self.turret_target[i] = None;
         self.form[i] = Member::NONE;
+        self.weapon[i] = REST;
         self.route.reset(i);
     }
 }

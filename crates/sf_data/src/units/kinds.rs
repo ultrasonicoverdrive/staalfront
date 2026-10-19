@@ -9,7 +9,9 @@
 //! A record that is removed leaves a **tombstone** in the file's `retired_*`
 //! list (`(kind: 12, name: "old_role")`), so that its number is never handed
 //! out again. A live record that uses a retired number is refused, and so are
-//! two records with the same number.
+//! two records with the same number. The retired id is not reused either: a
+//! live record that carries the name of a tombstone is refused, so an old save
+//! or scenario that names the removed entry never finds a different one.
 
 use serde::Deserialize;
 
@@ -64,6 +66,17 @@ pub(crate) fn check(
                 format!(
                     "{what} \"{}\": kind {} is already used by \"{}\"",
                     a.name, a.kind, other.name
+                ),
+            ));
+        }
+        if let Some(t) = retired.iter().find(|t| t.name == a.name) {
+            return Err(src.error_at_record(
+                key,
+                a.name,
+                0,
+                format!(
+                    "{what} \"{}\": the {key} was retired with kind {} and is never reused",
+                    a.name, t.kind
                 ),
             ));
         }
@@ -142,5 +155,8 @@ mod tests {
         assert!(e.message.contains("already retired"), "{e}");
         let e = check(src, "unit", "id", 5, &live(&[(6, "a")]), &[]).unwrap_err();
         assert!(e.message.contains("above the largest"), "{e}");
+        // The id of a tombstone is not reused under another number either.
+        let e = check(src, "unit", "id", 100, &live(&[(8, "old")]), &old).unwrap_err();
+        assert!(e.message.contains("retired with kind 7"), "{e}");
     }
 }

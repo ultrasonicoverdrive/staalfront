@@ -858,6 +858,100 @@ Open follow-ups, carried over:
    including the mode of the last tick, which is hashed) and the formation list with the rest.
 10. **A real-time check on the reference laptop** of 2,000 units with several formations has not been made (the
    headless numbers above are for this machine).
+11. **`formation_sweep` has one geometry.** Add a second one: the one-cell corridor gives vehicle-only groups
+   of 12 and 16 at 1.34 and 1.32 times their no-formation time (WP4.6 review). The sweep's bounds were chosen on
+   the one map of `formation_move` (an open field, a passage three cells wide, an open field), so a narrower
+   passage is where the next margin is likely to be thin.
+12. **Strung-out starting positions are not swept.** A 24-cell column takes 1.34 times the time while it closes
+   up (WP4.6 review); the sweep starts every group in a block. Add column and ragged starts of several lengths.
+13. **The end-overlap margin is thin.** 19 vehicles into a 5-wide corridor end at an overlap of 0.060 of a cell
+   against the limit of 0.0625 (1/16) (WP4.6 review): a small change of the arrival moves it over. Either widen
+   the margin (the arrival slots) or sweep corridor widths 3 to 8 for the end overlap, as the sweep does for the
+   time.
+
+## Phase 5 — Combat
+
+Status: WP5.1 is in; WP5.2 to WP5.6 are not started.
+
+- WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
+  the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
+  turns the definitions into `sf_sim::WeaponTable`, which a world is given with `World::with_weapons`; every
+  entity keeps a reload and a burst counter per weapon slot, in a new last checksum section `W` that is written
+  only while one is running; a unit with an `Attack` order fires an instant-hit placeholder; the
+  `weapons_reload` scenario; no pinned checksum moved), `docs/rules/weapons.md`: done
+
+### WP5.1 notes
+
+**What existed and was extended, not rebuilt.** `weapon_defs.ron` (range, minimum range, reload, damage,
+damage type, projectile kind, splash), the permanent `kind` and the `retired_weapons` tombstones, the validation
+with file and line, `SimWeaponDef`, `UnitStats::weapon_range` (the first weapon's range, what `Order::Attack`
+walks to) and the weapon reach digest in the orders section of the checksum were all there from WP3.1 to WP3.4.
+New: the fields below, a tombstone that also protects the **id** (for every list with tombstones), the
+turret-mount check on the units, the sim side (`sf_sim::weapons`), the bridge function and the scenario.
+
+**Data.** `burst` and `burst_delay` (the reload counts from the first shot of a burst, so the cadence is the
+reload whatever the burst; a burst that leaves no rest is refused), `projectile_speed`, `flight_height` and
+`guide_turn` (only for the kinds that use them; `Instant` takes none), `mount` (`Hull` or `Turret`; a turret mount
+needs a unit with a `turret_rate`) and `fire_arc` (half the arc in facing steps, 0 to 128). All optional with
+defaults that change nothing: the five frozen copies of the definitions under `assets/scenarios/*_defs/` predate
+them and still load, which `crates/sf_data/tests/weapons.rs` checks. Times are refused unless they are whole ticks
+(no silent rounding); distances round to the nearest 1/65536; a speed per tick is rounded once from the exact decimal.
+The placeholder set got speeds, heights, a rocket that steers, the turret mounts of the tanks and the howitzer,
+and two bursts that keep the damage of a reload (the twin cannon: 2 x 30 where it fired 60; the automated gun: 4 x 5
+where it fired 20). Seven hitscan weapons are now `Instant` (they were `Straight` placeholders).
+
+**Sim.** The weapons are a table of their own (`WeaponTable`: the weapons and which kind carries which, in slot
+order), not new fields of `UnitStats`, so the digests that the pinned scenarios fix (`UnitTable::digest`, the
+reach digest, the turret digest) are untouched; `World::with_weapons` checks the table against the unit table (a
+loadout for a missing kind, a first weapon whose range is not the kind's `weapon_range`, a kind with a reach and
+no weapon, a turret mount on a kind without a turret). A world that is not given a table has no weapons and hashes
+nothing about them. State per entity and slot: `wait` (ticks until it may fire) and `burst_left`. They count down
+whatever the unit is doing, so changing orders does not reload a weapon; a burst that cannot go on is dropped and
+the weapon waits the tail of the reload.
+
+**The placeholder, and why it is in WP5.1.** The brief asked for the data to be exercised. Reload state with
+nothing that fires could only be tested by poking the entity columns; a unit with an `Attack` order that is in
+reach, reloaded and aimed fires an instant hit that takes `damage` off the victim's hit points (saturating at
+zero), and a `Shot` is recorded for the tick (`World::shots`, `StepReport::shots`; derived, not hashed). Not
+done there on purpose: the projectile kind, the damage type, the splash and the armor (WP5.2, WP5.3); any order
+other than `Attack`, any choice of target (WP5.4); removing a victim at zero (WP5.5: it stays, is not shot again,
+and the attacker keeps its order); a check of whose unit the victim is. `sf_game` does not give its world a table
+yet: nothing there would show a shot and a unit shot to zero would stand as before.
+
+**Checksums.** The weapon section is last and written only while some live entity has a slot that is not at rest,
+so a world without a table, and one whose weapons never fired or have all reloaded, hashes as before. No pinned value
+moved: `wander_5000` 0x38d5e3c43358a889, `command_mix` 0x43f6583004258ceb, `terrain_256` 0xb577112845e0097e,
+`units_spawn` 0x6c369f42be150d6e, `bridge_200` 0x03971fcc3548fc0c, and `orders`, `terrain_costs`, `pathing`,
+`pathing_256`, `crowd_jam`, `turning`, `replan` and `formation_move` (`orders`, `turning` and `replan` have attack orders in them but no
+`combat: true` and so no table). New: `weapons_reload` (below).
+
+**`weapons_reload`** (`assets/scenarios/weapons_reload.ron`, a frozen copy of the definitions in
+`assets/scenarios/weapons_defs/`, 64 x 64 cells, 600 ticks, `combat: true`): three riflemen on a power plant, a
+light tank and a heavy tank on a heavy tank, a howitzer on a heavy tank ten cells off, a howitzer two cells from a
+rifleman, a rifleman on a scout. Final checksum `0x5a1bca1ebf1efa16`. The run, read off the shots: each rifleman
+fires every 20 ticks (27 shots each from tick 79 or 72, 81 hits on the plant, which ends at 114 of 600); the
+light tank every 40 ticks from tick 23 (35 each, 11 shells); the heavy tank in pairs, the shells 5 ticks apart and
+the pairs 40 (30 each, 18 shells, the last pair at 396 and 401); the first heavy tank is at 10 hit points after
+tick 401 and at **0 at tick 423** by the light tank's shell (925 points of fire into 900, 25 over), after which the heavy
+tank's next pair, due at 436, is not fired; the howitzer every 100 ticks from tick 9 (6 shells of 90, the target
+at 360 of 900); the rifleman on the scout shoots at ticks 1, 21, 41, 61, 81 (25 to 19, 13, 7, 1, 0) and no more; the
+howitzer inside its minimum range never fires; and a rifleman that is stopped at tick 200 and told to attack again
+at tick 205 fires at 219 with the others, not at 205. The same scenario without `combat` fires nothing.
+
+**Deferred, and why.**
+
+1. **Projectiles, armor, splash, target choice, destruction** are WP5.2 to WP5.5.
+2. **`projectile_speed` is not required** for a kind that flies. The frozen copies predate it, and making it a
+   load error would mean editing five frozen directories in this PR; the shipped file is complete (a test checks it).
+   WP5.2, the first to read it, decides whether to require it and refresh the copies.
+3. **A hull-mounted weapon on a unit with a turret is never aimed** by the placeholder: `Order::Attack` leaves the
+   turning to the turret for a unit that has one. No shipped unit has such a weapon. WP5.4 decides who turns what.
+4. **Zero hit points mean two things**: a kind that cannot be damaged (hp 0 in the table) and one that has been
+   shot down. The placeholder treats both as "not a target"; WP5.5 needs to tell them apart (a flag, or a removal).
+5. **`UnitStats::weapon_range` and the weapon table both carry the first weapon's range.** The world refuses a
+   table where they differ; one of them goes when the target choice (WP5.4) reads the table for reach.
+6. **`sf_game` has no weapons yet** (above): one line in the world setup once WP5.4 and WP5.5 land.
+7. **The three follow-ups of the WP4.6 review** are items 11 to 13 of the open items in the Phase 4 close-out.
 
 ## Phase 1 report (draft, WP1.14)
 

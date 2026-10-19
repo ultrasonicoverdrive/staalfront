@@ -17,7 +17,7 @@ use super::classes::{ClassTables, is_valid_name};
 use super::decimal::Decimal;
 use super::error::{DefError, Source};
 use super::kinds::{self, Live, Retired};
-use super::weapon::WeaponDef;
+use super::weapon::{WeaponDef, WeaponMount};
 
 /// Largest speed accepted, cells per second.
 const MAX_SPEED_MILLI: i64 = 20_000;
@@ -655,10 +655,18 @@ impl Ctx<'_> {
             return Err(self.here(format!("more than {MAX_WEAPONS} weapons")));
         }
         for (i, w) in u.weapons.iter().enumerate() {
-            if !self.weapons.iter().any(|d| d.id == *w) {
+            let Some(def) = self.weapons.iter().find(|d| d.id == *w) else {
                 return Err(self.at(
                     w,
                     format!("unknown weapon \"{w}\" (not in weapon_defs.ron)"),
+                ));
+            };
+            if def.mount == WeaponMount::Turret && u.turret_rate == 0 {
+                return Err(self.at(
+                    w,
+                    format!(
+                        "weapon \"{w}\" is mounted on a turret but the unit has no turret_rate"
+                    ),
                 ));
             }
             if u.weapons[..i].contains(w) {

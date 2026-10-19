@@ -26,6 +26,7 @@
 //! | flowfields (`L`), only while the pool holds a field | the pool and the build in flight (WP4.3; since WP4.4 each field also has its group order, its ring, the spacing and the inner radius of its slots) |
 //! | crowd (`K`), only while some live unit remembers being blocked, sidestepping, shoved or crowded | the collision settings, then each such unit in slot order: how long it has not come closer to its waypoint, its sidestep attempts and the best distance seen, a sidestep in progress, how far it has been shoved and for how long left alone, whether it has asked for a new route (WP4.4) |
 //! | turning (`R`), only while some live unit has a turret or an unfinished arc turn | the turret rates of the unit table and the movement table's digest, then each such unit in slot order: the thousandths of a step it has yet to turn and, for a turret, its facing and its target (WP4.5) |
+//! | weapons (`W`), only while some live entity has a weapon that is reloading or in a burst | the weapon table's digest, then each such entity in slot order: for each weapon slot the ticks it waits to fire and the shots left in its burst (WP5.1) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -112,6 +113,14 @@
 //! from its slot. What a tick works out from those (the slots, what each member does) is
 //! not hashed. A world whose move orders never formed one hashes as before.
 //!
+//! The weapons section (WP5.1, `W`) comes last and is written only while some live entity has a
+//! weapon that is not at rest: the digest of the weapon table, then each such entity in slot order
+//! with, for each of its weapon slots, the ticks it still waits to fire and the shots left in a
+//! running burst. A world that was given no weapon table, and a world whose weapons never fired or
+//! have all reloaded, hashes as before: the pinned wanderer scenarios, `units_spawn`, `orders` and
+//! the rest did not move. The shots themselves are not state (the hit points they took are,
+//! in the units section).
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -138,6 +147,7 @@ use crate::command::Command;
 use crate::crowd;
 use crate::entities::NO_DEF;
 use crate::orders::Order;
+use crate::weapons;
 use crate::world::World;
 
 /// Written first. Bump the number when the layout of the hashed bytes changes.
@@ -157,6 +167,7 @@ const SECTION_FIELDS: u8 = b'L';
 const SECTION_CROWD: u8 = b'K';
 const SECTION_TURNING: u8 = b'R';
 const SECTION_FORMATIONS: u8 = b'G';
+const SECTION_WEAPONS: u8 = b'W';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -449,6 +460,25 @@ impl World {
         if self.formations.any() {
             h.write_u8(SECTION_FORMATIONS);
             self.formations.write_hash(&mut h, e);
+        }
+
+        // Weapons (WP5.1): the table and every weapon that is reloading or in a burst.
+        // Only while one is, so a world without weapons, or whose weapons are ready,
+        // hashes as before.
+        if !self.arsenal.is_empty() {
+            let busy = |i: usize| e.alive[i] && !weapons::at_rest(&e.weapon[i]);
+            if (0..slots).any(busy) {
+                h.write_u8(SECTION_WEAPONS);
+                h.write_u64(self.arsenal.table.digest());
+                h.write_u64(len64((0..slots).filter(|&i| busy(i)).count()));
+                for i in (0..slots).filter(|&i| busy(i)) {
+                    h.write_u32(i as u32);
+                    for slot in &e.weapon[i] {
+                        h.write_u32(slot.wait);
+                        h.write_u8(slot.burst_left);
+                    }
+                }
+            }
         }
 
         h.finish()

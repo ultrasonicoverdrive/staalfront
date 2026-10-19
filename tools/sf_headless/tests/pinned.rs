@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan` and `formation_move`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move` and `weapons_reload`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -50,6 +50,8 @@ const TURNING_EXPECTED: &str = include_str!("../../../assets/scenarios/turning.e
 const REPLAN_EXPECTED: &str = include_str!("../../../assets/scenarios/replan.expected");
 const FORMATION_MOVE_EXPECTED: &str =
     include_str!("../../../assets/scenarios/formation_move.expected");
+const WEAPONS_RELOAD_EXPECTED: &str =
+    include_str!("../../../assets/scenarios/weapons_reload.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -185,6 +187,15 @@ fn replan_matches_the_pinned_checksum() {
 #[test]
 fn formation_move_matches_the_pinned_checksum() {
     check("formation_move", FORMATION_MOVE_EXPECTED);
+}
+
+/// Weapons and reload (WP5.1): riflemen, two tanks and two howitzers fire at what their attack
+/// orders name, one shot per reload window, a burst of two, a minimum range, a victim shot down to
+/// zero. A new scenario: pinned when it was added; no other value moved
+/// (`tests/weapons_reload.rs` asserts the shots).
+#[test]
+fn weapons_reload_matches_the_pinned_checksum() {
+    check("weapons_reload", WEAPONS_RELOAD_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
