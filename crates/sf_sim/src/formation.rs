@@ -156,23 +156,23 @@ pub struct FormationConfig {
     /// order does. At least `min_units`, at most [`MAX_MEMBERS`].
     pub max_units: u16,
     /// The spacing of the lattice, as thousandths of what the widest body of the group needs
-    /// (1000 puts bodies side by side). 1000 to 3000.
+    /// (1000 puts bodies side by side). From 1000 to 3000
     pub spacing_permille: u16,
     /// The most a formation may spread, as thousandths of the radius of a disc that holds the
-    /// bodies of the group: a scattered group is pulled in to this. 1000 to 4000.
+    /// bodies of the group: a scattered group is pulled in to this. From 1000 to 4000
     pub spread_permille: u16,
     /// The pace of the formation, as thousandths of the current speed of its slowest member
-    /// (the part it keeps back so that the slowest can keep up). 500 to 1000.
+    /// (the part it keeps back so that the slowest can keep up). From 500 to 1000
     pub pace_permille: u16,
     /// The most speed a member may use to catch up with its slot, as thousandths of its own
-    /// speed. Not less than `pace_permille`, at most 1000.
+    /// speed. Not less than `pace_permille`, at most 1000
     pub catchup_permille: u16,
     /// How far from its slot a member may be and still count as in formation, in tenths of a
     /// cell: farther and the leader waits for it (on open ground), and a unit ahead of its slot
-    /// by more than this waits. 5 to 100.
+    /// by more than this waits. From 5 to 100
     pub reform_tenths: u16,
     /// For how long, in ticks, the leader may wait for stragglers before the formation counts
-    /// as broken; a member away from its slot for twice that leaves. 20 to 2000.
+    /// as broken; a member away from its slot for twice that leaves. From 20 to 2000
     pub patience_ticks: u16,
 }
 
