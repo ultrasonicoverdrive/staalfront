@@ -19,6 +19,8 @@ use core::ops::{Index, IndexMut};
 
 use sf_math::hash::Fnv1a64;
 
+use crate::path::replan::Overlay;
+
 /// Waypoints the ring holds.
 pub const RING_CAP: usize = 8;
 
@@ -97,6 +99,10 @@ pub(crate) struct Route {
     pub field_rank: u16,
     /// A field member whose next step is straight on to its arrival slot.
     pub final_leg: bool,
+    /// The cells this request treats as blocked (WP4.7): the bodies that do not
+    /// move round a stuck unit. Empty for every route but the one a stuck unit
+    /// asks for; cleared when that request is over.
+    pub overlay: Overlay,
     ring: [u32; RING_CAP],
     ring_head: u8,
     ring_len: u8,
@@ -120,6 +126,7 @@ impl PartialEq for Route {
             && self.field_serial == o.field_serial
             && self.field_rank == o.field_rank
             && self.final_leg == o.final_leg
+            && self.overlay == o.overlay
             && self.ring_len() == o.ring_len()
             && (0..self.ring_len()).all(|k| self.ring_get(k) == o.ring_get(k))
             && self.abs_len() == o.abs_len()
@@ -145,6 +152,7 @@ impl Route {
         field_serial: 0,
         field_rank: 0,
         final_leg: false,
+        overlay: Overlay::EMPTY,
         ring: [0; RING_CAP],
         ring_head: 0,
         ring_len: 0,
@@ -283,6 +291,14 @@ impl Route {
             h.write_u32(self.field_serial);
             h.write_u32(u32::from(self.field_rank));
             h.write_u8(u8::from(self.final_leg));
+        }
+        // The overlay of a request (WP4.7); nothing for the routes without one.
+        if !self.overlay.is_empty() {
+            h.write_u8(0xF2);
+            h.write_u8(self.overlay.len() as u8);
+            for &c in self.overlay.cells() {
+                h.write_u32(c);
+            }
         }
     }
 }

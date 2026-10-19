@@ -156,6 +156,14 @@ fn threaded_sim_matches_headless_with_crowd_collisions() {
     threaded_equals_headless("crowd_jam", 120);
 }
 
+#[test]
+fn threaded_sim_matches_headless_with_replans() {
+    let _serial = one_at_a_time();
+    // A structure built in a corridor, a target removed, a goal built over, and a stuck
+    // unit's request for a new route round a unit on hold (WP4.7).
+    threaded_equals_headless("replan", 700);
+}
+
 /// The same, with the sim on its own clock and the commands sent while it
 /// runs, from what the snapshots show: nothing about *when* a command lands is
 /// fixed, but the log says on which tick it did, and a single-threaded world

@@ -155,6 +155,17 @@ pub fn collision_config(settings: &SimSettings) -> sf_sim::CollisionConfig {
     }
 }
 
+/// The replan settings from the settings of `sim.ron` (WP4.7), to hand to
+/// [`World::with_replan`](sf_sim::World::with_replan) (which refuses a combination
+/// that does not fit; `sf_data` has checked the same rules).
+pub fn replan_config(settings: &SimSettings) -> sf_sim::ReplanConfig {
+    sf_sim::ReplanConfig {
+        cooldown: settings.replan_cooldown,
+        max: settings.replan_max,
+        retarget_cooldown: settings.retarget_cooldown,
+    }
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -389,6 +400,24 @@ mod tests {
             World::new(WorldConfig::new(1))
                 .unwrap()
                 .with_collision(bad)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn the_shipped_replan_settings_are_the_simulations_defaults_and_a_world_takes_them() {
+        let config = replan_config(&SimSettings::embedded());
+        assert_eq!(config, sf_sim::ReplanConfig::DEFAULT);
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_replan(config)
+            .unwrap();
+        assert_eq!(world.replan_config(), config);
+        let bad = sf_sim::ReplanConfig { max: 0, ..config };
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_replan(bad)
                 .is_err()
         );
     }

@@ -299,7 +299,8 @@ CI runs it on Linux and Windows against `turning.expected`.
 ## Not here
 
 * **Formations and the pace of a group** (WP4.6): a group still goes at the pace of its own units.
-* **Replanning** (WP4.7): a unit that circles because of a corner it cannot take is not replanned.
+* **Replanning** (WP4.7 is done, `pathfinding.md`): a unit that circles because of a corner it cannot take
+  is not replanned; a unit that is stuck is (`collision.md`).
 * **Fog and visibility**: turret targeting has no fog or visibility check yet; a turret follows any
   target it is told to, seen or not.
 * **Reversing.** A wheeled vehicle never drives backward; the turn on the spot is a stand-in.

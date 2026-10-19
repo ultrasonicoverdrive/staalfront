@@ -210,6 +210,122 @@ impl Fields {
     }
 }
 
+/// How far from the cell of the order a field looks for a goal it can enter when a
+/// structure stands on that cell, in cells: one sector.
+pub(crate) const SUBSTITUTE_RADIUS: u32 = SECTOR_SIZE;
+
+/// How many candidates for the goal are tried before the field gives up on moving it.
+const SUBSTITUTE_TRIES: usize = 8;
+
+/// A cell is not a pocket when the cells that can be walked to from it number at least
+/// this many, or reach [`POCKET_REACH`] cells away.
+const POCKET_CELLS: usize = 40;
+
+/// See [`POCKET_CELLS`]: the half side of the window the walk is made in, in cells.
+const POCKET_REACH: i64 = 6;
+
+/// Side of the window of [`reaches_out`].
+const POCKET_SIDE: usize = 2 * POCKET_REACH as usize + 1;
+
+/// Whether the open cell `(x, y)` is a way out into the rest of the map and not a pocket
+/// the structures (or the rock) have shut round it: a walk by the steps of the class, at
+/// most [`POCKET_CELLS`] cells, in a window of [`POCKET_REACH`] cells each way, that
+/// either gets to the edge of the window or finds that many cells. A fixed amount of
+/// work, no allocation; the answer does not depend on the order of the neighbours. Also
+/// the cells the walk visited, which are a whole pocket when the answer is no.
+fn reaches_out(g: &ClassGraph, x: u32, y: u32) -> (bool, [u32; POCKET_CELLS], usize) {
+    let (x0, y0) = (i64::from(x) - POCKET_REACH, i64::from(y) - POCKET_REACH);
+    let mut seen = [false; POCKET_SIDE * POCKET_SIDE];
+    let mut queue = [(0_i64, 0_i64); POCKET_CELLS];
+    let at = |cx: i64, cy: i64| ((cy - y0) as usize) * POCKET_SIDE + (cx - x0) as usize;
+    let (mut head, mut tail) = (0, 1);
+    queue[0] = (i64::from(x), i64::from(y));
+    seen[at(i64::from(x), i64::from(y))] = true;
+    while head < tail {
+        let (cx, cy) = queue[head];
+        head += 1;
+        if (cx - i64::from(x)).abs() == POCKET_REACH || (cy - i64::from(y)).abs() == POCKET_REACH {
+            return (true, [0; POCKET_CELLS], 0);
+        }
+        for &(dx, dy) in &DIRS {
+            let (nx, ny) = (cx + dx, cy + dy);
+            if nx < 0
+                || ny < 0
+                || nx >= i64::from(g.grid.width())
+                || ny >= i64::from(g.grid.height())
+                || !g.grid.can_step(cx as u32, cy as u32, dx, dy)
+                || seen[at(nx, ny)]
+            {
+                continue;
+            }
+            seen[at(nx, ny)] = true;
+            if tail == POCKET_CELLS {
+                return (true, [0; POCKET_CELLS], 0);
+            }
+            queue[tail] = (nx, ny);
+            tail += 1;
+        }
+    }
+    let mut cells = [0; POCKET_CELLS];
+    for (k, &(qx, qy)) in queue[..tail].iter().enumerate() {
+        cells[k] = g.grid.index(qx as u32, qy as u32);
+    }
+    (false, cells, tail)
+}
+
+/// The cell a field for a group sent to `want` integrates toward (WP4.7): `want` when
+/// the class can enter it, else the nearest cell it can enter within
+/// [`SUBSTITUTE_RADIUS`] (by the squared distance, ties to the lower cell index: the
+/// same on every machine) that is not a pocket ([`reaches_out`]: a cell shut in by the
+/// structure itself is nearer, and no unit could ever walk to it), out of the nearest
+/// [`SUBSTITUTE_TRIES`]; `want` again when there is none, in which case the field
+/// integrates nothing and its units are routed one by one. Also how many cells were
+/// looked at, to charge them.
+pub(crate) fn effective_goal(g: &ClassGraph, want: u32) -> (u32, u32) {
+    let (wx, wy) = g.grid.xy(want);
+    if g.grid.open(i64::from(wx), i64::from(wy)) {
+        return (want, 0);
+    }
+    let r = i64::from(SUBSTITUTE_RADIUS);
+    let (w, h) = (i64::from(g.grid.width()), i64::from(g.grid.height()));
+    let (cx, cy) = (i64::from(wx), i64::from(wy));
+    let mut looked = 0;
+    // The cells of the pockets found so far, which are not tried again.
+    let mut pockets = [0_u32; 4 * POCKET_CELLS];
+    let mut pocketed = 0;
+    for _ in 0..SUBSTITUTE_TRIES {
+        let mut best: Option<(i64, u32)> = None;
+        for y in (cy - r).max(0)..=(cy + r).min(h - 1) {
+            for x in (cx - r).max(0)..=(cx + r).min(w - 1) {
+                looked += 1;
+                if !g.grid.open(x, y) {
+                    continue;
+                }
+                let key = (
+                    (x - cx) * (x - cx) + (y - cy) * (y - cy),
+                    g.grid.index(x as u32, y as u32),
+                );
+                if best.is_none_or(|b| key < b) && !pockets[..pocketed].contains(&key.1) {
+                    best = Some(key);
+                }
+            }
+        }
+        let Some(key) = best else { break };
+        let (kx, ky) = g.grid.xy(key.1);
+        let (out, cells, count) = reaches_out(g, kx, ky);
+        looked += count as u32 + 1;
+        if out {
+            return (key.1, looked);
+        }
+        // A pocket: this cell and the ones it is shut in with are not tried again (when
+        // the list is full the next try may meet it once more, and the tries are few).
+        let room = (pockets.len() - pocketed).min(count);
+        pockets[pocketed..pocketed + room].copy_from_slice(&cells[..room]);
+        pocketed += room;
+    }
+    (want, looked)
+}
+
 /// Stage one of the build.
 fn gather(
     f: &mut Field,
@@ -224,6 +340,14 @@ fn gather(
         c.started = true;
         c.cursor = 0;
         c.found = 0;
+        // A structure may have been built over the cell the group was sent to since
+        // the order was given (WP4.7): the field then leads to the nearest cell the
+        // class can enter, and the slots lie round that. Looked at again at every
+        // build, from the cell of the order, so that a structure taken away gives the
+        // goal back.
+        let (goal, looked) = effective_goal(g, f.want_goal);
+        f.goal = goal;
+        *rem -= ((looked as usize).div_ceil(GATHER_PER_NODE) as u32).min(*rem);
     }
     let total = e.route.len().min(e.len());
     let end = c

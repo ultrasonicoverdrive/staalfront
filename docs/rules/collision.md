@@ -191,16 +191,30 @@ A unit that is blocked does not push harder and does not give up at once.
   sidestep, not a jump), then the order goes on. When no spot is free the attempt is counted all the
   same.
 * **Asks for a new route.** After `stuck_attempts` (3 as shipped) sidesteps in a row that did not
-  help, the next stuck period **asks for a new route**: `Pathing::request_replan` (a unit with a route
-  of its own gets a new search from where it stands and goes on along the waypoints it has until it
-  is ready; a member of a flowfield forgets the leg it chose and recovers from a stranded route and
-  stays on the field) and the unit is **marked** (`World::replan_requested`, until its order changes
-  or ends). This is the hook of WP4.7: the replan that knows about blocked routes and vanished targets
-  will start from this mark and this request path; WP4.4 adds nothing to it but the request.
-* A unit that is **stranded** by terrain with a goal that can be reached (two refused steps, or a
-  cell-by-cell route that was refused) counts quiet ticks too, so it gets the same help. A route that
-  ends short because its goal cannot be reached at all (`unreachable`, `pathfinding.md`) does not:
-  that is WP4.7's.
+  help, the next stuck period **asks for a new route**: `Pathing::request_replan`, and the unit is
+  **marked** (`World::replan_requested`, until its order changes or ends). What the request is
+  (WP4.7, `pathfinding.md`, "Replanning"): the crowd pass looks for the bodies near the unit (within 8
+  cells) that stand still, units on `HoldPosition` and enemies with no order, and hands the cells they
+  fill to the request as an **overlay**, blocked for that request alone, so that the new route goes
+  round them; with none near (what is in the way is walking) it is the plain request of WP4.4 as before
+  (a unit with a route of its own gets a new search from where it stands and goes on along the
+  waypoints it has until it is ready; a member of a flowfield forgets the leg it chose and recovers
+  from a stranded route and stays on the field). With an overlay a member of a flowfield leaves the
+  field, which does not know the body, and is routed on its own.
+* **Limits (WP4.7).** A unit asks at most `replan_max` times in an order (3 as shipped), with at least
+  `replan_cooldown` ticks (100) between two; while the cooldown runs it sidesteps again and its
+  attempts stay at their limit, so the next stuck period asks. A request that finds no way round (the
+  destination cannot be reached with the bodies there) fails: the unit keeps no route, stands, and is
+  stuck again. When it would ask once more than `replan_max` times, the unit **gives the order up**
+  (`CrowdState::give_up`, `CrowdStats::gave_up`): on its next turn the order ends as if it were done, the
+  next queued order starts or the unit is idle where it stands. With the shipped numbers that is after
+  about 1,200 ticks of being stuck (one minute) in the worst case; the count (`World::replans_of`) starts
+  again with the next order.
+* A unit that is **stranded** by terrain with a goal that can be reached (two refused steps, a
+  cell-by-cell route that was refused, or a request with an overlay that found no way) counts quiet
+  ticks too, so it gets the same help. A route that ends short because its goal cannot be reached at
+  all (`unreachable`, `pathfinding.md`) does not: the unit stands where the route ends, the order
+  kept, as before (WP4.7 leaves it so: it is not stuck).
 * **A step the terrain refuses slides**: when a unit that was pushed off the line its route was
   smoothed along grazes a corner, it moves by the part of its step along the obstacle (the longer part
   first) instead of being refused and asking for a cell-by-cell route. The legacy walks do not slide:
@@ -209,7 +223,8 @@ A unit that is blocked does not push harder and does not give up at once.
   the middles of cells and a body is as wide as one: the unit in front is standing on it).
 
 The data are `wait_ticks`, `stuck_ticks` and `stuck_attempts` in `assets/config/sim.ron` (and the
-scenario field `collision: Some(false)` or `World::with_collision` for a world that has none of it).
+scenario field `collision: Some(false)` or `World::with_collision` for a world that has none of it), and
+since WP4.7 `replan_cooldown`, `replan_max` and `retarget_cooldown` (`World::with_replan`).
 
 ## Arrival
 
@@ -350,12 +365,15 @@ each other are parted").
 | wait before a detour | 6 ticks | `wait_ticks` in `sim.ron` |
 | stuck: sidestep to a free spot | 60 ticks | `stuck_ticks` in `sim.ron` |
 | sidesteps before a new route is asked for | 3 | `stuck_attempts` in `sim.ron` |
+| new routes a stuck unit may ask for in one order, then the order is given up (WP4.7) | 3 | `replan_max` in `sim.ron` |
+| ticks between two of them | 100 | `replan_cooldown` in `sim.ron` |
+| bodies that stand still are looked for within | 8 cells | `path::OVERLAY_RANGE` |
 | a crowded unit has arrived within | 1.5 cells (+2 per sidestep) | `CROWD_ARRIVE`, `CROWD_ARRIVE_STEP` |
 | a waypoint is reached when blocked within | 1 cell | `WAYPOINT_CROWD` |
 | slot spacing | the widest body (3/4 of it for infantry) + 1/16 | `slots::spacing_for` |
 | a unit takes its slot within | 6 cells of the outermost slot of its class | `claim::CLAIM_MARGIN` |
 | units that take a slot in a tick | 16 | `claim::CLAIMS_PER_TICK` |
-| units that look for a slot in a tick | 64 | `claim::LOOKS_PER_TICK` |
+| units that look for a slot in a tick (round robin since WP4.7) | 64 | `claim::LOOKS_PER_TICK` |
 | settled bodies may rest in each other by | 3/64 cell (else parted) | `REST_OVERLAP` |
 | cells along a side of the grid over the slots held | 24 | `claim::GRID_SIDE` |
 | a crowd held up counts as arrived no farther than | 1.3 times the radius of its disc (4 cells without a group) | `CROWD_ARRIVE_DISC`, `CROWD_ARRIVE_ALONE` |
@@ -387,7 +405,10 @@ unit in slot order. A unit that never met a crowd is not in it, so a world where
 as before, and so does one with collision turned off. The arrival slots joined section `L`: each
 field also hashes its group order, its ring, its spacing and its inner radius.
 
-WP4.4b adds to section `K` a unit's slot (the field and the place), the point it closes up toward and
+WP4.7 adds to a unit's part of section `K` its replan bookkeeping (the replans of this order, the
+cooldown, the retarget cooldown and the mark that it gives its order up), written only while any of
+them is not zero, and one bit for the give-up in the byte it shares with the replan mark: nothing a
+unit that never replanned would have written changed. WP4.4b adds to section `K` a unit's slot (the field and the place), the point it closes up toward and
 whether it rests, and how long it has been held up in all; to section `L` the table of who holds
 which slot of a field. A unit that never took a slot adds nothing, so `wander_5000`, `command_mix`,
 `terrain_256` and `units_spawn` did not move. **The re-pins of WP4.4b**, once, with the wheeled
@@ -524,9 +545,10 @@ and `bridge_200.ron` runs 4,600 ticks instead of 3,800 (below).
   the turning rules of its class.
 * **Formations** (WP4.6): slots are rings of a lattice, not a shape that keeps; the slowest does not
   set the pace; a group arrives in the order it can.
-* **Replanning** (WP4.7): the request exists and is marked; a replan that knows about blocked routes,
-  a vanished target or a better route is that work package's. Routes and fields still do not know the
-  other units, so a crowd is walked round by pushing and sidestepping, not by a better route.
+* **Replanning** (WP4.7, `pathfinding.md`): a stuck unit's request goes round the bodies that stand
+  still near it, and the order is given up after `replan_max` of them. Routes and fields still do not
+  know the units that *walk*, so a crowd of those is walked round by pushing and sidestepping, not by
+  a better route; the overlay is a snapshot of the bodies of that tick, not a prediction.
 * **Crushing, melee reach and weapons**: an attacker whose weapon reach is less than the sum of the
   radii cannot get in reach of a body (no shipped weapon is that short); infantry does not get run
   over.
@@ -567,3 +589,6 @@ and `bridge_200.ron` runs 4,600 ticks instead of 3,800 (below).
   slots, a stranded member recovering when the map changes and not keeping its field alive, an idle
   field expiring while it is being built.
 * `tools/sf_headless/tests/bridge_200.rs`, `crowd_jam.rs`, `crowd_perf.rs`: the scenarios above.
+* WP4.7: `crates/sf_sim/tests/replan.rs` and `tools/sf_headless/tests/replan.rs` (the `replan`
+  scenario): the stuck unit's request with an overlay, the limit, the cooldown and the order given up
+  (`pathfinding.md`, "Where it is tested").

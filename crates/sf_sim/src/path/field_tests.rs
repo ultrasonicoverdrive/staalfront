@@ -1155,3 +1155,229 @@ fn a_unit_on_the_far_side_of_a_wall_takes_no_slot_until_it_can_walk_to_one() {
     steer_all(&mut rig);
     assert!(rig.p.claimed_point(&rig.e, 0).is_some());
 }
+
+// --- round robin for the looks (WP4.7) ---
+
+/// A rig of `n` units that stand against the west face of a wall, in range of a goal east
+/// of it and in sight of no slot: each of them looks again every tick.
+fn behind_the_wall(n: usize) -> Rig {
+    let mut grid: Vec<Vec<u8>> = (0..64).map(|_| vec![b'.'; 96]).collect();
+    for row in grid.iter_mut().skip(2) {
+        row[62] = b'#';
+        row[63] = b'#';
+    }
+    let rows: Vec<String> = grid
+        .into_iter()
+        .map(|r| String::from_utf8(r).unwrap())
+        .collect();
+    let at: Vec<(u32, u32)> = (0..n)
+        .map(|k| (2 + k as u32 % 20, 2 + k as u32 / 20))
+        .collect();
+    let mut rig = Rig::new(&as_refs(&rows), &at);
+    rig.order((66, 40));
+    rig.build();
+    for i in 0..n {
+        rig.e.pos[i] = Vec2::new(
+            Fx::from_ratio(6100 + 5 * (i as i64 % 10), 100),
+            Fx::from_ratio(3650 + 20 * (i as i64 / 10), 100),
+        );
+    }
+    rig
+}
+
+#[test]
+fn the_looks_go_round_so_that_low_ids_cannot_shut_out_high_ones() {
+    let n = 100;
+    let mut rig = behind_the_wall(n);
+    let mut looked = vec![0_u32; n];
+    let mut per_tick = Vec::new();
+    for _ in 0..4 {
+        let mut this_tick = 0;
+        for (i, count) in looked.iter_mut().enumerate() {
+            let before = rig.p.fields.looks_left;
+            let _ = rig.p.steer(&mut rig.e, i, mid(66, 40), Some(FOOT));
+            if rig.p.fields.looks_left < before {
+                *count += 1;
+                this_tick += 1;
+            }
+        }
+        per_tick.push(this_tick);
+        rig.p.fields.tick();
+    }
+    // Nobody got a claim: they see no slot, so they look again every tick.
+    assert!((0..n).all(|i| rig.p.claimed_point(&rig.e, i).is_none()));
+    // The looks of a tick are the budget, and the lap goes on where it stopped: the first
+    // sixty-four, then the other thirty-six, and round again. Before WP4.7 the units from
+    // the sixty-fifth on never looked.
+    let budget = claim::LOOKS_PER_TICK as usize;
+    assert_eq!(per_tick, vec![budget, n - budget, budget, n - budget]);
+    assert!(looked.iter().all(|&c| c == 2), "{looked:?}");
+}
+
+#[test]
+fn the_cursor_of_the_looks_is_in_the_checksum() {
+    let mut rig = behind_the_wall(100);
+    let hash = |f: &Fields| {
+        let mut h = sf_math::hash::Fnv1a64::new();
+        f.write_hash(&mut h);
+        h.finish()
+    };
+    let quiet = hash(&rig.p.fields);
+    assert_eq!(rig.p.fields.look_from, 0);
+    for i in 0..100 {
+        let _ = rig.p.steer(&mut rig.e, i, mid(66, 40), Some(FOOT));
+    }
+    // Someone was turned away: the next lap begins from them, and that is state.
+    assert_eq!(rig.p.fields.look_denied, claim::LOOKS_PER_TICK);
+    let denied = hash(&rig.p.fields);
+    assert_ne!(denied, quiet);
+    rig.p.fields.tick();
+    assert_eq!(rig.p.fields.look_from, claim::LOOKS_PER_TICK);
+    assert_ne!(hash(&rig.p.fields), denied);
+    // A lap with nobody turned away begins from the lowest again.
+    for i in 0..100 {
+        let _ = rig.p.steer(&mut rig.e, i, mid(66, 40), Some(FOOT));
+    }
+    rig.p.fields.tick();
+    assert_eq!(rig.p.fields.look_from, 0);
+}
+
+// --- a goal built over (WP4.7) ---
+
+/// Takes the structures off `cells` and tells the service.
+fn remove(rig: &mut Rig, cells: &[(u32, u32)]) {
+    for &(x, y) in cells {
+        let i = rig.occupancy.index(Cell::new(x, y)).unwrap();
+        rig.occupancy.release(i);
+    }
+    let list: Vec<Cell> = cells.iter().map(|&(x, y)| Cell::new(x, y)).collect();
+    rig.p
+        .refresh_cells(&rig.terrain, &movement(), &rig.occupancy, list.into_iter());
+}
+
+#[test]
+fn a_goal_a_structure_is_built_on_moves_to_the_nearest_cell_and_comes_back_with_it() {
+    let rows: Vec<String> = (0..48).map(|_| ".".repeat(96)).collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 20), (2, 21), (3, 20)]);
+    rig.order((60, 20));
+    rig.build();
+    let want = rig.graph().grid.index(60, 20);
+    assert_eq!((rig.field().goal, rig.field().want_goal), (want, want));
+    // A structure on the goal cell: a successor is built with another cell for a goal, the
+    // lowest numbered of the four at a cell's distance (the one above it), and the units
+    // are still in the field.
+    place(&mut rig, &[(60, 20)], 7);
+    rig.build();
+    let f = rig.field();
+    let g = rig.graph();
+    assert_eq!(f.version, 1);
+    assert_eq!(f.want_goal, want, "the order's cell is remembered");
+    assert_eq!(g.grid.xy(f.goal), (60, 19));
+    assert!((0..3).all(|i| rig.p.arrival_point(&rig.e, i).is_some()));
+    // The slots lie round the new goal: in sight of it, none on the structure.
+    assert!(!f.slots.is_empty());
+    for &p in &f.slots {
+        assert_ne!(p.cell(), (60, 20), "a slot on the structure");
+        assert!(
+            (p - mid(60, 19)).length() < Fx::from_int(5),
+            "{p:?} is far from the new goal"
+        );
+    }
+    // The units can follow it: their cells are integrated.
+    for i in 0..3 {
+        let (cx, cy) = field::cell_of(g, rig.e.pos[i]);
+        assert_ne!(f.dir_at(&g.sectors, cx, cy), UNSET, "unit {i}");
+    }
+    // The structure is taken away: the next build goes back to the cell of the order.
+    remove(&mut rig, &[(60, 20)]);
+    rig.build();
+    let f = rig.field();
+    assert_eq!(f.version, 2);
+    assert_eq!((f.goal, f.want_goal), (want, want));
+}
+
+#[test]
+fn a_goal_with_a_structure_on_it_when_the_field_is_built_is_moved_before_the_slots_are_picked() {
+    // A bigger structure: three by three, the goal in the middle of it.
+    let rows: Vec<String> = (0..48).map(|_| ".".repeat(96)).collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 20), (2, 21), (3, 20), (3, 21)]);
+    rig.order((60, 20));
+    // Built over before the first build has started: the first field already leads to the
+    // nearest cell that can be entered.
+    let block: Vec<(u32, u32)> = (59..=61)
+        .flat_map(|x| (19..=21).map(move |y| (x, y)))
+        .collect();
+    place(&mut rig, &block, 7);
+    rig.build();
+    let f = rig.field();
+    let g = rig.graph();
+    let (gx, gy) = g.grid.xy(f.goal);
+    assert!(g.grid.open(i64::from(gx), i64::from(gy)));
+    // Two cells from the goal, outside the block: the lowest numbered of the four nearest.
+    assert_eq!((gx, gy), (60, 18));
+    assert_eq!(g.grid.xy(f.want_goal), (60, 20));
+    for &p in &f.slots {
+        let (x, y) = p.cell();
+        assert!(
+            !((59..=61).contains(&x) && (19..=21).contains(&y)),
+            "a slot on the structure at {p:?}"
+        );
+    }
+}
+
+#[test]
+fn a_goal_with_no_cell_to_stand_on_near_it_is_left_as_it_is() {
+    // The goal is the one open cell of a sealed pocket: nothing the class can enter lies
+    // within a sector of it once a structure stands on it.
+    let mut rows: Vec<Vec<u8>> = (0..48).map(|_| vec![b'.'; 96]).collect();
+    for row in &mut rows {
+        row[40..=80].fill(b'#');
+    }
+    rows[20][60] = b'.';
+    let rows: Vec<String> = rows
+        .into_iter()
+        .map(|r| String::from_utf8(r).unwrap())
+        .collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 2), (3, 2), (2, 3)]);
+    let g = rig.graph();
+    let cell = g.grid.index(60, 20);
+    assert_eq!(super::field_build::effective_goal(g, cell), (cell, 0));
+    place(&mut rig, &[(60, 20)], 7);
+    let g = rig.graph();
+    let (goal, looked) = super::field_build::effective_goal(g, cell);
+    assert!(looked > 0, "it looked");
+    assert_eq!(goal, cell, "and found nothing to move to");
+}
+
+#[test]
+fn a_goal_is_not_moved_into_a_pocket_the_structures_shut_in() {
+    // The goal cell and a ring of structures two cells out from it; the eight cells between
+    // are open and shut in. They are the nearest open cells, and no unit can walk to them.
+    let rows: Vec<String> = (0..48).map(|_| ".".repeat(96)).collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 20), (2, 21), (3, 20)]);
+    rig.order((60, 20));
+    let mut covered: Vec<(u32, u32)> = vec![(60, 20)];
+    for k in 58..=62 {
+        covered.extend([(k, 18), (k, 22)]);
+    }
+    for k in 19..=21 {
+        covered.extend([(58, k), (62, k)]);
+    }
+    place(&mut rig, &covered, 7);
+    rig.build();
+    let g = rig.graph();
+    let f = rig.field();
+    let (gx, gy) = g.grid.xy(f.goal);
+    assert!(g.grid.open(i64::from(gx), i64::from(gy)));
+    let in_the_pocket = (59..=61).contains(&gx) && (19..=21).contains(&gy);
+    assert!(!in_the_pocket, "the goal is in the pocket at ({gx}, {gy})");
+    // Outside the ring, as near as there is: a cell from the ring, three from the goal.
+    let d2 = (i64::from(gx) - 60).pow(2) + (i64::from(gy) - 20).pow(2);
+    assert_eq!(d2, 9, "({gx}, {gy})");
+    assert_eq!((gx, gy), (60, 17), "the lowest numbered of the nearest");
+    // And the units, outside the ring too, are in the field.
+    for i in 0..3 {
+        let (cx, cy) = field::cell_of(g, rig.e.pos[i]);
+        assert_ne!(f.dir_at(&g.sectors, cx, cy), UNSET, "unit {i}");
+    }
+}

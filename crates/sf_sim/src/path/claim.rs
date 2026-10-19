@@ -38,7 +38,11 @@
 //! Units look in the order the world visits them, which is the order of their entity
 //! ids, one at a time within the tick: a claim is a write that the next unit sees, so
 //! two units that come into range in the same tick take their slots in id order, and a
-//! permutation of the ids of a group order changes nothing. At most
+//! permutation of the ids of a group order changes nothing. The looks ([`LOOKS_PER_TICK`]
+//! of them in a tick, for the whole world) go round like the path service's requests
+//! (WP4.7): when a tick's looks run out the next tick's begin at the first unit that was
+//! turned away, so that units that look again and again cannot shut out the ones with
+//! higher ids; the cursor is hashed. At most
 //! [`CLAIMS_PER_TICK`] units take a slot in a tick; the others go on following the
 //! field and take theirs in the next, which keeps the cost of a crowd that arrives all
 //! at once bounded.
@@ -318,8 +322,19 @@ impl Fields {
         let range = f.reach + CLAIM_MARGIN;
         if (e.pos[i] - centre_of(g, f.goal)).length_squared() > range.square()
             || self.claims_left == 0
-            || self.looks_left == 0
         {
+            return;
+        }
+        // The looks go round (WP4.7): a unit that looks again every tick (it sees no slot
+        // it can walk to) must not shut out the ones with higher ids. When the looks of a
+        // tick run out the lap goes on from the first unit turned away; the units before
+        // it wait for the next lap.
+        let me = i as u32;
+        if me < self.look_from {
+            return;
+        }
+        if self.looks_left == 0 {
+            self.look_denied = self.look_denied.min(me);
             return;
         }
         self.looks_left -= 1;

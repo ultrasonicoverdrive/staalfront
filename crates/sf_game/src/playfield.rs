@@ -45,6 +45,7 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
     let budget = sf_bridge::path_budget(&settings);
     let threshold = sf_bridge::flowfield_threshold(&settings);
     let collision = sf_bridge::collision_config(&settings);
+    let replan = sf_bridge::replan_config(&settings);
     world
         .with_movement(table)
         .expect("a world that has not started takes its movement table")
@@ -54,6 +55,8 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
         .expect("the shipped flowfield threshold is one a world takes")
         .with_collision(collision)
         .expect("the shipped collision settings are ones a world takes")
+        .with_replan(replan)
+        .expect("the shipped replan settings are ones a world takes")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a
@@ -215,5 +218,7 @@ mod tests {
             world.collision_config().enabled,
             "bodies collide in the game"
         );
+        // And the replan settings (WP4.7).
+        assert_eq!(world.replan_config(), sf_bridge::replan_config(&settings));
     }
 }

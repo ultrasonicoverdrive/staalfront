@@ -129,7 +129,7 @@ refused a step only when its smoothed route grazed a corner, which makes it ask 
 route; the straight line into a river that ends at the bank is now the **legacy** `MoveTo` and the
 wanderers, and a destination that cannot be reached: the route then ends in the middle of the
 nearest cell it can enter (`pathfinding.md`, "Unreachable goals"). Noticing that a route is blocked
-later is the replan (WP4.7). Details:
+later is the replan (WP4.7, `pathfinding.md`, "Replanning"). Details:
 
 * **Structures.** A cell a structure occupies is blocked for every class that terrain restricts (the
   classes the path finder serves; aircraft fly over). A step into it is refused like a step into
@@ -286,7 +286,7 @@ holds the profiles that are not the old walk.
 
 ## Not here
 
-* **Replanning** a blocked route (WP4.7). Collision and a stuck unit are WP4.4
+* **Replanning** a blocked route is WP4.7 and done (`pathfinding.md`, "Replanning"). Collision and a stuck unit are WP4.4
   (`docs/rules/collision.md`: bodies, pushing, a unit that steps to a free neighbouring spot and asks
   for a new route; a step the terrain refuses now **slides** along what it grazed for a unit that walks
   an order, so a unit the crowd pushed off its route is not refused; the legacy walks still stand at

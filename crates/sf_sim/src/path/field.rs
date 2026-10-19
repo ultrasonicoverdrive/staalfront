@@ -151,8 +151,13 @@ pub(crate) struct Field {
     pub state: FieldState,
     /// The index of the class graph the field is for.
     pub graph: usize,
-    /// The goal cell, as a row-major index of the map.
+    /// The goal cell the field integrates toward, as a row-major index of the map. It
+    /// is [`Field::want_goal`] unless a structure covers that cell (WP4.7): then the
+    /// nearest cell the class can enter, found again whenever the field is built.
     pub goal: u32,
+    /// The cell the group was sent to: the point of the order. What `goal` is made
+    /// from at every build, so that a structure that is taken away gives the goal back.
+    pub want_goal: u32,
     /// How the slots of this field lie among those of the other classes of the
     /// same order (WP4.4).
     pub layout: Layout,
@@ -215,6 +220,7 @@ impl Field {
             state: FieldState::Queued,
             graph: 0,
             goal: 0,
+            want_goal: 0,
             layout: Layout::ALONE,
             members: 0,
             last_used: 0,
@@ -470,6 +476,12 @@ pub(crate) struct Fields {
     /// Looks at the free slots units may still make this tick, whether or not they end in
     /// a claim (a unit that sees no free slot looks again the next tick).
     pub looks_left: u32,
+    /// Round robin for the looks (WP4.7): units with a slot below this one have had their
+    /// turn in the lap that is going on and wait for the next. Zero: everyone may look.
+    pub look_from: u32,
+    /// The first unit this tick that was turned away because the looks were spent: the
+    /// lap goes on from it next tick. `u32::MAX` when no unit was.
+    pub look_denied: u32,
     /// The slots already taken by the group, gathered for one claim.
     pub held: claim::HeldBuf,
     /// Fields finished so far (and rebuilds).
@@ -492,6 +504,8 @@ impl Fields {
             clock: 0,
             claims_left: claim::CLAIMS_PER_TICK,
             looks_left: claim::LOOKS_PER_TICK,
+            look_from: 0,
+            look_denied: u32::MAX,
             held: claim::HeldBuf::default(),
             built: 0,
             nodes_last_tick: 0,
@@ -594,6 +608,7 @@ impl Fields {
         f.state = FieldState::Queued;
         f.graph = graph;
         f.goal = goal;
+        f.want_goal = goal;
         f.layout = layout;
         f.members = members;
         f.last_used = now;
@@ -617,7 +632,14 @@ impl Fields {
     fn make_successor(&mut self, of: usize, sector_count: usize) {
         let (serial, version, graph, goal, base, members) = {
             let f = &self.entries[of];
-            (f.serial, f.version, f.graph, f.goal, f.layout, f.members)
+            (
+                f.serial,
+                f.version,
+                f.graph,
+                f.want_goal,
+                f.layout,
+                f.members,
+            )
         };
         let i = self.alloc(serial, sector_count);
         let born = self.take_born();
@@ -630,6 +652,7 @@ impl Fields {
         f.state = FieldState::Queued;
         f.graph = graph;
         f.goal = goal;
+        f.want_goal = goal;
         f.layout = base;
         f.members = members;
         f.last_used = now;
@@ -646,6 +669,14 @@ impl Fields {
         self.nodes_last_tick = 0;
         self.claims_left = claim::CLAIMS_PER_TICK;
         self.looks_left = claim::LOOKS_PER_TICK;
+        // The next lap of the looks goes on from the first unit that was turned away
+        // (or begins again from the lowest when nobody was).
+        self.look_from = if self.look_denied == u32::MAX {
+            0
+        } else {
+            self.look_denied
+        };
+        self.look_denied = u32::MAX;
         for i in 0..self.entries.len() {
             let f = &self.entries[i];
             if f.serial != 0 && self.clock.wrapping_sub(f.last_used) > IDLE_TICKS {
@@ -852,6 +883,12 @@ impl Fields {
         h.write_u32(self.next_order);
         h.write_u32(self.clock);
         h.write_u64(self.built);
+        // The round robin of the looks (WP4.7); nothing while every unit may look.
+        if self.look_from != 0 || self.look_denied != u32::MAX {
+            h.write_u8(0x1C);
+            h.write_u32(self.look_from);
+            h.write_u32(self.look_denied);
+        }
         h.write_u32(self.live());
         for (i, f) in self.entries.iter().enumerate() {
             if f.serial == 0 {
@@ -864,6 +901,11 @@ impl Fields {
             h.write_u8(f.state.tag());
             h.write_u32(f.graph as u32);
             h.write_u32(f.goal);
+            // The cell the group was sent to, when a structure moved the goal (WP4.7).
+            if f.want_goal != f.goal {
+                h.write_u8(0x6A);
+                h.write_u32(f.want_goal);
+            }
             h.write_u32(f.layout.order);
             h.write_u8(f.layout.rank);
             h.write_fx(f.layout.spacing);

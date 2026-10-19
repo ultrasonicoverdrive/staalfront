@@ -6,14 +6,17 @@
 //! send to one place to get a flowfield, and the collision settings (WP4.4):
 //! whether bodies collide, how long a blocked unit waits before it detours, how
 //! long without progress makes it step to a free neighbouring spot, and how
-//! many such steps before it asks for a new route. Game data is in RON and not in code
+//! many such steps before it asks for a new route, and the replan settings (WP4.7): how
+//! many ticks between two replans of a stuck unit, how many it may ask for in one order
+//! before the order is given up, and how many ticks between two new searches for a
+//! target that keeps moving. Game data is in RON and not in code
 //! (PLAN.md section 5, rule 6), so the numbers live in the file; the simulation
 //! keeps its own defaults (the same numbers) for worlds that are given none,
 //! which is what the tests and the frozen headless scenarios use, so that
 //! turning a knob in the file never moves their checksums.
-//! `sf_bridge::path_budget`, `sf_bridge::flowfield_threshold` and
-//! `sf_bridge::collision_config` hand the values to the world, which checks them
-//! against its minimums.
+//! `sf_bridge::path_budget`, `sf_bridge::flowfield_threshold`,
+//! `sf_bridge::collision_config` and `sf_bridge::replan_config` hand the values to the
+//! world, which checks them against its minimums.
 //!
 //! ```
 //! use sf_data::sim_settings::SimSettings;
@@ -43,6 +46,12 @@ pub const MAX_FLOWFIELD_THRESHOLD: u32 = 1000;
 /// a typing mistake (fifty seconds).
 pub const MAX_STUCK_TICKS: u16 = 1000;
 
+/// The most ticks a replan cooldown may be (fifty seconds).
+pub const MAX_REPLAN_COOLDOWN: u16 = 1000;
+
+/// The most replans one order may allow a stuck unit.
+pub const MAX_REPLAN_MAX: u8 = 100;
+
 fn default_collision() -> bool {
     true
 }
@@ -57,6 +66,18 @@ fn default_stuck_ticks() -> u16 {
 
 fn default_stuck_attempts() -> u8 {
     3
+}
+
+fn default_replan_cooldown() -> u16 {
+    100
+}
+
+fn default_replan_max() -> u8 {
+    3
+}
+
+fn default_retarget_cooldown() -> u16 {
+    20
 }
 
 /// The settings of the simulation.
@@ -81,6 +102,16 @@ pub struct SimSettings {
     /// Such steps in a row after which it asks for a new route.
     #[serde(default = "default_stuck_attempts")]
     pub stuck_attempts: u8,
+    /// Ticks between two replans of a stuck unit (WP4.7).
+    #[serde(default = "default_replan_cooldown")]
+    pub replan_cooldown: u16,
+    /// Replans a stuck unit may ask for in one order; one more and the order is given
+    /// up (WP4.7).
+    #[serde(default = "default_replan_max")]
+    pub replan_max: u8,
+    /// Ticks between two new searches for a target that keeps moving (WP4.7).
+    #[serde(default = "default_retarget_cooldown")]
+    pub retarget_cooldown: u16,
 }
 
 /// Why a settings file was refused.
@@ -103,6 +134,16 @@ pub enum SimSettingsError {
         stuck: u16,
         /// `stuck_attempts`.
         attempts: u8,
+    },
+    /// The replan numbers are not valid: both cooldowns between 1 and
+    /// [`MAX_REPLAN_COOLDOWN`] ticks, and `replan_max` between 1 and [`MAX_REPLAN_MAX`].
+    Replan {
+        /// `replan_cooldown`.
+        cooldown: u16,
+        /// `replan_max`.
+        max: u8,
+        /// `retarget_cooldown`.
+        retarget: u16,
     },
 }
 
@@ -127,6 +168,16 @@ impl fmt::Display for SimSettingsError {
                 "sim.ron: wait_ticks {wait}, stuck_ticks {stuck} and stuck_attempts {attempts} do not fit: \
                  wait_ticks is at least 1, stuck_ticks is above it and at most {MAX_STUCK_TICKS}, \
                  stuck_attempts is at least 1"
+            ),
+            Self::Replan {
+                cooldown,
+                max,
+                retarget,
+            } => write!(
+                f,
+                "sim.ron: replan_cooldown {cooldown}, replan_max {max} and retarget_cooldown \
+                 {retarget} do not fit: both cooldowns are between 1 and {MAX_REPLAN_COOLDOWN}, \
+                 replan_max is between 1 and {MAX_REPLAN_MAX}"
             ),
         }
     }
@@ -158,6 +209,19 @@ impl SimSettings {
                 wait: settings.wait_ticks,
                 stuck: settings.stuck_ticks,
                 attempts: settings.stuck_attempts,
+            });
+        }
+        if settings.replan_cooldown < 1
+            || settings.replan_cooldown > MAX_REPLAN_COOLDOWN
+            || settings.retarget_cooldown < 1
+            || settings.retarget_cooldown > MAX_REPLAN_COOLDOWN
+            || settings.replan_max < 1
+            || settings.replan_max > MAX_REPLAN_MAX
+        {
+            return Err(SimSettingsError::Replan {
+                cooldown: settings.replan_cooldown,
+                max: settings.replan_max,
+                retarget: settings.retarget_cooldown,
             });
         }
         Ok(settings)
@@ -230,6 +294,29 @@ mod tests {
         assert!(with(6, 1001, 3).is_err(), "bounded");
         assert!(with(6, 1000, 3).is_ok());
         assert!(with(6, 40, 0).is_err(), "at least one attempt");
+    }
+
+    #[test]
+    fn the_replan_settings_have_defaults_and_are_checked() {
+        let s = SimSettings::from_ron("(path_node_budget: 4096, flowfield_threshold: 8)").unwrap();
+        assert_eq!(
+            (s.replan_cooldown, s.replan_max, s.retarget_cooldown),
+            (100, 3, 20)
+        );
+        let with = |cooldown: u16, max: u8, retarget: u16| {
+            SimSettings::from_ron(&format!(
+                "(path_node_budget: 4096, flowfield_threshold: 8, replan_cooldown: {cooldown}, \
+                 replan_max: {max}, retarget_cooldown: {retarget})"
+            ))
+        };
+        assert!(with(1, 1, 1).is_ok());
+        assert!(with(1000, 100, 1000).is_ok());
+        assert!(with(0, 3, 20).is_err(), "a cooldown is at least a tick");
+        assert!(with(100, 3, 0).is_err());
+        assert!(with(1001, 3, 20).is_err(), "bounded");
+        assert!(with(100, 3, 1001).is_err(), "bounded");
+        assert!(with(100, 0, 20).is_err(), "at least one replan");
+        assert!(with(100, 101, 20).is_err(), "bounded");
     }
 
     #[test]

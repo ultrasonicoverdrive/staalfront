@@ -115,6 +115,23 @@ impl Grid {
         };
     }
 
+    /// Shuts the cells of a request's overlay (WP4.7) and writes the speeds they had
+    /// to `saved`, for [`Grid::reopen`]. Only ever held for the length of one slice of
+    /// one job: nothing else is served while the cells are shut.
+    pub fn shut(&mut self, cells: &[u32], saved: &mut [u16]) {
+        for (k, &c) in cells.iter().enumerate() {
+            saved[k] = self.permille[c as usize];
+            self.set(c, 0);
+        }
+    }
+
+    /// Puts the cells shut by [`Grid::shut`] back as they were.
+    pub fn reopen(&mut self, cells: &[u32], saved: &[u16]) {
+        for (k, &c) in cells.iter().enumerate() {
+            self.set(c, saved[k]);
+        }
+    }
+
     /// The speed multiplier of an in-map cell; zero if blocked.
     #[inline]
     pub fn speed(&self, x: u32, y: u32) -> u16 {
@@ -356,5 +373,32 @@ mod tests {
         assert_eq!(s.neighbor(5, EAST), None);
         assert_eq!(opposite(NORTH), SOUTH);
         assert_eq!(opposite(EAST), WEST);
+    }
+
+    #[test]
+    fn shutting_cells_and_opening_them_again_leaves_the_grid_as_it_was() {
+        let mut g = Grid::new(6, 4);
+        for i in 0..24 {
+            g.set(
+                i,
+                if i % 5 == 0 {
+                    0
+                } else {
+                    500 + 100 * (i as u16 % 4)
+                },
+            );
+        }
+        let before = g.clone();
+        // Cells with different speeds and one that is blocked already.
+        let cells = [0_u32, 3, 7, 14, 20];
+        let mut saved = [0_u16; 8];
+        g.shut(&cells, &mut saved);
+        for &c in &cells {
+            assert_eq!(g.speed(c % 6, c / 6), 0);
+        }
+        assert!(!g.can_step(2, 0, 1, 0), "the cell east of (2, 0) is shut");
+        g.reopen(&cells, &saved);
+        assert!(g == before, "{g:?} {before:?}");
+        assert_eq!(g.step_cost(2, 0, 1, 0), before.step_cost(2, 0, 1, 0));
     }
 }

@@ -1,0 +1,102 @@
+// Replanning (WP4.7, docs/rules/pathfinding.md "Replanning", docs/rules/orders.md): a route
+// that is blocked, a target that moves away or disappears, a group whose goal is built over.
+// The map is assets/maps/replan, a flat 96 by 64 cell map of six rock-walled rooms of 32 by
+// 32 cells, made by `cargo run -p sf_headless --example gen_replan_map -- assets/maps/replan`
+// (the room of a unit is its x / 32 and y / 32; "room (ox, oy)" below is its corner):
+//
+//   R1 (0, 0)    R2 (32, 0)    R3 (64, 0)
+//   R4 (0, 32)   R5 (32, 32)   R6 (64, 32)
+//
+// R1 to R3: a left chamber (columns 1 to 6) and a right chamber (columns 25 to 30) joined by
+// a corridor one cell wide along row 8 and, in R1 and R2, a second one along row 24.
+//
+// Who does what (entity ids are the slots in the order of the spawns, all at generation 0;
+// the unit definitions are the frozen copy of the pathing scenario):
+//
+//   R1  slot 0     a light tank, (4, 8) -> (27, 8) along the upper corridor; on tick 90 a
+//                  defence tower is built in the corridor, 5 cells ahead of it. The structure
+//                  is part of the graph: the tank asks again at once and takes the lower
+//                  corridor.
+//   R2  slot 1     a light tank, (36, 8) -> (59, 8); slot 2 a heavy tank on HoldPosition in
+//                  the upper corridor at (48, 8). Nothing in the graph tells of it: the tank
+//                  drives up to it, sidesteps, and asks for a new route that has the cells of
+//                  the holder blocked, for that request only. It goes round by the lower
+//                  corridor.
+//   R3  slot 3     a light tank, (68, 8) -> (91, 8) with a second order queued behind it,
+//                  (67, 20) in the left chamber; slot 4 a heavy tank on HoldPosition in the
+//                  only corridor at (80, 8). No way round: every request fails, and after
+//                  `replan_max` of them the order is given up and the queued one starts.
+//   R4  slot 5     a scout, (3, 35) -> (28, 35), round the end of a wall by the gap at its
+//                  foot; slot 6 a rifleman that goes for it (an attack order): the target
+//                  outruns it and the rifleman asks again for a route as it moves away.
+//   R5  slot 7     a rifleman standing at (40, 40); slots 8 and 9 two light tanks that go
+//                  for it, slot 8 with a move queued behind the attack. On tick 40 the rifleman
+//                  is removed, and on tick 45 another one takes its slot (a new generation).
+//       slot 10    a rifleman that is given no order at all, at (60, 60): it must not move.
+//   R6  slots 11 to 22   twelve light tanks, (67..71, 38..44) -> (90, 48) on one order, so one
+//                  flowfield; on tick 60 a radar (2 by 2) is built over the goal cell. The
+//                  field is built again with the nearest cell the tanks can enter as its goal
+//                  and the tanks take their places round that.
+//
+// tools/sf_headless/tests/replan.rs asserts the outcomes, the replans each unit asked for
+// (each at most `replan_max`, the cooldowns kept) and that nobody ends on ground its class
+// cannot enter. CI runs the scenario on Linux and Windows and requires the checksum in
+// replan.expected.
+
+Scenario(
+    name: "replan",
+    seed: 0x7E47_0047,
+    map: (width: 96, height: 64),
+    map_name: Some("replan"),
+    unit_defs: Some("pathing_defs"),
+    ticks: 3000,
+    commands: [
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 8))),   // slot 0: R1 tank
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (36, 8))),  // slot 1: R2 tank
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (48, 8))),  // slot 2: R2 holder
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (68, 8))),  // slot 3: R3 tank
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (80, 8))),  // slot 4: R3 holder
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 1, cell: (3, 35))),  // slot 5: R4 scout
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (3, 40))),  // slot 6: R4 rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (40, 40))), // slot 7: R5 target
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (34, 50))), // slot 8: R5 hunter
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (46, 50))), // slot 9: R5 hunter
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (60, 60))), // slot 10: a bystander
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (67, 38))), // slot 11: R6 group
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (69, 38))), // slot 12
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (71, 38))), // slot 13
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (67, 40))), // slot 14
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (69, 40))), // slot 15
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (71, 40))), // slot 16
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (67, 42))), // slot 17
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (69, 42))), // slot 18
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (71, 42))), // slot 19
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (67, 44))), // slot 20
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (69, 44))), // slot 21
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (71, 44))), // slot 22
+
+        // --- tick 1: the orders ---
+        (tick: 1, command: OrderMove(ids: [Id(0, 0)], target: (27, 8))),
+        (tick: 1, command: OrderMove(ids: [Id(1, 0)], target: (59, 8))),
+        (tick: 1, command: OrderHold(ids: [Id(2, 0)])),
+        (tick: 1, command: OrderMove(ids: [Id(3, 0)], target: (91, 8))),
+        (tick: 1, command: OrderMove(ids: [Id(3, 0)], target: (67, 20), queued: true)),
+        (tick: 1, command: OrderHold(ids: [Id(4, 0)])),
+        (tick: 1, command: OrderMove(ids: [Id(5, 0)], target: (28, 35))),
+        (tick: 1, command: OrderAttack(ids: [Id(6, 0)], target: (5, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(8, 0)], target: (7, 0))),
+        (tick: 1, command: OrderMove(ids: [Id(8, 0)], target: (36, 36), queued: true)),
+        (tick: 1, command: OrderAttack(ids: [Id(9, 0)], target: (7, 0))),
+        (tick: 1, command: OrderMove(ids: [Range(11, 23)], target: (90, 48))),
+
+        // --- R5: the target is removed, and another unit takes its slot ---
+        (tick: 40, command: Despawn(ids: [Id(7, 0)])),
+        (tick: 45, command: SpawnUnit(kind: 12, owner: 1, cell: (60, 36))),
+
+        // --- R6: a radar is built over the goal cell of the group ---
+        (tick: 60, command: PlaceStructure(kind: 5, owner: 1, cell: (89, 47))),
+
+        // --- R1: a structure in the corridor, five cells ahead of the tank ---
+        (tick: 90, command: PlaceStructure(kind: 6, owner: 1, cell: (18, 8))),
+    ],
+)
