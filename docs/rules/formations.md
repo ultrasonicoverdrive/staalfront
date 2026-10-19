@@ -16,7 +16,7 @@ One `Move` order that sends enough units that cross the same ground to one point
 **formation**. The group's current layout becomes a **lattice** with room for the widest body;
 each unit gets an **offset** in it and so a **slot** that hangs from the **leader** (the unit
 nearest the middle) and turns with the way the leader goes. The leader follows the order's route
-or flowfield at the pace of the slowest member; the others walk straight to their slots. Where
+or flowfield no faster than the slowest member; the others walk straight to their slots. Where
 the ground is narrow the shape lets go and the units file through; on open ground the leader waits
 for stragglers and the shape forms up again. Near the goal the formation is let go and the
 members take the arrival slots of the goal, as the units of every group order do.
@@ -27,11 +27,11 @@ members take the arrival slots of the goal, as the units of every group order do
 |---|---|
 | Order | `Order::Move` to a point, **not** attack-move, guard, hold, stop, scatter or an attack (they keep their behaviour). A single unit is no group. The units must start the order now (a queued order behind another does not start one). |
 | Ground | Units of the **same family**: classes that may enter the same terrain types. Foot, wheeled and tracked units are one family (so a mixed ground group is one formation); a hovercraft, a vessel are each a family of their own; aircraft (no terrain stops them) form none. A vessel and a land unit sent together do **not** form one formation: the family that can reach the goal forms its own (the goal must be a cell the class may enter), the other follows the order as it always did. |
-| Number | At least `formation_min_units` (3 as shipped) units of one family, and the order sends at most `formation_max_units` (24, the largest size the sweep below has tested; see "Sizes") units **in all**, of whatever families: a bigger selection is a crowd and makes no formation at all. |
+| Number | At least `formation_min_units` (3 as shipped) units of one family, and the order sends at most `formation_max_units` (19, the largest size at which the sweep below is clean for every shape and mix; see "Sizes") units **in all**, of whatever families: a bigger selection is a crowd and makes no formation at all. |
 | World | `formation: true` and the world has pathfinding (terrain and a movement table). |
 
 **Decision: formation-move is the default for a group move order** (`sim.ron`: `formation: true`),
-**for orders of 3 to 24 units**. It is on because it does what the phase asks for those, and it leaves the
+**for orders of 3 to 19 units**. It is on because it does what the phase asks for those, and it leaves the
 criterion of phase 4 alone (`formation: Some(false)` in a scenario file gives the old behaviour back); an
 order above the limit moves as every group order did before. The 200-unit crowd of `bridge_200` forms **no**
 formation, not even among its five hover craft: it is a crowd with flowfields and arrival slots, and its
@@ -44,22 +44,19 @@ standing on their slots) by 0.270 of a cell, over the quarter of a cell of the c
 is thin and chaotic (twelve seeds of that variant gave 0.182 to 0.270). A formation inside a crowd buys nothing
 the criterion measures and costs it margin, and a selection of 200 is a mob whatever its families.
 
-**Why 24, measured** (not assumed). The first version had a limit of 48, picked because one formation of 195
+**Why 19, measured** (not assumed). The first version had a limit of 48, picked because one formation of 195
 did not work (a lattice 31 cells across on a map where the whole block is 20 wide and the first rock outcrop is
 14 cells away: its leader was at x = 26.6 after 4,600 ticks, from 17.7, against a crowd that has crossed the
 river by tick 2,225). Review round 1 swept the size and the shape of the group on the `formation_move` map
-(`tools/sf_headless/tests/formation_sweep.rs`, "Sizes" below) and found that 48 was never tested: groups of 28
-to 48 take longer than 1.4 times what the slowest alone would walk (up to 1.6) because of the queue that a wide
-block makes at a passage three cells wide, whatever the formation does about it. The crawl of the
-44 to 48 that the review saw (8,500 ticks in the worst run) came from rules fixed in this round, each
-described below: a patience that single good ticks filled up again, a heading turned by pushes while the leader
-waited, units ahead of their slots that walked back to them, a greedy hand-out of the slots, and small
-classes without a field. What is left: with the limit put back to 48, the mixed groups of 28 to 48 take 1.2 to
-1.6 times what the riflemen need alone (3,198 to 4,201 ticks against a bound of 3,680) as a formation, and 1.03
-to 1.15 as a group order ("Sizes", below). A wide block files through a passage three cells
-wide in many rows and the formation adds its pace (0.9), the wait for the last rows and the forming up to the
-queue that any group has. The limit is the largest size at which the sweep is clean for the groups the
-scenario is about (the riflemen among tanks and transports), and no larger. The limit is data (`formation_max_units`, at most 256).
+(`tools/sf_headless/tests/formation_sweep.rs`, "Sizes" below), found the crawl of groups of 44 to 48 and set the
+limit to 24. Review round 2 found that groups of only tanks and transports of 11 to 24 arrived later in formation
+than without one (up to 2.09 times their walk, as a group order up to 1.54), a delay of 200 to 800 ticks at the
+passage that the mixed groups paid too, hidden in the riflemen's long walk. Round 3 made the sweep assert the
+formation's time against the same group's as a group order for every run and mix, found the causes and fixed them
+(each rule below that says "review round 3"), and then set the limit to the largest size at which the sweep is
+clean for every shape and mix: **19**. Above it groups of 20 to 24 tanks and transports miss the bound of 1.4
+times their walk in 8 of 30 runs (1.40 to 1.50), while mixed and riflemen-only groups are clean up to 24; no
+single cause of that is left ("Sizes"). The limit is data (`formation_max_units`, at most 256).
 
 ## The shape
 
@@ -101,43 +98,66 @@ at most as fast as the formation does. The offsets turn by it with the fixed-poi
 
 ## The pace
 
-`pace = formation_pace_permille` (900) of the speed, **now**, of the slowest member: each member's
-speed per tick scaled by the terrain it stands on (`movement::scale_step`). The **leader never steps
-more than the pace** (its step is held to it before the terrain scales it). The others walk to their
-slots at up to `formation_catchup_permille` (1000) of their **own** speed, so:
+The **leader never steps faster than the slowest member**: the speed, **now**, of the slowest member, each
+member's speed per tick scaled by the terrain it stands on (`movement::scale_step`); the leader's step is held
+to it before the terrain scales it. While some member is **behind its slot** by more than half a cell (along
+the heading) the leader keeps a part back: it goes at `formation_pace_permille` (900) of that speed. The
+others walk to their slots at up to `formation_catchup_permille` (1000) of their **own** speed, so:
 
-* a unit behind its slot catches up, at its own speed at most, never faster;
-* a unit on its slot follows it: the slot comes at the pace of the formation, which is below every
-  member's speed, so each reaches it and waits on it;
-* the slowest has a tenth of its speed to catch up with when terrain or a crowd has held it up.
+* a unit behind its slot catches up, at its own speed at most, never faster; the slowest has a tenth of its
+  speed to catch up with, because the leader slows to 0.9 while it is behind;
+* a unit on its slot follows it: the slot comes at most at the speed of the slowest member, so each reaches it
+  and keeps up with it; one that drops behind by half a cell slows the formation until it is back;
+* a unit ahead of its slot waits for it ("What a member does").
 
-A formation sets the pace of the *order*: in `formation_move` the leader goes 0.0315 cells a tick, 0.9 of
-the rifleman's 0.035, and not faster, however fast the tanks are. What this costs is in "Sizes": a mixed
-group arrives in 1.08 to 1.39 times what the slowest would need alone to walk the same way (1.02 to 1.07 as a
-group order without a formation), and a group of only fast units takes longer relative to its own short walk,
-because the passage is a queue whose length does not depend on the pace.
+**Review round 3.** The pace was 0.9 of the slowest all the time, a tenth of the whole march for nothing while
+every member stands on its slot; on the 91 cells of the sweep's march that was about a hundred ticks for a group
+of tanks, a third of what the bound of 1.4 times their walk left them. The sweep's `mixed` groups went from 1.08 to
+1.21 times the walk to 1.01 to 1.15 with this change alone.
+
+A formation sets the pace of the *order*: in `formation_move` the leader goes 0.0349 cells a tick in the west
+field, the rifleman's 0.035, and not faster, however fast the tanks are. What this costs is in "Sizes": a mixed
+group arrives in 1.02 to 1.18 times what the slowest would need alone to walk the same way (1.01 to 1.05 as a group
+order without a formation, 1.00 to 1.12 times the group order's time).
 
 ## What a member does in a tick (`MemberMode`)
 
 | Mode | When | What |
 |---|---|---|
-| `Lead` | the leader | follows the order's flowfield or route (`path/`), at the pace of the formation, or at its own speed while the formation is loose |
+| `Lead` | the leader | follows the order's flowfield or route (`path/`), at the pace of the formation (the slowest's speed, or 0.9 of it while a member is behind), or at its own speed while the formation is loose |
 | `Direct` | the member sees its slot (the thick line of sight of `path/los.rs`, one sector at most, no rock, water or structure within a quarter of a cell) and the formation is not loose | walks straight to the slot (`behavior::walk`, so the turning of its class applies), snaps onto it when within a step; on its slot it turns to the heading the way its class turns on the spot. It asks for no route. |
 | `Flow` | the member cannot see its slot, or the formation is loose | follows the order's flowfield or route as every unit of a group does, at its own speed. When it was walking to a slot before, it chooses its way again from where it stands (a flowfield member from its cell; a route of its own is kept if its first waypoint is still ahead, within 12 cells, otherwise asked for again). |
-| `Wait` | the leader waiting for stragglers; or a `Direct` or `Flow` member that is ahead of its slot (farther along the heading than the slot, by more than the re-form distance) on open ground while the formation is not loose | stands (it does not walk back to its slot; the slot comes to it) |
+| `Wait` | the leader waiting for stragglers; or a `Direct` or `Flow` member that is ahead of its slot (farther along the heading than the slot, by more than the re-form distance) on open ground, **also while the formation is loose** | stands (it does not walk back to its slot; the slot comes to it). While the formation is loose this keeps the units that came out of a gap first from running on to the goal: in `formation_move`, before review round 3, the tanks did, 28 cells ahead of their slots once the formation had become loose for longer (below). |
 
 ### Narrow places and re-forming
 
-The ground round the leader is **open** when no rock, water or structure (by the class's own costs)
-lies within three cells in any of eight directions. When it is not, the formation is **loose** for at
-least 20 ticks more: everybody is `Flow`, the leader goes at its own speed, nobody waits for anybody.
-So a bridge, a gap in a wall, a funnel between outcrops lets the units file through without a formation
-standing in the doorway, and without a leader at a snail's pace holding up the units behind it.
+Ground is **open** round a point when no rock, water or structure (by the leader's class's own costs) lies
+within three cells of it in any of eight directions. The formation is open when the ground is open round the
+leader **and round the front of the lattice** (the point `extent` ahead of the leader along the heading, with a
+clear line to it). When it is not, the formation is **loose** for at least 20 ticks more: everybody is `Flow`
+(except units ahead of their slots on open ground, which wait), the leader goes at its own speed, nobody waits
+for anybody. So a bridge, a gap in a wall, a funnel between outcrops lets the units file through without a
+formation standing in the doorway, and without a leader at a snail's pace holding up the units behind it.
+
+**The front, review round 3.** Looking from the leader alone (the middle of the group) let a wide block reach the
+wall with its front rows still in their slots; the traffic at the mouth then pushed units off it and pinned them
+against the rock beside the passage. In the worst run of the sweep (17 tanks and transports, a block 8 deep) it was
+the leader, for 560 ticks, sidestepping away along the wall and back, while the others ran on to the goal. With the
+front looked at as well, a block lets go before it reaches the wall and files in as a group order does; that change
+alone took the failing runs of the sweep from 35 to 28. A look-ahead of 3 or 6 cells more was tried and not kept
+(18 and 19 failing runs against 23 at the time).
 
 On open ground the formation is whole again:
 
-* a member farther than `formation_reform_tenths` (3.0 cells) from its slot is a **straggler**, and
-  the leader **waits** (`Wait`) for it, if the leader itself is on open ground. The leader's
+* a member farther than `formation_reform_tenths` (3.0 cells) from its slot is a **straggler** when it is
+  **behind its slot, or that far to the side of it**; a unit ahead of its slot is none (its slot comes to it).
+  The leader **waits** (`Wait`) for stragglers, if the leader itself is on open ground. (Review round 3: counting
+  the distance alone made a unit 2.9 cells ahead of its slot and 1.5 to the side a straggler, 3.3 cells off; after the
+  passage the units that had come through first became stragglers one by one as their slots came near, and the
+  leader stopped for each, for some 200 ticks. Only "not ahead" was tried first, and then a soldier shut in 10
+  cells to the side, a little ahead of its slot, was no straggler at all: the formation counted as calm, refilled its
+  patience and waited for it a second time, which `a_broken_formation_is_whole_again_only_after_a_calm_stretch...`
+  caught.) The leader's
   `formation_patience_ticks` (300) run down one a tick while some straggler is **stalled**: has not
   come closer to its slot in a window of 20 ticks by at least a 32nd of a cell (compared with the
   nearest it has been since it fell off its slot, so a unit jostled by a crowd does not look as if it
@@ -164,20 +184,22 @@ On open ground the formation is whole again:
   squared distances (the Hungarian method over all pairs, ties to the lower slot; it replaced a greedy
   nearest-pair-first choice that could leave one unit with a slot in front of the leader's own column),
   the leader keeping its place. Units that came through a gap in another order than they went in would
-  otherwise have to pass each other to reach their slots.
-* A member **stalled** behind another that stands on or in the way to its slot swaps places with that
-  one (`swap_blocked`, once per window per member): the pair walks on without passing.
+  otherwise have to pass each other to reach their slots. (Without it the sweep failed 18 runs, against 10.)
+* **No swaps** (review round 3). Rounds 1 and 2 also let a stalled member swap slots with the member standing in
+  its way. With a lattice snapped from a block that has more units than lattice points in a row, the swaps handed a
+  lone slot two rows ahead of the rest from one unit behind to the next (three times in the first 80 ticks of one
+  march), each new holder a straggler the leader waited for. Without the swaps the failing runs of the sweep went
+  from 15 to 10; the reassignment above does what they were for.
 
-**A limit that is known.** A unit that came through the passage last and is given a slot in front of the
-leader's own column cannot pass the leader and the tight lattice (members stand 0.38 cells apart on their
-slots) and may stay up to the re-form distance (3 cells) behind its slot until the end: it is neither a
-straggler (it is within the distance) nor expelled, and it does not delay the arrival, but the shape is not
-exact there (in `formation_move` one member stood 2.3 cells behind its slot for 860 ticks). The check
-"formed up again" of `formation_move` allows for it.
+**Formed up again, as first written.** Rounds 1 and 2 had found a unit that came through the passage last, with a
+slot in front of the leader's own column, standing up to 3 cells behind its slot until the end, and had loosened the
+check "formed up again" of `formation_move` from "every member walks straight to its slot and is within 1 cell of it"
+to "within 3 cells, or waiting". With the rules of round 3 the first check holds again (tick 1,370) and the test is
+back to it.
 
 ### The end
 
-The formation is let go (`released`) when the leader is within `max(extent, d) + 2` cells of the
+The formation is let go (`released`) when the leader is within `max(extent, d)` cells of the
 goal, `extent` being the farthest a member's offset lies from the leader's and `d` the radius of the
 disc the bodies of the **whole order** fill (`CrowdState::disc`: the units of other families sent with
 it stand there). Or when the leader has come to the end of the way to a goal it cannot reach.
@@ -189,6 +211,13 @@ the goal by the heading of the formation** (`Layout::turn`; nothing for a group 
 so the slots of every other order are exactly as they were): the rows of the arrived group stand across
 the way it came. Arrival quality is the one of WP4.4b because the logic is: the claims, the bounds on
 the crowd that counts as arrived, the closing up of a settled crowd.
+
+**Review round 3**: the margin of 2 cells is gone. With it a block took its arrival slots while still about
+eight cells from the goal, all its units in the same few ticks and in the order of their ids (the claim logic's
+order), so the units of one side claimed slots on the other and crossed the block; letting go when the front is
+about at the goal took the failing runs of the sweep from 23 to 15. Later was worse (half the extent: 16; one cell:
+31). Taking the slots of a formation nearest first instead of in the order of the spiral was tried in `path/claim.rs`
+and not kept: it shortened the end of the run it was made for by 52 ticks and left the mean of the sweep where it was.
 
 A formation also ends when fewer than two members are left (`dissolved`): a new order, a stop, a
 death takes a unit out at once (`orders::begin` and `clear` reset its column).
@@ -221,65 +250,71 @@ death takes a unit out at once (`orders::begin` and `clear` reset its column).
 `assets/config/sim.ron`, read by `sf_data::sim_settings`, handed to the world by
 `sf_bridge::formation_config` and `World::with_formation`; the simulation's own defaults
 (`FormationConfig::DEFAULT`) are the same numbers, which is what tests and frozen scenarios use. A
-scenario file can say `formation: Some(false)`.
+scenario file can say `formation: Some(false)`, and (for probes above the limit, as the sweep's record does)
+`formation_max_units: Some(n)`.
 
 | Setting | Shipped | Range | |
 |---|---|---|---|
 | `formation` | true | | false moves a group as a group order did before WP4.6 |
 | `formation_min_units` | 3 | 2 to `max` | units of one family one order must send |
-| `formation_max_units` | 24 | `min` to 256 | an order that sends more is a crowd and makes no formation; 24 is the size the sweep has tested |
+| `formation_max_units` | 19 | `min` to 256 | an order that sends more is a crowd and makes no formation; 19 is the largest size at which the sweep is clean for every shape and mix |
 | `formation_spacing_permille` | 1250 | 1000 to 3000 | lattice cell, of the widest body's spacing |
 | `formation_spread_permille` | 1500 | 1000 to 4000 | widest the group may be, of the radius of its disc |
-| `formation_pace_permille` | 900 | 500 to 1000 | of the slowest member's speed now |
+| `formation_pace_permille` | 900 | 500 to 1000 | of the slowest member's speed now, while a member is behind its slot (otherwise the formation goes at that speed) |
 | `formation_catchup_permille` | 1000 | pace to 1000 | of its own speed, for a member getting back to its slot |
 | `formation_reform_tenths` | 30 | 5 to 100 | how far from its slot a member may be (tenths of a cell) |
 | `formation_patience_ticks` | 300 | 20 to 2000 | the leader's patience; a stalled straggler's too |
 
-Constants that are not data (`formation.rs`): the open-ground probes (three cells, eight ways),
-how long a formation stays loose (20 ticks), the window of the progress check (20 ticks, a 32nd of a
-cell), how close counts as on the slot (half a cell), how often the slots are handed out again
-(100 ticks), the release margin (2 cells), the size of the pool (64 formations, 256 members).
+Constants that are not data (`formation.rs`): the open-ground probes (three cells, eight ways, round
+the leader and round the front of the lattice), how long a formation stays loose (20 ticks), the window
+of the progress check (20 ticks, a 32nd of a cell), how close counts as on the slot (half a cell; also how
+far behind its slot a member is before the leader keeps its pace back), how often the slots are handed out
+again (100 ticks), the size of the pool (64 formations, 256 members).
 
 ## Sizes
 
-`formation_move` is one group (20 units, a block of 4 wide). A formation that works for that block and
+`formation_move` is one group (16 units, a block of 4 by 4). A formation that works for that block and
 crawls for another works for the test, so `tools/sf_headless/tests/formation_sweep.rs` (`#[ignore]`d, about
-40 seconds in release: `cargo test --release -p sf_headless --test formation_sweep -- --ignored --nocapture`)
-runs the same march on the same map for every size from 3 to `formation_max_units` (24), for blocks 2, 3, 4,
-5, 6 and 8 units wide, and for three mixes: `mixed` (riflemen, tanks and transports as in `formation_move`),
-`foot` (riflemen only) and `wheels` (tanks and transports only). 363 runs, each with the formation and again
-without one. It asserts for every run:
+half a minute in release for both tests: `cargo test --release -p sf_headless --test formation_sweep --
+--ignored --nocapture`) runs the same march on the same map for every size from 3 to `formation_max_units`
+(19), for blocks 2, 3, 4, 5, 6 and 8 cells deep along the way (a line abreast to a deep column), and for three
+mixes: `mixed` (riflemen, tanks and transports as in `formation_move`), `foot` (riflemen only) and `wheels`
+(tanks and transports only). 273 runs, each with the formation and again as the group order the same units
+make with `formation: false`. It asserts **for every run up to the limit, every depth and every mix** (nothing
+there is only printed):
 
 * **the 1.4 bound** of `formation_move`: every unit idle within 1.4 times the time the slowest alone needs to
   walk from the middle of the block to the goal;
+* **not much slower than the group order**: idle within 1.3 times the tick the same group is idle without a
+  formation (review round 3; a group of tanks has a walk of 920 ticks, and a delay of a few hundred at the
+  passage that hides inside 1.4 times a rifleman's walk does not hide inside a tank's);
 * **no crawl**: in no window of 600 ticks, while the rear of the group is short of the goal area, does the
   unit farthest west advance by less than a quarter of what the slowest would walk in it.
 
-| Mix | Size | Arrival, times the walk of the slowest | Without a formation | Rear in a window (share of the slowest's walk) |
-|---|---|---|---|---|
-| `mixed` | 3 to 24 | 1.08 to 1.39 (3 to 10: at most 1.18) | 1.01 to 1.07 | 0.49 and more |
-| `foot` | 3 to 24 | 1.10 to 1.23 | 1.01 to 1.11 | 0.63 and more |
-| `wheels` | 3 to 10 | 1.11 to 1.40 | 1.04 to 1.84 | 0.65 and more |
-| `wheels` | 11 to 24 | **1.18 to 2.09** | 1.13 to 1.54 | 0.48 and more |
+| Mix | Size | Arrival, times the walk of the slowest | Without a formation | Times the group order | Rear in a window (share of the slowest's walk) |
+|---|---|---|---|---|---|
+| `mixed` | 3 to 19 | 1.02 to 1.18 | 1.01 to 1.05 | 1.00 to 1.12 | 0.72 and more |
+| `foot` | 3 to 19 | 1.01 to 1.05 | 1.01 to 1.05 | 0.99 to 1.02 | 0.88 and more |
+| `wheels` | 3 to 19 | 1.02 to 1.37 | 1.04 to 1.84 | 0.62 to 1.24 | 0.55 and more |
 
-So: **for every mix with riflemen, 3 to 24, at every width, the bound holds** (and nothing here is looser
-than `formation_move`). **A group of only fast units (tanks and transports) above ten does not meet 1.4 times
-its own walk**: 33 of the 84 runs from 11 to 24 are over it (the worst 2.09, a block 8 wide of 17). That walk is
-only 920 ticks, the three-cell passage is a queue of a length that does not depend on the pace, and the
-formation adds the pace of its slowest (0.9) and the wait at the far end of the passage for the last unit
-through, which in the runs looked at is a wheeled unit that the traffic pushed off the mouth of the passage and
-that has to turn at the wall. The same march as a group order is over 1.4 in two of those runs too (1.13 to 1.54 in all of them).
-The sweep asserts the bound for `wheels` up to ten and prints the rest (`~`); the limit is not set lower
-because the pinned scenarios need 20 and the groups this phase is about are mixed.
+So: **from 3 to 19 units, at every depth of block, for all three mixes, all three bounds hold.** The margin of
+`wheels` against 1.4 is small, and not only near the limit (the worst run of a size is 1.37 at 7 and at 19, 1.35 at
+16): the runs are chaotic, and a change anywhere in the march moves which run is the worst. A group of fast units
+can be faster as a formation than as a group order (0.62: nine vehicles in a block 2 deep, which as a group order
+jam at the passage for 1.84 times their walk).
 
-What it costs in time, honestly: a formation arrives later than the same group would as a group order
-(`mixed` 1.08 to 1.39 against 1.01 to 1.07), because it keeps the pace of the slowest and files through the
-passage in a loose shape and then forms up. It is the price of the shape.
+**Above the limit.** `sizes_above_the_limit_for_the_record` makes the same march as a formation for 20 to 24
+units, with the limit raised for the probe, and asserts nothing: `mixed` takes 1.06 to 1.16 times the walk and
+`foot` 1.03 to 1.11, both clean; `wheels` takes 1.24 to 1.50, and **8 of its 30 runs are over 1.4** (20 units in a
+block 2 deep at 1.41; the worst, 24 units in a block 4 deep, at 1.50). None is over 1.26 times its group order, which
+itself takes 1.17 to 1.45 times the walk there. What is left is spread over the start of a deep block (the lattice is
+wider than the block the units stand in, and the units at the back stand ahead of their slots and walk back to them),
+the queue at the passage (chaotic: from 180 ticks faster to 133 slower than the group order in the runs looked at),
+the wait behind it and the arrival. No single cause is left, so the limit is 19.
 
-Above the limit (28, 32, 40, 48 units; `sizes_above_the_cap_for_the_record`) the group is not a formation and
-the same march takes 1.03 to 1.15 (`mixed`), 1.04 to 1.29 (`foot`) and 1.25 to 1.58 (`wheels`) times the walk;
-as a formation (limit put back to 48 for a probe) the `mixed` groups took 3,198 to 4,201 ticks, 1.2 to 1.6
-times the walk.
+What it costs in time, honestly: within the limit a formation arrives up to 1.12 (`mixed`) and 1.24 (`wheels`)
+times later than the same group as a group order, because it keeps the shape: the front waits for the back at
+the far end of the passage, and the block arrives together instead of one unit after the other.
 
 ## State and checksum
 
@@ -293,22 +328,22 @@ zero. A group order that forms no formation has exactly the checksum it had.
 
 ## Measured
 
-`formation_move` (map `assets/maps/formation`, 112 by 48 cells; 20 units: 10 riflemen, 5 light tanks,
-5 light transports in a block of 4 by 5, one order to a point 91 cells east and behind a 3-cell wide,
-8-cell long passage in a wall):
+`formation_move` (map `assets/maps/formation`, 112 by 48 cells; 16 units: 8 riflemen, 4 light tanks,
+4 light transports in a block of 4 by 4, one order to a point 91 cells east and behind a 3-cell wide,
+8-cell long passage in a wall; it had 20 units in a block of 4 by 5 until review round 3 set the limit to 19):
 
 | | |
 |---|---|
-| ticks on open ground (formation whole, leader outside 8 cells of the wall) | 1,988 |
-| of them with every member within 3.0 cells of its slot | 1,988 (100 %) |
-| farthest any member was from its slot there | 2.33 cells (the lattice is 4.46 cells from the leader) |
-| leader's speed in the west field | 0.0315 cells a tick (the rifleman's top speed 0.035) |
-| longest the group was along its heading | 7.2 cells |
-| loose at the passage | 170 ticks, up to 19 members following the order's way at once |
-| formed up again behind the passage (nobody loose or waiting; each member waiting on open ground or within 3 cells of its slot) | tick 1,383 |
-| leader's waits (ticks) / breaks / expelled | 267 / 0 / 0 |
-| formation let go | tick 2,715 |
-| everybody arrived | tick 2,997 (1.14 times the 2,629 the riflemen need alone); worst overlap during the run 0.038 cells, at the end 0.031 |
+| ticks on open ground (formation whole, leader outside 8 cells of the wall) | 1,854 |
+| of them with every member within 3.0 cells of its slot | 1,854 (100 %) |
+| farthest any member was from its slot there | 0.93 cells (the lattice is 4.46 cells from the leader) |
+| leader's speed in the west field | 0.0349 cells a tick (the rifleman's top speed 0.035; nobody behind, so the pace is the slowest's own) |
+| longest the group was along its heading | 5.3 cells |
+| loose at the passage | 504 ticks, up to 15 members following the order's way at once |
+| formed up again behind the passage (every member walking straight to its slot and within 1 cell of it) | tick 1,370 |
+| leader's waits (ticks) / breaks / expelled | 0 / 0 / 0 |
+| formation let go | tick 2,586 |
+| everybody arrived | tick 2,812 (1.07 times the 2,629 the riflemen need alone); worst overlap during the run 0.048 cells, at the end 0.029 |
 
 `bridge_200` is not changed by WP4.6 (a crowd of 200 forms no formation) and meets the done-when of phase 4
 as before: all 200 arrive by tick 3,456, 0 end beyond 1.3 times the packing radius, the worst overlap is 0.190 of
@@ -333,11 +368,11 @@ pinned was independence from a tuning number, a wish and not a requirement. It s
   an attack-move would have to fight as a group (phase 5).
 * **Formations the player chooses** (line, wedge, column): the shape is the group's own, kept. A named
   shape would be a different offset generator; the rest would not change.
-* **A formation of more than `formation_max_units`** (24): a crowd. Groups of only fast units above ten are
-  slower to arrive than 1.4 times their own walk ("Sizes").
-* **Exact shape for the last unit through**: a member that comes through the passage last and is given a slot
-  in front of the leader's own column can stay up to the re-form distance behind it ("Narrow places and
-  re-forming").
+* **A formation of more than `formation_max_units`** (19): a crowd. Groups of 20 to 24 tanks and transports miss
+  1.4 times their own walk in 8 of 30 runs of the sweep ("Sizes").
+* **Other ground than one passage**: the sweep and `formation_move` are one map, an open field, a passage three
+  cells wide and another open field. Rock outcrops, a river and its bridge, several gaps and turns have single
+  cases in `tests/formation.rs` and no sweep.
 * **Aircraft and mixed ground**: aircraft do not form; hovercraft and vessels form their own families but
   their formations have been tested only with three boats, and the hover class not at all
   (`tests/formation.rs`).

@@ -506,14 +506,16 @@ fn the_leader_goes_at_the_pace_of_the_slowest_and_the_others_use_their_own_speed
     let mut w = world();
     let group = mixed_five(&mut w, 6, 10);
     go(&mut w, &group, (80, 10));
-    // Form up, then watch a stretch of open ground.
-    run(&mut w, 150);
+    // The pace is the slowest member's speed while every member is on its slot or ahead of it,
+    // and `pace_permille` (900) of it while one is behind and has to catch up: never more.
     let slowest = per_tick(Fx::from_ratio(7, 10));
-    let pace = slowest.mul_int(900).div_int(1000);
+    let kept_back = slowest.mul_int(900).div_int(1000);
+    let near = |a: Fx, b: Fx| (a - b).abs() <= Fx::from_raw(2);
+    let (mut at_full, mut at_kept_back) = (0, 0);
     let mut fastest = Fx::ZERO;
     let mut last: Vec<Vec2> = group.iter().map(|&u| pos(&w, u)).collect();
     let mut leader_moved = 0;
-    for _ in 0..400 {
+    for t in 0..550 {
         w.step();
         for (k, &u) in group.iter().enumerate() {
             let now = pos(&w, u);
@@ -526,23 +528,35 @@ fn the_leader_goes_at_the_pace_of_the_slowest_and_the_others_use_their_own_speed
                 "unit {k} stepped {step:?} > {own:?}"
             );
             if v.leader {
-                fastest = fastest.max(step);
-                if step > Fx::ZERO {
-                    leader_moved += 1;
+                // Form up first (150 ticks), then watch a stretch of open ground.
+                if t >= 150 {
+                    fastest = fastest.max(step);
+                    if step > Fx::ZERO {
+                        leader_moved += 1;
+                    }
                 }
-                assert!(v.pace <= pace + Fx::from_raw(2), "{:?}", v.pace);
+                assert!(
+                    near(v.pace, slowest) || near(v.pace, kept_back),
+                    "tick {t}: the pace {:?} is neither {slowest:?} nor {kept_back:?}",
+                    v.pace
+                );
+                at_full += u32::from(near(v.pace, slowest));
+                at_kept_back += u32::from(near(v.pace, kept_back));
             }
             last[k] = now;
         }
     }
     // The leader never outpaces the slowest member (a hair for the rounding of the steps).
-    assert!(
-        fastest <= slowest.mul_int(901).div_int(1000) + Fx::from_raw(2),
-        "{fastest:?}"
-    );
+    assert!(fastest <= slowest + Fx::from_raw(2), "{fastest:?}");
     assert!(
         leader_moved > 100,
         "the leader moved on {leader_moved} ticks"
+    );
+    // Both happen: the group forms up (members behind their slots, the pace kept back) and
+    // then marches at the speed of its slowest.
+    assert!(
+        at_full > 100 && at_kept_back > 0,
+        "{at_full} ticks at the slowest's speed, {at_kept_back} kept back"
     );
 }
 

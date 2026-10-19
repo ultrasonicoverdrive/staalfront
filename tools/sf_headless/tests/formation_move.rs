@@ -1,4 +1,4 @@
-//! The `formation_move` scenario (WP4.6, `docs/rules/formations.md`): a mixed group of 20
+//! The `formation_move` scenario (WP4.6, `docs/rules/formations.md`): a mixed group of 16
 //! marches across open ground, through a narrow passage and on to a goal behind it, as one
 //! formation.
 //!
@@ -17,7 +17,7 @@ use sf_headless::scenario::Scenario;
 use sf_math::{Fx, Vec2};
 use sf_sim::{EntityId, MemberMode, Order, World};
 
-const UNITS: u32 = 20;
+const UNITS: u32 = 16;
 const GOAL: (i32, i32) = (100, 23);
 /// Columns of the wall: the passage is in rows 22 to 24 and eight cells long.
 const WALL: std::ops::RangeInclusive<i32> = 40..=47;
@@ -173,16 +173,13 @@ fn run() -> Run {
             if r.formed_again.is_none()
                 && lead_x > f64::from(*WALL.end()) + 6.0
                 && !lead.loose
-                && !lead.waiting
                 && lead.members == UNITS as usize
-                // Whole, as the formation itself counts it: no straggler, every member within the
-                // re-form distance of its slot, or ahead of it and standing (it ran ahead while
-                // the formation was loose and waits for the slot).
+                // Formed up: every member walks straight to its slot (none follows the order's
+                // way, none stands ahead of it) and is within a cell of it.
                 && (0..UNITS as usize).all(|s| {
                     views[s].is_some_and(|v| {
-                        v.mode == MemberMode::Wait
-                            || ((v.mode == MemberMode::Direct || v.leader)
-                                && cells((pos[s] - v.slot).length()) < NEAR)
+                        (v.mode == MemberMode::Direct || v.leader)
+                            && cells((pos[s] - v.slot).length()) < 1.0
                     })
                 })
             {

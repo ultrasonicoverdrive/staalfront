@@ -135,6 +135,12 @@ pub struct Scenario {
     /// and sends several units across the same ground to one place.
     #[serde(default)]
     pub formation: Option<bool>,
+    /// The most units one move order may send and still make formations
+    /// (`FormationConfig::max_units`); the simulation's default (as `sim.ron` ships it) when
+    /// left out. For a probe of sizes above the shipped limit, as the sweep of
+    /// `tests/formation_sweep.rs` makes to show why the limit is where it is.
+    #[serde(default)]
+    pub formation_max_units: Option<u16>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -906,11 +912,13 @@ impl Scenario {
                 })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
-        if let Some(enabled) = self.formation {
+        if self.formation.is_some() || self.formation_max_units.is_some() {
+            let base = sf_sim::FormationConfig::DEFAULT;
             world = world
                 .with_formation(sf_sim::FormationConfig {
-                    enabled,
-                    ..sf_sim::FormationConfig::DEFAULT
+                    enabled: self.formation.unwrap_or(base.enabled),
+                    max_units: self.formation_max_units.unwrap_or(base.max_units),
+                    ..base
                 })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }

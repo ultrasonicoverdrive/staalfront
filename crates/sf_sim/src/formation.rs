@@ -31,19 +31,25 @@
 //! # The pace
 //!
 //! The leader follows the order's route as any unit does (a flowfield or a route of its own,
-//! `path/`), but never faster than [`FormationConfig::pace_permille`] of the speed of the
-//! slowest member *as it stands now* (terrain included). The others walk to their slots as
-//! fast as [`FormationConfig::catchup_permille`] of their own speed allows: a unit that falls
-//! behind catches up, one that is ahead of its slot waits on it, because its slot comes to it
-//! at the pace of the formation.
+//! `path/`), but never faster than the speed of the slowest member *as it stands now* (terrain
+//! included), and only [`FormationConfig::pace_permille`] of that while some member is behind
+//! its slot and has to catch up. The others walk to their slots as fast as
+//! [`FormationConfig::catchup_permille`] of their own speed allows: a unit that falls behind
+//! catches up, one that is ahead of its slot waits on it, because its slot comes to it.
 //!
 //! # Narrow places and re-forming
 //!
 //! A member that cannot see its slot (a thick line of sight, `path/los.rs`: a wall, a gap, the
 //! river) follows the flowfield or route of the order as it always did and is not held back,
 //! except that a unit that is ahead of its slot by more than [`FormationConfig::reform_tenths`]
-//! waits where it stands if the ground round it is open. When the leader is on open ground
-//! and some member is farther from its slot than that, the **leader waits** for it, for at most
+//! waits where it stands if the ground round it is open, also while the formation is loose (so
+//! the fast units that come out of a gap first do not run off to the goal). The formation is
+//! **loose** (everybody follows the order's way, the leader at its own speed) while the ground
+//! round the leader, or round the front of the lattice, is not open: it lets go before its
+//! front rows reach a wall and files into a gap as a group order does. When the leader is on
+//! open ground and some member is behind its slot, or to the side of it, by more than the
+//! re-form distance (a **straggler**; a unit ahead of its slot is none, the slot comes to it),
+//! the **leader waits** for it, for at most
 //! [`FormationConfig::patience_ticks`] ticks in all (it runs down at a third of the rate
 //! while every straggler is coming closer); then the formation is *broken*: nobody waits any
 //! more until the stragglers are back (at most a tenth of the group away). The patience is
@@ -59,14 +65,15 @@
 //! The heading follows the leader's own steps (a leader that waits and is pushed about by
 //! others does not turn the formation). A unit that is ahead of its slot waits there, whatever
 //! way it was going (`Direct` or `Flow`), and does not walk back to it. When the units have come
-//! through a gap in another order than they went in, the slots are handed out again
-//! (`assign`: the least sum of squared distances over all pairs, by the Hungarian method, ties
-//! to the lower slot) so that nobody has to pass another to reach its slot.
+//! through a gap in another order than they went in, and every 100 ticks while some member is
+//! stalled, the slots are handed out again (`assign`: the least sum of squared distances over
+//! all pairs, by the Hungarian method, ties to the lower slot) so that nobody has to pass
+//! another to reach its slot.
 //!
 //! # The end
 //!
-//! A formation ends when its leader comes within the extent of the formation and two cells of
-//! the goal: the members are released and go on as every unit of a group order does, to the
+//! A formation ends when its leader comes within the extent of the formation of the goal (or
+//! within the disc the bodies of the whole order fill, when that is wider): the members are released and go on as every unit of a group order does, to the
 //! arrival slots of the goal's lattice, which is turned across the direction the group came
 //! in (`path/slots.rs`, [`Layout::turn`](crate::path)), claimed on approach (`path/claim.rs`)
 //! so that a slot that is blocked is simply not taken. Any other order, a death or the end of
@@ -97,14 +104,6 @@ pub const MAX_MEMBERS: usize = 256;
 /// The most formations a world keeps at once; an order beyond that moves its group as a
 /// group order always did.
 pub const MAX_FORMATIONS: usize = 64;
-
-/// How far inside the extent of the formation the leader is from the goal when the
-/// formation is let go, in cells.
-const RELEASE_MARGIN: Fx = Fx::from_int(2);
-
-/// How much more than the two radii a member may be from the one in front of it and be
-/// "in its way", in cells.
-const BLOCK_MARGIN: Fx = Fx::from_ratio(1, 2);
 
 /// How often, in ticks, the slots are handed out again while some member is stalled.
 const REASSIGN_EVERY: u32 = 100;
@@ -145,7 +144,7 @@ pub const MIN_UNITS_LIMIT: u16 = 2;
 /// The shipped numbers: see [`FormationConfig`] for what each does.
 pub const DEFAULT_MIN_UNITS: u16 = 3;
 /// See [`FormationConfig::max_units`].
-pub const DEFAULT_MAX_UNITS: u16 = 24;
+pub const DEFAULT_MAX_UNITS: u16 = 19;
 /// See [`FormationConfig::spacing_permille`].
 pub const DEFAULT_SPACING_PERMILLE: u16 = 1250;
 /// See [`FormationConfig::spread_permille`].
@@ -180,8 +179,9 @@ pub struct FormationConfig {
     /// The most a formation may spread, as thousandths of the radius of a disc that holds the
     /// bodies of the group: a scattered group is pulled in to this. From 1000 to 4000
     pub spread_permille: u16,
-    /// The pace of the formation, as thousandths of the current speed of its slowest member
-    /// (the part it keeps back so that the slowest can keep up). From 500 to 1000
+    /// The pace of the formation while some member is behind its slot, as thousandths of the
+    /// current speed of its slowest member (the part it keeps back so that the slowest can
+    /// catch up); with nobody behind it goes at that speed. From 500 to 1000
     pub pace_permille: u16,
     /// The most speed a member may use to catch up with its slot, as thousandths of its own
     /// speed. Not less than `pace_permille`, at most 1000
@@ -707,19 +707,21 @@ fn update_one(
         slowest = Some(slowest.map_or(step, |s| s.min(step)));
     }
     f.extent = extent2.sqrt();
-    let pace = slowest
-        .unwrap_or(Fx::ZERO)
+    let full = slowest.unwrap_or(Fx::ZERO).max(Fx::from_raw(1));
+    let pace = full
         .mul_int(i64::from(cfg.pace_permille))
         .div_int(1000)
         .max(Fx::from_raw(1));
     f.pace = pace;
 
-    // The end: the leader is within the extent and a margin of the goal, or within the disc
-    // the whole order's bodies fill round it (the units of other families that were sent
-    // with the formation stand there, and its slots would lie among them); or its goal is
-    // out of reach and it has come to the end of the way.
+    // The end: the leader is within the extent of the goal, so that the front of the shape is
+    // about there, or within the disc the whole order's bodies fill round it (the units of
+    // other families that were sent with the formation stand there, and its slots would lie
+    // among them); or its goal is out of reach and it has come to the end of the way. (Two
+    // cells farther out, as before review round 3, the block took its arrival slots while
+    // still eight cells off, all at once, and jostled for them longer.)
     let stranded = e.route[leader].state == RouteState::Stranded && e.route[leader].unreachable;
-    let ends = f.extent.max(e.crowd[leader].disc) + RELEASE_MARGIN;
+    let ends = f.extent.max(e.crowd[leader].disc);
     if stranded || (f.goal - lead_at).length() <= ends {
         return Verdict::Released;
     }
@@ -747,10 +749,18 @@ fn update_one(
         f.turn_wait = (period - 1) as u8;
     }
 
-    // Is the ground round the leader open? Near a wall, the water or a gap the formation
-    // lets go for a while: everybody follows the order's way at full speed, nobody waits
-    // for anybody, and the units file through. It forms up again on open ground.
-    let open = open_ground(path, class_of(e, units, leader), lead_at);
+    // Is the ground round the leader open, and round the front of the lattice (the extent
+    // ahead of the leader, along the heading)? Near a wall, the water or a gap the formation
+    // lets go for a while: everybody follows the order's way at full speed, nobody waits for
+    // anybody, and the units file through. It forms up again on open ground. Looking from the
+    // leader alone (the middle of the group) let the front rows of a wide block reach the
+    // wall still in their slots; pushed off the mouth of the gap they were pinned at the rock
+    // beside it, the leader once for 560 ticks (review round 3).
+    let lead_class = class_of(e, units, leader);
+    let front = lead_at + Vec2::X.rotate(f.heading) * f.extent;
+    let open = open_ground(path, lead_class, lead_at)
+        && path.sight_clear(lead_class, lead_at, front)
+        && open_ground(path, lead_class, front);
     let was_loose = f.loose > 0;
     f.loose = if open {
         f.loose.saturating_sub(1)
@@ -767,17 +777,14 @@ fn update_one(
         reassign(f, e, lead_at, lead_off);
     }
 
-    // A member that does not get to its slot because another stands in the way, on its own
-    // slot or on its way to it, swaps places with that one: the pair walks on without having
-    // to pass each other.
-    if !loose && f.age.is_multiple_of(WINDOW) {
-        swap_blocked(f, e, units, lead_at, lead_off);
-    }
-
     // Every member: its slot, and how far it is from it.
     let reform = cfg.reform();
     let forward = Vec2::X.rotate(f.heading);
     let mut lagging = 0_usize;
+    // Some member is behind its slot by more than half a cell: it has to catch up, and the
+    // leader keeps back the part of the pace that lets it (`pace_permille`). With nobody
+    // behind it goes at the slowest member's own speed.
+    let mut catching = false;
     let mut stalled_far = false;
     let mut expelled: Vec<u32> = Vec::new();
     f.age = f.age.wrapping_add(1);
@@ -816,13 +823,14 @@ fn update_one(
             MemberMode::Direct
         };
         // A unit that is ahead of its slot (farther along the heading than the re-form
-        // distance: it ran ahead while the formation was loose, or came out of a gap first)
-        // waits for it on open ground, whether it sees it or not: the slot comes to it at
-        // the pace of the formation, and walking back to it would only make the leader wait
-        // for it. It is not a straggler.
-        let ahead = !loose
-            && (e.pos[i] - member.slot).dot(forward) > reform
-            && open_ground(path, class, e.pos[i]);
+        // distance: it came out of a gap first) waits for it on open ground, whether it sees
+        // it or not, and also while the formation is loose: the slot comes to it at the pace
+        // of the formation, walking back to it would only make the leader wait for it, and
+        // running on while the rest files through would take it to the goal alone. It is not
+        // a straggler.
+        let along = (e.pos[i] - member.slot).dot(forward);
+        let aside = (e.pos[i] - member.slot).cross(forward).abs();
+        let ahead = along > reform && open_ground(path, class, e.pos[i]);
         if ahead {
             member.mode = MemberMode::Wait;
             member.lag = 0;
@@ -830,9 +838,14 @@ fn update_one(
             member.lag = 0;
             member.far = Fx::MAX;
         } else {
+            catching |= along < -SETTLE;
             // Off its slot by more than a body: it has to come closer by a little in every
-            // window, or it is stalled.
-            if lag > reform {
+            // window, or it is stalled. It is a straggler (the leader waits for it) when it is
+            // farther than the re-form distance and behind its slot or that far to the side of
+            // it; a unit ahead of it is none, the slot comes to it. (Counting the distance
+            // alone made the leader stop for each unit that had come out of a gap first, one
+            // after the other, as its slot came within the re-form distance of it.)
+            if lag > reform && (along <= Fx::ZERO || aside > reform) {
                 lagging += 1;
             }
             if f.age.is_multiple_of(WINDOW) {
@@ -869,6 +882,17 @@ fn update_one(
     }
     if f.members.len() < 2 {
         return Verdict::Dissolved;
+    }
+    // Nobody has to catch up: the leader goes at the speed of the slowest member itself.
+    if !loose && !catching {
+        let permille = ground.permille_at(lead_class, e.pos[leader]).max(1);
+        let own = units.at(e.def[leader] as usize).speed_per_tick;
+        e.form[leader].step = full
+            .mul_int(1000)
+            .div_int(i64::from(permille))
+            .min(own)
+            .max(Fx::from_raw(1));
+        f.pace = full;
     }
 
     // The leader waits for stragglers where it can do so without holding anybody up.
@@ -919,57 +943,6 @@ fn update_one(
         }
     }
     Verdict::Keep
-}
-
-/// Members that are stalled (not coming closer to their slot for a window) swap slots with the
-/// member that stands in their way: another member within the sum of the two radii and a
-/// little more of the unit, in the direction of its slot, that is not itself stalled. Each
-/// member swaps at most once per call, the lowest slot first.
-fn swap_blocked(f: &Formation, e: &mut Entities, units: &UnitTable, lead_at: Vec2, lead_off: Vec2) {
-    let mut moved = vec![false; e.len()];
-    for &m in &f.members {
-        let i = m as usize;
-        if i == f.leader as usize || moved[i] || e.form[i].lag == 0 {
-            continue;
-        }
-        let slot = lead_at + (e.form[i].off - lead_off).rotate(f.heading);
-        let want = slot - e.pos[i];
-        if want.is_zero() {
-            continue;
-        }
-        let radius_i = units.at(e.def[i] as usize).size.div_int(2);
-        // The nearest member ahead of it, toward the slot, close enough to be in the way.
-        let mut best: Option<(Fx, usize)> = None;
-        for &o in &f.members {
-            let j = o as usize;
-            if j == i || j == f.leader as usize || moved[j] {
-                continue;
-            }
-            let apart = e.pos[j] - e.pos[i];
-            let reach = radius_i + units.at(e.def[j] as usize).size.div_int(2) + BLOCK_MARGIN;
-            if apart.dot(want) <= Fx::ZERO || apart.length_squared() > reach.square() {
-                continue;
-            }
-            // The other must itself be where it belongs, or the swap only passes the problem on.
-            if e.form[j].lag != 0 {
-                continue;
-            }
-            let key = apart.length_squared();
-            if best.is_none_or(|(b, k)| (key, j) < (b, k)) {
-                best = Some((key, j));
-            }
-        }
-        if let Some((_, j)) = best {
-            let (a, b) = (e.form[i].off, e.form[j].off);
-            e.form[i].off = b;
-            e.form[j].off = a;
-            for k in [i, j] {
-                e.form[k].lag = 0;
-                e.form[k].far = Fx::MAX;
-                moved[k] = true;
-            }
-        }
-    }
 }
 
 /// Hands the slots of the lattice out again so that the units walk the least in all: the

@@ -142,7 +142,7 @@ fn pathing_256_matches_the_pinned_checksum() {
 /// WP4.5** (`0xa55348bf0b519c50` to the value in the file):
 /// the turning rules, infantry turning at once and wheeled vehicles in arcs. **Not moved by
 /// WP4.6** (`docs/rules/formations.md`): the 200 are a crowd, an order that sends more than
-/// `formation_max_units` (24) units makes no formation, not even among its five hover craft, so
+/// `formation_max_units` (19) units makes no formation, not even among its five hover craft, so
 /// the run ends on the value it had before formations.
 #[test]
 fn bridge_200_matches_the_pinned_checksum() {
@@ -153,7 +153,8 @@ fn bridge_200_matches_the_pinned_checksum() {
 /// in a corridor while others route round it (WP4.4). A new scenario: pinned when it
 /// was added. **Re-pinned at WP4.5** (`0xd5e9d6e45a14b0ef` to the value in the file): the
 /// turning rules. **Re-pinned at WP4.6** (`0x69e7a06fe17a33e5` to the value in the file): the
-/// two groups of 18 and the 8 tanks along the corridor are formations now.
+/// two groups of 18 and the 8 tanks along the corridor are formations now (orders of at most
+/// `formation_max_units`, 19); `tests/crowd_jam.rs` asserts what it did before and holds.
 #[test]
 fn crowd_jam_matches_the_pinned_checksum() {
     check("crowd_jam", CROWD_JAM_EXPECTED);
@@ -178,8 +179,9 @@ fn replan_matches_the_pinned_checksum() {
     check("replan", REPLAN_EXPECTED);
 }
 
-/// A mixed group of 20 marches across open ground, through a passage and on to a goal as one
-/// formation (WP4.6). A new scenario: pinned when it was added.
+/// A mixed group of 16 marches across open ground, through a passage and on to a goal as one
+/// formation (WP4.6). A new scenario: pinned when it was added (review round 3: 16 units, under
+/// the limit of 19 that the sweep of `tests/formation_sweep.rs` measured; it had 20 before).
 #[test]
 fn formation_move_matches_the_pinned_checksum() {
     check("formation_move", FORMATION_MOVE_EXPECTED);

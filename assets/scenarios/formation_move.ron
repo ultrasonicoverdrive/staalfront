@@ -9,18 +9,20 @@
 //                    in rows 22..24 (three
 //                    cells wide, eight long)
 //
-// The 20 units stand on a block of 4 by 5 cells (x 6..9, y 20..24), one to a cell, and
+// The 16 units stand on a block of 4 by 4 cells (x 6..9, y 20..23), one to a cell, and
 // get ONE move order on tick 1: go to (100, 23), 91 cells east and behind the passage.
 // The slots are the entity ids; every row mixes the three speeds:
 //
-//   10 riflemen (foot, 0.7 cells a second)   5 light tanks (tracked, 2)
-//    5 light transports (wheeled, 2.5)
+//   8 riflemen (foot, 0.7 cells a second)   4 light tanks (tracked, 2)
+//   4 light transports (wheeled, 2.5)
 //
-// All three cross the same ground, so the order makes ONE formation of 20: the group
+// All three cross the same ground, so the order makes ONE formation of 16: the group
 // keeps its shape in the open field, the slowest (a rifleman) sets the pace, the
 // formation breaks up at the passage, the units file through, and it forms up again on
-// the other side. The riflemen are 10, at least the flowfield threshold (8), so they
-// follow a field; the 5 tanks and 5 transports are below it and have routes of their own.
+// the other side. The order is wholly a formation, so every class of two or more units gets
+// a flowfield (docs/rules/formations.md, "Interplay with the rest"). The scenario had 20
+// units (a block of 4 by 5) until review round 3 of WP4.6 set the limit of a formation to
+// 19, the largest size the sweep of tools/sf_headless/tests/formation_sweep.rs is clean for.
 //
 // tools/sf_headless/tests/formation_move.rs asserts the shape in the open field (every
 // unit near its slot for nearly all of the ticks there), the pace (the group is never
@@ -55,12 +57,8 @@ Scenario(
         (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (7, 23))), // slot 13: rifleman
         (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 23))), // slot 14: light tank
         (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (9, 23))), // slot 15: rifleman
-        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 24))), // slot 16: rifleman
-        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (7, 24))), // slot 17: light tank
-        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 24))), // slot 18: rifleman
-        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (9, 24))), // slot 19: light transport
 
         // --- tick 1: one order for everybody ---
-        (tick: 1, command: OrderMove(ids: [Range(0, 20)], target: (100, 23))),
+        (tick: 1, command: OrderMove(ids: [Range(0, 16)], target: (100, 23))),
     ],
 )

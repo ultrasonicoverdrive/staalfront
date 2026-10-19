@@ -1,38 +1,42 @@
-//! A sweep over the size and shape of the group of `formation_move` (WP4.6, review round 1,
-//! `docs/rules/formations.md`, "Sizes").
+//! A sweep over the size and shape of the group of `formation_move` (WP4.6, review rounds 1
+//! to 3, `docs/rules/formations.md`, "Sizes").
 //!
-//! `formation_move` pins ONE group (20 units in a block of 4 wide). A formation that works for
+//! `formation_move` pins ONE group (16 units in a block of 4 wide). A formation that works for
 //! that block and crawls for another is a formation that works for the test, so this sweep
 //! builds the same march on the same map for every size from the smallest formation (3) up to
-//! `formation_max_units` (24), for six widths of the block the group starts in (2, 3, 4, 5, 6
-//! and 8 columns, so from a column to a wide block) and for three mixes of unit kinds
-//! (`mixed`: the riflemen, tanks and transports of `formation_move`; `foot`: riflemen only;
-//! `wheels`: tanks and transports only), and asserts for each run:
+//! `formation_max_units` (19), for six depths of the block the group starts in (2, 3, 4, 5, 6
+//! and 8 columns along the way, so from a line abreast to a deep column) and for three mixes of
+//! unit kinds (`mixed`: the riflemen, tanks and transports of `formation_move`; `foot`: riflemen
+//! only; `wheels`: tanks and transports only). Every run is made twice, with the formation and
+//! as the group order the same units make with `formation: false`, and for **every** run up to
+//! the limit, every width and every mix it asserts:
 //!
 //! - **the 1.4 times bound** the scenario holds itself to: every unit is idle (arrived) within
 //!   1.4 times the time the slowest unit of the group needs alone to walk the same way, with
 //!   no formation and no other body in the way (1.4 is what `formation_move` asserts, and
-//!   nothing here is looser). It is asserted for every size from 3 to 24 for `mixed` and
-//!   `foot` (the worst run is 1.39 for `mixed`, 1.23 for `foot`), and for `wheels` up to
-//!   `FAST_ONLY_BOUND_HOLDS_TO` (10) units. **Above that a group of only fast units misses
-//!   it** (1.18 to 2.09 times, and the same march without a formation takes 1.13 to 1.54): the
-//!   walk of a tank is short, the three cells wide passage is a queue whose length does not
-//!   depend on the pace, and the formation adds the pace of its slowest (0.9) and the wait for
-//!   the last unit through the passage. Those runs are printed (`~`), not asserted; the
-//!   documents say so;
+//!   nothing here is looser);
+//! - **not much slower than without a formation**: the formation is idle within 1.3 times the
+//!   tick the same group is idle as a group order (`TO_GROUP_ORDER`). A group of fast units has
+//!   a short walk, and a delay of a few hundred ticks at the passage hides inside 1.4 times a
+//!   rifleman's walk but not inside a tank's: this bound catches it for every mix;
 //! - **no crawl**: in no window of `WINDOW` ticks, while the rear of the group is still short
 //!   of the goal area, does the unit farthest west advance by less than a quarter of what the
-//!   slowest unit alone would walk in that window (the worst run: about half). The leader and
-//!   the fast units may wait for it, but it must be getting on. The first version of the
-//!   formation met the 1.4 bound for 20 units and took more than twice as long for 195, so
-//!   the bound alone is not what shows that a group moves on.
+//!   slowest unit alone would walk in that window. The leader and the fast units may wait for
+//!   it, but it must be getting on.
 //!
-//! The sweep is slow (a few hundred worlds, about 40 seconds in release), so it is `#[ignore]`d:
-//! run it with `cargo test --release -p sf_headless --test formation_sweep -- --ignored
-//! --nocapture`. The numbers it prints are in `docs/progress.md`. A size above the shipped cap
-//! is not a formation (the group moves as a group order); `sizes_above_the_cap_for_the_record`
-//! prints the same march for 28 to 48 units, so that what the cap is measured against stays
-//! visible.
+//! The limit is the largest size at which all three hold for every width and mix:
+//! `sizes_above_the_limit_for_the_record` makes the same march as a formation for 20 to 24
+//! units (the limit raised for the probe) and prints it, asserting nothing, so that what the
+//! limit is measured against stays visible: groups of only tanks and transports miss the 1.4
+//! times bound there in 8 of 30 runs (20 units in a block 2 deep is the first), while the mixes with
+//! riflemen stay clean.
+//!
+//! The sweep is slow (a few hundred worlds, about half a minute in release), so it is
+//! `#[ignore]`d: run it with `cargo test --release -p sf_headless --test formation_sweep --
+//! --ignored --nocapture`. The numbers it prints are in `docs/progress.md`. Each run is printed
+//! as `c<columns>=<arrival over the walk>x/<arrival over the group order's>o/r<least share of the
+//! slowest's walk the rear made in a window>/m<the same for the mean>|<the group order's
+//! arrival over the walk>`, and `!` marks a run outside the bounds.
 
 mod common;
 
@@ -50,6 +54,9 @@ const TANK_PACE: f64 = 2.0 / 20.0;
 const GOAL: (i32, i32) = (100, 23);
 /// The bound of `formation_move`.
 const BOUND: f64 = 1.4;
+/// The most a formation may take, as a share of the time the same group takes as a group order
+/// without one (the same march with `formation: false`).
+const TO_GROUP_ORDER: f64 = 1.3;
 /// The window of the no-crawl check, and the share of the slowest unit's walk the rear has
 /// to make in it.
 const WINDOW: u64 = 600;
@@ -63,8 +70,6 @@ struct Mix {
     name: &'static str,
     kinds: &'static [u16],
     slowest: f64,
-    /// The largest size for which the 1.4 times bound is asserted (see the module docs).
-    bound_holds_to: u32,
 }
 
 const MIXES: [Mix; 3] = [
@@ -72,31 +77,25 @@ const MIXES: [Mix; 3] = [
         name: "mixed",
         kinds: &[RIFLEMAN, TANK, RIFLEMAN, TRANSPORT],
         slowest: RIFLEMAN_PACE,
-        bound_holds_to: CAP,
     },
     Mix {
         name: "foot",
         kinds: &[RIFLEMAN],
         slowest: RIFLEMAN_PACE,
-        bound_holds_to: CAP,
     },
     Mix {
         name: "wheels",
         kinds: &[TANK, TRANSPORT],
         slowest: TANK_PACE,
-        bound_holds_to: FAST_ONLY_BOUND_HOLDS_TO,
     },
 ];
 
-/// The largest group of only fast units (tanks and transports, 2 and 2.5 cells a second) for
-/// which the 1.4 times bound holds at every width of the block. Above it the bound is printed but
-/// not asserted: see the module docs.
-const FAST_ONLY_BOUND_HOLDS_TO: u32 = 10;
-
 const WIDTHS: [u32; 6] = [2, 3, 4, 5, 6, 8];
-const CAP: u32 = 24;
-/// Sizes above the cap, printed (not asserted).
-const SIZES_ABOVE_THE_CAP: [u32; 4] = [28, 32, 40, 48];
+/// The shipped `formation_max_units`: the sweep covers exactly the sizes that make formations.
+const CAP: u32 = 19;
+/// The sizes above the limit printed for the record, as formations (the limit raised to the
+/// largest of them for the probe).
+const ABOVE: std::ops::RangeInclusive<u32> = 20..=24;
 
 struct Outcome {
     /// The tick every unit was idle, if they all were by the end of the run.
@@ -111,9 +110,10 @@ struct Outcome {
     expelled: u64,
 }
 
-fn build(n: u32, cols: u32, mix: &Mix, ticks: u64, formation: bool) -> Scenario {
+fn build(n: u32, cols: u32, mix: &Mix, ticks: u64, formation: bool, cap: u32) -> Scenario {
     let mut s = Scenario::load(&scenario_path("formation_move.ron")).unwrap();
     s.formation = Some(formation);
+    s.formation_max_units = Some(cap as u16);
     s.ticks = ticks;
     s.commands.clear();
     let rows = n.div_ceil(cols);
@@ -148,8 +148,8 @@ fn walk_ticks(cols: u32, mix: &Mix) -> f64 {
     (f64::from(GOAL.0) - start) / mix.slowest
 }
 
-fn run(n: u32, cols: u32, mix: &Mix, ticks: u64, formation: bool) -> Outcome {
-    let s = build(n, cols, mix, ticks, formation);
+fn run(n: u32, cols: u32, mix: &Mix, ticks: u64, formation: bool, cap: u32) -> Outcome {
+    let s = build(n, cols, mix, ticks, formation, cap);
     let mut w = s.build_world().unwrap();
     let ids: Vec<EntityId> = (0..n).map(|u| EntityId::new(u, 0)).collect();
     let mean = |w: &sf_sim::World| {
@@ -197,12 +197,34 @@ fn run(n: u32, cols: u32, mix: &Mix, ticks: u64, formation: bool) -> Outcome {
     }
 }
 
+/// The worst of each ratio over the runs of one mix: arrival over the walk, with and without a
+/// formation, the formation's time over the group order's, and the least share of the walk the
+/// rear made in a window.
+#[derive(Default)]
+struct Worst {
+    walk: (f64, f64),
+    off_walk: (f64, f64),
+    to_off: (f64, f64),
+    rear: f64,
+}
+
+fn widen(r: &mut (f64, f64), x: f64) {
+    if r.0 == 0.0 && r.1 == 0.0 {
+        *r = (x, x);
+    } else {
+        *r = (r.0.min(x), r.1.max(x));
+    }
+}
+
 /// Every size, width and mix; returns the lines that failed.
-fn sweep(sizes: &[u32], assert_it: bool) -> Vec<String> {
+fn sweep(sizes: &[u32], cap: u32, assert_it: bool) -> Vec<String> {
     let mut failed = Vec::new();
-    let mut not_asserted = Vec::new();
     for mix in &MIXES {
         println!("mix {}", mix.name);
+        let mut worst = Worst {
+            rear: f64::MAX,
+            ..Worst::default()
+        };
         for &n in sizes {
             let mut line = format!("  n={n:2}:");
             for &cols in WIDTHS.iter().filter(|&&c| c <= n) {
@@ -210,8 +232,8 @@ fn sweep(sizes: &[u32], assert_it: bool) -> Vec<String> {
                 let bound = walk * BOUND;
                 // Run on to twice the bound so that a slow run shows its time.
                 let limit = (bound * 2.0) as u64;
-                let o = run(n, cols, mix, limit, true);
-                let off = run(n, cols, mix, limit, false);
+                let o = run(n, cols, mix, limit, true, cap);
+                let off = run(n, cols, mix, limit, false, cap);
                 let fmt = |x: f64| {
                     if x == f64::MAX {
                         "-".to_string()
@@ -221,10 +243,12 @@ fn sweep(sizes: &[u32], assert_it: bool) -> Vec<String> {
                 };
                 let ratio = o.idle_at.map(|t| t as f64 / walk);
                 let off_ratio = off.idle_at.map(|t| t as f64 / walk);
+                let to_off = o.idle_at.zip(off.idle_at).map(|(a, b)| a as f64 / b as f64);
                 let show = |r: Option<f64>| r.map_or("never".to_string(), |r| format!("{r:.2}"));
                 line += &format!(
-                    " c{cols}={}x/r{}/m{}|{}",
+                    " c{cols}={}x/{}o/r{}/m{}|{}",
                     show(ratio),
+                    show(to_off),
                     fmt(o.worst_rear),
                     fmt(o.worst_share),
                     show(off_ratio)
@@ -232,15 +256,18 @@ fn sweep(sizes: &[u32], assert_it: bool) -> Vec<String> {
                 if o.breaks > 0 || o.expelled > 0 {
                     line += &format!("(b{} e{})", o.breaks, o.expelled);
                 }
+                ratio.inspect(|&r| widen(&mut worst.walk, r));
+                off_ratio.inspect(|&r| widen(&mut worst.off_walk, r));
+                to_off.inspect(|&r| widen(&mut worst.to_off, r));
+                worst.rear = worst.rear.min(o.worst_rear);
                 let late = ratio.is_none_or(|r| r > BOUND);
+                let slower = to_off.is_none_or(|r| r > TO_GROUP_ORDER);
                 let crawl = o.worst_rear < CRAWL_SHARE;
-                if late && n > mix.bound_holds_to && !crawl {
-                    line += "~";
-                    not_asserted.push((mix.name, n, cols, ratio, off_ratio));
-                } else if late || crawl {
+                if late || slower || crawl {
                     failed.push(format!(
                         "{} n={n} cols={cols}: arrived at {:?} (bound {bound:.0}; without a \
-                         formation {:?}), worst share of the walk of the rear {} (need {CRAWL_SHARE})",
+                         formation {:?}, bound {TO_GROUP_ORDER} times that), worst share of the \
+                         walk of the rear {} (need {CRAWL_SHARE})",
                         mix.name,
                         o.idle_at,
                         off.idle_at,
@@ -251,15 +278,19 @@ fn sweep(sizes: &[u32], assert_it: bool) -> Vec<String> {
             }
             println!("{line}");
         }
+        println!(
+            "  {}: arrival {:.2} to {:.2} times the walk (without a formation {:.2} to {:.2}); \
+             {:.2} to {:.2} times the group order; the rear made at least {:.2} of the walk in a window",
+            mix.name,
+            worst.walk.0,
+            worst.walk.1,
+            worst.off_walk.0,
+            worst.off_walk.1,
+            worst.to_off.0,
+            worst.to_off.1,
+            worst.rear
+        );
     }
-    println!(
-        "{} runs above the size the bound is asserted for are over it (~): {} of them with the same march without a formation over it as well",
-        not_asserted.len(),
-        not_asserted
-            .iter()
-            .filter(|r| r.4.is_none_or(|x| x > BOUND))
-            .count()
-    );
     if assert_it {
         assert!(
             failed.is_empty(),
@@ -273,25 +304,26 @@ fn sweep(sizes: &[u32], assert_it: bool) -> Vec<String> {
 
 #[test]
 #[ignore = "slow: about three hundred worlds; run with --ignored in release"]
-fn formations_up_to_the_cap_arrive_within_1_4_times_the_walk_and_never_crawl() {
+fn formations_up_to_the_limit_keep_every_bound_for_every_width_and_mix() {
     assert_eq!(
         u32::from(FormationConfig::DEFAULT.max_units),
         CAP,
-        "the sweep must cover exactly the shipped cap"
+        "the sweep must cover exactly the shipped limit"
     );
     let sizes: Vec<u32> = (3..=CAP).collect();
-    sweep(&sizes, true);
+    sweep(&sizes, CAP, true);
 }
 
 #[test]
-#[ignore = "slow: prints the sizes above the cap, asserts nothing"]
-fn sizes_above_the_cap_for_the_record() {
-    // Above the cap a group is not a formation (it moves as a group order), so this is the
-    // same march without one: it prints the times, so that the reason for the cap stays
-    // visible next to the ones that pass. It asserts nothing.
-    let failed = sweep(&SIZES_ABOVE_THE_CAP, false);
+#[ignore = "slow: prints the sizes above the limit as formations, asserts nothing"]
+fn sizes_above_the_limit_for_the_record() {
+    // Above the limit a group is not a formation (it moves as a group order). This makes the
+    // same march as a formation, with the limit raised for the probe, and prints it next to the
+    // group order, so that the reason for the limit stays visible. It asserts nothing.
+    let sizes: Vec<u32> = ABOVE.collect();
+    let failed = sweep(&sizes, *ABOVE.end(), false);
     println!(
-        "{} of the runs above the cap are outside the bounds",
+        "{} of the runs above the limit are outside the bounds",
         failed.len()
     );
 }

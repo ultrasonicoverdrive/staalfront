@@ -452,7 +452,7 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   a gap, a unit on hold in a corridor, map `assets/maps/crowd_jam`) run with bodies.
   `tests/crowd_perf.rs` runs 2,000 units with bodies on 256 by 256 cells and prints the ticks a second.
 - **Formations (WP4.6):** `formation_move.ron` (map `assets/maps/formation`, an open field, a wall with a
-  three-cell passage and an open field behind it): 20 units of three speeds march as one formation,
+  three-cell passage and an open field behind it): 16 units of three speeds march as one formation,
   `tools/sf_headless/tests/formation_move.rs` asserts the shape on open ground, the pace, the break-up at the
   passage and the re-forming behind it. The numbers are the `formation_*` ones of `sim.ron`
   (`World::with_formation`); a scenario says `formation: Some(false)` to move its group as before.

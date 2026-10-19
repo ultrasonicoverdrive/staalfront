@@ -95,7 +95,7 @@ fn default_formation_min_units() -> u16 {
 }
 
 fn default_formation_max_units() -> u16 {
-    24
+    19
 }
 
 fn default_formation_spacing_permille() -> u16 {
@@ -173,7 +173,8 @@ pub struct SimSettings {
     /// the bodies. 1000 to 4000.
     #[serde(default = "default_formation_spread_permille")]
     pub formation_spread_permille: u16,
-    /// The pace of the formation, as thousandths of the speed of its slowest member.
+    /// The pace of the formation while some member is behind its slot, as thousandths of the
+    /// speed of its slowest member (with nobody behind it goes at that speed).
     /// 500 to 1000.
     #[serde(default = "default_formation_pace_permille")]
     pub formation_pace_permille: u16,
@@ -436,7 +437,7 @@ mod tests {
                 s.formation_reform_tenths,
                 s.formation_patience_ticks
             ),
-            (3, 24, 1250, 1500, 900, 1000, 30, 300)
+            (3, 19, 1250, 1500, 900, 1000, 30, 300)
         );
         let with = |field: &str, value: &str| {
             SimSettings::from_ron(&format!(

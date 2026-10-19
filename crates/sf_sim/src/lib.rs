@@ -298,8 +298,8 @@
 //! [`FormationConfig::min_units`] units (and at most `max_units`) that cross the same ground to one
 //! point makes them a **formation** ([`formation`], [`World::with_formation`],
 //! [`World::formation_of`]): the layout of the group becomes a lattice with room for the widest body,
-//! every unit has a slot that hangs from the leader and turns with the way it goes, the leader goes at
-//! the pace of the slowest member, the others walk to their slots, the shape lets go in narrow places
+//! every unit has a slot that hangs from the leader and turns with the way it goes, the leader goes no
+//! faster than the slowest member, the others walk to their slots, the shape lets go in narrow places
 //! and forms up again on open ground, and at the goal the members take the arrival slots of the group
 //! order. The rules are in `docs/rules/formations.md`.
 //!
