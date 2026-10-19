@@ -66,7 +66,7 @@ use field::{Fields, Layout, centre_xy};
 use graph::{ClassGraph, node_sector};
 use grid::{Grid, Sectors};
 use job::{Job, Mode, Progress, Work};
-pub(crate) use replan::{OVERLAY_RANGE, Overlay, OverlayBuilder};
+pub(crate) use replan::{OVERLAY_RANGE, Overlay, OverlayBuilder, ShutCells};
 pub(crate) use route::{Route, RouteState, Routes};
 
 pub use field::{
@@ -447,31 +447,18 @@ impl Pathing {
             // (WP4.7): shut while its job works, open again before anything else is
             // served, so the graph and every other request see the map as it is.
             let overlay = e.route[slot].overlay;
-            let mut saved = [0_u16; OVERLAY_CAP];
             let shut = !overlay.is_empty() && e.route[slot].ticket == job.ticket;
-            if shut {
-                self.graphs[job.graph]
-                    .grid
-                    .shut(overlay.cells(), &mut saved);
-            }
-            // The cells are opened again even if the job panics (the panic is then
-            // passed on): `catch_unwind` is the guard, a drop guard would have to hold
-            // the grid that the job reads.
+            // The guard opens the cells again when it is dropped, a panic of the job
+            // included. It holds the graph, which the job reads through it.
             let progress = if shut {
-                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    job.run(
-                        &self.graphs[job.graph],
-                        &mut self.work,
-                        &mut e.route[slot],
-                        &mut rem,
-                        self.epoch,
-                    )
-                }));
-                self.graphs[job.graph].grid.reopen(overlay.cells(), &saved);
-                match ran {
-                    Ok(progress) => progress,
-                    Err(panic) => std::panic::resume_unwind(panic),
-                }
+                let guard = ShutCells::new(&mut self.graphs[job.graph], overlay);
+                job.run(
+                    guard.graph(),
+                    &mut self.work,
+                    &mut e.route[slot],
+                    &mut rem,
+                    self.epoch,
+                )
             } else {
                 job.run(
                     &self.graphs[job.graph],

@@ -29,6 +29,8 @@
 
 use sf_math::Fx;
 
+use crate::path::graph::ClassGraph;
+
 /// The settings of the replan, game data in `assets/config/sim.ron`. A world that is
 /// given none uses [`ReplanConfig::DEFAULT`], the same numbers.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -136,6 +138,40 @@ impl PartialEq for Overlay {
 
 impl Eq for Overlay {}
 
+/// The cells of an overlay, shut in a class graph's grid for as long as the guard lives
+/// and opened again, as they were, when it is dropped: at the end of the slice of the job,
+/// and when the job panics, so that a panic never leaves a shared grid with cells shut.
+/// The job reads the graph through [`ShutCells::graph`].
+pub(crate) struct ShutCells<'a> {
+    graph: &'a mut ClassGraph,
+    overlay: Overlay,
+    saved: [u16; OVERLAY_CAP],
+}
+
+impl<'a> ShutCells<'a> {
+    /// Shuts the cells of `overlay` in the grid of `graph`.
+    pub fn new(graph: &'a mut ClassGraph, overlay: Overlay) -> ShutCells<'a> {
+        let mut saved = [0_u16; OVERLAY_CAP];
+        graph.grid.shut(overlay.cells(), &mut saved);
+        ShutCells {
+            graph,
+            overlay,
+            saved,
+        }
+    }
+
+    /// The graph, with the cells shut.
+    pub fn graph(&self) -> &ClassGraph {
+        self.graph
+    }
+}
+
+impl Drop for ShutCells<'_> {
+    fn drop(&mut self) {
+        self.graph.grid.reopen(self.overlay.cells(), &self.saved);
+    }
+}
+
 /// A builder of an [`Overlay`] that keeps the [`OVERLAY_CAP`] cells nearest to a point
 /// (the squared distance, then the lower cell index): offered cells in any order, the
 /// result does not depend on it.
@@ -187,6 +223,38 @@ impl OverlayBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cells_are_opened_again_when_the_guard_is_dropped_even_by_a_panic() {
+        use crate::path::grid::Grid;
+        use crate::path::local::Local;
+        let mut grid = Grid::new(20, 20);
+        for i in 0..400 {
+            grid.set(i, if i % 7 == 0 { 0 } else { 800 });
+        }
+        let before = grid.clone();
+        let mut graph = ClassGraph::build(0, grid, &mut Local::new());
+        let mut builder = OverlayBuilder::new();
+        for cell in [3_u32, 14, 21, 100, 250] {
+            builder.offer(Fx::from_int(cell as i32), cell);
+        }
+        let overlay = builder.finish();
+        {
+            let guard = ShutCells::new(&mut graph, overlay);
+            for &c in overlay.cells() {
+                assert_eq!(guard.graph().grid.speed(c % 20, c / 20), 0);
+            }
+        }
+        assert!(graph.grid == before, "opened at the end of the slice");
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let guard = ShutCells::new(&mut graph, overlay);
+            let c = overlay.cells()[1];
+            assert_eq!(guard.graph().grid.speed(c % 20, c / 20), 0);
+            panic!("the job panicked");
+        }));
+        assert!(ran.is_err());
+        assert!(graph.grid == before, "opened again by the unwind");
+    }
 
     #[test]
     fn the_defaults_are_valid_and_bad_numbers_are_not() {

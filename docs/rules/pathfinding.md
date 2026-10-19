@@ -657,9 +657,11 @@ again). `CrowdStats::gave_up` is the world's count. The sf_game snapshot carries
 
 ### A panic while the cells are shut
 
-`Pathing::serve` opens the overlay's cells again even if the job panics (`catch_unwind` round the
-slice, the panic passed on), so a panic never leaves a shared grid with shut cells behind it. A panic
-in the simulation is still terminal for the world (the sim thread reports it and stops).
+The cells are shut by a guard (`ShutCells`, `path/replan.rs`) that holds the class graph for the slice of
+the job and opens them again, as they were, in its `Drop`; the job reads the graph through the guard.
+Whether the slice ends or the job panics, the unwind drops the guard first, so a panic never leaves a
+shared grid with shut cells behind it (a test drops the guard by a panic and compares the grid). A
+panic in the simulation is still terminal for the world (the sim thread reports it and stops).
 
 ### Round robin for the looks
 
