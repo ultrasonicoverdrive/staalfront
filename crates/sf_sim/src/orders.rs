@@ -94,7 +94,9 @@
 use sf_math::{Facing, Fx, Vec2};
 
 use crate::behavior::{Motion, Walk, walk};
-use crate::crowd::{CROWD_ARRIVE, CROWD_ARRIVE_STEP, WAYPOINT_CROWD};
+use crate::crowd::{
+    CROWD_ARRIVE, CROWD_ARRIVE_ALONE, CROWD_ARRIVE_DISC, CROWD_ARRIVE_STEP, Claim, WAYPOINT_CROWD,
+};
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Tick};
 use crate::movement::Ground;
@@ -112,6 +114,11 @@ pub const ORDER_QUEUE_CAP: usize = 8;
 /// of a cell is half a metre. A unit that is within one step of the
 /// destination snaps onto it, as the legacy `MoveTo` does.
 pub const ARRIVE_TOLERANCE: Fx = Fx::from_ratio(1, 8);
+
+/// Ticks a unit must have been held up by units that have arrived, all told, to count
+/// as one more sidestep when it is judged to have arrived in the crowd (the sidesteps
+/// themselves come every `stuck_ticks`, 60 as shipped).
+const PRESSED_PER_STEP: u32 = 60;
 
 /// A guard that follows an entity stops when it is this near the entity's edge,
 /// in cells.
@@ -326,6 +333,12 @@ pub(crate) fn begin(e: &mut Entities, i: usize, order: Order, tick: Tick, bounds
     e.target[i] = None;
     e.guard_walking[i] = false;
     e.crowd[i].reset_progress();
+    // A new order lets go of the arrival slot the unit stood on (WP4.4b).
+    e.crowd[i].claim = Claim::default();
+    e.crowd[i].disc = Fx::ZERO;
+    e.crowd[i].home = None;
+    e.crowd[i].home_wait = 0;
+    e.crowd[i].home_rest = false;
     e.route.reset(i);
     e.behavior[i] = if order == Order::Idle {
         crate::behavior::Behavior::Idle
@@ -370,8 +383,30 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
 fn finish(e: &mut Entities, i: usize, tick: Tick, bounds: (Vec2, Vec2)) {
     match e.queue[i].pop_front() {
         Some(next) => begin(e, i, next, tick, bounds),
-        None => clear(e, i),
+        None => {
+            clear(e, i);
+            e.crowd[i].settle = true;
+        }
     }
+}
+
+/// How far from the point a unit held up by the crowd on its destination counts as
+/// arrived, in cells (WP4.4, WP4.4b): `ring` (how far its own slot lies from the point,
+/// zero without one) plus [`CROWD_ARRIVE`] and [`CROWD_ARRIVE_STEP`] more for each of
+/// the `steps` it has sidestepped or been held up for. The growth is bounded by the
+/// disc the group's bodies fill (`disc`, [`CrowdState::disc`](crate::crowd::CrowdState),
+/// zero when the unit was not ordered with enough others to have one:
+/// [`CROWD_ARRIVE_ALONE`] then): nobody counts as arrived farther out than
+/// [`CROWD_ARRIVE_DISC`] times its radius, however long it has pressed. The slot itself
+/// and the base slack round it count whatever the disc.
+fn crowd_arrival_radius(ring: Fx, steps: u32, disc: Fx) -> Fx {
+    let slack = CROWD_ARRIVE + CROWD_ARRIVE_STEP.mul_int(i64::from(steps));
+    let bound = if disc.is_zero() {
+        CROWD_ARRIVE_ALONE
+    } else {
+        disc.saturating_mul(CROWD_ARRIVE_DISC)
+    };
+    (ring + slack).min(bound.max(ring + CROWD_ARRIVE))
 }
 
 /// One tick of walking toward `destination` until within `stop_at` of it.
@@ -392,11 +427,13 @@ fn go_to(
 ) -> bool {
     // A member of a group with a flowfield stops at its own arrival slot, not
     // at the order's point (WP4.3).
-    let arrival = path.arrival_point(e, i).unwrap_or(destination);
+    let at_slot = path.arrival_point(e, i);
+    let arrival = at_slot.unwrap_or(destination);
     let off = (arrival - e.pos[i]).length_squared();
     if off <= stop_at.square() {
         e.target[i] = None;
         e.route.reset(i);
+        e.crowd[i].home = at_slot.map(|_| destination);
         return true;
     }
     // A crowd stands on the spot (WP4.4): a unit that has been blocked for a while by
@@ -411,11 +448,17 @@ fn go_to(
         && e.crowd[i].quiet >= m.crowd_wait
         && e.crowd[i].idle_hit
     {
-        let slack = CROWD_ARRIVE + CROWD_ARRIVE_STEP.mul_int(i64::from(e.crowd[i].attempts));
+        let steps =
+            u32::from(e.crowd[i].attempts).max(u32::from(e.crowd[i].pressed) / PRESSED_PER_STEP);
+        // A unit that holds a slot has arrived when it is near that slot. One that
+        // does not (it shares a slot, or none was handed out yet) has arrived when
+        // it is as near the point as its slot is, plus the slack (WP4.4).
         let ring = (arrival - destination).length();
-        if (destination - e.pos[i]).length_squared() <= (ring + slack).square() {
+        let radius = crowd_arrival_radius(ring, steps, e.crowd[i].disc);
+        if (destination - e.pos[i]).length_squared() <= radius.square() {
             e.target[i] = None;
             e.route.reset(i);
+            e.crowd[i].home = at_slot.map(|_| destination);
             return true;
         }
     }
@@ -474,6 +517,7 @@ fn go_to(
             match walk(e, i, waypoint, m, ground) {
                 Walk::Arrived if aim == Aim::Destination => {
                     e.target[i] = None;
+                    e.crowd[i].home = at_slot.map(|_| destination);
                     true
                 }
                 Walk::Arrived => {

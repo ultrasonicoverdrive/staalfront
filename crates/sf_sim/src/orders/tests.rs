@@ -118,3 +118,38 @@ fn the_scatter_step_is_pinned() {
 
 /// `scatter_offset(0v0, tick 0)` then `(0v0, tick 1)`, as raw `(x, y, x, y)`.
 const PINNED_SCATTER: (i64, i64, i64, i64) = (-164575, 77837, 62669, 175153);
+
+#[test]
+fn the_slack_of_a_crowd_held_up_on_its_destination_grows_but_stays_inside_the_disc() {
+    let cells = |n: i64| Fx::from_int(n as i32);
+    // Without a disc to measure by, a few bodies fill little ground.
+    assert_eq!(crowd_arrival_radius(Fx::ZERO, 0, Fx::ZERO), CROWD_ARRIVE);
+    assert_eq!(
+        crowd_arrival_radius(Fx::ZERO, 1, Fx::ZERO),
+        CROWD_ARRIVE + CROWD_ARRIVE_STEP
+    );
+    assert_eq!(
+        crowd_arrival_radius(Fx::ZERO, 1000, Fx::ZERO),
+        CROWD_ARRIVE_ALONE
+    );
+    // With one: thirteen tenths of its radius, however long the unit has pressed.
+    let disc = cells(5);
+    let bound = disc.saturating_mul(CROWD_ARRIVE_DISC);
+    assert_eq!(crowd_arrival_radius(Fx::ZERO, 1000, disc), bound);
+    assert_eq!(crowd_arrival_radius(Fx::ZERO, u32::MAX, disc), bound);
+    // It never shrinks as the unit presses on, and never passes the bound.
+    let mut last = Fx::ZERO;
+    for steps in 0..40 {
+        let r = crowd_arrival_radius(Fx::ZERO, steps, disc);
+        assert!(r >= last && r <= bound, "{steps} steps: {r:?}");
+        last = r;
+    }
+    // The slot of a unit lies where it lies: its own slack round it counts even when
+    // the slot is farther out than the bound (the outer ring of a big group).
+    let far = cells(9);
+    assert_eq!(crowd_arrival_radius(far, 0, disc), far + CROWD_ARRIVE);
+    assert_eq!(crowd_arrival_radius(far, 1000, disc), far + CROWD_ARRIVE);
+    // And a slot inside it does not let the slack carry the unit past the bound.
+    let near = cells(3);
+    assert_eq!(crowd_arrival_radius(near, 1000, disc), bound);
+}

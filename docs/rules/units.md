@@ -66,7 +66,7 @@ permanent" below) and a unique snake_case `name`.
   A class may carry `ground: true` (foot, wheeled and tracked do): the ground classes, whose
   ability to enter a terrain type makes it open ground (`movement.md`, "The checksum"). Since
   WP4.5 a class may also carry a `turning` block: how its units turn the hull
-  (`turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.25, pivot_permille: 250)`; mode `Pivot`,
+  (`turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250)`; mode `Pivot`,
   `Arc` or `Instant`; every field defaults to the old walk, `Pivot` and 16 steps); the modes, the
   numbers and what is checked are in [`turning.md`](turning.md).
 * `armor_types`: none, infantry, light, heavy, structure. The set is a placeholder.

@@ -209,7 +209,9 @@ fn two_thousand_colliding_units_run_at_a_bounded_cost() {
     // In a release build no tick may take longer than the 20 Hz budget, 50 ms
     // (the game steps the sim on its own thread since WP1.15, so a tick over
     // budget no longer stalls a frame, but it makes the sim fall behind its
-    // clock). The review of WP4.4 measured 12.7 ms on average and 22 ms at worst.
+    // clock). The review of WP4.4 measured 12.7 ms on average and 22 ms at worst; with
+    // the slots taken on approach and the checks of WP4.4b it is 15 ms on average and
+    // 27 ms at worst on the same kind of machine.
     let longest = if cfg!(debug_assertions) {
         Duration::from_secs(5)
     } else {

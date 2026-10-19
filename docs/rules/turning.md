@@ -40,7 +40,7 @@ the **shape** of the table is decided here, and a test pins the modes):
 |---|---|---|---|---|---|
 | foot | `Instant` | (16) | | | a person turns at once |
 | tracked | `Pivot` | 16 steps (22 degrees) | | | pivots on its tracks; the margin the route smoothing was built on |
-| wheeled | `Arc` | 16 steps | 1.25 cells (5 m) | 250 | a truck's turn is a circle of 5 m; at a quarter of the turn rate it backs and turns |
+| wheeled | `Arc` | 16 steps | 1.5 cells (6 m) | 250 | a truck's turn is a circle of 6 m; at a quarter of the turn rate it backs and turns |
 | hover | `Arc` | 16 steps | 2 cells (8 m) | 500 | wider, and thrusters that turn it half as fast on the spot |
 | water | `Arc` | 16 steps | 4 cells (16 m) | 125 | a long turn, and a rudder that barely turns the vessel when it stands |
 | air | (not given) | | | | no role flies yet; a class that says nothing turns as the walk did before WP4.5: `Pivot`, 16 steps |
@@ -64,9 +64,9 @@ tie at 128 and the two sides of it are tests (`crates/sf_sim/tests/turning.rs`,
 A circle of radius `r` cells turns `256 / (2 pi)`, about 40.7, facing steps for every cell of path
 per cell of radius. So in a tick in which a unit covers `d` cells its heading may change by
 `d * 40.744 / r` steps (`40744` thousandths per radian, a table constant; the arithmetic is on the
-raw fixed point numbers). A light transport at 2.5 cells a second (0.125 a tick) with a 1.25-cell
-radius turns 4.07 steps a tick, a repair truck at 1.8 cells a second 2.9: a half turn is a half
-circle of 3.9 cells and takes 31 ticks. **The fraction of a step is carried from tick to tick**
+raw fixed point numbers). A light transport at 2.5 cells a second (0.125 a tick) with a 1.5-cell
+radius turns 3.4 steps a tick, a repair truck at 1.8 cells a second 2.4: a half turn is a half
+circle of 4.7 cells and takes 38 ticks. **The fraction of a step is carried from tick to tick**
 (`turn_carry`, thousandths of a step, in the entity columns and the checksum) so that the radius is
 the radius and not what whole steps round it to; the carry is cleared when the heading is the
 wanted one. `d` is the distance the unit really covers this tick, terrain included: slower on ore,
@@ -184,7 +184,7 @@ interpolation and the wrap.
 
 ```ron
 (kind: 1, name: "wheeled", ground: true,
- turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.25, pivot_permille: 250),
+ turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250),
  terrain_costs: [ ... ]),
 ```
 
@@ -225,6 +225,9 @@ move; the wanderers (`wander_5000`, `command_mix`) have no class and did not mov
 | `crowd_jam` | `0xd5e9d6e45a14b0ef` | `0x3d8fab0ab9a564e6` |
 | `turning` (new) | | `0xb07ba8066dd59884` |
 
+(WP4.4b then moved the wheeled radius to 1.5 cells and re-pinned the scenarios once more; the table of
+that is in `collision.md`, "Data, scenarios and the checksum".)
+
 Test changes that follow from the rule, in `tools/sf_headless/tests`: `terrain_costs.rs` (the
 pinned arrival ticks, the bound on the ticks a unit spends turning by mode, the least time of a
 unit that swings out of its lane, the ordering test without the hover craft, whose arrival ticks
@@ -234,39 +237,43 @@ has to move to turn may walk 1.25 times the best any-angle route, the others 1.1
 
 ### `bridge_200`, measured
 
-The "done when" of phase 4 (PLAN.md) holds with the turning rules; run on the final code
-(`tools/sf_headless/tests/bridge_200.rs`, which prints these):
+The "done when" of phase 4 (PLAN.md) holds with the turning rules. At WP4.5 it held only at the
+shipped radius, by the luck of the crowd, and the review of that package showed it: the table of the
+radii it swept failed at 1.5 (4 riflemen never arrive), 1.6 (9 never arrive and 6 end outside 9.58
+cells), 1.75 (worst overlap 0.286) and 2.0 (a hovercraft gets stuck), and passed at 1.25 and from 1.7
+to 1.8. **The cause was not the turning rules** (bodies are discs, so a turn never changes an overlap)
+**but the crowd and arrival logic of WP4.4**, which met the criterion by chaotic margins: the last
+units took the slots on the far side of a crowd that had arrived and pushed through it, the crowd
+spread out and was left that way, and two idle units that were pressed together stayed overlapped
+because nobody was moving them. WP4.4b made the criterion hold by construction (the slot a unit takes
+when it comes near, the bounds on the overlap, a settled crowd that closes up: `collision.md`,
+"Arrival" and "Bounds that hold whatever presses on the crowd"), and **the radius table now passes
+everywhere**:
 
-* All 200 arrive, by **tick 3,676** (183 s of game time): **slower than before**, by 150 ticks or
-  4 % against the 3,526 of the notes of WP4.4 (the test's own comment said 3,375). Its limit
-  (3,700 ticks) and the length of the scenario (3,800) did not need to change. The last unit
-  crosses the river on tick 1,965 (1,976 before). The riflemen are the last, as before: they
-  are the slowest class.
-* **At most 1 % end further than 1.3 times the radius of the disc that holds the bodies (9.58 cells):
-  1 of 200**, the farthest at 9.72 (before: none, the farthest 9.55). No two bodies overlap by more
-  than a quarter of a cell during the run (the worst 0.19; 0.22 before) and none by more than 1/16
-  at the end; nobody is stuck and nobody stood still for more than 60 ticks with its order not done
-  (73 before); 93 sidesteps and 5 requests for a new route (91 and 6 before); none is ever on ground
-  its class cannot enter; the path service never exceeds its budget.
-* **The margins are thin and the outcome moves with small changes** (the criterion was met by 0.03 of
-  a cell before WP4.5, and the rim of a crowd that ends by pushing idle friends aside, `collision.md`,
-  "Arrival", wanders by a few tenths of a cell with anything that changes the order in which units
-  arrive). The wheeled radius is the knob that was tried (the hover class stayed at 2). The review
-  swept it on the final code:
+| wheeled radius | result |
+|---|---|
+| 1.25 | passes; the last unit arrives on tick 3,703, the farthest ends 8.96 cells out (limit 9.58) |
+| 1.5 (ships) | passes; the last unit arrives on tick 3,456, the farthest ends 8.29 cells out |
+| 1.6 | passes; tick 3,302, the farthest 8.64 |
+| 1.75 | passes; tick 3,491, the farthest 8.86 |
+| 2.0 | passes; tick 3,239, the farthest 8.42 |
 
-  | wheeled radius | result |
-  |---|---|
-  | 1.25 (ships) | passes; the last unit arrives on tick 3,676 of the 3,700 limit |
-  | 1.5 | 4 riflemen never arrive |
-  | 1.6 | 9 never arrive and 6 end outside 9.58 cells |
-  | 1.7 to 1.8 | pass |
-  | 1.75 | worst overlap 0.286, above the quarter cell |
-  | 2.0 | a hovercraft gets stuck |
+(Worst overlap in the run 0.19 at every radius; the first tick, on which the block of
+units is placed, is clean since the second review round, which also added the variants: 90 tanks in
+place of the riflemen at 1.25, 1.5 and 2.0, and the goal one cell west at 1.5.)
 
-  The shipped 1.25 cells (5 m) is **a value that passes the test, not a claim about real trucks**; it
-  is data, for the balance rounds. The failures at the other radii do not come from the turning rules
-  but from the crowd and arrival logic of WP4.4 (`collision.md`, "Arrival"); a separate WP4.4b is to
-  make `bridge_200` robust for them.
+There is one test for each of those radii (`phase_four_holds_at_a_wheeled_radius_of_*` in
+`tools/sf_headless/tests/bridge_200.rs`, which replaces the radius in the movement table with a
+test-only knob and asks for every way the run misses the criterion at once); the full numbers of the
+run and the wider sweeps (112 variants of the block: `sweep_of_variants`) are in `collision.md`,
+"Measured".
+
+**The shipped radius is now 1.5 cells (6 m)**, a realistic truck, and it is data, for the balance
+rounds: since the criterion no longer depends on it, changing it is no longer a risk to phase 4. The
+scenarios that run on the frozen copies of the definitions (`orders`, `terrain_costs`, `pathing`,
+`pathing_256`, `turning`) were re-pinned for it, and `terrain_costs.rs` pins the new arrival ticks of
+the wheeled units (152, 185, 183, 164 and 176 for grass, ore, bridge, water and rock; the rock lane
+was 109 at 1.25 cells, the swing round the rock being longer).
 
 ## The `turning` scenario
 
@@ -278,7 +285,7 @@ CI runs it on Linux and Windows against `turning.expected`.
 * **A tank ordered behind itself** (a light tank, facing east, ordered west): turns the decreasing way,
   10 steps a tick, stands still for 11 ticks, drives on the 12th, then straight at its speed.
 * **A wheeled vehicle** (light transport, facing east, ordered to a spot behind and to the side): drives
-  off on the very next tick and every tick after, turns 3 or 4 steps a tick (the circle allows 4.07,
+  off on the very next tick and every tick after, turns 3 or 4 steps a tick (the circle allows 3.4,
   its turn rate is 10), swings on east by more than half its radius before it comes round, and arrives.
 * **A rifleman**: faces its goal on the first tick it is ordered, and ordered behind itself it faces
   west on the first tick and has stepped off.

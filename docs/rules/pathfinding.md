@@ -425,8 +425,12 @@ cell nearest to the goal, with the marks of "Unreachable goals", exactly as befo
 ### Arrival slots
 
 The goal is an area. If 200 units all aimed at the middle of the goal cell they would pile up on one
-point, so each member has its own **slot**: a point on a lattice around the goal, handed out in a
-spiral, **by rank** (the unit's place among its class in ascending entity id order).
+point, so each member has its own **slot**: a point on a lattice around the goal, laid out in a
+spiral, one for each member. The slot a unit stands on is **taken when it comes near** (WP4.4b,
+`docs/rules/collision.md`, "Arrival": the first free slot nearest the goal that it can walk to
+straight, so the crowd fills in the order it arrives); the slot **by rank** (the unit's place among its
+class in ascending entity id order) is the one it steers at until it has taken its own, and the
+one it shares if none was left.
 
 Since WP4.4 the lattice is made for the bodies it holds (`path/slots.rs`, `docs/rules/collision.md`,
 "Arrival"):

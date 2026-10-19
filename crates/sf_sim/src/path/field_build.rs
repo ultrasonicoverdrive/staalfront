@@ -467,6 +467,15 @@ fn pick_slots(
     if f.slots.is_empty() {
         f.slots.push(centre);
     }
+    // Nobody holds a slot of a field that was just made (WP4.4b, `path/claim.rs`).
+    f.taken.clear();
+    f.taken.resize(f.slots.len(), crate::path::claim::NO_HOLDER);
+    f.reach = f
+        .slots
+        .iter()
+        .map(|&p| (p - centre).length())
+        .max()
+        .unwrap_or(Fx::ZERO);
     f.slots_ready = true;
     c.started = false;
     c.stage = Stage::Integrate;

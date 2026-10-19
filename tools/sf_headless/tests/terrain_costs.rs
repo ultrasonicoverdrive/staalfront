@@ -240,14 +240,17 @@ fn the_pinned_arrival_ticks() {
     // turning rules moved them: infantry turn at once, wheeled vehicles, hover
     // craft and the gunboat have to move to turn, so the ticks of a unit that
     // starts facing the wrong way now include the swing (they differ from lane
-    // to lane because each unit is spawned with a heading of its own). At WP4.2 the
+    // to lane because each unit is spawned with a heading of its own). At WP4.4b the
+    // wheeled radius went from 1.25 cells to the 1.5 of a real truck: only the wheeled
+    // ticks moved, most in the rock lane, where the route round the rock has a
+    // longer swing. At WP4.2 the
     // lanes of open ground, the bridge and the hover craft in the water lane
     // each got one tick (the request for the route); the land classes in the
     // water lane and everyone in the rock lane take a route round the obstacle.
     let r = run();
     let table: [(usize, usize, u64); 24] = [
         (GRASS, FOOT, 427),
-        (GRASS, WHEELED, 158),
+        (GRASS, WHEELED, 152),
         (GRASS, TRACKED, 155),
         (GRASS, HOVER, 207),
         (ROAD, FOOT, 389),
@@ -255,29 +258,31 @@ fn the_pinned_arrival_ticks() {
         (ROAD, TRACKED, 133),
         (ROAD, HOVER, 261),
         (ORE, FOOT, 534),
-        (ORE, WHEELED, 183),
+        (ORE, WHEELED, 185),
         (ORE, TRACKED, 197),
         (ORE, HOVER, 222),
         (BRIDGE, FOOT, 274),
-        (BRIDGE, WHEELED, 182),
+        (BRIDGE, WHEELED, 183),
         (BRIDGE, TRACKED, 95),
         (BRIDGE, HOVER, 130),
         (WATER, FOOT, 404),
-        (WATER, WHEELED, 176),
+        (WATER, WHEELED, 164),
         (WATER, TRACKED, 152),
         (WATER, HOVER, 223),
         (ROCK, FOOT, 265),
-        (ROCK, WHEELED, 109),
+        (ROCK, WHEELED, 176),
         (ROCK, TRACKED, 95),
         (ROCK, HOVER, 182),
     ];
-    for (lane, class, tick) in table {
-        assert_eq!(
-            r.arrived(unit(lane, class)),
-            Some(tick),
-            "lane {lane} class {class}"
-        );
-    }
+    let got: Vec<(usize, usize, Option<u64>)> = table
+        .iter()
+        .map(|&(lane, class, _)| (lane, class, r.arrived(unit(lane, class))))
+        .collect();
+    let want: Vec<(usize, usize, Option<u64>)> = table
+        .iter()
+        .map(|&(lane, class, tick)| (lane, class, Some(tick)))
+        .collect();
+    assert_eq!(got, want);
     assert_eq!(r.arrived(BOAT_DOWN), Some(227));
     assert_eq!(r.arrived(BOAT_BANK), None);
     assert_eq!(r.arrived(DRONE), Some(234), "aircraft ask for no route");

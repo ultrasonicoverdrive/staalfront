@@ -241,6 +241,15 @@ fn a_unit_at_rest_leaves_the_checksum_alone_and_one_that_remembers_does_not() {
             idle_hit: true,
             ..CrowdState::default()
         },
+        // WP4.4b: held up by arrived units, and a settled unit that closes up.
+        CrowdState {
+            pressed: 1,
+            ..CrowdState::default()
+        },
+        CrowdState {
+            home: Some(Vec2::ONE),
+            ..CrowdState::default()
+        },
     ] {
         assert!(!remembers.at_rest(), "{remembers:?}");
         let (mut a, mut b) = (Fnv1a64::new(), Fnv1a64::new());
@@ -252,6 +261,7 @@ fn a_unit_at_rest_leaves_the_checksum_alone_and_one_that_remembers_does_not() {
     let mut c = CrowdState {
         quiet: 9,
         attempts: 2,
+        pressed: 70,
         replan: true,
         shoved: Fx::ONE,
         side: Some((Vec2::ONE, 3)),
@@ -259,5 +269,55 @@ fn a_unit_at_rest_leaves_the_checksum_alone_and_one_that_remembers_does_not() {
     };
     c.reset_progress();
     assert_eq!((c.quiet, c.attempts, c.replan, c.side), (0, 0, false, None));
+    assert_eq!(c.pressed, 0);
     assert_eq!(c.shoved, Fx::ONE);
+}
+
+#[test]
+fn a_slot_taken_is_in_the_hash_but_does_not_keep_the_crowd_pass_awake() {
+    let rest = CrowdState::default();
+    let hash = |c: &CrowdState| {
+        let mut h = Fnv1a64::new();
+        c.write_hash(&mut h);
+        h.finish()
+    };
+    let held = |serial, slot| CrowdState {
+        claim: Claim { serial, slot },
+        ..CrowdState::default()
+    };
+    // A unit standing on its slot is not "remembering a crowd": the pass sleeps when
+    // all that is left is the settled.
+    assert!(held(3, 7).at_rest());
+    // But which slot it holds is state that later arrivals depend on.
+    assert_ne!(hash(&rest), hash(&held(3, 7)));
+    assert_ne!(hash(&held(3, 7)), hash(&held(3, 8)));
+    assert_ne!(hash(&held(3, 7)), hash(&held(4, 7)));
+    assert_ne!(hash(&held(3, 7)), hash(&held(3, Claim::SHARED)));
+    // A unit that took none hashes as it did before WP4.4b.
+    assert_eq!(hash(&rest), hash(&CrowdState::default()));
+}
+
+#[test]
+fn the_disc_of_a_group_is_in_the_hash_but_does_not_keep_the_crowd_pass_awake() {
+    let hash = |c: &CrowdState| {
+        let mut h = Fnv1a64::new();
+        c.write_hash(&mut h);
+        h.finish()
+    };
+    let disc = |r: i64| CrowdState {
+        disc: Fx::from_int(r as i32),
+        ..CrowdState::default()
+    };
+    // Like the slot, it is state that later arrivals depend on and no reason to stay awake.
+    assert!(disc(5).at_rest());
+    assert_ne!(hash(&CrowdState::default()), hash(&disc(5)));
+    assert_ne!(hash(&disc(5)), hash(&disc(6)));
+    // A new order forgets it (`orders::begin`), and a unit without one hashes as before.
+    assert_eq!(
+        hash(&CrowdState::default()),
+        hash(&CrowdState {
+            disc: Fx::ZERO,
+            ..disc(5)
+        })
+    );
 }

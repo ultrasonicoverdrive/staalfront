@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BinaryHeap};
 
 use sf_math::{Facing, Fx, Rng, Vec2};
 
+use super::claim;
 use super::field::{
     Field, FieldState, Fields, GOAL, IDLE_TICKS, LOOKAHEAD, Layout, MAX_SLOTS, UNSET,
 };
@@ -967,4 +968,190 @@ fn a_change_while_the_field_is_being_built_starts_the_build_again() {
     assert_ne!(f.dir[i], UNSET);
     let (dx, dy) = DIRS[usize::from(f.dir[i])];
     assert!(!(dx == 1 && dy == 0), "not into the structure");
+}
+
+// --- slots taken on approach (WP4.4b, `path/claim.rs`) ---
+
+/// A rig of `n` units that are all in range of a goal at (80, 40) on open ground, standing in a
+/// row west of it, one every third of a cell, with the field built.
+fn near_the_goal(n: usize) -> Rig {
+    let rows: Vec<String> = (0..64).map(|_| ".".repeat(96)).collect();
+    let at: Vec<(u32, u32)> = (0..n)
+        .map(|k| (2 + k as u32 % 20, 2 + k as u32 / 20))
+        .collect();
+    let mut rig = Rig::new(&as_refs(&rows), &at);
+    rig.order((80, 40));
+    rig.build();
+    for i in 0..n {
+        rig.e.pos[i] = Vec2::new(
+            Fx::from_ratio(7600 + 33 * i as i64, 100),
+            Fx::from_ratio(4050, 100),
+        );
+    }
+    rig
+}
+
+/// Every unit asks for its next step once, in the order of the entities, as the world does.
+fn everyone_steers(rig: &mut Rig) {
+    for i in 0..rig.e.len() {
+        let _ = rig.p.steer(&mut rig.e, i, mid(80, 40), Some(FOOT));
+    }
+}
+
+#[test]
+fn a_unit_in_range_takes_the_first_free_slot_it_can_walk_to_and_the_next_takes_another() {
+    let mut rig = near_the_goal(3);
+    everyone_steers(&mut rig);
+    let f = rig.field();
+    let slots: Vec<usize> = (0..3)
+        .map(|i| {
+            f.taken
+                .iter()
+                .position(|&h| h == i as u32)
+                .expect("every unit took a slot")
+        })
+        .collect();
+    // The first to ask had the whole spiral to choose from and took its first point...
+    assert_eq!(slots[0], 0);
+    // ...the others, a slot a body away from every slot held, nearer the goal than the rest.
+    assert_ne!(slots[1], slots[0]);
+    assert_ne!(slots[2], slots[1]);
+    for a in 0..3 {
+        for b in a + 1..3 {
+            assert!(
+                (f.slots[slots[a]] - f.slots[slots[b]]).length() >= Fx::from_ratio(3, 10),
+                "slots {a} and {b} are too near"
+            );
+        }
+    }
+    // The slot a unit stands on is the one it took, not the one its rank gives.
+    for (i, &k) in slots.iter().enumerate() {
+        assert_eq!(rig.p.arrival_point(&rig.e, i), Some(f.slots[k]));
+        assert_eq!(rig.p.claimed_point(&rig.e, i), Some(f.slots[k]));
+    }
+}
+
+#[test]
+fn a_unit_out_of_range_takes_no_slot_and_goes_by_its_rank() {
+    let mut rig = near_the_goal(2);
+    // The second is a long way off.
+    rig.e.pos[1] = mid(10, 10);
+    everyone_steers(&mut rig);
+    assert!(rig.p.claimed_point(&rig.e, 0).is_some());
+    assert_eq!(rig.p.claimed_point(&rig.e, 1), None);
+    let f = rig.field();
+    assert_eq!(rig.p.arrival_point(&rig.e, 1), Some(f.slots[1]));
+}
+
+#[test]
+fn a_slot_is_free_again_when_its_holder_gets_another_order_or_is_removed() {
+    let mut rig = near_the_goal(3);
+    everyone_steers(&mut rig);
+    let k0 = rig.field().taken.iter().position(|&h| h == 0).unwrap();
+    let k1 = rig.field().taken.iter().position(|&h| h == 1).unwrap();
+    assert!(rig.field().held(&rig.e, k0));
+    assert!(rig.field().held(&rig.e, k1));
+    // Another order: the claim is let go (`orders::begin`).
+    rig.e.crowd[0].claim = crate::crowd::Claim::default();
+    assert!(!rig.field().held(&rig.e, k0));
+    // Removed: the slot of the entity is cleared with the rest of it.
+    rig.e.clear(1);
+    assert!(!rig.field().held(&rig.e, k1));
+    // And the next to ask takes the first slot again.
+    rig.e.pos[2] = Vec2::new(Fx::from_ratio(7650, 100), Fx::from_ratio(4050, 100));
+    rig.e.crowd[2].claim = crate::crowd::Claim::default();
+    let _ = rig.p.steer(&mut rig.e, 2, mid(80, 40), Some(FOOT));
+    let f = rig.field();
+    assert_eq!(f.taken.iter().position(|&h| h == 2), Some(k0.min(k1)));
+}
+
+#[test]
+fn only_so_many_units_take_a_slot_in_a_tick() {
+    let n = 40;
+    let mut rig = near_the_goal(n);
+    everyone_steers(&mut rig);
+    let taken = |rig: &Rig| {
+        (0..n)
+            .filter(|&i| rig.p.claimed_point(&rig.e, i).is_some())
+            .count()
+    };
+    assert_eq!(taken(&rig), claim::CLAIMS_PER_TICK as usize);
+    // The next tick lets the same number more.
+    rig.p.fields.tick();
+    everyone_steers(&mut rig);
+    assert_eq!(taken(&rig), 2 * claim::CLAIMS_PER_TICK as usize);
+}
+
+#[test]
+fn a_rebuilt_field_has_no_holders_and_the_units_take_their_slots_again() {
+    let mut rig = near_the_goal(3);
+    everyone_steers(&mut rig);
+    assert!((0..3).all(|i| rig.p.claimed_point(&rig.e, i).is_some()));
+    // A structure inside the region makes a successor; until it is built the old field serves.
+    place(
+        &mut rig,
+        &[(30, 13), (30, 14), (30, 15), (30, 16), (30, 17)],
+        7,
+    );
+    rig.build();
+    assert!(rig.field().taken.iter().all(|&h| h == claim::NO_HOLDER));
+    assert!((0..3).all(|i| rig.p.claimed_point(&rig.e, i).is_none()));
+    rig.p.fields.tick();
+    everyone_steers(&mut rig);
+    assert!((0..3).all(|i| rig.p.claimed_point(&rig.e, i).is_some()));
+}
+
+#[test]
+fn a_unit_on_the_far_side_of_a_wall_takes_no_slot_until_it_can_walk_to_one() {
+    // A wall two cells thick across the whole map but for the top two rows, the goal east
+    // of it. The margin of a claim (six cells beyond the slots) reaches across it.
+    let mut grid: Vec<Vec<u8>> = (0..64).map(|_| vec![b'.'; 96]).collect();
+    for row in grid.iter_mut().skip(2) {
+        row[62] = b'#';
+        row[63] = b'#';
+    }
+    let rows: Vec<String> = grid
+        .into_iter()
+        .map(|r| String::from_utf8(r).unwrap())
+        .collect();
+    let mut rig = Rig::new(&as_refs(&rows), &[(2, 2), (3, 2), (4, 2)]);
+    rig.order((66, 40));
+    rig.build();
+    let put = |rig: &mut Rig, i: usize, x: i64, y: i64| {
+        rig.e.pos[i] = Vec2::new(Fx::from_ratio(x, 100), Fx::from_ratio(y, 100));
+    };
+    // Unit 0 stands against the west face, five cells from the goal; the others east of it.
+    put(&mut rig, 0, 6150, 4050);
+    put(&mut rig, 1, 6650, 4350);
+    put(&mut rig, 2, 6650, 3750);
+    let steer_all = |rig: &mut Rig| {
+        for i in 0..3 {
+            let _ = rig.p.steer(&mut rig.e, i, mid(66, 40), Some(FOOT));
+        }
+    };
+    steer_all(&mut rig);
+    assert!(rig.p.claimed_point(&rig.e, 1).is_some());
+    assert!(rig.p.claimed_point(&rig.e, 2).is_some());
+    // It sees no slot, so it holds none, not even a shared one (that would stop it looking
+    // again), and it did not take a slot from the units that can walk to theirs.
+    assert_eq!(rig.p.claimed_point(&rig.e, 0), None);
+    assert_eq!(rig.e.crowd[0].claim, crate::crowd::Claim::default());
+    let held = rig
+        .field()
+        .taken
+        .iter()
+        .filter(|&&h| h != claim::NO_HOLDER)
+        .count();
+    assert_eq!(held, 2);
+    // Still no slot a few ticks on, while it stands there.
+    for _ in 0..5 {
+        rig.p.fields.tick();
+        steer_all(&mut rig);
+    }
+    assert_eq!(rig.p.claimed_point(&rig.e, 0), None);
+    // In sight of slots, it takes one.
+    put(&mut rig, 0, 6650, 4050);
+    rig.p.fields.tick();
+    steer_all(&mut rig);
+    assert!(rig.p.claimed_point(&rig.e, 0).is_some());
 }

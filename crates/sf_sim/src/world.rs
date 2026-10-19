@@ -541,6 +541,17 @@ impl World {
         self.pathing.arrival_point(&self.entities, i)
     }
 
+    /// The arrival slot a unit of a group has taken for itself (WP4.4b,
+    /// `docs/rules/collision.md`, "Arrival"): the slot it took when it came near the
+    /// goal, which is not the one its rank would give it. `None` before it has come
+    /// near, for a unit that shares a slot because none was free, for any other unit,
+    /// and once the group's field is gone (a few seconds after the last member
+    /// stopped asking it).
+    pub fn claimed_slot_of(&self, id: EntityId) -> Option<Vec2> {
+        let i = self.live_index(id)?;
+        self.pathing.claimed_point(&self.entities, i)
+    }
+
     /// The route of a unit (WP4.2): whether it follows waypoints, waits for
     /// them or stands at the end of its route, and whether its destination
     /// could be reached; `None` for a stale id. A unit without a walking
@@ -592,6 +603,15 @@ impl World {
     pub fn stuck_ticks_of(&self, id: EntityId) -> Option<u32> {
         let i = self.live_index(id)?;
         Some(u32::from(self.entities.crowd[i].quiet))
+    }
+
+    /// The point a settled member of a group closes up toward (WP4.4b,
+    /// `docs/rules/collision.md`, "Arrival"): the point its order sent it to. `None`
+    /// for a unit that is walking, has no group or has been given another order
+    /// since.
+    pub fn home_of(&self, id: EntityId) -> Option<Vec2> {
+        let i = self.live_index(id)?;
+        self.entities.crowd[i].home
     }
 
     pub fn path_stats(&self) -> PathStats {

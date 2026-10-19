@@ -361,8 +361,8 @@ fn a_crowd_walking_to_one_point_never_overlaps_beyond_the_slack_and_everyone_arr
         );
     }
     // The slack is a thirty-second; a packed crowd is a little over it at the worst
-    // moment and settles.
-    assert!(worst < fx(3, 10), "worst overlap {worst:?}");
+    // moment and settles. Never over the quarter of a cell the phase allows.
+    assert!(worst < fx(1, 4), "worst overlap {worst:?}");
     assert!(
         worst_overlap(&w, &ids) < fx(1, 20),
         "at rest the crowd has settled"
@@ -937,5 +937,273 @@ fn a_group_of_a_hundred_riflemen_fits_five_cells_and_a_hundred_tanks_need_far_mo
     assert!(
         tanks > Fx::from_int(5),
         "a hundred tanks cannot fit in five cells: {tanks:?}"
+    );
+}
+
+// --- bodies placed on top of each other (WP4.4b) ---
+
+/// Places `n` by `n` units of `kind` one cell apart, all on the same tick, and steps once.
+fn place_block(w: &mut World, kind: Kind, n: i32) -> Vec<EntityId> {
+    let tick = w.tick();
+    let first = w.slot_count() as u32;
+    let mut ids = Vec::new();
+    for k in 0..n * n {
+        ids.push(EntityId::new(first + k as u32, 0));
+        w.schedule(
+            tick,
+            PlayerId(0),
+            Command::SpawnUnit {
+                kind,
+                pos: cells(10 + k % n, 10 + k / n),
+                owner: PlayerId(0),
+            },
+        )
+        .unwrap();
+    }
+    w.step();
+    ids
+}
+
+#[test]
+fn a_block_of_wide_bodies_placed_a_cell_apart_is_clear_of_overlap_on_the_tick_it_is_placed() {
+    // A body one and a half cells wide on every cell: each overlaps its neighbours by half
+    // a cell, and the pushes of a neighbour on each side cancel, so only the edge of the
+    // block gives way in a round. The block spreads until it is within the bound of the
+    // crowd pass (three sixteenths of a cell) before the first tick is over.
+    for n in [3, 6, 9] {
+        let mut w = open_world();
+        let ids = place_block(&mut w, BIG, n);
+        let worst = worst_overlap(&w, &ids);
+        assert!(
+            worst <= fx(3, 16),
+            "a block of {n} by {n} overlaps by {worst:?} on the tick it is placed"
+        );
+    }
+}
+
+#[test]
+fn a_block_that_was_cleared_stays_where_it_is_and_units_placed_later_do_not_move_it() {
+    let mut w = open_world();
+    let ids = place_block(&mut w, BIG, 5);
+    let after: Vec<Vec2> = ids.iter().map(|&id| pos(&w, id)).collect();
+    // Nobody is touching it: it stays put, tick after tick...
+    run(&mut w, 30);
+    assert_eq!(after, ids.iter().map(|&id| pos(&w, id)).collect::<Vec<_>>());
+    // ...and a unit placed far away on a later tick disturbs nobody.
+    let far = spawn(&mut w, BIG, 0, cells(40, 40));
+    assert_eq!(pos(&w, far), cells(40, 40));
+    assert_eq!(after, ids.iter().map(|&id| pos(&w, id)).collect::<Vec<_>>());
+}
+
+#[test]
+fn what_is_placed_on_the_tick_does_not_depend_on_the_order_the_commands_are_listed_in() {
+    let run_block = |reverse: bool| {
+        let mut w = open_world();
+        let tick = w.tick();
+        let first = w.slot_count() as u32;
+        let mut order: Vec<i32> = (0..25).collect();
+        if reverse {
+            order.reverse();
+        }
+        for k in order {
+            w.schedule(
+                tick,
+                PlayerId(0),
+                Command::SpawnUnit {
+                    kind: BIG,
+                    pos: cells(10 + k % 5, 10 + k / 5),
+                    owner: PlayerId(0),
+                },
+            )
+            .unwrap();
+        }
+        w.step();
+        let mut places: Vec<Vec2> = (0..25u32)
+            .map(|k| pos(&w, EntityId::new(first + k, 0)))
+            .collect();
+        places.sort_by_key(|p| (p.x.raw(), p.y.raw()));
+        places
+    };
+    // The set of places the block ends in is the same.
+    assert_eq!(run_block(false), run_block(true));
+}
+
+// --- the arrival logic of a group (WP4.4b) ---
+
+/// A world with terrain (so that group orders make flowfields and slots) and one
+/// harmless rock far from where the tests walk.
+fn group_world() -> World {
+    rock_world(|x, y| x == 60 && y == 44)
+}
+
+/// Whether every unit of `ids` has no order left.
+fn all_idle(w: &World, ids: &[EntityId]) -> bool {
+    ids.iter().all(|&id| w.order_of(id) == Some(Order::Idle))
+}
+
+/// Steps until every unit of `ids` has arrived; panics if that takes more than `limit`.
+fn run_until_arrived(w: &mut World, ids: &[EntityId], limit: u64) -> u64 {
+    for t in 1..=limit {
+        w.step();
+        if all_idle(w, ids) {
+            return t;
+        }
+    }
+    panic!("not everybody had arrived after {limit} ticks");
+}
+
+#[test]
+fn a_unit_takes_its_slot_when_it_comes_near_so_the_crowd_fills_in_the_order_it_arrives() {
+    // Twelve tanks in a column, the one with the highest id nearest the goal. Slots by
+    // rank would give the lowest id the slot nearest the goal, and it is the last to
+    // come: it would have to push through the others.
+    let mut w = group_world();
+    let goal = cells(40, 20);
+    let ids: Vec<EntityId> = (0..12)
+        .map(|k| spawn(&mut w, TANK, 0, cells(4 + 2 * k, 20)))
+        .collect();
+    go(&mut w, &ids, goal);
+    // Until the first of them is near, nobody has taken a slot.
+    run(&mut w, 20);
+    assert!(ids.iter().all(|&id| w.claimed_slot_of(id).is_none()));
+    for _ in 0..600 {
+        w.step();
+        if ids.iter().all(|&id| w.claimed_slot_of(id).is_some()) {
+            break;
+        }
+    }
+    let slots: Vec<Vec2> = ids
+        .iter()
+        .map(|&id| w.claimed_slot_of(id).expect("every unit took a slot"))
+        .collect();
+    let radius = |p: Vec2| (p - goal).length();
+    // The first to come took the innermost slot, the last to come an outer one.
+    let nearest = ids.len() - 1;
+    for (k, &p) in slots.iter().enumerate() {
+        assert!(
+            radius(slots[nearest]) <= radius(p),
+            "unit {k} took a slot nearer the goal than the first to come"
+        );
+    }
+    assert!(radius(slots[0]) > radius(slots[nearest]) + Fx::ONE);
+    // All different, and a body apart.
+    for (k, &a) in ids.iter().enumerate() {
+        for (j, &b) in ids.iter().enumerate().skip(k + 1) {
+            assert!(
+                (slots[k] - slots[j]).length() >= keep(&w, a, b),
+                "slots {k} and {j} are too near"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_group_of_mixed_speeds_arrives_inside_the_disc_that_holds_its_bodies() {
+    // A column of tanks with a slow rifleman at its head: the tanks catch up with it
+    // and come to the goal before it does, in no order of their ids.
+    let mut w = group_world();
+    let goal = cells(40, 20);
+    let mut ids = Vec::new();
+    for k in 0..16 {
+        let kind = if k == 15 { SLOW } else { TANK };
+        ids.push(spawn(&mut w, kind, 0, cells(4 + 2 * k, 20)));
+    }
+    go(&mut w, &ids, goal);
+    run_until_arrived(&mut w, &ids, 2400);
+    run(&mut w, 100);
+    let worst = worst_overlap(&w, &ids);
+    assert!(
+        worst < fx(1, 16),
+        "at rest the crowd has settled, overlap {worst:?}"
+    );
+    // The disc whose area is a square of the distance the bodies keep, for each (355/113
+    // is pi), and the 1.3 times its radius the criterion of the phase allows.
+    let area = ids
+        .iter()
+        .map(|&id| keep(&w, id, id).square())
+        .fold(Fx::ZERO, |a, b| a + b);
+    let packing = area.mul_div(Fx::from_int(113), Fx::from_int(355)).sqrt();
+    let limit = packing.mul_int(13).div_int(10);
+    for &id in &ids {
+        let at = (pos(&w, id) - goal).length();
+        assert!(
+            at <= limit,
+            "{id:?} ended {at:?} cells from the goal, the disc that holds them is {packing:?}"
+        );
+    }
+}
+
+#[test]
+fn a_settled_crowd_closes_up_again_toward_the_point_after_something_pushed_through_it() {
+    let mut w = group_world();
+    let goal = cells(40, 20);
+    let riflemen: Vec<EntityId> = (0..40)
+        .map(|k| spawn(&mut w, RIFLE, 0, cells(6 + (k % 8), 10 + (k / 8) * 2)))
+        .collect();
+    go(&mut w, &riflemen, goal);
+    run_until_arrived(&mut w, &riflemen, 2400);
+    run(&mut w, 200);
+    let radius = |w: &World| {
+        riflemen
+            .iter()
+            .map(|&id| (pos(w, id) - goal).length())
+            .fold(Fx::ZERO, Fx::max)
+    };
+    let before = radius(&w);
+    // They are at home: the point their order sent them to.
+    for &id in &riflemen {
+        assert_eq!(w.home_of(id), Some(goal));
+    }
+    // A tank drives through the middle of them and on.
+    let tank = spawn(&mut w, TANK, 0, cells(20, 20));
+    go(&mut w, &[tank], cells(60, 20));
+    let mut widest = before;
+    for _ in 0..500 {
+        w.step();
+        widest = widest.max(radius(&w));
+    }
+    assert!(
+        widest > before + fx(1, 2),
+        "the tank pushed some of them out: {before:?} then {widest:?}"
+    );
+    // It has gone; they close up again.
+    run(&mut w, 800);
+    let after = radius(&w);
+    assert!(
+        after <= before + fx(1, 2),
+        "the crowd was {before:?} wide, {widest:?} at the widest and {after:?} after"
+    );
+    assert!(worst_overlap(&w, &riflemen) < fx(1, 16));
+    // A new order lets go of home.
+    go(&mut w, &riflemen[..1], cells(30, 30));
+    w.step();
+    assert_eq!(w.home_of(riflemen[0]), None);
+}
+
+#[test]
+fn a_crowd_pressed_into_a_dead_end_never_overlaps_beyond_the_bound_of_the_phase() {
+    // A corridor three cells wide that ends in rock; twenty-four vehicles and
+    // riflemen all ordered to its far end, where there is room for a handful. The
+    // ones behind press on the ones in front, which cannot give way any more.
+    let mut w = rock_world(|x, y| (30..50).contains(&x) && !(20..=22).contains(&y) || x >= 50);
+    let mut ids = Vec::new();
+    for k in 0..24 {
+        let kind = [TANK, RIFLE, RIFLE, BIG][k % 4];
+        ids.push(spawn(
+            &mut w,
+            kind,
+            0,
+            cells(2 + (k % 6) as i32 * 2, 14 + (k / 6) as i32 * 3),
+        ));
+    }
+    go(&mut w, &ids, cells(48, 21));
+    let mut worst = Fx::ZERO;
+    for _ in 0..2000 {
+        w.step();
+        worst = worst.max(worst_overlap(&w, &ids));
+    }
+    assert!(
+        worst < fx(1, 4),
+        "the crowd was pressed to an overlap of {worst:?}, the bound is a quarter of a cell"
     );
 }
