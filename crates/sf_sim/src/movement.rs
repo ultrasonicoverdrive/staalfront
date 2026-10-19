@@ -322,6 +322,26 @@ impl MovementTable {
             .is_some_and(|e| e.costs.iter().any(|c| matches!(c, Some(Cost::Impassable))))
     }
 
+    /// The terrain types the class may enter, as a set of 256 bits (bit `n` of word `n / 64`
+    /// is terrain type `n`): what the classes that walk together in a formation have in common
+    /// (WP4.6). Two classes with the same set cross the same ground, whatever their speeds, so
+    /// foot, wheeled and tracked units are one family and a hovercraft or a vessel is a family
+    /// of its own. `None` for a class the table does not have and for one that no terrain stops
+    /// (aircraft: nothing for a route to go round).
+    pub(crate) fn terrain_family(&self, class: u16) -> Option<[u64; 4]> {
+        let entry = self.entry(class)?;
+        if !self.restricts(class) {
+            return None;
+        }
+        let mut set = [0_u64; 4];
+        for (id, cost) in entry.costs.iter().enumerate() {
+            if matches!(cost, Some(Cost::Speed(_))) {
+                set[id / 64] |= 1 << (id % 64);
+            }
+        }
+        Some(set)
+    }
+
     /// The first terrain type of `defined` (ascending ids) that some class
     /// does not list: `(class, terrain)`.
     pub(crate) fn first_gap(

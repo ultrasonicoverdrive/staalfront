@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning` and `replan`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan` and `formation_move`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -48,6 +48,8 @@ const BRIDGE_200_EXPECTED: &str = include_str!("../../../assets/scenarios/bridge
 const CROWD_JAM_EXPECTED: &str = include_str!("../../../assets/scenarios/crowd_jam.expected");
 const TURNING_EXPECTED: &str = include_str!("../../../assets/scenarios/turning.expected");
 const REPLAN_EXPECTED: &str = include_str!("../../../assets/scenarios/replan.expected");
+const FORMATION_MOVE_EXPECTED: &str =
+    include_str!("../../../assets/scenarios/formation_move.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -138,7 +140,10 @@ fn pathing_256_matches_the_pinned_checksum() {
 /// the file): the units have bodies, the bridge is a bottleneck and the arrival
 /// slots are spaced for them, so the crossing takes about twice as long. **Re-pinned at
 /// WP4.5** (`0xa55348bf0b519c50` to the value in the file):
-/// the turning rules, infantry turning at once and wheeled vehicles in arcs.
+/// the turning rules, infantry turning at once and wheeled vehicles in arcs. **Re-pinned at
+/// WP4.6** (`0x03971fcc3548fc0c` to the value in the file): the five hover craft are a family
+/// of five and march as a formation; the 195 others are a crowd above the limit of 48 and move as
+/// they did (`docs/rules/formations.md`). With `formation: Some(false)` the run ends on the old value.
 #[test]
 fn bridge_200_matches_the_pinned_checksum() {
     check("bridge_200", BRIDGE_200_EXPECTED);
@@ -147,7 +152,8 @@ fn bridge_200_matches_the_pinned_checksum() {
 /// Two groups pass head-on through a narrow gap, and a unit holding position stands
 /// in a corridor while others route round it (WP4.4). A new scenario: pinned when it
 /// was added. **Re-pinned at WP4.5** (`0xd5e9d6e45a14b0ef` to the value in the file): the
-/// turning rules.
+/// turning rules. **Re-pinned at WP4.6** (`0x69e7a06fe17a33e5` to the value in the file): the
+/// two groups of 18 and the 8 tanks along the corridor are formations now.
 #[test]
 fn crowd_jam_matches_the_pinned_checksum() {
     check("crowd_jam", CROWD_JAM_EXPECTED);
@@ -164,10 +170,19 @@ fn turning_matches_the_pinned_checksum() {
 
 /// Replanning (WP4.7): a structure built in a corridor, a unit on hold with a way round
 /// and with none, a target that walks away and one that disappears, a group whose goal is
-/// built over. A new scenario: pinned when it was added.
+/// built over. A new scenario: pinned when it was added. **Re-pinned at WP4.6**
+/// (`0x2f05c63b9046ecc8` to the value in the file): its group order makes a formation; the
+/// assertions of `tests/replan.rs` are unchanged and hold.
 #[test]
 fn replan_matches_the_pinned_checksum() {
     check("replan", REPLAN_EXPECTED);
+}
+
+/// A mixed group of 20 marches across open ground, through a passage and on to a goal as one
+/// formation (WP4.6). A new scenario: pinned when it was added.
+#[test]
+fn formation_move_matches_the_pinned_checksum() {
+    check("formation_move", FORMATION_MOVE_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
@@ -249,6 +264,10 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
         final_checksum("turning", &altered),
         pinned(TURNING_EXPECTED)
     );
+    assert_eq!(
+        final_checksum("formation_move", &altered),
+        pinned(FORMATION_MOVE_EXPECTED)
+    );
     assert_eq!(final_checksum("orders", &altered), pinned(ORDERS_EXPECTED));
     // The scenario on the shipped definitions (no `unit_defs`) does move: the
     // test would prove nothing if the change reached nobody.
@@ -277,6 +296,7 @@ fn the_expected_files_hold_one_bare_checksum() {
         CROWD_JAM_EXPECTED,
         TURNING_EXPECTED,
         REPLAN_EXPECTED,
+        FORMATION_MOVE_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");

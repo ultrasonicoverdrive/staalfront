@@ -55,7 +55,7 @@ mod field_tests;
 mod tests;
 
 use sf_math::hash::Fnv1a64;
-use sf_math::{Fx, Vec2};
+use sf_math::{Facing, Fx, Vec2};
 
 use crate::entities::{Entities, NO_DEF};
 use crate::movement::{Cost, Ground, MovementTable};
@@ -68,6 +68,7 @@ use grid::{Grid, Sectors};
 use job::{Job, Mode, Progress, Work};
 pub(crate) use replan::{OVERLAY_RANGE, Overlay, OverlayBuilder, ShutCells};
 pub(crate) use route::{Route, RouteState, Routes};
+pub(crate) use slots::spacing_for;
 
 pub use field::{
     DEFAULT_FLOWFIELD_THRESHOLD, FIELD_POOL, FIELD_SECTORS, IDLE_TICKS as FIELD_IDLE_TICKS,
@@ -88,6 +89,10 @@ pub const DEFAULT_NODE_BUDGET: u32 = 4096;
 /// the one step the service cannot cut, so it must fit in a tick or a request
 /// could never finish; the minimum leaves room to make progress besides.
 pub const MIN_NODE_BUDGET: u32 = 512;
+
+/// A waypoint of a route farther than this many cells from a unit that has been away from
+/// its route is not trusted (`Pathing::way_is_stale`).
+const STALE_WAYPOINT: Fx = Fx::from_int(12);
 
 /// A destination that moves further than this many cells from the cell a
 /// route was asked for makes the unit ask again.
@@ -924,6 +929,7 @@ impl Pathing {
         units: &UnitTable,
         started: &[usize],
         destination: Vec2,
+        formed: &[(usize, Facing)],
     ) {
         let threshold = self.fields.threshold as usize;
         if threshold == 0 || self.graphs.is_empty() || started.len() < threshold {
@@ -999,12 +1005,25 @@ impl Pathing {
             let (gx, gy) = field::cell_of(g, destination);
             let goal = g.grid.index(gx, gy);
             let spacing = slots::spacing_for(class.widest);
+            // A class whose units march in a formation has its slots turned across the
+            // direction they come in (WP4.6); `formed` is ascending by slot.
+            let turn = class
+                .members
+                .iter()
+                .find_map(|m| {
+                    formed
+                        .binary_search_by_key(m, |&(slot, _)| slot)
+                        .ok()
+                        .map(|k| formed[k].1)
+                })
+                .unwrap_or(Facing::PLUS_X);
             let count = u32::try_from(class.members.len()).unwrap_or(u32::MAX);
             let layout = Layout {
                 order,
                 rank: u8::try_from(rank).unwrap_or(u8::MAX),
                 spacing,
                 inner,
+                turn,
             };
             let serial = self
                 .fields
@@ -1023,6 +1042,32 @@ impl Pathing {
             }
             inner = slots::outer_radius(inner, count.min(field::MAX_SLOTS as u32), spacing);
         }
+    }
+
+    /// Whether the route of unit `i`, which is not a member of a flowfield, leads the wrong
+    /// way for a unit that went off it to walk to a formation slot and now goes back to
+    /// the order (WP4.6): its first waypoint lies behind the unit as seen from `goal`, or
+    /// farther than [`STALE_WAYPOINT`] cells away. A route with no waypoint left, or none at
+    /// all, is not stale.
+    pub fn way_is_stale(&self, e: &Entities, i: usize, class: u16, goal: Vec2) -> bool {
+        let Some(gi) = self.graph_index(class) else {
+            return false;
+        };
+        let route = &e.route[i];
+        let Some(cell) = route.ring_front() else {
+            return false;
+        };
+        let at = Pathing::centre_of(&self.graphs[gi], cell);
+        let (to_way, to_goal) = (at - e.pos[i], goal - e.pos[i]);
+        to_way.dot(to_goal) <= Fx::ZERO || to_way.length_squared() > STALE_WAYPOINT.square()
+    }
+
+    /// Marks the fields of the groups the given units follow as used now (WP4.6): a
+    /// formation that marches without its members asking their field for a direction
+    /// (they steer for their slots) keeps the fields from expiring that the members go
+    /// back to when it breaks up or arrives.
+    pub fn keep_field(&mut self, serial: u32) {
+        self.fields.touch(serial);
     }
 
     /// Where unit `i` stands when it has arrived, if it is a member of a group

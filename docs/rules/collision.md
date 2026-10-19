@@ -543,8 +543,10 @@ and `bridge_200.ron` runs 4,600 ticks instead of 3,800 (below).
   are corrections of the position and bypass the turn constraint, by design), and the facing is the
   one of the order's walk; what a unit drives itself in a crowd (a sidestep, a detour) goes through
   the turning rules of its class.
-* **Formations** (WP4.6): slots are rings of a lattice, not a shape that keeps; the slowest does not
-  set the pace; a group arrives in the order it can.
+* **Formations** (WP4.6, `formations.md`): a group of up to 48 that crosses the same ground and gets one
+  move order keeps its shape and the pace of its slowest on open ground; the crowd pass is unchanged
+  (the lattice leaves a quarter more than the widest body). A crowd bigger than that (`bridge_200`) is
+  not a formation and still arrives in the order it can, in the rings of the arrival slots.
 * **Replanning** (WP4.7, `pathfinding.md`): a stuck unit's request goes round the bodies that stand
   still near it, and the order is given up after `replan_max` of them. Routes and fields still do not
   know the units that *walk*, so a crowd of those is walked round by pushing and sidestepping, not by

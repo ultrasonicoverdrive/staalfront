@@ -60,6 +60,12 @@
 // This is a test of routes and of the queue; bodies (WP4.4,
 // docs/rules/collision.md) would push those units apart and move the positions
 // asserted. Collision has its own scenarios (bridge_200, crowd_jam).
+//
+// `formation: Some(false)`: the same 24 transports are also a group that WP4.6 would make a
+// formation (docs/rules/formations.md): the units would walk to slots round their leader and
+// ask no route of their own, which is not what this scenario tests (the queue of single
+// requests). Its checksum is pinned on the group moving as it did before WP4.6. The march of
+// a group as a formation is `formation_move`, `crowd_jam` and `replan`.
 Scenario(
     name: "pathing",
     seed: 0x7E44_0042,
@@ -68,6 +74,7 @@ Scenario(
     unit_defs: Some("pathing_defs"),
     flowfield_threshold: Some(0),
     collision: Some(false),
+    formation: Some(false),
     ticks: 2600,
     commands: [
         (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 4))), // slot 0: tank, the maze

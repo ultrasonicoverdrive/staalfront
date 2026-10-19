@@ -94,7 +94,7 @@ impl Rig {
     fn order(&mut self, goal: (u32, u32)) {
         let started = self.everyone();
         self.p
-            .group_order(&mut self.e, &self.units, &started, mid(goal.0, goal.1));
+            .group_order(&mut self.e, &self.units, &started, mid(goal.0, goal.1), &[]);
     }
 
     fn serve(&mut self) {
@@ -587,6 +587,7 @@ fn the_ring_of_a_later_class_begins_where_the_earlier_ones_end_and_skips_their_s
             rank: 1,
             spacing: wide,
             inner: Fx::ZERO,
+            turn: Facing::PLUS_X,
         },
         12,
         sectors,

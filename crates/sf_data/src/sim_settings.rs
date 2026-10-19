@@ -9,13 +9,16 @@
 //! many such steps before it asks for a new route, and the replan settings (WP4.7): how
 //! many ticks between two replans of a stuck unit, how many it may ask for in one order
 //! before the order is given up, and how many ticks between two new searches for a
-//! target that keeps moving. Game data is in RON and not in code
+//! target that keeps moving, and the formation settings (WP4.6): whether a group move order
+//! forms a formation, how many units it needs and may have, how wide the lattice is, how
+//! fast the formation goes and how far from its slot a member may be. Game data is in RON and not in code
 //! (PLAN.md section 5, rule 6), so the numbers live in the file; the simulation
 //! keeps its own defaults (the same numbers) for worlds that are given none,
 //! which is what the tests and the frozen headless scenarios use, so that
 //! turning a knob in the file never moves their checksums.
 //! `sf_bridge::path_budget`, `sf_bridge::flowfield_threshold`,
-//! `sf_bridge::collision_config` and `sf_bridge::replan_config` hand the values to the
+//! `sf_bridge::collision_config`, `sf_bridge::replan_config` and
+//! `sf_bridge::formation_config` hand the values to the
 //! world, which checks them against its minimums.
 //!
 //! ```
@@ -52,6 +55,9 @@ pub const MAX_REPLAN_COOLDOWN: u16 = 1000;
 /// The most replans one order may allow a stuck unit.
 pub const MAX_REPLAN_MAX: u8 = 100;
 
+/// The most units a formation may hold (the arrival slots of a field are as many).
+pub const MAX_FORMATION_UNITS: u16 = 256;
+
 fn default_collision() -> bool {
     true
 }
@@ -78,6 +84,42 @@ fn default_replan_max() -> u8 {
 
 fn default_retarget_cooldown() -> u16 {
     20
+}
+
+fn default_formation() -> bool {
+    true
+}
+
+fn default_formation_min_units() -> u16 {
+    3
+}
+
+fn default_formation_max_units() -> u16 {
+    48
+}
+
+fn default_formation_spacing_permille() -> u16 {
+    1250
+}
+
+fn default_formation_spread_permille() -> u16 {
+    1500
+}
+
+fn default_formation_pace_permille() -> u16 {
+    900
+}
+
+fn default_formation_catchup_permille() -> u16 {
+    1000
+}
+
+fn default_formation_reform_tenths() -> u16 {
+    30
+}
+
+fn default_formation_patience_ticks() -> u16 {
+    300
 }
 
 /// The settings of the simulation.
@@ -112,6 +154,41 @@ pub struct SimSettings {
     /// Ticks between two new searches for a target that keeps moving (WP4.7).
     #[serde(default = "default_retarget_cooldown")]
     pub retarget_cooldown: u16,
+    /// Whether a group move order forms a formation (WP4.6); false moves the group as a
+    /// group order did before.
+    #[serde(default = "default_formation")]
+    pub formation: bool,
+    /// Units that cross the same ground that one move order must send to one place to form
+    /// a formation. 2 to `formation_max_units`.
+    #[serde(default = "default_formation_min_units")]
+    pub formation_min_units: u16,
+    /// The most units a formation holds; a bigger group moves as a crowd. Up to
+    /// [`MAX_FORMATION_UNITS`].
+    #[serde(default = "default_formation_max_units")]
+    pub formation_max_units: u16,
+    /// The spacing of the lattice, as thousandths of what the widest body needs. 1000 to 3000.
+    #[serde(default = "default_formation_spacing_permille")]
+    pub formation_spacing_permille: u16,
+    /// The most a formation may spread, as thousandths of the radius of a disc that holds
+    /// the bodies. 1000 to 4000.
+    #[serde(default = "default_formation_spread_permille")]
+    pub formation_spread_permille: u16,
+    /// The pace of the formation, as thousandths of the speed of its slowest member.
+    /// 500 to 1000.
+    #[serde(default = "default_formation_pace_permille")]
+    pub formation_pace_permille: u16,
+    /// The most speed a member uses to catch up with its slot, as thousandths of its own;
+    /// not less than the pace. At most 1000.
+    #[serde(default = "default_formation_catchup_permille")]
+    pub formation_catchup_permille: u16,
+    /// How far from its slot a member may be, in tenths of a cell, before the leader waits
+    /// for it. 5 to 100.
+    #[serde(default = "default_formation_reform_tenths")]
+    pub formation_reform_tenths: u16,
+    /// For how many ticks the leader waits for a straggler that does not come closer. 20 to
+    /// 2000.
+    #[serde(default = "default_formation_patience_ticks")]
+    pub formation_patience_ticks: u16,
 }
 
 /// Why a settings file was refused.
@@ -145,6 +222,9 @@ pub enum SimSettingsError {
         /// `retarget_cooldown`.
         retarget: u16,
     },
+    /// The formation numbers are out of their ranges (see the fields of
+    /// [`SimSettings`]).
+    Formation,
 }
 
 impl fmt::Display for SimSettingsError {
@@ -178,6 +258,15 @@ impl fmt::Display for SimSettingsError {
                 "sim.ron: replan_cooldown {cooldown}, replan_max {max} and retarget_cooldown \
                  {retarget} do not fit: both cooldowns are between 1 and {MAX_REPLAN_COOLDOWN}, \
                  replan_max is between 1 and {MAX_REPLAN_MAX}"
+            ),
+            Self::Formation => write!(
+                f,
+                "sim.ron: the formation numbers do not fit: formation_min_units is 2 or more and \
+                 at most formation_max_units, which is at most {MAX_FORMATION_UNITS}; \
+                 formation_spacing_permille is 1000 to 3000, formation_spread_permille 1000 to \
+                 4000, formation_pace_permille 500 to 1000, formation_catchup_permille from the \
+                 pace up to 1000, formation_reform_tenths 5 to 100 and formation_patience_ticks \
+                 20 to 2000"
             ),
         }
     }
@@ -223,6 +312,19 @@ impl SimSettings {
                 max: settings.replan_max,
                 retarget: settings.retarget_cooldown,
             });
+        }
+        if settings.formation_min_units < 2
+            || settings.formation_max_units < settings.formation_min_units
+            || settings.formation_max_units > MAX_FORMATION_UNITS
+            || !(1000..=3000).contains(&settings.formation_spacing_permille)
+            || !(1000..=4000).contains(&settings.formation_spread_permille)
+            || !(500..=1000).contains(&settings.formation_pace_permille)
+            || settings.formation_catchup_permille < settings.formation_pace_permille
+            || settings.formation_catchup_permille > 1000
+            || !(5..=100).contains(&settings.formation_reform_tenths)
+            || !(20..=2000).contains(&settings.formation_patience_ticks)
+        {
+            return Err(SimSettingsError::Formation);
         }
         Ok(settings)
     }
@@ -317,6 +419,60 @@ mod tests {
         assert!(with(100, 3, 1001).is_err(), "bounded");
         assert!(with(100, 0, 20).is_err(), "at least one replan");
         assert!(with(100, 101, 20).is_err(), "bounded");
+    }
+
+    #[test]
+    fn the_formation_settings_have_defaults_and_are_checked() {
+        let s = SimSettings::from_ron("(path_node_budget: 4096, flowfield_threshold: 8)").unwrap();
+        assert!(s.formation);
+        assert_eq!(
+            (
+                s.formation_min_units,
+                s.formation_max_units,
+                s.formation_spacing_permille,
+                s.formation_spread_permille,
+                s.formation_pace_permille,
+                s.formation_catchup_permille,
+                s.formation_reform_tenths,
+                s.formation_patience_ticks
+            ),
+            (3, 48, 1250, 1500, 900, 1000, 30, 300)
+        );
+        let with = |field: &str, value: &str| {
+            SimSettings::from_ron(&format!(
+                "(path_node_budget: 4096, flowfield_threshold: 8, {field}: {value})"
+            ))
+        };
+        assert!(with("formation", "false").is_ok_and(|s| !s.formation));
+        assert!(with("formation_min_units", "2").is_ok());
+        assert!(with("formation_min_units", "1").is_err(), "a pair at least");
+        assert!(
+            with("formation_min_units", "49").is_err(),
+            "above the maximum"
+        );
+        assert!(with("formation_max_units", "256").is_ok());
+        assert!(with("formation_max_units", "257").is_err(), "bounded");
+        assert!(with("formation_spacing_permille", "999").is_err());
+        assert!(with("formation_spacing_permille", "3000").is_ok());
+        assert!(with("formation_spread_permille", "4001").is_err());
+        assert!(with("formation_pace_permille", "499").is_err());
+        assert!(
+            with("formation_pace_permille", "950")
+                .is_ok_and(|s| s.formation_catchup_permille >= 950)
+        );
+        assert!(
+            with("formation_catchup_permille", "899").is_err(),
+            "not below the pace"
+        );
+        assert!(with("formation_catchup_permille", "1001").is_err());
+        assert!(with("formation_reform_tenths", "4").is_err());
+        assert!(with("formation_reform_tenths", "100").is_ok());
+        assert!(with("formation_patience_ticks", "19").is_err());
+        assert!(with("formation_patience_ticks", "2000").is_ok());
+        assert_eq!(
+            with("formation_patience_ticks", "2001").err(),
+            Some(SimSettingsError::Formation)
+        );
     }
 
     #[test]

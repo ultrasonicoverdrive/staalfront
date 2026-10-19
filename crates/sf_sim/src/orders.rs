@@ -93,6 +93,13 @@
 //! toward the victim, and leaves the hull of a unit with one to the turret
 //! ([`crate::turret`]), which aims at the victim from the tick of the order.
 //!
+//! # Formations (WP4.6)
+//!
+//! A unit of a formation ([`crate::formation`]) has a `Move` order like any other, but [`go_to`]
+//! asks the formation first what it does this tick: walk straight to its slot, stand, or go on with
+//! the order's own walk (the leader at the pace of the formation; a unit that cannot see its slot).
+//! Any new order or the end of one takes the unit out of its formation (`begin`, `clear`).
+//!
 //! # What phase 5 fills in
 //!
 //! There is no combat here. [`would_acquire_targets_here`] is called every
@@ -112,6 +119,7 @@ use crate::crowd::{
     CROWD_ARRIVE, CROWD_ARRIVE_ALONE, CROWD_ARRIVE_DISC, CROWD_ARRIVE_STEP, Claim, WAYPOINT_CROWD,
 };
 use crate::entities::{Entities, NO_DEF};
+use crate::formation::{self, Member};
 use crate::ids::{EntityId, Tick};
 use crate::movement::Ground;
 use crate::path::{Aim, Pathing, Steer};
@@ -366,6 +374,8 @@ pub(crate) fn begin(e: &mut Entities, i: usize, order: Order, tick: Tick, bounds
     e.crowd[i].home = None;
     e.crowd[i].home_wait = 0;
     e.crowd[i].home_rest = false;
+    // A new order takes the unit out of its formation (WP4.6).
+    e.form[i] = Member::NONE;
     e.route.reset(i);
     e.behavior[i] = if order == Order::Idle {
         crate::behavior::Behavior::Idle
@@ -408,6 +418,7 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
     e.target[i] = None;
     e.guard_walking[i] = false;
     e.crowd[i].reset_progress();
+    e.form[i] = Member::NONE;
     e.route.reset(i);
     e.behavior[i] = crate::behavior::Behavior::Idle;
 }
@@ -463,6 +474,21 @@ fn go_to(
     let c = &mut e.crowd[i];
     c.cool = c.cool.saturating_sub(1);
     c.retarget = c.retarget.saturating_sub(1);
+    // A unit in a formation walks to its slot, stands, or (the leader, and a unit that
+    // cannot see its slot) goes on with the order's walk, the leader at the pace of the
+    // formation (WP4.6).
+    let held;
+    let m = if e.form[i].serial != 0 {
+        match formation::drive(e, i, m, ground) {
+            Some(motion) => {
+                held = motion;
+                &held
+            }
+            None => return false,
+        }
+    } else {
+        m
+    };
     // A member of a group with a flowfield stops at its own arrival slot, not
     // at the order's point (WP4.3).
     let at_slot = path.arrival_point(e, i);

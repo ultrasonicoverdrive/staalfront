@@ -231,11 +231,11 @@ Known gaps (owner in brackets):
 
 ## Phase 4 — Movement and routes
 
-Status: 4.1–4.5 + 4.4b + 4.7 done, 4.6 open. The "done when" of PLAN.md (200 units across a bridge: all
-arrive, none stuck, at most 1 % beyond 1.3 times the packing radius, overlap within a quarter of a cell
-on the way and a sixteenth at the end) holds in `bridge_200` for every wheeled turning radius the review
-swept, so it no longer depends on the luck of the crowd. Phase 4 counts as done when WP4.6 (formations)
-is in as well.
+Status: **phase 4 is done**: 4.1–4.5, 4.4b, 4.6 and 4.7 are in. The "done when" of PLAN.md (200 units across
+a bridge: all arrive, none stuck, at most 1 % beyond 1.3 times the packing radius, overlap within a quarter
+of a cell on the way and a sixteenth at the end) holds in `bridge_200` with formations in, for every wheeled
+turning radius the review swept and for all 112 variants of `sweep_of_variants`; see "Phase 4 close-out"
+below the notes of WP4.7.
 
 - WP4.1 Movement classes with terrain costs (`sf_data::movement` and the `terrain_costs` list of
   every class in `unit_classes.ron`: for each of the six terrain types impassable or a speed in
@@ -311,7 +311,21 @@ is in as well.
   goal a structure covers leads to the nearest cell the class can enter, the slots taken again by
   the claim logic; the looks at the slots go round; the `replan` scenario, in CI on both systems),
   `docs/rules/pathfinding.md` ("Replanning"), `orders.md`, `collision.md`: done
-- WP4.6: open
+- WP4.6 Formations (`sf_sim::formation`, `orders`, `world`, `path`: one `Move` order that sends 3 to 48
+  units that cross the same ground to one point makes a formation; the layout of the group is turned into a
+  lattice with room for the widest body (a quarter more), pulled in if the group is scattered, with the unit
+  nearest the middle as the leader; every member has a slot that hangs from the leader and turns with the
+  heading of the formation, one facing step at a time; the leader goes at 0.9 of the speed of the slowest
+  member, terrain included, the others walk straight to their slots at up to their own speed; the shape
+  lets go ("loose") where the ground round the leader is not open, so units file through a gap, and forms
+  up again on open ground, where the leader waits for stragglers for a patience that runs down faster
+  when they do not close in, then the formation is "broken" until they are back, and a stalled straggler
+  leaves; slots are swapped or handed out again among members that block each other; the formation is let
+  go within its extent and the disc of the whole order from the goal and its members take the arrival
+  slots of WP4.4b, whose lattice is turned across the heading; the numbers are in `sim.ron`
+  (`formation_*`, `World::with_formation`), the state is in a new checksum section `G`; the
+  `formation_move` scenario, the `FormationConfig` and `scenario.formation` knobs, `tests/formation.rs`),
+  `docs/rules/formations.md`: done
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -585,13 +599,146 @@ What it does (`pathfinding.md`, "Replanning"; `orders.md`; `collision.md`):
   a sector beside the one that changed), 8 target replans, one order given up, 25 jobs, the budget never
   exceeded; `crowd_perf` 83 to 86 ticks a second in release (11.6 to 12.0 ms a tick, the slowest 17.7 to 22.6 ms; WP4.4b: 79 to 83), one request for a new route and no overlay in it.
 
-Not done on purpose: formations (WP4.6); bodies that walk are still no part of a route (a crowd is walked
+Not done on purpose: formations (WP4.6, below); bodies that walk are still no part of a route (a crowd is walked
 round by pushing and sidestepping); the overlay looks at the bodies of the tick it is made in (no
 prediction) and within 8 cells; a goal that is rock or water when the order is given still sends every
 unit to its own nearest cell (a substitute goal is found only for a goal a structure covers); a
 better route when a structure is removed and the old one is still walkable is not looked for;
 the replan counters and the cursor of the looks are in memory like everything else of the world (nothing
 new is lost on a restart: they are in the checksum and the world is cloned whole).
+
+WP4.6 notes. **The four legacy goldens did not move** (`wander_5000` `0x38d5e3c43358a889`, `command_mix`
+`0x43f6583004258ceb`, `terrain_256` `0xb577112845e0097e`, `units_spawn` `0x6c369f42be150d6e`), and neither
+did `orders`, `terrain_costs`, `pathing_256` and `turning`. A world in which no move order forms a
+formation hashes exactly as before: section `G` of the checksum is written only while a formation exists, a
+field's `turn` only when it is not zero, and with `formation: Some(false)` `bridge_200` ends on its old
+`0x03971fcc3548fc0c`. **Three scenarios were re-pinned, because their behaviour changed on purpose**:
+
+| Scenario | Old | New | Why |
+|---|---|---|---|
+| `bridge_200` | `0x03971fcc3548fc0c` | `0x00b7393f84780ee6` | the five hover craft are a family of five and march as a formation (the 195 others are above the limit of 48 and move as before) |
+| `crowd_jam` | `0x69e7a06fe17a33e5` | `0x4d615fb6b3de249c` | the two groups of 18 and the 8 tanks of the corridor are formations (3 made, 3 let go); its assertions are unchanged and hold |
+| `replan` | `0x2f05c63b9046ecc8` | `0xf92eb6b09ccfdeff` | its group order makes a formation (1 made, 1 let go); the assertions of `tests/replan.rs` are unchanged and hold |
+
+New: `formation_move` (`0x4a0b9928be197c5f`). `pathing` keeps its pinned value by `formation: Some(false)`
+(like `flowfield_threshold: Some(0)` and `collision: Some(false)` in the same file: it is the test of the queue of
+single requests, which a formation, whose members ask for no route, is not). Two tests were told the same
+and nothing else changed in them: `sf_sim/tests/pathing.rs` (the queue and the budget of single requests) and
+`sf_sim/tests/flowfield.rs::the_budget_decides_when_the_group_arrives_and_never_where`, which asserts that a
+path budget changes only when a group arrives and never where it ends: true of fields and of the arrival
+slots, **not true of a formation**, whose arrival order, and so the claims of the slots, depend on when the
+leader gets its route; it stays true for a group that is not one.
+
+**Decision: formation-move is the default for a group move order, for groups of 3 to 48 units that cross the
+same ground** (`formation: true`, `formation_min_units: 3`, `formation_max_units: 48`). The first version had
+no upper limit and `bridge_200` is what showed why one is needed: the 195 foot, wheeled and tracked units
+formed one lattice 31 cells across; its leader was at x = 26.6 after 4,600 ticks (from 17.7), the leader
+waited for stragglers or sat at the rock outcrops with most of its slots inside rock, and most of the
+200 had not arrived when the run ended. A crowd of that size is the group order of WP4.3 and WP4.4b, which the phase-4 criterion is
+made for, and it stays that. Mixed classes: foot, wheeled and tracked are one family (they cross the same
+ground; a group of them is one formation, whatever their speeds); a hovercraft and a vessel are each a family
+of their own; a land unit and a vessel sent together do not form one formation (the family that can reach the
+goal forms its own, the other follows the order as it always did); aircraft form none.
+
+What it does and the numbers are in `docs/rules/formations.md`. How it was found (the things that did not
+work first, because they are the reasons for the rules):
+
+* A route a unit had from before it walked to a slot is stale when it goes back to following the order
+  (the tanks of `formation_move` walked back to a waypoint of the passage after the release); a member goes
+  back to its way from where it stands: a flowfield member chooses its leg again, a route of its own is kept
+  only if its first waypoint is ahead of it and near (otherwise `bridge_200`'s hover craft asked for 65 routes
+  and `the_groups_start_within_a_few_ticks` allows 40), else it is asked for again.
+* A leader held to the pace of the slowest while it stood in a gap, and members that saw their slots standing
+  in the doorway, jammed the five hover craft at the wall of `bridge_200` for 1,000 ticks. Hence "loose": where
+  the ground round the leader is not open (no rock, water or structure within three cells in eight directions)
+  the leader goes at its own speed, nobody waits and everybody follows the order's own way; the leader also
+  waits only on open ground.
+* A rifleman that has to pass the tank standing on its own slot, in the same row, never does (two straight walks
+  in a line): a member stalled for a window swaps its slot with the one in its way, and the slots are handed out
+  again, nearest first, when the formation forms up after a loose stretch.
+* A leader that waits for stragglers for as long as they are closing in (the first version) waited 1,336 ticks
+  for four hover craft in one variant of the sweep, which arrived at tick 4,512 against the 4,400 of the
+  criterion. Now the patience runs down a third as fast while every straggler closes in.
+* The formation is let go within the disc the bodies of the **whole order** fill (not only its own extent): the
+  five hover craft were released inside the crowd of the 195 and the sweep showed a hover craft that never
+  arrived and an end overlap of 0.084.
+
+**`bridge_200` still meets the criterion of phase 4** (shipped wheeled radius 1.5, `cargo test --release -p
+sf_headless --test bridge_200`): all 200 arrive by tick 3,850 (192 s; 3,456 without formations: the five hover
+craft are the last; without formations the last is a rifleman), 0 of 200 end
+beyond 1.3 times the packing radius (the farthest 8.98 against 9.58 cells), the worst overlap during the run is
+0.187 of a cell (limit 0.25) and at the end 0.031 (limit 0.0625), nobody is stuck at the end, the longest a unit
+stood still with its order not done is 202 ticks (limit 600), the path service stays inside its budget (23 jobs
+of single routes for the five hover craft; the test allows 40 plus the replans). All 19 tests of the file pass,
+among them the radii 1.25, 1.6, 1.75 and 2.0, the 90 tanks at 1.25, 1.5 and 2.0, the goal at (79, 32) and the
+kinds shifted by 7. **`sweep_of_variants` (112 variants) is clean in all 112**: last arrival 3,010 to 4,155 (the
+limit is 4,400; before formations 2,974 to 4,176), worst overlap during a run 0.24, at the end 0.033, the longest
+any unit stood still 434 ticks (limit 600), 1 to 11 requests for a new route in a run. (The first run of the sweep
+with formations had 5 misses, the second 1, the third none; the rules above are what changed in between.)
+
+**`formation_move`** (map `assets/maps/formation`; 20 units, 10 riflemen at 0.7 cells a second, 5 light tanks
+at 2.0 and 5 light transports at 2.5 in a block of 4 by 5, one order to a point 91 cells east, behind a wall
+with a passage 3 cells wide and 8 long): on open ground the formation is whole for 1,993 ticks and in **all of
+them every member is within 3 cells of its slot** (the farthest 2.55 cells; the lattice reaches 4.46 cells from
+the leader); the leader goes 0.0314 cells a tick against the rifleman's 0.035 (the pace is 0.9 of it) and the
+group is never more than 7.2 cells long along its heading, where without formations the 10 vehicles are at the
+goal at tick 1,200 and the riflemen about 50 cells behind; the formation is loose at the passage for 153 ticks (up to
+19 members following the order's way at once) and every member is on its slot again at tick 2,117; it is let go at
+tick 2,967; everybody has arrived by tick 3,227 (the riflemen alone need 2,600 plus the passage); the leader waited
+526 ticks for stragglers, no break, nobody expelled; the worst overlap during the run is 0.088 of a cell and at the end
+0.026. `crowd_jam` and `replan` are marched by formations too and keep all their assertions.
+
+Cost: `crowd_perf` (2,000 colliding units, no formation among them) 66 to 69 ticks a second on this machine
+against 65 to 67 without the change. The formation pass costs a thick line of sight per member per tick and
+eight for the leader; a group of 48 is a few hundred line-of-sight calls a tick.
+
+Not done on purpose, and why: attack-move, guard and queued moves in formation (they keep their behaviour; a
+formation that fights is phase 5); a shape the player chooses (line, wedge, column: the shape is the group's own,
+kept; a named shape is another offset generator); formations of more than 48 (a crowd); a member that left
+rejoining; hover and vessel formations beyond five and three units tested; the arrival slots follow the group's
+rings, not its lattice (below); presentation (an outline of the slots).
+
+**Arrival, as built.** The slots of the goal are the class rings of WP4.4b turned about the goal by the heading
+of the formation, and the members take them by the claim logic on approach, so a blocked slot is simply not
+taken and the bounds of the arrival are the ones that hold for `bridge_200`. The lattice of the march is not the
+lattice of the arrival: the march is one lattice for all classes (the widest body's spacing for everybody), the
+arrival packs each class on its own (the criterion of phase 4 is a packing: 200 bodies on one lattice of the tank's
+spacing would need a disc about 1.4 times the radius of the one the criterion measures, which allows 1.3). So the group goes from one shape into the
+other when the formation is let go, within the disc of the order.
+
+## Phase 4 close-out
+
+Status of the work packages: 4.1 movement classes, 4.2 hierarchical A*, 4.3 flowfields, 4.4 local avoidance and
+collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning and 4.6 formations: **all done**
+(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`).
+
+**The done-when of phase 4, asserted again with everything in** (`cargo test --release -p sf_headless --test
+bridge_200`, the shipped scenario, wheeled radius 1.5, formations on): 200 units cross the bridge; all 200 arrive
+(by tick 3,850); none is stuck (no unit with a stuck count, a request for a new route or an order left at the end;
+the longest any unit stood still with its order not done is 202 ticks); 0 of 200 end beyond 1.3 times the radius of
+the disc whose area is the sum of their spacings squared (the farthest 8.98 cells against 9.58; 99 are outside the
+5 cells the criterion had before bodies); the worst overlap of two bodies during the run is 0.187 of a cell (limit
+0.25) and at the end 0.031 (limit 1/16). The same holds in the 19 tests of the file and in all 112 variants of the
+sweep (last arrival 3,010 to 4,155, worst overlap 0.24, end overlap at most 0.033).
+
+Open follow-ups, carried over:
+
+1. **The margin of the overlap during a run is thin and stays so**: 0.24 against 0.25 in the worst variant of the
+   sweep (WP4.7 said the same; unchanged by formations).
+2. **A crowd of more than 48 is not a formation** (`formation_max_units`): a big selection moves as a group order.
+   A formation of hundreds would need a lattice that bends round rock (slots on the map, not in a frame), a
+   leader that does not wait for hundreds, and the arrival packing in the lattice itself.
+3. **The march lattice is one cell for all classes** (the widest body); riflemen among tanks stand 1.7 cells from
+   each other. A lattice of rows by class, or one cell per row, would pack tighter and look better.
+4. **Formations of hover craft and vessels** are tested with five and three units; amphibious groups that cross
+   water and land in one order (the hover craft of `bridge_200` are the last to arrive in a formation, 394 ticks after the last unit of the run without)
+   may want a looser shape or none; `formation: false` per family is not a setting yet.
+5. **No attack-move or guard in formation, no player-chosen shape, no rejoining** (above).
+6. **Presentation**: nothing draws the slots or the formation; the renderer sees only positions.
+7. **Saving** (phase 13): a world rebuilt from a save has to restore the formation column (`Entities::form`,
+   including the mode of the last tick, which is hashed) and the formation list with the rest.
+8. **A real-time check on the reference laptop** of 2,000 units with several formations has not been made (the
+   headless numbers above are for this machine).
 
 ## Phase 1 report (draft, WP1.14)
 

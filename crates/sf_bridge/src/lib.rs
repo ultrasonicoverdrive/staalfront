@@ -166,6 +166,23 @@ pub fn replan_config(settings: &SimSettings) -> sf_sim::ReplanConfig {
     }
 }
 
+/// The formation settings from the settings of `sim.ron` (WP4.6), to hand to
+/// [`World::with_formation`](sf_sim::World::with_formation) (which refuses a combination
+/// that does not fit; `sf_data` has checked the same rules).
+pub fn formation_config(settings: &SimSettings) -> sf_sim::FormationConfig {
+    sf_sim::FormationConfig {
+        enabled: settings.formation,
+        min_units: settings.formation_min_units,
+        max_units: settings.formation_max_units,
+        spacing_permille: settings.formation_spacing_permille,
+        spread_permille: settings.formation_spread_permille,
+        pace_permille: settings.formation_pace_permille,
+        catchup_permille: settings.formation_catchup_permille,
+        reform_tenths: settings.formation_reform_tenths,
+        patience_ticks: settings.formation_patience_ticks,
+    }
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -420,6 +437,38 @@ mod tests {
                 .with_replan(bad)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn the_shipped_formation_settings_are_the_simulations_defaults_and_a_world_takes_them() {
+        let config = formation_config(&SimSettings::embedded());
+        assert_eq!(config, sf_sim::FormationConfig::DEFAULT);
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_formation(config)
+            .unwrap();
+        assert_eq!(world.formation_config(), config);
+        // A combination that does not fit comes back as the world's error.
+        let bad = sf_sim::FormationConfig {
+            pace_permille: 1200,
+            ..config
+        };
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_formation(bad)
+                .is_err()
+        );
+        // The settings of the file arrive one by one.
+        let settings = SimSettings {
+            formation: false,
+            formation_max_units: 20,
+            formation_reform_tenths: 45,
+            ..SimSettings::embedded()
+        };
+        let changed = formation_config(&settings);
+        assert!(!changed.enabled);
+        assert_eq!((changed.max_units, changed.reform_tenths), (20, 45));
     }
 
     #[test]

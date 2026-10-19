@@ -451,6 +451,12 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   a goal (`terrain_costs`, `pathing`) set it; `bridge_200` and `crowd_jam` (two groups head-on through
   a gap, a unit on hold in a corridor, map `assets/maps/crowd_jam`) run with bodies.
   `tests/crowd_perf.rs` runs 2,000 units with bodies on 256 by 256 cells and prints the ticks a second.
+- **Formations (WP4.6):** `formation_move.ron` (map `assets/maps/formation`, an open field, a wall with a
+  three-cell passage and an open field behind it): 20 units of three speeds march as one formation,
+  `tools/sf_headless/tests/formation_move.rs` asserts the shape on open ground, the pace, the break-up at the
+  passage and the re-forming behind it. The numbers are the `formation_*` ones of `sim.ron`
+  (`World::with_formation`); a scenario says `formation: Some(false)` to move its group as before.
+  `docs/rules/formations.md`.
 - **Replanning (WP4.7):** `replan.ron` (map `assets/maps/replan`, six rock-walled rooms: a structure
   built in a corridor, a unit on hold in a corridor with a way round and with none, a target that
   walks away, one that disappears, a group whose goal is built over) runs on the defaults, which are the
@@ -463,7 +469,7 @@ sf_headless <scenario.ron> [--ticks N] [--every K] [--out log.json] [--expect HE
   footprint from the definitions (and, since WP4.1, the movement costs of the classes). `units_spawn.ron` spawns every role of its frozen copy once;
   `tests/shipped_roles.rs` spawns every role of the shipped file, placed automatically, without a checksum.
 - **CI:** the `headless` job runs `wander_5000` (10,000 ticks, 5,000 wanderers),
-  `command_mix`, `terrain_256`, `units_spawn`, `orders`, `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning` and `replan` in release mode on Linux and Windows against the committed
+  `command_mix`, `terrain_256`, `units_spawn`, `orders`, `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan` and `formation_move` in release mode on Linux and Windows against the committed
   `<name>.expected` values and uploads the logs; `headless-compare` fails if the
   two sets differ in anything but `host` (`scripts/compare-headless-logs.sh`).
 

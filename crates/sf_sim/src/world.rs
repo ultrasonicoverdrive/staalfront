@@ -8,6 +8,7 @@ use crate::behavior::{self, Area, Behavior, Motion};
 use crate::command::{Command, CommandQueue, ScheduleError};
 use crate::crowd::{CollisionConfig, Crowd, CrowdStats};
 use crate::entities::{Entities, NO_DEF, NewEntity};
+use crate::formation::{FormationConfig, FormationStats, FormationView, Formations};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
@@ -126,6 +127,9 @@ pub enum ConfigError {
     /// The replan settings were given to a world that has already started, or are
     /// not valid ([`ReplanConfig::is_valid`](crate::ReplanConfig::is_valid)).
     Replan,
+    /// The formation settings were given to a world that has already started, or are
+    /// not valid ([`FormationConfig::is_valid`](crate::FormationConfig::is_valid)).
+    Formation,
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -156,6 +160,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::Replan => {
                 "the replan settings must be given before the world starts and be valid"
+            }
+            ConfigError::Formation => {
+                "the formation settings must be given before the world starts and be valid"
             }
             ConfigError::MovementAfterStart => {
                 "the movement table must be given before the world starts"
@@ -214,6 +221,9 @@ pub struct World {
     /// The collision pass (WP4.4): the settings, the bodies of the unit kinds, the
     /// scratch memory.
     pub(crate) crowd: Crowd,
+    /// The formations of group move orders (WP4.6): their settings and the groups that
+    /// keep their shape.
+    pub(crate) formations: Formations,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -353,6 +363,24 @@ impl World {
         Ok(self)
     }
 
+    /// The same world with other formation settings (WP4.6, `docs/rules/formations.md`):
+    /// whether a group move order forms a formation at all and how it keeps its shape and
+    /// its pace. A world that is given none uses
+    /// [`FormationConfig::DEFAULT`](crate::FormationConfig::DEFAULT), the numbers of the
+    /// shipped `sim.ron`. Call it right after the world is made
+    /// ([`ConfigError::Formation`] after it has started, or for invalid numbers).
+    pub fn with_formation(mut self, config: FormationConfig) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !config.is_valid()
+        {
+            return Err(ConfigError::Formation);
+        }
+        self.formations.config = config;
+        Ok(self)
+    }
+
     /// The same world with a different path budget: the nodes of search work it
     /// may do in one tick ([`DEFAULT_NODE_BUDGET`](crate::DEFAULT_NODE_BUDGET)
     /// otherwise). Call it right after the world is made
@@ -411,6 +439,7 @@ impl World {
             movement: MovementTable::empty(),
             pathing: Pathing::inactive(),
             crowd,
+            formations: Formations::new(),
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -633,6 +662,23 @@ impl World {
         Some(u32::from(self.entities.crowd[i].quiet))
     }
 
+    /// The formation settings of the world (WP4.6).
+    pub fn formation_config(&self) -> FormationConfig {
+        self.formations.config
+    }
+
+    /// What the formations did so far (WP4.6).
+    pub fn formation_stats(&self) -> FormationStats {
+        self.formations.stats
+    }
+
+    /// The formation a unit marches in (WP4.6): its place in it, what it does this tick and
+    /// how the formation is doing. `None` for a unit that is in none, and for a stale id.
+    pub fn formation_of(&self, id: EntityId) -> Option<FormationView> {
+        let i = self.live_index(id)?;
+        self.formations.view(&self.entities, i)
+    }
+
     /// The replan settings of the world (WP4.7).
     pub fn replan_config(&self) -> ReplanConfig {
         self.pathing.replan_config()
@@ -818,6 +864,9 @@ impl World {
             movement: &self.movement,
             occupancy: Some(&self.occupancy),
         };
+        // The formations work out where every member's slot is and what it does (WP4.6).
+        self.formations
+            .update(&mut self.entities, &self.units, &ground, &mut self.pathing);
         behavior::advance_all(
             &mut self.entities,
             &motion,
@@ -1233,8 +1282,32 @@ impl World {
                 if let Some(point) = group_point {
                     started.sort_unstable();
                     started.dedup();
-                    self.pathing
-                        .group_order(&mut self.entities, &self.units, &started, point);
+                    // A move order that sends enough units across the same ground forms a
+                    // formation (WP4.6); the arrival slots of the goal then stand across the
+                    // way the group came.
+                    let mut formed: Vec<(usize, Facing)> = Vec::new();
+                    if let Order::Move(_) = order {
+                        let ground = Ground {
+                            terrain: &self.terrain,
+                            movement: &self.movement,
+                            occupancy: Some(&self.occupancy),
+                        };
+                        formed = self.formations.create(
+                            &mut self.entities,
+                            &self.units,
+                            &ground,
+                            &self.pathing,
+                            &started,
+                            point,
+                        );
+                    }
+                    self.pathing.group_order(
+                        &mut self.entities,
+                        &self.units,
+                        &started,
+                        point,
+                        &formed,
+                    );
                 }
                 changed
             }

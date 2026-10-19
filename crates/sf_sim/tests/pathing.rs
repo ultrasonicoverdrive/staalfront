@@ -8,9 +8,9 @@
 
 use sf_math::{Fx, Vec2};
 use sf_sim::{
-    Cell, Command, ConfigError, Cost, EntityId, Footprint, Kind, MIN_NODE_BUDGET, MovementTable,
-    Order, PlayerId, RouteStatus, Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats,
-    UnitTable, World, WorldConfig, per_tick,
+    Cell, Command, ConfigError, Cost, EntityId, Footprint, FormationConfig, Kind, MIN_NODE_BUDGET,
+    MovementTable, Order, PlayerId, RouteStatus, Terrain, TerrainDef, TerrainFlags, TerrainId,
+    UnitStats, UnitTable, World, WorldConfig, per_tick,
 };
 
 const GRASS: TerrainId = TerrainId(0);
@@ -637,8 +637,11 @@ fn the_service_serves_in_the_order_of_the_ids_and_never_exceeds_its_budget() {
         .unwrap()
         .with_path_budget(MIN_NODE_BUDGET)
         .unwrap()
-        // This is about the queue of single requests: no flowfield for the crowd.
+        // This is about the queue of single requests: no flowfield for the crowd, and no
+        // formation, whose members walk to their slots and ask for no route (WP4.6).
         .with_flowfield_threshold(0)
+        .unwrap()
+        .with_formation(FormationConfig::OFF)
         .unwrap();
     let ids: Vec<EntityId> = (0..24)
         .map(|k| spawn(&mut w, SOLDIER, 4 + k % 4, 4))

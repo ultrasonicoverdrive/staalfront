@@ -128,6 +128,13 @@ pub struct Scenario {
     /// units that start side by side or share a goal.
     #[serde(default)]
     pub collision: Option<bool>,
+    /// Whether a group move order forms a formation (WP4.6,
+    /// `docs/rules/formations.md`); the simulation's default (on, as `sim.ron` ships
+    /// it) when left out. `Some(false)` moves the group as a group order did before
+    /// WP4.6: for a scenario that pins routes, arrival or turning with exact positions
+    /// and sends several units across the same ground to one place.
+    #[serde(default)]
+    pub formation: Option<bool>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -896,6 +903,14 @@ impl Scenario {
                 .with_collision(sf_sim::CollisionConfig {
                     enabled,
                     ..sf_sim::CollisionConfig::DEFAULT
+                })
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(enabled) = self.formation {
+            world = world
+                .with_formation(sf_sim::FormationConfig {
+                    enabled,
+                    ..sf_sim::FormationConfig::DEFAULT
                 })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }

@@ -48,6 +48,42 @@
 //
 // retarget_cooldown (WP4.7): ticks between two new searches of a unit that goes for a
 // target that keeps moving (an attack, a guard of an entity). 1 to 1000.
+//
+// Formations (WP4.6, docs/rules/formations.md): one move order that sends enough units that
+// cross the same ground (foot, wheeled and tracked units are one family; hovercraft and vessels
+// each their own) to one place makes them a formation: they keep the shape they stand in, as a
+// lattice with room for their bodies, turned with the way they go, at the pace of the slowest;
+// narrow places break the shape up and open ground forms it again. Single orders, attack-move,
+// hold, stop and scatter are not touched.
+//
+// formation: false moves a group as a group order did before WP4.6.
+//
+// formation_min_units / formation_max_units: how many units of one family one order must send
+// to form a formation, and the most a formation holds (a crowd of two hundred is not a
+// formation, it moves as a group order always did). 2 to 256.
+//
+// formation_spacing_permille: the width of the lattice, as thousandths of what the widest body
+// of the group needs (1000: bodies side by side). 1000 to 3000.
+//
+// formation_spread_permille: a scattered group is pulled in until it is no wider than this many
+// thousandths of the radius of a disc that holds its bodies. 1000 to 4000.
+//
+// formation_pace_permille: the speed of the formation, as thousandths of the current speed of
+// its slowest member. The part that is kept back is what the slowest has to catch up with.
+// 500 to 1000.
+//
+// formation_catchup_permille: the most speed a member uses to get back to its slot, as
+// thousandths of its own. Not below the pace, at most 1000.
+//
+// formation_reform_tenths: how far from its slot (tenths of a cell) a member may be before the
+// leader waits for it on open ground. 5 to 100.
+//
+// formation_patience_ticks: for how many ticks the leader waits for a straggler that does not
+// come closer before the formation counts as broken (nobody waits any more until the
+// stragglers are back), and for how long a member may be away from its slot without coming
+// closer before it leaves. 20 to 2000.
+// Tests and scenarios that do not give them use the simulation's own defaults, which are the
+// same numbers.
 (
     path_node_budget: 4096,
     flowfield_threshold: 8,
@@ -58,4 +94,13 @@
     replan_cooldown: 100,
     replan_max: 3,
     retarget_cooldown: 20,
+    formation: true,
+    formation_min_units: 3,
+    formation_max_units: 48,
+    formation_spacing_permille: 1250,
+    formation_spread_permille: 1500,
+    formation_pace_permille: 900,
+    formation_catchup_permille: 1000,
+    formation_reform_tenths: 30,
+    formation_patience_ticks: 300,
 )

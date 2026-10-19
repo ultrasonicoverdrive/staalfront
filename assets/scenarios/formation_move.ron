@@ -1,0 +1,66 @@
+// A mixed group marches across open ground, through a narrow passage and on to a
+// goal behind it, as one formation (WP4.6, docs/rules/formations.md). The map is
+// assets/maps/formation, a flat 112 by 48 cell map made by
+// `cargo run -p sf_headless --example gen_formation_map -- assets/maps/formation`:
+//
+//   x 0..39          x 40..47               x 48..111
+//   the west field   a wall of rock, every  the east field
+//   (open ground)    row, with a passage    (open ground)
+//                    in rows 22..24 (three
+//                    cells wide, eight long)
+//
+// The 20 units stand on a block of 4 by 5 cells (x 6..9, y 20..24), one to a cell, and
+// get ONE move order on tick 1: go to (100, 23), 91 cells east and behind the passage.
+// The slots are the entity ids; every row mixes the three speeds:
+//
+//   10 riflemen (foot, 0.7 cells a second)   5 light tanks (tracked, 2)
+//    5 light transports (wheeled, 2.5)
+//
+// All three cross the same ground, so the order makes ONE formation of 20: the group
+// keeps its shape in the open field, the slowest (a rifleman) sets the pace, the
+// formation breaks up at the passage, the units file through, and it forms up again on
+// the other side. The riflemen are 10, at least the flowfield threshold (8), so they
+// follow a field; the 5 tanks and 5 transports are below it and have routes of their own.
+//
+// tools/sf_headless/tests/formation_move.rs asserts the shape in the open field (every
+// unit near its slot for nearly all of the ticks there), the pace (the group is never
+// strung out along its heading by more than its own extent while it is in formation, and
+// takes about as long as the slowest alone would), that the formation is whole again after
+// the passage, that all of them arrive and none is stuck, and the overlap bounds of
+// phase 4. CI runs the scenario on Linux and Windows and requires the checksum in
+// formation_move.expected. `unit_defs` is the frozen copy of the definitions `pathing`
+// uses, so a rebalance of assets/config/ does not move the checksum.
+
+Scenario(
+    name: "formation_move",
+    seed: 0x7E44_0046,
+    map: (width: 112, height: 48),
+    map_name: Some("formation"),
+    unit_defs: Some("pathing_defs"),
+    ticks: 4200,
+    commands: [
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 20))), // slot 0: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (7, 20))), // slot 1: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 20))), // slot 2: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (9, 20))), // slot 3: light transport
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 21))), // slot 4: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (7, 21))), // slot 5: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (8, 21))), // slot 6: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (9, 21))), // slot 7: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 22))), // slot 8: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (7, 22))), // slot 9: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 22))), // slot 10: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (9, 22))), // slot 11: light tank
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (6, 23))), // slot 12: light transport
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (7, 23))), // slot 13: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 23))), // slot 14: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (9, 23))), // slot 15: rifleman
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 24))), // slot 16: rifleman
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (7, 24))), // slot 17: light tank
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (8, 24))), // slot 18: rifleman
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 0, cell: (9, 24))), // slot 19: light transport
+
+        // --- tick 1: one order for everybody ---
+        (tick: 1, command: OrderMove(ids: [Range(0, 20)], target: (100, 23))),
+    ],
+)

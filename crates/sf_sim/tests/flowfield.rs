@@ -8,9 +8,9 @@
 
 use sf_math::{Fx, Vec2};
 use sf_sim::{
-    Cell, Command, ConfigError, Cost, EntityId, Footprint, Kind, MIN_NODE_BUDGET, MovementTable,
-    Order, PlayerId, RouteStatus, Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats,
-    UnitTable, World, WorldConfig, per_tick,
+    Cell, Command, ConfigError, Cost, EntityId, Footprint, FormationConfig, Kind, MIN_NODE_BUDGET,
+    MovementTable, Order, PlayerId, RouteStatus, Terrain, TerrainDef, TerrainFlags, TerrainId,
+    UnitStats, UnitTable, World, WorldConfig, per_tick,
 };
 
 const GRASS: TerrainId = TerrainId(0);
@@ -624,7 +624,11 @@ fn the_field_and_single_routes_share_the_budget_and_both_get_served() {
 #[test]
 fn the_budget_decides_when_the_group_arrives_and_never_where() {
     let finals = |budget: u32| {
-        let mut w = world_with(budget, None);
+        // About the field and the path service, not about a formation, whose slots and
+        // arrival order do depend on when the leader gets its route (WP4.6).
+        let mut w = world_with(budget, None)
+            .with_formation(FormationConfig::OFF)
+            .unwrap();
         let ids = block(&mut w, SOLDIER, 20, 2, 2, 10);
         group_order(&mut w, &ids, (20, 40));
         let ticks = run_group(&mut w, &ids, 3000);

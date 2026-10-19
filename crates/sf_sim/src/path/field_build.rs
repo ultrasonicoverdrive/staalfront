@@ -562,7 +562,7 @@ fn pick_slots(
     // One node pays for 32 comparisons with the earlier classes' slots.
     let compare = (taken.len() / 32) as u32;
     while f.slots.len() < want && c.cursor < len {
-        let p = slots::position(centre, spiral[c.cursor], spacing);
+        let p = slots::position_turned(centre, spiral[c.cursor], spacing, f.layout.turn);
         if (p - centre).length() > slots::MAX_RADIUS {
             // The spiral goes outwards: everything after this is further.
             c.cursor = len;
