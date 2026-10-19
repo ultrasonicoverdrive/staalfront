@@ -91,9 +91,9 @@ its own (`guard_walking`), so the route could take `target` over.
   end the order: the route leads to the reachable cell nearest to it, the unit stands in the middle of
   it, and `World::route_of(id)` says `unreachable` and `Stranded` until the order is replaced. The
   order, the queue behind it and the arrival test stay as they are, as they did when the unit stood
-  at the edge of a river at WP4.1; ending such an order ("gives up", "stands as near as it gets")
-  is WP4.7's replan (WP4.4's crowd pass leaves such a unit alone: standing at the nearest cell is not
-  being stuck).
+  at the edge of a river at WP4.1. WP4.7 leaves it so (the crowd pass leaves such a unit alone:
+  standing at the nearest cell is not being stuck); when the target of an attack or a guard moves, the
+  unit looks for the new nearest cell, at most once in `retarget_cooldown` ticks.
 * **WP4.3** adds the flowfield step for groups to the same seam: when one `Move` or `AttackMove` to a
   point sends at least `flowfield_threshold` units of a class somewhere (8 as shipped), those units
   do not ask for routes; they are **members of one flowfield** (`docs/rules/pathfinding.md`,
@@ -102,8 +102,8 @@ its own (`guard_walking`), so the route could take `target` over.
   destination, and **arrival is judged against the slot** (`go_to`), not against the order's point, so
   that 200 units do not pile up on one spot; the order still ends as for any move. A member whose
   field is gone, or cannot serve it, is routed on its own. A guard of a point is not a group order (it walks
-  back to its exact post). **WP4.7** recomputes the route when it is blocked or the target has vanished, the
-  order staying.
+  back to its exact post). **WP4.7** recomputes the route when it is blocked, the order staying (below,
+  "Replanning and giving an order up").
 * **Terrain (WP4.1).** `walk` returns whether the unit arrived, is on its way, or was blocked by
   terrain; `go_to` counts only an arrival, and a blocked step on a route makes the unit ask for a
   cell-by-cell route (a second refusal leaves it standing, order kept). The speed of a step is
@@ -115,7 +115,7 @@ its own (`guard_walking`), so the route could take `target` over.
   destination (two cells more for each sidestep it tried), **counts as arrived**: the crowd is standing
   on its spot; and a unit that has gone `stuck_ticks` without coming closer to its waypoint **steps to a
   free neighbouring spot** for a few ticks instead of walking, and after `stuck_attempts` such steps
-  asks for a new route (`World::replan_requested`, the hook of WP4.7). A unit on `HoldPosition` is
+  asks for a new route (`World::replan_requested`; WP4.7 below). A unit on `HoldPosition` is
   never pushed; an idle unit is pushed aside by a friendly mover, a little and never into rock or a
   structure. A new order, or the end of one, forgets the progress and the sidestep.
 * **Turning (WP4.5).** The step turns the hull before the unit drives, the way its movement class
@@ -129,6 +129,35 @@ its own (`guard_walking`), so the route could take `target` over.
 Steering is the same step as the legacy `Wander` and `MoveTo` (`behavior::walk`): at
 the unit's own `speed_per_tick` and turn rate from the unit table. A unit within one step
 of its waypoint snaps onto it.
+
+### Replanning and giving an order up (WP4.7)
+
+The destination is the order's; the route is the unit's, and it is made again when it stops being the
+way, with the order, its queue and the destination left as they are (`pathfinding.md`, "Replanning",
+has the rules and the numbers):
+
+* **A structure placed or removed** near the route: the unit asks again at once from where it stands.
+* **A target that moves** (an attack, a guard of an entity), more than three cells from where the route
+  was asked for: the unit asks again, at most once in `retarget_cooldown` ticks, and follows the
+  waypoints it has meanwhile. This is the re-search of WP4.2 behind a cooldown; it is not counted
+  against the limit below, a hunter may follow a target for as long as the target keeps moving.
+* **A target that is gone** (dead, removed, or its slot holds another entity: the id's generation no
+  longer matches): the order ends, `Attack` and `Guard` of an entity alike. The next order of the queue
+  starts on the following tick, or the unit is idle where it stands. Nothing is left of the route.
+* **A target that cannot be reached** (an island): the unit stands at the reachable cell nearest to
+  it and waits, the order kept; it looks for a new nearest cell when the target has moved.
+* **A unit that is stuck** (`collision.md`, "Wait, detour, stuck") asks for a new route round the bodies
+  near it that stand still (units on `HoldPosition`, enemies with no order), at most `replan_max`
+  times in this order (3), `replan_cooldown` ticks (100) apart. **When it would ask once more, the
+  order is given up**: it ends as if it were done (the next queued order starts, or the unit is idle
+  where it is, wherever that is), and the count of the next order starts from zero. That holds for
+  every walking order; `HoldPosition` never walks and so is never given up. The unit keeps a record of
+it for the UI (`World::gave_up_at`, the tick, in the checksum, in the sf_game snapshot) until a command
+gives it an order or stops it.
+
+Why idle and not "the nearest reachable cell" or "keep waiting": a unit that is stuck is standing at, or
+next to, the place it cannot get past; the nearest reachable cell is where it is. And a unit that waits
+for ever holds up its queue and turns a deadlock of two units into one that never ends.
 
 ## Attack, attack-move and guard: what exists and what phase 5 fills in
 
@@ -266,6 +295,10 @@ rounds (phase 15), in `crates/sf_sim/src/orders.rs`.
   a dying one (and on a new entity in its slot), guard, scatter, the legacy commands, the
   checksum, and the sequence numbers.
 * `crates/sf_sim/src/command.rs`: the per-player sequence numbers.
+* `crates/sf_sim/tests/replan.rs` and the `replan` scenario (`tools/sf_headless/tests/replan.rs`): a
+  target that dies, with a new unit in its slot and a queued order behind the attack; a guard of an entity
+  that is gone; a target that moves, one that cannot be reached; a stuck unit that gives its order up
+  and goes on to the queued one.
 * `assets/scenarios/orders.ron` with `tools/sf_headless/tests/orders.rs`: the whole
   scenario with the states and positions asserted at the ticks that matter; the checksum
   is in `orders.expected` (checked by `pinned.rs` and, on Linux and Windows, by CI). It

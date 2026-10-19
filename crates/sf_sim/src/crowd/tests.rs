@@ -250,6 +250,23 @@ fn a_unit_at_rest_leaves_the_checksum_alone_and_one_that_remembers_does_not() {
             home: Some(Vec2::ONE),
             ..CrowdState::default()
         },
+        // WP4.7: the replans of this order, their cooldowns, and a unit giving its order up.
+        CrowdState {
+            replans: 1,
+            ..CrowdState::default()
+        },
+        CrowdState {
+            cool: 1,
+            ..CrowdState::default()
+        },
+        CrowdState {
+            retarget: 1,
+            ..CrowdState::default()
+        },
+        CrowdState {
+            give_up: true,
+            ..CrowdState::default()
+        },
     ] {
         assert!(!remembers.at_rest(), "{remembers:?}");
         let (mut a, mut b) = (Fnv1a64::new(), Fnv1a64::new());
@@ -267,8 +284,13 @@ fn a_unit_at_rest_leaves_the_checksum_alone_and_one_that_remembers_does_not() {
         side: Some((Vec2::ONE, 3)),
         ..CrowdState::default()
     };
+    c.replans = 2;
+    c.cool = 40;
+    c.retarget = 7;
+    c.give_up = true;
     c.reset_progress();
     assert_eq!((c.quiet, c.attempts, c.replan, c.side), (0, 0, false, None));
+    assert_eq!((c.replans, c.cool, c.retarget, c.give_up), (0, 0, 0, false));
     assert_eq!(c.pressed, 0);
     assert_eq!(c.shoved, Fx::ONE);
 }

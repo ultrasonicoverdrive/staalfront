@@ -26,6 +26,10 @@ use crate::path::heap::IndexedHeap;
 /// The parent of a node reached from the start.
 pub(crate) const FROM_START: u32 = u32::MAX;
 
+/// The most sectors one search may be told not to cross (WP4.7): the sectors a request's
+/// overlay touches, which is at most the nine a 21-cell window of the map spans.
+pub(crate) const BAN_CAP: usize = 12;
+
 /// How a run of the search ended.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(crate) enum Step {
@@ -53,6 +57,10 @@ pub(crate) struct AbstractSearch {
     goal_links: Vec<(u32, u32)>,
     /// The expanded node nearest the goal: `(heuristic, cost, node)`.
     nearest: Option<(u64, u64, u32)>,
+    /// Sectors whose edges through the sector are not used (WP4.7): the graph's costs
+    /// there were made without the request's overlay.
+    banned: [u32; BAN_CAP],
+    banned_len: usize,
 }
 
 impl AbstractSearch {
@@ -70,7 +78,25 @@ impl AbstractSearch {
             goal_sector: 0,
             goal_links: Vec::new(),
             nearest: None,
+            banned: [0; BAN_CAP],
+            banned_len: 0,
         }
+    }
+
+    /// Forbids the way through `sector` for the search begun last (WP4.7): a path may
+    /// still leave it from the portal it starts in, and enter it to reach the goal, but
+    /// does not cross it by the edges the graph has, which a request's overlay cut.
+    /// False if there is no room for one more. Call after [`AbstractSearch::begin`].
+    pub fn ban(&mut self, sector: u32) -> bool {
+        if self.banned[..self.banned_len].contains(&sector) {
+            return true;
+        }
+        if self.banned_len == BAN_CAP {
+            return false;
+        }
+        self.banned[self.banned_len] = sector;
+        self.banned_len += 1;
+        true
     }
 
     /// Starts a search from the portals in `start_links` (node, cost of the
@@ -95,6 +121,7 @@ impl AbstractSearch {
         self.goal_links.clear();
         self.goal_links.extend_from_slice(goal_links);
         self.nearest = None;
+        self.banned_len = 0;
         for &(n, cost) in start_links {
             self.relax(graph, n, u64::from(cost), FROM_START);
         }
@@ -166,6 +193,9 @@ impl AbstractSearch {
                 }
             }
             // Through the sector to its other portals.
+            if self.banned[..self.banned_len].contains(&s) {
+                continue;
+            }
             for &(k2, cost) in sg.edges(k) {
                 self.relax(graph, node(s, usize::from(k2)), g + u64::from(cost), n);
             }
@@ -398,5 +428,61 @@ mod tests {
             reachable > 20 && unreachable > 20,
             "{reachable} {unreachable}"
         );
+    }
+
+    #[test]
+    fn a_banned_sector_is_not_crossed_by_its_edges_but_can_be_left_and_reached() {
+        // Three sectors in a row, joined by one corridor each; a second way round below.
+        let mut g = Grid::new(48, 48);
+        for y in 0..16 {
+            for x in 0..48 {
+                g.set(g.index(x, y), 1000);
+            }
+        }
+        // A second way: down the left column, along the bottom row, up the right one.
+        for y in 16..48 {
+            for x in 0..48 {
+                let ring = !(3..45).contains(&x) || y >= 45;
+                if ring {
+                    g.set(g.index(x, y), 1000);
+                }
+            }
+        }
+        let mut local = Local::new();
+        let graph = ClassGraph::build(0, g, &mut local);
+        let (from, to) = ((2, 8), (45, 8));
+        let (step, plain) = search(&graph, &mut local, from, to);
+        assert_eq!(step, Step::Found);
+        // The straight way goes through sector 1 (the middle one of the top row).
+        assert!(plain.iter().any(|&n| node_sector(n) == 1));
+
+        let mut a = AbstractSearch::new(graph.sectors.count());
+        let (start, goal) = (
+            links(&graph, &mut local, from),
+            links(&graph, &mut local, to),
+        );
+        a.begin(&graph, &start, to, &goal);
+        assert!(a.ban(1));
+        assert!(a.ban(1), "again is fine");
+        let mut budget = u32::MAX;
+        assert_eq!(a.run(&graph, &mut budget), Step::Found);
+        let mut path = Vec::new();
+        a.path_to_goal(&mut path);
+        assert!(
+            path.iter().all(|&n| node_sector(n) != 1),
+            "went round: {path:?}"
+        );
+        // A search begun again forgets the ban.
+        a.begin(&graph, &start, to, &goal);
+        let mut budget = u32::MAX;
+        assert_eq!(a.run(&graph, &mut budget), Step::Found);
+        let mut again = Vec::new();
+        a.path_to_goal(&mut again);
+        assert_eq!(again, plain);
+        // The list is bounded.
+        for s in 0..BAN_CAP as u32 {
+            assert!(a.ban(100 + s));
+        }
+        assert!(!a.ban(999));
     }
 }

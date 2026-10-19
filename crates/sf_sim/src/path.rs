@@ -29,8 +29,10 @@
 //! not restrict walk the straight line, routes and fields do not know the other
 //! units (they are bodies that the crowd pass of WP4.4 pushes apart, `crate::crowd`;
 //! a unit that is stuck in a crowd asks for a new route through
-//! [`Pathing::request_replan`]), and a route made unwalkable by a change is only
-//! re-asked when the change touches it (replanning is WP4.7).
+//! [`Pathing::request_replan`], which carries the bodies that do not move as an overlay of
+//! blocked cells for that request only, `path/replan.rs`), and a route made unwalkable by
+//! a change is re-asked when the change touches it. A target that moves is searched for
+//! again behind a cooldown (WP4.7).
 
 mod abstract_search;
 mod claim;
@@ -43,6 +45,7 @@ mod heap;
 mod job;
 mod local;
 mod los;
+mod replan;
 mod route;
 mod slots;
 
@@ -59,10 +62,11 @@ use crate::movement::{Cost, Ground, MovementTable};
 use crate::terrain::{Cell, Occupancy, Terrain};
 use crate::units::UnitTable;
 
-use field::{Fields, Layout};
+use field::{Fields, Layout, centre_xy};
 use graph::{ClassGraph, node_sector};
 use grid::{Grid, Sectors};
 use job::{Job, Mode, Progress, Work};
+pub(crate) use replan::{OVERLAY_RANGE, Overlay, OverlayBuilder, ShutCells};
 pub(crate) use route::{Route, RouteState, Routes};
 
 pub use field::{
@@ -70,6 +74,10 @@ pub use field::{
     MAX_SLOTS as MAX_FIELD_SLOTS,
 };
 pub use grid::SECTOR_SIZE;
+pub use replan::{
+    DEFAULT_REPLAN_COOLDOWN, DEFAULT_REPLAN_MAX, DEFAULT_RETARGET_COOLDOWN, MAX_REPLAN_COOLDOWN,
+    MAX_REPLAN_MAX, OVERLAY_CAP, ReplanConfig,
+};
 pub use route::{ABS_CAP, RING_CAP};
 
 /// Path search work a world may do in one tick, as a number of nodes: cells
@@ -108,6 +116,19 @@ pub struct PathStats {
     pub fields_live: u32,
     /// Flowfields finished so far, rebuilds included.
     pub fields_built: u64,
+    /// Units that asked again for a route because a change of the map touched it
+    /// (WP4.7).
+    pub map_replans: u64,
+    /// Units that asked again for a route because the target they go for moved
+    /// (WP4.7), after the cooldown.
+    pub target_replans: u64,
+    /// Requests of stuck units for a new route (WP4.7): with the bodies round them as an
+    /// overlay, or without when nothing that stands still was near.
+    pub stuck_replans: u64,
+    /// Of those, the ones that carried an overlay.
+    pub overlay_replans: u64,
+    /// Requests with an overlay that found no way round (WP4.7).
+    pub detours_failed: u64,
 }
 
 /// Where a unit stands with its route, for the presentation and tests.
@@ -203,6 +224,8 @@ pub(crate) struct Pathing {
     scan: bool,
     /// The flowfields of group orders (WP4.3).
     fields: Fields,
+    /// The settings of the replan (WP4.7).
+    replan: ReplanConfig,
     stats: PathStats,
 }
 
@@ -220,6 +243,7 @@ impl Pathing {
             next_slot: 0,
             scan: false,
             fields: Fields::new(DEFAULT_FLOWFIELD_THRESHOLD),
+            replan: ReplanConfig::DEFAULT,
             stats: PathStats {
                 budget: DEFAULT_NODE_BUDGET,
                 ..PathStats::default()
@@ -277,6 +301,15 @@ impl Pathing {
 
     pub fn flowfield_threshold(&self) -> u32 {
         self.fields.threshold
+    }
+
+    /// Changes the replan settings (before the world starts).
+    pub fn set_replan(&mut self, config: ReplanConfig) {
+        self.replan = config;
+    }
+
+    pub fn replan_config(&self) -> ReplanConfig {
+        self.replan
     }
 
     pub fn stats(&self) -> PathStats {
@@ -410,13 +443,31 @@ impl Pathing {
             }
             let Some(job) = self.job.as_mut() else { break };
             let slot = job.slot as usize;
-            let progress = job.run(
-                &self.graphs[job.graph],
-                &mut self.work,
-                &mut e.route[slot],
-                &mut rem,
-                self.epoch,
-            );
+            // The bodies round a stuck unit are blocked cells for its request alone
+            // (WP4.7): shut while its job works, open again before anything else is
+            // served, so the graph and every other request see the map as it is.
+            let overlay = e.route[slot].overlay;
+            let shut = !overlay.is_empty() && e.route[slot].ticket == job.ticket;
+            // The guard opens the cells again when it is dropped, a panic of the job
+            // included. It holds the graph, which the job reads through it.
+            let progress = if shut {
+                let guard = ShutCells::new(&mut self.graphs[job.graph], overlay);
+                job.run(
+                    guard.graph(),
+                    &mut self.work,
+                    &mut e.route[slot],
+                    &mut rem,
+                    self.epoch,
+                )
+            } else {
+                job.run(
+                    &self.graphs[job.graph],
+                    &mut self.work,
+                    &mut e.route[slot],
+                    &mut rem,
+                    self.epoch,
+                )
+            };
             match progress {
                 Progress::Yield => break,
                 Progress::Done => {
@@ -424,6 +475,18 @@ impl Pathing {
                     self.stats.jobs_done += 1;
                 }
                 Progress::Dropped => self.job = None,
+                Progress::Failed => {
+                    // No way round the bodies of the overlay: the unit stands, with
+                    // its order kept; its own stuck rule asks again, up to the limit
+                    // of the replan settings, and then gives the order up.
+                    self.job = None;
+                    self.stats.detours_failed += 1;
+                    let route = &mut e.route[slot];
+                    route.overlay.clear();
+                    route.clear_plan();
+                    route.state = RouteState::Stranded;
+                    route.epoch = self.epoch;
+                }
                 Progress::Replan => {
                     self.job = None;
                     let ticket = self.new_ticket();
@@ -547,6 +610,12 @@ impl Pathing {
                 return Steer::Wait;
             }
             RouteState::Stranded if far(route.want, want) => {
+                // A target that keeps moving is searched for at most once in a while.
+                if e.crowd[i].retarget > 0 {
+                    return Steer::Stranded;
+                }
+                e.crowd[i].retarget = self.replan.retarget_cooldown;
+                self.stats.target_replans += 1;
                 self.next_ticket = self.next_ticket.wrapping_add(1);
                 let cautious = route.cautious;
                 *route = Route::IDLE;
@@ -557,9 +626,14 @@ impl Pathing {
                 self.scan = true;
                 return Steer::Wait;
             }
-            RouteState::Wanted | RouteState::Active if far(route.want, want) => {
+            RouteState::Wanted | RouteState::Active
+                if far(route.want, want) && e.crowd[i].retarget == 0 =>
+            {
                 // The destination moved: ask again, and keep following the
-                // waypoints there are until the new route is ready.
+                // waypoints there are until the new route is ready. Then not again
+                // for the cooldown: the unit follows the route it has meanwhile.
+                e.crowd[i].retarget = self.replan.retarget_cooldown;
+                self.stats.target_replans += 1;
                 self.next_ticket = self.next_ticket.wrapping_add(1);
                 route.want = want;
                 route.state = RouteState::Wanted;
@@ -586,6 +660,7 @@ impl Pathing {
         {
             let pos = Pathing::cell_index(g, e.pos[i]);
             if self.touched(g, &e.route[i], pos, since) {
+                self.stats.map_replans += 1;
                 self.next_ticket = self.next_ticket.wrapping_add(1);
                 let route = &mut e.route[i];
                 route.clear_plan();
@@ -665,17 +740,54 @@ impl Pathing {
         self.scan = true;
     }
 
-    /// The unit is stuck in a crowd and the sidesteps did not help (WP4.4): asks
-    /// again for what it follows, from where it stands. This is the hook WP4.7
-    /// builds the replan on (it will add the reasons and the costs of the other
-    /// units); until then it is the existing request path, nothing more.
+    /// The unit is stuck in a crowd and the sidesteps did not help (WP4.4, WP4.7): asks
+    /// again for what it follows, from where it stands, and says which bodies that
+    /// stand still are round it (`overlay`, from [`Pathing::overlay_for`]; empty when
+    /// the ones in its way are walking).
     ///
-    /// * A member of a flowfield stays on the field, forgets the leg it chose
-    ///   (the ring, the straight run to the slot) and recovers from `Stranded`:
-    ///   it chooses again from the cell it stands in, smoothing allowed.
-    /// * A unit with a route of its own gets a new search from where it stands, and
-    ///   goes on along the waypoints it has until that is ready.
-    pub fn request_replan(&mut self, e: &mut Entities, i: usize) {
+    /// * **With an overlay** the unit gets a new route of its own whatever it had: the
+    ///   search treats the cells of the overlay as blocked, for this request only, so
+    ///   the route goes round a body the graph does not know. A member of a flowfield
+    ///   leaves its field for it (the field leads through the gap the body stands in),
+    ///   and lets go of its arrival slot. The unit stands until the search has run, as
+    ///   a unit with a new order does: the way it was following is the one that is
+    ///   blocked.
+    /// * **Without** a member of a flowfield stays on the field, forgets the leg it
+    ///   chose (the ring, the straight run to the slot) and recovers from `Stranded`:
+    ///   it chooses again from the cell it stands in, smoothing allowed. A unit with a
+    ///   route of its own gets a new search from where it stands and goes on along the
+    ///   waypoints it has until that is ready.
+    pub fn request_replan(&mut self, e: &mut Entities, i: usize, class: u16, overlay: Overlay) {
+        self.stats.stuck_replans += 1;
+        if !overlay.is_empty() {
+            self.stats.overlay_replans += 1;
+            let want = crate::orders::destination_of(e, i)
+                .zip(self.graph_index(class))
+                .map(|(d, gi)| Pathing::cell_index(&self.graphs[gi], d));
+            let route = &mut e.route[i];
+            if route.state == RouteState::Idle {
+                return;
+            }
+            if route.field_serial != 0 {
+                let Some(want) = want else { return };
+                e.crowd[i].claim = crate::crowd::Claim::default();
+                *route = Route::IDLE;
+                route.want = want;
+                route.goal = want;
+                route.frontier = want;
+            }
+            // The waypoints it has stay until the search begins; a route that
+            // already leads to the nearest cell of an unreachable goal stays marked,
+            // so that a search that finds no way is not a failure but the same
+            // answer as before.
+            let route = &mut e.route[i];
+            route.overlay = overlay;
+            route.state = RouteState::Wanted;
+            self.next_ticket = self.next_ticket.wrapping_add(1);
+            route.ticket = self.next_ticket;
+            self.scan = true;
+            return;
+        }
         let route = &mut e.route[i];
         if route.field_serial != 0 {
             route.ring_clear();
@@ -696,6 +808,50 @@ impl Pathing {
         route.state = RouteState::Wanted;
         route.ticket = self.next_ticket;
         self.scan = true;
+    }
+
+    /// The overlay for a stuck unit of class `class` standing at `from` that is going to
+    /// `to`: the cells the bodies in `blockers` (their middle and radius) fill, with the
+    /// unit's own radius and a margin of clearance added, up to [`OVERLAY_CAP`] of them,
+    /// the nearest to the unit first. The cell the unit stands in and the cell of its
+    /// destination are never in it (the unit must be able to leave, and the route must
+    /// have somewhere to end). Empty when the class has no graph.
+    pub fn overlay_for(
+        &self,
+        class: u16,
+        from: Vec2,
+        to: Vec2,
+        mover_radius: Fx,
+        blockers: impl Iterator<Item = (Vec2, Fx)>,
+    ) -> Overlay {
+        let Some(gi) = self.graph_index(class) else {
+            return Overlay::EMPTY;
+        };
+        let g = &self.graphs[gi];
+        let (w, h) = (i64::from(g.grid.width()), i64::from(g.grid.height()));
+        let own = Pathing::cell_index(g, from);
+        let goal = Pathing::cell_index(g, to);
+        let mut builder = OverlayBuilder::new();
+        for (at, radius) in blockers {
+            let reach = radius + mover_radius + replan::OVERLAY_MARGIN;
+            let reach2 = reach.square();
+            let (x0, x1) = ((at.x - reach).floor_int(), (at.x + reach).floor_int());
+            let (y0, y1) = ((at.y - reach).floor_int(), (at.y + reach).floor_int());
+            let home = Pathing::cell_index(g, at);
+            for y in y0.max(0)..=y1.min(h - 1) {
+                for x in x0.max(0)..=x1.min(w - 1) {
+                    let cell = g.grid.index(x as u32, y as u32);
+                    if cell == own || cell == goal || !g.grid.open(x, y) {
+                        continue;
+                    }
+                    let middle = centre_xy(x as u32, y as u32);
+                    if cell == home || (middle - at).length_squared() <= reach2 {
+                        builder.offer((middle - from).length_squared(), cell);
+                    }
+                }
+            }
+        }
+        builder.finish()
     }
 
     fn cell_index(g: &ClassGraph, pos: Vec2) -> u32 {
@@ -1007,6 +1163,13 @@ impl Pathing {
         h.write_u32(self.epoch);
         h.write_u32(self.next_ticket);
         h.write_u32(self.next_slot);
+        // The replan settings (WP4.7), when they are not the defaults.
+        if self.replan != ReplanConfig::DEFAULT {
+            h.write_u8(0xE7);
+            h.write_u32(u32::from(self.replan.cooldown));
+            h.write_u32(u32::from(self.replan.max));
+            h.write_u32(u32::from(self.replan.retarget_cooldown));
+        }
         match &self.job {
             Some(job) => {
                 h.write_u8(1);

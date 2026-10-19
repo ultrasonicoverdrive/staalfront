@@ -231,11 +231,11 @@ Known gaps (owner in brackets):
 
 ## Phase 4 — Movement and routes
 
-Status: 4.1–4.5 + 4.4b done, 4.6/4.7 open. The "done when" of PLAN.md (200 units across a bridge: all
+Status: 4.1–4.5 + 4.4b + 4.7 done, 4.6 open. The "done when" of PLAN.md (200 units across a bridge: all
 arrive, none stuck, at most 1 % beyond 1.3 times the packing radius, overlap within a quarter of a cell
 on the way and a sixteenth at the end) holds in `bridge_200` for every wheeled turning radius the review
 swept, so it no longer depends on the luck of the crowd. Phase 4 counts as done when WP4.6 (formations)
-and WP4.7 (replan) are in as well.
+is in as well.
 
 - WP4.1 Movement classes with terrain costs (`sf_data::movement` and the `terrain_costs` list of
   every class in `unit_classes.ron`: for each of the six terrain types impassable or a speed in
@@ -299,7 +299,19 @@ and WP4.7 (replan) are in as well.
   in each other are parted, no slot is taken that the unit cannot walk to, and the whole sweep of 112
   variants is clean), `docs/rules/collision.md`,
   `docs/rules/turning.md`: done
-- WP4.6 and WP4.7: open
+- WP4.7 Replan on a blocked route or a disappeared target, destination ≠ route (`sf_sim::path::replan`,
+  `path`, `crowd`, `orders`: a unit that is stuck after its sidesteps asks for a new route through the
+  budgeted request path with the cells of the bodies that stand still near it (a unit on hold, an enemy
+  with no order) blocked **for that request only** (the grid is shut for the slices of its job and opened
+  again, the graph is never touched; the abstract search is kept from crossing the sectors the overlay
+  cuts), at most `replan_max` times in an order, `replan_cooldown` ticks apart, and then the order is
+  given up (idle, or the next queued order); a target that keeps moving is searched for at most once
+  in `retarget_cooldown`, and a unit in reach keeps its route; a target that is gone ends the order by
+  the generation of its id; a member of a flowfield that a body stops leaves the field; a field whose
+  goal a structure covers leads to the nearest cell the class can enter, the slots taken again by
+  the claim logic; the looks at the slots go round; the `replan` scenario, in CI on both systems),
+  `docs/rules/pathfinding.md` ("Replanning"), `orders.md`, `collision.md`: done
+- WP4.6: open
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -512,6 +524,74 @@ formations (WP4.6, which will replace the rings), the replan (WP4.7), a better r
 pathing matter), and slots for a class below the
 threshold of 8 for a flowfield (the five hover craft are single walkers with no slot among the crowd;
 they rely on the arrival slack that grows with the time they have pressed on it, within the bound).
+
+WP4.7 notes. **No pinned checksum moved.** `wander_5000`, `command_mix`, `terrain_256`, `units_spawn`
+(the four legacy goldens) and `orders`, `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`,
+`crowd_jam` and `turning` end on the values they ended on; the only new value is the new scenario `replan`
+(`0x2f05c63b9046ecc8`; pinned at `0x7fd2b8f9ff2dede3` when it was added and moved once in review when the per-unit record of a given-up order, `World::gave_up_at`, joined the checksum). What the replans add to the state is hashed only while it is
+there (a unit's replan counters, an overlay, a ban, a cursor of the looks, settings that are not the
+defaults), so the checksums of the ticks in between differ from before only where a unit asked for a
+replan (`bridge_200` has 5 or 6 of them; its final state is the same) or stood in reach of its target
+with the route it had (no pinned scenario ends differently for it). **`bridge_200` still meets the
+criterion of phase 4** with no change in its numbers (last arrival, farthest, worst overlap as in
+WP4.4b); the sweep of 112 variants (`sweep_of_variants`, ignored) is **clean in all 112** (last arrival 2,974 to 4,176, worst in-run overlap 0.241, worst end overlap 0.031, 1 to 13 requests for a new route in a run, nobody given up), the same numbers as before WP4.7.
+
+What it does (`pathfinding.md`, "Replanning"; `orders.md`; `collision.md`):
+
+* **A stuck unit's request goes round the bodies that stand still.** After `stuck_attempts` sidesteps the
+  crowd pass hands the cells that the units on hold and the idle enemies near the unit (within 8 cells)
+  fill, with the two radii and a quarter of a cell added, to the request as an **overlay** (at most 32
+  cells, in the route record). The job of that request sees them as blocked: `Pathing::serve` shuts the
+  cells in the class grid for the length of the slice and opens them again before anything else is
+  served, so the graph, the portals and every other unit's request are untouched (tests: `sight_clear` and
+  `plan_route` through the holder give the same answer on every tick of the request). The abstract
+  search may not cross the start and goal sectors by the edges of the graph if the overlay is in them (their
+  links were made with it), and bans a sector the overlay cuts when a leg in it cannot be refined, and
+  plans again. Structures are in the graph already: a structure on the route needs no overlay, the
+  unit asks again at once (`map_replans`).
+* **Limits and giving up.** At most `replan_max` (3) per order, `replan_cooldown` (100 ticks) apart; a
+  request that finds no way round fails and the unit stands, stuck, until it asks again. When it would
+  ask once more the order is **given up**: it ends as if done, the next queued order starts or the unit is
+  idle where it stands. Idle, because the nearest reachable cell is where it is and waiting for ever
+  would hold up the queue and make a deadlock of two units permanent. Not counted against the limit:
+  a map change (the graph is right) and a target that moves.
+* **A target that moves** is searched for at most once in `retarget_cooldown` (20 ticks): the re-search of
+  WP4.2 behind a cooldown, in the one place that decides it (`Pathing::steer`). **A unit in reach of a
+  target keeps its route** (it used to be dropped): a tank that catches up with a rifleman, stands, and
+  sees it step out of reach asked for a new route every four ticks (about 400 jobs in 1,500 ticks for
+  one hunter in the test); now it steers on after it at once and asks again only when the target has
+  moved three cells from where the route was asked for, once in the cooldown (about 20 jobs).
+* **A target that is gone** ends the order by the generation of its id (WP3.4, verified and kept, in the
+  scenario and in `tests/replan.rs`, with a new unit in the slot and a queued order behind the attack).
+  **A target that cannot be reached** leaves the unit at the nearest cell, waiting, the order kept
+  (WP4.2, verified with a target that paces up and down an island).
+* **Groups.** A member of a flowfield that a body stops leaves the field for a route of its own with the
+  overlay (the field leads through the gap the body stands in). A structure built over the **goal
+  cell** of a field: the successor leads to the nearest cell the class can enter within a sector (least
+  squared distance, ties to the lower cell; not a pocket the structure shuts in; `Field::want_goal` is the
+  order's cell and the goal is worked out again at every build, so taking the structure away gives it
+  back), the slots lie round that cell and the units that are on their way take them by the claim logic
+  of WP4.4b (a rebuilt field starts with no holders).
+* **Follow-ups of the review of PR #55.** The 64 looks per tick that units make at the free slots go round
+  like the requests of the path service (`Fields::look_from`, `look_denied`, hashed while they are not
+  at rest): the first unit turned away when a tick's looks run out is where the next tick begins, so a
+  unit that looks again every tick cannot shut out the ones with higher ids (a test with 100 units
+  behind a wall: each looks twice in four ticks; before, the last 36 never). **The 0.24 against 0.25
+  margin is thin and stays so:** the sweep's worst overlap during a run is 0.24 of a cell against the
+  quarter of a cell of the criterion (0.25), a margin of 0.01 that a change to the crowd pass can use up
+  without any other number moving; the end overlap (0.031 against 1/16) is not thin.
+* **Measured.** The `replan` scenario (23 units, 3,000 ticks, six rooms): 4 stuck replans (all with an
+  overlay, 3 of them found nothing), 2 map replans (the tower's, and the next room's tank, whose route lay in
+  a sector beside the one that changed), 8 target replans, one order given up, 25 jobs, the budget never
+  exceeded; `crowd_perf` 83 to 86 ticks a second in release (11.6 to 12.0 ms a tick, the slowest 17.7 to 22.6 ms; WP4.4b: 79 to 83), one request for a new route and no overlay in it.
+
+Not done on purpose: formations (WP4.6); bodies that walk are still no part of a route (a crowd is walked
+round by pushing and sidestepping); the overlay looks at the bodies of the tick it is made in (no
+prediction) and within 8 cells; a goal that is rock or water when the order is given still sends every
+unit to its own nearest cell (a substitute goal is found only for a goal a structure covers); a
+better route when a structure is removed and the old one is still walkable is not looked for;
+the replan counters and the cursor of the looks are in memory like everything else of the world (nothing
+new is lost on a restart: they are in the checksum and the world is cloned whole).
 
 ## Phase 1 report (draft, WP1.14)
 

@@ -287,13 +287,14 @@
 //! that has waited detours, an idle friend is shoved aside (a little, and never
 //! into rock) and a unit holding position never is. A unit that does not get closer
 //! to where it is going steps to a free neighbouring spot and, if that does not
-//! help, asks for a new route ([`World::replan_requested`], the hook of WP4.7).
+//! help, asks for a new route ([`World::replan_requested`]), round the bodies that stand still
+//! near it, and gives its order up when that does not help either (WP4.7, [`ReplanConfig`]).
 //! [`World::with_collision`] turns it off or tunes it; the rules are in
 //! `docs/rules/collision.md`.
 //!
 //! # Not here yet
 //!
-//! Replanning (the rest of phase 4), target
+//! Formations (WP4.6), target
 //! acquisition and firing (phase 5),
 //! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
@@ -331,9 +332,10 @@ pub use orders::{
     SCATTER_MIN, scatter_offset,
 };
 pub use path::{
-    ABS_CAP, DEFAULT_FLOWFIELD_THRESHOLD, DEFAULT_NODE_BUDGET, FIELD_IDLE_TICKS, FIELD_POOL,
-    FIELD_SECTORS, MAX_FIELD_SLOTS, MIN_NODE_BUDGET, PathStats, PlannedRoute, RING_CAP,
-    RouteStatus, RouteView, SECTOR_SIZE,
+    ABS_CAP, DEFAULT_FLOWFIELD_THRESHOLD, DEFAULT_NODE_BUDGET, DEFAULT_REPLAN_COOLDOWN,
+    DEFAULT_REPLAN_MAX, DEFAULT_RETARGET_COOLDOWN, FIELD_IDLE_TICKS, FIELD_POOL, FIELD_SECTORS,
+    MAX_FIELD_SLOTS, MAX_REPLAN_COOLDOWN, MAX_REPLAN_MAX, MIN_NODE_BUDGET, OVERLAY_CAP, PathStats,
+    PlannedRoute, RING_CAP, ReplanConfig, RouteStatus, RouteView, SECTOR_SIZE,
 };
 pub use snapshot::{EntityView, Snapshot, TurretView};
 pub use terrain::{

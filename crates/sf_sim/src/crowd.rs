@@ -73,8 +73,8 @@ use sf_math::{Facing, Fx, Vec2};
 use crate::behavior::Behavior;
 use crate::entities::{Entities, NO_DEF};
 use crate::movement::{Ground, MovementTable};
-use crate::orders::Order;
-use crate::path::Pathing;
+use crate::orders::{self, Order};
+use crate::path::{OVERLAY_RANGE, Overlay, Pathing};
 use crate::units::UnitTable;
 use crate::world::mix64;
 
@@ -145,6 +145,8 @@ pub struct CrowdStats {
     pub sidesteps: u64,
     /// Requests for a new route after the sidesteps did not help.
     pub replans: u64,
+    /// Orders given up because the unit was stuck after its replans (WP4.7).
+    pub gave_up: u64,
     /// Most participants in one tick.
     pub peak_bodies: u32,
 }
@@ -338,8 +340,23 @@ pub(crate) struct CrowdState {
     pub shoved: Fx,
     /// Ticks since it was last pushed.
     pub calm: u8,
-    /// The unit has asked for a new route (the WP4.7 hook, `World::replan_requested`).
+    /// The unit has asked for a new route (`World::replan_requested`).
     pub replan: bool,
+    /// Replans this order has asked for because the unit was stuck (WP4.7); the order
+    /// is given up when it would ask once more than `ReplanConfig::max`.
+    pub replans: u8,
+    /// Ticks until the unit may ask for a replan again (`ReplanConfig::cooldown`).
+    pub cool: u16,
+    /// Ticks until the unit may search again for a target that moved
+    /// (`ReplanConfig::retarget_cooldown`).
+    pub retarget: u16,
+    /// The unit has used up its replans: its order ends on its next turn (WP4.7).
+    pub give_up: bool,
+    /// The tick at which the unit last gave an order up (WP4.7), for the presentation
+    /// (`World::gave_up_at`). Unlike the rest of the replan bookkeeping it outlives the
+    /// order that was given up: a new order given to the unit (a command) clears it
+    /// (`orders::forget_give_up`), `reset_progress` does not.
+    pub gave_up_at: Option<crate::ids::Tick>,
     /// Last tick a body that has arrived (an idle friend) was in the way: only then
     /// does a blocked unit count as arrived for being crowded out of its spot. A
     /// unit stuck in a queue of other walkers has not arrived.
@@ -394,6 +411,11 @@ impl CrowdState {
             && self.calm == 0
             && self.pressed == 0
             && !self.replan
+            && !self.give_up
+            && self.gave_up_at.is_none()
+            && self.replans == 0
+            && self.cool == 0
+            && self.retarget == 0
             && !self.idle_hit
             && self.home.is_none()
     }
@@ -407,6 +429,10 @@ impl CrowdState {
         self.mark = None;
         self.side = None;
         self.replan = false;
+        self.replans = 0;
+        self.cool = 0;
+        self.retarget = 0;
+        self.give_up = false;
         self.walking = false;
         self.refused = false;
         self.stranded = false;
@@ -438,7 +464,19 @@ impl CrowdState {
         }
         h.write_fx(self.shoved);
         h.write_u8(self.calm);
-        h.write_u8(u8::from(self.replan) | u8::from(self.idle_hit) << 1);
+        h.write_u8(
+            u8::from(self.replan) | u8::from(self.idle_hit) << 1 | u8::from(self.give_up) << 2,
+        );
+        // The replan bookkeeping (WP4.7); nothing for a unit that has none.
+        if self.replans != 0 || self.cool != 0 || self.retarget != 0 {
+            h.write_u8(0xC5);
+            h.write_u8(self.replans);
+            h.write_u32(u32::from(self.cool) | u32::from(self.retarget) << 16);
+        }
+        if let Some(at) = self.gave_up_at {
+            h.write_u8(0xC6);
+            h.write_u64(at.0);
+        }
         // Nothing for a unit that never took a slot, so a world without groups
         // hashes as before.
         if self.claim.serial != 0 {
@@ -1360,13 +1398,29 @@ impl Work<'_, '_> {
                 // The watermark starts again from here; the waypoint is the same, so
                 // the attempts are not forgotten.
                 c.best = e.target[u].map_or(Fx::MAX, |t| (t - pos).length());
-                if c.attempts >= cfg.stuck_attempts {
+                let replans = path.replan_config();
+                if c.attempts >= cfg.stuck_attempts && c.replans >= replans.max {
+                    // The unit has asked for all the new routes it is allowed in this
+                    // order and is stuck still: the order is given up on its next turn
+                    // (WP4.7, `docs/rules/orders.md`).
+                    c.attempts = 0;
+                    c.give_up = true;
+                    self.stats.gave_up += 1;
+                } else if c.attempts >= cfg.stuck_attempts && c.cool == 0 {
                     c.attempts = 0;
                     c.replan = true;
+                    c.replans += 1;
+                    c.cool = replans.cooldown;
                     self.stats.replans += 1;
-                    path.request_replan(e, u);
+                    let class = self.bodies[u].class;
+                    let overlay = self.overlay_for(e, path, u, class);
+                    path.request_replan(e, u, class, overlay);
                 } else {
-                    c.attempts += 1;
+                    // Another sidestep; also while the cooldown of the last replan
+                    // runs, when the attempts stay at their limit so that the next
+                    // stuck period asks.
+                    let c = &mut e.crowd[u];
+                    c.attempts = (c.attempts + 1).min(cfg.stuck_attempts);
                     self.stats.sidesteps += 1;
                     // The slot it was going to is walled off: it takes another one
                     // when it can (WP4.4b, `path/claim.rs`).
@@ -1400,6 +1454,28 @@ impl Work<'_, '_> {
                 }
             }
         }
+    }
+
+    /// The cells of the bodies near the stuck unit `u` that stand still (a unit holding
+    /// position, an enemy with no order) that its request for a new route treats as
+    /// blocked (WP4.7, `path/replan.rs`). Empty when none is near, or the unit has no
+    /// destination.
+    fn overlay_for(&self, e: &Entities, path: &Pathing, u: usize, class: u16) -> Overlay {
+        let Some(dest) = orders::destination_of(e, u) else {
+            return Overlay::EMPTY;
+        };
+        let me = self.bodies[u];
+        let from = e.pos[u];
+        let range2 = OVERLAY_RANGE.square();
+        let blockers = (0..e.len().min(self.bodies.len()))
+            .filter(|&v| v != u)
+            .filter(|&v| {
+                let b = &self.bodies[v];
+                (b.role == Role::Hold || (b.role == Role::Idle && b.owner != me.owner))
+                    && (e.pos[v] - from).length_squared() <= range2
+            })
+            .map(|v| (e.pos[v], self.bodies[v].radius));
+        path.overlay_for(class, from, dest, me.radius, blockers)
     }
 
     /// Whether unit `a` may be moved by the hard separation for the sake of body `b`:

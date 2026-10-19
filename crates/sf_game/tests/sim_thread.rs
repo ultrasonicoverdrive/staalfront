@@ -66,8 +66,9 @@ fn views_of(world: &World) -> Vec<EntityView> {
 
 /// Runs `name` for `ticks` ticks through the sim thread, one tick at a time,
 /// with its commands sent over the channel, and through `sf_headless`; every
-/// tick's checksum, and every entity of the snapshot, must be the same.
-fn threaded_equals_headless(name: &str, ticks: u64) {
+/// tick's checksum, and every entity of the snapshot, must be the same. True if
+/// some unit had given an order up (WP4.7) by the end, as the snapshots showed.
+fn threaded_equals_headless(name: &str, ticks: u64) -> bool {
     let s = scenario(name);
     // The headless runner, with a checksum recorded after every tick.
     let headless = run(&s, &RunOptions { ticks, every: 1 }).unwrap();
@@ -80,6 +81,7 @@ fn threaded_equals_headless(name: &str, ticks: u64) {
     for (tick, player, command) in scenario_commands(&s) {
         sim.send_at(tick, player, command);
     }
+    let mut gave_up = false;
     for t in 1..=ticks {
         sim.advance(1);
         let snap = sim
@@ -105,6 +107,15 @@ fn threaded_equals_headless(name: &str, ticks: u64) {
             "{name}: tick {t}"
         );
         assert_eq!(snap.len(), reference.len());
+        // The record that an order was given up (WP4.7) is in the snapshot.
+        for v in snap.views() {
+            assert_eq!(
+                snap.gave_up_at(v.id),
+                reference.gave_up_at(v.id),
+                "{name}: tick {t}"
+            );
+            gave_up |= snap.gave_up_at(v.id).is_some();
+        }
     }
     let counters = sim.counters();
     assert_eq!(counters.ticks, ticks);
@@ -121,6 +132,7 @@ fn threaded_equals_headless(name: &str, ticks: u64) {
         "{name}: final checksum"
     );
     assert_eq!(exit.checksums, reference.checksum_history(), "{name}");
+    gave_up
 }
 
 #[test]
@@ -154,6 +166,17 @@ fn threaded_sim_matches_headless_with_paths() {
 fn threaded_sim_matches_headless_with_crowd_collisions() {
     let _serial = one_at_a_time();
     threaded_equals_headless("crowd_jam", 120);
+}
+
+#[test]
+fn threaded_sim_matches_headless_with_replans() {
+    let _serial = one_at_a_time();
+    // A structure built in a corridor, a target removed, a goal built over, and a stuck
+    // unit's request for a new route round a unit on hold (WP4.7). 1,500 ticks go past the
+    // tick (about 1,300) at which the tank in the corridor with no way round gives its order
+    // up, so the threaded and headless checksums are compared across it.
+    let gave_up = threaded_equals_headless("replan", 1_500);
+    assert!(gave_up, "the snapshots showed an order given up");
 }
 
 /// The same, with the sim on its own clock and the commands sent while it

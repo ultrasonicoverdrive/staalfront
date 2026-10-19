@@ -33,10 +33,21 @@
 // stuck_ticks: a unit that has not come closer for this many ticks steps to a free
 // neighbouring spot. More than wait_ticks, at most 1000.
 //
-// stuck_attempts: after this many such steps in a row it asks for a new route (the hook of
-// WP4.7). At least 1.
+// stuck_attempts: after this many such steps in a row it asks for a new route (WP4.7): a
+// new search from where it stands that goes round the bodies near it that stand still (a
+// unit holding position). At least 1.
 // Tests and scenarios that do not give them use the simulation's own defaults, which are
 // the same numbers.
+//
+// replan_cooldown (WP4.7): ticks between two such requests of one unit; it sidesteps again
+// meanwhile. 1 to 1000.
+//
+// replan_max (WP4.7): how many such requests one unit may make in one order. When it is
+// stuck still after the last, the order is given up: its next queued order starts, or it
+// stands idle where it is. 1 to 100.
+//
+// retarget_cooldown (WP4.7): ticks between two new searches of a unit that goes for a
+// target that keeps moving (an attack, a guard of an entity). 1 to 1000.
 (
     path_node_budget: 4096,
     flowfield_threshold: 8,
@@ -44,4 +55,7 @@
     wait_ticks: 6,
     stuck_ticks: 60,
     stuck_attempts: 3,
+    replan_cooldown: 100,
+    replan_max: 3,
+    retarget_cooldown: 20,
 )

@@ -30,7 +30,7 @@
 
 use sf_math::{Fx, Vec2};
 
-use crate::path::abstract_search::{AbstractSearch, Step};
+use crate::path::abstract_search::{AbstractSearch, BAN_CAP, Step};
 use crate::path::graph::{
     ClassGraph, NO_PORTAL, SLOTS, SLOTS_PER_SIDE, node, node_sector, node_slot,
 };
@@ -133,6 +133,11 @@ pub(crate) enum Progress {
     /// The graph changed under the job, or the route no longer fits it: the
     /// route is to be asked for again.
     Replan,
+    /// A request that carried an overlay (WP4.7) found no way round the bodies in it:
+    /// the destination cannot be reached with them there, or a sector the overlay cuts
+    /// cannot be crossed any more although the graph says it can. The unit keeps no
+    /// route and stands; asking again would give the same answer.
+    Failed,
 }
 
 /// The job being served.
@@ -142,6 +147,18 @@ pub(crate) struct Job {
     pub ticket: u32,
     pub graph: usize,
     mode: Mode,
+    /// The request carries an overlay and the destination could be reached without it
+    /// (WP4.7): a search that finds no way is a failure of the request, not a
+    /// destination that cannot be reached.
+    strict: bool,
+    /// The request carries an overlay (WP4.7): the searches see its cells as blocked.
+    overlay_on: bool,
+    /// The sectors the abstract search may not cross (WP4.7): those the overlay cuts,
+    /// whose edges in the graph were made without it. The start and goal sectors from
+    /// the beginning (their links are exact), another when a leg in it could not be
+    /// refined.
+    banned: [u32; BAN_CAP],
+    banned_len: u8,
     epoch: u32,
     phase: Phase,
     /// Where the unit stood when the job began.
@@ -216,6 +233,10 @@ impl Job {
             ticket,
             graph,
             mode,
+            strict: mode == Mode::Fresh && !route.overlay.is_empty() && !route.unreachable,
+            overlay_on: mode == Mode::Fresh && !route.overlay.is_empty(),
+            banned: [0; BAN_CAP],
+            banned_len: 0,
             epoch,
             phase: Phase::Begin,
             pos,
@@ -274,6 +295,13 @@ impl Job {
             Mode::Continue => 2,
         });
         h.write_u8(self.phase.tag());
+        if self.overlay_on {
+            h.write_u8(0x5E | u8::from(self.strict) << 7);
+            h.write_u8(self.banned_len);
+            for &b in &self.banned[..usize::from(self.banned_len)] {
+                h.write_u32(b);
+            }
+        }
         h.write_u8(self.legs);
         h.write_u32(self.start_cell);
         h.write_u8(
@@ -326,6 +354,66 @@ impl Job {
         debug_assert!(nodes.len() <= ABS_CAP || route.truncated);
     }
 
+    /// Whether a cell of the request's overlay lies in `sector`.
+    fn dirty(g: &ClassGraph, route: &Route, sector: u32) -> bool {
+        route
+            .overlay
+            .cells()
+            .iter()
+            .any(|&c| Job::sector_of(g, c) == sector)
+    }
+
+    /// Adds `sector` to the sectors the abstract search may not cross. False if it
+    /// was there already or there is no room.
+    fn ban(&mut self, sector: u32) -> bool {
+        let n = usize::from(self.banned_len);
+        if self.banned[..n].contains(&sector) || n == BAN_CAP {
+            return false;
+        }
+        self.banned[n] = sector;
+        self.banned_len += 1;
+        true
+    }
+
+    /// A leg inside `rect` could not be refined and the request has an overlay: the
+    /// graph's edges through the sectors of `rect` that the overlay cuts are not to be
+    /// trusted. Bans them and plans the abstract path again (`None`: carry on); with no
+    /// sector to ban the request fails, there is no way round.
+    fn ban_and_retry(
+        &mut self,
+        g: &ClassGraph,
+        route: &mut Route,
+        rect: (u32, u32, u32, u32),
+    ) -> Option<Progress> {
+        let (a, b) = (
+            g.sectors.of_cell(rect.0, rect.1),
+            g.sectors.of_cell(rect.2 - 1, rect.3 - 1),
+        );
+        let ((ax, ay), (bx, by)) = (g.sectors.coords(a), g.sectors.coords(b));
+        let mut added = false;
+        for sy in ay..=by {
+            for sx in ax..=bx {
+                let sector = sy * g.sectors.across + sx;
+                if Job::dirty(g, route, sector) {
+                    added |= self.ban(sector);
+                }
+            }
+        }
+        if !added {
+            return Some(Progress::Failed);
+        }
+        route.clear_plan();
+        route.frontier = self.start_cell;
+        self.legs = 0;
+        self.leg_ready = false;
+        self.searching = false;
+        self.pop_after = 0;
+        self.sm_active = false;
+        self.abs_started = false;
+        self.phase = Phase::Abstract;
+        None
+    }
+
     /// Whether this is the job of the unit in `slot` for the request `ticket`.
     pub fn is_for(&self, slot: u32, ticket: u32) -> bool {
         self.slot == slot && self.ticket == ticket
@@ -354,6 +442,23 @@ impl Job {
         if self.epoch != epoch {
             return Progress::Replan;
         }
+        match self.run_phases(g, w, route, rem, epoch) {
+            // With an overlay the graph and the grid disagree on purpose: a leg that
+            // cannot be refined is the answer to the request, and the request would
+            // only be made again with the same result.
+            Progress::Replan if self.overlay_on => Progress::Failed,
+            p => p,
+        }
+    }
+
+    fn run_phases(
+        &mut self,
+        g: &ClassGraph,
+        w: &mut Work,
+        route: &mut Route,
+        rem: &mut u32,
+        epoch: u32,
+    ) -> Progress {
         loop {
             match self.phase {
                 Phase::Begin => self.begin(g, route),
@@ -394,6 +499,9 @@ impl Job {
                 }
                 Phase::Finish => {
                     route.epoch = epoch;
+                    if self.mode == Mode::Fresh {
+                        route.overlay.clear();
+                    }
                     route.state = if route.complete && route.unreachable && route.ring_len() == 0 {
                         RouteState::Stranded
                     } else {
@@ -603,6 +711,19 @@ impl Job {
         let goal_xy = g.grid.xy(goal);
         if !self.abs_started {
             w.search.begin(g, &w.start_links, goal_xy, &w.goal_links);
+            if self.overlay_on {
+                // The links of the start and goal sectors were made with the overlay,
+                // so these two are exact; the way through them by the graph's edges
+                // is not, if the overlay cuts them.
+                for sector in [Job::sector_of(g, self.start_cell), Job::sector_of(g, goal)] {
+                    if Job::dirty(g, route, sector) {
+                        self.ban(sector);
+                    }
+                }
+                for k in 0..usize::from(self.banned_len) {
+                    w.search.ban(self.banned[k]);
+                }
+            }
             self.abs_started = true;
         }
         match w.search.run(g, rem) {
@@ -618,6 +739,11 @@ impl Job {
                 None
             }
             Step::Exhausted => {
+                if self.strict {
+                    // The destination could be reached before the overlay; with it
+                    // there is no way: the request fails (WP4.7).
+                    return Some(Progress::Failed);
+                }
                 self.phase = Phase::Nearest;
                 None
             }
@@ -857,7 +983,11 @@ impl Job {
                     return Some(Progress::Yield);
                 };
                 if !out.reached {
-                    // The graph said there is a way and the grid says no.
+                    // The graph said there is a way and the grid says no. With an
+                    // overlay that is the overlay: another way is looked for.
+                    if self.overlay_on {
+                        return self.ban_and_retry(g, route, rect);
+                    }
                     return Some(Progress::Replan);
                 }
                 w.cells.clear();

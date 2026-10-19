@@ -57,7 +57,7 @@
 //! corner) makes it ask for a route cell by cell, and a refusal on that leaves
 //! it **standing with the order kept**: nothing ends the order and the queue
 //! behind it waits, until a new order replaces it. Noticing that a route is
-//! blocked later is the replan's (WP4.7).
+//! blocked later is the replan's (WP4.7, below).
 //!
 //! # Crowds (WP4.4)
 //!
@@ -68,6 +68,20 @@
 //! (the crowd is standing on its spot), and a unit that is **stuck** replaces its
 //! walk for a few ticks by a step to a free neighbouring spot. A new order, or the
 //! end of one, forgets all of it (`CrowdState::reset_progress`).
+//!
+//! # Replanning (WP4.7)
+//!
+//! The destination stays in the order; the route is made again when it stops being the
+//! way (`docs/rules/pathfinding.md`, "Replanning"). A change of the map near the route and
+//! a target that moved are noticed by [`Pathing::steer`] (the second behind a cooldown); a
+//! unit that is stuck asks for a new route round the bodies that stand still, from the crowd
+//! pass; and a unit that has asked `ReplanConfig::max` times in this order and is stuck
+//! still **gives the order up** (`CrowdState::give_up`, carried out at the top of [`run`]):
+//! it ends as if it were done, the next queued order starts or the unit is idle where it
+//! stands. A target that is gone ends an `Attack` or a `Guard` of an entity by the
+//! generation of its id ([`live_slot`]). A unit in reach of its target keeps the route it
+//! has, so that a target that steps out of reach again and again is not a request for a
+//! route each time.
 //!
 //! # Turning (WP4.5)
 //!
@@ -285,6 +299,19 @@ pub fn scatter_offset(id: EntityId, tick: Tick) -> Vec2 {
 /// It does nothing yet.
 pub(crate) fn would_acquire_targets_here(_e: &Entities, _i: usize) {}
 
+/// Where the current order of unit `i` wants the unit to be: the point of a move, an
+/// attack-move or a guard of a point, the live position of the entity of an attack or
+/// a guard of an entity; `None` for an order that does not walk, or whose entity is gone.
+pub(crate) fn destination_of(e: &Entities, i: usize) -> Option<Vec2> {
+    match e.order[i] {
+        Order::Move(p) | Order::AttackMove(p) | Order::Guard(GuardTarget::Point(p)) => Some(p),
+        Order::Attack(id) | Order::Guard(GuardTarget::Entity(id)) => {
+            live_slot(e, id).map(|j| e.pos[j])
+        }
+        Order::Idle | Order::HoldPosition | Order::Scatter => None,
+    }
+}
+
 /// True if slot `j` holds the entity `id` names.
 pub(crate) fn live_slot(e: &Entities, id: EntityId) -> Option<usize> {
     let j = id.index() as usize;
@@ -358,12 +385,19 @@ pub(crate) fn give(
     tick: Tick,
     bounds: (Vec2, Vec2),
 ) -> bool {
+    forget_give_up(e, i);
     if queued && e.order[i] != Order::Idle {
         return e.queue[i].push_back(order);
     }
     e.queue[i].clear_all();
     begin(e, i, order, tick, bounds);
     true
+}
+
+/// A command gives the unit an order (or stops it): the record that its last order was
+/// given up (WP4.7, `World::gave_up_at`) is over.
+pub(crate) fn forget_give_up(e: &mut Entities, i: usize) {
+    e.crowd[i].gave_up_at = None;
 }
 
 /// Clears the current order and the queue: the unit stands still. The unit
@@ -425,6 +459,10 @@ fn go_to(
     ground: &Ground<'_>,
     path: &mut Pathing,
 ) -> bool {
+    // The cooldowns of the replan run down while the unit walks its order (WP4.7).
+    let c = &mut e.crowd[i];
+    c.cool = c.cool.saturating_sub(1);
+    c.retarget = c.retarget.saturating_sub(1);
     // A member of a group with a flowfield stops at its own arrival slot, not
     // at the order's point (WP4.3).
     let at_slot = path.arrival_point(e, i);
@@ -432,7 +470,15 @@ fn go_to(
     let off = (arrival - e.pos[i]).length_squared();
     if off <= stop_at.square() {
         e.target[i] = None;
-        e.route.reset(i);
+        // A move is over and its route with it. A unit in reach of a target (an attack, a
+        // guard of an entity) keeps the route it has (WP4.7): the target steps out of
+        // reach again and again, and a new request each time is a replan storm; with the
+        // route kept the unit steers on after it at once, and asks again for a route only
+        // when the target has moved far from where the route was asked for, once in the
+        // cooldown.
+        if stop_at <= ARRIVE_TOLERANCE {
+            e.route.reset(i);
+        }
         e.crowd[i].home = at_slot.map(|_| destination);
         return true;
     }
@@ -477,8 +523,9 @@ fn go_to(
         }
         Steer::Stranded => {
             e.target[i] = None;
-            // A route that ends short because the goal cannot be reached is
-            // waiting for WP4.7; one that was stranded by a refused step is stuck.
+            // A route that ends short because the goal cannot be reached is where the
+            // unit waits (not stuck); one that was stranded by a refused step, or by a
+            // request that found no way round a body (WP4.7), is stuck.
             e.crowd[i].stranded = !e.route[i].unreachable;
             false
         }
@@ -547,6 +594,14 @@ pub(crate) fn run(
     tick: Tick,
 ) {
     let bounds = (m.pos_min, m.pos_max);
+    // A unit that was stuck after all the replans it may ask for gives its order up
+    // (WP4.7): the next order of its queue starts, or it stands idle where it is.
+    if e.crowd[i].give_up {
+        finish(e, i, tick, bounds);
+        // Kept for the presentation until the unit is given an order (below).
+        e.crowd[i].gave_up_at = Some(tick);
+        return;
+    }
     match e.order[i] {
         // Not reachable through the invariant (a unit with no order is idle),
         // but a stray one settles instead of looping.

@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam` and `turning`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning` and `replan`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -47,6 +47,7 @@ const PATHING_256_EXPECTED: &str = include_str!("../../../assets/scenarios/pathi
 const BRIDGE_200_EXPECTED: &str = include_str!("../../../assets/scenarios/bridge_200.expected");
 const CROWD_JAM_EXPECTED: &str = include_str!("../../../assets/scenarios/crowd_jam.expected");
 const TURNING_EXPECTED: &str = include_str!("../../../assets/scenarios/turning.expected");
+const REPLAN_EXPECTED: &str = include_str!("../../../assets/scenarios/replan.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -161,6 +162,14 @@ fn turning_matches_the_pinned_checksum() {
     check("turning", TURNING_EXPECTED);
 }
 
+/// Replanning (WP4.7): a structure built in a corridor, a unit on hold with a way round
+/// and with none, a target that walks away and one that disappears, a group whose goal is
+/// built over. A new scenario: pinned when it was added.
+#[test]
+fn replan_matches_the_pinned_checksum() {
+    check("replan", REPLAN_EXPECTED);
+}
+
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
 /// a debug build; `cargo test --release -p sf_headless` runs it, and CI runs
 /// it through the binary on both operating systems.
@@ -267,6 +276,7 @@ fn the_expected_files_hold_one_bare_checksum() {
         BRIDGE_200_EXPECTED,
         CROWD_JAM_EXPECTED,
         TURNING_EXPECTED,
+        REPLAN_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");

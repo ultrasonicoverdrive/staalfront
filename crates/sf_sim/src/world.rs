@@ -11,7 +11,7 @@ use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
-use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, RouteView};
+use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::snapshot::{EntityView, Snapshot, TurretView};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::turret;
@@ -123,6 +123,9 @@ pub enum ConfigError {
     /// The collision settings were given to a world that has already started, or
     /// are not valid ([`CollisionConfig::is_valid`](crate::CollisionConfig::is_valid)).
     Collision,
+    /// The replan settings were given to a world that has already started, or are
+    /// not valid ([`ReplanConfig::is_valid`](crate::ReplanConfig::is_valid)).
+    Replan,
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -150,6 +153,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::Collision => {
                 "the collision settings must be given before the world starts and be valid"
+            }
+            ConfigError::Replan => {
+                "the replan settings must be given before the world starts and be valid"
             }
             ConfigError::MovementAfterStart => {
                 "the movement table must be given before the world starts"
@@ -294,6 +300,7 @@ impl World {
             return Err(ConfigError::MovementGap { class, terrain });
         }
         self.movement = movement;
+        let replan = self.pathing.replan_config();
         self.pathing = Pathing::build(
             &self.terrain,
             &self.movement,
@@ -301,6 +308,7 @@ impl World {
             self.pathing.budget(),
             self.pathing.flowfield_threshold(),
         );
+        self.pathing.set_replan(replan);
         self.crowd
             .set_tables(&self.units, &self.movement, self.map_size());
         Ok(self)
@@ -323,6 +331,25 @@ impl World {
             return Err(ConfigError::Collision);
         }
         self.crowd.config = config;
+        Ok(self)
+    }
+
+    /// The same world with other replan settings (WP4.7, `docs/rules/pathfinding.md`,
+    /// "Replanning"): how many ticks pass between two replans of a stuck unit, how many
+    /// it may ask for in one order before the order is given up, and how many ticks
+    /// pass between two new searches for a target that keeps moving. A world that is
+    /// given none uses [`ReplanConfig::DEFAULT`](crate::ReplanConfig::DEFAULT), the
+    /// numbers of the shipped `sim.ron`. Call it right after the world is made
+    /// ([`ConfigError::Replan`] after it has started, or for invalid numbers).
+    pub fn with_replan(mut self, config: ReplanConfig) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !config.is_valid()
+        {
+            return Err(ConfigError::Replan);
+        }
+        self.pathing.set_replan(config);
         Ok(self)
     }
 
@@ -591,8 +618,9 @@ impl World {
     }
 
     /// Whether the unit has asked for a new route because sidesteps did not get it
-    /// out of a crowd (the WP4.7 hook, `docs/rules/collision.md`). It stays set
-    /// until the unit's order changes or ends.
+    /// out of a crowd (WP4.7: it asks round the bodies that stand still near it,
+    /// `docs/rules/pathfinding.md`, "Replanning"). It stays set until the unit's order
+    /// changes or ends.
     pub fn replan_requested(&self, id: EntityId) -> Option<bool> {
         let i = self.live_index(id)?;
         Some(self.entities.crowd[i].replan)
@@ -603,6 +631,27 @@ impl World {
     pub fn stuck_ticks_of(&self, id: EntityId) -> Option<u32> {
         let i = self.live_index(id)?;
         Some(u32::from(self.entities.crowd[i].quiet))
+    }
+
+    /// The replan settings of the world (WP4.7).
+    pub fn replan_config(&self) -> ReplanConfig {
+        self.pathing.replan_config()
+    }
+
+    /// The new routes the unit has asked for in its current order because it was
+    /// stuck (WP4.7); at most [`ReplanConfig::max`], the order is given up when it
+    /// would ask for one more. Back to zero with a new order.
+    pub fn replans_of(&self, id: EntityId) -> Option<u8> {
+        let i = self.live_index(id)?;
+        Some(self.entities.crowd[i].replans)
+    }
+
+    /// The tick at which the unit last gave an order up because it was stuck after all
+    /// its replans (WP4.7), until a command gives it another order or stops it. `None`
+    /// for a unit that has not, or a stale id. In the checksum.
+    pub fn gave_up_at(&self, id: EntityId) -> Option<Tick> {
+        let i = self.live_index(id)?;
+        self.entities.crowd[i].gave_up_at
     }
 
     /// The point a settled member of a group closes up toward (WP4.4b,
@@ -1195,6 +1244,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::forget_give_up(&mut self.entities, i);
                         orders::clear(&mut self.entities, i);
                         self.entities.turret_target[i] = None;
                         changed = true;
@@ -1222,6 +1272,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::forget_give_up(&mut self.entities, i);
                         orders::clear(&mut self.entities, i);
                         self.entities.area[i] = area;
                         self.entities.behavior[i] = Behavior::Wander;
@@ -1239,6 +1290,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::forget_give_up(&mut self.entities, i);
                         orders::clear(&mut self.entities, i);
                         self.entities.behavior[i] = Behavior::MoveTo;
                         self.entities.target[i] = Some(target);
