@@ -633,11 +633,33 @@ stage of the build looks at it: if the class can enter it, that is the goal; if 
 distance, ties to the lower cell index) **that is not a pocket**: a cell the structure itself shuts in
 (a walk of at most 40 cells inside a window of 6 cells each way, `reaches_out`, finds no way to its
 edge) is nearer than any, and no unit could walk to it; the first eight candidates are tried. With
-none, the goal stays as it is and the units are routed one by one, as when a goal cannot be entered. The slots lie round that cell, in sight
+none, the goal stays as it is and the units are routed one by one, as when a goal cannot be entered.
+**The pocket check is a heuristic, and its limit is this:** it asks whether the cell opens onto
+the rest of the map, not whether *the group* can walk there. An enclosure of 40 cells or more, or one
+that reaches 6 cells out, counts as open, so a big courtyard that a structure ring shuts in, or a
+region cut off from the group by rock, is accepted as a goal. The field then integrates nothing for the
+units that cannot reach it (their cells are not in it) and they fall back to routes of their own, to
+the nearest reachable cell, as for any goal that cannot be reached; nothing is lost but the shared
+slots. A check of the group's own sectors would need the corridor stage, which runs after the goal is
+chosen. The slots lie round that cell, in sight
 of it (no slot on the structure), and the rest is the claim logic of WP4.4b: a rebuilt field has an
 empty table of holders and the units that are on their way take their slots again as they come near
 (`collision.md`, "Arrival"); the ones that stand have arrived and keep their places. A structure that is
 taken away makes the next successor with the cell of the order again.
+
+### Giving up, seen from outside
+
+`World::gave_up_at(id)` is the tick at which the unit last gave an order up (`CrowdState::gave_up_at`,
+hashed). It is set as the order ends, survives the queued order that starts next and the end of that
+one, and is cleared when a command gives the unit an order or stops it (and when the slot is used
+again). `CrowdStats::gave_up` is the world's count. The sf_game snapshot carries it per entity
+(`SimSnapshot::gave_up_at`), so the UI can show feedback later; nothing draws it yet.
+
+### A panic while the cells are shut
+
+`Pathing::serve` opens the overlay's cells again even if the job panics (`catch_unwind` round the
+slice, the panic passed on), so a panic never leaves a shared grid with shut cells behind it. A panic
+in the simulation is still terminal for the world (the sim thread reports it and stops).
 
 ### Round robin for the looks
 

@@ -377,6 +377,7 @@ fn with_no_way_round_the_order_is_given_up_after_k_replans_and_the_queue_goes_on
     go(&mut w, &[tank], goal);
     order(&mut w, &[tank], Order::Move(back), true);
     let k = w.replan_config().max;
+    assert_eq!(w.gave_up_at(tank), None);
     let mut most = 0;
     let mut gave_up_at = None;
     let mut asks = Counter::new(&w, |w| w.path_stats().stuck_replans);
@@ -386,6 +387,8 @@ fn with_no_way_round_the_order_is_given_up_after_k_replans_and_the_queue_goes_on
         most = most.max(w.replans_of(tank).unwrap());
         if gave_up_at.is_none() && w.order_of(tank) != Some(Order::Move(goal)) {
             gave_up_at = Some(w.tick().0);
+            // The record of it: the tick of the give-up, set as the order ended.
+            assert_eq!(w.gave_up_at(tank).map(|t| t.0 + 1), gave_up_at);
             // The next order of the queue started, with a new count.
             assert_eq!(w.order_of(tank), Some(Order::Move(back)));
             assert_eq!(w.replans_of(tank), Some(0));
@@ -406,6 +409,31 @@ fn with_no_way_round_the_order_is_given_up_after_k_replans_and_the_queue_goes_on
     // The queued order was carried out.
     assert_eq!(w.order_of(tank), Some(Order::Idle));
     assert!((pos(&w, tank) - back).length() < Fx::ONE);
+    // The record outlives the order that was given up, and the queued one starting.
+    assert_eq!(w.gave_up_at(tank).map(|t| t.0 + 1), gave_up_at);
+    // It is in the checksum: the same world with the record cleared hashes otherwise.
+    let with = w.clone();
+    let mut without = w.clone();
+    order(&mut without, &[tank], Order::HoldPosition, false);
+    without.step();
+    assert_eq!(without.gave_up_at(tank), None, "a new order clears it");
+    let mut also = with.clone();
+    also.step();
+    assert_eq!(also.gave_up_at(tank).map(|t| t.0 + 1), gave_up_at);
+    assert_ne!(
+        also.checksum_history().last(),
+        without.checksum_history().last()
+    );
+    // Stop clears it too.
+    let mut stopped = with.clone();
+    command(&mut stopped, Command::Stop { ids: vec![tank] });
+    stopped.step();
+    assert_eq!(stopped.gave_up_at(tank), None);
+    assert_eq!(
+        w.gave_up_at(EntityId::new(99, 0)),
+        None,
+        "a stale id has none"
+    );
     // Not a storm: the replans are a cooldown apart, at least.
     let cooldown = u64::from(w.replan_config().cooldown);
     for pair in asks.at.windows(2) {

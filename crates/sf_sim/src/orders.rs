@@ -385,12 +385,19 @@ pub(crate) fn give(
     tick: Tick,
     bounds: (Vec2, Vec2),
 ) -> bool {
+    forget_give_up(e, i);
     if queued && e.order[i] != Order::Idle {
         return e.queue[i].push_back(order);
     }
     e.queue[i].clear_all();
     begin(e, i, order, tick, bounds);
     true
+}
+
+/// A command gives the unit an order (or stops it): the record that its last order was
+/// given up (WP4.7, `World::gave_up_at`) is over.
+pub(crate) fn forget_give_up(e: &mut Entities, i: usize) {
+    e.crowd[i].gave_up_at = None;
 }
 
 /// Clears the current order and the queue: the unit stands still. The unit
@@ -591,6 +598,8 @@ pub(crate) fn run(
     // (WP4.7): the next order of its queue starts, or it stands idle where it is.
     if e.crowd[i].give_up {
         finish(e, i, tick, bounds);
+        // Kept for the presentation until the unit is given an order (below).
+        e.crowd[i].gave_up_at = Some(tick);
         return;
     }
     match e.order[i] {

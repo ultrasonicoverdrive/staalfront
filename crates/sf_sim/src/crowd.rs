@@ -352,6 +352,11 @@ pub(crate) struct CrowdState {
     pub retarget: u16,
     /// The unit has used up its replans: its order ends on its next turn (WP4.7).
     pub give_up: bool,
+    /// The tick at which the unit last gave an order up (WP4.7), for the presentation
+    /// (`World::gave_up_at`). Unlike the rest of the replan bookkeeping it outlives the
+    /// order that was given up: a new order given to the unit (a command) clears it
+    /// (`orders::forget_give_up`), `reset_progress` does not.
+    pub gave_up_at: Option<crate::ids::Tick>,
     /// Last tick a body that has arrived (an idle friend) was in the way: only then
     /// does a blocked unit count as arrived for being crowded out of its spot. A
     /// unit stuck in a queue of other walkers has not arrived.
@@ -407,6 +412,7 @@ impl CrowdState {
             && self.pressed == 0
             && !self.replan
             && !self.give_up
+            && self.gave_up_at.is_none()
             && self.replans == 0
             && self.cool == 0
             && self.retarget == 0
@@ -466,6 +472,10 @@ impl CrowdState {
             h.write_u8(0xC5);
             h.write_u8(self.replans);
             h.write_u32(u32::from(self.cool) | u32::from(self.retarget) << 16);
+        }
+        if let Some(at) = self.gave_up_at {
+            h.write_u8(0xC6);
+            h.write_u64(at.0);
         }
         // Nothing for a unit that never took a slot, so a world without groups
         // hashes as before.

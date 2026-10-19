@@ -237,6 +237,14 @@ fn with_no_way_round_the_tank_gives_up_after_k_replans_and_the_queued_order_star
         "not before the last replan: {gave_up_at} {asked:?}"
     );
     assert_eq!(r.world.crowd_stats().gave_up, 1);
+    // The unit remembers when: the tick its order ended, kept after the queued order started.
+    let at = r.world.gave_up_at(id(R3_TANK)).unwrap();
+    assert_eq!(at.0, gave_up_at);
+    for s in 0..23 {
+        if s != R3_TANK {
+            assert_eq!(r.world.gave_up_at(id(s)), None, "slot {s}");
+        }
+    }
     assert!(near(&r.world, R3_TANK, cell(67, 20), 1));
 }
 

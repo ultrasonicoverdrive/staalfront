@@ -12,7 +12,8 @@
 //!   previous and current position and facing, hit points), in ascending slot
 //!   order, so the previous tick and the current one are both in the snapshot
 //!   and the renderer interpolates inside it;
-//! * the current [`Order`] of each entity (the F1 panel names the hovered one's);
+//! * the current [`Order`] of each entity (the F1 panel names the hovered one's), and the
+//!   tick at which it last gave an order up for being stuck, if it did (WP4.7);
 //! * the unit table, shared and never changing, so that an entity's
 //!   [`UnitStats`] (class, movement class, weapon range, full hit points) are
 //!   one lookup by kind, exactly what [`World::stats_of`] answers;
@@ -65,6 +66,7 @@ pub struct SimSnapshot {
     map_size: (u32, u32),
     views: Vec<EntityView>,
     orders: Vec<Order>,
+    gave_up: Vec<Option<Tick>>,
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
@@ -80,6 +82,7 @@ impl SimSnapshot {
             map_size: (0, 0),
             views: Vec::new(),
             orders: Vec::new(),
+            gave_up: Vec::new(),
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
@@ -109,6 +112,9 @@ impl SimSnapshot {
                 .iter()
                 .map(|v| world.order_of(v.id).unwrap_or(Order::Idle)),
         );
+        self.gave_up.clear();
+        self.gave_up
+            .extend(self.views.iter().map(|v| world.gave_up_at(v.id)));
         // The table never changes after the world is made: share one copy.
         self.units = Arc::clone(&statics.units);
         self.ground = Arc::clone(&statics.ground);
@@ -187,6 +193,13 @@ impl SimSnapshot {
     /// The current order of an entity; `None` for a stale id.
     pub fn order_of(&self, id: EntityId) -> Option<Order> {
         self.find(id).map(|i| self.orders[i])
+    }
+
+    /// The tick at which the entity last gave an order up because it was stuck (WP4.7,
+    /// [`World::gave_up_at`]); `None` if it has not, or for a stale id. For the feedback
+    /// the UI will show; nothing draws it yet.
+    pub fn gave_up_at(&self, id: EntityId) -> Option<Tick> {
+        self.find(id).and_then(|i| self.gave_up[i])
     }
 
     /// The cell a position lies in; `None` outside the map.

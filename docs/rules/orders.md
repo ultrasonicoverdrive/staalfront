@@ -151,7 +151,9 @@ has the rules and the numbers):
   times in this order (3), `replan_cooldown` ticks (100) apart. **When it would ask once more, the
   order is given up**: it ends as if it were done (the next queued order starts, or the unit is idle
   where it is, wherever that is), and the count of the next order starts from zero. That holds for
-  every walking order; `HoldPosition` never walks and so is never given up.
+  every walking order; `HoldPosition` never walks and so is never given up. The unit keeps a record of
+it for the UI (`World::gave_up_at`, the tick, in the checksum, in the sf_game snapshot) until a command
+gives it an order or stops it.
 
 Why idle and not "the nearest reachable cell" or "keep waiting": a unit that is stuck is standing at, or
 next to, the place it cannot get past; the nearest reachable cell is where it is. And a unit that waits

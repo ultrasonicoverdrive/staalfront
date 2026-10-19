@@ -646,6 +646,14 @@ impl World {
         Some(self.entities.crowd[i].replans)
     }
 
+    /// The tick at which the unit last gave an order up because it was stuck after all
+    /// its replans (WP4.7), until a command gives it another order or stops it. `None`
+    /// for a unit that has not, or a stale id. In the checksum.
+    pub fn gave_up_at(&self, id: EntityId) -> Option<Tick> {
+        let i = self.live_index(id)?;
+        self.entities.crowd[i].gave_up_at
+    }
+
     /// The point a settled member of a group closes up toward (WP4.4b,
     /// `docs/rules/collision.md`, "Arrival"): the point its order sent it to. `None`
     /// for a unit that is walking, has no group or has been given another order
@@ -1236,6 +1244,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::forget_give_up(&mut self.entities, i);
                         orders::clear(&mut self.entities, i);
                         self.entities.turret_target[i] = None;
                         changed = true;
@@ -1263,6 +1272,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::forget_give_up(&mut self.entities, i);
                         orders::clear(&mut self.entities, i);
                         self.entities.area[i] = area;
                         self.entities.behavior[i] = Behavior::Wander;
@@ -1280,6 +1290,7 @@ impl World {
                     if let Some(i) = self.live_index(id)
                         && !self.is_immobile(i)
                     {
+                        orders::forget_give_up(&mut self.entities, i);
                         orders::clear(&mut self.entities, i);
                         self.entities.behavior[i] = Behavior::MoveTo;
                         self.entities.target[i] = Some(target);

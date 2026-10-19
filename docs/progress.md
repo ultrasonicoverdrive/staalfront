@@ -528,7 +528,7 @@ they rely on the arrival slack that grows with the time they have pressed on it,
 WP4.7 notes. **No pinned checksum moved.** `wander_5000`, `command_mix`, `terrain_256`, `units_spawn`
 (the four legacy goldens) and `orders`, `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`,
 `crowd_jam` and `turning` end on the values they ended on; the only new value is the new scenario `replan`
-(`0x7fd2b8f9ff2dede3`, pinned when it was added). What the replans add to the state is hashed only while it is
+(`0x2f05c63b9046ecc8`; pinned at `0x7fd2b8f9ff2dede3` when it was added and moved once in review when the per-unit record of a given-up order, `World::gave_up_at`, joined the checksum). What the replans add to the state is hashed only while it is
 there (a unit's replan counters, an overlay, a ban, a cursor of the looks, settings that are not the
 defaults), so the checksums of the ticks in between differ from before only where a unit asked for a
 replan (`bridge_200` has 5 or 6 of them; its final state is the same) or stood in reach of its target

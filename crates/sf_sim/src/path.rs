@@ -454,16 +454,33 @@ impl Pathing {
                     .grid
                     .shut(overlay.cells(), &mut saved);
             }
-            let progress = job.run(
-                &self.graphs[job.graph],
-                &mut self.work,
-                &mut e.route[slot],
-                &mut rem,
-                self.epoch,
-            );
-            if shut {
+            // The cells are opened again even if the job panics (the panic is then
+            // passed on): `catch_unwind` is the guard, a drop guard would have to hold
+            // the grid that the job reads.
+            let progress = if shut {
+                let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    job.run(
+                        &self.graphs[job.graph],
+                        &mut self.work,
+                        &mut e.route[slot],
+                        &mut rem,
+                        self.epoch,
+                    )
+                }));
                 self.graphs[job.graph].grid.reopen(overlay.cells(), &saved);
-            }
+                match ran {
+                    Ok(progress) => progress,
+                    Err(panic) => std::panic::resume_unwind(panic),
+                }
+            } else {
+                job.run(
+                    &self.graphs[job.graph],
+                    &mut self.work,
+                    &mut e.route[slot],
+                    &mut rem,
+                    self.epoch,
+                )
+            };
             match progress {
                 Progress::Yield => break,
                 Progress::Done => {
