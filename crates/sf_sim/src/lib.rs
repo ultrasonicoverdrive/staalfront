@@ -292,9 +292,20 @@
 //! [`World::with_collision`] turns it off or tunes it; the rules are in
 //! `docs/rules/collision.md`.
 //!
+//! # Formations
+//!
+//! A single [`Command::Order`] with an [`Order::Move`] that sends at least
+//! [`FormationConfig::min_units`] units (and at most `max_units`) that cross the same ground to one
+//! point makes them a **formation** ([`formation`], [`World::with_formation`],
+//! [`World::formation_of`]): the layout of the group becomes a lattice with room for the widest body,
+//! every unit has a slot that hangs from the leader and turns with the way it goes, the leader goes no
+//! faster than the slowest member, the others walk to their slots, the shape lets go in narrow places
+//! and forms up again on open ground, and at the goal the members take the arrival slots of the group
+//! order. The rules are in `docs/rules/formations.md`.
+//!
 //! # Not here yet
 //!
-//! Formations (WP4.6), target
+//! Target
 //! acquisition and firing (phase 5),
 //! damage, weapons and projectiles (phase 5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
@@ -305,6 +316,7 @@ pub mod checksum;
 pub mod command;
 pub mod crowd;
 mod entities;
+pub mod formation;
 pub mod ids;
 pub mod movement;
 pub mod orders;
@@ -321,6 +333,7 @@ pub use command::{Command, CommandQueue, ScheduleError};
 pub use crowd::{
     CollisionConfig, CrowdStats, DEFAULT_STUCK_ATTEMPTS, DEFAULT_STUCK_TICKS, DEFAULT_WAIT_TICKS,
 };
+pub use formation::{FormationConfig, FormationState, FormationStats, FormationView, MemberMode};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
 };

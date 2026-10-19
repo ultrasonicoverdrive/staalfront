@@ -7,9 +7,9 @@
 
 use sf_math::{Fx, Vec2};
 use sf_sim::{
-    Cell, CollisionConfig, Command, ConfigError, Cost, EntityId, Footprint, Kind, MovementTable,
-    Order, PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats, UnitTable, World,
-    WorldConfig, per_tick,
+    Cell, CollisionConfig, Command, ConfigError, Cost, EntityId, Footprint, FormationConfig, Kind,
+    MovementTable, Order, PlayerId, Terrain, TerrainDef, TerrainFlags, TerrainId, UnitStats,
+    UnitTable, World, WorldConfig, per_tick,
 };
 
 const GRASS: TerrainId = TerrainId(0);
@@ -1057,7 +1057,13 @@ fn a_unit_takes_its_slot_when_it_comes_near_so_the_crowd_fills_in_the_order_it_a
     // Twelve tanks in a column, the one with the highest id nearest the goal. Slots by
     // rank would give the lowest id the slot nearest the goal, and it is the last to
     // come: it would have to push through the others.
-    let mut w = group_world();
+    //
+    // Formations off: this pins the claims of a group order (WP4.4b), which come in the order
+    // the units arrive. Twelve tanks sent together are a formation since WP4.6, and a
+    // formation keeps its column closed (the front units wait for their slots), so the
+    // column reaches the slots as one block and the claims of one tick go in id order
+    // (`path/claim.rs`): there is no first to come.
+    let mut w = group_world().with_formation(FormationConfig::OFF).unwrap();
     let goal = cells(40, 20);
     let ids: Vec<EntityId> = (0..12)
         .map(|k| spawn(&mut w, TANK, 0, cells(4 + 2 * k, 20)))

@@ -36,7 +36,7 @@
 //! The rules are in `docs/rules/pathfinding.md`.
 
 use sf_math::hash::Fnv1a64;
-use sf_math::{Fx, Vec2};
+use sf_math::{Facing, Fx, Vec2};
 
 use crate::crowd::Claim;
 use crate::path::claim;
@@ -124,6 +124,10 @@ pub(crate) struct Layout {
     pub spacing: Fx,
     /// The distance from the goal at which the ring begins, in cells.
     pub inner: Fx,
+    /// How far the lattice of the slots is turned about the goal (WP4.6): the direction
+    /// the group came marching in, so that its rows stand across it. Nothing for a group
+    /// that did not form up.
+    pub turn: Facing,
 }
 
 impl Layout {
@@ -133,6 +137,7 @@ impl Layout {
         rank: 0,
         spacing: Fx::HALF,
         inner: Fx::ZERO,
+        turn: Facing::PLUS_X,
     };
 }
 
@@ -910,6 +915,11 @@ impl Fields {
             h.write_u8(f.layout.rank);
             h.write_fx(f.layout.spacing);
             h.write_fx(f.layout.inner);
+            // The turn of the lattice (WP4.6); nothing for the lattice as it always was.
+            if f.layout.turn != Facing::PLUS_X {
+                h.write_u8(0xF6);
+                h.write_u8(f.layout.turn.raw());
+            }
             h.write_u32(f.members);
             h.write_u32(f.last_used);
             h.write_u8(u8::from(f.region_ready) | u8::from(f.slots_ready) << 1);

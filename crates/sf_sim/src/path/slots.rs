@@ -29,7 +29,7 @@
 //! class but which points are valid differs (a bridge cell is open ground for a
 //! tank and water to a boat), so each field keeps only its own.
 
-use sf_math::{Fx, Vec2};
+use sf_math::{Facing, Fx, Vec2};
 
 /// Lattice points on each side of the middle, in each direction: the table is
 /// `2 * HALF_WIDTH` points wide and high. Forty spacings reach 14 cells at the
@@ -72,6 +72,20 @@ pub(crate) fn position(centre: Vec2, p: Point, spacing: Fx) -> Vec2 {
     // (a + 1/2) spacings: (2a + 1) * spacing / 2 cells.
     let to = |k: i8| spacing.mul_int(2 * i64::from(k) + 1).div_int(2);
     Vec2::new(centre.x + to(p.0), centre.y + to(p.1))
+}
+
+/// [`position`] with the whole lattice turned by `turn` about the middle of the goal cell
+/// (WP4.6): the rows of a group that came marching in a direction stand across it. A turn
+/// of nothing is [`position`] itself, bit for bit. The distances between points stay what
+/// the spacing says (to the precision of the trigonometry table), and so does the order of
+/// the spiral, which is by distance from the middle.
+pub(crate) fn position_turned(centre: Vec2, p: Point, spacing: Fx, turn: Facing) -> Vec2 {
+    let flat = position(centre, p, spacing);
+    if turn == Facing::PLUS_X {
+        flat
+    } else {
+        centre + (flat - centre).rotate(turn)
+    }
 }
 
 /// The squared distance of a point from the middle in units of half a spacing:

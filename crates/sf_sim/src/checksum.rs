@@ -106,6 +106,12 @@
 //! the facing is in the slots, and a class that turns as the walk always did (a
 //! table without turning profiles) leaves every checksum alone.
 //!
+//! The formation section (WP4.6, `G`) comes last and is written only while a formation
+//! exists: its number counter, and for each formation its goal, leader, heading, state and
+//! patience, and each member with its offset in the lattice and the ticks it has been away
+//! from its slot. What a tick works out from those (the slots, what each member does) is
+//! not hashed. A world whose move orders never formed one hashes as before.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -150,6 +156,7 @@ const SECTION_PATHS: u8 = b'P';
 const SECTION_FIELDS: u8 = b'L';
 const SECTION_CROWD: u8 = b'K';
 const SECTION_TURNING: u8 = b'R';
+const SECTION_FORMATIONS: u8 = b'G';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -434,6 +441,14 @@ impl World {
                     write_option_id(&mut h, e.turret_target[i]);
                 }
             }
+        }
+
+        // Formations (WP4.6): the groups that keep their shape and where each member
+        // stands in the lattice. Only while one exists, so a world whose orders never
+        // formed one hashes as before.
+        if self.formations.any() {
+            h.write_u8(SECTION_FORMATIONS);
+            self.formations.write_hash(&mut h, e);
         }
 
         h.finish()

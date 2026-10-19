@@ -11,6 +11,7 @@ use sf_math::{Facing, Rng, Vec2};
 
 use crate::behavior::{Area, Behavior};
 use crate::crowd::CrowdState;
+use crate::formation::Member;
 use crate::ids::{EntityId, Kind, PlayerId};
 use crate::orders::{Order, OrderQueue};
 use crate::path::Routes;
@@ -110,6 +111,9 @@ pub(crate) struct Entities {
     /// (`Command::AimTurret`; phase 5 target selection will set it too). Hashed
     /// with the turret.
     pub turret_target: Vec<Option<EntityId>>,
+    /// The formation the unit marches in, and where it stands in it (WP4.6); none for
+    /// everything that is not part of one. Hashed in the formation section.
+    pub form: Vec<Member>,
 }
 
 impl Entities {
@@ -145,6 +149,7 @@ impl Entities {
         self.turret.push(Facing::default());
         self.prev_turret.push(Facing::default());
         self.turret_target.push(None);
+        self.form.push(Member::NONE);
         index
     }
 
@@ -178,6 +183,7 @@ impl Entities {
         self.turret[i] = row.facing;
         self.prev_turret[i] = row.facing;
         self.turret_target[i] = None;
+        self.form[i] = Member::NONE;
         self.route.reset(i);
     }
 
@@ -207,6 +213,7 @@ impl Entities {
         self.turret[i] = Facing::default();
         self.prev_turret[i] = Facing::default();
         self.turret_target[i] = None;
+        self.form[i] = Member::NONE;
         self.route.reset(i);
     }
 }

@@ -706,8 +706,9 @@ them failed), 2 map replans, 8 target replans, one order given up, 25 jobs.
 ## Not here
 
 * **Collision, pushing and a stuck unit** are WP4.4 and done (`docs/rules/collision.md`). **Turning
-  before driving and turrets** (WP4.5), **formations** (WP4.6: arrival slots are a spiral, not a shape; the slowest does not set
-  the pace). **Replanning** (WP4.7) is "Replanning" above; what it does not do: look for a *better*
+  before driving and turrets** (WP4.5), **formations** (WP4.6 is done, `formations.md`: a move order for 3 to 19 units that cross the same
+  ground makes a formation that walks to slots round a leader; the arrival slots of such a group are the
+  same spiral, turned across the way it came). **Replanning** (WP4.7) is "Replanning" above; what it does not do: look for a *better*
   route when a structure is removed and the old route is still walkable, predict where a body will
   be, or find a way round a body that needs the abstract graph to cross a sector the overlay cuts
   by its own edges (only the lazy ban of "What the abstract search does not know" does), or look

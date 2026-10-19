@@ -169,6 +169,14 @@ fn threaded_sim_matches_headless_with_crowd_collisions() {
 }
 
 #[test]
+fn threaded_sim_matches_headless_with_formations() {
+    let _serial = one_at_a_time();
+    // A mixed group of 16 forms up, marches, breaks up at the passage in the wall and forms
+    // up again (WP4.6): 1,500 ticks reach the passage and go through it.
+    threaded_equals_headless("formation_move", 1_500);
+}
+
+#[test]
 fn threaded_sim_matches_headless_with_replans() {
     let _serial = one_at_a_time();
     // A structure built in a corridor, a target removed, a goal built over, and a stuck

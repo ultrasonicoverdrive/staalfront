@@ -128,6 +128,19 @@ pub struct Scenario {
     /// units that start side by side or share a goal.
     #[serde(default)]
     pub collision: Option<bool>,
+    /// Whether a group move order forms a formation (WP4.6,
+    /// `docs/rules/formations.md`); the simulation's default (on, as `sim.ron` ships
+    /// it) when left out. `Some(false)` moves the group as a group order did before
+    /// WP4.6: for a scenario that pins routes, arrival or turning with exact positions
+    /// and sends several units across the same ground to one place.
+    #[serde(default)]
+    pub formation: Option<bool>,
+    /// The most units one move order may send and still make formations
+    /// (`FormationConfig::max_units`); the simulation's default (as `sim.ron` ships it) when
+    /// left out. For a probe of sizes above the shipped limit, as the sweep of
+    /// `tests/formation_sweep.rs` makes to show why the limit is where it is.
+    #[serde(default)]
+    pub formation_max_units: Option<u16>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -896,6 +909,16 @@ impl Scenario {
                 .with_collision(sf_sim::CollisionConfig {
                     enabled,
                     ..sf_sim::CollisionConfig::DEFAULT
+                })
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if self.formation.is_some() || self.formation_max_units.is_some() {
+            let base = sf_sim::FormationConfig::DEFAULT;
+            world = world
+                .with_formation(sf_sim::FormationConfig {
+                    enabled: self.formation.unwrap_or(base.enabled),
+                    max_units: self.formation_max_units.unwrap_or(base.max_units),
+                    ..base
                 })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }

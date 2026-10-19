@@ -46,6 +46,7 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
     let threshold = sf_bridge::flowfield_threshold(&settings);
     let collision = sf_bridge::collision_config(&settings);
     let replan = sf_bridge::replan_config(&settings);
+    let formation = sf_bridge::formation_config(&settings);
     world
         .with_movement(table)
         .expect("a world that has not started takes its movement table")
@@ -57,6 +58,8 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
         .expect("the shipped collision settings are ones a world takes")
         .with_replan(replan)
         .expect("the shipped replan settings are ones a world takes")
+        .with_formation(formation)
+        .expect("the shipped formation settings are ones a world takes")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a
@@ -220,5 +223,14 @@ mod tests {
         );
         // And the replan settings (WP4.7).
         assert_eq!(world.replan_config(), sf_bridge::replan_config(&settings));
+        // And the formation settings (WP4.6).
+        assert_eq!(
+            world.formation_config(),
+            sf_bridge::formation_config(&settings)
+        );
+        assert!(
+            world.formation_config().enabled,
+            "group move orders form up in the game"
+        );
     }
 }
