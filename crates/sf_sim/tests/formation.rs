@@ -342,6 +342,26 @@ fn units_that_cross_other_ground_do_not_join_and_a_group_beyond_the_limit_is_no_
     go(&mut w, &five, (30, 10));
     w.step();
     assert!(five.iter().all(|&u| w.formation_of(u).is_none()));
+    // The limit counts the units the order sends, not the units of a family: three boats are a
+    // fleet of their own, but sent with five walkers (eight in all, over the limit of six) they
+    // are part of a crowd, and nobody forms up. Sent without the walkers they do.
+    let mut w = world()
+        .with_formation(FormationConfig {
+            max_units: 6,
+            ..FormationConfig::DEFAULT
+        })
+        .unwrap();
+    let walkers = mixed_five(&mut w, 6, 10);
+    let boats: Vec<EntityId> = (0..3)
+        .map(|k| spawn(&mut w, GUNBOAT, 10 + k * 3, 34))
+        .collect();
+    let crowd: Vec<EntityId> = walkers.iter().chain(&boats).copied().collect();
+    go(&mut w, &crowd, (28, 34));
+    w.step();
+    assert!(crowd.iter().all(|&u| w.formation_of(u).is_none()));
+    go(&mut w, &boats, (28, 34));
+    w.step();
+    assert_eq!(w.formation_of(boats[0]).map(|f| f.members), Some(3));
 }
 
 // ---- the shape --------------------------------------------------------------------------
@@ -709,30 +729,172 @@ fn another_order_takes_a_unit_out_and_a_leader_that_goes_is_replaced() {
     assert_ne!(w.formation_of(left[0]).unwrap().leader_id, doomed);
 }
 
-#[test]
-fn the_leader_waits_for_a_straggler_on_open_ground_and_gives_up_when_it_does_not_come() {
-    // Four tanks and a soldier; the soldier is held where it stands by a hold-position unit
-    // wall: the leader waits for it for its patience and then goes on.
+/// Four tanks and a soldier on open ground, the soldier shut in a pen of four tanks on
+/// hold position (a plus of cells, a body's width too narrow to get out of anywhere): it
+/// cannot get to its slot, whatever it tries. Returns the world (with a short patience), the
+/// four tanks of the group and the soldier.
+fn pen_world() -> (World, Vec<EntityId>, EntityId) {
     let mut w = world()
         .with_formation(FormationConfig {
             patience_ticks: 40,
             ..FormationConfig::DEFAULT
         })
         .unwrap();
-    let group = row(&mut w, &[TANK, TANK, TANK, TANK], 6, 10);
-    let straggler = spawn(&mut w, SOLDIER, 6, 16);
+    let group = row(&mut w, &[TANK, TANK, TANK, TANK], 6, 4);
+    let soldier = spawn(&mut w, SOLDIER, 10, 14);
+    let pen: Vec<EntityId> = [(9, 14), (11, 14), (10, 13), (10, 15)]
+        .iter()
+        .map(|&(x, y)| spawn(&mut w, TANK, x, y))
+        .collect();
+    order(&mut w, &pen, Order::HoldPosition);
+    w.step();
     let mut all = group.clone();
-    all.push(straggler);
+    all.push(soldier);
+    go(&mut w, &all, (80, 4));
+    (w, group, soldier)
+}
+
+#[test]
+fn a_straggler_that_cannot_come_holds_the_leader_for_its_patience_and_then_the_formation_goes_on_without_it()
+ {
+    let (mut w, group, soldier) = pen_world();
+    run(&mut w, 5);
+    assert!(
+        w.formation_of(soldier).is_some(),
+        "the soldier starts in the formation"
+    );
+    let leader = w.formation_of(group[0]).unwrap().leader_id;
+    // The leader waits (on open ground) for the soldier who cannot come; the patience of 40
+    // ticks runs out at full speed because the soldier is not getting closer, the formation
+    // is broken and the leader goes on; the soldier leaves after the same patience.
+    let (mut broke_at, mut left_at, mut leader_waited) = (None, None, 0);
+    for t in 0..600_u32 {
+        w.step();
+        let stats = w.formation_stats();
+        leader_waited += u32::from(w.formation_of(leader).is_some_and(|v| v.waiting));
+        if broke_at.is_none() && stats.breaks > 0 {
+            broke_at = Some(t);
+        }
+        if left_at.is_none() && stats.expelled > 0 {
+            left_at = Some(t);
+        }
+    }
+    let broke = broke_at.expect("the formation broke: the leader's patience ran out");
+    let left = left_at.expect("the straggler that never got closer left the formation");
+    assert!(
+        leader_waited > 20,
+        "the leader waited only {leader_waited} ticks"
+    );
+    assert!(broke < 200, "the formation broke on tick {broke}");
+    assert!(left < 300, "the straggler left on tick {left}");
+    assert!(
+        w.formation_of(soldier).is_none(),
+        "the soldier is out of the formation"
+    );
+    // The tanks went on, in formation, while the soldier is still penned in.
+    assert!(w.formation_stats().expelled == 1);
+    assert!(
+        pos(&w, leader).x > Fx::from_int(20),
+        "the leader is at {:?}",
+        pos(&w, leader)
+    );
+    assert!(
+        pos(&w, soldier).x < Fx::from_int(12),
+        "the soldier is shut in"
+    );
+    assert!(
+        group
+            .iter()
+            .all(|&t| w.formation_of(t).is_some_and(|v| v.members == 4))
+    );
+}
+
+#[test]
+fn a_broken_formation_is_whole_again_only_after_a_calm_stretch_and_waits_again_only_then() {
+    // Ten tanks in a column across the way and one soldier shut in: stragglers are 1 of 11,
+    // a tenth, so the formation is whole again when it is calm (60 ticks) and not before.
+    let mut w = world()
+        .with_formation(FormationConfig {
+            patience_ticks: 40,
+            ..FormationConfig::DEFAULT
+        })
+        .unwrap();
+    let tanks: Vec<EntityId> = (0..10).map(|k| spawn(&mut w, TANK, 6, 2 + k * 2)).collect();
+    let soldier = spawn(&mut w, SOLDIER, 10, 26);
+    let pen: Vec<EntityId> = [(9, 26), (11, 26), (10, 25), (10, 27)]
+        .iter()
+        .map(|&(x, y)| spawn(&mut w, TANK, x, y))
+        .collect();
+    order(&mut w, &pen, Order::HoldPosition);
+    w.step();
+    let mut all = tanks.clone();
+    all.push(soldier);
     go(&mut w, &all, (80, 10));
-    // The straggler is stopped on the spot by a stop in the middle of the walk: it leaves.
-    run(&mut w, 120);
-    assert!(w.formation_of(straggler).is_some());
-    let waits = w.formation_stats().waits;
-    // The soldier's slot is a few cells ahead: it is behind it at the start and catches up.
-    run(&mut w, 400);
-    assert!(w.formation_stats().waits >= waits);
-    // Whatever happened, the tanks have not stood still all the time: they went on.
-    assert!(pos(&w, group[0]).x > Fx::from_int(10));
+    let mut states = Vec::new();
+    for _ in 0..700 {
+        w.step();
+        if let Some(v) = w.formation_of(tanks[0]) {
+            states.push((v.state, v.waiting));
+        }
+    }
+    // Once broken it stays broken until it has been calm for 60 ticks in a row: a broken
+    // stretch is never shorter than that (the first version flipped back the next tick).
+    let mut runs: Vec<usize> = Vec::new();
+    let mut length = 0;
+    for &(state, _) in &states {
+        if state == FormationState::Broken {
+            length += 1;
+        } else if length > 0 {
+            runs.push(length);
+            length = 0;
+        }
+    }
+    assert!(w.formation_stats().breaks >= 1);
+    assert!(runs.iter().all(|&r| r >= 60), "broken stretches: {runs:?}");
+    // And it did not wait for ever: the patience of 40 ticks bounds what the leader waits
+    // for a straggler that does not come, however often the count of stragglers touches zero.
+    let waited = states.iter().filter(|s| s.1).count();
+    assert!(
+        waited <= 40 * (1 + w.formation_stats().reforms as usize) + 40,
+        "{waited}"
+    );
+}
+
+#[test]
+fn the_heading_follows_the_leaders_own_steps_and_not_the_pushes_it_gets_while_it_waits() {
+    // Twelve tanks packed east of the wall and a soldier far to the west: the leader waits
+    // for the soldier, with its members pressing on it. A push is not a direction of travel.
+    let mut w = world();
+    let tanks: Vec<EntityId> = (0..12)
+        .map(|k| spawn(&mut w, TANK, 60 + k % 4, 18 + k / 4))
+        .collect();
+    let soldier = spawn(&mut w, SOLDIER, 6, 19);
+    let mut all = tanks.clone();
+    all.push(soldier);
+    go(&mut w, &all, (90, 19));
+    w.step();
+    let first = w.formation_of(tanks[0]).unwrap();
+    let leader = first.leader_id;
+    let mut waited = 0;
+    // A tank of nobody's group walks west through the waiting formation, and pushes the
+    // leader and its members west as it goes.
+    let walker = spawn(&mut w, TANK, 80, 19);
+    go(&mut w, &[walker], (50, 19));
+    for _ in 0..700 {
+        w.step();
+        let Some(v) = w.formation_of(leader) else {
+            break;
+        };
+        waited += u32::from(v.waiting);
+        // The way is east, a few steps either way at most; never half a turn.
+        let off = v.heading.abs_diff(first.heading);
+        assert!(
+            off <= 24,
+            "the heading turned {off} steps (to {:?})",
+            v.heading
+        );
+    }
+    assert!(waited > 50, "the leader waited only {waited} ticks");
 }
 
 // ---- state and checksum -----------------------------------------------------------------

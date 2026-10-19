@@ -44,11 +44,24 @@
 //! except that a unit that is ahead of its slot by more than [`FormationConfig::reform_tenths`]
 //! waits where it stands if the ground round it is open. When the leader is on open ground
 //! and some member is farther from its slot than that, the **leader waits** for it, for at most
-//! [`FormationConfig::patience_ticks`] ticks in all; then the formation is *broken*: nobody
-//! waits any more until the stragglers are back (at most a tenth of the group away). A member
-//! that has been away from its slot for twice the patience leaves the formation and goes on
-//! as a unit of its own. So a bridge or a gap breaks the formation up, the units file through,
-//! and it forms up again on the other side; and nothing can wait for ever.
+//! [`FormationConfig::patience_ticks`] ticks in all (it runs down at a third of the rate
+//! while every straggler is coming closer); then the formation is *broken*: nobody waits any
+//! more until the stragglers are back (at most a tenth of the group away). The patience is
+//! filled up again, and a broken formation is whole again, only after
+//! `CALM_TICKS` (60) ticks in a row that are as whole as that, so a count of stragglers that
+//! touches zero between two stragglers neither refills the patience nor flips the state. A
+//! member that is farther from its slot than that and has not come closer for the patience
+//! (a stalled one: one window of twenty ticks after the other without gaining a 32nd of a
+//! cell) leaves the formation and goes on as a unit of its own. So a bridge or a gap breaks
+//! the formation up, the units file through, and it forms up again on the other side; and
+//! nothing can wait for ever.
+//!
+//! The heading follows the leader's own steps (a leader that waits and is pushed about by
+//! others does not turn the formation). A unit that is ahead of its slot waits there, whatever
+//! way it was going (`Direct` or `Flow`), and does not walk back to it. When the units have come
+//! through a gap in another order than they went in, the slots are handed out again
+//! (`assign`: the least sum of squared distances over all pairs, by the Hungarian method, ties
+//! to the lower slot) so that nobody has to pass another to reach its slot.
 //!
 //! # The end
 //!
@@ -62,7 +75,7 @@
 //!
 //! # State and checksum
 //!
-//! The formations and the members' offsets are in the checksum (section `F`, written only
+//! The formations and the members' offsets are in the checksum (section `G`, written only
 //! while a formation exists). What a tick works out for each member (its slot, what it does)
 //! is derived from that state and not hashed.
 
@@ -103,6 +116,11 @@ const REASSIGN_EVERY: u32 = 100;
 const WINDOW: u32 = 20;
 const PROGRESS: Fx = Fx::from_ratio(1, 32);
 
+/// How many ticks in a row a formation has to be as whole as it needs to be before the leader's
+/// patience is filled up again and before a broken formation counts as whole: a straggler count
+/// that touches zero for a tick or two between two stragglers does not start the wait over.
+const CALM_TICKS: u16 = 60;
+
 /// While every straggler is coming closer the leader's patience runs down one tick in this
 /// many, so that it waits that many times as long as for stragglers that do not.
 const CLOSING_SLOWDOWN: u32 = 3;
@@ -127,7 +145,7 @@ pub const MIN_UNITS_LIMIT: u16 = 2;
 /// The shipped numbers: see [`FormationConfig`] for what each does.
 pub const DEFAULT_MIN_UNITS: u16 = 3;
 /// See [`FormationConfig::max_units`].
-pub const DEFAULT_MAX_UNITS: u16 = 48;
+pub const DEFAULT_MAX_UNITS: u16 = 24;
 /// See [`FormationConfig::spacing_permille`].
 pub const DEFAULT_SPACING_PERMILLE: u16 = 1250;
 /// See [`FormationConfig::spread_permille`].
@@ -151,9 +169,10 @@ pub struct FormationConfig {
     /// How many units that cross the same ground one move order must send to one place to
     /// form a formation. At least 2, at most [`MAX_MEMBERS`].
     pub min_units: u16,
-    /// The most units a formation holds: a bigger group (a crowd of two hundred) is not a
-    /// formation but a mob, which a lattice that wide cannot keep, and it moves as a group
-    /// order does. At least `min_units`, at most [`MAX_MEMBERS`].
+    /// The most units one move order may send and still make formations (and so the most a
+    /// formation holds): a bigger selection (a crowd of two hundred) is a mob, which a lattice
+    /// that wide cannot keep, and none of it forms up; it moves as a group order does. At least
+    /// `min_units`, at most [`MAX_MEMBERS`].
     pub max_units: u16,
     /// The spacing of the lattice, as thousandths of what the widest body of the group needs
     /// (1000 puts bodies side by side). From 1000 to 3000
@@ -172,7 +191,8 @@ pub struct FormationConfig {
     /// by more than this waits. From 5 to 100
     pub reform_tenths: u16,
     /// For how long, in ticks, the leader may wait for stragglers before the formation counts
-    /// as broken; a member away from its slot for twice that leaves. From 20 to 2000
+    /// as broken, and for how long a straggler may be away from its slot without coming closer
+    /// before it leaves. From 20 to 2000
     pub patience_ticks: u16,
 }
 
@@ -330,6 +350,10 @@ pub(crate) struct Formation {
     pub waiting: bool,
     /// Ticks since the formation was made: the windows of the progress of the stragglers.
     pub age: u32,
+    /// Ticks in a row the formation has been as whole as it needs to be to wait again (whole:
+    /// no straggler; broken: at most a tenth of them): the patience is filled up again, or a
+    /// broken formation is whole again, only after [`CALM_TICKS`] of them.
+    pub calm: u16,
     /// Ticks the formation stays loose: the ground round the leader was not open that long ago.
     pub loose: u8,
     /// The members' slot indexes, ascending.
@@ -456,8 +480,8 @@ impl Formations {
 
     /// One `Order::Move` to `goal` was just given to the units in `started` (ascending
     /// slots, each once, each starting the order now). The ones that cross the same ground
-    /// and are at least [`FormationConfig::min_units`] (and at most `max_units`) form a
-    /// formation each. Returns the units that are in one with the heading of their formation,
+    /// and are at least [`FormationConfig::min_units`] form a formation each, unless the order
+    /// sends more than `max_units` in all (a crowd). Returns the units that are in one with the heading of their formation,
     /// ascending by slot: what the arrival slots of the goal are turned by.
     pub(crate) fn create(
         &mut self,
@@ -476,6 +500,12 @@ impl Formations {
         let Some(goal_cell) = ground.cell_at(goal) else {
             return formed;
         };
+        // A selection above the limit is a crowd, whatever its families: none of it forms up
+        // (the crowd of `bridge_200` has five hover craft among 195 others, and they march and
+        // arrive with the crowd, whose arrival is what the criterion of phase 4 measures).
+        if started.len() > usize::from(cfg.max_units) {
+            return formed;
+        }
         // The units that can form up, by the ground they cross.
         let mut families: BTreeMap<[u64; 4], Vec<usize>> = BTreeMap::new();
         for &i in started {
@@ -494,10 +524,7 @@ impl Formations {
             families.entry(family).or_default().push(i);
         }
         for (_, members) in families {
-            if members.len() < usize::from(cfg.min_units)
-                || members.len() > usize::from(cfg.max_units)
-                || self.list.len() >= MAX_FORMATIONS
-            {
+            if members.len() < usize::from(cfg.min_units) || self.list.len() >= MAX_FORMATIONS {
                 continue;
             }
             let serial = self.next_serial;
@@ -520,6 +547,7 @@ impl Formations {
                 patience: cfg.patience_ticks,
                 waiting: false,
                 age: 0,
+                calm: 0,
                 loose: 0,
                 members: members.iter().map(|&i| i as u32).collect(),
                 extent: Fx::ZERO,
@@ -594,6 +622,7 @@ impl Formations {
             h.write_u32(u32::from(f.patience));
             h.write_u8(f.loose);
             h.write_u32(f.age);
+            h.write_u32(u32::from(f.calm));
             h.write_u32(f.members.len() as u32);
             for &m in &f.members {
                 let member = e.form[m as usize];
@@ -621,6 +650,7 @@ impl Formation {
         patience: 0,
         waiting: false,
         age: 0,
+        calm: 0,
         loose: 0,
         members: Vec::new(),
         extent: Fx::ZERO,
@@ -695,12 +725,15 @@ fn update_one(
     }
 
     // The heading follows where the leader goes, a step at a time, no faster than the
-    // outermost slot can be followed at the pace of the formation.
+    // outermost slot can be followed at the pace of the formation. Only the leader's own
+    // steps count: the way its hull faces while it drives the order (`Lead` last tick), not
+    // a push of the crowd pass while it waits or is shoved by its members.
     f.turn_wait = f.turn_wait.saturating_sub(1);
     let moved = e.pos[leader] - e.prev_pos[leader];
+    let want = e.facing[leader];
     if f.turn_wait == 0
+        && e.form[leader].mode == MemberMode::Lead
         && moved.length_squared() >= pace.div_int(4).square()
-        && let Some(want) = moved.facing()
         && f.heading != want
     {
         f.heading = f.heading.turn_toward(want, 1);
@@ -743,6 +776,7 @@ fn update_one(
 
     // Every member: its slot, and how far it is from it.
     let reform = cfg.reform();
+    let forward = Vec2::X.rotate(f.heading);
     let mut lagging = 0_usize;
     let mut stalled_far = false;
     let mut expelled: Vec<u32> = Vec::new();
@@ -781,11 +815,13 @@ fn update_one(
         } else {
             MemberMode::Direct
         };
-        // A unit that cannot see its slot and is ahead of it waits for it on open ground:
-        // the slot comes to it at the pace of the formation. It is not a straggler.
-        let ahead = member.mode == MemberMode::Flow
-            && !loose
-            && (f.goal - e.pos[i]).length() + reform < (f.goal - member.slot).length()
+        // A unit that is ahead of its slot (farther along the heading than the re-form
+        // distance: it ran ahead while the formation was loose, or came out of a gap first)
+        // waits for it on open ground, whether it sees it or not: the slot comes to it at
+        // the pace of the formation, and walking back to it would only make the leader wait
+        // for it. It is not a straggler.
+        let ahead = !loose
+            && (e.pos[i] - member.slot).dot(forward) > reform
             && open_ground(path, class, e.pos[i]);
         if ahead {
             member.mode = MemberMode::Wait;
@@ -837,6 +873,11 @@ fn update_one(
 
     // The leader waits for stragglers where it can do so without holding anybody up.
     let n = f.members.len();
+    let calm = match f.state {
+        FormationState::Whole => lagging == 0,
+        FormationState::Broken => lagging * 10 <= n,
+    };
+    f.calm = if calm { f.calm.saturating_add(1) } else { 0 };
     match f.state {
         FormationState::Whole => {
             f.waiting = open && !loose && lagging > 0 && f.patience > 0;
@@ -848,7 +889,7 @@ fn update_one(
                     f.patience -= 1;
                 }
                 stats.waits += 1;
-            } else if lagging == 0 && !loose {
+            } else if f.calm >= CALM_TICKS && !loose {
                 f.patience = cfg.patience_ticks;
             }
             if f.patience == 0 && lagging > 0 {
@@ -859,9 +900,10 @@ fn update_one(
         }
         FormationState::Broken => {
             f.waiting = false;
-            if !loose && lagging * 10 <= n {
+            if !loose && f.calm >= CALM_TICKS {
                 f.state = FormationState::Whole;
                 f.patience = cfg.patience_ticks;
+                f.calm = 0;
                 stats.reforms += 1;
             }
         }
@@ -930,10 +972,12 @@ fn swap_blocked(f: &Formation, e: &mut Entities, units: &UnitTable, lead_at: Vec
     }
 }
 
-/// Hands the slots of the lattice out again, each to the unit nearest it: the pairs of a unit
-/// and a slot, nearest first, ties to the lower unit and then the lower slot, each unit and
-/// each slot used once. The leader keeps its place (it is where the lattice hangs from).
-/// A unit that already stands at a slot keeps it, as that pair is the nearest there is.
+/// Hands the slots of the lattice out again so that the units walk the least in all: the
+/// assignment of units to slots that has the smallest sum of squared distances (the Hungarian
+/// method, `assign`), which is also one in which no two straight walks cross. The leader keeps
+/// its place (it is where the lattice hangs from). Units that stand on a slot keep it unless
+/// another assignment is shorter in all; units that are still far behind (in a gap) get the
+/// slots at the back, and so do not have to pass the ones that are in place.
 fn reassign(f: &Formation, e: &mut Entities, lead_at: Vec2, lead_off: Vec2) {
     let movers: Vec<usize> = f
         .members
@@ -942,25 +986,19 @@ fn reassign(f: &Formation, e: &mut Entities, lead_at: Vec2, lead_off: Vec2) {
         .filter(|&i| i != f.leader as usize)
         .collect();
     let offsets: Vec<Vec2> = movers.iter().map(|&i| e.form[i].off).collect();
-    let mut pairs: Vec<(Fx, usize, usize)> = Vec::with_capacity(movers.len() * movers.len());
-    for (a, &i) in movers.iter().enumerate() {
-        for (k, off) in offsets.iter().enumerate() {
-            let slot = lead_at + (*off - lead_off).rotate(f.heading);
-            pairs.push(((slot - e.pos[i]).length_squared(), a, k));
-        }
-    }
-    pairs.sort_unstable();
-    let mut unit_done = vec![false; movers.len()];
-    let mut slot_done = vec![false; movers.len()];
-    let mut handed = vec![Vec2::ZERO; movers.len()];
-    for (_, a, k) in pairs {
-        if unit_done[a] || slot_done[k] {
-            continue;
-        }
-        unit_done[a] = true;
-        slot_done[k] = true;
-        handed[a] = offsets[k];
-    }
+    let cost: Vec<Vec<i64>> = movers
+        .iter()
+        .map(|&i| {
+            offsets
+                .iter()
+                .map(|off| {
+                    let slot = lead_at + (*off - lead_off).rotate(f.heading);
+                    (slot - e.pos[i]).length_squared().raw()
+                })
+                .collect()
+        })
+        .collect();
+    let handed: Vec<Vec2> = assign(&cost).into_iter().map(|k| offsets[k]).collect();
     for (a, &i) in movers.iter().enumerate() {
         if e.form[i].off != handed[a] {
             e.form[i].off = handed[a];
@@ -969,6 +1007,70 @@ fn reassign(f: &Formation, e: &mut Entities, lead_at: Vec2, lead_off: Vec2) {
             e.form[i].far = Fx::MAX;
         }
     }
+}
+
+/// The assignment of rows to columns of the square matrix `cost` with the least total cost
+/// (the Hungarian method with potentials, `O(n^3)`): `result[row]` is its column. Ties go
+/// to the lower column; the answer depends on the matrix alone.
+fn assign(cost: &[Vec<i64>]) -> Vec<usize> {
+    let n = cost.len();
+    // Potentials of rows and columns and the row matched to each column, 1-based with a
+    // sentinel in place zero.
+    let mut u = vec![0_i64; n + 1];
+    let mut v = vec![0_i64; n + 1];
+    let mut matched = vec![0_usize; n + 1];
+    let mut way = vec![0_usize; n + 1];
+    for row in 1..=n {
+        matched[0] = row;
+        let mut col = 0;
+        let mut min_v = vec![i64::MAX; n + 1];
+        let mut used = vec![false; n + 1];
+        loop {
+            used[col] = true;
+            let r = matched[col];
+            let mut delta = i64::MAX;
+            let mut next = 0;
+            for c in 1..=n {
+                if used[c] {
+                    continue;
+                }
+                let cur = cost[r - 1][c - 1] - u[r] - v[c];
+                if cur < min_v[c] {
+                    min_v[c] = cur;
+                    way[c] = col;
+                }
+                if min_v[c] < delta {
+                    delta = min_v[c];
+                    next = c;
+                }
+            }
+            for c in 0..=n {
+                if used[c] {
+                    u[matched[c]] += delta;
+                    v[c] -= delta;
+                } else {
+                    min_v[c] -= delta;
+                }
+            }
+            col = next;
+            if matched[col] == 0 {
+                break;
+            }
+        }
+        loop {
+            let prev = way[col];
+            matched[col] = matched[prev];
+            col = prev;
+            if col == 0 {
+                break;
+            }
+        }
+    }
+    let mut result = vec![0; n];
+    for c in 1..=n {
+        result[matched[c] - 1] = c - 1;
+    }
+    result
 }
 
 /// Unit `i` goes back to the order's own way (a route of its own or the flowfield of its
@@ -1194,7 +1296,7 @@ mod tests {
         let c = FormationConfig::DEFAULT;
         assert!(!FormationConfig { min_units: 1, ..c }.is_valid());
         assert!(
-            !FormationConfig { min_units: 49, ..c }.is_valid(),
+            !FormationConfig { min_units: 25, ..c }.is_valid(),
             "above max_units"
         );
         assert!(

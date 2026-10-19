@@ -173,11 +173,16 @@ fn run() -> Run {
             if r.formed_again.is_none()
                 && lead_x > f64::from(*WALL.end()) + 6.0
                 && !lead.loose
+                && !lead.waiting
                 && lead.members == UNITS as usize
+                // Whole, as the formation itself counts it: no straggler, every member within the
+                // re-form distance of its slot, or ahead of it and standing (it ran ahead while
+                // the formation was loose and waits for the slot).
                 && (0..UNITS as usize).all(|s| {
                     views[s].is_some_and(|v| {
-                        (v.mode == MemberMode::Direct || v.leader)
-                            && cells((pos[s] - v.slot).length()) < 1.0
+                        v.mode == MemberMode::Wait
+                            || ((v.mode == MemberMode::Direct || v.leader)
+                                && cells((pos[s] - v.slot).length()) < NEAR)
                     })
                 })
             {

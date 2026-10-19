@@ -140,10 +140,10 @@ fn pathing_256_matches_the_pinned_checksum() {
 /// the file): the units have bodies, the bridge is a bottleneck and the arrival
 /// slots are spaced for them, so the crossing takes about twice as long. **Re-pinned at
 /// WP4.5** (`0xa55348bf0b519c50` to the value in the file):
-/// the turning rules, infantry turning at once and wheeled vehicles in arcs. **Re-pinned at
-/// WP4.6** (`0x03971fcc3548fc0c` to the value in the file): the five hover craft are a family
-/// of five and march as a formation; the 195 others are a crowd above the limit of 48 and move as
-/// they did (`docs/rules/formations.md`). With `formation: Some(false)` the run ends on the old value.
+/// the turning rules, infantry turning at once and wheeled vehicles in arcs. **Not moved by
+/// WP4.6** (`docs/rules/formations.md`): the 200 are a crowd, an order that sends more than
+/// `formation_max_units` (24) units makes no formation, not even among its five hover craft, so
+/// the run ends on the value it had before formations.
 #[test]
 fn bridge_200_matches_the_pinned_checksum() {
     check("bridge_200", BRIDGE_200_EXPECTED);

@@ -932,7 +932,13 @@ impl Pathing {
         formed: &[(usize, Facing)],
     ) {
         let threshold = self.fields.threshold as usize;
-        if threshold == 0 || self.graphs.is_empty() || started.len() < threshold {
+        // An order that only makes formations (every unit that took it marches in one): its
+        // classes get the arrival slots of a field from two units (below).
+        let all_formed = !started.is_empty()
+            && started
+                .iter()
+                .all(|&m| formed.binary_search_by_key(&m, |&(slot, _)| slot).is_ok());
+        if threshold == 0 || self.graphs.is_empty() || (started.len() < threshold && !all_formed) {
             return;
         }
         // The disc the bodies of the group fill, for the bound on how far out a crowd
@@ -969,7 +975,11 @@ impl Pathing {
                         && units.at(e.def[i] as usize).movement_class == Some(g.class)
                 })
                 .collect();
-            if members.len() < threshold {
+            // The units of an order that is only formations get the arrival slots of a field
+            // whatever the threshold (two of a class are enough): without a field they would
+            // all be sent to the one point and arrive in a scramble (WP4.6). In a crowd with a
+            // formation inside it the small classes are routed on their own, as ever.
+            if members.len() < threshold && !(all_formed && members.len() >= 2) {
                 continue;
             }
             let (gx, gy) = field::cell_of(g, destination);

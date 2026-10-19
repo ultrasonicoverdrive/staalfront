@@ -59,8 +59,9 @@
 // formation: false moves a group as a group order did before WP4.6.
 //
 // formation_min_units / formation_max_units: how many units of one family one order must send
-// to form a formation, and the most a formation holds (a crowd of two hundred is not a
-// formation, it moves as a group order always did). 2 to 256.
+// to form a formation, and the most units one order may send and still make formations (a
+// crowd of two hundred forms none, it moves as a group order always did; 24 is the largest
+// size the sweep of tools/sf_headless/tests/formation_sweep.rs has tested). 2 to 256.
 //
 // formation_spacing_permille: the width of the lattice, as thousandths of what the widest body
 // of the group needs (1000: bodies side by side). 1000 to 3000.
@@ -96,7 +97,7 @@
     retarget_cooldown: 20,
     formation: true,
     formation_min_units: 3,
-    formation_max_units: 48,
+    formation_max_units: 24,
     formation_spacing_permille: 1250,
     formation_spread_permille: 1500,
     formation_pace_permille: 900,

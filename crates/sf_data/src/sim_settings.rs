@@ -95,7 +95,7 @@ fn default_formation_min_units() -> u16 {
 }
 
 fn default_formation_max_units() -> u16 {
-    48
+    24
 }
 
 fn default_formation_spacing_permille() -> u16 {
@@ -162,8 +162,8 @@ pub struct SimSettings {
     /// a formation. 2 to `formation_max_units`.
     #[serde(default = "default_formation_min_units")]
     pub formation_min_units: u16,
-    /// The most units a formation holds; a bigger group moves as a crowd. Up to
-    /// [`MAX_FORMATION_UNITS`].
+    /// The most units one move order may send and still make formations; a bigger selection is
+    /// a crowd and moves as a group order. Up to [`MAX_FORMATION_UNITS`].
     #[serde(default = "default_formation_max_units")]
     pub formation_max_units: u16,
     /// The spacing of the lattice, as thousandths of what the widest body needs. 1000 to 3000.
@@ -436,7 +436,7 @@ mod tests {
                 s.formation_reform_tenths,
                 s.formation_patience_ticks
             ),
-            (3, 48, 1250, 1500, 900, 1000, 30, 300)
+            (3, 24, 1250, 1500, 900, 1000, 30, 300)
         );
         let with = |field: &str, value: &str| {
             SimSettings::from_ron(&format!(
@@ -447,7 +447,7 @@ mod tests {
         assert!(with("formation_min_units", "2").is_ok());
         assert!(with("formation_min_units", "1").is_err(), "a pair at least");
         assert!(
-            with("formation_min_units", "49").is_err(),
+            with("formation_min_units", "25").is_err(),
             "above the maximum"
         );
         assert!(with("formation_max_units", "256").is_ok());

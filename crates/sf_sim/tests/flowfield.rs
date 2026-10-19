@@ -286,7 +286,10 @@ fn world_with(budget: u32, threshold: Option<u32>) -> World {
 
 #[test]
 fn eight_soldiers_get_a_field_and_seven_do_not() {
-    let mut w = world();
+    // The threshold of groups that are not formations: the units of a formation get a field
+    // from two of a class (WP4.6, `a_class_of_a_formation_gets_a_field_from_two`).
+    let off = || world().with_formation(FormationConfig::OFF).unwrap();
+    let mut w = off();
     assert_eq!(w.flowfield_threshold(), sf_sim::DEFAULT_FLOWFIELD_THRESHOLD);
     let seven = block(&mut w, SOLDIER, 7, 4, 4, 4);
     group_order(&mut w, &seven, (20, 30));
@@ -300,7 +303,7 @@ fn eight_soldiers_get_a_field_and_seven_do_not() {
     assert!(w.path_stats().jobs_done >= 7, "seven routes of their own");
     assert_eq!(w.path_stats().fields_built, 0);
 
-    let mut w = world();
+    let mut w = off();
     let eight = block(&mut w, SOLDIER, 8, 4, 4, 4);
     group_order(&mut w, &eight, (20, 30));
     w.step();
@@ -312,6 +315,32 @@ fn eight_soldiers_get_a_field_and_seven_do_not() {
     run_group(&mut w, &eight, 1500);
     assert_eq!(w.path_stats().fields_built, 1);
     assert_eq!(w.path_stats().jobs_done, 0, "not one route of their own");
+}
+
+#[test]
+fn a_class_of_a_formation_gets_a_field_from_two() {
+    // Three ferries are too few for a field of their own, but they march as a formation:
+    // without a field they would all be sent to the one point and arrive in a scramble.
+    let mut w = world();
+    let walkers = block(&mut w, SOLDIER, 10, 4, 4, 5);
+    let three = block(&mut w, FERRY, 3, 4, 8, 3);
+    let mut all = walkers.clone();
+    all.extend(&three);
+    group_order(&mut w, &all, (55, 5));
+    w.step();
+    assert_eq!(fields_in_use(&w), 2, "the walkers' and the ferries'");
+    assert!(w.route_of(three[0]).unwrap().field);
+    assert!(w.formation_of(three[0]).is_some());
+    // A single ferry in the order is no class of a formation.
+    let mut w = world();
+    let walkers = block(&mut w, SOLDIER, 10, 4, 4, 5);
+    let one = block(&mut w, FERRY, 1, 4, 8, 1);
+    let mut all = walkers.clone();
+    all.extend(&one);
+    group_order(&mut w, &all, (55, 5));
+    w.step();
+    assert_eq!(fields_in_use(&w), 1);
+    assert!(!w.route_of(one[0]).unwrap().field);
 }
 
 #[test]
@@ -412,8 +441,8 @@ fn mixed_classes_get_a_field_each_and_the_class_below_the_threshold_goes_alone()
         assert!(between(p, mid(55, 5)) <= Fx::from_int(5));
     }
 
-    // Three ferries are too few: they are routed on their own.
-    let mut w = world();
+    // Three ferries are too few: they are routed on their own (when they are no formation).
+    let mut w = world().with_formation(FormationConfig::OFF).unwrap();
     let walkers = block(&mut w, SOLDIER, 10, 4, 4, 5);
     let three = block(&mut w, FERRY, 3, 4, 8, 3);
     let mut all = walkers.clone();
