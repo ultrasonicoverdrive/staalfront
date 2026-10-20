@@ -204,8 +204,10 @@ state and not hashed.
 Since WP5.2 the projectiles in flight are hashed in a section of their own, `J`, written after `W` for as long
 as the world has a weapon table (and so never for a world without one): the slot count and free list of the
 projectile store and every projectile in flight. That is why `weapons_reload`, the only pinned scenario with a
-weapon table, was re-pinned in WP5.2 (it also moved because its shells take time now): `0x5a1bca1ebf1efa16`
-to `0x20a067e16e098d0b`; no other pinned checksum moved.
+weapon table, was re-pinned in WP5.2: `0x5a1bca1ebf1efa16` to `0x20a067e16e098d0b`. The final value moved
+**only** because of section `J`: with that section left out the branch ends on the WP5.1 value, because every
+shell has landed by the last tick and the end state is the same. (The flight times show in the checkpoints in
+between and in the asserts: the heavy tank D goes down at tick 427, not 423.) No other pinned checksum moved.
 
 `UnitStats` and the digests of the unit table (`digest`, the weapon reach digest of the orders
 section, the turret digest) are untouched: the weapons are a table of their own, so the sections that

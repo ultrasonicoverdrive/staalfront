@@ -154,7 +154,9 @@ Both fail if a hit point is changed between two decisions of a tick (checked by 
 
 Projectiles live in `Projectiles`: a slot vector, a generation per slot (bumped when the slot is freed), a
 free list used as a stack, and iteration in ascending slot order, like the entities but separate from them: a
-projectile is not an entity (no hit points, no orders, no cell). A `ProjectileId` is a slot and a generation.
+projectile is not an entity (no hit points, no orders, no cell). A `ProjectileId` is a slot and a generation. A
+slot whose generation is used up (`u32::MAX`) is **retired**: it is not put back on the free list, so it is never
+reused and its last id stays stale for ever (the rule for entity slots in `World::despawn`).
 
 The store is hashed in checksum section `J`, **written for as long as the world has a weapon table** (and only
 then, like the weapons section `W` it follows): the slot count, the free list, and every projectile in flight in

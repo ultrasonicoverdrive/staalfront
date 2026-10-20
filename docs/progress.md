@@ -1028,10 +1028,11 @@ table, and never otherwise, so no world without a table changed: `wander_5000` 0
 `command_mix` 0x43f6583004258ceb, `terrain_256` 0xb577112845e0097e, `units_spawn` 0x6c369f42be150d6e,
 `bridge_200` 0x03971fcc3548fc0c and `orders`, `terrain_costs`, `pathing`, `pathing_256`, `crowd_jam`, `turning`,
 `replan`, `formation_move` are the values they were (`crates/sf_sim/tests/golden.rs` too). **One re-pin:
-`weapons_reload` 0x5a1bca1ebf1efa16 to 0x20a067e16e098d0b**, for two reasons that cannot be told apart in the
-number: its cannon and howitzer shells take 4 and 15 ticks now (the heavy tank D goes down at tick 427, not
-423; the howitzer's six hits land 15 ticks after the shots), and the world has the projectile section. Its
-asserts changed with it: shots are launches (their `hp_after` is the target's hit points then), the hits are
+`weapons_reload` 0x5a1bca1ebf1efa16 to 0x20a067e16e098d0b**, and the only reason for the final value is the
+projectile section `J` (review round 1 of PR #59 left the section out and got the WP5.1 value back: every shell has
+landed by tick 600, so the end state is the same). The flight times, 4 and 15 ticks for the cannon and the
+howitzer, show in the checkpoints in between and in the asserts (the heavy tank D goes down at tick 427, not 423;
+the howitzer's six hits land 15 ticks after the shots), not in the final number. The asserts changed with it: shots are launches (their `hp_after` is the target's hit points then), the hits are
 read from the impacts, and `hp_after` of the riflemen is the end-of-tick value (the old test summed a running total
 that depended on the slot order).
 
@@ -1053,6 +1054,11 @@ that loses its target (unit tests).
 flies from a unit (light tank, heavy tank, artillery, rocket thrower, heavy gun team) at a heavy tank at its full
 range from 24 launch headings and requires the first shell to hit. The gunboat (needs water) and the structure
 with the emplacement gun (a structure takes no order; WP5.4) are not in it.
+
+**Slot generations.** A projectile slot whose generation cannot be bumped any further (`u32::MAX`) is retired, not
+put back on the free list, like an entity slot (`World::despawn`): a stale `ProjectileId` can never be mistaken
+for a later projectile. A unit test ages a slot to the last generation. No checksum can differ before a slot
+reaches it.
 
 **Deferred, and why.**
 

@@ -314,6 +314,41 @@ fn the_store_reuses_the_last_freed_slot_and_bumps_the_generation() {
 }
 
 #[test]
+fn a_slot_whose_generation_is_used_up_is_retired_and_its_ids_stay_stale() {
+    let mut s = Projectiles::default();
+    s.insert(filler());
+    s.insert(filler());
+    // Age slot 0 to one before the last generation, as a very long game would.
+    s.generation[0] = u32::MAX - 1;
+    let old = ProjectileId::new(0, u32::MAX - 1);
+    assert!(s.get(old).is_some());
+    s.remove(0);
+    // The last generation is still usable: the slot is freed and reused once more.
+    assert_eq!(s.free, [0]);
+    let last = s.insert(filler());
+    assert_eq!(last, ProjectileId::new(0, u32::MAX));
+    assert!(s.get(old).is_none());
+    // Freeing it cannot bump the generation any further: the slot is retired, not put on the free
+    // list, and the id of its last projectile is stale for good.
+    s.remove(0);
+    assert!(s.free.is_empty());
+    assert!(s.get(last).is_none());
+    assert_eq!(s.len(), 1);
+    // The next launches take new slots; none of them can alias the retired id.
+    let next = s.insert(filler());
+    let after = s.insert(filler());
+    assert_eq!([next.index(), after.index()], [2, 3]);
+    assert!(s.get(last).is_none() && s.get(old).is_none());
+    assert_eq!(s.slot_count(), 4);
+    // Removing the retired slot again does nothing.
+    let before = s.clone();
+    s.remove(0);
+    assert_eq!(s, before);
+    // A retired slot is never iterated or hashed as live.
+    assert!(s.iter().all(|(id, _)| id.index() != 0));
+}
+
+#[test]
 fn every_part_of_a_projectile_is_in_the_hash_and_putting_it_back_puts_the_hash_back() {
     let hash = |s: &Projectiles| {
         let mut h = Fnv1a64::new();

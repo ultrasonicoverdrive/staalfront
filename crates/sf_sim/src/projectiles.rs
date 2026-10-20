@@ -417,7 +417,8 @@ fn fly_guided(
     None
 }
 
-/// Every projectile in flight: a slot vector with a free list and a generation per slot.
+/// Every projectile in flight: a slot vector with a free list and a generation per slot. A slot whose
+/// generation is used up is retired, not reused (see [`Projectiles::remove`]).
 #[derive(Clone, PartialEq, Eq, Default, Debug)]
 pub(crate) struct Projectiles {
     /// How often each slot has been freed.
@@ -455,12 +456,19 @@ impl Projectiles {
     }
 
     /// Frees slot `index` and bumps its generation. Does nothing for a slot that is already free.
+    ///
+    /// The generation never wraps and never sticks: a slot whose generation cannot be bumped any further
+    /// is **retired** (not put on the free list, so it is never used again) and its last id stays stale for
+    /// good, the same rule as for the entities (`World::despawn`). Otherwise a stale id could be mistaken
+    /// for a new projectile that reuses the slot.
     pub fn remove(&mut self, index: u32) {
         let i = index as usize;
         if self.rows.get(i).is_some_and(Option::is_some) {
             self.rows[i] = None;
-            self.generation[i] = self.generation[i].saturating_add(1);
-            self.free.push(index);
+            if let Some(next) = self.generation[i].checked_add(1) {
+                self.generation[i] = next;
+                self.free.push(index);
+            }
             self.live -= 1;
         }
     }

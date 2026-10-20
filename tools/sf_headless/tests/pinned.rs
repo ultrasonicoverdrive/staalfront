@@ -192,9 +192,10 @@ fn formation_move_matches_the_pinned_checksum() {
 
 /// Weapons and reload (WP5.1): riflemen, two tanks and two howitzers fire at what their attack
 /// orders name, one shot per reload window, a burst of two, a minimum range, a victim shot down to
-/// zero. Pinned in WP5.1; re-pinned in WP5.2 (`0x5a1bca1ebf1efa16` to `0x20a067e16e098d0b`): the
-/// cannons and the howitzer launch projectiles now, so the hits land a few ticks after the shots,
-/// and the checksum has a projectile section (`tests/weapons_reload.rs` asserts the shots).
+/// zero. Pinned in WP5.1; re-pinned in WP5.2 (`0x5a1bca1ebf1efa16` to `0x20a067e16e098d0b`) **only**
+/// because the world hashes a projectile section (`J`) now: the run ends in the same state, as every
+/// shell has landed by the last tick, but the shells take time on the way (`tests/weapons_reload.rs`
+/// asserts the shots and impacts).
 #[test]
 fn weapons_reload_matches_the_pinned_checksum() {
     check("weapons_reload", WEAPONS_RELOAD_EXPECTED);

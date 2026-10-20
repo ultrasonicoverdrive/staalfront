@@ -429,10 +429,10 @@ pub fn sim_definitions(types: &TerrainTypes, costs: &MovementCosts) -> Vec<sf_si
 /// Reads the unit definitions in `<scenario directory>/<name>/` (the model and
 /// icon files they name are looked up under `<scenario directory>/..`, the
 /// assets directory) and turns them into the simulation's unit table and
-/// movement table, with the movement costs they came from.
-/// Reads the definitions in directory `name`. The weapon table is built only for a scenario with
-/// `combat` (it is the only one that hands it to a world), so a frozen copy that predates a rule the
-/// table has to meet (WP5.2: a projectile that flies needs a speed) still loads for the scenarios that
+/// movement table, with the movement costs they came from. The weapon table is
+/// built only for a scenario with `combat` (it is the only one that hands it to
+/// a world), so a frozen copy that predates a rule the table has to meet (WP5.2:
+/// a projectile that flies needs a speed) still loads for the scenarios that
 /// never fire.
 fn load_unit_defs(
     name: &str,

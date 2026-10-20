@@ -4,8 +4,10 @@
 //! shot per reload window to the tick, a burst of two a fixed gap apart, a minimum range, a victim
 //! shot down to zero hit points and then left alone, a reload that an order change does not
 //! reset, and that the same scenario without `combat` fires nothing. The checksum is pinned in
-//! `assets/scenarios/weapons_reload.expected` (see `pinned.rs`); it moved in WP5.2 because the
-//! cannon and the howitzer fire projectiles now (see `docs/progress.md`).
+//! `assets/scenarios/weapons_reload.expected` (see `pinned.rs`). The final checksum moved in WP5.2 only
+//! because the world now hashes the (empty) projectile store, section `J`: without that section the run
+//! ends on the WP5.1 value, since every shell has landed by tick 600. The shells' flight times show in the
+//! asserts below and in the checkpoints in between (the heavy tank D goes down at tick 427, not 423).
 //!
 //! The cast and the commands are written in `assets/scenarios/weapons_reload.ron`, which also
 //! lists the entity ids used below.
