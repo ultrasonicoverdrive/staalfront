@@ -40,7 +40,9 @@
 //! order walks to) and not within its minimum range, and the hull or turret points at it
 //! within the firing arc. The hit takes `damage` off the victim's hit points, saturating at
 //! zero, whatever the projectile kind, the damage type or the splash. A victim at zero hit points
-//! is not shot at, and a shooter at zero fires no more. Nothing is removed (WP5.5). Every shot is recorded in [`Shot`]s that
+//! is not shot at, and a shooter at zero fires no more. All the shots of a tick are decided from the
+//! hit points at the start of it and the damage is applied afterwards, so the outcome of a fight does
+//! not depend on which unit has the lower slot. Nothing is removed (WP5.5). Every shot is recorded in [`Shot`]s that
 //! [`World::shots`](crate::World::shots) lists for the last tick; they are not hashed (the
 //! hit points are).
 
@@ -423,7 +425,9 @@ pub struct Shot {
     pub slot: u8,
     /// The damage of the weapon, before it was taken off the target's hit points.
     pub damage: u32,
-    /// The target's hit points after the hit.
+    /// The target's hit points after this hit and the hits recorded before it in the same tick
+    /// (all the hits of a tick land together; this is a running total in the order of the
+    /// attackers' slots).
     pub hp_after: u32,
 }
 
@@ -490,8 +494,10 @@ impl Arsenal {
     }
 }
 
-/// Runs one tick of every weapon, in ascending slot order, after the units have moved and
-/// the turrets turned: the reloads count down and the placeholder shots are fired.
+/// Runs one tick of every weapon after the units have moved and the turrets turned: the
+/// reloads count down and the placeholder shots are fired, in two passes. The first goes
+/// through the entities in ascending slot order and decides every shot from the hit points at
+/// the start of the tick; the second applies the damage.
 pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arsenal, tick: Tick) {
     arsenal.shots.clear();
     if arsenal.is_empty() {
@@ -538,8 +544,6 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
                 }
                 continue;
             };
-            let hp_after = e.hp[j].saturating_sub(weapon.damage);
-            e.hp[j] = hp_after;
             let state = &mut e.weapon[i][s];
             // Shots left in this burst, this one included.
             let left = if state.burst_left > 0 {
@@ -561,9 +565,20 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
                 weapon: weapon.kind,
                 slot: s as u8,
                 damage: weapon.damage,
-                hp_after,
+                hp_after: 0,
             });
         }
+    }
+    // Second pass: the hits land. Nothing above changed a hit point, so who may shoot and who
+    // may be shot was decided from the state at the start of the tick, whatever the slot
+    // order: two units that kill each other both die, and two shooters that overkill one
+    // victim both fire and both reload. A victim's hit points take the sum of its hits,
+    // saturating at zero; the order only decides what each shot reports in `hp_after` (the
+    // hit points after this hit and the hits recorded before it in the tick).
+    for shot in shots.iter_mut() {
+        let j = shot.target.index() as usize;
+        e.hp[j] = e.hp[j].saturating_sub(shot.damage);
+        shot.hp_after = e.hp[j];
     }
 }
 

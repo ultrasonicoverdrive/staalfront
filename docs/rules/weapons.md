@@ -122,7 +122,7 @@ Height is presentation only (PLAN.md 1.3: no true 3D ballistics in v1): the flig
 the speed and the horizontal distance, not from the arc. A parameter on a kind that does not use it
 (a `guide_turn` on a `Straight` weapon) is refused, so a typo cannot hide.
 
-The weapons of the shipped file at full range: a light-tank shell takes about 3 ticks (30 cells a
+The weapons of the shipped file at full range: a light-tank shell takes about 3.3 ticks (30 cells a
 second), a rocket about 8, a howitzer shell about 14. The fuse and the detonation (analysis section 8)
 are WP5.2's; a fuse time, if it needs one, becomes another optional field.
 
@@ -182,11 +182,11 @@ scenario says `combat: true` (and has `unit_defs`).
 
 ### The checksum
 
-The weapon state of every entity is hashed in a new section, `W`, written **last and only while some
-live entity has a weapon that is reloading or in a burst** (`checksum.rs`): the table's digest, then
-each such entity in slot order with, for each of its four slots, `wait` and `burst_left`. A world
-without a table, and a world whose weapons never fired or have all reloaded, hashes exactly as before.
-That is why no pinned checksum of an earlier phase moved: `wander_5000`, `command_mix`, `terrain_256`,
+The weapon state of every entity is hashed in a new section, `W`, written **last and for as long as the
+world has a weapon table** (`checksum.rs`): the table's digest, the number of entities that have a weapon
+reloading or in a burst, and each of them in slot order with, for each of its four slots, `wait` and
+`burst_left`. Peers with different tables therefore differ from the first tick, not from the first shot. A
+world without a table hashes exactly as before (the section does not exist for it). That is why no pinned checksum of an earlier phase moved: `wander_5000`, `command_mix`, `terrain_256`,
 `units_spawn`, `orders`, `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`,
 `turning`, `replan` and `formation_move` are the values they were. The hit points the shots take are in
 the units section already. The shots listed by `World::shots` are not state and not hashed.
@@ -200,18 +200,27 @@ the earlier scenarios pin do not change.
 WP5.2 to WP5.4 replace this part, step by step; it exists so that the data and the reload are
 exercised and a scenario can pin them.
 
-After the units have moved and the turrets turned, for every entity in ascending slot order and every
-weapon slot of it in order: the wait counts down; when it is zero and the entity's **current order is
-`Attack`** on a live victim other than itself, the weapon fires if
+After the units have moved and the turrets turned, in **two passes**.
+
+The first goes through the entities in ascending slot order and every weapon slot of each in order: the
+wait counts down; when it is zero and the entity's **current order is `Attack`** on a live victim other
+than itself, the weapon fires if
 
 1. the victim has hit points (zero means it cannot be hurt, or has been shot down: see below), and
    so has the shooter (a unit whose kind has hit points but has none left fires no more),
 2. it is in reach and not inside the minimum range, as above,
 3. the hull or the turret points at it within the arc.
 
-A shot is an instant hit, whatever the `projectile` says: the victim's hit points go down by
-`damage`, saturating at zero, and a `Shot` (tick, attacker, victim, weapon, slot, damage, hit points
-after) is recorded for the tick. The `damage_type`, the splash and the armor play no part. Nothing is
+Nothing in this pass changes a hit point, so **every shot of a tick is decided from the hit points at the
+start of the tick**, whatever the slots: two units that kill each other both die, two shooters that overkill
+one victim both fire and both spend their reload, and a unit that is shot down on a tick still fires on it.
+The outcome of a fight does not depend on which unit was spawned first (tests spawn the units in every order).
+
+The second pass lands the hits. A shot is an instant hit, whatever the `projectile` says: the victim's hit
+points go down by `damage`, the sum of its hits of the tick saturating at zero, and a `Shot` (tick,
+attacker, victim, weapon, slot, damage, hit points after) is recorded for the tick. `hp_after` is a running
+total in the order of the attackers' slots (this hit and the ones recorded before it in the tick), so it is
+the one thing that depends on the order; it is a report and is not hashed. The `damage_type`, the splash and the armor play no part. Nothing is
 removed when a victim reaches zero (WP5.5): it stays where it is, is not fired at again, and the attacker
 keeps its order. Orders other than `Attack` (attack-move, guard, hold, a unit that is idle) fire
 nothing: target choice is WP5.4. There is no check of whose unit the victim is.

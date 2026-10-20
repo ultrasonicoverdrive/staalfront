@@ -911,15 +911,17 @@ the weapon waits the tail of the reload.
 
 **The placeholder, and why it is in WP5.1.** The brief asked for the data to be exercised. Reload state with
 nothing that fires could only be tested by poking the entity columns; a unit with an `Attack` order that is in
-reach, reloaded and aimed fires an instant hit that takes `damage` off the victim's hit points (saturating at
-zero), and a `Shot` is recorded for the tick (`World::shots`, `StepReport::shots`; derived, not hashed). Not
+reach, reloaded and aimed fires an instant hit that takes `damage` off the victim's hit points (the hits of a tick
+land together, saturating at zero; every shot is decided from the hit points at the start of the tick, so the outcome
+of a fight does not depend on the slot order, review round 1), and a `Shot` is recorded for the tick (`World::shots`, `StepReport::shots`; derived, not hashed). Not
 done there on purpose: the projectile kind, the damage type, the splash and the armor (WP5.2, WP5.3); any order
 other than `Attack`, any choice of target (WP5.4); removing a victim at zero (WP5.5: it stays, is not shot again,
 and the attacker keeps its order); a check of whose unit the victim is. `sf_game` does not give its world a table
 yet: nothing there would show a shot and a unit shot to zero would stand as before.
 
-**Checksums.** The weapon section is last and written only while some live entity has a slot that is not at rest,
-so a world without a table, and one whose weapons never fired or have all reloaded, hashes as before. No pinned value
+**Checksums.** The weapon section is last and written for as long as the world has a weapon table (the table's
+digest, then every entity with a weapon that is not at rest), so peers with different tables differ from the first
+tick (review round 1; it first appeared only while a weapon was busy). A world without a table hashes as before. No pinned value
 moved: `wander_5000` 0x38d5e3c43358a889, `command_mix` 0x43f6583004258ceb, `terrain_256` 0xb577112845e0097e,
 `units_spawn` 0x6c369f42be150d6e, `bridge_200` 0x03971fcc3548fc0c, and `orders`, `terrain_costs`, `pathing`,
 `pathing_256`, `crowd_jam`, `turning`, `replan` and `formation_move` (`orders`, `turning` and `replan` have attack orders in them but no
@@ -951,7 +953,15 @@ at tick 205 fires at 219 with the others, not at 205. The same scenario without 
 5. **`UnitStats::weapon_range` and the weapon table both carry the first weapon's range.** The world refuses a
    table where they differ; one of them goes when the target choice (WP5.4) reads the table for reach.
 6. **`sf_game` has no weapons yet** (above): one line in the world setup once WP5.4 and WP5.5 land.
-7. **The three follow-ups of the WP4.6 review** are items 11 to 13 of the open items in the Phase 4 close-out.
+7. **For WP5.2: the rocket cannot turn inside its own range.** With `guide_turn: 4` facing steps a tick at 12 cells
+   a second the turning radius is about 6.1 cells, larger than the rocket's range of 5; a guided rocket that has to
+   turn more than a few steps will miss. Raise `guide_turn`, lower `projectile_speed`, or let WP5.2 give the rocket a
+   launch direction; decide when the flight is built (review round 1).
+8. **`orders`, `replan` and `turning` will move once combat is on.** They have attack orders in them and run
+   without `combat`, so they are pinned as before; with `combat: true` the reviewer measured them ending at
+   `0x2397af78accc9214`, `0xbffd31b0686836f6` and `0x10f846dd7d437bdb`. Whichever WP turns combat on for them
+   (WP5.4, when units choose targets and sf_game gets its table) re-pins them with the reason (review round 1).
+9. **The three follow-ups of the WP4.6 review** are items 11 to 13 of the open items in the Phase 4 close-out.
 
 ## Phase 1 report (draft, WP1.14)
 

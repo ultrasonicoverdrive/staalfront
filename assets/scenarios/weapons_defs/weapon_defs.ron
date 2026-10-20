@@ -40,7 +40,7 @@
         // Demolition team: destroys any structure on contact, so the range is
         // touching distance and the damage is more than any structure's hit points.
         (kind: 5, id: "satchel_charge", range: 0.5, reload: 1, damage: 5000, damage_type: "demolition", projectile: Instant), // placeholder: range, reload, damage
-        // light_tank: the shell crosses the full range in about 4 ticks.
+        // light_tank: the shell crosses the full range in about 3.3 ticks.
         (kind: 6, id: "cannon", range: 5, reload: 2, damage: 35, damage_type: "cannon", projectile: Straight, projectile_speed: 30, mount: Turret), // placeholder: reload, damage, speed
         // heavy_tank: two barrels, a volley of two shots a quarter second apart (the 60 hit points of
         // the old single shot, split in two).

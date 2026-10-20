@@ -98,17 +98,18 @@ fn rest_is_ready_with_no_burst() {
 }
 
 #[test]
-fn every_part_of_the_state_is_in_the_checksum_and_only_while_it_is_not_at_rest() {
+fn every_part_of_the_state_is_in_the_checksum_and_putting_it_back_puts_the_checksum_back() {
     let mut w = world();
     let i = spawn(&mut w);
     let rest = w.checksum();
-    // At rest the section is absent: the checksum is what it would be without the table.
+    // At rest the section holds the table and nobody: the checksum differs from the world that
+    // has no table, from the first tick.
     let mut unarmed = World::new(WorldConfig::new(1).with_map_size(32, 32))
         .unwrap()
         .with_units(w.unit_table().clone())
         .unwrap();
     spawn(&mut unarmed);
-    assert_eq!(rest, unarmed.checksum());
+    assert_ne!(rest, unarmed.checksum());
     // Each field of each slot moves it, and putting it back puts the checksum back.
     let mut seen = vec![rest];
     for (slot, wait, burst_left) in [

@@ -24,9 +24,11 @@ const DUMMY: Kind = Kind(4);
 const THIN: Kind = Kind(5);
 const ROCK: Kind = Kind(6);
 const WEAK: Kind = Kind(7);
+const FRAIL: Kind = Kind(8); // seven hit points, and a gun that does seven, all round
 
 const GUN: u16 = 10; // reload 5, one shot of 7, range 4
 const TWIN: u16 = 11; // reload 8, two shots of 10 three ticks apart, range 5, on the turret
+const ZAP: u16 = 13; // reload 5, one shot of 7, range 4, all round
 const SHELL: u16 = 12; // reload 12, one shot of 20, range 10, not nearer than 3, on the turret
 
 fn unit(kind: Kind, hp: u32, range: i32, turret: u8) -> UnitStats {
@@ -57,6 +59,7 @@ fn units() -> UnitTable {
         unit(DUMMY, 1000, 0, 0),
         unit(THIN, 15, 0, 0),
         unit(WEAK, 10, 0, 0),
+        unit(FRAIL, 7, 4, 0),
         rock,
     ])
     .unwrap()
@@ -92,6 +95,10 @@ fn weapons() -> Vec<WeaponStats> {
             ..weapon(TWIN, 5, 8, 10)
         },
         WeaponStats {
+            fire_arc: 128,
+            ..weapon(ZAP, 4, 5, 7)
+        },
+        WeaponStats {
             min_range: Fx::from_int(3),
             mount: Mount::Turret,
             projectile: ProjectileKind::Arc,
@@ -112,6 +119,7 @@ fn loadouts() -> Vec<Loadout> {
         loadout(GUNNER, &[GUN]),
         loadout(TANK, &[TWIN]),
         loadout(MORTAR, &[SHELL]),
+        loadout(FRAIL, &[ZAP]),
     ]
 }
 
@@ -707,35 +715,50 @@ fn a_hull_weapon_waits_for_the_hull() {
 // ---- the checksum ----------------------------------------------------------------------------
 
 #[test]
-fn an_armed_world_hashes_as_an_unarmed_one_until_something_fires() {
-    let build = |with_weapons: bool| {
-        let mut w = if with_weapons { armed() } else { base() };
+fn a_world_with_a_weapon_table_differs_from_one_without_from_the_first_tick() {
+    // The table is in the checksum for as long as the world has one, so peers with different
+    // tables (or one with and one without) disagree at once, not at the first shot.
+    let build = |table: Option<WeaponTable>| match table {
+        Some(table) => base().with_weapons(table).unwrap(),
+        None => base(),
+    };
+    let mut tweaked = weapons();
+    tweaked[0].damage += 1;
+    let tweaked = WeaponTable::new(tweaked, loadouts()).unwrap();
+    let mut worlds = [build(None), build(Some(table())), build(Some(tweaked))];
+    let first: Vec<u64> = worlds.iter_mut().map(|w| w.step().checksum).collect();
+    assert_ne!(first[0], first[1]);
+    assert_ne!(first[1], first[2]);
+    assert_ne!(first[0], first[2]);
+    // And a world without a table is what it always was: the section does not exist for it
+    // (the pinned scenarios of the earlier phases fix that).
+    assert!(worlds[0].weapon_table().is_empty());
+}
+
+#[test]
+fn a_shot_changes_the_checksum_of_a_world_that_has_a_table() {
+    // Two armed worlds that differ only in whether the tank has been given its order.
+    let build = |order: bool| {
+        let mut w = armed();
         let tank = spawn(&mut w, TANK, at(10, 10));
-        let dummy = spawn(&mut w, DUMMY, at(30, 10));
-        tick_with(&mut w, vec![attack(tank, dummy)]);
+        let dummy = spawn(&mut w, DUMMY, at(14, 10));
+        if order {
+            tick_with(&mut w, vec![attack(tank, dummy)]);
+        } else {
+            tick_with(&mut w, vec![]);
+        }
         w
     };
     let (mut a, mut b) = (build(true), build(false));
-    // The tank has a long way to go: for as long as it does, the two worlds are bit for bit alike.
-    for _ in 0..60 {
-        a.step();
-        b.step();
-        assert_eq!(a.checksum(), b.checksum());
-        assert!(a.shots().is_empty());
-    }
-    assert_eq!(a.checksum_history(), b.checksum_history());
-    // Once it fires, the weapons are in the checksum, and so are the hit points.
     let mut fired = false;
-    for _ in 0..600 {
+    for _ in 0..100 {
         a.step();
         b.step();
-        if !a.shots().is_empty() {
-            fired = true;
-            assert_ne!(a.checksum(), b.checksum());
-            break;
-        }
+        fired |= !a.shots().is_empty();
     }
     assert!(fired);
+    assert_ne!(a.checksum(), b.checksum());
+    assert!(b.shots().is_empty());
 }
 
 #[test]
@@ -787,4 +810,134 @@ fn a_despawned_victim_ends_the_shooting() {
     let fresh = spawn(&mut w, DUMMY, at(13, 10));
     assert_ne!(fresh, dummy);
     assert!(run(&mut w, 20).is_empty());
+}
+
+// ---- the order of the slots does not decide a fight ---------------------------------------------
+
+/// What a skirmish came to, by the position of each unit (not by its slot).
+#[derive(Debug, PartialEq, Eq)]
+struct Outcome {
+    /// Hit points at the end.
+    hp: Vec<u32>,
+    /// Who shot whom on the tick the orders were given, as (shooter, victim) positions, sorted.
+    first_tick: Vec<(usize, usize)>,
+    /// Shots over the whole run.
+    total: usize,
+    /// Ticks until each unit may fire again, after the first tick.
+    waits_after_first: Vec<u32>,
+}
+
+const SPOTS: [(i32, i32); 3] = [(10, 10), (13, 10), (11, 13)];
+
+/// Seven-hit-point units at the first `n` spots, spawned in `order` (so the slot of each differs
+/// between runs), with `links` as attack orders given on one tick. Returns the outcome and the
+/// checksum of the end.
+fn skirmish(n: usize, links: &[(usize, usize)], order: &[usize]) -> (Outcome, u64) {
+    let mut w = armed();
+    let mut ids = vec![EntityId::new(0, 0); n];
+    for &p in order {
+        ids[p] = spawn(&mut w, FRAIL, at(SPOTS[p].0, SPOTS[p].1));
+    }
+    let pos_of = |id: EntityId| ids.iter().position(|&i| i == id).unwrap();
+    let commands = links.iter().map(|&(a, b)| attack(ids[a], ids[b])).collect();
+    let first = tick_with(&mut w, commands);
+    let mut first_tick: Vec<(usize, usize)> = first
+        .iter()
+        .map(|s| (pos_of(s.attacker), pos_of(s.target)))
+        .collect();
+    first_tick.sort_unstable();
+    let waits_after_first = ids.iter().map(|&i| w.weapon_wait(i, 0).unwrap()).collect();
+    let total = first.len() + run(&mut w, 30).len();
+    let hp = ids.iter().map(|&i| w.hp_of(i).unwrap()).collect();
+    (
+        Outcome {
+            hp,
+            first_tick,
+            total,
+            waits_after_first,
+        },
+        w.checksum(),
+    )
+}
+
+fn permutations(n: usize) -> Vec<Vec<usize>> {
+    if n == 1 {
+        return vec![vec![0]];
+    }
+    let mut out = Vec::new();
+    for rest in permutations(n - 1) {
+        for at in 0..=rest.len() {
+            let mut p = rest.clone();
+            p.insert(at, n - 1);
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// Runs the skirmish in every spawn order and expects one outcome, and the same checksum every
+/// time the same order is played again.
+fn in_every_order(n: usize, links: &[(usize, usize)]) -> Outcome {
+    let mut seen: Option<Outcome> = None;
+    for order in permutations(n) {
+        let (outcome, checksum) = skirmish(n, links, &order);
+        assert_eq!(skirmish(n, links, &order).1, checksum, "{order:?} repeats");
+        match &seen {
+            Some(first) => assert_eq!(&outcome, first, "spawn order {order:?}"),
+            None => seen = Some(outcome),
+        }
+    }
+    seen.unwrap()
+}
+
+#[test]
+fn two_units_that_kill_each_other_both_die() {
+    let o = in_every_order(2, &[(0, 1), (1, 0)]);
+    assert_eq!(o.hp, [0, 0]);
+    assert_eq!(o.first_tick, [(0, 1), (1, 0)]);
+    assert_eq!(o.total, 2);
+    // Both spent their reload.
+    assert_eq!(o.waits_after_first, [5, 5]);
+}
+
+#[test]
+fn two_shooters_that_overkill_one_victim_both_fire_and_both_reload() {
+    let o = in_every_order(3, &[(0, 2), (1, 2)]);
+    assert_eq!(o.hp, [7, 7, 0]);
+    assert_eq!(o.first_tick, [(0, 2), (1, 2)]);
+    assert_eq!(o.total, 2);
+    assert_eq!(o.waits_after_first, [5, 5, 0]);
+}
+
+#[test]
+fn a_ring_of_three_kills_all_three() {
+    let o = in_every_order(3, &[(0, 1), (1, 2), (2, 0)]);
+    assert_eq!(o.hp, [0, 0, 0]);
+    assert_eq!(o.first_tick, [(0, 1), (1, 2), (2, 0)]);
+    assert_eq!(o.total, 3);
+    assert_eq!(o.waits_after_first, [5, 5, 5]);
+}
+
+#[test]
+fn a_unit_that_is_shot_down_on_a_tick_still_fires_on_that_tick() {
+    // 0 shoots 1 and 1 shoots 2 on the same tick: 1 dies, and its shot at 2 still lands.
+    let o = in_every_order(3, &[(0, 1), (1, 2)]);
+    assert_eq!(o.hp, [7, 0, 0]);
+    assert_eq!(o.first_tick, [(0, 1), (1, 2)]);
+    assert_eq!(o.total, 2);
+}
+
+#[test]
+fn damage_is_the_sum_of_the_hits_of_the_tick_saturating_at_zero() {
+    // Both shooters hit a victim that cannot take two: the reports are a running total in slot
+    // order, the hit points the same whoever has the lower slot.
+    let mut w = armed();
+    let a = spawn(&mut w, FRAIL, at(10, 10));
+    let b = spawn(&mut w, FRAIL, at(13, 10));
+    let v = spawn(&mut w, DUMMY, at(11, 12));
+    let shots = tick_with(&mut w, vec![attack(a, v), attack(b, v)]);
+    assert_eq!(shots.len(), 2);
+    assert_eq!(shots[0].hp_after, 1000 - 7);
+    assert_eq!(shots[1].hp_after, 1000 - 14);
+    assert_eq!(w.hp_of(v), Some(1000 - 14));
 }
