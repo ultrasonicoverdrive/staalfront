@@ -161,8 +161,10 @@ for ever holds up its queue and turns a deadlock of two units into one that neve
 
 ## Attack, attack-move and guard: what exists and what phase 5 fills in
 
-There is **no combat** in this work package: nothing fires and no hit point changes.
-What exists is the movement part and the state:
+There is **no combat** in this work package: nothing fires and no hit point changes. (Since
+WP5.1 a world that is given a weapon table fires at the victim of an `Attack` order, as a
+placeholder: [`weapons.md`](weapons.md). Without a table, which is every world of the
+scenarios of phases 3 and 4, nothing changes.) What exists is the movement part and the state:
 
 * `Attack`: the unit walks until its distance to the target's middle is at most
   *weapon range + the target's radius* and then stops and turns toward it. The target's
@@ -186,12 +188,15 @@ What exists is the movement part and the state:
    returns to its post afterwards (the point guard already walks back).
 2. Idle units are skipped by the behaviour pass (`advance_all`), so the automatic return
    fire of an idle unit needs a pass of its own.
-3. Firing: reload timers, the minimum range of the howitzer (`min_range` is in the
-   weapon data, not in the table yet), more than the first weapon, damage. The order
-   `Attack` then also needs an end: the target dying is already one; leaving sight is
+3. Firing: **WP5.1 did the reload timers, the minimum range, more than the first weapon and
+   a placeholder instant hit** (`weapons.md`); projectiles are WP5.2, armor and splash WP5.3. The
+   order `Attack` then also needs an end: the target dying is already one; leaving sight is
    WP8's.
-4. `UnitStats::weapon_range` becomes the weapon list when WP5.1 puts the weapons into the
-   sim; the table's digest then covers them (today they are hashed with the orders, below).
+4. `UnitStats::weapon_range` stays the range of the first weapon (the reach of an attack order);
+   the weapon list is a table of its own, `sf_sim::WeaponTable`, with a digest of its own in
+   the weapons section of the checksum, so the weapon reach digest in the orders section, which
+   the pinned scenarios fix, is unchanged. The world refuses a table whose first weapon of a
+   kind has another range than `weapon_range`.
 
 ## Scatter
 

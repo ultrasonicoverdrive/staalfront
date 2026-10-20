@@ -25,7 +25,7 @@ use sf_math::Fx;
 use super::classes::ClassTables;
 use super::decimal::Decimal;
 use super::unit::{Category, Faction, Flags, UnitDef};
-use super::weapon::{Projectile, WeaponDef};
+use super::weapon::{Projectile, WeaponDef, WeaponMount};
 
 /// A weapon for the simulation.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -46,6 +46,27 @@ pub struct SimWeaponDef {
     pub projectile: Projectile,
     /// Splash radius in cells (zero for none).
     pub splash_radius: Fx,
+    /// Projectile speed in cells per game second (for tools and display);
+    /// zero when the file gives none and for an `Instant` weapon.
+    pub projectile_speed: Fx,
+    /// Projectile speed per tick, rounded once from the exact decimal like a
+    /// unit's `speed_per_tick`; what a projectile moves by (WP5.2).
+    pub projectile_speed_per_tick: Fx,
+    /// Height of the arc or the drop in cells; zero for none.
+    pub flight_height: Fx,
+    /// Facing steps (of 256) per tick a guided projectile steers; zero for
+    /// none.
+    pub guide_turn_per_tick: u8,
+    /// Shots per burst, at least 1.
+    pub burst: u8,
+    /// Ticks between the shots of a burst; zero exactly when `burst` is 1.
+    /// Over the whole burst it is shorter than the reload:
+    /// `(burst - 1) * burst_delay_ticks < reload_ticks`.
+    pub burst_delay_ticks: u32,
+    /// What the weapon aims with.
+    pub mount: WeaponMount,
+    /// Half the width of the firing arc in facing steps (of 256), 0 to 128.
+    pub fire_arc: u8,
 }
 
 /// The abilities of a role, with references turned into kind numbers.
@@ -170,6 +191,14 @@ pub(crate) fn convert_weapons(
                     .ok_or_else(|| format!("weapon {}: damage type", w.id))?,
                 projectile: w.projectile,
                 splash_radius: w.splash_radius.to_fx(),
+                projectile_speed: w.projectile_speed.to_fx(),
+                projectile_speed_per_tick: w.projectile_speed.to_fx_per_tick(),
+                flight_height: w.flight_height.to_fx(),
+                guide_turn_per_tick: w.guide_turn,
+                burst: w.burst,
+                burst_delay_ticks: ticks(w.burst_delay, &w.id)?,
+                mount: w.mount,
+                fire_arc: w.fire_arc,
             })
         })
         .collect()

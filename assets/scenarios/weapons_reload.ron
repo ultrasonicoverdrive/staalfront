@@ -1,0 +1,69 @@
+// Weapons and reload (WP5.1, docs/rules/weapons.md), on a 64 by 64 cell open map (no terrain layer).
+// A unit with an attack order walks into reach and fires its weapons at the victim: an instant hit
+// that takes the weapon's damage off the victim's hit points (the placeholder that WP5.2 to WP5.4
+// replace). What the run shows: the reload (a weapon fires once per reload window, to the tick), a
+// burst (two cannon shots five ticks apart), a minimum range (the howitzer too close to its target
+// never fires), a victim that is shot down to zero hit points and then left alone, and a reload
+// that an order change does not reset.
+// CI runs it on Linux and Windows and requires the checksum in weapons_reload.expected;
+// tools/sf_headless/tests/weapons_reload.rs asserts the shots along the way.
+//
+// `unit_defs` names a FROZEN copy of the definitions (weapons_defs/): the reloads, damages and
+// ranges the assertions stand on are the ones in that copy, so a rebalance of assets/config/ does
+// not move this checksum. `combat: true` gives the world the weapon table; without it (as in every
+// earlier scenario) nothing fires.
+// Owners: 0 Meridian, 1 Veyran.
+//
+// Entity ids, all at generation 0, in the order the spawns are written:
+//    0  power_plant P (kind 1, 600 hp)   owner 1  cell (50, 10)   target of three riflemen
+//    1  rifleman R1 (12, rifle)          owner 0  cell (43, 9)    attacks P
+//    2  rifleman R2 (12)                 owner 0  cell (43, 11)   attacks P
+//    3  rifleman R3 (12)                 owner 0  cell (43, 13)   attacks P; stopped at tick 200 and told
+//                                                                 to attack again at tick 205: its reload
+//                                                                 runs on while it is idle
+//    4  scout S (15, 25 hp)              owner 1  cell (20, 50)   shot down by R4 (six hit points a shot)
+//    5  rifleman R4 (12)                 owner 0  cell (16, 50)   attacks S
+//    6  heavy_tank D (20, 900 hp)        owner 1  cell (10, 20)   target of both tanks
+//    7  light_tank L (19, cannon)        owner 0  cell (2, 20)    attacks D: one shell of 35 every 40 ticks
+//    8  heavy_tank H (20, twin cannon)   owner 0  cell (2, 24)    attacks D: a burst of two shells of 30,
+//                                                                 five ticks apart, every 40 ticks
+//    9  siege_artillery A2 (21, howitzer) owner 0 cell (40, 40)   attacks E, ten cells off: 90 every 100 ticks
+//   10  heavy_tank E (20, 900 hp)        owner 1  cell (40, 30)   target of A2
+//   11  siege_artillery A1 (21)          owner 0  cell (56, 50)   attacks V from two cells: inside the
+//                                                                 minimum range of three, so it never fires
+//   12  rifleman V (12)                  owner 1  cell (58, 50)   the target that is too close
+Scenario(
+    name: "weapons_reload",
+    seed: 0x0A55_0510,
+    map: (width: 64, height: 64),
+    unit_defs: Some("weapons_defs"),
+    combat: true,
+    ticks: 600,
+    commands: [
+        // --- the cast, at tick 0 ---
+        (tick: 0, command: PlaceStructure(kind: 1, owner: 1, cell: (50, 10))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (43, 9))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (43, 11))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (43, 13))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 1, cell: (20, 50))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (16, 50))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (10, 20))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (2, 20))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 0, cell: (2, 24))),
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (40, 40))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (40, 30))),
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (56, 50))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (58, 50))),
+
+        // --- tick 1: everybody goes for their victim ---
+        (tick: 1, command: OrderAttack(ids: [Id(1, 0), Id(2, 0), Id(3, 0)], target: (0, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(5, 0)], target: (4, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(7, 0), Id(8, 0)], target: (6, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(9, 0)], target: (10, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(11, 0)], target: (12, 0))),
+
+        // --- R3 stands down and takes up the attack again: its reload does not start over ---
+        (tick: 200, command: Stop(ids: [Id(3, 0)])),
+        (tick: 205, command: OrderAttack(ids: [Id(3, 0)], target: (0, 0))),
+    ],
+)

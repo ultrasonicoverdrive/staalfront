@@ -6,7 +6,7 @@
 //! | File | Holds |
 //! |---|---|
 //! | `assets/config/unit_classes.ron` | movement classes, armor types, damage types (names that the other files use) |
-//! | `assets/config/weapon_defs.ron` | weapons: range, reload, damage, damage type, projectile kind, minimum range, splash |
+//! | `assets/config/weapon_defs.ron` | weapons: range, reload, damage, damage type, projectile kind and its parameters, burst, mount and firing arc, minimum range, splash (`docs/rules/weapons.md`) |
 //! | `assets/config/unit_defs.ron` | one record per role of `content/units.md`: cost, hit points, armor, movement, speed, weapons, model, icon, abilities |
 //!
 //! ([`UnitDefs::load`] reads the three; `units.ron` next to them is the
@@ -66,7 +66,10 @@ pub use unit::{
     Category, DeathBlast, Faction, Flags, Footprint, IconShape, MAX_UNIT_KIND, MAX_UNITS, Model,
     ModelShape, UnitDef,
 };
-pub use weapon::{MAX_WEAPON_KIND, Projectile, WeaponDef};
+pub use weapon::{
+    ALL_ROUND, DEFAULT_FIRE_ARC, MAX_BURST, MAX_GUIDE_TURN, MAX_WEAPON_KIND, Projectile, WeaponDef,
+    WeaponMount,
+};
 
 use error::Source;
 

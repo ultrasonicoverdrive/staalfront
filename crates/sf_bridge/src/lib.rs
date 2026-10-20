@@ -13,6 +13,9 @@
 //! rendering, and the game has no business linking a tool), and the other
 //! crates that see both sides (`sf_ai`) are about something else.
 //!
+//! Since WP5.1 it also turns the weapon definitions into the simulation's [`WeaponTable`]
+//! ([`weapon_table`]).
+//!
 //! Since WP4.1 it also carries the terrain half: [`movement_table`] copies the
 //! terrain cost of every movement class into a [`MovementTable`], and
 //! [`terrain_defs`] turns the terrain types into the simulation's definitions,
@@ -30,10 +33,13 @@
 use sf_data::movement::MovementCosts;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
-use sf_data::units::{SimUnitDef, TerrainCost, TurnMode, TurningDef, UnitDefs};
+use sf_data::units::{
+    Projectile, SimUnitDef, SimWeaponDef, TerrainCost, TurnMode, TurningDef, UnitDefs, WeaponMount,
+};
 use sf_sim::{
-    ClassCosts, Cost, Footprint, Kind, MovementTable, TerrainDef, TerrainFlags, TerrainId,
-    TurnMode as SimTurnMode, Turning, UnitStats, UnitTable,
+    ClassCosts, Cost, Footprint, Kind, Loadout, Mount, MovementTable, ProjectileKind, TerrainDef,
+    TerrainFlags, TerrainId, TurnMode as SimTurnMode, Turning, UnitStats, UnitTable, WeaponStats,
+    WeaponTable,
 };
 
 /// What the rules read about one role, copied from its converted definition.
@@ -73,6 +79,56 @@ pub fn unit_stats(defs: &UnitDefs) -> Vec<UnitStats> {
 /// rule that out for any definitions that loaded).
 pub fn unit_table(defs: &UnitDefs) -> Result<UnitTable, String> {
     UnitTable::new(unit_stats(defs)).map_err(|e| e.to_string())
+}
+
+/// One weapon of the data, as the simulation has it (WP5.1): every number is already in cells,
+/// fixed point and ticks in the converted definition, so this only renames.
+pub fn weapon_stats_of(weapon: &SimWeaponDef) -> WeaponStats {
+    WeaponStats {
+        kind: weapon.kind,
+        range: weapon.range,
+        min_range: weapon.min_range,
+        reload_ticks: weapon.reload_ticks,
+        burst: weapon.burst,
+        burst_delay_ticks: weapon.burst_delay_ticks,
+        damage: weapon.damage,
+        damage_type: weapon.damage_type,
+        projectile: match weapon.projectile {
+            Projectile::Instant => ProjectileKind::Instant,
+            Projectile::Straight => ProjectileKind::Straight,
+            Projectile::Arc => ProjectileKind::Arc,
+            Projectile::Guided => ProjectileKind::Guided,
+            Projectile::Falling => ProjectileKind::Falling,
+        },
+        projectile_speed_per_tick: weapon.projectile_speed_per_tick,
+        flight_height: weapon.flight_height,
+        guide_turn_per_tick: weapon.guide_turn_per_tick,
+        splash_radius: weapon.splash_radius,
+        mount: match weapon.mount {
+            WeaponMount::Hull => Mount::Hull,
+            WeaponMount::Turret => Mount::Turret,
+        },
+        fire_arc: weapon.fire_arc,
+    }
+}
+
+/// The simulation's weapon table for `defs` (WP5.1), to hand to
+/// [`World::with_weapons`](sf_sim::World::with_weapons) after the unit table: every weapon, and
+/// for every role that has any, which it carries in slot order. Fails with the simulation's
+/// reason if the table is refused (the definitions' own checks rule that out for any
+/// definitions that loaded).
+pub fn weapon_table(defs: &UnitDefs) -> Result<WeaponTable, String> {
+    let weapons = defs.sim_weapons().iter().map(weapon_stats_of).collect();
+    let loadouts = defs
+        .sim_units()
+        .iter()
+        .filter(|role| !role.weapons.is_empty())
+        .map(|role| Loadout {
+            unit: Kind(role.kind),
+            weapons: role.weapons.clone(),
+        })
+        .collect();
+    WeaponTable::new(weapons, loadouts).map_err(|e| e.to_string())
 }
 
 /// One cost of the data, as the simulation has it.
@@ -469,6 +525,97 @@ mod tests {
         let changed = formation_config(&settings);
         assert!(!changed.enabled);
         assert_eq!((changed.max_units, changed.reform_tenths), (20, 45));
+    }
+
+    #[test]
+    fn every_weapon_arrives_with_its_numbers() {
+        let defs = UnitDefs::embedded();
+        let table = weapon_table(&defs).unwrap();
+        assert_eq!(table.weapons().len(), defs.weapons().len());
+        for weapon in defs.sim_weapons() {
+            let stats = table
+                .weapon(weapon.kind)
+                .expect("every weapon is in the table");
+            assert_eq!(stats.range, weapon.range, "weapon {}", weapon.kind);
+            assert_eq!(stats.min_range, weapon.min_range);
+            assert_eq!(stats.reload_ticks, weapon.reload_ticks);
+            assert_eq!(
+                (stats.burst, stats.burst_delay_ticks),
+                (weapon.burst, weapon.burst_delay_ticks)
+            );
+            assert_eq!(stats.damage, weapon.damage);
+            assert_eq!(stats.damage_type, weapon.damage_type);
+            assert_eq!(
+                stats.projectile_speed_per_tick,
+                weapon.projectile_speed_per_tick
+            );
+            assert_eq!(stats.flight_height, weapon.flight_height);
+            assert_eq!(stats.guide_turn_per_tick, weapon.guide_turn_per_tick);
+            assert_eq!(stats.splash_radius, weapon.splash_radius);
+            assert_eq!(stats.fire_arc, weapon.fire_arc);
+            assert_eq!(weapon_stats_of(weapon), *stats);
+        }
+        // The kinds of projectile and of mount keep their meaning.
+        let kind = |id: &str| table.weapon(defs.weapon(id).unwrap().kind).unwrap();
+        assert_eq!(kind("rifle").projectile, ProjectileKind::Instant);
+        assert_eq!(kind("cannon").projectile, ProjectileKind::Straight);
+        assert_eq!(kind("howitzer").projectile, ProjectileKind::Arc);
+        assert_eq!(kind("rocket").projectile, ProjectileKind::Guided);
+        assert_eq!(kind("cannon").mount, Mount::Turret);
+        assert_eq!(kind("rifle").mount, Mount::Hull);
+        let plasma = SimWeaponDef {
+            projectile: Projectile::Falling,
+            ..*defs.sim_weapon(defs.weapon("rifle").unwrap().kind).unwrap()
+        };
+        assert_eq!(weapon_stats_of(&plasma).projectile, ProjectileKind::Falling);
+    }
+
+    #[test]
+    fn every_armed_role_carries_its_weapons_in_slot_order() {
+        let defs = UnitDefs::embedded();
+        let table = weapon_table(&defs).unwrap();
+        for role in defs.sim_units() {
+            assert_eq!(table.loadout(Kind(role.kind)), role.weapons.as_slice());
+        }
+        let armed = defs
+            .sim_units()
+            .iter()
+            .filter(|r| !r.weapons.is_empty())
+            .count();
+        assert!(armed >= 14, "{armed}");
+        // The twin cannon is the heavy tank's; the harvester carries nothing.
+        let heavy = defs.kind_of("heavy_tank").unwrap();
+        assert_eq!(
+            table.loadout(Kind(heavy)),
+            [defs.weapon("twin_cannon").unwrap().kind]
+        );
+        assert!(
+            table
+                .loadout(Kind(defs.kind_of("harvester").unwrap()))
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_shipped_weapons_fit_the_shipped_units_in_a_world() {
+        // The reach of an attack order is the first weapon's range, a turret mount is only on
+        // a unit with a turret: the world checks both, and the shipped data passes.
+        let defs = UnitDefs::embedded();
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_units(unit_table(&defs).unwrap())
+            .unwrap()
+            .with_weapons(weapon_table(&defs).unwrap())
+            .unwrap();
+        assert_eq!(world.weapon_table(), &weapon_table(&defs).unwrap());
+        assert_ne!(world.weapon_table().digest(), 0);
+        // The table does not fit a world without the units.
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_weapons(weapon_table(&defs).unwrap())
+                .is_err()
+        );
     }
 
     #[test]

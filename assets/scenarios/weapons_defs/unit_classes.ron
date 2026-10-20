@@ -1,0 +1,129 @@
+// FROZEN copy (see weapons_reload.ron) of assets/config/unit_classes.ron as it was when the weapons_reload
+// scenario was pinned (WP5.1). A balance change of the shipped file does not move its checksum.
+// Movement classes, armor types and damage types (WP3.1). Read by
+// sf_data::units; unit_defs.ron and weapon_defs.ron refer to these names.
+//
+// `kind` is the permanent number of an entry (what the simulation uses): never
+// changed, never reused, unique within its list. Entries may stand in any order.
+// A removed entry leaves a tombstone, (kind: <number>, name: "<old name>"), in
+// the matching `retired_*` list at the end of the file.
+//
+// Movement classes (WP4.1) carry `terrain_costs`: for EVERY terrain type of
+// terrain_types.ron (by name) either `Impassable` (the class cannot enter a
+// cell of that type) or `Speed(n)`, the unit's speed on it in thousandths of
+// its own: 1000 is normal, 1200 a fifth faster, 500 half, between 100 and
+// 2000. A class that leaves a type out, or names one that does not exist, is
+// refused when the files are combined (sf_data::movement::MovementCosts).
+// `ground: true` marks the ground classes (foot, wheeled, tracked): a terrain
+// type that all of them can enter counts as open ground, which the simulation
+// keeps as a summary flag of the terrain (sf_sim::TerrainFlags::ground). Left
+// out it is false.
+// The rules, the full table and the bridge rule are in docs/rules/movement.md.
+//
+// Movement classes (WP4.5) also say how their units turn the hull, in an optional
+// `turning` block (docs/rules/turning.md); left out, a class turns as the walk did
+// before: Pivot, drive_tolerance 16.
+//   mode             Pivot: turns in place at the unit's turn_rate, drives when its heading is
+//                    within drive_tolerance of the wanted one. Arc: has to move to turn, in an
+//                    arc of at least min_radius; a target inside its turning circles is reached
+//                    by a stand-in three-point turn on the spot at pivot_permille of the turn
+//                    rate. Instant: the heading snaps onto the wanted one.
+//   drive_tolerance  facing steps (256 to a turn), 0 to 64: the heading error up to which the
+//                    unit drives. Not used by Instant.
+//   min_radius       Arc only: cells, 0.25 to 32.
+//   pivot_permille   Arc only: 1 to 1000 (1000 = the full turn rate).
+//
+//   * armor_types and damage_types, WP5.3: the percentage of a damage type that
+//     an armor type takes (a damage table), and the splash falloff.
+//
+// docs/rules/units.md describes the six movement classes and the placeholder
+// armor and damage types below.
+(
+    movement_classes: [
+        // Turning (WP4.5): a person turns at once (Instant); a tank pivots on its tracks; the
+        // others have to move to turn (Arc): a wheeled vehicle in a 1.5-cell radius (6 m), a
+        // hovercraft in 2 cells with thrusters that turn it half as fast on the spot, a vessel
+        // in 4 cells with a rudder that barely turns it at a standstill. They all drive once
+        // they are within 16 steps (22 degrees) of where they are going, the margin that routes
+        // are smoothed with (docs/rules/pathfinding.md); a target inside the turning circle is
+        // reached by a stand-in three-point turn on the spot.
+        // infantry: slowed by ore, quicker on a road; the climb onto rock is not
+        // something a rifleman does (rock is steep or high ground).
+        (kind: 0, name: "foot", ground: true, turning: (mode: Instant), terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1100)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(800)),
+            ("bridge", Speed(1100)),
+        ]),
+        // trucks and light vehicles: the best on a road, the worst on rough ground.
+        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250), terrain_costs: [
+            ("grass", Speed(800)),
+            ("road", Speed(1200)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(600)),
+            ("bridge", Speed(1200)),
+        ]),
+        // tanks, artillery, harvesters: steady on grass, a little quicker on a road.
+        (kind: 2, name: "tracked", ground: true, turning: (mode: Pivot, drive_tolerance: 16), terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1200)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(800)),
+            ("bridge", Speed(1200)),
+        ]),
+        // crosses land and water (the amphibious transport). Its 800 on water is
+        // what the role's `water_speed` says (1.5 cells/s on land, 1.2 on water);
+        // a test keeps the two in step.
+        (kind: 3, name: "hover", turning: (mode: Arc, drive_tolerance: 16, min_radius: 2, pivot_permille: 500), terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1100)),
+            ("water", Speed(800)),
+            ("rock", Impassable),
+            ("ore", Speed(900)),
+            ("bridge", Speed(1100)),
+        ]),
+        // vessels: water only. A bridge cell is a road OVER water, so a vessel
+        // passes under it (docs/rules/movement.md, "The bridge").
+        (kind: 4, name: "water", turning: (mode: Arc, drive_tolerance: 16, min_radius: 4, pivot_permille: 125), terrain_costs: [
+            ("grass", Impassable),
+            ("road", Impassable),
+            ("water", Speed(1000)),
+            ("rock", Impassable),
+            ("ore", Impassable),
+            ("bridge", Speed(1000)),
+        ]),
+        // aircraft; no role uses it yet. Terrain does not matter: 1000 everywhere.
+        (kind: 5, name: "air", terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1000)),
+            ("water", Speed(1000)),
+            ("rock", Speed(1000)),
+            ("ore", Speed(1000)),
+            ("bridge", Speed(1000)),
+        ]),
+    ],
+    // placeholder: the set of armor types is a first guess for WP5.3.
+    armor_types: [
+        (kind: 0, name: "none"),      // cannot be damaged (ore field)
+        (kind: 1, name: "infantry"),
+        (kind: 2, name: "light"),     // light vehicles, vessels and small objects
+        (kind: 3, name: "heavy"),     // heavy vehicles
+        (kind: 4, name: "structure"),
+    ],
+    // placeholder: the set of damage types is a first guess for WP5.3.
+    damage_types: [
+        (kind: 0, name: "bullet"),     // small arms and machine guns
+        (kind: 1, name: "precision"),  // long rifle: infantry only (the armor table will say so)
+        (kind: 2, name: "rocket"),     // anti-armour rockets
+        (kind: 3, name: "cannon"),     // tank and gun shells
+        (kind: 4, name: "shell"),      // artillery
+        (kind: 5, name: "demolition"), // satchel charges
+    ],
+    retired_movement_classes: [],
+    retired_armor_types: [],
+    retired_damage_types: [],
+)

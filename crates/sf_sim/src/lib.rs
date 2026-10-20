@@ -14,7 +14,9 @@
 //! cell (see "Terrain and occupancy" below); since WP3.2 a world can spawn
 //! units and structures with the stats of a unit table (see "Units" below);
 //! since WP4.1 a unit's movement class decides which cells it may enter and
-//! how fast it moves there (see "Movement classes" below).
+//! how fast it moves there (see "Movement classes" below); since WP5.1 a world
+//! can be given a weapon table, and a unit with an attack order then fires a
+//! placeholder instant hit (see [`weapons`]).
 //!
 //! ```
 //! use sf_math::Vec2;
@@ -58,6 +60,7 @@
 //!   position and facing, then run its behaviour;
 //! * resolve the bodies of the units (the crowd pass, WP4.4) and turn the
 //!   turrets (WP4.5);
+//! * count the weapons down and fire them, when the world has a weapon table (WP5.1);
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!
@@ -306,8 +309,8 @@
 //! # Not here yet
 //!
 //! Target
-//! acquisition and firing (phase 5),
-//! damage, weapons and projectiles (phase 5), and
+//! acquisition (WP5.4), projectiles as entities (WP5.2), armor and splash (WP5.3), the destruction of
+//! what is shot down (WP5.5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
 
@@ -326,6 +329,7 @@ pub mod terrain;
 pub mod turning;
 mod turret;
 pub mod units;
+pub mod weapons;
 pub mod world;
 
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
@@ -358,6 +362,10 @@ pub use turning::{
     DEFAULT_DRIVE_TOLERANCE, MAX_DRIVE_TOLERANCE, MIN_ARC_RADIUS, TurnMode, Turning, TurningError,
 };
 pub use units::{Footprint, UnitClass, UnitStats, UnitTable, UnitTableError};
+pub use weapons::{
+    ALL_ROUND, Loadout, MAX_WEAPON_SLOTS, Mount, ProjectileKind, Shot, WeaponStats, WeaponTable,
+    WeaponsError,
+};
 pub use world::{
     ConfigError, DEFAULT_MAP_SIDE, DEFAULT_SPEED, DEFAULT_TURN_PER_TICK, MAX_ENTITIES,
     MAX_MAP_SIDE, StepReport, World, WorldConfig,

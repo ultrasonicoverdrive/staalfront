@@ -17,6 +17,7 @@ use crate::snapshot::{EntityView, Snapshot, TurretView};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::turret;
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
+use crate::weapons::{self, Arsenal, Shot, WeaponTable, WeaponsError};
 
 /// The most slots a world will ever allocate. A `Spawn` beyond it is ignored.
 /// It bounds memory against a runaway command stream and keeps slot indices
@@ -130,6 +131,11 @@ pub enum ConfigError {
     /// The formation settings were given to a world that has already started, or are
     /// not valid ([`FormationConfig::is_valid`](crate::FormationConfig::is_valid)).
     Formation,
+    /// The weapon table was given to a world that has already started, or before
+    /// its unit table.
+    WeaponsAfterStart,
+    /// The weapon table is not valid, or does not fit the unit table.
+    Weapons(WeaponsError),
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -167,6 +173,10 @@ impl fmt::Display for ConfigError {
             ConfigError::MovementAfterStart => {
                 "the movement table must be given before the world starts"
             }
+            ConfigError::WeaponsAfterStart => {
+                "the weapon table must be given before the world starts, after its unit table"
+            }
+            ConfigError::Weapons(_) => "the weapon table does not fit the unit table",
             ConfigError::MovementGap { .. } => {
                 "a movement class has no cost for a terrain type of the map"
             }
@@ -188,6 +198,9 @@ pub struct StepReport {
     /// Commands that ran and changed nothing (every target stale, the entity
     /// limit reached).
     pub commands_ignored: u32,
+    /// Shots the weapons fired in that tick (WP5.1; always zero in a world without a
+    /// weapon table). They are listed by [`World::shots`] until the next step.
+    pub shots: u32,
 }
 
 /// The complete simulation state. See the crate documentation for the design.
@@ -224,6 +237,9 @@ pub struct World {
     /// The formations of group move orders (WP4.6): their settings and the groups that
     /// keep their shape.
     pub(crate) formations: Formations,
+    /// The weapons (WP5.1): their table, and the shots of the last tick. Empty (nothing
+    /// fires) for a world that was given no table.
+    pub(crate) arsenal: Arsenal,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -291,6 +307,22 @@ impl World {
         self.units = units;
         self.crowd
             .set_tables(&self.units, &self.movement, self.map_size());
+        Ok(self)
+    }
+
+    /// The same world with the weapons of its unit kinds (WP5.1, `docs/rules/weapons.md`):
+    /// the numbers of every weapon and which weapons each kind carries. Without a table a
+    /// world fires nothing. Call it right after [`World::with_units`] and before anything
+    /// is scheduled ([`ConfigError::WeaponsAfterStart`] otherwise); the table has to fit
+    /// the unit table ([`ConfigError::Weapons`]: a loadout for an unknown kind, a first
+    /// weapon whose range is not the kind's `weapon_range`, a turret mount on a kind without
+    /// a turret). `sf_sim` does not read `sf_data`: `sf_bridge::weapon_table` converts the
+    /// definitions.
+    pub fn with_weapons(mut self, table: WeaponTable) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
+            return Err(ConfigError::WeaponsAfterStart);
+        }
+        self.arsenal = Arsenal::new(table, &self.units).map_err(ConfigError::Weapons)?;
         Ok(self)
     }
 
@@ -440,6 +472,7 @@ impl World {
             pathing: Pathing::inactive(),
             crowd,
             formations: Formations::new(),
+            arsenal: Arsenal::default(),
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -508,6 +541,41 @@ impl World {
     /// units).
     pub fn unit_table(&self) -> &UnitTable {
         &self.units
+    }
+
+    /// The weapon table the world was made with (empty without weapons).
+    pub fn weapon_table(&self) -> &WeaponTable {
+        &self.arsenal.table
+    }
+
+    /// The shots fired in the last tick (the placeholder of WP5.1, see
+    /// [`crate::weapons`]), in the order of the attackers' slots and, for one attacker,
+    /// of its weapon slots. Empty before the first step and in a world without weapons.
+    pub fn shots(&self) -> &[Shot] {
+        &self.arsenal.shots
+    }
+
+    /// The ticks until weapon slot `slot` of entity `id` may fire again, zero when it is
+    /// ready; `None` for a stale id, an entity without weapons, or a slot it does not have.
+    pub fn weapon_wait(&self, id: EntityId, slot: usize) -> Option<u32> {
+        let i = self.live_index(id)?;
+        self.weapon_slot(i, slot).map(|s| s.wait)
+    }
+
+    /// The shots still to come in the burst weapon slot `slot` of entity `id` is firing;
+    /// zero when none runs. `None` as for [`World::weapon_wait`].
+    pub fn weapon_burst_left(&self, id: EntityId, slot: usize) -> Option<u8> {
+        let i = self.live_index(id)?;
+        self.weapon_slot(i, slot).map(|s| s.burst_left)
+    }
+
+    fn weapon_slot(&self, i: usize, slot: usize) -> Option<&weapons::SlotState> {
+        let def = self.entities.def[i];
+        if def == NO_DEF {
+            return None;
+        }
+        let kind = self.units.at(def as usize).kind;
+        (slot < self.arsenal.table.loadout(kind).len()).then(|| &self.entities.weapon[i][slot])
     }
 
     /// The movement table the world was made with (empty without movement
@@ -885,6 +953,8 @@ impl World {
         );
         // The turrets turn toward their targets, from where the hulls ended (WP4.5).
         turret::update_all(&mut self.entities, &self.units);
+        // The weapons reload, and fire at the victims of attack orders (WP5.1).
+        weapons::update_all(&mut self.entities, &self.units, &mut self.arsenal, tick);
 
         self.tick = tick.next();
         let checksum = self.checksum();
@@ -894,6 +964,7 @@ impl World {
             checksum,
             commands_executed: executed,
             commands_ignored: ignored,
+            shots: self.arsenal.shots.len() as u32,
         }
     }
 

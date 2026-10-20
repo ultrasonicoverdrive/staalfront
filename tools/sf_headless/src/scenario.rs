@@ -47,7 +47,7 @@ use sf_data::units::UnitDefs;
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
     Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind, MAX_ENTITIES, MAX_MAP_SIDE,
-    MovementTable, Order, PlayerId, Terrain, Tick, UnitTable, World, WorldConfig,
+    MovementTable, Order, PlayerId, Terrain, Tick, UnitTable, WeaponTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -141,6 +141,16 @@ pub struct Scenario {
     /// `tests/formation_sweep.rs` makes to show why the limit is where it is.
     #[serde(default)]
     pub formation_max_units: Option<u16>,
+    /// Whether the units fire (WP5.1, `docs/rules/weapons.md`): the world is given the
+    /// weapon table of the `unit_defs` directory, and a unit with an `Attack` order shoots
+    /// its victim. Off when left out, so every scenario of the earlier phases (several of
+    /// them have attack orders) is the world it was pinned with. Needs `unit_defs`.
+    #[serde(default)]
+    pub combat: bool,
+    /// The weapon table read from `unit_defs` by [`Scenario::load`] when `combat` is on,
+    /// handed to the world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub weapon_table: Option<WeaponTable>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -423,7 +433,7 @@ pub fn sim_definitions(types: &TerrainTypes, costs: &MovementCosts) -> Vec<sf_si
 fn load_unit_defs(
     name: &str,
     scenario_file: &Path,
-) -> Result<(UnitTable, MovementTable, MovementCosts), ScenarioError> {
+) -> Result<(UnitTable, WeaponTable, MovementTable, MovementCosts), ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
         problems: vec![format!("unit_defs \"{name}\": {problem}")],
@@ -432,10 +442,11 @@ fn load_unit_defs(
     let defs = UnitDefs::load(&scenarios.join(name), &scenarios.join(".."))
         .map_err(|e| invalid(e.to_string()))?;
     let units = sf_bridge::unit_table(&defs).map_err(invalid)?;
+    let weapons = sf_bridge::weapon_table(&defs).map_err(invalid)?;
     let costs = MovementCosts::from_defs(&defs, &TerrainTypes::embedded())
         .map_err(|e| invalid(e.to_string()))?;
     let movement = sf_bridge::movement_table(&costs).map_err(invalid)?;
-    Ok((units, movement, costs))
+    Ok((units, weapons, movement, costs))
 }
 
 /// The middle of a cell, in cells: where an order sends a unit.
@@ -561,8 +572,9 @@ impl Scenario {
         // The unit definitions first: their costs decide the terrain's summary.
         let mut own_costs = None;
         if let Some(name) = scenario.unit_defs.clone() {
-            let (units, movement, costs) = load_unit_defs(&name, path)?;
+            let (units, weapons, movement, costs) = load_unit_defs(&name, path)?;
             scenario.unit_table = Some(units);
+            scenario.weapon_table = scenario.combat.then_some(weapons);
             scenario.movement_table = Some(movement);
             own_costs = Some(costs);
         }
@@ -686,6 +698,12 @@ impl Scenario {
                     "unit_defs \"{name}\" must be the name of one directory, without '/'"
                 ));
             }
+        }
+
+        if self.combat && self.unit_defs.is_none() {
+            p.push(
+                "combat needs `unit_defs` (the weapons are part of the definitions)".to_string(),
+            );
         }
 
         if self.flowfield_threshold == Some(1) {
@@ -888,6 +906,21 @@ impl Scenario {
             world = world
                 .with_units(table)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+            if self.combat {
+                let Some(weapons) = self.weapon_table.clone() else {
+                    return Err(ScenarioError::Invalid {
+                        path: None,
+                        problems: vec![
+                            "combat: the weapons are read from the files next to the scenario, \
+                             so the scenario must be loaded with Scenario::load"
+                                .into(),
+                        ],
+                    });
+                };
+                world = world
+                    .with_weapons(weapons)
+                    .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+            }
             if let Some(movement) = self.movement_table.clone() {
                 world = world
                     .with_movement(movement)

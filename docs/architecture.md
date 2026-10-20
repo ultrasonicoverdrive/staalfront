@@ -297,6 +297,12 @@ laptop. Never on the home server (B6, PLAN.md §13).
   `sf_math`, so `sf_data` needs no dependency on `sf_sim`. `sf_sim` does not read the
   definitions: its own `UnitTable` is filled from them by `sf_bridge` (WP3.2), a small
   crate that depends on both and is shared by `sf_game` and `sf_headless`. Fields and units: `docs/rules/units.md`.
+- **Weapons (WP5.1).** `weapon_defs.ron` carries the range, reload, burst, damage and its type, the
+  projectile and its parameters, the mount and the firing arc of every weapon; `sf_bridge::weapon_table`
+  turns them into `sf_sim::WeaponTable`, which a world is given with `World::with_weapons` (a world
+  without one fires nothing). Each entity keeps a reload and a burst counter per weapon slot, hashed in
+  checksum section `W`, written only while one is running, so no earlier checksum moved. A unit with an
+  `Attack` order fires an instant-hit placeholder that WP5.2 to WP5.4 replace. Rules: `docs/rules/weapons.md`.
 - **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
   central-difference normals from the global heightmap (so shared border
   vertices are bit-identical at equal levels), diagonals by global cell parity
