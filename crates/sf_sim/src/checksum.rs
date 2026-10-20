@@ -27,6 +27,7 @@
 //! | crowd (`K`), only while some live unit remembers being blocked, sidestepping, shoved or crowded | the collision settings, then each such unit in slot order: how long it has not come closer to its waypoint, its sidestep attempts and the best distance seen, a sidestep in progress, how far it has been shoved and for how long left alone, whether it has asked for a new route (WP4.4) |
 //! | turning (`R`), only while some live unit has a turret or an unfinished arc turn | the turret rates of the unit table and the movement table's digest, then each such unit in slot order: the thousandths of a step it has yet to turn and, for a turret, its facing and its target (WP4.5) |
 //! | weapons (`W`), only with a weapon table | the weapon table's digest, then each live entity with a weapon that is reloading or in a burst, in slot order: for each weapon slot the ticks it waits to fire and the shots left in its burst (WP5.1) |
+//! | projectiles (`J`), only with a weapon table | the projectile store: its slot count, free list (stack order) and each projectile in flight in slot order, with its slot, generation, weapon, owner, target, aim point, place, height, heading, span and fuse (WP5.2) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -121,6 +122,13 @@
 //! the rest did not move. The shots themselves are not state (the hit points they took are,
 //! in the units section).
 //!
+//! The projectile section (WP5.2, `J`) follows it under the same condition, the world having a weapon
+//! table: the store of projectiles in flight (slot count, free list, every live projectile), so a shell
+//! in the air is part of the state and two peers whose shells differ disagree at once. It is written even
+//! when nothing flies (the slot count and free list are state too: they decide the id of the next
+//! launch). A world without a weapon table cannot have a projectile and has no section, so no checksum of
+//! an earlier phase moved. The impacts and shots listed for a tick are reports and are not hashed.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -168,6 +176,7 @@ const SECTION_CROWD: u8 = b'K';
 const SECTION_TURNING: u8 = b'R';
 const SECTION_FORMATIONS: u8 = b'G';
 const SECTION_WEAPONS: u8 = b'W';
+const SECTION_PROJECTILES: u8 = b'J';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -478,6 +487,11 @@ impl World {
                     h.write_u8(slot.burst_left);
                 }
             }
+            // Projectiles (WP5.2): the store and everything in flight, after the weapons. Written
+            // for as long as the world has a weapon table, like the section above, so a world
+            // without one hashes as before.
+            h.write_u8(SECTION_PROJECTILES);
+            self.arsenal.projectiles.write_hash(&mut h);
         }
 
         h.finish()

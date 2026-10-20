@@ -429,10 +429,15 @@ pub fn sim_definitions(types: &TerrainTypes, costs: &MovementCosts) -> Vec<sf_si
 /// Reads the unit definitions in `<scenario directory>/<name>/` (the model and
 /// icon files they name are looked up under `<scenario directory>/..`, the
 /// assets directory) and turns them into the simulation's unit table and
-/// movement table, with the movement costs they came from.
+/// movement table, with the movement costs they came from. The weapon table is
+/// built only for a scenario with `combat` (it is the only one that hands it to
+/// a world), so a frozen copy that predates a rule the table has to meet (WP5.2:
+/// a projectile that flies needs a speed) still loads for the scenarios that
+/// never fire.
 fn load_unit_defs(
     name: &str,
     scenario_file: &Path,
+    combat: bool,
 ) -> Result<(UnitTable, WeaponTable, MovementTable, MovementCosts), ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
@@ -442,7 +447,11 @@ fn load_unit_defs(
     let defs = UnitDefs::load(&scenarios.join(name), &scenarios.join(".."))
         .map_err(|e| invalid(e.to_string()))?;
     let units = sf_bridge::unit_table(&defs).map_err(invalid)?;
-    let weapons = sf_bridge::weapon_table(&defs).map_err(invalid)?;
+    let weapons = if combat {
+        sf_bridge::weapon_table(&defs).map_err(invalid)?
+    } else {
+        WeaponTable::empty()
+    };
     let costs = MovementCosts::from_defs(&defs, &TerrainTypes::embedded())
         .map_err(|e| invalid(e.to_string()))?;
     let movement = sf_bridge::movement_table(&costs).map_err(invalid)?;
@@ -572,7 +581,7 @@ impl Scenario {
         // The unit definitions first: their costs decide the terrain's summary.
         let mut own_costs = None;
         if let Some(name) = scenario.unit_defs.clone() {
-            let (units, weapons, movement, costs) = load_unit_defs(&name, path)?;
+            let (units, weapons, movement, costs) = load_unit_defs(&name, path, scenario.combat)?;
             scenario.unit_table = Some(units);
             scenario.weapon_table = scenario.combat.then_some(weapons);
             scenario.movement_table = Some(movement);

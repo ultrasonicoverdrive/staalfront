@@ -1,5 +1,5 @@
-//! Weapons (WP5.1): what a unit carries, the reload that counts down in it, and a
-//! placeholder shot that exercises both.
+//! Weapons (WP5.1): what a unit carries, the reload that counts down in it, and the shot
+//! (an instant hit, or a projectile that flies, WP5.2).
 //!
 //! `sf_data` reads and checks `assets/config/weapon_defs.ron` and converts it to plain
 //! integers and fixed point; this crate may not depend on it, so the caller
@@ -31,29 +31,45 @@
 //! last shot is the rest of the reload. A burst that cannot go on (the target is gone, out of
 //! reach or not aimed at) is dropped, and the weapon waits the same rest.
 //!
-//! # The placeholder shot
+//! # A tick of shooting, in two passes
 //!
-//! Phase 5 replaces this part in steps: projectiles as entities (WP5.2), armor and splash
-//! (WP5.3), choosing targets (WP5.4). Until then a unit whose current order is
-//! [`Order::Attack`] fires each of its weapons at the victim, as an instant hit, whenever
-//! the weapon is reloaded, the victim is within the weapon's reach (the same distance the
-//! order walks to) and not within its minimum range, and the hull or turret points at it
-//! within the firing arc. The hit takes `damage` off the victim's hit points, saturating at
-//! zero, whatever the projectile kind, the damage type or the splash. A victim at zero hit points
-//! is not shot at, and a shooter at zero fires no more. All the shots of a tick are decided from the
-//! hit points at the start of it and the damage is applied afterwards, so the outcome of a fight does
-//! not depend on which unit has the lower slot. Nothing is removed (WP5.5). Every shot is recorded in [`Shot`]s that
-//! [`World::shots`](crate::World::shots) lists for the last tick; they are not hashed (the
-//! hit points are).
+//! Since WP5.2 a weapon either hits at once (`Instant`) or launches a projectile that flies and
+//! detonates later ([`crate::projectiles`]). Armor and splash (WP5.3) and choosing targets (WP5.4) are
+//! still to come, so what a hit does is the plainest thing: it takes the weapon's `damage` off the
+//! one victim.
+//!
+//! A tick of weapons runs in two passes, and **no hit point changes in the first**:
+//!
+//! * *Decide.* In ascending slot order the projectiles in flight move and decide whether they detonate
+//!   (and on whom); then, in ascending slot order, every weapon slot of every entity counts its wait
+//!   down and decides whether it fires: an `Instant` weapon decides a hit, any other launches a
+//!   projectile. Every decision reads the hit points and positions of the start of the weapon stage.
+//! * *Apply.* Every hit of the tick, the instant ones and the detonations, is turned into damage by
+//!   [`damage_of`], summed **per victim**, and taken off its hit points once, saturating at zero.
+//!   Detonated projectiles are removed and the new ones enter the store.
+//!
+//! So the outcome of a tick does not depend on the order of the entities or of the projectiles: two
+//! units that kill each other both die, two shooters that overkill one victim both fire and both spend
+//! their reload, a unit that is shot down on a tick still fires on it, and a shell that lands on a tick
+//! on a victim that another shell kills on that same tick still hurts it. Only the order of the
+//! *reports* ([`Shot`], [`Impact`]) follows the slots.
+//!
+//! A shooter at zero hit points fires no more, and a victim at zero is not shot at; a projectile
+//! already in flight does not care whether its shooter is alive. Nothing is removed when a victim
+//! reaches zero (WP5.5). Every trigger pull is recorded in a [`Shot`], every detonation of a projectile
+//! in an [`Impact`]; [`World::shots`](crate::World::shots) and
+//! [`World::impacts`](crate::World::impacts) list them for the last tick. They are reports, not state,
+//! and are not hashed (the hit points and the projectiles are).
 
 use core::fmt;
 
-use sf_math::Fx;
 use sf_math::hash::Fnv1a64;
+use sf_math::{Fx, Vec2};
 
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Kind, Tick};
 use crate::orders::{Order, live_slot, radius_of};
+use crate::projectiles::{self, ImpactCause, Projectile, Projectiles};
 use crate::units::UnitTable;
 
 /// Most weapons one unit kind carries.
@@ -68,19 +84,19 @@ pub const ALL_ROUND: u8 = 128;
 /// An empty slot in a table of weapon positions.
 const NONE: u16 = u16::MAX;
 
-/// How the projectile of a weapon travels. Only the placeholder shot reads it so far:
-/// it ignores the kind (WP5.2).
+/// How the projectile of a weapon travels (`docs/rules/projectiles.md`).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ProjectileKind {
     /// Hits in the tick of the shot; no projectile exists.
     Instant,
-    /// Flies straight at the target.
+    /// Flies at constant speed toward where the target stood, and goes off when its path touches the
+    /// target.
     Straight,
-    /// Lobbed on an arc.
+    /// Lobbed over everything between: goes off where it lands.
     Arc,
     /// Steers toward its target in flight.
     Guided,
-    /// Drops from above onto the target cell.
+    /// Drops from above onto the place where the target stood.
     Falling,
 }
 
@@ -115,9 +131,11 @@ pub struct WeaponStats {
     pub damage_type: u16,
     /// How the projectile travels.
     pub projectile: ProjectileKind,
-    /// Distance per tick of the projectile; zero for an instant hit.
+    /// Distance per tick of the projectile; zero for an instant hit, positive for every other kind
+    /// ([`WeaponsError::NoSpeed`]). For a falling projectile it is the speed of the drop.
     pub projectile_speed_per_tick: Fx,
-    /// Height of the arc or the drop, in cells; presentation.
+    /// Height of the top of an arc, or the height a falling projectile drops from, in cells; positive
+    /// for a falling one ([`WeaponsError::NoHeight`]). Presentation, apart from the time a drop takes.
     pub flight_height: Fx,
     /// Facing steps (of 256) per tick a guided projectile steers; zero for none.
     pub guide_turn_per_tick: u8,
@@ -159,6 +177,10 @@ pub enum WeaponsError {
     BadBurst(u16),
     /// A firing arc is above half a turn.
     BadArc(u16),
+    /// A projectile that flies (any kind but `Instant`) has no speed.
+    NoSpeed(u16),
+    /// A falling projectile has no height to drop from.
+    NoHeight(u16),
     /// Two loadouts are for the same unit kind.
     DuplicateLoadout(Kind),
     /// A loadout has no weapons or more than [`MAX_WEAPON_SLOTS`].
@@ -191,6 +213,15 @@ impl fmt::Display for WeaponsError {
             WeaponsError::NoReload(k) => write!(f, "weapon {k} has a reload of zero ticks"),
             WeaponsError::BadBurst(k) => write!(f, "weapon {k} has a burst that does not fit"),
             WeaponsError::BadArc(k) => write!(f, "weapon {k} has a firing arc above half a turn"),
+            WeaponsError::NoSpeed(k) => {
+                write!(f, "weapon {k} has a projectile that flies but no speed")
+            }
+            WeaponsError::NoHeight(k) => {
+                write!(
+                    f,
+                    "weapon {k} has a falling projectile but no height to drop from"
+                )
+            }
             WeaponsError::DuplicateLoadout(k) => {
                 write!(f, "unit kind {} has two loadouts", k.0)
             }
@@ -279,6 +310,12 @@ impl WeaponTable {
             }
             if w.fire_arc > ALL_ROUND {
                 return Err(WeaponsError::BadArc(k));
+            }
+            if w.projectile != ProjectileKind::Instant && w.projectile_speed_per_tick <= Fx::ZERO {
+                return Err(WeaponsError::NoSpeed(k));
+            }
+            if w.projectile == ProjectileKind::Falling && w.flight_height <= Fx::ZERO {
+                return Err(WeaponsError::NoHeight(k));
             }
         }
         for pair in loadouts.windows(2) {
@@ -410,38 +447,75 @@ pub(crate) fn at_rest(state: &WeaponState) -> bool {
     *state == REST
 }
 
-/// One shot of the placeholder: an instant hit, recorded for the tick it was fired in.
+/// One pull of a trigger: recorded for the tick it was fired in, whether the shot hits at once (an
+/// `Instant` weapon) or launches a projectile (any other kind; its detonation is an [`Impact`] some ticks
+/// later).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct Shot {
     /// The tick of the shot.
     pub tick: Tick,
     /// Who fired.
     pub attacker: EntityId,
-    /// Who was hit.
+    /// Who it was fired at.
     pub target: EntityId,
     /// The kind number of the weapon.
     pub weapon: u16,
     /// Which weapon slot of the attacker fired.
     pub slot: u8,
-    /// The damage of the weapon, before it was taken off the target's hit points.
+    /// The damage of the weapon, before it is taken off the target's hit points. For a projectile this is
+    /// what it will do if it hits, not what has been done.
     pub damage: u32,
-    /// The target's hit points after this hit and the hits recorded before it in the same tick
-    /// (all the hits of a tick land together; this is a running total in the order of the
-    /// attackers' slots).
+    /// The target's hit points at the **end of the tick** of the shot: after every hit of that tick, from
+    /// every shooter. All shots at one target in one tick report the same number, whatever the slots, so
+    /// it does not depend on the order of the attackers. For an instant weapon that is what is left of
+    /// the target after the hits; for a projectile weapon the shot has not landed yet and this is only
+    /// the target's hit points at the time of the launch.
+    ///
+    /// A report, not state and not hashed. It says what was left, not who took it: **kill credit
+    /// (WP5.5) must not be read from it**, nor from the order of [`Shot`]s or [`Impact`]s in a tick, which
+    /// follows the slots. Credit has to be settled from the set of the tick's hits.
     pub hp_after: u32,
 }
 
-/// The weapons of a world: the table, where each unit kind's slots point into it, and the
-/// shots of the last tick. Empty (no weapons, nothing fires) until the caller hands a table
-/// over.
+/// A projectile that went off: where, why, and the entity it counted as a direct hit on, if any.
+/// Recorded for the tick of the detonation (`docs/rules/projectiles.md`).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Impact {
+    /// The tick it went off.
+    pub tick: Tick,
+    /// The shooter, which may be gone or dead by now: a projectile lands anyway.
+    pub owner: EntityId,
+    /// The kind number of the weapon.
+    pub weapon: u16,
+    /// Where it went off.
+    pub at: Vec2,
+    /// Why.
+    pub cause: ImpactCause,
+    /// The entity it hit, if it hit one (a direct hit: splash is WP5.3).
+    pub victim: Option<EntityId>,
+    /// The damage it did to the victim before the sum of the tick saturated at zero: the weapon's damage
+    /// for a hit, zero for a miss.
+    pub damage: u32,
+    /// The victim's hit points at the **end of the tick** (zero if there is no victim). A report, with
+    /// the same caveat as [`Shot::hp_after`]: not for kill credit.
+    pub hp_after: u32,
+}
+
+/// The weapons of a world: the table, where each unit kind's slots point into it, the projectiles in
+/// flight, and the shots and impacts of the last tick. Empty (no weapons, nothing fires) until the caller
+/// hands a table over.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub(crate) struct Arsenal {
     pub table: WeaponTable,
     /// Per position in the unit table: the index into `table.weapons` of each slot, or
     /// [`NONE`].
     by_def: Vec<[u16; MAX_WEAPON_SLOTS]>,
+    /// The projectiles in flight (WP5.2). State: hashed.
+    pub projectiles: Projectiles,
     /// The shots of the last tick. Derived; not hashed.
     pub shots: Vec<Shot>,
+    /// The detonations of the last tick. Derived; not hashed.
+    pub impacts: Vec<Impact>,
 }
 
 impl Arsenal {
@@ -484,7 +558,9 @@ impl Arsenal {
         Ok(Arsenal {
             table,
             by_def,
+            projectiles: Projectiles::default(),
             shots: Vec::new(),
+            impacts: Vec::new(),
         })
     }
 
@@ -494,20 +570,92 @@ impl Arsenal {
     }
 }
 
-/// Runs one tick of every weapon after the units have moved and the turrets turned: the
-/// reloads count down and the placeholder shots are fired, in two passes. The first goes
-/// through the entities in ascending slot order and decides every shot from the hit points at
-/// the start of the tick; the second applies the damage.
+/// How a hit came about: an instant weapon's, or a projectile's detonation.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum HitKind {
+    /// An instant shot: no projectile.
+    Instant,
+    /// A projectile that went off, for this reason.
+    Projectile(ImpactCause),
+}
+
+/// A hit decided in the first pass: a weapon went off at a point, with this victim if it counts as a
+/// direct hit. Nothing has been taken from anyone yet.
+#[derive(Copy, Clone, Debug)]
+struct Hit {
+    /// Index into the weapon table.
+    weapon: usize,
+    /// The shooter.
+    owner: EntityId,
+    /// Where it went off (the victim's middle for an instant shot).
+    at: Vec2,
+    /// The direct victim's slot.
+    victim: Option<usize>,
+    kind: HitKind,
+}
+
+/// **The hook for WP5.3.** What a hit does to the world: pushes `(victim slot, damage)` for everyone it
+/// hurts. Today that is the direct victim, if any, for the plain `damage` of the weapon. WP5.3 changes
+/// exactly this function: the damage goes through the armor table (`damage_type` times the victim's
+/// armor), and everyone within `splash_radius` of `hit.at` is pushed too, with the falloff. Whatever it
+/// pushes is only summed and applied after every hit of the tick has been decided, so it has to read the
+/// state of the start of the tick and nothing else, and the order in which it pushes does not matter.
+fn damage_of(hit: &Hit, w: &WeaponStats, out: &mut Vec<(u32, u32)>) {
+    if let Some(j) = hit.victim {
+        out.push((j as u32, w.damage));
+    }
+}
+
+/// Runs one tick of every weapon after the units have moved and the turrets turned, in two passes
+/// (`docs/rules/projectiles.md`). The first decides everything from the state at the start of the
+/// tick: the projectiles in flight move and decide whether they go off, then the weapons count down and
+/// decide whether they fire (an instant hit, or a launch). The second applies all the damage at once.
 pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arsenal, tick: Tick) {
     arsenal.shots.clear();
+    arsenal.impacts.clear();
     if arsenal.is_empty() {
         return;
     }
     let Arsenal {
         table,
         by_def,
+        projectiles,
         shots,
+        impacts,
     } = arsenal;
+    let mut hits: Vec<Hit> = Vec::new();
+    let mut spent: Vec<u32> = Vec::new();
+    let mut launches: Vec<Projectile> = Vec::new();
+
+    // Decide, 1: the projectiles in flight move (those launched this tick are not in the store yet,
+    // so they start flying next tick) and some go off. A projectile reads the entities and itself, never
+    // another projectile.
+    for index in 0..projectiles.slot_count() {
+        let Some(p) = projectiles.row_mut(index) else {
+            continue;
+        };
+        let at = table
+            .weapons
+            .binary_search_by_key(&p.weapon, |w| w.kind)
+            .ok();
+        // A projectile of a weapon the table lacks cannot happen (the table is fixed); it would
+        // vanish rather than fly forever.
+        let burst = at.and_then(|at| projectiles::fly(p, &table.weapons[at], e, units));
+        if burst.is_some() || at.is_none() {
+            spent.push(index as u32);
+        }
+        if let (Some(burst), Some(at)) = (burst, at) {
+            hits.push(Hit {
+                weapon: at,
+                owner: p.owner,
+                at: burst.at,
+                victim: burst.victim,
+                kind: HitKind::Projectile(burst.cause),
+            });
+        }
+    }
+
+    // Decide, 2: the weapons count down and fire.
     for i in 0..e.len() {
         if !e.alive[i] || e.def[i] == NO_DEF {
             continue;
@@ -558,10 +706,29 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
             } else {
                 weapon.tail_ticks()
             };
+            let owner = EntityId::new(i as u32, e.generation[i]);
+            let target = EntityId::new(j as u32, e.generation[j]);
+            if weapon.projectile == ProjectileKind::Instant {
+                hits.push(Hit {
+                    weapon: at as usize,
+                    owner,
+                    at: e.pos[j],
+                    victim: Some(j),
+                    kind: HitKind::Instant,
+                });
+            } else {
+                let pointing = match weapon.mount {
+                    Mount::Hull => e.facing[i],
+                    Mount::Turret => e.turret[i],
+                };
+                launches.push(projectiles::launch(
+                    weapon, owner, e.owner[i], e.pos[i], pointing, target, e.pos[j],
+                ));
+            }
             shots.push(Shot {
                 tick,
-                attacker: EntityId::new(i as u32, e.generation[i]),
-                target: EntityId::new(j as u32, e.generation[j]),
+                attacker: owner,
+                target,
                 weapon: weapon.kind,
                 slot: s as u8,
                 damage: weapon.damage,
@@ -569,16 +736,52 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
             });
         }
     }
-    // Second pass: the hits land. Nothing above changed a hit point, so who may shoot and who
-    // may be shot was decided from the state at the start of the tick, whatever the slot
-    // order: two units that kill each other both die, and two shooters that overkill one
-    // victim both fire and both reload. A victim's hit points take the sum of its hits,
-    // saturating at zero; the order only decides what each shot reports in `hp_after` (the
-    // hit points after this hit and the hits recorded before it in the tick).
+
+    // Apply. Nothing above changed a hit point. The projectiles that went off leave the store and the
+    // launched ones enter it; every hit is turned into damage, summed per victim and taken off once,
+    // saturating at zero.
+    for index in spent {
+        projectiles.remove(index);
+    }
+    for p in launches {
+        projectiles.insert(p);
+    }
+    let mut damage: Vec<(u32, u32)> = Vec::new();
+    for hit in &hits {
+        damage_of(hit, &table.weapons[hit.weapon], &mut damage);
+    }
+    damage.sort_unstable();
+    let mut rest = damage.as_slice();
+    while let Some(&(victim, _)) = rest.first() {
+        let n = rest.iter().take_while(|d| d.0 == victim).count();
+        let sum: u64 = rest[..n].iter().map(|d| u64::from(d.1)).sum();
+        let j = victim as usize;
+        e.hp[j] = e.hp[j].saturating_sub(u32::try_from(sum).unwrap_or(u32::MAX));
+        rest = &rest[n..];
+    }
+
+    // Reports, from the state at the end of the tick.
     for shot in shots.iter_mut() {
-        let j = shot.target.index() as usize;
-        e.hp[j] = e.hp[j].saturating_sub(shot.damage);
-        shot.hp_after = e.hp[j];
+        shot.hp_after = e.hp[shot.target.index() as usize];
+    }
+    for hit in &hits {
+        let HitKind::Projectile(cause) = hit.kind else {
+            continue;
+        };
+        impacts.push(Impact {
+            tick,
+            owner: hit.owner,
+            weapon: table.weapons[hit.weapon].kind,
+            at: hit.at,
+            cause,
+            victim: hit.victim.map(|j| EntityId::new(j as u32, e.generation[j])),
+            damage: if hit.victim.is_some() {
+                table.weapons[hit.weapon].damage
+            } else {
+                0
+            },
+            hp_after: hit.victim.map_or(0, |j| e.hp[j]),
+        });
     }
 }
 

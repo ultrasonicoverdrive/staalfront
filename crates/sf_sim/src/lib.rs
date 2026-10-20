@@ -15,8 +15,9 @@
 //! units and structures with the stats of a unit table (see "Units" below);
 //! since WP4.1 a unit's movement class decides which cells it may enter and
 //! how fast it moves there (see "Movement classes" below); since WP5.1 a world
-//! can be given a weapon table, and a unit with an attack order then fires a
-//! placeholder instant hit (see [`weapons`]).
+//! can be given a weapon table, and a unit with an attack order then fires; since WP5.2
+//! a shot is an instant hit or a projectile that flies and detonates (see [`weapons`] and
+//! [`projectiles`]).
 //!
 //! ```
 //! use sf_math::Vec2;
@@ -60,7 +61,8 @@
 //!   position and facing, then run its behaviour;
 //! * resolve the bodies of the units (the crowd pass, WP4.4) and turn the
 //!   turrets (WP4.5);
-//! * count the weapons down and fire them, when the world has a weapon table (WP5.1);
+//! * count the weapons down and fire them, move the projectiles in flight and detonate them, when the
+//!   world has a weapon table (WP5.1, WP5.2): every decision first, then all the damage at once;
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!
@@ -309,7 +311,7 @@
 //! # Not here yet
 //!
 //! Target
-//! acquisition (WP5.4), projectiles as entities (WP5.2), armor and splash (WP5.3), the destruction of
+//! acquisition (WP5.4), armor and splash (WP5.3), the destruction of
 //! what is shot down (WP5.5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
@@ -324,6 +326,7 @@ pub mod ids;
 pub mod movement;
 pub mod orders;
 pub mod path;
+pub mod projectiles;
 pub mod snapshot;
 pub mod terrain;
 pub mod turning;
@@ -354,7 +357,8 @@ pub use path::{
     MAX_FIELD_SLOTS, MAX_REPLAN_COOLDOWN, MAX_REPLAN_MAX, MIN_NODE_BUDGET, OVERLAY_CAP, PathStats,
     PlannedRoute, RING_CAP, ReplanConfig, RouteStatus, RouteView, SECTOR_SIZE,
 };
-pub use snapshot::{EntityView, Snapshot, TurretView};
+pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
+pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 pub use terrain::{
     Cell, NO_OCCUPANT, Occupancy, Terrain, TerrainDef, TerrainError, TerrainFlags, TerrainId,
 };
@@ -363,8 +367,8 @@ pub use turning::{
 };
 pub use units::{Footprint, UnitClass, UnitStats, UnitTable, UnitTableError};
 pub use weapons::{
-    ALL_ROUND, Loadout, MAX_WEAPON_SLOTS, Mount, ProjectileKind, Shot, WeaponStats, WeaponTable,
-    WeaponsError,
+    ALL_ROUND, Impact, Loadout, MAX_WEAPON_SLOTS, Mount, ProjectileKind, Shot, WeaponStats,
+    WeaponTable, WeaponsError,
 };
 pub use world::{
     ConfigError, DEFAULT_MAP_SIDE, DEFAULT_SPEED, DEFAULT_TURN_PER_TICK, MAX_ENTITIES,

@@ -6,9 +6,11 @@
 //                                     0.05); from the first shot of a burst to the first of the next
 //   damage                            hit points per shot, before armor (WP5.3)
 //   damage_type                       a name from unit_classes.ron
-//   projectile                        Instant, Straight, Arc, Guided or Falling (the flight is WP5.2)
-//   projectile_speed                  cells per game second (not for Instant)
-//   flight_height                     cells: top of an Arc, start of a Falling drop (presentation)
+//   projectile                        Instant, Straight, Arc, Guided or Falling (docs/rules/projectiles.md)
+//   projectile_speed                  cells per game second (not for Instant; the simulation refuses a
+//                                     flying projectile that has none)
+//   flight_height                     cells: top of an Arc, start of a Falling drop (the simulation refuses
+//                                     a Falling weapon without one)
 //   guide_turn                        facing steps (of 256) per tick a Guided projectile steers
 //   burst, burst_delay                shots per trigger pull (default 1) and game seconds between them
 //   mount                             Hull (default) or Turret (only for a unit with a turret_rate)
@@ -29,8 +31,10 @@
     weapons: [
         // Baseline infantry rifle.
         (kind: 0, id: "rifle", range: 4, reload: 1, damage: 6, damage_type: "bullet", projectile: Instant), // placeholder: reload, damage
-        // Anti-armour rocket (rocket_trooper): about 8 ticks in the air at full range.
-        (kind: 1, id: "rocket", range: 5, reload: 2.5, damage: 45, damage_type: "rocket", projectile: Guided, projectile_speed: 12, guide_turn: 4), // placeholder: reload, damage, speed, guide_turn
+        // Anti-armour rocket (rocket_trooper): about 8 ticks in the air at full range. It turns 8 steps a
+        // tick (WP5.2; it was 4): at 12 cells a second that is a turning circle of about 3 cells, inside its
+        // range of 5, so it can still come round onto a target that has stepped out of its line.
+        (kind: 1, id: "rocket", range: 5, reload: 2.5, damage: 45, damage_type: "rocket", projectile: Guided, projectile_speed: 12, guide_turn: 8), // placeholder: reload, damage, speed, guide_turn
         // Sniper: infantry only (an armor-table matter, WP5.3).
         (kind: 2, id: "long_rifle", range: 8, reload: 3, damage: 40, damage_type: "precision", projectile: Instant), // placeholder: reload, damage
         (kind: 3, id: "pistol", range: 3, reload: 1, damage: 4, damage_type: "bullet", projectile: Instant), // placeholder: reload, damage

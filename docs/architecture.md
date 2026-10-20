@@ -301,8 +301,16 @@ laptop. Never on the home server (B6, PLAN.md §13).
   projectile and its parameters, the mount and the firing arc of every weapon; `sf_bridge::weapon_table`
   turns them into `sf_sim::WeaponTable`, which a world is given with `World::with_weapons` (a world
   without one fires nothing). Each entity keeps a reload and a burst counter per weapon slot, hashed in
-  checksum section `W`, written only while one is running, so no earlier checksum moved. A unit with an
-  `Attack` order fires an instant-hit placeholder that WP5.2 to WP5.4 replace. Rules: `docs/rules/weapons.md`.
+  checksum section `W`, written for as long as the world has a weapon table, so no earlier checksum moved.
+  A unit with an `Attack` order fires; WP5.3 and WP5.4 replace what a hit does and who it is fired at.
+  Rules: `docs/rules/weapons.md`.
+- **Projectiles (WP5.2).** A weapon that is not `Instant` launches a projectile (straight, arcing, guided or
+  falling) into a store of its own in `sf_sim::projectiles`: a slot vector with a free list and a generation
+  per slot, iterated in slot order and hashed in checksum section `J` (written with `W`, only for a world with
+  a weapon table). A tick of weapons is two passes: every decision (the projectiles move and detonate, the
+  weapons fire) first, from the state at the start of the tick, then all the damage summed per victim, so no
+  outcome depends on a slot order. `Snapshot::projectiles()` lists them for the renderer. Rules:
+  `docs/rules/projectiles.md`.
 - **Mesh** (`sf_render::terrain`): chunks of 32x32 cells, positions and
   central-difference normals from the global heightmap (so shared border
   vertices are bit-identical at equal levels), diagonals by global cell parity

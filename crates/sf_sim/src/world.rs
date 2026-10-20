@@ -13,11 +13,12 @@ use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
-use crate::snapshot::{EntityView, Snapshot, TurretView};
+use crate::projectiles::ProjectileId;
+use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::turret;
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
-use crate::weapons::{self, Arsenal, Shot, WeaponTable, WeaponsError};
+use crate::weapons::{self, Arsenal, Impact, Shot, WeaponTable, WeaponsError};
 
 /// The most slots a world will ever allocate. A `Spawn` beyond it is ignored.
 /// It bounds memory against a runaway command stream and keeps slot indices
@@ -201,6 +202,11 @@ pub struct StepReport {
     /// Shots the weapons fired in that tick (WP5.1; always zero in a world without a
     /// weapon table). They are listed by [`World::shots`] until the next step.
     pub shots: u32,
+    /// Projectiles launched in that tick (WP5.2): the shots of every weapon that is not `Instant`.
+    pub launched: u32,
+    /// Projectiles that went off in that tick, hit or miss. They are listed by [`World::impacts`] until
+    /// the next step.
+    pub impacts: u32,
 }
 
 /// The complete simulation state. See the crate documentation for the design.
@@ -548,11 +554,58 @@ impl World {
         &self.arsenal.table
     }
 
-    /// The shots fired in the last tick (the placeholder of WP5.1, see
-    /// [`crate::weapons`]), in the order of the attackers' slots and, for one attacker,
-    /// of its weapon slots. Empty before the first step and in a world without weapons.
+    /// The shots fired in the last tick (see [`crate::weapons`]), in the order of the attackers'
+    /// slots and, for one attacker, of its weapon slots: a report, so compare them as a set. Empty
+    /// before the first step and in a world without weapons.
     pub fn shots(&self) -> &[Shot] {
         &self.arsenal.shots
+    }
+
+    /// The projectiles that went off in the last tick (WP5.2, see [`crate::projectiles`]), hit or
+    /// miss, in the order of their slots. A report: the order follows the slots, so compare the
+    /// impacts of a tick as a set. Empty before the first step and in a world without weapons.
+    pub fn impacts(&self) -> &[Impact] {
+        &self.arsenal.impacts
+    }
+
+    /// The number of projectiles in flight.
+    pub fn projectile_count(&self) -> usize {
+        self.arsenal.projectiles.len()
+    }
+
+    /// One projectile in flight; `None` if it has gone off or the id is stale.
+    pub fn projectile(&self, id: ProjectileId) -> Option<ProjectileView> {
+        let p = self.arsenal.projectiles.get(id)?;
+        Some(self.projectile_view(id, p))
+    }
+
+    pub(crate) fn projectile_view(
+        &self,
+        id: ProjectileId,
+        p: &crate::projectiles::Projectile,
+    ) -> ProjectileView {
+        let kind = self
+            .arsenal
+            .table
+            .weapon(p.weapon)
+            .map_or(weapons::ProjectileKind::Straight, |w| w.projectile);
+        ProjectileView {
+            id,
+            weapon: p.weapon,
+            kind,
+            owner: p.owner,
+            player: p.player,
+            target: match p.target {
+                crate::projectiles::Target::Entity(t) => Some(t),
+                crate::projectiles::Target::Point => None,
+            },
+            aim: p.aim,
+            prev_pos: p.prev_pos,
+            pos: p.pos,
+            prev_height: p.prev_height,
+            height: p.height,
+            heading: p.heading,
+        }
     }
 
     /// The ticks until weapon slot `slot` of entity `id` may fire again, zero when it is
@@ -965,6 +1018,18 @@ impl World {
             commands_executed: executed,
             commands_ignored: ignored,
             shots: self.arsenal.shots.len() as u32,
+            launched: self
+                .arsenal
+                .shots
+                .iter()
+                .filter(|s| {
+                    self.arsenal
+                        .table
+                        .weapon(s.weapon)
+                        .is_some_and(|w| w.projectile != weapons::ProjectileKind::Instant)
+                })
+                .count() as u32,
+            impacts: self.arsenal.impacts.len() as u32,
         }
     }
 

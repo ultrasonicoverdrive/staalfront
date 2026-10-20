@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move` and `weapons_reload`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload` and `projectiles`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -52,6 +52,7 @@ const FORMATION_MOVE_EXPECTED: &str =
     include_str!("../../../assets/scenarios/formation_move.expected");
 const WEAPONS_RELOAD_EXPECTED: &str =
     include_str!("../../../assets/scenarios/weapons_reload.expected");
+const PROJECTILES_EXPECTED: &str = include_str!("../../../assets/scenarios/projectiles.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -191,11 +192,22 @@ fn formation_move_matches_the_pinned_checksum() {
 
 /// Weapons and reload (WP5.1): riflemen, two tanks and two howitzers fire at what their attack
 /// orders name, one shot per reload window, a burst of two, a minimum range, a victim shot down to
-/// zero. A new scenario: pinned when it was added; no other value moved
-/// (`tests/weapons_reload.rs` asserts the shots).
+/// zero. Pinned in WP5.1; re-pinned in WP5.2 (`0x5a1bca1ebf1efa16` to `0x20a067e16e098d0b`) **only**
+/// because the world hashes a projectile section (`J`) now: the run ends in the same state, as every
+/// shell has landed by the last tick, but the shells take time on the way (`tests/weapons_reload.rs`
+/// asserts the shots and impacts).
 #[test]
 fn weapons_reload_matches_the_pinned_checksum() {
     check("weapons_reload", WEAPONS_RELOAD_EXPECTED);
+}
+
+/// Projectiles (WP5.2): one of each kind in flight (straight, arcing, guided, falling), a miss on a
+/// moving target and a hit on a stopped one, a shooter shot down with its shell in the air, and two
+/// rocket throwers who shoot each other down. A new scenario: pinned when it was added; no other
+/// value moved but `weapons_reload` (`tests/projectiles.rs` asserts the shots and impacts).
+#[test]
+fn projectiles_matches_the_pinned_checksum() {
+    check("projectiles", PROJECTILES_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for
@@ -310,6 +322,8 @@ fn the_expected_files_hold_one_bare_checksum() {
         TURNING_EXPECTED,
         REPLAN_EXPECTED,
         FORMATION_MOVE_EXPECTED,
+        WEAPONS_RELOAD_EXPECTED,
+        PROJECTILES_EXPECTED,
     ] {
         let line = text.trim_end_matches(['\n', '\r']);
         assert!(!line.contains(['\n', ' ']), "{text:?}");

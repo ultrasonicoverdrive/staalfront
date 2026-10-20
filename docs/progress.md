@@ -871,7 +871,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 is in; WP5.2 to WP5.6 are not started.
+Status: WP5.1 and WP5.2 are in; WP5.3 to WP5.6 are not started.
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -879,6 +879,11 @@ Status: WP5.1 is in; WP5.2 to WP5.6 are not started.
   entity keeps a reload and a burst counter per weapon slot, in a new last checksum section `W` that is written
   only while one is running; a unit with an `Attack` order fires an instant-hit placeholder; the
   `weapons_reload` scenario; no pinned checksum moved), `docs/rules/weapons.md`: done
+- WP5.2 Projectiles as separate entities (a weapon that is not `Instant` launches a projectile into a store of
+  its own: straight, arcing, guided and falling flights, a fuse and three ways to go off; the two-pass rule of
+  the tick, written down; `Snapshot::projectiles()`; checksum section `J`; `Shot::hp_after` fixed to the end of
+  the tick; the rocket tuned; the `projectiles` scenario; `weapons_reload` re-pinned; no other pinned checksum
+  moved), `docs/rules/projectiles.md`, `docs/rules/weapons.md`: done
 
 ### WP5.1 notes
 
@@ -962,6 +967,118 @@ at tick 205 fires at 219 with the others, not at 205. The same scenario without 
    `0x2397af78accc9214`, `0xbffd31b0686836f6` and `0x10f846dd7d437bdb`. Whichever WP turns combat on for them
    (WP5.4, when units choose targets and sf_game gets its table) re-pins them with the reason (review round 1).
 9. **The three follow-ups of the WP4.6 review** are items 11 to 13 of the open items in the Phase 4 close-out.
+
+### WP5.2 notes
+
+**Design (more in `docs/rules/projectiles.md`).** A weapon whose projectile is not `Instant` launches a
+`Projectile` (owner, player, weapon, target, aim point, position, height, heading, span, fuse) into
+`sf_sim::projectiles::Projectiles`, a slot vector with a generation per slot and a free list (a stack), iterated
+in slot order. A projectile launched in tick T first moves in T + 1. *Straight* flies at constant speed toward
+the place the target stood (no lead) and goes off the moment the path of a step touches the target's reach (its
+radius plus a quarter cell); if the target has walked off it goes off at the aim point, a miss. *Arc* covers the
+same ground and can only go off where it lands, where the target is hit if the landing point is within its
+reach; its height is a parabola in integers. *Guided* leaves the way its launcher points and turns at most
+`guide_turn` steps a tick toward the target's current place; if the target dies it flies on to the last place it
+saw it. *Falling* starts above the aim point and drops `projectile_speed` a tick. Every projectile has a fuse
+(flight time plus one for the ballistic kinds, twice the time to fly the weapon's range for a guided one); at
+zero it goes off where it is, a miss. Only the target can be hit; armor and splash are WP5.3, which plugs into
+`weapons::damage_of`, the one function that turns a hit into damage.
+
+**The two passes (the rule from the WP5.1 review).** Per tick: first every decision (the projectiles in flight
+move and decide whether they go off, then the weapons fire), reading the state of the start of the weapon stage
+and changing no hit point; then one pass that sums the damage per victim and takes it off once, saturating at
+zero. Written down in `weapons.md`. A shell that lands in the same tick as the shot that brings its victim to
+zero counts; one that lands on a victim already at zero at the start of its tick is a miss. Tests: the WP5.1
+style permutation tests with projectiles (spawn order, two to four units), a six-shell crossfire in all 720
+creation orders with four states of the free list, overlapping volleys with slots freed and reused. They were
+checked to fail when a hit point is changed in the middle of the pass; the case that shows it is a victim that
+either of two simultaneous shells would kill (the second finds it at zero if the first has already been
+applied), so that case is a test of its own at both levels.
+
+**Moving targets (decision).** Straight, arcing and falling projectiles aim at where the target stood and do not
+lead; they can all miss. A straight shell at 30 cells a second in the air for 4 ticks hits anything a shipped
+unit does (a unit walks at most an eighth of a cell a tick); it misses only a slow shell or a fast target, and a
+test shows a slow shell (two fifths of a cell a tick over eight cells) missing a walker. An arc and a falling bomb
+miss a walking unit as a matter of course (15 and 16 ticks in the air). A guided projectile follows. So the
+`projectiles` scenario shows the misses with the arc and the bomb, and the straight miss is in the unit tests.
+
+**`Shot::hp_after`.** Fixed, not just documented: it is now the victim's hit points at the end of the tick, the
+same number for every shot and impact at that victim in that tick (it was a running total in attacker-slot
+order). `Shot` is every trigger pull; the new `Impact` is every detonation. Both are reports (in slot order,
+not hashed). **Follow-up for WP5.5: kill credit must not be read from `hp_after` or from the order of shots and
+impacts**; settle it from the set of the tick's hits with a rule that does not look at slots.
+
+**The rocket (item 7 of the WP5.1 follow-ups).** Measured first (the table is in `projectiles.md`): with
+`guide_turn` 4 the rocket already hit everything a shipped unit does (60 of 60 at every distance against a light
+transport at 2.5 cells a second), because it leaves within 8 steps of the target and needs to turn only a few
+steps; against an invented 4 cells a second runner it fell to 48 of 60. Its turning circle was 6.1 cells against a
+range of 5. **`guide_turn` is now 8** (circle about 3.1 cells; 60 of 60 against the 4 cells a second runner too).
+`sf_data` has a test that every shipped guided weapon turns inside its range, and the headless test fires the
+shipped rocket from 24 headings at a transport that breaks away at five distances (120 of 120).
+
+**`projectile_speed` (item 11).** Required by the simulation (`WeaponsError::NoSpeed`, and `NoHeight` for a
+falling weapon without a height), not by the loader. The five old frozen copies (`orders_defs`, `pathing_defs`,
+`terrain_costs_defs`, `turning_defs`, `units_spawn_defs`) are untouched, comments included. The one thing that
+had to change for that: `sf_headless` built the weapon table for every scenario with `unit_defs`, and that
+refused a table made from a frozen copy without speeds; it now builds it only for a scenario with `combat: true`.
+`weapons_defs` has the speeds already.
+
+**Checksums.** Section `J` (the projectile store) is written after `W` for as long as the world has a weapon
+table, and never otherwise, so no world without a table changed: `wander_5000` 0x38d5e3c43358a889,
+`command_mix` 0x43f6583004258ceb, `terrain_256` 0xb577112845e0097e, `units_spawn` 0x6c369f42be150d6e,
+`bridge_200` 0x03971fcc3548fc0c and `orders`, `terrain_costs`, `pathing`, `pathing_256`, `crowd_jam`, `turning`,
+`replan`, `formation_move` are the values they were (`crates/sf_sim/tests/golden.rs` too). **One re-pin:
+`weapons_reload` 0x5a1bca1ebf1efa16 to 0x20a067e16e098d0b**, and the only reason for the final value is the
+projectile section `J` (review round 1 of PR #59 left the section out and got the WP5.1 value back: every shell has
+landed by tick 600, so the end state is the same). The flight times, 4 and 15 ticks for the cannon and the
+howitzer, show in the checkpoints in between and in the asserts (the heavy tank D goes down at tick 427, not 423;
+the howitzer's six hits land 15 ticks after the shots), not in the final number. The asserts changed with it: shots are launches (their `hp_after` is the target's hit points then), the hits are
+read from the impacts, and `hp_after` of the riflemen is the end-of-tick value (the old test summed a running total
+that depended on the slot order).
+
+**`projectiles`** (`assets/scenarios/projectiles.ron`, a frozen copy of the definitions in
+`assets/scenarios/projectiles_defs/` with the rocket as tuned, a `bomb` weapon (Falling) and a `bomb_team` unit
+(kind 90) added so that every kind takes part; 64 x 64 cells, 480 ticks, `combat: true`). Final checksum
+`0x770192e1d2d6da1c`. A light tank puts 11 shells on a heavy tank (flight 4 ticks, the formula
+`ceil((distance - reach) / speed)` to the tick); a howitzer shells a scout that is walking: the shells at ticks 20
+and 120 land where it was and miss, the one at 220 (it has stopped) kills it, each after
+`ceil(distance / 0.7)` ticks (11, 9, 11); a rocket thrower fires six rockets at a transport that zigzags in a box
+and all six hit (250 down to 0); one bomb team drops eight bombs on a tank that stands (16 ticks each, 900 down
+to 420) while another's first bomb falls where its transport was and misses and the next five kill it; a bomb
+team is shot down by a sniper at tick 6 and its bomb, dropped at tick 1, lands on tick 17; two rocket throwers
+kill each other with rockets that land on tick 7. Up to 6 projectiles in the air at once. Not in the scenario:
+a straight miss (the shipped shells are too fast for any unit; the unit tests have it) and a guided projectile
+that loses its target (unit tests).
+
+**Shipped weapons end to end.** `tools/sf_headless/tests/projectiles.rs` also fires every shipped weapon that
+flies from a unit (light tank, heavy tank, artillery, rocket thrower, heavy gun team) at a heavy tank at its full
+range from 24 launch headings and requires the first shell to hit. The gunboat (needs water) and the structure
+with the emplacement gun (a structure takes no order; WP5.4) are not in it.
+
+**Slot generations.** A projectile slot whose generation cannot be bumped any further (`u32::MAX`) is retired, not
+put back on the free list, like an entity slot (`World::despawn`): a stale `ProjectileId` can never be mistaken
+for a later projectile. A unit test ages a slot to the last generation. No checksum can differ before a slot
+reaches it.
+
+**Deferred, and why.**
+
+1. **Firing at the ground** and any target choice for structures: WP5.4 (a projectile can already have a
+   ground-point target; a guided one whose target died is one).
+2. **Armor, splash, damage types:** WP5.3, at `weapons::damage_of`.
+3. **Destruction and kill credit:** WP5.5 (see the `hp_after` follow-up above). A unit at zero stays in the world.
+4. **Drawing the projectiles:** WP5.6; the snapshot has them (`ProjectileView`). No marker in `sf_game`, which has
+   no weapon table yet.
+5. **Hitting what is in the way** (a unit in the path of a straight shell, a wall) and terrain height: not in v1's
+   rules; a shell hits its target or nothing.
+6. **The detonation point of a proximity hit** is the point of the step nearest the target's middle, not the point
+   where the path enters its reach; fine for the splash of WP5.3 (centred near the target), worth a look when
+   WP5.6 draws the impact.
+7. **`orders`, `replan` and `turning` still move once combat is on** (the follow-up of WP5.1): whichever WP turns
+   combat on for them re-pins them.
+8. **The other open items of the WP5.1 review stay open:** a hull weapon on a turret unit is never aimed (WP5.4), zero
+   hit points mean two things (WP5.5), `weapon_range` and the table both carry the first weapon's range (WP5.4).
+9. **A projectile store cap:** none. The number in the air is bounded by the weapon slots times flight over
+   reload; if a game ever shows more than a few thousand, add a limit with an order-independent rule.
 
 ## Phase 1 report (draft, WP1.14)
 
