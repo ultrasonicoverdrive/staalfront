@@ -1,4 +1,4 @@
-# Weapons (WP5.1, projectiles WP5.2)
+# Weapons (WP5.1, projectiles WP5.2, armor and splash WP5.3)
 
 A weapon is a row of numbers in `assets/config/weapon_defs.ron`: how far it shoots, how often,
 how hard, with what kind of damage, and what the shot does on its way. Units carry up to four
@@ -7,8 +7,9 @@ complete enough for the three that follow (projectiles WP5.2, armor and splash W
 targets WP5.4), puts it into the simulation, and uses it in the smallest possible way: a unit
 with an attack order fires when its weapon is reloaded and the victim is in reach, and the hit
 takes hit points off the victim. Since WP5.2 a weapon that is not `Instant` launches a projectile
-that flies and detonates ([`projectiles.md`](projectiles.md)); what a hit does is still the plain
-`damage` off one victim, a **placeholder** for WP5.3.
+that flies and detonates ([`projectiles.md`](projectiles.md)). Since WP5.3 what a hit does is the
+weapon's `damage` times the victim's armor percentage, and a weapon with a splash radius also hurts what
+stands near the burst ([`armour.md`](armour.md)).
 
 Everything is in our own words and numbers (clean-room, B5): invented weapon names, invented
 values, nothing from another game's data. The ranges are the design targets of `content/units.md`;
@@ -40,8 +41,8 @@ ever exists between the file and the simulation. The conversion module has no fl
 | `range` | longest distance it can hit, measured to the **edge** of the target | above 0, at most 64 cells | required |
 | `min_range` | shortest distance it can hit, measured the same way | 0 or more, below `range` | 0 (none) |
 | `reload` | time from the first shot of a burst to the first shot of the next | at least one tick (0.05 s), at most 600 s, a multiple of 0.05 | required |
-| `damage` | hit points per shot, before armor | 1 to 1,000,000 | required |
-| `damage_type` | a name from `unit_classes.ron`; the armor table of WP5.3 keys on it | must exist | required |
+| `damage` | hit points per shot, before armor and falloff | 1 to 1,000,000 | required |
+| `damage_type` | a name from `unit_classes.ron`; the armor table (WP5.3, [`armour.md`](armour.md)) keys on it | must exist | required |
 | `projectile` | `Instant`, `Straight`, `Arc`, `Guided` or `Falling` | | required |
 | `projectile_speed` | cells per second | 0 to 200 (ten cells a tick); not for `Instant` | 0 (not given) |
 | `flight_height` | cells: the top of an `Arc`, the height a `Falling` shell drops from | 0 to 32; only `Arc` and `Falling` | 0 |
@@ -50,7 +51,9 @@ ever exists between the file and the simulation. The conversion module has no fl
 | `burst_delay` | time between the shots of a burst | a multiple of 0.05 s; at least one tick when `burst` is above 1, **zero** when it is 1 | 0 |
 | `mount` | `Hull` or `Turret` | `Turret` only on a unit with a `turret_rate` | `Hull` |
 | `fire_arc` | half the width of the firing arc, in facing steps | 0 to 128 (128 is all round) | 8 (eleven degrees and a quarter) |
-| `splash_radius` | cells in which a hit also damages, with falloff (WP5.3) | 0 to 64 | 0 (none) |
+| `splash_radius` | cells from the burst, to the edge of a victim, in which a hit also damages, with falloff (WP5.3) | 0 to 64 | 0 (none) |
+| `splash_inner` | cells inside which the splash does its full damage, then it falls in a straight line to nothing at `splash_radius` (WP5.3) | 0 or more and below `splash_radius`; only with a `splash_radius` | 0 (it falls from the start) |
+| `friendly_fire` | whether the splash also hurts the shooter's own side (WP5.3) | only `false` is given, and only with a `splash_radius` | `true` |
 
 None of the fields added in WP5.1 is required **by the loader**. The scenarios pin their checksums on
 frozen copies of the definition files written before the fields existed, and those copies must keep
@@ -135,13 +138,14 @@ The weapons of the shipped file at full range: a shell of the cannons takes 4 ti
 rocket 8, a howitzer shell 15 (14 cells a second over ten cells), a bomb of the scenario's frozen
 definitions 16. The fuse is not a field: it follows from the flight (`projectiles.md`).
 
-### Damage type and splash, for WP5.3
+### Damage type and splash (WP5.3)
 
-`damage_type` is a name in `unit_classes.ron`, stored as its kind number; the table of WP5.3 is
-damage type times armor type to a percentage, and it adds itself next to the lists in that file. The
-sniper's "infantry only" is that table's job (precision does nothing to non-infantry armor), not a
-field of the weapon. `splash_radius` is stored and converted; the falloff is WP5.3's. WP5.1 uses
-neither.
+`damage_type` is a name in `unit_classes.ron`, stored as its kind number; the armor table in that file is
+damage type times armor type to a percentage ([`armour.md`](armour.md)). The sniper's "infantry only" is
+that table's job (precision does nothing to non-infantry armor), not a field of the weapon.
+`splash_radius`, `splash_inner` and `friendly_fire` make a burst hurt what stands near it; how the
+falloff works, who is hurt (the direct victim once, the shooter and the shooter's side included unless
+the weapon says otherwise) and how the number is rounded are in [`armour.md`](armour.md).
 
 ## Permanent numbers and tombstones
 
@@ -163,6 +167,8 @@ burst of 2 shots 2 s apart (40 ticks): the next burst would start before this on
 * numbers: a `kind` above 4095, twice, missing or on a tombstone; an empty list of weapons;
 * `reload`: zero, negative, not a multiple of 0.05 s, above 600 s;
 * `range` out of bounds; `min_range` negative or not below `range`; `splash_radius` out of bounds;
+  `splash_inner` negative, not below the radius, or given to a weapon without one; `friendly_fire: false`
+  on a weapon without a splash;
 * `damage` zero or above the limit; `damage_type` that does not exist;
 * `burst` out of 1 to 16; `burst_delay` not whole ticks, missing for a burst, present for a single
   shot, or a burst that does not fit in the reload; `fire_arc` above 128;
@@ -209,6 +215,13 @@ weapon table, was re-pinned in WP5.2: `0x5a1bca1ebf1efa16` to `0x20a067e16e098d0
 shell has landed by the last tick and the end state is the same. (The flight times show in the checkpoints in
 between and in the asserts: the heavy tank D goes down at tick 427, not 423.) No other pinned checksum moved.
 
+WP5.3 changed the **digest of the weapon table** (the first thing section `W` hashes): its tag is
+`sf_sim/weapons/v2` and it covers the full-strength radius of a splash, the friendly-fire flag and the armor
+table, the armor type of every unit kind included ([`armour.md`](armour.md#the-checksum)). Worlds without a
+weapon table are still not affected; `weapons_reload` was re-pinned again (`0x20a067e16e098d0b` to
+`0x59d08622efd30483`) and `projectiles` too (`0x770192e1d2d6da1c` to `0xb8bd6976866471e2`), for the reasons
+measured in `docs/progress.md`.
+
 `UnitStats` and the digests of the unit table (`digest`, the weapon reach digest of the orders
 section, the turret digest) are untouched: the weapons are a table of their own, so the sections that
 the earlier scenarios pin do not change.
@@ -216,8 +229,9 @@ the earlier scenarios pin do not change.
 ## A tick of shooting, in two passes
 
 Since WP5.2 a weapon either hits at once (`Instant`) or launches a projectile that flies and detonates later.
-Armor and splash (WP5.3) and choosing targets (WP5.4) are still to come, so what a hit does is the plainest
-thing: it takes the weapon's `damage` off the one victim.
+Since WP5.3 what a hit does is `weapons::damage_of`: the weapon's `damage` through the armor table for the
+victim it hit, and the falloff share for everyone else near the burst ([`armour.md`](armour.md)). Choosing
+targets (WP5.4) is still to come.
 
 After the units have moved and the turrets turned, the weapons of a tick run in **two passes, and no hit point
 changes in the first**. This is the rule, and it is binding for every work package that changes what a hit
@@ -236,8 +250,9 @@ does (it was asked for in the review of WP5.1):
    store in the second pass, and first moves in the next tick). **Every decision reads the hit points and
    positions of the start of the weapon stage and changes none.**
 2. **Apply.** Every hit of the tick, the instant ones and the detonations, is turned into damage by
-   `weapons::damage_of`, **summed per victim, and taken off its hit points once, saturating at zero**.
-   Projectiles that went off leave the store and the launched ones enter it.
+   `weapons::damage_of` (the direct victim, and since WP5.3 everyone in a splash too), **summed per victim,
+   and taken off its hit points once, saturating at zero**. Projectiles that went off leave the store and
+   the launched ones enter it.
 
 So the outcome of a tick does not depend on the order of the entities or of the projectiles: two units that
 kill each other both die; two shooters that overkill one victim both fire and both spend their reload; a unit
@@ -252,7 +267,8 @@ every order with every state of the free list (`src/projectiles/tests.rs`).
 that target in that tick (in WP5.1 it was a running total in attacker-slot order, which was the one thing that
 depended on the order). It is a report, not state, not hashed, and **not to be read as truth about who took the
 hit points: WP5.5's kill credit must not use it** (nor the order of the shots in a tick). `damage` of a
-projectile's shot is what it will do if it hits.
+projectile's shot is what it will do if it hits, **before the armor** (`Impact::damage` is what the burst did
+to its direct victim after it, and `Impact::splash_victims` counts the others it hurt).
 
 Nothing is removed when a victim reaches zero (WP5.5): it stays where it is, is not fired at again, and the
 attacker keeps its order. Orders other than `Attack` (attack-move, guard, hold, a unit that is idle) fire
@@ -260,10 +276,12 @@ nothing: target choice is WP5.4. There is no check of whose unit the victim is.
 
 ## What WP5.3 and WP5.4 do with each field
 
+(WP5.3 is done: [`armour.md`](armour.md).)
+
 | Work package | Replaces or reads |
 |---|---|
 | WP5.2 projectiles (done) | `projectile` and its parameters: an `Instant` weapon hits in its tick, the others launch a projectile that carries the weapon's `damage` (and, for WP5.3, `damage_type` and `splash_radius`) to its detonation. The reload, burst and aim rules stay |
-| WP5.3 armor and splash | `damage_type` times the victim's armor type; `splash_radius` with a falloff; the saturating subtraction becomes the real damage. It plugs into `weapons::damage_of`, the one function that turns a hit into damage |
+| WP5.3 armor and splash (done) | `damage_type` times the victim's armor type; `splash_radius` and `splash_inner` with a falloff, `friendly_fire`; the saturating subtraction takes the real damage. It plugs into `weapons::damage_of`, the one function that turns a hit into damage |
 | WP5.4 targets | which victim, which weapon at which target, the choice of order other than `Attack`, whether a hull weapon on a turret unit turns the hull, backing off inside `min_range`, firing at the ground |
 
 ## The shipped set (placeholders)
@@ -281,13 +299,13 @@ four. Time is the reload in seconds and ticks.
 | `satchel_charge` | 5 | 0.5 (2) | | 1 (20) | 5000 | demolition | Instant | | Hull | 8 |
 | `cannon` | 6 | 5 (20) | | 2 (40) | 35 | cannon | Straight | 30 | Turret | 8 |
 | `twin_cannon` | 7 | 5 (20) | | 2 (40) | 2 x 30, 5 ticks apart | cannon | Straight | 30 | Turret | 8 |
-| `howitzer` | 8 | 10 (40) | 3 | 5 (100) | 90, splash 1.5 | shell | Arc (height 3) | 14 | Turret | 8 |
+| `howitzer` | 8 | 10 (40) | 3 | 5 (100) | 90, splash 1.5 (full to 0.5) | shell | Arc (height 3) | 14 | Turret | 8 |
 | `anti_tank_gun` | 9 | 6 (24) | | 2.5 (50) | 70 | cannon | Straight | 36 | Hull | 8 |
 | `naval_cannon` | 10 | 6 (24) | | 2 (40) | 45 | cannon | Straight | 30 | Hull | 8 |
 | `tower_gun` | 11 | 6 (24) | | 0.8 (16) | 8 | bullet | Instant | | Hull | 128 |
 | `emplacement_gun` | 12 | 7 (28) | | 2.5 (50) | 80 | cannon | Straight | 36 | Hull | 128 |
 | `automated_gun` | 13 | 8 (32) | | 1 (20) | 4 x 5, 2 ticks apart | bullet | Instant | | Hull | 128 |
-| `battery_shell` | 14 | 12 (48) | 3 | 6 (120) | 80, splash 1.5 | shell | Arc (height 3) | 14 | Hull | 128 |
+| `battery_shell` | 14 | 12 (48) | 3 | 6 (120) | 80, splash 1.5 (full to 0.5) | shell | Arc (height 3) | 14 | Hull | 128 |
 
 The rocket's `guide_turn` went from 4 to 8 in WP5.2, so that its turning circle (about 3.1 cells at 12 cells a
 second) is inside its range of 5 where it was larger (about 6.1); the numbers behind it are in
@@ -308,10 +326,11 @@ reload: the twin cannon fires two shells of 30 where it fired one of 60, and the
   range, aim by turret and by hull, a victim at zero, orders that do not fire, the checksum section and
   that a world with weapons that have not fired hashes as one without;
 * the projectile tests are listed in [`projectiles.md`](projectiles.md#tests);
+* the armor and splash tests are listed in [`armour.md`](armour.md#tests);
 * `crates/sf_bridge`: every weapon and loadout arrives, and the shipped table fits the shipped units in
   a world;
 * `assets/scenarios/weapons_reload.ron` with `tools/sf_headless/tests/weapons_reload.rs`: riflemen on a
   structure, two tanks on a tank, two howitzers (one too close), a victim shot down to zero, and a reload
-  that an order change does not reset; the checksum is pinned in `weapons_reload.expected` (re-pinned in WP5.2)
+  that an order change does not reset; the checksum is pinned in `weapons_reload.expected` (re-pinned in WP5.2 and WP5.3)
   and run by CI on Linux and Windows. It reads a **frozen copy** of the definitions,
   `assets/scenarios/weapons_defs/`.

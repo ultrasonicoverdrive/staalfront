@@ -117,6 +117,8 @@ fn weapon(
         flight_height: height,
         guide_turn_per_tick: turn,
         splash_radius: Fx::ZERO,
+        splash_inner: Fx::ZERO,
+        friendly_fire: true,
         mount: Mount::Hull,
         fire_arc: arc,
     }

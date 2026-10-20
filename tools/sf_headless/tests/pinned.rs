@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload` and `projectiles`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles` and `armour_splash`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -53,6 +53,8 @@ const FORMATION_MOVE_EXPECTED: &str =
 const WEAPONS_RELOAD_EXPECTED: &str =
     include_str!("../../../assets/scenarios/weapons_reload.expected");
 const PROJECTILES_EXPECTED: &str = include_str!("../../../assets/scenarios/projectiles.expected");
+const ARMOUR_SPLASH_EXPECTED: &str =
+    include_str!("../../../assets/scenarios/armour_splash.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -195,7 +197,11 @@ fn formation_move_matches_the_pinned_checksum() {
 /// zero. Pinned in WP5.1; re-pinned in WP5.2 (`0x5a1bca1ebf1efa16` to `0x20a067e16e098d0b`) **only**
 /// because the world hashes a projectile section (`J`) now: the run ends in the same state, as every
 /// shell has landed by the last tick, but the shells take time on the way (`tests/weapons_reload.rs`
-/// asserts the shots and impacts).
+/// asserts the shots and impacts). Re-pinned again in WP5.3 (`0x20a067e16e098d0b` to
+/// `0x59d08622efd30483`) **only** because the digest of the weapon table, which the weapons section
+/// hashes from the first tick, has a new layout (the splash's full-strength radius, the friendly-fire
+/// flag and the armor table; the table of this scenario's frozen definitions has none): with the old
+/// digest layout the run has the WP5.2 value at all 30 checkpoints, 20 ticks apart.
 #[test]
 fn weapons_reload_matches_the_pinned_checksum() {
     check("weapons_reload", WEAPONS_RELOAD_EXPECTED);
@@ -205,9 +211,24 @@ fn weapons_reload_matches_the_pinned_checksum() {
 /// moving target and a hit on a stopped one, a shooter shot down with its shell in the air, and two
 /// rocket throwers who shoot each other down. A new scenario: pinned when it was added; no other
 /// value moved but `weapons_reload` (`tests/projectiles.rs` asserts the shots and impacts).
+/// Re-pinned in WP5.3 (`0x770192e1d2d6da1c` to `0xb8bd6976866471e2`) for the two reasons of the digest
+/// of the weapon table and **not** for a change in what the run does: the new digest layout, and the
+/// frozen definitions lost `splash_radius: 1.5` on the howitzer, because splash became real and a
+/// shell that lands where the walking scout stood would now hurt it (the scenario is about the miss).
+/// With the old digest layout, and the old code that has no splash and no armor, the edited
+/// definitions give the same value as the new code at all 24 checkpoints, 20 ticks apart.
 #[test]
 fn projectiles_matches_the_pinned_checksum() {
     check("projectiles", PROJECTILES_EXPECTED);
+}
+
+/// Armor and splash (WP5.3): bullets, rockets and a sniper against heavy, light and no armor, a howitzer
+/// shell into a crowd, two bombs (one that spares the shooter's side) and a bomb team that bombs
+/// what is next to it. A new scenario: pinned when it was added (`tests/armour_splash.rs` asserts the
+/// numbers against hand calculations).
+#[test]
+fn armour_splash_matches_the_pinned_checksum() {
+    check("armour_splash", ARMOUR_SPLASH_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for

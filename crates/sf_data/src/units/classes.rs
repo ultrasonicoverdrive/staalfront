@@ -15,7 +15,13 @@
 //! * **Turning** (WP4.5): how the class turns its hull, a `turning` block per
 //!   movement class ([`TurningDef`]; `docs/rules/turning.md`).
 //! * **Armor types** and **damage types** (WP5.3): the damage-times-armor
-//!   percentage table and the splash falloff.
+//!   percentage table (`armor_table`, [`ClassTables::armor_percent`]). Every
+//!   unit names one armor type (`armor` in `unit_defs.ron`) and every weapon one
+//!   damage type; the table says how much of the weapon's damage the armor
+//!   takes. It is optional in the file, so the frozen copies of the definitions
+//!   that predate it still load (without a table every hit does the weapon's
+//!   damage); when it is there it has to be complete. The rules are in
+//!   `docs/rules/armour.md`.
 
 use serde::Deserialize;
 
@@ -35,6 +41,10 @@ pub const MIN_COST_PERMILLE: u16 = 100;
 
 /// The fastest speed multiplier a terrain may give, in permille (double).
 pub const MAX_COST_PERMILLE: u16 = 2000;
+
+/// The most one armor type may take of a damage type, in percent (four times the damage). The
+/// simulation's own bound (`sf_sim::MAX_ARMOR_PERCENT`) is the same number.
+pub const MAX_ARMOR_PERCENT: u16 = 400;
 
 /// What one movement class does on one terrain type (WP4.1): it cannot enter
 /// it, or it moves there at a fraction of its own speed.
@@ -158,8 +168,8 @@ pub struct ArmorType {
     pub kind: u16,
     /// Unique snake_case name that units refer to.
     pub name: String,
-    // WP5.3: the percentage taken per damage type goes here or in a separate
-    // damage table next to the lists in the file.
+    // The percentage it takes of each damage type is in the file's `armor_table`
+    // (WP5.3), not on the type: one table to read for the balance.
 }
 
 /// What kind of damage a weapon deals.
@@ -172,6 +182,18 @@ pub struct DamageType {
     pub name: String,
 }
 
+/// One row of the `armor_table` as written in the file: the percentage that each armor type takes of
+/// one damage type, in a list of pairs so that a name written twice is an error and not the last one.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArmorRowDef {
+    /// Name of a damage type.
+    damage: String,
+    /// `(armor type name, percent)` for every armor type. A signed number, so that a negative one is
+    /// refused with a message and not as a syntax error.
+    percent: Vec<(String, i32)>,
+}
+
 /// The RON file.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -179,6 +201,9 @@ struct ClassesFile {
     movement_classes: Vec<MovementClass>,
     armor_types: Vec<ArmorType>,
     damage_types: Vec<DamageType>,
+    /// Damage times armor (WP5.3). Left out: no table, every hit does the weapon's damage.
+    #[serde(default)]
+    armor_table: Vec<ArmorRowDef>,
     #[serde(default)]
     retired_movement_classes: Vec<Retired>,
     #[serde(default)]
@@ -197,6 +222,9 @@ pub struct ClassTables {
     pub armor_types: Vec<ArmorType>,
     /// Damage types.
     pub damage_types: Vec<DamageType>,
+    /// The armor table as `(damage kind, armor kind, percent)`, one entry for every pair of a damage
+    /// type and an armor type, sorted; empty when the file has no `armor_table` (WP5.3).
+    pub armor_percents: Vec<(u16, u16, u16)>,
     /// Numbers of removed movement classes, never to be reused.
     pub retired_movement_classes: Vec<Retired>,
     /// Numbers of removed armor types.
@@ -238,6 +266,7 @@ impl ClassTables {
             check_costs(src, class)?;
             check_turning(src, class)?;
         }
+        let armor_percents = check_armor_table(src, &file)?;
         file.movement_classes.sort_by_key(|c| c.kind);
         file.armor_types.sort_by_key(|c| c.kind);
         file.damage_types.sort_by_key(|c| c.kind);
@@ -245,6 +274,7 @@ impl ClassTables {
             movement_classes: file.movement_classes,
             armor_types: file.armor_types,
             damage_types: file.damage_types,
+            armor_percents,
             retired_movement_classes: file.retired_movement_classes,
             retired_armor_types: file.retired_armor_types,
             retired_damage_types: file.retired_damage_types,
@@ -281,6 +311,20 @@ impl ClassTables {
             .iter()
             .find(|c| c.name == name)
             .map(|c| c.kind)
+    }
+
+    /// Whether the file has an `armor_table`.
+    pub fn has_armor_table(&self) -> bool {
+        !self.armor_percents.is_empty()
+    }
+
+    /// The percentage of damage type `damage` (by kind number) that armor type `armor` takes; `None`
+    /// when the file has no `armor_table` or either number is not in it.
+    pub fn armor_percent(&self, damage: u16, armor: u16) -> Option<u16> {
+        self.armor_percents
+            .binary_search_by_key(&(damage, armor), |&(d, a, _)| (d, a))
+            .ok()
+            .map(|i| self.armor_percents[i].2)
     }
 }
 
@@ -321,6 +365,112 @@ fn check_costs(src: Source<'_>, class: &MovementClass) -> Result<(), DefError> {
         }
     }
     Ok(())
+}
+
+/// The checks of the `armor_table` (WP5.3): every row names a damage type that exists, once; every
+/// row has every armor type that exists, once, with a percentage from 0 to [`MAX_ARMOR_PERCENT`];
+/// every damage type has a row. A file without a table passes (and gives an empty list). Returns the
+/// cells as `(damage kind, armor kind, percent)`, sorted.
+fn check_armor_table(
+    src: Source<'_>,
+    file: &ClassesFile,
+) -> Result<Vec<(u16, u16, u16)>, DefError> {
+    if file.armor_table.is_empty() {
+        return Ok(Vec::new());
+    }
+    let damage_kind = |name: &str| {
+        file.damage_types
+            .iter()
+            .find(|d| d.name == name)
+            .map(|d| d.kind)
+    };
+    let armor_kind = |name: &str| {
+        file.armor_types
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.kind)
+    };
+    let mut cells = Vec::new();
+    for (i, row) in file.armor_table.iter().enumerate() {
+        let name = row.damage.as_str();
+        let nth = file.armor_table[..i]
+            .iter()
+            .filter(|r| r.damage == row.damage)
+            .count();
+        let here = |message: String| {
+            src.error_at_record(
+                "damage",
+                name,
+                nth,
+                format!("armor_table, row \"{name}\": {message}"),
+            )
+        };
+        let Some(damage) = damage_kind(name) else {
+            return Err(src.error_at_record(
+                "damage",
+                name,
+                nth,
+                format!("armor_table: unknown damage type \"{name}\" (not in damage_types)"),
+            ));
+        };
+        if nth > 0 {
+            return Err(src.error_at_record(
+                "damage",
+                name,
+                nth,
+                format!("armor_table: damage type \"{name}\" has two rows"),
+            ));
+        }
+        for (j, (armor_name, percent)) in row.percent.iter().enumerate() {
+            let in_row = |message: String| {
+                src.error_in_record("damage", name, armor_name, message_in(name, message))
+            };
+            let Some(armor) = armor_kind(armor_name) else {
+                return Err(in_row(format!(
+                    "unknown armor type \"{armor_name}\" (not in armor_types)"
+                )));
+            };
+            if row.percent[..j].iter().any(|(n, _)| n == armor_name) {
+                return Err(in_row(format!(
+                    "armor type \"{armor_name}\" is listed twice"
+                )));
+            }
+            let Ok(percent) = u16::try_from(*percent) else {
+                return Err(in_row(format!(
+                    "\"{armor_name}\" is {percent} percent, which must be 0 to {MAX_ARMOR_PERCENT}"
+                )));
+            };
+            if percent > MAX_ARMOR_PERCENT {
+                return Err(in_row(format!(
+                    "\"{armor_name}\" is {percent} percent, which must be 0 to {MAX_ARMOR_PERCENT}"
+                )));
+            }
+            cells.push((damage, armor, percent));
+        }
+        for armor in &file.armor_types {
+            if !row.percent.iter().any(|(n, _)| *n == armor.name) {
+                return Err(here(format!(
+                    "armor type \"{}\" has no percentage (the table has to be complete)",
+                    armor.name
+                )));
+            }
+        }
+    }
+    for damage in &file.damage_types {
+        if !file.armor_table.iter().any(|r| r.damage == damage.name) {
+            return Err(src.error(format!(
+                "armor_table: damage type \"{}\" has no row (the table has to be complete)",
+                damage.name
+            )));
+        }
+    }
+    cells.sort_unstable();
+    Ok(cells)
+}
+
+/// The start of every message about one cell of a row.
+fn message_in(damage: &str, message: String) -> String {
+    format!("armor_table, row \"{damage}\": {message}")
 }
 
 /// The checks of one class's `turning` block (WP4.5).

@@ -80,6 +80,8 @@ fn weapon(kind: u16, range: i32, reload: u32, damage: u32) -> WeaponStats {
         flight_height: Fx::ZERO,
         guide_turn_per_tick: 0,
         splash_radius: Fx::ZERO,
+        splash_inner: Fx::ZERO,
+        friendly_fire: true,
         mount: Mount::Hull,
         fire_arc: 8,
     }

@@ -1,0 +1,86 @@
+// FROZEN copy (see armour_splash.ron) of assets/config/weapon_defs.ron as it was when the armour_splash
+// scenario was pinned (WP5.3). A balance change of the shipped file does not move its checksum.
+// Weapons (WP3.1, extended in WP5.1 and WP5.3). Read by sf_data::units; unit_defs.ron refers to them by id.
+// Every field and what the combat work packages do with it: docs/rules/weapons.md.
+//
+//   range, min_range, splash_radius   cells (1 cell = 4 m, B12), measured to the edge of the target
+//   splash_inner                      cells from the edge of a victim inside which a splash does its
+//                                     full damage; from there it falls in a straight line to nothing
+//                                     at splash_radius (default 0: it falls from the start). Only
+//                                     for a weapon with a splash_radius, and below it.
+//   friendly_fire                     whether the splash also hurts the shooter's own side (default
+//                                     true). The direct victim is hurt whoever it belongs to.
+//   reload                            game seconds, a whole number of 20 Hz ticks (a multiple of
+//                                     0.05); from the first shot of a burst to the first of the next
+//   damage                            hit points per shot, before armor (WP5.3: the percentage of
+//                                     unit_classes.ron's armor_table for its damage type and the
+//                                     victim's armor type, times the splash falloff)
+//   damage_type                       a name from unit_classes.ron
+//   projectile                        Instant, Straight, Arc, Guided or Falling (docs/rules/projectiles.md)
+//   projectile_speed                  cells per game second (not for Instant; the simulation refuses a
+//                                     flying projectile that has none)
+//   flight_height                     cells: top of an Arc, start of a Falling drop (the simulation refuses
+//                                     a Falling weapon without one)
+//   guide_turn                        facing steps (of 256) per tick a Guided projectile steers
+//   burst, burst_delay                shots per trigger pull (default 1) and game seconds between them
+//   mount                             Hull (default) or Turret (only for a unit with a turret_rate)
+//   fire_arc                          half the firing arc in facing steps of 256 (default 8, all
+//                                     round is 128): how far from the target the hull, or the
+//                                     turret, may point and still fire
+//   kind                              the permanent number of the weapon (what the simulation
+//                                     uses): never changed, never reused; records may stand in any
+//                                     order. A removed weapon leaves a tombstone in
+//                                     `retired_weapons` (below), and its id is not reused either.
+//
+// Ranges (and min_range of the howitzer) are the design targets of content/units.md. Everything
+// marked `placeholder` is not in that file and is a guess for the balance rounds of phase 15:
+// damage, reload, splash, the burst, and the speed and height of the projectiles, and the numbers
+// of the weapons that units.md names without stats. Structures keep a fixed hull, so their
+// weapons fire all round until the defensive buildings get turrets (WP6.7).
+(
+    weapons: [
+        // Baseline infantry rifle.
+        (kind: 0, id: "rifle", range: 4, reload: 1, damage: 6, damage_type: "bullet", projectile: Instant), // placeholder: reload, damage
+        // Anti-armour rocket (rocket_trooper): about 8 ticks in the air at full range. It turns 8 steps a
+        // tick (WP5.2; it was 4): at 12 cells a second that is a turning circle of about 3 cells, inside its
+        // range of 5, so it can still come round onto a target that has stepped out of its line.
+        (kind: 1, id: "rocket", range: 5, reload: 2.5, damage: 45, damage_type: "rocket", projectile: Guided, projectile_speed: 12, guide_turn: 8), // placeholder: reload, damage, speed, guide_turn
+        // Sniper: infantry only (the armor table gives every other armor 0 percent of "precision").
+        (kind: 2, id: "long_rifle", range: 8, reload: 3, damage: 40, damage_type: "precision", projectile: Instant), // placeholder: reload, damage
+        (kind: 3, id: "pistol", range: 3, reload: 1, damage: 4, damage_type: "bullet", projectile: Instant), // placeholder: reload, damage
+        (kind: 4, id: "carbine", range: 3, reload: 0.8, damage: 5, damage_type: "bullet", projectile: Instant), // placeholder: reload, damage
+        // Demolition team: destroys any structure on contact, so the range is
+        // touching distance and the damage is more than any structure's hit points.
+        (kind: 5, id: "satchel_charge", range: 0.5, reload: 1, damage: 5000, damage_type: "demolition", projectile: Instant), // placeholder: range, reload, damage
+        // light_tank: the shell crosses the full range in about 3.3 ticks.
+        (kind: 6, id: "cannon", range: 5, reload: 2, damage: 35, damage_type: "cannon", projectile: Straight, projectile_speed: 30, mount: Turret), // placeholder: reload, damage, speed
+        // heavy_tank: two barrels, a volley of two shots a quarter second apart (the 60 hit points of
+        // the old single shot, split in two).
+        (kind: 7, id: "twin_cannon", range: 5, reload: 2, damage: 30, damage_type: "cannon", projectile: Straight, projectile_speed: 30, burst: 2, burst_delay: 0.25, mount: Turret), // placeholder: reload, damage, speed, burst
+        // siege_artillery.
+        (kind: 8, id: "howitzer", range: 10, min_range: 3, reload: 5, damage: 90, damage_type: "shell", projectile: Arc, projectile_speed: 14, flight_height: 3, splash_radius: 1.5, splash_inner: 0.5, mount: Turret), // placeholder: reload, damage, splash, speed, height
+        // heavy_gun_team: infantry, so the hull is the gun (it deploys to fire).
+        (kind: 9, id: "anti_tank_gun", range: 6, reload: 2.5, damage: 70, damage_type: "cannon", projectile: Straight, projectile_speed: 36), // placeholder: reload, damage, speed
+        // gunboat: fixed to the hull.
+        (kind: 10, id: "naval_cannon", range: 6, reload: 2, damage: 45, damage_type: "cannon", projectile: Straight, projectile_speed: 30), // placeholder: reload, damage, speed
+        // defence_tower: anti-infantry and light vehicles.
+        (kind: 11, id: "tower_gun", range: 6, reload: 0.8, damage: 8, damage_type: "bullet", projectile: Instant, fire_arc: 128), // placeholder: reload, damage
+        // advanced_defences: anti-armour gun emplacement.
+        (kind: 12, id: "emplacement_gun", range: 7, reload: 2.5, damage: 80, damage_type: "cannon", projectile: Straight, projectile_speed: 36, fire_arc: 128), // placeholder: reload, damage, speed
+        // automated_gun (F2-M10 hub prototype defence): a machine gun, four shots a burst a tenth of
+        // a second apart (the 20 hit points of the old single shot, split in four).
+        (kind: 13, id: "automated_gun", range: 8, reload: 1, damage: 5, damage_type: "bullet", projectile: Instant, burst: 4, burst_delay: 0.1, fire_arc: 128), // placeholder: reload, damage, burst
+        // unmanned_artillery (F2-M09): units.md gives no numbers.
+        (kind: 14, id: "battery_shell", range: 12, min_range: 3, reload: 6, damage: 80, damage_type: "shell", projectile: Arc, projectile_speed: 14, flight_height: 3, splash_radius: 1.5, splash_inner: 0.5, fire_arc: 128), // placeholder: all numbers
+        // Scenario only (WP5.3), not in the shipped set: two bombs that fall on the spot where the target stood
+        // and burst. A radius of 2 cells, full damage out to 1 from the edge of a victim, then a straight
+        // line down to nothing. The reload is long on purpose (30 s, longer than the scenario): each bomb
+        // team drops exactly one bomb, so the hand calculations of the test are about one burst.
+        // `bomb` hurts everyone, the shooter and its own side included (the default); `careful_bomb` spares
+        // the units of the shooter's own player (`friendly_fire: false`), the shooter among them.
+        (kind: 15, id: "bomb", range: 6, reload: 30, damage: 60, damage_type: "shell", projectile: Falling, projectile_speed: 4, flight_height: 3, splash_radius: 2, splash_inner: 1, fire_arc: 128), // scenario fixture
+        (kind: 16, id: "careful_bomb", range: 6, reload: 30, damage: 60, damage_type: "shell", projectile: Falling, projectile_speed: 4, flight_height: 3, splash_radius: 2, splash_inner: 1, friendly_fire: false, fire_arc: 128), // scenario fixture
+    ],
+    // Tombstones of removed weapons, as (kind: <number>, name: "<old id>").
+    retired_weapons: [],
+)

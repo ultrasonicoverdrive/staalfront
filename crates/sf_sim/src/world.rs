@@ -1007,7 +1007,13 @@ impl World {
         // The turrets turn toward their targets, from where the hulls ended (WP4.5).
         turret::update_all(&mut self.entities, &self.units);
         // The weapons reload, and fire at the victims of attack orders (WP5.1).
-        weapons::update_all(&mut self.entities, &self.units, &mut self.arsenal, tick);
+        weapons::update_all(
+            &mut self.entities,
+            &self.units,
+            &mut self.arsenal,
+            tick,
+            (self.config.width, self.config.height),
+        );
 
         self.tick = tick.next();
         let checksum = self.checksum();
