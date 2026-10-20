@@ -1,0 +1,98 @@
+// Projectiles (WP5.2, docs/rules/projectiles.md), on a 64 by 64 cell open map (no terrain layer).
+// A weapon whose projectile is not Instant launches a projectile that flies for a number of ticks and
+// goes off; the hit points come off only then. What the run shows, one group of units at a time:
+//   A  Straight   a light tank's shell flies to a heavy tank: distance over speed in ticks.
+//   B  Arc        a howitzer shells a scout that is walking across its front: the shell lands where the
+//                 scout stood and misses; once the scout stands still the next shell hits and kills it.
+//   C  Guided     a rocket thrower fires at a light transport (2.5 cells a second) that zigzags in a
+//                 small box: the rockets steer and hit.
+//   D  Falling    a bomb drops from three cells above where its target stood. One target stands still
+//                 and is hit; the other is walking and is missed, then stands still and is hit.
+//   E  Shooter    a bomb team is shot down by a sniper while its bomb is in the air: the bomb lands.
+//   F  Mutual     two rocket throwers shoot each other down, each with a rocket that was in the air.
+// CI runs it on Linux and Windows and requires the checksum in projectiles.expected;
+// tools/sf_headless/tests/projectiles.rs asserts the shots and impacts along the way.
+//
+// `unit_defs` names a FROZEN copy of the definitions (projectiles_defs/): a balance change of
+// assets/config/ does not move this checksum. The copy has two additions that the shipped set does
+// not have, so that the scenario shows every kind of projectile: the weapon `bomb` (Falling) and the
+// unit `bomb_team` (kind 90) that carries it. `combat: true` gives the world the weapon table.
+// Owners: 0 Meridian, 1 Veyran.
+//
+// Entity ids, all at generation 0, in the order the spawns are written:
+//    0  heavy_tank TA (20, 900 hp)         owner 1  cell (14, 6)    A: stands still
+//    1  light_tank LA (19, cannon)         owner 0  cell (4, 6)     A: attacks TA, a shell of 35 every 40 ticks
+//    2  scout SB (15, 25 hp)               owner 1  cell (28, 6)    B: walks to (28, 16), 1.3 cells a second
+//    3  siege_artillery AB (21, howitzer)  owner 0  cell (22, 12)   B: attacks SB, a shell of 90 every 100 ticks
+//    4  light_transport TC (24, 250 hp)    owner 1  cell (10, 30)   C: zigzags in a box of 3 by 4 cells
+//    5  rocket_trooper RC (13, rocket)     owner 0  cell (11, 33)   C: attacks TC, a rocket of 45 every 50 ticks
+//    6  heavy_tank TD1 (20)                owner 1  cell (40, 8)    D: stands still
+//    7  bomb_team BD1 (90, bomb)           owner 0  cell (38, 5)    D: attacks TD1
+//    8  light_transport TD2 (24)           owner 1  cell (50, 8)    D: walks to (50, 12), 2.5 cells a second
+//    9  bomb_team BD2 (90)                 owner 0  cell (47, 8)    D: attacks TD2
+//   10  heavy_tank TE (20)                 owner 1  cell (40, 30)   E: stands still
+//   11  bomb_team BE (90, 30 hp)           owner 0  cell (38, 27)   E: attacks TE; shot down at tick 6
+//   12  sniper SE (16, long rifle)         owner 1  cell (31, 27)   E: told to attack BE at tick 6: 40 damage
+//   13  rocket_trooper RF1 (13, 45 hp)     owner 0  cell (10, 50)   F: attacks RF2
+//   14  rocket_trooper RF2 (13, 45 hp)     owner 1  cell (14, 50)   F: attacks RF1
+Scenario(
+    name: "projectiles",
+    seed: 0x0A55_0520,
+    map: (width: 64, height: 64),
+    unit_defs: Some("projectiles_defs"),
+    combat: true,
+    ticks: 480,
+    commands: [
+        // --- the cast, at tick 0 ---
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (14, 6))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (4, 6))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 1, cell: (28, 6))),
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (22, 12))),
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 1, cell: (10, 30))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 0, cell: (11, 33))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (40, 8))),
+        (tick: 0, command: SpawnUnit(kind: 90, owner: 0, cell: (38, 5))),
+        (tick: 0, command: SpawnUnit(kind: 24, owner: 1, cell: (50, 8))),
+        (tick: 0, command: SpawnUnit(kind: 90, owner: 0, cell: (47, 8))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (40, 30))),
+        (tick: 0, command: SpawnUnit(kind: 90, owner: 0, cell: (38, 27))),
+        (tick: 0, command: SpawnUnit(kind: 16, owner: 1, cell: (31, 27))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 0, cell: (10, 50))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (14, 50))),
+
+        // --- tick 1: everybody goes for their victim ---
+        (tick: 1, command: OrderAttack(ids: [Id(1, 0)], target: (0, 0))),
+        (tick: 1, command: OrderMove(ids: [Id(2, 0)], target: (28, 16))),
+        (tick: 1, command: OrderAttack(ids: [Id(3, 0)], target: (2, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(5, 0)], target: (4, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(7, 0)], target: (6, 0))),
+        (tick: 1, command: OrderMove(ids: [Id(8, 0)], target: (50, 12))),
+        (tick: 1, command: OrderAttack(ids: [Id(9, 0)], target: (8, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(11, 0)], target: (10, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(13, 0)], target: (14, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(14, 0)], target: (13, 0))),
+
+        // --- C: the transport zigzags in its box, three times through ---
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (13, 32))),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (10, 34), queued: true)),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (13, 30), queued: true)),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (10, 30), queued: true)),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (13, 34), queued: true)),
+        (tick: 1, command: OrderMove(ids: [Id(4, 0)], target: (10, 32), queued: true)),
+        (tick: 160, command: OrderMove(ids: [Id(4, 0)], target: (13, 32))),
+        (tick: 160, command: OrderMove(ids: [Id(4, 0)], target: (10, 34), queued: true)),
+        (tick: 160, command: OrderMove(ids: [Id(4, 0)], target: (13, 30), queued: true)),
+        (tick: 160, command: OrderMove(ids: [Id(4, 0)], target: (10, 30), queued: true)),
+        (tick: 160, command: OrderMove(ids: [Id(4, 0)], target: (13, 34), queued: true)),
+        (tick: 160, command: OrderMove(ids: [Id(4, 0)], target: (10, 32), queued: true)),
+        (tick: 320, command: OrderMove(ids: [Id(4, 0)], target: (13, 32))),
+        (tick: 320, command: OrderMove(ids: [Id(4, 0)], target: (10, 34), queued: true)),
+        (tick: 320, command: OrderMove(ids: [Id(4, 0)], target: (13, 30), queued: true)),
+        (tick: 320, command: OrderMove(ids: [Id(4, 0)], target: (10, 30), queued: true)),
+        (tick: 320, command: OrderMove(ids: [Id(4, 0)], target: (13, 34), queued: true)),
+        (tick: 320, command: OrderMove(ids: [Id(4, 0)], target: (10, 32), queued: true)),
+
+        // --- E: the sniper takes the bomb team down while its bomb is in the air ---
+        (tick: 6, command: OrderAttack(ids: [Id(12, 0)], target: (11, 0))),
+    ],
+)

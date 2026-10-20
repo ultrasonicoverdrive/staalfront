@@ -1,9 +1,10 @@
 // Weapons and reload (WP5.1, docs/rules/weapons.md), on a 64 by 64 cell open map (no terrain layer).
-// A unit with an attack order walks into reach and fires its weapons at the victim: an instant hit
-// that takes the weapon's damage off the victim's hit points (the placeholder that WP5.2 to WP5.4
-// replace). What the run shows: the reload (a weapon fires once per reload window, to the tick), a
-// burst (two cannon shots five ticks apart), a minimum range (the howitzer too close to its target
-// never fires), a victim that is shot down to zero hit points and then left alone, and a reload
+// A unit with an attack order walks into reach and fires its weapons at the victim. The weapon's damage
+// comes off the victim's hit points when the shot arrives: at once for a rifle, after the flight of the
+// shell for the cannons and the howitzer (WP5.2; pinned in WP5.1, when every weapon hit at once, and
+// re-pinned in WP5.2). What the run shows: the reload (a weapon fires once per reload window, to the
+// tick), a burst (two cannon shots five ticks apart), a minimum range (the howitzer too close to its
+// target never fires), a victim that is shot down to zero hit points and then left alone, and a reload
 // that an order change does not reset.
 // CI runs it on Linux and Windows and requires the checksum in weapons_reload.expected;
 // tools/sf_headless/tests/weapons_reload.rs asserts the shots along the way.

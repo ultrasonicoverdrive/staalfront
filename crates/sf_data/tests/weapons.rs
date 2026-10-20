@@ -174,7 +174,31 @@ fn the_shipped_weapons_in_the_sims_units() {
     // The rocket steers.
     let rocket = sim("rocket");
     assert_eq!(rocket.projectile, Projectile::Guided);
-    assert_eq!(rocket.guide_turn_per_tick, 4);
+    assert_eq!(rocket.guide_turn_per_tick, 8);
+}
+
+#[test]
+fn every_shipped_guided_projectile_can_turn_inside_its_own_range() {
+    // WP5.2: a rocket whose turning circle is larger than its range cannot come round onto a target
+    // that has stepped out of its line. The circle has a radius of the distance covered in a tick over
+    // the angle turned in a tick: `speed * 256 / (2 pi * turn)`. With 2 pi taken as 6.28 (a hair low,
+    // so the circle is a hair large) it has to be smaller than the range.
+    let defs = shipped();
+    let mut guided = 0;
+    for sim in defs.sim_weapons() {
+        if sim.projectile != Projectile::Guided {
+            continue;
+        }
+        guided += 1;
+        let circle_times_628 = sim.projectile_speed_per_tick.raw() * 256 * 100;
+        let range_times_turn = 628 * i64::from(sim.guide_turn_per_tick) * sim.range.raw();
+        assert!(
+            circle_times_628 < range_times_turn,
+            "weapon {}: the turning circle is not inside the range",
+            sim.kind
+        );
+    }
+    assert!(guided >= 1);
 }
 
 #[test]
@@ -479,7 +503,7 @@ fn the_new_numbers_must_be_in_bounds() {
     );
     refused(
         "rocket",
-        "guide_turn: 4",
+        "guide_turn: 8",
         "guide_turn: 65",
         "guide_turn 65 must be 0 to 64",
     );

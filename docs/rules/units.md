@@ -87,15 +87,15 @@ WP5.3 adds the damage-times-armor table and the splash falloff next to these lis
 | `reload` | game seconds between shots, at least one tick |
 | `damage` | hit points per hit before armor, 1 or more |
 | `damage_type` | a name from `unit_classes.ron` |
-| `projectile` | `Instant`, `Straight`, `Arc`, `Guided` or `Falling` (the flight is WP5.2) |
+| `projectile` | `Instant`, `Straight`, `Arc`, `Guided` or `Falling` (the flights: [`projectiles.md`](projectiles.md)) |
 | `splash_radius` | cells, default 0 (none); falloff is WP5.3 |
-| `projectile_speed`, `flight_height`, `guide_turn` | the parameters of the projectile (WP5.1; WP5.2 reads them); all optional |
+| `projectile_speed`, `flight_height`, `guide_turn` | the parameters of the projectile (WP5.1; read by WP5.2); optional for the loader, required by the simulation for a projectile that flies (`projectiles.md`) |
 | `burst`, `burst_delay` | shots per trigger pull and the time between them (WP5.1); default one shot |
 | `mount`, `fire_arc` | `Hull` or `Turret`, and how far from the target the weapon may point and still fire (WP5.1) |
 
 Since WP5.1 `reload` counts from the first shot of a burst to the first of the next, and the
 sixteen fields and their rules, the rounding, the shipped set and what each field means for
-WP5.2 to WP5.4 are in [`weapons.md`](weapons.md).
+WP5.3 and WP5.4 are in [`weapons.md`](weapons.md).
 
 ## `unit_defs.ron`
 
