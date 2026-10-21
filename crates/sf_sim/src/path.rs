@@ -932,13 +932,15 @@ impl Pathing {
         formed: &[(usize, Facing)],
     ) {
         let threshold = self.fields.threshold as usize;
-        // An order that only makes formations (every unit that took it marches in one): its
-        // classes get the arrival slots of a field from two units (below).
-        let all_formed = !started.is_empty()
-            && started
-                .iter()
-                .all(|&m| formed.binary_search_by_key(&m, |&(slot, _)| slot).is_ok());
-        if threshold == 0 || self.graphs.is_empty() || (started.len() < threshold && !all_formed) {
+        let in_formation = |m: usize| formed.binary_search_by_key(&m, |&(slot, _)| slot).is_ok();
+        // A class whose units all march in a formation gets the arrival slots of a field from two
+        // units (below), whatever the other units of the order do: a unit that forms none (an
+        // aircraft, a family of one, a vessel among tanks) is no reason for the tanks, the foot
+        // soldiers and the trucks that did form to be sent to the one point (WP4.6b).
+        if threshold == 0
+            || self.graphs.is_empty()
+            || (started.len() < threshold && formed.is_empty())
+        {
             return;
         }
         // The disc the bodies of the group fill, for the bound on how far out a crowd
@@ -975,11 +977,13 @@ impl Pathing {
                         && units.at(e.def[i] as usize).movement_class == Some(g.class)
                 })
                 .collect();
-            // The units of an order that is only formations get the arrival slots of a field
-            // whatever the threshold (two of a class are enough): without a field they would
-            // all be sent to the one point and arrive in a scramble (WP4.6). In a crowd with a
-            // formation inside it the small classes are routed on their own, as ever.
-            if members.len() < threshold && !(all_formed && members.len() >= 2) {
+            // The units of a class that is only formation members get the arrival slots of a
+            // field whatever the threshold (two of a class are enough): without a field they
+            // would all be sent to the one point and arrive in a scramble (WP4.6). A class with
+            // a unit outside every formation is judged by the threshold as ever, and so are the
+            // small classes of a crowd with a formation inside it.
+            let formed_class = members.len() >= 2 && members.iter().all(|&m| in_formation(m));
+            if members.len() < threshold && !formed_class {
                 continue;
             }
             let (gx, gy) = field::cell_of(g, destination);

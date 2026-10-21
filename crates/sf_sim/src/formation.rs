@@ -35,21 +35,26 @@
 //! included), and only [`FormationConfig::pace_permille`] of that while some member is behind
 //! its slot and has to catch up. The others walk to their slots as fast as
 //! [`FormationConfig::catchup_permille`] of their own speed allows: a unit that falls behind
-//! catches up, one that is ahead of its slot waits on it, because its slot comes to it.
+//! catches up, one that is ahead of its slot waits on it, because its slot comes to it. The
+//! pace holds in narrow places too (WP4.6b): a loose formation lets go of its shape, not of its
+//! pace.
 //!
 //! # Narrow places and re-forming
 //!
 //! A member that cannot see its slot (a thick line of sight, `path/los.rs`: a wall, a gap, the
-//! river) follows the flowfield or route of the order as it always did and is not held back,
-//! except that a unit that is ahead of its slot by more than [`FormationConfig::reform_tenths`]
-//! waits where it stands if the ground round it is open, also while the formation is loose (so
-//! the fast units that come out of a gap first do not run off to the goal). The formation is
-//! **loose** (everybody follows the order's way, the leader at its own speed) while the ground
-//! round the leader, or round the front of the lattice, is not open: it lets go before its
-//! front rows reach a wall and files into a gap as a group order does. When the leader is on
-//! open ground and some member is behind its slot, or to the side of it, by more than the
-//! re-form distance (a **straggler**; a unit ahead of its slot is none, the slot comes to it),
-//! the **leader waits** for it, for at most
+//! river) follows the flowfield or route of the order as it always did, at its own speed while
+//! it is no farther ahead of its slot than [`FormationConfig::ahead_tenths`] and at the pace of
+//! the formation beyond that, except that a unit that is ahead of its slot by more than
+//! [`FormationConfig::reform_tenths`] and on its column waits where it stands if the ground
+//! round it is open, also while the formation is loose (so the fast units that come out of a
+//! gap first do not run off to the goal). The formation is **loose** (everybody follows the
+//! order's way, the leader at the pace of the formation) while the ground round the leader, or
+//! round the front of the lattice, is not open: it lets go before its front rows reach a wall
+//! and files into a gap as a group order does. When the leader is on open ground (and the
+//! members that stand in their places have no obstacle within three cells) and some member is
+//! behind its slot, or to the side of it, by more than the re-form distance (a **straggler**; a
+//! unit ahead of its slot is none, the slot comes to it), the **leader waits** for it, for at
+//! most
 //! [`FormationConfig::patience_ticks`] ticks in all (it runs down at a third of the rate
 //! while every straggler is coming closer); then the formation is *broken*: nobody waits any
 //! more until the stragglers are back (at most a tenth of the group away). The patience is
@@ -64,7 +69,9 @@
 //!
 //! The heading follows the leader's own steps (a leader that waits and is pushed about by
 //! others does not turn the formation). A unit that is ahead of its slot waits there, whatever
-//! way it was going (`Direct` or `Flow`), and does not walk back to it. When the units have come
+//! way it was going (`Direct` or `Flow`), and does not walk back to it, unless it is also off
+//! its column by more than the re-form distance: then it walks back if it sees its slot, or
+//! goes on at the pace of the formation if it does not. When the units have come
 //! through a gap in another order than they went in, and every 100 ticks while some member is
 //! stalled, the slots are handed out again (`assign`: the least sum of squared distances over
 //! all pairs, by the Hungarian method, ties to the lower slot) so that nobody has to pass
@@ -157,6 +164,8 @@ pub const DEFAULT_CATCHUP_PERMILLE: u16 = 1000;
 pub const DEFAULT_REFORM_TENTHS: u16 = 30;
 /// See [`FormationConfig::patience_ticks`].
 pub const DEFAULT_PATIENCE_TICKS: u16 = 300;
+/// See [`FormationConfig::ahead_tenths`].
+pub const DEFAULT_AHEAD_TENTHS: u16 = 20;
 
 /// The formation settings of a world: game data (`assets/config/sim.ron`); a world that is
 /// given none uses [`FormationConfig::DEFAULT`], the same numbers.
@@ -194,6 +203,12 @@ pub struct FormationConfig {
     /// as broken, and for how long a straggler may be away from its slot without coming closer
     /// before it leaves. From 20 to 2000
     pub patience_ticks: u16,
+    /// How far ahead of its slot, along the heading, a member that follows the order's way
+    /// (the formation is loose, or the member cannot see its slot) may get, in tenths of a cell.
+    /// Farther ahead it goes no faster than the formation, so a loose formation lets go of its
+    /// shape but not of its pace: the fast units do not run off from the slow ones. From 5 to
+    /// `reform_tenths`
+    pub ahead_tenths: u16,
 }
 
 impl FormationConfig {
@@ -208,6 +223,7 @@ impl FormationConfig {
         catchup_permille: DEFAULT_CATCHUP_PERMILLE,
         reform_tenths: DEFAULT_REFORM_TENTHS,
         patience_ticks: DEFAULT_PATIENCE_TICKS,
+        ahead_tenths: DEFAULT_AHEAD_TENTHS,
     };
 
     /// The shipped numbers with formations turned off: a world where group orders move
@@ -234,10 +250,16 @@ impl FormationConfig {
             && self.reform_tenths <= 100
             && self.patience_ticks >= 20
             && self.patience_ticks <= 2000
+            && self.ahead_tenths >= 5
+            && self.ahead_tenths <= self.reform_tenths
     }
 
     fn reform(&self) -> Fx {
         Fx::from_ratio(i64::from(self.reform_tenths), 10)
+    }
+
+    fn ahead(&self) -> Fx {
+        Fx::from_ratio(i64::from(self.ahead_tenths), 10)
     }
 }
 
@@ -302,7 +324,9 @@ pub(crate) struct Member {
     /// The world position of the slot.
     pub slot: Vec2,
     /// The step the unit may take this tick before the ground scales it: the pace of the
-    /// formation for the leader, the catch-up speed for the others.
+    /// formation for the leader, the catch-up speed for a unit that walks to its slot, and for
+    /// a unit that follows the order's way its own speed, or the pace of the formation once it
+    /// is farther ahead of its slot than `ahead_tenths`.
     pub step: Fx,
     /// The heading of the formation, for a unit that stands in its slot.
     pub heading: Facing,
@@ -426,6 +450,16 @@ const PROBES: [Vec2; 8] = [
 /// are not: the leader does not stand and wait in them, where it would hold the others up.
 fn open_ground(path: &Pathing, class: u16, at: Vec2) -> bool {
     PROBES.iter().all(|&d| path.sight_clear(class, at, at + d))
+}
+
+/// Whether nothing a unit of `class` cannot cross (rock, water, a structure) lies within three
+/// cells of `at` in any of the eight directions: [`open_ground`], except that the edge of the
+/// map is no obstacle. For a leader that waits and must not stand its members in a gap; a
+/// formation at the edge of the map is not in one.
+fn no_obstacle_near(path: &Pathing, ground: &Ground<'_>, class: u16, at: Vec2) -> bool {
+    PROBES
+        .iter()
+        .all(|&d| ground.cell_at(at + d).is_none() || path.sight_clear(class, at, at + d))
 }
 
 /// The inverse of a facing: the one that turns back what `f` turned.
@@ -779,6 +813,7 @@ fn update_one(
 
     // Every member: its slot, and how far it is from it.
     let reform = cfg.reform();
+    let ahead_max = cfg.ahead();
     let forward = Vec2::X.rotate(f.heading);
     let mut lagging = 0_usize;
     // Some member is behind its slot by more than half a cell: it has to catch up, and the
@@ -801,16 +836,14 @@ fn update_one(
             if matches!(was, MemberMode::Direct | MemberMode::Wait) {
                 forget_way(e, i, units, path, f.goal);
             }
-            // At the pace of the formation, unless the formation is loose.
+            // At the pace of the formation, loose or not: a loose formation lets go of its
+            // shape, not of its pace (WP4.6b).
             let permille = ground.permille_at(class_of(e, units, i), e.pos[i]).max(1);
-            member.step = if loose {
-                own
-            } else {
-                pace.mul_int(1000)
-                    .div_int(i64::from(permille))
-                    .min(own)
-                    .max(Fx::from_raw(1))
-            };
+            member.step = pace
+                .mul_int(1000)
+                .div_int(i64::from(permille))
+                .min(own)
+                .max(Fx::from_raw(1));
             e.form[i] = member;
             continue;
         }
@@ -828,9 +861,31 @@ fn update_one(
         // of the formation, walking back to it would only make the leader wait for it, and
         // running on while the rest files through would take it to the goal alone. It is not
         // a straggler.
+        //
+        // WP4.6b: only if it is on its column. A unit that is ahead and also off its column by
+        // more than the re-form distance (its line of sight to the slot was blocked, it took the
+        // longer way round and came out ahead and to the side) used to stand there, sideways of
+        // the formation and in the way of those coming out behind it. Now it walks back to its
+        // slot if it sees it (`Direct`), and follows the order's way no faster than the
+        // formation goes if it does not (`Flow`). It is no straggler either way: it is ahead,
+        // the slot comes to it.
         let along = (e.pos[i] - member.slot).dot(forward);
         let aside = (e.pos[i] - member.slot).cross(forward).abs();
-        let ahead = along > reform && open_ground(path, class, e.pos[i]);
+        let ahead = along > reform && aside <= reform && open_ground(path, class, e.pos[i]);
+        if member.mode == MemberMode::Flow && !ahead {
+            // Following the order's way at its own speed, but not farther ahead of its slot
+            // than the formation allows (`ahead_tenths`): beyond that, no faster than the
+            // formation goes. A narrow place loosens the shape and never the pace.
+            member.step = if along > ahead_max {
+                let permille = ground.permille_at(class, e.pos[i]).max(1);
+                full.mul_int(1000)
+                    .div_int(i64::from(permille))
+                    .min(own)
+                    .max(Fx::from_raw(1))
+            } else {
+                own
+            };
+        }
         if ahead {
             member.mode = MemberMode::Wait;
             member.lag = 0;
@@ -845,7 +900,7 @@ fn update_one(
             // it; a unit ahead of it is none, the slot comes to it. (Counting the distance
             // alone made the leader stop for each unit that had come out of a gap first, one
             // after the other, as its slot came within the re-form distance of it.)
-            if lag > reform && (along <= Fx::ZERO || aside > reform) {
+            if lag > reform && (along <= Fx::ZERO || (aside > reform && along <= reform)) {
                 lagging += 1;
             }
             if f.age.is_multiple_of(WINDOW) {
@@ -883,8 +938,9 @@ fn update_one(
     if f.members.len() < 2 {
         return Verdict::Dissolved;
     }
-    // Nobody has to catch up: the leader goes at the speed of the slowest member itself.
-    if !loose && !catching {
+    // Nobody has to catch up: the leader goes at the speed of the slowest member itself
+    // (which it also does while the formation is loose: nobody is counted as behind then).
+    if !catching {
         let permille = ground.permille_at(lead_class, e.pos[leader]).max(1);
         let own = units.at(e.def[leader] as usize).speed_per_tick;
         e.form[leader].step = full
@@ -904,7 +960,18 @@ fn update_one(
     f.calm = if calm { f.calm.saturating_add(1) } else { 0 };
     match f.state {
         FormationState::Whole => {
-            f.waiting = open && !loose && lagging > 0 && f.patience > 0;
+            // The leader waits only while the members that are in their places stand on open
+            // ground (WP4.6b): units that wait on their slots in the mouth of a gap hold up the
+            // stragglers they wait for. (A straggler is not asked: it is on its way, or shut in.)
+            f.waiting = open
+                && !loose
+                && lagging > 0
+                && f.patience > 0
+                && f.members.iter().all(|&m| {
+                    let i = m as usize;
+                    (e.pos[i] - e.form[i].slot).length() > reform
+                        || no_obstacle_near(path, ground, class_of(e, units, i), e.pos[i])
+                });
             if f.waiting {
                 // The patience runs out at full speed while some straggler is not coming
                 // closer and at a third of it while they all are: it is waited for longer,
@@ -1098,8 +1165,8 @@ pub(crate) fn drive(e: &mut Entities, i: usize, m: &Motion, ground: &Ground<'_>)
         ..*m
     };
     match member.mode {
-        MemberMode::None | MemberMode::Flow => Some(*m),
-        MemberMode::Lead => Some(capped(m.step.min(member.step))),
+        MemberMode::None => Some(*m),
+        MemberMode::Flow | MemberMode::Lead => Some(capped(m.step.min(member.step))),
         MemberMode::Wait => {
             e.target[i] = None;
             None

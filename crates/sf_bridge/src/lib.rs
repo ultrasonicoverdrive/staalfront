@@ -236,6 +236,7 @@ pub fn formation_config(settings: &SimSettings) -> sf_sim::FormationConfig {
         catchup_permille: settings.formation_catchup_permille,
         reform_tenths: settings.formation_reform_tenths,
         patience_ticks: settings.formation_patience_ticks,
+        ahead_tenths: settings.formation_ahead_tenths,
     }
 }
 

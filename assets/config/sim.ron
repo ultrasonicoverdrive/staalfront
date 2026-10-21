@@ -85,6 +85,12 @@
 // come closer before the formation counts as broken (nobody waits any more until the
 // stragglers are back), and for how long a member may be away from its slot without coming
 // closer before it leaves. 20 to 2000.
+//
+// formation_ahead_tenths: how far ahead of its slot (tenths of a cell, along the heading) a
+// member that follows the order's own way may get - the formation is loose in a narrow place
+// (rock, water, a structure within three cells), or the member cannot see its slot - before it
+// goes no faster than the formation. A narrow place loosens the shape, never the pace. 5 up to
+// formation_reform_tenths.
 // Tests and scenarios that do not give them use the simulation's own defaults, which are the
 // same numbers.
 (
@@ -106,4 +112,5 @@
     formation_catchup_permille: 1000,
     formation_reform_tenths: 30,
     formation_patience_ticks: 300,
+    formation_ahead_tenths: 20,
 )

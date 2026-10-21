@@ -231,7 +231,7 @@ Known gaps (owner in brackets):
 
 ## Phase 4 — Movement and routes
 
-Status: the work packages 4.1–4.5, 4.4b, 4.6 and 4.7 are in. The "done when" of PLAN.md (200 units across
+Status: the work packages 4.1–4.5, 4.4b, 4.6, 4.6b and 4.7 are in. The "done when" of PLAN.md (200 units across
 a bridge: all arrive, none stuck, at most 1 % beyond 1.3 times the packing radius, overlap within a quarter
 of a cell on the way and a sixteenth at the end) holds in `bridge_200` (formations on, a crowd above the limit makes none), for every wheeled
 turning radius the review swept and for all 112 variants of `sweep_of_variants`; `bridge_200` is a crowd and
@@ -336,6 +336,13 @@ the limit is 19. See "Phase 4 close-out" below the notes of WP4.7 for the open i
   (`formation_*`, `World::with_formation`), the state is in a new checksum section `G`; the
   `formation_move` scenario, the `FormationConfig` and `scenario.formation` knobs, `tests/formation.rs`),
   `docs/rules/formations.md`: done
+- WP4.6b Formations that hold in a real base (follow-up of WP4.6, found in the viewer: the sandbox of `sf_game` on
+  the map `assets/maps/formation`, the 12 mobile Meridian units, one Move; a loose formation keeps the pace of its
+  slowest member and a member that follows the order's way may get at most `formation_ahead_tenths` ahead of its
+  slot; a unit ahead of its slot and off its column walks back or goes on at the pace instead of standing; the
+  leader waits only while the members in their places have no obstacle near; `group_order` judges the shared
+  fields per class, so a unit in no formation takes nothing from the classes that formed; `crowd_jam` and
+  `formation_move` re-pinned; `tests/formation_base.rs` in `sf_game`), `docs/rules/formations.md` ("In a base"): done
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -809,11 +816,101 @@ arrival packs each class on its own (the criterion of phase 4 is a packing: 200 
 spacing would need a disc about 1.4 times the radius of the one the criterion measures, which allows 1.3). So the group goes from one shape into the
 other when the formation is let go, within the disc of the order.
 
+WP4.6b notes (formations that hold in a real base). **The base-start gap was found in the viewer, after the phase-4
+close-out below, and is fixed here.** Everything WP4.6 proved was proved on a field with one passage and no
+structures (`formation_move`, `formation_sweep`) or on a crowd (`bridge_200`); nothing built the world the way the game
+does and gave an order in it. In `sf_game`, on the sandbox map `assets/maps/formation`, box-selecting the 12 mobile
+Meridian units and giving one Move sent the tanks ahead at 1.4 to 2 cells a second with the riflemen (0.7) behind and no
+shape to be seen. The diagnosis found no wiring bug (the settings reach the world, there is one group order, the sim
+thread passes it through); the formation forms, with 11 members. Three things degrade it among structures, all
+confirmed by measurement:
+
+1. A structure within three cells makes the ground not open, so the formation is **loose** (12 to 51 % of the ticks
+   of the four goals measured), and loose meant "the leader and the members at their own speed": no pace at all.
+2. A unit whose line of sight to its slot a structure blocks takes a longer way round and comes out ahead of its slot
+   **and to the side of its column**; the "ahead" test ignored the sideways offset, so it stood there 5 to 7 cells off
+   its column in the way of the units behind it, and the leader did not wait for it.
+3. The order has one **amphibious transport**, a family of one, in no formation; `all_formed` (every unit that
+   starts the order is a member) was then false and no class got a shared field or the arrival slots of the goal.
+   (Read in the code, now measured: the three classes of 5, 4 and 2 units had no field before and have one after.)
+
+What changed (orchestrator decisions A to D, 18-10-2026; the rules are in `docs/rules/formations.md`):
+
+* **A. The pace holds in narrow places.** The leader steps at most the formation pace loose or not; a member that
+  follows the order's way runs at its own speed while it is at most `formation_ahead_tenths` (new, `sim.ron`, 2.0
+  cells as shipped, 0.5 up to the re-form distance) ahead of its slot along the heading, and goes no faster than the
+  formation beyond that. The docs said a loose formation means own speed; they now say it does not.
+* **B. A unit ahead of its slot and off its column does not stand.** It walks back if it sees its slot, follows the
+  way at the pace of the formation if it does not, and is no straggler either way (it is ahead). One more rule came
+  out of the sweep, not out of the diagnosis, and is kept because the sweep is not clean without it: the leader waits
+  for stragglers only while the members that stand in their places have no obstacle within three cells of them (the
+  edge of the map is no obstacle for this), because rear rows standing on their slots in the mouth of a gap held up
+  the stragglers the leader waited for.
+* **C. A unit outside every formation takes nothing from the classes that formed.** `group_order` in `path.rs` judges
+  each class: all its units in a formation is the same rule as before ("a class of two or more gets a field, below the
+  threshold"), a class with a unit outside every formation is judged by the threshold as ever.
+* **D. Structures stay narrow places.** Not touched.
+
+**Tests (the missing coverage).** `crates/sf_game/tests/formation_base.rs` builds the sandbox as the viewer does
+(`playfield::make_world`, `with_movement`, `sandbox::schedule`, the viewer's world speed) on `assets/maps/formation`,
+selects the 12 mobile Meridian units and sends one `commands::move_command` to (56, 44), (90, 44), (90, 10) and
+(100, 40): one formation of 11; the three formed classes have shared fields and the amphibious transport none; the
+leader's pace and the share of windows above 1.2 times the slowest's speed in loose stretches (29 % of the windows
+before, 14 % after, bound 20 %); the shape; everybody arrives, nobody stuck, overlap 0.049 at most during the run (bound
+0.25) and 0.030 at the end (bound 1/16); reproducible. Run on the head of main (670cf33) it fails 3 of its 7 tests
+(pace, shape and fields). `tests/formation.rs` has five new tests, each of which fails on the old rules: the leader of a
+loose formation keeps the pace (0.1000 cells a tick before, 0.0350 after), the bound on the lead is data, the
+off-column tank walks back (it stood 45 ticks), a far tank is not waited for, and the unit outside every formation
+leaves the fields to the classes that formed.
+
+**Measured** (the table is in `docs/rules/formations.md`, "In a base"). Over four goals the loose stretches have 14 %
+of their windows above 1.2 times the slowest's speed against 29 % before. **The shape in the sandbox is not good:** all
+members within 3 cells of their slots 14 to 38 % of the ticks (9 to 42 % before), members within 3 cells 59 to 92 %
+(62 to 89 %), the formation loose 38 to 71 % of the ticks (12 to 51 %). Over ten goals the means of the members within
+3 cells are 71 % before, 77 % with the pace, off-column and wait rules alone, and 73 % with the shared fields of
+decision C as well (which also bring the mean arrival from 1,699 to 1,610 ticks). The structures are narrow places by
+decision D, and two heavy tracked units (1.5 cells across) are stuck among them for hundreds of ticks in several runs,
+with or without a formation: paths and fields are made on cells, and the sandbox leaves one-cell gaps between
+structures. That is a movement problem (bodies in the routes), not a formation rule, and it is listed in the close-out.
+
+**Re-pinned, with the reason** (the pace in loose stretches, the bound on the lead, the wait rule and the per-class
+fields are changes of the specified behaviour; the assertions of both scenarios' tests are unchanged and hold):
+
+| Scenario | Old | New |
+|---|---|---|
+| `formation_move` | `0x83315f6388469125` | `0x67abfe8bf07e8f05` (loose 521 ticks, formed up again on tick 1,356, let go on 2,597, everybody arrived on 2,840) |
+| `crowd_jam` | `0x11dfc55cfc2c2c34` | `0xc7da0f15ce1bf3ce` (its groups of 18 and 8 are formations that pass the gap) |
+
+**Not moved:** `wander_5000` `0x38d5e3c43358a889`, `command_mix` `0x43f6583004258ceb`, `terrain_256`
+`0xb577112845e0097e`, `units_spawn` `0x6c369f42be150d6e`, `orders`, `terrain_costs`, `pathing`, `pathing_256`, `turning`,
+`weapons_reload`, `replan`, and `bridge_200` (`0x03971fcc3548fc0c`: a crowd, no formation, must not move and does not).
+`formation_sweep` (273 runs) is clean with the bounds as they were: `mixed` 1.02 to 1.14 times the walk (1.02 to 1.18
+before), `foot` 1.01 to 1.05, `wheels` 1.02 to 1.37 (the same worst, 1.37). It took four rounds to get there: the
+pace in loose stretches costs time in the sweep's loose stretch (a leader that was a truck at 2.5 cells a second goes at
+the tank's 2.0), and the first versions of the rules put one run of 273 over the bound by 2 to 56 ticks (the runs are
+chaotic and the margin of `wheels` is thin, as the notes of WP4.6 say). `sweep_of_variants` (112 variants) is clean:
+the crowd forms no formation.
+
+Not done on purpose: bodies in routes and fields (the cause of the stuck heavy units); `open_ground` still treats the
+edge of the map as an obstacle for the loose rule (only the new wait rule ignores it); a unit left out of every
+formation (the amphibious transport) still walks the order at its own speed beside the formation, which is what the
+viewer shows of it; presentation of the slots; a second sandbox layout, other maps and other orders.
+
+Screenshots (Xvfb with Mesa lavapipe, the real `sf_game` release build, the 12 units box-selected and one right-click to
+(56, 44), the same camera and the same ticks before, on the head of main, and after):
+`docs/screenshots/wp4.6b/contact_sheet_before.png` and `contact_sheet_after.png`. Honestly: the units are small at the
+zoom that shows the whole way, and the two sheets look much alike (the difference is in the pace of the units that
+follow the order's way, which a still does not show well, and in the numbers above); they show that the order, the camera
+and the run are the same, and the amphibious transport reaching the goal alone first in both.
+
 ## Phase 4 close-out
 
 Status of the work packages: 4.1 movement classes, 4.2 hierarchical A*, 4.3 flowfields, 4.4 local avoidance and
-collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning and 4.6 formations are in
-(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). The
+collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning, 4.6 formations and 4.6b formations in a real base
+are in
+(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). **Amended
+for WP4.6b:** the claim below was made for a field, and the viewer showed the gap: formations in the sandbox, among
+structures and with a unit in no formation, had no pace and no fields until WP4.6b (see its notes above). The
 criterion of phase 4 is met by `bridge_200`. For formations the claim is the one the sweep supports and no
 more: groups of 3 to 19, of riflemen with tanks and transports, of riflemen only and of tanks and transports only, at
 every depth of block tried (2 to 8), on the map of `formation_move`, arrive within 1.4 times the slowest's walk and
@@ -839,7 +936,8 @@ Open follow-ups, carried over:
    instance) and an arrival that keeps the shape.
 2. **Proven on one map**: the sweep and `formation_move` march across an open field, through one passage three
    cells wide and across another field. Rock outcrops, a river with a bridge, several passages and turns are not
-   swept (`tests/formation.rs` has single cases of them).
+   swept (`tests/formation.rs` has single cases of them). A base of structures is measured since WP4.6b
+   (`sf_game/tests/formation_base.rs`, items 14 and 15).
 3. **The margin of the overlap during a run is thin and stays so**: 0.24 against 0.25 in the worst variant of the
    sweep (WP4.7 said the same). It is chaotic: a small change of the arrival of five hover craft among the crowd
    took one variant to 0.270 (and twelve seeds of it gave 0.182 to 0.270), which is why a crowd forms no formation.
@@ -868,6 +966,15 @@ Open follow-ups, carried over:
    against the limit of 0.0625 (1/16) (WP4.6 review): a small change of the arrival moves it over. Either widen
    the margin (the arrival slots) or sweep corridor widths 3 to 8 for the end overlap, as the sweep does for the
    time.
+14. **Bodies are not part of the routes** (found in the viewer, WP4.6b). A heavy unit (1.5 cells across) is sent through
+   a one-cell gap between two structures, gets stuck, sidesteps, asks again; in the sandbox two of the twelve selected
+   units (the harvester and the siege artillery) are stuck among the structures for 500 to 1,500 ticks in several runs,
+   with or without a formation, and the shape of a formation in a base is poor mostly because of them. A movement work
+   package: clearance in the sector graph and the cost grid of the fields, or a minimum gap per class.
+15. **The sandbox is one layout and `formation_base` has four goals.** The bounds hold for those; a second base, other
+   selections (the Veyran side, a selection of only vehicles, of 19) and goals inside the base are not measured.
+   `open_ground` also treats the edge of the map as an obstacle for the loose rule (the wait rule ignores it): a
+   formation along the edge of the map is loose all the way.
 
 ## Phase 5 — Combat
 
