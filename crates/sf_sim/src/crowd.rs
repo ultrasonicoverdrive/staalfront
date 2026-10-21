@@ -924,6 +924,8 @@ impl Crowd {
             Behavior::Idle => Role::Idle,
             Behavior::Ordered => match e.order[i] {
                 Order::HoldPosition => Role::Hold,
+                // A unit on hold that fired at what it picked (WP5.4) is still held.
+                Order::Pursue(_) if e.eng[i].resume == Some(Order::HoldPosition) => Role::Hold,
                 Order::Idle | Order::Scatter => Role::Idle,
                 _ => Role::Mover,
             },

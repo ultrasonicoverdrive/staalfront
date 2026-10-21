@@ -69,9 +69,9 @@ Every participant has a **role**, from its order:
 
 | Role | Is | Gives way |
 |---|---|---|
-| mover | an order that walks (move, attack-move, attack, guard of an entity or of a point) | to other movers, by mass (a push is shared in proportion to the inverse of the mass, so the heavier moves less) |
+| mover | an order that walks (move, attack-move, attack, guard of an entity or of a point, and the `Pursue` a unit gives itself to fight, WP5.4) | to other movers, by mass (a push is shared in proportion to the inverse of the mass, so the heavier moves less) |
 | idle | no order (or one that ended) | to a **friendly mover** only |
-| hold | `HoldPosition` | **never**: it is never pushed |
+| hold | `HoldPosition`, also while it fires at what it picked (`Pursue` that resumes a hold, WP5.4) | **never**: it is never pushed |
 
 * **Units moving the same way follow.** When two movers have headings less than 60 degrees apart,
   the one behind gives way completely and the one in front is not pushed on. A queue is therefore

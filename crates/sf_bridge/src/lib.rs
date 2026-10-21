@@ -269,6 +269,13 @@ pub fn formation_config(settings: &SimSettings) -> sf_sim::FormationConfig {
     }
 }
 
+/// The targeting settings from the settings of `sim.ron` (WP5.4), to hand to
+/// [`World::with_targeting`](sf_sim::World::with_targeting) (which refuses numbers out of their
+/// ranges; `sf_data` has checked the same rules).
+pub fn targeting_config(settings: &SimSettings) -> sf_sim::TargetingConfig {
+    sf_sim::TargetingConfig::from_cells(settings.scan_cooldown, settings.pursuit_cells)
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -523,6 +530,40 @@ mod tests {
                 .with_replan(bad)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn the_shipped_targeting_settings_are_the_simulations_defaults_and_a_world_takes_them() {
+        let config = targeting_config(&SimSettings::embedded());
+        assert_eq!(config, sf_sim::TargetingConfig::DEFAULT);
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_targeting(config)
+            .unwrap();
+        assert_eq!(world.targeting_config(), Some(config));
+        // A world that is given none does not choose targets.
+        let plain = World::new(WorldConfig::new(1)).unwrap();
+        assert_eq!(plain.targeting_config(), None);
+        // Numbers out of their ranges come back as the world's error.
+        let bad = sf_sim::TargetingConfig {
+            scan_cooldown: 0,
+            ..config
+        };
+        assert!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .with_targeting(bad)
+                .is_err()
+        );
+        // The settings of the file arrive one by one.
+        let settings = SimSettings {
+            scan_cooldown: 25,
+            pursuit_cells: 9,
+            ..SimSettings::embedded()
+        };
+        let changed = targeting_config(&settings);
+        assert_eq!(changed, sf_sim::TargetingConfig::from_cells(25, 9));
+        assert_eq!(changed.scan_cooldown, 25);
     }
 
     #[test]

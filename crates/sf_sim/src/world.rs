@@ -15,6 +15,7 @@ use crate::orders::{self, GuardTarget, Order};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::projectiles::ProjectileId;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
+use crate::targeting::{self, Engagement, Targeting, TargetingConfig};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::turret;
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
@@ -129,6 +130,9 @@ pub enum ConfigError {
     /// The replan settings were given to a world that has already started, or are
     /// not valid ([`ReplanConfig::is_valid`](crate::ReplanConfig::is_valid)).
     Replan,
+    /// The targeting settings were given to a world that has already started, or are not valid
+    /// ([`TargetingConfig::is_valid`]).
+    Targeting,
     /// The formation settings were given to a world that has already started, or are
     /// not valid ([`FormationConfig::is_valid`](crate::FormationConfig::is_valid)).
     Formation,
@@ -167,6 +171,9 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::Replan => {
                 "the replan settings must be given before the world starts and be valid"
+            }
+            ConfigError::Targeting => {
+                "the targeting settings must be given before the world starts and be valid"
             }
             ConfigError::Formation => {
                 "the formation settings must be given before the world starts and be valid"
@@ -246,6 +253,8 @@ pub struct World {
     /// The weapons (WP5.1): their table, and the shots of the last tick. Empty (nothing
     /// fires) for a world that was given no table.
     pub(crate) arsenal: Arsenal,
+    /// Target selection and return fire (WP5.4): the settings, if the world was given any.
+    pub(crate) targeting: Targeting,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -419,6 +428,25 @@ impl World {
         Ok(self)
     }
 
+    /// The same world with its units choosing their own targets (WP5.4, `docs/rules/targeting.md`):
+    /// an idle unit, a unit on hold, a guard and a unit on attack-move pick an enemy in the reach of
+    /// their weapons, and a unit that is shot at turns on its attacker. A world that is given none
+    /// does none of it: a unit fires only at the victim of its attack order, which is what every
+    /// scenario of the phases before this one is pinned on. Needs a weapon table to do anything. Call
+    /// it right after the world is made ([`ConfigError::Targeting`] after it has started, or for
+    /// invalid numbers); [`TargetingConfig::DEFAULT`] is the numbers of the shipped `sim.ron`.
+    pub fn with_targeting(mut self, config: TargetingConfig) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !config.is_valid()
+        {
+            return Err(ConfigError::Targeting);
+        }
+        self.targeting.config = Some(config);
+        Ok(self)
+    }
+
     /// The same world with a different path budget: the nodes of search work it
     /// may do in one tick ([`DEFAULT_NODE_BUDGET`](crate::DEFAULT_NODE_BUDGET)
     /// otherwise). Call it right after the world is made
@@ -479,6 +507,7 @@ impl World {
             crowd,
             formations: Formations::new(),
             arsenal: Arsenal::default(),
+            targeting: Targeting::default(),
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -692,6 +721,32 @@ impl World {
     pub fn order_of(&self, id: EntityId) -> Option<Order> {
         let i = self.live_index(id)?;
         Some(self.entities.order[i])
+    }
+
+    /// The targeting settings, if the world was given any (WP5.4).
+    pub fn targeting_config(&self) -> Option<TargetingConfig> {
+        self.targeting.config
+    }
+
+    /// The target a unit chose itself and what it goes back to, while its order is a `Pursue`
+    /// (WP5.4); `None` for a stale id and for a unit that has not chosen.
+    pub fn engagement_of(&self, id: EntityId) -> Option<Engagement> {
+        let i = self.live_index(id)?;
+        let Order::Pursue(target) = self.entities.order[i] else {
+            return None;
+        };
+        let eng = &self.entities.eng[i];
+        Some(Engagement {
+            target,
+            following: eng.chase,
+            resumes: eng.resume.unwrap_or(Order::Idle),
+        })
+    }
+
+    /// The ticks until a unit looks round for a target again (WP5.4); `None` for a stale id.
+    pub fn scan_wait_of(&self, id: EntityId) -> Option<u16> {
+        let i = self.live_index(id)?;
+        Some(self.entities.eng[i].cool)
     }
 
     /// The orders waiting behind the current one, front first; `None` for a
@@ -1004,16 +1059,46 @@ impl World {
             (motion.pos_min, motion.pos_max),
             &mut self.pathing,
         );
+        // The units that choose their own targets look round, from where the bodies ended (WP5.4).
+        let bounds = (motion.pos_min, motion.pos_max);
+        let aim = self.targeting.config.filter(|_| !self.arsenal.is_empty());
+        if let Some(config) = aim {
+            let cx = targeting::Context {
+                units: &self.units,
+                arsenal: &self.arsenal,
+                config,
+                tick,
+                bounds,
+                map: (self.config.width, self.config.height),
+            };
+            self.targeting.update(&mut self.entities, &cx);
+        }
         // The turrets turn toward their targets, from where the hulls ended (WP4.5).
         turret::update_all(&mut self.entities, &self.units);
-        // The weapons reload, and fire at the victims of attack orders (WP5.1).
+        // The weapons reload, and fire at the victims of attack orders and at what the units chose (WP5.1).
         weapons::update_all(
             &mut self.entities,
             &self.units,
             &mut self.arsenal,
             tick,
             (self.config.width, self.config.height),
+            aim.is_some(),
         );
+        // The units that were hurt turn on their attackers (WP5.4).
+        if let Some(config) = aim {
+            let mut attacks = std::mem::take(&mut self.arsenal.attacks);
+            let cx = targeting::Context {
+                units: &self.units,
+                arsenal: &self.arsenal,
+                config,
+                tick,
+                bounds,
+                map: (self.config.width, self.config.height),
+            };
+            self.targeting
+                .return_fire(&mut self.entities, &cx, &mut attacks);
+            self.arsenal.attacks = attacks;
+        }
 
         self.tick = tick.next();
         let checksum = self.checksum();
@@ -1357,9 +1442,18 @@ impl World {
         if self.motion().of_entity(def, &self.units).step <= Fx::ZERO {
             return false;
         }
+        // A unit at zero hit points takes no orders: it stands where it fell until it is removed
+        // (WP5.5). Only in a world with targeting, which is what looks after such a unit.
+        if self.targeting.config.is_some()
+            && self.entities.hp[i] == 0
+            && self.stats_at(i).is_some_and(|s| s.hp > 0)
+        {
+            return false;
+        }
         let itself = EntityId::new(i as u32, self.entities.generation[i]);
         match order {
-            Order::Idle => false,
+            // `Pursue` is what a unit gives itself (WP5.4), never a command.
+            Order::Idle | Order::Pursue(_) => false,
             Order::Move(_) | Order::AttackMove(_) | Order::Scatter | Order::HoldPosition => true,
             Order::Guard(GuardTarget::Point(_)) => true,
             Order::Guard(GuardTarget::Entity(watched)) => {

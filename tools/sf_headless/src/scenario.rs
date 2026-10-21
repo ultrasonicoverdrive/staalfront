@@ -147,6 +147,12 @@ pub struct Scenario {
     /// them have attack orders) is the world it was pinned with. Needs `unit_defs`.
     #[serde(default)]
     pub combat: bool,
+    /// Whether the units choose their own targets and fire back (WP5.4, `docs/rules/targeting.md`):
+    /// the world is given the simulation's own targeting settings (the numbers of `sim.ron`). Off when
+    /// left out, so every scenario of the earlier phases, and the combat scenarios of WP5.1 to WP5.3
+    /// that have victims standing still, are the worlds they were pinned with. Needs `combat`.
+    #[serde(default)]
+    pub targeting: bool,
     /// The weapon table read from `unit_defs` by [`Scenario::load`] when `combat` is on,
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
@@ -715,6 +721,10 @@ impl Scenario {
             );
         }
 
+        if self.targeting && !self.combat {
+            p.push("targeting needs `combat` (a unit picks targets for its weapons)".to_string());
+        }
+
         if self.flowfield_threshold == Some(1) {
             p.push(
                 "flowfield_threshold 1 is not a group (use 0 to turn flowfields off, or 2 and up)"
@@ -929,6 +939,11 @@ impl Scenario {
                 world = world
                     .with_weapons(weapons)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+                if self.targeting {
+                    world = world
+                        .with_targeting(sf_sim::TargetingConfig::DEFAULT)
+                        .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+                }
             }
             if let Some(movement) = self.movement_table.clone() {
                 world = world

@@ -87,7 +87,10 @@ pub struct UnitStats {
     /// weapon. How near an `Attack` order brings the unit to its target
     /// (WP3.4). Left out of [`UnitTable::digest`], which the pinned
     /// `units_spawn` scenario fixes; the checksum hashes it with the orders
-    /// ([`UnitTable::reach_digest`]).
+    /// ([`UnitTable::reach_digest`]). It repeats the range of the first weapon of the weapon table,
+    /// which a world given both refuses to disagree with; it stays (WP5.4) because the pinned
+    /// scenarios without a weapon table hash it, and the target selection does not read it
+    /// (`docs/rules/targeting.md`).
     pub weapon_range: Fx,
     /// Facing steps (of 256) per tick the turret turns; zero for a kind without
     /// a turret (WP4.5, `docs/rules/turning.md`). Left out of

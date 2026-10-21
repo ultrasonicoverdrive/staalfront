@@ -87,6 +87,20 @@
 // closer before it leaves. 20 to 2000.
 // Tests and scenarios that do not give them use the simulation's own defaults, which are the
 // same numbers.
+//
+// Targeting (WP5.4, docs/rules/targeting.md): an idle unit, a unit on hold, a guard and a unit on
+// attack-move pick an enemy within the reach of their weapons, and a unit that is shot at turns on its
+// attacker. A world that is not given these settings does none of it.
+//
+// scan_cooldown: ticks between two looks round for a target of one unit (20 ticks are a second). A
+// unit that has a target keeps it and does not look. 1 to 1000.
+//
+// pursuit_cells: how far beyond its weapon's reach a unit that is shot at follows its attacker, and the
+// farthest it strays from where it stood when it began. Only an idle unit and a guard follow; a unit on
+// hold or on attack-move fires back only from where it is, and one that is moving does not stop. 0
+// means nobody follows. At most 32.
+// Tests and scenarios that do not give them use the simulation's own defaults, which are the same
+// numbers.
 (
     path_node_budget: 4096,
     flowfield_threshold: 8,
@@ -106,4 +120,6 @@
     formation_catchup_permille: 1000,
     formation_reform_tenths: 30,
     formation_patience_ticks: 300,
+    scan_cooldown: 10,
+    pursuit_cells: 6,
 )

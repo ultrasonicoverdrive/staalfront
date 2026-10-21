@@ -37,7 +37,7 @@
 //! detonates later ([`crate::projectiles`]). Since WP5.3 what a hit does is [`damage_of`]: the weapon's
 //! `damage` goes through the armor table ([`crate::armor`]) for the victim it hit, and a weapon with a
 //! splash radius also hurts everything else near the detonation, less the farther out it stands
-//! (`docs/rules/armour.md`). Choosing targets is still to come (WP5.4).
+//! (`docs/rules/armour.md`). Since WP5.4 a unit can also choose its target ([`crate::targeting`]).
 //!
 //! A tick of weapons runs in two passes, and **no hit point changes in the first**:
 //!
@@ -231,6 +231,14 @@ pub enum WeaponsError {
         /// The weapon kind.
         weapon: u16,
     },
+    /// A hull-mounted weapon on a unit kind that has a turret (WP5.4): the turret aims, the hull does
+    /// not follow it for a weapon, so the weapon would never be aimed.
+    HullWeaponOnTurret {
+        /// The unit kind.
+        unit: Kind,
+        /// The weapon kind.
+        weapon: u16,
+    },
 }
 
 impl fmt::Display for WeaponsError {
@@ -288,6 +296,11 @@ impl fmt::Display for WeaponsError {
             WeaponsError::TurretWithoutTurret { unit, weapon } => write!(
                 f,
                 "unit kind {} has no turret for weapon {weapon}, which is turret-mounted",
+                unit.0
+            ),
+            WeaponsError::HullWeaponOnTurret { unit, weapon } => write!(
+                f,
+                "unit kind {} has a turret, and weapon {weapon} is hull-mounted: it would never be aimed",
                 unit.0
             ),
         }
@@ -611,6 +624,9 @@ pub(crate) struct Arsenal {
     pub shots: Vec<Shot>,
     /// The detonations of the last tick. Derived; not hashed.
     pub impacts: Vec<Impact>,
+    /// Who hurt whom in the last tick, as (victim slot, attacker), for the return fire of
+    /// [`crate::targeting`] (WP5.4). Filled only in a world with targeting; derived, not hashed.
+    pub attacks: Vec<(u32, EntityId)>,
 }
 
 /// The spatial index of a splash's victims (the crowd pass's grid, built here from whatever can be hurt)
@@ -656,6 +672,12 @@ impl Arsenal {
                         weapon: w,
                     });
                 }
+                if weapon.mount == Mount::Hull && stats.has_turret() {
+                    return Err(WeaponsError::HullWeaponOnTurret {
+                        unit: l.unit,
+                        weapon: w,
+                    });
+                }
                 by_def[def][slot] = at as u16;
             }
         }
@@ -691,12 +713,115 @@ impl Arsenal {
             projectiles: Projectiles::default(),
             shots: Vec::new(),
             impacts: Vec::new(),
+            attacks: Vec::new(),
         })
     }
 
     /// True while the world has no weapons.
     pub fn is_empty(&self) -> bool {
         self.table.is_empty()
+    }
+
+    /// Whether the unit kind at table position `def` carries a weapon.
+    pub fn is_armed(&self, def: u32) -> bool {
+        self.by_def
+            .get(def as usize)
+            .is_some_and(|slots| slots[0] != NONE)
+    }
+
+    /// The weapons of the unit kind at table position `def`, in slot order.
+    pub fn weapons_of(&self, def: u32) -> impl Iterator<Item = &WeaponStats> + '_ {
+        self.by_def[def as usize]
+            .iter()
+            .take_while(|&&at| at != NONE)
+            .map(move |&at| &self.table.weapons[at as usize])
+    }
+
+    /// How much of `weapon`'s damage the armor of the unit kind at table position `def` takes, in
+    /// percent: one hundred when the world has no armor table (a hit then does what the weapon says).
+    pub fn percent(&self, weapon: &WeaponStats, def: u32) -> u16 {
+        percent_of(
+            self.table.armor.as_ref(),
+            &self.armor_of_def,
+            weapon.damage_type,
+            def,
+        )
+    }
+
+    /// The widest radius of any kind that can be hurt: how far beyond a distance the middle of a
+    /// victim can lie while its edge is inside it.
+    pub fn widest(&self) -> Fx {
+        self.widest
+    }
+
+    /// The weapon of the unit kind at table position `def` that does the most against the unit
+    /// kind at `target_def`, standing `d2` (squared, middle to middle) from it with `edge` the
+    /// radius of the target. A weapon that does nothing to it (zero percent) is never chosen. With
+    /// `in_reach_only` only a weapon that could fire at it now counts (within its range and not within
+    /// its minimum range, both measured to the edge, as [`can_fire`] does); without, the distance is
+    /// ignored. The first of equally good weapons in slot order wins.
+    pub fn best_against(
+        &self,
+        def: u32,
+        target_def: u32,
+        d2: Fx,
+        edge: Fx,
+        in_reach_only: bool,
+    ) -> Option<Pick> {
+        let mut best: Option<Pick> = None;
+        for w in self.weapons_of(def) {
+            let percent = self.percent(w, target_def);
+            if percent == 0 || (in_reach_only && !in_reach(w, d2, edge)) {
+                continue;
+            }
+            let score = weapon_score(w, percent);
+            if best.is_none_or(|b| score > b.score) {
+                best = Some(Pick {
+                    score,
+                    reach: w.range,
+                });
+            }
+        }
+        best
+    }
+}
+
+/// What a weapon is worth against one kind of target, for choosing targets (WP5.4): the best weapon's
+/// score and its range.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Pick {
+    /// The damage per second the weapon does to that target, in percent thousandths (see
+    /// [`weapon_score`]).
+    pub score: u64,
+    /// The range of the weapon, in cells.
+    pub reach: Fx,
+}
+
+/// The expected damage of a weapon against an armor that takes `percent` of it, per second of
+/// reloads, as one integer: `damage * burst * percent * 1000 / reload ticks`. It is the armor
+/// table's opinion (WP5.3) scaled by how hard and how often the weapon hits, so a weapon prefers
+/// what its damage type does most to, and between two weapons of one unit the one that does more
+/// wins. Nothing is rounded to a hit point: it only has to order targets. The most it can be is
+/// 10^6 * 16 * 400 * 1000, which fits a `u64` with room.
+pub fn weapon_score(w: &WeaponStats, percent: u16) -> u64 {
+    u64::from(w.damage) * u64::from(w.burst) * u64::from(percent) * 1000 / u64::from(w.reload_ticks)
+}
+
+/// The percent of damage of `damage_type` that the armor of the unit kind at table position `def`
+/// takes: one hundred when there is no armor table, and for a kind without an armor type (an entity
+/// that is not made from a unit kind has `NO_DEF`, which no position of the table is).
+fn percent_of(
+    armor: Option<&ArmorTable>,
+    armor_of_def: &[Option<u16>],
+    damage_type: u16,
+    def: u32,
+) -> u16 {
+    let Some(armor) = armor else {
+        return 100;
+    };
+    match armor_of_def.get(def as usize) {
+        Some(&Some(kind)) => armor.percent(damage_type, kind).unwrap_or(100),
+        _ => 100,
     }
 }
 
@@ -748,13 +873,7 @@ impl Blast<'_> {
     /// The percent of `damage_type` that the armor of entity `j` takes: one hundred when the world has no
     /// armor table (a hit then does what the weapon says), and for an entity that has no unit kind.
     fn percent(&self, j: usize, damage_type: u16) -> u16 {
-        let Some(armor) = self.armor else {
-            return 100;
-        };
-        match self.armor_of_def.get(self.e.def[j] as usize) {
-            Some(&Some(kind)) => armor.percent(damage_type, kind).unwrap_or(100),
-            _ => 100,
-        }
+        percent_of(self.armor, self.armor_of_def, damage_type, self.e.def[j])
     }
 }
 
@@ -818,15 +937,20 @@ fn damage_of(blast: &Blast<'_>, hit: &Hit, w: &WeaponStats, out: &mut Vec<(u32, 
 /// tick: the projectiles in flight move and decide whether they go off, then the weapons count down and
 /// decide whether they fire (an instant hit, or a launch). The second applies all the damage at once.
 /// `map` is the size of the world's map in cells (the splash's index covers it).
+///
+/// `record_attacks` (a world with targeting, WP5.4) lists who hurt whom this tick in
+/// [`Arsenal::attacks`], for the return fire that follows.
 pub(crate) fn update_all(
     e: &mut Entities,
     units: &UnitTable,
     arsenal: &mut Arsenal,
     tick: Tick,
     map: (u32, u32),
+    record_attacks: bool,
 ) {
     arsenal.shots.clear();
     arsenal.impacts.clear();
+    arsenal.attacks.clear();
     if arsenal.is_empty() {
         return;
     }
@@ -839,6 +963,7 @@ pub(crate) fn update_all(
         projectiles,
         shots,
         impacts,
+        attacks,
     } = arsenal;
     let mut hits: Vec<Hit> = Vec::new();
     let mut spent: Vec<u32> = Vec::new();
@@ -887,9 +1012,13 @@ pub(crate) fn update_all(
         if e.hp[i] == 0 && units.at(e.def[i] as usize).hp > 0 {
             continue;
         }
-        let victim = match e.order[i] {
-            Order::Attack(id) => live_slot(e, id).filter(|&j| j != i),
-            _ => None,
+        // The victim of an attack order, or the target the unit chose itself (WP5.4, `Pursue`). A unit
+        // that chose its target does not fire a weapon that does nothing to it (zero percent in the
+        // armor table); an attack order fires all weapons that can reach, as before.
+        let (victim, chosen) = match e.order[i] {
+            Order::Attack(id) => (live_slot(e, id).filter(|&j| j != i), false),
+            Order::Pursue(id) => (live_slot(e, id).filter(|&j| j != i), true),
+            _ => (None, false),
         };
         for (s, &at) in slots.iter().enumerate() {
             if at == NONE {
@@ -901,7 +1030,16 @@ pub(crate) fn update_all(
             if state.wait > 0 {
                 continue;
             }
-            let Some(j) = victim.filter(|&j| can_fire(e, units, i, j, weapon)) else {
+            let Some(j) = victim.filter(|&j| {
+                can_fire(e, units, i, j, weapon)
+                    && (!chosen
+                        || percent_of(
+                            table.armor.as_ref(),
+                            armor_of_def,
+                            weapon.damage_type,
+                            e.def[j],
+                        ) > 0)
+            }) else {
                 let state = &mut e.weapon[i][s];
                 if state.burst_left > 0 {
                     // The burst cannot go on: drop it, and wait out the rest of the reload.
@@ -991,12 +1129,23 @@ pub(crate) fn update_all(
             widest: *widest,
         };
         for hit in &hits {
+            let from = damage.len();
             dealt.push(damage_of(
                 &blast,
                 hit,
                 &table.weapons[hit.weapon],
                 &mut damage,
             ));
+            if record_attacks {
+                // Whoever the hit hurt, apart from the shooter and its own side (a splash can reach
+                // both), was attacked by the shooter.
+                for &(victim, hurt) in &damage[from..] {
+                    let own_side = blast.e.owner[victim as usize] == hit.player;
+                    if hurt > 0 && victim != hit.owner.index() && !own_side {
+                        attacks.push((victim, hit.owner));
+                    }
+                }
+            }
         }
     }
     damage.sort_unstable();
@@ -1041,10 +1190,7 @@ fn can_fire(e: &Entities, units: &UnitTable, i: usize, j: usize, w: &WeaponStats
     let between = e.pos[j] - e.pos[i];
     let d2 = between.length_squared();
     let edge = radius_of(e, j, units);
-    if d2 > (w.range + edge).square() {
-        return false;
-    }
-    if !w.min_range.is_zero() && d2 < (w.min_range + edge).square() {
+    if !in_reach(w, d2, edge) {
         return false;
     }
     // On top of each other there is no direction: it counts as aimed.
@@ -1056,6 +1202,14 @@ fn can_fire(e: &Entities, units: &UnitTable, i: usize, j: usize, w: &WeaponStats
         Mount::Turret => e.turret[i],
     };
     pointing.abs_diff(wanted) <= w.fire_arc
+}
+
+/// Whether a target whose middle is `d2` (squared) away and whose edge is `edge` from its middle is
+/// within the reach of weapon `w`: not farther than `range` and not nearer than `min_range`, both to the
+/// edge (the test by which an attack order counts as arrived).
+pub(crate) fn in_reach(w: &WeaponStats, d2: Fx, edge: Fx) -> bool {
+    d2 <= (w.range + edge).square()
+        && (w.min_range.is_zero() || d2 >= (w.min_range + edge).square())
 }
 
 #[cfg(test)]

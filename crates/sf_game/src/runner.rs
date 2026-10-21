@@ -490,6 +490,7 @@ fn order_text(order: sf_sim::Order, world: &SimSnapshot) -> String {
         Order::Guard(GuardTarget::Entity(id)) => format!("guard {}", id_text(id)),
         Order::Scatter => "scatter".to_owned(),
         Order::HoldPosition => "hold position".to_owned(),
+        Order::Pursue(id) => format!("engage {}", id_text(id)),
     }
 }
 
