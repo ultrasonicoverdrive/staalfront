@@ -302,8 +302,8 @@ laptop. Never on the home server (B6, PLAN.md §13).
   turns them into `sf_sim::WeaponTable`, which a world is given with `World::with_weapons` (a world
   without one fires nothing). Each entity keeps a reload and a burst counter per weapon slot, hashed in
   checksum section `W`, written for as long as the world has a weapon table, so no earlier checksum moved.
-  A unit with an `Attack` order fires; WP5.3 and WP5.4 replace what a hit does and who it is fired at.
-  Rules: `docs/rules/weapons.md`.
+  A unit with an `Attack` order fires; WP5.3 replaced what a hit does (armor table, splash) and WP5.4
+  will replace who it is fired at. Rules: `docs/rules/weapons.md`, `docs/rules/armour.md`.
 - **Projectiles (WP5.2).** A weapon that is not `Instant` launches a projectile (straight, arcing, guided or
   falling) into a store of its own in `sf_sim::projectiles`: a slot vector with a free list and a generation
   per slot, iterated in slot order and hashed in checksum section `J` (written with `W`, only for a world with

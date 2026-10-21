@@ -55,8 +55,8 @@ mod weapon;
 use std::path::Path;
 
 pub use classes::{
-    ArmorType, ClassTables, DamageType, MAX_CLASS_KIND, MAX_COST_PERMILLE, MAX_DRIVE_TOLERANCE,
-    MIN_COST_PERMILLE, MovementClass, TerrainCost, TurnMode, TurningDef,
+    ArmorType, ClassTables, DamageType, MAX_ARMOR_PERCENT, MAX_CLASS_KIND, MAX_COST_PERMILLE,
+    MAX_DRIVE_TOLERANCE, MIN_COST_PERMILLE, MovementClass, TerrainCost, TurnMode, TurningDef,
 };
 pub use decimal::{Decimal, TICK_MILLIS, TICKS_PER_SECOND};
 pub use error::DefError;

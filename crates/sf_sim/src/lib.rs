@@ -62,7 +62,8 @@
 //! * resolve the bodies of the units (the crowd pass, WP4.4) and turn the
 //!   turrets (WP4.5);
 //! * count the weapons down and fire them, move the projectiles in flight and detonate them, when the
-//!   world has a weapon table (WP5.1, WP5.2): every decision first, then all the damage at once;
+//!   world has a weapon table (WP5.1, WP5.2): every decision first, then all the damage at once, each
+//!   hit through the armor table and with its splash (WP5.3);
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!
@@ -311,11 +312,12 @@
 //! # Not here yet
 //!
 //! Target
-//! acquisition (WP5.4), armor and splash (WP5.3), the destruction of
+//! acquisition (WP5.4), the destruction of
 //! what is shot down (WP5.5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
 
+pub mod armor;
 pub mod behavior;
 pub mod checksum;
 pub mod command;
@@ -335,6 +337,7 @@ pub mod units;
 pub mod weapons;
 pub mod world;
 
+pub use armor::{ArmorError, ArmorTable, MAX_PERCENT as MAX_ARMOR_PERCENT};
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
 pub use command::{Command, CommandQueue, ScheduleError};
 pub use crowd::{

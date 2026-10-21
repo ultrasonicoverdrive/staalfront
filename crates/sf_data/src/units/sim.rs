@@ -46,6 +46,11 @@ pub struct SimWeaponDef {
     pub projectile: Projectile,
     /// Splash radius in cells (zero for none).
     pub splash_radius: Fx,
+    /// Cells from the edge of a victim inside which the splash does its full
+    /// damage (zero: it falls from the start).
+    pub splash_inner: Fx,
+    /// Whether the splash hurts the shooter's own side.
+    pub friendly_fire: bool,
     /// Projectile speed in cells per game second (for tools and display);
     /// zero when the file gives none and for an `Instant` weapon.
     pub projectile_speed: Fx,
@@ -191,6 +196,8 @@ pub(crate) fn convert_weapons(
                     .ok_or_else(|| format!("weapon {}: damage type", w.id))?,
                 projectile: w.projectile,
                 splash_radius: w.splash_radius.to_fx(),
+                splash_inner: w.splash_inner.to_fx(),
+                friendly_fire: w.friendly_fire,
                 projectile_speed: w.projectile_speed.to_fx(),
                 projectile_speed_per_tick: w.projectile_speed.to_fx_per_tick(),
                 flight_height: w.flight_height.to_fx(),

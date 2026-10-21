@@ -1,0 +1,165 @@
+// FROZEN copy (see armour_splash.ron) of assets/config/unit_classes.ron as it was when the armour_splash
+// scenario was pinned (WP5.3). A balance change of the shipped file does not move its checksum.
+// Movement classes, armor types and damage types (WP3.1). Read by
+// sf_data::units; unit_defs.ron and weapon_defs.ron refer to these names.
+//
+// `kind` is the permanent number of an entry (what the simulation uses): never
+// changed, never reused, unique within its list. Entries may stand in any order.
+// A removed entry leaves a tombstone, (kind: <number>, name: "<old name>"), in
+// the matching `retired_*` list at the end of the file.
+//
+// Movement classes (WP4.1) carry `terrain_costs`: for EVERY terrain type of
+// terrain_types.ron (by name) either `Impassable` (the class cannot enter a
+// cell of that type) or `Speed(n)`, the unit's speed on it in thousandths of
+// its own: 1000 is normal, 1200 a fifth faster, 500 half, between 100 and
+// 2000. A class that leaves a type out, or names one that does not exist, is
+// refused when the files are combined (sf_data::movement::MovementCosts).
+// `ground: true` marks the ground classes (foot, wheeled, tracked): a terrain
+// type that all of them can enter counts as open ground, which the simulation
+// keeps as a summary flag of the terrain (sf_sim::TerrainFlags::ground). Left
+// out it is false.
+// The rules, the full table and the bridge rule are in docs/rules/movement.md.
+//
+// Movement classes (WP4.5) also say how their units turn the hull, in an optional
+// `turning` block (docs/rules/turning.md); left out, a class turns as the walk did
+// before: Pivot, drive_tolerance 16.
+//   mode             Pivot: turns in place at the unit's turn_rate, drives when its heading is
+//                    within drive_tolerance of the wanted one. Arc: has to move to turn, in an
+//                    arc of at least min_radius; a target inside its turning circles is reached
+//                    by a stand-in three-point turn on the spot at pivot_permille of the turn
+//                    rate. Instant: the heading snaps onto the wanted one.
+//   drive_tolerance  facing steps (256 to a turn), 0 to 64: the heading error up to which the
+//                    unit drives. Not used by Instant.
+//   min_radius       Arc only: cells, 0.25 to 32.
+//   pivot_permille   Arc only: 1 to 1000 (1000 = the full turn rate).
+//
+// Armor types and damage types (WP5.3): every unit names one armor type (`armor` in
+// unit_defs.ron), every weapon one damage type (`damage_type` in weapon_defs.ron), and the
+// `armor_table` at the end of the lists says how much of a hit the armor takes.
+//   armor_table   one row for EVERY damage type (`damage`, by name), each with a `percent` list
+//                 of (armor type name, percent) for EVERY armor type. 100 takes the weapon's
+//                 damage as it is, 0 takes none (immune: no minimum applies), up to 400 takes
+//                 more. A hit is rounded once to the nearest hit point (a tie up) and does at
+//                 least 1 unless the percentage is 0. Left out entirely, a hit does the weapon's
+//                 damage whatever it hits (the frozen scenario copies predate the table); put in,
+//                 a missing row or cell, a name that does not exist, a name twice or a number out
+//                 of range is refused when the file loads.
+// The splash falloff is a field of the weapon (`splash_radius`, `splash_inner`, `friendly_fire`
+// in weapon_defs.ron). The rules and the reasons: docs/rules/armour.md.
+//
+// docs/rules/units.md describes the six movement classes and the placeholder
+// armor and damage types below.
+(
+    movement_classes: [
+        // Turning (WP4.5): a person turns at once (Instant); a tank pivots on its tracks; the
+        // others have to move to turn (Arc): a wheeled vehicle in a 1.5-cell radius (6 m), a
+        // hovercraft in 2 cells with thrusters that turn it half as fast on the spot, a vessel
+        // in 4 cells with a rudder that barely turns it at a standstill. They all drive once
+        // they are within 16 steps (22 degrees) of where they are going, the margin that routes
+        // are smoothed with (docs/rules/pathfinding.md); a target inside the turning circle is
+        // reached by a stand-in three-point turn on the spot.
+        // infantry: slowed by ore, quicker on a road; the climb onto rock is not
+        // something a rifleman does (rock is steep or high ground).
+        (kind: 0, name: "foot", ground: true, turning: (mode: Instant), terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1100)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(800)),
+            ("bridge", Speed(1100)),
+        ]),
+        // trucks and light vehicles: the best on a road, the worst on rough ground.
+        (kind: 1, name: "wheeled", ground: true, turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250), terrain_costs: [
+            ("grass", Speed(800)),
+            ("road", Speed(1200)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(600)),
+            ("bridge", Speed(1200)),
+        ]),
+        // tanks, artillery, harvesters: steady on grass, a little quicker on a road.
+        (kind: 2, name: "tracked", ground: true, turning: (mode: Pivot, drive_tolerance: 16), terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1200)),
+            ("water", Impassable),
+            ("rock", Impassable),
+            ("ore", Speed(800)),
+            ("bridge", Speed(1200)),
+        ]),
+        // crosses land and water (the amphibious transport). Its 800 on water is
+        // what the role's `water_speed` says (1.5 cells/s on land, 1.2 on water);
+        // a test keeps the two in step.
+        (kind: 3, name: "hover", turning: (mode: Arc, drive_tolerance: 16, min_radius: 2, pivot_permille: 500), terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1100)),
+            ("water", Speed(800)),
+            ("rock", Impassable),
+            ("ore", Speed(900)),
+            ("bridge", Speed(1100)),
+        ]),
+        // vessels: water only. A bridge cell is a road OVER water, so a vessel
+        // passes under it (docs/rules/movement.md, "The bridge").
+        (kind: 4, name: "water", turning: (mode: Arc, drive_tolerance: 16, min_radius: 4, pivot_permille: 125), terrain_costs: [
+            ("grass", Impassable),
+            ("road", Impassable),
+            ("water", Speed(1000)),
+            ("rock", Impassable),
+            ("ore", Impassable),
+            ("bridge", Speed(1000)),
+        ]),
+        // aircraft; no role uses it yet. Terrain does not matter: 1000 everywhere.
+        (kind: 5, name: "air", terrain_costs: [
+            ("grass", Speed(1000)),
+            ("road", Speed(1000)),
+            ("water", Speed(1000)),
+            ("rock", Speed(1000)),
+            ("ore", Speed(1000)),
+            ("bridge", Speed(1000)),
+        ]),
+    ],
+    // The set of armor types (WP5.3): five are enough to tell the weapons apart, and a unit that
+    // is neither fits the nearest one. A sixth (a medium tank) is a data change.
+    armor_types: [
+        (kind: 0, name: "none"),      // cannot be damaged (ore field); takes nothing from anything
+        (kind: 1, name: "infantry"),
+        (kind: 2, name: "light"),     // light vehicles, vessels and small objects
+        (kind: 3, name: "heavy"),     // heavy vehicles
+        (kind: 4, name: "structure"),
+    ],
+    // The set of damage types (WP5.3).
+    damage_types: [
+        (kind: 0, name: "bullet"),     // small arms and machine guns
+        (kind: 1, name: "precision"),  // long rifle: infantry only (see the table)
+        (kind: 2, name: "rocket"),     // anti-armour rockets
+        (kind: 3, name: "cannon"),     // tank and gun shells
+        (kind: 4, name: "shell"),      // artillery
+        (kind: 5, name: "demolition"), // satchel charges
+    ],
+    // Damage times armor, in percent. All placeholder values (invented, for the balance rounds of
+    // phase 15); the intent: rifles are poor against heavy armor, the sniper hurts infantry only,
+    // rockets are good against vehicles, cannons are for vehicles, artillery is good against
+    // structures and everything soft, and a satchel destroys anything but what takes nothing.
+    armor_table: [
+        (damage: "bullet", percent: [
+            ("none", 0), ("infantry", 100), ("light", 40), ("heavy", 10), ("structure", 20),
+        ]),
+        (damage: "precision", percent: [
+            ("none", 0), ("infantry", 100), ("light", 0), ("heavy", 0), ("structure", 0),
+        ]),
+        (damage: "rocket", percent: [
+            ("none", 0), ("infantry", 40), ("light", 130), ("heavy", 100), ("structure", 70),
+        ]),
+        (damage: "cannon", percent: [
+            ("none", 0), ("infantry", 40), ("light", 100), ("heavy", 85), ("structure", 60),
+        ]),
+        (damage: "shell", percent: [
+            ("none", 0), ("infantry", 100), ("light", 75), ("heavy", 50), ("structure", 150),
+        ]),
+        (damage: "demolition", percent: [
+            ("none", 0), ("infantry", 100), ("light", 100), ("heavy", 100), ("structure", 100),
+        ]),
+    ],
+    retired_movement_classes: [],
+    retired_armor_types: [],
+    retired_damage_types: [],
+)
