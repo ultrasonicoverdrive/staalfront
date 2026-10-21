@@ -9,8 +9,8 @@
 //   C  Sniper      the long rifle does 0 percent to a heavy tank (the shots are fired, nothing comes off)
 //                  and 40 to a rocket thrower (45 hit points: the second shot kills).
 //   E  Howitzer    one shell on a rifleman in the middle of a crowd. The splash is 1.5 cells with full
-//                  strength out to 0.5 from the edge of a body: a rifleman a cell away takes 63, a light
-//                  tank next to the target 68 (75 percent of 90, a tie rounded up), a heavy tank two cells
+//                  strength out to 0.5 from the edge of a body: a rifleman a cell away loses all its 50
+//                  (63 by hand), a light tank next to the target 68 (75 percent of 90, a tie rounded up), a heavy tank two cells
 //                  off 11 (50 percent of 90 at a quarter), a generator next to it 135 (150 percent); a
 //                  rocket thrower two cells off is outside; a rifleman of the SHOOTER'S side next to the
 //                  target dies with it (friendly fire).

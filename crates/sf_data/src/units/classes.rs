@@ -201,9 +201,10 @@ struct ClassesFile {
     movement_classes: Vec<MovementClass>,
     armor_types: Vec<ArmorType>,
     damage_types: Vec<DamageType>,
-    /// Damage times armor (WP5.3). Left out: no table, every hit does the weapon's damage.
-    #[serde(default)]
-    armor_table: Vec<ArmorRowDef>,
+    /// Damage times armor (WP5.3). Left out: no table, every hit does the weapon's damage. Written
+    /// but empty (`armor_table: []`): refused, as it says neither.
+    #[serde(default, deserialize_with = "present")]
+    armor_table: Option<Vec<ArmorRowDef>>,
     #[serde(default)]
     retired_movement_classes: Vec<Retired>,
     #[serde(default)]
@@ -367,16 +368,32 @@ fn check_costs(src: Source<'_>, class: &MovementClass) -> Result<(), DefError> {
     Ok(())
 }
 
+/// A field that is written is `Some`, even when it is an empty list; one that is left out is `None`
+/// (through `#[serde(default)]`). The file writes the list itself, not `Some([...])`.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// The checks of the `armor_table` (WP5.3): every row names a damage type that exists, once; every
 /// row has every armor type that exists, once, with a percentage from 0 to [`MAX_ARMOR_PERCENT`];
-/// every damage type has a row. A file without a table passes (and gives an empty list). Returns the
-/// cells as `(damage kind, armor kind, percent)`, sorted.
+/// every damage type has a row. A file without a table passes (and gives an empty list); an empty
+/// table (`armor_table: []`) is refused. Returns the cells as `(damage kind, armor kind, percent)`,
+/// sorted.
 fn check_armor_table(
     src: Source<'_>,
     file: &ClassesFile,
 ) -> Result<Vec<(u16, u16, u16)>, DefError> {
-    if file.armor_table.is_empty() {
+    let Some(table) = &file.armor_table else {
         return Ok(Vec::new());
+    };
+    if table.is_empty() {
+        return Err(src.error(
+            "armor_table is empty: leave the field out for no table, or give every damage type a row",
+        ));
     }
     let damage_kind = |name: &str| {
         file.damage_types
@@ -391,12 +408,9 @@ fn check_armor_table(
             .map(|a| a.kind)
     };
     let mut cells = Vec::new();
-    for (i, row) in file.armor_table.iter().enumerate() {
+    for (i, row) in table.iter().enumerate() {
         let name = row.damage.as_str();
-        let nth = file.armor_table[..i]
-            .iter()
-            .filter(|r| r.damage == row.damage)
-            .count();
+        let nth = table[..i].iter().filter(|r| r.damage == row.damage).count();
         let here = |message: String| {
             src.error_at_record(
                 "damage",
@@ -457,7 +471,7 @@ fn check_armor_table(
         }
     }
     for damage in &file.damage_types {
-        if !file.armor_table.iter().any(|r| r.damage == damage.name) {
+        if !table.iter().any(|r| r.damage == damage.name) {
             return Err(src.error(format!(
                 "armor_table: damage type \"{}\" has no row (the table has to be complete)",
                 damage.name

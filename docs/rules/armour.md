@@ -69,7 +69,9 @@ builds its own table (`ArmorTable::new`).
 **The table is optional in the file.** The frozen copies of the definitions that the earlier scenarios are
 pinned on (`assets/scenarios/*_defs/`) predate the table and must keep loading, so a file without an
 `armor_table` loads and a hit then does the weapon's damage whatever it hits (100 percent). The shipped file
-has the table (a test sees to that), and a world is given one with the rest of its weapons.
+has the table (a test sees to that), and a world is given one with the rest of its weapons. Left out and
+empty are not the same: `armor_table: []` is refused when the file loads ("armor_table is empty"), since
+it would silently mean "no table" while it looks like one that was meant to be filled in.
 
 ### What is refused when the files load
 
@@ -227,10 +229,12 @@ with weapons were re-pinned, and **measured** (`docs/progress.md`, WP5.3 notes, 
 * `weapons_reload` moved only because of the new layout of the digest. With the old layout (and the new
   code) the run has the old value at every one of its 30 checkpoints, so the splash of its howitzers
   and the (absent) table changed nothing in it.
-* `projectiles` moved for the same reason **and** because its frozen weapon definitions lost
-  `splash_radius: 1.5` on the howitzer: with splash real, the shell that lands where its walking scout stood
-  would hurt it, and the scenario is the one that shows an arc missing a walker. With the old layout and the
-  old code the edited definitions end where the new code does at all 24 checkpoints.
+* `projectiles` moved for the same reason **and** because of a real change of the rules in its run: its
+  frozen weapon definitions (untouched) give the howitzer `splash_radius: 1.5`, which did nothing before
+  and is real now. The shell that lands where the walking scout stood (tick 31) misses the direct hit, but
+  the scout is inside the splash, which kills it (25 hit points); the howitzer then fires no more. With
+  the old digest layout the new code ends on `0x99d52b29b228098c`, with the new one on
+  `0xd9912751868da230`.
 
 ## The shipped placeholders
 

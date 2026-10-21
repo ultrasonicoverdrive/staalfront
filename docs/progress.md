@@ -1132,15 +1132,14 @@ ticks apart:
   (no splash, no armor, old digest) reproduces the old pin; the new code with the old digest layout gives the
   old value at all 30 checkpoints. Its frozen definitions have no armor table (every hit is 100 percent) and
   the howitzers' splash of 1.5 hurt nobody in that run. The frozen copy is untouched.
-- **`projectiles` 0x770192e1d2d6da1c to 0xb8bd6976866471e2: the digest layout, and an edit of the frozen
-  definitions that the new rule made necessary.** The new code on the *unchanged* frozen definitions ends on
-  0x99d52b29b228098c (old digest layout), the first checkpoint that differs is tick 40: the howitzer's frozen
-  `splash_radius: 1.5` was inert before; now the first shell, which lands where the walking scout stood, hurts it
-  (the scenario is the one that shows an arc *missing* a walker). So `projectiles_defs/weapon_defs.ron` lost
-  `splash_radius: 1.5` on the **howitzer** (nothing else; a comment says why), which is also a term of the table's
-  digest. With that edit the old code with the old digest ends on 0xe9ce8750fb47fe52 and the new code with the
-  old digest layout on the same value at all 24 checkpoints: the behaviour of the run is unchanged, and the new
-  digest gives 0xb8bd6976866471e2. The splash itself is shown by the new scenario.
+- **`projectiles` 0x770192e1d2d6da1c to 0xd9912751868da230: the digest layout, and a real change of the
+  run.** The frozen definitions are untouched (review round 1 put back an edit that had taken the
+  howitzer's `splash_radius: 1.5` out). That splash was inert before and is real now: the first shell, which
+  lands where the walking scout stood (impact at tick 31; the first checkpoint that differs is tick 40),
+  misses the direct hit, but the scout is inside the splash and dies of it (25 hit points), so the howitzer
+  fires once instead of three times. The new code with the old digest layout ends on 0x99d52b29b228098c (the
+  run's change alone); with the new layout on 0xd9912751868da230. `tests/projectiles.rs` asserts the miss of
+  the direct hit, `splash_victims` 1 and the dead scout. The splash itself is shown in full by the new scenario.
 No armor change reached either scenario: both freeze definitions that have no `armor_table`.
 
 **`armour_splash`** (`assets/scenarios/armour_splash.ron`, frozen definitions in `armour_splash_defs/`: the
@@ -1150,8 +1149,8 @@ shipped set of WP5.3 plus two bombs and their bomb teams, kinds 15, 16, 90 and 9
 2 to a light one (40 percent), 6 to a rifleman (9 shots kill 50 hit points: 8 * 6 + 2); a rocket does 59 to a
 light tank (130 percent of 45 is 58.5, a tie up; 7 rockets), 45 to a heavy one, 18 to a rifleman (3 rockets);
 the sniper does nothing to a heavy tank (10 shots, 900 hit points to the end) and kills a rocket thrower in 2.
-One howitzer shell (90, radius 1.5, full to 0.5) into a crowd: the target 90; a rifleman a cell off 63
-(falloff 7/10); a light tank a cell off 68 (75 percent of 90, a tie up); a heavy tank two cells off 11 (50
+One howitzer shell (90, radius 1.5, full to 0.5) into a crowd: the target 90; a rifleman a cell off loses all 50
+(63 by hand, falloff 7/10); a light tank a cell off 68 (75 percent of 90, a tie up); a heavy tank two cells off 11 (50
 percent of 90 at a quarter); a generator a cell off 135 (150 percent); a rocket thrower two cells off
 untouched; a rifleman of the *shooter's* side a cell off dead (friendly fire); five hurt besides the target,
 `Impact::splash_victims` 5. A bomb (60, radius 2, full to 1) on a heavy tank: 30 direct, a friendly rifleman a

@@ -201,6 +201,21 @@ fn a_file_without_a_table_loads_and_has_none() {
 }
 
 #[test]
+fn an_empty_table_is_refused_rather_than_read_as_no_table() {
+    let e = load(
+        |t| {
+            let start = t.find("    armor_table: [").expect("the shipped table");
+            let end = t[start..].find("\n    ],").unwrap() + start + "\n    ],".len();
+            format!("{}    armor_table: [],{}", &t[..start], &t[end + 1..])
+        },
+        str::to_string,
+    )
+    .unwrap_err();
+    assert_eq!(e.file, "classes.ron");
+    assert!(e.message.contains("armor_table is empty"), "{e}");
+}
+
+#[test]
 fn the_frozen_copies_of_the_scenarios_load_without_a_table_and_with_the_splash_defaults() {
     let root = repo().join("assets");
     for dir in [

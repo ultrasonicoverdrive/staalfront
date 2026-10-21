@@ -236,8 +236,10 @@ fn a_howitzer_shell_hurts_a_crowd_by_the_falloff_and_the_armor() {
     // measured from the edge of a body.
     let tick = shell.tick.0;
     assert_eq!(r.hp(TE), 0, "the direct victim, 90 off 50");
-    // E1, a rifleman a cell off (a radius of 0.2, so its edge is 0.8 away): 90 * (1.5 - 0.8) / 1 = 63.
-    assert_eq!(r.losses(E1), [(tick, 50)], "63 off 50 hit points");
+    // E1, a rifleman a cell off (a radius of 0.2, so its edge is 0.8 away): by hand 90 * (1.5 - 0.8) / 1
+    // = 63, more than its 50 hit points, so the run can only show that it lost all 50 on that tick (the
+    // 63 itself is checked against `scaled_damage` in the last test of this file).
+    assert_eq!(r.losses(E1), [(tick, 50)], "all 50 hit points");
     assert_eq!(r.hp(E1), 0);
     // E2, a heavy tank two cells off (a radius of 0.75: edge 1.25): 90 * 50 percent * (1.5 - 1.25) = 11.25.
     assert_eq!(r.losses(E2), [(tick, 11)]);
@@ -253,7 +255,8 @@ fn a_howitzer_shell_hurts_a_crowd_by_the_falloff_and_the_armor() {
     // E5, two cells off, edge 1.8: outside.
     assert_eq!(r.hp(E5), 45);
     assert!(r.losses(E5).is_empty());
-    // E6 is the shooter's own side and stands a cell from the target: friendly fire, 63 off 50.
+    // E6 is the shooter's own side and stands a cell from the target: friendly fire: by
+    // hand 63, as E1, which shows as all its 50 hit points.
     assert_eq!(r.losses(E6), [(tick, 50)]);
     // The howitzer itself is far away.
     assert_eq!(r.hp(AE), 300);
@@ -345,7 +348,8 @@ fn nothing_else_was_hurt_and_the_numbers_come_from_the_table() {
     assert_eq!(scaled_damage(40, pct("precision", "heavy"), 1, 1), 0);
     assert_eq!(scaled_damage(90, pct("shell", "light"), 1, 1), 68);
     assert_eq!(scaled_damage(90, pct("shell", "structure"), 1, 1), 135);
-    // 63 for E1 and 11 for E2, at the exact fractions of the falloff.
+    // 63 for E1 and E6 (the run shows only their 50 hit points going) and 11 for E2, at the exact
+    // fractions of the falloff.
     assert_eq!(scaled_damage(90, pct("shell", "infantry"), 7, 10), 63);
     assert_eq!(scaled_damage(90, pct("shell", "heavy"), 1, 4), 11);
 }

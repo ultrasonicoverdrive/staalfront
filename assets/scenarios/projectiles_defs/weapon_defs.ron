@@ -50,11 +50,7 @@
         // the old single shot, split in two).
         (kind: 7, id: "twin_cannon", range: 5, reload: 2, damage: 30, damage_type: "cannon", projectile: Straight, projectile_speed: 30, burst: 2, burst_delay: 0.25, mount: Turret), // placeholder: reload, damage, speed, burst
         // siege_artillery.
-        // WP5.3: `splash_radius: 1.5` is left out of this copy (it was in the file the scenario was pinned on).
-        // Splash became real in WP5.3, and a shell that lands where a walking scout stood now hurts it; the
-        // scenario is about an arc landing where its target stood and missing a walker, so the howitzer
-        // keeps the pure miss. The splash is shown by the `armour_splash` scenario.
-        (kind: 8, id: "howitzer", range: 10, min_range: 3, reload: 5, damage: 90, damage_type: "shell", projectile: Arc, projectile_speed: 14, flight_height: 3, mount: Turret), // placeholder: reload, damage, speed, height
+        (kind: 8, id: "howitzer", range: 10, min_range: 3, reload: 5, damage: 90, damage_type: "shell", projectile: Arc, projectile_speed: 14, flight_height: 3, splash_radius: 1.5, mount: Turret), // placeholder: reload, damage, splash, speed, height
         // heavy_gun_team: infantry, so the hull is the gun (it deploys to fire).
         (kind: 9, id: "anti_tank_gun", range: 6, reload: 2.5, damage: 70, damage_type: "cannon", projectile: Straight, projectile_speed: 36), // placeholder: reload, damage, speed
         // gunboat: fixed to the hull.

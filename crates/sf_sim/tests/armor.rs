@@ -32,13 +32,13 @@ const STRUCT: u16 = 4;
 // Shooters.
 const RIFLEMAN: Kind = Kind(1); // a rifle: 6 bullet damage
 const PISTOLEER: Kind = Kind(2); // a pistol: 4 bullet damage
-const GRENADIER: Kind = Kind(3); // 100 blast damage, splash 3 with 1 at full strength, hurts its own side
+const THROWER: Kind = Kind(3); // 100 blast damage, splash 3 with 1 at full strength, hurts its own side
 const CAREFUL: Kind = Kind(4); // the same, but spares its own side
 const NUKER: Kind = Kind(5); // 100 blast damage, splash 6 falling from the start, hurts its own side; 30 hp
 const CAREFUL_NUKER: Kind = Kind(6); // the same, sparing its own side
 const BOMBER: Kind = Kind(7); // a falling bomb of 100 blast damage, splash 3 with 1 at full strength
 const PEBBLER: Kind = Kind(8); // 3 blast damage, splash 3 falling from the start
-const GLASS: Kind = Kind(9); // a grenadier with 20 hit points
+const GLASS: Kind = Kind(9); // a thrower with 20 hit points
 // Things that are shot at.
 const TROOPER: Kind = Kind(20); // soft, 1000 hit points
 const TANK: Kind = Kind(21); // hard, 1000
@@ -88,7 +88,7 @@ fn units() -> UnitTable {
     UnitTable::new(vec![
         still(RIFLEMAN, 50, 6),
         still(PISTOLEER, 50, 4),
-        still(GRENADIER, 50, 4),
+        still(THROWER, 50, 4),
         still(CAREFUL, 50, 4),
         still(NUKER, 30, 4),
         still(CAREFUL_NUKER, 30, 4),
@@ -186,7 +186,7 @@ fn loadouts() -> Vec<Loadout> {
     vec![
         l(RIFLEMAN, RIFLE),
         l(PISTOLEER, PISTOL),
-        l(GRENADIER, GRENADE),
+        l(THROWER, GRENADE),
         l(CAREFUL, CAREFUL_GRENADE),
         l(NUKER, NUKE),
         l(CAREFUL_NUKER, CAREFUL_NUKE),
@@ -475,7 +475,7 @@ fn blast_cast(shooter: Spawn) -> Vec<Spawn> {
 fn a_splash_falls_off_with_the_distance_from_the_edge_and_takes_the_armor_too() {
     let mut w = armed();
     // 4.3 cells from T, so its own edge is 3.8 from the blast.
-    let ids = spawn(&mut w, &blast_cast(Spawn::Unit(GRENADIER, hc(27, 15), 0)));
+    let ids = spawn(&mut w, &blast_cast(Spawn::Unit(THROWER, hc(27, 15), 0)));
     let shots = go(&mut w, vec![attack(ids[0], ids[1])], 1).shots;
     assert_eq!(shots.len(), 1);
     assert_eq!(hp(&w, ids[0]), 50, "the shooter is outside the splash");
@@ -584,7 +584,7 @@ fn a_splash_that_misses_its_target_hurts_what_is_near_where_it_lands() {
 
 #[test]
 fn friendly_fire_is_a_flag_of_the_weapon() {
-    for (shooter, spared) in [(GRENADIER, false), (CAREFUL, true)] {
+    for (shooter, spared) in [(THROWER, false), (CAREFUL, true)] {
         let mut w = armed();
         let ids = spawn(
             &mut w,
@@ -742,7 +742,7 @@ fn the_spatial_query_finds_exactly_what_a_plain_scan_finds() {
     let shooter_at = at(11, 15);
     let near = |p: Vec2, q: Vec2| (p - q).length() <= Fx::from_ratio(6, 5);
     for (weapon_kind, shooter) in [
-        (GRENADE, GRENADIER),
+        (GRENADE, THROWER),
         (NUKE, NUKER),
         (PEBBLE, PEBBLER),
         (CAREFUL_GRENADE, CAREFUL),
@@ -888,16 +888,16 @@ fn in_every_order(cast: &[Spawn], links: &[(usize, usize)], ticks: u32) -> Outco
 
 #[test]
 fn overlapping_splashes_add_up_in_every_spawn_order() {
-    // Two grenadiers on opposite sides fire at one trooper on the same tick. Each blast reaches the
-    // other grenadier and the one that fired it (edge 2.5, a quarter of the damage each, 25 + 25 off 50),
+    // Two throwers on opposite sides fire at one trooper on the same tick. Each blast reaches the
+    // other thrower and the one that fired it (edge 2.5, a quarter of the damage each, 25 + 25 off 50),
     // the fragile unit (120 hit points: either blast alone leaves it standing, both together do not)
     // and the tank. Everything is summed per victim and taken off once.
     let cast = [
-        Spawn::Unit(GRENADIER, at(13, 10), 0), // 0: 3 cells east of T
-        Spawn::Unit(GRENADIER, at(7, 10), 1),  // 1: 3 cells west of T
-        Spawn::Unit(TROOPER, at(10, 10), 1),   // 2: T
-        Spawn::Unit(FRAGILE, at(10, 12), 1),   // 3: edge 1.5 from both blasts: 75 + 75
-        Spawn::Unit(TANK, at(10, 8), 0),       // 4: edge 1.5 from both: 2 * 38
+        Spawn::Unit(THROWER, at(13, 10), 0), // 0: 3 cells east of T
+        Spawn::Unit(THROWER, at(7, 10), 1),  // 1: 3 cells west of T
+        Spawn::Unit(TROOPER, at(10, 10), 1), // 2: T
+        Spawn::Unit(FRAGILE, at(10, 12), 1), // 3: edge 1.5 from both blasts: 75 + 75
+        Spawn::Unit(TANK, at(10, 8), 0),     // 4: edge 1.5 from both: 2 * 38
     ];
     let o = in_every_order(&cast, &[(0, 2), (1, 2)], 2);
     assert_eq!(o.hp, vec![0, 0, 800, 0, 1000 - 76]);
@@ -966,6 +966,59 @@ fn bombs_that_land_together_add_up_in_every_spawn_order() {
         "{:?}",
         o.impacts
     );
+}
+
+#[test]
+fn bombs_that_land_together_count_a_victim_that_the_first_already_finishes_in_every_spawn_order() {
+    // As above, with a 20 hit point unit in the middle: either bomb alone brings it to nothing, so a
+    // splash that skipped a victim already at zero from an earlier hit of the same tick would count it
+    // for one bomb only, and which one would depend on the spawn order. Both blasts are worked out
+    // from the start of the tick: each counts it.
+    let cast = [
+        Spawn::Unit(BOMBER, at(22, 10), 0),  // 0
+        Spawn::Unit(BOMBER, at(22, 14), 0),  // 1
+        Spawn::Unit(TROOPER, at(16, 10), 1), // 2
+        Spawn::Unit(TROOPER, at(16, 14), 1), // 3
+        Spawn::Unit(GLASS, at(16, 12), 1),   // 4: 2 cells from each, edge 1.5: 75 off 20, twice
+    ];
+    let o = in_every_order(&cast, &[(0, 2), (1, 3)], 16);
+    assert_eq!(o.hp, vec![50, 50, 900, 900, 0]);
+    assert_eq!(
+        o.impacts.iter().map(|i| (i.3, i.4)).collect::<Vec<_>>(),
+        vec![(100, 1), (100, 1)],
+        "{:?}",
+        o.impacts
+    );
+}
+
+#[test]
+fn a_splash_rounds_the_armor_and_the_falloff_together_once() {
+    // A grenade of 30 against a hard armor that takes 15 percent. A tank at edge 2 (half strength) takes
+    // 30 * 15/100 * 1/2 = 2.25: 2. Rounding the armor first (4.5: 5) and then the half (2.5: 3) would
+    // give 3. A tank at edge 1.5 (3/4): 3.375, 3; twice rounded 5 * 3/4 = 3.75, 4.
+    let mut ws = weapons();
+    ws[2].damage = 30;
+    let mut cells = percent_cells();
+    cells[6].2 = 15;
+    let mut w = world_with(
+        WeaponTable::new(ws, loadouts())
+            .unwrap()
+            .with_armor(armor_table_with(cells))
+            .unwrap(),
+    );
+    let ids = spawn(&mut w, &blast_cast(Spawn::Unit(THROWER, hc(27, 15), 0)));
+    go(&mut w, vec![attack(ids[0], ids[1])], 1);
+    assert_eq!(
+        hp(&w, ids[7]),
+        1000 - 2,
+        "B2: edge 2, 30 * 15/100 * 1/2 = 2.25"
+    );
+    assert_eq!(
+        hp(&w, ids[3]),
+        1000 - 3,
+        "B6: edge 1.5, 30 * 15/100 * 3/4 = 3.375"
+    );
+    assert_eq!(hp(&w, ids[1]), 1000 - 30, "the direct victim is soft: 30");
 }
 
 // ---- what is refused and what the checksum covers -------------------------------------------------------

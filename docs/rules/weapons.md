@@ -219,7 +219,7 @@ WP5.3 changed the **digest of the weapon table** (the first thing section `W` ha
 `sf_sim/weapons/v2` and it covers the full-strength radius of a splash, the friendly-fire flag and the armor
 table, the armor type of every unit kind included ([`armour.md`](armour.md#the-checksum)). Worlds without a
 weapon table are still not affected; `weapons_reload` was re-pinned again (`0x20a067e16e098d0b` to
-`0x59d08622efd30483`) and `projectiles` too (`0x770192e1d2d6da1c` to `0xb8bd6976866471e2`), for the reasons
+`0x59d08622efd30483`) and `projectiles` too (`0x770192e1d2d6da1c` to `0xd9912751868da230`), for the reasons
 measured in `docs/progress.md`.
 
 `UnitStats` and the digests of the unit table (`digest`, the weapon reach digest of the orders

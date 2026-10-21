@@ -3,7 +3,7 @@
 // goes off; the hit points come off only then. What the run shows, one group of units at a time:
 //   A  Straight   a light tank's shell flies to a heavy tank: distance over speed in ticks.
 //   B  Arc        a howitzer shells a scout that is walking across its front: the shell lands where the
-//                 scout stood and misses; once the scout stands still the next shell hits and kills it.
+//                 scout stood and misses the direct hit; the splash (WP5.3) still hurts it, and kills it.
 //   C  Guided     a rocket thrower fires at a light transport (2.5 cells a second) that zigzags in a
 //                 small box: the rockets steer and hit.
 //   D  Falling    a bomb drops from three cells above where its target stood. One target stands still

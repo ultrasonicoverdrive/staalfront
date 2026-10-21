@@ -211,12 +211,11 @@ fn weapons_reload_matches_the_pinned_checksum() {
 /// moving target and a hit on a stopped one, a shooter shot down with its shell in the air, and two
 /// rocket throwers who shoot each other down. A new scenario: pinned when it was added; no other
 /// value moved but `weapons_reload` (`tests/projectiles.rs` asserts the shots and impacts).
-/// Re-pinned in WP5.3 (`0x770192e1d2d6da1c` to `0xb8bd6976866471e2`) for the two reasons of the digest
-/// of the weapon table and **not** for a change in what the run does: the new digest layout, and the
-/// frozen definitions lost `splash_radius: 1.5` on the howitzer, because splash became real and a
-/// shell that lands where the walking scout stood would now hurt it (the scenario is about the miss).
-/// With the old digest layout, and the old code that has no splash and no armor, the edited
-/// definitions give the same value as the new code at all 24 checkpoints, 20 ticks apart.
+/// Re-pinned in WP5.3 (`0x770192e1d2d6da1c` to `0xd9912751868da230`) for two causes: the new layout
+/// of the digest of the weapon table, and a real change in what the run does. The frozen definitions
+/// (untouched) give the howitzer `splash_radius: 1.5`, which is real since WP5.3: the shell that
+/// lands where the walking scout stood (tick 31) misses the direct hit, but its splash kills the scout,
+/// so the howitzer fires once. With the old digest layout the new code ends on `0x99d52b29b228098c`.
 #[test]
 fn projectiles_matches_the_pinned_checksum() {
     check("projectiles", PROJECTILES_EXPECTED);
