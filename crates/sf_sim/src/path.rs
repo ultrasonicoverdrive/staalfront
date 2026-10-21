@@ -979,9 +979,9 @@ impl Pathing {
                 .collect();
             // The units of a class that is only formation members get the arrival slots of a
             // field whatever the threshold (two of a class are enough): without a field they
-            // would all be sent to the one point and arrive in a scramble (WP4.6). A class with
-            // a unit outside every formation is judged by the threshold as ever, and so are the
-            // small classes of a crowd with a formation inside it.
+            // would all be sent to the one point and arrive in a scramble (WP4.6). The rule is per
+            // class: only a class with a unit outside every formation still needs the threshold,
+            // also in a crowd with a formation inside it.
             let formed_class = members.len() >= 2 && members.iter().all(|&m| in_formation(m));
             if members.len() < threshold && !formed_class {
                 continue;

@@ -174,7 +174,11 @@ On open ground the formation is whole again:
   stand in their places (within the re-form distance of their slots) have no rock, water or structure within three
   cells of them** (WP4.6b; the edge of the map is no obstacle here): members standing on their slots in the mouth
   of a gap held up the very stragglers the leader waited for, the rear rows of a wide block in the sweep among them
-  (a straggler is not asked: it is on its way, or shut in). (Review round 3: counting
+  (a straggler is not asked: it is on its way, or shut in). **Side effect:** one member in its place within three
+  cells of an obstacle is enough to switch the wait off, so a block passing an outcrop, a lake shore or a structure
+  does not wait for its stragglers while any member that is in place is that close to it; it waits again once
+  they are all clear (`tests/formation.rs::a_member_in_its_place_near_an_obstacle_switches_off_the_wait_for_stragglers`).
+  A straggler that is left behind there is caught up by the patience as before, not by the wait. (Review round 3: counting
   the distance alone made a unit 2.9 cells ahead of its slot and 1.5 to the side a straggler, 3.3 cells off; after the
   passage the units that had come through first became stragglers one by one as their slots came near, and the
   leader stopped for each, for some 200 ticks. Only "not ahead" was tried first, and then a soldier shut in 10
@@ -264,8 +268,9 @@ death takes a unit out at once (`orders::begin` and `clear` reset its column).
   the amphibious transport among tanks and soldiers, a vessel) does not take the fields away from the classes that
   did** (WP4.6b: until then the rule was "the order is wholly formations", and in the sandbox's order of 12 one
   amphibious transport switched off the fields and the arrival slots of the foot, tracked and wheeled units, which
-  were sent to the one point). A class with a unit outside every formation, and a small class of a crowd with a
-  formation inside it, are judged by the threshold as ever. A formation that marches without its members
+  were sent to the one point). The rule is per class: a class with a unit outside every formation gets a field only at the
+  threshold, and a class that is wholly formation members gets one below it, also when it is a small class of a
+  crowd with a formation inside it. A formation that marches without its members
   asking the field for a direction would let it expire after `FIELD_IDLE_TICKS`; the formation touches the
   fields of its members every tick (`Pathing::keep_field`), so they are there when the members go back
   to them.
@@ -384,8 +389,9 @@ pace in a loose stretch is asserted with a tank for a leader in `tests/formation
 
 **The shape in the sandbox is not good, and the test says what it can say.** The structures keep the formation loose for
 40 to 70 % of the march and it forms up again between them; the numbers above are what holds, and the test asserts the
-bounds that hold with the shipped settings (half the members near their slots, a tenth of the ticks off loose ground
-with every member near, the pace in loose stretches, the shared fields, the arrival). Over ten goals, not four, the
+pace in loose stretches, the shared fields and the arrival, and for the shape only that it does not regress: per goal a
+few points below what is measured (members near their slots 92/59/75/68 %, all near off loose ground 24/18/74/34 %).
+**The shape in a base is not fixed by WP4.6b** (`docs/progress.md`, open items 14 and 15). Over ten goals, not four, the
 means are:
 
 | | members within 3 cells | all within 3 cells | loose | mean arrival tick |

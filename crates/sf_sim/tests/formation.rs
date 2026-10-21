@@ -114,7 +114,16 @@ fn config() -> WorldConfig {
 }
 
 fn world() -> World {
-    let terrain = Terrain::from_layer(MAP.0, MAP.1, &layer(), &defs()).unwrap();
+    world_with_rock(&[])
+}
+
+/// The world of `world`, with rock in the cells `rock` besides.
+fn world_with_rock(rock: &[(u32, u32)]) -> World {
+    let mut cells = layer();
+    for &(x, y) in rock {
+        cells[(y * MAP.0 + x) as usize] = ROCK.0;
+    }
+    let terrain = Terrain::from_layer(MAP.0, MAP.1, &cells, &defs()).unwrap();
     World::with_terrain(config(), terrain)
         .unwrap()
         .with_units(table())
@@ -756,9 +765,14 @@ fn another_order_takes_a_unit_out_and_a_leader_that_goes_is_replaced() {
 /// cannot get to its slot, whatever it tries. Returns the world (with a short patience), the
 /// four tanks of the group and the soldier.
 fn pen_world() -> (World, Vec<EntityId>, EntityId) {
-    let mut w = world()
+    pen_world_with(&[], 40)
+}
+
+/// `pen_world` with rock in the cells `rock` besides and a patience of `patience` ticks.
+fn pen_world_with(rock: &[(u32, u32)], patience: u16) -> (World, Vec<EntityId>, EntityId) {
+    let mut w = world_with_rock(rock)
         .with_formation(FormationConfig {
-            patience_ticks: 40,
+            patience_ticks: patience,
             ..FormationConfig::DEFAULT
         })
         .unwrap();
@@ -1221,5 +1235,75 @@ fn a_unit_ahead_of_its_slot_and_off_its_column_walks_back_instead_of_standing() 
     assert!(
         closest < Fx::from_int(3),
         "the tank came no nearer than {closest:?} to its slot"
+    );
+}
+
+/// How far `p` is from the box of cells `x0..=x1` by `y0..=y1`.
+fn distance_to_cells(p: Vec2, (x0, y0): (i32, i32), (x1, y1): (i32, i32)) -> Fx {
+    let clamp = |v: Fx, lo: i32, hi: i32| v.max(Fx::from_int(lo)).min(Fx::from_int(hi + 1));
+    let near = Vec2::new(clamp(p.x, x0, x1), clamp(p.y, y0, y1));
+    (p - near).length()
+}
+
+#[test]
+fn a_member_in_its_place_near_an_obstacle_switches_off_the_wait_for_stragglers() {
+    // The block of `pen_world` with its penned soldier (a straggler that never comes), once on
+    // the open field and once with an outcrop of two rock cells north-west of it. The wait rule
+    // of WP4.6b: the leader waits only while every member that is in its place has no obstacle
+    // within three cells. A side effect, documented in `docs/rules/formations.md`: one member
+    // in place by an outcrop is enough, and the block passing it does not wait.
+    let rock = [(8_u32, 1_u32), (9, 1)];
+    let reform = Fx::from_ratio(i64::from(FormationConfig::DEFAULT.reform_tenths), 10);
+    let early = |rock: &[(u32, u32)]| {
+        let (mut w, group, _) = pen_world_with(rock, 300);
+        run(&mut w, 2);
+        let leader = w.formation_of(group[0]).unwrap().leader_id;
+        (0..30_u32)
+            .map(|_| {
+                w.step();
+                u32::from(w.formation_of(leader).is_some_and(|v| v.waiting))
+            })
+            .sum::<u32>()
+    };
+    assert!(
+        early(&[]) > 20,
+        "on the open field the leader waits at once"
+    );
+    assert_eq!(early(&rock), 0, "by the outcrop it does not");
+
+    let (mut w, group, soldier) = pen_world_with(&rock, 300);
+    run(&mut w, 2);
+    let leader = w.formation_of(group[0]).unwrap().leader_id;
+    let (mut waited_near, mut waited_clear) = (0, 0);
+    for _ in 0..400_u32 {
+        w.step();
+        if w.formation_of(soldier).is_none() {
+            break;
+        }
+        let Some(lead) = w.formation_of(leader) else {
+            break;
+        };
+        let in_place: Vec<Fx> = group
+            .iter()
+            .filter_map(|&g| {
+                let v = w.formation_of(g)?;
+                let p = pos(&w, g);
+                ((p - v.slot).length() <= reform).then(|| distance_to_cells(p, (8, 1), (9, 1)))
+            })
+            .collect();
+        if lead.waiting && in_place.iter().any(|&d| d < Fx::from_int(3)) {
+            waited_near += 1;
+        }
+        if lead.waiting && in_place.iter().all(|&d| d > fx(4500)) {
+            waited_clear += 1;
+        }
+    }
+    assert_eq!(
+        waited_near, 0,
+        "the leader waited while a member in place was by the outcrop"
+    );
+    assert!(
+        waited_clear > 0,
+        "once clear of the outcrop the leader waits for the straggler again"
     );
 }

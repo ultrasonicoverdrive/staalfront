@@ -14,10 +14,13 @@
 //!
 //! * one formation forms, of the eleven ground units; the amphibious transport is a family of
 //!   one and forms none, and does not take the shared fields of the others away;
-//! * the **pace**: the leader never steps faster than the slowest member, loose or not, and in
-//!   the stretches where the formation is loose the members that keep up with their slots do
-//!   not run at the speeds they have of their own (that was the bug);
-//! * the **shape**: how many members are near their slots. The honest bound is a low one:
+//! * the **pace**: in the stretches where the formation is loose the members that keep up with
+//!   their slots do not run at the speeds they have of their own (that was the bug). The leader
+//!   here is a rifleman, the slowest unit, so its check only bounds how far the crowd shoves
+//!   it; the leader's pace proper is tested with a tank leader in `sf_sim/tests/formation.rs`;
+//! * **no regression of the shape**: how many members are near their slots, per goal just
+//!   below what is measured. The shape in a base is NOT fixed by WP4.6b (open items 14 and 15
+//!   of `docs/progress.md`):
 //!   the structures of the sandbox keep the formation loose for 40 to 70 % of the march
 //!   (they stay "narrow places", `docs/rules/formations.md`), two heavy tracked units are
 //!   stuck among them for a long time with or without a formation (the paths are made for
@@ -481,11 +484,13 @@ fn the_unit_left_out_does_not_switch_off_the_shared_fields_of_the_classes_that_f
 fn a_loose_formation_keeps_the_pace() {
     let (mut loose_windows, mut loose_fast) = (0, 0);
     for r in reports() {
-        // The leader never steps faster than the slowest member (a hair for the pushes of
-        // the crowd pass).
+        // The leader of the sandbox is a rifleman, itself the slowest unit, so this measures
+        // only how far the crowd shoves it: at most 15 % above its own walk (1.12 measured, at
+        // (56, 44)). The leader's pace when it is faster than the slowest (a tank leading) is
+        // tested in `sf_sim/tests/formation.rs`.
         assert!(
             r.leader_top <= r.slowest * 1.15,
-            "goal {:?}: the leader went {:.4} cells a tick over {WINDOW}, the slowest {:.4}",
+            "goal {:?}: the leader was shoved to {:.4} cells a tick over {WINDOW}, its walk {:.4}",
             r.goal,
             r.leader_top,
             r.slowest
@@ -519,8 +524,22 @@ fn a_loose_formation_keeps_the_pace() {
 }
 
 #[test]
-fn the_shape_holds_as_far_as_the_base_lets_it() {
+fn the_shape_does_not_regress_in_the_base() {
+    // Per goal: (members near their slots, all members near on the ticks not loose, worst
+    // deviation in cells). Measured on the merge with main at cfef151: (92 %, 24 %, 4.4),
+    // (59 %, 18 %, 25.5), (75 %, 74 %, 5.8), (68 %, 34 %, 24.2). The bounds sit a few points
+    // below; they guard against regression and claim no good shape (open items 14 and 15).
+    let bounds: [((i32, i32), f64, f64, f64); 4] = [
+        ((56, 44), 0.85, 0.18, 8.0),
+        ((90, 44), 0.55, 0.14, 30.0),
+        ((90, 10), 0.70, 0.65, 9.0),
+        ((100, 40), 0.62, 0.28, 30.0),
+    ];
     for r in reports() {
+        let &(_, member, open, worst) = bounds
+            .iter()
+            .find(|b| b.0 == r.goal)
+            .expect("a bound for every goal");
         // Loose for a good part of the march (the structures are narrow places), but not the
         // whole of it: the formation forms up again between them.
         assert!(
@@ -529,25 +548,25 @@ fn the_shape_holds_as_far_as_the_base_lets_it() {
             r.goal,
             r.open
         );
-        // The members near their slots, over all the ticks of the formation; the bound that
-        // holds is half (it is 59 to 92 % with the shipped settings; the two heavy tracked
-        // units that are stuck among the structures account for most of what is missing).
         assert!(
-            r.member_share() >= 0.50,
+            r.member_share() >= member,
             "goal {:?}: {:.0} % of the members near their slots",
             r.goal,
             100.0 * r.member_share()
         );
-        // All of them at once, on the ticks that are not loose: 18 to 74 % as shipped.
         assert!(
-            r.open_shape_share() >= 0.10,
+            r.open_shape_share() >= open,
             "goal {:?}: {:.0} % of the ticks that are not loose",
             r.goal,
             100.0 * r.open_shape_share()
         );
-        // Nobody wanders off: the farthest any member was from its slot is the farthest a
-        // stuck heavy unit was, far less than the map.
-        assert!(r.worst_deviation < 40.0, "goal {:?}", r.goal);
+        // The worst is a heavy unit stuck among the structures (item 14).
+        assert!(
+            r.worst_deviation < worst,
+            "goal {:?}: {:.1}",
+            r.goal,
+            r.worst_deviation
+        );
     }
 }
 

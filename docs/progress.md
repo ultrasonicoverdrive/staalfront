@@ -336,7 +336,7 @@ the limit is 19. See "Phase 4 close-out" below the notes of WP4.7 for the open i
   (`formation_*`, `World::with_formation`), the state is in a new checksum section `G`; the
   `formation_move` scenario, the `FormationConfig` and `scenario.formation` knobs, `tests/formation.rs`),
   `docs/rules/formations.md`: done
-- WP4.6b Formations that hold in a real base (follow-up of WP4.6, found in the viewer: the sandbox of `sf_game` on
+- WP4.6b The formation pace holds in a base; the shape gap stays open (open items 14 and 15) (follow-up of WP4.6, found in the viewer: the sandbox of `sf_game` on
   the map `assets/maps/formation`, the 12 mobile Meridian units, one Move; a loose formation keeps the pace of its
   slowest member and a member that follows the order's way may get at most `formation_ahead_tenths` ahead of its
   slot; a unit ahead of its slot and off its column walks back or goes on at the pace instead of standing; the
@@ -816,8 +816,10 @@ arrival packs each class on its own (the criterion of phase 4 is a packing: 200 
 spacing would need a disc about 1.4 times the radius of the one the criterion measures, which allows 1.3). So the group goes from one shape into the
 other when the formation is let go, within the disc of the order.
 
-WP4.6b notes (formations that hold in a real base). **The base-start gap was found in the viewer, after the phase-4
-close-out below, and is fixed here.** Everything WP4.6 proved was proved on a field with one passage and no
+WP4.6b notes (the formation pace holds in a base). **The base-start gap was found in the viewer, after the phase-4
+close-out below. The pace is fixed here; the shape is not:** members near their slots went from 71 to 73 % over ten
+goals, and "all members near" is equal or worse at 3 of the 4 goals of `formation_base`. The shape gap in a base stays
+open (open items 14 and 15). Everything WP4.6 proved was proved on a field with one passage and no
 structures (`formation_move`, `formation_sweep`) or on a crowd (`bridge_200`); nothing built the world the way the game
 does and gave an order in it. In `sf_game`, on the sandbox map `assets/maps/formation`, box-selecting the 12 mobile
 Meridian units and giving one Move sent the tanks ahead at 1.4 to 2 cells a second with the riflemen (0.7) behind and no
@@ -896,21 +898,19 @@ edge of the map as an obstacle for the loose rule (only the new wait rule ignore
 formation (the amphibious transport) still walks the order at its own speed beside the formation, which is what the
 viewer shows of it; presentation of the slots; a second sandbox layout, other maps and other orders.
 
-Screenshots (Xvfb with Mesa lavapipe, the real `sf_game` release build, the 12 units box-selected and one right-click to
-(56, 44), the same camera and the same ticks before, on the head of main, and after):
-`docs/screenshots/wp4.6b/contact_sheet_before.png` and `contact_sheet_after.png`. Honestly: the units are small at the
-zoom that shows the whole way, and the two sheets look much alike (the difference is in the pace of the units that
-follow the order's way, which a still does not show well, and in the numbers above); they show that the order, the camera
-and the run are the same, and the amphibious transport reaching the goal alone first in both.
+No screenshots: a before/after pair at goal (56, 44) was made (Xvfb, Mesa lavapipe, the release build) and dropped in
+review round 1, the two stills being near-identical (the difference is in the pace, which a still does not show, and
+in the numbers above).
 
 ## Phase 4 close-out
 
 Status of the work packages: 4.1 movement classes, 4.2 hierarchical A*, 4.3 flowfields, 4.4 local avoidance and
-collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning, 4.6 formations and 4.6b formations in a real base
+collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning, 4.6 formations and 4.6b the formation pace in a base
 are in
 (`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). **Amended
 for WP4.6b:** the claim below was made for a field, and the viewer showed the gap: formations in the sandbox, among
-structures and with a unit in no formation, had no pace and no fields until WP4.6b (see its notes above). The
+structures and with a unit in no formation, had no pace and no fields until WP4.6b (see its notes above); the pace holds there now, the shape does not
+(open items 14 and 15). The
 criterion of phase 4 is met by `bridge_200`. For formations the claim is the one the sweep supports and no
 more: groups of 3 to 19, of riflemen with tanks and transports, of riflemen only and of tanks and transports only, at
 every depth of block tried (2 to 8), on the map of `formation_move`, arrive within 1.4 times the slowest's walk and
