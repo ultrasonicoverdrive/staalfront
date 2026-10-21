@@ -1158,6 +1158,85 @@ Things to know:
 - `World::passable` looks at terrain only (not at structures), so the snapshot reads the ground once.
   A unit test fails if that ever changes.
 
+## Art set v4 (asset WP, 21-10-2026)
+
+The fourth art delivery (`Staalfront_GLB_Pakket_v3.zip`, sha256
+`cfe8f6890a30d610136df87e477f7c0f2f397249ae05beb36f3bf92e41780003`; the producer's name
+"GLB pakket v3" would clash with `assets/set_v3`, so the repo calls it **set v4**) replaces set v3
+as the placeholder model pack: 200 `.glb` files, of which **194 are stored** in `assets/set_v4`,
+byte for byte as delivered, and wired into `unit_defs.ron`. The follow-up of PR #42 and PR #48 in one.
+
+**Decision: levels of detail (docs/conventions.md section 12).** The delivery stores LOD0, LOD1 and
+LOD2 as three glTF scenes (`LOD0`, `LOD1`, `LOD2`, one root each), the brief and the loader expect
+three roots in the default scene. The loader and the checker now read both layouts as the same model
+(`sf_render::glb::lod_roots`, one function the checker calls too), instead of a repack step: the
+files stay identical to the delivery (their sha256 match its `asset_register.csv`) and nothing has
+to be re-run for the next delivery. A scene named `LOD<n>` must hold one root `<id>_LOD<n>`; anything
+else is refused with a message, and files with other scene names are read by their default scene as
+before. The art brief will say that one scene is preferred. Tests: `glb::tests` (the same model from
+both layouts, scene order, six kinds of refusal, files that are not the layout),
+`sf_asset_check/tests/rules.rs` (same report in both layouts, broken scene-per-LOD files).
+
+**Checker numbers (files: pass / warnings only / fail).**
+
+| Run | Files | Pass | Warn only | Fail |
+|---|---|---|---|---|
+| The delivery as delivered, checker of main (`1f9933b`) | 200 | 0 | 0 | 200 (every file: `LOD1` and `LOD2` "missing", 400 `lod-roots` findings) |
+| Same checker on the orchestrator's lossless one-scene repack | 200 | 3 | 183 | 14 (8 `class`, 4 wrecks without `fx` nodes, the two teams) |
+| The delivery as delivered, this branch | 200 | 3 | 191 | 6 |
+| `assets/set_v4` as stored (exit code 0) | 194 | 3 | 191 | 0 |
+
+The step from 183 to 191 warnings is the checker rule for decor roles: `cliff_edge`, `fence` and
+`rubble_*` (the shared rubble heaps per footprint) are decor with the decor budget 1500/500/150
+(`tools/sf_asset_check/src/class.rs`; a structure's own rubble state such as `generator_rubble`
+stays that structure). The six that still fail are left out, not edited.
+
+**Left out (6 of 200), findings for the producer.**
+- `neutral_wreck_light`, `_medium`, `_heavy`, `_boat`: no empty `fx_smoke_*` / `fx_fire_*` nodes (the
+  delivery README says the wrecks have them). The v3 wrecks stay in `assets/set_v3`.
+- `veyran_heavy_gun_team`: five parts in one level (the engine takes four) and none of the infantry
+  nodes (`torso`, `head`, ...), 4.4 m wide and 1.6 m high, so it is not upright infantry either.
+  The role stays a primitive (no v3 model either).
+- `veyran_demolition_team`: five parts in one level as well, and the nodes of the second figure
+  (`*_2`) are missing. The role keeps the set v3 file.
+
+**Other findings for the producer (warnings, the files are stored).**
+- The `lamp` material has an emissive factor in 190 of 194 files; the engine reads base colour
+  only. Say whether the factor stays (the checker then keeps warning) or goes.
+- The team colour is a diagonal triangle across the top surfaces. It meets the 20 to 40 % rule
+  (27 to 31 % measured by the producer, the checker agrees) but reads as a trick for the rule, not
+  as a team-coloured panel or stripe (`docs/screenshots/set_v4/`).
+- 132 of the 194 files have the same triangle count in all three levels (LOD1 and LOD2 are copies of
+  LOD0); the models are 8 to 288 triangles in LOD0.
+- The vessels `neutral_ferry`, `neutral_ferry_stalled` and `veyran_gunboat` stand on `Y = 0`; the
+  waterline is meant to cut through the hull.
+- The four fallen trees have their origin at one end (2.6 to 3.1 m from the middle).
+- Eleven vehicles (trucks, harvesters, transports, ferries) have no empty `turret` and `barrel`
+  nodes; the brief keeps them for every vehicle.
+- `meridian_supply_truck` and `veyran_supply_truck` exist, but `unit_defs.ron` gives the role
+  `supply_truck` to Neutral alone; deliver `neutral_supply_truck` or say the role is per faction.
+  Until then it keeps its `testpack_v1` model.
+- `state_map.json` (which state file belongs to which model) was not adopted: the delivery calls it
+  "not a proven models.ron schema". The damage and construction states are in the pack but no
+  definition names them yet (the building WPs).
+
+**Wiring.** Every role with a model that passes is on set v4 (`docs/rules/units.md`, "What is
+wired"): 18 roles of both factions with a model per faction, 22 with one file; demolition_team stays
+on set v3, heavy_gun_team on its primitive, supply_truck on `testpack_v1`. The roster tests that
+assumed shared files or primitives were adapted, and `built_with` in `roster.rs` makes the
+shared-file case (two roles, one file, two icons) testable with the shipped definitions. Set v3
+stays in the repo: `demolition_team` and the v3 wrecks and decor still use it and its tests pin it.
+`sf_sim` is untouched, no checksum moved (presentation only).
+
+**Seen in the game (`docs/screenshots/set_v4/`).** Both factions, in the sandbox with
+`--unit-display models` under Xvfb and Mesa lavapipe. The plain red box, the yellow pyramid, the blue
+cone and the lavender cubes are the sandbox's existing placeholder scene (they are there with
+`--models none` too), not set v4. The engine scales a structure's model to its footprint (up to four
+times): the v4 relay transmitter is a 25 m mast and stands 52 m high on the placeholder 2 x 2 cell
+footprint (`units.md`); a footprint decision, not an art one. The whole pack, with the damage states
+and the decor, is `sf_game --crowd --models set_v4` (the sandbox draws its roles through the roster
+and does not read `--models`).
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -1232,8 +1311,10 @@ fixed, delete the entry in the same PR.
     delivery's licence text ("eigen werk, vrij te gebruiken in Staalfront") is not an SPDX
     licence: confirm a precise one before any release (phase 16).
 25. **Models not wired.** Decor (trees, rocks, ore stages) and wrecks are not unit roles and
-    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); vehicles and
-    buildings have no set v3 model (the next art delivery, then `models` in `unit_defs.ron`).
+    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); the vehicles and
+    buildings are wired to set v4 (see "Art set v4" above). Still open there: the damage and
+    construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
+    names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay).
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
@@ -1245,3 +1326,15 @@ fixed, delete the entry in the same PR.
     before their tick, so the queue is empty whenever a checksum is taken; (b) leave the pending
     commands out of the checksum (moves every pinned checksum that has commands waiting at a tick
     end). Decide before WP14.1; see `docs/architecture.md` section 18.
+28. **Tijmen must set the licence of set v4 before any release.** The delivery says "licentie nog
+    vast te leggen door projecteigenaar" on every line (procedural geometry made by "Copilot" at the
+    user's request, Python and NumPy, no external meshes or textures); `assets/LICENSES.md` has one
+    line per file saying "Not set". Until it is, `assets/set_v4` (and the contact sheet in
+    `docs/screenshots/set_v4/`) is for development only. Set v3's "own work, free to use in
+    Staalfront" (item 24) is not an SPDX licence either: decide both together (for example CC0 or
+    the project licence), then replace the lines.
+29. **Art set v4 findings to hand to the producer** (details and file names in "Art set v4"
+    above): four wrecks without `fx` nodes, `heavy_gun_team` and `demolition_team` (parts and
+    nodes), emissive `lamp` material, diagonal team triangles, copied levels of detail, vessels on
+    `Y = 0`, the `supply_truck` faction, `state_map.json`. Owner: Tijmen with the producer; when a
+    fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.

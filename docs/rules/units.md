@@ -123,7 +123,7 @@ the file does not matter.
 | `sight` | cells; above 0 except for an Object |
 | `weapons` | up to four ids from `weapon_defs.ron` |
 | `model` | `Shape(Cube \| Cylinder \| Cone)`, a placeholder primitive of `units.ron`, or `Glb("<path under assets/>")`, a glTF file that must exist and lie in a pack of `config/models.ron`. The generic look of the role (see "Models per faction") |
-| `models` | optional map from a faction to a model, `models: { Meridian: Glb("set_v3/meridian_rifleman.glb"), Veyran: Glb("set_v3/veyran_rifleman.glb") }`; the keys are factions of the role; each value is a model like `model` (see "Models per faction") |
+| `models` | optional map from a faction to a model, `models: { Meridian: Glb("set_v4/meridian_rifleman.glb"), Veyran: Glb("set_v4/veyran_rifleman.glb") }`; the keys are factions of the role; each value is a model like `model` (see "Models per faction") |
 | `strategic_icon` | `Square`, `Circle`, `Triangle` or `HalfCircle`: the base shape at strategic zoom, one per kind of role (structure, infantry, vehicle, vessel); what the role is drawn as when it has no `icon` (WP1.9, WP3.6) |
 | `icon` | optional name of the role's strategic icon (WP3.6): a picture of the icon set in `assets/icons`, `a-z 0-9 _`, at most 48 characters; see [`icons.md`](icons.md). Only the spelling is checked in `sf_data`; a name the set does not have is a warning when the game loads and the role is drawn as its `strategic_icon`. (The build menu picture of WP11.1 will be a field of its own.) |
 | `flags` | abilities, below; every flag defaults to off |
@@ -287,7 +287,7 @@ without hit points.
 
 ## Models per faction
 
-One role can look different for each faction: art set v3 has `meridian_rifleman.glb`
+One role can look different for each faction: art set v4 has `meridian_rifleman.glb`
 and `veyran_rifleman.glb` for the single role `rifleman`. The role keeps one **kind**
 and one record; only how a unit is *drawn* depends on who owns it.
 
@@ -317,12 +317,36 @@ key that is not a faction, a faction listed twice, and a faction the role does n
 refused with the file and line. A `models.ron` that is not there (a tool with a partial assets
 directory) skips only the pack check.
 
-What is wired (art set v3, `assets/set_v3`): rifleman, rocket_trooper, engineer and scout with
-a model for Meridian and one for Veyran; sniper (Meridian), medic, combat_engineer and
-demolition_team (Veyran) and the neutral civilian and technician with their single model.
-`heavy_gun_team` has no model in the set yet. Decor (ore stages, rocks, trees) and wrecks are
-not unit roles and are not in `unit_defs.ron`; placing them on maps is later work (phase
-2.2/2.3, wrecks 5.5).
+What is wired (art set v4, `assets/set_v4`, which replaced set v3 as the placeholder pack):
+
+* **A model for Meridian and one for Veyran** (`models`; the generic `model` stays as it was and
+  is what an owner that is neither gets): the structures construction_center, power_plant,
+  refinery, barracks, vehicle_factory, radar, defence_tower, advanced_defences and shipyard; the
+  vehicles harvester, light_tank, heavy_tank, siege_artillery and repair_truck; the infantry
+  rifleman, rocket_trooper, engineer and scout.
+* **One file in `model`** (roles of one faction, and neutral ones): decoy_emplacement
+  (Meridian), fortified_bunker (Veyran), sniper (Meridian), medic and combat_engineer (Veyran),
+  transport_truck (Veyran), light_transport and amphibious_transport (Meridian), gunboat
+  (Veyran), civilian, technician, relay_transmitter, fuel_depot, archive_building,
+  evidence_crate, ferry, bridge_segment, rail_spur, automated_gun and unmanned_artillery (the
+  files of these two are `network_*.glb`), generator and ore_field.
+* **Not on set v4:** `demolition_team` keeps the set v3 file (the v4 file fails `sf_asset_check`:
+  five parts in one level, no nodes for the second figure); `heavy_gun_team` is a primitive (same
+  reason, no v3 model either); `supply_truck` keeps its `testpack_v1` model (v4 has a
+  supply truck per faction, but the role is Neutral's alone).
+
+The file names of v4 are `<faction>_<role>.glb`, so a role of both factions has two. The
+damage and construction states of a structure (`_damaged`, `_heavily_damaged`, `_foundation`,
+`_scaffolding`, `_rubble`, `_no_uplink`, ...) and the shared rubble heaps are in the pack
+`set_v4` but are not roles, so no definition names them: they wait for the building and map
+work. Decor (ore stages, rocks, trees) and wrecks are not unit roles and are not in
+`unit_defs.ron`; placing them on maps is later work (phase 2.2/2.3, wrecks 5.5; the four v4
+wrecks fail the checker and are not in the repo, the v3 wrecks are).
+
+A structure's model is scaled, the same in every direction, to fit its footprint (at most
+four times bigger or smaller, `sf_render::glb::load_pack_model`). The footprints of the mission
+structures are placeholders: the v4 relay transmitter is a tall mast (3.8 x 25 x 3.8 m) and
+stands 52 m high on its 2 x 2 cell footprint until that footprint is decided.
 
 ## Conversion for the simulation
 

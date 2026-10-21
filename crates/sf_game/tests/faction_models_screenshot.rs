@@ -1,8 +1,8 @@
 //! Screenshot tests of roles drawn with their glTF models through the real renderer: the
-//! per-faction infantry models of art set v3 and, since WP4.5, a tank whose turret the
+//! per-faction infantry models of art set v4 and, since WP4.5, a tank whose turret the
 //! simulation has turned off its hull.
 //!
-//! The first: the per-faction infantry models of art set v3
+//! The first: the per-faction infantry models of art set v4
 //! (`models:` in `assets/config/unit_defs.ron`), through the real renderer on a
 //! software adapter (Mesa lavapipe / DX12 WARP): Meridian and Veyran
 //! infantry side by side at close zoom, drawn with the glTF files the
@@ -380,11 +380,11 @@ fn meridian_and_veyran_riflemen_side_by_side_at_close_zoom() {
     assert!(mm > 3 * mv && vv > 3 * vm, "the colours do not swap");
 }
 
-/// All the infantry of set v3 at once, a row per role: Meridian left, Veyran
+/// All the infantry of set v4 at once, a row per role: Meridian left, Veyran
 /// right, the neutral civilians and technicians apart. A look at the whole
 /// set, with a check that every figure is drawn and upright.
 #[test]
-fn the_infantry_of_set_v3_stands_upright_in_a_row_per_role() {
+fn the_infantry_of_set_v4_stands_upright_in_a_row_per_role() {
     let mut scene = Scene::new();
     let mut r = renderer(&scene.map);
     let mut figures: Vec<(&str, u8, EntityId)> = Vec::new();
@@ -419,17 +419,26 @@ fn the_infantry_of_set_v3_stands_upright_in_a_row_per_role() {
     }
     // Upright, on the ground, a person's height: every infantry model as the
     // roster loaded it (front +X and up +Y were converted once, in the loader).
+    let infantry_files: std::collections::BTreeSet<String> = scene
+        .defs
+        .units()
+        .iter()
+        .filter(|d| d.category == sf_data::units::Category::Infantry)
+        .flat_map(|d| d.all_models())
+        .filter_map(|m| match m {
+            sf_data::units::Model::Glb(path) => std::path::Path::new(path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned()),
+            sf_data::units::Model::Shape(_) => None,
+        })
+        .collect();
     let people: Vec<_> = scene
         .roster
         .pack()
         .unwrap()
         .models
         .iter()
-        .filter(|m| {
-            ["meridian_", "veyran_", "neutral_"]
-                .iter()
-                .any(|p| m.name.starts_with(p))
-        })
+        .filter(|m| infantry_files.contains(&m.name))
         .collect();
     assert_eq!(
         people.len(),
@@ -437,12 +446,22 @@ fn the_infantry_of_set_v3_stands_upright_in_a_row_per_role() {
         "all the infantry of the set is in the roster"
     );
     for model in people {
+        // The parts hang on each other (set v4: hull, torso, the right arm),
+        // each with a transform to its parent, so take every vertex to the
+        // unit's frame first.
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        let mut world = Vec::new();
         for part in &model.levels[0].parts {
+            let to_unit = match part.parent {
+                Some(parent) => world[parent] * part.rest,
+                None => part.rest,
+            };
+            world.push(to_unit);
             for v in &part.mesh.vertices {
+                let at = to_unit.transform_point3(v.position.into()).to_array();
                 for k in 0..3 {
-                    lo[k] = lo[k].min(v.position[k]);
-                    hi[k] = hi[k].max(v.position[k]);
+                    lo[k] = lo[k].min(at[k]);
+                    hi[k] = hi[k].max(at[k]);
                 }
             }
         }
@@ -471,7 +490,7 @@ fn the_infantry_of_set_v3_stands_upright_in_a_row_per_role() {
     let empty = scene.shoot(&mut r, &cam);
     scene.sync(true);
     let img = scene.shoot(&mut r, &cam);
-    save("infantry_set_v3.png", &img);
+    save("infantry_set_v4.png", &img);
     let mut seen = 0;
     for (role, owner, id) in &figures {
         let p = scene.screen(&cam, *id);

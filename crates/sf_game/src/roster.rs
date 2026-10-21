@@ -36,7 +36,7 @@
 //! # One role, a model per faction
 //!
 //! A role has one generic `model` and may have a `models` entry per faction
-//! (set v3: `meridian_rifleman.glb` and `veyran_rifleman.glb` are one role).
+//! (set v4: `meridian_rifleman.glb` and `veyran_rifleman.glb` are one role).
 //! Which one a unit is drawn with follows its **owner**: [`faction_of_owner`]
 //! maps the owner number to a faction (the sandbox's seats), and
 //! [`Roster::look_for`] picks the faction's entry if the role has one that
@@ -608,6 +608,38 @@ mod tests {
         assert_eq!(set.models().len(), style.shape_count());
     }
 
+    /// The shipped definitions built into a roster after `edit` changed the
+    /// text of `unit_defs.ron` (for what the shipped roles no longer do, such
+    /// as two roles drawn with one file).
+    fn built_with(edit: impl Fn(&str) -> String) -> (UnitDefs, Roster) {
+        use sf_data::units::{
+            DefFile, DefSources, EMBEDDED_CLASSES, EMBEDDED_UNITS, EMBEDDED_WEAPONS,
+        };
+        let units = edit(&EMBEDDED_UNITS.replace("\r\n", "\n"));
+        let (classes, weapons) = (
+            EMBEDDED_CLASSES.replace("\r\n", "\n"),
+            EMBEDDED_WEAPONS.replace("\r\n", "\n"),
+        );
+        let sources = DefSources {
+            classes: DefFile {
+                name: "classes.ron",
+                text: &classes,
+            },
+            weapons: DefFile {
+                name: "weapons.ron",
+                text: &weapons,
+            },
+            units: DefFile {
+                name: "units.ron",
+                text: &units,
+            },
+        };
+        let defs = UnitDefs::from_sources(&sources, Some(&assets())).unwrap();
+        let roster =
+            Roster::build(&defs, &base(), &icons(), &assets(), &models_ron(), true).unwrap();
+        (defs, roster)
+    }
+
     #[test]
     fn the_roles_with_a_glb_use_it_and_the_rest_are_primitives() {
         let (defs, roster) = built(true);
@@ -620,6 +652,19 @@ mod tests {
                 def.id
             );
         }
+        // The shipped roles name a file of their own each. To see how roles
+        // that name one file are drawn, give the decoy the tower's file and the
+        // transport truck the repair truck's (the testpack ones they had).
+        let (defs, roster) = built_with(|text| {
+            text.replace(
+                "set_v4/meridian_decoy_emplacement.glb",
+                "testpack_v1/models/verdedigingstoren.glb",
+            )
+            .replace(
+                "set_v4/veyran_transport_truck.glb",
+                "testpack_v1/models/pantserwagen.glb",
+            )
+        });
         // Two roles with the same file and icon are one shape (the decoy has
         // the tower's icon on purpose); with different icons they are two
         // shapes that share one model: the same chain, so the same meshes.
@@ -687,10 +732,13 @@ mod tests {
             MeshKind::Cylinder,
             "infantry with a glb file"
         );
-        // A role that names a primitive keeps it.
+        assert_eq!(mesh("fuel_depot"), MeshKind::Cube, "an object's glb file");
+        assert_eq!(mesh("gunboat"), MeshKind::Cone, "a vessel's glb file");
+        // A role that names a primitive keeps it (the infantry's own is a cone,
+        // not the cylinder its sort of thing gets).
         assert_eq!(mesh("rifleman"), MeshKind::Cone);
-        assert_eq!(mesh("fuel_depot"), MeshKind::Cylinder);
-        assert_eq!(mesh("gunboat"), MeshKind::Cylinder);
+        assert_eq!(mesh("heavy_gun_team"), MeshKind::Cone);
+        assert_eq!(mesh("barracks"), MeshKind::Cube);
     }
 
     #[test]
@@ -743,7 +791,9 @@ mod tests {
             assert_eq!(shape.size[2], f32::from(fp.height) * cell, "{}", def.id);
             seen += 1;
         }
-        assert!(seen >= 10, "most structures are still primitives: {seen}");
+        // The generic look of the structures of both factions is still a
+        // primitive (what an owner without a faction model gets): five of them.
+        assert!(seen >= 5, "structures with a primitive: {seen}");
     }
 
     #[test]
@@ -782,12 +832,14 @@ mod tests {
     fn a_primitive_unit_is_as_wide_as_its_size() {
         let (defs, roster) = built(true);
         let style = full_style(&roster);
+        // The generic looks of the infantry of both factions, and the one
+        // role set v4 has no usable model for.
         for id in [
             "rifleman",
+            "rocket_trooper",
+            "engineer",
+            "scout",
             "heavy_gun_team",
-            "gunboat",
-            "evidence_crate",
-            "ferry",
         ] {
             let def = defs.unit(id).unwrap();
             let sim = defs.sim_unit(def.kind).unwrap();
@@ -928,8 +980,8 @@ mod tests {
         set.model(shape).meshes().map(|m| m.index()).collect()
     }
 
-    /// Set v3 is wired in: a role with a model per faction is drawn with the
-    /// model of its owner's faction, and the others with the one they have.
+    /// Art set v4 is wired in: a role with a model per faction is drawn with
+    /// the model of its owner's faction, and the others with the one they have.
     #[test]
     fn a_unit_is_drawn_with_the_model_of_its_owners_faction() {
         let (defs, roster) = built(true);
@@ -939,7 +991,18 @@ mod tests {
             Some(Faction::Veyran),
             Some(Faction::Neutral),
         );
-        for id in ["rifleman", "rocket_trooper", "engineer", "scout"] {
+        // The roles of both factions: infantry, vehicles, structures.
+        let dual: Vec<&str> = defs
+            .units()
+            .iter()
+            .filter(|d| !d.models.is_empty())
+            .map(|d| d.id.as_str())
+            .collect();
+        assert_eq!(dual.len(), 18, "{dual:?}");
+        for id in ["rifleman", "light_tank", "power_plant", "harvester"] {
+            assert!(dual.contains(&id), "{id}");
+        }
+        for &id in &dual {
             let (sm, sv) = (
                 shape_in(&roster, &defs, id, m),
                 shape_in(&roster, &defs, id, v),
@@ -949,13 +1012,21 @@ mod tests {
             assert!(roster.look_for(kind, m).unwrap().model, "{id}");
             assert!(roster.look_for(kind, v).unwrap().model, "{id}");
             assert_ne!(meshes_of(&roster, sm), meshes_of(&roster, sv), "{id}");
-            // Neutral and an owner that is no side: the generic model, a primitive.
+            // Neutral and an owner that is no side: the generic model (a
+            // primitive or an older stand-in), which is neither faction's.
             let generic = roster.shape_of(kind).unwrap();
             assert_eq!(shape_in(&roster, &defs, id, n), generic, "{id}");
             assert_eq!(shape_in(&roster, &defs, id, None), generic, "{id}");
+            assert_ne!(sm, generic, "{id}");
+            assert_ne!(sv, generic, "{id}");
+        }
+        // A primitive generic look stays a primitive (the infantry's cone).
+        for id in ["rifleman", "rocket_trooper", "engineer", "scout"] {
+            let kind = Kind(defs.kind_of(id).unwrap());
             assert!(!roster.look(kind).unwrap().model, "{id}");
         }
-        // A role of one faction has one model, whoever asks.
+        // A role of one faction has one model, whoever asks. Set v3's
+        // demolition team is the one that is not from set v4.
         for id in [
             "sniper",
             "medic",
@@ -963,6 +1034,14 @@ mod tests {
             "demolition_team",
             "civilian",
             "technician",
+            "transport_truck",
+            "light_transport",
+            "amphibious_transport",
+            "gunboat",
+            "decoy_emplacement",
+            "fortified_bunker",
+            "ferry",
+            "ore_field",
         ] {
             let kind = Kind(defs.kind_of(id).unwrap());
             let own = roster.shape_of(kind).unwrap();
@@ -971,9 +1050,11 @@ mod tests {
                 assert_eq!(shape_in(&roster, &defs, id, f), own, "{id}");
             }
         }
-        // The vehicles and the buildings did not change.
-        let tank = shape_in(&roster, &defs, "light_tank", m);
-        assert_eq!(shape_in(&roster, &defs, "light_tank", v), tank);
+        // The roles that stay as they were are a primitive (heavy_gun_team,
+        // which has no usable v4 model) or an older stand-in (supply_truck).
+        let kind = |id: &str| Kind(defs.kind_of(id).unwrap());
+        assert!(!roster.look(kind("heavy_gun_team")).unwrap().model);
+        assert!(roster.look(kind("supply_truck")).unwrap().model);
         // Every faction look is a role of the definitions, in the style, with
         // the icon of the role.
         let style = full_style(&roster);
@@ -987,7 +1068,7 @@ mod tests {
             assert_eq!(style.shape(look.shape).icon, want, "{}", def.id);
             seen += 1;
         }
-        assert_eq!(seen, 8, "four roles, two factions");
+        assert_eq!(seen, 36, "eighteen roles, two factions");
     }
 
     /// With models off, or a faction's file missing, its units get the generic
@@ -1006,10 +1087,10 @@ mod tests {
         }
 
         let dir = std::env::temp_dir().join(format!("sf_roster_faction_{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("set_v3")).unwrap();
+        std::fs::create_dir_all(dir.join("set_v4")).unwrap();
         std::fs::copy(
-            assets().join("set_v3/veyran_rifleman.glb"),
-            dir.join("set_v3/veyran_rifleman.glb"),
+            assets().join("set_v4/veyran_rifleman.glb"),
+            dir.join("set_v4/veyran_rifleman.glb"),
         )
         .unwrap();
         let roster = Roster::build(&defs, &base(), &icons(), &dir, &models_ron(), true);
