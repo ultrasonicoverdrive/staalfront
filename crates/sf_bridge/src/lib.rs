@@ -14,7 +14,8 @@
 //! crates that see both sides (`sf_ai`) are about something else.
 //!
 //! Since WP5.1 it also turns the weapon definitions into the simulation's [`WeaponTable`]
-//! ([`weapon_table`]).
+//! ([`weapon_table`]), and since WP5.3 that table carries the armor table (damage type times armor
+//! type, and the armor type of every role) when the definitions have one ([`armor_table`]).
 //!
 //! Since WP4.1 it also carries the terrain half: [`movement_table`] copies the
 //! terrain cost of every movement class into a [`MovementTable`], and
@@ -37,9 +38,9 @@ use sf_data::units::{
     Projectile, SimUnitDef, SimWeaponDef, TerrainCost, TurnMode, TurningDef, UnitDefs, WeaponMount,
 };
 use sf_sim::{
-    ClassCosts, Cost, Footprint, Kind, Loadout, Mount, MovementTable, ProjectileKind, TerrainDef,
-    TerrainFlags, TerrainId, TurnMode as SimTurnMode, Turning, UnitStats, UnitTable, WeaponStats,
-    WeaponTable,
+    ArmorTable, ClassCosts, Cost, Footprint, Kind, Loadout, Mount, MovementTable, ProjectileKind,
+    TerrainDef, TerrainFlags, TerrainId, TurnMode as SimTurnMode, Turning, UnitStats, UnitTable,
+    WeaponStats, WeaponTable,
 };
 
 /// What the rules read about one role, copied from its converted definition.
@@ -104,6 +105,8 @@ pub fn weapon_stats_of(weapon: &SimWeaponDef) -> WeaponStats {
         flight_height: weapon.flight_height,
         guide_turn_per_tick: weapon.guide_turn_per_tick,
         splash_radius: weapon.splash_radius,
+        splash_inner: weapon.splash_inner,
+        friendly_fire: weapon.friendly_fire,
         mount: match weapon.mount {
             WeaponMount::Hull => Mount::Hull,
             WeaponMount::Turret => Mount::Turret,
@@ -128,7 +131,34 @@ pub fn weapon_table(defs: &UnitDefs) -> Result<WeaponTable, String> {
             weapons: role.weapons.clone(),
         })
         .collect();
-    WeaponTable::new(weapons, loadouts).map_err(|e| e.to_string())
+    let table = WeaponTable::new(weapons, loadouts).map_err(|e| e.to_string())?;
+    match armor_table(defs)? {
+        Some(armor) => table.with_armor(armor).map_err(|e| e.to_string()),
+        None => Ok(table),
+    }
+}
+
+/// The simulation's armor table for `defs` (WP5.3): the percentage of every damage type against every
+/// armor type, and the armor type of every role. `None` when the definitions have no `armor_table`
+/// (the frozen copies of the scenarios that predate it): a hit then does the weapon's damage.
+/// [`weapon_table`] puts it into the weapon table. Fails with the simulation's reason if the table is
+/// refused (the definitions' own checks rule that out for any definitions that loaded).
+pub fn armor_table(defs: &UnitDefs) -> Result<Option<ArmorTable>, String> {
+    let classes = defs.classes();
+    if !classes.has_armor_table() {
+        return Ok(None);
+    }
+    ArmorTable::new(
+        classes.damage_types.iter().map(|d| d.kind).collect(),
+        classes.armor_types.iter().map(|a| a.kind).collect(),
+        classes.armor_percents.clone(),
+        defs.sim_units()
+            .iter()
+            .map(|role| (Kind(role.kind), role.armor_type))
+            .collect(),
+    )
+    .map(Some)
+    .map_err(|e| e.to_string())
 }
 
 /// One cost of the data, as the simulation has it.
@@ -553,6 +583,8 @@ mod tests {
             assert_eq!(stats.flight_height, weapon.flight_height);
             assert_eq!(stats.guide_turn_per_tick, weapon.guide_turn_per_tick);
             assert_eq!(stats.splash_radius, weapon.splash_radius);
+            assert_eq!(stats.splash_inner, weapon.splash_inner);
+            assert_eq!(stats.friendly_fire, weapon.friendly_fire);
             assert_eq!(stats.fire_arc, weapon.fire_arc);
             assert_eq!(weapon_stats_of(weapon), *stats);
         }
@@ -617,6 +649,61 @@ mod tests {
                 .with_weapons(weapon_table(&defs).unwrap())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn the_armor_table_arrives_with_every_percentage_and_every_roles_armor() {
+        let defs = UnitDefs::embedded();
+        let armor = armor_table(&defs)
+            .unwrap()
+            .expect("the shipped file has a table");
+        let classes = defs.classes();
+        assert_eq!(armor.damage_types().len(), classes.damage_types.len());
+        assert_eq!(armor.armor_types().len(), classes.armor_types.len());
+        for d in &classes.damage_types {
+            for a in &classes.armor_types {
+                assert_eq!(
+                    armor.percent(d.kind, a.kind),
+                    classes.armor_percent(d.kind, a.kind),
+                    "{} against {}",
+                    d.name,
+                    a.name
+                );
+            }
+        }
+        for role in defs.sim_units() {
+            assert_eq!(armor.armor_of(Kind(role.kind)), Some(role.armor_type));
+        }
+        assert_eq!(
+            armor.armor_of(Kind(defs.kind_of("heavy_tank").unwrap())),
+            classes.armor_kind("heavy")
+        );
+        // The weapon table carries it, and the world accepts the pair.
+        let table = weapon_table(&defs).unwrap();
+        assert_eq!(table.armor(), Some(&armor));
+        assert_eq!(sf_data::units::MAX_ARMOR_PERCENT, sf_sim::MAX_ARMOR_PERCENT);
+    }
+
+    #[test]
+    fn definitions_without_an_armor_table_give_a_weapon_table_without_one() {
+        // A file written before WP5.3: the classes have no armor_table.
+        let classes = sf_data::units::EMBEDDED_CLASSES;
+        let start = classes
+            .find("    armor_table: [")
+            .expect("the shipped table");
+        let end = classes[start..].find("\n    ],").unwrap() + start + "\n    ],".len();
+        let old = format!("{}{}", &classes[..start], &classes[end..]);
+        let sources = sf_data::units::DefSources {
+            classes: sf_data::units::DefFile {
+                name: "old unit_classes.ron",
+                text: &old,
+            },
+            ..sf_data::units::DefSources::embedded()
+        };
+        let defs = UnitDefs::from_sources(&sources, None).unwrap();
+        assert!(!defs.classes().has_armor_table());
+        assert_eq!(armor_table(&defs).unwrap(), None);
+        assert!(weapon_table(&defs).unwrap().armor().is_none());
     }
 
     #[test]

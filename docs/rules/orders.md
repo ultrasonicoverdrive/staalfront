@@ -163,7 +163,7 @@ for ever holds up its queue and turns a deadlock of two units into one that neve
 
 There is **no combat** in this work package: nothing fires and no hit point changes. (Since
 WP5.1 a world that is given a weapon table fires at the victim of an `Attack` order, as a
-placeholder: [`weapons.md`](weapons.md). Without a table, which is every world of the
+placeholder (WP5.2: an instant hit, or a projectile that flies): [`weapons.md`](weapons.md). Without a table, which is every world of the
 scenarios of phases 3 and 4, nothing changes.) What exists is the movement part and the state:
 
 * `Attack`: the unit walks until its distance to the target's middle is at most
@@ -189,7 +189,7 @@ scenarios of phases 3 and 4, nothing changes.) What exists is the movement part 
 2. Idle units are skipped by the behaviour pass (`advance_all`), so the automatic return
    fire of an idle unit needs a pass of its own.
 3. Firing: **WP5.1 did the reload timers, the minimum range, more than the first weapon and
-   a placeholder instant hit** (`weapons.md`); projectiles are WP5.2, armor and splash WP5.3. The
+   a placeholder instant hit, WP5.2 the projectiles** (`weapons.md`, `projectiles.md`), **WP5.3 armor and splash** (`armour.md`). The
    order `Attack` then also needs an end: the target dying is already one; leaving sight is
    WP8's.
 4. `UnitStats::weapon_range` stays the range of the first weapon (the reach of an attack order);

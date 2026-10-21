@@ -14,9 +14,11 @@
 //! while one is alive. That is the point: the presentation cannot mutate the
 //! simulation through it, and cannot observe a half-finished tick.
 
-use sf_math::{Facing, Vec2};
+use sf_math::{Facing, Fx, Vec2};
 
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
+use crate::projectiles::ProjectileId;
+use crate::weapons::ProjectileKind;
 use crate::world::World;
 
 /// The turret of a unit as the presentation sees it (WP4.5): an absolute facing
@@ -59,6 +61,42 @@ pub struct EntityView {
     pub hp: u32,
     /// The turret, for a unit that has one (WP4.5); `None` for everything else.
     pub turret: Option<TurretView>,
+}
+
+/// One projectile in flight as the presentation sees it (WP5.2).
+///
+/// Like an [`EntityView`] it carries the state at the end of the previous tick and of the current one
+/// for interpolation. `height` is how far above the ground it is, in cells: zero for a straight or guided
+/// projectile, the parabola of an arc, the drop of a falling shell. The ground position `pos` is where
+/// its shadow would be.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct ProjectileView {
+    /// The projectile's handle; stable for as long as it flies.
+    pub id: ProjectileId,
+    /// The kind number of its weapon (picks a model or a tracer).
+    pub weapon: u16,
+    /// How it flies.
+    pub kind: ProjectileKind,
+    /// The shooter; may be gone by now.
+    pub owner: EntityId,
+    /// The shooter's player (picks the colour).
+    pub player: PlayerId,
+    /// What it is chasing or aimed at, `None` for a point on the ground (a guided projectile whose
+    /// target is gone).
+    pub target: Option<EntityId>,
+    /// The point it is flying to.
+    pub aim: Vec2,
+    /// Ground position at the end of the previous tick, in cells. Equal to `pos` on the tick of the
+    /// launch.
+    pub prev_pos: Vec2,
+    /// Ground position at the end of the current tick, in cells.
+    pub pos: Vec2,
+    /// Height above the ground at the end of the previous tick, in cells.
+    pub prev_height: Fx,
+    /// Height above the ground at the end of the current tick, in cells.
+    pub height: Fx,
+    /// The direction it is flying.
+    pub heading: Facing,
 }
 
 /// A read-only view of every live entity, in ascending slot order.
@@ -113,5 +151,29 @@ impl<'a> Snapshot<'a> {
     pub fn collect_into(&self, out: &mut Vec<EntityView>) {
         out.clear();
         out.extend(self.iter());
+    }
+
+    /// The number of projectiles in flight (WP5.2); zero in a world without weapons.
+    pub fn projectile_count(&self) -> usize {
+        self.world.projectile_count()
+    }
+
+    /// Every projectile in flight, in ascending slot order (WP5.2). A projectile that goes off leaves
+    /// the list in the tick it detonates; its slot may be reused by a later launch with a new
+    /// generation, so key a cache by [`ProjectileId`], not by the slot.
+    pub fn projectiles(&self) -> impl Iterator<Item = ProjectileView> + 'a {
+        let world = self.world;
+        world
+            .arsenal
+            .projectiles
+            .iter()
+            .map(move |(id, p)| world.projectile_view(id, p))
+    }
+
+    /// Replaces the contents of `out` with every projectile in flight (the same order as
+    /// [`Snapshot::projectiles`]), reusing its allocation.
+    pub fn collect_projectiles_into(&self, out: &mut Vec<ProjectileView>) {
+        out.clear();
+        out.extend(self.projectiles());
     }
 }

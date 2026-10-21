@@ -1,10 +1,13 @@
 //! The `weapons_reload` scenario (WP5.1, `docs/rules/weapons.md`): units with an attack order
-//! walk into reach and fire their weapons at the victim, an instant hit that takes the damage off
-//! its hit points (the placeholder of WP5.1; WP5.2 to WP5.4 replace it). Asserted: one shot per
-//! reload window to the tick, a burst of two a fixed gap apart, a minimum range, a victim shot
-//! down to zero hit points and then left alone, a reload that an order change does not reset, and
-//! that the same scenario without `combat` fires nothing. The checksum is pinned in
-//! `assets/scenarios/weapons_reload.expected` (see `pinned.rs`).
+//! walk into reach and fire their weapons at the victim: a rifle hits at once, a shell takes its
+//! flight to arrive (WP5.2) and the damage comes off the victim's hit points then. Asserted: one
+//! shot per reload window to the tick, a burst of two a fixed gap apart, a minimum range, a victim
+//! shot down to zero hit points and then left alone, a reload that an order change does not
+//! reset, and that the same scenario without `combat` fires nothing. The checksum is pinned in
+//! `assets/scenarios/weapons_reload.expected` (see `pinned.rs`). The final checksum moved in WP5.2 only
+//! because the world now hashes the (empty) projectile store, section `J`: without that section the run
+//! ends on the WP5.1 value, since every shell has landed by tick 600. The shells' flight times show in the
+//! asserts below and in the checkpoints in between (the heavy tank D goes down at tick 427, not 423).
 //!
 //! The cast and the commands are written in `assets/scenarios/weapons_reload.ron`, which also
 //! lists the entity ids used below.
@@ -13,7 +16,7 @@ mod common;
 
 use common::scenario_path;
 use sf_headless::scenario::Scenario;
-use sf_sim::{EntityId, Order, Shot, Tick, World};
+use sf_sim::{EntityId, Impact, Order, Shot, Tick, World};
 
 const PLANT: EntityId = EntityId::new(0, 0);
 const R1: EntityId = EntityId::new(1, 0);
@@ -40,16 +43,24 @@ struct Run {
     world: World,
     /// Every shot of the run, in order.
     shots: Vec<Shot>,
+    /// Every projectile that went off in the run, in order.
+    impacts: Vec<Impact>,
 }
 
 fn run_scenario(scenario: &Scenario) -> Run {
     let mut world = scenario.build_world().unwrap();
     let mut shots = Vec::new();
+    let mut impacts = Vec::new();
     for _ in 0..scenario.ticks {
         world.step();
         shots.extend_from_slice(world.shots());
+        impacts.extend_from_slice(world.impacts());
     }
-    Run { world, shots }
+    Run {
+        world,
+        shots,
+        impacts,
+    }
 }
 
 fn scenario() -> Scenario {
@@ -191,11 +202,35 @@ fn the_hit_points_are_the_start_less_every_hit() {
         .collect();
     assert_eq!(on_plant.len(), 81);
     assert_eq!(r.hp(PLANT), 600 - 6 * 81);
+    // Each shot reports what is left of the plant at the end of its tick (since WP5.2 the same
+    // number for the riflemen who fire on the same tick, whatever their slots), which is the
+    // start less every hit up to and including that tick.
     for (k, shot) in on_plant.iter().enumerate() {
-        assert_eq!(shot.hp_after, 600 - 6 * (k as u32 + 1), "{shot:?}");
+        let hits_by_then = on_plant.iter().filter(|s| s.tick <= shot.tick).count() as u32;
+        assert_eq!(shot.hp_after, 600 - 6 * hits_by_then, "{k}: {shot:?}");
     }
-    // The howitzer on the second heavy tank (900): six shells of 90.
+    assert!(
+        on_plant
+            .iter()
+            .any(|s| on_plant.iter().filter(|t| t.tick == s.tick).count() > 1),
+        "no tick had two hits: the test would not show the end-of-tick report"
+    );
+    // The howitzer on the second heavy tank (900): six shells of 90, each landing on the tank where
+    // it stands, 15 ticks after it was fired.
     assert_eq!(r.hp(E), 900 - 90 * 6);
+    let landed: Vec<&Impact> = r.impacts.iter().filter(|i| i.owner == A2).collect();
+    assert_eq!(landed.len(), 6);
+    assert!(landed.iter().all(|i| i.victim == Some(E) && i.damage == 90));
+    let speed = r
+        .world
+        .weapon_table()
+        .weapon(8)
+        .unwrap()
+        .projectile_speed_per_tick;
+    let ten_cells = (sf_math::Fx::from_int(10).raw() as u64).div_ceil(speed.raw() as u64);
+    for (shot, impact) in r.by(A2).iter().zip(&landed) {
+        assert_eq!(impact.tick.0 - shot.tick.0, ten_cells, "{shot:?}");
+    }
     // Nothing else was hurt: the attackers and the rifleman inside the minimum range have all
     // the hit points of their role.
     for id in [R1, R2, R3, R4, LIGHT, HEAVY, A1, A2, V] {
@@ -217,18 +252,21 @@ fn a_victim_at_zero_hit_points_is_left_alone() {
         [(1, 19), (21, 13), (41, 7), (61, 1), (81, 0)]
     );
     assert_eq!(r.hp(SCOUT), 0);
-    // The tanks on D (900): 11 shells of 35 and 18 of 30 are 925, and the last shell, the light
-    // tank's at tick 423, takes it from 10 to zero (25 points over, not counted). The heavy tank's
-    // next burst, due at tick 436, is not fired at a tank with no hit points.
+    // The tanks on D (900): 11 shells of 35 and 18 of 30 are 925. The light tank's last shell is
+    // fired at tick 423 (the tank has 10 left then) and lands four ticks later, at 427, taking it
+    // from 10 to zero (25 points over, not counted). The heavy tank's next burst, due at tick 436,
+    // is not fired at a tank with no hit points.
     let last = r.by(LIGHT).last().copied().unwrap();
-    assert_eq!((last.tick.0, last.hp_after), (423, 0));
+    assert_eq!((last.tick.0, last.hp_after), (423, 10));
     assert_eq!(r.hp(D), 0);
-    let down_at = r
-        .shots
+    let down = r
+        .impacts
         .iter()
-        .find(|s| s.target == D && s.hp_after == 0)
-        .map(|s| s.tick.0)
+        .find(|i| i.victim == Some(D) && i.hp_after == 0)
+        .copied()
         .unwrap();
+    assert_eq!((down.tick.0, down.owner), (427, LIGHT));
+    let down_at = down.tick.0;
     assert!(
         r.shots
             .iter()

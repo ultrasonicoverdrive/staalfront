@@ -80,6 +80,8 @@ fn weapon(kind: u16, range: i32, reload: u32, damage: u32) -> WeaponStats {
         flight_height: Fx::ZERO,
         guide_turn_per_tick: 0,
         splash_radius: Fx::ZERO,
+        splash_inner: Fx::ZERO,
+        friendly_fire: true,
         mount: Mount::Hull,
         fire_arc: 8,
     }
@@ -102,6 +104,8 @@ fn weapons() -> Vec<WeaponStats> {
             min_range: Fx::from_int(3),
             mount: Mount::Turret,
             projectile: ProjectileKind::Arc,
+            projectile_speed_per_tick: Fx::HALF,
+            flight_height: Fx::from_int(2),
             ..weapon(SHELL, 10, 12, 20)
         },
     ]
@@ -929,15 +933,16 @@ fn a_unit_that_is_shot_down_on_a_tick_still_fires_on_that_tick() {
 
 #[test]
 fn damage_is_the_sum_of_the_hits_of_the_tick_saturating_at_zero() {
-    // Both shooters hit a victim that cannot take two: the reports are a running total in slot
-    // order, the hit points the same whoever has the lower slot.
+    // Both shooters hit a victim that cannot take two: the hit points are the sum of the hits
+    // whoever has the lower slot, and both shots report what is left at the end of the tick (the
+    // same number, not a running total that would follow the slot order).
     let mut w = armed();
     let a = spawn(&mut w, FRAIL, at(10, 10));
     let b = spawn(&mut w, FRAIL, at(13, 10));
     let v = spawn(&mut w, DUMMY, at(11, 12));
     let shots = tick_with(&mut w, vec![attack(a, v), attack(b, v)]);
     assert_eq!(shots.len(), 2);
-    assert_eq!(shots[0].hp_after, 1000 - 7);
+    assert_eq!(shots[0].hp_after, 1000 - 14);
     assert_eq!(shots[1].hp_after, 1000 - 14);
     assert_eq!(w.hp_of(v), Some(1000 - 14));
 }

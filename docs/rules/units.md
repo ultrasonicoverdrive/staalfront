@@ -69,12 +69,15 @@ permanent" below) and a unique snake_case `name`.
   (`turning: (mode: Arc, drive_tolerance: 16, min_radius: 1.5, pivot_permille: 250)`; mode `Pivot`,
   `Arc` or `Instant`; every field defaults to the old walk, `Pivot` and 16 steps); the modes, the
   numbers and what is checked are in [`turning.md`](turning.md).
-* `armor_types`: none, infantry, light, heavy, structure. The set is a placeholder.
-* `damage_types`: bullet, precision, rocket, cannon, shell, demolition. The set is a
-  placeholder. "Infantry only" for the sniper is the future armor table's job
-  (precision does nothing to non-infantry armor), not a weapon field.
-
-WP5.3 adds the damage-times-armor table and the splash falloff next to these lists.
+* `armor_types`: none, infantry, light, heavy, structure (WP5.3 kept the set; the reasons and how to add
+  a sixth are in [`armour.md`](armour.md)).
+* `damage_types`: bullet, precision, rocket, cannon, shell, demolition. "Infantry only" for the sniper is the
+  armor table's job (precision does nothing to non-infantry armor), not a weapon field.
+* `armor_table` (WP5.3): one row for every damage type with a percentage for every armor type, `(damage:
+  "bullet", percent: [("none", 0), ("infantry", 100), ...])`. Optional in the file (the frozen copies of
+  the scenarios have none: a hit then does the weapon's damage), complete and 0 to 400 percent when it is
+  there. A new damage type or armor type needs its row or cell. The numbers, the rounding and everything
+  refused are in [`armour.md`](armour.md).
 
 ## `weapon_defs.ron`
 
@@ -87,15 +90,15 @@ WP5.3 adds the damage-times-armor table and the splash falloff next to these lis
 | `reload` | game seconds between shots, at least one tick |
 | `damage` | hit points per hit before armor, 1 or more |
 | `damage_type` | a name from `unit_classes.ron` |
-| `projectile` | `Instant`, `Straight`, `Arc`, `Guided` or `Falling` (the flight is WP5.2) |
-| `splash_radius` | cells, default 0 (none); falloff is WP5.3 |
-| `projectile_speed`, `flight_height`, `guide_turn` | the parameters of the projectile (WP5.1; WP5.2 reads them); all optional |
+| `projectile` | `Instant`, `Straight`, `Arc`, `Guided` or `Falling` (the flights: [`projectiles.md`](projectiles.md)) |
+| `splash_radius`, `splash_inner`, `friendly_fire` | the splash (WP5.3): cells from the burst to the edge of a victim in which a hit also damages, the cells inside which it does its full damage, and whether it spares the shooter's own side (default: hurts everyone); [`armour.md`](armour.md) |
+| `projectile_speed`, `flight_height`, `guide_turn` | the parameters of the projectile (WP5.1; read by WP5.2); optional for the loader, required by the simulation for a projectile that flies (`projectiles.md`) |
 | `burst`, `burst_delay` | shots per trigger pull and the time between them (WP5.1); default one shot |
 | `mount`, `fire_arc` | `Hull` or `Turret`, and how far from the target the weapon may point and still fire (WP5.1) |
 
 Since WP5.1 `reload` counts from the first shot of a burst to the first of the next, and the
 sixteen fields and their rules, the rounding, the shipped set and what each field means for
-WP5.2 to WP5.4 are in [`weapons.md`](weapons.md).
+WP5.3 and WP5.4 are in [`weapons.md`](weapons.md).
 
 ## `unit_defs.ron`
 

@@ -22,6 +22,8 @@ fn stats() -> WeaponStats {
         flight_height: Fx::ZERO,
         guide_turn_per_tick: 0,
         splash_radius: Fx::ZERO,
+        splash_inner: Fx::ZERO,
+        friendly_fire: true,
         mount: Mount::Hull,
         fire_arc: 8,
     }
