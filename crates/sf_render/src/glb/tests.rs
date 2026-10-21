@@ -916,3 +916,154 @@ fn levels_must_be_numbered_without_gaps() {
     let m = load_glb(&writer::write(&scene), &AxisConvention::ENGINE).unwrap();
     assert_eq!(m.levels.len(), 1);
 }
+
+/// A model `m` with three levels in one scene: per level a root `m_LOD<n>`
+/// with one mesh child `hull`, the level getting smaller with `n`. The roots
+/// are the nodes 0, 2 and 4.
+fn three_level_scene() -> Scene {
+    let node = |name: String, size: f32, children: Vec<usize>, mesh: bool| writer::Node {
+        name,
+        children,
+        prim: mesh.then(|| {
+            writer::box_faces([0.0; 3], [size; 3], [0; 6])
+                .into_iter()
+                .next()
+                .unwrap()
+        }),
+        ..writer::Node::default()
+    };
+    let mut nodes = Vec::new();
+    for n in 0..3 {
+        nodes.push(node(format!("m_LOD{n}"), 1.0, vec![nodes.len() + 1], false));
+        nodes.push(node("hull".into(), 1.0 - 0.1 * n as f32, vec![], true));
+    }
+    Scene {
+        materials: vec![("steel".into(), writer::STEEL)],
+        nodes,
+        roots: vec![0, 2, 4],
+        version: "2.0".into(),
+        extra_json: String::new(),
+    }
+}
+
+/// `glb` with the value of its `scenes` member replaced by `scenes_json`
+/// (the writer puts `"scenes":[...]` directly before `"nodes"`).
+fn with_scenes(glb: &[u8], scenes_json: &str) -> Vec<u8> {
+    let len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+    let json = std::str::from_utf8(&glb[20..20 + len]).unwrap();
+    let start = json.find("\"scenes\":").unwrap() + "\"scenes\":".len();
+    let end = json.find("],\"nodes\":[").unwrap() + 1;
+    let mut json = format!("{}{scenes_json}{}", &json[..start], &json[end..]).into_bytes();
+    while !json.len().is_multiple_of(4) {
+        json.push(b' ');
+    }
+    let rest = &glb[20 + len..];
+    let mut out = Vec::new();
+    out.extend_from_slice(b"glTF");
+    out.extend_from_slice(&2u32.to_le_bytes());
+    out.extend_from_slice(&((20 + json.len() + rest.len()) as u32).to_le_bytes());
+    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    out.extend_from_slice(b"JSON");
+    out.extend_from_slice(&json);
+    out.extend_from_slice(rest);
+    out
+}
+
+const PER_LOD: &str =
+    r#"[{"name":"LOD0","nodes":[0]},{"name":"LOD1","nodes":[2]},{"name":"LOD2","nodes":[4]}]"#;
+
+#[test]
+fn a_scene_per_lod_loads_as_the_same_model_as_one_scene() {
+    let axes = AxisConvention::ENGINE;
+    let one = writer::write(&three_level_scene());
+    let per_lod = with_scenes(&one, PER_LOD);
+    assert_ne!(one, per_lod);
+    let (a, b) = (
+        load_glb(&one, &axes).unwrap(),
+        load_glb(&per_lod, &axes).unwrap(),
+    );
+    assert_eq!(a.levels.len(), 3);
+    assert_eq!(a, b, "the layout of the scenes changes nothing");
+
+    // The order of the scenes in the file does not matter.
+    let shuffled = with_scenes(
+        &one,
+        r#"[{"name":"LOD2","nodes":[4]},{"name":"LOD0","nodes":[0]},{"name":"LOD1","nodes":[2]}]"#,
+    );
+    assert_eq!(load_glb(&shuffled, &axes).unwrap(), a);
+}
+
+#[test]
+fn lod_roots_names_the_layout_and_the_roots_in_level_order() {
+    let names = |bytes: &[u8]| {
+        let gltf = gltf::Gltf::from_slice(bytes).unwrap();
+        let (layout, roots) = lod_roots(&gltf.document).unwrap();
+        let names: Vec<String> = roots
+            .iter()
+            .map(|r| r.name().unwrap_or("").to_owned())
+            .collect();
+        (layout, names)
+    };
+    let one = writer::write(&three_level_scene());
+    let expected = ["m_LOD0", "m_LOD1", "m_LOD2"].map(String::from).to_vec();
+    assert_eq!(names(&one), (LodLayout::OneScene, expected.clone()));
+    let per_lod = with_scenes(&one, PER_LOD);
+    assert_eq!(names(&per_lod), (LodLayout::ScenePerLod, expected));
+}
+
+#[test]
+fn only_clean_scene_per_lod_files_are_accepted() {
+    let axes = AxisConvention::ENGINE;
+    let one = writer::write(&three_level_scene());
+    let refused = |scenes: &str, needle: &str| {
+        let e = load_glb(&with_scenes(&one, scenes), &axes).expect_err(scenes);
+        assert!(e.to_string().contains(needle), "{scenes}: {e}");
+    };
+    // A scene with two roots, or none.
+    refused(
+        r#"[{"name":"LOD0","nodes":[0,2]},{"name":"LOD1","nodes":[4]}]"#,
+        "exactly one root",
+    );
+    refused(
+        r#"[{"name":"LOD0","nodes":[0]},{"name":"LOD1","nodes":[]}]"#,
+        "exactly one root",
+    );
+    // The number of the scene and the number of its root disagree.
+    refused(
+        r#"[{"name":"LOD0","nodes":[0]},{"name":"LOD1","nodes":[4]},{"name":"LOD2","nodes":[2]}]"#,
+        "must be named <model>_LOD1",
+    );
+    // Two scenes with one number: either the root has the wrong number for
+    // the second scene, or it is the same root twice.
+    refused(
+        r#"[{"name":"LOD0","nodes":[0]},{"name":"LOD0","nodes":[2]}]"#,
+        "must be named <model>_LOD0",
+    );
+    refused(
+        r#"[{"name":"LOD0","nodes":[0]},{"name":"LOD0","nodes":[0]}]"#,
+        "two scenes are named LOD0",
+    );
+    // A gap in the numbers is the same error as in one scene.
+    refused(
+        r#"[{"name":"LOD0","nodes":[0]},{"name":"LOD2","nodes":[4]}]"#,
+        "without gaps",
+    );
+    // A model name that differs between the levels is the same error too.
+    let mut other = three_level_scene();
+    other.nodes[2].name = "n_LOD1".into();
+    let e = load_glb(&with_scenes(&writer::write(&other), PER_LOD), &axes).unwrap_err();
+    assert!(e.to_string().contains("different models"), "{e}");
+
+    // Scenes that are not (all) named LOD<n> are not the layout: the default
+    // scene is read as always. Here scene 0 is a one-level model.
+    for scenes in [
+        r#"[{"nodes":[0]},{"nodes":[2]}]"#,
+        r#"[{"name":"LOD0","nodes":[0]},{"name":"extra","nodes":[2]}]"#,
+        r#"[{"name":"lod0","nodes":[0]},{"name":"lod1","nodes":[2]}]"#,
+        r#"[{"name":"LOD","nodes":[0]},{"name":"LODx","nodes":[2]}]"#,
+        r#"[{"name":"LOD0","nodes":[0]}]"#,
+    ] {
+        let model = load_glb(&with_scenes(&one, scenes), &axes).unwrap();
+        assert_eq!(model.levels.len(), 1, "{scenes}");
+    }
+}

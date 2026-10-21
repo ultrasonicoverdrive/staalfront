@@ -4,8 +4,8 @@
 //! `team` material is required (factions) or forbidden (neutral objects); the
 //! role decides the budget class. The role is looked up in `unit_defs.ron`
 //! (its category: infantry, vehicle, vessel, structure, object); roles that
-//! are not units are decor (trees, rocks) or wrecks, which both get the decor
-//! budget.
+//! are not units are decor (trees, rocks, fences, cliff edges, rubble heaps)
+//! or wrecks, which both get the decor budget.
 
 use sf_data::units::{Category, Faction as DefFaction, UnitDefs};
 
@@ -131,8 +131,24 @@ pub const fn budget(class: Class, pair: bool) -> [u32; 3] {
     }
 }
 
-/// Roles that are not in `unit_defs.ron` but are decor, by their first word.
-const DECOR_WORDS: [&str; 2] = ["tree", "rock"];
+/// Roles that are not in `unit_defs.ron` but are decor: the role is this
+/// name or starts with it and an underscore (`tree_pine`, `rubble_2x3`).
+///
+/// - `tree`, `rock`: scenery.
+/// - `fence`, `cliff_edge`: static map dressing that is no unit or structure
+///   with hit points, so no node rules apply, only the decor budget.
+/// - `rubble`: what a destroyed structure leaves behind (`rubble_<w>x<h>`,
+///   one per footprint size, shared by all factions). A heap on the ground,
+///   neutral and static like a rock; the decor budget is far more than a
+///   heap needs. A structure's own rubble state (`generator_rubble`) is that
+///   structure's role in `unit_defs.ron` and keeps the building budget.
+const DECOR_ROLES: [&str; 5] = ["tree", "rock", "fence", "cliff_edge", "rubble"];
+
+/// Whether `role` is `name` or `name_<more>`.
+fn role_is(role: &str, name: &str) -> bool {
+    role.strip_prefix(name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('_'))
+}
 
 /// Roles that are two figures in one file; they need the `_2` nodes even if
 /// the file forgot them.
@@ -182,7 +198,7 @@ pub fn classify(role: &str, defs: &UnitDefs) -> Result<Classified, String> {
             unit_factions: Some(def.factions.clone()),
         });
     }
-    if DECOR_WORDS.contains(&words[0]) {
+    if DECOR_ROLES.iter().any(|name| role_is(role, name)) {
         return Ok(Classified {
             class: Class::Decor,
             vessel: false,
@@ -191,7 +207,7 @@ pub fn classify(role: &str, defs: &UnitDefs) -> Result<Classified, String> {
     }
     Err(format!(
         "cannot tell the budget class of role {role:?}: it is not a role in unit_defs.ron \
-         and not wreck_*, tree_* or rock_*"
+         and not wreck_*, tree_*, rock_*, rubble_*, fence or cliff_edge"
     ))
 }
 
@@ -270,6 +286,38 @@ mod tests {
         let vessel = classify("wreck_vessel", &d).unwrap();
         assert_eq!((vessel.class, vessel.vessel), (Class::Wreck, true));
         assert!(classify("spaceship", &d).is_err());
+    }
+
+    #[test]
+    fn fences_cliff_edges_and_rubble_heaps_are_decor() {
+        let d = defs();
+        for role in [
+            "fence",
+            "cliff_edge",
+            "rubble_1x1",
+            "rubble_2x3",
+            "rubble_4x5",
+        ] {
+            let c = classify(role, &d).unwrap_or_else(|e| panic!("{role}: {e}"));
+            assert_eq!(c.class, Class::Decor, "{role}");
+            assert!(!c.vessel, "{role}");
+            // Not a unit of unit_defs.ron, so no faction list to compare.
+            assert_eq!(c.unit_factions, None, "{role}");
+        }
+        // The budget is the decor one.
+        assert_eq!(budget(Class::Decor, false), [1500, 500, 150]);
+        // Whole words only: these are not decor, and the error says what is.
+        for role in ["fencing", "cliff", "cliffs", "rubbles", "rubblex", "rocket"] {
+            let e = classify(role, &d).expect_err(role);
+            assert!(e.contains("rubble_*") && e.contains("cliff_edge"), "{e}");
+        }
+        // The rubble state of a structure is that structure, not a heap.
+        let generator = classify("generator_rubble", &d).unwrap();
+        assert_eq!(generator.class, Class::Building);
+        assert_eq!(
+            generator.unit_factions,
+            classify("generator", &d).unwrap().unit_factions
+        );
     }
 
     #[test]

@@ -1,10 +1,12 @@
 //! What the glTF document says, beyond what the engine loader keeps: the node
 //! tree of every LOD root (including empty `fx_*` nodes, which the loader
-//! prunes), the materials and the features the engine refuses.
+//! prunes), the materials and the features the engine refuses. The LOD roots
+//! are found by the loader's own `lod_roots`, so the checker and the engine
+//! cannot disagree on a file that has one scene per level.
 
 use std::collections::BTreeSet;
 
-use sf_render::glb::split_lod_suffix;
+use sf_render::glb::{LodLayout, lod_roots, split_lod_suffix};
 
 /// Deepest node tree this module follows (the loader refuses deeper ones too).
 const MAX_DEPTH: usize = 32;
@@ -101,6 +103,9 @@ pub struct MaterialInfo {
 /// The inspected document.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DocInfo {
+    /// Whether the LOD roots share the default scene or have a scene each.
+    /// Both are accepted and read the same; the brief prefers one scene.
+    pub layout: LodLayout,
     pub roots: Vec<LodRoot>,
     pub materials: Vec<MaterialInfo>,
     /// A primitive has no material (the default material would be a seventh).
@@ -122,12 +127,11 @@ impl DocInfo {
 pub fn inspect(bytes: &[u8]) -> Result<DocInfo, String> {
     let gltf = gltf::Gltf::from_slice(bytes).map_err(|e| format!("not a valid glTF: {e}"))?;
     let doc = &gltf.document;
-    let scene = doc
-        .default_scene()
-        .or_else(|| doc.scenes().next())
-        .ok_or("the file has no scene")?;
+    // The same reading as the engine loader: the default scene, or one scene
+    // per LOD named LOD0, LOD1, ... (see `docs/conventions.md` section 12).
+    let (layout, scene_roots) = lod_roots(doc).map_err(|e| e.to_string())?;
     let mut roots = Vec::new();
-    for node in scene.nodes() {
+    for node in scene_roots {
         let raw_name = node.name().unwrap_or("").to_owned();
         let (base, lod) = split_lod_suffix(&raw_name);
         let (base, lod) = (base.to_owned(), lod);
@@ -155,6 +159,7 @@ pub fn inspect(bytes: &[u8]) -> Result<DocInfo, String> {
         .meshes()
         .any(|m| m.primitives().any(|p| p.material().index().is_none()));
     Ok(DocInfo {
+        layout,
         roots,
         materials,
         unmaterialed_primitive,
