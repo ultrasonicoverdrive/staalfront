@@ -418,11 +418,12 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 Two agents, both in the repo (they travel to every environment), same instructions:
 
 - `.claude/agents/bouwer-sonnet.md` — model `sonnet`, effort `high`: the default for every WP, including the hard ones marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
-- `.claude/agents/bouwer-opus-medium.md` — model `opus`, effort `medium`: only for a WP that failed review twice on `bouwer-sonnet`.
+- `.claude/agents/bouwer-opus-medium.md` — model `opus`: the fix rounds after a review asks for changes. Round 1 runs it at effort `low`, round 2 and later at effort `medium`, on the WP's own branch.
 
 Decision Tijmen 17-10-2026, second change that day (Sonnet medium/xhigh from
-14-10-2026, then Opus low/medium earlier on 17-10-2026). Each agent executes one
-work package, works in its own git worktree/branch, opens a PR.
+14-10-2026, then Opus low/medium earlier on 17-10-2026); fix rounds changed by
+decision Tijmen 21-10-2026. Each agent executes one work package, works in its own
+git worktree/branch, opens a PR.
 
 Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
 

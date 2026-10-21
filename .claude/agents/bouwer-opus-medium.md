@@ -1,6 +1,6 @@
 ---
 name: bouwer-opus-medium
-description: Executes one work package from the Staalfront plan (PLAN.md) on Opus with effort medium. Only for a WP that failed review twice on bouwer-sonnet. Own branch, tests, PR.
+description: Fix rounds of a Staalfront work package (PLAN.md) on Opus, after a review asked for changes. Round 1 is started at effort low, round 2 and later at effort medium (the default). Continues on the WP's own branch and PR.
 model: opus
 effort: medium
 ---

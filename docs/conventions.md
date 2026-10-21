@@ -46,13 +46,16 @@ Agent definitions live in `.claude/agents/`.
 | Agent | Model / effort | Use |
 |---|---|---|
 | `bouwer-sonnet` | sonnet, high | Default for every WP, including those marked **[xhigh]** in PLAN.md §3. |
-| `bouwer-opus-medium` | opus, medium | A WP that failed review twice on `bouwer-sonnet`. |
+| `bouwer-opus-medium` | opus, low or medium | Fix rounds: round 1 at effort low, round 2 and later at effort medium. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
 
-If a WP fails review twice on `bouwer-sonnet`, the orchestrator reruns it on
-`bouwer-opus-medium` (decision Tijmen 17-10-2026). The two supporting agents have no edit, commit or push
-rights.
+A WP is built by `bouwer-sonnet`. After the first `CHANGES REQUESTED` the
+orchestrator starts fix round 1 on `bouwer-opus-medium` at effort low; fix round 2
+and later run on `bouwer-opus-medium` at effort medium. Each fix round continues on
+the WP's own branch (decision Tijmen 21-10-2026, replacing "rerun on Opus medium
+after two failed reviews" of 17-10-2026). The two supporting agents have no edit,
+commit or push rights.
 
 ## 4. Quality rules (PLAN.md §5, apply to every WP)
 
