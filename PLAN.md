@@ -440,7 +440,7 @@ Decision Tijmen 14-10-2026.
 5. After each phase: short playable build + report in `docs/progress.md`.
 
 ### 12.3 Parallelism
-At most 3 agents at a time, only on WPs without overlap in crates (see §4).
+At most 5 agents at a time (decision Tijmen 22-10-2026; was 3), only on WPs without overlap in crates (see §4).
 Conflicts in `Cargo.lock`/shared types are resolved by the orchestrator.
 
 ### 12.4 What an agent does not do
