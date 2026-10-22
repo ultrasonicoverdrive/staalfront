@@ -17,7 +17,8 @@ One `Move` order that sends enough units that cross the same ground to one point
 each unit gets an **offset** in it and so a **slot** that hangs from the **leader** (the unit
 nearest the middle) and turns with the way the leader goes. The leader follows the order's route
 or flowfield no faster than the slowest member; the others walk straight to their slots. Where
-the ground is narrow the shape lets go and the units file through; on open ground the leader waits
+the ground is narrow the shape lets go and the units file through, **at the pace of the formation**
+(a narrow place loosens the shape and never the pace, WP4.6b); on open ground the leader waits
 for stragglers and the shape forms up again. Near the goal the formation is let go and the
 members take the arrival slots of the goal, as the units of every group order do.
 
@@ -117,17 +118,31 @@ of tanks, a third of what the bound of 1.4 times their walk left them. The sweep
 
 A formation sets the pace of the *order*: in `formation_move` the leader goes 0.0349 cells a tick in the west
 field, the rifleman's 0.035, and not faster, however fast the tanks are. What this costs is in "Sizes": a mixed
-group arrives in 1.02 to 1.18 times what the slowest would need alone to walk the same way (1.01 to 1.05 as a group
-order without a formation, 1.00 to 1.12 times the group order's time).
+group arrives in 1.02 to 1.14 times what the slowest would need alone to walk the same way (1.01 to 1.05 as a group
+order without a formation, 1.00 to 1.09 times the group order's time).
+
+**The pace holds where the shape does not (WP4.6b).** A loose formation (below) used to mean "everybody at their
+own speed": the leader at its own, the members following the order's way at theirs, nobody waiting for anybody. In
+a base, among structures, the formation is loose for half of the march, and the tanks raced ahead of the
+riflemen at 1.4 to 2 cells a second. Now a narrow place loosens the shape and never the pace:
+
+* **the leader** steps at most the formation pace loose or not (the slowest member's speed, now);
+* **a member that follows the order's way** (`Flow`: the formation is loose, or the member does not see its
+  slot) runs at its own speed while it is no farther **ahead of its slot along the heading** than
+  `formation_ahead_tenths` (2.0 cells as shipped, at most the re-form distance), and **goes no faster than the
+  formation** beyond that. Behind its slot, or on it, nothing holds it back: it catches up at its own speed, and
+  the slot, which comes at the pace of the formation, never gets away from it. A member standing in a narrow
+  place is held to the pace, not stopped: a unit that stood in a gap would hold up the straggler the leader is
+  waiting for. (Standing is for open ground, below.)
 
 ## What a member does in a tick (`MemberMode`)
 
 | Mode | When | What |
 |---|---|---|
-| `Lead` | the leader | follows the order's flowfield or route (`path/`), at the pace of the formation (the slowest's speed, or 0.9 of it while a member is behind), or at its own speed while the formation is loose |
+| `Lead` | the leader | follows the order's flowfield or route (`path/`), at the pace of the formation (the slowest's speed, or 0.9 of it while a member is behind), **loose or not** |
 | `Direct` | the member sees its slot (the thick line of sight of `path/los.rs`, one sector at most, no rock, water or structure within a quarter of a cell) and the formation is not loose | walks straight to the slot (`behavior::walk`, so the turning of its class applies), snaps onto it when within a step; on its slot it turns to the heading the way its class turns on the spot. It asks for no route. |
-| `Flow` | the member cannot see its slot, or the formation is loose | follows the order's flowfield or route as every unit of a group does, at its own speed. When it was walking to a slot before, it chooses its way again from where it stands (a flowfield member from its cell; a route of its own is kept if its first waypoint is still ahead, within 12 cells, otherwise asked for again). |
-| `Wait` | the leader waiting for stragglers; or a `Direct` or `Flow` member that is ahead of its slot (farther along the heading than the slot, by more than the re-form distance) on open ground, **also while the formation is loose** | stands (it does not walk back to its slot; the slot comes to it). While the formation is loose this keeps the units that came out of a gap first from running on to the goal: in `formation_move`, before review round 3, the tanks did, 28 cells ahead of their slots once the formation had become loose for longer (below). |
+| `Flow` | the member cannot see its slot, or the formation is loose | follows the order's flowfield or route as every unit of a group does, at its own speed while it is no farther ahead of its slot than `formation_ahead_tenths`, and at the pace of the formation beyond that. When it was walking to a slot before, it chooses its way again from where it stands (a flowfield member from its cell; a route of its own is kept if its first waypoint is still ahead, within 12 cells, otherwise asked for again). |
+| `Wait` | the leader waiting for stragglers; or a `Direct` or `Flow` member that is ahead of its slot (farther along the heading than the slot, by more than the re-form distance) **and on its column** (not farther to the side of the slot than the re-form distance) on open ground, **also while the formation is loose** | stands (it does not walk back to its slot; the slot comes to it). While the formation is loose this keeps the units that came out of a gap first from running on to the goal: in `formation_move`, before review round 3, the tanks did, 28 cells ahead of their slots once the formation had become loose for longer (below). A unit that is ahead **and off its column** does not stand (WP4.6b): its line of sight to the slot was blocked, it took the longer way round and came out ahead and to the side, and standing there it stood 5 to 7 cells off its column in the way of the units coming out behind it, with nobody waiting for it. It walks back to its slot if it sees it (`Direct`), and follows the order's way at the pace of the formation if it does not (`Flow`, beyond one sector or behind a structure). It is no straggler either way: it is ahead, the slot comes to it. |
 
 ### Narrow places and re-forming
 
@@ -135,9 +150,12 @@ Ground is **open** round a point when no rock, water or structure (by the leader
 within three cells of it in any of eight directions. The formation is open when the ground is open round the
 leader **and round the front of the lattice** (the point `extent` ahead of the leader along the heading, with a
 clear line to it). When it is not, the formation is **loose** for at least 20 ticks more: everybody is `Flow`
-(except units ahead of their slots on open ground, which wait), the leader goes at its own speed, nobody waits
-for anybody. So a bridge, a gap in a wall, a funnel between outcrops lets the units file through without a
-formation standing in the doorway, and without a leader at a snail's pace holding up the units behind it.
+(except units ahead of their slots on open ground, which wait), the leader goes at the pace of the formation
+(not at its own speed: WP4.6b, "The pace" above), nobody waits for anybody. So a bridge, a gap in a wall, a
+funnel between outcrops, **a structure** lets the units file through without a formation standing in the
+doorway. (Structures are narrow places on purpose: a base is not open ground, and a formation that stood
+round a barracks would hold up everything behind it. What changed in WP4.6b is that the pace survives the
+loosening.)
 
 **The front, review round 3.** Looking from the leader alone (the middle of the group) let a wide block reach the
 wall with its front rows still in their slots; the traffic at the mouth then pushed units off it and pinned them
@@ -150,8 +168,17 @@ alone took the failing runs of the sweep from 35 to 28. A look-ahead of 3 or 6 c
 On open ground the formation is whole again:
 
 * a member farther than `formation_reform_tenths` (3.0 cells) from its slot is a **straggler** when it is
-  **behind its slot, or that far to the side of it**; a unit ahead of its slot is none (its slot comes to it).
-  The leader **waits** (`Wait`) for stragglers, if the leader itself is on open ground. (Review round 3: counting
+  **behind its slot, or that far to the side of it**; a unit ahead of its slot is none (its slot comes to it),
+  also when it is ahead by more than the re-form distance and off its column (WP4.6b).
+  The leader **waits** (`Wait`) for stragglers, if the leader itself is on open ground **and the members that
+  stand in their places (within the re-form distance of their slots) have no rock, water or structure within three
+  cells of them** (WP4.6b; the edge of the map is no obstacle here): members standing on their slots in the mouth
+  of a gap held up the very stragglers the leader waited for, the rear rows of a wide block in the sweep among them
+  (a straggler is not asked: it is on its way, or shut in). **Side effect:** one member in its place within three
+  cells of an obstacle is enough to switch the wait off, so a block passing an outcrop, a lake shore or a structure
+  does not wait for its stragglers while any member that is in place is that close to it; it waits again once
+  they are all clear (`tests/formation.rs::a_member_in_its_place_near_an_obstacle_switches_off_the_wait_for_stragglers`).
+  A straggler that is left behind there is caught up by the patience as before, not by the wait. (Review round 3: counting
   the distance alone made a unit 2.9 cells ahead of its slot and 1.5 to the side a straggler, 3.3 cells off; after the
   passage the units that had come through first became stragglers one by one as their slots came near, and the
   leader stopped for each, for some 200 ticks. Only "not ahead" was tried first, and then a soldier shut in 10
@@ -232,13 +259,18 @@ death takes a unit out at once (`orders::begin` and `clear` reset its column).
   for a new route round the bodies that stand still, and gives its order up after `replan_max` of them;
   it then leaves the formation (the order ended) and the next unit leads. A member that is expelled
   or released asks for routes as any unit.
-* **Flowfields** (WP4.3): the fields are made as before, with one change for orders that are wholly
-  formations (`all_formed` in `path.rs`: every unit that starts the order is a member of a formation made by it):
-  a class of two or more units of such an order gets a field, below the usual threshold of 8. Members of a formation
-  ask for no route of their own while they walk to their slots, so a small class of a small formation left
-  to routes scrambled to one point at the arrival (a group of 12 in two columns arrived at tick 3,898 against
-  3,171 with the field). In an order where some units form no formation (aircraft, a family below the minimum) the threshold is
-  unchanged. A formation that marches without its members
+* **Flowfields** (WP4.3): the fields are made as before, with one change for classes that are wholly
+  formation members (`group_order` in `path.rs`: every unit of the class that starts the order is a member of a
+  formation made by it): a class of two or more such units gets a field, below the usual threshold of 8.
+  Members of a formation ask for no route of their own while they walk to their slots, so a small class of a
+  small formation left to routes scrambled to one point at the arrival (a group of 12 in two columns arrived at
+  tick 3,898 against 3,171 with the field). **A unit that forms no formation (an aircraft, a family of one such as
+  the amphibious transport among tanks and soldiers, a vessel) does not take the fields away from the classes that
+  did** (WP4.6b: until then the rule was "the order is wholly formations", and in the sandbox's order of 12 one
+  amphibious transport switched off the fields and the arrival slots of the foot, tracked and wheeled units, which
+  were sent to the one point). The rule is per class: a class with a unit outside every formation gets a field only at the
+  threshold, and a class that is wholly formation members gets one below it, also when it is a small class of a
+  crowd with a formation inside it. A formation that marches without its members
   asking the field for a direction would let it expire after `FIELD_IDLE_TICKS`; the formation touches the
   fields of its members every tick (`Pathing::keep_field`), so they are there when the members go back
   to them.
@@ -264,6 +296,7 @@ scenario file can say `formation: Some(false)`, and (for probes above the limit,
 | `formation_catchup_permille` | 1000 | pace to 1000 | of its own speed, for a member getting back to its slot |
 | `formation_reform_tenths` | 30 | 5 to 100 | how far from its slot a member may be (tenths of a cell) |
 | `formation_patience_ticks` | 300 | 20 to 2000 | the leader's patience; a stalled straggler's too |
+| `formation_ahead_tenths` | 20 | 5 to `formation_reform_tenths` | how far ahead of its slot (tenths of a cell, along the heading) a member that follows the order's way may get before it goes no faster than the formation (WP4.6b). The sweep is clean with 20 and with 30 (5 was tried under an earlier version of the rules and cost it two runs); the unit test `the_bound_on_how_far_ahead_a_member_may_get_is_data` runs 5 and 30 |
 
 Constants that are not data (`formation.rs`): the open-ground probes (three cells, eight ways, round
 the leader and round the front of the lattice), how long a formation stays loose (20 ticks), the window
@@ -293,9 +326,14 @@ there is only printed):
 
 | Mix | Size | Arrival, times the walk of the slowest | Without a formation | Times the group order | Rear in a window (share of the slowest's walk) |
 |---|---|---|---|---|---|
-| `mixed` | 3 to 19 | 1.02 to 1.18 | 1.01 to 1.05 | 1.00 to 1.12 | 0.72 and more |
+| `mixed` | 3 to 19 | 1.02 to 1.14 | 1.01 to 1.05 | 1.00 to 1.09 | 0.72 and more |
 | `foot` | 3 to 19 | 1.01 to 1.05 | 1.01 to 1.05 | 0.99 to 1.02 | 0.88 and more |
-| `wheels` | 3 to 19 | 1.02 to 1.37 | 1.04 to 1.84 | 0.62 to 1.24 | 0.55 and more |
+| `wheels` | 3 to 19 | 1.02 to 1.37 | 1.04 to 1.84 | 0.62 to 1.20 | 0.55 and more |
+
+(WP4.6b moved `mixed` from 1.02 to 1.18 and 1.00 to 1.12, and `wheels` from 0.62 to 1.24 times the group order; the
+other columns are what they were. The two rules that cost time in a loose stretch, the pace and the bound on the lead,
+cost the sweep one run over the bound at first: a block of 19 vehicles 6 deep at 1.43, on a unit that took 130 ticks
+longer to settle at the goal than the rest. The rule for the leader's wait above is what got the sweep clean again.)
 
 So: **from 3 to 19 units, at every depth of block, for all three mixes, all three bounds hold.** The margin of
 `wheels` against 1.4 is small, and not only near the limit (the worst run of a size is 1.37 at 7 and at 19, 1.35 at
@@ -304,17 +342,74 @@ can be faster as a formation than as a group order (0.62: nine vehicles in a blo
 jam at the passage for 1.84 times their walk).
 
 **Above the limit.** `sizes_above_the_limit_for_the_record` makes the same march as a formation for 20 to 24
-units, with the limit raised for the probe, and asserts nothing: `mixed` takes 1.06 to 1.16 times the walk and
-`foot` 1.03 to 1.11, both clean; `wheels` takes 1.24 to 1.50, and **8 of its 30 runs are over 1.4** (20 units in a
-block 2 deep at 1.41; the worst, 24 units in a block 4 deep, at 1.50). None is over 1.26 times its group order, which
-itself takes 1.17 to 1.45 times the walk there. What is left is spread over the start of a deep block (the lattice is
+units, with the limit raised for the probe, and asserts nothing: `mixed` takes 1.06 to 1.15 times the walk and
+`foot` 1.03 to 1.11, both clean; `wheels` takes 1.23 to 1.55, and **6 of its 30 runs are over 1.4** (22 units in a
+block 2 deep at 1.45 is the first; the worst, 24 units in a block 8 deep, at 1.55). None is over 1.33 times its group
+order, which itself takes 1.17 to 1.45 times the walk there. What is left is spread over the start of a deep block (the lattice is
 wider than the block the units stand in, and the units at the back stand ahead of their slots and walk back to them),
 the queue at the passage (chaotic: from 180 ticks faster to 133 slower than the group order in the runs looked at),
 the wait behind it and the arrival. No single cause is left, so the limit is 19.
 
-What it costs in time, honestly: within the limit a formation arrives up to 1.12 (`mixed`) and 1.24 (`wheels`)
+What it costs in time, honestly: within the limit a formation arrives up to 1.09 (`mixed`) and 1.20 (`wheels`)
 times later than the same group as a group order, because it keeps the shape: the front waits for the back at
 the far end of the passage, and the block arrives together instead of one unit after the other.
+
+## In a base (WP4.6b)
+
+WP4.6 proved formations on a field with one passage and no structures. In the viewer, in the sandbox
+(`crates/sf_game/src/sandbox.rs`: a few structures and units of each side on the map `assets/maps/formation`), the
+same order looked broken: box-select the 12 mobile Meridian units, one right-click, and the tanks raced ahead at
+1.4 to 2 cells a second while the riflemen (0.7) trailed and no shape was to be seen. The cause was not a wiring bug.
+The structures are narrow places (the ground is not open within three cells of one), so the formation was loose for
+12 to 51 % of the march, and loose meant "own speed"; units that took a longer way round a structure came out ahead of
+their slot and stood off their column; and the order had one amphibious transport, a family of one, which switched
+off the shared fields and arrival slots of the other eleven. The rules above are the fixes: the pace holds in narrow
+places; a unit ahead and off its column does not stand; a unit outside every formation takes nothing from the classes
+that formed. **Structures are still narrow places** (a formation that stood round a barracks would hold up everything
+behind it); the pace is what survives them.
+
+The test is `crates/sf_game/tests/formation_base.rs`: the world built as the viewer builds it (`playfield`,
+`sandbox::schedule`, the viewer's world speed), the twelve mobile Meridian units selected, one `commands::move_command`
+to each of four goals, (56, 44), (90, 44), (90, 10) and (100, 40). Measured (debug and release give the same numbers),
+before and after:
+
+| goal | formation loose | all members within 3 cells of their slots | members within 3 cells | windows of 20 ticks above 1.2 times the slowest's speed, in loose stretches | last unit idle |
+|---|---|---|---|---|---|
+| (56, 44) | 12 % → 60 % | 19 % → 18 % | 89 % → 92 % | 44 % → 39 % | tick 825 → 784 |
+| (90, 44) | 51 % → 48 % | 9 % → 14 % | 62 % → 59 % | 23 % → 6 % | 2,172 → 2,496 |
+| (90, 10) | 35 % → 71 % | 42 % → 38 % | 77 % → 75 % | 49 % → 14 % | 1,689 → 1,397 |
+| (100, 40) | 38 % → 38 % | 37 % → 25 % | 70 % → 68 % | 16 % → 9 % | 2,317 → 2,206 |
+
+Over the four goals together the loose stretches have 29 % of their windows above 1.2 times the slowest's speed
+before and 14 % after. The peak of a member's speed over twenty ticks is 2.7 to 2.9 times the slowest's both before and
+after: a unit behind its slot catches up at its own speed, and one within the bound of its slot runs for a moment,
+on purpose. The leader of the sandbox's group is a rifleman, so its pace cannot show a difference there; the leader's
+pace in a loose stretch is asserted with a tank for a leader in `tests/formation.rs`
+(`a_loose_formation_lets_go_of_its_shape_and_not_of_its_pace`: 0.1000 cells a tick before, 0.0350 after).
+
+**The shape in the sandbox is not good, and the test says what it can say.** The structures keep the formation loose for
+40 to 70 % of the march and it forms up again between them; the numbers above are what holds, and the test asserts the
+pace in loose stretches, the shared fields and the arrival, and for the shape only that it does not regress: per goal a
+few points below what is measured (members near their slots 92/59/75/68 %, all near off loose ground 24/18/74/34 %).
+**The shape in a base is not fixed by WP4.6b** (`docs/progress.md`, open items 14 and 15). Over ten goals, not four, the
+means are:
+
+| | members within 3 cells | all within 3 cells | loose | mean arrival tick |
+|---|---|---|---|---|
+| before WP4.6b | 71 % | 33 % | 41 % | 1,723 |
+| pace, off-column and wait rules, without the shared fields | 77 % | 40 % | 44 % | 1,699 |
+| all of WP4.6b | 73 % | 35 % | 54 % | 1,610 |
+
+So the rules that keep the pace and the shape help a little (71 → 77 % of the members near their slots), and the shared
+fields of the classes that formed cost some of that back (77 → 73 %) and bring the arrival forward (1,699 → 1,610):
+the field makes the members of a class follow the same cell-level directions through the narrow places among the
+structures, where single routes spread them, and it gives them the arrival slots of the goal. That is what decision C
+asked for (a unit outside every formation must not take the fields away), and it is kept. **What is left is not the
+formation's:** two heavy tracked units (the harvester and the siege artillery, 1.5 cells across) are stuck among the
+structures of the base for 500 to 1,500 ticks in several runs, with or without a formation (the paths are made on cells of
+one body's width, and the gaps the sandbox leaves between structures are one cell), and the leader waits for them until
+its patience is gone. Bodies as a part of the routes are a work package of their own; until then a base is a place
+where a formation holds its pace and loses its shape.
 
 ## State and checksum
 
@@ -334,16 +429,19 @@ zero. A group order that forms no formation has exactly the checksum it had.
 
 | | |
 |---|---|
-| ticks on open ground (formation whole, leader outside 8 cells of the wall) | 1,854 |
-| of them with every member within 3.0 cells of its slot | 1,854 (100 %) |
+| ticks on open ground (formation whole, leader outside 8 cells of the wall) | 1,852 |
+| of them with every member within 3.0 cells of its slot | 1,852 (100 %) |
 | farthest any member was from its slot there | 0.93 cells (the lattice is 4.46 cells from the leader) |
 | leader's speed in the west field | 0.0349 cells a tick (the rifleman's top speed 0.035; nobody behind, so the pace is the slowest's own) |
 | longest the group was along its heading | 5.3 cells |
-| loose at the passage | 504 ticks, up to 15 members following the order's way at once |
-| formed up again behind the passage (every member walking straight to its slot and within 1 cell of it) | tick 1,370 |
+| loose at the passage | 521 ticks, up to 15 members following the order's way at once |
+| formed up again behind the passage (every member walking straight to its slot and within 1 cell of it) | tick 1,356 |
 | leader's waits (ticks) / breaks / expelled | 0 / 0 / 0 |
-| formation let go | tick 2,586 |
-| everybody arrived | tick 2,812 (1.07 times the 2,629 the riflemen need alone); worst overlap during the run 0.048 cells, at the end 0.029 |
+| formation let go | tick 2,597 |
+| everybody arrived | tick 2,840 (1.08 times the 2,629 the riflemen need alone); worst overlap during the run 0.043 cells, at the end 0.020 |
+
+(WP4.6b moved the last four rows from 504 loose ticks, tick 1,370, tick 2,586, tick 2,812 and overlap 0.048 / 0.029: the
+leader goes at the pace in the loose stretch too, and waits only while the members in their places have open ground.)
 
 `bridge_200` is not changed by WP4.6 (a crowd of 200 forms no formation) and meets the done-when of phase 4
 as before: all 200 arrive by tick 3,456, 0 end beyond 1.3 times the packing radius, the worst overlap is 0.190 of
@@ -372,7 +470,11 @@ pinned was independence from a tuning number, a wish and not a requirement. It s
   1.4 times their own walk in 8 of 30 runs of the sweep ("Sizes").
 * **Other ground than one passage**: the sweep and `formation_move` are one map, an open field, a passage three
   cells wide and another open field. Rock outcrops, a river and its bridge, several gaps and turns have single
-  cases in `tests/formation.rs` and no sweep.
+  cases in `tests/formation.rs` and no sweep. A base (the sandbox) has `formation_base` (above): four goals, one
+  layout, bounds that hold and numbers that are low.
+* **Bodies in the routes**: a heavy unit (1.5 cells across) is sent through a one-cell gap between two structures
+  because paths and fields are made on cells, gets stuck, sidesteps, asks again; in the sandbox that is what keeps two
+  of the twelve from the formation for a long time ("In a base"). Not a formation rule; a movement work package.
 * **Aircraft and mixed ground**: aircraft do not form; hovercraft and vessels form their own families but
   their formations have been tested only with three boats, and the hover class not at all
   (`tests/formation.rs`).
