@@ -2,18 +2,28 @@
 //! field of view, and click/drag to move the camera.
 //!
 //! # Rendering to a texture
-//! The terrain image is *baked on the CPU* by [`Minimap::bake`]: one pixel per
-//! cell (or fewer for maps larger than the requested side), coloured with the
-//! average of the cell's procedural material texture and shaded by the slope
-//! of the heightmap (light from the north-west). Baking the map is a few
-//! milliseconds for 256 x 256 and happens once, when the map is set; the
-//! result is uploaded as a texture by `UiRenderer::set_minimap`. The terrain
-//! is static in this work package, so there is no update rate: call
-//! [`Minimap::bake`] and `set_minimap` again when the map changes (terrain
-//! edits, WP2.x). A GPU top-down render of the real terrain pass was
-//! rejected: it would tie the minimap to the terrain chunks and LOD of WP1.8
-//! and cost a depth buffer and a second scene pass for an image that never
-//! changes.
+//! The terrain image is *baked on the CPU* by [`Minimap::bake`], one gameplay
+//! cell at a time (WP2.3). A cell is drawn in the flat `minimap_colour` of its
+//! terrain type (`assets/config/terrain_types.ron`: water, rock, road, ore,
+//! bridge, grass), so the minimap shows what the game rules see, not what the
+//! materials of the 3D view look like. A map without a terrain layer falls back
+//! to the average colour of the cell's procedural material. The relief is
+//! shaded lightly on top (light from the north-west, one shade per cell,
+//! at most [`RELIEF_SHADE`] either way) so hills read without hiding the type.
+//!
+//! The image has a whole number of pixels per cell (nearest-neighbour), so
+//! cells stay crisp under the UI's bilinear sampler: a 64-cell map becomes
+//! 256 x 256 (4 px per cell), a 256-cell map 256 x 256 (1 px per cell, shown
+//! slightly smaller than 1 px per cell in a 200 px panel, where a one-cell
+//! road is still a visible line). A map larger than the requested side is
+//! sampled down. Baking is a few milliseconds for 256 x 256 cells and happens
+//! once, when the map is set; the result is uploaded as a texture by
+//! `UiRenderer::set_minimap`. The terrain is static, so there is no update
+//! rate and the per-frame cost is the same one textured quad as before: call
+//! [`Minimap::bake`] and `set_minimap` again when the terrain changes (terrain
+//! edits, later). A GPU top-down render of the real terrain pass was rejected:
+//! it would tie the minimap to the terrain chunks and LOD of WP1.8 and cost a
+//! depth buffer and a second scene pass for an image that never changes.
 //!
 //! Everything dynamic is drawn on top as UI quads every frame: unit dots
 //! (a few pixels each) and the field-of-view frame.
@@ -24,6 +34,8 @@
 //! its aspect ratio kept ([`MinimapGeometry`]).
 
 use sf_data::map::Map;
+use sf_data::terrain::TerrainTypes;
+use sf_math::CELL_METRES;
 use sf_render::Camera;
 use sf_render::camera::DVec2;
 
@@ -31,6 +43,17 @@ use crate::color::Color;
 use crate::draw::Texture;
 use crate::layout::Rect;
 use crate::ui::Ui;
+
+/// How far the relief shading may brighten or darken a cell's colour (a
+/// fraction: 0.18 = at most 18 % either way). Small on purpose: the colour
+/// tells the terrain type, the shade only hints at the hills.
+pub const RELIEF_SHADE: f32 = 0.18;
+/// Brightness change per metre of height difference across a cell, measured
+/// from the north-west to the south-east side of its surroundings. A hill of
+/// 6 m over 40 m (the demo map) reaches the limit on its flanks.
+const RELIEF_GAIN: f32 = 0.2;
+/// Colour of a cell whose terrain type or material is unknown.
+const UNKNOWN: [u8; 3] = [128, 128, 128];
 
 /// The baked image: sRGB RGBA8, row-major, top row = north.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,10 +72,15 @@ pub struct Minimap {
 
 impl Minimap {
     /// Bake `map` into an image whose longer side is at most `max_side`
-    /// pixels.
+    /// pixels, with the shipped terrain types ([`TerrainTypes::embedded`]).
     pub fn bake(map: &Map, max_side: u32) -> Self {
+        Self::bake_with(map, max_side, &TerrainTypes::embedded())
+    }
+
+    /// [`Minimap::bake`] with an explicit table of terrain types.
+    pub fn bake_with(map: &Map, max_side: u32, types: &TerrainTypes) -> Self {
         Self {
-            image: bake_terrain(map, max_side),
+            image: bake_terrain_with(map, max_side, types),
             map_size: (map.width() as f32, map.height() as f32),
         }
     }
@@ -66,7 +94,8 @@ impl Minimap {
     }
 }
 
-/// Average sRGB color of each material of the map.
+/// Average sRGB color of each material of the map (the colour of a cell on a
+/// map without a terrain layer).
 fn material_colors(map: &Map) -> Vec<[u8; 3]> {
     map.materials()
         .iter()
@@ -84,38 +113,87 @@ fn material_colors(map: &Map) -> Vec<[u8; 3]> {
         .collect()
 }
 
+/// The shade factor of gameplay cell `(cx, cz)`: height at the north-west of
+/// its surroundings minus the south-east, so a slope that faces the light is
+/// brighter. 1.0 on flat ground.
+fn relief_shade(map: &Map, cx: i64, cz: i64) -> f32 {
+    let cell = i64::from(CELL_METRES);
+    let (mx, mz) = (cx * cell + cell / 2, cz * cell + cell / 2);
+    let reach = cell;
+    let slope =
+        map.vertex_height(mx - reach, mz - reach) - map.vertex_height(mx + reach, mz + reach);
+    (1.0 + slope * RELIEF_GAIN).clamp(1.0 - RELIEF_SHADE, 1.0 + RELIEF_SHADE)
+}
+
+/// The colour of every gameplay cell (row-major, `cw * ch`), lightly shaded by
+/// the relief: the `minimap_colour` of the cell's terrain type, or the average
+/// of its material when the map has no terrain layer.
+fn cell_colors(map: &Map, types: &TerrainTypes) -> Vec<[u8; 3]> {
+    let (cw, ch) = map.size_in_cells();
+    // The procedural material textures are only generated for the fallback.
+    let materials = if map.terrain().is_some() {
+        Vec::new()
+    } else {
+        material_colors(map)
+    };
+    let cell = i64::from(CELL_METRES);
+    let mut out = Vec::with_capacity(cw as usize * ch as usize);
+    for cz in 0..i64::from(ch) {
+        for cx in 0..i64::from(cw) {
+            let flat = match map.terrain() {
+                Some(layer) => layer
+                    .get(cx as u32, cz as u32)
+                    .and_then(|id| types.get(id))
+                    .map_or(UNKNOWN, |t| t.minimap_colour),
+                None => materials
+                    .get(usize::from(
+                        map.material_at(cx * cell + cell / 2, cz * cell + cell / 2),
+                    ))
+                    .copied()
+                    .unwrap_or(UNKNOWN),
+            };
+            let shade = relief_shade(map, cx, cz);
+            out.push(flat.map(|c| (f32::from(c) * shade).clamp(0.0, 255.0).round() as u8));
+        }
+    }
+    out
+}
+
 /// See [`Minimap::bake`].
 pub fn bake_terrain(map: &Map, max_side: u32) -> MinimapImage {
-    let (mw, mh) = (map.width(), map.height());
-    let longest = mw.max(mh);
-    let (w, h) = if longest <= max_side.max(1) {
-        (mw, mh)
+    bake_terrain_with(map, max_side, &TerrainTypes::embedded())
+}
+
+/// See [`Minimap::bake_with`].
+pub fn bake_terrain_with(map: &Map, max_side: u32, types: &TerrainTypes) -> MinimapImage {
+    let (cw, ch) = map.size_in_cells();
+    let (cw, ch) = (cw.max(1), ch.max(1));
+    let longest = cw.max(ch);
+    let max_side = max_side.max(1);
+    // A whole number of pixels per cell when the map fits (crisp cells under
+    // bilinear sampling); sampled down when it does not.
+    let (w, h) = if longest <= max_side {
+        let s = max_side / longest;
+        (cw * s, ch * s)
     } else {
-        let k = f64::from(max_side.max(1)) / f64::from(longest);
+        let k = f64::from(max_side) / f64::from(longest);
         (
-            ((f64::from(mw) * k).round() as u32).max(1),
-            ((f64::from(mh) * k).round() as u32).max(1),
+            ((f64::from(cw) * k).round() as u32).max(1),
+            ((f64::from(ch) * k).round() as u32).max(1),
         )
     };
-    let colors = material_colors(map);
+    let colors = cell_colors(map, types);
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for py in 0..h {
+        // The cell this row of pixels samples (nearest, centre of the pixel).
+        let cz = ((u64::from(py) * 2 + 1) * u64::from(ch) / (u64::from(h) * 2)) as usize;
         for px in 0..w {
-            // The cell this pixel samples (nearest, centre of the pixel).
-            let cx = (u64::from(px) * 2 + 1) * u64::from(mw) / (u64::from(w) * 2);
-            let cz = (u64::from(py) * 2 + 1) * u64::from(mh) / (u64::from(h) * 2);
-            let (cx, cz) = (cx as i64, cz as i64);
-            let base = colors
-                .get(usize::from(map.material_at(cx, cz)))
+            let cx = ((u64::from(px) * 2 + 1) * u64::from(cw) / (u64::from(w) * 2)) as usize;
+            let c = colors
+                .get(cz * cw as usize + cx)
                 .copied()
-                .unwrap_or([128, 128, 128]);
-            // North-west light: higher towards the light side = brighter.
-            let slope = map.vertex_height(cx, cz) - map.vertex_height(cx + 1, cz + 1);
-            let shade = (1.0 + slope * 0.35).clamp(0.7, 1.3);
-            for c in base {
-                rgba.push((f32::from(c) * shade).clamp(0.0, 255.0).round() as u8);
-            }
-            rgba.push(255);
+                .unwrap_or(UNKNOWN);
+            rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
         }
     }
     MinimapImage {
@@ -363,7 +441,7 @@ impl Ui {
 mod tests {
     use super::*;
     use glam::{DVec3, DVec4};
-    use sf_data::map::generate::generate;
+    use sf_data::map::generate::{generate, generate_cells};
     use sf_render::CameraConfig;
 
     fn close(a: f32, b: f32, eps: f32) -> bool {
@@ -763,11 +841,12 @@ mod tests {
     }
 
     #[test]
-    fn bake_gives_one_pixel_per_cell_with_shaded_material_colors() {
+    fn bake_gives_a_whole_number_of_pixels_per_cell() {
+        // 64 x 48 m = 16 x 12 gameplay cells -> 16 px per cell.
         let map = generate(64, 48, 1);
         let img = bake_terrain(&map, 256);
-        assert_eq!((img.width, img.height), (64, 48));
-        assert_eq!(img.rgba.len(), 64 * 48 * 4);
+        assert_eq!((img.width, img.height), (256, 192));
+        assert_eq!(img.rgba.len(), 256 * 192 * 4);
         assert!(img.rgba.chunks_exact(4).all(|p| p[3] == 255));
         let distinct: std::collections::BTreeSet<_> = img
             .rgba
@@ -780,14 +859,180 @@ mod tests {
             distinct.len()
         );
         assert_eq!(img, bake_terrain(&map, 256), "baking is deterministic");
+        // Every pixel of one cell has the colour of the cell.
+        for (cx, cz) in [(0usize, 0usize), (5, 7), (15, 11)] {
+            let first = &img.rgba[((cz * 16) * 256 + cx * 16) * 4..][..4];
+            for dy in 0..16 {
+                for dx in 0..16 {
+                    let at = ((cz * 16 + dy) * 256 + cx * 16 + dx) * 4;
+                    assert_eq!(&img.rgba[at..at + 4], first, "cell ({cx}, {cz})");
+                }
+            }
+        }
     }
 
     #[test]
     fn bake_downsizes_big_maps_to_the_requested_side() {
+        // 256 x 128 m = 64 x 32 cells.
         let map = generate(256, 128, 2);
         let img = bake_terrain(&map, 64);
         assert_eq!((img.width, img.height), (64, 32));
         let same = bake_terrain(&map, 256);
         assert_eq!((same.width, same.height), (256, 128));
+        // A 250 x 125 cell map is sampled down to a side of 100 px.
+        let big = generate_cells(250, 125, 2);
+        let img = bake_terrain(&big, 100);
+        assert_eq!((img.width, img.height), (100, 50));
+    }
+
+    /// A map of `wc x hc` gameplay cells with the given terrain ids and a
+    /// height function over the 1 m vertices (raw u16 heights).
+    fn map_with_types(wc: u32, hc: u32, ids: Vec<u8>, raw_height: impl Fn(u32, u32) -> u16) -> Map {
+        let (w, h) = (wc * CELL_METRES, hc * CELL_METRES);
+        let heights: Vec<u16> = (0..=h)
+            .flat_map(|z| (0..=w).map(move |x| (x, z)))
+            .map(|(x, z)| raw_height(x, z))
+            .collect();
+        Map::from_parts(
+            w,
+            h,
+            8.0,
+            vec!["grass".into()],
+            heights,
+            vec![0; (w * h) as usize],
+        )
+        .unwrap()
+        .with_terrain(
+            sf_data::terrain::TerrainLayer::new(wc, hc, ids).unwrap(),
+            &TerrainTypes::embedded(),
+        )
+        .unwrap()
+    }
+
+    fn texel(img: &MinimapImage, x: u32, y: u32) -> [u8; 3] {
+        let at = ((y * img.width + x) * 4) as usize;
+        [img.rgba[at], img.rgba[at + 1], img.rgba[at + 2]]
+    }
+
+    /// WP2.3: on a small map with every terrain type, the texel of a cell
+    /// has the colour of its type, at one pixel per cell and at several.
+    #[test]
+    fn a_texel_has_the_colour_of_its_cells_terrain_type() {
+        let types = TerrainTypes::embedded();
+        // 6 x 3 cells: row 0 = ids 0..=5, row 1 = reversed, row 2 = all water.
+        let mut ids: Vec<u8> = (0..6).collect();
+        ids.extend((0..6).rev());
+        ids.extend([2; 6]);
+        let map = map_with_types(6, 3, ids.clone(), |_, _| 0);
+        for max_side in [6, 12, 24, 96] {
+            let img = bake_terrain(&map, max_side);
+            let s = max_side / 6;
+            assert_eq!((img.width, img.height), (6 * s, 3 * s), "side {max_side}");
+            for cz in 0..3u32 {
+                for cx in 0..6u32 {
+                    let want = types
+                        .get(ids[(cz * 6 + cx) as usize])
+                        .unwrap()
+                        .minimap_colour;
+                    for (dx, dy) in [(0, 0), (s - 1, s - 1), (s / 2, s / 2)] {
+                        assert_eq!(
+                            texel(&img, cx * s + dx, cz * s + dy),
+                            want,
+                            "cell ({cx}, {cz}) at {s} px per cell"
+                        );
+                    }
+                }
+            }
+        }
+        // Every pair of types gives a different texel.
+        let img = bake_terrain(&map, 6);
+        let firsts: std::collections::BTreeSet<_> = (0..6).map(|x| texel(&img, x, 0)).collect();
+        assert_eq!(firsts.len(), 6);
+    }
+
+    #[test]
+    fn the_relief_shades_the_type_colour_lightly_and_never_changes_the_type() {
+        let types = TerrainTypes::embedded();
+        let ids = vec![0u8; 8 * 3];
+        let grass = types.get(0).unwrap().minimap_colour;
+        let lum = |c: [u8; 3]| u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2]);
+        // Ground that rises to the east faces away from the north-west light
+        // (darker); ground that falls to the east faces it (brighter).
+        let rising = map_with_types(8, 3, ids.clone(), |x, _| (x * 1000) as u16);
+        let falling = map_with_types(8, 3, ids.clone(), |x, _| ((32 - x) * 1000) as u16);
+        let flat = map_with_types(8, 3, ids, |_, _| 5000);
+        let (r, f, l) = (
+            texel(&bake_terrain(&rising, 8), 4, 1),
+            texel(&bake_terrain(&falling, 8), 4, 1),
+            texel(&bake_terrain(&flat, 8), 4, 1),
+        );
+        assert_eq!(l, grass, "flat ground is the plain type colour");
+        assert!(lum(r) < lum(l) && lum(l) < lum(f), "{r:?} {l:?} {f:?}");
+        for c in [r, f] {
+            for i in 0..3 {
+                let ratio = f32::from(c[i]) / f32::from(grass[i]);
+                assert!(
+                    (1.0 - RELIEF_SHADE - 0.01..=1.0 + RELIEF_SHADE + 0.01).contains(&ratio),
+                    "shade {ratio} beyond the limit"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_map_without_a_terrain_layer_falls_back_to_the_material_colour() {
+        let map = Map::from_parts(
+            16,
+            16,
+            8.0,
+            vec!["grass".into()],
+            vec![0; 17 * 17],
+            vec![0; 16 * 16],
+        )
+        .unwrap();
+        assert!(map.terrain().is_none());
+        let img = bake_terrain(&map, 4);
+        assert_eq!((img.width, img.height), (4, 4));
+        let want = material_colors(&map)[0];
+        assert_eq!(texel(&img, 2, 2), want);
+    }
+
+    #[test]
+    fn a_type_the_table_lacks_is_grey_not_a_panic() {
+        let map = map_with_types(2, 1, vec![0, 3], |_, _| 0);
+        let only_grass =
+            TerrainTypes::new(vec![TerrainTypes::embedded().get(0).unwrap().clone()]).unwrap();
+        let img = bake_terrain_with(&map, 2, &only_grass);
+        assert_eq!(texel(&img, 1, 0), UNKNOWN);
+        assert_eq!(texel(&img, 0, 0), only_grass.get(0).unwrap().minimap_colour);
+    }
+
+    /// The shipped bridge map has water, rock, road and a bridge: all of them
+    /// show on its minimap, and the bridge is not swallowed by the water.
+    #[test]
+    fn the_bridge_map_shows_water_rock_and_a_bridge() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/maps/bridge");
+        let map = Map::load(&dir).expect("bridge map");
+        let types = TerrainTypes::embedded();
+        let img = bake_terrain(&map, 256);
+        let (cw, ch) = map.size_in_cells();
+        let s = img.width / cw;
+        let layer = map.terrain().expect("terrain layer");
+        for name in ["water", "rock", "bridge"] {
+            let id = types.id_of(name).unwrap();
+            let (cx, cz) = (0..ch)
+                .flat_map(|z| (0..cw).map(move |x| (x, z)))
+                .find(|&(x, z)| layer.get(x, z) == Some(id))
+                .unwrap_or_else(|| panic!("the bridge map has no {name} cell"));
+            let want = types.get(id).unwrap().minimap_colour;
+            let got = texel(&img, cx * s + s / 2, cz * s + s / 2);
+            for i in 0..3 {
+                let ratio = f32::from(got[i]) / f32::from(want[i]);
+                assert!(
+                    (1.0 - RELIEF_SHADE - 0.01..=1.0 + RELIEF_SHADE + 0.01).contains(&ratio),
+                    "{name} cell ({cx}, {cz}): {got:?} vs {want:?}"
+                );
+            }
+        }
     }
 }

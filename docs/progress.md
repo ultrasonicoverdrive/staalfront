@@ -85,7 +85,8 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
 - WP2.2 Materials per terrain type: open
-- WP2.3 Minimap shows terrain types: open
+- WP2.3 Minimap shows terrain types (flat `minimap_colour` per type in the terrain type table,
+  baked per cell, light relief shading; notes below): done (PR pending)
 - WP2.4 Cell grid overlay by terrain type and occupancy: open
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
@@ -99,6 +100,49 @@ rock, ore, a road and bridges, and the sim keeps a type and an occupant per cell
 terrain and occupancy are in the checksum only when present, so `wander_5000`,
 `command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
 are in `docs/rules/terrain.md`.
+
+WP2.3 notes. The minimap draws every gameplay cell in the flat colour of its terrain type.
+- **Colour in data.** `TerrainType` has a new required field `minimap_colour: (r, g, b)` (sRGB)
+  in `assets/config/terrain_types.ron` (grass green, road tan, water blue, rock grey, ore
+  gold, bridge brown); a test requires every pair of shipped colours to be at least 50 apart
+  in RGB. It is presentation only (the sim never reads it, no checksum moves). WP2.2 maps the
+  types to 3D materials on its own; the two are meant to line up by type name, nothing shares
+  code. If WP2.2 added a colour field to the same struct, merge by keeping both: this one is
+  the minimap's, a material colour is a different thing.
+- **Bake** (`sf_ui::minimap`, `Minimap::bake` / `bake_with`): one colour per gameplay cell
+  (`Map::terrain`), then a whole number of pixels per cell (nearest), so cells stay crisp under
+  the UI's bilinear sampler: 64 cells -> 256 px (4 per cell), 96 x 64 -> 192 x 128, 256 ->
+  256 (1 per cell, drawn at about 0.8 px per cell in the 200 px panel; a one-cell road or
+  river is still a visible line). A map larger than the side is sampled down. A map without a
+  terrain layer falls back to the average material colour (as before); an id missing from the
+  table is grey. The old per-metre bake is gone.
+- **Relief.** One shade per cell from the height difference between the north-west and the
+  south-east of its surroundings (light from the north-west), at most 18 % either way
+  (`RELIEF_SHADE`), so hills read and the type colour stays the type. This replaces the faint
+  per-metre shading (open item 8).
+- **Cost.** One texture and one quad, as before: nothing is added per frame (the field-of-view
+  frame, the click-to-move and the unit dots are untouched). Baked once when the map is set;
+  the bake takes 0.5 / 1.1 / 3.8 ms for 64 / 128 / 256 cells (release, this machine), less than
+  the old bake, because the procedural material textures are no longer generated when the map
+  has a terrain layer. The terrain is static; when it can change (editing, later) call
+  `Minimap::bake` and `UiRenderer::set_minimap` again, which is what `Hud::attach` does.
+- **Lavapipe frame time** (`sf_demo --bench --seconds 20`, 1280 x 720, Xvfb, five alternating
+  runs each; the machine was shared with other agents, so single runs range 84 to 160 ms
+  p50): the quietest pair is 84.3 ms before and 84.9 ms after (p50), the other pairs scatter
+  either way by more than that. No difference can be seen. The GTX 1650 expectation: the same
+  one textured quad over a texture of at most 256 x 256, as before; well under a millisecond
+  of GPU time and far under the 3.9 ms p99 of M0. M0b is Tijmen's run after WP2.4.
+- **Tests.** `sf_ui` unit tests: a texel of every cell has its type's colour (all six types,
+  at 1, 2, 4 and 16 px per cell), the relief shade is bounded and directional, the material
+  fallback, an unknown type, a downsized map, and the shipped `assets/maps/bridge` map shows
+  water, rock and bridge. The existing minimap input and screenshot tests are unchanged and
+  green. Screenshots (`--shots` under Xvfb with Mesa lavapipe): `docs/screenshots/wp2.3/`.
+- **Seen in the screenshots, not changed.** The 3D view still draws water and the bridge deck
+  with the old materials (WP2.2), so for now the minimap shows the types and the main view
+  does not. The blue unit dots (player 2) are close to the water colour, but ground units are
+  not on water; vessels will be (phase 4 follow-up), so revisit the dot colours then.
+- The "Known gaps" line under "Playable state" that lists "no minimap colours" is left for the
+  end of phase 2 (WP2.2 and WP2.4 edit it as well); the minimap colours are done.
 
 ## Phase 3 — Units, selection and commands
 
@@ -1383,12 +1427,9 @@ fixed, delete the entry in the same PR.
    Windows (for example behind `cfg(windows)`) would not be caught. Run it on both
    systems once the CI time allows.
 7. **The minimap is baked once.** It does not follow terrain changes. Re-bake it when
-   the terrain changes (phase 2: terrain types in WP2.1 to WP2.3, later editing).
-   WP2.1 put the terrain types into the map data (`Map::terrain`) and the sim; the
-   bake does not read them yet, that is WP2.3.
-8. **The minimap bake shows relief weakly.** Its slope shading is faint next to the
-   terrain in the main view. Use a stronger relief shading in the bake (WP1.12
-   follow-up, together with WP2.3).
+   the terrain changes (later editing): `Minimap::bake` and `UiRenderer::set_minimap`
+   again, as `Hud::attach` does. WP2.3 made the bake read the terrain types and a
+   stronger relief shade (the old item 8, deleted).
 9. **Release packaging must ship the egui font licence texts.** `assets/LICENSES.md`
    lists the default egui fonts (OFL-1.1, Ubuntu-font-1.0); the texts themselves are
    in the `epaint_default_fonts` crate and have to be part of the third-party notice
@@ -1420,7 +1461,9 @@ fixed, delete the entry in the same PR.
     every map size (hills of 5 to 10 m radius, more of them on a bigger map),
     so at the whole-map zoom of the 1,024 m map the relief shows only as
     shading. Add broad hills for big maps when the look of the map matters
-    (phase 2, WP2.3).
+    (phase 2, WP2.3). WP2.3 did not change the generator (it would move the generator's
+    pinned hashes and the maps built on it): on the 256-cell demo map the minimap shows the
+    relief as faint patches, on a 64-cell map as clear hills. Still open.
 21. **Plain `--shots` still highlights the unit under the X pointer.** The game cursor is
     drawn only with `--hover` since the close-out of phase 3, but the hover highlight and the
     F1 hover line still follow the real pointer, so a screenshot taken with a mouse over a

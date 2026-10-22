@@ -239,6 +239,7 @@ mod tests {
                     name: (*n).into(),
                     buildable: false,
                     harvestable: false,
+                    minimap_colour: [200, 0, 200],
                 })
                 .collect(),
         )

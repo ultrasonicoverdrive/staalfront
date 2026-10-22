@@ -36,6 +36,10 @@ What the flags mean, and who reads them:
   (below) and `Command::PlaceStructure`; WP6.x building placement will read it too.
 * `harvestable`: whether harvesters can take resources from the cell. Nothing reads it
   yet (phase 7).
+* `minimap_colour` (WP2.3): the flat sRGB colour of the type on the minimap. Presentation
+  only, the sim never reads it. The six shipped colours are pinned to differ by at least 50
+  (RGB distance), so a new type has to bring a colour that stands out. The minimap shades the
+  relief lightly over it (at most 18 % either way), so the colour stays the type.
 
 Which cells a unit may enter and its speed there: `World::cost(class, cell)` and
 `World::passable(class, cell)` (`movement.md`). The sim's `TerrainFlags` also has a derived

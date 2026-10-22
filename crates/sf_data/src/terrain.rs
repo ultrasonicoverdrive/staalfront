@@ -48,6 +48,12 @@ pub struct TerrainType {
     pub buildable: bool,
     /// Whether harvesters can take resources from it.
     pub harvestable: bool,
+    /// The flat colour of this type on the minimap (WP2.3), sRGB. Chosen so
+    /// that every pair of types can be told apart at a few pixels per cell;
+    /// a test on the shipped table holds that. Pure presentation: the sim never
+    /// reads it, and it is not what the 3D terrain looks like (WP2.2 maps the
+    /// types to materials on its own).
+    pub minimap_colour: [u8; 3],
 }
 
 /// The RON file: a list of types.
@@ -259,6 +265,7 @@ mod tests {
             name: name.into(),
             buildable: true,
             harvestable: false,
+            minimap_colour: [id.wrapping_mul(40), 90, 90],
         }
     }
 
@@ -283,6 +290,32 @@ mod tests {
         assert_eq!(types.id_of("lava"), None);
         assert!(!types.is_empty());
         assert_eq!(types.len(), 6);
+    }
+
+    /// The minimap shows each type as a flat colour (WP2.3): two types that
+    /// look alike would be unreadable at a few pixels per cell, with the light
+    /// shading of the relief on top.
+    #[test]
+    fn the_shipped_minimap_colours_are_clearly_different() {
+        let types = TerrainTypes::embedded();
+        let all: Vec<&TerrainType> = types.iter().collect();
+        for (i, a) in all.iter().enumerate() {
+            for b in &all[i + 1..] {
+                let d2: i32 = a
+                    .minimap_colour
+                    .iter()
+                    .zip(&b.minimap_colour)
+                    .map(|(x, y)| (i32::from(*x) - i32::from(*y)).pow(2))
+                    .sum();
+                assert!(
+                    d2 >= 50 * 50,
+                    "{} and {} are too close on the minimap (distance {:.0})",
+                    a.name,
+                    b.name,
+                    f64::from(d2).sqrt()
+                );
+            }
+        }
     }
 
     #[test]
