@@ -312,7 +312,7 @@ See §9 for the design.
 - WP13.2 Replays = start state + command log; playback at various speeds.
 - WP13.3 Quick save, autosave, version migration of save files.
 
-### Phase 14 — Multiplayer (optional, after M2)
+### Phase 14 — Multiplayer (optional, after M2; **parked** by decision Tijmen 22-10-2026)
 - WP14.1 **[xhigh]** Deterministic lockstep over UDP (or QUIC), command delay, ping-compensated.
 - WP14.2 Desync detection via checksums + automatic dump.
 - WP14.3 Lobby, direct connection, later a small relay server.
