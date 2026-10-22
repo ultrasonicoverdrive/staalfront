@@ -340,6 +340,28 @@ pub fn patch_json(glb: &[u8], f: impl FnOnce(String) -> String) -> Vec<u8> {
     out
 }
 
+/// The same `.glb` with one scene per LOD root, named `LOD0`, `LOD1`, ...,
+/// the way the exporter of art set v4 writes it (the nodes stay as they are).
+pub fn scene_per_lod(glb: &[u8]) -> Vec<u8> {
+    patch_json(glb, |json| {
+        let head = "\"scenes\":[{\"nodes\":[";
+        let start = json.find(head).expect("the writer's single scene");
+        let from = start + head.len();
+        let end = from + json[from..].find("]}]").expect("end of the scene");
+        let scenes: Vec<String> = json[from..end]
+            .split(',')
+            .enumerate()
+            .map(|(n, root)| format!("{{\"name\":\"LOD{n}\",\"nodes\":[{root}]}}"))
+            .collect();
+        format!(
+            "{}\"scenes\":[{}]{}",
+            &json[..start],
+            scenes.join(","),
+            &json[end + 3..]
+        )
+    })
+}
+
 /// A second figure in the same file: a `_2` copy of the six figure nodes in
 /// every LOD.
 pub fn add_second_figure(m: &mut Model) {

@@ -704,7 +704,12 @@ units twice that, vehicle, decor and wreck 1500/500/150, building 5000/1500/300)
 `assets/set_v3` (the third delivery, 30 models) is the first set it was run on;
 `crates/sf_render/tests/set_v3_load.rs` loads every file through the engine
 loader and `tools/sf_asset_check/tests/set_v3.rs` pins that the checker can
-judge all of them.
+judge all of them. `assets/set_v4` (the fourth delivery) was stored only as far
+as it passes: 194 of its 200 models, byte for byte as delivered
+(`crates/sf_render/tests/set_v4_load.rs`, `tools/sf_asset_check/tests/set_v4.rs`).
+That delivery stores its levels of detail as one glTF scene each (`LOD0`, `LOD1`,
+`LOD2`); `sf_render::glb::lod_roots` reads that as the three roots of one scene,
+for the loader and the checker alike (`docs/conventions.md` section 12).
 
 Two things about the loader that a model must know: a mesh node **without
 children** is folded into its parent part, except a node named `turret` or

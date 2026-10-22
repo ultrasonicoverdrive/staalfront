@@ -2,7 +2,10 @@
 
 mod common;
 
-use common::{Model, Part, add_second_figure, decor, infantry, patch_json, tank, wreck};
+use common::{
+    Model, Part, add_second_figure, decor, infantry, patch_json, scene_per_lod, tank, wreck,
+};
+use sf_asset_check::class::Class;
 use sf_asset_check::{Checker, FileReport, Status};
 
 fn check(file: &str, m: &Model) -> FileReport {
@@ -85,6 +88,34 @@ fn an_unknown_role_cannot_get_a_budget_class() {
 }
 
 #[test]
+fn fences_cliff_edges_and_rubble_heaps_are_decor_with_the_decor_budget() {
+    for stem in [
+        "neutral_fence",
+        "neutral_cliff_edge",
+        "neutral_rubble_1x1",
+        "neutral_rubble_4x5",
+    ] {
+        let r = check(&format!("{stem}.glb"), &decor(stem));
+        assert_clean(&r);
+        assert_eq!(r.facts.class, Some(Class::Decor), "{stem}");
+        assert_eq!(r.facts.budget, Some([1500, 500, 150]), "{stem}");
+    }
+    // Over the decor budget still fails (LOD2 may have 150 triangles).
+    let mut m = decor("neutral_rubble_2x2");
+    m.part_mut(2, "trunk").reps = 13;
+    let r = check("neutral_rubble_2x2.glb", &m);
+    assert!(r.failed("budget"), "{:#?}", r.findings);
+    // A fence is neutral: under a faction prefix it is only a remark.
+    let r = check("veyran_fence.glb", &decor("veyran_fence"));
+    assert!(!r.failed("class") && r.has("faction"), "{:#?}", r.findings);
+    // Names that only start like a decor role are still unknown.
+    for stem in ["neutral_fencing", "neutral_cliff", "neutral_rubbles"] {
+        let r = check(&format!("{stem}.glb"), &decor(stem));
+        assert!(r.failed("class"), "{stem}: {:#?}", r.findings);
+    }
+}
+
+#[test]
 fn a_role_for_the_other_faction_is_a_warning() {
     // The sniper is a Meridian role in unit_defs.ron.
     let r = check("veyran_sniper.glb", &infantry("veyran_sniper", 0.30));
@@ -110,6 +141,78 @@ fn a_missing_lod_is_a_failure_and_an_extra_one_a_warning() {
         "{:#?}",
         r.findings
     );
+}
+
+#[test]
+fn a_scene_per_lod_is_judged_exactly_like_one_scene() {
+    let checker = Checker::embedded();
+    let cases = [
+        ("meridian_rifleman", infantry("meridian_rifleman", 0.30)),
+        ("veyran_light_tank", tank("veyran_light_tank", 0.30)),
+        (
+            "neutral_wreck_medium_vehicle",
+            wreck("neutral_wreck_medium_vehicle"),
+        ),
+        ("neutral_tree_pine", decor("neutral_tree_pine")),
+    ];
+    for (stem, model) in cases {
+        let file = format!("{stem}.glb");
+        let one = model.bytes();
+        let per_lod = scene_per_lod(&one);
+        assert_ne!(one, per_lod, "{stem}: the fixture really has three scenes");
+        assert!(
+            String::from_utf8_lossy(&per_lod).contains("\"name\":\"LOD2\""),
+            "{stem}"
+        );
+        let (a, b) = (
+            checker.check_bytes(&file, &one),
+            checker.check_bytes(&file, &per_lod),
+        );
+        assert_clean(&b);
+        assert_eq!(a, b, "{stem}: same facts and findings in both layouts");
+    }
+}
+
+#[test]
+fn a_broken_scene_per_lod_file_is_a_failure_with_the_reason() {
+    let checker = Checker::embedded();
+    let bytes = infantry("meridian_rifleman", 0.30).bytes();
+    // The root node numbers of scenes LOD1 and LOD2 in the fixture.
+    let root = |json: &str, n: u32| {
+        let head = format!("\"name\":\"LOD{n}\",\"nodes\":[");
+        let from = json.find(&head).unwrap() + head.len();
+        json[from..from + json[from..].find(']').unwrap()].to_owned()
+    };
+    let per_lod = scene_per_lod(&bytes);
+    // A scene that holds another level's root, and one with two roots.
+    for (swap, needle) in [
+        (true, "scene LOD1 holds the root"),
+        (false, "exactly one root"),
+    ] {
+        let broken = patch_json(&per_lod, |json| {
+            let (x, y) = (root(&json, 1), root(&json, 2));
+            let (lod1, lod2) = (
+                format!("\"name\":\"LOD1\",\"nodes\":[{x}]"),
+                format!("\"name\":\"LOD2\",\"nodes\":[{y}]"),
+            );
+            if swap {
+                json.replace(&lod1, "LOD1_TMP")
+                    .replace(&lod2, &format!("\"name\":\"LOD2\",\"nodes\":[{x}]"))
+                    .replace("LOD1_TMP", &format!("\"name\":\"LOD1\",\"nodes\":[{y}]"))
+            } else {
+                json.replace(&lod1, &format!("\"name\":\"LOD1\",\"nodes\":[{x},{y}]"))
+            }
+        });
+        let r = checker.check_bytes("meridian_rifleman.glb", &broken);
+        assert!(r.failed("glb"), "{needle}: {:#?}", r.findings);
+        assert!(messages(&r, "glb").contains(needle), "{needle}: {r:#?}");
+    }
+    // A file with two scenes named LOD0 and LOD1 lacks LOD2, as always.
+    let mut m = infantry("meridian_rifleman", 0.30);
+    m.lods.pop();
+    let r = checker.check_bytes("meridian_rifleman.glb", &scene_per_lod(&m.bytes()));
+    assert!(r.failed("lod-roots"), "{:#?}", r.findings);
+    assert!(messages(&r, "lod-roots").contains("meridian_rifleman_LOD2 is missing"));
 }
 
 #[test]
