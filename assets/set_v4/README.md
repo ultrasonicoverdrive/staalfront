@@ -10,8 +10,8 @@ repo it is **set v4**, so the name does not clash with `assets/set_v3`.
   wrecks, ore fields, trees, rocks, fences and cliff edges), 800 review renders, a
   register, scripts. Procedural geometry (Python and NumPy, no external meshes or
   textures), made by "Copilot" at the project owner's request, as the delivery's
-  `LICENSES.md` says. **The licence has not been set by the project owner** (see
-  `assets/LICENSES.md`).
+  `LICENSES.md` says. The project owner, Tijmen, licensed them under the **project licence** on
+  22-10-2026 (see `assets/LICENSES.md`).
 - **What is in the repo.** The **194** `.glb` files in this folder, **byte for byte as
   delivered** (each file's sha256 equals the one in the delivery's `asset_register.csv`).
   Not copied: the 800 review renders (the contact sheet `controleblad.png` is in
