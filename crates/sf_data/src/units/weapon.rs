@@ -75,6 +75,10 @@ fn default_fire_arc() -> u8 {
     DEFAULT_FIRE_ARC
 }
 
+fn default_friendly_fire() -> bool {
+    true
+}
+
 /// One weapon, as written in the file.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -102,6 +106,18 @@ pub struct WeaponDef {
     /// zero means no splash.
     #[serde(default)]
     pub splash_radius: Decimal,
+    /// Cells from the edge of a victim inside which the splash does its full
+    /// damage; from there it falls in a straight line to nothing at
+    /// `splash_radius` (WP5.3). Zero (left out): it starts to fall at once.
+    /// Only for a weapon with a `splash_radius`, and below it.
+    #[serde(default)]
+    pub splash_inner: Decimal,
+    /// Whether the splash also hurts the units of the shooter's own player
+    /// (WP5.3). The default is true, as in a classic RTS; false spares them.
+    /// The direct victim is hurt whoever it belongs to. Only for a weapon with
+    /// a `splash_radius`.
+    #[serde(default = "default_friendly_fire")]
+    pub friendly_fire: bool,
     /// Speed of the projectile in cells per game second (WP5.2). Left out or
     /// zero: not given. Not for an `Instant` weapon.
     #[serde(default)]
@@ -185,6 +201,7 @@ pub(crate) fn parse(
                 w.splash_radius
             )));
         }
+        check_splash(w, &here)?;
         match w.reload.to_ticks() {
             None if w.reload.is_negative() => {
                 return Err(here(format!(
@@ -250,6 +267,37 @@ pub(crate) fn parse(
     )?;
     weapons.sort_by_key(|w| w.kind);
     Ok((weapons, file.retired_weapons))
+}
+
+/// The splash (WP5.3): the full-damage radius lies inside the radius, and neither it nor the
+/// friendly-fire flag is given to a weapon that has no splash.
+fn check_splash(w: &WeaponDef, here: &dyn Fn(String) -> DefError) -> Result<(), DefError> {
+    if w.splash_inner.is_negative() {
+        return Err(here(format!(
+            "splash_inner {} must be 0 or more",
+            w.splash_inner
+        )));
+    }
+    if w.splash_radius.is_zero() {
+        if !w.splash_inner.is_zero() {
+            return Err(here(format!(
+                "splash_inner {} is for weapons with a splash_radius",
+                w.splash_inner
+            )));
+        }
+        if !w.friendly_fire {
+            return Err(here(
+                "friendly_fire: false is for weapons with a splash_radius (a direct hit has no side to spare)"
+                    .into(),
+            ));
+        }
+    } else if w.splash_inner >= w.splash_radius {
+        return Err(here(format!(
+            "splash_inner {} must be below the splash_radius {}",
+            w.splash_inner, w.splash_radius
+        )));
+    }
+    Ok(())
 }
 
 /// The burst: its length, the delay between the shots, and that the reload is

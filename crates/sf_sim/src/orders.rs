@@ -125,7 +125,7 @@ use crate::movement::Ground;
 use crate::path::{Aim, Pathing, Steer};
 use crate::turning::{self, Turning};
 use crate::turret;
-use crate::units::{UnitClass, UnitTable};
+use crate::units::{UnitClass, UnitStats, UnitTable};
 use crate::world::mix64;
 
 /// How many orders wait behind the current one. A queue append beyond it is
@@ -337,7 +337,11 @@ pub(crate) fn radius_of(e: &Entities, j: usize, units: &UnitTable) -> Fx {
             Fx::HALF
         };
     }
-    let stats = units.at(e.def[j] as usize);
+    radius_of_stats(units.at(e.def[j] as usize))
+}
+
+/// [`radius_of`] for a unit kind: half the `size`, for a structure the shorter half side.
+pub(crate) fn radius_of_stats(stats: &UnitStats) -> Fx {
     match (stats.class(), stats.footprint) {
         (UnitClass::Structure, Some(fp)) => Fx::from_ratio(i64::from(fp.width.min(fp.height)), 2),
         _ => stats.size.div_int(2),

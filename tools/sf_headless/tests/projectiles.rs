@@ -1,8 +1,8 @@
 //! The `projectiles` scenario (WP5.2, `docs/rules/projectiles.md`) and the shipped weapons: a weapon
 //! whose projectile is not `Instant` launches a projectile that flies and goes off, and the hit points
 //! come off then. Asserted along the scenario's groups: a straight shell's flight is the distance over
-//! the speed, an arcing shell lands where the target stood (a miss on a walking target, a hit on a
-//! standing one), a guided rocket hits a zigzagging transport, a falling bomb takes the drop's time and
+//! the speed, an arcing shell lands where the target stood (a walking target escapes the direct hit
+//! but not the splash), a guided rocket hits a zigzagging transport, a falling bomb takes the drop's time and
 //! can be walked out from under, a shell in the air lands when its shooter has been shot down, and two
 //! rocket throwers shoot each other down on the same tick. The second half of the file runs the
 //! **shipped** definitions (`assets/config`): every weapon that flies hits a standing target at its full
@@ -182,32 +182,26 @@ fn a_straight_shell_takes_the_distance_over_the_speed_to_arrive() {
 }
 
 #[test]
-fn an_arcing_shell_lands_where_the_target_stood_and_misses_one_that_is_walking() {
+fn an_arcing_shell_lands_where_the_walking_target_stood_and_its_splash_still_hurts_it() {
     let r = run();
     let shells = pairs(&r, AB);
-    assert_eq!(shells.len(), 3);
+    // One shell: its splash kills the scout, so the howitzer has nothing left to fire at.
+    assert_eq!(shells.len(), 1);
+    assert_eq!(r.shots_by(AB).len(), 1);
     let speed = r.speed_of(HOWITZER);
-    for (f, i) in &shells {
-        // It lands at the aim point, after the ground distance over the speed.
-        assert_eq!(i.at, f.target, "{f:?}");
-        let d = (f.target - f.shooter).length();
-        assert_eq!(i.tick.0 - f.shot.tick.0, ticks_to_cover(d, speed), "{f:?}");
-        assert_eq!(i.cause, ImpactCause::Arrived);
-    }
-    // The first two were fired at a scout on the move and land where it was: nothing there.
-    for (f, i) in &shells[..2] {
-        assert!(f.target_moving, "{f:?}");
-        assert_eq!((i.victim, i.damage), (None, 0), "{i:?}");
-        let scout_then = r.world.get(SB).unwrap().pos;
-        assert_ne!(i.at, scout_then);
-    }
-    // The third is fired when the scout has stopped, and kills it (90 against 25).
-    let (f, i) = &shells[2];
-    assert!(!f.target_moving);
-    assert_eq!((i.victim, i.hp_after), (Some(SB), 0));
+    let (f, i) = &shells[0];
+    // It lands at the aim point, after the ground distance over the speed.
+    assert_eq!(i.at, f.target, "{f:?}");
+    let d = (f.target - f.shooter).length();
+    assert_eq!(i.tick.0 - f.shot.tick.0, ticks_to_cover(d, speed), "{f:?}");
+    assert_eq!(i.cause, ImpactCause::Arrived);
+    // It was fired at a scout on the move and lands where the scout was: no direct hit ...
+    assert!(f.target_moving, "{f:?}");
+    assert_eq!((i.victim, i.damage), (None, 0), "{i:?}");
+    assert_ne!(i.at, r.world.get(SB).unwrap().pos);
+    // ... but the scout is still within the splash (1.5 cells) and the splash kills it (25 hp).
+    assert_eq!(i.splash_victims, 1, "{i:?}");
     assert_eq!(r.hp(SB), 0);
-    // The scout is down, so the howitzer fires no more.
-    assert_eq!(r.shots_by(AB).len(), 3);
 }
 
 #[test]

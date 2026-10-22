@@ -871,7 +871,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 and WP5.2 are in; WP5.3 to WP5.6 are not started.
+Status: WP5.1 to WP5.3 are in; WP5.4 to WP5.6 are not started.
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -884,6 +884,13 @@ Status: WP5.1 and WP5.2 are in; WP5.3 to WP5.6 are not started.
   the tick, written down; `Snapshot::projectiles()`; checksum section `J`; `Shot::hp_after` fixed to the end of
   the tick; the rocket tuned; the `projectiles` scenario; `weapons_reload` re-pinned; no other pinned checksum
   moved), `docs/rules/projectiles.md`, `docs/rules/weapons.md`: done
+- WP5.3 Armor table and splash damage (the damage-times-armor table in percent in `unit_classes.ron`, complete
+  or refused, optional for the frozen copies; one rounding, to the nearest, a tie up, at least one hit point
+  unless the percentage is zero; splash with a full-strength radius and a straight falloff measured from the
+  edge of a body, found through the crowd pass's spatial index; the direct victim hurt once; friendly fire a
+  flag of the weapon, on by default; the weapon table's digest covers all of it; the `armour_splash`
+  scenario; `weapons_reload` and `projectiles` re-pinned with the measured cause; no other pinned checksum
+  moved), `docs/rules/armour.md`, `docs/rules/weapons.md`: done
 
 ### WP5.1 notes
 
@@ -1080,6 +1087,95 @@ reaches it.
 9. **A projectile store cap:** none. The number in the air is bounded by the weapon slots times flight over
    reload; if a game ever shows more than a few thousand, add a limit with an order-independent rule.
 
+### WP5.3 notes
+
+**Design (more in `docs/rules/armour.md`).** The armor type of a unit was data since WP3.1 (`armor:` in
+`unit_defs.ron`, five types: none, infantry, light, heavy, structure); WP5.3 kept the set and added the table.
+`unit_classes.ron` has an optional `armor_table`: one row per damage type, a percent (0 to 400) for every armor
+type, complete or refused with the file and line (every refusal has a test in `crates/sf_data/tests/armor.rs`;
+the simulation's `ArmorTable::new` checks it again). `sf_sim::ArmorTable` also carries the armor type of every
+unit kind, so `UnitStats` and the unit table's digests (pinned by earlier scenarios) stay as they were; it rides
+inside `WeaponTable` (`with_armor`), and `Arsenal::new` refuses a table that misses a unit kind of the world or
+lists one it does not have. `weapons::damage_of` is the hook WP5.2 left: the direct victim takes `damage` times
+its armor's percentage; with a `splash_radius` everyone else with hit points whose **edge** is nearer than the
+radius takes the falloff too (one up to `splash_inner`, then a straight line to zero at the radius). The
+spatial query uses the crowd pass's `Index` (made `pub(crate)`, with a generic `build_with` and a rectangle
+query `in_rect`; `build` is the same loop as before, via the closure), built from everything that can be
+hurt, only on a tick with a splash, buckets of four cells; the damage it makes is summed per victim, so no
+outcome depends on its order.
+
+**Decisions.**
+- *Direct hit and splash:* the direct victim is hurt **once**, at full strength (armor only); the splash is for
+  everyone else. Otherwise the middle of every burst would do twice the damage of the data.
+- *Friendly fire:* on by default (a classic RTS), a per-weapon flag `friendly_fire: false` spares the shooter's
+  own player (the shooter included); the direct victim is always hurt. No alliances exist yet: own side is the
+  same player.
+- *The shooter:* no exception; in its own blast it is hurt (unless the weapon is careful).
+- *Rounding:* one exact fraction of integers (`damage * percent / 100 * num / den`, `u128`), rounded **once**
+  to the nearest hit point, a tie going up. No intermediate rounding, so a splash on armor is not rounded twice.
+- *Minimum damage:* a hit with a positive damage, percentage and falloff does **at least 1**; a percentage of
+  0 is immunity and does nothing (the sniper against a tank); the edge of the radius (falloff 0) is not touched.
+- *All three causes burst* (proximity, arrival, fuse): an explosion explodes; so a shell that lands where its
+  walking target stood now hurts whatever is near, which is what makes an artillery near miss matter.
+- *Structures* are a disc of their shorter half side (the radius a range is measured to); the far corners of a
+  big building are not reached by a splash that would just reach them. Written down as not here.
+
+**Checksums (measured, not guessed).** The digest of the weapon table (the first thing section `W` hashes,
+tag now `sf_sim/weapons/v2`) covers `splash_inner`, `friendly_fire` and the armor table; the unit table's
+digests are untouched. `wander_5000` 0x38d5e3c43358a889, `command_mix` 0x43f6583004258ceb, `terrain_256`
+0xb577112845e0097e, `units_spawn` 0x6c369f42be150d6e, `bridge_200` 0x03971fcc3548fc0c and `orders`,
+`terrain_costs`, `pathing`, `pathing_256`, `crowd_jam`, `turning`, `replan`, `formation_move` are the values
+they were (no weapon table, so no weapons section). Two re-pins, each measured with temporary probes
+(removed again) that put the old digest layout and the old behaviour back one at a time, all checkpoints 20
+ticks apart:
+- **`weapons_reload` 0x20a067e16e098d0b to 0x59d08622efd30483: the new digest layout only.** The old code
+  (no splash, no armor, old digest) reproduces the old pin; the new code with the old digest layout gives the
+  old value at all 30 checkpoints. Its frozen definitions have no armor table (every hit is 100 percent) and
+  the howitzers' splash of 1.5 hurt nobody in that run. The frozen copy is untouched.
+- **`projectiles` 0x770192e1d2d6da1c to 0xd9912751868da230: the digest layout, and a real change of the
+  run.** The frozen definitions are untouched (review round 1 put back an edit that had taken the
+  howitzer's `splash_radius: 1.5` out). That splash was inert before and is real now: the first shell, which
+  lands where the walking scout stood (impact at tick 31; the first checkpoint that differs is tick 40),
+  misses the direct hit, but the scout is inside the splash and dies of it (25 hit points), so the howitzer
+  fires once instead of three times. The new code with the old digest layout ends on 0x99d52b29b228098c (the
+  run's change alone); with the new layout on 0xd9912751868da230. `tests/projectiles.rs` asserts the miss of
+  the direct hit, `splash_victims` 1 and the dead scout. The splash itself is shown in full by the new scenario.
+No armor change reached either scenario: both freeze definitions that have no `armor_table`.
+
+**`armour_splash`** (`assets/scenarios/armour_splash.ron`, frozen definitions in `armour_splash_defs/`: the
+shipped set of WP5.3 plus two bombs and their bomb teams, kinds 15, 16, 90 and 91; 64 x 64 cells, 600 ticks,
+`combat: true`; 36 entities). Final checksum `0x1f1adf3b2177358f`. By hand and asserted in
+`tools/sf_headless/tests/armour_splash.rs`: a rifleman does 1 a shot to a heavy tank (10 percent of 6 is 3/5),
+2 to a light one (40 percent), 6 to a rifleman (9 shots kill 50 hit points: 8 * 6 + 2); a rocket does 59 to a
+light tank (130 percent of 45 is 58.5, a tie up; 7 rockets), 45 to a heavy one, 18 to a rifleman (3 rockets);
+the sniper does nothing to a heavy tank (10 shots, 900 hit points to the end) and kills a rocket thrower in 2.
+One howitzer shell (90, radius 1.5, full to 0.5) into a crowd: the target 90; a rifleman a cell off loses all 50
+(63 by hand, falloff 7/10); a light tank a cell off 68 (75 percent of 90, a tie up); a heavy tank two cells off 11 (50
+percent of 90 at a quarter); a generator a cell off 135 (150 percent); a rocket thrower two cells off
+untouched; a rifleman of the *shooter's* side a cell off dead (friendly fire); five hurt besides the target,
+`Impact::splash_victims` 5. A bomb (60, radius 2, full to 1) on a heavy tank: 30 direct, a friendly rifleman a
+cell off 60 (dead), an enemy two cells off 12; the same with `careful_bomb` spares the friend. A bomb team that
+bombs an enemy next to it is in its own blast and dies with the target; the careful one lives.
+
+**Tests.** `crates/sf_sim/src/armor/tests.rs` (the table, every refusal, the arithmetic);
+`crates/sf_sim/tests/armor.rs` (24 tests: hand-worked blast with a wall and the radius itself, the minimum, a
+world without a table, friendly fire, the shooter in its own blast, the spatial query against a plain scan
+over ~80 units across bucket borders, and order independence **in every spawn order**: overlapping splashes
+that add up, a mutual kill by splash alone, a splash that hits its own shooter, bombs that land together on a
+bucket corner; all compared by position); `crates/sf_data/tests/armor.rs` (20 tests: the shipped table, a file
+without one, the frozen copies, each way the table or the splash fields can be wrong with message and line);
+`crates/sf_bridge` (the table arrives; definitions without one give a table without one).
+`a_new_weapon_damage_type_and_movement_class_are_data_too` (`crates/sf_data/tests/units.rs`) now adds the new
+damage type's row to the armor table as well, since a table that is there has to be complete.
+
+**Deferred.**
+1. Steps instead of a straight falloff (a list of radii and percentages), if a weapon needs it.
+2. A splash that stops at walls or reaches the far corners of a big structure (a structure is a disc of its
+   shorter half side); alliances for `friendly_fire`; kill credit and destruction (WP5.5, settled from the set
+   of the tick's hits); choosing targets (WP5.4); `sf_game` still gives its world no weapon table.
+3. The cost of the splash index is not benchmarked on its own: it is built once on a tick with a splash, an
+   `O(entities)` counting sort, and not at all on a tick without one.
+
 ## Phase 1 report (draft, WP1.14)
 
 Phase 1 delivers the engine. `sf_engine` runs the window and a fixed 20 Hz
@@ -1193,7 +1289,8 @@ stays that structure). The six that still fail are left out, not edited.
 
 **Left out (6 of 200), findings for the producer.**
 - `neutral_wreck_light`, `_medium`, `_heavy`, `_boat`: no empty `fx_smoke_*` / `fx_fire_*` nodes (the
-  delivery README says the wrecks have them). The v3 wrecks stay in `assets/set_v3`.
+  delivery README says the wrecks have them). The v3 wrecks stay in `assets/set_v3`, but they fail
+  `sf_asset_check` as well: their LOD2 lacks the `debris` and `scorch` nodes.
 - `veyran_heavy_gun_team`: five parts in one level (the engine takes four) and none of the infantry
   nodes (`torso`, `head`, ...), 4.4 m wide and 1.6 m high, so it is not upright infantry either.
   The role stays a primitive (no v3 model either).
@@ -1225,7 +1322,8 @@ wired"): 18 roles of both factions with a model per faction, 22 with one file; d
 on set v3, heavy_gun_team on its primitive, supply_truck on `testpack_v1`. The roster tests that
 assumed shared files or primitives were adapted, and `built_with` in `roster.rs` makes the
 shared-file case (two roles, one file, two icons) testable with the shipped definitions. Set v3
-stays in the repo: `demolition_team` and the v3 wrecks and decor still use it and its tests pin it.
+stays in the repo: `demolition_team` and the v3 wrecks and decor still use it and its tests pin it (the v3 wrecks fail
+`sf_asset_check` too: LOD2 lacks `debris` and `scorch`).
 `sf_sim` is untouched, no checksum moved (presentation only).
 
 **Seen in the game (`docs/screenshots/set_v4/`).** Both factions, in the sandbox with
@@ -1309,12 +1407,14 @@ fixed, delete the entry in the same PR.
 24. **Art set v3.** Seven of 30 models fail `sf_asset_check` (list in PR #42): owner Tijmen,
     in the next delivery or by deciding on a rule exception (rocks sunk on purpose). The
     delivery's licence text ("eigen werk, vrij te gebruiken in Staalfront") is not an SPDX
-    licence: confirm a precise one before any release (phase 16).
+    licence: resolved, Tijmen set the project licence for sets v3 and v4 on 22-10-2026
+    (`assets/LICENSES.md`).
 25. **Models not wired.** Decor (trees, rocks, ore stages) and wrecks are not unit roles and
     have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); the vehicles and
     buildings are wired to set v4 (see "Art set v4" above). Still open there: the damage and
     construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
-    names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay).
+    names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay, but
+    fail the checker as well: LOD2 lacks `debris` and `scorch`).
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
@@ -1326,13 +1426,9 @@ fixed, delete the entry in the same PR.
     before their tick, so the queue is empty whenever a checksum is taken; (b) leave the pending
     commands out of the checksum (moves every pinned checksum that has commands waiting at a tick
     end). Decide before WP14.1; see `docs/architecture.md` section 18.
-28. **Tijmen must set the licence of set v4 before any release.** The delivery says "licentie nog
-    vast te leggen door projecteigenaar" on every line (procedural geometry made by "Copilot" at the
-    user's request, Python and NumPy, no external meshes or textures); `assets/LICENSES.md` has one
-    line per file saying "Not set". Until it is, `assets/set_v4` (and the contact sheet in
-    `docs/screenshots/set_v4/`) is for development only. Set v3's "own work, free to use in
-    Staalfront" (item 24) is not an SPDX licence either: decide both together (for example CC0 or
-    the project licence), then replace the lines.
+28. **`crowd_perf.rs::two_thousand_colliding_units_run_at_a_bounded_cost` is a wall-clock bound** (the slowest
+    tick in a release build must be under 50 ms) and it failed 1 time in 3 on a loaded machine (103 ms and
+    58.9 ms); CI is green, but the bound is load-sensitive. Not relaxed; count the work instead of the clock.
 29. **Art set v4 findings to hand to the producer** (details and file names in "Art set v4"
     above): four wrecks without `fx` nodes, `heavy_gun_team` and `demolition_team` (parts and
     nodes), emissive `lamp` material, diagonal team triangles, copied levels of detail, vessels on

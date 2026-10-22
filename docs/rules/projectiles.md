@@ -55,7 +55,8 @@ the target, the shell goes off at the aim point (**arrived**) and hits nobody.
   (a test uses two fifths of a cell a tick over eight cells) is not. A target that walks *into* the path is hit
   sooner.
 * Only the target can be hit. A unit that happens to stand in the path is not (no friendly fire, no body
-  blocking: neither is a rule of this work package). Armor and splash are WP5.3.
+  blocking: neither is a rule of this work package). Armor and splash (WP5.3) are in [`armour.md`](armour.md): the
+  target's armor decides how much of the damage it takes, and the shell's burst also hurts what stands near it.
 * Flight time: the shell covers the distance less the target's reach, so it is `ceil((distance - reach) / speed)`
   ticks, which is within a tick or two of the plain `distance / speed` (the light tank's shell on a heavy tank at
   the weapon's range: 4 ticks by the formula, 4 by the quotient). The tests assert the formula exactly and the
@@ -74,7 +75,8 @@ On landing the target is hit if it is alive, can be hurt, and the landing point 
 plus `HIT_SLACK`) of its middle. So an arc **can miss a moving target**, and the miss is the normal thing for a
 walking one: the howitzer's shell takes 15 ticks over ten cells, in which a scout (1.3 cells a second) walks
 about a cell, more than its reach of 0.45. A target that has only walked a little (less than its reach) is
-still hit. Splash (WP5.3) is what will make the near misses of an artillery shell matter.
+still hit. Splash (WP5.3) is what makes the near misses of an artillery shell matter: a shell that lands where
+the walker stood hurts whatever is within its radius of the landing point.
 
 ### Guided
 
@@ -124,16 +126,17 @@ lands on a unit another shell shot down to zero in an earlier tick finds it at z
 that would be over is not counted); a shell that lands in the same tick as the shot that brings it to zero is
 decided from the same start-of-tick hit points and **counts**, whatever the order of the slots.
 
-## What a detonation does: the hook for WP5.3
+## What a detonation does (the hook, filled in by WP5.3)
 
-`weapons::damage_of(hit, weapon, out)` is the one function that turns a detonation (or an instant hit, which
-is a detonation at the target) into damage. Today it pushes `(victim slot, weapon damage)` for the direct
-victim. WP5.3 changes this function and nothing around it: the damage goes through the armor table
-(`damage_type` times the victim's armor) and everyone within `splash_radius` of the detonation point is pushed
-too, with the falloff. It must read the state of the start of the tick only; whatever it pushes is summed per
-victim afterwards, so the order it pushes in does not matter. The detonation point (`Hit::at`, `Impact::at`) is
+`weapons::damage_of` is the one function that turns a detonation (or an instant hit, which is a detonation
+at the target) into damage. Until WP5.2 it pushed `(victim slot, weapon damage)` for the direct victim. Since
+WP5.3 it pushes the direct victim's damage through the armor table (`damage_type` times the victim's armor),
+and everyone else within `splash_radius` of the detonation point too, with the falloff; nothing around it
+changed. It reads the state of the start of the tick only; whatever it pushes is summed per victim
+afterwards, so the order it pushes in does not matter. The detonation point (`Hit::at`, `Impact::at`) is
 where the splash is centred: the aim point for an arrival, and the point of the step nearest the target for a
-proximity hit.
+proximity hit. A fuse that runs out bursts too, where the projectile is. The rules are in
+[`armour.md`](armour.md).
 
 ## Order independence
 
@@ -230,7 +233,7 @@ sees to it). `weapons_defs` (WP5.1) has the speeds already; `projectiles_defs` i
 
 * Firing at the ground, and any way for a structure to choose a target: WP5.4 (a projectile already has a
   ground-point target: a guided one whose target died is one).
-* Armor, splash, damage types: WP5.3 (the hook above).
+* Armor, splash, damage types: done in WP5.3 ([`armour.md`](armour.md)).
 * A destroyed unit leaving the world, kill credit: WP5.5 (see the `hp_after` note).
 * Drawing projectiles, muzzle flashes, explosions: WP5.6 (the snapshot is ready).
 * Projectiles hitting what is in the way (a wall, a friendly unit), line of sight, terrain height: later.

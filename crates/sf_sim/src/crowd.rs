@@ -604,7 +604,7 @@ fn distance_between(ra: Fx, small_a: bool, rb: Fx, small_b: bool) -> Fx {
 /// bucket, in slot order, so what a bucket holds is ascending and the same on every
 /// machine. Fixed arrays, rebuilt before each pass.
 #[derive(Clone, Debug, Default)]
-struct Index {
+pub(crate) struct Index {
     /// Cells to a bucket side.
     side: i64,
     across: u32,
@@ -623,11 +623,11 @@ struct Index {
 /// A body as the index holds it: its slot, its position and what its distance to
 /// another body depends on.
 #[derive(Copy, Clone, Debug)]
-struct Near {
-    id: u32,
+pub(crate) struct Near {
+    pub(crate) id: u32,
     small: bool,
-    radius: Fx,
-    at: Vec2,
+    pub(crate) radius: Fx,
+    pub(crate) at: Vec2,
 }
 
 impl Near {
@@ -640,7 +640,7 @@ impl Near {
 }
 
 impl Index {
-    fn configure(&mut self, side: i64, width: u32, height: u32) {
+    pub(crate) fn configure(&mut self, side: i64, width: u32, height: u32) {
         self.side = side.max(1);
         self.across = (i64::from(width) / self.side + 1) as u32;
         self.down = (i64::from(height) / self.side + 1) as u32;
@@ -656,10 +656,26 @@ impl Index {
     }
 
     fn build(&mut self, e: &Entities, bodies: &[Body]) {
+        self.build_with(e, bodies.len(), |i| {
+            let b = &bodies[i];
+            (b.role != Role::None).then_some((b.small, b.radius))
+        });
+    }
+
+    /// Fills the index with the entities `0..slots` for which `body` gives `(small, radius)`: a
+    /// counting sort by bucket in slot order. The crowd pass builds it from its bodies; the weapons
+    /// (WP5.3) build one of their own from whatever can be hurt, for the radius query of a splash.
+    #[inline(always)]
+    pub(crate) fn build_with(
+        &mut self,
+        e: &Entities,
+        slots: usize,
+        body: impl Fn(usize) -> Option<(bool, Fx)>,
+    ) {
         self.start.iter_mut().for_each(|c| *c = 0);
         let mut count = 0;
-        for (i, b) in bodies.iter().enumerate() {
-            if b.role != Role::None {
+        for i in 0..slots {
+            if body(i).is_some() {
                 let (bx, by) = self.bucket(e.pos[i]);
                 self.start[(by * self.across + bx) as usize + 1] += 1;
                 count += 1;
@@ -674,21 +690,36 @@ impl Index {
         self.items.resize(count, 0);
         self.packed.clear();
         self.packed.resize(count, Near::EMPTY);
-        for (i, b) in bodies.iter().enumerate() {
-            if b.role != Role::None {
+        for i in 0..slots {
+            if let Some((small, radius)) = body(i) {
                 let (bx, by) = self.bucket(e.pos[i]);
                 let at = (by * self.across + bx) as usize;
                 let place = self.fill[at] as usize;
                 self.items[place] = i as u32;
                 self.packed[place] = Near {
                     id: i as u32,
-                    small: b.small,
-                    radius: b.radius,
+                    small,
+                    radius,
                     at: e.pos[i],
                 };
                 self.fill[at] += 1;
             }
         }
+    }
+
+    /// Everything in the buckets that the rectangle from `lo` to `hi` touches, as one stretch for
+    /// each row of buckets and ascending within a bucket. It holds every body whose middle lies in
+    /// the rectangle, and more: the caller tests the distance. The order depends on the layout of
+    /// the buckets, not on the slots, so a caller that must not depend on it sums what it finds.
+    pub(crate) fn in_rect(&self, lo: Vec2, hi: Vec2) -> impl Iterator<Item = &[Near]> + '_ {
+        let (x0, y0) = self.bucket(lo);
+        let (x1, y1) = self.bucket(hi);
+        (y0..=y1).map(move |y| {
+            let row = (y * self.across) as usize;
+            let from = self.start[row + x0 as usize] as usize;
+            let to = self.start[row + x1 as usize + 1] as usize;
+            &self.packed[from..to]
+        })
     }
 
     /// The participants in the nine buckets round `p`, as up to three stretches, one for

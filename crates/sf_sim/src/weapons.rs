@@ -34,9 +34,10 @@
 //! # A tick of shooting, in two passes
 //!
 //! Since WP5.2 a weapon either hits at once (`Instant`) or launches a projectile that flies and
-//! detonates later ([`crate::projectiles`]). Armor and splash (WP5.3) and choosing targets (WP5.4) are
-//! still to come, so what a hit does is the plainest thing: it takes the weapon's `damage` off the
-//! one victim.
+//! detonates later ([`crate::projectiles`]). Since WP5.3 what a hit does is [`damage_of`]: the weapon's
+//! `damage` goes through the armor table ([`crate::armor`]) for the victim it hit, and a weapon with a
+//! splash radius also hurts everything else near the detonation, less the farther out it stands
+//! (`docs/rules/armour.md`). Choosing targets is still to come (WP5.4).
 //!
 //! A tick of weapons runs in two passes, and **no hit point changes in the first**:
 //!
@@ -45,8 +46,9 @@
 //!   down and decides whether it fires: an `Instant` weapon decides a hit, any other launches a
 //!   projectile. Every decision reads the hit points and positions of the start of the weapon stage.
 //! * *Apply.* Every hit of the tick, the instant ones and the detonations, is turned into damage by
-//!   [`damage_of`], summed **per victim**, and taken off its hit points once, saturating at zero.
-//!   Detonated projectiles are removed and the new ones enter the store.
+//!   [`damage_of`] (the direct victim and everyone in a splash), summed **per victim**, and taken off its
+//!   hit points once, saturating at zero. Detonated projectiles are removed and the new ones enter the
+//!   store.
 //!
 //! So the outcome of a tick does not depend on the order of the entities or of the projectiles: two
 //! units that kill each other both die, two shooters that overkill one victim both fire and both spend
@@ -66,9 +68,11 @@ use core::fmt;
 use sf_math::hash::Fnv1a64;
 use sf_math::{Fx, Vec2};
 
+use crate::armor::{ArmorTable, scaled_damage};
+use crate::crowd::Index;
 use crate::entities::{Entities, NO_DEF};
-use crate::ids::{EntityId, Kind, Tick};
-use crate::orders::{Order, live_slot, radius_of};
+use crate::ids::{EntityId, Kind, PlayerId, Tick};
+use crate::orders::{Order, live_slot, radius_of, radius_of_stats};
 use crate::projectiles::{self, ImpactCause, Projectile, Projectiles};
 use crate::units::UnitTable;
 
@@ -76,7 +80,10 @@ use crate::units::UnitTable;
 pub const MAX_WEAPON_SLOTS: usize = 4;
 
 /// Written first into the digest; bump when its layout changes.
-const DIGEST_TAG: &[u8] = b"sf_sim/weapons/v1";
+const DIGEST_TAG: &[u8] = b"sf_sim/weapons/v2";
+
+/// Cells to a bucket of the index a splash looks its victims up in.
+const SPLASH_BUCKET: i64 = 4;
 
 /// The widest firing arc: half a turn to either side is all round.
 pub const ALL_ROUND: u8 = 128;
@@ -139,8 +146,16 @@ pub struct WeaponStats {
     pub flight_height: Fx,
     /// Facing steps (of 256) per tick a guided projectile steers; zero for none.
     pub guide_turn_per_tick: u8,
-    /// Radius in cells in which a hit also damages (WP5.3); zero for none.
+    /// Radius in cells in which a detonation also hurts what is near it (WP5.3); zero for none. Measured
+    /// from the point where it goes off to the **edge** of the victim.
     pub splash_radius: Fx,
+    /// Inside this distance from the edge of a victim the splash does its full damage; from there it falls
+    /// away in a straight line to nothing at `splash_radius`. Zero: it starts to fall at once. Below
+    /// `splash_radius` (and zero when that is zero).
+    pub splash_inner: Fx,
+    /// Whether the splash hurts the shooter's own player's units too. The direct victim is hurt whoever
+    /// it belongs to.
+    pub friendly_fire: bool,
     /// What it aims with.
     pub mount: Mount,
     /// Half the width of the firing arc in facing steps (of 256), at most [`ALL_ROUND`].
@@ -177,6 +192,9 @@ pub enum WeaponsError {
     BadBurst(u16),
     /// A firing arc is above half a turn.
     BadArc(u16),
+    /// A full-damage splash radius that is negative, or not below the splash radius (or given without
+    /// one).
+    BadSplash(u16),
     /// A projectile that flies (any kind but `Instant`) has no speed.
     NoSpeed(u16),
     /// A falling projectile has no height to drop from.
@@ -192,8 +210,18 @@ pub enum WeaponsError {
         /// The weapon kind.
         weapon: u16,
     },
-    /// A loadout is for a unit kind the world's unit table does not have.
+    /// A loadout, or an entry of the armor table, is for a unit kind the world's unit table does not
+    /// have.
     UnknownUnit(Kind),
+    /// A weapon's damage type is not in the armor table.
+    UnknownDamageType {
+        /// The weapon kind.
+        weapon: u16,
+        /// The damage type.
+        damage_type: u16,
+    },
+    /// The armor table gives no armor type to a unit kind of the unit table.
+    NoArmor(Kind),
     /// The range of the first weapon of a unit is not the `weapon_range` of its stats.
     ReachMismatch(Kind),
     /// A turret-mounted weapon on a unit kind without a turret.
@@ -213,6 +241,20 @@ impl fmt::Display for WeaponsError {
             WeaponsError::NoReload(k) => write!(f, "weapon {k} has a reload of zero ticks"),
             WeaponsError::BadBurst(k) => write!(f, "weapon {k} has a burst that does not fit"),
             WeaponsError::BadArc(k) => write!(f, "weapon {k} has a firing arc above half a turn"),
+            WeaponsError::BadSplash(k) => write!(
+                f,
+                "weapon {k} has a full-damage splash radius that is not below its splash radius"
+            ),
+            WeaponsError::UnknownDamageType {
+                weapon,
+                damage_type,
+            } => write!(
+                f,
+                "weapon {weapon} has damage type {damage_type}, which the armor table lacks"
+            ),
+            WeaponsError::NoArmor(k) => {
+                write!(f, "unit kind {} has no armor type in the armor table", k.0)
+            }
             WeaponsError::NoSpeed(k) => {
                 write!(f, "weapon {k} has a projectile that flies but no speed")
             }
@@ -234,7 +276,7 @@ impl fmt::Display for WeaponsError {
             WeaponsError::UnknownUnit(k) => {
                 write!(
                     f,
-                    "a loadout is for kind {}, which the unit table lacks",
+                    "a loadout or an armor entry is for kind {}, which the unit table lacks",
                     k.0
                 )
             }
@@ -261,6 +303,8 @@ pub struct WeaponTable {
     weapons: Vec<WeaponStats>,
     /// Sorted by unit kind.
     loadouts: Vec<Loadout>,
+    /// Damage times armor, as percentages (WP5.3); `None` takes every hit at one hundred percent.
+    armor: Option<ArmorTable>,
     /// Hash of everything above; zero when empty.
     digest: u64,
 }
@@ -270,6 +314,7 @@ impl fmt::Debug for WeaponTable {
         f.debug_struct("WeaponTable")
             .field("weapons", &self.weapons.len())
             .field("armed_kinds", &self.loadouts.len())
+            .field("armor", &self.armor.is_some())
             .field("digest", &format_args!("{:#018x}", self.digest))
             .finish()
     }
@@ -311,6 +356,12 @@ impl WeaponTable {
             if w.fire_arc > ALL_ROUND {
                 return Err(WeaponsError::BadArc(k));
             }
+            if w.splash_radius.is_negative()
+                || w.splash_inner.is_negative()
+                || (w.splash_inner >= w.splash_radius && !w.splash_inner.is_zero())
+            {
+                return Err(WeaponsError::BadSplash(k));
+            }
             if w.projectile != ProjectileKind::Instant && w.projectile_speed_per_tick <= Fx::ZERO {
                 return Err(WeaponsError::NoSpeed(k));
             }
@@ -339,13 +390,37 @@ impl WeaponTable {
         let digest = if weapons.is_empty() && loadouts.is_empty() {
             0
         } else {
-            digest_of(&weapons, &loadouts)
+            digest_of(&weapons, &loadouts, None)
         };
         Ok(WeaponTable {
             weapons,
             loadouts,
+            armor: None,
             digest,
         })
+    }
+
+    /// The same table with an armor table (WP5.3): every hit then takes the percentage of its damage
+    /// type against the victim's armor type. Every weapon's damage type has to be in the armor table.
+    /// (That every unit kind of the world has an armor type is checked when the world is given the
+    /// table, which knows the unit table.)
+    pub fn with_armor(mut self, armor: ArmorTable) -> Result<WeaponTable, WeaponsError> {
+        for w in &self.weapons {
+            if armor.damage_types().binary_search(&w.damage_type).is_err() {
+                return Err(WeaponsError::UnknownDamageType {
+                    weapon: w.kind,
+                    damage_type: w.damage_type,
+                });
+            }
+        }
+        self.digest = digest_of(&self.weapons, &self.loadouts, Some(&armor));
+        self.armor = Some(armor);
+        Ok(self)
+    }
+
+    /// The armor table, if the table has one.
+    pub fn armor(&self) -> Option<&ArmorTable> {
+        self.armor.as_ref()
     }
 
     /// True if there are no weapons and no loadouts.
@@ -382,7 +457,7 @@ impl WeaponTable {
     }
 }
 
-fn digest_of(weapons: &[WeaponStats], loadouts: &[Loadout]) -> u64 {
+fn digest_of(weapons: &[WeaponStats], loadouts: &[Loadout], armor: Option<&ArmorTable>) -> u64 {
     let mut h = Fnv1a64::new();
     h.write_bytes(DIGEST_TAG);
     h.write_u64(u64::try_from(weapons.len()).unwrap_or(u64::MAX));
@@ -406,6 +481,8 @@ fn digest_of(weapons: &[WeaponStats], loadouts: &[Loadout]) -> u64 {
         h.write_fx(w.flight_height);
         h.write_u8(w.guide_turn_per_tick);
         h.write_fx(w.splash_radius);
+        h.write_fx(w.splash_inner);
+        h.write_u8(u8::from(w.friendly_fire));
         h.write_u8(match w.mount {
             Mount::Hull => 0,
             Mount::Turret => 1,
@@ -418,6 +495,13 @@ fn digest_of(weapons: &[WeaponStats], loadouts: &[Loadout]) -> u64 {
         h.write_u8(l.weapons.len() as u8);
         for w in &l.weapons {
             h.write_bytes(&w.to_le_bytes());
+        }
+    }
+    match armor {
+        None => h.write_u8(0),
+        Some(armor) => {
+            h.write_u8(1);
+            h.write_u64(armor.digest());
         }
     }
     h.finish()
@@ -462,8 +546,9 @@ pub struct Shot {
     pub weapon: u16,
     /// Which weapon slot of the attacker fired.
     pub slot: u8,
-    /// The damage of the weapon, before it is taken off the target's hit points. For a projectile this is
-    /// what it will do if it hits, not what has been done.
+    /// The damage of the weapon, before the armor and before it is taken off the target's hit points. For a
+    /// projectile this is what it will do if it hits, not what has been done (see [`Impact::damage`] for
+    /// what a hit did after the armor).
     pub damage: u32,
     /// The target's hit points at the **end of the tick** of the shot: after every hit of that tick, from
     /// every shooter. All shots at one target in one tick report the same number, whatever the slots, so
@@ -491,11 +576,14 @@ pub struct Impact {
     pub at: Vec2,
     /// Why.
     pub cause: ImpactCause,
-    /// The entity it hit, if it hit one (a direct hit: splash is WP5.3).
+    /// The entity it hit, if it hit one (a direct hit; the splash around it is `splash_victims`).
     pub victim: Option<EntityId>,
-    /// The damage it did to the victim before the sum of the tick saturated at zero: the weapon's damage
-    /// for a hit, zero for a miss.
+    /// The damage it did to the direct victim **after the armor**, before the sum of the tick saturated
+    /// at zero: zero for a miss, and for a victim whose armor is immune to its damage type.
     pub damage: u32,
+    /// How many other entities its splash hurt (a victim that took nothing, because the falloff or
+    /// the armor made it zero, is not counted). Zero for a weapon without a splash.
+    pub splash_victims: u32,
     /// The victim's hit points at the **end of the tick** (zero if there is no victim). A report, with
     /// the same caveat as [`Shot::hp_after`]: not for kill credit.
     pub hp_after: u32,
@@ -510,6 +598,13 @@ pub(crate) struct Arsenal {
     /// Per position in the unit table: the index into `table.weapons` of each slot, or
     /// [`NONE`].
     by_def: Vec<[u16; MAX_WEAPON_SLOTS]>,
+    /// Per position in the unit table: the armor type of the kind, when the table has an armor table.
+    armor_of_def: Vec<Option<u16>>,
+    /// The widest radius of any unit kind that can be hurt: how far beyond the splash radius the middle of
+    /// a victim can lie while its edge is inside it.
+    widest: Fx,
+    /// Where the splash looks its victims up. Scratch, not state.
+    splash: SplashIndex,
     /// The projectiles in flight (WP5.2). State: hashed.
     pub projectiles: Projectiles,
     /// The shots of the last tick. Derived; not hashed.
@@ -517,6 +612,22 @@ pub(crate) struct Arsenal {
     /// The detonations of the last tick. Derived; not hashed.
     pub impacts: Vec<Impact>,
 }
+
+/// The spatial index of a splash's victims (the crowd pass's grid, built here from whatever can be hurt)
+/// with the map it was configured for. Scratch memory: two arsenals are equal whatever it holds.
+#[derive(Clone, Default)]
+struct SplashIndex {
+    index: Index,
+    map: Option<(u32, u32)>,
+}
+
+impl PartialEq for SplashIndex {
+    fn eq(&self, _: &SplashIndex) -> bool {
+        true
+    }
+}
+
+impl Eq for SplashIndex {}
 
 impl Arsenal {
     /// Checks `table` against the unit table and builds the lookup from unit-table position
@@ -555,9 +666,28 @@ impl Arsenal {
                 return Err(WeaponsError::ReachMismatch(units.at(def).kind));
             }
         }
+        let mut armor_of_def = vec![None; units.len()];
+        if let Some(armor) = &table.armor {
+            if let Some(kind) = armor.unit_kinds().find(|&k| units.index_of(k).is_none()) {
+                return Err(WeaponsError::UnknownUnit(kind));
+            }
+            for (def, slot) in armor_of_def.iter_mut().enumerate() {
+                let kind = units.at(def).kind;
+                *slot = Some(armor.armor_of(kind).ok_or(WeaponsError::NoArmor(kind))?);
+            }
+        }
+        let widest = (0..units.len())
+            .map(|def| units.at(def))
+            .filter(|stats| stats.hp > 0)
+            .map(radius_of_stats)
+            .max()
+            .unwrap_or(Fx::ZERO);
         Ok(Arsenal {
             table,
             by_def,
+            armor_of_def,
+            widest,
+            splash: SplashIndex::default(),
             projectiles: Projectiles::default(),
             shots: Vec::new(),
             impacts: Vec::new(),
@@ -587,6 +717,8 @@ struct Hit {
     weapon: usize,
     /// The shooter.
     owner: EntityId,
+    /// The shooter's player, as it was when the shot was fired (a splash that spares its own side asks).
+    player: PlayerId,
     /// Where it went off (the victim's middle for an instant shot).
     at: Vec2,
     /// The direct victim's slot.
@@ -594,23 +726,105 @@ struct Hit {
     kind: HitKind,
 }
 
-/// **The hook for WP5.3.** What a hit does to the world: pushes `(victim slot, damage)` for everyone it
-/// hurts. Today that is the direct victim, if any, for the plain `damage` of the weapon. WP5.3 changes
-/// exactly this function: the damage goes through the armor table (`damage_type` times the victim's
-/// armor), and everyone within `splash_radius` of `hit.at` is pushed too, with the falloff. Whatever it
-/// pushes is only summed and applied after every hit of the tick has been decided, so it has to read the
-/// state of the start of the tick and nothing else, and the order in which it pushes does not matter.
-fn damage_of(hit: &Hit, w: &WeaponStats, out: &mut Vec<(u32, u32)>) {
-    if let Some(j) = hit.victim {
-        out.push((j as u32, w.damage));
+/// What a hit did, for the reports: the damage to the direct victim after the armor, and how many others
+/// the splash hurt.
+#[derive(Copy, Clone, Debug, Default)]
+struct Dealt {
+    direct: u32,
+    splash_victims: u32,
+}
+
+/// What [`damage_of`] reads: the entities as they were at the start of the weapon stage, the armor table,
+/// and the index of what a splash can reach. Nothing in it changes while the hits are turned into damage.
+struct Blast<'a> {
+    e: &'a Entities,
+    armor: Option<&'a ArmorTable>,
+    armor_of_def: &'a [Option<u16>],
+    index: &'a Index,
+    widest: Fx,
+}
+
+impl Blast<'_> {
+    /// The percent of `damage_type` that the armor of entity `j` takes: one hundred when the world has no
+    /// armor table (a hit then does what the weapon says), and for an entity that has no unit kind.
+    fn percent(&self, j: usize, damage_type: u16) -> u16 {
+        let Some(armor) = self.armor else {
+            return 100;
+        };
+        match self.armor_of_def.get(self.e.def[j] as usize) {
+            Some(&Some(kind)) => armor.percent(damage_type, kind).unwrap_or(100),
+            _ => 100,
+        }
     }
+}
+
+/// **What a hit does to the world** (WP5.3): pushes `(victim slot, damage)` for everyone it hurts.
+///
+/// * The **direct victim** (if the hit has one) takes the weapon's `damage` times the armor's percentage
+///   for its damage type, at full strength: a direct hit is the centre of its own splash and takes it
+///   once, not twice.
+/// * With a `splash_radius`, **every other** entity that can be hurt (alive, with hit points at the start
+///   of the weapon stage) whose edge is nearer than the radius to `hit.at` takes the damage times the
+///   falloff times its armor's percentage. The falloff is one up to `splash_inner` from the edge and then
+///   falls in a straight line to nothing at `splash_radius`. The shooter is no exception, and a weapon
+///   without `friendly_fire` spares the units of the shooter's own player.
+/// * The number is worked out once by [`scaled_damage`]: one rounding, and at least one hit point for any
+///   positive damage, percentage and falloff.
+///
+/// It reads the state of the start of the tick only, and the order in which it pushes does not matter:
+/// the pushes are summed per victim afterwards.
+fn damage_of(blast: &Blast<'_>, hit: &Hit, w: &WeaponStats, out: &mut Vec<(u32, u32)>) -> Dealt {
+    let mut dealt = Dealt::default();
+    if let Some(j) = hit.victim {
+        dealt.direct = scaled_damage(w.damage, blast.percent(j, w.damage_type), 1, 1);
+        out.push((j as u32, dealt.direct));
+    }
+    if w.splash_radius.is_zero() {
+        return dealt;
+    }
+    // A victim whose edge is inside the radius has its middle inside the radius plus its own.
+    let reach = Vec2::splat(w.splash_radius + blast.widest);
+    let width = (w.splash_radius - w.splash_inner).raw().unsigned_abs();
+    for stretch in blast.index.in_rect(hit.at - reach, hit.at + reach) {
+        for near in stretch {
+            let j = near.id as usize;
+            if hit.victim == Some(j) {
+                continue;
+            }
+            if !w.friendly_fire && blast.e.owner[j] == hit.player {
+                continue;
+            }
+            let edge = ((near.at - hit.at).length() - near.radius).max(Fx::ZERO);
+            if edge >= w.splash_radius {
+                continue;
+            }
+            let (num, den) = if edge <= w.splash_inner {
+                (1, 1)
+            } else {
+                ((w.splash_radius - edge).raw().unsigned_abs(), width)
+            };
+            let damage = scaled_damage(w.damage, blast.percent(j, w.damage_type), num, den);
+            if damage > 0 {
+                out.push((j as u32, damage));
+                dealt.splash_victims += 1;
+            }
+        }
+    }
+    dealt
 }
 
 /// Runs one tick of every weapon after the units have moved and the turrets turned, in two passes
 /// (`docs/rules/projectiles.md`). The first decides everything from the state at the start of the
 /// tick: the projectiles in flight move and decide whether they go off, then the weapons count down and
 /// decide whether they fire (an instant hit, or a launch). The second applies all the damage at once.
-pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arsenal, tick: Tick) {
+/// `map` is the size of the world's map in cells (the splash's index covers it).
+pub(crate) fn update_all(
+    e: &mut Entities,
+    units: &UnitTable,
+    arsenal: &mut Arsenal,
+    tick: Tick,
+    map: (u32, u32),
+) {
     arsenal.shots.clear();
     arsenal.impacts.clear();
     if arsenal.is_empty() {
@@ -619,6 +833,9 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
     let Arsenal {
         table,
         by_def,
+        armor_of_def,
+        widest,
+        splash,
         projectiles,
         shots,
         impacts,
@@ -648,6 +865,7 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
             hits.push(Hit {
                 weapon: at,
                 owner: p.owner,
+                player: p.player,
                 at: burst.at,
                 victim: burst.victim,
                 kind: HitKind::Projectile(burst.cause),
@@ -712,6 +930,7 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
                 hits.push(Hit {
                     weapon: at as usize,
                     owner,
+                    player: e.owner[i],
                     at: e.pos[j],
                     victim: Some(j),
                     kind: HitKind::Instant,
@@ -746,9 +965,39 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
     for p in launches {
         projectiles.insert(p);
     }
+    // The splash looks its victims up in the crowd pass's grid, built here from everything that can be
+    // hurt, and only on a tick in which some hit has a splash.
+    if hits
+        .iter()
+        .any(|h| !table.weapons[h.weapon].splash_radius.is_zero())
+    {
+        if splash.map != Some(map) {
+            splash.index.configure(SPLASH_BUCKET, map.0, map.1);
+            splash.map = Some(map);
+        }
+        let hurtable = |i: usize| e.alive[i] && e.def[i] != NO_DEF && e.hp[i] > 0;
+        splash.index.build_with(e, e.len(), |i| {
+            hurtable(i).then(|| (false, radius_of_stats(units.at(e.def[i] as usize))))
+        });
+    }
     let mut damage: Vec<(u32, u32)> = Vec::new();
-    for hit in &hits {
-        damage_of(hit, &table.weapons[hit.weapon], &mut damage);
+    let mut dealt: Vec<Dealt> = Vec::with_capacity(hits.len());
+    {
+        let blast = Blast {
+            e,
+            armor: table.armor.as_ref(),
+            armor_of_def,
+            index: &splash.index,
+            widest: *widest,
+        };
+        for hit in &hits {
+            dealt.push(damage_of(
+                &blast,
+                hit,
+                &table.weapons[hit.weapon],
+                &mut damage,
+            ));
+        }
     }
     damage.sort_unstable();
     let mut rest = damage.as_slice();
@@ -764,7 +1013,7 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
     for shot in shots.iter_mut() {
         shot.hp_after = e.hp[shot.target.index() as usize];
     }
-    for hit in &hits {
+    for (hit, dealt) in hits.iter().zip(&dealt) {
         let HitKind::Projectile(cause) = hit.kind else {
             continue;
         };
@@ -775,11 +1024,8 @@ pub(crate) fn update_all(e: &mut Entities, units: &UnitTable, arsenal: &mut Arse
             at: hit.at,
             cause,
             victim: hit.victim.map(|j| EntityId::new(j as u32, e.generation[j])),
-            damage: if hit.victim.is_some() {
-                table.weapons[hit.weapon].damage
-            } else {
-                0
-            },
+            damage: dealt.direct,
+            splash_victims: dealt.splash_victims,
             hp_after: hit.victim.map_or(0, |j| e.hp[j]),
         });
     }

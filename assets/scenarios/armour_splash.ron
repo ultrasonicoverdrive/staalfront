@@ -1,0 +1,130 @@
+// Armor and splash (WP5.3, docs/rules/armour.md), on a 64 by 64 cell open map (no terrain layer). A hit takes
+// the percentage of the armor table (damage type against the victim's armor type) and a weapon with a
+// splash radius also hurts what is near where it goes off. What the run shows, one group at a time; all the
+// shooters are owner 0, the targets owner 1 unless it says otherwise:
+//   A  Bullets     a rifleman on a heavy tank (10 percent of 6 is 3/5: one hit point a shot), one on a light
+//                  tank (40 percent: 2) and one on a rifleman (100 percent: 6; the 9th shot kills).
+//   B  Rockets     a rocket thrower on a light tank (130 percent of 45 is 58.5: 59), on a heavy tank (100:
+//                  45) and on a rifleman (40: 18, three rockets).
+//   C  Sniper      the long rifle does 0 percent to a heavy tank (the shots are fired, nothing comes off)
+//                  and 40 to a rocket thrower (45 hit points: the second shot kills).
+//   E  Howitzer    one shell on a rifleman in the middle of a crowd. The splash is 1.5 cells with full
+//                  strength out to 0.5 from the edge of a body: a rifleman a cell away loses all its 50
+//                  (63 by hand), a light tank next to the target 68 (75 percent of 90, a tie rounded up), a heavy tank two cells
+//                  off 11 (50 percent of 90 at a quarter), a generator next to it 135 (150 percent); a
+//                  rocket thrower two cells off is outside; a rifleman of the SHOOTER'S side next to the
+//                  target dies with it (friendly fire).
+//   F  Bombs       a bomb of 60 with a splash of 2 (full out to 1) on a heavy tank: 30 (50 percent) direct,
+//                  and the bystanders: a friendly rifleman a cell off takes the full 60 (it dies) from `bomb`
+//                  and nothing from `careful_bomb`; an enemy rifleman two cells off takes 12 either way.
+//   G  Self        a bomb team that bombs an enemy next to it is in its own blast and goes down with the
+//                  target; the careful one is not.
+// CI runs it on Linux and Windows and requires the checksum in armour_splash.expected;
+// tools/sf_headless/tests/armour_splash.rs asserts the numbers above along the way.
+//
+// `unit_defs` names a FROZEN copy of the definitions (armour_splash_defs/): a balance change of
+// assets/config/ does not move this checksum. The copy is the shipped set of WP5.3 with two additions:
+// the weapons `bomb` and `careful_bomb` and the units `bomb_team` (90) and `careful_bomb_team` (91) that
+// carry them. The reload of the bombs is longer than the run: each team drops exactly one. `combat: true`
+// gives the world the weapon table, with the armor table.
+// Owners: 0 Meridian, 1 Veyran. Everything stands on the middle of its cell.
+//
+// Entity ids, all at generation 0, in the order the spawns are written:
+//    0  rifleman RA1 (12)                owner 0  cell (4, 4)    A: attacks 1
+//    1  heavy_tank TA1 (20, 900 hp)      owner 1  cell (8, 4)
+//    2  rifleman RA2                     owner 0  cell (4, 8)    A: attacks 3
+//    3  rifleman VA2 (50 hp)             owner 1  cell (8, 8)
+//    4  rifleman RA3                     owner 0  cell (4, 12)   A: attacks 5
+//    5  light_tank TA3 (19, 400 hp)      owner 1  cell (8, 12)
+//    6  rocket_trooper RB1 (13)          owner 0  cell (14, 4)   B: attacks 7
+//    7  light_tank TB1                   owner 1  cell (18, 4)
+//    8  rocket_trooper RB2               owner 0  cell (14, 8)   B: attacks 9
+//    9  heavy_tank TB2                   owner 1  cell (18, 8)
+//   10  rocket_trooper RB3               owner 0  cell (14, 12)  B: attacks 11
+//   11  rifleman VB3                     owner 1  cell (18, 12)
+//   12  sniper SC1 (16, long rifle)      owner 0  cell (24, 4)   C: attacks 13
+//   13  heavy_tank TC1                   owner 1  cell (30, 4)
+//   14  sniper SC2                       owner 0  cell (24, 8)   C: attacks 15
+//   15  rocket_trooper VC2 (45 hp)       owner 1  cell (30, 8)
+//   16  siege_artillery AE (21)          owner 0  cell (6, 30)   E: attacks 17
+//   17  rifleman TE                      owner 1  cell (6, 22)   E: the middle of the burst
+//   18  rifleman E1                      owner 1  cell (7, 22)   E: a cell east
+//   19  heavy_tank E2                    owner 1  cell (6, 24)   E: two cells south
+//   20  light_tank E3                    owner 1  cell (5, 22)   E: a cell west
+//   21  generator E4 (40, a structure)   owner 1  cell (6, 21)   E: a cell north
+//   22  rocket_trooper E5                owner 1  cell (6, 20)   E: two cells north
+//   23  rifleman E6                      owner 0  cell (6, 23)   E: a cell south, the shooter's own side
+//   24  bomb_team BF1 (90)               owner 0  cell (24, 22)  F: attacks 25
+//   25  heavy_tank TF1                   owner 1  cell (30, 22)
+//   26  rifleman FF1                     owner 0  cell (31, 22)  F: a friend, a cell east of the target
+//   27  rifleman FE1                     owner 1  cell (30, 24)  F: an enemy, two cells south
+//   28  careful_bomb_team BF2 (91)       owner 0  cell (24, 28)  F: attacks 29
+//   29  heavy_tank TF2                   owner 1  cell (30, 28)
+//   30  rifleman FF2                     owner 0  cell (31, 28)  F: a friend
+//   31  rifleman FE2                     owner 1  cell (30, 30)  F: an enemy
+//   32  bomb_team BG1                    owner 0  cell (20, 36)  G: attacks 33
+//   33  rifleman VG1                     owner 1  cell (21, 36)
+//   34  careful_bomb_team BG2            owner 0  cell (28, 36)  G: attacks 35
+//   35  rifleman VG2                     owner 1  cell (29, 36)
+Scenario(
+    name: "armour_splash",
+    seed: 0x0A55_0530,
+    map: (width: 64, height: 64),
+    unit_defs: Some("armour_splash_defs"),
+    combat: true,
+    ticks: 600,
+    commands: [
+        // --- the cast, at tick 0 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (4, 4))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (8, 4))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (4, 8))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (8, 8))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (4, 12))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (8, 12))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 0, cell: (14, 4))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (18, 4))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 0, cell: (14, 8))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (18, 8))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 0, cell: (14, 12))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (18, 12))),
+        (tick: 0, command: SpawnUnit(kind: 16, owner: 0, cell: (24, 4))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (30, 4))),
+        (tick: 0, command: SpawnUnit(kind: 16, owner: 0, cell: (24, 8))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (30, 8))),
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (6, 30))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (6, 22))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (7, 22))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (6, 24))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (5, 22))),
+        (tick: 0, command: PlaceStructure(kind: 40, owner: 1, cell: (6, 21))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (6, 20))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (6, 23))),
+        (tick: 0, command: SpawnUnit(kind: 90, owner: 0, cell: (24, 22))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (30, 22))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (31, 22))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (30, 24))),
+        (tick: 0, command: SpawnUnit(kind: 91, owner: 0, cell: (24, 28))),
+        (tick: 0, command: SpawnUnit(kind: 20, owner: 1, cell: (30, 28))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (31, 28))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (30, 30))),
+        (tick: 0, command: SpawnUnit(kind: 90, owner: 0, cell: (20, 36))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (21, 36))),
+        (tick: 0, command: SpawnUnit(kind: 91, owner: 0, cell: (28, 36))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (29, 36))),
+
+        // --- tick 1: everybody goes for their victim ---
+        (tick: 1, command: OrderAttack(ids: [Id(0, 0)], target: (1, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(2, 0)], target: (3, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(4, 0)], target: (5, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(6, 0)], target: (7, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(8, 0)], target: (9, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(10, 0)], target: (11, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(12, 0)], target: (13, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(14, 0)], target: (15, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(16, 0)], target: (17, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(24, 0)], target: (25, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(28, 0)], target: (29, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(32, 0)], target: (33, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(34, 0)], target: (35, 0))),
+    ],
+)

@@ -591,16 +591,23 @@ fn a_new_weapon_damage_type_and_movement_class_are_data_too() {
             // A movement class is a record with its terrain costs: one cost for
             // every terrain type (the walker climbs rock, slowly).
             t.replacen(
-                "    ],\n    // placeholder: the set of armor types",
+                "    ],\n    // The set of armor types",
                 "        (kind: 6, name: \"strider\", terrain_costs: [(\"grass\", Speed(1000)), \
                  (\"road\", Speed(1000)), (\"water\", Impassable), (\"rock\", Speed(300)), \
                  (\"ore\", Speed(1000)), (\"bridge\", Speed(1000))]),\n    ],\n    \
-                 // placeholder: the set of armor types",
+                 // The set of armor types",
                 1,
             )
             .replacen(
                 "(kind: 5, name: \"demolition\"),",
                 "(kind: 5, name: \"demolition\"), (kind: 6, name: \"plasma\"),",
+                1,
+            )
+            // A new damage type needs its row in the armor table (the table is complete or refused).
+            .replacen(
+                "        (damage: \"demolition\", percent: [",
+                "        (damage: \"plasma\", percent: [(\"none\", 0), (\"infantry\", 100), (\"light\", 100), \
+                 (\"heavy\", 100), (\"structure\", 100)]),\n        (damage: \"demolition\", percent: [",
                 1,
             )
         },
