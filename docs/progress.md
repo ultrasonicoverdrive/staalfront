@@ -21,7 +21,7 @@ Windows, in debug and in release. No playable build yet (phase 0 has no gameplay
 
 ## Phase 1 — Engine
 
-Status: all work packages done; M0 waits for the benchmark run on the laptop.
+Status: done. M0 is met: Tijmen's laptop run of 22-10-2026 gave a p99 frame time of 3.9 ms (`docs/bench/m0-2026-10-22.json`).
 
 - WP1.1 `sf_engine` main loop, input and frame timing: done (PR #4, aa5cf7b)
 - WP1.2 `sf_sim` core (world, commands, checksums, wander): done (PR #9, 4df4759)
@@ -54,8 +54,16 @@ M0 status:
   smoke test with screenshots on lavapipe and WARP).
 - egui panels show frame time, draw calls and checksum live: met (F1, WP1.11).
 - p99 frame time <= 16.7 ms with 5,000 units in view over the whole camera
-  flight: **pending Tijmen's laptop run** of `cargo run --release -p sf_demo --
-  --bench` (README, "Benchmark (M0)"), which has to be taken on the code of WP1.15
+  flight: **met** on 22-10-2026, Tijmen's laptop (GTX 1650, DX12, 1920 x 1080
+  borderless fullscreen, Immediate present, no vsync), main at cfef151:
+  p99 3.895 ms (avg 2.79, max 10.27), cpu p99 3.68 ms, gpu p99 0.73 ms, 0 hitches
+  over 25 ms, 0 buffer allocations in the flight, sim tick p99 2.13 ms on its own
+  thread with 0 late publishes. Full result in `docs/bench/m0-2026-10-22.json`.
+  Caveat: the demo scene uses the test pack models (at most 156k triangles in
+  view), no terrain materials, combat or effects yet, so the GPU is almost idle;
+  hence the re-runs M0b (after WP2.4) and M0c (after WP5.6) in PLAN.md. Earlier
+  history: the run had to be taken on `cargo run --release -p sf_demo --
+  --bench` (README, "Benchmark (M0)") on the code of WP1.15
   or later: the sim runs on its own thread there and is no longer in the frame,
   so a number from before it is not comparable. The benchmark exists, runs without vsync
   in real fullscreen at 1920 x 1080 and writes `bench.json`; on lavapipe it only

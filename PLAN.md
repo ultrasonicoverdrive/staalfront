@@ -212,6 +212,8 @@ The first gameplay work: the map gets meaning for the game.
 
 **Done when:** a 256×256-cell (1,024 m) playfield loads in sim and presentation; headless test checks terrain types and occupancy per cell.
 
+**Laptop benchmark M0b (decision Tijmen 22-10-2026):** after WP2.4 Tijmen runs `cargo run --release -p sf_demo -- --bench` again on the reference laptop (GTX 1650, 1920×1080); the p99 frame time must stay ≤ 16.7 ms with the terrain materials, minimap and overlay in. Baseline: M0, p99 3.9 ms (`docs/bench/m0-2026-10-22.json`).
+
 ### Phase 3 — Units, selection and commands
 - WP3.1 `sf_data`: unit definitions (speed, turn rate, movement class, health, armor, weapons, cost, model).
 - WP3.2 Units spawn in the sim from `sf_data` definitions; presentation via the engine (instancing, interpolation, LOD from phase 1).
@@ -245,6 +247,8 @@ _Note: this replaces "≤ 1 % outside 5 cells (20 m)" by the orchestrator decisi
 - WP5.6 Visual effects: muzzle flash, impact, explosions, smoke (particles), scale with zoom.
 
 **Done when:** headless "10 tanks vs 20 infantry" gives the same outcome and checksum every run; it looks that way in the game too.
+
+**Laptop benchmark M0c (decision Tijmen 22-10-2026):** after WP5.6 the same laptop run again, with combat and effects in the demo scene; p99 frame time ≤ 16.7 ms and `sim.tick_ms` p99 well within the 50 ms tick, compared with M0 and M0b.
 
 ### Phase 6 — Buildings, building and power
 - WP6.1 Building definitions: footprint, build time, power, requirements (tech tree), function.
