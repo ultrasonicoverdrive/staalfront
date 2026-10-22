@@ -258,6 +258,14 @@ pub fn lod_roots(doc: &gltf::Document) -> Result<(LodLayout, Vec<gltf::Node<'_>>
     let scenes: Vec<gltf::Scene<'_>> = doc.scenes().collect();
     let numbers: Vec<Option<u32>> = scenes.iter().map(|s| scene_lod(s.name())).collect();
     if scenes.len() >= 2 && numbers.iter().all(Option::is_some) {
+        // Bound the work before the duplicate check below, which is
+        // quadratic: a hostile file can hold tens of thousands of scenes.
+        if scenes.len() > MAX_LODS {
+            return Err(GlbError::Invalid(format!(
+                "{} levels of detail (at most {MAX_LODS})",
+                scenes.len()
+            )));
+        }
         let mut found: Vec<(u32, gltf::Node<'_>)> = Vec::new();
         for (scene, n) in scenes.iter().zip(numbers.iter().flatten().copied()) {
             let mut nodes = scene.nodes();

@@ -793,7 +793,7 @@ mod tests {
         }
         // The generic look of the structures of both factions is still a
         // primitive (what an owner without a faction model gets): five of them.
-        assert!(seen >= 5, "structures with a primitive: {seen}");
+        assert_eq!(seen, 5, "structures with a primitive");
     }
 
     #[test]

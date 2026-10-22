@@ -1012,6 +1012,21 @@ fn lod_roots_names_the_layout_and_the_roots_in_level_order() {
 }
 
 #[test]
+fn a_file_with_very_many_lod_scenes_is_refused_quickly() {
+    // 80,000 scenes named LOD<n> once took seconds in the duplicate check.
+    let one = writer::write(&three_level_scene());
+    let scenes: Vec<String> = (0..80_000)
+        .map(|n| format!(r#"{{"name":"LOD{n}","nodes":[0]}}"#))
+        .collect();
+    let hostile = with_scenes(&one, &format!("[{}]", scenes.join(",")));
+    let start = std::time::Instant::now();
+    let e = load_glb(&hostile, &AxisConvention::ENGINE).unwrap_err();
+    let took = start.elapsed();
+    assert!(e.to_string().contains("levels of detail"), "{e}");
+    assert!(took < std::time::Duration::from_secs(2), "took {took:?}");
+}
+
+#[test]
 fn only_clean_scene_per_lod_files_are_accepted() {
     let axes = AxisConvention::ENGINE;
     let one = writer::write(&three_level_scene());
