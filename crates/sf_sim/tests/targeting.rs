@@ -1456,3 +1456,144 @@ fn units_that_return_fire_do_the_same_in_every_spawn_order() {
     let o = in_every_order(&cast, &shoot, 300);
     assert!(o.hp[2] < 40 || o.hp[3] < 40, "{o:?}");
 }
+
+/// Where every unit stands after each tick, per starting place: a rifleman that is shot at by a long gun
+/// beyond its reach follows it, and the long gun walks away while it is followed. Spawned in `order`.
+fn chase_trace(order: &[usize]) -> Vec<Vec<(i64, i64)>> {
+    let cast = [
+        (RIFLEMAN, 0, at(10, 10)),
+        (ARTY, 1, at(18, 10)),
+        (RIFLEMAN, 0, at(10, 16)),
+    ];
+    let mut w = fought();
+    let list: Vec<Spawn> = order.iter().map(|&p| cast[p]).collect();
+    let slots = spawn(&mut w, &list);
+    let mut ids = vec![EntityId::new(0, 0); cast.len()];
+    for (k, &p) in order.iter().enumerate() {
+        ids[p] = slots[k];
+    }
+    let mut trace = Vec::new();
+    let mut record = |w: &World| {
+        trace.push(
+            ids.iter()
+                .map(|&i| (pos(w, i).x.raw(), pos(w, i).y.raw()))
+                .collect::<Vec<_>>(),
+        );
+    };
+    run_command(&mut w, attack(ids[1], ids[0]));
+    record(&w);
+    w.step();
+    record(&w);
+    assert_eq!(w.order_of(ids[0]), Some(Order::Pursue(ids[1])), "{order:?}");
+    // The long gun walks off along the row while the rifleman follows it.
+    run_command(&mut w, mv(ids[1], at(40, 13)));
+    record(&w);
+    for _ in 0..120 {
+        w.step();
+        record(&w);
+    }
+    trace
+}
+
+#[test]
+fn a_follower_walks_to_where_a_moving_target_stood_at_the_start_of_the_tick_in_every_spawn_order() {
+    // The follower aims at the snapshot of the target's position; were it to read the live position, a
+    // target in a lower slot would already have stepped this tick, and the paths would part.
+    let first = chase_trace(&[0, 1, 2]);
+    assert!(
+        first.last().unwrap()[0].0 > at(12, 10).x.raw(),
+        "the rifleman did follow"
+    );
+    for order in permutations(3) {
+        let trace = chase_trace(&order);
+        for (tick, (a, b)) in first.iter().zip(&trace).enumerate() {
+            assert_eq!(a, b, "spawn order {order:?} parts at step {tick}");
+        }
+    }
+}
+
+/// A long gun hits `r` from eight cells, steps back seven cells while `r` follows, and as soon as `r`
+/// has let go hits it again from where it now is; six times. Returns how far `r` got from `from`.
+fn lure(w: &mut World, r: EntityId, s: EntityId, from: Vec2) -> Fx {
+    let mut farthest = Fx::ZERO;
+    for round in 0..6 {
+        run_command(w, attack(s, r));
+        let followed = (0..80).any(|_| {
+            w.step();
+            farthest = farthest.max((pos(w, r) - from).length());
+            matches!(w.order_of(r), Some(Order::Pursue(t)) if t == s)
+        });
+        if !followed {
+            break;
+        }
+        let back = pos(w, s) + Vec2::from_ints(7, 0);
+        run_command(w, mv(s, back));
+        for _ in 0..200 {
+            w.step();
+            farthest = farthest.max((pos(w, r) - from).length());
+            if !matches!(w.order_of(r), Some(Order::Pursue(_))) && round < 5 {
+                break;
+            }
+        }
+    }
+    farthest
+}
+
+#[test]
+fn an_idle_unit_cannot_be_lured_away_chase_by_chase() {
+    let mut w = fought();
+    let ids = spawn(&mut w, &[(RIFLEMAN, 0, at(6, 10)), (ARTY, 1, at(14, 10))]);
+    let farthest = lure(&mut w, ids[0], ids[1], at(6, 10));
+    assert!(
+        farthest <= Fx::from_int(6) + Fx::from_ratio(1, 4),
+        "it strayed {farthest}"
+    );
+    assert!(farthest >= Fx::from_int(5), "it did follow: {farthest}");
+}
+
+#[test]
+fn a_guard_measures_its_pursuit_from_its_post() {
+    let mut w = fought();
+    let post = at(6, 10);
+    let ids = spawn(&mut w, &[(RIFLEMAN, 0, post), (ARTY, 1, at(14, 10))]);
+    run_command(
+        &mut w,
+        order(ids[0], Order::Guard(GuardTarget::Point(post))),
+    );
+    let farthest = lure(&mut w, ids[0], ids[1], post);
+    assert!(
+        farthest <= Fx::from_int(6) + Fx::from_ratio(1, 4),
+        "it strayed {farthest}"
+    );
+    assert!(farthest >= Fx::from_int(5), "it did follow: {farthest}");
+}
+
+#[test]
+fn after_a_rest_an_idle_unit_measures_a_new_chase_from_where_it_stands() {
+    // The same lure, but the long gun waits longer than pursuit_reset_ticks between rounds: each chase
+    // is then a new one.
+    let mut w = fought_with(TargetingConfig::DEFAULT.with_pursuit_reset(20));
+    let ids = spawn(&mut w, &[(RIFLEMAN, 0, at(6, 10)), (ARTY, 1, at(14, 10))]);
+    let (r, s) = (ids[0], ids[1]);
+    let farthest = lure(&mut w, r, s, at(6, 10));
+    assert!(farthest > Fx::from_int(7), "it went on: {farthest}");
+}
+
+#[test]
+fn a_unit_shot_at_from_inside_its_minimum_range_does_not_follow_and_stays_at_rest() {
+    // A mortar (reach 10, not nearer than 3) is hit by a long gun two cells away. It cannot fire at it,
+    // and walking will not help: it does not take the attacker on (before, it took a `Pursue` it kept
+    // for ever without a shot).
+    let mut w = fought();
+    let ids = spawn(&mut w, &[(MORTAR, 0, at(10, 10)), (ARTY, 1, at(12, 10))]);
+    let (m, s) = (ids[0], ids[1]);
+    let mut shots = Vec::new();
+    for _ in 0..100 {
+        w.step();
+        shots.extend_from_slice(w.shots());
+        assert_eq!(w.order_of(m), Some(Order::Idle), "tick {}", w.tick().0);
+    }
+    assert!(hp(&w, m) < 100, "it was hit");
+    assert!(shots_by(&shots, s).len() >= 3);
+    assert!(shots_by(&shots, m).is_empty());
+}

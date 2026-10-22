@@ -1367,7 +1367,9 @@ ground, nobody given an attack order. The first shot is at tick 270; **228 shots
 44 rockets); the last shot at **tick 787** and the last infantryman falls at the end of tick 791. **The tanks win with 4
 of 10 left** (ids 1, 2, 3, 9 with 282, 400, 400, 400 hit points, 1482 of 4000); all 20 infantry are down; the four
 tanks go on and stand within four cells of their goal, and the 26 units at zero are where they fell, on hold.
-Final checksum `0x7c3338cf6b72e9c2`. `tools/sf_headless/tests/tanks_vs_infantry.rs` runs it twice and compares the
+Final checksum `0x53d3bcb0110a9479`. (Re-pinned in fix round 1 from `0x7c3338cf6b72e9c2`: the settings hash gained
+`pursuit_reset_ticks` and the engagement hash the kept anchor (`held`, `rest`); with those left out of the hash the
+old value comes back, so no position, hit point or shot moved.) `tools/sf_headless/tests/tanks_vs_infantry.rs` runs it twice and compares the
 checksum after every tick, all shots and the hit points and places of all thirty at every tick, then the numbers, the
 committed value, and (along the run) that nobody fires at its own side, that nobody at zero fires or is fired at and
 that a unit at zero never moves again. CI runs it on Linux and Windows (`ci.yml` list, `.expected`).
@@ -1386,17 +1388,21 @@ heading in a tick. That is older than this work package (it is why no earlier pe
 **Deferred, and why.**
 1. **Structures choosing targets** (towers, emplacements): WP6.7. A structure takes no order, and a `Pursue` on one
    would make it walk; it needs a target without an order.
-2. **Firing at the ground, backing off inside the minimum range, threat-based priorities** (shoot what shoots you
+2. **Firing at the ground, backing off inside the minimum range** (a follower that finds its target inside the
+   minimum range lets go and goes back to its order; it does not step back), **threat-based priorities** (shoot what shoots you
    first, focus fire, retreat): the AI of WP9.3 commands those; here a unit prefers what its weapon does most to.
 3. **Alliances and neutrals:** every other owner is an enemy, so a neutral crate or civilian of another owner is a
    candidate. Left for the mission work (phase 10).
-4. **Switching to a better target**, and **returning to the spot an idle unit began on** after a chase.
+4. **Switching to a better target**, and **returning to the spot an idle unit began on** after a chase. (The leash
+   itself is measured from the guard post, or for an idle unit from where its first chase began until it has been
+   at rest `pursuit_reset_ticks`; fix round 1.)
 5. **A resumed attack-move or guard is routed again on its own**; it does not rejoin the flowfield group of the order
    that started it. A battle of hundreds of attack-moving units would ask the path service for many routes after each
    engagement; not measured.
-6. **All units look on the same ticks** (spawned together: 0, 10, 20 ...). A 2,000-unit test run (1,000 against 1,000
-   on attack-move, 600 ticks, release) took 1,385 ms with targeting against 1,111 ms without, so no spike worth
-   staggering, but staggering by anything other than the slot would need a number that is not state; not done.
+6. **All units look on the same ticks** (spawned together: 0, 10, 20 ...). With 1,600 armed units targeting costs
+   about +15 % before contact and about +35 % over a 1,500-tick fight; the worst tick is 21 to 36 ms against
+   13.4 ms without targeting, within the 50 ms budget but not free. Staggering by anything other than the slot
+   would need a number that is not state; not done.
 7. **`sf_game` still has no weapon table** (WP5.5 and WP5.6 first); `sf_game`'s order text for a selected unit
    reads `Pursue` as "engage".
 8. **`orders`, `replan` and `turning` will move once combat is on for them** (follow-up 7 of WP5.1): they are not given
@@ -1404,6 +1410,11 @@ heading in a tick. That is older than this work package (it is why no earlier pe
 9. **WP5.5 must** settle kill credit from the set of the tick's hits (the attackers `return_fire` reads are that
    set), remove units at zero (they hold where they fell until then), and decide what an explicit `Attack` order does
    with a victim that was removed (it ends, as for a despawned one).
+10. **Spawn-order independence is not shown for slow-turning units.** A mobile unit is born with a random facing
+    drawn from its spawn serial (`world.rs`), so a unit that must turn before it drives sets off on a different
+    tick in another spawn order. The permutation tests use units that turn in one tick; a fight of slow-turning
+    units spawned in another order can differ. Settle with the facing rule (a facing that does not depend on the
+    spawn order) before the AI work relies on it.
 
 ## Phase 1 report (draft, WP1.14)
 

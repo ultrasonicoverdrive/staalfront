@@ -20,7 +20,8 @@ either.
 | Field | Meaning | Bounds | Shipped |
 |---|---|---|---|
 | `scan_cooldown` | ticks between two looks round for a target of one unit (20 ticks are a second) | 1 to 1000 | 10 (half a second) |
-| `pursuit_cells` | how far beyond its weapon's reach a unit that is shot at follows its attacker, and the farthest it strays from where it stood when it began; 0 means nobody follows | 0 to 32 | 6 (24 m) |
+| `pursuit_cells` | how far beyond its weapon's reach a unit that is shot at follows its attacker, and the farthest it ever strays: a guard from its post, an idle unit from where its first chase began; 0 means nobody follows | 0 to 32 | 6 (24 m) |
+| `pursuit_reset_ticks` | how long an idle unit must be back at rest (no target) before a new chase measures from where it then stands | 1 to 2000 | 100 (5 s) |
 
 `TargetingConfig::DEFAULT` is the same two numbers; a test keeps them equal. Worlds, tests and scenarios that are
 not given settings use the defaults. What a unit *prefers* is not a setting of its own: it is the armor table
@@ -110,7 +111,9 @@ y, x, slot, generation)`. It is a total order, so the choice is the same whateve
 found in. Equal scores: the **nearer** wins. Equal distances too: the one with the **smaller y, then the smaller
 x** wins, and only a tie on the position itself (two bodies on one point) falls to the slot. So two candidates
 that cannot be told apart by what they are or where they stand are not told apart by when they were spawned
-either; `tests/targeting.rs` spawns the same cast in every order to show it.
+either; `tests/targeting.rs` spawns the same cast in every order to show it. The slot only decides between two
+bodies on one point, and those the crowd pass already splits by slot (`crowd.rs`, module notes: units on exactly the
+same point are split by slot index), so the slot-ordered tie is no new dependence.
 
 **Finding them.** A scan uses the crowd pass's spatial index (`crowd::Index`, buckets of four cells), built
 once in a tick in which some unit looks round, from everything that can be shot at, and queries the rectangle
@@ -132,8 +135,9 @@ and the old order begun again, when:
 * for a unit that may not follow (everything but a unit following an attacker): it is no longer in reach of a
   weapon that hurts it (it walked out of range, or inside the minimum range). **A target that leaves its range
   is dropped, not followed**: a unit that chose in reach has no reason to walk;
-* for a unit that follows: the target is farther than its reach plus the pursuit distance, or the unit has
-  strayed farther than the pursuit distance from where it stood when it began.
+* for a unit that follows: the target is farther than its reach plus the pursuit distance, the unit has
+  strayed farther than the pursuit distance from its anchor (below), or the target is in reach but inside the
+  minimum range of every weapon that hurts it (walking closer will not help; the unit goes back to its order).
 
 When an engagement ends and the cooldown has already run out, the unit looks round on that same tick.
 
@@ -146,8 +150,13 @@ of that tick if its stance lets it (the table above), **at once and not on the c
 * An attacker in reach of a weapon of the unit is engaged where the unit stands.
 * An attacker beyond its reach but not beyond reach plus `pursuit` is **followed** (idle and guard only): the
   unit walks toward the place the target stood at the end of the last tick, into the range of the weapon that
-  chose it, and fires. It goes no farther than `pursuit` cells from the spot it stood on when it began, and
-  lets go of an attacker that gets away (the leash above). It does not go back: an idle unit stays where the
+  chose it, and fires. It goes no farther than `pursuit` cells from its **anchor**, and lets go of an attacker
+  that gets away (the leash above). The anchor of a guard is its **post** (the guard point, or where the guarded
+  entity stands when the chase begins). The anchor of an idle unit is where its **first** chase began, and it is
+  kept across chases that follow straight after each other: only after `pursuit_reset_ticks` back at rest (no
+  target) does a new chase measure from where the unit then stands. So an attacker that hits, steps back and hits
+  again cannot lure a unit away chase by chase. A unit already at the end of its leash does not set out again,
+  and an attacker inside the minimum range of every weapon (in reach, but nothing can fire) is not followed. It does not go back: an idle unit stays where the
   chase ended; a guard walks back to its post because that is what a guard does.
 * An attacker beyond that is not answered.
 * When several enemies hurt the unit in one tick it answers **one**, by the key above, and **one it can answer
@@ -200,8 +209,8 @@ it:
 
 Tests spawn the same units in every order and compare **by position** (`crates/sf_sim/tests/targeting.rs`):
 idle units that pick each other, two on two on attack-move who meet, stop, fight and go on (24 orders, 400
-ticks, with the outcome per starting place), units that return fire and follow, and several attackers hitting
-one unit in the same tick. One thing had to be arranged for them: a mobile unit is born with a **random facing
+ticks, with the outcome per starting place), units that return fire and follow, a follower whose target walks away while it is followed (all six orders, positions compared
+**on every tick**), and several attackers hitting one unit in the same tick (the two attackers swapped). One thing had to be arranged for them: a mobile unit is born with a **random facing
 drawn from the order it was spawned in**, and a unit that has to turn before it drives would set off at a different
 tick. The test units therefore turn to any heading in a tick; the one test that is about turning uses a slow unit
 and checks the facing, not the timing.
@@ -251,7 +260,7 @@ other's ground. Measured:
 | shots | 228: 87 cannon shells from the tanks, 97 rifle shots and 44 rockets at the tanks |
 | outcome | the tanks win with **4 of 10** left (ids 1, 2, 3 and 9, with 282, 400, 400 and 400 hit points: 1482 of 4000); all **20** infantrymen are down |
 | after the fight | the four tanks march on and stand within four cells of their goal; the 26 units at zero are still where they fell, on hold |
-| final checksum | `0x7c3338cf6b72e9c2` |
+| final checksum | `0x53d3bcb0110a9479` |
 
 `tools/sf_headless/tests/tanks_vs_infantry.rs` runs it **twice** and compares the checksum after every tick, all
 shots, and the hit points and places of all thirty at every tick; checks the numbers above and the checksum

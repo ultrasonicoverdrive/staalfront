@@ -275,6 +275,7 @@ pub fn formation_config(settings: &SimSettings) -> sf_sim::FormationConfig {
 /// ranges; `sf_data` has checked the same rules).
 pub fn targeting_config(settings: &SimSettings) -> sf_sim::TargetingConfig {
     sf_sim::TargetingConfig::from_cells(settings.scan_cooldown, settings.pursuit_cells)
+        .with_pursuit_reset(settings.pursuit_reset_ticks)
 }
 
 /// The simulation's table of terrain types: ids and flags, no names. The
@@ -560,10 +561,14 @@ mod tests {
         let settings = SimSettings {
             scan_cooldown: 25,
             pursuit_cells: 9,
+            pursuit_reset_ticks: 40,
             ..SimSettings::embedded()
         };
         let changed = targeting_config(&settings);
-        assert_eq!(changed, sf_sim::TargetingConfig::from_cells(25, 9));
+        assert_eq!(
+            changed,
+            sf_sim::TargetingConfig::from_cells(25, 9).with_pursuit_reset(40)
+        );
         assert_eq!(changed.scan_cooldown, 25);
     }
 

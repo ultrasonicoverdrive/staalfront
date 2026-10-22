@@ -88,7 +88,7 @@ use crate::behavior::Behavior;
 use crate::crowd::Index;
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Tick};
-use crate::orders::{self, Order, live_slot, radius_of};
+use crate::orders::{self, GuardTarget, Order, live_slot, radius_of};
 use crate::units::{UnitClass, UnitTable};
 use crate::weapons::Arsenal;
 
@@ -98,6 +98,13 @@ pub const DEFAULT_SCAN_COOLDOWN: u16 = 10;
 /// Cells a unit follows an attacker beyond its reach unless the settings say otherwise.
 pub const DEFAULT_PURSUIT_CELLS: u8 = 6;
 
+/// Ticks an idle unit must be back at rest before a new chase measures from a new spot, unless
+/// the settings say otherwise: five seconds.
+pub const DEFAULT_PURSUIT_RESET_TICKS: u16 = 100;
+
+/// The most ticks `pursuit_reset_ticks` may be.
+pub const MAX_PURSUIT_RESET_TICKS: u16 = 2000;
+
 /// The most ticks a scan cooldown may be (fifty seconds).
 pub const MAX_SCAN_COOLDOWN: u16 = 1000;
 
@@ -105,7 +112,7 @@ pub const MAX_SCAN_COOLDOWN: u16 = 1000;
 pub const MAX_PURSUIT_CELLS: u8 = 32;
 
 /// Written first into the hash of the settings; bump when the layout changes.
-const SETTINGS_TAG: &[u8] = b"sf_sim/targeting/v1";
+const SETTINGS_TAG: &[u8] = b"sf_sim/targeting/v2";
 
 /// The settings of target selection (`sim.ron`, `docs/rules/targeting.md`).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -116,6 +123,10 @@ pub struct TargetingConfig {
     /// and the farthest it strays from where it stood when it began. Zero: it never follows.
     /// At most [`MAX_PURSUIT_CELLS`].
     pub pursuit: Fx,
+    /// Ticks an idle unit must have been back at rest (no target) before its next chase measures
+    /// the pursuit from where it then stands; until then it measures from where its first chase
+    /// began. 1 to [`MAX_PURSUIT_RESET_TICKS`].
+    pub pursuit_reset: u16,
 }
 
 impl TargetingConfig {
@@ -128,6 +139,15 @@ impl TargetingConfig {
         TargetingConfig {
             scan_cooldown,
             pursuit: Fx::from_int(pursuit_cells as i32),
+            pursuit_reset: DEFAULT_PURSUIT_RESET_TICKS,
+        }
+    }
+
+    /// The same settings with another `pursuit_reset`.
+    pub const fn with_pursuit_reset(self, ticks: u16) -> TargetingConfig {
+        TargetingConfig {
+            pursuit_reset: ticks,
+            ..self
         }
     }
 
@@ -136,12 +156,14 @@ impl TargetingConfig {
         (1..=MAX_SCAN_COOLDOWN).contains(&self.scan_cooldown)
             && !self.pursuit.is_negative()
             && self.pursuit <= Fx::from_int(i32::from(MAX_PURSUIT_CELLS))
+            && (1..=MAX_PURSUIT_RESET_TICKS).contains(&self.pursuit_reset)
     }
 
     fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_bytes(SETTINGS_TAG);
         h.write_bytes(&self.scan_cooldown.to_le_bytes());
         h.write_fx(self.pursuit);
+        h.write_bytes(&self.pursuit_reset.to_le_bytes());
     }
 }
 
@@ -161,9 +183,15 @@ pub(crate) struct Engage {
     /// Whether the unit may walk after the target (an attacker beyond its reach) as opposed to
     /// firing from where it stands.
     pub chase: bool,
-    /// Where the unit stood when the engagement began: a following unit strays no farther than the
-    /// pursuit distance from here.
+    /// What a following unit measures its pursuit from: the guard post for a guard, otherwise
+    /// where the unit stood when its first chase began (kept across chases that follow straight
+    /// after each other, see `held`).
     pub anchor: Vec2,
+    /// Whether `anchor` still binds: set by every engagement, kept when it ends, and dropped once
+    /// the unit has been at rest for `pursuit_reset` ticks or is given an order by its player.
+    pub held: bool,
+    /// Ticks the unit has been at rest (no `Pursue`) while `held`.
+    pub rest: u16,
     /// Where the target was at the end of the movement stage of the last tick. The unit walks and
     /// faces toward this, not toward the live position of the target, which another unit's step may
     /// already have changed this tick (so the slot order cannot matter).
@@ -180,6 +208,8 @@ impl Engage {
         resume: None,
         chase: false,
         anchor: Vec2::ZERO,
+        held: false,
+        rest: 0,
         aim: Vec2::ZERO,
         reach: Fx::ZERO,
         cool: 0,
@@ -292,15 +322,30 @@ fn targetable(e: &Entities, j: usize) -> bool {
     e.alive[j] && e.def[j] != NO_DEF && e.hp[j] > 0
 }
 
+/// What unit `i` would measure a chase from if it began one now: a guard from its post, an idle unit
+/// from where its first chase began while that still binds (so an attacker that hits and steps back
+/// cannot lure it on chase by chase), otherwise from where it stands.
+fn anchor_of(e: &Entities, i: usize) -> Vec2 {
+    match e.order[i] {
+        Order::Guard(GuardTarget::Point(p)) => p,
+        Order::Guard(GuardTarget::Entity(id)) => live_slot(e, id).map_or(e.pos[i], |k| e.pos[k]),
+        _ if e.eng[i].held => e.eng[i].anchor,
+        _ => e.pos[i],
+    }
+}
+
 /// Puts unit `i` on a `Pursue` order toward `j`, remembering the order it had.
 fn engage(e: &mut Entities, i: usize, j: usize, chase: bool, reach: Fx, cx: &Context<'_>) {
     let resume = e.order[i];
+    let anchor = anchor_of(e, i);
     let victim = EntityId::new(j as u32, e.generation[j]);
     orders::begin(e, i, Order::Pursue(victim), cx.tick, cx.bounds);
     e.eng[i] = Engage {
         resume: Some(resume),
         chase,
-        anchor: e.pos[i],
+        anchor,
+        held: true,
+        rest: 0,
         aim: e.pos[j],
         reach,
         cool: cx.config.scan_cooldown,
@@ -310,12 +355,16 @@ fn engage(e: &mut Entities, i: usize, j: usize, chase: bool, reach: Fx, cx: &Con
 /// The engagement of unit `i` is over: it goes back to the order it had (or, if it was idle, to
 /// the first order queued behind it, or to rest).
 pub(crate) fn end_engagement(e: &mut Entities, i: usize, tick: Tick, bounds: (Vec2, Vec2)) {
-    let resume = e.eng[i].resume;
+    let Engage { resume, anchor, .. } = e.eng[i];
     e.eng[i].forget();
     match resume {
         Some(order) if order != Order::Idle => orders::begin(e, i, order, tick, bounds),
         _ => orders::finish(e, i, tick, bounds),
     }
+    // The anchor outlives the engagement until the unit has been at rest a while.
+    e.eng[i].anchor = anchor;
+    e.eng[i].held = true;
+    e.eng[i].rest = 0;
 }
 
 impl Targeting {
@@ -342,6 +391,14 @@ impl Targeting {
             }
             if let Order::Pursue(victim) = e.order[i] {
                 check(e, i, victim, cx);
+            } else if e.eng[i].held {
+                let eng = &mut e.eng[i];
+                eng.rest += 1;
+                if eng.rest >= cx.config.pursuit_reset {
+                    eng.held = false;
+                    eng.rest = 0;
+                    eng.anchor = Vec2::ZERO;
+                }
             }
             if e.eng[i].cool == 0 && stance_of(e, i).is_some() {
                 scanners.push(i);
@@ -450,7 +507,11 @@ impl Targeting {
             let Some(stance) = stance_of(e, i) else {
                 continue;
             };
-            let follow = stance.follows() && !cx.config.pursuit.is_zero();
+            // A unit already at the end of its leash does not set out again (it would creep a step
+            // further with every hit).
+            let follow = stance.follows()
+                && !cx.config.pursuit.is_zero()
+                && (e.pos[i] - anchor_of(e, i)).length_squared() < cx.config.pursuit.square();
             let def = e.def[i];
             let mut best: Option<(Key, usize, bool, Fx)> = None;
             for &(_, attacker) in group {
@@ -467,6 +528,7 @@ impl Targeting {
                         (0, pick)
                     } else if follow
                         && let Some(pick) = cx.arsenal.best_against(def, e.def[j], d2, edge, false)
+                        && d2 > (pick.reach + edge).square()
                         && d2 <= (pick.reach + edge + cx.config.pursuit).square()
                     {
                         (1, pick)
@@ -503,7 +565,14 @@ fn check(e: &mut Entities, i: usize, victim: EntityId, cx: &Context<'_>) {
     let keep = if eng.chase {
         let strayed = (e.pos[i] - eng.anchor).length_squared() > cx.config.pursuit.square();
         let escaped = d2 > (eng.reach + edge + cx.config.pursuit).square();
-        !strayed && !escaped
+        // In reach but no weapon can fire (inside its minimum range): walking closer will not
+        // help, so it lets go instead of standing there for ever.
+        let too_close = d2 <= (eng.reach + edge).square()
+            && cx
+                .arsenal
+                .best_against(e.def[i], e.def[j], d2, edge, true)
+                .is_none();
+        !strayed && !escaped && !too_close
     } else {
         cx.arsenal
             .best_against(e.def[i], e.def[j], d2, edge, true)
@@ -545,6 +614,8 @@ pub(crate) fn write_hash(h: &mut Fnv1a64, config: &TargetingConfig, e: &Entities
             None => h.write_u8(0),
         }
         h.write_vec2(eng.anchor);
+        h.write_u8(u8::from(eng.held));
+        h.write_bytes(&eng.rest.to_le_bytes());
         h.write_vec2(eng.aim);
         h.write_fx(eng.reach);
     }

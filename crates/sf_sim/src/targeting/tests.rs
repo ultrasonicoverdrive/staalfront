@@ -42,6 +42,9 @@ fn the_settings_are_valid_between_their_bounds_and_not_outside() {
     assert!(!ok(0, 6));
     assert!(!ok(MAX_SCAN_COOLDOWN + 1, 6));
     assert!(!ok(10, MAX_PURSUIT_CELLS + 1));
+    let reset = |t| TargetingConfig::DEFAULT.with_pursuit_reset(t).is_valid();
+    assert!(reset(1) && reset(MAX_PURSUIT_RESET_TICKS));
+    assert!(!reset(0) && !reset(MAX_PURSUIT_RESET_TICKS + 1));
     let negative = TargetingConfig {
         pursuit: Fx::from_int(-1),
         ..TargetingConfig::DEFAULT
@@ -66,6 +69,10 @@ fn the_settings_hash_differently_when_they_differ() {
     assert_eq!(base, hash(TargetingConfig::from_cells(10, 6)));
     assert_ne!(base, hash(TargetingConfig::from_cells(11, 6)));
     assert_ne!(base, hash(TargetingConfig::from_cells(10, 7)));
+    assert_ne!(
+        base,
+        hash(TargetingConfig::DEFAULT.with_pursuit_reset(DEFAULT_PURSUIT_RESET_TICKS + 1))
+    );
 }
 
 #[test]
@@ -74,6 +81,8 @@ fn forgetting_an_engagement_keeps_the_cooldown_and_nothing_else() {
         resume: Some(Order::Guard(GuardTarget::Point(Vec2::from_ints(3, 4)))),
         chase: true,
         anchor: Vec2::from_ints(1, 2),
+        held: true,
+        rest: 3,
         aim: Vec2::from_ints(5, 6),
         reach: Fx::from_int(4),
         cool: 7,

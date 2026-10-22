@@ -367,8 +367,8 @@ pub use path::{
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
 pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 pub use targeting::{
-    DEFAULT_PURSUIT_CELLS, DEFAULT_SCAN_COOLDOWN, Engagement, MAX_PURSUIT_CELLS, MAX_SCAN_COOLDOWN,
-    TargetingConfig,
+    DEFAULT_PURSUIT_CELLS, DEFAULT_PURSUIT_RESET_TICKS, DEFAULT_SCAN_COOLDOWN, Engagement,
+    MAX_PURSUIT_CELLS, MAX_PURSUIT_RESET_TICKS, MAX_SCAN_COOLDOWN, TargetingConfig,
 };
 pub use terrain::{
     Cell, NO_OCCUPANT, Occupancy, Terrain, TerrainDef, TerrainError, TerrainFlags, TerrainId,
