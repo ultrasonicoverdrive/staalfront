@@ -31,8 +31,8 @@ CLAUDE.md or an agent file.
 4. **Review gate:** the `reviewer` agent checks out the PR, runs the checks itself,
    assesses it against the WP's acceptance criteria, §5 and §12.4, and posts
    `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only
-   after `APPROVE`; on `CHANGES REQUESTED` the builder fixes the findings on the
-   same branch and the reviewer reviews again.
+   after `APPROVE`; on `CHANGES REQUESTED` a fix round of `bouwer-opus-medium`
+   (§3) fixes the findings on the same branch and the reviewer reviews again.
 5. After each phase: a short playable build and a report in `docs/progress.md`.
 
 Parallelism (§12.3): normally 3-4 agents at a time, 5 at most (decision Tijmen 22-10-2026), only on WPs without overlap in

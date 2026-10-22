@@ -336,7 +336,7 @@ See §9 for the design.
 ## 4. Dependencies
 
 ```
-F0 ─ F1 ═ M0 ─ F2 ─ F3 ─ F4 ─ F5 ─┬─ F6 ─ F7 ═ M1 ─┬─ F8 ─ F9 ─ F10 ─ F15 ═ M2 ─ F14 ─ F16
+F0 ─ F1 ═ M0 ─ F2 ─ F3 ─ F4 ─ F5 ─┬─ F6 ─ F7 ═ M1 ─┬─ F8 ─ F9 ─ F10 ─ F15 ═ M2 ─ F16   (F14 parked, 22-10-2026)
                                   │                └─ F13
 F1 ─────── F12 (player can run in parallel from F1; demo scene after F3)
 F1 ─────── F11 (UI components in parallel as soon as the relevant system exists)
@@ -365,7 +365,7 @@ alongside the system they belong to; editor (WP10.4) alongside F8–F9.
 |---|---|---|
 | Determinism leaks (float, hash order, threads) | Replays/multiplayer broken, discovered only late | From F0 checksum tests on Linux and Windows in CI |
 | Pathfinding with many units | Hangs, slow | Flowfields + headless stress tests from F4 |
-| Zoom breaks performance | Stuttering when zoomed out | LOD/instancing/icons in the engine (F1), fps benchmark from M0 at every phase |
+| Zoom breaks performance | Stuttering when zoomed out | LOD/instancing/icons in the engine (F1), fps benchmark from M0, re-run on the laptop as M0b (after WP2.4) and M0c (after WP5.6) |
 | Art is missing | Game keeps looking "programmer-made" | Decide early who makes models and cartoons (§10) |
 | Agents diverge | Inconsistent code | Fixed conventions in `CLAUDE.md`, review gate per phase (§12) |
 | Legal | Trademark/GPL | Clean-room, own name and content (B5) |
@@ -419,15 +419,15 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 ## 12. Execution with agents
 
 ### 12.1 Agent type
-Two agents, both in the repo (they travel to every environment), same instructions:
+Two building agents, both in the repo (they travel to every environment):
 
 - `.claude/agents/bouwer-sonnet.md` — model `sonnet`, effort `high`: the default for every WP, including the hard ones marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
-- `.claude/agents/bouwer-opus-medium.md` — model `opus`: the fix rounds after a review asks for changes. Round 1 runs it at effort `low`, round 2 and later at effort `medium`, on the WP's own branch.
+- `.claude/agents/bouwer-opus-medium.md` — model `opus`, effort `medium` in the file: the fix rounds after a review asks for changes. Round 1 is started with the Agent tool's per-call effort set to `low`, round 2 and later use the file's `medium`. It works on the WP's existing branch and pushes to the existing PR.
 
 Decision Tijmen 17-10-2026, second change that day (Sonnet medium/xhigh from
 14-10-2026, then Opus low/medium earlier on 17-10-2026); fix rounds changed by
-decision Tijmen 21-10-2026. Each agent executes one work package, works in its own
-git worktree/branch, opens a PR.
+decision Tijmen 21-10-2026. `bouwer-sonnet` builds one work package in its own git
+worktree/branch and opens a PR; `bouwer-opus-medium` continues that branch and PR.
 
 Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
 
@@ -440,7 +440,7 @@ Decision Tijmen 14-10-2026.
 1. Orchestrator (main session) starts an agent with: WP number, the acceptance criteria from this plan, relevant `docs/`.
 2. Agent works on branch `wp/<number>-<name>`, writes tests first where possible, runs `cargo fmt`, `clippy -D warnings`, `cargo test`, headless scenarios.
 3. Agent opens a PR with: what was done, how it was tested, what was deliberately not done.
-4. Review gate: the `reviewer` agent checks out the PR, runs the checks itself, assesses it against the WP's acceptance criteria, §5 and §12.4, and posts `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only after `APPROVE`; on `CHANGES REQUESTED` the builder fixes the findings on the same branch and the reviewer reviews again.
+4. Review gate: the `reviewer` agent checks out the PR, runs the checks itself, assesses it against the WP's acceptance criteria, §5 and §12.4, and posts `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only after `APPROVE`; on `CHANGES REQUESTED` a fix round of `bouwer-opus-medium` (§12.1) fixes the findings on the same branch and the reviewer reviews again.
 5. After each phase: short playable build + report in `docs/progress.md`.
 
 ### 12.3 Parallelism
@@ -474,4 +474,4 @@ The project lives **only on GitHub**; nothing goes on the home server
 1. Link cloud agents to the GitHub repo (§13).
 2. Confirm decisions B1–B7.
 3. Agent type `bouwer-sonnet` active (Sonnet 5, effort high since 17-10-2026), start phase 0 (WP0.1 through WP0.3), then phase 1 (engine).
-4. At M0 (engine demo): benchmark on the laptop, view the zoom and tune the camera sensitivity together. Only then phase 2.
+4. At M0 (engine demo): benchmark on the laptop, view the zoom and tune the camera sensitivity together. Only then phase 2. (22-10-2026: the benchmark is met; the zoom look and camera sensitivity are still to be judged by Tijmen, and phase 2 goes ahead meanwhile, see `docs/progress.md`.)

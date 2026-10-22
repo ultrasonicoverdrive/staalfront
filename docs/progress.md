@@ -50,15 +50,17 @@ M0 status:
 - Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
   2026-10-15 (main at 8f64071). Judged before the zoom-out hitches (below) were
   looked at; to be re-judged with the demo, together with the benchmark.
+  **Still open (22-10-2026):** the benchmark ran, the zoom look and the camera
+  sensitivity have not been judged again yet (owner Tijmen; does not hold up phase 2).
 - CI green on two OSes including screenshot tests: met (PR #30 adds the demo
   smoke test with screenshots on lavapipe and WARP).
 - egui panels show frame time, draw calls and checksum live: met (F1, WP1.11).
 - p99 frame time <= 16.7 ms with 5,000 units in view over the whole camera
   flight: **met** on 22-10-2026, Tijmen's laptop (GTX 1650, DX12, 1920 x 1080
   borderless fullscreen, Immediate present, no vsync), main at cfef151:
-  p99 3.895 ms (avg 2.79, max 10.27), cpu p99 3.68 ms, gpu p99 0.73 ms, 0 hitches
-  over 25 ms, 0 buffer allocations in the flight, sim tick p99 2.13 ms on its own
-  thread with 0 late publishes. Full result in `docs/bench/m0-2026-10-22.json`.
+  p99 3.895 ms (avg 2.79, max 10.27), cpu p99 3.677 ms, gpu p99 0.726 ms, 0 hitches
+  over 25 ms, 0 buffer allocations in the flight, sim tick p99 2.126 ms on its own
+  thread with 0 late publishes (the commit is from the chat; the JSON has no commit field). Full result in `docs/bench/m0-2026-10-22.json`.
   Caveat: the demo scene uses the test pack models (at most 156k triangles in
   view), no terrain materials, combat or effects yet, so the GPU is almost idle;
   hence the re-runs M0b (after WP2.4) and M0c (after WP5.6) in PLAN.md. Earlier
@@ -78,8 +80,7 @@ Report: _see "Phase 1 report" below._
 ## Phase 2 — Playfield
 
 Status: in progress. WP2.1 is done (PR #39). WP2.2 to WP2.4 (what is drawn from the terrain
-types) wait for the M0 laptop benchmark: the Phase 1 report starts phase 2 proper when
-the p99 number is in. Phase 3 and the start of phase 4 were built on WP2.1 meanwhile.
+types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it after WP2.4. Phase 3 and the start of phase 4 were built on WP2.1 meanwhile.
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
@@ -227,14 +228,14 @@ Known gaps (owner in brackets):
   or takes damage; only the first weapon's range is read (phase 5, WP5.1).
 - No ownership check in the sim and no lockstep packet (WP14.1).
 - The terrain types are not drawn from the type layer: no per-type material, no minimap
-  colours, no cell overlay (WP2.2 to WP2.4, after the M0 laptop run).
+  colours, no cell overlay (WP2.2 to WP2.4, next now that M0 is met).
 - No sidebar, build menu, economy or power; the HUD is a top bar with the selected count
   (phases 6, 7, 11).
 - No vessels in the sandbox (WP4.1 follow-up: they need water to stand on).
 - All icons (41) and cursors (24) are generated placeholders; vehicles and buildings still
   show test-pack models or primitives; set v3 has no `heavy_gun_team` model.
-- Nothing of phase 3 has been measured on the GTX 1650 (the M0 benchmark is still the only
-  laptop run to do). Icon drawing costs a few percent more frame time on lavapipe
+- Nothing of phase 3 has been measured on the GTX 1650: the M0 run (22-10-2026) is the engine
+  demo, not the sandbox. Icon drawing costs a few percent more frame time on lavapipe
   (+3 % frame, +4 % GPU, within noise); on the card it is estimated far below 0.1 ms.
 
 ## Phase 4 — Movement and routes
@@ -1209,9 +1210,9 @@ time, units in view, draw calls and triangles per phase, the slowest frames and
 the sim checksums to `bench.json`.
 
 M0 criteria: headless checksum met, CI on two OSes with screenshots met, panels
-met, smooth zoom judged on 2026-10-15, **p99 <= 16.7 ms on the GTX 1650: pending
-Tijmen's laptop run.** Phase 2 starts when that number is in and the zoom has
-been looked at again.
+met, smooth zoom judged on 2026-10-15, **p99 <= 16.7 ms on the GTX 1650: met on
+22-10-2026, p99 3.895 ms** (`docs/bench/m0-2026-10-22.json`). The zoom has not been
+looked at again yet (owner Tijmen); phase 2 goes ahead meanwhile.
 
 ## WP1.15 notes: the simulation on its own thread
 
@@ -1255,10 +1256,11 @@ Things to know:
   and effective tick, `SimHandle::moved_commands`); the full command log is off in the game.
 - Latency from click to visible movement: up to 50 ms input delay plus 30 ms `INTERP_DELAY`,
   about 80 ms. Follow-up: an adaptive `INTERP_DELAY` that follows the measured lateness of the
-  snapshots (and so is smaller on a fast machine), once the laptop's `sim.late_publishes` is known.
+  snapshots (and so is smaller on a fast machine). The laptop's `sim.late_publishes` is 0 (M0 run,
+  22-10-2026), so 30 ms is enough there; whether it can go lower is not measured.
 - The sleep jitter of Windows timers is not known on the laptop; `INTERP_DELAY` (30 ms) is a guess
-  made on Linux. If `sim.late_publishes` in the laptop's `bench.json` is not near zero, raise it or
-  make it follow the measured lateness.
+  made on Linux. The laptop's `bench.json` (22-10-2026) has `sim.late_publishes` 0 and
+  `clock_resets` 0, so it need not be raised.
 - `World::passable` looks at terrain only (not at structures), so the snapshot reads the ground once.
   A unit test fails if that ever changes.
 
@@ -1293,16 +1295,8 @@ fixed, delete the entry in the same PR.
     runner is outside it. That is fine while it only calls `sf_sim`; extend the lint
     when it grows logic of its own. Add `sf_bridge` at the same time (PR #41 review): it
     only copies fields at world creation today.
-14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found
-    in WP1.14 as far as software rendering shows it: the per-mesh instance
-    buffers were created on the first frame their list was not empty and
-    regrown on the way (66 creations during one slow zoom out, up to 2 in a
-    frame; the new `buffer_allocs` per frame in `bench.json` shows it), and are
-    now allocated once at load (`Renderer::reserve_units`; `--no-reserve` gives
-    the old behaviour). On lavapipe a creation costs under a millisecond, so
-    whether this explains 34-40 ms on DX12 is **not proven**: delete this entry
-    when the laptop's `bench.json` shows no hitch over 25 ms; if it does, the
-    `hitches.worst` list names the phase and the part of the frame.
+14. **Zoom-out hitches of 34-40 ms**: resolved. The M0 laptop run (22-10-2026) has 0 hitches
+    over 25 ms (worst frame 10.27 ms in `flick_out`) and 0 buffer allocations in the flight.
 15. **Vulkan hangs on the test laptop.** Adapter creation hung with Vulkan
     (NVIDIA GTX 1650, Windows); the game window now uses DX12 on Windows.
     `WGPU_BACKEND` overrides it, `SF_GPU_TRACE=1` prints each GPU startup step.
@@ -1313,6 +1307,8 @@ fixed, delete the entry in the same PR.
     has no window manager and grants no fullscreen at all); the exclusive path
     with wgpu on DX12 has not run anywhere. `bench.json` records the mode used
     (`display.screen_mode`, `display.note`).
+    The M0 laptop run (22-10-2026) took the borderless path again (monitor already
+    1920 x 1080), so the exclusive path is still untested.
 20. **The demo map is gentle.** `generate` keeps the relief at most 6 m high at
     every map size (hills of 5 to 10 m radius, more of them on a bigger map),
     so at the whole-map zoom of the 1,024 m map the relief shows only as
@@ -1327,8 +1323,9 @@ fixed, delete the entry in the same PR.
 22. **A right-click on a unit inside the 4 px edge band gives no order** (PR #46; the band
     wins over everything and the cursor shows the scroll arrow, documented in `cursor.md`).
     Owner: WP11.1, when the HUD and the edge scrolling are revisited.
-23. **Icon set.** Confirm the cost of the SDF icon quad on the GTX 1650 (PR #45; owner: the
-    M0 laptop run, `bench.json` overview phases). The weakest pairs of the placeholders
+23. **Icon set.** The cost of the SDF icon quad on the GTX 1650: the M0 laptop run
+    (22-10-2026) has gpu p99 0.496 ms in the overview phases (all 5,000 units in view, at the zoom where
+    they are icons), so it is negligible there. The weakest pairs of the placeholders
     (power_plant meets the 6-pixel blob rule exactly; barracks / power_plant differ by 17 of
     196 pixels) are for the artist's set: owner, the delivery that replaces the placeholders.
 24. **Art set v3.** Seven of 30 models fail `sf_asset_check` (list in PR #42): owner Tijmen,
@@ -1341,7 +1338,7 @@ fixed, delete the entry in the same PR.
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
-27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen).**
+27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen; parked with phase 14 on 22-10-2026).**
     `sf_sim::checksum` hashes the commands that wait for their tick, so two peers that receive the
     same command for the same tick at different times get different checksums in between: a false
     desync, which a command deadline does not remove. It changes a determinism rule (PLAN.md section
