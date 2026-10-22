@@ -966,7 +966,8 @@ impl Renderer {
 
     /// Show a terrain with the shipped settings (`assets/config/terrain.ron`):
     /// builds the chunk meshes of all levels of detail, the material texture
-    /// array and the material index texture from `map` and draws it before
+    /// array and the cell index texture from `map` (from its gameplay terrain
+    /// types when it has them, WP2.2) and draws it before
     /// the scene objects. Replaces a previous terrain. Call on map changes,
     /// not every frame.
     pub fn set_terrain(&mut self, map: &sf_data::map::Map) {
@@ -981,7 +982,11 @@ impl Renderer {
             &self.globals_layout,
             self.format,
             DEPTH_FORMAT,
-            map,
+            &crate::terrain_gpu::TerrainSource {
+                map,
+                types: &sf_data::terrain::TerrainTypes::embedded(),
+                looks: &crate::terrain_look::TerrainLooks::embedded(),
+            },
             config,
         ));
         if let Some(t) = &self.terrain {

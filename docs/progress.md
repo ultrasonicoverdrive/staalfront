@@ -84,7 +84,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
-- WP2.2 Materials per terrain type: open
+- WP2.2 Materials per terrain type: done (PR pending, branch `wp/2.2-terrain-materials`)
 - WP2.3 Minimap shows terrain types: open
 - WP2.4 Cell grid overlay by terrain type and occupancy: open
 
@@ -99,6 +99,30 @@ rock, ore, a road and bridges, and the sim keeps a type and an occupant per cell
 terrain and occupancy are in the checksum only when present, so `wander_5000`,
 `command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
 are in `docs/rules/terrain.md`.
+
+WP2.2 notes. The presentation draws a map with a terrain layer from the gameplay terrain
+type of each 4 m cell; the per-sample material map of the map file is then not used (a map
+without a layer is drawn from it as before). The mapping is data, by type name:
+`assets/config/terrain_look.ron` (invented colours, procedural patterns, `flat` and `liquid`
+style flags; a type without an entry still renders, in a colour derived from its name).
+`sf_render::terrain_look` builds the texture-array layers (one per terrain type, id order)
+and one index texel per cell (layer, style bits); `terrain.wgsl` blends the four nearest
+cell centres with a 2 m ramp centred on the cell border (the middle of a cell stays pure),
+wobbles the border by up to 0.7 m (a staircase road does not look like a chessboard), takes a
+single texture sample where the four cells agree, draws water and the bridge deck level
+(no hill shading) and puts a light line along a shore. No new pass, no extra vertex data, no
+new dependency; `sf_sim` is untouched. Rules, looks and the blend are in
+`docs/rules/terrain.md` ("How it is drawn"). Tests: `terrain_look/tests.rs` (data, textures,
+index), `tests/terrain_types_screenshot.rs` (each type in its own look, the material map does
+not matter, soft border, staircase corner, level water and bridge on a slope, shore line),
+`typed_map_shows_every_terrain_type` (goldens `terrain_types_*_320.png`). Goldens that changed
+because their maps carry a terrain layer and so look different: `terrain_lod_far_320`,
+`instancing_10k_320`, `glb_testpack_close_320` (regenerated; no other golden moved). The
+WP1.7 colour/relief/seam tests of `terrain_screenshot.rs` now run on test64 *without* its
+layer (material path), their goldens unchanged. Lavapipe frame time per view and the
+before/after pictures: PR description and `docs/screenshots/wp2.2/`. Still open for M0b:
+WP2.3 (the minimap still bakes the old material map) and WP2.4. Water has no level offset and
+is not animated (later polish).
 
 ## Phase 3 — Units, selection and commands
 

@@ -27,9 +27,28 @@ const TOLERANCE: Tolerance = Tolerance {
     max_ratio: 0.02,
 };
 
-fn test_map() -> Map {
+/// The committed 64x64 test map with its terrain layer (all six types).
+fn typed_map() -> Map {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/maps/test64");
     Map::load(&dir).expect("committed test map loads")
+}
+
+/// The same map **without** its terrain layer: since WP2.2 a map with a layer
+/// is drawn from its terrain types, so the tests of the per-sample material
+/// map (WP1.7: material colours, relief shading, chunk seams) run on this copy,
+/// which still takes the material path. `tests/terrain_types_screenshot.rs`
+/// and `typed_map_shows_every_terrain_type` cover the types.
+fn test_map() -> Map {
+    let m = typed_map();
+    Map::from_parts(
+        m.width(),
+        m.height(),
+        m.height_scale(),
+        m.materials().to_vec(),
+        m.heights().to_vec(),
+        m.cells().to_vec(),
+    )
+    .expect("the same map without a terrain layer")
 }
 
 fn renderer(map: &Map, markers: bool) -> Renderer {
@@ -156,6 +175,64 @@ fn lit_fraction(map: &Map, vx: i64, vz: i64) -> f32 {
 
 fn is_flat(map: &Map, vx: i64, vz: i64) -> bool {
     vertex_normal(map, vx, vz)[1] > 0.95
+}
+
+/// WP2.2: the test map drawn from its gameplay terrain types, whole map and
+/// close up, against golden images, and every type shows its own colours.
+#[test]
+fn typed_map_shows_every_terrain_type() {
+    let map = typed_map();
+    let layer = map.terrain().expect("test64 has a terrain layer");
+    let mut r = renderer(&map, false);
+    let far = camera(&map, 1.0, (32.0, 32.0));
+    let img = shot(&mut r, &far);
+    check_golden("terrain_types_far_320.png", &img);
+    check_golden(
+        "terrain_types_close_320.png",
+        &shot(&mut r, &camera(&map, 0.1, (32.0, 32.0))),
+    );
+    assert!(distinct_colors(&img) > 60, "{}", distinct_colors(&img));
+    // The middle of a flat cell of each type has that type's colours (the
+    // middle of a cell stays pure, the borders are 2 m soft; the test map's
+    // relief is gentle, so shading only scales them).
+    let types = ["grass", "road", "water", "rock", "ore", "bridge"];
+    let mut seen = [0usize; 6];
+    for cz in 0..layer.height() {
+        for cx in 0..layer.width() {
+            let id = layer.get(cx, cz).unwrap();
+            let (mx, mz) = (f64::from(cx) * 4.0 + 2.0, f64::from(cz) * 4.0 + 2.0);
+            let flat = is_flat(&map, cx as i64 * 4 + 2, cz as i64 * 4 + 2);
+            if !flat {
+                continue;
+            }
+            let h = map.height_at(mx as f32, mz as f32);
+            let Some((px, py)) = project(&far, Vec3::new(mx as f32, h, mz as f32)) else {
+                continue;
+            };
+            let p = img.pixel(px, py);
+            let (r, g, b) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
+            let ok = match types[usize::from(id)] {
+                "grass" => g > r && g > b,
+                "road" => (r - b).abs() < 25 && r < 110,
+                "water" => b > r + 30 && b > g,
+                "rock" => (r - b).abs() < 30 && r >= 90,
+                "ore" => r > g && g > b && r - b > 30,
+                "bridge" => r > g && g > b && r > 120,
+                _ => unreachable!(),
+            };
+            assert!(
+                ok,
+                "{} at cell ({cx},{cz}) looks like {p:?}",
+                types[usize::from(id)]
+            );
+            seen[usize::from(id)] += 1;
+        }
+    }
+    println!("interior flat cells checked per type: {seen:?}");
+    assert!(
+        seen.iter().filter(|&&n| n >= 1).count() >= 4,
+        "too few types verified: {seen:?}"
+    );
 }
 
 #[test]

@@ -125,10 +125,6 @@ fn distinct_colors(img: &Rgba8) -> usize {
     seen.len()
 }
 
-fn luminance(p: [u8; 4]) -> f32 {
-    0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2])
-}
-
 /// Screen pixel of a world point, `None` if behind the camera or outside the frame.
 fn project(vp: &Mat4, size: (u32, u32), p: Vec3) -> Option<(u32, u32)> {
     let m = glam::DMat4::from_cols_array(&vp.to_cols_array().map(f64::from));
@@ -204,16 +200,41 @@ fn whole_map_with_relief_uses_far_fewer_triangles_and_looks_the_same() {
         sky_delta < (W * H / 200) as usize,
         "the silhouette moved: {sky_delta} pixels"
     );
-    // Relief is visible: lit and shaded slopes.
-    let mut l: Vec<f32> = (0..H)
-        .flat_map(|y| (0..W).map(move |x| (x, y)))
-        .map(|(x, y)| lod.pixel(x, y))
-        .filter(|p| !is_sky(*p))
-        .map(luminance)
-        .collect();
-    l.sort_by(f32::total_cmp);
-    let (lo, hi) = (l[l.len() / 20], l[l.len() * 19 / 20]);
-    assert!(hi > lo * 1.4, "flat-looking frame: p5 {lo:.1}, p95 {hi:.1}");
+    // Relief is visible: lit and shaded slopes. Since WP2.2 the colours come
+    // from the terrain types (mostly grass), so the luminance spread is not a
+    // measure any more; compare with the same map on flat ground instead: the
+    // shading of the slopes must change some of the pixels (the demo map's
+    // relief is gentle, follow-up 20: about 6 % at this zoom; a flat render
+    // would give 0).
+    let flat = Map::from_parts(
+        map.width(),
+        map.height(),
+        map.height_scale(),
+        map.materials().to_vec(),
+        vec![0; map.heights().len()],
+        map.cells().to_vec(),
+    )
+    .expect("flat copy")
+    .with_terrain(
+        map.terrain().expect("generated maps have terrain").clone(),
+        &sf_data::terrain::TerrainTypes::embedded(),
+    )
+    .expect("terrain on the flat copy");
+    // One headless device at a time per process: release the first.
+    drop(r);
+    let mut rf = renderer(W, H);
+    rf.set_terrain(&flat);
+    let flat_img = shot(&mut rf, &camera(&flat, (W, H), 1.0, (128.0, 128.0)));
+    let relief = compare(&lod, &flat_img, 4).expect("same size");
+    println!(
+        "relief vs flat: {:.3} of the pixels differ by more than 4/255",
+        relief.ratio()
+    );
+    assert!(
+        relief.ratio() > 0.02,
+        "relief barely shows: {:.3}",
+        relief.ratio()
+    );
 }
 
 /// Triangle counts close and far, for the report.

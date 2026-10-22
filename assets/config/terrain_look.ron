@@ -1,0 +1,74 @@
+// How the terrain types look (WP2.2). Read by sf_render::terrain_look.
+//
+// One entry per terrain type of terrain_types.ron, matched by `terrain` (the
+// type's name, not its id). The colours are invented and procedural: every
+// look is a small tileable texture drawn from a base colour and a pattern
+// (flat colours with a little variation, in the style of the low-poly art
+// brief); there are no third-party textures. A type without an entry is still
+// drawn: its colour is derived from its name.
+//
+// The picture is chosen to read from 45 to 80 degrees and to stay apart from
+// the unit colours of the factions (sand, olive and weathered blue; slate,
+// charcoal and muted crimson, content/world.md): fresh yellow-green grass,
+// dark road, saturated blue water, mid grey rock, dark gold ore and a
+// light wooden bridge.
+(
+    // Where two types meet (see docs/rules/terrain.md, "How it is drawn").
+    edge: (
+        // Width of the soft transition between two neighbouring cells, in
+        // metres, centred on the cell border. A cell is 4 m, so 2 m keeps the
+        // middle of every cell pure and the borders soft.
+        ramp_m: 2.0,
+        // How far the border wanders, in metres, so a staircase of cells does
+        // not look like a chessboard. 0 = straight borders.
+        wobble_m: 0.7,
+        // Colour (linear 0..1) and strength of the light band along a shore,
+        // where a `liquid` type meets another type.
+        shore: (0.80, 0.93, 0.96),
+        shore_amount: 0.40,
+    ),
+    looks: [
+        (
+            terrain: "grass",
+            color: (82, 138, 54),
+            contrast: 0.30,
+            pattern: Noise,
+        ),
+        (
+            terrain: "road",
+            color: (98, 94, 96),
+            contrast: 0.18,
+            pattern: Noise,
+        ),
+        (
+            // Drawn flat (no hill shading, the river bed's slope does not show)
+            // with a light line along the shore.
+            terrain: "water",
+            color: (40, 108, 164),
+            contrast: 0.14,
+            pattern: Ripples,
+            flat: true,
+            liquid: true,
+        ),
+        (
+            terrain: "rock",
+            color: (132, 128, 124),
+            contrast: 0.38,
+            pattern: Cracks,
+        ),
+        (
+            terrain: "ore",
+            color: (98, 66, 34),
+            contrast: 0.22,
+            pattern: Flecks(color: (244, 190, 52)),
+        ),
+        (
+            // A deck: flat, with planks across the tile.
+            terrain: "bridge",
+            color: (202, 142, 76),
+            contrast: 0.10,
+            pattern: Planks(count: 8),
+            flat: true,
+        ),
+    ],
+)
