@@ -130,6 +130,10 @@ fn default_formation_patience_ticks() -> u16 {
     300
 }
 
+fn default_formation_ahead_tenths() -> u16 {
+    20
+}
+
 fn default_scan_cooldown() -> u16 {
     10
 }
@@ -206,6 +210,11 @@ pub struct SimSettings {
     /// 2000.
     #[serde(default = "default_formation_patience_ticks")]
     pub formation_patience_ticks: u16,
+    /// How far ahead of its slot, in tenths of a cell, a member that follows the order's way
+    /// (a loose formation, or no sight of its slot) may get before it goes no faster than the
+    /// formation. 5 to `formation_reform_tenths`.
+    #[serde(default = "default_formation_ahead_tenths")]
+    pub formation_ahead_tenths: u16,
     /// Ticks between two looks round for a target of one unit (WP5.4). 1 to
     /// [`MAX_SCAN_COOLDOWN`].
     #[serde(default = "default_scan_cooldown")]
@@ -299,8 +308,8 @@ impl fmt::Display for SimSettingsError {
                  at most formation_max_units, which is at most {MAX_FORMATION_UNITS}; \
                  formation_spacing_permille is 1000 to 3000, formation_spread_permille 1000 to \
                  4000, formation_pace_permille 500 to 1000, formation_catchup_permille from the \
-                 pace up to 1000, formation_reform_tenths 5 to 100 and formation_patience_ticks \
-                 20 to 2000"
+                 pace up to 1000, formation_reform_tenths 5 to 100, formation_patience_ticks \
+                 20 to 2000 and formation_ahead_tenths 5 up to formation_reform_tenths"
             ),
             Self::Targeting { scan, pursuit } => write!(
                 f,
@@ -363,6 +372,8 @@ impl SimSettings {
             || settings.formation_catchup_permille > 1000
             || !(5..=100).contains(&settings.formation_reform_tenths)
             || !(20..=2000).contains(&settings.formation_patience_ticks)
+            || settings.formation_ahead_tenths < 5
+            || settings.formation_ahead_tenths > settings.formation_reform_tenths
         {
             return Err(SimSettingsError::Formation);
         }
@@ -511,9 +522,10 @@ mod tests {
                 s.formation_pace_permille,
                 s.formation_catchup_permille,
                 s.formation_reform_tenths,
-                s.formation_patience_ticks
+                s.formation_patience_ticks,
+                s.formation_ahead_tenths
             ),
-            (3, 19, 1250, 1500, 900, 1000, 30, 300)
+            (3, 19, 1250, 1500, 900, 1000, 30, 300, 20)
         );
         let with = |field: &str, value: &str| {
             SimSettings::from_ron(&format!(
@@ -544,6 +556,15 @@ mod tests {
         assert!(with("formation_catchup_permille", "1001").is_err());
         assert!(with("formation_reform_tenths", "4").is_err());
         assert!(with("formation_reform_tenths", "100").is_ok());
+        assert!(with("formation_ahead_tenths", "4").is_err());
+        assert!(
+            with("formation_ahead_tenths", "30").is_ok(),
+            "up to the re-form distance"
+        );
+        assert!(
+            with("formation_ahead_tenths", "31").is_err(),
+            "not beyond the re-form distance"
+        );
         assert!(with("formation_patience_ticks", "19").is_err());
         assert!(with("formation_patience_ticks", "2000").is_ok());
         assert_eq!(

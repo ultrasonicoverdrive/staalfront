@@ -31,11 +31,11 @@ CLAUDE.md or an agent file.
 4. **Review gate:** the `reviewer` agent checks out the PR, runs the checks itself,
    assesses it against the WP's acceptance criteria, §5 and §12.4, and posts
    `APPROVE` or `CHANGES REQUESTED` as a PR comment. The orchestrator merges only
-   after `APPROVE`; on `CHANGES REQUESTED` the builder fixes the findings on the
-   same branch and the reviewer reviews again.
+   after `APPROVE`; on `CHANGES REQUESTED` a fix round of `bouwer-opus-medium`
+   (§3) fixes the findings on the same branch and the reviewer reviews again.
 5. After each phase: a short playable build and a report in `docs/progress.md`.
 
-Parallelism (§12.3): at most 3 agents at a time, only on WPs without overlap in
+Parallelism (§12.3): normally 3-4 agents at a time, 5 at most (decision Tijmen 22-10-2026), only on WPs without overlap in
 crates. Conflicts in `Cargo.lock` or shared types are resolved by the
 orchestrator.
 
@@ -46,13 +46,16 @@ Agent definitions live in `.claude/agents/`.
 | Agent | Model / effort | Use |
 |---|---|---|
 | `bouwer-sonnet` | sonnet, high | Default for every WP, including those marked **[xhigh]** in PLAN.md §3. |
-| `bouwer-opus-medium` | opus, medium | A WP that failed review twice on `bouwer-sonnet`. |
+| `bouwer-opus-medium` | opus, low or medium | Fix rounds: round 1 at effort low, round 2 and later at effort medium. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
 
-If a WP fails review twice on `bouwer-sonnet`, the orchestrator reruns it on
-`bouwer-opus-medium` (decision Tijmen 17-10-2026). The two supporting agents have no edit, commit or push
-rights.
+A WP is built by `bouwer-sonnet`. After the first `CHANGES REQUESTED` the
+orchestrator starts fix round 1 on `bouwer-opus-medium` at effort low; fix round 2
+and later run on `bouwer-opus-medium` at effort medium. Each fix round continues on
+the WP's own branch (decision Tijmen 21-10-2026, replacing "rerun on Opus medium
+after two failed reviews" of 17-10-2026). The two supporting agents have no edit,
+commit or push rights.
 
 ## 4. Quality rules (PLAN.md §5, apply to every WP)
 

@@ -895,8 +895,8 @@ longer "the commands as stamped". The full log (`SimConfig::record_commands`:
 every command, `LoggedCommand`) grows with the session, so it is off in the game
 and on in the tests.
 
-**Open decision for phase 14 (lockstep), owner Tijmen: pending commands are in
-the world checksum.** The checksum hashes the commands that wait for their tick
+**Open decision for phase 14 (lockstep), owner Tijmen, parked with phase 14 on
+22-10-2026: pending commands are in the world checksum.** The checksum hashes the commands that wait for their tick
 (`sf_sim::checksum`, the queue section). So two peers that receive the same
 command, for the same tick, at *different times* have different checksums in
 the ticks between its arrival and its execution: a false desync. A deadline by

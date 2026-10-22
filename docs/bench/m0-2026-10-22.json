@@ -1,0 +1,695 @@
+{
+  "format": 1,
+  "tool": "sf_demo --bench",
+  "version": "0.1.0",
+  "build": "release",
+  "host": {
+    "os": "windows",
+    "arch": "x86_64",
+    "adapter": "NVIDIA GeForce GTX 1650 [DiscreteGpu, Dx12]",
+    "backend_env": null
+  },
+  "display": {
+    "requested": "1920x1080 fullscreen",
+    "actual": [
+      1920,
+      1080
+    ],
+    "screen_mode": "borderless",
+    "monitor": "\\\\.\\DISPLAY1",
+    "monitor_size": [
+      1920,
+      1080
+    ],
+    "refresh_hz": 60.0,
+    "note": null
+  },
+  "present": {
+    "mode": "Immediate",
+    "vsync": false,
+    "requested": "uncapped",
+    "note": null
+  },
+  "scene": {
+    "units": 5000,
+    "buildings": 24,
+    "models": "testpack",
+    "map_cells": [
+      256,
+      256
+    ],
+    "map_metres": [
+      1024,
+      1024
+    ],
+    "metres_per_cell": 4,
+    "instance_buffers_reserved": true
+  },
+  "flight": {
+    "progress_by": "time",
+    "seconds": 75.0,
+    "frames_limit": null,
+    "warmup_frames": 90,
+    "segments": [
+      "close_up",
+      "glide_out",
+      "overview",
+      "glide_in",
+      "mid_hold",
+      "flick_out",
+      "overview_again",
+      "flick_in",
+      "low_pass"
+    ]
+  },
+  "frames": {
+    "count": 26880,
+    "seconds": 75.003,
+    "avg_fps": 358.385
+  },
+  "frame_ms": {
+    "samples": 26880,
+    "avg": 2.79,
+    "p50": 2.955,
+    "p95": 3.634,
+    "p99": 3.895,
+    "max": 10.27
+  },
+  "cpu_ms": {
+    "samples": 26880,
+    "avg": 2.611,
+    "p50": 2.782,
+    "p95": 3.441,
+    "p99": 3.677,
+    "max": 9.989
+  },
+  "gpu_ms": {
+    "available": true,
+    "note": null,
+    "stats": {
+      "samples": 26880,
+      "avg": 0.433,
+      "p50": 0.442,
+      "p95": 0.679,
+      "p99": 0.726,
+      "max": 0.78
+    }
+  },
+  "criterion": {
+    "name": "M0: p99 frame time over the whole flight with 5,000 units",
+    "p99_target_ms": 16.667,
+    "p99_ms": 3.895,
+    "met": true,
+    "caveats": []
+  },
+  "phases": [
+    {
+      "name": "close_up",
+      "frames": 2277,
+      "frame_ms": {
+        "samples": 2277,
+        "avg": 2.636,
+        "p50": 2.643,
+        "p95": 3.454,
+        "p99": 3.65,
+        "max": 5.628
+      },
+      "cpu_ms": {
+        "samples": 2277,
+        "avg": 2.464,
+        "p50": 2.444,
+        "p95": 3.284,
+        "p99": 3.466,
+        "max": 5.343
+      },
+      "gpu_ms": {
+        "samples": 2277,
+        "avg": 0.309,
+        "p50": 0.298,
+        "p95": 0.377,
+        "p99": 0.383,
+        "max": 0.388
+      },
+      "units_in_view": {
+        "avg": 44.101,
+        "max": 51
+      },
+      "draw_calls": {
+        "avg": 24.632,
+        "max": 27
+      },
+      "triangles": {
+        "avg": 10668.306,
+        "max": 14576
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "glide_out",
+      "frames": 5912,
+      "frame_ms": {
+        "samples": 5912,
+        "avg": 2.791,
+        "p50": 2.972,
+        "p95": 3.646,
+        "p99": 3.851,
+        "max": 4.64
+      },
+      "cpu_ms": {
+        "samples": 5912,
+        "avg": 2.624,
+        "p50": 2.809,
+        "p95": 3.476,
+        "p99": 3.663,
+        "max": 4.454
+      },
+      "gpu_ms": {
+        "samples": 5912,
+        "avg": 0.498,
+        "p50": 0.535,
+        "p95": 0.707,
+        "p99": 0.734,
+        "max": 0.75
+      },
+      "units_in_view": {
+        "avg": 1448.884,
+        "max": 5000
+      },
+      "draw_calls": {
+        "avg": 55.84,
+        "max": 142
+      },
+      "triangles": {
+        "avg": 74216.535,
+        "max": 156032
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "overview",
+      "frames": 2870,
+      "frame_ms": {
+        "samples": 2870,
+        "avg": 3.136,
+        "p50": 3.142,
+        "p95": 3.613,
+        "p99": 3.899,
+        "max": 6.62
+      },
+      "cpu_ms": {
+        "samples": 2870,
+        "avg": 2.944,
+        "p50": 2.951,
+        "p95": 3.377,
+        "p99": 3.624,
+        "max": 4.284
+      },
+      "gpu_ms": {
+        "samples": 2870,
+        "avg": 0.483,
+        "p50": 0.483,
+        "p95": 0.49,
+        "p99": 0.495,
+        "max": 0.506
+      },
+      "units_in_view": {
+        "avg": 5000.0,
+        "max": 5000
+      },
+      "draw_calls": {
+        "avg": 98.0,
+        "max": 98
+      },
+      "triangles": {
+        "avg": 84632.0,
+        "max": 84632
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "glide_in",
+      "frames": 5652,
+      "frame_ms": {
+        "samples": 5652,
+        "avg": 2.919,
+        "p50": 3.087,
+        "p95": 3.706,
+        "p99": 3.966,
+        "max": 5.172
+      },
+      "cpu_ms": {
+        "samples": 5652,
+        "avg": 2.739,
+        "p50": 2.899,
+        "p95": 3.516,
+        "p99": 3.711,
+        "max": 5.003
+      },
+      "gpu_ms": {
+        "samples": 5652,
+        "avg": 0.531,
+        "p50": 0.535,
+        "p95": 0.701,
+        "p99": 0.733,
+        "max": 0.743
+      },
+      "units_in_view": {
+        "avg": 1811.323,
+        "max": 5000
+      },
+      "draw_calls": {
+        "avg": 54.852,
+        "max": 111
+      },
+      "triangles": {
+        "avg": 68140.696,
+        "max": 128916
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "mid_hold",
+      "frames": 1664,
+      "frame_ms": {
+        "samples": 1664,
+        "avg": 2.705,
+        "p50": 2.728,
+        "p95": 3.576,
+        "p99": 3.798,
+        "max": 4.651
+      },
+      "cpu_ms": {
+        "samples": 1664,
+        "avg": 2.524,
+        "p50": 2.519,
+        "p95": 3.377,
+        "p99": 3.61,
+        "max": 4.387
+      },
+      "gpu_ms": {
+        "samples": 1664,
+        "avg": 0.33,
+        "p50": 0.332,
+        "p95": 0.347,
+        "p99": 0.35,
+        "max": 0.362
+      },
+      "units_in_view": {
+        "avg": 111.108,
+        "max": 126
+      },
+      "draw_calls": {
+        "avg": 28.007,
+        "max": 31
+      },
+      "triangles": {
+        "avg": 19436.363,
+        "max": 25244
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "flick_out",
+      "frames": 1045,
+      "frame_ms": {
+        "samples": 1045,
+        "avg": 2.869,
+        "p50": 2.988,
+        "p95": 3.806,
+        "p99": 4.206,
+        "max": 10.27
+      },
+      "cpu_ms": {
+        "samples": 1045,
+        "avg": 2.701,
+        "p50": 2.835,
+        "p95": 3.645,
+        "p99": 4.041,
+        "max": 9.989
+      },
+      "gpu_ms": {
+        "samples": 1045,
+        "avg": 0.538,
+        "p50": 0.547,
+        "p95": 0.725,
+        "p99": 0.772,
+        "max": 0.78
+      },
+      "units_in_view": {
+        "avg": 1881.898,
+        "max": 5000
+      },
+      "draw_calls": {
+        "avg": 59.912,
+        "max": 141
+      },
+      "triangles": {
+        "avg": 87727.713,
+        "max": 154624
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "overview_again",
+      "frames": 721,
+      "frame_ms": {
+        "samples": 721,
+        "avg": 3.121,
+        "p50": 3.107,
+        "p95": 3.753,
+        "p99": 4.148,
+        "max": 4.756
+      },
+      "cpu_ms": {
+        "samples": 721,
+        "avg": 2.942,
+        "p50": 2.933,
+        "p95": 3.582,
+        "p99": 3.841,
+        "max": 4.312
+      },
+      "gpu_ms": {
+        "samples": 721,
+        "avg": 0.484,
+        "p50": 0.483,
+        "p95": 0.491,
+        "p99": 0.496,
+        "max": 0.5
+      },
+      "units_in_view": {
+        "avg": 5000.0,
+        "max": 5000
+      },
+      "draw_calls": {
+        "avg": 98.0,
+        "max": 98
+      },
+      "triangles": {
+        "avg": 84632.0,
+        "max": 84632
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "flick_in",
+      "frames": 1067,
+      "frame_ms": {
+        "samples": 1067,
+        "avg": 2.813,
+        "p50": 2.983,
+        "p95": 3.712,
+        "p99": 4.071,
+        "max": 4.24
+      },
+      "cpu_ms": {
+        "samples": 1067,
+        "avg": 2.635,
+        "p50": 2.795,
+        "p95": 3.537,
+        "p99": 3.906,
+        "max": 4.05
+      },
+      "gpu_ms": {
+        "samples": 1067,
+        "avg": 0.496,
+        "p50": 0.512,
+        "p95": 0.698,
+        "p99": 0.748,
+        "max": 0.753
+      },
+      "units_in_view": {
+        "avg": 1710.677,
+        "max": 5000
+      },
+      "draw_calls": {
+        "avg": 51.213,
+        "max": 111
+      },
+      "triangles": {
+        "avg": 60769.886,
+        "max": 118700
+      },
+      "buffer_allocs": 0
+    },
+    {
+      "name": "low_pass",
+      "frames": 5672,
+      "frame_ms": {
+        "samples": 5672,
+        "avg": 2.512,
+        "p50": 2.533,
+        "p95": 3.389,
+        "p99": 3.673,
+        "max": 5.783
+      },
+      "cpu_ms": {
+        "samples": 5672,
+        "avg": 2.322,
+        "p50": 2.3,
+        "p95": 3.183,
+        "p99": 3.364,
+        "max": 5.633
+      },
+      "gpu_ms": {
+        "samples": 5672,
+        "avg": 0.283,
+        "p50": 0.28,
+        "p95": 0.314,
+        "p99": 0.34,
+        "max": 0.365
+      },
+      "units_in_view": {
+        "avg": 81.702,
+        "max": 160
+      },
+      "draw_calls": {
+        "avg": 24.143,
+        "max": 30
+      },
+      "triangles": {
+        "avg": 14064.998,
+        "max": 20300
+      },
+      "buffer_allocs": 0
+    }
+  ],
+  "hitches": {
+    "threshold_ms": 25.0,
+    "count": 0,
+    "worst": [
+      {
+        "frame": 18878,
+        "phase": "flick_out",
+        "frame_ms": 10.27,
+        "cpu_ms": 3.883,
+        "sim_ms": 0.0,
+        "build_ms": 0.351,
+        "upload_ms": 1.422,
+        "render_ms": 1.799,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 10182,
+        "phase": "overview",
+        "frame_ms": 6.62,
+        "cpu_ms": 2.316,
+        "sim_ms": 0.0,
+        "build_ms": 0.721,
+        "upload_ms": 0.145,
+        "render_ms": 1.25,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 23686,
+        "phase": "low_pass",
+        "frame_ms": 5.783,
+        "cpu_ms": 1.571,
+        "sim_ms": 0.0,
+        "build_ms": 0.048,
+        "upload_ms": 0.384,
+        "render_ms": 0.96,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 1190,
+        "phase": "close_up",
+        "frame_ms": 5.628,
+        "cpu_ms": 4.352,
+        "sim_ms": 0.0,
+        "build_ms": 0.107,
+        "upload_ms": 1.42,
+        "render_ms": 1.69,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 12222,
+        "phase": "glide_in",
+        "frame_ms": 5.172,
+        "cpu_ms": 2.515,
+        "sim_ms": 0.0,
+        "build_ms": 0.972,
+        "upload_ms": 0.213,
+        "render_ms": 1.099,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 12509,
+        "phase": "glide_in",
+        "frame_ms": 4.97,
+        "cpu_ms": 3.087,
+        "sim_ms": 0.0,
+        "build_ms": 0.924,
+        "upload_ms": 0.166,
+        "render_ms": 1.693,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 1681,
+        "phase": "close_up",
+        "frame_ms": 4.901,
+        "cpu_ms": 2.443,
+        "sim_ms": 0.0,
+        "build_ms": 0.053,
+        "upload_ms": 0.822,
+        "render_ms": 1.244,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 19105,
+        "phase": "flick_out",
+        "frame_ms": 4.827,
+        "cpu_ms": 2.727,
+        "sim_ms": 1.518,
+        "build_ms": 0.816,
+        "upload_ms": 0.189,
+        "render_ms": 0.93,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 16655,
+        "phase": "glide_in",
+        "frame_ms": 4.81,
+        "cpu_ms": 1.919,
+        "sim_ms": 0.0,
+        "build_ms": 0.067,
+        "upload_ms": 0.494,
+        "render_ms": 1.164,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 19623,
+        "phase": "overview_again",
+        "frame_ms": 4.756,
+        "cpu_ms": 3.746,
+        "sim_ms": 0.0,
+        "build_ms": 0.876,
+        "upload_ms": 0.245,
+        "render_ms": 2.278,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 18835,
+        "phase": "flick_out",
+        "frame_ms": 4.74,
+        "cpu_ms": 2.213,
+        "sim_ms": 0.0,
+        "build_ms": 0.192,
+        "upload_ms": 0.725,
+        "render_ms": 1.043,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 25023,
+        "phase": "low_pass",
+        "frame_ms": 4.687,
+        "cpu_ms": 2.624,
+        "sim_ms": 0.0,
+        "build_ms": 0.045,
+        "upload_ms": 0.289,
+        "render_ms": 2.082,
+        "buffer_allocs": 0
+      }
+    ]
+  },
+  "sim": {
+    "thread": true,
+    "note": "the simulation runs on its own thread since WP1.15: frame_ms and cpu_ms exclude it; runs from before that change are not comparable",
+    "tick_ms": {
+      "samples": 1500,
+      "avg": 1.438,
+      "p50": 1.38,
+      "p95": 1.854,
+      "p99": 2.126,
+      "max": 3.044
+    },
+    "behind_passes": 0,
+    "clock_resets": 0,
+    "late_commands": 0,
+    "late_publishes": 0,
+    "extra_tick_ms": 0.0,
+    "ticks": 1509,
+    "final_checksum": "0x9e196a6ced2ef024",
+    "checksums": [
+      {
+        "tick": 100,
+        "checksum": "0x31dd7bed928a9fbd"
+      },
+      {
+        "tick": 200,
+        "checksum": "0xc9e1a1952b5d0de7"
+      },
+      {
+        "tick": 300,
+        "checksum": "0xb601b5b6774e4860"
+      },
+      {
+        "tick": 400,
+        "checksum": "0x98b5f8f389f0a68a"
+      },
+      {
+        "tick": 500,
+        "checksum": "0x17644906020fb586"
+      },
+      {
+        "tick": 600,
+        "checksum": "0x41080ed619d78974"
+      },
+      {
+        "tick": 700,
+        "checksum": "0xb8b97d9b066a7659"
+      },
+      {
+        "tick": 800,
+        "checksum": "0xfd4f0bbcb2f41908"
+      },
+      {
+        "tick": 900,
+        "checksum": "0xb8b137a4af4221f7"
+      },
+      {
+        "tick": 1000,
+        "checksum": "0xbc988b5226521da3"
+      },
+      {
+        "tick": 1100,
+        "checksum": "0xa8d32a4689268c39"
+      },
+      {
+        "tick": 1200,
+        "checksum": "0xc8b3259b8fc9eb9f"
+      },
+      {
+        "tick": 1300,
+        "checksum": "0x1d3fb045feca8dd9"
+      },
+      {
+        "tick": 1400,
+        "checksum": "0xd5dd8287278417c9"
+      },
+      {
+        "tick": 1500,
+        "checksum": "0x9e196a6ced2ef024"
+      }
+    ]
+  }
+}

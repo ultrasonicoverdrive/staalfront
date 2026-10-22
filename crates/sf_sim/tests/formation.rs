@@ -114,7 +114,16 @@ fn config() -> WorldConfig {
 }
 
 fn world() -> World {
-    let terrain = Terrain::from_layer(MAP.0, MAP.1, &layer(), &defs()).unwrap();
+    world_with_rock(&[])
+}
+
+/// The world of `world`, with rock in the cells `rock` besides.
+fn world_with_rock(rock: &[(u32, u32)]) -> World {
+    let mut cells = layer();
+    for &(x, y) in rock {
+        cells[(y * MAP.0 + x) as usize] = ROCK.0;
+    }
+    let terrain = Terrain::from_layer(MAP.0, MAP.1, &cells, &defs()).unwrap();
     World::with_terrain(config(), terrain)
         .unwrap()
         .with_units(table())
@@ -284,6 +293,14 @@ fn formations_can_be_turned_off_and_are_checked_when_given() {
         },
         FormationConfig {
             patience_ticks: 5,
+            ..c
+        },
+        FormationConfig {
+            ahead_tenths: 4,
+            ..c
+        },
+        FormationConfig {
+            ahead_tenths: 31,
             ..c
         },
     ] {
@@ -748,9 +765,14 @@ fn another_order_takes_a_unit_out_and_a_leader_that_goes_is_replaced() {
 /// cannot get to its slot, whatever it tries. Returns the world (with a short patience), the
 /// four tanks of the group and the soldier.
 fn pen_world() -> (World, Vec<EntityId>, EntityId) {
-    let mut w = world()
+    pen_world_with(&[], 40)
+}
+
+/// `pen_world` with rock in the cells `rock` besides and a patience of `patience` ticks.
+fn pen_world_with(rock: &[(u32, u32)], patience: u16) -> (World, Vec<EntityId>, EntityId) {
+    let mut w = world_with_rock(rock)
         .with_formation(FormationConfig {
-            patience_ticks: 40,
+            patience_ticks: patience,
             ..FormationConfig::DEFAULT
         })
         .unwrap();
@@ -967,4 +989,321 @@ fn the_state_of_a_formation_can_be_read_back() {
     assert_eq!(v.state, FormationState::Whole);
     assert!(v.extent > Fx::ZERO);
     assert!(w.formation_of(EntityId::new(999, 0)).is_none());
+}
+
+// ---- a base, not a field (WP4.6b) -------------------------------------------------------
+
+/// How far ahead of its slot, along the heading, unit `u` is (negative: behind it).
+fn ahead_of_slot(w: &World, u: EntityId) -> Fx {
+    let v = w.formation_of(u).unwrap();
+    (pos(w, u) - v.slot).dot(v.heading.to_vec2())
+}
+
+/// What a march through the gap saw: the farthest the leader went over a window of twenty
+/// ticks in which the formation was loose and the leader led all the time, and how far ahead
+/// of its slot a member that followed the order's way ever got while the formation was loose.
+struct Loose {
+    windows: u32,
+    leader_fastest: Fx,
+    most_ahead: Fx,
+    arrived: bool,
+}
+
+/// A tank leads a soldier, two more tanks and a truck through the gap in the wall. Before
+/// WP4.6b a loose formation went at everybody's own speed: the leader (a tank) at 2.0 cells a
+/// second, the soldiers at 0.7.
+fn loose_march(cfg: FormationConfig) -> Loose {
+    let mut w = world().with_formation(cfg).unwrap();
+    let group = row(&mut w, &[SOLDIER, TANK, TANK, TRUCK, SOLDIER], 20, 19);
+    go(&mut w, &group, (80, 19));
+    let mut r = Loose {
+        windows: 0,
+        leader_fastest: Fx::ZERO,
+        most_ahead: Fx::MIN,
+        arrived: false,
+    };
+    // The leader's position on the ticks it has led in a loose formation, in a row.
+    let mut run_of: Vec<Vec2> = Vec::new();
+    for _ in 0..4000 {
+        w.step();
+        let Some(leader) = group
+            .iter()
+            .copied()
+            .find(|&u| w.formation_of(u).is_some_and(|v| v.leader))
+        else {
+            // Let go at the goal: the rest of the walk is the arrival.
+            if group.iter().all(|&u| w.order_of(u) == Some(Order::Idle)) {
+                break;
+            }
+            continue;
+        };
+        let v = w.formation_of(leader).unwrap();
+        if v.loose && v.mode == MemberMode::Lead {
+            run_of.push(pos(&w, leader));
+            if run_of.len() > 20 {
+                r.windows += 1;
+                let moved = (run_of[run_of.len() - 1] - run_of[run_of.len() - 21]).length();
+                r.leader_fastest = r.leader_fastest.max(moved);
+            }
+            for &u in &group {
+                if w.formation_of(u)
+                    .is_some_and(|m| m.mode == MemberMode::Flow)
+                {
+                    r.most_ahead = r.most_ahead.max(ahead_of_slot(&w, u));
+                }
+            }
+        } else {
+            run_of.clear();
+        }
+    }
+    r.arrived = group.iter().all(|&u| w.order_of(u) == Some(Order::Idle));
+    r
+}
+
+#[test]
+fn a_loose_formation_lets_go_of_its_shape_and_not_of_its_pace() {
+    let r = loose_march(FormationConfig::DEFAULT);
+    // Twenty ticks of the soldier's pace (0.7 cells a second).
+    let slowest = per_tick(Fx::from_ratio(7, 10)).mul_int(20);
+    assert!(
+        r.windows > 100,
+        "only {} windows led while loose",
+        r.windows
+    );
+    // The leader is a tank (2.0 cells a second) and steps no faster than the soldier (0.7)
+    // in the narrow place too; a hair for the rounding of the steps and the pushes.
+    assert!(
+        r.leader_fastest <= slowest.mul_int(105).div_int(100),
+        "the leader went {:?} cells in twenty ticks, the slowest {slowest:?}",
+        r.leader_fastest
+    );
+    // A member that follows the way does not run ahead of its slot by more than the bound
+    // (2.0 cells as shipped) and a step or two: before it was 28 cells.
+    assert!(
+        r.most_ahead <= Fx::from_ratio(25, 10),
+        "{:?} cells ahead",
+        r.most_ahead
+    );
+    assert!(r.arrived, "everybody arrives");
+}
+
+#[test]
+fn the_bound_on_how_far_ahead_a_member_may_get_is_data() {
+    let tight = loose_march(FormationConfig {
+        ahead_tenths: 5,
+        ..FormationConfig::DEFAULT
+    });
+    let wide = loose_march(FormationConfig {
+        ahead_tenths: 30,
+        ..FormationConfig::DEFAULT
+    });
+    // The bound and a step or two.
+    assert!(
+        tight.most_ahead <= Fx::from_ratio(10, 10),
+        "{:?}",
+        tight.most_ahead
+    );
+    assert!(
+        wide.most_ahead <= Fx::from_ratio(35, 10),
+        "{:?}",
+        wide.most_ahead
+    );
+    assert!(
+        wide.most_ahead > tight.most_ahead + Fx::HALF,
+        "{:?} with 3.0, {:?} with 0.5",
+        wide.most_ahead,
+        tight.most_ahead
+    );
+    assert!(tight.arrived && wide.arrived);
+}
+
+#[test]
+fn a_unit_that_forms_no_formation_does_not_switch_off_the_fields_of_the_classes_that_did() {
+    // Four walkers and two trucks (two classes of one family, a formation) and a plane, which
+    // forms none, sent to one place: seven units, below the threshold of a field (8). The two
+    // classes that are wholly in the formation get a field of their own (and with it the
+    // arrival slots of the goal); the plane follows its own route. Before WP4.6b one unit
+    // outside every formation took the fields away from everybody.
+    let mut w = world();
+    let walkers = row(&mut w, &[SOLDIER, TANK, SOLDIER, TANK], 6, 10);
+    let trucks = row(&mut w, &[TRUCK, TRUCK], 6, 14);
+    let plane = spawn(&mut w, PLANE, 6, 18);
+    let mut all = walkers.clone();
+    all.extend(&trucks);
+    all.push(plane);
+    go(&mut w, &all, (60, 14));
+    w.step();
+    assert_eq!(w.formation_stats().formed, 1);
+    assert!(
+        walkers
+            .iter()
+            .chain(&trucks)
+            .all(|&u| w.formation_of(u).is_some())
+    );
+    assert!(w.formation_of(plane).is_none());
+    for &u in walkers.iter().chain(&trucks) {
+        assert!(w.route_of(u).unwrap().field, "{u:?} has no field");
+    }
+    assert!(!w.route_of(plane).unwrap().field);
+    // Everybody arrives, near the goal.
+    run(&mut w, 3000);
+    for &u in &all {
+        assert_eq!(w.order_of(u), Some(Order::Idle), "{u:?}");
+        assert!(
+            (pos(&w, u) - mid(60, 14)).length() < Fx::from_int(8),
+            "{u:?}"
+        );
+    }
+}
+
+#[test]
+fn a_unit_ahead_and_off_its_column_that_cannot_see_its_slot_goes_on_at_the_pace_of_the_formation() {
+    // The same tank, now so far from its slot (beyond the one sector a line of sight may run
+    // through) that it cannot walk to it. It does not stand off to the side of the formation,
+    // and the leader does not wait for a unit that is ahead; it follows the order's way, and
+    // no faster than the formation goes: 0.7 cells a second, not its own 2.0.
+    let mut w = world();
+    let mut group = row(&mut w, &[SOLDIER, SOLDIER, SOLDIER], 20, 20);
+    let tank = spawn(&mut w, TANK, 64, 36);
+    group.push(tank);
+    go(&mut w, &group, (80, 20));
+    let leader = {
+        w.step();
+        w.formation_of(group[0]).unwrap().leader_id
+    };
+    let (mut stood, mut leader_waited, mut fastest) = (0, 0, Fx::ZERO);
+    let mut then = vec![pos(&w, tank)];
+    for t in 0..300 {
+        w.step();
+        stood += u32::from(w.formation_of(tank).unwrap().mode == MemberMode::Wait);
+        then.push(pos(&w, tank));
+        if t >= 100 {
+            // The first ticks are the group forming up round its leader.
+            leader_waited += u32::from(w.formation_of(leader).is_some_and(|v| v.waiting));
+            let n = then.len();
+            fastest = fastest.max((then[n - 1] - then[n - 21]).length());
+        }
+    }
+    assert_eq!(stood, 0, "the tank stood off its column for {stood} ticks");
+    assert_eq!(
+        leader_waited, 0,
+        "the leader waited for a unit that is ahead"
+    );
+    let slowest = per_tick(Fx::from_ratio(7, 10)).mul_int(20);
+    assert!(
+        fastest <= slowest.mul_int(105).div_int(100),
+        "the tank went {fastest:?} cells in twenty ticks, the formation {slowest:?}"
+    );
+}
+
+#[test]
+fn a_unit_ahead_of_its_slot_and_off_its_column_walks_back_instead_of_standing() {
+    // Three soldiers close together and a tank 20 cells ahead of them and 12 to the side: the
+    // lattice pulls the tank in, so its slot is behind it and beside it. Before WP4.6b a unit
+    // ahead of its slot waited on open ground whatever its sideways offset: the tank stood
+    // where it was, 12 cells off its column, and the leader did not wait for it.
+    let mut w = world();
+    let mut group = row(&mut w, &[SOLDIER, SOLDIER, SOLDIER], 20, 20);
+    let tank = spawn(&mut w, TANK, 31, 28);
+    group.push(tank);
+    go(&mut w, &group, (80, 20));
+    let start = pos(&w, tank);
+    let mut waited = 0;
+    let mut closest = Fx::MAX;
+    for _ in 0..120 {
+        w.step();
+        let v = w.formation_of(tank).unwrap();
+        let off = pos(&w, tank) - v.slot;
+        let heading = v.heading.to_vec2();
+        let (along, aside) = (off.dot(heading), off.cross(heading).abs());
+        if along > Fx::from_int(3) && aside > Fx::from_int(3) {
+            waited += u32::from(v.mode == MemberMode::Wait);
+        }
+        closest = closest.min(off.length());
+    }
+    assert_eq!(
+        waited, 0,
+        "the tank stood off its column for {waited} ticks"
+    );
+    // It walked back toward its slot instead (the soldiers walk toward the tank at 0.7 cells a
+    // second, the tank back to them at 2.0).
+    assert!(
+        (pos(&w, tank) - start).length() > Fx::from_int(5),
+        "the tank moved only {:?}",
+        pos(&w, tank) - start
+    );
+    assert!(
+        closest < Fx::from_int(3),
+        "the tank came no nearer than {closest:?} to its slot"
+    );
+}
+
+/// How far `p` is from the box of cells `x0..=x1` by `y0..=y1`.
+fn distance_to_cells(p: Vec2, (x0, y0): (i32, i32), (x1, y1): (i32, i32)) -> Fx {
+    let clamp = |v: Fx, lo: i32, hi: i32| v.max(Fx::from_int(lo)).min(Fx::from_int(hi + 1));
+    let near = Vec2::new(clamp(p.x, x0, x1), clamp(p.y, y0, y1));
+    (p - near).length()
+}
+
+#[test]
+fn a_member_in_its_place_near_an_obstacle_switches_off_the_wait_for_stragglers() {
+    // The block of `pen_world` with its penned soldier (a straggler that never comes), once on
+    // the open field and once with an outcrop of two rock cells north-west of it. The wait rule
+    // of WP4.6b: the leader waits only while every member that is in its place has no obstacle
+    // within three cells. A side effect, documented in `docs/rules/formations.md`: one member
+    // in place by an outcrop is enough, and the block passing it does not wait.
+    let rock = [(8_u32, 1_u32), (9, 1)];
+    let reform = Fx::from_ratio(i64::from(FormationConfig::DEFAULT.reform_tenths), 10);
+    let early = |rock: &[(u32, u32)]| {
+        let (mut w, group, _) = pen_world_with(rock, 300);
+        run(&mut w, 2);
+        let leader = w.formation_of(group[0]).unwrap().leader_id;
+        (0..30_u32)
+            .map(|_| {
+                w.step();
+                u32::from(w.formation_of(leader).is_some_and(|v| v.waiting))
+            })
+            .sum::<u32>()
+    };
+    assert!(
+        early(&[]) > 20,
+        "on the open field the leader waits at once"
+    );
+    assert_eq!(early(&rock), 0, "by the outcrop it does not");
+
+    let (mut w, group, soldier) = pen_world_with(&rock, 300);
+    run(&mut w, 2);
+    let leader = w.formation_of(group[0]).unwrap().leader_id;
+    let (mut waited_near, mut waited_clear) = (0, 0);
+    for _ in 0..400_u32 {
+        w.step();
+        if w.formation_of(soldier).is_none() {
+            break;
+        }
+        let Some(lead) = w.formation_of(leader) else {
+            break;
+        };
+        let in_place: Vec<Fx> = group
+            .iter()
+            .filter_map(|&g| {
+                let v = w.formation_of(g)?;
+                let p = pos(&w, g);
+                ((p - v.slot).length() <= reform).then(|| distance_to_cells(p, (8, 1), (9, 1)))
+            })
+            .collect();
+        if lead.waiting && in_place.iter().any(|&d| d < Fx::from_int(3)) {
+            waited_near += 1;
+        }
+        if lead.waiting && in_place.iter().all(|&d| d > fx(4500)) {
+            waited_clear += 1;
+        }
+    }
+    assert_eq!(
+        waited_near, 0,
+        "the leader waited while a member in place was by the outcrop"
+    );
+    assert!(
+        waited_clear > 0,
+        "once clear of the outcrop the leader waits for the straggler again"
+    );
 }

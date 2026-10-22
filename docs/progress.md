@@ -21,7 +21,7 @@ Windows, in debug and in release. No playable build yet (phase 0 has no gameplay
 
 ## Phase 1 — Engine
 
-Status: all work packages done; M0 waits for the benchmark run on the laptop.
+Status: done. M0 is met: Tijmen's laptop run of 22-10-2026 gave a p99 frame time of 3.9 ms (`docs/bench/m0-2026-10-22.json`).
 
 - WP1.1 `sf_engine` main loop, input and frame timing: done (PR #4, aa5cf7b)
 - WP1.2 `sf_sim` core (world, commands, checksums, wander): done (PR #9, 4df4759)
@@ -50,12 +50,22 @@ M0 status:
 - Smooth zooming to the cursor: met, judged by Tijmen on the laptop on
   2026-10-15 (main at 8f64071). Judged before the zoom-out hitches (below) were
   looked at; to be re-judged with the demo, together with the benchmark.
+  **Still open (22-10-2026):** the benchmark ran, the zoom look and the camera
+  sensitivity have not been judged again yet (owner Tijmen; does not hold up phase 2).
 - CI green on two OSes including screenshot tests: met (PR #30 adds the demo
   smoke test with screenshots on lavapipe and WARP).
 - egui panels show frame time, draw calls and checksum live: met (F1, WP1.11).
 - p99 frame time <= 16.7 ms with 5,000 units in view over the whole camera
-  flight: **pending Tijmen's laptop run** of `cargo run --release -p sf_demo --
-  --bench` (README, "Benchmark (M0)"), which has to be taken on the code of WP1.15
+  flight: **met** on 22-10-2026, Tijmen's laptop (GTX 1650, DX12, 1920 x 1080
+  borderless fullscreen, Immediate present, no vsync), main at cfef151:
+  p99 3.895 ms (avg 2.79, max 10.27), cpu p99 3.677 ms, gpu p99 0.726 ms, 0 hitches
+  over 25 ms, 0 buffer allocations in the flight, sim tick p99 2.126 ms on its own
+  thread with 0 late publishes (the commit is from the chat; the JSON has no commit field). Full result in `docs/bench/m0-2026-10-22.json`.
+  Caveat: the demo scene uses the test pack models (at most 156k triangles in
+  view), no terrain materials, combat or effects yet, so the GPU is almost idle;
+  hence the re-runs M0b (after WP2.4) and M0c (after WP5.6) in PLAN.md. Earlier
+  history: the run had to be taken on `cargo run --release -p sf_demo --
+  --bench` (README, "Benchmark (M0)") on the code of WP1.15
   or later: the sim runs on its own thread there and is no longer in the frame,
   so a number from before it is not comparable. The benchmark exists, runs without vsync
   in real fullscreen at 1920 x 1080 and writes `bench.json`; on lavapipe it only
@@ -70,8 +80,7 @@ Report: _see "Phase 1 report" below._
 ## Phase 2 — Playfield
 
 Status: in progress. WP2.1 is done (PR #39). WP2.2 to WP2.4 (what is drawn from the terrain
-types) wait for the M0 laptop benchmark: the Phase 1 report starts phase 2 proper when
-the p99 number is in. Phase 3 and the start of phase 4 were built on WP2.1 meanwhile.
+types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it after WP2.4. Phase 3 and the start of phase 4 were built on WP2.1 meanwhile.
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
@@ -219,19 +228,19 @@ Known gaps (owner in brackets):
   or takes damage; only the first weapon's range is read (phase 5, WP5.1).
 - No ownership check in the sim and no lockstep packet (WP14.1).
 - The terrain types are not drawn from the type layer: no per-type material, no minimap
-  colours, no cell overlay (WP2.2 to WP2.4, after the M0 laptop run).
+  colours, no cell overlay (WP2.2 to WP2.4, next now that M0 is met).
 - No sidebar, build menu, economy or power; the HUD is a top bar with the selected count
   (phases 6, 7, 11).
 - No vessels in the sandbox (WP4.1 follow-up: they need water to stand on).
 - All icons (41) and cursors (24) are generated placeholders; vehicles and buildings still
   show test-pack models or primitives; set v3 has no `heavy_gun_team` model.
-- Nothing of phase 3 has been measured on the GTX 1650 (the M0 benchmark is still the only
-  laptop run to do). Icon drawing costs a few percent more frame time on lavapipe
+- Nothing of phase 3 has been measured on the GTX 1650: the M0 run (22-10-2026) is the engine
+  demo, not the sandbox. Icon drawing costs a few percent more frame time on lavapipe
   (+3 % frame, +4 % GPU, within noise); on the card it is estimated far below 0.1 ms.
 
 ## Phase 4 — Movement and routes
 
-Status: the work packages 4.1–4.5, 4.4b, 4.6 and 4.7 are in. The "done when" of PLAN.md (200 units across
+Status: the work packages 4.1–4.5, 4.4b, 4.6, 4.6b and 4.7 are in. The "done when" of PLAN.md (200 units across
 a bridge: all arrive, none stuck, at most 1 % beyond 1.3 times the packing radius, overlap within a quarter
 of a cell on the way and a sixteenth at the end) holds in `bridge_200` (formations on, a crowd above the limit makes none), for every wheeled
 turning radius the review swept and for all 112 variants of `sweep_of_variants`; `bridge_200` is a crowd and
@@ -336,6 +345,13 @@ the limit is 19. See "Phase 4 close-out" below the notes of WP4.7 for the open i
   (`formation_*`, `World::with_formation`), the state is in a new checksum section `G`; the
   `formation_move` scenario, the `FormationConfig` and `scenario.formation` knobs, `tests/formation.rs`),
   `docs/rules/formations.md`: done
+- WP4.6b The formation pace holds in a base; the shape gap stays open (open items 14 and 15) (follow-up of WP4.6, found in the viewer: the sandbox of `sf_game` on
+  the map `assets/maps/formation`, the 12 mobile Meridian units, one Move; a loose formation keeps the pace of its
+  slowest member and a member that follows the order's way may get at most `formation_ahead_tenths` ahead of its
+  slot; a unit ahead of its slot and off its column walks back or goes on at the pace instead of standing; the
+  leader waits only while the members in their places have no obstacle near; `group_order` judges the shared
+  fields per class, so a unit in no formation takes nothing from the classes that formed; `crowd_jam` and
+  `formation_move` re-pinned; `tests/formation_base.rs` in `sf_game`), `docs/rules/formations.md` ("In a base"): done
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -809,11 +825,101 @@ arrival packs each class on its own (the criterion of phase 4 is a packing: 200 
 spacing would need a disc about 1.4 times the radius of the one the criterion measures, which allows 1.3). So the group goes from one shape into the
 other when the formation is let go, within the disc of the order.
 
+WP4.6b notes (the formation pace holds in a base). **The base-start gap was found in the viewer, after the phase-4
+close-out below. The pace is fixed here; the shape is not:** members near their slots went from 71 to 73 % over ten
+goals, and "all members near" is equal or worse at 3 of the 4 goals of `formation_base`. The shape gap in a base stays
+open (open items 14 and 15). Everything WP4.6 proved was proved on a field with one passage and no
+structures (`formation_move`, `formation_sweep`) or on a crowd (`bridge_200`); nothing built the world the way the game
+does and gave an order in it. In `sf_game`, on the sandbox map `assets/maps/formation`, box-selecting the 12 mobile
+Meridian units and giving one Move sent the tanks ahead at 1.4 to 2 cells a second with the riflemen (0.7) behind and no
+shape to be seen. The diagnosis found no wiring bug (the settings reach the world, there is one group order, the sim
+thread passes it through); the formation forms, with 11 members. Three things degrade it among structures, all
+confirmed by measurement:
+
+1. A structure within three cells makes the ground not open, so the formation is **loose** (12 to 51 % of the ticks
+   of the four goals measured), and loose meant "the leader and the members at their own speed": no pace at all.
+2. A unit whose line of sight to its slot a structure blocks takes a longer way round and comes out ahead of its slot
+   **and to the side of its column**; the "ahead" test ignored the sideways offset, so it stood there 5 to 7 cells off
+   its column in the way of the units behind it, and the leader did not wait for it.
+3. The order has one **amphibious transport**, a family of one, in no formation; `all_formed` (every unit that
+   starts the order is a member) was then false and no class got a shared field or the arrival slots of the goal.
+   (Read in the code, now measured: the three classes of 5, 4 and 2 units had no field before and have one after.)
+
+What changed (orchestrator decisions A to D, 18-10-2026; the rules are in `docs/rules/formations.md`):
+
+* **A. The pace holds in narrow places.** The leader steps at most the formation pace loose or not; a member that
+  follows the order's way runs at its own speed while it is at most `formation_ahead_tenths` (new, `sim.ron`, 2.0
+  cells as shipped, 0.5 up to the re-form distance) ahead of its slot along the heading, and goes no faster than the
+  formation beyond that. The docs said a loose formation means own speed; they now say it does not.
+* **B. A unit ahead of its slot and off its column does not stand.** It walks back if it sees its slot, follows the
+  way at the pace of the formation if it does not, and is no straggler either way (it is ahead). One more rule came
+  out of the sweep, not out of the diagnosis, and is kept because the sweep is not clean without it: the leader waits
+  for stragglers only while the members that stand in their places have no obstacle within three cells of them (the
+  edge of the map is no obstacle for this), because rear rows standing on their slots in the mouth of a gap held up
+  the stragglers the leader waited for.
+* **C. A unit outside every formation takes nothing from the classes that formed.** `group_order` in `path.rs` judges
+  each class: all its units in a formation is the same rule as before ("a class of two or more gets a field, below the
+  threshold"), a class with a unit outside every formation is judged by the threshold as ever.
+* **D. Structures stay narrow places.** Not touched.
+
+**Tests (the missing coverage).** `crates/sf_game/tests/formation_base.rs` builds the sandbox as the viewer does
+(`playfield::make_world`, `with_movement`, `sandbox::schedule`, the viewer's world speed) on `assets/maps/formation`,
+selects the 12 mobile Meridian units and sends one `commands::move_command` to (56, 44), (90, 44), (90, 10) and
+(100, 40): one formation of 11; the three formed classes have shared fields and the amphibious transport none; the
+leader's pace and the share of windows above 1.2 times the slowest's speed in loose stretches (29 % of the windows
+before, 14 % after, bound 20 %); the shape; everybody arrives, nobody stuck, overlap 0.049 at most during the run (bound
+0.25) and 0.030 at the end (bound 1/16); reproducible. Run on the head of main (670cf33) it fails 3 of its 7 tests
+(pace, shape and fields). `tests/formation.rs` has five new tests, each of which fails on the old rules: the leader of a
+loose formation keeps the pace (0.1000 cells a tick before, 0.0350 after), the bound on the lead is data, the
+off-column tank walks back (it stood 45 ticks), a far tank is not waited for, and the unit outside every formation
+leaves the fields to the classes that formed.
+
+**Measured** (the table is in `docs/rules/formations.md`, "In a base"). Over four goals the loose stretches have 14 %
+of their windows above 1.2 times the slowest's speed against 29 % before. **The shape in the sandbox is not good:** all
+members within 3 cells of their slots 14 to 38 % of the ticks (9 to 42 % before), members within 3 cells 59 to 92 %
+(62 to 89 %), the formation loose 38 to 71 % of the ticks (12 to 51 %). Over ten goals the means of the members within
+3 cells are 71 % before, 77 % with the pace, off-column and wait rules alone, and 73 % with the shared fields of
+decision C as well (which also bring the mean arrival from 1,699 to 1,610 ticks). The structures are narrow places by
+decision D, and two heavy tracked units (1.5 cells across) are stuck among them for hundreds of ticks in several runs,
+with or without a formation: paths and fields are made on cells, and the sandbox leaves one-cell gaps between
+structures. That is a movement problem (bodies in the routes), not a formation rule, and it is listed in the close-out.
+
+**Re-pinned, with the reason** (the pace in loose stretches, the bound on the lead, the wait rule and the per-class
+fields are changes of the specified behaviour; the assertions of both scenarios' tests are unchanged and hold):
+
+| Scenario | Old | New |
+|---|---|---|
+| `formation_move` | `0x83315f6388469125` | `0x67abfe8bf07e8f05` (loose 521 ticks, formed up again on tick 1,356, let go on 2,597, everybody arrived on 2,840) |
+| `crowd_jam` | `0x11dfc55cfc2c2c34` | `0xc7da0f15ce1bf3ce` (its groups of 18 and 8 are formations that pass the gap) |
+
+**Not moved:** `wander_5000` `0x38d5e3c43358a889`, `command_mix` `0x43f6583004258ceb`, `terrain_256`
+`0xb577112845e0097e`, `units_spawn` `0x6c369f42be150d6e`, `orders`, `terrain_costs`, `pathing`, `pathing_256`, `turning`,
+`weapons_reload`, `replan`, and `bridge_200` (`0x03971fcc3548fc0c`: a crowd, no formation, must not move and does not).
+`formation_sweep` (273 runs) is clean with the bounds as they were: `mixed` 1.02 to 1.14 times the walk (1.02 to 1.18
+before), `foot` 1.01 to 1.05, `wheels` 1.02 to 1.37 (the same worst, 1.37). It took four rounds to get there: the
+pace in loose stretches costs time in the sweep's loose stretch (a leader that was a truck at 2.5 cells a second goes at
+the tank's 2.0), and the first versions of the rules put one run of 273 over the bound by 2 to 56 ticks (the runs are
+chaotic and the margin of `wheels` is thin, as the notes of WP4.6 say). `sweep_of_variants` (112 variants) is clean:
+the crowd forms no formation.
+
+Not done on purpose: bodies in routes and fields (the cause of the stuck heavy units); `open_ground` still treats the
+edge of the map as an obstacle for the loose rule (only the new wait rule ignores it); a unit left out of every
+formation (the amphibious transport) still walks the order at its own speed beside the formation, which is what the
+viewer shows of it; presentation of the slots; a second sandbox layout, other maps and other orders.
+
+No screenshots: a before/after pair at goal (56, 44) was made (Xvfb, Mesa lavapipe, the release build) and dropped in
+review round 1, the two stills being near-identical (the difference is in the pace, which a still does not show, and
+in the numbers above).
+
 ## Phase 4 close-out
 
 Status of the work packages: 4.1 movement classes, 4.2 hierarchical A*, 4.3 flowfields, 4.4 local avoidance and
-collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning and 4.6 formations are in
-(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). The
+collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning, 4.6 formations and 4.6b the formation pace in a base
+are in
+(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). **Amended
+for WP4.6b:** the claim below was made for a field, and the viewer showed the gap: formations in the sandbox, among
+structures and with a unit in no formation, had no pace and no fields until WP4.6b (see its notes above); the pace holds there now, the shape does not
+(open items 14 and 15). The
 criterion of phase 4 is met by `bridge_200`. For formations the claim is the one the sweep supports and no
 more: groups of 3 to 19, of riflemen with tanks and transports, of riflemen only and of tanks and transports only, at
 every depth of block tried (2 to 8), on the map of `formation_move`, arrive within 1.4 times the slowest's walk and
@@ -839,7 +945,8 @@ Open follow-ups, carried over:
    instance) and an arrival that keeps the shape.
 2. **Proven on one map**: the sweep and `formation_move` march across an open field, through one passage three
    cells wide and across another field. Rock outcrops, a river with a bridge, several passages and turns are not
-   swept (`tests/formation.rs` has single cases of them).
+   swept (`tests/formation.rs` has single cases of them). A base of structures is measured since WP4.6b
+   (`sf_game/tests/formation_base.rs`, items 14 and 15).
 3. **The margin of the overlap during a run is thin and stays so**: 0.24 against 0.25 in the worst variant of the
    sweep (WP4.7 said the same). It is chaotic: a small change of the arrival of five hover craft among the crowd
    took one variant to 0.270 (and twelve seeds of it gave 0.182 to 0.270), which is why a crowd forms no formation.
@@ -868,6 +975,15 @@ Open follow-ups, carried over:
    against the limit of 0.0625 (1/16) (WP4.6 review): a small change of the arrival moves it over. Either widen
    the margin (the arrival slots) or sweep corridor widths 3 to 8 for the end overlap, as the sweep does for the
    time.
+14. **Bodies are not part of the routes** (found in the viewer, WP4.6b). A heavy unit (1.5 cells across) is sent through
+   a one-cell gap between two structures, gets stuck, sidesteps, asks again; in the sandbox two of the twelve selected
+   units (the harvester and the siege artillery) are stuck among the structures for 500 to 1,500 ticks in several runs,
+   with or without a formation, and the shape of a formation in a base is poor mostly because of them. A movement work
+   package: clearance in the sector graph and the cost grid of the fields, or a minimum gap per class.
+15. **The sandbox is one layout and `formation_base` has four goals.** The bounds hold for those; a second base, other
+   selections (the Veyran side, a selection of only vehicles, of 19) and goals inside the base are not measured.
+   `open_ground` also treats the edge of the map as an obstacle for the loose rule (the wait rule ignores it): a
+   formation along the edge of the map is loose all the way.
 
 ## Phase 5 — Combat
 
@@ -1314,9 +1430,9 @@ time, units in view, draw calls and triangles per phase, the slowest frames and
 the sim checksums to `bench.json`.
 
 M0 criteria: headless checksum met, CI on two OSes with screenshots met, panels
-met, smooth zoom judged on 2026-10-15, **p99 <= 16.7 ms on the GTX 1650: pending
-Tijmen's laptop run.** Phase 2 starts when that number is in and the zoom has
-been looked at again.
+met, smooth zoom judged on 2026-10-15, **p99 <= 16.7 ms on the GTX 1650: met on
+22-10-2026, p99 3.895 ms** (`docs/bench/m0-2026-10-22.json`). The zoom has not been
+looked at again yet (owner Tijmen); phase 2 goes ahead meanwhile.
 
 ## WP1.15 notes: the simulation on its own thread
 
@@ -1360,10 +1476,11 @@ Things to know:
   and effective tick, `SimHandle::moved_commands`); the full command log is off in the game.
 - Latency from click to visible movement: up to 50 ms input delay plus 30 ms `INTERP_DELAY`,
   about 80 ms. Follow-up: an adaptive `INTERP_DELAY` that follows the measured lateness of the
-  snapshots (and so is smaller on a fast machine), once the laptop's `sim.late_publishes` is known.
+  snapshots (and so is smaller on a fast machine). The laptop's `sim.late_publishes` is 0 (M0 run,
+  22-10-2026), so 30 ms is enough there; whether it can go lower is not measured.
 - The sleep jitter of Windows timers is not known on the laptop; `INTERP_DELAY` (30 ms) is a guess
-  made on Linux. If `sim.late_publishes` in the laptop's `bench.json` is not near zero, raise it or
-  make it follow the measured lateness.
+  made on Linux. The laptop's `bench.json` (22-10-2026) has `sim.late_publishes` 0 and
+  `clock_resets` 0, so it need not be raised.
 - `World::passable` looks at terrain only (not at structures), so the snapshot reads the ground once.
   A unit test fails if that ever changes.
 
@@ -1398,16 +1515,8 @@ fixed, delete the entry in the same PR.
     runner is outside it. That is fine while it only calls `sf_sim`; extend the lint
     when it grows logic of its own. Add `sf_bridge` at the same time (PR #41 review): it
     only copies fields at world creation today.
-14. **Zoom-out hitches of 34-40 ms** (laptop run, 2026-10-15). Cause found
-    in WP1.14 as far as software rendering shows it: the per-mesh instance
-    buffers were created on the first frame their list was not empty and
-    regrown on the way (66 creations during one slow zoom out, up to 2 in a
-    frame; the new `buffer_allocs` per frame in `bench.json` shows it), and are
-    now allocated once at load (`Renderer::reserve_units`; `--no-reserve` gives
-    the old behaviour). On lavapipe a creation costs under a millisecond, so
-    whether this explains 34-40 ms on DX12 is **not proven**: delete this entry
-    when the laptop's `bench.json` shows no hitch over 25 ms; if it does, the
-    `hitches.worst` list names the phase and the part of the frame.
+14. **Zoom-out hitches of 34-40 ms**: resolved. The M0 laptop run (22-10-2026) has 0 hitches
+    over 25 ms (worst frame 10.27 ms in `flick_out`) and 0 buffer allocations in the flight.
 15. **Vulkan hangs on the test laptop.** Adapter creation hung with Vulkan
     (NVIDIA GTX 1650, Windows); the game window now uses DX12 on Windows.
     `WGPU_BACKEND` overrides it, `SF_GPU_TRACE=1` prints each GPU startup step.
@@ -1418,6 +1527,8 @@ fixed, delete the entry in the same PR.
     has no window manager and grants no fullscreen at all); the exclusive path
     with wgpu on DX12 has not run anywhere. `bench.json` records the mode used
     (`display.screen_mode`, `display.note`).
+    The M0 laptop run (22-10-2026) took the borderless path again (monitor already
+    1920 x 1080), so the exclusive path is still untested.
 20. **The demo map is gentle.** `generate` keeps the relief at most 6 m high at
     every map size (hills of 5 to 10 m radius, more of them on a bigger map),
     so at the whole-map zoom of the 1,024 m map the relief shows only as
@@ -1432,8 +1543,9 @@ fixed, delete the entry in the same PR.
 22. **A right-click on a unit inside the 4 px edge band gives no order** (PR #46; the band
     wins over everything and the cursor shows the scroll arrow, documented in `cursor.md`).
     Owner: WP11.1, when the HUD and the edge scrolling are revisited.
-23. **Icon set.** Confirm the cost of the SDF icon quad on the GTX 1650 (PR #45; owner: the
-    M0 laptop run, `bench.json` overview phases). The weakest pairs of the placeholders
+23. **Icon set.** The cost of the SDF icon quad on the GTX 1650: the M0 laptop run
+    (22-10-2026) has gpu p99 0.496 ms in the overview phases (all 5,000 units in view, at the zoom where
+    they are icons), so it is negligible there. The weakest pairs of the placeholders
     (power_plant meets the 6-pixel blob rule exactly; barracks / power_plant differ by 17 of
     196 pixels) are for the artist's set: owner, the delivery that replaces the placeholders.
 24. **Art set v3.** Seven of 30 models fail `sf_asset_check` (list in PR #42): owner Tijmen,
@@ -1446,7 +1558,7 @@ fixed, delete the entry in the same PR.
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
-27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen).**
+27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen; parked with phase 14 on 22-10-2026).**
     `sf_sim::checksum` hashes the commands that wait for their tick, so two peers that receive the
     same command for the same tick at different times get different checksums in between: a false
     desync, which a command deadline does not remove. It changes a determinism rule (PLAN.md section
