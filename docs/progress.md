@@ -88,7 +88,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 - WP2.3 Minimap shows terrain types: open
 - WP2.4 Cell grid overlay by terrain type and occupancy: done (branch `wp/2.4-cell-overlay`), see "WP2.4 notes"
 
-M0b status (23-10-2026): WP2.4 is in, so the M0b laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is now due from Tijmen.
+M0b status (23-10-2026): M0b becomes due once WP2.2-2.4 are on main; then the laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is due from Tijmen.
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
 headless test checks terrain types and occupancy per cell. The headless half is met
@@ -107,14 +107,14 @@ are in `docs/rules/terrain.md`.
 The F1 checkbox "Cell grid (4 m)" (`--debug-grid`) now also tints every 4 m cell by its
 terrain type and shows occupancy on top: structure (sim occupancy, whole footprint),
 units (derived from snapshot positions; the sim does not track units per cell),
-impassable (hatched: not open ground for foot/wheeled/tracked), open. Rules and the
+impassable (hatched: at least one of foot/wheeled/tracked cannot enter), open. Rules and the
 meaning of "occupied": `docs/rules/cell_overlay.md`. Colours: `assets/config/cell_overlay.ron`
-(per type by name, to be unified with WP2.3's `minimap_colour`). One `Rgba8Uint` texel per
-cell, rebuilt at most once per sim tick while on, only changed rows uploaded; drawn as a
-second, blended pass over the terrain's LOD draws (one call per run of chunks). Off = no
-build, upload or draw. `sf_sim` untouched; all scenarios match `--expect`.
+(per type by name; to derive from `assets/config/terrain_look.ron` once PR #66 is merged, follow-up 30). One `Rgba8Uint` texel per
+cell, rebuilt at most once per sim tick while on, the span from the first to the last changed row uploaded; drawn as a
+second, blended pass over the terrain's LOD draws (one call per run of chunks, counted in the F1 panel). Off = no
+rebuild, upload or draw; the layer, texture and pipeline are built at start-up, and the snapshot lists structure cells every tick regardless (about 26 us with 1-200 structures, 40 us with 2000, at 5000 entities: about 2 % of a tick step). `sf_sim` untouched; all scenarios match `--expect`.
 Screenshots: `docs/screenshots/wp2.4/`.
-Cost, lavapipe 1280x720 sandbox (`sf_game --bench --frames 300`, 3-4 agents on the machine): frame p50 101/132 ms off, 193/205 ms on (grid lines and overlay together), about 1.5-1.9x: lavapipe is fill bound and the overlay is one more blended terrain-covering pass. Expected on a GTX 1650 at 1080p: one extra pass of ~2 M fragments with one texel fetch, well under 0.3 ms; nothing when off. Occupancy rebuild: a 256x256 compare per tick, sub-millisecond.
+Cost, lavapipe 1280x720 sandbox (reviewer's measurement, two runs each, noisy machine): frame p50 112.5/90.3 ms off, about the same with the grid lines only, 111.0/119.5 ms on; p99 220.8/188.1 ms off, 282.9/279.9 ms on. So about +10-35 % on average and +20-30 % at p99. Expected on a GTX 1650 at 1080p: one extra pass of ~2 M fragments with one texel fetch, under 0.3 ms. Occupancy rebuild: a 256x256 compare per tick, sub-millisecond.
 
 ## Phase 3 — Units, selection and commands
 
@@ -1562,3 +1562,5 @@ fixed, delete the entry in the same PR.
     nodes), emissive `lamp` material, diagonal team triangles, copied levels of detail, vessels on
     `Y = 0`, the `supply_truck` faction, `state_map.json`. Owner: Tijmen with the producer; when a
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
+
+30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. Once PR #66 is merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.

@@ -13,9 +13,10 @@
 //!   (units have bodies, not cells, see `sf_sim::terrain`); the presentation
 //!   derives it from the snapshot's positions, so it is "where units are", not
 //!   "what blocks".
-//! * [`CellState::Impassable`]: the terrain type is not open ground: no ground
-//!   movement class (foot, wheeled, tracked) may enter it. The sim's
-//!   `TerrainFlags::ground`, so water is impassable even though boats sail it.
+//! * [`CellState::Impassable`]: the terrain type is not open ground: at least
+//!   one ground movement class (foot, wheeled, tracked) cannot enter it. The
+//!   sim's `TerrainFlags::ground` is false (it is true only when every ground
+//!   class can enter), so water is impassable even though boats sail it.
 //! * [`CellState::Open`]: none of the above.
 //!
 //! The colours are data (`assets/config/cell_overlay.ron`).
@@ -23,11 +24,12 @@
 //! # Cost
 //!
 //! One texel per cell (`Rgba8Uint`: the colour and the state), written by
-//! [`CellLayer::update`] at most once per sim tick and uploaded only for the
-//! rows that changed. Drawing is one more pass over the terrain draws the
-//! level of detail already selected (one call per run of chunks), with a
-//! shader that reads one texel per fragment. When the overlay is off nothing
-//! is built, uploaded or drawn.
+//! [`CellLayer::update`] at most once per sim tick; the upload covers the span
+//! from the first changed row to the last ([`upload_span`]). Drawing is one
+//! more pass over the terrain draws the level of detail already selected (one
+//! call per run of chunks), with a shader that reads one texel per fragment.
+//! When the overlay is off nothing is rebuilt, uploaded or drawn; the layer,
+//! texture and pipeline are built at start-up regardless.
 
 use std::collections::BTreeMap;
 
@@ -250,6 +252,21 @@ impl CellLayer {
     }
 }
 
+/// What [`CellOverlayGpu::upload`] writes for the changed `rows` of a layer
+/// of `(width, height)` cells: the rows clamped to the map, and the texel
+/// indices they cover. `None` when nothing is left to upload.
+pub fn upload_span(
+    (width, height): (u32, u32),
+    rows: std::ops::Range<u32>,
+) -> Option<(std::ops::Range<u32>, std::ops::Range<usize>)> {
+    let rows = rows.start.min(height)..rows.end.min(height);
+    if rows.is_empty() {
+        return None;
+    }
+    let texels = (rows.start * width) as usize..(rows.end * width) as usize;
+    Some((rows, texels))
+}
+
 /// Mirrors `OverlayParams` in `cell_overlay.wgsl`.
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -404,15 +421,13 @@ impl CellOverlayGpu {
         gpu
     }
 
-    /// Upload the texels of `rows`.
+    /// Upload the texels of `rows` (see [`upload_span`]).
     pub fn upload(&self, queue: &wgpu::Queue, rows: std::ops::Range<u32>) {
-        let (width, height) = self.layer.size();
-        let rows = rows.start.min(height)..rows.end.min(height);
-        if rows.is_empty() {
+        let (width, _) = self.layer.size();
+        let Some((rows, texels)) = upload_span(self.layer.size(), rows) else {
             return;
-        }
-        let start = (rows.start * width) as usize;
-        let end = (rows.end * width) as usize;
+        };
+        let (start, end) = (texels.start, texels.end);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
@@ -528,6 +543,18 @@ mod tests {
             [r, g, b, CellState::Impassable as u8],
             "water again"
         );
+    }
+
+    /// The upload writes the span of changed rows, not the whole map:
+    /// rows 3..5 of a 10 x 8 layer are texels 30..50; rows past the map are
+    /// cut off and an empty span uploads nothing.
+    #[test]
+    fn upload_covers_only_the_changed_span() {
+        assert_eq!(upload_span((10, 8), 3..5), Some((3..5, 30..50)));
+        assert_eq!(upload_span((10, 8), 7..12), Some((7..8, 70..80)));
+        assert_eq!(upload_span((10, 8), 0..8), Some((0..8, 0..80)));
+        assert_eq!(upload_span((10, 8), 4..4), None);
+        assert_eq!(upload_span((10, 8), 9..12), None);
     }
 
     #[test]

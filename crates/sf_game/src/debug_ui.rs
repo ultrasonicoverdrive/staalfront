@@ -258,11 +258,15 @@ fn frame_graph(ui: &mut egui::Ui, frames_ms: &[f32]) {
 fn draw_calls(ui: &mut egui::Ui, data: &PanelData) {
     let d = &data.draw;
     ui.label(format!(
-        "{} draw calls: units {}, scene {}, terrain {}",
-        d.dynamic_draw_calls + d.scene_draw_calls + d.terrain_draw_calls,
+        "{} draw calls: units {}, scene {}, terrain {}, cell overlay {}",
+        d.dynamic_draw_calls
+            + d.scene_draw_calls
+            + d.terrain_draw_calls
+            + d.cell_overlay_draw_calls,
         d.dynamic_draw_calls,
         d.scene_draw_calls,
         d.terrain_draw_calls,
+        d.cell_overlay_draw_calls,
     ));
     ui.label(format!(
         "terrain chunks drawn {} / {}, {} triangles",

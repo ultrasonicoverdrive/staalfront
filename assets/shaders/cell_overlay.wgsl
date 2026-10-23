@@ -76,20 +76,16 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             let base = colour * mix(0.6, 1.0, pattern);
             return mix(vec4<f32>(base, params.fill), vec4<f32>(0.02, 0.02, 0.02, 0.6), stripe);
         }
-        // Units: a disc in the cell.
+        // Units: a disc in the cell. Far away: a flat tint of the whole cell.
         case 2u: {
             let d = length(f - vec2<f32>(0.5, 0.5));
-            if (d < 0.3) {
-                return vec4<f32>(colour, 0.85);
-            }
-            return vec4<f32>(colour, 0.5 * params.fill);
+            let near = select(0.5 * params.fill, 0.85, d < 0.3);
+            return vec4<f32>(colour, mix(0.7, near, pattern));
         }
-        // Structure: filled and outlined.
+        // Structure: filled and outlined. Far away: a flat fill.
         case 3u: {
-            if (edge < 0.08) {
-                return vec4<f32>(colour, 0.95);
-            }
-            return vec4<f32>(colour, 0.65);
+            let near = select(0.65, 0.95, edge < 0.08);
+            return vec4<f32>(colour, mix(0.7, near, pattern));
         }
         default: {
             return vec4<f32>(colour, params.fill);
