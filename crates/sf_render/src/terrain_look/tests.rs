@@ -48,6 +48,7 @@ fn every_shipped_type_has_a_look_and_every_look_a_type() {
             l.terrain
         );
     }
+    assert!(looks.check_names(&types).is_ok());
 }
 
 #[test]
@@ -122,8 +123,13 @@ fn the_looks_say_what_the_types_are() {
     assert!(ore[0] > ore[2] + 30.0, "ore is warm");
     assert!(bridge[0] > bridge[2] + 30.0, "a bridge is wood");
     let lum = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-    assert!(lum(road) < lum(grass), "the road is darker than the grass");
-    assert!(lum(road) < lum(rock), "the road is darker than the rock");
+    // Packed earth: a light tan, lighter and much warmer than the grey rock.
+    assert!(lum(road) > lum(rock), "the road is lighter than the rock");
+    assert!(
+        road[0] > road[2] + 50.0,
+        "the road is warm, the rock is grey"
+    );
+    assert!(rock[0] < rock[2] + 20.0, "the rock is grey");
     // Water and the bridge deck are the level ones, only water is a liquid.
     assert!(looks.look_for("water").flat && looks.look_for("water").liquid);
     assert!(looks.look_for("bridge").flat && !looks.look_for("bridge").liquid);
@@ -161,12 +167,12 @@ fn a_map_with_terrain_is_drawn_from_its_types_not_its_material_map() {
 #[test]
 fn a_new_type_is_drawn_before_anybody_chose_its_colours() {
     let mut list: Vec<TerrainType> = TerrainTypes::embedded().iter().cloned().collect();
-    list.push(TerrainType {
-        id: 9,
-        name: "lava".into(),
-        buildable: false,
-        harvestable: false,
-    });
+    // A copy of a shipped type under a new id and name, not a struct literal:
+    // a new field of TerrainType (the minimap colour of WP2.3) cannot break it.
+    let mut lava: TerrainType = list[0].clone();
+    lava.id = 9;
+    lava.name = "lava".into();
+    list.push(lava);
     let types = TerrainTypes::new(list).unwrap();
     let looks = TerrainLooks::embedded();
     assert!(looks.get("lava").is_none());
@@ -246,4 +252,18 @@ fn a_looks_file_with_a_problem_is_refused() {
             .is_err()
     );
     assert!(TerrainLooks::from_ron("(looks: [)").is_err());
+    assert!(
+        TerrainLooks::from_ron(
+            "(edge: (ramp_m: 2.0, wobble_m: 0.5, shore: (1.0, 3.0, 1.0), shore_amount: 0.4), looks: [])"
+        )
+        .unwrap_err()
+        .0
+        .contains("shore")
+    );
+    // A misspelt type name parses, and is refused against the table.
+    let (types, _) = shipped();
+    let misspelt =
+        ok("(terrain: \"gras\", color: (1, 2, 3), contrast: 0.2, pattern: Noise)").unwrap();
+    assert!(misspelt.check_names(&types).unwrap_err().0.contains("gras"));
+    assert!(ok(grass).unwrap().check_names(&types).is_ok());
 }

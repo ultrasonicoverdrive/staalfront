@@ -108,7 +108,8 @@ pub struct TerrainLooks {
 impl TerrainLooks {
     /// Parse and validate: unique names, `contrast` in `0..=1`, a ramp of at
     /// most one cell, a wobble of at most one metre and a half, plank counts
-    /// 1 to 64, shore strength `0..=1`.
+    /// 1 to 64, shore colour and strength `0..=1`. Whether the names are real
+    /// terrain types is [`TerrainLooks::check_names`], against the table.
     pub fn from_ron(text: &str) -> Result<Self, LookError> {
         let file: LookFile = ron::from_str(text).map_err(|e| LookError(e.to_string()))?;
         let cell = sf_math::render_bridge::METRES_PER_CELL;
@@ -121,6 +122,9 @@ impl TerrainLooks {
         }
         if !(0.0..=1.0).contains(&e.shore_amount) {
             return Err(LookError("shore_amount must be 0..=1".into()));
+        }
+        if !e.shore.iter().all(|c| (0.0..=1.0).contains(c)) {
+            return Err(LookError("shore must be a linear colour, 0..=1".into()));
         }
         for (i, l) in file.looks.iter().enumerate() {
             if !(0.0..=1.0).contains(&l.contrast) {
@@ -139,6 +143,19 @@ impl TerrainLooks {
             edge: e,
             looks: file.looks,
         })
+    }
+
+    /// Every entry names a type of `types`: a misspelt name would silently
+    /// leave its type in the derived colour.
+    pub fn check_names(&self, types: &TerrainTypes) -> Result<(), LookError> {
+        match self
+            .looks
+            .iter()
+            .find(|l| types.id_of(&l.terrain).is_none())
+        {
+            Some(l) => Err(LookError(format!("{}: no such terrain type", l.terrain))),
+            None => Ok(()),
+        }
     }
 
     /// The shipped file.
@@ -305,6 +322,10 @@ pub fn terrain_surface(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) ->
         style_of[usize::from(t.id)] = look.style_bits();
         layers.push(look.texture());
     }
+    debug_assert!(
+        terrain.ids().iter().all(|&id| types.get(id).is_some()),
+        "the terrain layer holds an id that is not in the table of terrain types"
+    );
     let cell = sf_math::render_bridge::METRES_PER_CELL;
     TerrainSurface {
         layers,

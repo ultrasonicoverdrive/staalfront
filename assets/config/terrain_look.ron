@@ -10,7 +10,7 @@
 // The picture is chosen to read from 45 to 80 degrees and to stay apart from
 // the unit colours of the factions (sand, olive and weathered blue; slate,
 // charcoal and muted crimson, content/world.md): fresh yellow-green grass,
-// dark road, saturated blue water, mid grey rock, dark gold ore and a
+// a light tan road of packed earth, saturated blue water, mid grey rock, dark gold ore and a
 // light wooden bridge.
 (
     // Where two types meet (see docs/rules/terrain.md, "How it is drawn").
@@ -35,9 +35,10 @@
             pattern: Noise,
         ),
         (
+            // Packed earth: light tan, clearly apart from the grey rock.
             terrain: "road",
-            color: (98, 94, 96),
-            contrast: 0.18,
+            color: (206, 184, 132),
+            contrast: 0.16,
             pattern: Noise,
         ),
         (

@@ -177,62 +177,74 @@ fn is_flat(map: &Map, vx: i64, vz: i64) -> bool {
     vertex_normal(map, vx, vz)[1] > 0.95
 }
 
-/// WP2.2: the test map drawn from its gameplay terrain types, whole map and
-/// close up, against golden images, and every type shows its own colours.
+/// WP2.2: the test map drawn from its gameplay terrain types, whole map
+/// against a golden image, and every type shows its own colours, whole map and
+/// close up.
+///
+/// The close-up is checked by properties per cell and not by a golden: WARP and
+/// lavapipe pick different mip levels in the high-contrast ore flecks and the
+/// shore band, which moved 2.7 % of its pixels (limit 2 %).
 #[test]
 fn typed_map_shows_every_terrain_type() {
     let map = typed_map();
-    let layer = map.terrain().expect("test64 has a terrain layer");
     let mut r = renderer(&map, false);
     let far = camera(&map, 1.0, (32.0, 32.0));
     let img = shot(&mut r, &far);
     check_golden("terrain_types_far_320.png", &img);
-    check_golden(
-        "terrain_types_close_320.png",
-        &shot(&mut r, &camera(&map, 0.1, (32.0, 32.0))),
-    );
     assert!(distinct_colors(&img) > 60, "{}", distinct_colors(&img));
-    // The middle of a flat cell of each type has that type's colours (the
-    // middle of a cell stays pure, the borders are 2 m soft; the test map's
-    // relief is gentle, so shading only scales them).
-    let types = ["grass", "road", "water", "rock", "ore", "bridge"];
     let mut seen = [0usize; 6];
+    check_cell_colours(&map, &img, &far, &mut seen);
+    // Close up, over the bridge (cells 10 and 11 of row 9) and the river.
+    let close = camera(&map, 0.1, (44.0, 38.0));
+    let close_img = shot(&mut r, &close);
+    assert!(distinct_colors(&close_img) > 40);
+    let mut seen_close = [0usize; 6];
+    check_cell_colours(&map, &close_img, &close, &mut seen_close);
+    println!("cell middles checked per type: far {seen:?}, close {seen_close:?}");
+    for (i, n) in seen.iter().zip(&seen_close).map(|(a, b)| a + b).enumerate() {
+        assert!(n >= 1, "type {i} never checked: {seen:?} {seen_close:?}");
+    }
+    assert!(seen_close.iter().filter(|&&n| n >= 1).count() >= 3);
+}
+
+/// The middle of each cell of the terrain layer that is in view has its
+/// type's colours (the middle of a cell stays pure, the borders are 2 m soft;
+/// the test map's relief is gentle, so shading only scales them). Ground types
+/// count only on flat ground; water and the bridge are drawn level, so they
+/// count wherever they are.
+fn check_cell_colours(map: &Map, img: &Rgba8, c: &Camera, seen: &mut [usize; 6]) {
+    let layer = map.terrain().expect("test64 has a terrain layer");
+    let types = ["grass", "road", "water", "rock", "ore", "bridge"];
     for cz in 0..layer.height() {
         for cx in 0..layer.width() {
             let id = layer.get(cx, cz).unwrap();
+            let name = types[usize::from(id)];
             let (mx, mz) = (f64::from(cx) * 4.0 + 2.0, f64::from(cz) * 4.0 + 2.0);
-            let flat = is_flat(&map, cx as i64 * 4 + 2, cz as i64 * 4 + 2);
-            if !flat {
+            let level = name == "water" || name == "bridge";
+            if !level && !is_flat(map, cx as i64 * 4 + 2, cz as i64 * 4 + 2) {
                 continue;
             }
             let h = map.height_at(mx as f32, mz as f32);
-            let Some((px, py)) = project(&far, Vec3::new(mx as f32, h, mz as f32)) else {
+            let Some((px, py)) = project(c, Vec3::new(mx as f32, h, mz as f32)) else {
                 continue;
             };
             let p = img.pixel(px, py);
             let (r, g, b) = (i32::from(p[0]), i32::from(p[1]), i32::from(p[2]));
-            let ok = match types[usize::from(id)] {
+            let ok = match name {
                 "grass" => g > r && g > b,
-                "road" => (r - b).abs() < 25 && r < 110,
+                // Light tan packed earth: warm, and its green close to its red.
+                "road" => r > g && g > b && r - b > 30 && g * 10 > r * 8 && r >= 120,
                 "water" => b > r + 30 && b > g,
                 "rock" => (r - b).abs() < 30 && r >= 90,
                 "ore" => r > g && g > b && r - b > 30,
-                "bridge" => r > g && g > b && r > 120,
+                // Wood: warm, its green well below its red.
+                "bridge" => r > g && g > b && r > 120 && g * 10 < r * 8,
                 _ => unreachable!(),
             };
-            assert!(
-                ok,
-                "{} at cell ({cx},{cz}) looks like {p:?}",
-                types[usize::from(id)]
-            );
+            assert!(ok, "{name} at cell ({cx},{cz}) looks like {p:?}");
             seen[usize::from(id)] += 1;
         }
     }
-    println!("interior flat cells checked per type: {seen:?}");
-    assert!(
-        seen.iter().filter(|&&n| n >= 1).count() >= 4,
-        "too few types verified: {seen:?}"
-    );
 }
 
 #[test]

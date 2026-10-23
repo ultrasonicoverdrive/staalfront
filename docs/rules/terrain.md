@@ -95,14 +95,15 @@ are not involved.
   texture generated in code (one repeat per 4 m, so it is aligned to the cells).
 * **The colours are invented** to read from 45 to 80 degrees and to stay apart from the
   unit colours of the factions (sand, olive, weathered blue; slate, charcoal, muted
-  crimson, `content/world.md`): fresh yellow-green grass, dark road, saturated blue
+  crimson, `content/world.md`): fresh yellow-green grass, a light tan road of packed
+  earth (clearly apart from the grey rock), saturated blue
   water, mid grey rock, dark gold ore with bright flecks and a light wooden
   bridge with planks.
 
 | type | look | style |
 |---|---|---|
 | grass | yellow-green patches | |
-| road | dark grey-brown, low contrast | |
+| road | packed earth: light tan, low contrast | |
 | water | blue with thin light wave crests | flat, liquid |
 | rock | mid grey with dark cracks | |
 | ore | dark ochre with gold flecks | |
@@ -116,9 +117,11 @@ are not involved.
   `edge.wobble_m` (0.7 m, value noise in world space, fading to nothing at the cell
   centres so the picture stays continuous), which turns the corners of a staircase
   of cells (the generated road) into rounded, irregular shapes instead of a
-  chessboard. Where the four cells agree the shader takes one texture sample, so the
-  cost is that of the old four-sample blend in the borders and a quarter of it
-  elsewhere. No extra pass, no extra vertex data.
+  chessboard. **Cost:** the four index `textureLoad`s run for every pixel. Where the
+  four cells agree the shader takes one texture sample; in a border it takes four,
+  plus two `value_noise` calls, an `fwidth` and a `smoothstep`. A GPU shades in 2x2
+  quads, so in a quad that straddles a border both paths run. No extra pass, no extra
+  vertex data.
 * **Water.** A `flat` style is lit as level ground: the slope of the river bed does
   not shade the water (the mesh is not changed, there is no level offset). A `liquid`
   gets a light line along its shore (`edge.shore`, `edge.shore_amount`), strongest where

@@ -84,7 +84,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
-- WP2.2 Materials per terrain type: done (PR pending, branch `wp/2.2-terrain-materials`)
+- WP2.2 Materials per terrain type: done (PR #66, branch `wp/2.2-terrain-materials`, CI green incl. Windows/WARP)
 - WP2.3 Minimap shows terrain types: open
 - WP2.4 Cell grid overlay by terrain type and occupancy: open
 
@@ -115,12 +115,20 @@ new dependency; `sf_sim` is untouched. Rules, looks and the blend are in
 `docs/rules/terrain.md` ("How it is drawn"). Tests: `terrain_look/tests.rs` (data, textures,
 index), `tests/terrain_types_screenshot.rs` (each type in its own look, the material map does
 not matter, soft border, staircase corner, level water and bridge on a slope, shore line),
-`typed_map_shows_every_terrain_type` (goldens `terrain_types_*_320.png`). Goldens that changed
+`typed_map_shows_every_terrain_type` (golden `terrain_types_far_320.png`; the close-up is checked by
+properties per cell, not a golden, because WARP and lavapipe pick different mip levels in the
+ore flecks and the shore band). Goldens that changed
 because their maps carry a terrain layer and so look different: `terrain_lod_far_320`,
 `instancing_10k_320`, `glb_testpack_close_320` (regenerated; no other golden moved). The
 WP1.7 colour/relief/seam tests of `terrain_screenshot.rs` now run on test64 *without* its
-layer (material path), their goldens unchanged. Lavapipe frame time per view and the
-before/after pictures: PR description and `docs/screenshots/wp2.2/`. Still open for M0b:
+layer (material path), their goldens unchanged. Frame time (review, lavapipe, 5
+alternating PR/main pairs): PR/main frame p50 0.45 to 0.67, p99 0.40 to 0.54, so about 40 to
+50 % faster (single sample where four cells agree); GTX 1650 estimate within 0.1 to 0.2 ms at
+1080p. The before/after pictures are in `docs/screenshots/wp2.2/`. Follow-ups: (1) the
+renderer always uses the shipped `TerrainTypes::embedded()` table; a map validated against
+another table would draw unknown ids as layer 0 (a `debug_assert` catches it), so pass the
+real table in once maps can carry their own; (2) the faint 4 m tile repeat shows from far
+away; a per-cell texture offset or a longer repeat would hide it. Still open for M0b:
 WP2.3 (the minimap still bakes the old material map) and WP2.4. Water has no level offset and
 is not animated (later polish).
 
@@ -251,8 +259,8 @@ Known gaps (owner in brackets):
 - No combat: attack and attack-move walk to weapon reach; nothing acquires a target, fires
   or takes damage; only the first weapon's range is read (phase 5, WP5.1).
 - No ownership check in the sim and no lockstep packet (WP14.1).
-- The terrain types are not drawn from the type layer: no per-type material, no minimap
-  colours, no cell overlay (WP2.2 to WP2.4, next now that M0 is met).
+- The terrain types are drawn per type (WP2.2), but the minimap still shows the old
+  material map and there is no cell overlay (WP2.3, WP2.4).
 - No sidebar, build menu, economy or power; the HUD is a top bar with the selected count
   (phases 6, 7, 11).
 - No vessels in the sandbox (WP4.1 follow-up: they need water to stand on).

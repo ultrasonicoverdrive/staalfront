@@ -231,7 +231,10 @@ fn whole_map_with_relief_uses_far_fewer_triangles_and_looks_the_same() {
         relief.ratio()
     );
     assert!(
-        relief.ratio() > 0.02,
+        // Measured 0.062 (lavapipe). Before WP2.2 this was "p95 luminance >
+        // 1.4 x p5", which the even terrain-type colours no longer give; the
+        // limit sits below the measurement with room for another adapter.
+        relief.ratio() > 0.04,
         "relief barely shows: {:.3}",
         relief.ratio()
     );

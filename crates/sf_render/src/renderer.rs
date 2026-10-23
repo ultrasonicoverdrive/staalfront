@@ -976,6 +976,12 @@ impl Renderer {
 
     /// Like [`Renderer::set_terrain`] with explicit settings.
     pub fn set_terrain_with(&mut self, map: &sf_data::map::Map, config: &TerrainConfig) {
+        // The map was checked against the shipped table when it was loaded
+        // (an unknown id is refused there), and a test checks the shipped
+        // looks against the same table.
+        let types = sf_data::terrain::TerrainTypes::embedded();
+        let looks = crate::terrain_look::TerrainLooks::embedded();
+        debug_assert!(looks.check_names(&types).is_ok());
         self.terrain = Some(crate::terrain_gpu::build(
             &self.gpu.device,
             &self.gpu.queue,
@@ -984,8 +990,8 @@ impl Renderer {
             DEPTH_FORMAT,
             &crate::terrain_gpu::TerrainSource {
                 map,
-                types: &sf_data::terrain::TerrainTypes::embedded(),
-                looks: &crate::terrain_look::TerrainLooks::embedded(),
+                types: &types,
+                looks: &looks,
             },
             config,
         ));

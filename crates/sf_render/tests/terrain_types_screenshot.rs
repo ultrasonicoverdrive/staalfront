@@ -168,8 +168,8 @@ fn every_type_is_drawn_in_its_own_look() {
         "ore and wood are warm"
     );
     assert!(
-        lum(road) < lum(grass) && lum(road) < lum(rock),
-        "the road is dark"
+        lum(road) > lum(rock) && road[0] > road[2] + 40.0,
+        "the road is light tan packed earth, apart from the grey rock"
     );
     // Every pair reads apart.
     let all = [
@@ -247,10 +247,11 @@ fn a_border_is_a_soft_ramp_not_a_step() {
 
 #[test]
 fn a_staircase_of_cells_does_not_show_a_chessboard() {
-    // A diagonal road of cells on grass: the corner where two road cells touch
-    // is rounded off, not a square notch; measured as the road colour weight
-    // at the outer corner point of a step (two grass cells meet two road cells
-    // diagonally) being between grass and road.
+    // A diagonal road of cells on grass. What this proves: the border is not
+    // hard, the point where two road cells and two grass cells meet diagonally
+    // is a blend of both colours, not one of them. It does not prove the
+    // wobble (a straight soft ramp passes as well); the wobble is only seen in
+    // the pictures of docs/screenshots/wp2.2.
     let ids = [
         1, 0, 0, 0, //
         0, 1, 0, 0, //
