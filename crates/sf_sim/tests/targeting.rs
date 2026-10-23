@@ -240,6 +240,28 @@ fn fought() -> World {
     fought_with(TargetingConfig::DEFAULT)
 }
 
+/// The test table with every weapon changed by `change`.
+fn table_with(change: impl Fn(&mut WeaponStats)) -> WeaponTable {
+    let mut list = weapons();
+    list.iter_mut().for_each(change);
+    WeaponTable::new(list, loadouts())
+        .unwrap()
+        .with_armor(armor_table())
+        .unwrap()
+}
+
+/// A world whose units choose their own targets, with the shipped settings and `table`.
+fn fought_with_table(table: WeaponTable) -> World {
+    World::new(WorldConfig::new(7).with_map_size(MAP, MAP))
+        .unwrap()
+        .with_units(units())
+        .unwrap()
+        .with_weapons(table)
+        .unwrap()
+        .with_targeting(TargetingConfig::DEFAULT)
+        .unwrap()
+}
+
 fn fought_with(config: TargetingConfig) -> World {
     World::new(WorldConfig::new(7).with_map_size(MAP, MAP))
         .unwrap()
@@ -1515,10 +1537,16 @@ fn a_follower_walks_to_where_a_moving_target_stood_at_the_start_of_the_tick_in_e
 /// A long gun hits `r` from eight cells, steps back seven cells while `r` follows, and as soon as `r`
 /// has let go hits it again from where it now is; six times. Returns how far `r` got from `from`.
 fn lure(w: &mut World, r: EntityId, s: EntityId, from: Vec2) -> Fx {
+    lure_for(w, r, s, from, 80, 6)
+}
+
+/// [`lure`] with `rounds` rounds, in each of which the long gun keeps hitting `r` for up to `patience`
+/// ticks before it gives up on `r` following it.
+fn lure_for(w: &mut World, r: EntityId, s: EntityId, from: Vec2, patience: u32, rounds: u32) -> Fx {
     let mut farthest = Fx::ZERO;
-    for round in 0..6 {
+    for round in 0..rounds {
         run_command(w, attack(s, r));
-        let followed = (0..80).any(|_| {
+        let followed = (0..patience).any(|_| {
             w.step();
             farthest = farthest.max((pos(w, r) - from).length());
             matches!(w.order_of(r), Some(Order::Pursue(t)) if t == s)
@@ -1531,7 +1559,7 @@ fn lure(w: &mut World, r: EntityId, s: EntityId, from: Vec2) -> Fx {
         for _ in 0..200 {
             w.step();
             farthest = farthest.max((pos(w, r) - from).length());
-            if !matches!(w.order_of(r), Some(Order::Pursue(_))) && round < 5 {
+            if !matches!(w.order_of(r), Some(Order::Pursue(_))) && round + 1 < rounds {
                 break;
             }
         }
@@ -1549,6 +1577,33 @@ fn an_idle_unit_cannot_be_lured_away_chase_by_chase() {
         "it strayed {farthest}"
     );
     assert!(farthest >= Fx::from_int(5), "it did follow: {farthest}");
+}
+
+#[test]
+fn an_idle_unit_hit_for_longer_than_the_reset_at_the_end_of_its_leash_is_not_lured_away() {
+    // The long gun hits for 1 (so the rifleman lives through hundreds of ticks of it) and keeps hitting
+    // a rifleman that stands at the end of its leash for three times `pursuit_reset_ticks` per round.
+    // Being hurt is not rest: the anchor stays where the first chase began, so it never sets out again
+    // (before, after 100 ticks of being hit the anchor moved and the next hit began a new chase of 6
+    // cells, round after round).
+    let reset = TargetingConfig::DEFAULT.pursuit_reset;
+    let mut w = fought_with_table(table_with(|w| {
+        if w.kind == LOBBER {
+            w.damage = 1;
+        }
+    }));
+    let ids = spawn(&mut w, &[(RIFLEMAN, 0, at(6, 10)), (ARTY, 1, at(14, 10))]);
+    let (r, s) = (ids[0], ids[1]);
+    let farthest = lure_for(&mut w, r, s, at(6, 10), 3 * u32::from(reset), 8);
+    assert!(
+        farthest <= Fx::from_int(6) + Fx::from_ratio(1, 4),
+        "it strayed {farthest}"
+    );
+    assert!(farthest >= Fx::from_int(5), "it did follow: {farthest}");
+    // It was hit all that time (one point every 30 ticks, so many times per `pursuit_reset_ticks`) and lived.
+    let hits = 50 - hp(&w, r);
+    assert!(hp(&w, r) > 0, "it lived");
+    assert!(hits >= 3 * u32::from(reset) / 30, "it was hit {hits} times");
 }
 
 #[test]
@@ -1577,6 +1632,50 @@ fn after_a_rest_an_idle_unit_measures_a_new_chase_from_where_it_stands() {
     let (r, s) = (ids[0], ids[1]);
     let farthest = lure(&mut w, r, s, at(6, 10));
     assert!(farthest > Fx::from_int(7), "it went on: {farthest}");
+}
+
+#[test]
+fn a_follower_whose_target_comes_inside_its_minimum_range_lets_go() {
+    // An idle mortar (reach 10, not nearer than 3; its damage cut to 1 so the target lives) is hit by a
+    // long gun 14 cells away and follows it. The long gun then walks onto the mortar: once it is inside
+    // the minimum range nothing of the mortar can fire, walking will not help, and the mortar lets go
+    // and is idle again, the target still in reach of its walk and alive.
+    let mut w = fought_with_table(table_with(|w| {
+        if w.kind == MORTAR_GUN {
+            w.damage = 1;
+        }
+    }));
+    let ids = spawn(&mut w, &[(MORTAR, 0, at(10, 10)), (ARTY, 1, at(24, 10))]);
+    let (m, s) = (ids[0], ids[1]);
+    run_command(&mut w, attack(s, m));
+    let followed = (0..80).any(|_| {
+        w.step();
+        w.order_of(m) == Some(Order::Pursue(s))
+    });
+    assert!(followed, "the mortar follows");
+    // Let it get into reach and fire, then the long gun walks onto it.
+    let mut shots = run(&mut w, 40);
+    assert_eq!(w.order_of(m), Some(Order::Pursue(s)));
+    let onto = pos(&w, m);
+    run_command(&mut w, mv(s, onto));
+    let mut let_go = None;
+    for _ in 0..200 {
+        w.step();
+        shots.extend_from_slice(w.shots());
+        if let_go.is_none() && w.order_of(m) == Some(Order::Idle) {
+            let_go = Some((w.tick().0, (pos(&w, s) - pos(&w, m)).length()));
+        }
+        if let_go.is_some() {
+            assert_eq!(w.order_of(m), Some(Order::Idle), "tick {}", w.tick().0);
+        }
+    }
+    let (tick, d) = let_go.expect("the mortar lets go once the target is too close");
+    assert!(d < Fx::from_int(4), "at tick {tick} it was {d} away");
+    assert!(hp(&w, s) > 0, "the target lives");
+    assert!(
+        !shots_by(&shots, m).is_empty(),
+        "the mortar did fire while it could"
+    );
 }
 
 #[test]

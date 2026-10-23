@@ -21,7 +21,7 @@ either.
 |---|---|---|---|
 | `scan_cooldown` | ticks between two looks round for a target of one unit (20 ticks are a second) | 1 to 1000 | 10 (half a second) |
 | `pursuit_cells` | how far beyond its weapon's reach a unit that is shot at follows its attacker, and the farthest it ever strays: a guard from its post, an idle unit from where its first chase began; 0 means nobody follows | 0 to 32 | 6 (24 m) |
-| `pursuit_reset_ticks` | how long an idle unit must be back at rest (no target) before a new chase measures from where it then stands | 1 to 2000 | 100 (5 s) |
+| `pursuit_reset_ticks` | how long an idle unit must be back at rest (no target, not hurt) before a new chase measures from where it then stands | 1 to 2000 | 100 (5 s) |
 
 `TargetingConfig::DEFAULT` is the same two numbers; a test keeps them equal. Worlds, tests and scenarios that are
 not given settings use the defaults. What a unit *prefers* is not a setting of its own: it is the armor table
@@ -152,10 +152,12 @@ of that tick if its stance lets it (the table above), **at once and not on the c
   unit walks toward the place the target stood at the end of the last tick, into the range of the weapon that
   chose it, and fires. It goes no farther than `pursuit` cells from its **anchor**, and lets go of an attacker
   that gets away (the leash above). The anchor of a guard is its **post** (the guard point, or where the guarded
-  entity stands when the chase begins). The anchor of an idle unit is where its **first** chase began, and it is
-  kept across chases that follow straight after each other: only after `pursuit_reset_ticks` back at rest (no
-  target) does a new chase measure from where the unit then stands. So an attacker that hits, steps back and hits
-  again cannot lure a unit away chase by chase. A unit already at the end of its leash does not set out again,
+  entity stands when the chase begins). A guard of an entity measures its leash from where the guarded unit
+  stood when the chase began, not from where it walks to during the chase. The anchor of an idle unit is where
+  its **first** chase began, and it is kept across chases that follow straight after each other: only after
+  `pursuit_reset_ticks` back at rest (no target, and not hurt: every hit starts the count again) does a new
+  chase measure from where the unit then stands. So an attacker that hits, steps back and hits again cannot lure
+  a unit away chase by chase, however long it keeps hitting a unit that stands at the end of its leash. A unit already at the end of its leash does not set out again,
   and an attacker inside the minimum range of every weapon (in reach, but nothing can fire) is not followed. It does not go back: an idle unit stays where the
   chase ended; a guard walks back to its post because that is what a guard does.
 * An attacker beyond that is not answered.

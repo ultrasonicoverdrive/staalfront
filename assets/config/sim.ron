@@ -107,9 +107,10 @@
 // on hold or on attack-move fires back only from where it is, and one that is moving does not stop. 0
 // means nobody follows. At most 32.
 //
-// pursuit_reset_ticks: how long an idle unit must be back at rest (no target) before a new chase
-// measures from where it then stands. Until then chase after chase measures from the first spot, so
-// an attacker that hits and steps back cannot lure it away. 1 to 2000.
+// pursuit_reset_ticks: how long an idle unit must be back at rest (no target, and not hurt: every hit
+// starts the count again) before a new chase measures from where it then stands. Until then chase
+// after chase measures from the first spot, so an attacker that hits and steps back cannot lure it
+// away, however long it keeps hitting. 1 to 2000.
 // Tests and scenarios that do not give them use the simulation's own defaults, which are the same
 // numbers.
 (

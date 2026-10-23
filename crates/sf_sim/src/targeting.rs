@@ -123,9 +123,9 @@ pub struct TargetingConfig {
     /// and the farthest it strays from where it stood when it began. Zero: it never follows.
     /// At most [`MAX_PURSUIT_CELLS`].
     pub pursuit: Fx,
-    /// Ticks an idle unit must have been back at rest (no target) before its next chase measures
-    /// the pursuit from where it then stands; until then it measures from where its first chase
-    /// began. 1 to [`MAX_PURSUIT_RESET_TICKS`].
+    /// Ticks an idle unit must have been back at rest (no target, not hurt) before its next chase
+    /// measures the pursuit from where it then stands; until then it measures from where its first
+    /// chase began. 1 to [`MAX_PURSUIT_RESET_TICKS`].
     pub pursuit_reset: u16,
 }
 
@@ -190,7 +190,7 @@ pub(crate) struct Engage {
     /// Whether `anchor` still binds: set by every engagement, kept when it ends, and dropped once
     /// the unit has been at rest for `pursuit_reset` ticks or is given an order by its player.
     pub held: bool,
-    /// Ticks the unit has been at rest (no `Pursue`) while `held`.
+    /// Ticks the unit has been at rest (no `Pursue`, not hurt) while `held`.
     pub rest: u16,
     /// Where the target was at the end of the movement stage of the last tick. The unit walks and
     /// faces toward this, not toward the live position of the target, which another unit's step may
@@ -504,6 +504,9 @@ impl Targeting {
             if !cx.arsenal.is_armed(e.def[i]) {
                 continue;
             }
+            // Being hurt is not rest: a unit at the end of its leash that keeps being hit (and does
+            // not follow) keeps measuring from where its first chase began.
+            e.eng[i].rest = 0;
             let Some(stance) = stance_of(e, i) else {
                 continue;
             };
