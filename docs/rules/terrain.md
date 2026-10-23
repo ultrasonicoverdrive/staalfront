@@ -72,6 +72,62 @@ bit-exact on every platform; pinned by `crates/sf_data/tests/golden.rs`):
    height) to the east edge (four fifths), so it always crosses the river; every
    road cell that lies on water is a **bridge**. A map under 5 cells high has no road.
 
+## How it is drawn
+
+Work package WP2.2. The presentation shows the terrain type of every cell, so what you
+see is what units can do: the water is where vessels go, the rock is where nothing
+passes, the road is where units are fast, the ore is where harvesters work, and the
+bridge is a deck over the river. This is presentation only; `sf_sim` and its checksums
+are not involved.
+
+* **A map with a terrain layer** is drawn from it. The material map of the map file
+  (one material per 1 m sample) is then **not used**: the terrain type decides. A map
+  without a layer is drawn from its material map as before (WP1.7).
+* **The mapping is data**: `assets/config/terrain_look.ron`, one entry per terrain
+  type, matched by the type's **name** (ids are what map files store, names are what the
+  tools use). An entry has a base colour (sRGB), a `contrast`, a procedural `pattern`
+  (`Noise`, `Cracks`, `Ripples`, `Planks(count)`, `Flecks(color)`) and two style flags:
+  `flat` (drawn level, no hill shading) and `liquid` (gets a shore line). A type
+  without an entry is still drawn, in a colour derived from its name, so adding a type
+  to `terrain_types.ron` never breaks the picture; the test
+  `every_shipped_type_has_a_look_and_every_look_a_type` fails until somebody has chosen
+  its colours. There are no third-party textures: every look is a 128 x 128 tileable
+  texture generated in code (one repeat per 4 m, so it is aligned to the cells).
+* **The colours are invented** to read from 45 to 80 degrees and to stay apart from the
+  unit colours of the factions (sand, olive, weathered blue; slate, charcoal, muted
+  crimson, `content/world.md`): fresh yellow-green grass, a light tan road of packed
+  earth (clearly apart from the grey rock), saturated blue
+  water, mid grey rock, dark gold ore with bright flecks and a light wooden
+  bridge with planks.
+
+| type | look | style |
+|---|---|---|
+| grass | yellow-green patches | |
+| road | packed earth: light tan, low contrast | |
+| water | blue with thin light wave crests | flat, liquid |
+| rock | mid grey with dark cracks | |
+| ore | dark ochre with gold flecks | |
+| bridge | light wood, 8 planks per 4 m with dark gaps | flat |
+
+* **Soft borders.** The terrain shader reads one index texel per gameplay cell (the
+  texture array layer and the style bits) and blends the four nearest cell centres.
+  The blend is a ramp of `edge.ramp_m` (2 m) centred on the cell border, so the middle
+  of every cell stays pure and a border is two metres soft (the ramp is never narrower
+  than a pixel, so a far zoom does not alias). The border **wobbles** by up to
+  `edge.wobble_m` (0.7 m, value noise in world space, fading to nothing at the cell
+  centres so the picture stays continuous), which turns the corners of a staircase
+  of cells (the generated road) into rounded, irregular shapes instead of a
+  chessboard. **Cost:** the four index `textureLoad`s run for every pixel. Where the
+  four cells agree the shader takes one texture sample; in a border it takes four,
+  plus two `value_noise` calls, an `fwidth` and a `smoothstep`. A GPU shades in 2x2
+  quads, so in a quad that straddles a border both paths run. No extra pass, no extra
+  vertex data.
+* **Water.** A `flat` style is lit as level ground: the slope of the river bed does
+  not shade the water (the mesh is not changed, there is no level offset). A `liquid`
+  gets a light line along its shore (`edge.shore`, `edge.shore_amount`), strongest where
+  water and the other type weigh the same. The bridge is flat as well, and so lies like
+  a deck over water. Water is not animated (later polish).
+
 ## Occupancy
 
 Every cell has at most one **occupant**, an entity. Only structures occupy cells;
@@ -118,6 +174,9 @@ the occupancy cell by cell in ascending order. See `sf_sim::checksum`.
   file name safety, the generator's layer and its pinned hashes.
 * `crates/sf_sim/tests/terrain.rs`: queries, `Place` rules, despawn and slot reuse,
   wanderers unchanged by terrain, the checksum sections.
+* `crates/sf_render` (`terrain_look/tests.rs`, `tests/terrain_types_screenshot.rs`): the
+  looks, the index built from a map, and the picture (each type in its own colours, the
+  material map does not matter, soft borders, level water, the shore line).
 * `assets/scenarios/terrain_256.ron` with `tools/sf_headless/tests/terrain.rs`: the
   256 x 256 cell playfield, terrain type and occupancy asserted per cell, and the
   pinned checksum on Linux and Windows (CI job `headless`).

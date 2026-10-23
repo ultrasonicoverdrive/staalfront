@@ -11,6 +11,10 @@
 //! WP1.7 adds the terrain ([`terrain`]): 32x32-cell chunk meshes from an
 //! `sf_data` map and a procedural material texture array.
 //!
+//! WP2.2 draws the terrain from the gameplay terrain types ([`terrain_look`]): one
+//! procedural look per type (data in `assets/config/terrain_look.ron`), soft
+//! borders between neighbouring cells in the shader, level flat water.
+//!
 //! WP1.6 adds instancing ([`instancing`], [`frustum`], [`style`]): interpolated
 //! unit instances from two sim ticks, per-tile frustum culling, one instance
 //! buffer and one draw call per placeholder mesh (cube, cylinder, cone).
@@ -61,6 +65,7 @@ mod shader_watch;
 pub mod style;
 pub mod terrain;
 mod terrain_gpu;
+pub mod terrain_look;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
 pub use frustum::{Aabb, Frustum, Visibility};

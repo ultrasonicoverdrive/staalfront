@@ -8,6 +8,7 @@ use wgpu::util::DeviceExt;
 
 use crate::lod::{LodPlanner, TerrainConfig};
 use crate::terrain::{self, MeshOptions, TEXTURE_SIZE, TILE_METERS, TerrainVertex};
+use crate::terrain_look::{TerrainLooks, terrain_surface};
 
 /// The terrain shader, embedded at build time (no hot-reload yet).
 pub const EMBEDDED_TERRAIN_SHADER: &str = include_str!("../../../assets/shaders/terrain.wgsl");
@@ -15,11 +16,13 @@ pub const EMBEDDED_TERRAIN_SHADER: &str = include_str!("../../../assets/shaders/
 pub(crate) const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
 
-/// Mirrors `TerrainParams` in `terrain.wgsl`.
+/// Mirrors `TerrainParams` in `terrain.wgsl` (56 bytes, no vector members, so
+/// the WGSL layout is plain 4-byte packing plus the 8-byte `index_size`).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct TerrainParams {
-    map_cells: [i32; 2],
+    /// Size of the cell index texture in texels.
+    index_size: [i32; 2],
     tile_meters: f32,
     /// Debug flags, bit 0: tint chunks by their level of detail.
     flags: u32,
@@ -27,6 +30,15 @@ struct TerrainParams {
     grid_alpha: f32,
     /// Metres between the grid lines: one gameplay cell (B12).
     cell_meters: f32,
+    /// Metres per index texel (4 with terrain types, 1 without).
+    index_meters: f32,
+    /// Half the width of the blend ramp in texels.
+    ramp: f32,
+    /// Wobble of the borders in texels.
+    wobble: f32,
+    shore_amount: f32,
+    shore_color: [f32; 3],
+    _pad: f32,
 }
 
 /// `flags` bit: tint chunks by their level of detail.
@@ -41,7 +53,8 @@ pub struct TerrainGpu {
     pub indices: wgpu::Buffer,
     /// The `TerrainParams` uniform, rewritten by [`TerrainGpu::write_debug_view`].
     params: wgpu::Buffer,
-    map_cells: [i32; 2],
+    /// The params without the debug view (what the map decided).
+    base_params: TerrainParams,
     pub config: TerrainConfig,
     pub planner: LodPlanner,
     /// Debug: fixed level per chunk instead of the automatic selection.
@@ -52,14 +65,20 @@ impl TerrainGpu {
     /// Update the debug visualisation flags in the terrain uniform.
     pub fn write_debug_view(&self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
         let params = TerrainParams {
-            map_cells: self.map_cells,
-            tile_meters: TILE_METERS,
             flags: if view.lod_tint { FLAG_LOD_TINT } else { 0 },
             grid_alpha: view.grid_alpha.clamp(0.0, 1.0),
-            cell_meters: sf_math::render_bridge::METRES_PER_CELL,
+            ..self.base_params
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
     }
+}
+
+/// What a terrain is built from: the map, the table of terrain types its layer
+/// uses and the looks of those types.
+pub struct TerrainSource<'a> {
+    pub map: &'a sf_data::map::Map,
+    pub types: &'a sf_data::terrain::TerrainTypes,
+    pub looks: &'a TerrainLooks,
 }
 
 pub fn build(
@@ -68,9 +87,10 @@ pub fn build(
     globals_layout: &wgpu::BindGroupLayout,
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
-    map: &sf_data::map::Map,
+    source: &TerrainSource<'_>,
     config: &TerrainConfig,
 ) -> TerrainGpu {
+    let TerrainSource { map, types, looks } = *source;
     // Chunk meshes of all levels in one vertex and one index buffer.
     let mesh = terrain::build_mesh_with(
         map,
@@ -91,8 +111,10 @@ pub fn build(
     });
     let planner = LodPlanner::new(&mesh, packed.ranges);
 
-    // Material texture array with a full mip chain.
-    let layers = map.materials().len() as u32;
+    // Material texture array with a full mip chain: one layer per terrain
+    // type (WP2.2), or per map material without a terrain layer.
+    let surface = terrain_surface(map, types, looks);
+    let layers = surface.layers.len() as u32;
     let mip_levels = TEXTURE_SIZE.ilog2() + 1;
     let array = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("terrain materials"),
@@ -108,8 +130,8 @@ pub fn build(
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    for (layer, name) in map.materials().iter().enumerate() {
-        let levels = terrain::mip_chain(terrain::material_texture(name), TEXTURE_SIZE);
+    for (layer, level0) in surface.layers.iter().enumerate() {
+        let levels = terrain::mip_chain(level0.clone(), TEXTURE_SIZE);
         for (level, texels) in levels.iter().enumerate() {
             let size = (TEXTURE_SIZE >> level).max(1);
             queue.write_texture(
@@ -152,43 +174,51 @@ pub fn build(
         ..Default::default()
     });
 
-    // Material index per cell.
+    // Layer and style per cell: one texel per gameplay cell (per 1 m sample
+    // without a terrain layer).
     let cell_extent = wgpu::Extent3d {
-        width: map.width(),
-        height: map.height(),
+        width: surface.size.0,
+        height: surface.size.1,
         depth_or_array_layers: 1,
     };
     let cell_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("terrain cell materials"),
+        label: Some("terrain cell index"),
         size: cell_extent,
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R8Uint,
+        format: wgpu::TextureFormat::Rg8Uint,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
     queue.write_texture(
         cell_texture.as_image_copy(),
-        map.cells(),
+        &surface.index,
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(map.width()),
-            rows_per_image: Some(map.height()),
+            bytes_per_row: Some(surface.size.0 * 2),
+            rows_per_image: Some(surface.size.1),
         },
         cell_extent,
     );
     let cell_view = cell_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+    let base_params = TerrainParams {
+        index_size: [surface.size.0 as i32, surface.size.1 as i32],
+        tile_meters: TILE_METERS,
+        flags: 0,
+        grid_alpha: 0.0,
+        cell_meters: sf_math::render_bridge::METRES_PER_CELL,
+        index_meters: surface.index_meters,
+        ramp: surface.ramp,
+        wobble: surface.wobble,
+        shore_amount: surface.shore_amount,
+        shore_color: surface.shore,
+        _pad: 0.0,
+    };
     let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("terrain params"),
-        contents: bytemuck::bytes_of(&TerrainParams {
-            map_cells: [map.width() as i32, map.height() as i32],
-            tile_meters: TILE_METERS,
-            flags: 0,
-            grid_alpha: 0.0,
-            cell_meters: sf_math::render_bridge::METRES_PER_CELL,
-        }),
+        contents: bytemuck::bytes_of(&base_params),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
@@ -313,7 +343,7 @@ pub fn build(
         vertices,
         indices,
         params,
-        map_cells: [map.width() as i32, map.height() as i32],
+        base_params,
         config: *config,
         planner,
         level_override: None,

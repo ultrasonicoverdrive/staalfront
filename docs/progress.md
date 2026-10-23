@@ -84,7 +84,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
-- WP2.2 Materials per terrain type: open
+- WP2.2 Materials per terrain type: done (PR #66, branch `wp/2.2-terrain-materials`, CI green incl. Windows/WARP)
 - WP2.3 Minimap shows terrain types: open
 - WP2.4 Cell grid overlay by terrain type and occupancy: done (branch `wp/2.4-cell-overlay`), see "WP2.4 notes"
 
@@ -102,6 +102,38 @@ terrain and occupancy are in the checksum only when present, so `wander_5000`,
 `command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
 are in `docs/rules/terrain.md`.
 
+WP2.2 notes. The presentation draws a map with a terrain layer from the gameplay terrain
+type of each 4 m cell; the per-sample material map of the map file is then not used (a map
+without a layer is drawn from it as before). The mapping is data, by type name:
+`assets/config/terrain_look.ron` (invented colours, procedural patterns, `flat` and `liquid`
+style flags; a type without an entry still renders, in a colour derived from its name).
+`sf_render::terrain_look` builds the texture-array layers (one per terrain type, id order)
+and one index texel per cell (layer, style bits); `terrain.wgsl` blends the four nearest
+cell centres with a 2 m ramp centred on the cell border (the middle of a cell stays pure),
+wobbles the border by up to 0.7 m (a staircase road does not look like a chessboard), takes a
+single texture sample where the four cells agree, draws water and the bridge deck level
+(no hill shading) and puts a light line along a shore. No new pass, no extra vertex data, no
+new dependency; `sf_sim` is untouched. Rules, looks and the blend are in
+`docs/rules/terrain.md` ("How it is drawn"). Tests: `terrain_look/tests.rs` (data, textures,
+index), `tests/terrain_types_screenshot.rs` (each type in its own look, the material map does
+not matter, soft border, staircase corner, level water and bridge on a slope, shore line),
+`typed_map_shows_every_terrain_type` (golden `terrain_types_far_320.png`; the close-up is checked by
+properties per cell, not a golden, because WARP and lavapipe pick different mip levels in the
+ore flecks and the shore band). Goldens that changed
+because their maps carry a terrain layer and so look different: `terrain_lod_far_320`,
+`instancing_10k_320`, `glb_testpack_close_320` (regenerated; no other golden moved). The
+WP1.7 colour/relief/seam tests of `terrain_screenshot.rs` now run on test64 *without* its
+layer (material path), their goldens unchanged. Frame time (review, lavapipe, 5
+alternating PR/main pairs): PR/main frame p50 0.45 to 0.67, p99 0.40 to 0.54, so about 40 to
+50 % faster (single sample where four cells agree); GTX 1650 estimate within 0.1 to 0.2 ms at
+1080p. The before/after pictures are in `docs/screenshots/wp2.2/`. Follow-ups: (1) the
+renderer always uses the shipped `TerrainTypes::embedded()` table; a map validated against
+another table would draw unknown ids as layer 0 (a `debug_assert` catches it), so pass the
+real table in once maps can carry their own; (2) the faint 4 m tile repeat shows from far
+away; a per-cell texture offset or a longer repeat would hide it. Still open for M0b:
+WP2.3 (the minimap still bakes the old material map) and WP2.4. Water has no level offset and
+is not animated (later polish).
+
 ### WP2.4 notes
 
 The F1 checkbox "Cell grid (4 m)" (`--debug-grid`) now also tints every 4 m cell by its
@@ -109,7 +141,7 @@ terrain type and shows occupancy on top: structure (sim occupancy, whole footpri
 units (derived from snapshot positions; the sim does not track units per cell),
 impassable (hatched: at least one of foot/wheeled/tracked cannot enter), open. Rules and the
 meaning of "occupied": `docs/rules/cell_overlay.md`. Colours: `assets/config/cell_overlay.ron`
-(per type by name; to derive from `assets/config/terrain_look.ron` once PR #66 is merged, follow-up 30). One `Rgba8Uint` texel per
+(per type by name; to derive from `assets/config/terrain_look.ron`, merged with PR #66 while this PR was in review: follow-up 30). One `Rgba8Uint` texel per
 cell, rebuilt at most once per sim tick while on, the span from the first to the last changed row uploaded; drawn as a
 second, blended pass over the terrain's LOD draws (one call per run of chunks, counted in the F1 panel). Off = no
 rebuild, upload or draw; the layer, texture and pipeline are built at start-up, and the snapshot lists structure cells every tick regardless (about 26 us with 1-200 structures, 40 us with 2000, at 5000 entities: about 2 % of a tick step). `sf_sim` untouched; all scenarios match `--expect`.
@@ -243,8 +275,8 @@ Known gaps (owner in brackets):
 - No combat: attack and attack-move walk to weapon reach; nothing acquires a target, fires
   or takes damage; only the first weapon's range is read (phase 5, WP5.1).
 - No ownership check in the sim and no lockstep packet (WP14.1).
-- The terrain types are not drawn from the type layer: no per-type material, no minimap
-  colours, no cell overlay (WP2.2 to WP2.4, next now that M0 is met).
+- The terrain types are drawn per type (WP2.2), but the minimap still shows the old
+  material map and there is no cell overlay (WP2.3, WP2.4).
 - No sidebar, build menu, economy or power; the HUD is a top bar with the selected count
   (phases 6, 7, 11).
 - No vessels in the sandbox (WP4.1 follow-up: they need water to stand on).
@@ -1563,4 +1595,4 @@ fixed, delete the entry in the same PR.
     `Y = 0`, the `supply_truck` faction, `state_map.json`. Owner: Tijmen with the producer; when a
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
 
-30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. Once PR #66 is merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.
+30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. With PR #66 merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.

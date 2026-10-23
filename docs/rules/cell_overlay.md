@@ -27,8 +27,8 @@ with a unit is not blocked for anything.
 
 `assets/config/cell_overlay.ron`: an sRGB colour for every terrain type (by name; a
 missing or unknown name is refused), the `units` and `structure` colours and the opacity
-of the tint. The single source of per-type colour is to be `assets/config/terrain_look.ron`
-(PR #66); the minimap and this overlay both derive from it once it is merged (follow-up 30
+of the tint. The single source of per-type colour is `assets/config/terrain_look.ron`
+(PR #66, on main); the minimap and this overlay are to derive from it (follow-up 30
 in `docs/progress.md`). Until then this table stands alone.
 
 Fading: below about 8 screen pixels per cell the patterns fade out, so the far zoom shows
