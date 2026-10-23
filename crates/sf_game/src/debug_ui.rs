@@ -609,6 +609,7 @@ mod tests {
                 terrain_chunks_visible: 12,
                 terrain_triangles: 9_216,
                 terrain_chunks_per_level: [4, 5, 3, 0, 0, 0],
+                cell_overlay_draw_calls: 0,
             },
             instances: InstanceStats {
                 total: 1350,

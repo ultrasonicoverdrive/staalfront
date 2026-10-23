@@ -67,6 +67,8 @@ pub struct SimSnapshot {
     views: Vec<EntityView>,
     orders: Vec<Order>,
     gave_up: Vec<Option<Tick>>,
+    /// Every cell a structure occupies (WP2.4), in entity order.
+    structures: Vec<(u32, u32)>,
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
@@ -83,6 +85,7 @@ impl SimSnapshot {
             views: Vec::new(),
             orders: Vec::new(),
             gave_up: Vec::new(),
+            structures: Vec::new(),
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
@@ -115,6 +118,20 @@ impl SimSnapshot {
         self.gave_up.clear();
         self.gave_up
             .extend(self.views.iter().map(|v| world.gave_up_at(v.id)));
+        // The occupancy, for the cell grid overlay: nothing to look up in a
+        // world without structures (the crowd benchmark).
+        self.structures.clear();
+        if world.occupied_cells() > 0 {
+            for v in &self.views {
+                if let (Some(at), Some(fp)) = (world.cell_of(v.id), world.footprint_of(v.id)) {
+                    for dy in 0..u32::from(fp.height) {
+                        for dx in 0..u32::from(fp.width) {
+                            self.structures.push((at.x + dx, at.y + dy));
+                        }
+                    }
+                }
+            }
+        }
         // The table never changes after the world is made: share one copy.
         self.units = Arc::clone(&statics.units);
         self.ground = Arc::clone(&statics.ground);
@@ -200,6 +217,12 @@ impl SimSnapshot {
     /// the UI will show; nothing draws it yet.
     pub fn gave_up_at(&self, id: EntityId) -> Option<Tick> {
         self.find(id).and_then(|i| self.gave_up[i])
+    }
+
+    /// Every cell a structure occupies, as the sim's occupancy holds it
+    /// (`World::occupant_at`), `(x, y)`. Units occupy no cells.
+    pub fn structure_cells(&self) -> &[(u32, u32)] {
+        &self.structures
     }
 
     /// The cell a position lies in; `None` outside the map.

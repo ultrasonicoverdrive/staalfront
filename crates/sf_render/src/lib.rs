@@ -39,6 +39,7 @@
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
 pub mod camera;
+pub mod cell_overlay;
 pub mod frustum;
 pub mod glb;
 pub mod gpu;

@@ -112,6 +112,9 @@ pub struct DrawStats {
     pub terrain_triangles: u32,
     /// Visible terrain chunks per level of detail (index 0 = full detail).
     pub terrain_chunks_per_level: [u32; LOD_LEVELS],
+    /// Draw calls of the cell grid overlay (WP2.4): the terrain's draws once
+    /// more, 0 when the overlay is off.
+    pub cell_overlay_draw_calls: u32,
 }
 
 impl DrawStats {
@@ -120,6 +123,7 @@ impl DrawStats {
             + self.scene_draw_calls
             + self.terrain_draw_calls
             + self.icon_draw_calls
+            + self.cell_overlay_draw_calls
     }
 }
 
@@ -165,6 +169,9 @@ pub struct Renderer {
     last_stats: Cell<DrawStats>,
     /// Terrain debug visualisations (LOD tint, cell grid).
     debug_view: DebugView,
+    /// The cell grid overlay (WP2.4), once [`Renderer::set_cell_layer`] gave
+    /// it a map; drawn only while [`DebugView::cells`] is on.
+    cell_overlay: Option<crate::cell_overlay::CellOverlayGpu>,
     /// The egui painter, created on the first [`Renderer::set_overlay`].
     overlay: Option<Overlay>,
     #[cfg(debug_assertions)]
@@ -220,6 +227,9 @@ pub struct DebugView {
     /// Opacity `0..=1` of the gameplay cell grid lines (one per 4 m cell,
     /// B12); `0` = off.
     pub grid_alpha: f32,
+    /// The cell grid overlay (WP2.4): cells tinted by terrain type and
+    /// occupancy. Needs [`Renderer::set_cell_layer`].
+    pub cells: bool,
 }
 
 impl DebugView {
@@ -468,6 +478,7 @@ impl Renderer {
             lighting,
             last_stats: Cell::new(DrawStats::default()),
             debug_view: DebugView::default(),
+            cell_overlay: None,
             overlay: None,
             #[cfg(debug_assertions)]
             watch: None,
@@ -947,6 +958,46 @@ impl Renderer {
         }
     }
 
+    /// Give the cell grid overlay its map (WP2.4): terrain type and
+    /// passability per cell, and the colours. Call on map changes.
+    pub fn set_cell_layer(&mut self, layer: crate::cell_overlay::CellLayer) {
+        self.cell_overlay = Some(crate::cell_overlay::CellOverlayGpu::new(
+            &self.gpu.device,
+            &self.gpu.queue,
+            &self.globals_layout,
+            self.format,
+            DEPTH_FORMAT,
+            layer,
+        ));
+    }
+
+    /// New occupancy for the cell grid overlay: the cells that hold units and
+    /// the cells structures occupy. Only the rows that changed are uploaded.
+    /// Call at most once per sim tick, and only while the overlay is on.
+    /// Returns the number of rows uploaded.
+    pub fn update_cell_occupancy(
+        &mut self,
+        units: impl IntoIterator<Item = (u32, u32)>,
+        structures: impl IntoIterator<Item = (u32, u32)>,
+    ) -> u32 {
+        let Some(o) = &mut self.cell_overlay else {
+            return 0;
+        };
+        match o.layer.update(units, structures) {
+            Some(rows) => {
+                o.upload(&self.gpu.queue, rows.clone());
+                rows.end - rows.start
+            }
+            None => 0,
+        }
+    }
+
+    /// The cell grid overlay's texels (`None` before
+    /// [`Renderer::set_cell_layer`]), for tests.
+    pub fn cell_layer(&self) -> Option<&crate::cell_overlay::CellLayer> {
+        self.cell_overlay.as_ref().map(|o| &o.layer)
+    }
+
     /// Hand over the egui output for the next frame(s): drawn on top of the
     /// scene by [`Renderer::render`] and [`Renderer::render_to_image`] until
     /// replaced or cleared. The painter is created on the first call.
@@ -1107,6 +1158,14 @@ impl Renderer {
             for range in &t.planner.selection().draws {
                 pass.draw(DrawGroup::Terrain, range.clone(), 0..1);
             }
+            // The cell grid overlay over the same chunk draws, blended.
+            if let (true, Some(o)) = (self.debug_view.cells, &self.cell_overlay) {
+                pass.set_pipeline(&o.pipeline);
+                pass.set_bind_group(1, &o.bind_group);
+                for range in &t.planner.selection().draws {
+                    pass.draw(DrawGroup::CellOverlay, range.clone(), 0..1);
+                }
+            }
         }
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group);
@@ -1171,6 +1230,7 @@ enum DrawGroup {
     Scene,
     Units,
     Icons,
+    CellOverlay,
 }
 
 /// A render pass whose only way to draw is [`CountedPass::draw`], which
@@ -1229,6 +1289,7 @@ impl<'a> CountedPass<'a> {
                 s.icon_draw_calls += 1;
                 s.icon_instances += n;
             }
+            DrawGroup::CellOverlay => s.cell_overlay_draw_calls += 1,
         }
     }
 

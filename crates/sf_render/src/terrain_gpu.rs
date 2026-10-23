@@ -12,7 +12,7 @@ use crate::terrain::{self, MeshOptions, TEXTURE_SIZE, TILE_METERS, TerrainVertex
 /// The terrain shader, embedded at build time (no hot-reload yet).
 pub const EMBEDDED_TERRAIN_SHADER: &str = include_str!("../../../assets/shaders/terrain.wgsl");
 
-const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
+pub(crate) const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
 
 /// Mirrors `TerrainParams` in `terrain.wgsl`.

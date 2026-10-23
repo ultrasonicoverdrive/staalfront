@@ -86,7 +86,9 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
 - WP2.2 Materials per terrain type: open
 - WP2.3 Minimap shows terrain types: open
-- WP2.4 Cell grid overlay by terrain type and occupancy: open
+- WP2.4 Cell grid overlay by terrain type and occupancy: done (branch `wp/2.4-cell-overlay`), see "WP2.4 notes"
+
+M0b status (23-10-2026): WP2.4 is in, so the M0b laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is now due from Tijmen.
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
 headless test checks terrain types and occupancy per cell. The headless half is met
@@ -99,6 +101,20 @@ rock, ore, a road and bridges, and the sim keeps a type and an occupant per cell
 terrain and occupancy are in the checksum only when present, so `wander_5000`,
 `command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
 are in `docs/rules/terrain.md`.
+
+### WP2.4 notes
+
+The F1 checkbox "Cell grid (4 m)" (`--debug-grid`) now also tints every 4 m cell by its
+terrain type and shows occupancy on top: structure (sim occupancy, whole footprint),
+units (derived from snapshot positions; the sim does not track units per cell),
+impassable (hatched: not open ground for foot/wheeled/tracked), open. Rules and the
+meaning of "occupied": `docs/rules/cell_overlay.md`. Colours: `assets/config/cell_overlay.ron`
+(per type by name, to be unified with WP2.3's `minimap_colour`). One `Rgba8Uint` texel per
+cell, rebuilt at most once per sim tick while on, only changed rows uploaded; drawn as a
+second, blended pass over the terrain's LOD draws (one call per run of chunks). Off = no
+build, upload or draw. `sf_sim` untouched; all scenarios match `--expect`.
+Screenshots: `docs/screenshots/wp2.4/`.
+Cost, lavapipe 1280x720 sandbox (`sf_game --bench --frames 300`, 3-4 agents on the machine): frame p50 101/132 ms off, 193/205 ms on (grid lines and overlay together), about 1.5-1.9x: lavapipe is fill bound and the overlay is one more blended terrain-covering pass. Expected on a GTX 1650 at 1080p: one extra pass of ~2 M fragments with one texel fetch, well under 0.3 ms; nothing when off. Occupancy rebuild: a 256x256 compare per tick, sub-millisecond.
 
 ## Phase 3 — Units, selection and commands
 
