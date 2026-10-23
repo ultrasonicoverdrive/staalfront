@@ -1,9 +1,15 @@
-// Terrain shader (WP1.7, WP1.8): one vertex grid per chunk and level of
-// detail, material per cell.
-// The material index map is a texture (R8Uint, one texel per cell); the
-// fragment shader blends the four nearest cell centres. Materials live in a
-// texture array and are sampled with world-space UVs. Lighting as in
-// scene.wgsl: one directional light + ambient, Lambert.
+// Terrain shader (WP1.7, WP1.8, WP2.2): one vertex grid per chunk and level
+// of detail, material per cell.
+// The cell index is a texture (Rg8Uint, one texel per gameplay cell of 4 m, or
+// per 1 m sample on a map without terrain types): red = layer of the material
+// texture array, green = style bits (1 = flat, 2 = liquid). The fragment shader
+// blends the four nearest cell centres with a narrow ramp around the cell
+// border (so a cell stays pure in its middle), the border wobbles a little so a
+// staircase of cells does not look like a chessboard, and where all four cells
+// agree it takes a single texture sample. Materials live in a texture array and
+// are sampled with world-space UVs. Lighting as in scene.wgsl: one directional
+// light + ambient, Lambert; a flat style (water, a bridge deck) is lit as
+// level ground, and a liquid gets a light line along its shore.
 
 struct Globals {
     view_proj: mat4x4<f32>,
@@ -14,8 +20,8 @@ struct Globals {
 };
 
 struct TerrainParams {
-    // Map size in cells.
-    map_cells: vec2<i32>,
+    // Size of the cell index texture in texels.
+    index_size: vec2<i32>,
     // World size of one texture repeat in metres.
     tile_meters: f32,
     // Debug flags: bit 0 = tint chunks by their level of detail.
@@ -24,12 +30,24 @@ struct TerrainParams {
     grid_alpha: f32,
     // Metres in one gameplay cell: the spacing of the debug grid (B12).
     cell_meters: f32,
+    // Metres per index texel.
+    index_meters: f32,
+    // Half the width of the blend ramp in texels (0.5 = centre to centre).
+    ramp: f32,
+    // How far borders wander, in texels; 0 = straight.
+    wobble: f32,
+    // Strength of the shore line, 0 = off.
+    shore_amount: f32,
+    shore_r: f32,
+    shore_g: f32,
+    shore_b: f32,
+    pad: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(1) @binding(0) var materials: texture_2d_array<f32>;
 @group(1) @binding(1) var material_sampler: sampler;
-@group(1) @binding(2) var cell_materials: texture_2d<u32>;
+@group(1) @binding(2) var cell_index: texture_2d<u32>;
 @group(1) @binding(3) var<uniform> params: TerrainParams;
 
 struct VertexIn {
@@ -69,9 +87,32 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
-fn layer_at(cell: vec2<i32>) -> i32 {
-    let c = clamp(cell, vec2<i32>(0, 0), params.map_cells - vec2<i32>(1, 1));
-    return i32(textureLoad(cell_materials, c, 0).r);
+// Layer (x) and style bits (y) of an index texel; the map edge repeats.
+fn cell_at(cell: vec2<i32>) -> vec2<u32> {
+    let c = clamp(cell, vec2<i32>(0, 0), params.index_size - vec2<i32>(1, 1));
+    return textureLoad(cell_index, c, 0).rg;
+}
+
+fn hash_cell(p: vec2<i32>) -> f32 {
+    var h = u32(p.x) * 0x85ebca6bu ^ u32(p.y) * 0xc2b2ae35u;
+    h = h ^ (h >> 16u);
+    h = h * 0x7feb352du;
+    h = h ^ (h >> 15u);
+    h = h * 0x846ca68bu;
+    h = h ^ (h >> 16u);
+    return f32(h >> 8u) / 16777216.0;
+}
+
+// Smooth value noise in 0..1, one lattice point per `1 / freq` metres.
+fn value_noise(p: vec2<f32>) -> f32 {
+    let i = vec2<i32>(floor(p));
+    let f = fract(p);
+    let s = f * f * (vec2<f32>(3.0, 3.0) - 2.0 * f);
+    let a = hash_cell(i);
+    let b = hash_cell(i + vec2<i32>(1, 0));
+    let c = hash_cell(i + vec2<i32>(0, 1));
+    let d = hash_cell(i + vec2<i32>(1, 1));
+    return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
 }
 
 // Chunk size in metres (32 terrain cells of 1 m), for the debug grid's chunk
@@ -95,16 +136,66 @@ fn grid_lines(p: vec2<f32>, period: f32, px: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let uv = in.world_xz / params.tile_meters;
-    // Cell centres sit at integer + 0.5; blend between the four nearest,
-    // with a smooth ramp over a full cell (centre to centre).
-    let p = in.world_xz - vec2<f32>(0.5, 0.5);
-    let base = vec2<i32>(floor(p));
-    let w = smoothstep(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0), fract(p));
-    let c00 = textureSample(materials, material_sampler, uv, layer_at(base)).rgb;
-    let c10 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(1, 0))).rgb;
-    let c01 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(0, 1))).rgb;
-    let c11 = textureSample(materials, material_sampler, uv, layer_at(base + vec2<i32>(1, 1))).rgb;
-    var albedo = mix(mix(c00, c10, w.x), mix(c01, c11, w.x), w.y);
+    // Derivatives before any branch: the texture samples below sit in
+    // non-uniform control flow and so take explicit gradients.
+    let ddx = dpdx(uv);
+    let ddy = dpdy(uv);
+    // Index texel centres sit at integer + 0.5; the four nearest are blended.
+    let q = in.world_xz / params.index_meters - vec2<f32>(0.5, 0.5);
+    let footprint = max(fwidth(q.x), fwidth(q.y));
+    let base = vec2<i32>(floor(q));
+    let c00 = cell_at(base);
+    let c10 = cell_at(base + vec2<i32>(1, 0));
+    let c01 = cell_at(base + vec2<i32>(0, 1));
+    let c11 = cell_at(base + vec2<i32>(1, 1));
+
+    var albedo: vec3<f32>;
+    var flat_weight: f32;
+    var liquid_weight: f32;
+    if (all(c00 == c10) && all(c00 == c01) && all(c00 == c11)) {
+        // Inside a uniform stretch: one sample, no weights.
+        albedo = textureSampleGrad(materials, material_sampler, uv, i32(c00.x), ddx, ddy).rgb;
+        flat_weight = f32(c00.y & 1u);
+        liquid_weight = f32((c00.y >> 1u) & 1u);
+    } else {
+        var f = fract(q);
+        // The border (f = 0.5) wanders by up to `wobble` texels; far away,
+        // where a pixel covers a good part of a cell, it stays put.
+        if (params.wobble > 0.0) {
+            let near = 1.0 - smoothstep(0.1, 0.4, footprint);
+            let n = vec2<f32>(
+                value_noise(in.world_xz * 0.9),
+                value_noise(in.world_xz * 0.9 + vec2<f32>(31.7, 17.3)));
+            // The shift fades to nothing at the texel centres (f = 0 and 1), so
+            // the picture stays continuous where `base` changes.
+            let window = 4.0 * f * (vec2<f32>(1.0, 1.0) - f);
+            f = clamp(
+                f + (n - vec2<f32>(0.5, 0.5)) * 2.0 * params.wobble * near * window,
+                vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 1.0));
+        }
+        // Ramp of `ramp` texels either side of the border, at least as wide as
+        // a pixel so the border does not alias when zoomed out.
+        let r = clamp(max(params.ramp, 0.5 * footprint), 0.001, 0.5);
+        let w = smoothstep(vec2<f32>(0.5 - r, 0.5 - r), vec2<f32>(0.5 + r, 0.5 + r), f);
+        let t00 = textureSampleGrad(materials, material_sampler, uv, i32(c00.x), ddx, ddy).rgb;
+        let t10 = textureSampleGrad(materials, material_sampler, uv, i32(c10.x), ddx, ddy).rgb;
+        let t01 = textureSampleGrad(materials, material_sampler, uv, i32(c01.x), ddx, ddy).rgb;
+        let t11 = textureSampleGrad(materials, material_sampler, uv, i32(c11.x), ddx, ddy).rgb;
+        albedo = mix(mix(t00, t10, w.x), mix(t01, t11, w.x), w.y);
+        let flat4 = vec4<f32>(f32(c00.y & 1u), f32(c10.y & 1u), f32(c01.y & 1u), f32(c11.y & 1u));
+        let liquid4 = vec4<f32>(
+            f32((c00.y >> 1u) & 1u), f32((c10.y >> 1u) & 1u),
+            f32((c01.y >> 1u) & 1u), f32((c11.y >> 1u) & 1u));
+        let w4 = vec4<f32>(
+            (1.0 - w.x) * (1.0 - w.y), w.x * (1.0 - w.y),
+            (1.0 - w.x) * w.y, w.x * w.y);
+        flat_weight = dot(w4, flat4);
+        liquid_weight = dot(w4, liquid4);
+    }
+    // A light line where a liquid meets something else: strongest where the
+    // liquid and the rest weigh the same.
+    let shore = 4.0 * liquid_weight * (1.0 - liquid_weight);
+    albedo = mix(albedo, vec3<f32>(params.shore_r, params.shore_g, params.shore_b), params.shore_amount * shore);
     if ((params.flags & 1u) != 0u) {
         albedo = mix(albedo, lod_tint(in.lod), 0.6);
     }
@@ -119,7 +210,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         albedo = mix(albedo, vec3<f32>(1.0, 0.75, 0.1), 0.9 * chunk_lines * params.grid_alpha);
     }
 
-    let n = normalize(in.normal);
+    // Flat styles are lit as level ground.
+    let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), flat_weight));
     let diffuse = max(dot(n, globals.light_dir.xyz), 0.0);
     let lit = globals.ambient.rgb + globals.light_color.rgb * diffuse;
     return vec4<f32>(albedo * lit, 1.0);
