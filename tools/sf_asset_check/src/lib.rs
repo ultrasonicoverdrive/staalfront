@@ -10,9 +10,9 @@
 //!
 //! | rule id | what | severity |
 //! |---|---|---|
-//! | `file-name`, `class`, `faction` | `<faction>_<role>.glb`; the role gives the budget class (`unit_defs.ron` category, else `wreck_*`, `tree_*`, `rock_*`) | fail, fail, warn |
+//! | `file-name`, `class`, `faction` | `<faction>_<role>.glb`; the role gives the budget class (`unit_defs.ron` category, else `wreck_*`, `tree_*`, `rock_*`, `rubble_*`, `fence`, `cliff_edge`) | fail, fail, warn |
 //! | `glb`, `engine-load` | a valid glTF 2.0 binary that `sf_render::glb::load_glb` accepts with front +X, up +Y, 1 m | fail |
-//! | `lod-roots` | roots `<id>_LOD0`, `_LOD1`, `_LOD2` named after the file | fail (extra LODs warn) |
+//! | `lod-roots` | roots `<id>_LOD0`, `_LOD1`, `_LOD2` named after the file, in the default scene or one scene per LOD named `LOD0`..`LOD2` (same reading as the engine loader) | fail (extra LODs warn) |
 //! | `lod-structure`, `lod-origin` | the same node tree and the same root transform in every LOD | fail |
 //! | `lod-size` | LOD1/LOD2 bounds against LOD0: more than 10 % of the longest side apart | warn |
 //! | `budget`, `lod-triangles` | triangles per LOD within the class budget; fewer per level | fail, warn |

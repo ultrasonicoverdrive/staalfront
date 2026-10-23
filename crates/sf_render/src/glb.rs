@@ -23,7 +23,9 @@
 //!
 //! # Levels, parts and materials
 //! Each root node of the scene is one level of detail, named `<model>_LOD<n>`
-//! (a single root without a suffix is a one-level model). Below a root, a node
+//! (a single root without a suffix is a one-level model). A file may instead
+//! have one scene per level, named `LOD0`, `LOD1`, ... ([`lod_roots`]); that
+//! is read as the same model. Below a root, a node
 //! without a mesh, or with children, is a **part** (`hull_LOD0`, `turret_LOD0`,
 //! `barrel_LOD0`); a mesh node without children (`hull_steel_LOD0`, ...) is
 //! merged into the nearest part above it with its transform relative to that
@@ -220,6 +222,82 @@ pub fn strip_lod_suffix(name: &str) -> &str {
     split_lod_suffix(name).0
 }
 
+/// How a file stores its levels of detail (`docs/conventions.md` section 12).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LodLayout {
+    /// The default scene holds every LOD root. The layout the art brief
+    /// prefers.
+    OneScene,
+    /// One scene per level, named `LOD0`, `LOD1`, ..., each with one root
+    /// node `<model>_LOD<n>`. The same model as [`LodLayout::OneScene`]; the
+    /// exporter of art set v4 writes it this way.
+    ScenePerLod,
+}
+
+/// The level number of a scene named exactly `LOD<digits>`.
+fn scene_lod(name: Option<&str>) -> Option<u32> {
+    let digits = name?.strip_prefix("LOD")?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
+}
+
+/// The LOD root nodes of a document and the layout they were found in.
+///
+/// - **Scene per LOD:** the document has two or more scenes and every scene
+///   is named `LOD<n>`. Each such scene holds exactly one root, named
+///   `<model>_LOD<n>` with the same number, and the roots come back in level
+///   order. This is read exactly like one scene with all the roots.
+/// - **Otherwise:** the roots of the default scene (the first scene if the
+///   file names none), in file order.
+///
+/// A file that mixes scenes named `LOD<n>` with other scenes is not the
+/// scene-per-LOD layout; its default scene is read as before.
+pub fn lod_roots(doc: &gltf::Document) -> Result<(LodLayout, Vec<gltf::Node<'_>>), GlbError> {
+    let scenes: Vec<gltf::Scene<'_>> = doc.scenes().collect();
+    let numbers: Vec<Option<u32>> = scenes.iter().map(|s| scene_lod(s.name())).collect();
+    if scenes.len() >= 2 && numbers.iter().all(Option::is_some) {
+        // Bound the work before the duplicate check below, which is
+        // quadratic: a hostile file can hold tens of thousands of scenes.
+        if scenes.len() > MAX_LODS {
+            return Err(GlbError::Invalid(format!(
+                "{} levels of detail (at most {MAX_LODS})",
+                scenes.len()
+            )));
+        }
+        let mut found: Vec<(u32, gltf::Node<'_>)> = Vec::new();
+        for (scene, n) in scenes.iter().zip(numbers.iter().flatten().copied()) {
+            let mut nodes = scene.nodes();
+            let (Some(root), None) = (nodes.next(), nodes.next()) else {
+                return Err(GlbError::Invalid(format!(
+                    "scene LOD{n} must hold exactly one root node"
+                )));
+            };
+            let raw = root.name().unwrap_or("");
+            if split_lod_suffix(raw).1 != Some(n) {
+                return Err(GlbError::Invalid(format!(
+                    "scene LOD{n} holds the root {raw:?}; it must be named <model>_LOD{n}"
+                )));
+            }
+            if found.iter().any(|(m, _)| *m == n) {
+                return Err(GlbError::Invalid(format!("two scenes are named LOD{n}")));
+            }
+            found.push((n, root));
+        }
+        found.sort_by_key(|(n, _)| *n);
+        return Ok((
+            LodLayout::ScenePerLod,
+            found.into_iter().map(|(_, node)| node).collect(),
+        ));
+    }
+    let scene = doc
+        .default_scene()
+        .or_else(|| scenes.first().cloned())
+        .ok_or_else(|| GlbError::Invalid("the file has no scene".into()))?;
+    Ok((LodLayout::OneScene, scene.nodes().collect()))
+}
+
 /// A part name that carries a joint (`turret` yaws, `barrel` pitches), after
 /// the LOD suffix is stripped. Such a node is always a part of its own.
 fn is_joint_name(name: &str) -> bool {
@@ -279,13 +357,10 @@ pub fn load_glb(bytes: &[u8], axes: &AxisConvention) -> Result<LoadedModel, GlbE
     }
     let blob = gltf.blob.as_deref();
 
-    let scene = doc
-        .default_scene()
-        .or_else(|| doc.scenes().next())
-        .ok_or_else(|| GlbError::Invalid("the file has no scene".into()))?;
+    let (_, scene_roots) = lod_roots(doc)?;
     let mut roots: Vec<(u32, gltf::Node<'_>)> = Vec::new();
     let mut model_name: Option<String> = None;
-    for node in scene.nodes() {
+    for node in scene_roots {
         let name = node.name().unwrap_or("");
         let (base, lod) = split_lod_suffix(name);
         roots.push((lod.unwrap_or(0), node));

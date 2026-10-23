@@ -272,7 +272,7 @@ Known gaps (owner in brackets):
 
 ## Phase 4 — Movement and routes
 
-Status: the work packages 4.1–4.5, 4.4b, 4.6 and 4.7 are in. The "done when" of PLAN.md (200 units across
+Status: the work packages 4.1–4.5, 4.4b, 4.6, 4.6b and 4.7 are in. The "done when" of PLAN.md (200 units across
 a bridge: all arrive, none stuck, at most 1 % beyond 1.3 times the packing radius, overlap within a quarter
 of a cell on the way and a sixteenth at the end) holds in `bridge_200` (formations on, a crowd above the limit makes none), for every wheeled
 turning radius the review swept and for all 112 variants of `sweep_of_variants`; `bridge_200` is a crowd and
@@ -377,6 +377,13 @@ the limit is 19. See "Phase 4 close-out" below the notes of WP4.7 for the open i
   (`formation_*`, `World::with_formation`), the state is in a new checksum section `G`; the
   `formation_move` scenario, the `FormationConfig` and `scenario.formation` knobs, `tests/formation.rs`),
   `docs/rules/formations.md`: done
+- WP4.6b The formation pace holds in a base; the shape gap stays open (open items 14 and 15) (follow-up of WP4.6, found in the viewer: the sandbox of `sf_game` on
+  the map `assets/maps/formation`, the 12 mobile Meridian units, one Move; a loose formation keeps the pace of its
+  slowest member and a member that follows the order's way may get at most `formation_ahead_tenths` ahead of its
+  slot; a unit ahead of its slot and off its column walks back or goes on at the pace instead of standing; the
+  leader waits only while the members in their places have no obstacle near; `group_order` judges the shared
+  fields per class, so a unit in no formation takes nothing from the classes that formed; `crowd_jam` and
+  `formation_move` re-pinned; `tests/formation_base.rs` in `sf_game`), `docs/rules/formations.md` ("In a base"): done
 
 WP4.1 notes. The three `passable` flags of `terrain_types.ron` are replaced by the costs of the
 movement classes; the types keep `buildable` and `harvestable`. In the sim `TerrainFlags` has a
@@ -850,11 +857,101 @@ arrival packs each class on its own (the criterion of phase 4 is a packing: 200 
 spacing would need a disc about 1.4 times the radius of the one the criterion measures, which allows 1.3). So the group goes from one shape into the
 other when the formation is let go, within the disc of the order.
 
+WP4.6b notes (the formation pace holds in a base). **The base-start gap was found in the viewer, after the phase-4
+close-out below. The pace is fixed here; the shape is not:** members near their slots went from 71 to 73 % over ten
+goals, and "all members near" is equal or worse at 3 of the 4 goals of `formation_base`. The shape gap in a base stays
+open (open items 14 and 15). Everything WP4.6 proved was proved on a field with one passage and no
+structures (`formation_move`, `formation_sweep`) or on a crowd (`bridge_200`); nothing built the world the way the game
+does and gave an order in it. In `sf_game`, on the sandbox map `assets/maps/formation`, box-selecting the 12 mobile
+Meridian units and giving one Move sent the tanks ahead at 1.4 to 2 cells a second with the riflemen (0.7) behind and no
+shape to be seen. The diagnosis found no wiring bug (the settings reach the world, there is one group order, the sim
+thread passes it through); the formation forms, with 11 members. Three things degrade it among structures, all
+confirmed by measurement:
+
+1. A structure within three cells makes the ground not open, so the formation is **loose** (12 to 51 % of the ticks
+   of the four goals measured), and loose meant "the leader and the members at their own speed": no pace at all.
+2. A unit whose line of sight to its slot a structure blocks takes a longer way round and comes out ahead of its slot
+   **and to the side of its column**; the "ahead" test ignored the sideways offset, so it stood there 5 to 7 cells off
+   its column in the way of the units behind it, and the leader did not wait for it.
+3. The order has one **amphibious transport**, a family of one, in no formation; `all_formed` (every unit that
+   starts the order is a member) was then false and no class got a shared field or the arrival slots of the goal.
+   (Read in the code, now measured: the three classes of 5, 4 and 2 units had no field before and have one after.)
+
+What changed (orchestrator decisions A to D, 18-10-2026; the rules are in `docs/rules/formations.md`):
+
+* **A. The pace holds in narrow places.** The leader steps at most the formation pace loose or not; a member that
+  follows the order's way runs at its own speed while it is at most `formation_ahead_tenths` (new, `sim.ron`, 2.0
+  cells as shipped, 0.5 up to the re-form distance) ahead of its slot along the heading, and goes no faster than the
+  formation beyond that. The docs said a loose formation means own speed; they now say it does not.
+* **B. A unit ahead of its slot and off its column does not stand.** It walks back if it sees its slot, follows the
+  way at the pace of the formation if it does not, and is no straggler either way (it is ahead). One more rule came
+  out of the sweep, not out of the diagnosis, and is kept because the sweep is not clean without it: the leader waits
+  for stragglers only while the members that stand in their places have no obstacle within three cells of them (the
+  edge of the map is no obstacle for this), because rear rows standing on their slots in the mouth of a gap held up
+  the stragglers the leader waited for.
+* **C. A unit outside every formation takes nothing from the classes that formed.** `group_order` in `path.rs` judges
+  each class: all its units in a formation is the same rule as before ("a class of two or more gets a field, below the
+  threshold"), a class with a unit outside every formation is judged by the threshold as ever.
+* **D. Structures stay narrow places.** Not touched.
+
+**Tests (the missing coverage).** `crates/sf_game/tests/formation_base.rs` builds the sandbox as the viewer does
+(`playfield::make_world`, `with_movement`, `sandbox::schedule`, the viewer's world speed) on `assets/maps/formation`,
+selects the 12 mobile Meridian units and sends one `commands::move_command` to (56, 44), (90, 44), (90, 10) and
+(100, 40): one formation of 11; the three formed classes have shared fields and the amphibious transport none; the
+leader's pace and the share of windows above 1.2 times the slowest's speed in loose stretches (29 % of the windows
+before, 14 % after, bound 20 %); the shape; everybody arrives, nobody stuck, overlap 0.049 at most during the run (bound
+0.25) and 0.030 at the end (bound 1/16); reproducible. Run on the head of main (670cf33) it fails 3 of its 7 tests
+(pace, shape and fields). `tests/formation.rs` has five new tests, each of which fails on the old rules: the leader of a
+loose formation keeps the pace (0.1000 cells a tick before, 0.0350 after), the bound on the lead is data, the
+off-column tank walks back (it stood 45 ticks), a far tank is not waited for, and the unit outside every formation
+leaves the fields to the classes that formed.
+
+**Measured** (the table is in `docs/rules/formations.md`, "In a base"). Over four goals the loose stretches have 14 %
+of their windows above 1.2 times the slowest's speed against 29 % before. **The shape in the sandbox is not good:** all
+members within 3 cells of their slots 14 to 38 % of the ticks (9 to 42 % before), members within 3 cells 59 to 92 %
+(62 to 89 %), the formation loose 38 to 71 % of the ticks (12 to 51 %). Over ten goals the means of the members within
+3 cells are 71 % before, 77 % with the pace, off-column and wait rules alone, and 73 % with the shared fields of
+decision C as well (which also bring the mean arrival from 1,699 to 1,610 ticks). The structures are narrow places by
+decision D, and two heavy tracked units (1.5 cells across) are stuck among them for hundreds of ticks in several runs,
+with or without a formation: paths and fields are made on cells, and the sandbox leaves one-cell gaps between
+structures. That is a movement problem (bodies in the routes), not a formation rule, and it is listed in the close-out.
+
+**Re-pinned, with the reason** (the pace in loose stretches, the bound on the lead, the wait rule and the per-class
+fields are changes of the specified behaviour; the assertions of both scenarios' tests are unchanged and hold):
+
+| Scenario | Old | New |
+|---|---|---|
+| `formation_move` | `0x83315f6388469125` | `0x67abfe8bf07e8f05` (loose 521 ticks, formed up again on tick 1,356, let go on 2,597, everybody arrived on 2,840) |
+| `crowd_jam` | `0x11dfc55cfc2c2c34` | `0xc7da0f15ce1bf3ce` (its groups of 18 and 8 are formations that pass the gap) |
+
+**Not moved:** `wander_5000` `0x38d5e3c43358a889`, `command_mix` `0x43f6583004258ceb`, `terrain_256`
+`0xb577112845e0097e`, `units_spawn` `0x6c369f42be150d6e`, `orders`, `terrain_costs`, `pathing`, `pathing_256`, `turning`,
+`weapons_reload`, `replan`, and `bridge_200` (`0x03971fcc3548fc0c`: a crowd, no formation, must not move and does not).
+`formation_sweep` (273 runs) is clean with the bounds as they were: `mixed` 1.02 to 1.14 times the walk (1.02 to 1.18
+before), `foot` 1.01 to 1.05, `wheels` 1.02 to 1.37 (the same worst, 1.37). It took four rounds to get there: the
+pace in loose stretches costs time in the sweep's loose stretch (a leader that was a truck at 2.5 cells a second goes at
+the tank's 2.0), and the first versions of the rules put one run of 273 over the bound by 2 to 56 ticks (the runs are
+chaotic and the margin of `wheels` is thin, as the notes of WP4.6 say). `sweep_of_variants` (112 variants) is clean:
+the crowd forms no formation.
+
+Not done on purpose: bodies in routes and fields (the cause of the stuck heavy units); `open_ground` still treats the
+edge of the map as an obstacle for the loose rule (only the new wait rule ignores it); a unit left out of every
+formation (the amphibious transport) still walks the order at its own speed beside the formation, which is what the
+viewer shows of it; presentation of the slots; a second sandbox layout, other maps and other orders.
+
+No screenshots: a before/after pair at goal (56, 44) was made (Xvfb, Mesa lavapipe, the release build) and dropped in
+review round 1, the two stills being near-identical (the difference is in the pace, which a still does not show, and
+in the numbers above).
+
 ## Phase 4 close-out
 
 Status of the work packages: 4.1 movement classes, 4.2 hierarchical A*, 4.3 flowfields, 4.4 local avoidance and
-collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning and 4.6 formations are in
-(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). The
+collisions, 4.5 turning, 4.4b robust group arrival, 4.7 replanning, 4.6 formations and 4.6b the formation pace in a base
+are in
+(`docs/rules/movement.md`, `pathfinding.md`, `collision.md`, `turning.md`, `orders.md`, `formations.md`). **Amended
+for WP4.6b:** the claim below was made for a field, and the viewer showed the gap: formations in the sandbox, among
+structures and with a unit in no formation, had no pace and no fields until WP4.6b (see its notes above); the pace holds there now, the shape does not
+(open items 14 and 15). The
 criterion of phase 4 is met by `bridge_200`. For formations the claim is the one the sweep supports and no
 more: groups of 3 to 19, of riflemen with tanks and transports, of riflemen only and of tanks and transports only, at
 every depth of block tried (2 to 8), on the map of `formation_move`, arrive within 1.4 times the slowest's walk and
@@ -880,7 +977,8 @@ Open follow-ups, carried over:
    instance) and an arrival that keeps the shape.
 2. **Proven on one map**: the sweep and `formation_move` march across an open field, through one passage three
    cells wide and across another field. Rock outcrops, a river with a bridge, several passages and turns are not
-   swept (`tests/formation.rs` has single cases of them).
+   swept (`tests/formation.rs` has single cases of them). A base of structures is measured since WP4.6b
+   (`sf_game/tests/formation_base.rs`, items 14 and 15).
 3. **The margin of the overlap during a run is thin and stays so**: 0.24 against 0.25 in the worst variant of the
    sweep (WP4.7 said the same). It is chaotic: a small change of the arrival of five hover craft among the crowd
    took one variant to 0.270 (and twelve seeds of it gave 0.182 to 0.270), which is why a crowd forms no formation.
@@ -909,6 +1007,15 @@ Open follow-ups, carried over:
    against the limit of 0.0625 (1/16) (WP4.6 review): a small change of the arrival moves it over. Either widen
    the margin (the arrival slots) or sweep corridor widths 3 to 8 for the end overlap, as the sweep does for the
    time.
+14. **Bodies are not part of the routes** (found in the viewer, WP4.6b). A heavy unit (1.5 cells across) is sent through
+   a one-cell gap between two structures, gets stuck, sidesteps, asks again; in the sandbox two of the twelve selected
+   units (the harvester and the siege artillery) are stuck among the structures for 500 to 1,500 ticks in several runs,
+   with or without a formation, and the shape of a formation in a base is poor mostly because of them. A movement work
+   package: clearance in the sector graph and the cost grid of the fields, or a minimum gap per class.
+15. **The sandbox is one layout and `formation_base` has four goals.** The bounds hold for those; a second base, other
+   selections (the Veyran side, a selection of only vehicles, of 19) and goals inside the base are not measured.
+   `open_ground` also treats the edge of the map as an obstacle for the loose rule (the wait rule ignores it): a
+   formation along the edge of the map is loose all the way.
 
 ## Phase 5 — Combat
 
@@ -1296,6 +1403,87 @@ Things to know:
 - `World::passable` looks at terrain only (not at structures), so the snapshot reads the ground once.
   A unit test fails if that ever changes.
 
+## Art set v4 (asset WP, 21-10-2026)
+
+The fourth art delivery (`Staalfront_GLB_Pakket_v3.zip`, sha256
+`cfe8f6890a30d610136df87e477f7c0f2f397249ae05beb36f3bf92e41780003`; the producer's name
+"GLB pakket v3" would clash with `assets/set_v3`, so the repo calls it **set v4**) replaces set v3
+as the placeholder model pack: 200 `.glb` files, of which **194 are stored** in `assets/set_v4`,
+byte for byte as delivered, and wired into `unit_defs.ron`. The follow-up of PR #42 and PR #48 in one.
+
+**Decision: levels of detail (docs/conventions.md section 12).** The delivery stores LOD0, LOD1 and
+LOD2 as three glTF scenes (`LOD0`, `LOD1`, `LOD2`, one root each), the brief and the loader expect
+three roots in the default scene. The loader and the checker now read both layouts as the same model
+(`sf_render::glb::lod_roots`, one function the checker calls too), instead of a repack step: the
+files stay identical to the delivery (their sha256 match its `asset_register.csv`) and nothing has
+to be re-run for the next delivery. A scene named `LOD<n>` must hold one root `<id>_LOD<n>`; anything
+else is refused with a message, and files with other scene names are read by their default scene as
+before. The art brief will say that one scene is preferred. Tests: `glb::tests` (the same model from
+both layouts, scene order, six kinds of refusal, files that are not the layout),
+`sf_asset_check/tests/rules.rs` (same report in both layouts, broken scene-per-LOD files).
+
+**Checker numbers (files: pass / warnings only / fail).**
+
+| Run | Files | Pass | Warn only | Fail |
+|---|---|---|---|---|
+| The delivery as delivered, checker of main (`1f9933b`) | 200 | 0 | 0 | 200 (every file: `LOD1` and `LOD2` "missing", 400 `lod-roots` findings) |
+| Same checker on the orchestrator's lossless one-scene repack | 200 | 3 | 183 | 14 (8 `class`, 4 wrecks without `fx` nodes, the two teams) |
+| The delivery as delivered, this branch | 200 | 3 | 191 | 6 |
+| `assets/set_v4` as stored (exit code 0) | 194 | 3 | 191 | 0 |
+
+The step from 183 to 191 warnings is the checker rule for decor roles: `cliff_edge`, `fence` and
+`rubble_*` (the shared rubble heaps per footprint) are decor with the decor budget 1500/500/150
+(`tools/sf_asset_check/src/class.rs`; a structure's own rubble state such as `generator_rubble`
+stays that structure). The six that still fail are left out, not edited.
+
+**Left out (6 of 200), findings for the producer.**
+- `neutral_wreck_light`, `_medium`, `_heavy`, `_boat`: no empty `fx_smoke_*` / `fx_fire_*` nodes (the
+  delivery README says the wrecks have them). The v3 wrecks stay in `assets/set_v3`, but they fail
+  `sf_asset_check` as well: their LOD2 lacks the `debris` and `scorch` nodes.
+- `veyran_heavy_gun_team`: five parts in one level (the engine takes four) and none of the infantry
+  nodes (`torso`, `head`, ...), 4.4 m wide and 1.6 m high, so it is not upright infantry either.
+  The role stays a primitive (no v3 model either).
+- `veyran_demolition_team`: five parts in one level as well, and the nodes of the second figure
+  (`*_2`) are missing. The role keeps the set v3 file.
+
+**Other findings for the producer (warnings, the files are stored).**
+- The `lamp` material has an emissive factor in 190 of 194 files; the engine reads base colour
+  only. Say whether the factor stays (the checker then keeps warning) or goes.
+- The team colour is a diagonal triangle across the top surfaces. It meets the 20 to 40 % rule
+  (27 to 31 % measured by the producer, the checker agrees) but reads as a trick for the rule, not
+  as a team-coloured panel or stripe (`docs/screenshots/set_v4/`).
+- 132 of the 194 files have the same triangle count in all three levels (LOD1 and LOD2 are copies of
+  LOD0); the models are 8 to 288 triangles in LOD0.
+- The vessels `neutral_ferry`, `neutral_ferry_stalled` and `veyran_gunboat` stand on `Y = 0`; the
+  waterline is meant to cut through the hull.
+- The four fallen trees have their origin at one end (2.6 to 3.1 m from the middle).
+- Eleven vehicles (trucks, harvesters, transports, ferries) have no empty `turret` and `barrel`
+  nodes; the brief keeps them for every vehicle.
+- `meridian_supply_truck` and `veyran_supply_truck` exist, but `unit_defs.ron` gives the role
+  `supply_truck` to Neutral alone; deliver `neutral_supply_truck` or say the role is per faction.
+  Until then it keeps its `testpack_v1` model.
+- `state_map.json` (which state file belongs to which model) was not adopted: the delivery calls it
+  "not a proven models.ron schema". The damage and construction states are in the pack but no
+  definition names them yet (the building WPs).
+
+**Wiring.** Every role with a model that passes is on set v4 (`docs/rules/units.md`, "What is
+wired"): 18 roles of both factions with a model per faction, 22 with one file; demolition_team stays
+on set v3, heavy_gun_team on its primitive, supply_truck on `testpack_v1`. The roster tests that
+assumed shared files or primitives were adapted, and `built_with` in `roster.rs` makes the
+shared-file case (two roles, one file, two icons) testable with the shipped definitions. Set v3
+stays in the repo: `demolition_team` and the v3 wrecks and decor still use it and its tests pin it (the v3 wrecks fail
+`sf_asset_check` too: LOD2 lacks `debris` and `scorch`).
+`sf_sim` is untouched, no checksum moved (presentation only).
+
+**Seen in the game (`docs/screenshots/set_v4/`).** Both factions, in the sandbox with
+`--unit-display models` under Xvfb and Mesa lavapipe. The plain red box, the yellow pyramid, the blue
+cone and the lavender cubes are the sandbox's existing placeholder scene (they are there with
+`--models none` too), not set v4. The engine scales a structure's model to its footprint (up to four
+times): the v4 relay transmitter is a 25 m mast and stands 52 m high on the placeholder 2 x 2 cell
+footprint (`units.md`); a footprint decision, not an art one. The whole pack, with the damage states
+and the decor, is `sf_game --crowd --models set_v4` (the sandbox draws its roles through the roster
+and does not read `--models`).
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -1363,10 +1551,14 @@ fixed, delete the entry in the same PR.
 24. **Art set v3.** Seven of 30 models fail `sf_asset_check` (list in PR #42): owner Tijmen,
     in the next delivery or by deciding on a rule exception (rocks sunk on purpose). The
     delivery's licence text ("eigen werk, vrij te gebruiken in Staalfront") is not an SPDX
-    licence: confirm a precise one before any release (phase 16).
+    licence: resolved, Tijmen set the project licence for sets v3 and v4 on 22-10-2026
+    (`assets/LICENSES.md`).
 25. **Models not wired.** Decor (trees, rocks, ore stages) and wrecks are not unit roles and
-    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); vehicles and
-    buildings have no set v3 model (the next art delivery, then `models` in `unit_defs.ron`).
+    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); the vehicles and
+    buildings are wired to set v4 (see "Art set v4" above). Still open there: the damage and
+    construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
+    names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay, but
+    fail the checker as well: LOD2 lacks `debris` and `scorch`).
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
@@ -1381,3 +1573,8 @@ fixed, delete the entry in the same PR.
 28. **`crowd_perf.rs::two_thousand_colliding_units_run_at_a_bounded_cost` is a wall-clock bound** (the slowest
     tick in a release build must be under 50 ms) and it failed 1 time in 3 on a loaded machine (103 ms and
     58.9 ms); CI is green, but the bound is load-sensitive. Not relaxed; count the work instead of the clock.
+29. **Art set v4 findings to hand to the producer** (details and file names in "Art set v4"
+    above): four wrecks without `fx` nodes, `heavy_gun_team` and `demolition_team` (parts and
+    nodes), emissive `lamp` material, diagonal team triangles, copied levels of detail, vessels on
+    `Y = 0`, the `supply_truck` faction, `state_map.json`. Owner: Tijmen with the producer; when a
+    fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.

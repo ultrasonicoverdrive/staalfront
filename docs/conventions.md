@@ -204,3 +204,32 @@ PLAN.md §3 WP1.10 has this WP fix the engine convention here:
   (`assets/testpack_v1`) was authored front `+X`.
 - Part joints: a turret turns about its local `+Y` (positive = front towards `+Z`,
   the facing sense), a barrel tilts about its local `+Z` (positive = muzzle up).
+
+### Levels of detail in the file (art set v4)
+
+A model has the level roots `<id>_LOD0`, `<id>_LOD1`, `<id>_LOD2`, with the same node
+structure, origin and size (the art brief). A `.glb` may store them in **either of two
+layouts**, which the engine loader (`sf_render::glb::lod_roots`) and `sf_asset_check` read
+the same way:
+
+1. **One scene (preferred, what the art brief asks for):** the default scene (`scene`, else
+   the first scene) holds all the roots.
+2. **One scene per level (accepted):** two or more scenes, *all* named exactly `LOD0`,
+   `LOD1`, ..., each with exactly one root node named `<id>_LOD<n>` with the same `n`
+   (`"scenes": [{"name": "LOD0", "nodes": [0]}, {"name": "LOD1", "nodes": [5]}, ...]`). This is
+   how the producer's exporter wrote art set v4 (its `scene` points at LOD0 only; its own README
+   says the loader has to pick the other scenes). It is read as the same model as layout 1: the
+   roots in level order, so the loaded model is identical.
+
+Any other file (unnamed scenes, a scene that is not `LOD<n>` among them, one scene only) is
+read by its default scene as before, so the checker says what is missing (`lod-roots`). A
+`LOD<n>` scene with two roots, a root with another number than its scene, or two scenes with one
+number is refused with a message (`glb` in the checker, a `GlbError::Invalid` in the engine).
+Node names stay local to their level, as before (`hull` may appear in every level).
+
+**Why a loader change and not an import step.** The change is one function and its tests
+(`glb::tests`, `sf_asset_check/tests/rules.rs`); the checker calls the loader's function, so the two
+cannot disagree; and the delivered files stay **byte for byte** what the producer made (their
+sha256 in the delivery's `asset_register.csv` still matches), so no repack script has to be kept,
+trusted or re-run for the next delivery. The art brief will be clarified to say that one scene
+is preferred; the other layout is not an error and not a warning.

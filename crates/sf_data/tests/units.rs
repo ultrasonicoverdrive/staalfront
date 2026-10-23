@@ -720,11 +720,11 @@ fn a_role_can_have_a_model_per_faction() {
     let rifleman = get("rifleman");
     assert_eq!(
         rifleman.model_for(Some(Faction::Meridian)),
-        &glb("set_v3/meridian_rifleman.glb")
+        &glb("set_v4/meridian_rifleman.glb")
     );
     assert_eq!(
         rifleman.model_for(Some(Faction::Veyran)),
-        &glb("set_v3/veyran_rifleman.glb")
+        &glb("set_v4/veyran_rifleman.glb")
     );
     // No entry for Neutral, and an owner that is no known side: the generic model.
     assert_eq!(rifleman.model_for(Some(Faction::Neutral)), &rifleman.model);
@@ -734,7 +734,7 @@ fn a_role_can_have_a_model_per_faction() {
     // A role with no `models` is drawn with `model` whoever owns it.
     let sniper = get("sniper");
     assert!(sniper.models.is_empty());
-    assert_eq!(sniper.model, glb("set_v3/meridian_sniper.glb"));
+    assert_eq!(sniper.model, glb("set_v4/meridian_sniper.glb"));
     for faction in [Some(Faction::Meridian), Some(Faction::Veyran), None] {
         assert_eq!(sniper.model_for(faction), &sniper.model);
     }
@@ -743,6 +743,119 @@ fn a_role_can_have_a_model_per_faction() {
     for def in defs.units() {
         for faction in def.models.keys() {
             assert!(def.factions.contains(faction), "{}: {faction:?}", def.id);
+        }
+    }
+}
+
+/// Art set v4 is wired wherever it has a model that passes `sf_asset_check`;
+/// the three roles it cannot serve are the exceptions, and every file the
+/// roles name is listed in the pack of its directory.
+#[test]
+fn art_set_v4_is_wired_into_the_roles_it_has_a_usable_model_for() {
+    use sf_data::units::{Model, ModelShape};
+    let defs = shipped();
+    let get = |id: &str| defs.unit(id).unwrap();
+    let glb = |p: &str| Model::Glb(p.to_owned());
+
+    // A role of both factions: a model each, the generic model stays behind.
+    for id in [
+        "construction_center",
+        "power_plant",
+        "refinery",
+        "barracks",
+        "vehicle_factory",
+        "radar",
+        "defence_tower",
+        "advanced_defences",
+        "shipyard",
+        "harvester",
+        "rifleman",
+        "rocket_trooper",
+        "engineer",
+        "scout",
+        "light_tank",
+        "heavy_tank",
+        "siege_artillery",
+        "repair_truck",
+    ] {
+        let def = get(id);
+        assert_eq!(
+            def.model_for(Some(Faction::Meridian)),
+            &glb(&format!("set_v4/meridian_{id}.glb")),
+            "{id}"
+        );
+        assert_eq!(
+            def.model_for(Some(Faction::Veyran)),
+            &glb(&format!("set_v4/veyran_{id}.glb")),
+            "{id}"
+        );
+        assert_eq!(
+            def.models.len(),
+            2,
+            "{id}: Meridian and Veyran, nothing else"
+        );
+    }
+
+    // A role of one faction, or a neutral one: its file is the model.
+    for (id, file) in [
+        ("decoy_emplacement", "meridian_decoy_emplacement"),
+        ("fortified_bunker", "veyran_fortified_bunker"),
+        ("sniper", "meridian_sniper"),
+        ("medic", "veyran_medic"),
+        ("combat_engineer", "veyran_combat_engineer"),
+        ("transport_truck", "veyran_transport_truck"),
+        ("light_transport", "meridian_light_transport"),
+        ("amphibious_transport", "meridian_amphibious_transport"),
+        ("gunboat", "veyran_gunboat"),
+        ("civilian", "neutral_civilian"),
+        ("technician", "neutral_technician"),
+        ("relay_transmitter", "neutral_relay_transmitter"),
+        ("fuel_depot", "neutral_fuel_depot"),
+        ("archive_building", "neutral_archive_building"),
+        ("evidence_crate", "neutral_evidence_crate"),
+        ("ferry", "neutral_ferry"),
+        ("bridge_segment", "neutral_bridge_segment"),
+        ("rail_spur", "neutral_rail_spur"),
+        ("automated_gun", "network_automated_gun"),
+        ("generator", "neutral_generator"),
+        ("unmanned_artillery", "network_unmanned_artillery"),
+        ("ore_field", "neutral_ore_field"),
+    ] {
+        let def = get(id);
+        assert!(def.models.is_empty(), "{id}");
+        assert_eq!(def.model, glb(&format!("set_v4/{file}.glb")), "{id}");
+    }
+
+    // The exceptions: the v4 files of demolition_team and heavy_gun_team fail
+    // sf_asset_check and are not in the set; v4 has no neutral supply truck.
+    assert_eq!(
+        get("demolition_team").model,
+        glb("set_v3/veyran_demolition_team.glb")
+    );
+    assert_eq!(get("heavy_gun_team").model, Model::Shape(ModelShape::Cone));
+    assert_eq!(
+        get("supply_truck").model,
+        glb("testpack_v1/models/pantserwagen.glb")
+    );
+    let root = repo();
+    for name in ["veyran_demolition_team", "veyran_heavy_gun_team"] {
+        assert!(!root.join(format!("assets/set_v4/{name}.glb")).exists());
+    }
+
+    // Every v4 file a role names is in the pack `set_v4` of models.ron.
+    let models_ron = lf(&std::fs::read_to_string(root.join("assets/config/models.ron")).unwrap());
+    let pack = &models_ron[models_ron.find("\"set_v4\": (").expect("pack set_v4")..];
+    for def in defs.units() {
+        for model in def.all_models() {
+            if let Model::Glb(path) = model
+                && let Some(file) = path.strip_prefix("set_v4/")
+            {
+                assert!(
+                    pack.contains(&format!("(file: \"{file}\", icon: ")),
+                    "{}: {path} is not in the pack set_v4",
+                    def.id
+                );
+            }
         }
     }
 }
@@ -763,8 +876,8 @@ fn models_per_faction_are_checked_like_the_generic_model() {
 
     // A file that is not there.
     let e = replace_units(
-        "set_v3/veyran_rifleman.glb",
-        "set_v3/veyran_rifleman_v9.glb",
+        "set_v4/veyran_rifleman.glb",
+        "set_v4/veyran_rifleman_v9.glb",
     )
     .unwrap_err();
     assert!(
@@ -773,11 +886,11 @@ fn models_per_faction_are_checked_like_the_generic_model() {
     );
     assert!(e.line.is_some(), "{e}");
     // A path that leaves assets/.
-    let e = replace_units("set_v3/veyran_rifleman.glb", "../veyran_rifleman.glb").unwrap_err();
+    let e = replace_units("set_v4/veyran_rifleman.glb", "../veyran_rifleman.glb").unwrap_err();
     assert!(e.message.contains("not a plain relative path"), "{e}");
     // A faction that does not exist is a parse error with a line.
     let e = replace_units(
-        "Veyran: Glb(\"set_v3/veyran_scout.glb\")",
+        "Veyran: Glb(\"set_v4/veyran_scout.glb\")",
         "Pirates: Shape(Cube)",
     )
     .unwrap_err();
@@ -839,7 +952,7 @@ fn a_glb_model_must_lie_in_a_model_pack() {
     let load = |generic: &str, faction: &str| {
         // The other roles' files are not in the temporary assets: they become primitives.
         let units = strip_glbs(&lf(EMBEDDED_UNITS).replacen(
-            "model: Glb(\"set_v3/meridian_sniper.glb\")",
+            "model: Glb(\"set_v4/meridian_sniper.glb\")",
             "model: @G@, models: {Meridian: @F@}",
             1,
         ))
