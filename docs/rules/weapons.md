@@ -4,7 +4,7 @@ A weapon is a row of numbers in `assets/config/weapon_defs.ron`: how far it shoo
 how hard, with what kind of damage, and what the shot does on its way. Units carry up to four
 weapons by id (`weapons: ["cannon"]` in `unit_defs.ron`). This work package makes the data
 complete enough for the three that follow (projectiles WP5.2, armor and splash WP5.3, choosing
-targets WP5.4), puts it into the simulation, and uses it in the smallest possible way: a unit
+targets WP5.4, [`targeting.md`](targeting.md)), puts it into the simulation, and uses it in the smallest possible way: a unit
 with an attack order fires when its weapon is reloaded and the victim is in reach, and the hit
 takes hit points off the victim. Since WP5.2 a weapon that is not `Instant` launches a projectile
 that flies and detonates ([`projectiles.md`](projectiles.md)). Since WP5.3 what a hit does is the
@@ -99,7 +99,7 @@ the `size` of a unit and half the shorter side of the footprint of a structure, 
 `Order::Attack` walks to (`orders.md`). The condition is `distance <= range + radius`, which is
 exactly the test by which an attack order counts as arrived, so a unit that has stopped in reach can
 fire. The minimum range is `distance >= min_range + radius`. A unit that is too close to fire does
-not back away (that is a matter of choosing targets, WP5.4).
+not back away (and since WP5.4 it does not pick a target that close either: [`targeting.md`](targeting.md)).
 
 ### Mount and arc
 
@@ -108,8 +108,9 @@ its own facing since WP4.5, `turning.md`). It fires when that facing is within `
 bearing to the victim, the shortest way round. Infantry and a gunboat carry hull weapons; the three
 tanks and the siege artillery carry theirs on the turret. A unit with a turret does not turn its hull
 toward its victim (`Order::Attack` leaves that to the turret), so a **hull** weapon on a unit with a
-turret would never be aimed; no shipped unit has one, and WP5.4 will have to decide whether the hull
-turns for such a weapon. The structures' weapons are `fire_arc: 128` (all round) because a structure
+turret would never be aimed; no shipped unit has one, and WP5.4 decided that the world **refuses** such a
+table (`WeaponsError::HullWeaponOnTurret`; the turret aims and the hull does not follow it for a weapon, see
+[`targeting.md`](targeting.md#range-check-and-the-duplicated-range)). The structures' weapons are `fire_arc: 128` (all round) because a structure
 has a fixed hull until the defensive buildings get turrets (WP6.7).
 
 The data check: a weapon with `mount: Turret` on a unit without a `turret_rate` is refused when the
@@ -192,8 +193,9 @@ and no weapon, a turret mount on a kind without a turret.
 
 A world that is not given a table has no weapons: nothing fires, nothing about weapons or projectiles is
 hashed. The game (`sf_game`) does not give one yet, because nothing there would show a shot and a destroyed
-unit would stand where it was; it is one line when WP5.4 and WP5.5 land. The headless runner gives it when a
-scenario says `combat: true` (and has `unit_defs`).
+unit would stand where it was; it is one line when WP5.5 and WP5.6 land (WP5.4 added the targeting settings that
+go with it, [`targeting.md`](targeting.md)). The headless runner gives it when a scenario says `combat: true` (and has
+`unit_defs`), and the targeting when it says `targeting: true`.
 
 ### The checksum
 
@@ -222,6 +224,10 @@ weapon table are still not affected; `weapons_reload` was re-pinned again (`0x20
 `0x59d08622efd30483`) and `projectiles` too (`0x770192e1d2d6da1c` to `0xd9912751868da230`), for the reasons
 measured in `docs/progress.md`.
 
+WP5.4 added a section `A` after `J`, written only when the world was also given targeting settings
+([`targeting.md`](targeting.md#the-checksum)); `weapons_reload`, `projectiles` and `armour_splash` are given none and
+did not move.
+
 `UnitStats` and the digests of the unit table (`digest`, the weapon reach digest of the orders
 section, the turret digest) are untouched: the weapons are a table of their own, so the sections that
 the earlier scenarios pin do not change.
@@ -231,7 +237,7 @@ the earlier scenarios pin do not change.
 Since WP5.2 a weapon either hits at once (`Instant`) or launches a projectile that flies and detonates later.
 Since WP5.3 what a hit does is `weapons::damage_of`: the weapon's `damage` through the armor table for the
 victim it hit, and the falloff share for everyone else near the burst ([`armour.md`](armour.md)). Choosing
-targets (WP5.4) is still to come.
+targets is WP5.4 ([`targeting.md`](targeting.md)).
 
 After the units have moved and the turrets turned, the weapons of a tick run in **two passes, and no hit point
 changes in the first**. This is the rule, and it is binding for every work package that changes what a hit
@@ -240,7 +246,8 @@ does (it was asked for in the review of WP5.1):
 1. **Decide.** In ascending slot order the projectiles in flight move and decide whether they go off, and on
    whom ([`projectiles.md`](projectiles.md)); then, in ascending slot order, every weapon slot of every entity
    counts its wait down and decides whether it fires. A weapon fires when it is ready and the entity's
-   **current order is `Attack`** on a live victim other than itself, and
+   **current order is `Attack`** (or, since WP5.4, `Pursue`: the same, on a target the unit chose itself, which
+   fires only the weapons that do something to it) on a live victim other than itself, and
    1. the victim has hit points (zero means it cannot be hurt, or has been shot down: see below), and so has
       the shooter (a unit whose kind has hit points but has none left fires no more),
    2. it is in reach and not inside the minimum range, as above,
@@ -271,18 +278,19 @@ projectile's shot is what it will do if it hits, **before the armor** (`Impact::
 to its direct victim after it, and `Impact::splash_victims` counts the others it hurt).
 
 Nothing is removed when a victim reaches zero (WP5.5): it stays where it is, is not fired at again, and the
-attacker keeps its order. Orders other than `Attack` (attack-move, guard, hold, a unit that is idle) fire
-nothing: target choice is WP5.4. There is no check of whose unit the victim is.
+attacker keeps its order. Orders other than `Attack` and `Pursue` (move, and attack-move, guard, hold and idle in a world
+without targeting) fire nothing. An attack order does not check whose unit the victim is; a unit that
+chooses its target does (it never picks its own side).
 
 ## What WP5.3 and WP5.4 do with each field
 
-(WP5.3 is done: [`armour.md`](armour.md).)
+(WP5.3 is done: [`armour.md`](armour.md). So is WP5.4: [`targeting.md`](targeting.md).)
 
 | Work package | Replaces or reads |
 |---|---|
 | WP5.2 projectiles (done) | `projectile` and its parameters: an `Instant` weapon hits in its tick, the others launch a projectile that carries the weapon's `damage` (and, for WP5.3, `damage_type` and `splash_radius`) to its detonation. The reload, burst and aim rules stay |
 | WP5.3 armor and splash (done) | `damage_type` times the victim's armor type; `splash_radius` and `splash_inner` with a falloff, `friendly_fire`; the saturating subtraction takes the real damage. It plugs into `weapons::damage_of`, the one function that turns a hit into damage |
-| WP5.4 targets | which victim, which weapon at which target, the choice of order other than `Attack`, whether a hull weapon on a turret unit turns the hull, backing off inside `min_range`, firing at the ground |
+| WP5.4 targets (done) | `range`, `min_range` and the armor table's percentage pick the target (the weapon's `damage`, `burst`, `reload` weigh the weapons of one unit); a weapon that does nothing to the chosen target does not fire; the choice by idle, hold, guard and attack-move units, and return fire; a hull weapon on a turret unit is refused. Not done: backing off inside `min_range`, firing at the ground |
 
 ## The shipped set (placeholders)
 

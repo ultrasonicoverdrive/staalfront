@@ -147,10 +147,11 @@ checksum, with the target (below).
 short way round, with the fixed tie at 128:
 
 * at the unit in its **turret target** column, while that unit is alive (set by `Command::AimTurret`;
-  phase 5 target selection writes the same column from `turret::would_acquire_turret_target_here`,
-  a hook that does nothing yet); a target that is gone, or the unit itself, clears the column;
-* else at the victim of an **`Attack` order**, from the tick of the order, also while the hull is
-  still on its way (the turret is on the target before the hull is);
+  WP5.4 left it to the command alone and removed the hook that was to write it); a target that is
+  gone, or the unit itself, clears the column;
+* else at the victim of an **`Attack` order**, or at the target the unit chose itself (`Pursue`, WP5.4),
+  from the tick of the order, also while the hull is still on its way (the turret is on the target
+  before the hull is);
 * else **along the hull**: the turret returns to hull-forward, the short way, and follows the hull when
   it turns, with the lag of its own rate.
 

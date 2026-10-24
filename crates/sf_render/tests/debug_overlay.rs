@@ -265,6 +265,7 @@ fn grid_and_lod_tint_change_only_the_terrain_and_switch_off_cleanly() {
 
     let grid = DebugView {
         lod_tint: false,
+        cells: false,
         grid_alpha: 1.0,
     };
     let with_grid = terrain_shot(&mut r, 0.0, grid);
@@ -280,6 +281,7 @@ fn grid_and_lod_tint_change_only_the_terrain_and_switch_off_cleanly() {
 
     let tint = DebugView {
         lod_tint: true,
+        cells: false,
         grid_alpha: 0.0,
     };
     let tinted = terrain_shot(&mut r, 0.0, tint);
@@ -320,4 +322,67 @@ fn grid_opacity_fades_with_the_camera_distance() {
         last = v;
     }
     assert!(a(360.0) > 0.0 && a(360.0) < 1.0);
+}
+
+/// WP2.4: the cell grid overlay tints the terrain, shows a structure in its
+/// own colour, costs the terrain's draw calls once more, and leaves the
+/// picture bit-for-bit as it was when switched off.
+#[test]
+fn cell_overlay_tints_the_terrain_and_switches_off_cleanly() {
+    use sf_data::terrain::TerrainTypes;
+    use sf_render::cell_overlay::{CellLayer, CellOverlayStyle};
+
+    let mut r = renderer();
+    let map = test_map();
+    r.set_terrain(&map);
+    let off = terrain_shot(&mut r, 0.0, DebugView::default());
+
+    let types = TerrainTypes::embedded();
+    let palette = CellOverlayStyle::embedded().palette(&types).unwrap();
+    let layer = map.terrain().expect("test64 has a terrain layer");
+    let water = types.id_of("water").unwrap();
+    let rock = types.id_of("rock").unwrap();
+    r.set_cell_layer(CellLayer::new(
+        layer.width(),
+        layer.height(),
+        layer.ids().to_vec(),
+        |id| id == water || id == rock,
+        palette.clone(),
+    ));
+    // A layer alone draws nothing.
+    let still_off = terrain_shot(&mut r, 0.0, DebugView::default());
+    assert_eq!(compare(&off, &still_off, 0).unwrap().differing, 0);
+    assert_eq!(r.draw_stats().cell_overlay_draw_calls, 0);
+
+    // A structure on the cells around the focus (32 m, 32 m = cell 8, 8).
+    let block: Vec<(u32, u32)> = (6..11).flat_map(|y| (6..11).map(move |x| (x, y))).collect();
+    assert_eq!(r.update_cell_occupancy([], block.iter().copied()), 5);
+    assert_eq!(
+        r.update_cell_occupancy([], block.iter().copied()),
+        0,
+        "unchanged"
+    );
+
+    let cells = DebugView {
+        cells: true,
+        ..DebugView::default()
+    };
+    let on = terrain_shot(&mut r, 0.0, cells);
+    let s = r.draw_stats();
+    assert_eq!(s.cell_overlay_draw_calls, s.terrain_draw_calls);
+    let (_, n) = changed(&off, &on);
+    let total = (W * H) as usize;
+    println!("cell overlay changed {n} of {total}");
+    assert!(n * 100 > total * 60, "overlay not visible: {n}");
+    let [r_, g, b, _] = on.pixel(W / 2, H / 2);
+    let [sr, sg, sb] = palette.structure;
+    println!("centre {r_},{g},{b}, structure {sr},{sg},{sb}");
+    assert!(
+        r_ > g + 40 && b > g,
+        "the structure colour shows at the centre"
+    );
+
+    let again = terrain_shot(&mut r, 0.0, DebugView::default());
+    assert_eq!(compare(&off, &again, 0).unwrap().differing, 0);
+    assert_eq!(r.draw_stats().cell_overlay_draw_calls, 0);
 }

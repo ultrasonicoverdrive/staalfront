@@ -296,6 +296,6 @@ vehicle, 1 on a heavy one; rocket (45) 18, 59, 45; cannon (35) 14, 35, 30; howit
   of the geometry (a structure is a disc of its shorter half side here).
 * Alliances (`friendly_fire` means the same player); kill credit and what a destroyed unit leaves (WP5.5:
   settle credit from the set of the tick's hits, never from `hp_after`).
-* Choosing what to shoot at, and splash from a unit's own death (`death_blast` of `unit_defs.ron`): WP5.4 and
-  WP5.5.
+* Choosing what to shoot at is WP5.4 ([`targeting.md`](targeting.md): the armor table is what a weapon
+  prefers); splash from a unit's own death (`death_blast` of `unit_defs.ron`): WP5.5.
 * Damage to terrain, and the game itself firing (`sf_game` still gives its world no weapon table).

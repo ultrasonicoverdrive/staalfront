@@ -1,0 +1,33 @@
+// Colours of the cell grid overlay (WP2.4), the debug / planning view that
+// the F1 panel's "Cell grid (4 m)" checkbox (or `--debug-grid`) switches on.
+// Read by sf_render::cell_overlay. Colours are sRGB bytes (r, g, b).
+//
+// `types` names EVERY terrain type of terrain_types.ron (by name); a missing
+// or unknown name is refused when the overlay is set up, so a new type cannot
+// silently show up uncoloured. The single source of per-type colour is to be
+// `assets/config/terrain_look.ron` (PR #66, now on main); the overlay is to
+// derive its tints from it (follow-up 30 in docs/progress.md) and this file
+// only keeps the occupancy colours.
+//
+// What is drawn per 4 m cell (see docs/rules/cell_overlay.md):
+//   open        the type colour, translucent (`fill_percent`)
+//   impassable  the type colour with dark diagonal hatching: at least one
+//               ground class (foot, wheeled, tracked) cannot enter the type
+//   units       `units` colour, a disc in the cell: at least one unit's
+//               position is in the cell (presentation only, the sim does
+//               not track units per cell)
+//   structure   `structure` colour, filled and outlined: the sim's
+//               occupancy says a structure stands on the cell
+(
+    fill_percent: 35,
+    types: {
+        "grass": (96, 184, 72),
+        "road": (200, 176, 120),
+        "water": (48, 112, 224),
+        "rock": (128, 120, 112),
+        "ore": (232, 184, 32),
+        "bridge": (202, 142, 76),
+    },
+    units: (40, 230, 230),
+    structure: (230, 40, 120),
+)

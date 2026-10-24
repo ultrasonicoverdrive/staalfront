@@ -15,6 +15,7 @@ use crate::formation::Member;
 use crate::ids::{EntityId, Kind, PlayerId};
 use crate::orders::{Order, OrderQueue};
 use crate::path::Routes;
+use crate::targeting::Engage;
 use crate::terrain::NO_CELL;
 use crate::weapons::{REST, WeaponState};
 
@@ -118,6 +119,9 @@ pub(crate) struct Entities {
     /// The reload and the running burst of each weapon slot (WP5.1); at rest for
     /// everything that has not fired. Hashed in the weapons section while some slot is not.
     pub weapon: Vec<WeaponState>,
+    /// What the unit remembers about choosing its own targets (WP5.4); at rest for everything that
+    /// has not. Hashed in the targeting section for as long as the world has targeting.
+    pub eng: Vec<Engage>,
 }
 
 impl Entities {
@@ -155,6 +159,7 @@ impl Entities {
         self.turret_target.push(None);
         self.form.push(Member::NONE);
         self.weapon.push(REST);
+        self.eng.push(Engage::REST);
         index
     }
 
@@ -190,6 +195,7 @@ impl Entities {
         self.turret_target[i] = None;
         self.form[i] = Member::NONE;
         self.weapon[i] = REST;
+        self.eng[i] = Engage::REST;
         self.route.reset(i);
     }
 
@@ -221,6 +227,7 @@ impl Entities {
         self.turret_target[i] = None;
         self.form[i] = Member::NONE;
         self.weapon[i] = REST;
+        self.eng[i] = Engage::REST;
         self.route.reset(i);
     }
 }

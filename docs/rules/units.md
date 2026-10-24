@@ -98,7 +98,7 @@ permanent" below) and a unique snake_case `name`.
 
 Since WP5.1 `reload` counts from the first shot of a burst to the first of the next, and the
 sixteen fields and their rules, the rounding, the shipped set and what each field means for
-WP5.3 and WP5.4 are in [`weapons.md`](weapons.md).
+WP5.3 and WP5.4 are in [`weapons.md`](weapons.md) and [`targeting.md`](targeting.md).
 
 ## `unit_defs.ron`
 

@@ -28,6 +28,7 @@
 //! | turning (`R`), only while some live unit has a turret or an unfinished arc turn | the turret rates of the unit table and the movement table's digest, then each such unit in slot order: the thousandths of a step it has yet to turn and, for a turret, its facing and its target (WP4.5) |
 //! | weapons (`W`), only with a weapon table | the weapon table's digest, then each live entity with a weapon that is reloading or in a burst, in slot order: for each weapon slot the ticks it waits to fire and the shots left in its burst (WP5.1) |
 //! | projectiles (`J`), only with a weapon table | the projectile store: its slot count, free list (stack order) and each projectile in flight in slot order, with its slot, generation, weapon, owner, target, aim point, place, height, heading, span and fuse (WP5.2) |
+//! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -129,6 +130,13 @@
 //! launch). A world without a weapon table cannot have a projectile and has no section, so no checksum of
 //! an earlier phase moved. The impacts and shots listed for a tick are reports and are not hashed.
 //!
+//! The targeting section (WP5.4, `A`) follows them under one more condition, that the world was given
+//! targeting settings (`World::with_targeting`): the settings, then each live unit whose memory of
+//! the targets it chose is not at rest (its cooldown to the next scan, whether it follows its target,
+//! the order it goes back to, where it began and where it last saw the target, the reach it walks
+//! to). The `Pursue` order a unit gives itself is in the orders section. A world without those
+//! settings, which is every pinned scenario of the earlier phases, hashes as before.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -155,6 +163,7 @@ use crate::command::Command;
 use crate::crowd;
 use crate::entities::NO_DEF;
 use crate::orders::Order;
+use crate::targeting;
 use crate::weapons;
 use crate::world::World;
 
@@ -177,6 +186,7 @@ const SECTION_TURNING: u8 = b'R';
 const SECTION_FORMATIONS: u8 = b'G';
 const SECTION_WEAPONS: u8 = b'W';
 const SECTION_PROJECTILES: u8 = b'J';
+const SECTION_TARGETING: u8 = b'A';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -492,6 +502,13 @@ impl World {
             // without one hashes as before.
             h.write_u8(SECTION_PROJECTILES);
             self.arsenal.projectiles.write_hash(&mut h);
+            // Targeting (WP5.4): the settings and what each unit remembers about the targets it chose.
+            // Only in a world that was given settings, after the projectiles, so a world with weapons
+            // that never chooses targets hashes as before.
+            if let Some(config) = &self.targeting.config {
+                h.write_u8(SECTION_TARGETING);
+                targeting::write_hash(&mut h, config, e);
+            }
         }
 
         h.finish()

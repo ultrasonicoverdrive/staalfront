@@ -102,6 +102,7 @@
 
 pub mod args;
 pub mod bench;
+pub mod cell_overlay;
 pub mod commands;
 pub mod cursor;
 pub mod debug_ui;

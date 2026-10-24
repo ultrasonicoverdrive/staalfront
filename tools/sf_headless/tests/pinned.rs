@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles` and `armour_splash`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash` and `tanks_vs_infantry`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -55,6 +55,8 @@ const WEAPONS_RELOAD_EXPECTED: &str =
 const PROJECTILES_EXPECTED: &str = include_str!("../../../assets/scenarios/projectiles.expected");
 const ARMOUR_SPLASH_EXPECTED: &str =
     include_str!("../../../assets/scenarios/armour_splash.expected");
+const TANKS_VS_INFANTRY_EXPECTED: &str =
+    include_str!("../../../assets/scenarios/tanks_vs_infantry.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -228,6 +230,15 @@ fn projectiles_matches_the_pinned_checksum() {
 #[test]
 fn armour_splash_matches_the_pinned_checksum() {
     check("armour_splash", ARMOUR_SPLASH_EXPECTED);
+}
+
+/// Ten tanks against twenty infantry on automatic targeting (WP5.4): both sides attack-move onto the
+/// other's ground, the units pick their own targets, stop to fight and go on. The headless half of the
+/// phase-5 done-when. A new scenario: pinned when it was added; no value of an earlier scenario moved
+/// (`tests/tanks_vs_infantry.rs` runs it twice, asserts the outcome and the rules along the run).
+#[test]
+fn tanks_vs_infantry_matches_the_pinned_checksum() {
+    check("tanks_vs_infantry", TANKS_VS_INFANTRY_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for

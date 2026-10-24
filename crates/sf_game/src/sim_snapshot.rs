@@ -67,6 +67,8 @@ pub struct SimSnapshot {
     views: Vec<EntityView>,
     orders: Vec<Order>,
     gave_up: Vec<Option<Tick>>,
+    /// Every cell a structure occupies (WP2.4), in entity order.
+    structures: Vec<(u32, u32)>,
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
@@ -83,6 +85,7 @@ impl SimSnapshot {
             views: Vec::new(),
             orders: Vec::new(),
             gave_up: Vec::new(),
+            structures: Vec::new(),
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
@@ -115,6 +118,20 @@ impl SimSnapshot {
         self.gave_up.clear();
         self.gave_up
             .extend(self.views.iter().map(|v| world.gave_up_at(v.id)));
+        // The occupancy, for the cell grid overlay: nothing to look up in a
+        // world without structures (the crowd benchmark).
+        self.structures.clear();
+        if world.occupied_cells() > 0 {
+            for v in &self.views {
+                if let (Some(at), Some(fp)) = (world.cell_of(v.id), world.footprint_of(v.id)) {
+                    for dy in 0..u32::from(fp.height) {
+                        for dx in 0..u32::from(fp.width) {
+                            self.structures.push((at.x + dx, at.y + dy));
+                        }
+                    }
+                }
+            }
+        }
         // The table never changes after the world is made: share one copy.
         self.units = Arc::clone(&statics.units);
         self.ground = Arc::clone(&statics.ground);
@@ -200,6 +217,12 @@ impl SimSnapshot {
     /// the UI will show; nothing draws it yet.
     pub fn gave_up_at(&self, id: EntityId) -> Option<Tick> {
         self.find(id).and_then(|i| self.gave_up[i])
+    }
+
+    /// Every cell a structure occupies, as the sim's occupancy holds it
+    /// (`World::occupant_at`), `(x, y)`. Units occupy no cells.
+    pub fn structure_cells(&self) -> &[(u32, u32)] {
+        &self.structures
     }
 
     /// The cell a position lies in; `None` outside the map.
@@ -411,6 +434,108 @@ mod tests {
         assert!(world.is_occupied(Cell::new(4, 4)));
         snap.fill(&world, &statics, Pace::now());
         same_ground(&snap, &world);
+    }
+
+    /// The structure cells match the sim's occupancy exactly, cell by cell:
+    /// `structure_cells` holds a cell iff `World::occupant_at` is `Some`.
+    fn same_occupancy(snap: &SimSnapshot, world: &World) {
+        let listed: std::collections::BTreeSet<(u32, u32)> =
+            snap.structure_cells().iter().copied().collect();
+        for y in 0..SIZE {
+            for x in 0..SIZE {
+                assert_eq!(
+                    listed.contains(&(x, y)),
+                    world.occupant_at(Cell::new(x, y)).is_some(),
+                    "cell ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    /// The overlay's structure feed is the sim's occupancy, for footprints
+    /// of more than one cell, before and after a despawn.
+    #[test]
+    fn structure_cells_follow_the_occupancy() {
+        let (mut world, defs) = world();
+        for (name, cell) in [
+            ("barracks", Cell::new(2, 2)),
+            ("barracks", Cell::new(16, 20)),
+        ] {
+            schedule(
+                &mut world,
+                Command::PlaceStructure {
+                    kind: Kind(defs.kind_of(name).unwrap()),
+                    cell,
+                    owner: PlayerId(0),
+                },
+            );
+        }
+        let ids: Vec<EntityId> = world.snapshot().iter().map(|v| v.id).collect();
+        assert_eq!(ids.len(), 2);
+        let fp = world
+            .footprint_of(ids[0])
+            .expect("a structure has a footprint");
+        assert!(
+            fp.width >= 2 && fp.height >= 2,
+            "a footprint of at least 2x2"
+        );
+        assert_eq!(
+            world.occupied_cells(),
+            2 * usize::from(fp.width) * usize::from(fp.height)
+        );
+        let snap = SimSnapshot::capture(&world);
+        assert!(!snap.structure_cells().is_empty());
+        same_occupancy(&snap, &world);
+
+        schedule(&mut world, Command::Despawn { id: ids[0] });
+        assert!(world.occupant_at(Cell::new(2, 2)).is_none());
+        let snap = SimSnapshot::capture(&world);
+        same_occupancy(&snap, &world);
+    }
+
+    /// The overlay's unit feed is the cell of every entity's position.
+    #[test]
+    fn unit_cells_are_the_cells_of_the_positions() {
+        let (mut world, defs) = world();
+        let kind = Kind(defs.kind_of("rifleman").unwrap());
+        for (x, y) in [(3, 3), (20, 7), (20, 7), (30, 1)] {
+            schedule(
+                &mut world,
+                Command::SpawnUnit {
+                    kind,
+                    pos: Vec2::from_ints(x, y),
+                    owner: PlayerId(0),
+                },
+            );
+        }
+        let snap = SimSnapshot::capture(&world);
+        let mut got: Vec<(u32, u32)> = crate::cell_overlay::unit_cells(&snap).collect();
+        let mut want: Vec<(u32, u32)> = snap
+            .views()
+            .iter()
+            .map(|v| {
+                let c = world.cell_at(v.pos).expect("on the map");
+                (c.x, c.y)
+            })
+            .collect();
+        got.sort_unstable();
+        want.sort_unstable();
+        assert_eq!(got.len(), 4);
+        assert_eq!(got, want);
+        assert!(got.contains(&(3, 3)) && got.contains(&(30, 1)));
+    }
+
+    /// The overlay's terrain layer is the world's terrain: grass open, the
+    /// river (water) impassable, each with its type colour.
+    #[test]
+    fn layer_for_reads_the_world_terrain() {
+        use sf_render::cell_overlay::CellState;
+        let (world, _) = world();
+        let layer = crate::cell_overlay::layer_for(&world).unwrap();
+        assert_eq!(layer.size(), (SIZE, SIZE));
+        assert_eq!(layer.texel(5, 5)[3], CellState::Open as u8);
+        assert_eq!(layer.texel(11, 5)[3], CellState::Impassable as u8);
+        assert_ne!(layer.texel(5, 5)[..3], layer.texel(11, 5)[..3]);
     }
 
     /// Lookups by id are the world's: a stale id is nothing.

@@ -309,11 +309,14 @@
 //! and forms up again on open ground, and at the goal the members take the arrival slots of the group
 //! order. The rules are in `docs/rules/formations.md`.
 //!
+//! A world given targeting settings ([`targeting`], [`World::with_targeting`]) lets its idle, holding,
+//! guarding and attack-moving units pick the target their weapon does most to, and turn on whoever shoots
+//! them, by taking an [`Order::Pursue`] on it and going back to the order they had afterwards. The rules
+//! are in `docs/rules/targeting.md`.
+//!
 //! # Not here yet
 //!
-//! Target
-//! acquisition (WP5.4), the destruction of
-//! what is shot down (WP5.5), and
+//! The destruction of what is shot down (WP5.5), and
 //! saving the state to bytes (phase 13). The world is `Clone`, which already
 //! gives a perfect in-memory snapshot for tests.
 
@@ -330,6 +333,7 @@ pub mod orders;
 pub mod path;
 pub mod projectiles;
 pub mod snapshot;
+pub mod targeting;
 pub mod terrain;
 pub mod turning;
 mod turret;
@@ -362,6 +366,10 @@ pub use path::{
 };
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
 pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
+pub use targeting::{
+    DEFAULT_PURSUIT_CELLS, DEFAULT_PURSUIT_RESET_TICKS, DEFAULT_SCAN_COOLDOWN, Engagement,
+    MAX_PURSUIT_CELLS, MAX_PURSUIT_RESET_TICKS, MAX_SCAN_COOLDOWN, TargetingConfig,
+};
 pub use terrain::{
     Cell, NO_OCCUPANT, Occupancy, Terrain, TerrainDef, TerrainError, TerrainFlags, TerrainId,
 };

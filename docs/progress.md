@@ -87,7 +87,9 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 - WP2.2 Materials per terrain type: done (PR #66, branch `wp/2.2-terrain-materials`, CI green incl. Windows/WARP)
 - WP2.3 Minimap shows terrain types (one flat colour per type from its look in
   `terrain_look.ron`, baked per cell, light relief shading; notes below): in review (PR #65)
-- WP2.4 Cell grid overlay by terrain type and occupancy: open
+- WP2.4 Cell grid overlay by terrain type and occupancy: done (branch `wp/2.4-cell-overlay`), see "WP2.4 notes"
+
+M0b status (23-10-2026): M0b becomes due once WP2.2-2.4 are on main; then the laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is due from Tijmen.
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
 headless test checks terrain types and occupancy per cell. The headless half is met
@@ -192,6 +194,20 @@ WP2.3 notes. The minimap draws every gameplay cell in the flat colour of its ter
   yellow on bridge (78), red on bridge (79), blue on water (85) and green on grass (91); ore
   went from gold to gold-brown, so yellow on ore (53 in round 0) is now 113. No outline was
   added: it would be one quad more per unit per frame; it is an open item under "Known gaps".
+
+### WP2.4 notes
+
+The F1 checkbox "Cell grid (4 m)" (`--debug-grid`) now also tints every 4 m cell by its
+terrain type and shows occupancy on top: structure (sim occupancy, whole footprint),
+units (derived from snapshot positions; the sim does not track units per cell),
+impassable (hatched: at least one of foot/wheeled/tracked cannot enter), open. Rules and the
+meaning of "occupied": `docs/rules/cell_overlay.md`. Colours: `assets/config/cell_overlay.ron`
+(per type by name; to derive from `assets/config/terrain_look.ron`, merged with PR #66 while this PR was in review: follow-up 30). One `Rgba8Uint` texel per
+cell, rebuilt at most once per sim tick while on, the span from the first to the last changed row uploaded; drawn as a
+second, blended pass over the terrain's LOD draws (one call per run of chunks, counted in the F1 panel). Off = no
+rebuild, upload or draw; the layer, texture and pipeline are built at start-up, and the snapshot lists structure cells every tick regardless (about 26 us with 1-200 structures, 40 us with 2000, at 5000 entities: about 2 % of a tick step). `sf_sim` untouched; all scenarios match `--expect`.
+Screenshots: `docs/screenshots/wp2.4/`.
+Cost, lavapipe 1280x720 sandbox (reviewer's measurement, two runs each, noisy machine): frame p50 112.5/90.3 ms off, about the same with the grid lines only, 111.0/119.5 ms on; p99 220.8/188.1 ms off, 282.9/279.9 ms on. So about +10-35 % on average and +20-30 % at p99. Expected on a GTX 1650 at 1080p: one extra pass of ~2 M fragments with one texel fetch, under 0.3 ms. Occupancy rebuild: a 256x256 compare per tick, sub-millisecond.
 
 ## Phase 3 — Units, selection and commands
 
@@ -1084,7 +1100,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 to WP5.3 are in; WP5.4 to WP5.6 are not started.
+Status: WP5.1 to WP5.4 are in; WP5.5 and WP5.6 are not started.
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -1104,6 +1120,12 @@ Status: WP5.1 to WP5.3 are in; WP5.4 to WP5.6 are not started.
   flag of the weapon, on by default; the weapon table's digest covers all of it; the `armour_splash`
   scenario; `weapons_reload` and `projectiles` re-pinned with the measured cause; no other pinned checksum
   moved), `docs/rules/armour.md`, `docs/rules/weapons.md`: done
+- WP5.4 Target selection and automatic return fire (opt-in per world: `World::with_targeting`, two numbers in
+  `sim.ron`; an idle, holding, guarding or attack-moving unit picks the enemy in reach whose armor its weapon does
+  most to, then the nearest, by a total key; it takes an `Order::Pursue` on it and begins its old order again
+  afterwards; a unit that is shot at turns on its attacker in reach or, if idle or on guard, follows it a bounded
+  way; a move never stops; a player's order always wins; a unit at zero hit points holds where it fell; checksum
+  section `A`; `tanks_vs_infantry`; no pinned checksum moved), `docs/rules/targeting.md`: done
 
 ### WP5.1 notes
 
@@ -1173,10 +1195,15 @@ at tick 205 fires at 219 with the others, not at 205. The same scenario without 
    WP5.2, the first to read it, decides whether to require it and refresh the copies.
 3. **A hull-mounted weapon on a unit with a turret is never aimed** by the placeholder: `Order::Attack` leaves the
    turning to the turret for a unit that has one. No shipped unit has such a weapon. WP5.4 decides who turns what.
+   (Settled in WP5.4: the world refuses such a table; see the WP5.4 notes.)
 4. **Zero hit points mean two things**: a kind that cannot be damaged (hp 0 in the table) and one that has been
    shot down. The placeholder treats both as "not a target"; WP5.5 needs to tell them apart (a flag, or a removal).
+   (WP5.4 tells them apart for the units it handles: a kind with hit points zero is not mobile and not a
+   candidate; a mobile unit at zero holds where it fell.)
 5. **`UnitStats::weapon_range` and the weapon table both carry the first weapon's range.** The world refuses a
    table where they differ; one of them goes when the target choice (WP5.4) reads the table for reach.
+   (Settled in WP5.4: the choice reads the table; `weapon_range` stays because the pinned scenarios without a
+   table hash it, see the WP5.4 notes.)
 6. **`sf_game` has no weapons yet** (above): one line in the world setup once WP5.4 and WP5.5 land.
 7. **For WP5.2: the rocket cannot turn inside its own range.** With `guide_turn: 4` facing steps a tick at 12 cells
    a second the turning radius is about 6.1 cells, larger than the rocket's range of 5; a guided rocket that has to
@@ -1388,6 +1415,119 @@ damage type's row to the armor table as well, since a table that is there has to
    of the tick's hits); choosing targets (WP5.4); `sf_game` still gives its world no weapon table.
 3. The cost of the splash index is not benchmarked on its own: it is built once on a tick with a splash, an
    `O(entities)` counting sort, and not at all on a tick without one.
+
+### WP5.4 notes
+
+**Design (more in `docs/rules/targeting.md`).** Targeting is **opt-in per world**: `World::with_targeting(config)`
+(after `with_weapons`), with `sf_bridge::targeting_config` making the config from two new numbers of `sim.ron`
+(`scan_cooldown` 10 ticks, `pursuit_cells` 6) and the headless scenario field `targeting: true`. A world without
+it behaves exactly as before, so the three scenarios that have a weapon table (`weapons_reload`, `projectiles`,
+`armour_splash`, whose victims stand still on purpose and whose tests are hand calculations that units shooting
+back would invalidate) are untouched. A chosen target is **an order the unit gives itself**, `Order::Pursue(target)`
+(tag 8 in the orders section; `Command::Order` refuses it), with the order the unit had kept in a new per-entity
+`Engage` (the order to resume, whether it may follow, where it began, where it last saw the target, the range it
+walks to, the ticks to its next look). That reuses everything an `Attack` already does (the hull or turret turns,
+the weapons fire, the unit walks into reach) and makes the old order simply begin again when the engagement ends.
+A stage `Targeting::update` runs between the crowd pass and the turrets (validate the targets, then scan for the
+units whose cooldown has run out, through the crowd pass's spatial index) and `Targeting::return_fire` after the
+weapons (from a list of who hurt whom that the weapon stage's apply pass fills). Candidates are enemies (another
+owner) with hit points that a weapon of the unit hurts (more than zero percent in the armor table) and could fire at
+now (range and minimum range to the edge, as a shot is checked); the score is `damage * burst * percent * 1000 /
+reload ticks` of the best weapon, so the preference of a weapon is the row of its damage type in the armor table
+(a rifle prefers infantry, a rocket or a cannon vehicles, a shell buildings, the long rifle only infantry); the key
+is `(mode, score, distance squared, y, x, slot, generation)`, so ties are broken by where a unit stands and not by when
+it was spawned.
+
+**Decisions.**
+- *A move never stops to fight.* A unit on `Move` neither picks a target nor returns fire (documented in
+  `orders.md` and `targeting.md`); attack-move is the order for fighting on the way.
+- *Hold fires from where it stands; idle and guard follow an attacker; attack-move does not.* The follow is bounded twice
+  (the attacker must be within reach plus `pursuit`; the unit strays no farther than `pursuit` from where it
+  began). An idle unit stays where the chase ended, a guard walks back (that is what a guard does).
+- *A unit keeps its target while it is valid*, and **drops it when it leaves its reach** (for a unit that may not
+  follow), as the brief asks; when the cooldown has already run out it looks again on the same tick.
+- *Return fire does not wait for the cooldown* and answers one attacker, the best by the key, in reach before out of it;
+  damage of zero (an immune armor) and a splash of its own side do not count as an attack. The set of attackers
+  comes from the tick's hits, never from `Shot::hp_after` (kill credit, WP5.5, must do the same).
+- *What a following unit walks to is a snapshot* (`Engage::aim`, taken after the movement stage), not the live
+  position of the target, so that the slot order cannot decide the step.
+- *A unit at zero hit points* (with targeting): is nobody's candidate, picks nothing, fires nothing (as
+  before), **loses its orders and holds where it fell** from the end of the tick it fell on (so a wreck does not
+  march on to its destination; this is `HoldPosition`, which nobody pushes) and takes no orders. WP5.5 removes it.
+- *A weapon that does nothing to the chosen target does not fire* (a hybrid's long gun against a tank); an explicit
+  attack order still fires every weapon that can reach, as before.
+- *Hull weapon on a turret unit* (follow-up 3 of WP5.1): **refused** by the world when it is given the table
+  (`WeaponsError::HullWeaponOnTurret`). The loader cannot refuse it: the frozen copies that predate `mount` have
+  their tank cannons on the default, `Hull`.
+- *The duplicated range* (follow-up 5 of WP5.1) **stays**, because it cannot go without moving legacy goldens
+  (it is in the reach digest of the pinned scenarios that have a unit table and no weapon table, it is what an
+  `Attack` order walks to in the game today, and `sf_game`'s cursor reads it). The targeting does not read it; it uses
+  the range of the weapon that chose the target, and the world still refuses a table that disagrees.
+
+**Checksums (measured).** The new section `A` is written only in a world with a weapon table and targeting
+settings, after `J`; the orders section has the new tag only in such a world. **No pinned value moved**:
+`wander_5000` `0x38d5e3c43358a889`, `command_mix` `0x43f6583004258ceb`, `terrain_256` `0xb577112845e0097e`,
+`units_spawn` `0x6c369f42be150d6e`, `bridge_200` `0x03971fcc3548fc0c`, and `orders`, `terrain_costs`, `pathing`,
+`pathing_256`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles` and
+`armour_splash` are the values they were (the debug and the release runs of `pinned.rs` and the golden tests of
+`sf_sim`, and `sf_headless --expect` on every scenario). So there is no re-pin to explain. The new scenario is
+`tanks_vs_infantry`.
+
+**`tanks_vs_infantry`** (`assets/scenarios/tanks_vs_infantry.ron`, a frozen copy of the shipped definitions in
+`tanks_vs_infantry_defs/`, 64 x 64 cells, 1500 ticks, `combat` and `targeting`; 30 entities): 10 light tanks
+(400 hp) against 14 riflemen and 6 rocket troopers forty cells apart, each side attack-moving onto the other's
+ground, nobody given an attack order. The first shot is at tick 270; **228 shots** (87 cannon shells, 97 rifle shots,
+44 rockets); the last shot at **tick 787** and the last infantryman falls at the end of tick 791. **The tanks win with 4
+of 10 left** (ids 1, 2, 3, 9 with 282, 400, 400, 400 hit points, 1482 of 4000); all 20 infantry are down; the four
+tanks go on and stand within four cells of their goal, and the 26 units at zero are where they fell, on hold.
+Final checksum `0x53d3bcb0110a9479`. (Re-pinned in fix round 1 from `0x7c3338cf6b72e9c2`: the settings hash gained
+`pursuit_reset_ticks` and the engagement hash the kept anchor (`held`, `rest`); with those left out of the hash the
+old value comes back, so no position, hit point or shot moved.) `tools/sf_headless/tests/tanks_vs_infantry.rs` runs it twice and compares the
+checksum after every tick, all shots and the hit points and places of all thirty at every tick, then the numbers, the
+committed value, and (along the run) that nobody fires at its own side, that nobody at zero fires or is fired at and
+that a unit at zero never moves again. CI runs it on Linux and Windows (`ci.yml` list, `.expected`).
+
+**Tests.** `crates/sf_sim/tests/targeting.rs` (38 tests: settings, a world without them, what a unit picks and
+refuses, the armor table's preferences, the key and its tie-breaks in both spawn orders, minimum range, two weapons,
+the cooldown as data, letting go, the stances, explicit orders, return fire in every stance, the pursuit bound,
+aim, zero hit points, the checksum, and three permutation tests that spawn the cast in every order and compare
+the outcome by starting place: idle units that pick each other, two on two on attack-move that meet and fight on
+the move, and units that return fire and follow); `crates/sf_sim/src/targeting/tests.rs`; `sim_settings` and
+`sf_bridge` for the settings; `tools/sf_headless/tests/tanks_vs_infantry.rs` and `pinned.rs`. **A finding that the
+permutation tests had to work around:** a mobile unit is born with a random facing drawn from the order it was
+spawned in, and a unit that has to turn before it drives sets off at a different tick; the test units turn to any
+heading in a tick. That is older than this work package (it is why no earlier permutation test moves units).
+
+**Deferred, and why.**
+1. **Structures choosing targets** (towers, emplacements): WP6.7. A structure takes no order, and a `Pursue` on one
+   would make it walk; it needs a target without an order.
+2. **Firing at the ground, backing off inside the minimum range** (a follower that finds its target inside the
+   minimum range lets go and goes back to its order; it does not step back), **threat-based priorities** (shoot what shoots you
+   first, focus fire, retreat): the AI of WP9.3 commands those; here a unit prefers what its weapon does most to.
+3. **Alliances and neutrals:** every other owner is an enemy, so a neutral crate or civilian of another owner is a
+   candidate. Left for the mission work (phase 10).
+4. **Switching to a better target**, and **returning to the spot an idle unit began on** after a chase. (The leash
+   itself is measured from the guard post, or for an idle unit from where its first chase began until it has been
+   at rest `pursuit_reset_ticks`; fix round 1.)
+5. **A resumed attack-move or guard is routed again on its own**; it does not rejoin the flowfield group of the order
+   that started it. A battle of hundreds of attack-moving units would ask the path service for many routes after each
+   engagement; not measured.
+6. **All units look on the same ticks** (spawned together: 0, 10, 20 ...). With 1,600 armed units targeting costs
+   about +15 % before contact and about +35 % over a 1,500-tick fight; the worst tick is 21 to 36 ms against
+   13.4 ms without targeting, within the 50 ms budget but not free. Staggering by anything other than the slot
+   would need a number that is not state; not done.
+7. **`sf_game` still has no weapon table** (WP5.5 and WP5.6 first); `sf_game`'s order text for a selected unit
+   reads `Pursue` as "engage".
+8. **`orders`, `replan` and `turning` will move once combat is on for them** (follow-up 7 of WP5.1): they are not given
+   a weapon table or targeting here, so they are the values they were.
+9. **WP5.5 must** settle kill credit from the set of the tick's hits (the attackers `return_fire` reads are that
+   set), remove units at zero (they hold where they fell until then), and decide what an explicit `Attack` order does
+   with a victim that was removed (it ends, as for a despawned one).
+10. **Spawn-order independence is not shown for slow-turning units.** A mobile unit is born with a random facing
+    drawn from its spawn serial (`world.rs`), so a unit that must turn before it drives sets off on a different
+    tick in another spawn order. The permutation tests use units that turn in one tick; a fight of slow-turning
+    units spawned in another order can differ. Settle with the facing rule (a facing that does not depend on the
+    spawn order) before the AI work relies on it.
 
 ## Phase 1 report (draft, WP1.14)
 
@@ -1642,3 +1782,5 @@ fixed, delete the entry in the same PR.
     nodes), emissive `lamp` material, diagonal team triangles, copied levels of detail, vessels on
     `Y = 0`, the `supply_truck` faction, `state_map.json`. Owner: Tijmen with the producer; when a
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
+
+30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. With PR #66 merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.

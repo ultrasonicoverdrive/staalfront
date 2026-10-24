@@ -15,14 +15,15 @@ hashed in the checksum and independent of the click that made them.
 
 | Order | The unit... | Ends when |
 |---|---|---|
-| `Idle` | has no order: it is what a unit has when nothing was ordered, and `Stop` puts it there. Phase 5 lets an idle unit react (return fire, auto-acquire). | never by itself; any other order replaces it |
-| `HoldPosition` | stands still **on purpose** and never moves, not to chase and not to get closer. Phase 5 may fire from it at what is in range, but it never moves by itself. | never by itself; a queued order behind it waits (an idle unit would start it at once) until the hold is replaced or stopped |
+| `Idle` | has no order: it is what a unit has when nothing was ordered, and `Stop` puts it there. In a world with targeting (WP5.4, [`targeting.md`](targeting.md)) an idle unit picks a target in reach and returns fire, following an attacker a little way. | never by itself; any other order replaces it |
+| `HoldPosition` | stands still **on purpose** and never moves, not to chase and not to get closer. In a world with targeting it fires from where it stands at what it picks in reach, and never moves. | never by itself; a queued order behind it waits (an idle unit would start it at once) until the hold is replaced or stopped |
 | `Move(point)` | goes to the point | it is within `ARRIVE_TOLERANCE` (an eighth of a cell, half a metre) of the point |
 | `Attack(entity)` | goes toward the entity until it is within the reach of its first weapon, then stands and turns to face it (a unit with a turret turns the turret, from the tick of the order, and leaves the hull; `turning.md`) | the target is gone: dead, despawned, or an id whose slot now holds another entity (generation check) |
-| `AttackMove(point)` | goes to the point; on the way it would engage what it meets (phase 5) | it is within `ARRIVE_TOLERANCE` of the point |
+| `AttackMove(point)` | goes to the point; in a world with targeting it stops to fight what it meets in reach and marches on when that is over (WP5.4) | it is within `ARRIVE_TOLERANCE` of the point |
 | `Guard(point)` | goes to the point and stays; walks back if it is ever moved off | never by itself: a queued order behind it waits until the guard is replaced or stopped |
 | `Guard(entity)` | follows the entity and stays near it | the entity is gone |
 | `Scatter` | takes a short step in a deterministic direction | it is a `Move` as soon as it starts (below) |
+| `Pursue(entity)` | what an `Attack` does, on a target the unit **chose itself** (WP5.4): it is the unit's own order, a player cannot give it (the command is ignored), and the order the unit had is kept and begun again when this one ends | the target is gone, at zero hit points, or (for a unit that may not follow it) out of reach |
 | `Stop` (a command) | clears the current order and the queue; the unit stands where it is, idle (a wandering placeholder stops wandering too) | not an order: the unit is `Idle` afterwards |
 
 A point is in cells (`Fx::ONE` = 4 m, B12) and is clamped into the map when the command
@@ -159,12 +160,12 @@ Why idle and not "the nearest reachable cell" or "keep waiting": a unit that is 
 next to, the place it cannot get past; the nearest reachable cell is where it is. And a unit that waits
 for ever holds up its queue and turns a deadlock of two units into one that never ends.
 
-## Attack, attack-move and guard: what exists and what phase 5 fills in
+## Attack, attack-move and guard: what they do, and what phase 5 filled in
 
-There is **no combat** in this work package: nothing fires and no hit point changes. (Since
-WP5.1 a world that is given a weapon table fires at the victim of an `Attack` order, as a
-placeholder (WP5.2: an instant hit, or a projectile that flies): [`weapons.md`](weapons.md). Without a table, which is every world of the
-scenarios of phases 3 and 4, nothing changes.) What exists is the movement part and the state:
+There was **no combat** in this work package: nothing fired and no hit point changed. (Since
+WP5.1 a world that is given a weapon table fires at the victim of an `Attack` order (WP5.2: an
+instant hit, or a projectile that flies): [`weapons.md`](weapons.md). Without a table, which is every world of the
+scenarios of phases 3 and 4, nothing changes.) What WP3.4 built is the movement part and the state:
 
 * `Attack`: the unit walks until its distance to the target's middle is at most
   *weapon range + the target's radius* and then stops and turns toward it. The target's
@@ -177,22 +178,25 @@ scenarios of phases 3 and 4, nothing changes.) What exists is the movement part 
 * `Guard(entity)` stops within `GUARD_CLOSE` (one and a half cells) of the entity's edge and
   starts walking again beyond `GUARD_LEASH` (two and a half), so a guard does not shuffle
   at the boundary.
-* `AttackMove` and both guards call `orders::would_acquire_targets_here` once per tick.
-  It does nothing.
+* `AttackMove` and both guards used to call a hook, `orders::would_acquire_targets_here`, once
+  per tick. WP5.4 took it out: the choice is made in a stage of its own, after the crowd pass.
 
-**Phase 5 must fill in:**
+**What phase 5 filled in:**
 
-1. `would_acquire_targets_here`: look for an enemy in sight (WP5.4 target selection and
-   priorities), and for an attack-move or a guard turn the unit toward it, keeping the
-   interrupted order (for example by putting it at the front of the queue). A guard
-   returns to its post afterwards (the point guard already walks back).
-2. Idle units are skipped by the behaviour pass (`advance_all`), so the automatic return
-   fire of an idle unit needs a pass of its own.
+1. **Looking for an enemy** (WP5.4, [`targeting.md`](targeting.md)): a unit that picks a target takes an
+   `Order::Pursue` on it and keeps the interrupted order (in the unit's engagement, not at the front of the
+   queue, which has a fixed size and may be full); when the target is gone the old order is begun again, so
+   a guard walks back to its post and an attack-move marches on.
+2. **Return fire**: idle units are skipped by the behaviour pass, so the units that were hurt are turned on
+   their attackers by a pass of their own, after the weapons. An idle unit that follows an attacker is given
+   the `Pursue` order, which makes it an ordinary mover.
 3. Firing: **WP5.1 did the reload timers, the minimum range, more than the first weapon and
    a placeholder instant hit, WP5.2 the projectiles** (`weapons.md`, `projectiles.md`), **WP5.3 armor and splash** (`armour.md`). The
    order `Attack` then also needs an end: the target dying is already one; leaving sight is
-   WP8's.
-4. `UnitStats::weapon_range` stays the range of the first weapon (the reach of an attack order);
+   WP8's. Nothing is removed at zero hit points until WP5.5; a unit with an attack order on a
+   victim at zero keeps the order (a unit with targeting stops and holds when it is itself at zero).
+4. `UnitStats::weapon_range` stays the range of the first weapon (the reach of an attack order; the
+   targeting does not read it, see [`targeting.md`](targeting.md#range-check-and-the-duplicated-range));
    the weapon list is a table of its own, `sf_sim::WeaponTable`, with a digest of its own in
    the weapons section of the checksum, so the weapon reach digest in the orders section, which
    the pinned scenarios fix, is unchanged. The world refuses a table whose first weapon of a

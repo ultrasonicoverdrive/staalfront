@@ -151,6 +151,54 @@ fn every_part_of_the_state_is_in_the_checksum_and_putting_it_back_puts_the_check
 }
 
 #[test]
+fn reach_is_measured_to_the_edge_and_both_ends_are_inclusive() {
+    let w = WeaponStats {
+        min_range: Fx::from_int(2),
+        ..stats()
+    };
+    let edge = Fx::HALF;
+    let at = |d: Fx| d.square();
+    // A range of 4 reaches a middle 4 and a half away (the edge is 4 away) and not a hair farther.
+    assert!(in_reach(&w, at(Fx::from_ratio(9, 2)), edge));
+    assert!(!in_reach(&w, at(Fx::from_ratio(9, 2) + Fx::EPSILON), edge));
+    // A minimum of 2 does not reach a middle 2 and a half away or nearer, but exactly 2 and a half is out
+    // of the minimum, since the edge is then 2 away.
+    assert!(in_reach(&w, at(Fx::from_ratio(5, 2)), edge));
+    assert!(!in_reach(&w, at(Fx::from_ratio(5, 2) - Fx::EPSILON), edge));
+    assert!(!in_reach(&w, at(Fx::ZERO), edge));
+    // No minimum: right on top of the target is in reach (it counts as aimed).
+    assert!(in_reach(&stats(), at(Fx::ZERO), edge));
+}
+
+#[test]
+fn a_weapon_scores_zero_against_an_armor_that_takes_nothing_and_the_best_weapon_chooses() {
+    let mut w = world();
+    let i = spawn(&mut w);
+    let def = w.entities.def[i];
+    // Without an armor table every hit is a hundred percent.
+    assert_eq!(w.arsenal.percent(&stats(), def), 100);
+    let pick = w
+        .arsenal
+        .best_against(def, def, Fx::from_int(4), Fx::HALF, true)
+        .expect("in reach");
+    assert_eq!(pick.reach, Fx::from_int(4));
+    assert_eq!(pick.score, weapon_score(&stats(), 100));
+    // Too far for the weapon: nothing, unless the distance does not matter.
+    let far = Fx::from_int(100);
+    assert!(
+        w.arsenal
+            .best_against(def, def, far, Fx::HALF, true)
+            .is_none()
+    );
+    assert!(
+        w.arsenal
+            .best_against(def, def, far, Fx::HALF, false)
+            .is_some()
+    );
+    assert!(w.arsenal.is_armed(def));
+}
+
+#[test]
 fn a_new_entity_in_a_used_slot_starts_ready() {
     let mut w = world();
     let i = spawn(&mut w);

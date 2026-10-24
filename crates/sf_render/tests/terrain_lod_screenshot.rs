@@ -388,6 +388,7 @@ fn level_tint_colours_chunks_by_level() {
     assert_eq!(stats.per_level, [1; LOD_LEVELS]);
     r.set_debug_view(DebugView {
         lod_tint: true,
+        cells: false,
         grid_alpha: 0.0,
     });
     let tinted = shot(&mut r, &cam);
