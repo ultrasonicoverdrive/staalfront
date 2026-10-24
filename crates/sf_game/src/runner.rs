@@ -201,6 +201,11 @@ pub struct Runner {
     /// The newest snapshot of the sim, taken at the top of every frame; what
     /// everything on the main thread reads instead of a world.
     snap: Arc<SimSnapshot>,
+    /// The cell grid overlay's map (WP2.4), until the renderer takes it.
+    cell_layer: Option<sf_render::cell_overlay::CellLayer>,
+    /// The tick whose occupancy the overlay shows; `None` while it is off,
+    /// so switching it on refreshes it.
+    cells_tick: Option<sf_sim::Tick>,
     /// When the last snapshot that showed the sim behind its clock arrived:
     /// the F1 panel keeps saying "sim behind" for a second after.
     behind_seen: Option<Instant>,
@@ -327,6 +332,9 @@ impl Runner {
             buildings,
             ..
         } = start;
+        let cell_layer = crate::cell_overlay::layer_for(&world)
+            .map_err(|e| eprintln!("sf_game: no cell grid overlay: {e}"))
+            .ok();
         // From here on the world belongs to the sim thread. Its clock stays
         // held until the window and the renderer exist (`on_start`), so the
         // units do not wander off while the GPU starts.
@@ -413,6 +421,8 @@ impl Runner {
             lod,
             sim,
             snap,
+            cell_layer,
+            cells_tick: None,
             behind_seen: None,
             instancer,
             pack,
@@ -888,7 +898,19 @@ impl Runner {
                 } else {
                     0.0
                 },
+                cells: state.grid,
             });
+            // The overlay's occupancy: once per sim tick, only while it is on.
+            if !state.grid {
+                self.cells_tick = None;
+            } else if self.cells_tick != Some(self.snap.tick()) {
+                self.cells_tick = Some(self.snap.tick());
+                let snap = &self.snap;
+                renderer.update_cell_occupancy(
+                    crate::cell_overlay::unit_cells(snap),
+                    snap.structure_cells().iter().copied(),
+                );
+            }
         }
     }
 }
@@ -1404,6 +1426,9 @@ impl App for Runner {
                 renderer.set_icon_atlas(&self.icons);
                 renderer.set_terrain(&self.map);
                 renderer.set_terrain_lod(self.lod);
+                if let Some(layer) = self.cell_layer.take() {
+                    renderer.set_cell_layer(layer);
+                }
                 let ground = &self.ground;
                 let map = &self.map;
                 renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
