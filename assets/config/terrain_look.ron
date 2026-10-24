@@ -12,6 +12,13 @@
 // charcoal and muted crimson, content/world.md): fresh yellow-green grass,
 // a light tan road of packed earth, saturated blue water, mid grey rock, dark gold ore and a
 // light wooden bridge.
+//
+// The minimap (WP2.3) draws every cell in one flat colour of its type, taken
+// from here: `minimap: (r, g, b)` if a look names one, otherwise `color`. Only
+// a look whose texture averages far from its base colour needs it (ore, with
+// its bright flecks). Tests keep each minimap colour near the mean of its
+// texture, at least 50 apart from every other type, and saying what the type
+// is (water blue, ore warm, rock grey, ...).
 (
     // Where two types meet (see docs/rules/terrain.md, "How it is drawn").
     edge: (
@@ -62,6 +69,8 @@
             color: (98, 66, 34),
             contrast: 0.22,
             pattern: Flecks(color: (244, 190, 52)),
+            // The mean of the texture: the flecks make ore read gold-brown.
+            minimap: (138, 100, 39),
         ),
         (
             // A deck: flat, with planks across the tile.

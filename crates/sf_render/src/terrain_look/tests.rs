@@ -220,6 +220,17 @@ fn a_looks_file_with_a_problem_is_refused() {
     let grass = "(terrain: \"grass\", color: (1, 2, 3), contrast: 0.2, pattern: Noise)";
     assert!(ok(grass).is_ok());
     assert!(ok("").is_ok(), "no entries: every type gets a derived look");
+    // The minimap colour is optional and written plainly, without `Some`.
+    let mini = ok(
+        "(terrain: \"grass\", color: (1, 2, 3), contrast: 0.2, pattern: Noise, \
+                   minimap: (7, 8, 9))",
+    )
+    .expect("minimap override");
+    assert_eq!(mini.get("grass").unwrap().minimap_color(), [7, 8, 9]);
+    assert_eq!(
+        ok(grass).unwrap().get("grass").unwrap().minimap_color(),
+        [1, 2, 3]
+    );
     assert!(
         ok(&format!("{grass}, {grass}"))
             .unwrap_err()
@@ -266,4 +277,109 @@ fn a_looks_file_with_a_problem_is_refused() {
         ok("(terrain: \"gras\", color: (1, 2, 3), contrast: 0.2, pattern: Noise)").unwrap();
     assert!(misspelt.check_names(&types).unwrap_err().0.contains("gras"));
     assert!(ok(grass).unwrap().check_names(&types).is_ok());
+}
+
+/// RGB distance between two colours.
+fn rgb_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+}
+
+/// How far a minimap colour may lie from the mean of its look's texture.
+const MINIMAP_DRIFT: f32 = 40.0;
+
+/// WP2.3: the minimap colour of a type comes from its look, so it cannot
+/// drift away from what the 3D view draws: it is the look's `color`, or an
+/// override that lies near the mean of the texture.
+#[test]
+fn the_minimap_colour_stays_near_the_look() {
+    let (types, looks) = shipped();
+    for t in types.iter() {
+        let l = looks.look_for(&t.name);
+        let mini = l.minimap_color();
+        match l.minimap {
+            None => assert_eq!(mini, l.color, "{}: no override, so the look colour", t.name),
+            Some(c) => assert_eq!(mini, c, "{}", t.name),
+        }
+        let d = rgb_distance(mini.map(f32::from), mean_color(&l.texture()));
+        assert!(
+            d <= MINIMAP_DRIFT,
+            "{}: minimap colour {mini:?} is {d:.0} from the mean of its look",
+            t.name
+        );
+    }
+    // A type without a look still gets a minimap colour: the derived one.
+    let new = looks.look_for("lava");
+    assert_eq!(new.minimap_color(), new.color);
+}
+
+/// Every pair of minimap colours is at least 50 apart (RGB), so the types
+/// can be told apart at a few pixels per cell with the relief shading on top.
+#[test]
+fn the_minimap_colours_are_clearly_different() {
+    let (types, looks) = shipped();
+    let all: Vec<(String, [f32; 3])> = types
+        .iter()
+        .map(|t| {
+            (
+                t.name.clone(),
+                looks.look_for(&t.name).minimap_color().map(f32::from),
+            )
+        })
+        .collect();
+    for (i, (a, ca)) in all.iter().enumerate() {
+        for (b, cb) in &all[..i] {
+            let d = rgb_distance(*ca, *cb);
+            assert!(
+                d >= 50.0,
+                "{a} and {b} are too close on the minimap ({d:.0})"
+            );
+        }
+    }
+}
+
+/// What each minimap colour means: swapping two colours (water and bridge,
+/// say) breaks it.
+#[test]
+fn the_minimap_colours_say_what_the_types_are() {
+    let (_, looks) = shipped();
+    let c = |n: &str| looks.look_for(n).minimap_color().map(i32::from);
+    let (grass, road, water, rock, ore, bridge) = (
+        c("grass"),
+        c("road"),
+        c("water"),
+        c("rock"),
+        c("ore"),
+        c("bridge"),
+    );
+    let spread = |c: [i32; 3]| c.iter().max().unwrap() - c.iter().min().unwrap();
+    let sum = |c: [i32; 3]| c.iter().sum::<i32>();
+    assert!(
+        grass[1] > grass[0] + 30 && grass[1] > grass[2] + 30,
+        "grass is green: {grass:?}"
+    );
+    assert!(
+        water[2] > water[0] + 60 && water[2] > water[1] + 30,
+        "water is blue: {water:?}"
+    );
+    assert!(
+        spread(rock) <= 20 && (90..=170).contains(&rock[1]),
+        "rock is mid grey: {rock:?}"
+    );
+    assert!(
+        ore[0] > ore[2] + 60 && ore[1] > ore[2],
+        "ore is warm: {ore:?}"
+    );
+    assert!(sum(ore) < sum(road), "ore is darker than the road: {ore:?}");
+    assert!(
+        road[0] > road[2] + 50 && sum(road) > sum(rock) + 100,
+        "the road is light tan: {road:?}"
+    );
+    assert!(
+        bridge[0] > bridge[2] + 80 && bridge[0] > 160,
+        "the bridge is light wood: {bridge:?}"
+    );
+    assert!(
+        road[2] > bridge[2] + 30,
+        "the road is paler than the wood: {road:?} {bridge:?}"
+    );
 }

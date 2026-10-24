@@ -299,19 +299,23 @@ struct MinimapScene {
 }
 
 fn minimap_scene(with_overlays: bool) -> MinimapScene {
+    minimap_scene_of(generate(128, 128, 1), with_overlays, 170.0)
+}
+
+fn minimap_scene_of(map: sf_data::map::Map, with_overlays: bool, panel: f32) -> MinimapScene {
     let mut r = renderer();
-    let map = generate(128, 128, 1);
+    let (mw, mh) = (map.width() as f32, map.height() as f32);
     r.set_terrain(&map);
     let mut cam = Camera::new(
         CameraConfig {
-            map_size: DVec2::new(128.0, 128.0),
+            map_size: DVec2::new(f64::from(mw), f64::from(mh)),
             ..CameraConfig::default()
         },
         W,
         H,
     );
     cam.set_zoom(0.3);
-    cam.set_focus(DVec2::new(64.0, 64.0));
+    cam.set_focus(DVec2::new(f64::from(mw) * 0.5, f64::from(mh) * 0.5));
     r.set_view_proj(cam.view_proj());
 
     let minimap = Minimap::bake(&map, 256);
@@ -324,9 +328,9 @@ fn minimap_scene(with_overlays: bool) -> MinimapScene {
         ui.screen(),
         Anchor::BottomRight,
         (10.0, 10.0),
-        (170.0, 170.0),
+        (panel, panel),
     );
-    let quad = fov_polygon(&cam, (W as f32, H as f32), (128.0, 128.0));
+    let quad = fov_polygon(&cam, (W as f32, H as f32), (mw, mh));
     let dots = [
         ((30.0, 30.0), Color(255, 0, 0, 255)),
         ((100.0, 90.0), Color(255, 0, 0, 255)),
@@ -351,13 +355,82 @@ fn minimap_scene(with_overlays: bool) -> MinimapScene {
         "frame, minimap image, dots and lines: {} draw calls",
         ur.draw_calls()
     );
-    let geom = MinimapGeometry::new(frame.inset(2.0), (128.0, 128.0));
+    let geom = MinimapGeometry::new(frame.inset(2.0), (mw, mh));
     MinimapScene {
         img,
         frame,
         geom,
         quad,
         minimap,
+    }
+}
+
+/// WP2.3 review: every cell is drawn where it is, on a map of whole cells
+/// and on one whose sides end in a partial cell (130 x 126 m). The map is a
+/// flat checkerboard of water and grass cells, so every neighbour has another
+/// colour. Along the south and east edges (where a stretched image is furthest
+/// off) each cell is looked up on screen at its `world_to_screen` position,
+/// near both ends of its part on the map, and must show its own baked colour;
+/// a water cell must be blue on screen.
+#[test]
+fn minimap_draws_every_cell_where_it_is() {
+    use sf_data::terrain::{TerrainLayer, TerrainTypes};
+    for (w, h) in [(128_u32, 128_u32), (130, 126)] {
+        let types = TerrainTypes::embedded();
+        let (water, grass) = (types.id_of("water").unwrap(), types.id_of("grass").unwrap());
+        let (cw, ch) = (w.div_ceil(4), h.div_ceil(4));
+        let ids: Vec<u8> = (0..ch)
+            .flat_map(|z| (0..cw).map(move |x| if (x + z) % 2 == 0 { water } else { grass }))
+            .collect();
+        let map = sf_data::map::Map::from_parts(
+            w,
+            h,
+            8.0,
+            vec!["grass".into()],
+            vec![0; ((w + 1) * (h + 1)) as usize],
+            vec![0; (w * h) as usize],
+        )
+        .unwrap()
+        .with_terrain(TerrainLayer::new(cw, ch, ids.clone()).unwrap(), &types)
+        .unwrap();
+        // A big panel: about 2.6 px per metre, so a 2 m partial cell is 5 px.
+        let s = minimap_scene_of(map, false, 340.0);
+        save(&format!("minimap_cells_{w}x{h}.png"), &s.img);
+        let image = s.minimap.image();
+        let (pw, ph) = (image.width / cw, image.height / ch);
+        // The cells along the last two rows and the last two columns.
+        let cells: Vec<(u32, u32)> = (0..cw)
+            .flat_map(|x| [(x, ch - 2), (x, ch - 1)])
+            .chain((0..ch).flat_map(|z| [(cw - 2, z), (cw - 1, z)]))
+            .collect();
+        let at = |c: u32, size: u32, f: f32| {
+            let (a, b) = ((c * 4) as f32, ((c + 1) * 4).min(size) as f32);
+            a + (b - a) * f
+        };
+        let mut checked_water = false;
+        for (cx, cz) in cells {
+            let i = ((cz * ph + ph / 2) * image.width + cx * pw + pw / 2) as usize * 4;
+            let baked = &image.rgba[i..i + 3];
+            for (fx, fz) in [(0.25, 0.25), (0.75, 0.75), (0.25, 0.75), (0.75, 0.25)] {
+                let (sx, sy) = s.geom.world_to_screen(at(cx, w, fx), at(cz, h, fz));
+                let shown = px(&s.img, sx, sy);
+                for c in 0..3 {
+                    assert!(
+                        (i32::from(shown[c]) - i32::from(baked[c])).abs() <= 12,
+                        "{w}x{h}: cell ({cx}, {cz}) at ({sx:.1}, {sy:.1}) shows {shown:?}, \
+                         its colour is {baked:?}"
+                    );
+                }
+                if ids[(cz * cw + cx) as usize] == water {
+                    assert!(
+                        shown[2] > shown[0] + 60,
+                        "{w}x{h}: water is blue: {shown:?}"
+                    );
+                    checked_water = true;
+                }
+            }
+        }
+        assert!(checked_water);
     }
 }
 
