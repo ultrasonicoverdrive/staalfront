@@ -28,12 +28,16 @@ last commit, and put the list in your report and the PR body with ✓ or ✗ and
    mutation), show which test fails, then revert. Name the mutation and the failing test.
 3. **Re-pins.** For every checksum or golden that moved, measure the cause (for example: run
    with the new part switched off and show the old value comes back) and write it down.
-   The four legacy goldens never move: `wander_5000`, `command_mix`, `terrain_256` and
-   `units_spawn` (pinned in `crates/sf_sim/tests/golden.rs`).
+   Pins of earlier phases (the `crates/sf_sim/tests/golden.rs` constants and the
+   `assets/scenarios/*.expected` of `wander_5000`, `command_mix`, `terrain_256`, `units_spawn`)
+   do not move as a side effect; a move needs a rule the WP deliberately changes and a measured
+   cause (as `units_spawn` in WP4.1).
 4. **Frozen copies.** Do not change an existing copy in `assets/scenarios/*_defs/`, comments
-   included, to keep a checksum or to hide a behaviour change. Change one only when the WP
-   deliberately changes the rule or data format it covers; then document it as a re-pin
-   (line 3) and in `docs/rules/`. Adding a new `*_defs/` copy for a new scenario is fine.
+   included, to keep a checksum or to hide a behaviour change. Change one only to bring it in
+   line with the shipped data for a rule the WP deliberately changes (add the new field, or take
+   the shipped value), with a re-pin (line 3) and a note in `docs/rules/`. Never remove a value
+   or move it away from the shipped file to keep a checksum. Adding a new `*_defs/` copy for a
+   new scenario is fine.
 5. **Performance.** For a change on a hot path (sim tick, frame, upload), give before/after
    numbers from the same machine, alternating runs, and say how busy the machine was.
    These are relative timings; the container and CI cannot measure the fps requirement

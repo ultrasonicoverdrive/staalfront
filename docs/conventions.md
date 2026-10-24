@@ -53,7 +53,7 @@ Agent definitions live in `.claude/agents/`.
 A WP is built by `bouwer-sonnet` at effort medium, which works through the done-checklist in
 `.claude/agents/bouwer-sonnet.md` (claims backed, mutation-proof tests, measured re-pin causes,
 frozen copies untouched, performance numbers, licence lines, green CI on both OSes, parallel
-work, in-game screenshots for visible changes, time split). Every fix round after
+work, in-game screenshots for visible changes, the basics, time split). Every fix round after
 `CHANGES REQUESTED` runs on `bouwer-opus-medium` at effort low and continues on the WP's own
 branch. The reviewer stays on Opus at effort medium (decision Tijmen 24-10-2026, replacing
 Sonnet high and the two fix-round levels of 21-10-2026). The two supporting agents have no edit,
