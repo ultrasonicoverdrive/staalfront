@@ -132,7 +132,7 @@ const PLACEHOLDER_SCALE: f32 = 3.0;
 
 /// The placeholder look: `units.ron` at vehicle size.
 fn placeholder_style(style: Style) -> Style {
-    style.scaled(PLACEHOLDER_SCALE)
+    crate::looks::with_wreck_colour(style.scaled(PLACEHOLDER_SCALE))
 }
 
 /// Frames to let the camera settle before a screenshot is taken.
@@ -355,7 +355,7 @@ impl Runner {
         if pack.is_some() || looks.roster().is_some_and(|r| r.pack().is_some()) {
             instancer.set_aim(Some([0.5 * map_metres.0, 0.5 * map_metres.1]));
         }
-        instancer.update_tick(snap.views().iter().map(|v| motion_of(&looks, v)));
+        instancer.update_tick(motions_of(&looks, &snap));
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let camera_config = CameraConfig {
@@ -521,6 +521,18 @@ fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
         Some(t) => motion.with_turret(t.prev_facing, t.facing),
         None => motion,
     }
+}
+
+/// Everything the instancer draws for a snapshot: the entities, then the wrecks and the rubble (WP5.5),
+/// which are numbered from the first slot no entity has.
+fn motions_of<'a>(looks: &'a Looks, snap: &'a SimSnapshot) -> impl Iterator<Item = Motion> + 'a {
+    let first = snap.views().last().map_or(0, |v| v.id.index() + 1);
+    snap.views().iter().map(move |v| motion_of(looks, v)).chain(
+        snap.wrecks()
+            .iter()
+            .enumerate()
+            .filter_map(move |(n, w)| looks.wreck_motion(w, first + n as u32)),
+    )
 }
 
 impl Runner {
@@ -817,8 +829,7 @@ impl Runner {
         // metres and bucketed by map tile.
         let started = Instant::now();
         let looks = &self.looks;
-        self.instancer
-            .update_tick(self.snap.views().iter().map(|v| motion_of(looks, v)));
+        self.instancer.update_tick(motions_of(looks, &self.snap));
         self.tick_ms.push(started.elapsed());
     }
 
@@ -1110,7 +1121,10 @@ impl Runner {
             return true;
         };
         if !shot.requested {
-            shot.settled += 1;
+            // `--shots-tick`: the camera only starts to settle once the simulation is that far on.
+            if self.snap.tick().0 >= self.options.shots_tick {
+                shot.settled += 1;
+            }
             return true;
         }
         let name = SHOTS[shot.step].0;
@@ -1129,12 +1143,13 @@ impl Runner {
             return false;
         }
         println!(
-            "shot: {} ({}x{}, {} units in view, {} draw calls)",
+            "shot: {} ({}x{}, {} units in view, {} draw calls, tick {})",
             path.display(),
             image.width,
             image.height,
             self.stats.visible,
-            self.draw_calls
+            self.draw_calls,
+            self.snap.tick()
         );
         shot.step += 1;
         shot.settled = 0;
@@ -1869,6 +1884,7 @@ fn sandbox_scene(
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
     }
     world = crate::playfield::with_movement(world, &defs);
+    world = crate::playfield::with_combat(world, &defs);
     let models_ron =
         std::fs::read_to_string(assets.join(roster::MODELS_FILE)).unwrap_or_else(|e| {
             eprintln!(
@@ -1892,6 +1908,10 @@ fn sandbox_scene(
     crowd.spawn(&mut world, options.units, cells);
     let mut views = Vec::new();
     let report = world.step();
+    if options.fight {
+        let sent = crate::sandbox::start_fight(&mut world);
+        println!("fight: {sent} armed units sent on attack-move to the other side's base");
+    }
     world.snapshot().collect_into(&mut views);
     println!(
         "sandbox: {} structures and {} units placed ({} refused, {} left out), {} placeholder wanderers",

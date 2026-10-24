@@ -1035,7 +1035,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 to WP5.4 are in; WP5.5 and WP5.6 are not started.
+Status: WP5.1 to WP5.5 are in; WP5.6 is not started.
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -1061,6 +1061,13 @@ Status: WP5.1 to WP5.4 are in; WP5.5 and WP5.6 are not started.
   afterwards; a unit that is shot at turns on its attacker in reach or, if idle or on guard, follows it a bounded
   way; a move never stops; a player's order always wins; a unit at zero hit points holds where it fell; checksum
   section `A`; `tanks_vs_infantry`; no pinned checksum moved), `docs/rules/targeting.md`: done
+- WP5.5 Destruction (opt-in per world: `World::with_destruction`, three numbers in `sim.ron`; a unit or structure at
+  zero hit points is removed at one point of the tick, after all the damage is applied and before the return fire,
+  with its cells freed and the routes rebuilt; vehicles leave wrecks and structures rubble, which block nothing,
+  expire and are cleared by a building; kill credit from the damage of the killing tick, never from `hp_after`;
+  `Snapshot::deaths`/`wrecks` for the effects; checksum section `X`; the `destruction` scenario;
+  `tanks_vs_infantry` re-pinned with the cause measured; `sf_game` gets weapons, targeting and destruction, a
+  sandbox placed out of reach, wrecks drawn from the v4 models), `docs/rules/destruction.md`: done, see "WP5.5 notes"
 
 ### WP5.1 notes
 
@@ -1134,12 +1141,14 @@ at tick 205 fires at 219 with the others, not at 205. The same scenario without 
 4. **Zero hit points mean two things**: a kind that cannot be damaged (hp 0 in the table) and one that has been
    shot down. The placeholder treats both as "not a target"; WP5.5 needs to tell them apart (a flag, or a removal).
    (WP5.4 tells them apart for the units it handles: a kind with hit points zero is not mobile and not a
-   candidate; a mobile unit at zero holds where it fell.)
+   candidate; a mobile unit at zero holds where it fell.) (Settled in WP5.5: in a world with destruction a
+   shot-down entity is removed, so an entity at zero is always one that cannot be damaged.)
 5. **`UnitStats::weapon_range` and the weapon table both carry the first weapon's range.** The world refuses a
    table where they differ; one of them goes when the target choice (WP5.4) reads the table for reach.
    (Settled in WP5.4: the choice reads the table; `weapon_range` stays because the pinned scenarios without a
    table hash it, see the WP5.4 notes.)
 6. **`sf_game` has no weapons yet** (above): one line in the world setup once WP5.4 and WP5.5 land.
+   (Settled in WP5.5: `playfield::with_combat`.)
 7. **For WP5.2: the rocket cannot turn inside its own range.** With `guide_turn: 4` facing steps a tick at 12 cells
    a second the turning radius is about 6.1 cells, larger than the rocket's range of 5; a guided rocket that has to
    turn more than a few steps will miss. Raise `guide_turn`, lower `projectile_speed`, or let WP5.2 give the rocket a
@@ -1452,17 +1461,138 @@ heading in a tick. That is older than this work package (it is why no earlier pe
    13.4 ms without targeting, within the 50 ms budget but not free. Staggering by anything other than the slot
    would need a number that is not state; not done.
 7. **`sf_game` still has no weapon table** (WP5.5 and WP5.6 first); `sf_game`'s order text for a selected unit
-   reads `Pursue` as "engage".
+   reads `Pursue` as "engage". (Settled in WP5.5: it has one.)
 8. **`orders`, `replan` and `turning` will move once combat is on for them** (follow-up 7 of WP5.1): they are not given
    a weapon table or targeting here, so they are the values they were.
 9. **WP5.5 must** settle kill credit from the set of the tick's hits (the attackers `return_fire` reads are that
    set), remove units at zero (they hold where they fell until then), and decide what an explicit `Attack` order does
-   with a victim that was removed (it ends, as for a despawned one).
+   with a victim that was removed (it ends, as for a despawned one). (Done in WP5.5, see "WP5.5 notes".)
 10. **Spawn-order independence is not shown for slow-turning units.** A mobile unit is born with a random facing
     drawn from its spawn serial (`world.rs`), so a unit that must turn before it drives sets off on a different
     tick in another spawn order. The permutation tests use units that turn in one tick; a fight of slow-turning
     units spawned in another order can differ. Settle with the facing rule (a facing that does not depend on the
     spawn order) before the AI work relies on it.
+
+### WP5.5 notes
+
+**Design (more in `docs/rules/destruction.md`).** Destruction is **opt-in per world**, like targeting:
+`World::with_destruction(config)` (three numbers in `sim.ron`: `wreck_ticks` 600, `rubble_ticks` 1200,
+`wreck_min_size_tenths` 10; `sf_bridge::destruction_config`; the headless scenario field `destruction: true`,
+which needs `combat`). A world without it behaves exactly as before, so no pinned checksum of an earlier phase
+moved. With it:
+
+- **One death point in the tick.** `World::reap` runs right after the weapon stage (all the damage of the tick is
+  applied, the two-pass rule of WP5.2 stands: nothing in the tick has seen a death, so a mutual kill kills both) and
+  before the return fire. Whatever has hit points in its kind and zero now is removed with the same `despawn`
+  a `Despawn` command uses (generation up, ids stale, a structure frees its cells and the routes over them are rebuilt).
+  Zero hit points no longer mean two things: in such a world an entity at zero is always one that cannot be damaged.
+- **Wrecks and rubble** are records (`Wreck`), not entities: a vehicle (a mobile unit at least a cell across; the
+  infantry leave nothing) leaves a wreck for 600 ticks, a structure rubble of its footprint for 1200. **They block
+  nothing** (decided and written down: nothing can be trapped by a field of wrecks, the graphs stay as they are, no
+  per-tick cost). They are kept sorted by a total key, so the slot order of the dead is invisible; a building placed
+  on them clears them.
+- **Kill credit** is settled from the damage of the killing tick, per shooter, enemy damage only: most damage is the
+  killer, the rest are assists, ties by where the shooter stood `(y, x)`, never by slot, `Shot::hp_after` or the order
+  of the shots (the follow-ups of WP5.1 and WP5.4). The weapon stage notes every piece of damage with its shooter
+  (`Arsenal::hurt`, a report, not hashed). Stored as state: a tally per player (kills, assists, losses) and a kill count
+  per unit, hashed in the new last section `X`. Known limit, on purpose: damage of earlier ticks counts for nothing.
+- **Effects hook:** `Snapshot::deaths()` (tick, victim, kind, owner, class, position, facing, size, footprint, what it
+  left, killer, assists) and `Snapshot::wrecks()`; no particles (WP5.6).
+- **`sf_game`:** `playfield::with_combat` gives the world the weapon table, the targeting settings and the destruction
+  settings. A world with a weapon table gets the sandbox with the bases ten cells farther out (24 instead of 14 from
+  the middle): at 14 the two gatherings were six cells apart and would have fired on each other on tick one; a world
+  without weapons keeps the old layout, which `formation_base.rs` is measured on (I first moved it for every world and
+  three of those tests moved with it; reverted to this). Test `the_sandbox_does_not_attack_itself_once_the_world_has_weapons`
+  (a minute, three maps, zero shots). The wrecks are drawn with `Looks::wreck_motion`: the v3 vehicle wreck models
+  (light, medium, heavy by size) and the v4 rubble models by footprint (the nearest area, scaled to fit), in a dark
+  colour added to the style (`looks::with_wreck_colour`; the palette in `units.ron` is unchanged), numbered with an id no
+  entity has so that a click selects nothing. New viewer options: `--fight` (the armed units of both sides attack-move to
+  the other side's base at the start) and `--shots-tick N` (the screenshots wait for tick N); the `shot:` line names the tick.
+
+**Checksums (measured).** The section `X` is written only in a world with destruction settings. **No pinned value of an
+earlier phase moved**: `wander_5000`, `command_mix`, `terrain_256`, `units_spawn`, `bridge_200` and the others are
+what they were (`sf_sim` golden and `pinned.rs`, debug and release; `sf_headless --expect` on every scenario). **One
+re-pin, `tanks_vs_infantry`**: `0x53d3bcb0110a9479` -> `0xabca73188c269c2d`, because the scenario now has
+`destruction: true`. Measured cause: with the flag switched off in the same file the old value comes back (test
+`without_destruction_it_is_the_run_of_wp5_4`, and the release binary on a copy of the file); and with it on the run is
+**identical to the old one (positions and hit points of all thirty, every tick) until tick 303, the first removal**, after
+which the dead no longer stand in the way. The outcome moved with it: the tanks win with **3** of 10 left (was 4;
+ids 3, 4, 9 with 282, 388, 400 hit points), 243 shots (was 228), the last shot at tick 820 (was 787). The frozen copy
+`tanks_vs_infantry_defs/` is untouched.
+
+**Scenarios.**
+- `tanks_vs_infantry` (the phase-5 done-when, headless half, now with removal): every run gives the same
+  outcome and the same checksum every tick (the test compares checksums, shots, deaths, hit points, places and wrecks of
+  two runs). 27 units fall (7 tanks, 20 infantry), the first shot is at tick 270, the last infantryman falls on tick 823;
+  the seven tank wrecks appear on ticks 408, 417, 497, 558, 627, 717, 776 and the last is gone on tick 1376; the credit:
+  Meridian 20 kills, 17 assists, 7 losses, Veyran 7 kills, 0 assists, 20 losses (a tank falls to a rocket of 59, an
+  infantryman to a shell of 14: the finishing hit of the tick).
+- `destruction` (new, pinned `0x0f2b826da7a1f2d1`; the map of `pathing`, explicit attack orders, the frozen
+  definitions of `tanks_vs_infantry`): two relay transmitters shut each gap of a rock wall; the first falls on tick 372
+  and the second on 772 (cells 16 -> 12 -> 8 occupied), their rubble lies until ticks 1572 and 1972; a rifleman sent
+  at tick 800 walks through the freed cells and arrives (before, the way to the east bank was 100 cells and more round the
+  lake in the north, after it is under 45; the sectors were rebuilt); a light tank is destroyed on tick 71 and its wreck is
+  gone on tick 671; a trooper that falls on tick 109 leaves nothing; the credit by damage and position.
+
+**Tests.** `crates/sf_sim/tests/destruction.rs` (31 tests: the settings, death at the end of the tick, the mutual kill,
+objects and legacy entities never die, the cells and the routes and a walking unit, wrecks and rubble and their exact
+lifetime, a building clearing them, credit (largest share, assists, ties by place in all 24 orders of four, friendly fire
+and self-blast, a shell that outlives its gunner), what pointed at the dead (attack order, guard, engagement and
+scan, a guided rocket, a formation), the snapshot, and order independence: a fight with deaths in all 120 orders of five,
+two walls that fall together in all 720 orders of six), `crates/sf_sim/src/destruction/tests.rs` (every part of the state
+is in the checksum, the report is not, wrecks sorted), `tools/sf_headless/tests/destruction.rs` and the rewritten
+`tanks_vs_infantry.rs`, `sf_data` and `sf_bridge` (the settings), `sf_game` (`the_sandbox_does_not_attack_itself...`,
+`tests/destruction_screenshot.rs`: the real renderer on a software adapter, wreck and rubble drawn from models, the
+picture changing where each lies and back after they expire).
+
+**Mutations** (each broken on purpose in a scratch copy, the failing tests named, then reverted): no death stage at
+all (24 tests); a dead structure keeps its cells (`a_destroyed_structure_frees_every_cell_of_its_footprint`, the route
+test, the two-wall permutation test); killer by slot (`..._equal_damage_is_decided_by_where_the_shooters_stand_in_every_spawn_order`,
+the fight permutation test); credit that ignores the damage (`the_biggest_share_...`); ranking reversed (two tests); a
+wreck one tick too long (`wrecks_and_rubble_last_the_number_of_ticks_...`); wrecks not sorted (the unit test, the rubble
+and two-wall tests); own side counts for credit (`damage_from_the_victims_own_side_is_no_kill`, the blast test); a
+building that leaves the rubble under it (two tests); wrecks not hashed (`every_part_of_the_state_is_in_the_checksum`);
+deaths reported in slot order (`a_structure_leaves_rubble_the_size_of_its_footprint`); every mobile unit leaves a wreck
+(`a_vehicle_leaves_a_wreck_and_a_small_unit_leaves_none`); no credit recorded at all (the weapon stage not noting
+who hurt whom: 10 tests); a structure without rubble (4 tests); losses, assists and the unit's own kills not counted (one
+or two tests each); a gone shooter not scoring (`a_shell_that_outlives_its_gunner_still_scores_for_his_side`).
+
+**Performance.** The death stage is one pass over the slots with an early return in a world without the settings, and
+the weapon stage notes the damage only when they are given. Alternating runs of the release binary of `main` and of this
+branch on the same scenario files, five each, on a machine with a load of 4 to 6 (so only the rough size means anything): `wander_5000`
+826/833/787/817/816 ticks/s on main against 857/829/844/810/826 here, `armour_splash` 52,000 to 81,000 on both,
+`crowd_jam` about 29,000 on both (one slow run of main at 21,000): no difference beyond the noise. With the settings on, `tanks_vs_infantry` runs at 57,000 to 80,000
+ticks/s against 33,000 to 52,000 with them off (the dead no longer count in the crowd pass). These are relative numbers; the
+fps requirement is for the laptop benchmarks (M0c, after WP5.6).
+
+**Seen in the game** (Xvfb, Mesa lavapipe, `sf_game --sandbox --fight --shots-tick N --shots dir`; `docs/screenshots/wp5.5/`):
+`game_t0151_close_up_before_contact.jpg` (the two sides have started to march), `game_t0628_close_up_two_wrecks.jpg`
+(two dark vehicle wrecks next to the tanks that are still fighting), `game_t0718_middle_panels.jpg` (the F1 panels
+say tick 718, 50 entities: two of 52 are gone), `game_t1142_close_up_wrecks_expired.jpg` (the same spot after the
+wrecks have expired). From the screenshot test: `scene_t0002_before.jpg`, `scene_t0194_first_wreck.jpg` (the Veyran tank
+destroyed, its wreck lying), `scene_t0634_wrecks_and_rubble.jpg` (the wreck and the pile of rubble of the relay
+transmitter), `scene_t1834_expired.jpg`. The rubble model of 2 x 2 shows as four grey pieces. The v3 vehicle wrecks
+and the v4 rubble still lack the `fx` nodes (the checker's finding), so the visual effects stay WP5.6.
+
+**Deferred, and why.**
+1. **Death blasts** (`fuel_depot` has `death_blast: radius 3, damage 200` in the definitions) and **`consumed_on_use`**
+   (the demolition team stays after planting its charge): abilities and chains of deaths in one tick are a rule of their
+   own; the data is there. Not in this brief.
+2. **Veterancy, score, a kill feed:** the data is there (`kills_of`, `tally_of`, `Death`); nothing reads it.
+   **Accumulated credit** (damage of earlier ticks) would need a column; the killing-tick rule is the brief's.
+3. **Effects** (explosion, smoke, a fade of the wreck): WP5.6. `SimSnapshot::deaths` is the last tick's list only; a frame
+   that skips a tick skips its deaths: WP5.6 reads every snapshot or has the sim thread queue them.
+4. **Vessel wrecks** (a vessel takes the heavy vehicle wreck), the damaged and destroyed models of structures, wrecks that
+   block or slow, repair and salvage.
+5. **`Attack` orders walk round a wall of structures** (found while building the scenario): an attack order plans its route
+   to the victim's own cell, which is blocked, so units that stand within reach of the structure behind a wall walk the long
+   way round and come at it from the other side. It is the pathfinding's rule for an unreachable goal (nearest reachable
+   cell, a tie going east: my reading, the cause was not traced), not destruction's; the scenario stands the tanks in reach so as not to depend on it. A
+   WP9 or WP4 follow-up: aim an attack route at the nearest cell within weapon reach.
+6. **A unit that is told to go to an unreachable place, and the place opens,** keeps its detour (it is not asked again until it
+   arrives); the scenario orders the rifleman after the gap is open. Not changed here.
+7. **`sf_game`'s wreck instances share the LOD state slot** with the entity that has the same slot index (the wreck's id
+   is the first index no entity has); a wreck can at worst switch level of detail a frame late. Cosmetic.
 
 ## Phase 1 report (draft, WP1.14)
 
@@ -1693,8 +1823,9 @@ fixed, delete the entry in the same PR.
     delivery's licence text ("eigen werk, vrij te gebruiken in Staalfront") is not an SPDX
     licence: resolved, Tijmen set the project licence for sets v3 and v4 on 22-10-2026
     (`assets/LICENSES.md`).
-25. **Models not wired.** Decor (trees, rocks, ore stages) and wrecks are not unit roles and
-    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); the vehicles and
+25. **Models not wired.** Decor (trees, rocks, ore stages) is not a unit role and
+    has no place in the map yet (decor placement WP2.2 / WP2.3); wrecks and rubble are drawn since WP5.5
+    (from the v4 models, `sf_game::roster`); the vehicles and
     buildings are wired to set v4 (see "Art set v4" above). Still open there: the damage and
     construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
     names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay, but

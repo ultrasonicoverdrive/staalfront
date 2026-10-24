@@ -12,8 +12,10 @@
 // table and `targeting: true` lets the units choose their targets (without it nothing fires, and in
 // the earlier combat scenarios only attack orders do).
 //
-// Units at zero hit points are not removed (that is WP5.5): they stay where they fell, on hold, are not
-// picked as targets and fire no more. So the units "left" at the end are the ones with hit points.
+// `destruction: true` (WP5.5, docs/rules/destruction.md): a unit shot to zero is removed at the end of that
+// tick, and a tank leaves a wreck for 600 ticks. Until WP5.5 the dead stayed where they fell, on hold; the
+// scenario was re-pinned (0x53d3bcb0110a9479 before) with that flag, which is the only change, and
+// tools/sf_headless/tests/tanks_vs_infantry.rs shows the old value coming back with the flag off.
 // Owners: 0 Meridian (the tanks), 1 Veyran (the infantry).
 //
 // Entity ids, all at generation 0, in the order the spawns are written:
@@ -28,6 +30,7 @@ Scenario(
     unit_defs: Some("tanks_vs_infantry_defs"),
     combat: true,
     targeting: true,
+    destruction: true,
     ticks: 1500,
     commands: [
         // --- the tanks: two columns of five ---

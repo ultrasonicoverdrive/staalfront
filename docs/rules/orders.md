@@ -193,8 +193,9 @@ scenarios of phases 3 and 4, nothing changes.) What WP3.4 built is the movement 
 3. Firing: **WP5.1 did the reload timers, the minimum range, more than the first weapon and
    a placeholder instant hit, WP5.2 the projectiles** (`weapons.md`, `projectiles.md`), **WP5.3 armor and splash** (`armour.md`). The
    order `Attack` then also needs an end: the target dying is already one; leaving sight is
-   WP8's. Nothing is removed at zero hit points until WP5.5; a unit with an attack order on a
-   victim at zero keeps the order (a unit with targeting stops and holds when it is itself at zero).
+   WP8's. In a world without destruction settings nothing is removed at zero hit points; a unit with an attack order
+   on a victim at zero keeps the order (a unit with targeting stops and holds when it is itself at zero). With them
+   (WP5.5) the victim is gone and the order ends like one against any entity that is gone.
 4. `UnitStats::weapon_range` stays the range of the first weapon (the reach of an attack order; the
    targeting does not read it, see [`targeting.md`](targeting.md#range-check-and-the-duplicated-range));
    the weapon list is a table of its own, `sf_sim::WeaponTable`, with a digest of its own in

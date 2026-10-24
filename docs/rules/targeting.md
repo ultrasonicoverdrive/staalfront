@@ -10,8 +10,8 @@ choice is made, so every rule and number here is ours (clean-room, B5).
 the config from `sim.ron`, and a world that is not given one behaves exactly as it did: an idle unit next to an
 enemy fires nothing, nothing about targeting is hashed, and every checksum that was pinned before is what it
 was (below). The headless runner gives it to a scenario that says `targeting: true` (which needs `combat: true`).
-`sf_game` gives its world no weapon table yet (WP5.5 and WP5.6 come first), so the game does not choose targets
-either.
+Since WP5.5 `sf_game` gives its world the weapon table, these settings and the destruction settings
+([`destruction.md`](destruction.md)), so the units in the viewer choose targets, fire back and fall.
 
 ## The settings (data)
 
@@ -217,9 +217,11 @@ drawn from the order it was spawned in**, and a unit that has to turn before it 
 tick. The test units therefore turn to any heading in a tick; the one test that is about turning uses a slow unit
 and checks the facing, not the timing.
 
-## Zero hit points (until WP5.5)
+## Zero hit points (in a world without destruction)
 
-Nothing is removed when a unit reaches zero until WP5.5. Meanwhile, **in a world with targeting**, a unit at zero:
+Since WP5.5 a world with destruction settings removes a unit the moment it reaches zero
+([`destruction.md`](destruction.md)), and none of this applies there. In a world **without** them nothing is
+removed, and **in a world with targeting** a unit at zero:
 
 * is not a candidate and is not answered, and picks nothing, fires nothing (as before);
 * **loses its orders and stays where it fell**: `HoldPosition`, which nobody pushes, from the end of the tick it
@@ -297,7 +299,7 @@ WP5.6.
 * **Switching to a better target**, and **returning to where an idle unit stood** after a chase.
 * A unit that resumes an attack-move or a guard is **routed again on its own**: it does not rejoin the flowfield
   group of the order that started it.
-* **Kill credit and removing the dead** (WP5.5), the effects (WP5.6), and `sf_game` giving its world the weapon
-  table and the settings (when WP5.5 and WP5.6 land).
+* The effects (WP5.6). Kill credit, removing the dead and `sf_game` giving its world the weapon table and the
+  settings are done in WP5.5 ([`destruction.md`](destruction.md)).
 * The cost of a tick with many scanners is not benchmarked on its own (see "The cooldown"): every unit looks on
   the same tick of ten.

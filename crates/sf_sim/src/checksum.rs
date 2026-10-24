@@ -29,6 +29,7 @@
 //! | weapons (`W`), only with a weapon table | the weapon table's digest, then each live entity with a weapon that is reloading or in a burst, in slot order: for each weapon slot the ticks it waits to fire and the shots left in its burst (WP5.1) |
 //! | projectiles (`J`), only with a weapon table | the projectile store: its slot count, free list (stack order) and each projectile in flight in slot order, with its slot, generation, weapon, owner, target, aim point, place, height, heading, span and fuse (WP5.2) |
 //! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
+//! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -137,6 +138,12 @@
 //! to). The `Pursue` order a unit gives itself is in the orders section. A world without those
 //! settings, which is every pinned scenario of the earlier phases, hashes as before.
 //!
+//! The destruction section (WP5.5, `X`) comes last and is written only in a world that was given
+//! destruction settings (`World::with_destruction`): the settings, every wreck and heap of rubble
+//! (kept sorted by where it lies), the tally of each player (kills, assists, losses) and the kills
+//! credited to each live unit. The deaths of the last tick are a report and are not hashed. A world
+//! without those settings hashes as before.
+//!
 //! # What is deliberately left out
 //!
 //! * `prev_pos` and `prev_facing`. They exist for render interpolation only
@@ -187,6 +194,7 @@ const SECTION_FORMATIONS: u8 = b'G';
 const SECTION_WEAPONS: u8 = b'W';
 const SECTION_PROJECTILES: u8 = b'J';
 const SECTION_TARGETING: u8 = b'A';
+const SECTION_DESTRUCTION: u8 = b'X';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -509,6 +517,12 @@ impl World {
                 h.write_u8(SECTION_TARGETING);
                 targeting::write_hash(&mut h, config, e);
             }
+        }
+        // Destruction (WP5.5): the settings, the wrecks, the scores and the kills of each unit. Only in
+        // a world that was given settings, so every world of the earlier phases hashes as before.
+        if self.destruction.config.is_some() {
+            h.write_u8(SECTION_DESTRUCTION);
+            self.destruction.write_hash(&mut h, e);
         }
 
         h.finish()

@@ -30,7 +30,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sf_math::Vec2;
-use sf_sim::{Cell, EntityId, EntityView, Order, Tick, UnitStats, UnitTable, World};
+use sf_sim::{
+    Cell, Death, EntityId, EntityView, Order, Tick, UnitStats, UnitTable, World, WreckView,
+};
 
 /// How a tick went, for the interpolation and the F1 panel.
 #[derive(Copy, Clone, Debug)]
@@ -69,6 +71,10 @@ pub struct SimSnapshot {
     gave_up: Vec<Option<Tick>>,
     /// Every cell a structure occupies (WP2.4), in entity order.
     structures: Vec<(u32, u32)>,
+    /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
+    wrecks: Vec<WreckView>,
+    /// What was destroyed in the last tick (WP5.5): the hook of the effects (WP5.6).
+    deaths: Vec<Death>,
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
@@ -86,6 +92,8 @@ impl SimSnapshot {
             orders: Vec::new(),
             gave_up: Vec::new(),
             structures: Vec::new(),
+            wrecks: Vec::new(),
+            deaths: Vec::new(),
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
@@ -132,6 +140,10 @@ impl SimSnapshot {
                 }
             }
         }
+        self.wrecks.clear();
+        self.wrecks.extend(world.snapshot().wrecks());
+        self.deaths.clear();
+        self.deaths.extend_from_slice(world.snapshot().deaths());
         // The table never changes after the world is made: share one copy.
         self.units = Arc::clone(&statics.units);
         self.ground = Arc::clone(&statics.ground);
@@ -174,6 +186,19 @@ impl SimSnapshot {
     /// Every live entity, in ascending slot order.
     pub fn views(&self) -> &[EntityView] {
         &self.views
+    }
+
+    /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie. Not entities: they
+    /// cannot be picked or ordered.
+    pub fn wrecks(&self) -> &[WreckView] {
+        &self.wrecks
+    }
+
+    /// What was destroyed in the last tick of this snapshot (WP5.5): where, what, how big, who did it.
+    /// Only the last tick's: the effects of WP5.6 must read every snapshot, or the sim thread must hand
+    /// them over, before a frame that skips a tick loses a death.
+    pub fn deaths(&self) -> &[Death] {
+        &self.deaths
     }
 
     /// The position of `id` in [`SimSnapshot::views`]; `None` for a stale id.

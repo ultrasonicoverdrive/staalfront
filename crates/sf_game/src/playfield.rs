@@ -62,6 +62,33 @@ pub fn with_movement(world: World, defs: &UnitDefs) -> World {
         .expect("the shipped formation settings are ones a world takes")
 }
 
+/// `world` with the weapons of `defs` (the weapon table, WP5.1 to WP5.3), the units choosing their own
+/// targets and firing back (WP5.4, the numbers of the shipped `sim.ron`) and what is shot to zero being
+/// destroyed (WP5.5, the same file): combat as the game plays it. Call it after the unit table
+/// ([`with_movement`] is independent), before the world starts. If the weapon table is refused the
+/// world comes back as it was, reported on stderr, and nobody fires; the sandbox then stands as it did
+/// before phase 5.
+pub fn with_combat(world: World, defs: &UnitDefs) -> World {
+    if world.unit_table().is_empty() {
+        return world;
+    }
+    let table = match sf_bridge::weapon_table(defs) {
+        Ok(table) => table,
+        Err(e) => {
+            eprintln!("sf_game: weapon table: {e}; nobody fires");
+            return world;
+        }
+    };
+    let settings = SimSettings::embedded();
+    world
+        .with_weapons(table)
+        .expect("a world that has its unit table and has not started takes the weapon table")
+        .with_targeting(sf_bridge::targeting_config(&settings))
+        .expect("the shipped targeting settings are ones a world takes")
+        .with_destruction(sf_bridge::destruction_config(&settings))
+        .expect("the shipped destruction settings are ones a world takes")
+}
+
 /// The terrain of `map` for the simulation: `None` for a map without a
 /// terrain layer. The layer was checked against the shipped table when the map
 /// was loaded (`Map::load`) or generated, so an error here means the map was

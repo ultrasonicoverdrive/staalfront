@@ -16,8 +16,11 @@
 
 use sf_math::{Facing, Fx, Vec2};
 
+use crate::destruction::{Death, WreckKind};
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
 use crate::projectiles::ProjectileId;
+use crate::terrain::Cell;
+use crate::units::Footprint;
 use crate::weapons::ProjectileKind;
 use crate::world::World;
 
@@ -99,6 +102,34 @@ pub struct ProjectileView {
     pub heading: Facing,
 }
 
+/// A wreck or a pile of rubble as the presentation sees it (WP5.5). Not an entity: it has no id, cannot
+/// be picked and blocks nothing; it is drawn where it lies until `ticks_left` runs out.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct WreckView {
+    /// Vehicle wreck or rubble.
+    pub kind: WreckKind,
+    /// The kind number of the unit or structure it was (picks the model).
+    pub unit: Kind,
+    /// Who owned it (picks the colour).
+    pub owner: PlayerId,
+    /// Where it lies, in cells.
+    pub pos: Vec2,
+    /// The way a vehicle faced; zero for rubble.
+    pub facing: Facing,
+    /// The diameter of a vehicle in cells; zero for rubble.
+    pub size: Fx,
+    /// The cells rubble covers; `None` for a vehicle wreck.
+    pub footprint: Option<Footprint>,
+    /// The corner cell of the rubble with the smallest x and y; `None` for a vehicle wreck.
+    pub anchor: Option<Cell>,
+    /// The tick it was made.
+    pub born: Tick,
+    /// Ticks until it is gone, counted from the next tick to run (so it fades over the last of them).
+    pub ticks_left: u64,
+    /// How long it lies in all, in ticks.
+    pub lifetime: u64,
+}
+
 /// A read-only view of every live entity, in ascending slot order.
 #[derive(Copy, Clone)]
 pub struct Snapshot<'a> {
@@ -168,6 +199,31 @@ impl<'a> Snapshot<'a> {
             .projectiles
             .iter()
             .map(move |(id, p)| world.projectile_view(id, p))
+    }
+
+    /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
+    pub fn wrecks(&self) -> impl Iterator<Item = WreckView> + 'a {
+        let world = self.world;
+        let now = world.tick();
+        world.wrecks().iter().map(move |w| WreckView {
+            kind: w.kind,
+            unit: w.unit,
+            owner: w.owner,
+            pos: w.pos,
+            facing: w.facing,
+            size: w.size,
+            footprint: w.footprint,
+            anchor: w.anchor,
+            born: w.born,
+            ticks_left: w.ticks_left(now),
+            lifetime: w.expires.0.saturating_sub(w.born.0),
+        })
+    }
+
+    /// What was destroyed in the last tick (WP5.5): where, what, how big, and who did it. The list is
+    /// replaced by every step; the effects of WP5.6 draw an explosion from each.
+    pub fn deaths(&self) -> &'a [Death] {
+        self.world.deaths()
     }
 
     /// Replaces the contents of `out` with every projectile in flight (the same order as
