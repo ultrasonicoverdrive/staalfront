@@ -45,16 +45,18 @@ Agent definitions live in `.claude/agents/`.
 
 | Agent | Model / effort | Use |
 |---|---|---|
-| `bouwer-sonnet` | sonnet, high | Default for every WP, including those marked **[xhigh]** in PLAN.md §3. |
-| `bouwer-opus-medium` | opus, low or medium | Fix rounds: round 1 at effort low, round 2 and later at effort medium. |
+| `bouwer-sonnet` | sonnet, medium | Default for every WP, including those marked **[xhigh]** in PLAN.md §3; works through the done-checklist in its agent file. |
+| `bouwer-opus-medium` | opus, low | Every fix round, started at effort low. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
 
-A WP is built by `bouwer-sonnet`. After the first `CHANGES REQUESTED` the
-orchestrator starts fix round 1 on `bouwer-opus-medium` at effort low; fix round 2
-and later run on `bouwer-opus-medium` at effort medium. Each fix round continues on
-the WP's own branch (decision Tijmen 21-10-2026, replacing "rerun on Opus medium
-after two failed reviews" of 17-10-2026). The two supporting agents have no edit,
+A WP is built by `bouwer-sonnet` at effort medium, which works through the done-checklist in
+`.claude/agents/bouwer-sonnet.md` (claims backed, mutation-proof tests, measured re-pin causes,
+frozen copies untouched, performance numbers, licence lines, green CI on both OSes, parallel
+work, in-game screenshots for visible changes, time split). Every fix round after
+`CHANGES REQUESTED` runs on `bouwer-opus-medium` at effort low and continues on the WP's own
+branch. The reviewer stays on Opus at effort medium (decision Tijmen 24-10-2026, replacing
+Sonnet high and the two fix-round levels of 21-10-2026). The two supporting agents have no edit,
 commit or push rights.
 
 ## 4. Quality rules (PLAN.md §5, apply to every WP)

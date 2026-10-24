@@ -421,12 +421,12 @@ Record the license per asset in `assets/LICENSES.md` — from the first file onw
 ### 12.1 Agent type
 Two building agents, both in the repo (they travel to every environment):
 
-- `.claude/agents/bouwer-sonnet.md` — model `sonnet`, effort `high`: the default for every WP, including the hard ones marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
-- `.claude/agents/bouwer-opus-medium.md` — model `opus`, effort `medium` in the file: the fix rounds after a review asks for changes. Round 1 is started with the Agent tool's per-call effort set to `low`, round 2 and later use the file's `medium`. It works on the WP's existing branch and pushes to the existing PR.
+- `.claude/agents/bouwer-sonnet.md` — model `sonnet`, effort `medium` (since 24-10-2026, with a done-checklist in the file): the default for every WP, including the hard ones marked **[xhigh]** in §3 (determinism, simulation core, terrain LOD seams, picking/LOD, pathfinding, AI, full-state serialization, lockstep).
+- `.claude/agents/bouwer-opus-medium.md` — model `opus`: every fix round after a review asks for changes, started with the Agent tool's per-call effort set to `low` (since 24-10-2026). It works on the WP's existing branch and pushes to the existing PR.
 
 Decision Tijmen 17-10-2026, second change that day (Sonnet medium/xhigh from
 14-10-2026, then Opus low/medium earlier on 17-10-2026); fix rounds changed by
-decision Tijmen 21-10-2026. `bouwer-sonnet` builds one work package in its own git
+decision Tijmen 21-10-2026; build effort, checklist and fix-round effort changed by decision Tijmen 24-10-2026. `bouwer-sonnet` builds one work package in its own git
 worktree/branch and opens a PR; `bouwer-opus-medium` continues that branch and PR.
 
 Two supporting agents, both model `opus`, both read-only (no edit, commit or push):
