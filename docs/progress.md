@@ -1624,6 +1624,34 @@ footprint (`units.md`); a footprint decision, not an art one. The whole pack, wi
 and the decor, is `sf_game --crowd --models set_v4` (the sandbox draws its roles through the roster
 and does not read `--models`).
 
+## Phase 6 — Buildings, building and power
+
+Status: WP6.1 is in; WP6.2 to WP6.8 are not started.
+
+- WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
+  record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
+  there; the function is an enum with permanent numbers; the prerequisites are the tech tree; `sf_bridge::building_table`
+  turns them into `sf_sim::BuildingTable`, which a world is given with `World::with_buildings`; a new last
+  checksum section `B` that exists only with a table; no behaviour yet; no pinned checksum moved),
+  `docs/rules/buildings.md`: done
+
+### WP6.1 notes
+
+- **Where the data lives.** In `unit_defs.ron`, as a block in the structure's own record, not a new file: the
+  kind numbers, the tombstones (`retired_units`) and the footprint, price, time and power are already there,
+  and a second file would have written them twice and made a second id space. The block is optional, so the
+  frozen copies in `assets/scenarios/*_defs/` load unchanged and are not touched.
+- **Clean-room.** Every function, edge and number is invented (`buildings.md`); the build times, prices and
+  power are the placeholders of WP3.1, unchanged. `content/units.md` is unchanged.
+- **Not done, on purpose.** Nothing reads the table: placement (WP6.2), power (WP6.4) and production (WP6.5) do.
+  No unit prerequisites (which factory a rifleman needs; WP6.5). The game and the headless runner do not give
+  their worlds the table yet, so no scenario has section `B`; WP6.2 wires it with the first rule that reads it.
+  The campaign unlock order stays mission data (phase 10); a test only checks that the tree and the unlock rows
+  of `content/units.md` do not contradict each other.
+- **To decide, owner Tijmen:** the prerequisite edges (for example a radar needs a vehicle factory, advanced
+  defences need a tower and a radar) are guesses for the first skirmish; change them in
+  `unit_defs.ron` and in `the_shipped_tech_tree_is_the_documented_one`.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
