@@ -1,0 +1,71 @@
+// Ten tanks against twenty infantry, both sides on automatic targeting (WP5.4, docs/rules/targeting.md),
+// on a 64 by 64 cell open map (no terrain layer). Nobody is given an attack order: each side is told to
+// attack-move to the other's starting ground, and from there the units pick their own targets (the one
+// whose weapon the armor table says does most, then the nearest), stop to fight, and go on when it is over.
+// This is the headless half of the phase-5 done-when: the same outcome and the same checksum every run.
+// CI runs it on Linux and Windows and requires the checksum in tanks_vs_infantry.expected;
+// tools/sf_headless/tests/tanks_vs_infantry.rs runs it twice and asserts the outcome.
+//
+// `unit_defs` names a FROZEN copy of the shipped definitions (tanks_vs_infantry_defs/): the hit points,
+// reloads, ranges and the armor table that the outcome stands on are the ones in that copy, so a
+// rebalance of assets/config/ does not move this checksum. `combat: true` gives the world the weapon
+// table and `targeting: true` lets the units choose their targets (without it nothing fires, and in
+// the earlier combat scenarios only attack orders do).
+//
+// Units at zero hit points are not removed (that is WP5.5): they stay where they fell, on hold, are not
+// picked as targets and fire no more. So the units "left" at the end are the ones with hit points.
+// Owners: 0 Meridian (the tanks), 1 Veyran (the infantry).
+//
+// Entity ids, all at generation 0, in the order the spawns are written:
+//    0 to  9  light_tank (kind 19, 400 hp, armor light, cannon 35 / 2 s)       owner 0  x 6 or 8, y 24 to 36
+//   10 to 19  rifleman   (kind 12, 50 hp, armor infantry, rifle 6 / 1 s)       owner 1  x 49 to 53, y 27 to 30
+//   20 to 25  rocket_trooper (kind 13, 45 hp, rocket 45 / 2.5 s)               owner 1  the back column, x 53
+//   26 to 29  rifleman                                                         owner 1  the back column
+Scenario(
+    name: "tanks_vs_infantry",
+    seed: 0x0A54_0F17,
+    map: (width: 64, height: 64),
+    unit_defs: Some("tanks_vs_infantry_defs"),
+    combat: true,
+    targeting: true,
+    ticks: 1500,
+    commands: [
+        // --- the tanks: two columns of five ---
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 24))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 27))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 30))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 33))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (6, 36))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 24))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 27))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 30))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 33))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (8, 36))),
+
+        // --- the infantry: five columns of four; rifles in front, the rocket troopers behind ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (49, 27))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (49, 28))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (49, 29))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (49, 30))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (50, 27))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (50, 28))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (50, 29))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (50, 30))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (51, 27))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (51, 28))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (52, 27))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (52, 28))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (52, 29))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (52, 30))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (53, 27))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (53, 28))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (53, 29))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (53, 30))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (51, 29))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (51, 30))),
+
+        // --- tick 1: each side attack-moves onto the other's ground; nobody is told to attack anyone ---
+        (tick: 1, command: OrderAttackMove(ids: [Range(0, 10)], target: (56, 30))),
+        (tick: 1, command: OrderAttackMove(ids: [Range(10, 30)], target: (8, 30))),
+    ],
+)

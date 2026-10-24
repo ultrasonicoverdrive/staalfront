@@ -303,7 +303,11 @@ laptop. Never on the home server (B6, PLAN.md §13).
   without one fires nothing). Each entity keeps a reload and a burst counter per weapon slot, hashed in
   checksum section `W`, written for as long as the world has a weapon table, so no earlier checksum moved.
   A unit with an `Attack` order fires; WP5.3 replaced what a hit does (armor table, splash) and WP5.4
-  will replace who it is fired at. Rules: `docs/rules/weapons.md`, `docs/rules/armour.md`.
+  who it is fired at: in a world given the targeting settings (`World::with_targeting`) idle, hold, guard and
+  attack-move units pick the target their weapon does most to (the armor table is the preference, the nearest
+  breaks a tie) by taking an `Order::Pursue` on it and keeping the order they had, and a unit that is shot at
+  turns on its attacker (checksum section `A`, only with the settings). Rules: `docs/rules/weapons.md`,
+  `docs/rules/armour.md`, `docs/rules/targeting.md`.
 - **Projectiles (WP5.2).** A weapon that is not `Instant` launches a projectile (straight, arcing, guided or
   falling) into a store of its own in `sf_sim::projectiles`: a slot vector with a free list and a generation
   per slot, iterated in slot order and hashed in checksum section `J` (written with `W`, only for a world with

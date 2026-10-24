@@ -130,7 +130,7 @@ jobs:
         run: |
           mkdir -p headless-logs
           status=0
-          for name in wander_5000 command_mix terrain_256 units_spawn orders terrain_costs pathing pathing_256 bridge_200 crowd_jam turning replan formation_move weapons_reload projectiles armour_splash; do
+          for name in wander_5000 command_mix terrain_256 units_spawn orders terrain_costs pathing pathing_256 bridge_200 crowd_jam turning replan formation_move weapons_reload projectiles armour_splash tanks_vs_infantry; do
             cargo run --release -p sf_headless -- "assets/scenarios/$name.ron" \
               --every 100 \
               --out "headless-logs/$name.json" \

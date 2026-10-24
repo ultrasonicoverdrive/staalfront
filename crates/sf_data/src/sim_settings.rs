@@ -11,14 +11,16 @@
 //! before the order is given up, and how many ticks between two new searches for a
 //! target that keeps moving, and the formation settings (WP4.6): whether a group move order
 //! forms a formation, how many units it needs and may have, how wide the lattice is, how
-//! fast the formation goes and how far from its slot a member may be. Game data is in RON and not in code
+//! fast the formation goes and how far from its slot a member may be, and the targeting settings (WP5.4):
+//! how many ticks pass between two looks round of a unit for a target and how far it follows an
+//! attacker beyond its reach. Game data is in RON and not in code
 //! (PLAN.md section 5, rule 6), so the numbers live in the file; the simulation
 //! keeps its own defaults (the same numbers) for worlds that are given none,
 //! which is what the tests and the frozen headless scenarios use, so that
 //! turning a knob in the file never moves their checksums.
 //! `sf_bridge::path_budget`, `sf_bridge::flowfield_threshold`,
-//! `sf_bridge::collision_config`, `sf_bridge::replan_config` and
-//! `sf_bridge::formation_config` hand the values to the
+//! `sf_bridge::collision_config`, `sf_bridge::replan_config`, `sf_bridge::formation_config` and
+//! `sf_bridge::targeting_config` hand the values to the
 //! world, which checks them against its minimums.
 //!
 //! ```
@@ -57,6 +59,15 @@ pub const MAX_REPLAN_MAX: u8 = 100;
 
 /// The most units a formation may hold (the arrival slots of a field are as many).
 pub const MAX_FORMATION_UNITS: u16 = 256;
+
+/// The most ticks a scan cooldown may be (fifty seconds).
+pub const MAX_SCAN_COOLDOWN: u16 = 1000;
+
+/// The most cells a unit may follow an attacker.
+pub const MAX_PURSUIT_CELLS: u8 = 32;
+
+/// The most ticks `pursuit_reset_ticks` may be (equal to `sf_sim`'s).
+pub const MAX_PURSUIT_RESET_TICKS: u16 = 2000;
 
 fn default_collision() -> bool {
     true
@@ -124,6 +135,18 @@ fn default_formation_patience_ticks() -> u16 {
 
 fn default_formation_ahead_tenths() -> u16 {
     20
+}
+
+fn default_scan_cooldown() -> u16 {
+    10
+}
+
+fn default_pursuit_cells() -> u8 {
+    6
+}
+
+fn default_pursuit_reset_ticks() -> u16 {
+    100
 }
 
 /// The settings of the simulation.
@@ -199,6 +222,19 @@ pub struct SimSettings {
     /// formation. 5 to `formation_reform_tenths`.
     #[serde(default = "default_formation_ahead_tenths")]
     pub formation_ahead_tenths: u16,
+    /// Ticks between two looks round for a target of one unit (WP5.4). 1 to
+    /// [`MAX_SCAN_COOLDOWN`].
+    #[serde(default = "default_scan_cooldown")]
+    pub scan_cooldown: u16,
+    /// Cells beyond its weapon's reach that a unit that is shot at follows its attacker, and the
+    /// farthest it strays from where it began (WP5.4). 0 (never follows) to
+    /// [`MAX_PURSUIT_CELLS`].
+    #[serde(default = "default_pursuit_cells")]
+    pub pursuit_cells: u8,
+    /// Ticks an idle unit must be back at rest before a new chase measures its pursuit from a new
+    /// spot (WP5.4). 1 to [`MAX_PURSUIT_RESET_TICKS`].
+    #[serde(default = "default_pursuit_reset_ticks")]
+    pub pursuit_reset_ticks: u16,
 }
 
 /// Why a settings file was refused.
@@ -235,6 +271,16 @@ pub enum SimSettingsError {
     /// The formation numbers are out of their ranges (see the fields of
     /// [`SimSettings`]).
     Formation,
+    /// The targeting numbers are out of their ranges: `scan_cooldown` between 1 and
+    /// [`MAX_SCAN_COOLDOWN`], `pursuit_cells` at most [`MAX_PURSUIT_CELLS`].
+    Targeting {
+        /// `scan_cooldown`.
+        scan: u16,
+        /// `pursuit_cells`.
+        pursuit: u8,
+        /// `pursuit_reset_ticks`.
+        reset: u16,
+    },
 }
 
 impl fmt::Display for SimSettingsError {
@@ -277,6 +323,17 @@ impl fmt::Display for SimSettingsError {
                  4000, formation_pace_permille 500 to 1000, formation_catchup_permille from the \
                  pace up to 1000, formation_reform_tenths 5 to 100, formation_patience_ticks \
                  20 to 2000 and formation_ahead_tenths 5 up to formation_reform_tenths"
+            ),
+            Self::Targeting {
+                scan,
+                pursuit,
+                reset,
+            } => write!(
+                f,
+                "sim.ron: scan_cooldown {scan}, pursuit_cells {pursuit} and pursuit_reset_ticks \
+                 {reset} do not fit: scan_cooldown is between 1 and {MAX_SCAN_COOLDOWN}, \
+                 pursuit_cells is at most {MAX_PURSUIT_CELLS}, pursuit_reset_ticks is between 1 \
+                 and {MAX_PURSUIT_RESET_TICKS}"
             ),
         }
     }
@@ -337,6 +394,17 @@ impl SimSettings {
             || settings.formation_ahead_tenths > settings.formation_reform_tenths
         {
             return Err(SimSettingsError::Formation);
+        }
+        if settings.scan_cooldown < 1
+            || settings.scan_cooldown > MAX_SCAN_COOLDOWN
+            || settings.pursuit_cells > MAX_PURSUIT_CELLS
+            || !(1..=MAX_PURSUIT_RESET_TICKS).contains(&settings.pursuit_reset_ticks)
+        {
+            return Err(SimSettingsError::Targeting {
+                scan: settings.scan_cooldown,
+                pursuit: settings.pursuit_cells,
+                reset: settings.pursuit_reset_ticks,
+            });
         }
         Ok(settings)
     }
@@ -431,6 +499,44 @@ mod tests {
         assert!(with(100, 3, 1001).is_err(), "bounded");
         assert!(with(100, 0, 20).is_err(), "at least one replan");
         assert!(with(100, 101, 20).is_err(), "bounded");
+    }
+
+    #[test]
+    fn the_targeting_settings_have_defaults_and_are_checked() {
+        let s = SimSettings::from_ron("(path_node_budget: 4096, flowfield_threshold: 8)").unwrap();
+        assert_eq!((s.scan_cooldown, s.pursuit_cells), (10, 6));
+        let with = |scan: u16, pursuit: u8| {
+            SimSettings::from_ron(&format!(
+                "(path_node_budget: 4096, flowfield_threshold: 8, scan_cooldown: {scan}, \
+                 pursuit_cells: {pursuit})"
+            ))
+        };
+        assert!(with(1, 0).is_ok(), "a pursuit of zero never follows");
+        assert!(with(1000, 32).is_ok());
+        assert!(with(0, 6).is_err(), "a cooldown is at least a tick");
+        assert!(with(1001, 6).is_err(), "bounded");
+        assert!(with(10, 33).is_err(), "bounded");
+        let reset = |t: u16| {
+            SimSettings::from_ron(&format!(
+                "(path_node_budget: 4096, flowfield_threshold: 8, pursuit_reset_ticks: {t})"
+            ))
+        };
+        assert_eq!(reset(1).unwrap().pursuit_reset_ticks, 1);
+        assert!(reset(MAX_PURSUIT_RESET_TICKS).is_ok());
+        assert!(reset(0).is_err(), "a reset is at least a tick");
+        assert!(reset(MAX_PURSUIT_RESET_TICKS + 1).is_err(), "bounded");
+        assert!(
+            matches!(
+                with(0, 6),
+                Err(SimSettingsError::Targeting {
+                    scan: 0,
+                    pursuit: 6,
+                    reset: 100
+                })
+            ),
+            "{:?}",
+            with(0, 6)
+        );
     }
 
     #[test]

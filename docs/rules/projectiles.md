@@ -231,13 +231,14 @@ sees to it). `weapons_defs` (WP5.1) has the speeds already; `projectiles_defs` i
 
 ## Not here (and where it goes)
 
-* Firing at the ground, and any way for a structure to choose a target: WP5.4 (a projectile already has a
+* Firing at the ground (not done in WP5.4 either), and a structure that chooses a target: WP6.7, see
+  [`targeting.md`](targeting.md) (a projectile already has a
   ground-point target: a guided one whose target died is one).
 * Armor, splash, damage types: done in WP5.3 ([`armour.md`](armour.md)).
 * A destroyed unit leaving the world, kill credit: WP5.5 (see the `hp_after` note).
 * Drawing projectiles, muzzle flashes, explosions: WP5.6 (the snapshot is ready).
 * Projectiles hitting what is in the way (a wall, a friendly unit), line of sight, terrain height: later.
-* `sf_game` still has no weapon table (nothing would show a shot): one line when WP5.4 and WP5.5 land.
+* `sf_game` still has no weapon table (nothing would show a shot): one line when WP5.5 and WP5.6 land.
 
 ## Tests
 

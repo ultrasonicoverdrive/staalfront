@@ -15,9 +15,10 @@
 //! | [`Order::HoldPosition`] | stands still on purpose and never moves | never by itself; it blocks the queue behind it |
 //! | [`Order::Move`] | goes to a point | it is within [`ARRIVE_TOLERANCE`] of the point |
 //! | [`Order::Attack`] | goes toward an entity until it is within its first weapon's reach, then faces it | the target is gone (dead, despawned, stale id) |
-//! | [`Order::AttackMove`] | goes to a point and would engage what it meets on the way | it is within [`ARRIVE_TOLERANCE`] of the point |
+//! | [`Order::AttackMove`] | goes to a point and, in a world with targeting (WP5.4), stops to fight what it meets in reach on the way | it is within [`ARRIVE_TOLERANCE`] of the point |
 //! | [`Order::Guard`] | goes to a point and stays there, or follows an entity and stays near it | a point guard never ends by itself; an entity guard ends when the entity is gone |
 //! | [`Order::Scatter`] | takes a short step in a deterministic direction | it is within [`ARRIVE_TOLERANCE`] of the spot |
+//! | [`Order::Pursue`] | what an `Attack` does, on a target the unit chose itself (WP5.4); a player cannot give it | the target is gone, at zero hit points or (for a unit that may not follow) out of reach; the unit then goes back to the order it had |
 //!
 //! `Scatter` is a *command-time* order: when it becomes current it is replaced
 //! by the [`Order::Move`] to the spot it picked (a pure function of the unit's
@@ -100,17 +101,20 @@
 //! the order's own walk (the leader at the pace of the formation; a unit that cannot see its slot).
 //! Any new order or the end of one takes the unit out of its formation (`begin`, `clear`).
 //!
-//! # What phase 5 fills in
+//! # Choosing targets (WP5.4)
 //!
-//! There is no combat here. [`would_acquire_targets_here`] is called every
-//! tick from the places where a unit would look for a target ([`Order::AttackMove`]
-//! and [`Order::Guard`]); it does nothing. Phase 5 puts target selection behind
-//! it: scan for an enemy in sight, and for an attack-move or a guard turn the
-//! unit toward it (keeping the interrupted order, for instance by putting it at
-//! the front of the queue). Idle units are skipped by the behaviour pass, so
-//! the return-fire of an idle unit needs a pass of its own. The reach used for
-//! [`Order::Attack`] is `UnitStats::weapon_range`, the first weapon's range
-//! (WP5.1 adds the others and the minimum range).
+//! A world with targeting ([`crate::targeting`], `docs/rules/targeting.md`) lets an idle unit, a
+//! unit on `HoldPosition`, a guard and a unit on attack-move pick a target in reach, and fire back
+//! at whoever shoots them. The unit puts itself on an [`Order::Pursue`] on the target and keeps the
+//! order it had; when the target is gone the order is begun again. [`Order::Pursue`] is walked like an
+//! [`Order::Attack`], except that it heads for the place where the target stood at the end of the
+//! last tick (so that the slot order cannot matter) and, for a unit that may not follow its target
+//! (everything but an idle unit or a guard that was shot at from beyond its reach), it never walks.
+//! A move order is never interrupted. The reach used for [`Order::Attack`] is
+//! `UnitStats::weapon_range`, the first weapon's range (WP5.1); `Pursue` uses the range of the
+//! weapon that chose the target, from the weapon table. `UnitStats::weapon_range` stays because the
+//! pinned scenarios without a weapon table hash it and `sf_game` has no table yet; the world
+//! refuses a table whose first weapons disagree with it.
 
 use sf_math::{Facing, Fx, Vec2};
 
@@ -123,6 +127,7 @@ use crate::formation::{self, Member};
 use crate::ids::{EntityId, Tick};
 use crate::movement::Ground;
 use crate::path::{Aim, Pathing, Steer};
+use crate::targeting;
 use crate::turning::{self, Turning};
 use crate::turret;
 use crate::units::{UnitClass, UnitStats, UnitTable};
@@ -186,6 +191,10 @@ pub enum Order {
     Guard(GuardTarget),
     /// A short step in a deterministic direction.
     Scatter,
+    /// Go for an entity the unit chose itself (WP5.4): an `Attack` that a unit gives itself and
+    /// that a player cannot. The order the unit had is kept in its engagement and begun again when this
+    /// one ends.
+    Pursue(EntityId),
 }
 
 impl Order {
@@ -217,6 +226,11 @@ impl Order {
             }
             Order::Scatter => h.write_u8(6),
             Order::HoldPosition => h.write_u8(7),
+            Order::Pursue(id) => {
+                h.write_u8(8);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
         }
     }
 }
@@ -302,11 +316,6 @@ pub fn scatter_offset(id: EntityId, tick: Tick) -> Vec2 {
     Vec2::from_facing(facing, length)
 }
 
-/// The hook for target selection (phase 5). Called every tick for a unit that
-/// would look for a target: an attack-move on its way and a guard at its post.
-/// It does nothing yet.
-pub(crate) fn would_acquire_targets_here(_e: &Entities, _i: usize) {}
-
 /// Where the current order of unit `i` wants the unit to be: the point of a move, an
 /// attack-move or a guard of a point, the live position of the entity of an attack or
 /// a guard of an entity; `None` for an order that does not walk, or whose entity is gone.
@@ -316,6 +325,8 @@ pub(crate) fn destination_of(e: &Entities, i: usize) -> Option<Vec2> {
         Order::Attack(id) | Order::Guard(GuardTarget::Entity(id)) => {
             live_slot(e, id).map(|j| e.pos[j])
         }
+        // Where the target stood at the end of the last tick, as `run` walks it.
+        Order::Pursue(id) => live_slot(e, id).map(|_| e.eng[i].aim),
         Order::Idle | Order::HoldPosition | Order::Scatter => None,
     }
 }
@@ -371,6 +382,8 @@ pub(crate) fn begin(e: &mut Entities, i: usize, order: Order, tick: Tick, bounds
     e.order[i] = order;
     e.target[i] = None;
     e.guard_walking[i] = false;
+    // Any new order ends an engagement (WP5.4); the unit that engaged itself sets it again after.
+    e.eng[i].forget();
     e.crowd[i].reset_progress();
     // A new order lets go of the arrival slot the unit stood on (WP4.4b).
     e.crowd[i].claim = Claim::default();
@@ -421,6 +434,7 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
     e.queue[i] = OrderQueue::EMPTY;
     e.target[i] = None;
     e.guard_walking[i] = false;
+    e.eng[i].forget();
     e.crowd[i].reset_progress();
     e.form[i] = Member::NONE;
     e.route.reset(i);
@@ -429,7 +443,7 @@ pub(crate) fn clear(e: &mut Entities, i: usize) {
 
 /// The current order is done: the next queued order starts, or the unit goes
 /// idle.
-fn finish(e: &mut Entities, i: usize, tick: Tick, bounds: (Vec2, Vec2)) {
+pub(crate) fn finish(e: &mut Entities, i: usize, tick: Tick, bounds: (Vec2, Vec2)) {
     match e.queue[i].pop_front() {
         Some(next) => begin(e, i, next, tick, bounds),
         None => {
@@ -627,7 +641,11 @@ pub(crate) fn run(
     // A unit that was stuck after all the replans it may ask for gives its order up
     // (WP4.7): the next order of its queue starts, or it stands idle where it is.
     if e.crowd[i].give_up {
-        finish(e, i, tick, bounds);
+        if let Order::Pursue(_) = e.order[i] {
+            targeting::end_engagement(e, i, tick, bounds);
+        } else {
+            finish(e, i, tick, bounds);
+        }
         // Kept for the presentation until the unit is given an order (below).
         e.crowd[i].gave_up_at = Some(tick);
         return;
@@ -636,21 +654,20 @@ pub(crate) fn run(
         // Not reachable through the invariant (a unit with no order is idle),
         // but a stray one settles instead of looping.
         Order::Idle | Order::Scatter => clear(e, i),
-        // Never moves. Phase 5 may fire from here, never chase.
-        Order::HoldPosition => would_acquire_targets_here(e, i),
+        // Never moves. It fires from here at what it picks in reach (WP5.4): its order is then a
+        // `Pursue` that does not walk.
+        Order::HoldPosition => {}
         Order::Move(destination) => {
             if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground, path) {
                 finish(e, i, tick, bounds);
             }
         }
         Order::AttackMove(destination) => {
-            would_acquire_targets_here(e, i);
             if go_to(e, i, destination, ARRIVE_TOLERANCE, m, ground, path) {
                 finish(e, i, tick, bounds);
             }
         }
         Order::Guard(GuardTarget::Point(post)) => {
-            would_acquire_targets_here(e, i);
             // Never ends by itself; a unit that has been moved off its post
             // walks back.
             go_to(e, i, post, ARRIVE_TOLERANCE, m, ground, path);
@@ -660,7 +677,6 @@ pub(crate) fn run(
                 finish(e, i, tick, bounds);
                 return;
             };
-            would_acquire_targets_here(e, i);
             let radius = radius_of(e, j, units);
             let (close, leash) = (GUARD_CLOSE + radius, GUARD_LEASH + radius);
             // Hysteresis: a walking guard walks on until it is close; a
@@ -690,6 +706,42 @@ pub(crate) fn run(
                 // In reach: face the target the way the class turns on the spot
                 // (WP4.5). A unit with a turret leaves that to the turret and
                 // keeps its hull as it is. Firing comes in phase five.
+                let turning = m
+                    .class
+                    .map_or(Turning::LEGACY, |class| ground.movement.turning(class));
+                let (facing, carry) = turning::turn_in_place(
+                    &turning,
+                    e.facing[i],
+                    e.turn_carry[i],
+                    wanted,
+                    m.turn_per_tick,
+                );
+                e.facing[i] = facing;
+                e.turn_carry[i] = carry;
+            }
+        }
+        Order::Pursue(victim) => {
+            let Some(j) = live_slot(e, victim) else {
+                targeting::end_engagement(e, i, tick, bounds);
+                return;
+            };
+            // The place the target stood at the end of the last tick, not where it is now: a target
+            // that already took its step this tick would make the walk depend on the slot order.
+            let eng = e.eng[i];
+            let at = eng.aim;
+            // A unit that may follow walks into reach; one that may not stands (it was in reach when it
+            // chose, and the targeting stage lets go of a target that left it).
+            let in_reach = if eng.chase {
+                let reach = eng.reach + radius_of(e, j, units);
+                go_to(e, i, at, reach, m, ground, path)
+            } else {
+                e.target[i] = None;
+                true
+            };
+            if in_reach
+                && let Some(wanted) = (at - e.pos[i]).facing()
+                && !turret::has_turret(e, i, units)
+            {
                 let turning = m
                     .class
                     .map_or(Turning::LEGACY, |class| ground.movement.turning(class));
