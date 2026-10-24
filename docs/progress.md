@@ -85,8 +85,8 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
 - WP2.2 Materials per terrain type: done (PR #66, branch `wp/2.2-terrain-materials`, CI green incl. Windows/WARP)
-- WP2.3 Minimap shows terrain types (flat `minimap_colour` per type in the terrain type table,
-  baked per cell, light relief shading; notes below): done (PR pending)
+- WP2.3 Minimap shows terrain types (one flat colour per type from its look in
+  `terrain_look.ron`, baked per cell, light relief shading; notes below): in review (PR #65)
 - WP2.4 Cell grid overlay by terrain type and occupancy: open
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
@@ -130,17 +130,23 @@ renderer always uses the shipped `TerrainTypes::embedded()` table; a map validat
 another table would draw unknown ids as layer 0 (a `debug_assert` catches it), so pass the
 real table in once maps can carry their own; (2) the faint 4 m tile repeat shows from far
 away; a per-cell texture offset or a longer repeat would hide it. Still open for M0b:
-WP2.3 (the minimap still bakes the old material map) and WP2.4. Water has no level offset and
+WP2.3 (minimap, PR #65) and WP2.4. Water has no level offset and
 is not animated (later polish).
 
 WP2.3 notes. The minimap draws every gameplay cell in the flat colour of its terrain type.
-- **Colour in data.** `TerrainType` has a new required field `minimap_colour: (r, g, b)` (sRGB)
-  in `assets/config/terrain_types.ron` (grass green, road tan, water blue, rock grey, ore
-  gold, bridge brown); a test requires every pair of shipped colours to be at least 50 apart
-  in RGB. It is presentation only (the sim never reads it, no checksum moves). WP2.2 maps the
-  types to 3D materials on its own; the two are meant to line up by type name, nothing shares
-  code. If WP2.2 added a colour field to the same struct, merge by keeping both: this one is
-  the minimap's, a material colour is a different thing.
+- **Colour from the look, one source** (review round 1, decision by the orchestrator). The
+  colour is not in the gameplay table: `TerrainLook` (`assets/config/terrain_look.ron`,
+  WP2.2) has an optional `minimap: (r, g, b)`, and `TerrainLook::minimap_color()` gives it or
+  the look's base `color`. Only ore names one (the mean of its flecked texture); the others
+  use their base colour: grass (82, 138, 54), road packed earth light tan (206, 184, 132),
+  water (40, 108, 164), rock mid grey (132, 128, 124), ore (138, 100, 39), bridge light wood
+  (202, 142, 76). sf_ui already depended on sf_render (camera, wgpu, the material textures),
+  so the minimap reads `sf_render::terrain_look::TerrainLooks` directly; no type moved
+  crates and sf_data is back to main's (no presentation field in `TerrainType`). Tests
+  (`sf_render`, `terrain_look/tests.rs`): every minimap colour is the look colour or an
+  override within 40 of the texture mean (drift), all pairs at least 50 apart, and each
+  colour says what the type is (a water/bridge swap fails). `Minimap::bake_with` takes the
+  looks next to the types.
 - **Bake** (`sf_ui::minimap`, `Minimap::bake` / `bake_with`): one colour per gameplay cell
   (`Map::terrain`), then a whole number of pixels per cell (nearest), so cells stay crisp under
   the UI's bilinear sampler: 64 cells -> 256 px (4 per cell), 96 x 64 -> 192 x 128, 256 ->
@@ -148,33 +154,44 @@ WP2.3 notes. The minimap draws every gameplay cell in the flat colour of its ter
   river is still a visible line). A map larger than the side is sampled down. A map without a
   terrain layer falls back to the average material colour (as before); an id missing from the
   table is grey. The old per-metre bake is gone.
+- **Partial cells** (review round 1). A map side that is not a multiple of 4 m ends in a
+  partial cell; the image holds whole cells, so it is wider than the map. The panel now shows
+  only the part of the image on the map (`Minimap::uv`: image size x metres / (cells x 4)),
+  so every cell is where its metres are and the dots, the field-of-view frame and clicks
+  (all in metres) agree with it. Before, 66 x 50, 130 x 62 and 1022 x 1022 m maps showed 29,
+  48 and 511 cells in a neighbour's place (review measurement). Tests:
+  `a_map_with_partial_cells_draws_every_cell_in_its_own_place` (66 x 50 at 15 and 1 px per
+  cell, 130 x 62, 1022 x 1022; every cell at nine points via the drawn quad, each a dot,
+  the frame on the last cell's borders, a click in the last cell) and the lavapipe test
+  `minimap_draws_every_cell_where_it_is` (a water/grass checkerboard of 128 and 130 x 126 m,
+  the pixel at each edge cell's `world_to_screen` position). With the old UV both fail
+  (197 of 221 cells wrong at 66 x 50).
 - **Relief.** One shade per cell from the height difference between the north-west and the
   south-east of its surroundings (light from the north-west), at most 18 % either way
   (`RELIEF_SHADE`), so hills read and the type colour stays the type. This replaces the faint
   per-metre shading (open item 8).
 - **Cost.** One texture and one quad, as before: nothing is added per frame (the field-of-view
-  frame, the click-to-move and the unit dots are untouched). Baked once when the map is set;
-  the bake takes 0.5 / 1.1 / 3.8 ms for 64 / 128 / 256 cells (release, this machine), less than
-  the old bake, because the procedural material textures are no longer generated when the map
-  has a terrain layer. The terrain is static; when it can change (editing, later) call
+  frame, the click-to-move and the unit dots are untouched; the UV is computed at bake time).
+  Baked once when the map is set; the bake takes 0.5 / 1.1 / 3.8 ms for 64 / 128 / 256 cells
+  (release, round 0), less than the old bake, because the procedural material textures are no
+  longer generated when the map has a terrain layer. Round 1 looks the colour up once per type
+  id, not per cell. The terrain is static; when it can change (editing, later) call
   `Minimap::bake` and `UiRenderer::set_minimap` again, which is what `Hud::attach` does.
-- **Lavapipe frame time** (`sf_demo --bench --seconds 20`, 1280 x 720, Xvfb, five alternating
-  runs each; the machine was shared with other agents, so single runs range 84 to 160 ms
-  p50): the quietest pair is 84.3 ms before and 84.9 ms after (p50), the other pairs scatter
-  either way by more than that. No difference can be seen. The GTX 1650 expectation: the same
-  one textured quad over a texture of at most 256 x 256, as before; well under a millisecond
-  of GPU time and far under the 3.9 ms p99 of M0. M0b is Tijmen's run after WP2.4.
+- **Lavapipe frame time** (round 0, `sf_demo --bench --seconds 20`, 1280 x 720, Xvfb, five
+  alternating runs each; shared machine, single runs 84 to 160 ms p50): the quietest pair is
+  84.3 ms before and 84.9 ms after (p50); no difference can be seen. The GTX 1650
+  expectation: the same one textured quad over a texture of at most 256 x 256; well under a
+  millisecond of GPU time and far under the 3.9 ms p99 of M0. M0b is Tijmen's run after WP2.4.
 - **Tests.** `sf_ui` unit tests: a texel of every cell has its type's colour (all six types,
   at 1, 2, 4 and 16 px per cell), the relief shade is bounded and directional, the material
-  fallback, an unknown type, a downsized map, and the shipped `assets/maps/bridge` map shows
-  water, rock and bridge. The existing minimap input and screenshot tests are unchanged and
-  green. Screenshots (`--shots` under Xvfb with Mesa lavapipe): `docs/screenshots/wp2.3/`.
-- **Seen in the screenshots, not changed.** The 3D view still draws water and the bridge deck
-  with the old materials (WP2.2), so for now the minimap shows the types and the main view
-  does not. The blue unit dots (player 2) are close to the water colour, but ground units are
-  not on water; vessels will be (phase 4 follow-up), so revisit the dot colours then.
-- The "Known gaps" line under "Playable state" that lists "no minimap colours" is left for the
-  end of phase 2 (WP2.2 and WP2.4 edit it as well); the minimap colours are done.
+  fallback, an unknown type, a downsized map, the shipped `assets/maps/bridge` map shows
+  water, rock and bridge, and the partial-cell test above. Screenshots (`--shots` under Xvfb
+  with Mesa lavapipe): `docs/screenshots/wp2.3/`.
+- **Unit dots.** Not every ground unit stays off water: the hover `amphibious_transport`
+  crosses it. With the round-1 palette the closest dot/terrain pairs are yellow on road (75),
+  yellow on bridge (78), red on bridge (79), blue on water (85) and green on grass (91); ore
+  went from gold to gold-brown, so yellow on ore (53 in round 0) is now 113. No outline was
+  added: it would be one quad more per unit per frame; it is an open item under "Known gaps".
 
 ## Phase 3 — Units, selection and commands
 
@@ -303,8 +320,12 @@ Known gaps (owner in brackets):
 - No combat: attack and attack-move walk to weapon reach; nothing acquires a target, fires
   or takes damage; only the first weapon's range is read (phase 5, WP5.1).
 - No ownership check in the sim and no lockstep packet (WP14.1).
-- The terrain types are drawn per type (WP2.2), but the minimap still shows the old
-  material map and there is no cell overlay (WP2.3, WP2.4).
+- The terrain types are drawn per type (WP2.2) and on the minimap (WP2.3), but there is no
+  cell overlay (WP2.4).
+- The minimap unit dots have no outline; the closest dot/terrain pair is the yellow player
+  on road (RGB distance 75), then yellow on bridge (78), red on bridge (79) and blue on
+  water (85; the hover `amphibious_transport` can be there). An outline would be one more
+  quad per unit per frame (WP2.3 follow-up).
 - No sidebar, build menu, economy or power; the HUD is a top bar with the selected count
   (phases 6, 7, 11).
 - No vessels in the sandbox (WP4.1 follow-up: they need water to stand on).

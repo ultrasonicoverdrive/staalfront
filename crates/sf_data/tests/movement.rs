@@ -331,7 +331,6 @@ fn a_new_terrain_type_needs_a_cost_from_every_class() {
         name: "marsh".into(),
         buildable: false,
         harvestable: false,
-        minimap_colour: [60, 90, 60],
     });
     let types = TerrainTypes::new(types).unwrap();
     let defs = UnitDefs::embedded();

@@ -36,10 +36,6 @@ What the flags mean, and who reads them:
   (below) and `Command::PlaceStructure`; WP6.x building placement will read it too.
 * `harvestable`: whether harvesters can take resources from the cell. Nothing reads it
   yet (phase 7).
-* `minimap_colour` (WP2.3): the flat sRGB colour of the type on the minimap. Presentation
-  only, the sim never reads it. The six shipped colours are pinned to differ by at least 50
-  (RGB distance), so a new type has to bring a colour that stands out. The minimap shades the
-  relief lightly over it (at most 18 % either way), so the colour stays the type.
 
 Which cells a unit may enter and its speed there: `World::cost(class, cell)` and
 `World::passable(class, cell)` (`movement.md`). The sim's `TerrainFlags` also has a derived
@@ -112,6 +108,17 @@ are not involved.
 | rock | mid grey with dark cracks | |
 | ore | dark ochre with gold flecks | |
 | bridge | light wood, 8 planks per 4 m with dark gaps | flat |
+
+* **The minimap** (WP2.3) draws every cell in one flat colour of its type, taken from the
+  same look: `minimap: (r, g, b)` if the entry names one, otherwise its base `color`. The
+  look is the one source of a type's colour; the gameplay table `terrain_types.ron` has
+  none. Only ore names a minimap colour (138, 100, 39): its base is the dark ground under
+  the gold flecks, the minimap colour is the mean of the texture. Tests in
+  `sf_render::terrain_look` hold that every minimap colour lies within 40 (RGB distance)
+  of the mean of its look's texture, that every pair is at least 50 apart, and that each
+  says what its type is (grass green, water blue, rock a mid grey of low saturation, ore
+  warm and darker than the road, road light tan, bridge light wood). The minimap shades
+  the relief lightly over the colour (at most 18 % either way).
 
 * **Soft borders.** The terrain shader reads one index texel per gameplay cell (the
   texture array layer and the style bits) and blends the four nearest cell centres.

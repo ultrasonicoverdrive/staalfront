@@ -171,7 +171,6 @@ fn a_cell_with_an_unknown_terrain_id_is_refused_with_its_position() {
         name: "lava".into(),
         buildable: false,
         harvestable: false,
-        minimap_colour: [200, 40, 20],
     });
     let custom = TerrainTypes::new(types).unwrap();
     let ok = Map::parse_with(

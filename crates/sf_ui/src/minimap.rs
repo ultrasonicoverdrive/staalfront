@@ -3,10 +3,12 @@
 //!
 //! # Rendering to a texture
 //! The terrain image is *baked on the CPU* by [`Minimap::bake`], one gameplay
-//! cell at a time (WP2.3). A cell is drawn in the flat `minimap_colour` of its
-//! terrain type (`assets/config/terrain_types.ron`: water, rock, road, ore,
-//! bridge, grass), so the minimap shows what the game rules see, not what the
-//! materials of the 3D view look like. A map without a terrain layer falls back
+//! cell at a time (WP2.3). A cell is drawn in the flat minimap colour of its
+//! terrain type (water, rock, road, ore, bridge, grass), so the minimap shows
+//! what the game rules see. The colour comes from the type's 3D look
+//! (`assets/config/terrain_look.ron`, [`sf_render::terrain_look::TerrainLook::minimap_color`]): the
+//! look is the one source of a type's colour, so the minimap and the main view
+//! agree. A map without a terrain layer falls back
 //! to the average colour of the cell's procedural material. The relief is
 //! shaded lightly on top (light from the north-west, one shade per cell,
 //! at most [`RELIEF_SHADE`] either way) so hills read without hiding the type.
@@ -32,12 +34,19 @@
 //! The map is `map_w x map_h` metres with `x` east and `z` south; north is
 //! up on the minimap, like on screen. The map is centred in the panel with
 //! its aspect ratio kept ([`MinimapGeometry`]).
+//!
+//! A map side that is not a multiple of the 4 m cell ends in a partial cell:
+//! the image holds whole cells (`Map::size_in_cells` rounds up), so it covers
+//! a little more than the map. The panel shows the map in metres and only the
+//! part of the image that lies on it ([`Minimap::uv`]), so every cell is drawn
+//! where its metres are and the dots, the field of view and the clicks agree.
 
 use sf_data::map::Map;
 use sf_data::terrain::TerrainTypes;
 use sf_math::CELL_METRES;
 use sf_render::Camera;
 use sf_render::camera::DVec2;
+use sf_render::terrain_look::TerrainLooks;
 
 use crate::color::Color;
 use crate::draw::Texture;
@@ -68,25 +77,50 @@ pub struct MinimapImage {
 pub struct Minimap {
     image: MinimapImage,
     map_size: (f32, f32),
+    uv: [f32; 4],
 }
 
 impl Minimap {
     /// Bake `map` into an image whose longer side is at most `max_side`
-    /// pixels, with the shipped terrain types ([`TerrainTypes::embedded`]).
+    /// pixels, with the shipped terrain types ([`TerrainTypes::embedded`])
+    /// and looks ([`TerrainLooks::embedded`]).
     pub fn bake(map: &Map, max_side: u32) -> Self {
-        Self::bake_with(map, max_side, &TerrainTypes::embedded())
+        Self::bake_with(
+            map,
+            max_side,
+            &TerrainTypes::embedded(),
+            &TerrainLooks::embedded(),
+        )
     }
 
-    /// [`Minimap::bake`] with an explicit table of terrain types.
-    pub fn bake_with(map: &Map, max_side: u32, types: &TerrainTypes) -> Self {
+    /// [`Minimap::bake`] with an explicit table of terrain types and looks.
+    pub fn bake_with(map: &Map, max_side: u32, types: &TerrainTypes, looks: &TerrainLooks) -> Self {
+        let image = bake_terrain_with(map, max_side, types, looks);
+        let (cw, ch) = map.size_in_cells();
+        let cell = CELL_METRES as f32;
+        // The image spans whole cells; the map ends inside the last one.
+        let uv = [
+            0.0,
+            0.0,
+            image.width as f32 * map.width() as f32 / (cw.max(1) as f32 * cell),
+            image.height as f32 * map.height() as f32 / (ch.max(1) as f32 * cell),
+        ];
         Self {
-            image: bake_terrain_with(map, max_side, types),
+            image,
             map_size: (map.width() as f32, map.height() as f32),
+            uv,
         }
     }
 
     pub fn image(&self) -> &MinimapImage {
         &self.image
+    }
+
+    /// The part of the image that lies on the map, in image pixels
+    /// (`[u0, v0, u1, v1]`, texels): the whole image when the map is a whole number of
+    /// cells, less when it ends in a partial cell.
+    pub fn uv(&self) -> [f32; 4] {
+        self.uv
     }
 
     pub fn map_size(&self) -> (f32, f32) {
@@ -126,9 +160,9 @@ fn relief_shade(map: &Map, cx: i64, cz: i64) -> f32 {
 }
 
 /// The colour of every gameplay cell (row-major, `cw * ch`), lightly shaded by
-/// the relief: the `minimap_colour` of the cell's terrain type, or the average
-/// of its material when the map has no terrain layer.
-fn cell_colors(map: &Map, types: &TerrainTypes) -> Vec<[u8; 3]> {
+/// the relief: the minimap colour of the cell's terrain type (from its look),
+/// or the average of its material when the map has no terrain layer.
+fn cell_colors(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) -> Vec<[u8; 3]> {
     let (cw, ch) = map.size_in_cells();
     // The procedural material textures are only generated for the fallback.
     let materials = if map.terrain().is_some() {
@@ -136,6 +170,11 @@ fn cell_colors(map: &Map, types: &TerrainTypes) -> Vec<[u8; 3]> {
     } else {
         material_colors(map)
     };
+    // The colour of every terrain id, looked up once (not per cell).
+    let mut by_id = [UNKNOWN; 256];
+    for t in types.iter() {
+        by_id[usize::from(t.id)] = looks.look_for(&t.name).minimap_color();
+    }
     let cell = i64::from(CELL_METRES);
     let mut out = Vec::with_capacity(cw as usize * ch as usize);
     for cz in 0..i64::from(ch) {
@@ -143,8 +182,7 @@ fn cell_colors(map: &Map, types: &TerrainTypes) -> Vec<[u8; 3]> {
             let flat = match map.terrain() {
                 Some(layer) => layer
                     .get(cx as u32, cz as u32)
-                    .and_then(|id| types.get(id))
-                    .map_or(UNKNOWN, |t| t.minimap_colour),
+                    .map_or(UNKNOWN, |id| by_id[usize::from(id)]),
                 None => materials
                     .get(usize::from(
                         map.material_at(cx * cell + cell / 2, cz * cell + cell / 2),
@@ -161,11 +199,21 @@ fn cell_colors(map: &Map, types: &TerrainTypes) -> Vec<[u8; 3]> {
 
 /// See [`Minimap::bake`].
 pub fn bake_terrain(map: &Map, max_side: u32) -> MinimapImage {
-    bake_terrain_with(map, max_side, &TerrainTypes::embedded())
+    bake_terrain_with(
+        map,
+        max_side,
+        &TerrainTypes::embedded(),
+        &TerrainLooks::embedded(),
+    )
 }
 
 /// See [`Minimap::bake_with`].
-pub fn bake_terrain_with(map: &Map, max_side: u32, types: &TerrainTypes) -> MinimapImage {
+pub fn bake_terrain_with(
+    map: &Map,
+    max_side: u32,
+    types: &TerrainTypes,
+    looks: &TerrainLooks,
+) -> MinimapImage {
     let (cw, ch) = map.size_in_cells();
     let (cw, ch) = (cw.max(1), ch.max(1));
     let longest = cw.max(ch);
@@ -182,7 +230,7 @@ pub fn bake_terrain_with(map: &Map, max_side: u32, types: &TerrainTypes) -> Mini
             ((f64::from(ch) * k).round() as u32).max(1),
         )
     };
-    let colors = cell_colors(map, types);
+    let colors = cell_colors(map, types, looks);
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for py in 0..h {
         // The cell this row of pixels samples (nearest, centre of the pixel).
@@ -395,13 +443,7 @@ impl Ui {
         self.fill(frame, self.cfg.minimap_frame);
         let geom = MinimapGeometry::new(frame.inset(border), minimap.map_size);
         let content = geom.content();
-        let img = minimap.image();
-        self.image(
-            Texture::Minimap,
-            content,
-            [0.0, 0.0, img.width as f32, img.height as f32],
-            Color::WHITE,
-        );
+        self.image(Texture::Minimap, content, minimap.uv(), Color::WHITE);
 
         let dot = self.scale().round().max(1.0) * 2.0;
         for ((x, z), color) in units {
@@ -443,6 +485,18 @@ mod tests {
     use glam::{DVec3, DVec4};
     use sf_data::map::generate::{generate, generate_cells};
     use sf_render::CameraConfig;
+
+    use crate::color::UiConfig;
+    use crate::draw::Texture as Tex;
+    use crate::ui::UiInput;
+
+    /// The minimap colour of a terrain type id, from the shipped looks.
+    fn mini(id: u8) -> [u8; 3] {
+        let types = TerrainTypes::embedded();
+        TerrainLooks::embedded()
+            .look_for(&types.get(id).unwrap().name)
+            .minimap_color()
+    }
 
     fn close(a: f32, b: f32, eps: f32) -> bool {
         (a - b).abs() <= eps
@@ -918,7 +972,6 @@ mod tests {
     /// has the colour of its type, at one pixel per cell and at several.
     #[test]
     fn a_texel_has_the_colour_of_its_cells_terrain_type() {
-        let types = TerrainTypes::embedded();
         // 6 x 3 cells: row 0 = ids 0..=5, row 1 = reversed, row 2 = all water.
         let mut ids: Vec<u8> = (0..6).collect();
         ids.extend((0..6).rev());
@@ -930,10 +983,7 @@ mod tests {
             assert_eq!((img.width, img.height), (6 * s, 3 * s), "side {max_side}");
             for cz in 0..3u32 {
                 for cx in 0..6u32 {
-                    let want = types
-                        .get(ids[(cz * 6 + cx) as usize])
-                        .unwrap()
-                        .minimap_colour;
+                    let want = mini(ids[(cz * 6 + cx) as usize]);
                     for (dx, dy) in [(0, 0), (s - 1, s - 1), (s / 2, s / 2)] {
                         assert_eq!(
                             texel(&img, cx * s + dx, cz * s + dy),
@@ -952,9 +1002,8 @@ mod tests {
 
     #[test]
     fn the_relief_shades_the_type_colour_lightly_and_never_changes_the_type() {
-        let types = TerrainTypes::embedded();
         let ids = vec![0u8; 8 * 3];
-        let grass = types.get(0).unwrap().minimap_colour;
+        let grass = mini(0);
         let lum = |c: [u8; 3]| u32::from(c[0]) + u32::from(c[1]) + u32::from(c[2]);
         // Ground that rises to the east faces away from the north-west light
         // (darker); ground that falls to the east faces it (brighter).
@@ -1002,9 +1051,9 @@ mod tests {
         let map = map_with_types(2, 1, vec![0, 3], |_, _| 0);
         let only_grass =
             TerrainTypes::new(vec![TerrainTypes::embedded().get(0).unwrap().clone()]).unwrap();
-        let img = bake_terrain_with(&map, 2, &only_grass);
+        let img = bake_terrain_with(&map, 2, &only_grass, &TerrainLooks::embedded());
         assert_eq!(texel(&img, 1, 0), UNKNOWN);
-        assert_eq!(texel(&img, 0, 0), only_grass.get(0).unwrap().minimap_colour);
+        assert_eq!(texel(&img, 0, 0), mini(0));
     }
 
     /// The shipped bridge map has water, rock, road and a bridge: all of them
@@ -1024,7 +1073,7 @@ mod tests {
                 .flat_map(|z| (0..cw).map(move |x| (x, z)))
                 .find(|&(x, z)| layer.get(x, z) == Some(id))
                 .unwrap_or_else(|| panic!("the bridge map has no {name} cell"));
-            let want = types.get(id).unwrap().minimap_colour;
+            let want = mini(id);
             let got = texel(&img, cx * s + s / 2, cz * s + s / 2);
             for i in 0..3 {
                 let ratio = f32::from(got[i]) / f32::from(want[i]);
@@ -1033,6 +1082,248 @@ mod tests {
                     "{name} cell ({cx}, {cz}): {got:?} vs {want:?}"
                 );
             }
+        }
+    }
+
+    /// Review WP2.3 round 1: a map side that is not a multiple of 4 m ends in
+    /// a partial cell, and the image (whole cells) is wider than the map. Every
+    /// cell must still be drawn where its metres are, and the unit dots, the
+    /// field-of-view frame and a click must land on the same cell as the image.
+    /// With the whole image stretched over the map (the round-0 bug) cells near
+    /// the far edges show their neighbour.
+    #[test]
+    fn a_map_with_partial_cells_draws_every_cell_in_its_own_place() {
+        const SCREEN: (u32, u32) = (1200, 1200);
+        for (w, h, side) in [
+            (66_u32, 50_u32, 256_u32),
+            (66, 50, 17),
+            (130, 62, 256),
+            (1022, 1022, 256),
+        ] {
+            let (cw, ch) = (w.div_ceil(CELL_METRES), h.div_ceil(CELL_METRES));
+            // Neighbours always differ: +1 per column, +2 per row (mod 6).
+            let ids: Vec<u8> = (0..ch)
+                .flat_map(|z| (0..cw).map(move |x| ((x + 2 * z) % 6) as u8))
+                .collect();
+            let map = Map::from_parts(
+                w,
+                h,
+                8.0,
+                vec!["grass".into()],
+                vec![0; ((w + 1) * (h + 1)) as usize],
+                vec![0; (w * h) as usize],
+            )
+            .unwrap()
+            .with_terrain(
+                sf_data::terrain::TerrainLayer::new(cw, ch, ids.clone()).unwrap(),
+                &TerrainTypes::embedded(),
+            )
+            .unwrap();
+            assert_eq!(map.size_in_cells(), (cw, ch));
+            let minimap = Minimap::bake(&map, side);
+            let img = minimap.image();
+            let frame = Rect::new(20.0, 20.0, 1100.0, 1100.0);
+            let step = (cw / 24).max(1);
+            let cells: Vec<(u32, u32)> = (0..ch)
+                .step_by(step as usize)
+                .chain([ch - 1])
+                .flat_map(|z| {
+                    (0..cw)
+                        .step_by(step as usize)
+                        .chain([cw - 1])
+                        .map(move |x| (x, z))
+                })
+                .collect();
+            // The part of cell (cx, cz) that lies on the map, in metres.
+            let span = |c: u32, size: u32| {
+                let a = (c * CELL_METRES) as f32;
+                (a, ((c + 1) * CELL_METRES).min(size) as f32)
+            };
+            // Three points across every sampled cell, each a dot of its own colour.
+            let fractions = [0.15_f32, 0.5, 0.85];
+            let mut dots = Vec::new();
+            for &(cx, cz) in &cells {
+                let ((x0, x1), (z0, z1)) = (span(cx, w), span(cz, h));
+                for fx in fractions {
+                    for fz in fractions {
+                        let i = dots.len() as u32;
+                        let colour = Color((i & 0xff) as u8, ((i >> 8) & 0xff) as u8, 7, 255);
+                        let p = (x0 + (x1 - x0) * fx, z0 + (z1 - z0) * fz);
+                        dots.push(((cx, cz), p, colour));
+                    }
+                }
+            }
+            // The field of view: exactly the last (partial) cell.
+            let (lx, lz) = (span(cw - 1, w), span(ch - 1, h));
+            let fov = [(lx.0, lz.0), (lx.1, lz.0), (lx.1, lz.1), (lx.0, lz.1)];
+            // Click in the middle of the last cell.
+            let click_world = ((lx.0 + lx.1) * 0.5, (lz.0 + lz.1) * 0.5);
+            let mut ui = Ui::new(UiConfig::default());
+            // Where would the click be: draw once to learn the quad.
+            ui.begin_frame(UiInput::default(), SCREEN, 1.0);
+            ui.minimap(&minimap, "m", frame, None, []);
+            ui.end_frame();
+            let quad = minimap_quad(&ui);
+            let click = quad.world_to_screen(click_world, (w as f32, h as f32));
+            let mut input = UiInput {
+                cursor: Some(click),
+                ..UiInput::default()
+            };
+            input.pressed[0] = true;
+            input.down[0] = true;
+            ui.begin_frame(input, SCREEN, 1.0);
+            let target = ui.minimap(
+                &minimap,
+                "m",
+                frame,
+                Some(&fov),
+                dots.iter().map(|&(_, p, c)| (p, c)),
+            );
+            ui.end_frame();
+            let quad = minimap_quad(&ui);
+            let list = ui.draw_list();
+            // The image under every dot is the colour of the dot's cell.
+            let mut wrong = Vec::new();
+            for &((cx, cz), p, colour) in &dots {
+                let c = colour.to_array();
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for v in list.vertices.iter().filter(|v| v.color == c) {
+                    x0 = x0.min(v.pos[0]);
+                    y0 = y0.min(v.pos[1]);
+                    x1 = x1.max(v.pos[0]);
+                    y1 = y1.max(v.pos[1]);
+                }
+                assert!(
+                    x0 <= x1,
+                    "{w}x{h}: dot of cell ({cx}, {cz}) at {p:?} is not drawn"
+                );
+                let centre = ((x0 + x1) * 0.5, (y0 + y1) * 0.5);
+                // A dot is snapped to whole pixels; less than a pixel off.
+                let exact = quad.world_to_screen(p, (w as f32, h as f32));
+                assert!(
+                    (centre.0 - exact.0).abs() <= 0.5 && (centre.1 - exact.1).abs() <= 0.5,
+                    "{w}x{h}: dot of cell ({cx}, {cz}) at {centre:?}, the image has it at {exact:?}"
+                );
+                let (u, v) = quad.texel(exact);
+                let want = mini(ids[(cz * cw + cx) as usize]);
+                if texel(img, u, v) != want {
+                    wrong.push((cx, cz));
+                }
+            }
+            wrong.sort_unstable();
+            wrong.dedup();
+            assert!(
+                wrong.is_empty(),
+                "{w}x{h} at side {side}: {} cells show another cell's colour, e.g. {:?}",
+                wrong.len(),
+                &wrong[..wrong.len().min(5)]
+            );
+            // The frame of the field of view sits on the borders of the last
+            // cell in the image: its edges map to that cell's first texel and
+            // to the end of the image.
+            let fov_colour = UiConfig::default().fov_frame.to_array();
+            let frame_pts: Vec<(f32, f32)> = list
+                .vertices
+                .iter()
+                .filter(|v| v.color == fov_colour)
+                .map(|v| (v.pos[0], v.pos[1]))
+                .collect();
+            assert!(!frame_pts.is_empty(), "{w}x{h}: no field-of-view frame");
+            let left = frame_pts.iter().map(|p| p.0).fold(f32::MAX, f32::min);
+            let right = frame_pts.iter().map(|p| p.0).fold(f32::MIN, f32::max);
+            let top = frame_pts.iter().map(|p| p.1).fold(f32::MAX, f32::min);
+            let bottom = frame_pts.iter().map(|p| p.1).fold(f32::MIN, f32::max);
+            // The line is a pixel thick around the exact edge.
+            let (ul, vt) = quad.texel_f((left + 0.5, top + 0.5));
+            let (ur, vb) = quad.texel_f((right - 0.5, bottom - 0.5));
+            let (px_x, px_y) = (img.width as f32 / cw as f32, img.height as f32 / ch as f32);
+            let tol = quad.texels_per_pixel() + 0.01;
+            for (got, want, what) in [
+                (ul, (cw - 1) as f32 * px_x, "left"),
+                (vt, (ch - 1) as f32 * px_y, "top"),
+                (ur, minimap.uv()[2], "right"),
+                (vb, minimap.uv()[3], "bottom"),
+            ] {
+                assert!(
+                    (got - want).abs() <= tol,
+                    "{w}x{h}: the {what} edge of the frame is at texel {got}, the cell's at {want}"
+                );
+            }
+            // The click in the last cell moves the camera into it.
+            let (tx, tz) = target.expect("a click on the minimap");
+            assert_eq!(
+                (
+                    (tx / CELL_METRES as f32) as u32,
+                    (tz / CELL_METRES as f32) as u32
+                ),
+                (cw - 1, ch - 1),
+                "{w}x{h}: click at {click:?} went to ({tx}, {tz})"
+            );
+        }
+    }
+
+    /// The minimap image as drawn: its screen rectangle and texel rectangle.
+    struct DrawnQuad {
+        pos: [f32; 4],
+        uv: [f32; 4],
+    }
+
+    impl DrawnQuad {
+        /// The screen point of a world point, assuming the quad shows the
+        /// whole map (what the dots and the frame use).
+        fn world_to_screen(&self, p: (f32, f32), map: (f32, f32)) -> (f32, f32) {
+            (
+                self.pos[0] + p.0 / map.0 * (self.pos[2] - self.pos[0]),
+                self.pos[1] + p.1 / map.1 * (self.pos[3] - self.pos[1]),
+            )
+        }
+
+        /// The (continuous) texel coordinate the GPU samples at a screen point.
+        fn texel_f(&self, s: (f32, f32)) -> (f32, f32) {
+            (
+                self.uv[0]
+                    + (s.0 - self.pos[0]) / (self.pos[2] - self.pos[0]) * (self.uv[2] - self.uv[0]),
+                self.uv[1]
+                    + (s.1 - self.pos[1]) / (self.pos[3] - self.pos[1]) * (self.uv[3] - self.uv[1]),
+            )
+        }
+
+        fn texel(&self, s: (f32, f32)) -> (u32, u32) {
+            let (u, v) = self.texel_f(s);
+            (u.floor() as u32, v.floor() as u32)
+        }
+
+        fn texels_per_pixel(&self) -> f32 {
+            (self.uv[2] - self.uv[0]) / (self.pos[2] - self.pos[0])
+        }
+    }
+
+    fn minimap_quad(ui: &Ui) -> DrawnQuad {
+        let list = ui.draw_list();
+        let batch = list
+            .batches
+            .iter()
+            .find(|b| b.texture == Tex::Minimap)
+            .expect("the minimap image is drawn");
+        let vs: Vec<_> = list.indices[batch.start as usize..batch.end as usize]
+            .iter()
+            .map(|&i| list.vertices[i as usize])
+            .collect();
+        let min = |f: fn(&crate::draw::Vertex) -> f32| vs.iter().map(f).fold(f32::MAX, f32::min);
+        let max = |f: fn(&crate::draw::Vertex) -> f32| vs.iter().map(f).fold(f32::MIN, f32::max);
+        DrawnQuad {
+            pos: [
+                min(|v| v.pos[0]),
+                min(|v| v.pos[1]),
+                max(|v| v.pos[0]),
+                max(|v| v.pos[1]),
+            ],
+            uv: [
+                min(|v| v.uv[0]),
+                min(|v| v.uv[1]),
+                max(|v| v.uv[0]),
+                max(|v| v.uv[1]),
+            ],
         }
     }
 }

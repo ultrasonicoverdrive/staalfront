@@ -13,12 +13,6 @@
 // movement class in unit_classes.ron (WP4.1), which has to name every type
 // here. The flags are documented in docs/rules/terrain.md, the costs in
 // docs/rules/movement.md.
-//
-// `minimap_colour` (WP2.3) is the flat sRGB colour of the type on the minimap.
-// It is presentation only; the sim never reads it. The materials of the 3D
-// terrain per type (WP2.2) are mapped separately. A test requires every pair of
-// colours to differ clearly, so a new type needs a colour that stands out from
-// the others (and from the dark minimap frame).
 (
     types: [
         (
@@ -26,42 +20,36 @@
             name: "grass",
             buildable: true,
             harvestable: false,
-            minimap_colour: (86, 140, 66),
         ),
         (
             id: 1,
             name: "road",
             buildable: false,
             harvestable: false,
-            minimap_colour: (206, 184, 132),
         ),
         (
             id: 2,
             name: "water",
             buildable: false,
             harvestable: false,
-            minimap_colour: (44, 96, 172),
         ),
         (
             id: 3,
             name: "rock",
             buildable: false,
             harvestable: false,
-            minimap_colour: (104, 104, 112),
         ),
         (
             id: 4,
             name: "ore",
             buildable: false,
             harvestable: true,
-            minimap_colour: (236, 170, 36),
         ),
         (
             id: 5,
             name: "bridge",
             buildable: false,
             harvestable: false,
-            minimap_colour: (122, 72, 40),
         ),
     ],
 )
