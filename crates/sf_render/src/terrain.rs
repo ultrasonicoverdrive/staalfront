@@ -40,12 +40,14 @@
 //!   selection, hysteresis and culling stay per chunk, the index data is built
 //!   once, and chunks of equal level can be drawn in one call (see
 //!   [`PackedTerrain`]). The price is a few triangles per edge.
-//! * **Materials:** one material per *cell*, not per vertex. The material
-//!   index map is uploaded as an `R8Uint` texture and the fragment shader
-//!   blends the four nearest cell centres, so the mesh stays one shared
-//!   vertex grid. Each material is a small procedural tileable texture in a
-//!   `texture_2d_array`, sampled with world-space UVs (one repeat per
-//!   [`TILE_METERS`]).
+//! * **Materials:** one material per *cell*, not per vertex. A map with a
+//!   terrain layer (WP2.2) is drawn from the gameplay terrain type of every 4 m
+//!   cell ([`crate::terrain_look`]); a map without one from the material of
+//!   every 1 m sample (WP1.7). Either way the index map is uploaded as a small
+//!   texture and the fragment shader blends the four nearest cell centres, so
+//!   the mesh stays one shared vertex grid. Each material is a small procedural
+//!   tileable texture in a `texture_2d_array`, sampled with world-space UVs
+//!   (one repeat per [`TILE_METERS`]).
 
 use std::ops::Range;
 
@@ -580,7 +582,7 @@ pub fn pack(mesh: &TerrainMesh) -> PackedTerrain {
 // Procedural material textures
 // ---------------------------------------------------------------------------
 
-fn hash(seed: u32, x: u32, y: u32) -> u32 {
+pub(crate) fn hash(seed: u32, x: u32, y: u32) -> u32 {
     let mut h = seed ^ x.wrapping_mul(0x85eb_ca6b) ^ y.wrapping_mul(0xc2b2_ae35);
     h ^= h >> 16;
     h = h.wrapping_mul(0x7feb_352d);
@@ -591,7 +593,7 @@ fn hash(seed: u32, x: u32, y: u32) -> u32 {
 
 /// Tileable value noise in `0..1`: `period` lattice points across the
 /// texture, wrapping so opposite edges match.
-fn tile_noise(seed: u32, u: f32, v: f32, period: u32) -> f32 {
+pub(crate) fn tile_noise(seed: u32, u: f32, v: f32, period: u32) -> f32 {
     let (x, y) = (u * period as f32, v * period as f32);
     let (x0, y0) = (x.floor(), y.floor());
     let s = |t: f32| t * t * (3.0 - 2.0 * t);
@@ -610,7 +612,7 @@ fn tile_noise(seed: u32, u: f32, v: f32, period: u32) -> f32 {
     (a + (b - a) * fx) * (1.0 - fy) + (c + (d - c) * fx) * fy
 }
 
-fn name_hash(name: &str) -> u32 {
+pub(crate) fn name_hash(name: &str) -> u32 {
     name.bytes().fold(0x811c_9dc5_u32, |h, b| {
         (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
     })

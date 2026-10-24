@@ -84,7 +84,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
 
 - WP2.1 Terrain types per cell (`sf_data` table and map layer, generator, `sf_sim`
   terrain and occupancy, `Place`, `terrain_256` scenario): done (PR #39, 6d28bff)
-- WP2.2 Materials per terrain type: open
+- WP2.2 Materials per terrain type: done (PR #66, branch `wp/2.2-terrain-materials`, CI green incl. Windows/WARP)
 - WP2.3 Minimap shows terrain types (flat `minimap_colour` per type in the terrain type table,
   baked per cell, light relief shading; notes below): done (PR pending)
 - WP2.4 Cell grid overlay by terrain type and occupancy: open
@@ -100,6 +100,38 @@ rock, ore, a road and bridges, and the sim keeps a type and an occupant per cell
 terrain and occupancy are in the checksum only when present, so `wander_5000`,
 `command_mix` and the sf_sim goldens are unchanged. The rules and the placeholder flags
 are in `docs/rules/terrain.md`.
+
+WP2.2 notes. The presentation draws a map with a terrain layer from the gameplay terrain
+type of each 4 m cell; the per-sample material map of the map file is then not used (a map
+without a layer is drawn from it as before). The mapping is data, by type name:
+`assets/config/terrain_look.ron` (invented colours, procedural patterns, `flat` and `liquid`
+style flags; a type without an entry still renders, in a colour derived from its name).
+`sf_render::terrain_look` builds the texture-array layers (one per terrain type, id order)
+and one index texel per cell (layer, style bits); `terrain.wgsl` blends the four nearest
+cell centres with a 2 m ramp centred on the cell border (the middle of a cell stays pure),
+wobbles the border by up to 0.7 m (a staircase road does not look like a chessboard), takes a
+single texture sample where the four cells agree, draws water and the bridge deck level
+(no hill shading) and puts a light line along a shore. No new pass, no extra vertex data, no
+new dependency; `sf_sim` is untouched. Rules, looks and the blend are in
+`docs/rules/terrain.md` ("How it is drawn"). Tests: `terrain_look/tests.rs` (data, textures,
+index), `tests/terrain_types_screenshot.rs` (each type in its own look, the material map does
+not matter, soft border, staircase corner, level water and bridge on a slope, shore line),
+`typed_map_shows_every_terrain_type` (golden `terrain_types_far_320.png`; the close-up is checked by
+properties per cell, not a golden, because WARP and lavapipe pick different mip levels in the
+ore flecks and the shore band). Goldens that changed
+because their maps carry a terrain layer and so look different: `terrain_lod_far_320`,
+`instancing_10k_320`, `glb_testpack_close_320` (regenerated; no other golden moved). The
+WP1.7 colour/relief/seam tests of `terrain_screenshot.rs` now run on test64 *without* its
+layer (material path), their goldens unchanged. Frame time (review, lavapipe, 5
+alternating PR/main pairs): PR/main frame p50 0.45 to 0.67, p99 0.40 to 0.54, so about 40 to
+50 % faster (single sample where four cells agree); GTX 1650 estimate within 0.1 to 0.2 ms at
+1080p. The before/after pictures are in `docs/screenshots/wp2.2/`. Follow-ups: (1) the
+renderer always uses the shipped `TerrainTypes::embedded()` table; a map validated against
+another table would draw unknown ids as layer 0 (a `debug_assert` catches it), so pass the
+real table in once maps can carry their own; (2) the faint 4 m tile repeat shows from far
+away; a per-cell texture offset or a longer repeat would hide it. Still open for M0b:
+WP2.3 (the minimap still bakes the old material map) and WP2.4. Water has no level offset and
+is not animated (later polish).
 
 WP2.3 notes. The minimap draws every gameplay cell in the flat colour of its terrain type.
 - **Colour in data.** `TerrainType` has a new required field `minimap_colour: (r, g, b)` (sRGB)
@@ -271,8 +303,8 @@ Known gaps (owner in brackets):
 - No combat: attack and attack-move walk to weapon reach; nothing acquires a target, fires
   or takes damage; only the first weapon's range is read (phase 5, WP5.1).
 - No ownership check in the sim and no lockstep packet (WP14.1).
-- The terrain types are not drawn from the type layer: no per-type material, no minimap
-  colours, no cell overlay (WP2.2 to WP2.4, next now that M0 is met).
+- The terrain types are drawn per type (WP2.2), but the minimap still shows the old
+  material map and there is no cell overlay (WP2.3, WP2.4).
 - No sidebar, build menu, economy or power; the HUD is a top bar with the selected count
   (phases 6, 7, 11).
 - No vessels in the sandbox (WP4.1 follow-up: they need water to stand on).
@@ -1415,6 +1447,87 @@ Things to know:
 - `World::passable` looks at terrain only (not at structures), so the snapshot reads the ground once.
   A unit test fails if that ever changes.
 
+## Art set v4 (asset WP, 21-10-2026)
+
+The fourth art delivery (`Staalfront_GLB_Pakket_v3.zip`, sha256
+`cfe8f6890a30d610136df87e477f7c0f2f397249ae05beb36f3bf92e41780003`; the producer's name
+"GLB pakket v3" would clash with `assets/set_v3`, so the repo calls it **set v4**) replaces set v3
+as the placeholder model pack: 200 `.glb` files, of which **194 are stored** in `assets/set_v4`,
+byte for byte as delivered, and wired into `unit_defs.ron`. The follow-up of PR #42 and PR #48 in one.
+
+**Decision: levels of detail (docs/conventions.md section 12).** The delivery stores LOD0, LOD1 and
+LOD2 as three glTF scenes (`LOD0`, `LOD1`, `LOD2`, one root each), the brief and the loader expect
+three roots in the default scene. The loader and the checker now read both layouts as the same model
+(`sf_render::glb::lod_roots`, one function the checker calls too), instead of a repack step: the
+files stay identical to the delivery (their sha256 match its `asset_register.csv`) and nothing has
+to be re-run for the next delivery. A scene named `LOD<n>` must hold one root `<id>_LOD<n>`; anything
+else is refused with a message, and files with other scene names are read by their default scene as
+before. The art brief will say that one scene is preferred. Tests: `glb::tests` (the same model from
+both layouts, scene order, six kinds of refusal, files that are not the layout),
+`sf_asset_check/tests/rules.rs` (same report in both layouts, broken scene-per-LOD files).
+
+**Checker numbers (files: pass / warnings only / fail).**
+
+| Run | Files | Pass | Warn only | Fail |
+|---|---|---|---|---|
+| The delivery as delivered, checker of main (`1f9933b`) | 200 | 0 | 0 | 200 (every file: `LOD1` and `LOD2` "missing", 400 `lod-roots` findings) |
+| Same checker on the orchestrator's lossless one-scene repack | 200 | 3 | 183 | 14 (8 `class`, 4 wrecks without `fx` nodes, the two teams) |
+| The delivery as delivered, this branch | 200 | 3 | 191 | 6 |
+| `assets/set_v4` as stored (exit code 0) | 194 | 3 | 191 | 0 |
+
+The step from 183 to 191 warnings is the checker rule for decor roles: `cliff_edge`, `fence` and
+`rubble_*` (the shared rubble heaps per footprint) are decor with the decor budget 1500/500/150
+(`tools/sf_asset_check/src/class.rs`; a structure's own rubble state such as `generator_rubble`
+stays that structure). The six that still fail are left out, not edited.
+
+**Left out (6 of 200), findings for the producer.**
+- `neutral_wreck_light`, `_medium`, `_heavy`, `_boat`: no empty `fx_smoke_*` / `fx_fire_*` nodes (the
+  delivery README says the wrecks have them). The v3 wrecks stay in `assets/set_v3`, but they fail
+  `sf_asset_check` as well: their LOD2 lacks the `debris` and `scorch` nodes.
+- `veyran_heavy_gun_team`: five parts in one level (the engine takes four) and none of the infantry
+  nodes (`torso`, `head`, ...), 4.4 m wide and 1.6 m high, so it is not upright infantry either.
+  The role stays a primitive (no v3 model either).
+- `veyran_demolition_team`: five parts in one level as well, and the nodes of the second figure
+  (`*_2`) are missing. The role keeps the set v3 file.
+
+**Other findings for the producer (warnings, the files are stored).**
+- The `lamp` material has an emissive factor in 190 of 194 files; the engine reads base colour
+  only. Say whether the factor stays (the checker then keeps warning) or goes.
+- The team colour is a diagonal triangle across the top surfaces. It meets the 20 to 40 % rule
+  (27 to 31 % measured by the producer, the checker agrees) but reads as a trick for the rule, not
+  as a team-coloured panel or stripe (`docs/screenshots/set_v4/`).
+- 132 of the 194 files have the same triangle count in all three levels (LOD1 and LOD2 are copies of
+  LOD0); the models are 8 to 288 triangles in LOD0.
+- The vessels `neutral_ferry`, `neutral_ferry_stalled` and `veyran_gunboat` stand on `Y = 0`; the
+  waterline is meant to cut through the hull.
+- The four fallen trees have their origin at one end (2.6 to 3.1 m from the middle).
+- Eleven vehicles (trucks, harvesters, transports, ferries) have no empty `turret` and `barrel`
+  nodes; the brief keeps them for every vehicle.
+- `meridian_supply_truck` and `veyran_supply_truck` exist, but `unit_defs.ron` gives the role
+  `supply_truck` to Neutral alone; deliver `neutral_supply_truck` or say the role is per faction.
+  Until then it keeps its `testpack_v1` model.
+- `state_map.json` (which state file belongs to which model) was not adopted: the delivery calls it
+  "not a proven models.ron schema". The damage and construction states are in the pack but no
+  definition names them yet (the building WPs).
+
+**Wiring.** Every role with a model that passes is on set v4 (`docs/rules/units.md`, "What is
+wired"): 18 roles of both factions with a model per faction, 22 with one file; demolition_team stays
+on set v3, heavy_gun_team on its primitive, supply_truck on `testpack_v1`. The roster tests that
+assumed shared files or primitives were adapted, and `built_with` in `roster.rs` makes the
+shared-file case (two roles, one file, two icons) testable with the shipped definitions. Set v3
+stays in the repo: `demolition_team` and the v3 wrecks and decor still use it and its tests pin it (the v3 wrecks fail
+`sf_asset_check` too: LOD2 lacks `debris` and `scorch`).
+`sf_sim` is untouched, no checksum moved (presentation only).
+
+**Seen in the game (`docs/screenshots/set_v4/`).** Both factions, in the sandbox with
+`--unit-display models` under Xvfb and Mesa lavapipe. The plain red box, the yellow pyramid, the blue
+cone and the lavender cubes are the sandbox's existing placeholder scene (they are there with
+`--models none` too), not set v4. The engine scales a structure's model to its footprint (up to four
+times): the v4 relay transmitter is a 25 m mast and stands 52 m high on the placeholder 2 x 2 cell
+footprint (`units.md`); a footprint decision, not an art one. The whole pack, with the damage states
+and the decor, is `sf_game --crowd --models set_v4` (the sandbox draws its roles through the roster
+and does not read `--models`).
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -1481,10 +1594,14 @@ fixed, delete the entry in the same PR.
 24. **Art set v3.** Seven of 30 models fail `sf_asset_check` (list in PR #42): owner Tijmen,
     in the next delivery or by deciding on a rule exception (rocks sunk on purpose). The
     delivery's licence text ("eigen werk, vrij te gebruiken in Staalfront") is not an SPDX
-    licence: confirm a precise one before any release (phase 16).
+    licence: resolved, Tijmen set the project licence for sets v3 and v4 on 22-10-2026
+    (`assets/LICENSES.md`).
 25. **Models not wired.** Decor (trees, rocks, ore stages) and wrecks are not unit roles and
-    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); vehicles and
-    buildings have no set v3 model (the next art delivery, then `models` in `unit_defs.ron`).
+    have no place in the map yet (decor placement WP2.2 / WP2.3, wrecks WP5.5); the vehicles and
+    buildings are wired to set v4 (see "Art set v4" above). Still open there: the damage and
+    construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
+    names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay, but
+    fail the checker as well: LOD2 lacks `debris` and `scorch`).
 26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
     click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
     group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
@@ -1499,3 +1616,8 @@ fixed, delete the entry in the same PR.
 28. **`crowd_perf.rs::two_thousand_colliding_units_run_at_a_bounded_cost` is a wall-clock bound** (the slowest
     tick in a release build must be under 50 ms) and it failed 1 time in 3 on a loaded machine (103 ms and
     58.9 ms); CI is green, but the bound is load-sensitive. Not relaxed; count the work instead of the clock.
+29. **Art set v4 findings to hand to the producer** (details and file names in "Art set v4"
+    above): four wrecks without `fx` nodes, `heavy_gun_team` and `demolition_team` (parts and
+    nodes), emissive `lamp` material, diagonal team triangles, copied levels of detail, vessels on
+    `Y = 0`, the `supply_truck` faction, `state_map.json`. Owner: Tijmen with the producer; when a
+    fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
