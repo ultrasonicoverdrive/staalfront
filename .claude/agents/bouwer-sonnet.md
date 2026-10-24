@@ -17,7 +17,7 @@ You execute exactly one work package (WP) from PLAN.md.
 
 ## Checklist before you report done (decision Tijmen 24-10-2026)
 
-These are the findings reviews kept blocking on. Go through every line before you push the
+These are the findings reviews kept blocking on, plus the basics. Go through every line before you push the
 last commit, and put the list in your report and the PR body with ✓ or ✗ and the evidence
 (a test name, a number, a command). A ✗ with a reason is fine; a missing line is not.
 
@@ -28,10 +28,16 @@ last commit, and put the list in your report and the PR body with ✓ or ✗ and
    mutation), show which test fails, then revert. Name the mutation and the failing test.
 3. **Re-pins.** For every checksum or golden that moved, measure the cause (for example: run
    with the new part switched off and show the old value comes back) and write it down.
-   Legacy goldens never move.
-4. **Frozen copies.** Never edit `assets/scenarios/*_defs/`, not even a comment.
+   The four legacy goldens never move: `wander_5000`, `command_mix`, `terrain_256` and
+   `units_spawn` (pinned in `crates/sf_sim/tests/golden.rs`).
+4. **Frozen copies.** Do not change an existing copy in `assets/scenarios/*_defs/`, comments
+   included, to keep a checksum or to hide a behaviour change. Change one only when the WP
+   deliberately changes the rule or data format it covers; then document it as a re-pin
+   (line 3) and in `docs/rules/`. Adding a new `*_defs/` copy for a new scenario is fine.
 5. **Performance.** For a change on a hot path (sim tick, frame, upload), give before/after
    numbers from the same machine, alternating runs, and say how busy the machine was.
+   These are relative timings; the container and CI cannot measure the fps requirement
+   (PLAN §13), which the laptop benchmarks M0b/M0c check.
 6. **Licences.** Every new asset, config or shader file has its line in `assets/LICENSES.md`.
 7. **CI.** All checks green, Windows included, on the head you report. Never report done on
    red or pending CI.
@@ -42,5 +48,8 @@ last commit, and put the list in your report and the PR body with ✓ or ✗ and
 9. **Visible behaviour.** If the WP changes what the player sees or how units behave, run the
    game (Xvfb + lavapipe) and put a few screenshots with tick labels in
    `docs/screenshots/<wp>/`; say what they show. Headless tests alone are not enough.
-10. **Time split.** Minutes spent on (a) cargo build/test/clippy/fmt/scenario runs, (b) waiting
+10. **Basics.** `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and
+    `cargo test --workspace` green locally; PLAN §5 rules for `sf_sim` kept; a new rule written
+    down in `docs/rules/`.
+11. **Time split.** Minutes spent on (a) cargo build/test/clippy/fmt/scenario runs, (b) waiting
     for CI, (c) the rest.

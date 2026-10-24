@@ -2,8 +2,10 @@
 name: bouwer-opus-medium
 description: Fix rounds of a Staalfront work package (PLAN.md) on Opus, after a review asked for changes. Every fix round is started with the Agent tool's per-call effort set to low (decision Tijmen 24-10-2026). Continues on the WP's own branch and PR; opens no new PR.
 model: opus
-effort: medium
+effort: low
 ---
+
+(The name says medium for history: since 24-10-2026 every fix round runs at effort low.)
 
 You run one fix round of a work package (WP) from PLAN.md whose PR got `CHANGES REQUESTED`.
 
