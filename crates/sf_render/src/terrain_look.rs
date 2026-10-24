@@ -67,6 +67,13 @@ pub struct TerrainLook {
     /// A liquid: gets the shore line.
     #[serde(default)]
     pub liquid: bool,
+    /// The flat colour of the type on the minimap (WP2.3), sRGB, when it
+    /// should differ from `color`: the minimap shows one colour per cell, so a
+    /// look whose texture is far from its base colour (ore: dark ground with
+    /// bright flecks) names its average here. Without it the minimap uses
+    /// `color`. A test keeps it near the mean of the texture.
+    #[serde(default)]
+    pub minimap: Option<[u8; 3]>,
 }
 
 /// How two types meet (see the file comment of `terrain_look.ron`).
@@ -111,7 +118,11 @@ impl TerrainLooks {
     /// 1 to 64, shore colour and strength `0..=1`. Whether the names are real
     /// terrain types is [`TerrainLooks::check_names`], against the table.
     pub fn from_ron(text: &str) -> Result<Self, LookError> {
-        let file: LookFile = ron::from_str(text).map_err(|e| LookError(e.to_string()))?;
+        // `minimap: (r, g, b)` without `Some(...)`: implicit options.
+        let file: LookFile = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
+            .from_str(text)
+            .map_err(|e| LookError(e.to_string()))?;
         let cell = sf_math::render_bridge::METRES_PER_CELL;
         let e = file.edge;
         if !(0.0..=cell).contains(&e.ramp_m) {
@@ -188,12 +199,20 @@ impl TerrainLooks {
                 pattern: Pattern::Noise,
                 flat: false,
                 liquid: false,
+                minimap: None,
             }
         })
     }
 }
 
 impl TerrainLook {
+    /// The flat colour of this type on the minimap: `minimap` if the look
+    /// names one, otherwise its base `color`. The 3D look is the one source
+    /// of a type's colour (WP2.3); the gameplay table has none.
+    pub fn minimap_color(&self) -> [u8; 3] {
+        self.minimap.unwrap_or(self.color)
+    }
+
     /// The style bits of the cell index.
     pub fn style_bits(&self) -> u8 {
         (if self.flat { STYLE_FLAT } else { 0 }) | (if self.liquid { STYLE_LIQUID } else { 0 })
