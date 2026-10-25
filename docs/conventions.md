@@ -45,7 +45,8 @@ Agent definitions live in `.claude/agents/`.
 
 | Agent | Model / effort | Use |
 |---|---|---|
-| `bouwer-sonnet` | sonnet, medium | Default for every WP, including those marked **[xhigh]** in PLAN.md §3; works through the done-checklist in its agent file. |
+| `bouwer-sonnet` | sonnet, medium | Default for every WP; works through the done-checklist in its agent file. |
+| `bouwer-sonnet` with per-call `model: opus`, effort low | opus, low | WPs marked **[xhigh]** in PLAN.md §3 (since 25-10-2026); same instructions and checklist. |
 | `bouwer-opus-medium` | opus, low | Every fix round, started at effort low. |
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
@@ -56,7 +57,9 @@ frozen copies untouched, performance numbers, licence lines, green CI on both OS
 work, in-game screenshots for visible changes, the basics, time split). Every fix round after
 `CHANGES REQUESTED` runs on `bouwer-opus-medium` at effort low and continues on the WP's own
 branch. The reviewer stays on Opus at effort medium (decision Tijmen 24-10-2026, replacing
-Sonnet high and the two fix-round levels of 21-10-2026). The two supporting agents have no edit,
+Sonnet high and the two fix-round levels of 21-10-2026). A WP marked **[xhigh]** starts the same
+`bouwer-sonnet` agent with per-call `model: opus` and effort low, so it keeps the same
+instructions and checklist (decision Tijmen 25-10-2026). The two supporting agents have no edit,
 commit or push rights.
 
 ## 4. Quality rules (PLAN.md §5, apply to every WP)

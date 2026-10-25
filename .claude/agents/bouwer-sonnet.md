@@ -1,6 +1,6 @@
 ---
 name: bouwer-sonnet
-description: Builds one work package from the Staalfront plan (PLAN.md) on Sonnet 5 with effort medium, with the done-checklist. The default for every WP, including those marked [xhigh]. Own branch, tests, PR.
+description: Builds one work package from the Staalfront plan (PLAN.md) on Sonnet 5 with effort medium, with the done-checklist. The default for every WP; WPs marked [xhigh] start this same agent with per-call model opus and effort low. Own branch, tests, PR.
 model: sonnet
 effort: medium
 ---
