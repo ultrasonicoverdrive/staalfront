@@ -160,6 +160,12 @@ is in PLAN.md §1.0.
   `/ra-original/`.
 - **B5 clean-room:** use only the functional analysis, never read-and-retype EA
   code (EA code is GPL). Own name, units, graphics and music are mandatory.
+  Fact check against GPL sources (decision Tijmen 26-10-2026): `onderzoeker` and
+  `reviewer` may consult EA or OpenRA code and data (for example OpenRA's sound
+  YAML) to check single facts, such as which Red Alert file name belongs to which
+  sound. They pass on only those facts in their own words, never text, tables or
+  code; a builder never reads those sources, and nothing from them is copied into
+  the repo.
 
 ## 9. Commit messages
 
