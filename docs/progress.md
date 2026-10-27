@@ -1737,7 +1737,9 @@ Status: WP6.1 is in; WP6.2 to WP6.8 are not started.
   (`f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base`). When WP6.2 makes `factions` restrict
   building, it must say whether it also restricts pre-placed mission objects. Options: open the decoy to
   Veyran, give Veyran its own decoy role, or keep `[Meridian]` for building and allow mission placement of any
-  role. The faction list is not changed in this round.
+  role. The faction list is not changed in this round. Main's content revision of 27-10 (#72) already reads
+  it as the last option (`content/units.md`: "Meridian only as a buildable structure", the 8 are network-supplied
+  mission objects); what Tijmen still decides is that WP6.2 then checks `factions` only when building.
 
 ## Open follow-ups
 
