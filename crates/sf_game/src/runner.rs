@@ -209,6 +209,8 @@ pub struct Runner {
     /// The tick whose occupancy the overlay shows; `None` while it is off,
     /// so switching it on refreshes it.
     cells_tick: Option<sf_sim::Tick>,
+    /// The fill levels of the ore the picture shows (WP7.1).
+    ore_view: crate::ore_view::OreView,
     /// When the last snapshot that showed the sim behind its clock arrived:
     /// the F1 panel keeps saying "sim behind" for a second after.
     behind_seen: Option<Instant>,
@@ -440,6 +442,9 @@ impl Runner {
             snap,
             cell_layer,
             cells_tick: None,
+            ore_view: crate::ore_view::OreView::new(
+                &sf_render::terrain_look::TerrainLooks::embedded(),
+            ),
             behind_seen: None,
             instancer,
             pack,
@@ -989,6 +994,26 @@ impl Runner {
         let looks = &self.looks;
         self.instancer.update_tick(motions_of(looks, &self.snap));
         self.tick_ms.push(started.elapsed());
+        self.show_ore();
+    }
+
+    /// Draw the ore cells whose fill level changed, on the terrain and on the minimap (WP7.1).
+    /// Nothing happens before the renderer exists; the first call after it does draws every
+    /// cell.
+    fn show_ore(&mut self) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+        let changes = self.ore_view.changes(&self.snap);
+        if changes.is_empty() {
+            return;
+        }
+        renderer.update_resource_levels(&changes);
+        let colors: Vec<(u32, u32, [u8; 3])> = changes
+            .iter()
+            .filter_map(|&(x, y, level)| Some((x, y, self.ore_view.minimap_color(level)?)))
+            .collect();
+        self.hud.paint_minimap(renderer, &self.map, &colors);
     }
 
     /// The sim thread's numbers for the F1 panel.
@@ -1644,6 +1669,8 @@ impl App for Runner {
                 self.hud.attach(&renderer, &self.map);
                 self.viewport = (s.width, s.height);
                 self.renderer = Some(renderer);
+                self.ore_view.forget();
+                self.show_ore();
             }
             Err(e) => {
                 eprintln!("sf_game: cannot start the renderer: {e}");

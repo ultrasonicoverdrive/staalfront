@@ -123,6 +123,17 @@ impl Hud {
         self.minimap = Some(minimap);
     }
 
+    /// Repaint single cells of the minimap (the ore a cell still holds, WP7.1) and upload the
+    /// image again if any pixel changed.
+    pub fn paint_minimap(&mut self, renderer: &Renderer, map: &Map, cells: &[(u32, u32, [u8; 3])]) {
+        if let (Some(minimap), Some(ui_gpu)) = (&mut self.minimap, &mut self.gpu)
+            && minimap.paint_cells(map, cells) > 0
+        {
+            let gpu = renderer.gpu();
+            ui_gpu.set_minimap(&gpu.device, &gpu.queue, minimap.image());
+        }
+    }
+
     /// Build this frame's UI. A click or drag on the minimap moves `camera`.
     pub fn frame(
         &mut self,

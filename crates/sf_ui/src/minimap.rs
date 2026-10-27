@@ -116,6 +116,46 @@ impl Minimap {
         &self.image
     }
 
+    /// Repaint single cells (WP7.1: the ore a cell still holds): each `(x, y, colour)` sets the
+    /// pixels that show cell `(x, y)` to `colour` under the same relief shade the bake used.
+    /// The image has to be uploaded again afterwards (`UiRenderer::set_minimap`). Returns the
+    /// number of cells whose pixels changed.
+    pub fn paint_cells(&mut self, map: &Map, cells: &[(u32, u32, [u8; 3])]) -> usize {
+        let (cw, ch) = map.size_in_cells();
+        let (cw, ch) = (cw.max(1), ch.max(1));
+        let (w, h) = (self.image.width, self.image.height);
+        // The pixels whose centre samples cell `c` of `n` cells over `px` pixels (as the bake).
+        let span = |c: u32, n: u32, px: u32| -> std::ops::Range<u32> {
+            let lo = (u64::from(c) * u64::from(px) / u64::from(n)).saturating_sub(1) as u32;
+            let hi = ((u64::from(c) + 1) * u64::from(px) / u64::from(n) + 1).min(u64::from(px));
+            let of = |p: u32| ((u64::from(p) * 2 + 1) * u64::from(n) / (u64::from(px) * 2)) as u32;
+            match (lo..hi as u32).find(|&p| of(p) == c) {
+                Some(f) => f..f + (f..hi as u32).take_while(|&p| of(p) == c).count() as u32,
+                None => 0..0,
+            }
+        };
+        let mut changed = 0;
+        for &(x, y, color) in cells {
+            if x >= cw || y >= ch {
+                continue;
+            }
+            let shade = relief_shade(map, i64::from(x), i64::from(y));
+            let c = color.map(|c| (f32::from(c) * shade).clamp(0.0, 255.0).round() as u8);
+            let mut touched = false;
+            for py in span(y, ch, h) {
+                for px in span(x, cw, w) {
+                    let at = ((py * w + px) * 4) as usize;
+                    if self.image.rgba[at..at + 3] != c {
+                        self.image.rgba[at..at + 3].copy_from_slice(&c);
+                        touched = true;
+                    }
+                }
+            }
+            changed += usize::from(touched);
+        }
+        changed
+    }
+
     /// The part of the image that lies on the map, in image pixels
     /// (`[u0, v0, u1, v1]`, texels): the whole image when the map is a whole number of
     /// cells, less when it ends in a partial cell.

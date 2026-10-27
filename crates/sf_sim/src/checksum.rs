@@ -31,7 +31,8 @@
 //! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
 //! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
 //! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
-//! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3). It is the last section |
+//! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
+//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). It is the last section; the sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -199,7 +200,10 @@ const SECTION_PROJECTILES: u8 = b'J';
 const SECTION_TARGETING: u8 = b'A';
 const SECTION_DESTRUCTION: u8 = b'X';
 const SECTION_BUILDINGS: u8 = b'B';
-const SECTION_CONSTRUCTION: u8 = b'N';
+//! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
+//! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3). It is the last section |
+//! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1). |
+//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). It is the last section; the sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -297,6 +301,12 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
                 h.write_u32(id.generation());
             }
             write_option_id(h, *target);
+        }
+        Command::TakeOre { cell, amount } => {
+            h.write_u8(12);
+            h.write_u32(cell.x);
+            h.write_u32(cell.y);
+            h.write_bytes(&amount.to_le_bytes());
         }
         Command::Despawn { id } => {
             h.write_u8(2);
@@ -562,6 +572,16 @@ impl World {
             for i in (0..slots).filter(|&i| building(i)) {
                 h.write_u32(i as u32);
                 h.write_u32(e.build_left[i]);
+            }
+        }
+
+        // Ore (WP7.1), after construction (merge of WP6.3 and WP7.1): the rules, the number of field cells and a running sum over the amounts.
+        // Last, and only in a world that was given ore rules, so every world without them
+        // hashes as before.
+        if let Some(ore) = &self.ore {
+            h.write_u8(SECTION_ORE);
+            for word in ore.fingerprint() {
+                h.write_u64(word);
             }
         }
 
