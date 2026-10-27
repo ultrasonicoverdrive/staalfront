@@ -103,6 +103,7 @@
 pub mod args;
 pub mod bench;
 pub mod build_mode;
+pub mod cargo_view;
 pub mod cell_overlay;
 pub mod commands;
 pub mod cursor;

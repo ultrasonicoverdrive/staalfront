@@ -1208,6 +1208,24 @@ impl Runner {
         }
     }
 
+    /// The ore the harvesters carry (WP7.2): a fill bar under each. With no harvester in the snapshot it
+    /// does nothing.
+    fn draw_cargo(&mut self) {
+        if !self.snap.has_harvesters() {
+            return;
+        }
+        let (width, height) = self.viewport;
+        let frame = FrameGeometry {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+            blend: self.instancer.blend(),
+            icon_px: self.instancer.icon_params().size_px,
+        };
+        let mut layer = self.hud.world_layer();
+        crate::cargo_view::draw(&self.instancer, &self.snap, &frame, &mut layer);
+    }
+
     /// Debug builds: `assets/config/units.ron` changed on disk. A broken
     /// file is reported and the old look stays.
     fn reload_style(&mut self, ctx: &Context, path: &std::path::Path) {
@@ -1260,7 +1278,9 @@ impl Runner {
         }
         if let Some(shot) = &self.shots {
             let zoom = SHOTS[shot.step.min(SHOTS.len() - 1)].1;
-            return Some((zoom, (map.0 * 0.5, map.1 * 0.5), 0));
+            // `--focus x,z` (metres) decides where the shots look; the middle of the map without it.
+            let focus = self.options.focus.unwrap_or((map.0 * 0.5, map.1 * 0.5));
+            return Some((zoom, focus, 0));
         }
         None
     }
@@ -1723,6 +1743,7 @@ impl App for Runner {
             });
             self.build_units(alpha, cursor);
             self.mark_selection();
+            self.draw_cargo();
             self.draw_ghost();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
@@ -2048,6 +2069,10 @@ fn sandbox_scene(
                 .expect("a world that has not started takes its unit table");
             // WP6.2: `BuildStructure` is checked; the sandbox itself places with `PlaceStructure`.
             world = crate::playfield::with_buildings(world, &defs);
+            // WP7.2 (`--harvest`): the harvesters work. Off by default, so the sandbox stands as it did.
+            if options.harvest {
+                world = crate::playfield::with_harvest(world, &defs);
+            }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
     }
@@ -2076,6 +2101,15 @@ fn sandbox_scene(
     crowd.spawn(&mut world, options.units, cells);
     let mut views = Vec::new();
     let report = world.step();
+    if options.harvest {
+        match crate::sandbox::start_harvest(&mut world, &defs) {
+            Some(setup) => println!(
+                "harvest: a refinery on {:?} and {} harvesters beside the ore field round {:?}",
+                setup.refinery, setup.harvesters, setup.field
+            ),
+            None => eprintln!("sf_game: --harvest: no room for a refinery beside an ore field"),
+        }
+    }
     if options.fight {
         let sent = crate::sandbox::start_fight(&mut world);
         println!("fight: {sent} armed units sent on attack-move to the other side's base");

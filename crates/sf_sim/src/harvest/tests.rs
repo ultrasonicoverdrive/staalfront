@@ -123,8 +123,8 @@ fn place(w: &mut World, cell: (u32, u32)) {
 /// that has mined a full load and is driving back.
 fn returning() -> World {
     let mut w = world();
-    place(&mut w, (6, 20)); // slot 0, dock point (9.5, 22.5)
-    place(&mut w, (6, 36)); // slot 1, dock point (9.5, 38.5)
+    place(&mut w, (6, 20)); // slot 0, dock point in the middle of cell (9, 22)
+    place(&mut w, (6, 36)); // slot 1, dock point in the middle of cell (9, 38)
     let spawn = Command::SpawnUnit {
         kind: HARVESTER,
         pos: Vec2::new(Fx::from_ratio(29, 2), Fx::from_ratio(45, 2)),
@@ -169,7 +169,7 @@ fn a_refinery_at_zero_hit_points_is_not_a_refinery() {
 }
 
 #[test]
-fn a_refinery_that_stops_standing_under_a_queued_harvester_sends_it_to_the_other() {
+fn a_refinery_that_stops_standing_under_a_harvester_on_its_way_sends_it_to_the_other() {
     let mut w = returning();
     until_returning(&mut w);
     // It is on its way to refinery 0; that one stops standing.
@@ -186,4 +186,20 @@ fn a_structure_stands_while_it_has_hit_points() {
     assert!(w.is_standing(0));
     w.entities.hp[0] = 0;
     assert!(!w.is_standing(0));
+}
+
+#[test]
+fn the_ore_delivered_so_far_is_in_the_checksum() {
+    let mut a = world();
+    place(&mut a, (6, 20));
+    a.step();
+    let mut b = a.clone();
+    assert_eq!(a.checksum(), b.checksum());
+    b.harvest.as_mut().unwrap().credit(PlayerId(0), 5);
+    assert_ne!(a.checksum(), b.checksum());
+    assert_eq!(b.ore_delivered(PlayerId(0)), 5);
+    // The amount counts, not only that there is an entry.
+    let mut c = a.clone();
+    c.harvest.as_mut().unwrap().credit(PlayerId(0), 6);
+    assert_ne!(b.checksum(), c.checksum());
 }

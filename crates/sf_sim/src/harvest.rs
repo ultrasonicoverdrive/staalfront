@@ -30,15 +30,15 @@
 //! The stage runs after the commands and the regrowth of the tick and before anyone moves (the
 //! orders it gives are carried out in the same tick).
 //!
-//! 1. **Sync.** The harvesters and the docks of the world are found; the state of one that is
+//! (1) **Sync.** The harvesters and the docks of the world are found; the state of one that is
 //!    gone (or whose slot was reused) is dropped and its claim on an ore cell released.
-//! 2. **Docks.** Each dock, in ascending slot order, reads its inbox in the order it was sent,
+//! (2) **Docks.** Each dock, in ascending slot order, reads its inbox in the order it was sent,
 //!    answers, counts down its grant and its unloading and grants the bay to the next in the
 //!    queue. A dock writes only its own state, the harvesters' mailboxes and the player's
 //!    delivered counter.
-//! 3. **Decide.** Every harvester, in ascending slot order, works out what it does from the
+//! (3) **Decide.** Every harvester, in ascending slot order, works out what it does from the
 //!    state at the start of the stage: nothing is changed in this pass. The result is a [`Plan`].
-//! 4. **Apply.** The plans are carried out in ascending slot order: claims on ore cells (the
+//! (4) **Apply.** The plans are carried out in ascending slot order: claims on ore cells (the
 //!    first harvester of the slot order keeps a cell two of them chose in the same tick; the
 //!    other searches again next tick), orders, bites of ore (where two harvesters bite one
 //!    cell that cannot feed both, the lower slot is served first) and the messages to the
@@ -343,6 +343,9 @@ struct Plan {
     act: Act,
     take: Option<(u32, u16)>,
     send: Option<(EntityId, Msg)>,
+    /// The cell in `core.cell` was chosen with room round it: if another harvester has claimed a
+    /// neighbouring cell in this same pass, the choice is not kept.
+    spaced: bool,
 }
 
 /// The harvest state of a world: the rules, the harvester kinds, one record per slot, the docks,
@@ -634,7 +637,7 @@ impl Harvest {
 
     fn run_dock(&mut self, w: &World, d: &mut Dock) {
         let rules = self.rules;
-        // 1. The holder of the bay: gone, or too slow to arrive.
+        // (1) The holder of the bay: gone, or too slow to arrive.
         match d.bay {
             Bay::Reserved { who, left } => {
                 if !self.hv_live(who) {
@@ -661,7 +664,7 @@ impl Harvest {
                 d.queue.remove(k);
             }
         }
-        // 2. The inbox, in the order it was sent.
+        // (2) The inbox, in the order it was sent.
         let inbox = std::mem::take(&mut d.inbox);
         for m in inbox {
             if !self.hv_live(m.from) || w.entities.owner[m.from.index() as usize] != d.owner {
@@ -702,7 +705,7 @@ impl Harvest {
                 }
             }
         }
-        // 3. Unloading.
+        // (3) Unloading.
         if let Bay::Unloading { who, wait } = d.bay {
             if wait == 0 {
                 let slot = who.index() as usize;
@@ -728,7 +731,7 @@ impl Harvest {
                 };
             }
         }
-        // 4. A free bay goes to the first in the queue.
+        // (4) A free bay goes to the first in the queue.
         if matches!(d.bay, Bay::Free) && !d.queue.is_empty() {
             let who = d.queue.remove(0);
             d.bay = Bay::Reserved {
@@ -773,9 +776,11 @@ impl Harvest {
                 let index = cell.y * width + cell.x;
                 index != bad && self.free_for(i, cell, (width, height), spaced)
             })
+            .map(|cell| (cell, spaced))
         });
         match found {
-            Some(cell) => {
+            Some((cell, spaced)) => {
+                plan.spaced = spaced;
                 let index = cell.y * width + cell.x;
                 let to = centre(index, width);
                 c.phase = Phase::ToOre;
@@ -866,16 +871,17 @@ impl Harvest {
             act: Act::Keep,
             take: None,
             send: None,
+            spaced: false,
         };
 
-        // 1. What was taken off the load (always true, whatever the harvester does now).
+        // (1) What was taken off the load (always true, whatever the harvester does now).
         for r in &hv.mail {
             if let Reply::Unloaded(n) = *r {
                 plan.core.load = plan.core.load.saturating_sub(n);
             }
         }
 
-        // 2. A walk of its own that is over, or an order from somewhere else. Judged on what the
+        // (2) A walk of its own that is over, or an order from somewhere else. Judged on what the
         // harvester expected at the start of the tick, before any answer changes it.
         let c = &mut plan.core;
         let ended = matches!((c.own, cur), (Order::Move(_), Order::Idle));
@@ -957,7 +963,7 @@ impl Harvest {
             }
         }
 
-        // 3. The phase.
+        // (3) The phase.
         let dock_pt = |dock: Option<EntityId>| dock.and_then(|d| self.dock_of(d));
         match plan.core.phase {
             Phase::Manual => {
@@ -1159,12 +1165,15 @@ impl Harvest {
             let i = slot as usize;
             let old = self.units[i].core.cell;
             // A cell two harvesters chose in one tick goes to the first of them.
+            let (width, height) = (w.config.width, w.config.height);
             if plan.core.cell != old
                 && plan.core.cell != NO_CELL
-                && self
-                    .claims
-                    .get(&plan.core.cell)
-                    .is_some_and(|&holder| holder != slot)
+                && !self.free_for(
+                    i,
+                    cell_of_index(plan.core.cell, width),
+                    (width, height),
+                    plan.spaced,
+                )
             {
                 plan.core.cell = NO_CELL;
                 plan.core.phase = Phase::Search;

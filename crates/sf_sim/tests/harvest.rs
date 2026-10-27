@@ -704,7 +704,7 @@ fn harvesters_claim_different_cells() {
     for k in 0..4 {
         spawn_harvester(&mut w, 0, (14, 20 + k), P0);
     }
-    run(&mut w, 3);
+    run(&mut w, 12);
     let cells: Vec<Cell> = (1..=4)
         .map(|s| w.harvester_of(id(s)).unwrap().cell.unwrap())
         .collect();
@@ -736,21 +736,135 @@ fn a_harvester_is_not_sent_to_a_cell_another_one_is_driving_to() {
 }
 
 #[test]
+fn harvesters_do_not_claim_cells_next_to_each_other_while_there_is_room() {
+    let mut w = world();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    for k in 0..4 {
+        spawn_harvester(&mut w, 0, (14, 20 + k), P0);
+    }
+    run(&mut w, 12);
+    let cells: Vec<Cell> = (1..=4)
+        .map(|s| w.harvester_of(id(s)).unwrap().cell.unwrap())
+        .collect();
+    // Field A is 4 x 4 cells: four harvesters fit with a cell between every two of them.
+    for (a, ca) in cells.iter().enumerate() {
+        for cb in &cells[a + 1..] {
+            let apart = ca.x.abs_diff(cb.x).max(ca.y.abs_diff(cb.y));
+            assert!(apart >= 2, "{ca:?} and {cb:?} are next to each other");
+        }
+    }
+}
+
+#[test]
+fn when_there_is_no_room_a_harvester_takes_any_cell_nobody_has() {
+    // Field A is 16 cells; eight harvesters cannot all keep a cell between them, but every one of
+    // them still gets a cell of its own.
+    let mut w = world();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    for k in 0..8 {
+        spawn_harvester(&mut w, 0, (14, 18 + k), P0);
+    }
+    run(&mut w, 40);
+    let mut cells: Vec<Cell> = (1..=8)
+        .filter_map(|s| w.harvester_of(id(s)).and_then(|v| v.cell))
+        .collect();
+    assert_eq!(cells.len(), 8, "a harvester was left without a cell");
+    cells.sort_by_key(|c| (c.y, c.x));
+    cells.dedup();
+    assert_eq!(cells.len(), 8, "two harvesters share a cell");
+}
+
+#[test]
+fn the_queue_is_first_come_first_served() {
+    let mut w = world();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    // Three harvesters, each a little farther from the field than the one before: they come back
+    // full in that order, a few ticks apart.
+    for k in 0..3 {
+        spawn_harvester(&mut w, 0, (14 + 3 * k, 19 + 2 * k), P0);
+    }
+    run(&mut w, 2);
+    let mut asked: Vec<EntityId> = Vec::new();
+    let mut holders: Vec<EntityId> = Vec::new();
+    for _ in 0..4000 {
+        w.step();
+        let d = w.dock_of(id(0)).unwrap();
+        for h in d.holder.into_iter().chain(d.queue.iter().copied()) {
+            if !asked.contains(&h) {
+                asked.push(h);
+            }
+        }
+        if let Some(h) = d.holder
+            && holders.last() != Some(&h)
+        {
+            holders.push(h);
+        }
+        if holders.len() >= 3 {
+            break;
+        }
+    }
+    assert_eq!(holders.len(), 3, "{holders:?}");
+    // The order they were first seen at the dock is the order they got the bay.
+    assert_eq!(holders, asked[..3], "asked {asked:?}, served {holders:?}");
+}
+
+#[test]
 fn a_destroyed_harvester_releases_its_claim_on_an_ore_cell() {
     let mut w = world();
     place_refinery(&mut w, 0, (6, 20), P0);
     spawn_harvester(&mut w, 0, (14, 22), P0);
     run(&mut w, 3);
     let claimed = w.harvester_of(id(1)).unwrap().cell.unwrap();
-    // It dies; another harvester appears on the same spot (in the slot the first one left).
+    // It dies. In the same tick a second refinery takes the slot it leaves, so that the harvester
+    // that appears next is in a slot of its own and nothing but the released claim stands between
+    // it and the cell.
     at(&mut w, 3, Command::Despawn { id: id(1) });
+    place_refinery(&mut w, 3, (6, 30), P0);
     spawn_harvester(&mut w, 5, (14, 22), P0);
-    run(&mut w, 8);
+    run(&mut w, 12);
     let again = w
-        .harvester_of(EntityId::new(1, 1))
+        .harvester_of(id(2))
         .and_then(|v| v.cell)
         .expect("the new harvester has a cell");
     assert_eq!(again, claimed);
+}
+
+#[test]
+fn a_load_is_never_above_the_capacity_even_when_a_bite_does_not_divide_it() {
+    let rules = HarvestRules {
+        capacity: 102,
+        ..RULES
+    };
+    let mut w = world_with(rules, Some(ORE_RULES), true);
+    place_refinery(&mut w, 0, (6, 20), P0);
+    spawn_harvester(&mut w, 0, (14, 22), P0);
+    let mut most = 0;
+    for _ in 0..1200 {
+        w.step();
+        most = most.max(load(&w, 1));
+    }
+    // 20 bites of 5 and one of 2.
+    assert_eq!(most, 102);
+}
+
+#[test]
+fn a_harvester_destroyed_in_the_bay_frees_it_for_the_next_in_line() {
+    let mut w = world();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    spawn_harvester(&mut w, 0, (14, 22), P0);
+    spawn_harvester(&mut w, 0, (15, 24), P0);
+    run(&mut w, 2);
+    run_until(&mut w, 3000, |w| {
+        w.dock_of(id(0))
+            .is_some_and(|d| d.unloading && !d.queue.is_empty())
+    });
+    let d = w.dock_of(id(0)).unwrap();
+    let (holder, next) = (d.holder.unwrap(), d.queue[0]);
+    let tick = w.tick().0;
+    at(&mut w, tick, Command::Despawn { id: holder });
+    run(&mut w, 4);
+    let d = w.dock_of(id(0)).unwrap();
+    assert_eq!(d.holder, Some(next));
 }
 
 // ---- configuration ------------------------------------------------------------------------

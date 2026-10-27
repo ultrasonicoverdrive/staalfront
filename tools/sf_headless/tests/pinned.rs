@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction` and `placement` (and `ore_256`, pinned in `tests/ore.rs`). A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction` and `placement` (and `ore_256` and `harvest`, pinned in `tests/ore.rs` and `tests/harvest.rs`). A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;

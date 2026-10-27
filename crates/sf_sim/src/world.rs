@@ -765,8 +765,9 @@ impl World {
     /// live harvester of a world with harvest rules (and for a harvester that was spawned in the
     /// current tick, before the first tick has run).
     pub fn harvester_of(&self, id: EntityId) -> Option<HarvesterView> {
+        let harvest = self.harvest.as_deref()?;
         self.live_index(id)?;
-        self.harvest.as_deref()?.view_of(id, self.config.width)
+        harvest.view_of(id, self.config.width)
     }
 
     /// The bay and the queue of the refinery `id`; `None` for anything that is not a standing

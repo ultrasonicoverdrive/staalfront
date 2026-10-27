@@ -13,11 +13,12 @@ use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
 use sf_headless::cli::parse_checksum;
 use sf_headless::run::{RunOptions, run};
-use sf_headless::scenario::Scenario;
+use sf_headless::scenario::{Action, Scenario, TimedCommand};
 use sf_math::{Fx, Vec2};
 use sf_sim::{
     Cell, Command, EntityId, HarvestStage, Kind, Order, PlayerId, Terrain, Tick, World, WorldConfig,
 };
+use std::time::Instant;
 
 const EXPECTED: &str = include_str!("../../../assets/scenarios/harvest.expected");
 
@@ -201,6 +202,35 @@ fn harvesters_take_turns_on_one_bay_and_the_second_one_queues() {
     assert!(entries(1) >= 2 && entries(2) >= 2 && entries(4) >= 2);
 }
 
+/// A harvester that drives to an ore cell stops and mines within one cell of it, so two harvesters
+/// at neighbouring cells do not hold each other off: no stretch of `ToOre` is longer than the drive
+/// from the refinery plus a margin. (Without the stop, harvesters stood against each other in
+/// `ToOre` for thousands of ticks.)
+#[test]
+fn no_harvester_is_stuck_driving_to_ore() {
+    let log = run_scenario();
+    let mut longest = 0u64;
+    for slot in [1u32, 2, 3, 4] {
+        let mine: Vec<(u64, HarvestStage)> = log
+            .stages
+            .iter()
+            .filter(|&&(_, s, _)| s == slot)
+            .map(|&(t, _, st)| (t, st))
+            .collect();
+        for pair in mine.windows(2) {
+            if pair[0].1 == HarvestStage::ToOre {
+                longest = longest.max(pair[1].0 - pair[0].0);
+            }
+        }
+    }
+    println!("longest ToOre stretch: {longest} ticks");
+    assert!(longest < LONGEST_TO_ORE, "{longest} ticks in ToOre");
+}
+
+/// The longest stretch seen is 686 ticks (the first drive, round the rock patch); the jam without
+/// the stop lasted 1900.
+const LONGEST_TO_ORE: u64 = 1000;
+
 #[test]
 fn the_player_without_a_refinery_gets_nothing_and_does_not_clog_the_bay() {
     let log = run_scenario();
@@ -360,4 +390,81 @@ fn without_the_holder_it_takes_the_upper_opening_and_never_replans() {
     assert_eq!(most, 0);
     assert!(upper);
     assert!(w.ore_delivered(P0) >= 200);
+}
+
+// ---- cost ---------------------------------------------------------------------------------------
+
+/// The `harvest` scenario with 50 harvesters of player 0 (a lattice of 54 places east of the rock
+/// patch, on open grass) and three refineries, over `ticks` ticks; with `harvest` off the same units
+/// stand where they are put (no harvest rules).
+fn crowd_scenario(harvest: bool, ticks: u64) -> Scenario {
+    let mut s = scenario();
+    s.ticks = ticks;
+    if !harvest {
+        s.harvest = None;
+    }
+    s.commands.clear();
+    let mut push = |command: Action| {
+        s.commands.push(TimedCommand {
+            tick: 0,
+            player: 0,
+            command,
+        })
+    };
+    for cell in [(96, 86), (108, 76), (90, 80)] {
+        push(Action::PlaceStructure {
+            kind: 2,
+            owner: 0,
+            cell,
+        });
+    }
+    for y in (94..=108).step_by(2) {
+        for x in (106..=116).step_by(2) {
+            push(Action::SpawnUnit {
+                kind: 11,
+                owner: 0,
+                cell: (x, y),
+            });
+        }
+    }
+    s
+}
+
+/// Milliseconds a run of `scenario` takes, and the harvesters alive at the end.
+fn timed(scenario: &Scenario) -> (f64, usize, u64) {
+    let mut world = scenario.build_world().unwrap();
+    let started = Instant::now();
+    for _ in 0..scenario.ticks {
+        world.step();
+    }
+    let ms = started.elapsed().as_secs_f64() * 1e3;
+    (ms, world.len() - 3, world.ore_delivered(P0))
+}
+
+/// Prints the relative cost of the harvest stage with 50 harvesters: alternating runs of the same
+/// scenario with the harvest rules on and off. Run it in release:
+/// `cargo test --release -p sf_headless --test harvest -- --ignored --nocapture harvest_cost`.
+#[test]
+#[ignore]
+fn harvest_cost() {
+    let ticks = 4000;
+    let (on, off) = (crowd_scenario(true, ticks), crowd_scenario(false, ticks));
+    let mut rows = Vec::new();
+    for round in 0..5 {
+        let (with, n, delivered) = timed(&on);
+        let (without, _, _) = timed(&off);
+        println!(
+            "round {round}: {with:8.1} ms with the harvest rules, {without:8.1} ms without \
+             ({n} harvesters, {delivered} ore delivered in {ticks} ticks)"
+        );
+        rows.push((with, without));
+    }
+    let mean = |f: fn(&(f64, f64)) -> f64| rows.iter().map(f).sum::<f64>() / rows.len() as f64;
+    let (with, without) = (mean(|r| r.0), mean(|r| r.1));
+    println!(
+        "mean: {with:.1} ms with, {without:.1} ms without: {:.1} microseconds per tick more with \
+         harvesting ({:.1} microseconds per tick in all)",
+        (with - without) * 1e3 / f64::from(ticks as u32),
+        with * 1e3 / f64::from(ticks as u32)
+    );
 }
