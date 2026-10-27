@@ -77,7 +77,13 @@ pub struct FxEvent {
     /// A `Fire`: the length of the shooter's body, metres. An `Impact`: the splash radius, metres. A
     /// `Death`: the size of the body (or the longer side of the footprint), metres.
     pub size: f32,
+    /// A `Fire`: the slot (the index half of the id) of the shooter, which is how the picture finds the
+    /// shooter's drawn model and so its muzzle anchor (WP5.6b); [`NO_SHOOTER`] for every other kind.
+    pub shooter: u32,
 }
+
+/// The `shooter` of an event that has none.
+pub const NO_SHOOTER: u32 = u32::MAX;
 
 /// The queue the sim thread fills and the main thread empties. See the module documentation.
 #[derive(Debug, Default)]
@@ -222,6 +228,7 @@ pub fn record(world: &World, out: &mut Vec<FxEvent>) -> u64 {
             pos: from.pos,
             facing: aim.raw(),
             size: from.length_m,
+            shooter: shot.attacker.index(),
         });
         if weapon.projectile == ProjectileKind::Instant {
             match origin_of(world, shot.target) {
@@ -237,6 +244,7 @@ pub fn record(world: &World, out: &mut Vec<FxEvent>) -> u64 {
                     pos: at.pos,
                     facing: 0,
                     size: 0.0,
+                    shooter: NO_SHOOTER,
                 }),
                 None => unresolved += 1,
             }
@@ -258,6 +266,7 @@ pub fn record(world: &World, out: &mut Vec<FxEvent>) -> u64 {
             pos: vec2_cells_to_metres(impact.at),
             facing: 0,
             size: splash_m,
+            shooter: NO_SHOOTER,
         });
     }
     for d in world.deaths() {
@@ -272,6 +281,7 @@ pub fn record(world: &World, out: &mut Vec<FxEvent>) -> u64 {
             pos: vec2_cells_to_metres(d.pos),
             facing: d.facing.raw(),
             size: death_size_m(d),
+            shooter: NO_SHOOTER,
         });
     }
     unresolved
@@ -289,6 +299,7 @@ impl Default for FxEvent {
             pos: [0.0; 2],
             facing: 0,
             size: 0.0,
+            shooter: NO_SHOOTER,
         }
     }
 }
@@ -306,6 +317,7 @@ mod tests {
             pos: [0.0, 0.0],
             facing: 0,
             size: 0.0,
+            shooter: NO_SHOOTER,
         }
     }
 

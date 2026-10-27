@@ -50,6 +50,14 @@ impl Population {
     /// The placeholder shapes plus, with a pack, one kind per model after
     /// them (kind `PLACEHOLDER_SHAPES + i` is model `i`, shape the same).
     pub fn new(pack: Option<&LoadedPack>) -> Self {
+        Self::with_pack_shapes_from(pack, PLACEHOLDER_SHAPES as usize)
+    }
+
+    /// [`Population::new`] for a scene whose pack models come after more shapes than the three
+    /// placeholders: model `i` of the pack is shape `first_pack_shape + i` (the combat benchmark draws the
+    /// roles of the unit definitions between the placeholders and the test pack, WP5.6b). The kinds, their
+    /// order and weights, and so the crowd [`Population::spawn`] makes, are the same.
+    pub fn with_pack_shapes_from(pack: Option<&LoadedPack>, first_pack_shape: usize) -> Self {
         let mut kinds: Vec<KindSpec> = (0..PLACEHOLDER_SHAPES)
             .map(|i| KindSpec {
                 shape: i as u8,
@@ -61,7 +69,7 @@ impl Population {
             for (i, icon) in pack.icons.iter().enumerate() {
                 let building = *icon == IconId::from(IconShape::Square);
                 kinds.push(KindSpec {
-                    shape: (PLACEHOLDER_SHAPES as usize + i).min(255) as u8,
+                    shape: (first_pack_shape + i).min(255) as u8,
                     mobile: !building,
                     weight: 1,
                 });

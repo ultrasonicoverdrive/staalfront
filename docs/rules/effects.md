@@ -1,4 +1,7 @@
-# Visual effects (WP5.6a)
+# Visual effects (WP5.6a, WP5.6b)
+
+WP5.6a made the effects; WP5.6b (sections 5 and 10, and the end of 8 and 9) put the flash at the model's muzzle node and
+added the combat benchmark of M0c (`docs/bench/README.md`).
 
 Muzzle flashes, hits, explosions, smoke and the tracers of projectiles in flight. **Presentation only**: nothing
 here reaches the simulation (`git diff origin/main -- crates/sf_sim` is empty, no checksum or pinned value moved),
@@ -60,8 +63,8 @@ seconds, speeds metres per second.
 | Part | What it says |
 |---|---|
 | `limits` | `max_particles` 4096 (the pool), `max_tracer_dots` 2048, `min_px` 2 and `max_px` 64 (the size on the screen), `middle_below_px` 60, `middle_factor` 0.5, `smoke_refuse_percent` 75, `strategic_flash_alpha` 0.6, `max_event_age_ticks` 40; the curve shapes `rise_jitter` 0.4 (rise times 0.8 to 1.2), `smoke_fade_in` 8 (smoke comes in over the first eighth of its life), `flash_hold` 0.5 (a death flash holds over the first half), `tracer_taper` 0.6 (the last dot is 0.4 of the head). Pool and dots together must fit the GPU buffer (8192 instances; a test keeps `EFFECT_CAPACITY` and `MAX_INSTANCES` equal). |
-| `muzzle` | where a flash starts when the model has no muzzle anchor (section 5): `reach_fraction` 0.5 of the body length out, at least `min_reach_m` 0.8, `height_fraction` 0.22 of the body length up. |
-| `placement` | `hit_height_m` 0.6 (a hit, a death and wreck smoke start this high), `projectile_lift_m` 1.0 (a projectile on the ground is drawn this high), burst radius `impact_radius_fraction` 0.5 / `death_radius_fraction` 0.4 of the size, at least `min_burst_radius_m` 0.3. |
+| `muzzle` | where a flash starts **when the model has no muzzle anchor** (section 5; a model with one uses it): `reach_fraction` 0.5 of the body length out, at least `min_reach_m` 0.8, `height_fraction` 0.22 of the body length up. |
+| `placement` | `hit_height_m` 0.6 (a hit, a death and wreck smoke start this high), `death_lift_m` 0.5 (WP5.6b, a review observation of WP5.6a: a death bursts this much higher than that, so the blast of a body starts above the wreck it leaves; test `a_death_bursts_a_little_higher_than_a_hit`, which also shows a hit is not lifted), `projectile_lift_m` 1.0 (a projectile on the ground is drawn this high), burst radius `impact_radius_fraction` 0.5 / `death_radius_fraction` 0.4 of the size, at least `min_burst_radius_m` 0.3. |
 | `effects` | 23 named bursts: `count`, `life_s`, `size_m`, `growth_mps`, `colour` (sRGB), `alpha`, `glow`, `rise_mps`, `spread_mps`, `sound`. `glow: true` is additive light; `false` is the **smoke class**. |
 | `by_damage_type` | per damage type of `unit_classes.ron`: the `fire` and `impact` lists. Every damage type has one. |
 | `by_weapon` | per weapon **id** of `weapon_defs.ron`: a `fire` and/or `impact` list that replaces the damage type's (an empty list keeps it). Shipped: `howitzer` fires `flash_howitzer`. |
@@ -80,7 +83,7 @@ its range (count 1 to 64, life 0.01 to 10 s, size 0.05 to 50 m, alpha above 0, `
 0.05 to 1, `strategic_flash_alpha` at least 0.5, trails only with a rate); a `sound` is a dotted lower-case name or empty
 and no two effects share one.
 
-**Every number is pinned** by a test: `the_shipped_limits_are_these_numbers`, `every_shipped_effect_is_these_numbers`
+**Every number is pinned** by a test: `the_shipped_limits_are_these_numbers` (which also pins `placement`, `death_lift_m` included), `every_shipped_effect_is_these_numbers`
 (all 23 effects, field by field, sorted by name, so an effect added or removed fails it),
 `the_links_and_the_rest_are_these_numbers` (the damage-type links, the override, the miss, the deaths, the wreck smoke,
 the four tracers) and `every_shipped_weapon_resolves_to_a_fire_and_an_impact_effect` (all 15 shipped weapons).
@@ -124,15 +127,82 @@ soft disc (no texture, no asset). Depth is tested against the scene, not written
 * Not sorted back to front: with premultiplied alpha the order of glow and smoke is hardly visible; sort only if a
   screenshot shows a problem (none did).
 
-## 5. Where a flash starts (fallback until WP5.6b)
+## 5. Where a flash starts
 
-The loader throws the `muzzle` nodes of the models away, so there are no anchors. WP5.6a starts the flash at the
-**bounding-box rule**: from the unit's middle, out along the facing of the weapon's mount (the turret's for a turret
-weapon, the hull's otherwise), `reach_fraction` (0.5) of the body length, at least 0.8 m, at `height_fraction` (0.22)
-of the body length up. The **body length is the unit's `size` in the definitions** (a structure: the longer side of its
-footprint), not the model's measured box: an approximation (a 6 m tank gets 3 m of reach and 1.32 m of height). A
-burst of two (`twin_cannon`) flashes twice at the same point. WP5.6b replaces both with the anchors of the glb files.
-Test: `the_muzzle_is_out_along_the_mount_and_up`.
+**At the model's muzzle node** when the shooter's model has one (WP5.6b), else by a **bounding-box rule** (WP5.6a).
+
+### The anchors in the glb loader (`sf_render::glb`)
+
+A node of the file named `muzzle*` or `fx_*` (after the `_LOD<n>` suffix is stripped) with no mesh of its own is an
+**anchor**: a named point that is not drawn. The loader used to make such a node an empty part and prune it; now it keeps
+it, before pruning, on `LoadedLevel::anchors` as `Anchor { name, parent, local }`: the name, the part whose frame it is in
+and its matrix in that frame (converted to engine axes with the same `S M S^-1` as the parts, scaled with
+`LoadedModel::scaled`). In the order of the file (`muzzle_l` before `muzzle_r`).
+
+* **Re-parenting.** A part with no geometry and no kept part below it is pruned (the test pack's empty `turret` and `barrel`
+  nodes). An anchor under such a part moves to its nearest kept ancestor, with the pruned parts' frames folded into its
+  matrix (`an_anchor_under_a_pruned_part_moves_to_its_nearest_kept_ancestor`: a muzzle 2 m ahead of a pruned barrel that
+  is 1 m ahead of the turret is on the turret, 3 m ahead). Its joint is then the kept ancestor's, not the pruned part's.
+* A node called `muzzle` that **has geometry** is geometry, not an anchor (`a_muzzle_named_mesh_is_geometry_not_an_anchor`).
+* In set v4: of 194 files, **44 carry `muzzle*` anchors and 119 carry `fx_*`**, 283 anchors in all
+  (`set_v4_anchor_counts_are_these_numbers`). The heavy tanks have `muzzle_l` and `muzzle_r` on the barrel, the light tanks, the
+  riflemen and rocket troopers and the siege artillery one `muzzle`. The test pack has **no** anchor; set v3 has `fx_*` on four
+  neutral wrecks and no muzzle (`the_test_pack_and_set_v3_have_no_muzzle_anchors_and_fall_back`).
+* `model_set` carries them per level to `ModelLods::anchors(level)` (`RigAnchor`); `anchor_count(prefix)` counts them.
+
+### Where an anchor is in the world (`Instancer::anchor_world`)
+
+`Instancer::anchor_world(slot, prefix, n, alpha, ground)` poses the unit **exactly as `build_frame` draws it at `alpha`**: the
+same interpolated position and hull facing, the same turret yaw (`Motion::turret_yaw`, or the demo aim) and barrel pitch
+(`Instancer::joint_angles`, the one function both use), the same `pose_parts`, on the terrain height `ground` gives; then
+`posed[parent] * local`. The `n`-th matching anchor (the file's order) is taken **modulo the number of matching anchors**.
+The finest level's anchors are used (every level of a file has the same ones). `slot` is the index half of a `UnitId`; the
+instancer finds it by halving when the slots of the tick rise (the game's do) and by scanning when they do not. `None` when
+there is no such unit or the model has no such anchor. Tests: `an_anchor_is_where_the_drawn_barrel_carries_it` (the barrel
+instance the frame uploaded times the muzzle's own matrix, interpolated, on a slope, turret off the hull, barrel pitched),
+`a_turret_turned_64_steps_rotates_its_anchor_90_degrees_about_the_pivot` and
+`a_turret_64_steps_off_the_hull_swings_the_muzzle_a_quarter_turn_about_the_pivot` (the turret turned a quarter turn swings the
+anchor 90 degrees about the pivot, `(x, z)` to `(-z, x)`, on a hull that itself faces 20 steps off the axis),
+`an_anchor_is_found_by_slot_and_a_wreck_slot_is_not_a_unit`.
+
+### Which muzzle, and which unit
+
+* An `FxEvent` of a shot carries `shooter`: the **slot** of the attacker (4 bytes in what was padding; the event is still 32
+  bytes), `NO_SHOOTER` (`u32::MAX`) for every other kind. `FxPlayer::frame_with(snap, ground, anchors, frame)` asks the
+  `Anchors` trait (the runner answers it from the instancer, `DrawnAnchors`) for `("muzzle", n, alpha)` of that slot.
+* **`n = weapon slot + the number of shots of that (shooter, weapon slot) already shown`**. So the shots of a burst
+  alternate between the muzzles: the heavy tank's volley of two (`twin_cannon`, `burst: 2`) flashes at `muzzle_l`, then
+  `muzzle_r`, and the next volley again at `muzzle_l`; a unit with one `muzzle` flashes there every time; a second weapon slot
+  starts on the next muzzle. (A hull-mounted weapon on a model whose muzzle is on its barrel flashes at the barrel too: the
+  event does not say which muzzle belongs to which weapon. Not built; no shipped unit has both.)
+* **Wrecks and units are told apart by slot.** The picture numbers wrecks from the first slot no live entity has
+  (`looks::first_wreck_slot`). `DrawnAnchors` answers only for slots **below** it, so a shooter that died after it fired is never
+  looked for under the wreck that took its slot number (`drawn_anchors_do_not_answer_for_a_wreck_slot`).
+* **The shot count is never pruned.** `shots_shown` keeps one counter per (slot, weapon slot) ever seen, so it is bounded by
+  slots times weapon slots and does not grow without end. A new unit that takes a dead unit's slot starts its burst at the
+  muzzle the old count leaves (left or right instead of always left). Cosmetic only, and the picture of a burst still alternates;
+  not built.
+* **The flash follows the drawn pose at the frame it is shown**, interpolated at the frame's alpha, not the pose of the tick of
+  the shot: a unit that drives on between the shot and the frame has its flash at its barrel as drawn.
+* Counters `flashes_at_anchor` and `flashes_by_rule` (F1 and the bench JSON): in the combat benchmark of 45 s on lavapipe,
+  3,559 flashes at an anchor and 16 by the rule.
+
+### The fallback: the bounding-box rule
+
+For a model without a `muzzle` anchor (the test pack, set v3, the placeholder shapes, a shooter whose model is not drawn): from
+the unit's middle, out along the facing of the weapon's mount (the turret's for a turret weapon, the hull's otherwise),
+`reach_fraction` (0.5) of the body length, at least 0.8 m, at `height_fraction` (0.22) of the body length up. The **body
+length is the unit's `size` in the definitions** (a structure: the longer side of its footprint), not the model's measured box:
+an approximation (a 6 m tank gets 3 m of reach and 1.32 m of height). A burst of two flashes twice at the same point there.
+Tests: `the_muzzle_is_out_along_the_mount_and_up`, `a_model_without_a_muzzle_gets_the_bounding_box_rule`.
+
+### Seen
+
+`docs/screenshots/wp5.6b/`: the flash at the barrel tip of a Veyran heavy tank (set v4) whose turret is 40 steps off its hull,
+the first shot at `muzzle_l` (tick 5) and the second at `muzzle_r` (tick 10), 0.9 m apart; and of a light tank (one `muzzle`)
+with its turret turned, with the tracer going away from it (tick 9). From the screenshot test, which asserts a bright change
+there (1,514 and 1,708 pixels brighter, 1,694 for the light tank) and that the particles of each shot are within 0.3 m of the
+instancer's answer for that muzzle (0.10 m and 0.09 m in the run printed).
 
 ## 6. Zoom
 
@@ -189,6 +259,36 @@ a sound name changed: `every_shipped_effect_is_these_numbers`; events shown a ti
 `the_muzzle_is_out_along_the_mount_and_up`; the queue dropping the newest: `a_full_queue_drops_the_oldest_...`; projectiles not copied into the
 snapshot: both tracer tests.
 
+**WP5.6b tests** (`sf_render::glb::anchor_tests`, `sf_render::instancing::tests`, `sf_game::fx::tests`, `tests/effects_screenshot.rs`,
+`tests/bench_scene.rs`, `bench::tests`):
+
+| Test | Proves |
+|---|---|
+| `the_veyran_heavy_tank_has_two_muzzle_anchors` | the real file: `muzzle_l` and `muzzle_r` on the barrel at all three levels, at (2.808, 0, -/+0.456) from the barrel pivot |
+| `an_anchor_under_a_pruned_part_moves_to_its_nearest_kept_ancestor`, `anchors_follow_the_axis_and_unit_conversion_and_scaling`, `a_muzzle_named_mesh_is_geometry_not_an_anchor` | the loader's rules of the section above |
+| `set_v4_anchor_counts_are_these_numbers`, `the_test_pack_and_set_v3_have_no_muzzle_anchors_and_fall_back` | 194 files, 44 with `muzzle`, 119 with `fx_`, 283 anchors; test pack 14 files and set v3 30 files with no `muzzle`, four v3 files with `fx_` |
+| the four instancer tests of section 5 | an anchor is where the drawn barrel carries it; a quarter turn of the turret is a quarter turn of the anchor about the pivot; slots, wrecks, rising or not |
+| `a_flash_starts_at_the_muzzle_anchor_when_the_model_has_one`, `a_model_without_a_muzzle_gets_the_bounding_box_rule`, `a_burst_alternates_between_the_muzzles_by_shooter_and_slot`, `drawn_anchors_do_not_answer_for_a_wreck_slot`, `a_shot_seen_from_afar_looks_up_no_anchor_and_counts_no_flash`, `a_death_bursts_a_little_higher_than_a_hit` | what `FxPlayer` asks the picture and does with the answer (a fake `Anchors`, and the real heavy tank in an instancer) |
+| `fx_events.rs` `a_shot_points_along_its_mount_turret_or_hull` | gained: every `Fire` carries the attacker's slot, nothing else has a shooter |
+| `a_flash_starts_at_the_barrel_tip_and_a_twin_cannon_alternates_its_muzzles`, `a_single_muzzle_tank_with_its_turret_turned_flashes_at_the_barrel` | through `record`, `frame_with`, `DrawnAnchors` and the real renderer: the particles of each shot start within 0.3 m of the instancer's answer for that muzzle (the second shot of a burst at the other one, 0.912 m apart), the turret is 40 steps off its hull, the picture changes brightly there; the light tank's barrel tip is 2.6 m from the rule's point (the test asserts more than 1 m) |
+| `bench_scene.rs` (five tests) | the checksums of the benchmark worlds, section 10 |
+| `bench::tests::the_fight_benchmark_reports_its_effects` | `scene.combat`, `scene.skirmish_units`, the `effects` block and `effect_instances` overall and per phase arrive in the JSON |
+
+**Mutations of WP5.6b** (each made in place, the tests that failed named, then reverted; every one failed what it should):
+anchors not moved to the nearest kept ancestor with the pruned frame folded in: `an_anchor_under_a_pruned_part_...` and
+`anchors_follow_the_axis_...`; anchors not converted to engine axes: `anchors_follow_the_axis_and_unit_conversion_and_scaling`;
+`anchor_world` posing the unit with joints at rest: `an_anchor_is_where_the_drawn_barrel_carries_it` and
+`a_turret_64_steps_off_the_hull_...`; slots always taken as rising: `an_anchor_is_found_by_slot_...` (the first version of that
+test did **not** catch it, two units cannot tell; it now has four unsorted ones); `n` without the shot counter:
+`a_burst_alternates_between_the_muzzles_...` and the heavy-tank screenshot test; no cut at the first wreck slot:
+`drawn_anchors_do_not_answer_for_a_wreck_slot`; shots at strategic zoom looked up anyway:
+`a_shot_seen_from_afar_looks_up_no_anchor_and_counts_no_flash`; no death lift: `a_death_bursts_a_little_higher_than_a_hit`; `death_lift_m` 0.5
+changed to 0.6 in the RON: `the_shipped_limits_are_these_numbers`; `record` without the shooter: `a_shot_points_along_its_mount_...`
+and both anchor screenshot tests; skirmish gap 3.6 cells changed to 4.0: `the_fight_benchmark_ends_at_these_checksums_...`;
+`DEMO_SPEED` 1.5 changed to 2: all three checksum tests; the skirmish scheduled before the crowd:
+`the_fight_benchmark_has_the_crowd_of_the_plain_one_...`; the effect instances counted from the triangle column:
+`the_fight_benchmark_reports_its_effects`.
+
 ## 9. Cost (relative; the real number is M0c on the laptop after WP5.6b)
 
 Release build, same machine, alternating runs, a shared container whose load average was 2.7 to 3.6 (so only the size of
@@ -205,20 +305,58 @@ lavapipe) and say how the cost grows, not what a GTX 1650 does.
 | main thread: pool update (4096 alive) + emit (1224 of them in view) + 300 tracers | **109 to 116 us** per frame (2042 instances) |
 | software rasterizer, whole frame 960 x 540, close zoom with the fight | no effects **21.9 to 22.2 ms**; 500 instances of 12 to 31 px **+0.3 to +1.0 ms**; 6144 instances all at 64 px **+15.3 to +15.6 ms** |
 
+**WP5.6b** (release, `cargo test --release -p sf_render --lib what_the_anchor_lookup_costs -- --ignored --nocapture`, 5 alternating
+rounds, load average 1.2 before the run and 4.3 after it because the release build ran in between, so the first round is the
+slowest and the numbers are only the size): one `anchor_world` among 5,000 units takes **121 to 126 ns** when the slots rise (the
+game's do; the first round 179 ns) and **1.3 to 1.4 us** when they do not (the scan; the first round 2.9 us). A frame asks once
+per shot shown: a fight of 30 shots in a frame costs under 4 us. The only per-tick cost of the feature is the check that the
+slots rise, in `Instancer::update_tick`: **2.0 to 2.1 us** of an `update_tick` of 5,000 units that takes **99 to 112 us** (about
+2 %, measured as the check alone inside the same loop; there is no "before" binary, the rest of `update_tick` is unchanged).
+Nothing else of the flash changed: one lookup in a `BTreeMap` of shot counts per shot (bounded by shooters times weapon
+slots).
+
 The 6144 x 64 px case is the worst the buffer allows (about 38 screens of overdraw at this size) and not something a
 fight makes: the guards are `max_px`, the 75 % smoke rule and the pool size. The design's estimate for the GTX 1650
 (at most 0.5 ms) is an estimate; nothing here measured it. Measure: `cargo test --release -p sf_game --test
 effects_screenshot -- --ignored --nocapture` and `--test fx_events -- --ignored --nocapture`.
 
-## 10. Not done
+## 10. The combat benchmark and its checksums (WP5.6b)
 
-* **Muzzle and `fx_*` anchors** in the glb loader, and the bench with a fight (`sf_demo --bench --fight`, M0c): WP5.6b.
+`sf_demo --bench --fight` flies the M0 camera path over the M0 crowd with an armed skirmish added; how Tijmen runs it and
+what to read is `docs/bench/README.md`. The skirmish (`sf_game::skirmish`) is fixed: three sites (the map centre, the place of
+`mid_hold`, the middle of `low_pass`), a wave of 8 units per side every 100 ticks from tick 0 to 1400 (720 units in all), face
+to face at 3.6 cells, no orders (the units pick their own targets, WP5.4), made by scheduled `SpawnUnit` commands on a world
+given the unit table and `playfield::with_combat`. All of it is `assets/config/skirmish.ron` (`sf_data::skirmish`: checked at
+load, against the unit definitions, and every number pinned: `every_shipped_number_is_this_number`). The crowd is the demo's own (same seed, kinds, owners; checked equal entity by
+entity at tick 0), drawn with the test pack; the roles are drawn with their set v4 models (so the muzzle anchors are in the
+benchmark), the crowd's pack models after them in the instancer (`Population::with_pack_shapes_from`).
+
+`bench_scene` builds the world without a window (the **headless twin**), the runner builds it with the same functions, and
+`tests/bench_scene.rs` pins three lists of 15 checksums (every 100 ticks to tick 1500). Compared with a real run under Xvfb and
+lavapipe: the plain benchmark's checkpoints 100 to 400 and the fight's 100 to 300 are equal to the twin's.
+
+* **The plain benchmark no longer ends at M0's `0x9e196a6ced2ef024`.** On `main` after WP7.1 (ore on the map, in the checksum) it
+  ends at `0x8e57352fc4bdec7b`. Measured: the same world built without the ore gives all 15 of M0's checkpoints
+  (`the_plain_benchmark_without_ore_is_the_world_m0_recorded`). Nothing of WP5.6b moved it (`git diff origin/main -- crates/sf_sim`
+  is empty; the plain scene is built by the same calls in the same order as before). The brief of this WP said the old value
+  still held; it had moved before this WP, and the test now says why.
+* The fight's list ends at `0x568d257d092daa7b`. In the twin the fight makes 143 to 536 shots, 66 to 267 hits and 6 to 44 deaths
+  per hundred ticks and at most 32 events in one tick: a light load next to the design's 100 to 500 events a tick for 5,000 units
+  all fighting, which this does not try to be (the cap and the pool have headroom: 45 s flight on lavapipe, 7,075 events, pool
+  peak 1,513 of 4,096, nothing dropped).
+
+## 11. Not done
+
+* **Smoke and fire from the `fx_*` anchors** (the loader keeps them, nothing reads them): WP6.8 for damaged buildings.
+* **Which muzzle belongs to which weapon** when a unit has weapons on the hull and on the turret and a model with several
+  muzzles: the flash alternates over all of them (no shipped unit has both).
 * The sounds themselves: the positional playing is WP11.3 (`audio.md`); the sound files and the original-audio mapping are WP11.7.
 * **Building damage display, smoke and fire on damaged buildings**: WP6.8. Wrecks give off smoke now; a live building
   does not.
 * An `Impact` of an instant weapon whose target died in the same tick is placed from the tick's deaths; one whose target
   is in neither list is not drawn (`fx_unresolved`).
-* The effects do not follow a unit that moves after the shot (a flash stays where the muzzle was at the tick).
+* The effects do not follow a unit that moves after the shot (a flash stays where it was made, at the muzzle of the pose
+  of the frame that showed it).
 * No hot reload of `effects.ron`; no sorting of the blended particles; no distinct tracer colour per player; a wreck does
   not fade.
 * **The strategic death flash is small by design** (an icon's size at most, drawn over the wreck's icon): a screenshot at

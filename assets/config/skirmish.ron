@@ -1,0 +1,54 @@
+// The armed skirmish of `sf_demo --bench --fight` (WP5.6b, the combat benchmark of milestone M0c). Read by
+// `sf_data::skirmish`, checked when it is loaded and against the unit definitions, every number pinned by a test.
+// `docs/bench/README.md` says what the benchmark is and how it is run; `crates/sf_game/src/skirmish.rs` places it.
+//
+// Fixed on purpose: every run, on every machine, plays the same fight, so the checksums of the world are comparable
+// (`crates/sf_game/tests/bench_scene.rs` pins them). Changing a number here moves them: say why in the change.
+//
+// Units of measure: cells (1 cell = 4 m) on the map of 256 x 256 cells the benchmark's camera path is written for
+// (a smaller map scales the sites, as the path scales), tenths of a cell for the offsets, ticks (20 a second).
+(
+    // A wave appears at every site at tick 0, wave_every_ticks, 2 * wave_every_ticks, ... up to last_wave_tick (the
+    // flight of the benchmark is about 1,500 ticks long): a wave that has died is replaced, so the fight lasts
+    // the whole flight.
+    wave_every_ticks: 100,
+    last_wave_tick: 1400,
+
+    // The distance between the two front lines of a wave, tenths of a cell: inside the reach of the weapons
+    // (cannons 5 cells, rifles 4), so nobody needs an order to start (the units pick their own targets, WP5.4).
+    gap_tenths: 36,
+
+    // The sideways shift of a wave, tenths of a cell: wave 0 takes the first entry, wave 1 the second, and so on,
+    // repeating. A wave stands a little off the last one, so a survivor of the last wave is not stood on.
+    wave_shift_tenths: [-4, 0, 4],
+
+    // The two sides: the owner of the units (0 Meridian, 1 Veyran in the sandbox's seats) and which way from the
+    // middle of the site its units stand: -1 west of it, 1 east of it.
+    sides: [
+        (owner: 0, direction: -1),
+        (owner: 1, direction: 1),
+    ],
+
+    // One site under each phase of the camera flight that is to show a fight: the first at the map centre (the
+    // `close_up` phase looks at cells (125..132, 125..130)), the second where `mid_hold` looks (cells (175..172,
+    // 95..100)), the third about the middle of the `low_pass` (it flies from cell (75, 162) to (205, 180)).
+    sites: [
+        (name: "centre",   at: (128, 128)),
+        (name: "mid_hold", at: (174, 97)),
+        (name: "low_pass", at: (140, 171)),
+    ],
+
+    // The wave of one side: the role (an id of unit_defs.ron, armed), `along` tenths of a cell behind the side's front
+    // line and `across` tenths of a cell sideways. Infantry in front (they reach the other side's front line), the
+    // tanks behind them: 3 riflemen, 2 rocket troopers, a heavy tank (two muzzles) and 2 light tanks (one each).
+    wave: [
+        (role: "rifleman",       along: 0,  across: -12),
+        (role: "rifleman",       along: 0,  across: 0),
+        (role: "rifleman",       along: 0,  across: 12),
+        (role: "rocket_trooper", along: 0,  across: -24),
+        (role: "rocket_trooper", along: 0,  across: 24),
+        (role: "heavy_tank",     along: 16, across: 0),
+        (role: "light_tank",     along: 16, across: -28),
+        (role: "light_tank",     along: 16, across: 28),
+    ],
+)

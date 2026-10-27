@@ -43,6 +43,13 @@ pub fn with_wreck_colour(style: Style) -> Style {
 /// id easy to recognise.
 const WRECK_GENERATION: u32 = u32::MAX;
 
+/// The first slot the picture gives a wreck: one past the highest slot of any live entity of `snap`. The
+/// wrecks are numbered from here on, so a slot below it names an entity and a slot from it a wreck (or
+/// nothing), never both. [`Looks::wreck_motion`] is given slots from this one.
+pub fn first_wreck_slot(snap: &crate::sim_snapshot::SimSnapshot) -> u32 {
+    snap.views().last().map_or(0, |v| v.id.index() + 1)
+}
+
 /// The mapping from entities to shapes of the scene being shown.
 pub enum Looks {
     /// Opaque kinds, mapped by the demo's population.

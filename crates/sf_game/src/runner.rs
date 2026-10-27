@@ -26,7 +26,6 @@ use sf_data::map::{Map, generate::generate_cells};
 use sf_data::units::UnitDefs;
 use sf_engine::winit::event::MouseButton;
 use sf_engine::{Action, App, Context, Resized, winit};
-use sf_math::Fx;
 use sf_math::render_bridge::{METRES_PER_CELL, vec2_metres_to_cells};
 use sf_render::camera::DVec2;
 use sf_render::glb::{self, LoadedPack};
@@ -36,7 +35,7 @@ use sf_render::{
     Ground, IconAtlas, InstanceStats, Instancer, LodConfig, ModelSet, Motion, Pick, PickQuery,
     PickVia, RectQuery, Renderer, ScreenRect, Style, TerrainGround, TerrainStats, UnitId,
 };
-use sf_sim::{EntityView, World, WorldConfig};
+use sf_sim::{EntityView, World};
 
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
@@ -45,7 +44,7 @@ use crate::commands;
 use crate::construction_view;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
-use crate::fx::{FxFrame, FxPlayer};
+use crate::fx::{DrawnAnchors, FxFrame, FxPlayer};
 use crate::fx_sound::{FxSound, start_audio};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
@@ -57,10 +56,8 @@ use crate::selection_view::{self, FrameGeometry, SelectionView};
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
 
-/// Walking speed of the demo's units: 1.5 cells a second, 6 m/s (22 km/h),
-/// a believable tank. The sim's default of 4 cells a second was a walking
-/// speed when a cell was a metre; at 4 m per cell it would be 58 km/h.
-const DEMO_SPEED: Fx = Fx::from_ratio(3, 2);
+// The walking speed of the demo's units (`bench_scene::DEMO_SPEED`) lives next to the world's
+// configuration there, where the headless twin of the benchmark scene builds the same world.
 
 /// Longest frame time fed to the camera; a stall (window drag, breakpoint)
 /// must not make it jump.
@@ -229,6 +226,8 @@ pub struct Runner {
     /// Map size in sim cells (B12): what the sim was created with.
     cells: (u32, u32),
     units: u32,
+    /// Units of the armed skirmish the scene adds to the crowd (`--fight`, WP5.6b); zero without one.
+    skirmish_units: u32,
     /// Latest instancing and draw counters, for the once-a-second line.
     stats: InstanceStats,
     terrain: TerrainStats,
@@ -328,10 +327,7 @@ impl Runner {
         let now = Instant::now();
         // B12: the sim counts cells, the map and everything drawn metres.
         let cells = map.size_in_cells();
-        let config = WorldConfig {
-            speed: DEMO_SPEED,
-            ..WorldConfig::new(1).with_map_size(cells.0, cells.1)
-        };
+        let config = crate::bench_scene::world_config(cells);
         // WP2.1: the map's terrain types go to the sim (open ground if it has
         // no terrain layer; a layer the sim refuses stops the start); nothing
         // is drawn from them yet (WP2.2 to WP2.4).
@@ -339,6 +335,10 @@ impl Runner {
         let style = placeholder_style(Style::embedded());
         let icons = load_icons();
         let start = match options.scene {
+            // The crowd with an armed skirmish (`--fight`, the combat benchmark of M0c) or the plain crowd.
+            Scene::Crowd if options.fight => {
+                fight_scene(world, &options, pack.as_ref(), &style, &icons, cells)
+            }
             Scene::Crowd => crowd_scene(world, &options, pack.as_ref(), cells),
             Scene::Sandbox => sandbox_scene(world, &options, &style, &icons, cells),
         };
@@ -347,6 +347,7 @@ impl Runner {
             looks,
             units,
             buildings,
+            skirmish_units,
             mut build,
         } = start;
         if let Some(role) = &options.build
@@ -460,6 +461,7 @@ impl Runner {
             buildings,
             cells,
             units,
+            skirmish_units,
             stats: InstanceStats::default(),
             terrain: TerrainStats::default(),
             draw_calls: 0,
@@ -566,7 +568,7 @@ pub fn motions_of<'a>(
     looks: &'a Looks,
     snap: &'a SimSnapshot,
 ) -> impl Iterator<Item = Motion> + 'a {
-    let first = snap.views().last().map_or(0, |v| v.id.index() + 1);
+    let first = crate::looks::first_wreck_slot(snap);
     snap.views()
         .iter()
         .map(move |v| motion_of(looks, snap, v))
@@ -1245,7 +1247,14 @@ impl Runner {
             dt,
             alpha,
         };
-        let instances = self.fx.frame(&self.snap, &*self.ground, &frame);
+        let anchors = DrawnAnchors {
+            instancer: &self.instancer,
+            ground: &*self.ground,
+            first_wreck_slot: crate::looks::first_wreck_slot(&self.snap),
+        };
+        let instances = self
+            .fx
+            .frame_with(&self.snap, &*self.ground, &anchors, &frame);
         if let Some(renderer) = &mut self.renderer {
             renderer.set_effects(instances);
         }
@@ -1447,6 +1456,7 @@ impl Runner {
             draw_calls: stats.total_draw_calls(),
             triangles: stats.terrain_triangles + stats.dynamic_triangles,
             buffer_allocs: (allocs - run.allocs_seen) as u32,
+            effect_instances: stats.effect_instances,
             segment: segment as u8,
         });
         run.allocs_seen = allocs;
@@ -1533,6 +1543,8 @@ impl Runner {
                 map_metres: (self.map.width(), self.map.height()),
                 metres_per_cell: sf_math::CELL_METRES,
                 instance_buffers_reserved: self.options.reserve,
+                combat: self.options.fight,
+                skirmish_units: self.skirmish_units,
             },
             flight: bench::FlightInfo {
                 progress_by: if run.opts.frames.is_some() {
@@ -1559,6 +1571,21 @@ impl Runner {
                     late_commands: now.late_commands - base.late_commands,
                     late_publishes: now.late_publishes - base.late_publishes,
                     extra_tick_ms: self.options.sim_delay.as_secs_f64() * 1e3,
+                }
+            },
+            effects: {
+                let (now, base) = (self.sim.counters(), run.sim_base);
+                let (fx, pool) = (self.fx.counters(), self.fx.pool_stats());
+                bench::EffectsInfo {
+                    fx_events: now.fx_recorded - base.fx_recorded,
+                    fx_dropped: now.fx_dropped - base.fx_dropped,
+                    particles_peak: pool.peak,
+                    particles_dropped: pool.dropped,
+                    smoke_refused: pool.smoke_refused,
+                    tracer_dots_dropped: fx.tracer_dots_dropped,
+                    flashes_at_anchor: fx.flashes_at_anchor,
+                    flashes_by_rule: fx.flashes_by_rule,
+                    effect_instances: bench::Counts::default(),
                 }
             },
         };
@@ -2060,8 +2087,25 @@ fn apply_looks(
         Some(roster) => {
             let style = roster.style(&base);
             apply_pack(instancer, roster.pack(), style);
+            // The combat benchmark has the test pack's crowd next to the roles (the sandbox has none).
+            if let Some(pack) = crowd_pack {
+                add_pack(instancer, pack);
+            }
         }
         None => apply_pack(instancer, crowd_pack, base),
+    }
+}
+
+/// The shapes and models of `pack` after the ones the instancer has: model `i` of the pack is shape
+/// `instancer.style().shape_count() + i` of the style before the call.
+fn add_pack(instancer: &mut Instancer, pack: &LoadedPack) {
+    let combined = pack.style_after(instancer.style()).ok().and_then(|style| {
+        let set = instancer.models().concat(&pack.set)?;
+        Some((style, set))
+    });
+    match combined {
+        Some((style, set)) => instancer.set_style_and_models(style, set),
+        None => eprintln!("sf_game: cannot add the model pack"),
     }
 }
 
@@ -2073,6 +2117,8 @@ struct SceneStart {
     units: u32,
     /// Buildings of the crowd's base.
     buildings: u32,
+    /// Units of the armed skirmish added to the crowd (WP5.6b); zero in every other scene.
+    skirmish_units: u32,
     /// The structures the local player may build (WP6.2); none in the crowd scene.
     build: BuildMode,
 }
@@ -2088,17 +2134,92 @@ fn crowd_scene(
 ) -> SceneStart {
     let population = Population::new(pack);
     let units = options.units;
-    let buildings = population.spawn(&mut world, units, cells);
-    // Tick 0 creates the entities; the buildings are then told to stay.
-    let mut views = Vec::new();
-    world.step();
-    world.snapshot().collect_into(&mut views);
-    population.plant_buildings(&mut world, &views);
+    // Spawn, tick 0, the buildings told to stay (`bench_scene`, shared with the headless twin).
+    let (buildings, _) = crate::bench_scene::populate(&mut world, &population, units, cells, None);
     SceneStart {
         world,
         looks: Looks::Crowd(population),
         units,
         buildings,
+        skirmish_units: 0,
+        build: BuildMode::empty(),
+    }
+}
+
+/// The unit definitions of `assets/config`, or the ones compiled in when they do not load.
+fn load_defs(assets: &std::path::Path) -> UnitDefs {
+    UnitDefs::load(&assets.join("config"), assets).unwrap_or_else(|e| {
+        eprintln!("sf_game: {e}; using the unit definitions compiled in");
+        UnitDefs::embedded()
+    })
+}
+
+/// The roster of the unit definitions, the roles drawn with their glTF models unless `--models none`. What
+/// does not load is reported and the roles are drawn as shapes.
+fn load_roster(
+    options: &Options,
+    defs: &UnitDefs,
+    style: &Style,
+    icons: &IconAtlas,
+    assets: &std::path::Path,
+) -> Roster {
+    let models_ron =
+        std::fs::read_to_string(assets.join(roster::MODELS_FILE)).unwrap_or_else(|e| {
+            eprintln!(
+                "sf_game: {}: {e}; roles are drawn as shapes",
+                roster::MODELS_FILE
+            );
+            String::new()
+        });
+    let use_models = options.role_models && !models_ron.is_empty();
+    let roster =
+        Roster::build(defs, style, icons, assets, &models_ron, use_models).unwrap_or_else(|e| {
+            eprintln!("sf_game: {e}; roles are drawn as shapes");
+            Roster::build(defs, style, icons, assets, "", false).expect("shapes alone fit")
+        });
+    for warning in &roster.warnings {
+        eprintln!("sf_game: {warning}");
+    }
+    roster
+}
+
+/// The crowd scene with an armed skirmish (`--fight`, the combat benchmark of M0c, WP5.6b): the demo's crowd
+/// exactly as `crowd_scene` makes it, with the combat of the game on the world and the waves of
+/// [`crate::skirmish`] scheduled on top, drawn with the models of the roles (their muzzle anchors
+/// included) next to the crowd's test pack. See `crate::bench_scene` for the world, which the tests build
+/// without a window.
+fn fight_scene(
+    mut world: World,
+    options: &Options,
+    pack: Option<&LoadedPack>,
+    style: &Style,
+    icons: &IconAtlas,
+    cells: (u32, u32),
+) -> SceneStart {
+    let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+    let defs = load_defs(&assets);
+    world = crate::bench_scene::armed(world, &defs);
+    let roster = load_roster(options, &defs, style, icons, &assets);
+    // The crowd's pack models come after the roles' shapes, models and variants in the instancer.
+    let first_pack_shape =
+        roster.style(style).shape_count() + roster.pack().map_or(0, |p| p.set.models().len());
+    let population = Population::with_pack_shapes_from(pack, first_pack_shape);
+    let units = options.units;
+    let (buildings, armed) =
+        crate::bench_scene::populate(&mut world, &population, units, cells, Some(&defs));
+    println!(
+        "fight: {armed} armed units in waves at {} sites on top of {units} wanderers",
+        sf_data::skirmish::Skirmish::embedded().sites.len()
+    );
+    SceneStart {
+        world,
+        looks: Looks::Roster {
+            roster: Box::new(roster),
+            crowd: population,
+        },
+        units,
+        buildings,
+        skirmish_units: armed,
         build: BuildMode::empty(),
     }
 }
@@ -2115,10 +2236,7 @@ fn sandbox_scene(
     cells: (u32, u32),
 ) -> SceneStart {
     let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
-    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|e| {
-        eprintln!("sf_game: {e}; using the unit definitions compiled in");
-        UnitDefs::embedded()
-    });
+    let defs = load_defs(&assets);
     match sf_bridge::unit_table(&defs) {
         Ok(table) => {
             world = world
@@ -2131,23 +2249,7 @@ fn sandbox_scene(
     }
     world = crate::playfield::with_movement(world, &defs);
     world = crate::playfield::with_combat(world, &defs);
-    let models_ron =
-        std::fs::read_to_string(assets.join(roster::MODELS_FILE)).unwrap_or_else(|e| {
-            eprintln!(
-                "sf_game: {}: {e}; roles are drawn as shapes",
-                roster::MODELS_FILE
-            );
-            String::new()
-        });
-    let use_models = options.role_models && !models_ron.is_empty();
-    let roster = Roster::build(&defs, style, icons, &assets, &models_ron, use_models)
-        .unwrap_or_else(|e| {
-            eprintln!("sf_game: {e}; roles are drawn as shapes");
-            Roster::build(&defs, style, icons, &assets, "", false).expect("shapes alone fit")
-        });
-    for warning in &roster.warnings {
-        eprintln!("sf_game: {warning}");
-    }
+    let roster = load_roster(options, &defs, style, icons, &assets);
     let plan = crate::sandbox::schedule(&mut world, &defs);
     // Extra placeholder wanderers (`--units`), the crowd's way.
     let crowd = Population::new(None);
@@ -2172,6 +2274,7 @@ fn sandbox_scene(
         },
         units,
         buildings: plan.structures,
+        skirmish_units: 0,
         build: BuildMode::for_faction(
             &defs,
             crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
@@ -2294,10 +2397,7 @@ mod tests {
 
     fn world(cells: u32) -> World {
         let map = generate_cells(cells, cells, 1);
-        let config = WorldConfig {
-            speed: DEMO_SPEED,
-            ..WorldConfig::new(1).with_map_size(cells, cells)
-        };
+        let config = crate::bench_scene::world_config((cells, cells));
         crate::playfield::make_world(config, &map).expect("a generated map starts a world")
     }
 
