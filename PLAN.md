@@ -5,7 +5,7 @@ close-up to the whole map and cartoon cutscenes. Inspired by the game rules of
 Command & Conquer: Red Alert, without its name, world, units or media.*
 
 Drawn up 14-10-2026. Source: `docs/red-alert-analysis.md` (functional analysis of
-the EA source code). Execution: Sonnet 5 agents at effort medium, fix rounds on Opus at effort low (see §12; since 24-10-2026).
+the EA source code). Execution: Sonnet 5 agents at effort medium, [xhigh] work packages on Opus at effort low, fix rounds on Opus at effort low (see §12; since 24-10-2026 and 25-10-2026).
 
 ---
 
@@ -17,7 +17,7 @@ the EA source code). Execution: Sonnet 5 agents at effort medium, fix rounds on 
 | B2 | What "2.5D" means here | **True 3D world, fixed camera angle, low-poly models** | Sprites (like the original) get ugly with seamless zooming. 3D models stay sharp up close and simplify cleanly from afar. Gameplay stays flat (2D grid). |
 | B3 | Simulation | **Deterministic, fixed tick (20 Hz), fixed-point math, separate from rendering** | Enables replays, saving, multiplayer (lockstep) and automated tests. Adding it afterwards is nearly impossible. |
 | B4 | Cutscenes | **In-engine cartoon player (cutout/vector animation, scripted) + video as fallback (deferred, WP12.4)** | Small, sharp at any resolution, lip-sync and translation adjustable afterwards. See §9. |
-| B5 | License of the source-code reference | **Clean-room**: use only the functional analysis, never read-and-retype EA code | EA code is GPL; copying it verbatim makes Staalfront GPL. Own name, units, graphics, music are mandatory (trademark). Exception for original audio: B11. Since 26-10-2026 `onderzoeker` and `reviewer` may check single facts against EA/OpenRA sources and pass on only the facts, never text, tables or code (docs/conventions.md). |
+| B5 | License of the source-code reference | **Clean-room**: use only the functional analysis, never read-and-retype EA code | EA code is GPL; copying it verbatim makes Staalfront GPL. Own name, units, graphics, music are mandatory (trademark). Exception for original audio: B11. Since 26-10-2026 `onderzoeker` and `reviewer` may check single facts against EA/OpenRA sources and pass them on in their own words, never text, tables or code; a builder never reads those sources and may write a single checked fact into the repo, but never a list or table taken over as a whole or in its structure (docs/conventions.md §8). |
 | B6 | Where it is built | **GitHub + cloud agents + laptop**, never on the home server (see §13) | The home server runs live services and has no room (RAM, GPU) for a Rust game build. |
 | B7 | Target platform v1 | Windows + Linux desktop. Web and macOS later. | Mouse + keyboard; an RTS on a phone is a different game. |
 | B8 | Language of the game | **English** (menus, UI texts, voices, subtitles); all game texts in language files, not in code | Decision Tijmen 14-10-2026. Language files keep translating possible later. |

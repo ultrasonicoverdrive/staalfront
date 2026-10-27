@@ -51,7 +51,7 @@ Agent definitions live in `.claude/agents/`.
 | `reviewer` | opus, medium, read-only | Review gate per PR. |
 | `onderzoeker` | opus, low, read-only | Research questions (crates, APIs, algorithms, asset licenses); does not review. |
 
-A WP is built by `bouwer-sonnet` at effort medium, which works through the done-checklist in
+By default, a WP is built by `bouwer-sonnet` at effort medium, which works through the done-checklist in
 `.claude/agents/bouwer-sonnet.md` (claims backed, mutation-proof tests, measured re-pin causes,
 frozen copies untouched, performance numbers, licence lines, green CI on both OSes, parallel
 work, in-game screenshots for visible changes, the basics, time split). Every fix round after
@@ -164,8 +164,10 @@ is in PLAN.md §1.0.
   `reviewer` may consult EA or OpenRA code and data (for example OpenRA's sound
   YAML) to check single facts, such as which Red Alert file name belongs to which
   sound. They pass on only those facts in their own words, never text, tables or
-  code; a builder never reads those sources, and nothing from them is copied into
-  the repo.
+  code; a builder never reads those sources. A builder may write a single checked
+  fact from such a report into the repo (for example one file name in
+  `assets/audio/ra_mapping.ron`), but never a list or table taken over as a whole
+  or in its structure.
 
 ## 9. Commit messages
 
