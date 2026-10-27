@@ -22,6 +22,7 @@ fn run() -> (World, Vec<(u64, u8, u16, PlacementError)>) {
 }
 
 /// The same run, and the structures that became complete: `(tick, kind, owner)`.
+#[allow(clippy::type_complexity)]
 fn run_with_completions() -> (
     World,
     Vec<(u64, u8, u16, PlacementError)>,

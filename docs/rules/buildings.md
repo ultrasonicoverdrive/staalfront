@@ -167,9 +167,9 @@ the data are dropped.
 
 **Standing.** A structure stands for the prerequisites and the base when it exists in the world and has hit
 points left, or has none in the table (it cannot be damaged). A structure at zero hit points does not stand
-(`a_structure_at_zero_hit_points_does_not_stand_but_one_that_cannot_be_hurt_does`). There is no build state
-yet: WP6.3 adds the construction animation, and until it says otherwise a structure stands from the tick it was
-placed. The commands of one tick run in order, so a second build of the same tick sees the first
+(`a_structure_at_zero_hit_points_does_not_stand_but_one_that_cannot_be_hurt_does`). Since WP6.3 a structure also has to be **complete**:
+one built with `BuildStructure` is under construction for its `build_ticks` and does not stand until then
+(`docs/rules/construction.md`); one placed with `PlaceStructure` is complete at once. The commands of one tick run in order, so a second build of the same tick sees the first
 (`two_builds_in_one_tick_see_each_other`); "the state when the command runs", not a snapshot of the tick's
 start, is the state the rule reads, and it is the same on every machine.
 
@@ -204,7 +204,7 @@ facing.
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
 only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
 put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
-charged and nothing takes time (phase 7, WP6.3). `fortified_bunker` is built by a combat engineer in the field
+charged (phase 7, WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
 (`content/units.md`); here it is a base structure behind the barracks, as in WP6.1.
 
 ### The ghost under the cursor (game)
@@ -243,6 +243,10 @@ tests). The scenario fields
 `buildings: true` (the world is given the building rules of `unit_defs`), `factions: [(player, Faction)]` and the
 action `BuildStructure(kind, cell)` (the issuer is the timed command's `player`) are new and optional, so no
 earlier scenario changed.
+
+**WP6.3:** a built structure goes up first, so the scenario waits for each prerequisite to complete (2110 ticks, the
+commands moved to the ticks the builds finish) and `placement.expected` was re-pinned `0x523c7fcc0105b96f` to
+`0x9c83a43fc19af879`, with the cause measured (`docs/rules/construction.md`, "`placement.expected` re-pinned").
 
 ## The shipped tech tree (placeholder)
 

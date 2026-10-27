@@ -13,12 +13,12 @@
 //! rule of the analysis, section 10, read the way this project uses it: the picture may never run
 //! ahead of the rule, and the rule never waits for the picture). In [`World::step`]:
 //!
-//! 1. the structures under construction advance by one tick ([`World::advance_construction`]),
+//! (1) the structures under construction advance by one tick ([`World::advance_construction`]),
 //!    in ascending slot order; one that reaches zero is complete and a [`Completion`] is recorded
 //!    for this tick ([`World::completions`], counted in `StepReport::structures_completed`);
-//! 2. then the commands of the tick run: a structure that completed in step 1 already stands for
+//! (2) then the commands of the tick run: a structure that completed in step 1 already stands for
 //!    a `BuildStructure` of the same tick (a prerequisite, a base anchor);
-//! 3. the rest of the tick as before.
+//! (3) the rest of the tick as before.
 //!
 //! A structure placed in the step of tick `t` with `n` build ticks has `n` ticks left after
 //! `t`, and is complete after tick `t + n` (its [`Completion`] says `tick: t + n`). The

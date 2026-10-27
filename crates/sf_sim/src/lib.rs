@@ -55,6 +55,9 @@
 //! number of the tick the next [`World::step`] runs. [`World::step`] advances
 //! exactly one tick and does, in this order:
 //!
+//! * advance the structures under construction by one tick and record the ones that complete
+//!   (WP6.3, [`construction`]); the state moves first, so a command of this tick already sees them
+//!   standing;
 //! * run every command scheduled for this tick, in `(player, insertion)`
 //!   order;
 //! * for every live entity in ascending slot order: remember the previous
