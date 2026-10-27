@@ -13,10 +13,35 @@
 //!   when the role has one per faction). Placeholder wanderers added with
 //!   `--units` have no role and keep the population's mapping.
 
-use sf_sim::EntityView;
+use sf_render::{Motion, Style, UnitId};
+use sf_sim::{EntityView, WreckView};
 
 use crate::population::Population;
 use crate::roster::{Roster, faction_of_owner};
+
+/// The player colour wrecks and rubble are drawn in: an entry after the four of the palette of
+/// `assets/config/units.ron`, its sRGB the `colour` of `assets/config/wrecks.ron`, put there by [`with_wreck_colour`] (a model keeps its own materials; the team
+/// parts and the primitives take it).
+pub const WRECK_COLOUR: u8 = 4;
+
+/// `style` with the wreck colour added at index [`WRECK_COLOUR`]. Every style the game draws units with goes
+/// through it (the runner's placeholder style, the screenshot tests'). A palette that already has more than the
+/// four player colours is left alone: the colour would not be at the index the wrecks use.
+pub fn with_wreck_colour(style: Style) -> Style {
+    if style.color_count() == usize::from(WRECK_COLOUR) {
+        let (r, g, b) = crate::wreck_looks::WreckLooks::shipped().colour;
+        style.with_colour("wreck", [r, g, b])
+    } else {
+        style
+    }
+}
+
+/// The generation the picture gives the id of a wreck. It does not keep the wreck apart from the
+/// entities: a live entity can have it too (`despawn` raises a slot to `u32::MAX` and still reuses it;
+/// only the bump after that retires the slot). What does is the slot: [`Looks::wreck_motion`] is given
+/// one past every live entity's, so a pick of a wreck names no entity. The value only makes a wreck's
+/// id easy to recognise.
+const WRECK_GENERATION: u32 = u32::MAX;
 
 /// The mapping from entities to shapes of the scene being shown.
 pub enum Looks {
@@ -60,6 +85,21 @@ impl Looks {
             return name.to_owned();
         }
         format!("placeholder {}", v.kind.0)
+    }
+
+    /// What a wreck or a pile of rubble is drawn as (WP5.5): the model or primitive of its class, in the
+    /// wreck colour, where it lies. `slot` is an index no live entity has (the picture numbers its units
+    /// by their slots): the wreck is not an entity, and a pick of it names none. `None` in the crowd,
+    /// which has no wrecks, and for rubble of a footprint the roster has no look for.
+    pub fn wreck_motion(&self, w: &WreckView, slot: u32) -> Option<Motion> {
+        let Looks::Roster { roster, .. } = self else {
+            return None;
+        };
+        let shape = roster.wreck_shape(w)?;
+        Some(
+            Motion::from_fixed(shape, WRECK_COLOUR, w.pos, w.pos, w.facing, w.facing)
+                .with_id(UnitId::from_parts(slot, WRECK_GENERATION)),
+        )
     }
 
     /// The roster, in the sandbox.

@@ -337,6 +337,17 @@ pub fn targeting_config(settings: &SimSettings) -> sf_sim::TargetingConfig {
         .with_pursuit_reset(settings.pursuit_reset_ticks)
 }
 
+/// The destruction settings from the settings of `sim.ron` (WP5.5), to hand to
+/// [`World::with_destruction`](sf_sim::World::with_destruction) (which refuses numbers out of their
+/// ranges; `sf_data` has checked the same rules).
+pub fn destruction_config(settings: &SimSettings) -> sf_sim::DestructionConfig {
+    sf_sim::DestructionConfig::from_tenths(
+        settings.wreck_ticks,
+        settings.rubble_ticks,
+        settings.wreck_min_size_tenths,
+    )
+}
+
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` flag (open ground for foot, wheeled and tracked units) is derived
 /// from the movement costs; it is part of the terrain digest, see
@@ -629,6 +640,35 @@ mod tests {
             sf_sim::TargetingConfig::from_cells(25, 9).with_pursuit_reset(40)
         );
         assert_eq!(changed.scan_cooldown, 25);
+    }
+
+    #[test]
+    fn the_shipped_destruction_settings_are_the_simulations_defaults_and_a_world_takes_them() {
+        let config = destruction_config(&SimSettings::embedded());
+        assert_eq!(config, sf_sim::DestructionConfig::DEFAULT);
+        let world = World::new(WorldConfig::new(1))
+            .unwrap()
+            .with_destruction(config)
+            .unwrap();
+        assert_eq!(world.destruction_config(), Some(config));
+        // A world that is given none destroys nothing.
+        assert_eq!(
+            World::new(WorldConfig::new(1))
+                .unwrap()
+                .destruction_config(),
+            None
+        );
+        // The settings of the file arrive one by one.
+        let settings = SimSettings {
+            wreck_ticks: 30,
+            rubble_ticks: 40,
+            wreck_min_size_tenths: 5,
+            ..SimSettings::embedded()
+        };
+        assert_eq!(
+            destruction_config(&settings),
+            sf_sim::DestructionConfig::from_tenths(30, 40, 5)
+        );
     }
 
     #[test]

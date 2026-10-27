@@ -193,6 +193,17 @@ impl Style {
         style
     }
 
+    /// The same style with one more colour at the end of the palette: the colour of something that is
+    /// no player (the wrecks of WP5.5), which the caller names by its index, the old colour count. The
+    /// shipped palette in `units.ron` stays the players'.
+    pub fn with_colour(&self, name: &str, srgb: [u8; 3]) -> Style {
+        let mut style = self.clone();
+        style.names.push(name.to_owned());
+        style.srgb.push(srgb);
+        style.linear.push(srgb.map(srgb_to_linear));
+        style
+    }
+
     /// The same palette, icon and level settings with other shapes (one per
     /// glTF model of a pack, WP1.10). The shapes get no placeholder level
     /// chains: their models bring their own.

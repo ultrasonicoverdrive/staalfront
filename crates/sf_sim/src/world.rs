@@ -8,6 +8,7 @@ use crate::behavior::{self, Area, Behavior, Motion};
 use crate::buildings::{BuildingTable, BuildingsError};
 use crate::command::{Command, CommandQueue, ScheduleError};
 use crate::crowd::{CollisionConfig, Crowd, CrowdStats};
+use crate::destruction::{Death, Destruction, DestructionConfig, Tally, Wreck};
 use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::formation::{FormationConfig, FormationStats, FormationView, Formations};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
@@ -117,6 +118,9 @@ pub enum ConfigError {
     /// ran, an entity exists or a command is pending). The table is part of
     /// how the world is made.
     UnitsAfterStart,
+    /// The destruction settings were given to a world that has already started, or are not valid
+    /// ([`DestructionConfig::is_valid`]).
+    Destruction,
     /// The movement table was given to a world that has already started, for
     /// the same reason.
     MovementAfterStart,
@@ -187,6 +191,9 @@ impl fmt::Display for ConfigError {
             ConfigError::Targeting => {
                 "the targeting settings must be given before the world starts and be valid"
             }
+            ConfigError::Destruction => {
+                "the destruction settings must be given before the world starts and be valid"
+            }
             ConfigError::Formation => {
                 "the formation settings must be given before the world starts and be valid"
             }
@@ -228,6 +235,9 @@ pub struct StepReport {
     /// Commands that ran and changed nothing (every target stale, the entity
     /// limit reached).
     pub commands_ignored: u32,
+    /// Units and structures destroyed in that tick (WP5.5); always zero in a world without destruction.
+    /// They are listed by [`World::deaths`] until the next step.
+    pub deaths: u32,
     /// Shots the weapons fired in that tick (WP5.1; always zero in a world without a
     /// weapon table). They are listed by [`World::shots`] until the next step.
     pub shots: u32,
@@ -285,6 +295,9 @@ pub struct World {
     pub(crate) placement: PlacementState,
     /// Target selection and return fire (WP5.4): the settings, if the world was given any.
     pub(crate) targeting: Targeting,
+    /// Destruction (WP5.5): the settings, the wrecks and the scores. Nothing is destroyed in a world
+    /// that was given no settings.
+    pub(crate) destruction: Destruction,
     pub(crate) queue: CommandQueue,
     /// `history[k]` is the checksum after tick `k` ran.
     pub(crate) history: Vec<u64>,
@@ -513,6 +526,25 @@ impl World {
         Ok(self)
     }
 
+    /// The same world with destruction (WP5.5, `docs/rules/destruction.md`): a unit or structure whose hit
+    /// points the weapons take to zero is removed from the world at the end of the weapon stage, its
+    /// cells are freed, it may leave a wreck or rubble, and the kill is credited. A world that is given no
+    /// settings destroys nothing: a unit at zero stays where it fell, which is what the scenarios of
+    /// WP5.1 to WP5.4 are pinned on. Call it right after the world is made
+    /// ([`ConfigError::Destruction`] after it has started, or for invalid numbers);
+    /// [`DestructionConfig::DEFAULT`] is the numbers of the shipped `sim.ron`.
+    pub fn with_destruction(mut self, config: DestructionConfig) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !config.is_valid()
+        {
+            return Err(ConfigError::Destruction);
+        }
+        self.destruction.config = Some(config);
+        Ok(self)
+    }
+
     /// The same world with a different path budget: the nodes of search work it
     /// may do in one tick ([`DEFAULT_NODE_BUDGET`](crate::DEFAULT_NODE_BUDGET)
     /// otherwise). Call it right after the world is made
@@ -576,6 +608,7 @@ impl World {
             buildings: BuildingTable::empty(),
             placement: PlacementState::default(),
             targeting: Targeting::default(),
+            destruction: Destruction::default(),
             queue: CommandQueue::new(),
             history: Vec::new(),
         }
@@ -1028,6 +1061,34 @@ impl World {
         Snapshot::new(self)
     }
 
+    /// The destruction settings, if the world was given any.
+    pub fn destruction_config(&self) -> Option<DestructionConfig> {
+        self.destruction.config
+    }
+
+    /// What was destroyed in the last tick, by where it stood (WP5.5). Derived: it is a report, not state.
+    pub fn deaths(&self) -> &[Death] {
+        &self.destruction.deaths
+    }
+
+    /// The wrecks and the rubble that lie in the world, by where they lie (WP5.5).
+    pub fn wrecks(&self) -> &[Wreck] {
+        &self.destruction.wrecks
+    }
+
+    /// What `player` has killed, helped to kill and lost since the world began (WP5.5).
+    pub fn tally_of(&self, player: PlayerId) -> Tally {
+        self.destruction
+            .tally
+            .binary_search_by_key(&player, |t| t.0)
+            .map_or_else(|_| Tally::default(), |at| self.destruction.tally[at].1)
+    }
+
+    /// How many kills the unit `id` has been credited with (WP5.5); `None` if it is gone.
+    pub fn kills_of(&self, id: EntityId) -> Option<u16> {
+        self.live_index(id).map(|i| self.entities.kills[i])
+    }
+
     /// The commands waiting for their tick.
     pub fn pending_commands(&self) -> &CommandQueue {
         &self.queue
@@ -1158,7 +1219,10 @@ impl World {
             tick,
             (self.config.width, self.config.height),
             aim.is_some(),
+            self.destruction.config.is_some(),
         );
+        // What the weapons took to zero is destroyed now, after all the damage of the tick is in (WP5.5).
+        self.reap(tick);
         // The units that were hurt turn on their attackers (WP5.4).
         if let Some(config) = aim {
             let mut attacks = std::mem::take(&mut self.arsenal.attacks);
@@ -1183,6 +1247,7 @@ impl World {
             checksum,
             commands_executed: executed,
             commands_ignored: ignored,
+            deaths: self.destruction.deaths.len() as u32,
             shots: self.arsenal.shots.len() as u32,
             launched: self
                 .arsenal
@@ -1449,6 +1514,8 @@ impl World {
             debug_assert!(claimed, "the cells were free a moment ago");
         }
         self.entities.cell[id.index() as usize] = anchor_index;
+        // A structure built on rubble or a wreck clears it away.
+        self.destruction.clear_under(anchor, footprint);
         // The cells are taken: ground units can no longer cross them.
         self.pathing.refresh_cells(
             &self.terrain,

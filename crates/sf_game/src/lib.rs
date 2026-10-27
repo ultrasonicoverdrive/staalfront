@@ -120,6 +120,7 @@ pub mod selection_view;
 pub mod sim_snapshot;
 pub mod sim_thread;
 mod sound_browser;
+pub mod wreck_looks;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

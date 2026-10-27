@@ -69,6 +69,12 @@ pub const MAX_PURSUIT_CELLS: u8 = 32;
 /// The most ticks `pursuit_reset_ticks` may be (equal to `sf_sim`'s).
 pub const MAX_PURSUIT_RESET_TICKS: u16 = 2000;
 
+/// The most ticks a wreck or rubble may last (equal to `sf_sim`'s).
+pub const MAX_WRECK_TICKS: u32 = 72_000;
+
+/// The most tenths of a cell `wreck_min_size_tenths` may be (equal to `sf_sim`'s).
+pub const MAX_WRECK_MIN_SIZE_TENTHS: u16 = 80;
+
 fn default_collision() -> bool {
     true
 }
@@ -147,6 +153,18 @@ fn default_pursuit_cells() -> u8 {
 
 fn default_pursuit_reset_ticks() -> u16 {
     100
+}
+
+fn default_wreck_ticks() -> u32 {
+    600
+}
+
+fn default_rubble_ticks() -> u32 {
+    1200
+}
+
+fn default_wreck_min_size_tenths() -> u16 {
+    10
 }
 
 /// The settings of the simulation.
@@ -235,6 +253,18 @@ pub struct SimSettings {
     /// spot (WP5.4). 1 to [`MAX_PURSUIT_RESET_TICKS`].
     #[serde(default = "default_pursuit_reset_ticks")]
     pub pursuit_reset_ticks: u16,
+    /// Ticks a vehicle wreck lies where the vehicle was destroyed (WP5.5). 1 to
+    /// [`MAX_WRECK_TICKS`].
+    #[serde(default = "default_wreck_ticks")]
+    pub wreck_ticks: u32,
+    /// Ticks the rubble of a destroyed structure lies where it stood (WP5.5). 1 to
+    /// [`MAX_WRECK_TICKS`].
+    #[serde(default = "default_rubble_ticks")]
+    pub rubble_ticks: u32,
+    /// The smallest body, in tenths of a cell across, of a mobile unit that leaves a wreck (WP5.5).
+    /// 0 to [`MAX_WRECK_MIN_SIZE_TENTHS`].
+    #[serde(default = "default_wreck_min_size_tenths")]
+    pub wreck_min_size_tenths: u16,
 }
 
 /// Why a settings file was refused.
@@ -280,6 +310,16 @@ pub enum SimSettingsError {
         pursuit: u8,
         /// `pursuit_reset_ticks`.
         reset: u16,
+    },
+    /// The destruction numbers are out of their ranges: both lifetimes between 1 and
+    /// [`MAX_WRECK_TICKS`], `wreck_min_size_tenths` at most [`MAX_WRECK_MIN_SIZE_TENTHS`].
+    Destruction {
+        /// `wreck_ticks`.
+        wreck: u32,
+        /// `rubble_ticks`.
+        rubble: u32,
+        /// `wreck_min_size_tenths`.
+        min_size: u16,
     },
 }
 
@@ -334,6 +374,16 @@ impl fmt::Display for SimSettingsError {
                  {reset} do not fit: scan_cooldown is between 1 and {MAX_SCAN_COOLDOWN}, \
                  pursuit_cells is at most {MAX_PURSUIT_CELLS}, pursuit_reset_ticks is between 1 \
                  and {MAX_PURSUIT_RESET_TICKS}"
+            ),
+            Self::Destruction {
+                wreck,
+                rubble,
+                min_size,
+            } => write!(
+                f,
+                "sim.ron: wreck_ticks {wreck}, rubble_ticks {rubble} and wreck_min_size_tenths \
+                 {min_size} do not fit: both lifetimes are between 1 and {MAX_WRECK_TICKS}, \
+                 wreck_min_size_tenths is at most {MAX_WRECK_MIN_SIZE_TENTHS}"
             ),
         }
     }
@@ -404,6 +454,16 @@ impl SimSettings {
                 scan: settings.scan_cooldown,
                 pursuit: settings.pursuit_cells,
                 reset: settings.pursuit_reset_ticks,
+            });
+        }
+        if !(1..=MAX_WRECK_TICKS).contains(&settings.wreck_ticks)
+            || !(1..=MAX_WRECK_TICKS).contains(&settings.rubble_ticks)
+            || settings.wreck_min_size_tenths > MAX_WRECK_MIN_SIZE_TENTHS
+        {
+            return Err(SimSettingsError::Destruction {
+                wreck: settings.wreck_ticks,
+                rubble: settings.rubble_ticks,
+                min_size: settings.wreck_min_size_tenths,
             });
         }
         Ok(settings)
@@ -536,6 +596,43 @@ mod tests {
             ),
             "{:?}",
             with(0, 6)
+        );
+    }
+
+    #[test]
+    fn the_destruction_settings_have_defaults_and_are_checked() {
+        let s = SimSettings::from_ron("(path_node_budget: 4096, flowfield_threshold: 8)").unwrap();
+        assert_eq!(
+            (s.wreck_ticks, s.rubble_ticks, s.wreck_min_size_tenths),
+            (600, 1200, 10)
+        );
+        let with = |wreck: u32, rubble: u32, min: u16| {
+            SimSettings::from_ron(&format!(
+                "(path_node_budget: 4096, flowfield_threshold: 8, wreck_ticks: {wreck}, \
+                 rubble_ticks: {rubble}, wreck_min_size_tenths: {min})"
+            ))
+        };
+        assert!(with(1, 1, 0).is_ok(), "every mobile unit leaves a wreck");
+        assert!(with(MAX_WRECK_TICKS, MAX_WRECK_TICKS, MAX_WRECK_MIN_SIZE_TENTHS).is_ok());
+        assert!(with(0, 1200, 10).is_err(), "a wreck lasts a tick at least");
+        assert!(with(600, 0, 10).is_err(), "rubble too");
+        assert!(with(MAX_WRECK_TICKS + 1, 1200, 10).is_err(), "bounded");
+        assert!(with(600, MAX_WRECK_TICKS + 1, 10).is_err(), "bounded");
+        assert!(
+            with(600, 1200, MAX_WRECK_MIN_SIZE_TENTHS + 1).is_err(),
+            "bounded"
+        );
+        assert!(
+            matches!(
+                with(0, 1200, 10),
+                Err(SimSettingsError::Destruction {
+                    wreck: 0,
+                    rubble: 1200,
+                    min_size: 10
+                })
+            ),
+            "{:?}",
+            with(0, 1200, 10)
         );
     }
 
