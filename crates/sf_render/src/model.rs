@@ -86,6 +86,51 @@ pub struct RigPart {
     pub joint: Joint,
 }
 
+/// A named point on a model that is not drawn (WP5.6b): the end of a barrel (`muzzle`, `muzzle_l`), a
+/// place for smoke or fire (`fx_smoke`). It sits in the frame of a part of the level, so it follows the
+/// turret's yaw and the barrel's pitch like the part does.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RigAnchor {
+    /// The node name without its `_LOD<n>` suffix.
+    pub name: String,
+    /// The part whose frame it is in (an index in the level's parts); `None` = the unit itself.
+    pub parent: Option<u8>,
+    /// From the anchor's frame to its parent's, in engine axes (metres).
+    pub local: Mat4,
+}
+
+/// The world position of the `n`-th anchor of a level whose name starts with `prefix`, for a unit drawn
+/// with matrix `unit` and joint `angles`: the same `pose_parts` the draw uses, then `parent * local`.
+/// `n` counts the matching anchors in the file's order and wraps around (a burst alternates between
+/// `muzzle_l` and `muzzle_r`). `None` when no anchor matches.
+pub fn anchor_position(
+    unit: Mat4,
+    parts: &[RigPart],
+    anchors: &[RigAnchor],
+    angles: PartAngles,
+    prefix: &str,
+    n: usize,
+) -> Option<Vec3> {
+    let count = anchors
+        .iter()
+        .filter(|a| a.name.starts_with(prefix))
+        .count();
+    if count == 0 {
+        return None;
+    }
+    let anchor = anchors
+        .iter()
+        .filter(|a| a.name.starts_with(prefix))
+        .nth(n % count)?;
+    let mut world = [Mat4::IDENTITY; MAX_PARTS];
+    pose_parts(unit, parts, angles, &mut world);
+    let parent = match anchor.parent {
+        Some(p) => *world.get(usize::from(p))?,
+        None => unit,
+    };
+    Some((parent * anchor.local).transform_point3(Vec3::ZERO))
+}
+
 /// The real extent of a model with parts, in the unit's frame (front `+X`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ModelBounds {
@@ -240,6 +285,8 @@ pub struct ModelLods {
     switch_px: Vec<f32>,
     /// The parts of each level; empty = the level is its single mesh.
     parts: Vec<Vec<RigPart>>,
+    /// The anchors of each level (WP5.6b), parallel to `parts`; empty = none.
+    anchors: Vec<Vec<RigAnchor>>,
     bounds: Option<ModelBounds>,
 }
 
@@ -265,6 +312,7 @@ impl ModelLods {
             levels,
             switch_px,
             parts: Vec::new(),
+            anchors: Vec::new(),
             bounds: None,
         })
     }
@@ -301,8 +349,33 @@ impl ModelLods {
             levels: vec![LodLevel { mesh }],
             switch_px: Vec::new(),
             parts: Vec::new(),
+            anchors: Vec::new(),
             bounds: None,
         }
+    }
+
+    /// The same chain with the anchors of each level (one list per level, in the order of the levels).
+    /// Lists beyond the levels are ignored.
+    pub fn with_anchors(mut self, mut anchors: Vec<Vec<RigAnchor>>) -> Self {
+        anchors.truncate(self.levels.len());
+        self.anchors = anchors;
+        self
+    }
+
+    /// The anchors of a level (clamped like [`ModelLods::level`]); empty when the model has none.
+    pub fn anchors(&self, level: u8) -> &[RigAnchor] {
+        if self.anchors.is_empty() {
+            return &[];
+        }
+        &self.anchors[usize::from(level).min(self.anchors.len() - 1)]
+    }
+
+    /// How many anchors of the finest level have a name that starts with `prefix`.
+    pub fn anchor_count(&self, prefix: &str) -> usize {
+        self.anchors(0)
+            .iter()
+            .filter(|a| a.name.starts_with(prefix))
+            .count()
     }
 
     /// The parts of a level (clamped like [`ModelLods::level`]); empty for a

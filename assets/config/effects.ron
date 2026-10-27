@@ -39,7 +39,8 @@
         tracer_taper: 0.6,
     ),
 
-    // Where the flash starts when the model has no muzzle anchor (WP5.6b adds those): from the unit's middle,
+    // Where the flash starts when the model has no muzzle anchor (a model with a `muzzle*` node, WP5.6b, uses it
+    // instead; the rule is for the test pack, set v3 and the placeholder shapes): from the unit's middle,
     // along the weapon's mount (hull or turret facing), `reach_fraction` of the body length out (at least
     // `min_reach_m`), at `height_fraction` of the body length above the ground. The body length is the
     // unit's size in the definitions (cells times 4 m): the bounding box's length without reading the model.
@@ -48,8 +49,11 @@
     // Where hits and deaths burst: hit_height_m above the ground (wreck smoke too), in a disc of the event's
     // size times impact_radius_fraction (a hit) or death_radius_fraction (a death), at least min_burst_radius_m.
     // A projectile that flies on the ground is drawn projectile_lift_m up, the muzzle's height.
+    // A death bursts death_lift_m higher still (WP5.6b, a review observation of WP5.6a): the blast of a
+    // body starts above the wreck it leaves, not in it.
     placement: (
         hit_height_m: 0.6,
+        death_lift_m: 0.5,
         projectile_lift_m: 1.0,
         impact_radius_fraction: 0.5,
         death_radius_fraction: 0.4,

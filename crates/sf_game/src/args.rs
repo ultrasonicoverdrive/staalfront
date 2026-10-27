@@ -104,6 +104,8 @@ pub struct Options {
     /// `--fight` (sandbox scene): at the start every armed mobile unit of each side is sent on attack-move
     /// to the other side's base, so the sandbox fights without anyone giving an order (WP5.5): to see
     /// shots, deaths, wrecks and rubble in the viewer. Without it the sides stand still, out of reach.
+    /// In the crowd scene (`sf_demo`, `sf_game --crowd`) it adds the armed skirmish of the combat benchmark
+    /// of M0c, waves of units at three sites over the same crowd (WP5.6b, `crate::skirmish`).
     pub fight: bool,
     /// `--harvest` (sandbox scene): the world is given the harvest rules (WP7.2) and, besides what the
     /// sandbox places, Meridian gets a refinery and three harvesters beside the ore field nearest the
@@ -406,6 +408,21 @@ mod tests {
         assert_eq!(demo.present, Present::Vsync);
         assert_eq!(demo.screen, ScreenMode::Windowed);
         assert!(demo.reserve);
+    }
+
+    /// `sf_demo --bench --fight` is the combat benchmark of M0c (WP5.6b): the demo's crowd scene with the
+    /// skirmish; the plain `--bench` stays the fight-free benchmark of M0 and M0b.
+    #[test]
+    fn bench_with_fight_is_the_combat_benchmark_and_plain_bench_has_no_fight() {
+        let o = parse(Preset::Demo, "--bench --fight");
+        assert_eq!(
+            (o.scene, o.units, o.fight),
+            (Scene::Crowd, DEMO_UNITS, true)
+        );
+        assert!(o.bench.is_some());
+        assert_eq!(o.models.as_deref(), Some(DEMO_PACK), "the same pack as M0");
+        let plain = parse(Preset::Demo, "--bench");
+        assert!(!plain.fight && plain.bench.is_some());
     }
 
     #[test]

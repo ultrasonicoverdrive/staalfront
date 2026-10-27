@@ -378,6 +378,9 @@ pub struct Instancer {
     visible_tiles: Vec<VisibleTile>,
     /// Where the turrets aim (`x`, `z`), the WP1.10 demo; `None` = straight ahead.
     aim: Option<[f32; 2]>,
+    /// The slots of `motions` rise strictly from first to last (true for the game's entities followed by
+    /// its wrecks), so [`Instancer::anchor_world`] can search them by halving.
+    slots_ascending: bool,
 }
 
 /// `(footprint, tallest)` of a style and its models: half the diagonal of
@@ -482,6 +485,7 @@ impl Instancer {
             records: Vec::new(),
             visible_tiles: Vec::new(),
             aim: None,
+            slots_ascending: true,
         }
     }
 
@@ -490,6 +494,70 @@ impl Instancer {
     /// straight ahead. Takes effect in the next build.
     pub fn set_aim(&mut self, aim: Option<[f32; 2]>) {
         self.aim = aim;
+    }
+
+    /// The turret yaw and barrel pitch a unit is drawn with at `alpha`: the simulated turret's if it has one,
+    /// else the demo aim. The one place both the draw and [`Instancer::anchor_world`] get them from.
+    fn joint_angles(&self, m: &Motion, at: [f32; 2], steps: f32, alpha: f32) -> PartAngles {
+        match m.turret_yaw(alpha) {
+            Some(yaw) => PartAngles {
+                yaw,
+                pitch: m.barrel_pitch,
+            },
+            None => aim_angles(at[0], at[1], steps, self.aim),
+        }
+    }
+
+    /// The unit that was given slot `slot` (the index half of its [`UnitId`]) in the last
+    /// [`Instancer::update_tick`], whether it is on screen or not. Wrecks are drawn as units with slots
+    /// above every entity's, so a slot names one or the other and never both.
+    fn motion_at_slot(&self, slot: u32) -> Option<&Motion> {
+        if self.slots_ascending {
+            let at = self
+                .motions
+                .binary_search_by_key(&slot, |m| m.id.index())
+                .ok()?;
+            Some(&self.motions[at])
+        } else {
+            self.motions.iter().find(|m| m.id.index() == slot)
+        }
+    }
+
+    /// Where an anchor of a unit's model is in the world (WP5.6b): the `n`-th anchor, in the order of the
+    /// model file, whose name starts with `prefix` (`"muzzle"`, `"fx_smoke"`); `n` wraps around, so a
+    /// burst that counts its shots alternates between `muzzle_l` and `muzzle_r`. The unit is posed
+    /// exactly as [`Instancer::build_frame`] draws it at `alpha`: the same interpolated position and
+    /// hull facing, the same turret yaw and barrel pitch, the same part matrices (`pose_parts`), on
+    /// the terrain height `ground` gives. The finest level's anchors are used (they are the same
+    /// points at every level). `slot` is the index of the unit's [`UnitId`]. `None` when there is no
+    /// such unit this tick or its model has no such anchor; the caller then falls back to a rule of
+    /// its own.
+    pub fn anchor_world(
+        &self,
+        slot: u32,
+        prefix: &str,
+        n: usize,
+        alpha: f32,
+        ground: impl Fn(f32, f32) -> f32,
+    ) -> Option<[f32; 3]> {
+        let m = self.motion_at_slot(slot)?;
+        let chain = self.models.model(m.shape);
+        let anchors = chain.anchors(0);
+        if anchors.is_empty() {
+            return None;
+        }
+        let ([x, z], steps) = m.at(alpha);
+        let unit = model_matrix(x, ground(x, z), z, steps, self.geom(m.shape).scale);
+        let angles = self.joint_angles(m, [x, z], steps, alpha);
+        crate::model::anchor_position(
+            Mat4::from_cols_array_2d(&unit),
+            chain.parts(0),
+            anchors,
+            angles,
+            prefix,
+            n,
+        )
+        .map(|p| p.to_array())
     }
 
     /// The look of shape `shape` to the culling, the level selection and
@@ -625,6 +693,10 @@ impl Instancer {
         }
         // One byte of hysteresis state per entity slot, kept between ticks
         // (slots are stable in the simulation, so are the levels).
+        self.slots_ascending = self
+            .motions
+            .windows(2)
+            .all(|w| w[0].id.index() < w[1].id.index());
         let wanted = (highest + 1).min(MAX_LOD_STATE);
         if self.lod_state.len() < wanted && !self.motions.is_empty() {
             self.lod_state.resize(wanted, NO_LEVEL);
@@ -785,13 +857,7 @@ impl Instancer {
                         let mut world = [Mat4::IDENTITY; MAX_PARTS];
                         // A turret the simulation turns is drawn at its angle; any other
                         // turret part follows the demo aim (if there is one).
-                        let angles = match m.turret_yaw(view.alpha) {
-                            Some(yaw) => PartAngles {
-                                yaw,
-                                pitch: m.barrel_pitch,
-                            },
-                            None => aim_angles(x, z, steps, self.aim),
-                        };
+                        let angles = self.joint_angles(m, [x, z], steps, view.alpha);
                         pose_parts(Mat4::from_cols_array_2d(&unit), parts, angles, &mut world);
                         for (i, part) in parts.iter().enumerate().take(MAX_PARTS) {
                             // A part kept only as the frame of its children
@@ -1558,6 +1624,213 @@ mod tests {
         let cam = camera(1.0, (32.0, 32.0), 64.0);
         inst.build(&Frustum::from_view_proj(cam.view_proj()), 0.0, |_, _| 0.0);
         assert_eq!(inst.mesh_instances(shared).len(), 8);
+    }
+
+    /// An instancer with the real heavy tank of set v4 as every shape (two muzzles on the barrel).
+    fn tank_instancer() -> (Instancer, crate::model::ModelLods) {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/set_v4/veyran_heavy_tank.glb");
+        let model = crate::glb::load_glb_file(&path, &crate::glb::AxisConvention::ENGINE).unwrap();
+        let set =
+            crate::glb::model_set(std::slice::from_ref(&model), &crate::glb::DEFAULT_SWITCH_PX)
+                .unwrap();
+        let chain = set.model(0).clone();
+        // Shape 0 is the tank, shape 1 a plain cube (what a wreck of a placeholder looks like).
+        let both = ModelSet::new(
+            set.extra_meshes().to_vec(),
+            vec![chain.clone(), crate::model::ModelLods::single(MeshId(0))],
+        )
+        .unwrap();
+        let mut inst = Instancer::new(Style::embedded(), (256.0, 256.0));
+        inst.set_models(both);
+        (inst, chain)
+    }
+
+    /// A heavy tank at (160 m, 240 m) moving 8 m towards +x, hull 10 -> 30, turret 64 -> 96 (world facing).
+    fn moving_tank(slot: u32) -> Motion {
+        Motion::from_fixed(
+            0,
+            0,
+            v2(160, 240),
+            v2(168, 240),
+            Facing::new(10),
+            Facing::new(30),
+        )
+        .with_turret(Facing::new(64), Facing::new(96))
+        .with_barrel_pitch(0.2)
+        .with_id(UnitId::from_parts(slot, 0))
+    }
+
+    /// The anchor is where the drawn barrel carries it: the barrel instance the frame uploaded, times the
+    /// muzzle's own matrix. Interpolated (alpha 0.37), on a sloped ground, with the turret off the hull and
+    /// the barrel pitched, so a pose that differs from the draw's in any one of them fails.
+    #[test]
+    fn an_anchor_is_where_the_drawn_barrel_carries_it() {
+        let (mut inst, chain) = tank_instancer();
+        inst.update_tick([moving_tank(3)]);
+        let ground = |x: f32, z: f32| 0.05 * x + 0.02 * z;
+        let alpha = 0.37;
+        let cam = camera(0.0, (162.0, 240.0), 256.0);
+        let frustum = Frustum::from_view_proj(cam.view_proj());
+        let view = FrameView::models_only(&frustum, alpha);
+        inst.build_frame(&view, ground);
+        let barrel = chain.parts(0)[2];
+        let drawn = inst.mesh_instances(barrel.mesh);
+        assert_eq!(drawn.len(), 1, "the tank is in view");
+        let barrel_world = Mat4::from_cols_array_2d(&drawn[0].model);
+        for (n, name) in ["muzzle_l", "muzzle_r"].iter().enumerate() {
+            let local = chain
+                .anchors(0)
+                .iter()
+                .find(|a| a.name == *name)
+                .unwrap()
+                .local;
+            let expected = (barrel_world * local).transform_point3(Vec3::ZERO);
+            let got = inst.anchor_world(3, "muzzle", n, alpha, ground).unwrap();
+            assert!(
+                (Vec3::from(got) - expected).length() < 1e-4,
+                "{name}: {got:?} vs {expected}"
+            );
+        }
+        // n wraps, so a burst of three alternates left, right, left.
+        let l = inst.anchor_world(3, "muzzle", 0, alpha, ground).unwrap();
+        assert_eq!(inst.anchor_world(3, "muzzle", 2, alpha, ground).unwrap(), l);
+        // The interpolation matters: another alpha is another place (the tank drives, the turret turns).
+        let other = inst.anchor_world(3, "muzzle", 0, 0.9, ground).unwrap();
+        assert!((Vec3::from(other) - Vec3::from(l)).length() > 0.1);
+    }
+
+    /// With the turret 64 steps off the hull, the muzzle is a quarter turn about the turret pivot from where it is
+    /// with the turret straight, in the world, on a hull that itself faces 20 steps off the axis.
+    #[test]
+    fn a_turret_64_steps_off_the_hull_swings_the_muzzle_a_quarter_turn_about_the_pivot() {
+        let (mut inst, _) = tank_instancer();
+        let mut at = |hull: u8, turret: u8| {
+            let m = Motion::from_fixed(
+                0,
+                0,
+                v2(80, 80),
+                v2(80, 80),
+                Facing::new(hull),
+                Facing::new(hull),
+            )
+            .with_turret(Facing::new(turret), Facing::new(turret))
+            .with_id(UnitId::from_parts(0, 0));
+            inst.update_tick([m]);
+            Vec3::from(inst.anchor_world(0, "muzzle", 0, 0.0, |_, _| 0.0).unwrap())
+        };
+        let straight = at(20, 20);
+        let turned = at(20, 20 + 64);
+        // The turret pivot in the world: 0.624 m along the hull's facing (20 steps) and 1.334 m up from the
+        // unit's origin at (80, 80) m.
+        let (s, c) = (20.0_f32 * std::f32::consts::TAU / 256.0).sin_cos();
+        let pivot = Vec3::new(80.0 + 0.624 * c, 1.334, 80.0 + 0.624 * s);
+        let (b, a) = ((straight - pivot).with_y(0.0), (turned - pivot).with_y(0.0));
+        assert!((b.length() - a.length()).abs() < 1e-4);
+        assert!(b.dot(a).abs() < 1e-3, "a right angle, got {}", b.dot(a));
+        // Towards +Z from +X: (x, z) -> (-z, x).
+        assert!(
+            (a - Vec3::new(-b.z, 0.0, b.x)).length() < 1e-3,
+            "{a} from {b}"
+        );
+        assert!((straight.y - turned.y).abs() < 1e-5);
+    }
+
+    /// A slot names a unit or a wreck and nothing else: a slot that is not there, or whose model has no
+    /// anchors, gives nothing, and units are found whether their slots rise or not.
+    #[test]
+    fn an_anchor_is_found_by_slot_and_a_wreck_slot_is_not_a_unit() {
+        let (mut inst, _) = tank_instancer();
+        let rise = Motion::from_fixed(0, 0, v2(80, 80), v2(80, 80), Facing::new(0), Facing::new(0));
+        // A plain cube (no parts) drawn as a wreck in slot 7, above every unit's slot.
+        let mut wreck = rise.with_id(UnitId::from_parts(7, u32::MAX));
+        wreck.shape = 1;
+        let tank = rise.with_id(UnitId::from_parts(3, 0));
+        inst.update_tick([tank, wreck]);
+        let find = |inst: &Instancer, slot| inst.anchor_world(slot, "muzzle", 0, 0.0, |_, _| 0.0);
+        assert!(find(&inst, 3).is_some());
+        assert!(find(&inst, 5).is_none(), "no unit has slot 5");
+        assert!(
+            find(&inst, 7).is_none(),
+            "the wreck is its own slot and has no muzzle"
+        );
+        // Unsorted slots are found too (the linear search).
+        inst.update_tick([wreck, tank]);
+        assert!(find(&inst, 3).is_some());
+        assert!(find(&inst, 7).is_none());
+        assert!(find(&inst, 4).is_none());
+        let at = |slot| rise.with_id(UnitId::from_parts(slot, 0));
+        inst.update_tick([at(9), at(2), at(5), at(1)]);
+        for slot in [9, 2, 5, 1] {
+            assert!(find(&inst, slot).is_some(), "slot {slot}, slots not rising");
+        }
+        assert!(find(&inst, 3).is_none());
+        // Placeholder models answer nothing at all.
+        let mut plain = Instancer::new(Style::embedded(), (64.0, 64.0));
+        plain.update_tick([tank]);
+        assert!(find(&plain, 3).is_none());
+    }
+
+    /// What the anchor lookup costs (a measurement, not a test that can fail): one `anchor_world` among 5,000
+    /// units with ascending slots (binary search) and among 5,000 whose slots are not ascending (a scan), and
+    /// what the check for ascending slots adds to `update_tick` (the only per-tick cost of the feature).
+    /// Alternating runs. `cargo test --release -p sf_render --lib what_the_anchor_lookup_costs -- --ignored --nocapture`
+    #[test]
+    #[ignore = "a measurement, run by hand"]
+    fn what_the_anchor_lookup_costs() {
+        use std::time::Instant;
+        let (mut inst, _) = tank_instancer();
+        let tanks = |reverse_pairs: bool| -> Vec<Motion> {
+            (0..5000_u32)
+                .map(|i| {
+                    let slot = if reverse_pairs { i ^ 1 } else { i };
+                    Motion::from_fixed(
+                        0,
+                        0,
+                        v2(8 * (i % 100) as i32, 8 * (i / 100) as i32),
+                        v2(8 * (i % 100) as i32, 8 * (i / 100) as i32),
+                        Facing::new(i as u8),
+                        Facing::new(i as u8),
+                    )
+                    .with_turret(Facing::new(1), Facing::new(2))
+                    .with_id(UnitId::from_parts(slot, 0))
+                })
+                .collect()
+        };
+        let (sorted, unsorted) = (tanks(false), tanks(true));
+        let ground = |_: f32, _: f32| 0.0;
+        for round in 0..5 {
+            let mut line = format!("round {round}:");
+            for (name, motions) in [("ascending", &sorted), ("not ascending", &unsorted)] {
+                inst.update_tick(motions.iter().copied());
+                let began = Instant::now();
+                let mut sum = 0.0;
+                for k in 0..200_000_u32 {
+                    sum += inst
+                        .anchor_world(k % 5000, "muzzle", (k % 7) as usize, 0.5, ground)
+                        .map_or(0.0, |p| p[0]);
+                }
+                let per = began.elapsed().as_nanos() as f64 / 200_000.0;
+                line += &format!(" {name}: {per:.0} ns per anchor_world ({sum:.0});");
+            }
+            let began = Instant::now();
+            for _ in 0..2000 {
+                inst.update_tick(sorted.iter().copied());
+            }
+            let tick = began.elapsed().as_nanos() as f64 / 2000.0;
+            let ids: Vec<u32> = sorted.iter().map(|m| m.id.index()).collect();
+            let began = Instant::now();
+            let mut all = 0;
+            for _ in 0..20_000 {
+                all += usize::from(ids.windows(2).all(|w| w[0] < w[1]));
+            }
+            let check = began.elapsed().as_nanos() as f64 / 20_000.0;
+            line += &format!(
+                " update_tick {:.1} us of which the ascending check {check:.0} ns ({all})",
+                tick / 1e3
+            );
+            println!("{line}");
+        }
     }
 
     #[test]
