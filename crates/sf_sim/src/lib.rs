@@ -55,6 +55,9 @@
 //! number of the tick the next [`World::step`] runs. [`World::step`] advances
 //! exactly one tick and does, in this order:
 //!
+//! * advance the structures under construction by one tick and record the ones that complete
+//!   (WP6.3, [`construction`]); the state moves first, so a command of this tick already sees them
+//!   standing;
 //! * run every command scheduled for this tick, in `(player, insertion)`
 //!   order;
 //! * for every live entity in ascending slot order: remember the previous
@@ -332,6 +335,7 @@ pub mod behavior;
 pub mod buildings;
 pub mod checksum;
 pub mod command;
+pub mod construction;
 pub mod crowd;
 pub mod destruction;
 mod entities;
@@ -356,6 +360,7 @@ pub use armor::{ArmorError, ArmorTable, MAX_PERCENT as MAX_ARMOR_PERCENT};
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
 pub use buildings::{BuildingFunction, BuildingStats, BuildingTable, BuildingsError, Side};
 pub use command::{Command, CommandQueue, ScheduleError};
+pub use construction::{Completion, Construction};
 pub use crowd::{
     CollisionConfig, CrowdStats, DEFAULT_STUCK_ATTEMPTS, DEFAULT_STUCK_TICKS, DEFAULT_WAIT_TICKS,
 };

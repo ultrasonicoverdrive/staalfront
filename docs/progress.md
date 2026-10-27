@@ -1884,7 +1884,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1 is in; WP6.2 is built (in review); WP6.3 to WP6.8 are not started.
+Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are not started.
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -1900,6 +1900,47 @@ Status: WP6.1 is in; WP6.2 is built (in review); WP6.3 to WP6.8 are not started.
   sim has a faction per player now (`World::with_player_factions`); the game shows a ghost under the cursor
   (B chooses, left click places, right click puts away) whose verdict is the simulation's, asked through the sim
   thread; a new scenario `placement`; `docs/rules/buildings.md`, "Placement": done
+
+- WP6.3 Build animation tied to state: a structure built with `BuildStructure` is under construction for its
+  `build_ticks` (one integer of state per entity, hashed in a section `N` that exists only while something goes up) and is
+  a prerequisite and a base anchor only when complete (`World::stands`); a completion is a `World::completions()`
+  entry in the step the state flips, which is where a mission trigger hooks in; the picture (foundation, scaffolding,
+  finished model, a progress bar) is worked out from the snapshot's state, with the stages and thresholds in
+  `assets/config/build_stages.ron` and a box as the fallback; pre-placed structures start complete; scenario
+  `construction`, `placement.expected` re-pinned with a measured cause; `docs/rules/construction.md`: done
+
+### WP6.3 notes
+
+- **Order inside a tick.** The constructions advance first, then the commands run, so a `BuildStructure` of the
+  tick in which a plant completes already has it as a prerequisite. The state is the truth and the presentation
+  follows it; the rule is written in `construction.md`.
+- **One pin moved, on purpose: `placement.expected`** `0x523c7fcc0105b96f` to `0x9c83a43fc19af879`. Measured:
+  the old scenario file with `BuildStructure` temporarily placing complete ends on `0x523c7fcc0105b96f`; on the new
+  rule it ends on `0x208d804b162a500b` with 17 of 23 commands ignored (11 before). The scenario now waits for the
+  builds (2110 ticks). The golden constants and the other `.expected` files did not move. `placement_defs/` is untouched.
+  New: `construction.expected` `0x941d7392ff550040`, also added to the CI scenario loop.
+- **Mutations** (each broken on purpose, the test that fails): a structure under construction counts as standing
+  (`a_structure_under_construction_is_no_prerequisite_until_it_completes`, `a_base_under_construction_gives_no_reach`, the bridge
+  tree test), a build one tick too long (`a_built_structure_is_complete_after_exactly_its_build_ticks`), a dead structure
+  keeps building (`a_structure_at_zero_hit_points_does_not_finish_building_and_fires_no_event`), the constructions advance after
+  the commands (`the_command_of_the_completing_tick_sees_the_structure_standing`), the section not hashed
+  (`construction_is_in_the_checksum_and_is_gone_when_it_completes`), a placed structure starts under construction
+  (`a_pre_placed_structure_starts_complete`), a stage one thousandth late (`the_stage_is_the_last_one_that_has_begun`), the picture
+  ignoring the state (`the_snapshot_carries_the_construction_and_the_stage_follows_it`), the bar filling too fast, a data threshold
+  changed (`the_stage_shown_follows_the_thresholds_of_the_data`), a completion not reported. One survived and is
+  equivalent: not resetting the progress in `Entities::clear`, because `fill` resets it and every reader checks `alive`.
+- **Performance** of the extra scan of the build column per tick: `wander_5000` release, five alternating runs, the machine
+  shared with other sessions (load about 1.5): 767 ticks/s with against 780 without, about 2 %, inside the spread of the runs
+  (748 to 804). A counter would remove it; not done.
+- **With WP5.5 (merged from main during this work):** a structure shot down while it goes up is removed with its state and
+  never completes (`shot_down::a_structure_shot_down_while_it_goes_up_never_completes`, an end-to-end test with a real attack
+  order; it passes by `clear`/`fill` and would not catch a missing reset, which is the equivalent mutant above).
+- **Gaps:** nothing is charged (phase 7, WP7.4), no cancel or pause, no builder unit or queue, no slow-down by a power
+  shortage (WP6.4), hit points do not rise with progress (phase 15), no sound for "complete".
+- **F1-M05:** the decoy builds in 8 s (160 ticks) and needs only the barracks; the shortest build of the tree.
+- **WP6.4, WP6.5, WP6.6 can use:** `World::stands(id)` (not hit points alone), `World::completions()`, `World::construction_of(id)`.
+  The WP7.1 builder and WP5.5 touch `checksum.rs`, `world.rs` and `entities.rs` as well; this work package adds one column,
+  one section after `B` and one call at the top of `step`.
 
 ### WP6.2 notes
 

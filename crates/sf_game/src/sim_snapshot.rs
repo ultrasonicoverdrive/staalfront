@@ -34,8 +34,8 @@ use std::time::{Duration, Instant};
 
 use sf_math::Vec2;
 use sf_sim::{
-    Cell, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId, ProjectileView,
-    Tick, UnitStats, UnitTable, World, WreckView,
+    Cell, Construction, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId,
+    ProjectileView, Tick, UnitStats, UnitTable, World, WreckView,
 };
 
 /// A placement question for the ghost under the cursor (WP6.2): may `player` build `kind` with
@@ -113,6 +113,10 @@ pub struct SimSnapshot {
     pace: Pace,
     /// The answer to the placement question being asked, if one is (WP6.2).
     ghost: Option<GhostAnswer>,
+    /// The structures under construction and how far along they are (WP6.3), ascending by slot.
+    /// Usually empty. The picture picks the stage model and the progress bar from this and nothing
+    /// else: the state is the simulation's.
+    builds: Vec<(EntityId, Construction)>,
 }
 
 impl SimSnapshot {
@@ -137,6 +141,7 @@ impl SimSnapshot {
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
             ghost: None,
+            builds: Vec::new(),
         }
     }
 
@@ -180,6 +185,9 @@ impl SimSnapshot {
                 }
             }
         }
+        // The constructions (WP6.3), read from the state of this tick like everything else.
+        self.builds.clear();
+        self.builds.extend(world.constructions());
         // The ore: the amounts are copied only when something changed since this buffer was last
         // filled (a take, a growth), so a field at rest costs one comparison.
         match world.ore() {
@@ -218,6 +226,18 @@ impl SimSnapshot {
     pub(crate) fn answer(&mut self, world: &World, query: GhostQuery) {
         let preview = world.preview_placement(query.kind, query.cell, query.player);
         self.ghost = Some(GhostAnswer { query, preview });
+    }
+
+    /// How far along the structure `id` is, or `None` when it is complete (or no structure): the
+    /// state of the snapshot's tick (WP6.3).
+    pub fn construction_of(&self, id: EntityId) -> Option<Construction> {
+        // Nearly always empty, and a handful of entries when not: a scan is the cheap way.
+        self.builds.iter().find(|(b, _)| *b == id).map(|(_, c)| *c)
+    }
+
+    /// Every structure under construction, ascending by slot.
+    pub fn constructions(&self) -> &[(EntityId, Construction)] {
+        &self.builds
     }
 
     /// The simulation's answer to the placement question asked last, if one was asked
