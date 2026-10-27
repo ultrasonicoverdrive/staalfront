@@ -220,10 +220,11 @@ there.
 **Choosing a refinery:** the nearest **standing** refinery of the harvester's own player: the
 smallest squared straight-line distance from the harvester to the dock point, a tie to the lower
 slot. "Standing" is `World::is_standing` (the rule `placement.rs` and the tech tree use): hit
-points left, or a structure that cannot be damaged. **WP6.3 (#76) extends that function to
-"complete", so a refinery under construction stops being a dock the day it merges; nothing here
-builds one, so that half is untested here** (the zero-hit-point half is:
-`harvest::tests::a_refinery_at_zero_hit_points_is_not_a_refinery`). A refinery of another player
+points left, or a structure that cannot be damaged, and since WP6.3 also complete: a refinery a
+player builds with `BuildStructure` is no dock while it is under construction and becomes one when
+it is complete (`a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete`); the
+zero-hit-point half is
+`harvest::tests::a_refinery_at_zero_hit_points_is_not_a_refinery`. A refinery of another player
 is not a refinery (`a_refinery_of_another_player_is_not_a_refinery`).
 
 **Choosing ore:** `nearest_ore_where` from the harvester's own cell, within `search_radius`, among

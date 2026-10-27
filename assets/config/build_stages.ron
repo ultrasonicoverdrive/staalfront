@@ -1,0 +1,30 @@
+// How a structure under construction is drawn (WP6.3, docs/rules/construction.md). Read by
+// sf_data::build_stages, compiled into the game like unit_defs.ron, and checked when it is parsed.
+// Presentation only: how long a build takes is `build_seconds` in unit_defs.ron, and no checksum
+// depends on this file.
+//
+// The stages in order. A stage is shown from `from_permille` (thousandths of the build time done)
+// until the next one begins; the finished model is shown from the tick the simulation says the
+// structure is complete. `suffix` goes before ".glb" in the finished model's file name:
+// "set_v4/meridian_barracks.glb" + "_foundation" = "set_v4/meridian_barracks_foundation.glb". A
+// structure whose stage model does not exist (or that is drawn as a placeholder box) gets the box
+// at `fallback_height_permille` thousandths of its height.
+(
+    stages: [
+        (id: "foundation", from_permille: 0, suffix: "_foundation", fallback_height_permille: 80),
+        (id: "scaffolding", from_permille: 400, suffix: "_scaffolding", fallback_height_permille: 550),
+    ],
+    // The progress bar under the structure's front edge (sRGB, alpha last). Sizes in logical
+    // pixels: no bar when the edge is narrower than `min_width_px` on the screen, never wider than
+    // `max_width_px`, `gap_px` below the edge.
+    bar: (
+        fill: (120, 200, 255, 235),
+        back: (10, 14, 20, 190),
+        height_px: 6,
+        min_width_px: 18,
+        max_width_px: 220,
+        gap_px: 4,
+    ),
+    // A stage drawn as a placeholder box is never lower than this (millimetres), so it is no sliver.
+    fallback_min_height_mm: 200,
+)

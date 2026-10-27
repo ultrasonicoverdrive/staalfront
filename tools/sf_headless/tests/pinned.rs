@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction` and `placement` (and `ore_256` and `harvest`, pinned in `tests/ore.rs` and `tests/harvest.rs`). A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction`, `placement` and `construction` (and `ore_256` and `harvest`, pinned in `tests/ore.rs` and `tests/harvest.rs`). A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -59,6 +59,7 @@ const TANKS_VS_INFANTRY_EXPECTED: &str =
     include_str!("../../../assets/scenarios/tanks_vs_infantry.expected");
 const DESTRUCTION_EXPECTED: &str = include_str!("../../../assets/scenarios/destruction.expected");
 const PLACEMENT_EXPECTED: &str = include_str!("../../../assets/scenarios/placement.expected");
+const CONSTRUCTION_EXPECTED: &str = include_str!("../../../assets/scenarios/construction.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -196,12 +197,25 @@ fn formation_move_matches_the_pinned_checksum() {
     check("formation_move", FORMATION_MOVE_EXPECTED);
 }
 
-/// Two bases build with `BuildStructure`, and every placement rule refuses something (WP6.2). A new
-/// scenario: pinned when it was added; the others did not change. `tests/placement.rs` asserts which
-/// build stands and why each other is refused.
+/// Two bases build with `BuildStructure`, and every placement rule refuses something (WP6.2).
+/// Pinned when it was added (`0x523c7fcc0105b96f`); **re-pinned in WP6.3** (`0x9c83a43fc19af879`)
+/// because a built structure now goes up for its build time before it is a prerequisite, so the
+/// scenario waits for the builds (2110 ticks instead of 60, the commands moved to the ticks the
+/// builds complete). Measured: the old scenario file, with `BuildStructure` placing a structure
+/// complete as before, still gives `0x523c7fcc0105b96f`; run unchanged on the WP6.3 rules it gives
+/// `0x208d804b162a500b`, with 17 of its 23 commands ignored instead of 11.
+/// `tests/placement.rs` asserts which build stands and why each other is refused.
 #[test]
 fn placement_matches_the_pinned_checksum() {
     check("placement", PLACEMENT_EXPECTED);
+}
+
+/// A structure is built and counts only when complete (WP6.3). A new scenario: pinned when it was
+/// added. `tests/construction.rs` asserts the tick each structure completes and what is refused
+/// until then.
+#[test]
+fn construction_matches_the_pinned_checksum() {
+    check("construction", CONSTRUCTION_EXPECTED);
 }
 
 /// Weapons and reload (WP5.1): riflemen, two tanks and two howitzers fire at what their attack
@@ -348,6 +362,10 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
     assert_eq!(
         final_checksum("placement", &altered),
         pinned(PLACEMENT_EXPECTED)
+    );
+    assert_eq!(
+        final_checksum("construction", &altered),
+        pinned(CONSTRUCTION_EXPECTED)
     );
     // The scenario on the shipped definitions (no `unit_defs`) does move: the
     // test would prove nothing if the change reached nobody.

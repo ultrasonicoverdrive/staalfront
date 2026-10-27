@@ -43,6 +43,7 @@ use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::build_mode::BuildMode;
 use crate::commands;
+use crate::construction_view;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::fx::{FxFrame, FxPlayer};
@@ -534,10 +535,14 @@ fn order_text(order: sf_sim::Order, world: &SimSnapshot) -> String {
 }
 
 /// A sim entity as the instancer wants it. The positions are in cells;
-/// `Motion::from_fixed` is where they become metres (B12).
-fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
+/// `Motion::from_fixed` is where they become metres (B12). A structure under construction gets
+/// the shape of its stage, from the snapshot's construction (WP6.3); the game and the tests call
+/// this one function.
+pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
+    // A structure under construction is drawn as the stage its progress is in (WP6.3).
+    let building = snap.construction_of(v.id).map(|c| c.permille());
     let motion = Motion::from_fixed(
-        looks.shape_of(v),
+        looks.shape_at(v, building),
         v.owner.0,
         v.prev_pos,
         v.pos,
@@ -554,14 +559,20 @@ fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
 
 /// Everything the instancer draws for a snapshot: the entities, then the wrecks and the rubble (WP5.5),
 /// which are numbered from the first slot no entity has.
-fn motions_of<'a>(looks: &'a Looks, snap: &'a SimSnapshot) -> impl Iterator<Item = Motion> + 'a {
+pub fn motions_of<'a>(
+    looks: &'a Looks,
+    snap: &'a SimSnapshot,
+) -> impl Iterator<Item = Motion> + 'a {
     let first = snap.views().last().map_or(0, |v| v.id.index() + 1);
-    snap.views().iter().map(move |v| motion_of(looks, v)).chain(
-        snap.wrecks()
-            .iter()
-            .enumerate()
-            .filter_map(move |(n, w)| looks.wreck_motion(w, first + n as u32)),
-    )
+    snap.views()
+        .iter()
+        .map(move |v| motion_of(looks, snap, v))
+        .chain(
+            snap.wrecks()
+                .iter()
+                .enumerate()
+                .filter_map(move |(n, w)| looks.wreck_motion(w, first + n as u32)),
+        )
 }
 
 impl Runner {
@@ -908,6 +919,24 @@ impl Runner {
         let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
         let mut layer = self.hud.world_layer();
         placement_view::draw_ghost(&mut layer, &frame, &terrain, answer);
+    }
+
+    /// The progress bars of the structures under construction (WP6.3), from the snapshot's state.
+    fn draw_construction_bars(&mut self) {
+        if self.snap.constructions().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        construction_view::draw_for(&mut layer, &frame, &terrain, &snap, &self.looks);
     }
 
     /// Replace the camera with one built from `config`, keeping where it
@@ -1788,6 +1817,7 @@ impl App for Runner {
             self.mark_selection();
             self.draw_cargo();
             self.draw_ghost();
+            self.draw_construction_bars();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();

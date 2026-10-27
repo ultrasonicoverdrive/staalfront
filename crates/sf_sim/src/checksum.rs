@@ -30,7 +30,8 @@
 //! | projectiles (`J`), only with a weapon table | the projectile store: its slot count, free list (stack order) and each projectile in flight in slot order, with its slot, generation, weapon, owner, target, aim point, place, height, heading, span and fuse (WP5.2) |
 //! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
 //! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
-//! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1). |
+//! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
+//! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
 //! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
 //! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2). It is the last section |
 //!
@@ -200,6 +201,7 @@ const SECTION_PROJECTILES: u8 = b'J';
 const SECTION_TARGETING: u8 = b'A';
 const SECTION_DESTRUCTION: u8 = b'X';
 const SECTION_BUILDINGS: u8 = b'B';
+const SECTION_CONSTRUCTION: u8 = b'N';
 const SECTION_ORE: u8 = b'E';
 const SECTION_HARVEST: u8 = b'H';
 
@@ -559,9 +561,24 @@ impl World {
             }
         }
 
-        // Ore (WP7.1): the rules, the number of field cells and a running sum over the amounts.
-        // Last, and only in a world that was given ore rules, so every world without them
-        // hashes as before.
+        // Construction (WP6.3): the ticks still to go of every structure under construction, in
+        // slot order. Only while one exists, so a world that never built anything with
+        // `BuildStructure` (and one whose builds are all complete) hashes as before. The total
+        // is the table's `build_ticks`, hashed in section `B`.
+        let building = |i: usize| e.alive[i] && e.build_left[i] != 0;
+        if (0..slots).any(building) {
+            h.write_u8(SECTION_CONSTRUCTION);
+            h.write_u64(len64((0..slots).filter(|&i| building(i)).count()));
+            for i in (0..slots).filter(|&i| building(i)) {
+                h.write_u32(i as u32);
+                h.write_u32(e.build_left[i]);
+            }
+        }
+
+        // Ore (`E`, WP7.1: the rules, the number of field cells and a running sum over the amounts)
+        // is the last section and construction (`N`, WP6.3) comes just before it. Both are
+        // gated: `N` only while something is under construction, `E` only in a world that was given
+        // ore rules. So every world without them hashes as before and every pin of either WP stays.
         if let Some(ore) = &self.ore {
             h.write_u8(SECTION_ORE);
             for word in ore.fingerprint() {

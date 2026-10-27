@@ -1246,3 +1246,101 @@ fn a_clone_runs_on_identically() {
     assert_eq!(a.checksum_history(), b.checksum_history());
     assert!(a == b);
 }
+
+// ---- construction (WP6.3) -----------------------------------------------------------------
+
+#[test]
+fn a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete() {
+    // The obligation of whichever of #76 and #78 landed second: a refinery that a player builds
+    // with `BuildStructure` starts under construction (WP6.3); harvest asks `World::is_standing`,
+    // which is "complete and with hit points", so it is no dock until it is done.
+    const YARD: Kind = Kind(1);
+    let mut stats: Vec<UnitStats> = units().iter().cloned().collect();
+    stats.push(UnitStats {
+        kind: YARD,
+        hp: 1000,
+        movement_class: None,
+        speed_per_tick: Fx::ZERO,
+        turn_per_tick: 0,
+        size: Fx::ZERO,
+        footprint: Some(Footprint {
+            width: 2,
+            height: 2,
+        }),
+        weapon_range: Fx::ZERO,
+        turret_per_tick: 0,
+    });
+    let mut entries: Vec<BuildingStats> = buildings().iter().cloned().collect();
+    entries.push(BuildingStats {
+        kind: YARD,
+        footprint: Footprint {
+            width: 2,
+            height: 2,
+        },
+        function: BuildingFunction::Anchor,
+        exit_side: None,
+        build_ticks: 100,
+        cost: Some(1000),
+        power: 0,
+        factions: 3,
+        requires: vec![],
+        build_radius: 8,
+    });
+    let ids: Vec<u8> = (0..48u32)
+        .flat_map(|y| (0..64u32).map(move |x| (x, y)))
+        .map(|(x, y)| if is_ore(x, y) { ORE } else { GRASS })
+        .collect();
+    let terrain = Terrain::from_layer(64, 48, &ids, &terrain_defs()).unwrap();
+    let mut w = World::with_terrain(WorldConfig::new(7).with_map_size(64, 48), terrain)
+        .unwrap()
+        .with_units(UnitTable::new(stats).unwrap())
+        .unwrap()
+        .with_buildings(BuildingTable::new(entries).unwrap())
+        .unwrap()
+        .with_player_factions(&[(P0, 1)])
+        .unwrap()
+        .with_ore(ORE_RULES)
+        .unwrap()
+        .with_harvest(RULES, &[HARVESTER])
+        .unwrap();
+    at(
+        &mut w,
+        0,
+        Command::PlaceStructure {
+            kind: YARD,
+            cell: Cell::new(3, 20),
+            owner: P0,
+        },
+    );
+    spawn_harvester(&mut w, 0, (14, 22), P0);
+    at(
+        &mut w,
+        1,
+        Command::BuildStructure {
+            kind: REFINERY,
+            cell: Cell::new(6, 20),
+        },
+    );
+    run(&mut w, 2);
+    let refinery = id(2);
+    assert_eq!(w.get(refinery).map(|e| e.kind), Some(REFINERY));
+    assert!(w.construction_of(refinery).is_some());
+    assert!(!w.stands(refinery));
+    // The refinery's build takes 800 ticks: the harvester fills up long before and finds no dock.
+    run_until(&mut w, 700, |w| {
+        stage(w, 1) == Some(HarvestStage::NoRefinery)
+    });
+    assert_eq!(stage(&w, 1), Some(HarvestStage::NoRefinery));
+    assert!(w.construction_of(refinery).is_some(), "built too soon");
+    assert!(w.dock_of(refinery).is_none());
+    assert_eq!(w.ore_delivered(P0), 0);
+    // Complete: a dock, and the waiting harvester delivers.
+    run_until(&mut w, 1000, |w| w.stands(refinery));
+    assert!(w.stands(refinery));
+    w.step();
+    assert!(w.dock_of(refinery).is_some());
+    run_until(&mut w, 1500, |w| {
+        w.ore_delivered(P0) >= u64::from(RULES.capacity)
+    });
+    assert_eq!(w.ore_delivered(P0), RULES.capacity.into());
+}

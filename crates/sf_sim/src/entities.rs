@@ -122,6 +122,10 @@ pub(crate) struct Entities {
     /// What the unit remembers about choosing its own targets (WP5.4); at rest for everything that
     /// has not. Hashed in the targeting section for as long as the world has targeting.
     pub eng: Vec<Engage>,
+    /// Ticks until a structure placed with `BuildStructure` is complete (WP6.3); zero for
+    /// everything that is complete, which is every unit and every structure placed with
+    /// `PlaceStructure`. Hashed in the construction section while some entity is not zero.
+    pub build_left: Vec<u32>,
     /// How many kills the unit has been credited with (WP5.5); zero for everything that has none.
     /// Hashed in the destruction section while it is not zero.
     pub kills: Vec<u16>,
@@ -163,6 +167,7 @@ impl Entities {
         self.form.push(Member::NONE);
         self.weapon.push(REST);
         self.eng.push(Engage::REST);
+        self.build_left.push(0);
         self.kills.push(0);
         index
     }
@@ -200,6 +205,7 @@ impl Entities {
         self.form[i] = Member::NONE;
         self.weapon[i] = REST;
         self.eng[i] = Engage::REST;
+        self.build_left[i] = 0;
         self.kills[i] = 0;
         self.route.reset(i);
     }
@@ -233,6 +239,7 @@ impl Entities {
         self.form[i] = Member::NONE;
         self.weapon[i] = REST;
         self.eng[i] = Engage::REST;
+        self.build_left[i] = 0;
         self.kills[i] = 0;
         self.route.reset(i);
     }

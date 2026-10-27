@@ -434,10 +434,16 @@ impl World {
         Ok(())
     }
 
-    /// Whether the structure in slot `i` stands: it has hit points left, or
-    /// cannot be damaged at all (zero in the table).
-    pub(crate) fn is_standing(&self, i: usize) -> bool {
+    /// Whether the entity in slot `i` has hit points left, or cannot be damaged at all (zero in
+    /// the table).
+    pub(crate) fn has_hit_points(&self, i: usize) -> bool {
         self.entities.hp[i] > 0 || self.stats_at(i).is_some_and(|s| s.hp == 0)
+    }
+
+    /// Whether the structure in slot `i` stands: it is complete (WP6.3) and has hit points left,
+    /// or cannot be damaged at all. A structure under construction does not stand.
+    pub(crate) fn is_standing(&self, i: usize) -> bool {
+        self.entities.build_left[i] == 0 && self.has_hit_points(i)
     }
 
     /// Runs one command of `player`. `BuildStructure` is the only command whose
@@ -449,7 +455,12 @@ impl World {
         let verdict = self.check_placement(kind, cell, player);
         let reason = match verdict {
             Ok(()) => match self.place_structure(kind, cell, player) {
-                Some(_) => return true,
+                Some(id) => {
+                    // Built by a player: it starts under construction (WP6.3).
+                    let ticks = self.buildings.get(kind).map_or(0, |b| b.build_ticks);
+                    self.entities.build_left[id.index() as usize] = ticks;
+                    return true;
+                }
                 None => PlacementError::EntityLimit,
             },
             Err(reason) => reason,
