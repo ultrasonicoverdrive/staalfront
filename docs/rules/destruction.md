@@ -139,7 +139,8 @@ hash section, and the first rule that needs it (veterancy, score) can ask for it
 
 `Snapshot::deaths()` lists, for the last tick, each death with its tick, the victim's (stale) id, kind, owner,
 class (mobile or structure), position, facing, size (a diameter) and footprint, what it left (`wreck`), and
-the killer and assists. WP5.6 draws the explosions from it. It is a report: replaced by every step, not hashed.
+the killer and assists. WP5.6a draws the explosions from the deaths of its own queue (`sf_game::fx_events`, which is
+lossless; see [`effects.md`](effects.md)), not from this list. It is a report: replaced by every step, not hashed.
 `StepReport::deaths` counts them. In the simulation the list is complete per tick. `sf_game`'s
 `SimSnapshot::deaths` is not: the sim thread runs up to `1 + max_catch_up` steps in one pass and publishes one
 snapshot after them, so it carries only the last step's deaths, and the deaths of the earlier steps of a
@@ -174,7 +175,8 @@ that turn in one tick.
 3. **Damaged and destroyed models of structures** (`_damaged`, `_foundation` in the art pack), slowing rubble,
    wrecks that can be repaired or salvaged, vessel wrecks (a vessel takes the heavy vehicle wreck for now).
 4. **Accumulated credit** (above).
-5. **Visual effects** (explosions, smoke, a fade of the wreck): WP5.6.
+5. **Visual effects** (explosions, smoke): done in WP5.6a ([`effects.md`](effects.md)). A fade of the wreck itself is not
+   built; the wreck gives off smoke while it lies.
 
 ## The game (`sf_game`)
 
@@ -197,4 +199,5 @@ not load (with a warning). The model files, the size bounds and the colour are d
 `assets/config/wrecks.ron` (compiled in like `units.ron`, checked when parsed, `sf_game::wreck_looks`). They are drawn in an added colour of the style (`looks::with_wreck_colour`, dark grey,
 after the four players': the players' palette in `units.ron` is unchanged), as instances that are not entities:
 they have an id no entity has, so a click on one selects nothing. The `fx` nodes of these models are missing (the
-checker's finding), so the visual effects stay WP5.6. The screenshots are in `docs/screenshots/wp5.5/`.
+checker's finding); WP5.6a's smoke does not need them (the fallback of `effects.md`), WP5.6b reads them. The
+screenshots are in `docs/screenshots/wp5.5/`.

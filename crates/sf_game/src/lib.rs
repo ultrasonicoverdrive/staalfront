@@ -108,6 +108,8 @@ pub mod commands;
 pub mod construction_view;
 pub mod cursor;
 pub mod debug_ui;
+pub mod fx;
+pub mod fx_events;
 pub mod hud;
 pub mod looks;
 pub mod ore_view;

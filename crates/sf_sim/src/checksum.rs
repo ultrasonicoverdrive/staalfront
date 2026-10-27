@@ -573,8 +573,8 @@ impl World {
             }
         }
 
-        // Ore (WP7.1): the rules, the number of field cells and a running sum over the amounts.
-        // Ore (`E`) is the last section and construction (`N`, WP6.3) comes just before it. Both are
+        // Ore (`E`, WP7.1: the rules, the number of field cells and a running sum over the amounts)
+        // is the last section and construction (`N`, WP6.3) comes just before it. Both are
         // gated: `N` only while something is under construction, `E` only in a world that was given
         // ore rules. So every world without them hashes as before and every pin of either WP stays.
         if let Some(ore) = &self.ore {

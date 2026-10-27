@@ -1100,7 +1100,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 to WP5.5 are in; WP5.6 is not started.
+Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a, which is in, and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`), which is not started.
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -1133,6 +1133,11 @@ Status: WP5.1 to WP5.5 are in; WP5.6 is not started.
   `Snapshot::deaths`/`wrecks` for the effects; checksum section `X`; the `destruction` scenario;
   `tanks_vs_infantry` re-pinned with the cause measured; `sf_game` gets weapons, targeting and destruction, a
   sandbox placed out of reach, wrecks drawn from the v4 models), `docs/rules/destruction.md`: done, see "WP5.5 notes"
+- WP5.6a Visual effects, part one (an effects event queue recorded after every sim step, lossless and capped at 4096
+  with a drop counter in the F1 panel; `assets/config/effects.ron` linked by damage type and weapon id and checked at
+  load, every number pinned; one particle pool of 4096 drawn in one instanced premultiplied-alpha call counted in
+  `DrawStats`; zoom rules; wreck smoke; projectile tracers; the dotted audio event names; `sf_sim` untouched, no pin
+  moved), `docs/rules/effects.md`: done, see "WP5.6a notes"
 
 ### WP5.1 notes
 
@@ -1645,9 +1650,9 @@ and the v4 rubble still lack the `fx` nodes (the checker's finding), so the visu
    own; the data is there. Not in this brief.
 2. **Veterancy, score, a kill feed:** the data is there (`kills_of`, `tally_of`, `Death`); nothing reads it.
    **Accumulated credit** (damage of earlier ticks) would need a column; the killing-tick rule is the brief's.
-3. **Effects** (explosion, smoke, a fade of the wreck): WP5.6. `SimSnapshot::deaths` is the last step's list only: a
-   catch-up pass of the sim thread publishes once after several steps, so reading every snapshot still loses deaths.
-   Lossless delivery is WP5.6a's effects event queue (see Open follow-ups).
+3. **Effects** (explosion, smoke): done in WP5.6a (see "WP5.6a notes"); a fade of the wreck is not built.
+   `SimSnapshot::deaths` is the last step's list only (a catch-up pass publishes once after several steps), so the
+   effects read the lossless queue of `sf_game::fx_events` instead.
 4. **Vessel wrecks** (a vessel takes the heavy vehicle wreck), the damaged and destroyed models of structures, wrecks that
    block or slow, repair and salvage.
 5. **`Attack` orders walk round a wall of structures** (found while building the scenario): an attack order plans its route
@@ -1659,6 +1664,63 @@ and the v4 rubble still lack the `fx` nodes (the checker's finding), so the visu
    arrives); the scenario orders the rifleman after the gap is open. Not changed here.
 7. **`sf_game`'s wreck instances share the LOD state slot** with the entity that has the same slot index (the wreck's id
    is the first index no entity has); a wreck can at worst switch level of detail a frame late. Cosmetic.
+
+### WP5.6a notes
+
+**What it is.** The first half of the split WP5.6 (orchestrator, Tijmen's approval, 27-10-2026; `PLAN.md` Phase 5 says
+so). Everything is in `docs/rules/effects.md`; this is the short version and what to know when you touch it.
+
+* `sf_game::fx_events` (the queue and `record`), `sf_game::fx` (`FxPlayer`: events, wrecks, projectiles to bursts and
+  tracers), `sf_render::effects` (the pool, the zoom rules, `EffectInstance`), `sf_data::effects` and
+  `assets/config/effects.ron`, `assets/shaders/effect.wgsl`; `SimSnapshot::projectiles()`; `SimHandle::drain_fx`,
+  `SimCounters::{fx_recorded, fx_dropped, fx_unresolved}`; `Renderer::set_effects`, `DrawStats::{effect_instances,
+  effect_draw_calls}`; two F1 lines.
+* **Follow-up 31 is closed** (deleted below): the sim thread records the events of every tick, so a catch-up pass of four
+  ticks loses none (`tests/fx_events.rs`, `max_catch_up` 3, `max_pass_ticks` 4, the same 112 events as the single-threaded
+  run; the snapshots in that run showed 0 of the 4 deaths).
+* **`sf_sim` is untouched** (`git diff origin/main -- crates/sf_sim` is empty). No pin moved: `cargo test --workspace`
+  (2,492 checks, 0 failed, 10 ignored: the two measurements of this WP among them; after merging main with WP7.1) and `sf_headless --expect` for the 19 scenarios of CI, all ok.
+* **Deviations from the research brief** (each written down in `effects.md`): effects are drawn **after the icons** (the
+  death flash was hidden under the wreck's icon otherwise; found in the screenshot test); the pixel size is computed on
+  the CPU (unit-tested) and the shader only lays out the quad; the muzzle fallback uses the unit's `size` instead of
+  the model's measured box; effect references are lists (a flash and its smoke), the death table has four classes; the
+  event carries sizes, not heights; the strategic flash comes from the death list's first glowing effect.
+* **Two things that did not need doing**: a depth bias for the strategic flash (tried, not needed on the 64-cell map, left
+  out); a texture for the particles (a disc made in the shader), so no art asset, only `effects.ron` and `effect.wgsl`
+  lines in `assets/LICENSES.md`.
+* **Seen in the game** (Xvfb, Mesa lavapipe, `sf_game --sandbox --fight --shots-tick N --shots dir`;
+  `docs/screenshots/wp5.6a/`): `game_t0201_close_up.jpg` (a flash and a blast by the tanks), `game_t0285_middle_panels_tracers.jpg`
+  and `game_t0753_middle_panels.jpg` (the F1 panels say "21 drawn (11 tracer dots), pool 11/4096" and "17 drawn", the
+  effects event line says 40 and 172 recorded, queue dropped 0), `game_t0343_strategic.jpg` (icons only, nothing of the
+  effects at that moment: no unit died then). From the screenshot test, in the same fight, with tick labels:
+  `test_t0061_close_muzzle_flash.jpg` (the flash at the barrel), `test_t0061_strategic_no_flash.jpg` (the same instant
+  from afar: icons only), `test_t0064_close_hit.jpg`, `test_t0194_close_death.jpg`, `test_t0194_middle_death.jpg` (fewer
+  particles) and `test_t0194_strategic_death_flash.jpg` (one small flash on the wreck's icon). The game frames are
+  the three zooms of `--shots` at whatever tick the fight is at; they do not catch every effect, which is why the test
+  takes its pictures at the tick of the event.
+* **Not measured**: the GPU cost on the reference card (M0c, after WP5.6b); the cap flooded in a running game; Windows
+  (CI).
+* **Cost** (release, relative, shared container, load 2.7 to 3.6, alternating runs): see `effects.md` section 9. The
+  recording on the sim thread is 0.05 us per tick against a 25.6 us step in the test scenario; a quiet `FxPlayer::frame`
+  is 0.24 us; a full pool plus 300 tracers about 110 us; on the software rasterizer 500 instances cost +0.3 to +1.0 ms of
+  a 22 ms frame and the worst frame the buffer allows (6144 instances at 64 px) +15 ms.
+* **Fix round 1** (review of #77): the placement numbers (hit height, projectile lift, burst radii, wreck smoke
+  radius) and the four curve shapes (rise jitter, smoke fade-in, flash hold, tracer taper) moved from Rust into
+  `effects.ron` (`placement`, `limits`, `wreck_smoke.radius_fraction`), range-checked and pinned; only `MAX_DT` (a
+  frame-time guard) stays in code. New test `a_shot_points_along_its_mount_turret_or_hull` runs `record` on the
+  destruction fight (45 turret shots with the turret off its hull, 9 hull or infantry shots); it catches
+  `Mount::Turret => from.hull`. The screenshot test reads the muzzle rule from `Effects::embedded()`.
+* **Not done** (deliberately):
+  1. Muzzle and fx anchors in the models, and `--bench --fight` for M0c: WP5.6b.
+  2. Sound: only the event names are in `effects.ron`; the audio is WP11.7.
+  3. Smoke and fire on damaged buildings: WP6.8.
+  4. An instant hit on a target that is gone in the same tick is counted in `fx_unresolved` and not drawn.
+  5. No particle sorting (back to front).
+  6. No hot reload of `effects.ron` (compiled in).
+  7. No wreck fade (the wreck model disappears at the end of its life; only its smoke fades).
+* **For M0c** (reviewer's advice): record `particles_peak` and `effect_instances` in the bench JSON; if frame p99
+  fails, lower `max_particles` to 2048 before touching `max_px` (a smaller `max_px` makes close-up explosions smaller
+  than the tank they come from).
 
 ## Phase 1 report (draft, WP1.14)
 
@@ -2085,4 +2147,3 @@ fixed, delete the entry in the same PR.
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
 
 30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. With PR #66 merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.
-31. **Deaths reach the presentation lossily** (WP5.5, PR #70 review; for WP5.6a): `SimSnapshot::deaths` holds only the last step of a sim-thread pass, and a catch-up pass of `1 + max_catch_up` steps publishes once, so the deaths of its earlier steps reach no snapshot. `sf_sim`'s `Snapshot::deaths()` is complete per tick. WP5.6a adds a lossless effects event queue in `sf_game`, filled in the sim thread right after each `world.step()`; test it with `max_catch_up` > 0. Delete this entry then.

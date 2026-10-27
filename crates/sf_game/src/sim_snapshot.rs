@@ -34,8 +34,8 @@ use std::time::{Duration, Instant};
 
 use sf_math::Vec2;
 use sf_sim::{
-    Cell, Construction, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId, Tick,
-    UnitStats, UnitTable, World, WreckView,
+    Cell, Construction, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId,
+    ProjectileView, Tick, UnitStats, UnitTable, World, WreckView,
 };
 
 /// A placement question for the ghost under the cursor (WP6.2): may `player` build `kind` with
@@ -104,8 +104,10 @@ pub struct SimSnapshot {
     ore: Vec<(u32, u32, u16)>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
-    /// What was destroyed in the last tick (WP5.5): the hook of the effects (WP5.6).
+    /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
     deaths: Vec<Death>,
+    /// The projectiles in flight (WP5.2), for the tracers (WP5.6a).
+    projectiles: Vec<ProjectileView>,
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
@@ -134,6 +136,7 @@ impl SimSnapshot {
             ore: Vec::new(),
             wrecks: Vec::new(),
             deaths: Vec::new(),
+            projectiles: Vec::new(),
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
@@ -206,6 +209,9 @@ impl SimSnapshot {
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
         self.deaths.extend_from_slice(world.snapshot().deaths());
+        world
+            .snapshot()
+            .collect_projectiles_into(&mut self.projectiles);
         // The table never changes after the world is made: share one copy.
         self.units = Arc::clone(&statics.units);
         self.ground = Arc::clone(&statics.ground);
@@ -287,10 +293,16 @@ impl SimSnapshot {
     /// What was destroyed in the last step before this snapshot (WP5.5): where, what, how big, who did it.
     /// Lossy: the sim thread publishes once per pass of up to `1 + max_catch_up` steps, so the deaths of
     /// the earlier steps of a catch-up pass are in no snapshot, and reading every snapshot does not
-    /// recover them. Effects must not rely on it; lossless delivery is WP5.6a's effects event queue,
-    /// filled in the sim thread right after each `world.step()`.
+    /// recover them. The effects do not read it: they use the lossless queue of [`crate::fx_events`]
+    /// (WP5.6a), filled in the sim thread right after every `world.step()`. It stays for the F1 panel.
     pub fn deaths(&self) -> &[Death] {
         &self.deaths
+    }
+
+    /// The projectiles in flight at the end of the last step (WP5.2): drawn as tracers (WP5.6a), each with
+    /// the ground position and height of the previous and the current tick to interpolate between.
+    pub fn projectiles(&self) -> &[ProjectileView] {
+        &self.projectiles
     }
 
     /// The position of `id` in [`SimSnapshot::views`]; `None` for a stale id.
