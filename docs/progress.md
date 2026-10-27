@@ -1679,7 +1679,7 @@ so). Everything is in `docs/rules/effects.md`; this is the short version and wha
   ticks loses none (`tests/fx_events.rs`, `max_catch_up` 3, `max_pass_ticks` 4, the same 112 events as the single-threaded
   run; the snapshots in that run showed 0 of the 4 deaths).
 * **`sf_sim` is untouched** (`git diff origin/main -- crates/sf_sim` is empty). No pin moved: `cargo test --workspace`
-  (2,448 checks, 0 failed, before the last test additions) and `sf_headless --expect` for the 19 scenarios of CI, all ok.
+  (2,492 checks, 0 failed, 10 ignored: the two measurements of this WP among them; after merging main with WP7.1) and `sf_headless --expect` for the 19 scenarios of CI, all ok.
 * **Deviations from the research brief** (each written down in `effects.md`): effects are drawn **after the icons** (the
   death flash was hidden under the wreck's icon otherwise; found in the screenshot test); the pixel size is computed on
   the CPU (unit-tested) and the shader only lays out the quad; the muzzle fallback uses the unit's `size` instead of
