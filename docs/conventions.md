@@ -57,7 +57,7 @@ By default, a WP is built by `bouwer-sonnet` at effort medium, which works throu
 `.claude/agents/bouwer-sonnet.md` (claims backed, mutation-proof tests, measured re-pin causes,
 frozen copies untouched, performance numbers, licence lines, green CI on both OSes, parallel
 work, in-game screenshots for visible changes, the basics, time split from timestamps,
-presentation data in RON, tests that call the production code, numbers pinned against the data). Every fix round after
+presentation data in RON, tests that call the production code, numbers pinned: literals for checksum-only values, the shipped RON against literals, and both sides of a data-to-sim mapping). Every fix round after
 `CHANGES REQUESTED` runs on `bouwer-opus-medium` at effort low and continues on the WP's own
 branch. The reviewer stays on Opus at effort medium (decision Tijmen 24-10-2026, replacing
 Sonnet high and the two fix-round levels of 21-10-2026). A WP marked **[xhigh]** starts the same
