@@ -1645,8 +1645,9 @@ and the v4 rubble still lack the `fx` nodes (the checker's finding), so the visu
    own; the data is there. Not in this brief.
 2. **Veterancy, score, a kill feed:** the data is there (`kills_of`, `tally_of`, `Death`); nothing reads it.
    **Accumulated credit** (damage of earlier ticks) would need a column; the killing-tick rule is the brief's.
-3. **Effects** (explosion, smoke, a fade of the wreck): WP5.6. `SimSnapshot::deaths` is the last tick's list only; a frame
-   that skips a tick skips its deaths: WP5.6 reads every snapshot or has the sim thread queue them.
+3. **Effects** (explosion, smoke, a fade of the wreck): WP5.6. `SimSnapshot::deaths` is the last step's list only: a
+   catch-up pass of the sim thread publishes once after several steps, so reading every snapshot still loses deaths.
+   Lossless delivery is WP5.6a's effects event queue (see Open follow-ups).
 4. **Vessel wrecks** (a vessel takes the heavy vehicle wreck), the damaged and destroyed models of structures, wrecks that
    block or slow, repair and salvage.
 5. **`Attack` orders walk round a wall of structures** (found while building the scenario): an attack order plans its route
@@ -1967,3 +1968,4 @@ fixed, delete the entry in the same PR.
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
 
 30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. With PR #66 merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.
+31. **Deaths reach the presentation lossily** (WP5.5, PR #70 review; for WP5.6a): `SimSnapshot::deaths` holds only the last step of a sim-thread pass, and a catch-up pass of `1 + max_catch_up` steps publishes once, so the deaths of its earlier steps reach no snapshot. `sf_sim`'s `Snapshot::deaths()` is complete per tick. WP5.6a adds a lossless effects event queue in `sf_game`, filled in the sim thread right after each `world.step()`; test it with `max_catch_up` > 0. Delete this entry then.

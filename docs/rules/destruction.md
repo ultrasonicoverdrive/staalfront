@@ -140,15 +140,18 @@ hash section, and the first rule that needs it (veterancy, score) can ask for it
 `Snapshot::deaths()` lists, for the last tick, each death with its tick, the victim's (stale) id, kind, owner,
 class (mobile or structure), position, facing, size (a diameter) and footprint, what it left (`wreck`), and
 the killer and assists. WP5.6 draws the explosions from it. It is a report: replaced by every step, not hashed.
-`StepReport::deaths` counts them. `sf_game`'s `SimSnapshot::deaths` carries the last tick's list across the
-thread boundary; a frame that skips a tick would skip its deaths, so WP5.6 reads every snapshot or has the sim
-thread queue them.
+`StepReport::deaths` counts them. In the simulation the list is complete per tick. `sf_game`'s
+`SimSnapshot::deaths` is not: the sim thread runs up to `1 + max_catch_up` steps in one pass and publishes one
+snapshot after them, so it carries only the last step's deaths, and the deaths of the earlier steps of a
+catch-up pass reach no snapshot at all; reading every snapshot does not help. Lossless delivery to the
+presentation is WP5.6a's effects event queue in `sf_game`, filled in the sim thread right after each
+`world.step()`.
 
 ## The checksum
 
-A new last section `X` is written **only in a world with destruction settings**, after the targeting section:
+A new section `X` is written **only in a world with destruction settings**, after the targeting section:
 the settings, every wreck (kind, unit, owner, place, facing, size, footprint and anchor, born, expires), the
-tally of each player, and the kills of each live unit. The deaths of the last tick are not hashed. A world
+tally of each player, and the kills of each live unit. It comes after the targeting section and before the buildings section `B`. The deaths of the last tick are not hashed. A world
 without the settings hashes as before. Tests: `destruction::tests::every_part_of_the_state_is_in_the_checksum`
 and `..._report_of_the_last_tick_is_not_in_the_checksum`.
 
@@ -188,9 +191,10 @@ base), which `--shots-tick N` waits for before taking the screenshots of `--shot
 
 The wrecks and rubble are drawn from the models of the art sets (the vehicle wrecks `neutral_wreck_light_vehicle`,
 `..._medium_...` and `..._heavy_...` of set v3, which has them, and `neutral_rubble_1x1` to `4x5` of set v4): a
-vehicle's by its size (up to 1.2 cells light, up to 1.3 medium, the rest heavy), rubble by the nearest footprint
+vehicle's by its size (in the shipped data up to 1.2 cells light, up to 1.3 medium, the rest heavy), rubble by the nearest footprint
 area, scaled to fit the structure's real footprint; a dark primitive of the right size stands in if a model does
-not load (with a warning). They are drawn in an added colour of the style (`looks::with_wreck_colour`, dark grey,
+not load (with a warning). The model files, the size bounds and the colour are data in
+`assets/config/wrecks.ron` (compiled in like `units.ron`, checked when parsed, `sf_game::wreck_looks`). They are drawn in an added colour of the style (`looks::with_wreck_colour`, dark grey,
 after the four players': the players' palette in `units.ron` is unchanged), as instances that are not entities:
 they have an id no entity has, so a click on one selects nothing. The `fx` nodes of these models are missing (the
 checker's finding), so the visual effects stay WP5.6. The screenshots are in `docs/screenshots/wp5.5/`.

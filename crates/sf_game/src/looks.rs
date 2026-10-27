@@ -19,27 +19,28 @@ use sf_sim::{EntityView, WreckView};
 use crate::population::Population;
 use crate::roster::{Roster, faction_of_owner};
 
-/// The player colour wrecks and rubble are drawn in: a dark grey entry after the four of the palette of
-/// `assets/config/units.ron`, put there by [`with_wreck_colour`] (a model keeps its own materials; the team
+/// The player colour wrecks and rubble are drawn in: an entry after the four of the palette of
+/// `assets/config/units.ron`, its sRGB the `colour` of `assets/config/wrecks.ron`, put there by [`with_wreck_colour`] (a model keeps its own materials; the team
 /// parts and the primitives take it).
 pub const WRECK_COLOUR: u8 = 4;
-
-/// The sRGB of [`WRECK_COLOUR`].
-pub const WRECK_RGB: [u8; 3] = [70, 66, 62];
 
 /// `style` with the wreck colour added at index [`WRECK_COLOUR`]. Every style the game draws units with goes
 /// through it (the runner's placeholder style, the screenshot tests'). A palette that already has more than the
 /// four player colours is left alone: the colour would not be at the index the wrecks use.
 pub fn with_wreck_colour(style: Style) -> Style {
     if style.color_count() == usize::from(WRECK_COLOUR) {
-        style.with_colour("wreck", WRECK_RGB)
+        let (r, g, b) = crate::wreck_looks::WreckLooks::shipped().colour;
+        style.with_colour("wreck", [r, g, b])
     } else {
         style
     }
 }
 
-/// The generation the picture gives the id of a wreck. No entity has it (a slot whose generation
-/// cannot be bumped any more is retired first), so a pick of a wreck names no entity.
+/// The generation the picture gives the id of a wreck. It does not keep the wreck apart from the
+/// entities: a live entity can have it too (`despawn` raises a slot to `u32::MAX` and still reuses it;
+/// only the bump after that retires the slot). What does is the slot: [`Looks::wreck_motion`] is given
+/// one past every live entity's, so a pick of a wreck names no entity. The value only makes a wreck's
+/// id easy to recognise.
 const WRECK_GENERATION: u32 = u32::MAX;
 
 /// The mapping from entities to shapes of the scene being shown.

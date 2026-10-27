@@ -194,9 +194,11 @@ impl SimSnapshot {
         &self.wrecks
     }
 
-    /// What was destroyed in the last tick of this snapshot (WP5.5): where, what, how big, who did it.
-    /// Only the last tick's: the effects of WP5.6 must read every snapshot, or the sim thread must hand
-    /// them over, before a frame that skips a tick loses a death.
+    /// What was destroyed in the last step before this snapshot (WP5.5): where, what, how big, who did it.
+    /// Lossy: the sim thread publishes once per pass of up to `1 + max_catch_up` steps, so the deaths of
+    /// the earlier steps of a catch-up pass are in no snapshot, and reading every snapshot does not
+    /// recover them. Effects must not rely on it; lossless delivery is WP5.6a's effects event queue,
+    /// filled in the sim thread right after each `world.step()`.
     pub fn deaths(&self) -> &[Death] {
         &self.deaths
     }

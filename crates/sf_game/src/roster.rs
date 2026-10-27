@@ -67,6 +67,7 @@ use sf_render::{IconAtlas, IconId, IconShape, ModelSet, Style};
 use sf_sim::{Kind, WreckKind, WreckView};
 
 use crate::sandbox;
+use crate::wreck_looks::WreckLooks;
 
 /// Height of a placeholder structure in metres: this plus one metre per cell
 /// of its shorter side (so a 1 x 1 tower is 4 m, a 4 x 4 centre 7 m).
@@ -343,21 +344,23 @@ impl Roster {
         // by their footprint. Presentation only, under kind numbers no role can have.
         let mut extra_names: BTreeMap<u16, String> = BTreeMap::new();
         let wreck_icon = icons.resolve(None, IconShape::Square);
-        for (class, id, file, size) in WRECK_CLASSES {
+        let wreck_data = WreckLooks::shipped();
+        for (i, class) in wreck_data.vehicles.iter().enumerate() {
+            let kind = vehicle_wreck_kind(i);
             let role = RoleCtx {
-                id,
-                size: sf_math::Fx::from_ratio(size, 10),
+                id: &class.id,
+                size: sf_math::Fx::from_ratio(class.size_tenths, 10),
                 footprint: None,
                 shape: IconShape::Triangle,
                 icon: wreck_icon,
             };
             let source = loader
-                .source(&role, None, &Model::Glb(file.to_owned()), base)
+                .source(&role, None, &Model::Glb(class.model.clone()), base)
                 .unwrap_or_else(|| {
                     placeholder(role.size, None, mesh_of(ModelShape::Cube), wreck_icon, base)
                 });
-            sources.insert((class.0, None), source);
-            extra_names.insert(class.0, (*id).to_owned());
+            sources.insert((kind.0, None), source);
+            extra_names.insert(kind.0, class.id.clone());
         }
         let footprints: std::collections::BTreeSet<(u8, u8)> = defs
             .units()
@@ -375,7 +378,12 @@ impl Roster {
                 icon: wreck_icon,
             };
             let source = loader
-                .source(&role, None, &Model::Glb(rubble_file(w, h).to_owned()), base)
+                .source(
+                    &role,
+                    None,
+                    &Model::Glb(wreck_data.rubble_file(w, h).to_owned()),
+                    base,
+                )
                 .unwrap_or_else(|| {
                     placeholder(
                         role.size,
@@ -615,64 +623,16 @@ fn placeholder(
 /// The kind numbers of the looks of what destruction leaves: above any role (the definitions keep
 /// kind numbers well below `MAX_UNIT_KIND`).
 const FIRST_WRECK_KIND: u16 = 0xFE00;
-const WRECK_LIGHT: Kind = Kind(0xFFF0);
-const WRECK_MEDIUM: Kind = Kind(0xFFF1);
-const WRECK_HEAVY: Kind = Kind(0xFFF2);
 
-/// The wrecks of vehicles: look, id, the glTF file of art set v3 (set v4 has the rubble but no vehicle
-/// wrecks that pass its checks), and the size in tenths of a cell
-/// of the vehicle a primitive stands in for.
-const WRECK_CLASSES: [(Kind, &str, &str, i64); 3] = [
-    (
-        WRECK_LIGHT,
-        "wreck_light_vehicle",
-        "set_v3/neutral_wreck_light_vehicle.glb",
-        12,
-    ),
-    (
-        WRECK_MEDIUM,
-        "wreck_medium_vehicle",
-        "set_v3/neutral_wreck_medium_vehicle.glb",
-        13,
-    ),
-    (
-        WRECK_HEAVY,
-        "wreck_heavy_vehicle",
-        "set_v3/neutral_wreck_heavy_vehicle.glb",
-        15,
-    ),
-];
-
-/// A vehicle up to this many tenths of a cell across leaves the light wreck, up to
-/// `MEDIUM_WRECK_TENTHS` the medium one, anything bigger the heavy one.
-const LIGHT_WRECK_TENTHS: i64 = 12;
-const MEDIUM_WRECK_TENTHS: i64 = 13;
-
-/// The rubble models of art set v4 by footprint (cells wide, cells deep). A structure of another
-/// footprint takes the nearest by area and the model is scaled to fit its footprint, like any
-/// structure's.
-const RUBBLE_FILES: [((u8, u8), &str); 6] = [
-    ((1, 1), "set_v4/neutral_rubble_1x1.glb"),
-    ((2, 2), "set_v4/neutral_rubble_2x2.glb"),
-    ((2, 3), "set_v4/neutral_rubble_2x3.glb"),
-    ((3, 4), "set_v4/neutral_rubble_3x4.glb"),
-    ((4, 4), "set_v4/neutral_rubble_4x4.glb"),
-    ((4, 5), "set_v4/neutral_rubble_4x5.glb"),
-];
+/// The kind number of the look of vehicle wreck class `i` of `wrecks.ron` (at most
+/// [`crate::wreck_looks::MAX_VEHICLE_CLASSES`], checked when the file is parsed).
+fn vehicle_wreck_kind(i: usize) -> Kind {
+    Kind(0xFFF0 + i as u16)
+}
 
 /// The kind number of the look of the rubble of a `w` x `h` structure.
 fn rubble_kind(w: u8, h: u8) -> Kind {
     Kind(0xFE00 + u16::from(w) * 16 + u16::from(h))
-}
-
-/// The rubble file whose area is nearest to `w` x `h` (the smaller one on a tie).
-fn rubble_file(w: u8, h: u8) -> &'static str {
-    let area = |(a, b): (u8, u8)| i32::from(a) * i32::from(b);
-    let want = area((w, h));
-    RUBBLE_FILES
-        .iter()
-        .min_by_key(|(f, _)| ((area(*f) - want).abs(), area(*f)))
-        .map_or(RUBBLE_FILES[0].1, |(_, file)| file)
 }
 
 /// The kind number of the look of this wreck or pile of rubble.
@@ -682,13 +642,7 @@ pub fn wreck_kind_of(w: &WreckView) -> Kind {
         _ => {
             let tenths =
                 (w.size.raw() * 10 + (1 << (sf_math::FRAC_BITS - 1))) >> sf_math::FRAC_BITS;
-            if tenths <= LIGHT_WRECK_TENTHS {
-                WRECK_LIGHT
-            } else if tenths <= MEDIUM_WRECK_TENTHS {
-                WRECK_MEDIUM
-            } else {
-                WRECK_HEAVY
-            }
+            vehicle_wreck_kind(WreckLooks::shipped().vehicle_class(tenths))
         }
     }
 }

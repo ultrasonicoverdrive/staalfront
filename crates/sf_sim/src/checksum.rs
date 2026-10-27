@@ -139,7 +139,8 @@
 //! to). The `Pursue` order a unit gives itself is in the orders section. A world without those
 //! settings, which is every pinned scenario of the earlier phases, hashes as before.
 //!
-//! The destruction section (WP5.5, `X`) comes last and is written only in a world that was given
+//! The destruction section (WP5.5, `X`) comes after the targeting section and before the
+//! buildings section (`B`), and is written only in a world that was given
 //! destruction settings (`World::with_destruction`): the settings, every wreck and heap of rubble
 //! (kept sorted by where it lies), the tally of each player (kills, assists, losses) and the kills
 //! credited to each live unit. The deaths of the last tick are a report and are not hashed. A world
