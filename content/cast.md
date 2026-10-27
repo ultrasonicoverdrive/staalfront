@@ -84,4 +84,4 @@
 - Faction: both (neutral UI voice)
 - Role in the story: Objective updates and timer warnings only; never story content.
 - Appears in missions: F1-M01, F1-M02, F1-M04, F1-M05, F1-M08, F1-M10, F2-M06, F2-M07, F2-M08, F2-M09, F2-M10 (11 missions, 18 lines in the MSG tables; cue name: OPERATIONS)
-- Voice: neutral, flat, radio-filtered. One actor, one or two short lines per mission; F2-M10 has four (the vault countdown calls at 8:00, 4:00 and 1:30 and the culvert report).
+- Voice: neutral, flat, radio-filtered. One actor, one or two short lines per mission; F1-M10 has three (the archive erased, and the two protocol-power reports) and F2-M10 has four (the vault countdown calls at 8:00, 4:00 and 1:30 and the culvert report).
