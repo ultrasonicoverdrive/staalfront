@@ -237,9 +237,11 @@ sees to it). `weapons_defs` (WP5.1) has the speeds already; `projectiles_defs` i
 * Armor, splash, damage types: done in WP5.3 ([`armour.md`](armour.md)).
 * A destroyed unit leaving the world, kill credit: done in WP5.5 ([`destruction.md`](destruction.md); the credit
   is settled from the damage of the tick, never from `hp_after`).
-* Drawing projectiles, muzzle flashes, explosions: WP5.6 (the snapshot is ready).
+* Drawing projectiles, muzzle flashes, explosions: done in WP5.6a ([`effects.md`](effects.md)): the snapshot's
+  projectiles are drawn as tracers and the shots and impacts become particles. The flash starts at the real muzzle
+  node of the model in WP5.6b.
 * Projectiles hitting what is in the way (a wall, a friendly unit), line of sight, terrain height: later.
-* `sf_game` has a weapon table since WP5.5; drawing the projectiles is WP5.6.
+* `sf_game` has a weapon table since WP5.5; the projectiles are drawn since WP5.6a.
 
 ## Tests
 

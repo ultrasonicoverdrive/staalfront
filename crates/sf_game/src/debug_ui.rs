@@ -119,6 +119,22 @@ pub struct SimPanel {
     pub late_publishes: u64,
     /// The thread has ended (it panicked, or was stopped).
     pub stopped: bool,
+    /// The effects (WP5.6a): events recorded by the sim thread, dropped by its full queue, without a
+    /// position, expired when their turn came, and waiting for the picture to reach their tick.
+    pub fx_recorded: u64,
+    pub fx_dropped: u64,
+    pub fx_unresolved: u64,
+    pub fx_expired: u64,
+    pub fx_pending: u32,
+    /// The particle pool: alive, its size, the most alive at once, pushed out of a full pool, smoke refused.
+    pub particles: u32,
+    pub particle_cap: u32,
+    pub particles_peak: u32,
+    pub particles_dropped: u64,
+    pub smoke_refused: u64,
+    /// Instances drawn in the last frame, and the tracer dots among them.
+    pub effect_instances: u32,
+    pub tracer_dots: u32,
 }
 
 /// What the panels edit.
@@ -269,6 +285,10 @@ fn draw_calls(ui: &mut egui::Ui, data: &PanelData) {
         d.cell_overlay_draw_calls,
     ));
     ui.label(format!(
+        "effects: {} instances in {} draw call",
+        d.effect_instances, d.effect_draw_calls
+    ));
+    ui.label(format!(
         "terrain chunks drawn {} / {}, {} triangles",
         d.terrain_chunks_visible, d.terrain_chunks_total, d.terrain_triangles
     ));
@@ -382,6 +402,22 @@ fn simulation(ui: &mut egui::Ui, data: &PanelData) {
         ui.label(format!(
             "clock restarts {}, late commands {}, late snapshots {}",
             sim.clock_resets, sim.late_commands, sim.late_publishes
+        ));
+    }
+    if sim.fx_recorded > 0 || sim.particles_peak > 0 {
+        ui.label(format!(
+            "effects: {} drawn ({} tracer dots), pool {}/{} (peak {}, pushed out {}, smoke refused {})",
+            sim.effect_instances,
+            sim.tracer_dots,
+            sim.particles,
+            sim.particle_cap,
+            sim.particles_peak,
+            sim.particles_dropped,
+            sim.smoke_refused
+        ));
+        ui.label(format!(
+            "effect events: {} recorded, queue dropped {}, no position {}, expired {}, waiting {}",
+            sim.fx_recorded, sim.fx_dropped, sim.fx_unresolved, sim.fx_expired, sim.fx_pending
         ));
     }
 }
@@ -614,6 +650,7 @@ mod tests {
                 terrain_triangles: 9_216,
                 terrain_chunks_per_level: [4, 5, 3, 0, 0, 0],
                 cell_overlay_draw_calls: 0,
+                ..DrawStats::default()
             },
             instances: InstanceStats {
                 total: 1350,
@@ -797,6 +834,39 @@ mod tests {
         data.sim.stopped = true;
         let (texts, _) = pass(&ctx, &data, &mut state);
         assert!(texts.iter().any(|t| t.contains("sim thread stopped")));
+    }
+
+    /// The effects lines show the event queue's drop counter and the pool's counters (WP5.6a).
+    #[test]
+    fn the_panel_shows_the_effects_counters() {
+        let ctx = egui::Context::default();
+        let mut state = PanelState::new(CameraConfig::default());
+        let mut data = sample_data();
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(
+            !texts.iter().any(|t| t.contains("effect events")),
+            "nothing to say yet: {texts:?}"
+        );
+        data.sim.fx_recorded = 120;
+        data.sim.fx_dropped = 7;
+        data.sim.particles = 300;
+        data.sim.particle_cap = 4096;
+        data.sim.particles_peak = 900;
+        data.sim.effect_instances = 310;
+        data.sim.tracer_dots = 10;
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("120 recorded, queue dropped 7")),
+            "{texts:?}"
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|t| t.contains("310 drawn (10 tracer dots), pool 300/4096 (peak 900")),
+            "{texts:?}"
+        );
     }
 
     #[test]
