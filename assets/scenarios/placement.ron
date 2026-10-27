@@ -1,0 +1,69 @@
+// Placement (WP6.2, docs/rules/buildings.md "Placement"): two bases on the 256 by 256
+// cell playfield (assets/maps/playfield256) build with BuildStructure, one command per
+// tick, and every rule of the placement refuses something at least once.
+// CI runs it on Linux and Windows and requires the checksum in placement.expected;
+// tools/sf_headless/tests/placement.rs asserts, tick by tick, which build stood and why
+// each other one was refused.
+//
+// `unit_defs` names a directory next to this file with a FROZEN copy of the unit
+// definitions (a copy of the shipped files at the time of WP6.2). `buildings` gives the
+// world the building rules of that copy, `factions` says who is which faction.
+// Kinds are the permanent numbers of the records (docs/rules/buildings.md): 0
+// construction_center, 1 power_plant, 2 refinery, 3 barracks, 4 vehicle_factory, 9
+// decoy_emplacement, 10 fortified_bunker, 12 rifleman.
+//
+// Meridian (player 0): anchor on (22, 44), a rock patch on x 14 to 17, y 44 to 49.
+// Veyran (player 1): anchor on (100, 36). Both anchors are PLACED (PlaceStructure, as a
+// mission places its start state): the anchor cannot be built.
+Scenario(
+    name: "placement",
+    seed: 0x5EED_0062,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("placement_defs"),
+    buildings: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ticks: 60,
+    commands: [
+        // --- the start state ---
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (22, 44))),
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 1, cell: (100, 36))),
+        // A rifleman of Meridian standing on (30, 44).
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (30, 44))),
+        // --- Meridian ---
+        // 1: stands (gap 4 from the anchor).
+        (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (30, 40))),
+        // 2: refused, the power plant would stand on the rock patch.
+        (tick: 2, player: 0, command: BuildStructure(kind: 1, cell: (16, 44))),
+        // 3: refused, the same cells as 1.
+        (tick: 3, player: 0, command: BuildStructure(kind: 1, cell: (30, 41))),
+        // 4: refused, the rifleman stands on (30, 44).
+        (tick: 4, player: 0, command: BuildStructure(kind: 1, cell: (29, 44))),
+        // 5: refused, 20 cells east of the anchor's edge.
+        (tick: 5, player: 0, command: BuildStructure(kind: 1, cell: (46, 44))),
+        // 6: refused, the vehicle factory needs a refinery.
+        (tick: 6, player: 0, command: BuildStructure(kind: 4, cell: (19, 40))),
+        // 7: the refinery needs the power plant of 1 and stands.
+        (tick: 7, player: 0, command: BuildStructure(kind: 2, cell: (22, 49))),
+        // 8: stands, now that the refinery does; its exit cell is (22, 42).
+        (tick: 8, player: 0, command: BuildStructure(kind: 4, cell: (19, 40))),
+        // 9: the barracks, then the Meridian decoy on it, and the Veyran bunker, which is refused.
+        (tick: 9, player: 0, command: BuildStructure(kind: 3, cell: (26, 49))),
+        (tick: 10, player: 0, command: BuildStructure(kind: 9, cell: (30, 48))),
+        (tick: 11, player: 0, command: BuildStructure(kind: 10, cell: (31, 48))),
+        // 12: the anchor cannot be built.
+        (tick: 12, player: 0, command: BuildStructure(kind: 0, cell: (30, 36))),
+        // --- Veyran ---
+        (tick: 13, player: 1, command: BuildStructure(kind: 1, cell: (108, 36))),
+        (tick: 14, player: 1, command: BuildStructure(kind: 3, cell: (104, 42))),
+        // 15: refused, the decoy is Meridian's to build.
+        (tick: 15, player: 1, command: BuildStructure(kind: 9, cell: (106, 42))),
+        // 16: its own bunker stands.
+        (tick: 16, player: 1, command: BuildStructure(kind: 10, cell: (106, 42))),
+        // 17: refused, the Meridian base is 66 cells from the Veyran anchor.
+        (tick: 17, player: 1, command: BuildStructure(kind: 1, cell: (34, 44))),
+        // --- a mission object is placed without the rules ---
+        // 20: a Veyran decoy PLACED beside the Meridian base: no faction, no radius.
+        (tick: 20, command: PlaceStructure(kind: 9, owner: 1, cell: (60, 100))),
+    ],
+)

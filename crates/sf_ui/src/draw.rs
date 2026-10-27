@@ -242,6 +242,16 @@ impl<'a> Layer<'a> {
         self.list.outline(self.white, rect, thickness, color);
     }
 
+    /// A solid quad with arbitrary corners, clockwise from the top-left on the
+    /// screen: a cell of the ground seen in perspective (WP6.2).
+    pub fn fill_quad(&mut self, corners: [(f32, f32); 4], color: Color) {
+        if color.3 == 0 {
+            return;
+        }
+        let uv = [self.white.0, self.white.1, self.white.0, self.white.1];
+        self.list.quad_points(Texture::Atlas, corners, uv, color);
+    }
+
     /// A line segment of `thickness` pixels.
     pub fn line(&mut self, a: (f32, f32), b: (f32, f32), thickness: f32, color: Color) {
         self.list.line(self.white, a, b, thickness, color);
@@ -276,6 +286,24 @@ mod tests {
     use crate::atlas::AtlasRect;
 
     const WHITE: (f32, f32) = (1.0, 1.0);
+
+    #[test]
+    fn fill_quad_is_one_solid_quad_with_the_given_corners() {
+        let mut d = DrawList::default();
+        let corners = [(10.0, 10.0), (50.0, 12.0), (60.0, 40.0), (5.0, 38.0)];
+        Layer::new(&mut d, WHITE).fill_quad(corners, Color(1, 2, 3, 200));
+        assert_eq!(
+            (d.vertices.len(), d.indices.len(), d.quad_count()),
+            (4, 6, 1)
+        );
+        let got: Vec<(f32, f32)> = d.vertices.iter().map(|v| (v.pos[0], v.pos[1])).collect();
+        assert_eq!(got, corners.to_vec());
+        // Every corner samples the white texel.
+        assert!(d.vertices.iter().all(|v| v.uv == [WHITE.0, WHITE.1]));
+        // A fully transparent quad is not drawn.
+        Layer::new(&mut d, WHITE).fill_quad(corners, Color(1, 2, 3, 0));
+        assert_eq!(d.quad_count(), 1);
+    }
 
     #[test]
     fn rect_makes_one_quad_and_merges_batches() {

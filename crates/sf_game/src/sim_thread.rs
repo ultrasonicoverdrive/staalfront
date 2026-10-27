@@ -91,9 +91,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use sf_sim::{Command, PlayerId, TICK_MILLIS, Tick, World};
+use sf_sim::{Command, PlacementRejection, PlayerId, TICK_MILLIS, Tick, World};
 
-use crate::sim_snapshot::{Pace, SimSnapshot, Statics};
+use crate::sim_snapshot::{GhostQuery, Pace, SimSnapshot, Statics};
 
 /// One sim tick of wall time (20 Hz).
 pub const TICK_PERIOD: Duration = Duration::from_millis(TICK_MILLIS as u64);
@@ -267,8 +267,13 @@ enum Msg {
     Advance(u32),
     /// Realtime with `start_paused`: begin the clock.
     Start,
+    /// The placement question to answer in every snapshot from now on (WP6.2), or none.
+    Ghost(Option<GhostQuery>),
     Shutdown,
 }
+
+/// The builds the simulation refused that the handle keeps (the last ones).
+pub const REJECTED_LOG_CAP: usize = 64;
 
 /// What the two threads share.
 struct Shared {
@@ -287,6 +292,9 @@ struct Shared {
     max_pass_ticks: AtomicU64,
     /// Commands that were moved to a later tick, the last [`MOVED_LOG_CAP`].
     moved: Mutex<Vec<LoggedCommand>>,
+    /// Every `BuildStructure` the world refused (WP6.2): how many in all, and the last
+    /// [`REJECTED_LOG_CAP`] of them.
+    rejected: Mutex<(u64, Vec<PlacementRejection>)>,
 }
 
 /// A lock that a panic elsewhere does not poison for good: the data behind
@@ -324,6 +332,7 @@ impl SimHandle {
             late_publishes: AtomicU64::new(0),
             max_pass_ticks: AtomicU64::new(0),
             moved: Mutex::new(Vec::new()),
+            rejected: Mutex::new((0, Vec::new())),
         });
         let (tx, rx) = mpsc::channel();
         let period = config.period;
@@ -335,6 +344,7 @@ impl SimHandle {
             shared: Arc::clone(&shared),
             statics,
             retired: Vec::new(),
+            ghost: None,
             log: Vec::new(),
             last_step: Duration::ZERO,
         };
@@ -374,6 +384,21 @@ impl SimHandle {
             player,
             command,
         });
+    }
+
+    /// Asks the simulation, in every snapshot from the next one on, whether `query.player` may
+    /// build `query.kind` on `query.cell` (WP6.2); `None` stops asking. The answer is
+    /// `World::preview_placement`, read with [`SimSnapshot::ghost`]. Send it when the question
+    /// changes, not every frame.
+    pub fn set_ghost(&self, query: Option<GhostQuery>) {
+        let _ = self.tx.send(Msg::Ghost(query));
+    }
+
+    /// The builds the world refused (WP6.2), as `(how many in all, the last ones)`: each with
+    /// the tick, the player, the kind, the cell and the reason. A `BuildStructure` that is
+    /// refused is reported here and nowhere else; the game says it on the console.
+    pub fn rejected_builds(&self) -> (u64, Vec<PlacementRejection>) {
+        lock(&self.shared.rejected).clone()
     }
 
     /// Starts the clock of a thread made with [`SimConfig::start_paused`].
@@ -516,6 +541,8 @@ struct Sim {
     /// Snapshots that were published and replaced, waiting for the main
     /// thread to let go so that their buffers can be used again.
     retired: Vec<Arc<SimSnapshot>>,
+    /// The placement question to answer in every snapshot (WP6.2).
+    ghost: Option<GhostQuery>,
     log: Vec<LoggedCommand>,
     last_step: Duration,
 }
@@ -636,6 +663,13 @@ impl Sim {
                 }
             }
             Msg::Start => self.started = true,
+            Msg::Ghost(query) => {
+                self.ghost = query;
+                // Stepped by hand there is no clock to carry the answer to the next snapshot.
+                if self.config.pacing == Pacing::Manual {
+                    self.publish(Instant::now(), Duration::ZERO);
+                }
+            }
             Msg::Shutdown => return Flow::Stop,
         }
         Flow::Go
@@ -684,6 +718,13 @@ impl Sim {
         let began = Instant::now();
         let number = self.world.tick().0;
         let report = self.world.step();
+        if report.placements_rejected > 0 {
+            let mut kept = lock(&self.shared.rejected);
+            kept.0 += u64::from(report.placements_rejected);
+            kept.1.extend_from_slice(self.world.placement_rejections());
+            let excess = kept.1.len().saturating_sub(REJECTED_LOG_CAP);
+            kept.1.drain(..excess);
+        }
         if self.config.panic_at == Some(number) {
             panic!("sim thread test hook: panic in tick {number}");
         }
@@ -726,6 +767,11 @@ impl Sim {
         Arc::get_mut(&mut next)
             .expect("a buffer taken from the pool is held by nobody else")
             .fill(&self.world, &self.statics, pace);
+        if let Some(query) = self.ghost {
+            Arc::get_mut(&mut next)
+                .expect("a buffer taken from the pool is held by nobody else")
+                .answer(&self.world, query);
+        }
         // Counted when the snapshot is ready, which is when the main thread
         // can first see it.
         if self.config.pacing == Pacing::Realtime && due.elapsed() > INTERP_DELAY {

@@ -282,9 +282,9 @@ fn the_shipped_building_table_digest_is_pinned() {
 #[test]
 fn f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base() {
     // F1-M05 places 8 decoy_emplacement for Enemy 1 (Veyran) although the decoy is
-    // `factions: [Meridian]`. In WP6.1 `factions` is hashed data only: the sim has no faction
-    // per player and `PlaceStructure` checks no faction or prerequisite, so a pre-placed decoy
-    // of another owner is accepted. Whether that stays so is a follow-up (docs/progress.md).
+    // `factions: [Meridian]`. `PlaceStructure` is the placement of scenario setup and mission
+    // objects and checks no faction or prerequisite (WP6.2: only `BuildStructure` does,
+    // `tests/placement.rs`), so a pre-placed decoy of another owner is accepted.
     let defs = defs();
     let mut w = with_buildings(&defs);
     let player = sf_sim::PlayerId(0);

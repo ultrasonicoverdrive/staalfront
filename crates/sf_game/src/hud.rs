@@ -38,7 +38,7 @@ const OWNER_DOTS: [Color; 4] = [
 ];
 
 /// Numbers shown in the top bar.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct HudStats {
     pub fps: u32,
     pub units: u32,
@@ -48,6 +48,9 @@ pub struct HudStats {
     /// selected).
     pub inspecting: bool,
     pub tick: u64,
+    /// A second line under the top bar: what is being built and whether the ghost's place is
+    /// allowed (WP6.2). Nothing while no structure is chosen.
+    pub build_line: Option<String>,
 }
 
 pub struct Hud {
@@ -152,6 +155,10 @@ impl Hud {
             ),
             text,
         );
+        if let Some(line) = &stats.build_line {
+            let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (520.0, 26.0));
+            ui.text_in(strip, Anchor::Left, (12.0, 0.0), line, text);
+        }
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {
             "Dots: on"

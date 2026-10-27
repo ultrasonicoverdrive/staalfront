@@ -41,11 +41,13 @@ use sf_sim::{EntityView, World, WorldConfig};
 
 use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
+use crate::build_mode::BuildMode;
 use crate::commands;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
+use crate::placement_view::{self, GhostFrame};
 use crate::population::Population;
 use crate::roster::{self, Roster};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
@@ -272,6 +274,12 @@ pub struct Runner {
     /// its benchmark show no game cursor) and when the pictures could not be
     /// read (the operating system's cursor stays).
     cursor_art: Option<CursorArt>,
+    /// The structure chosen to build, if one is (WP6.2, [`crate::build_mode`]).
+    build: BuildMode,
+    /// How many refused builds the console has been told about.
+    rejected_seen: u64,
+    /// The last refused build in words, and when, for the line under the top bar.
+    refusal: Option<(String, Instant)>,
     /// The operating system's cursor is hidden right now (only ever while
     /// the software cursor is drawn).
     os_cursor_hidden: bool,
@@ -330,8 +338,16 @@ impl Runner {
             looks,
             units,
             buildings,
-            ..
+            mut build,
         } = start;
+        if let Some(role) = &options.build
+            && !build.choose(role)
+        {
+            eprintln!("sf_game: --build {role}: the local faction does not build that");
+        }
+        if let Some((x, y)) = options.build_at {
+            build.pin(sf_sim::Cell::new(x, y));
+        }
         let cell_layer = crate::cell_overlay::layer_for(&world)
             .map_err(|e| eprintln!("sf_game: no cell grid overlay: {e}"))
             .ok();
@@ -458,6 +474,9 @@ impl Runner {
             cursor_kind: CursorKind::Select,
             cursor_art,
             os_cursor_hidden: false,
+            build,
+            rejected_seen: 0,
+            refusal: None,
             failed,
         })
     }
@@ -608,6 +627,7 @@ impl Runner {
         let scale = self.hud.scale();
         if actions.pressed(Action::SelectClick)
             && !ui_busy
+            && !self.build.is_active()
             && let Some(at) = cursor
         {
             self.pointer.press(at);
@@ -729,6 +749,7 @@ impl Runner {
         // nothing is ordered.
         if actions.pressed(Action::OrderMove)
             && !ui_busy
+            && !self.build.is_active()
             && let Some(command) = commands::right_click(
                 &self.snap,
                 &self.selection,
@@ -756,6 +777,115 @@ impl Runner {
                 commands::issue(&self.sim, command);
             }
         }
+    }
+
+    /// The cell under the mouse at `at` (pixels), if it points at the ground of the map.
+    fn cell_under(&self, at: Option<(f32, f32)>) -> Option<sf_sim::Cell> {
+        let (x, y) = at?;
+        let ground = self
+            .camera
+            .ground_point(DVec2::new(f64::from(x), f64::from(y)))?;
+        let cells = vec2_metres_to_cells([ground.x as f32, ground.y as f32]);
+        let (cx, cy) = cells.cell();
+        let (cx, cy) = (u32::try_from(cx).ok()?, u32::try_from(cy).ok()?);
+        (cx < self.cells.0 && cy < self.cells.1).then(|| sf_sim::Cell::new(cx, cy))
+    }
+
+    /// Building (WP6.2, [`crate::build_mode`]): B chooses the next structure, the select
+    /// button places the chosen one on the ghost's cell, the order button puts it away; and
+    /// the sim thread is told which place the ghost is on, so that its answer comes back in the
+    /// snapshot. The refusals of the simulation are said on the console and in the top bar.
+    fn handle_build(&mut self, ctx: &Context, now: Instant) {
+        let actions = ctx.actions();
+        let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
+        let cursor = self
+            .hover_at
+            .or_else(|| ctx.input().cursor().map(|(x, y)| (x as f32, y as f32)))
+            .filter(|_| self.hover_at.is_some() || !ui_busy);
+        let cell = self.cell_under(cursor);
+        if actions.pressed(Action::BuildCycle) {
+            self.build.cycle();
+            match self.build.chosen() {
+                Some(c) => println!(
+                    "build: {} (left click places it, right click puts it away)",
+                    c.id
+                ),
+                None => println!("build: nothing chosen"),
+            }
+        }
+        if self.build.is_active() && !ui_busy {
+            if actions.pressed(Action::OrderMove) {
+                self.build.cancel();
+                println!("build: nothing chosen");
+            } else if actions.pressed(Action::SelectClick)
+                && let Some(command) = self.build.click(cell)
+            {
+                commands::issue(&self.sim, command);
+            }
+        }
+        let under = if self.build.is_active() { cell } else { None };
+        let query = self.build.query(commands::LOCAL_PLAYER, under);
+        self.build.ask(&self.sim, query);
+
+        // What the simulation refused: said once each.
+        let (total, last) = self.sim.rejected_builds();
+        if total > self.rejected_seen {
+            let new = usize::try_from(total - self.rejected_seen)
+                .unwrap_or(usize::MAX)
+                .min(last.len());
+            for r in &last[last.len() - new..] {
+                let words = placement_view::describe(r.reason, &|k| self.build.name_of(k));
+                println!(
+                    "build refused in tick {}: {} on ({}, {}): {words}",
+                    r.tick.0,
+                    self.build.name_of(r.kind),
+                    r.cell.x,
+                    r.cell.y
+                );
+                self.refusal = Some((words, now));
+            }
+            self.rejected_seen = total;
+        }
+    }
+
+    /// The second line of the top bar: the chosen structure and the verdict of the ghost, or the
+    /// last refusal for a few seconds.
+    fn build_line(&self, now: Instant) -> Option<String> {
+        let chosen = self.build.chosen()?;
+        let name = self.build.name_of(chosen.kind);
+        if let Some((words, at)) = &self.refusal
+            && now.duration_since(*at) < Duration::from_secs(4)
+        {
+            return Some(format!("Build {name}: refused, {words}"));
+        }
+        let verdict = match self.snap.ghost() {
+            Some(g) if g.query.kind == chosen.kind => match g.preview.verdict {
+                Ok(()) => "place here".to_owned(),
+                Err(e) => placement_view::describe(e, &|k| self.build.name_of(k)),
+            },
+            _ => "move the cursor over the ground".to_owned(),
+        };
+        Some(format!("Build {name}: {verdict}"))
+    }
+
+    /// The ghost of the structure being placed, drawn from the simulation's answer on the UI's
+    /// world layer (WP6.2, [`crate::placement_view`]).
+    fn draw_ghost(&mut self) {
+        if !self.build.is_active() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let Some(answer) = snap.ghost() else { return };
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        placement_view::draw_ghost(&mut layer, &frame, &terrain, answer);
     }
 
     /// Replace the camera with one built from `config`, keeping where it
@@ -1521,6 +1651,7 @@ impl App for Runner {
             selected: self.selection.len() as u32,
             inspecting: self.selection.inspected().is_some(),
             tick: self.snap.tick().0,
+            build_line: self.build_line(now),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);
@@ -1550,6 +1681,7 @@ impl App for Runner {
             });
             self.build_units(alpha, cursor);
             self.mark_selection();
+            self.draw_ghost();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
@@ -1587,6 +1719,7 @@ impl App for Runner {
             self.terrain = renderer.terrain_stats();
             self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
+        self.handle_build(ctx, now);
         self.handle_selection(ctx);
         self.handle_orders(ctx);
         let actions = ctx.actions();
@@ -1817,6 +1950,8 @@ struct SceneStart {
     units: u32,
     /// Buildings of the crowd's base.
     buildings: u32,
+    /// The structures the local player may build (WP6.2); none in the crowd scene.
+    build: BuildMode,
 }
 
 /// The engine demo's scene: a crowd of placeholder wanderers and, with a model
@@ -1841,6 +1976,7 @@ fn crowd_scene(
         looks: Looks::Crowd(population),
         units,
         buildings,
+        build: BuildMode::empty(),
     }
 }
 
@@ -1865,6 +2001,8 @@ fn sandbox_scene(
             world = world
                 .with_units(table)
                 .expect("a world that has not started takes its unit table");
+            // WP6.2: `BuildStructure` is checked; the sandbox itself places with `PlaceStructure`.
+            world = crate::playfield::with_buildings(world, &defs);
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
     }
@@ -1906,6 +2044,11 @@ fn sandbox_scene(
         },
         units,
         buildings: plan.structures,
+        build: BuildMode::for_faction(
+            &defs,
+            crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
+                .unwrap_or(sf_data::units::Faction::Meridian),
+        ),
     }
 }
 

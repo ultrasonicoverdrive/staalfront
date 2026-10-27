@@ -201,6 +201,9 @@ pub struct SimBuildingDef {
     pub power: i32,
     /// Kind numbers of the buildings it needs, ascending.
     pub requires: Vec<u16>,
+    /// The `build_radius` flag: cells around the footprint in which the owner
+    /// may build (the base anchor); zero for everything else.
+    pub build_radius: Fx,
 }
 
 /// Converts the structures (the roles with a footprint).
@@ -233,6 +236,7 @@ pub(crate) fn convert_buildings(units: &[UnitDef]) -> Result<Vec<SimBuildingDef>
             cost: u.cost,
             power: u.power,
             requires,
+            build_radius: u.flags.build_radius.to_fx(),
         });
     }
     out.sort_by_key(|b| b.kind);
