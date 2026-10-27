@@ -46,6 +46,9 @@ egui-winit = { version = "0.36.2", default-features = false, features = ["x11", 
 # and ron use them); no new crate is added.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# assets/config/wrecks.ron (WP5.5, how wrecks and rubble are drawn) is parsed here. ron 0.12 is already
+# in the lockfile (sf_data and sf_render use it); no new crate is added.
+ron = "0.12"
 
 [dev-dependencies]
 # The threaded sim is checked tick by tick against the headless runner

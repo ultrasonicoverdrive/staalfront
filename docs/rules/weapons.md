@@ -192,9 +192,9 @@ units: a loadout for a kind it lacks, a first weapon whose range is not the kind
 and no weapon, a turret mount on a kind without a turret.
 
 A world that is not given a table has no weapons: nothing fires, nothing about weapons or projectiles is
-hashed. The game (`sf_game`) does not give one yet, because nothing there would show a shot and a destroyed
-unit would stand where it was; it is one line when WP5.5 and WP5.6 land (WP5.4 added the targeting settings that
-go with it, [`targeting.md`](targeting.md)). The headless runner gives it when a scenario says `combat: true` (and has
+hashed. Since WP5.5 the game (`sf_game`) gives its world one, with the targeting settings
+([`targeting.md`](targeting.md)) and the destruction settings ([`destruction.md`](destruction.md)); the sandbox's
+sides are placed out of each other's reach so that the viewer does not start as a battle. The headless runner gives it when a scenario says `combat: true` (and has
 `unit_defs`), and the targeting when it says `targeting: true`.
 
 ### The checksum
@@ -277,8 +277,10 @@ hit points: WP5.5's kill credit must not use it** (nor the order of the shots in
 projectile's shot is what it will do if it hits, **before the armor** (`Impact::damage` is what the burst did
 to its direct victim after it, and `Impact::splash_victims` counts the others it hurt).
 
-Nothing is removed when a victim reaches zero (WP5.5): it stays where it is, is not fired at again, and the
-attacker keeps its order. Orders other than `Attack` and `Pursue` (move, and attack-move, guard, hold and idle in a world
+In a world without destruction settings nothing is removed when a victim reaches zero: it stays where it
+is, is not fired at again, and the attacker keeps its order. With them (WP5.5, [`destruction.md`](destruction.md))
+the victim is removed at the end of the tick it reaches zero, and an order against it ends like one against
+any entity that is gone. Orders other than `Attack` and `Pursue` (move, and attack-move, guard, hold and idle in a world
 without targeting) fire nothing. An attack order does not check whose unit the victim is; a unit that
 chooses its target does (it never picks its own side).
 

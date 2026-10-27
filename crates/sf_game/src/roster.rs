@@ -58,17 +58,16 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use sf_data::units::{
-    Category, Faction, IconShape as DataIcon, Model, ModelShape, UnitDef, UnitDefs,
-};
+use sf_data::units::{Category, Faction, IconShape as DataIcon, Model, ModelShape, UnitDefs};
 use sf_math::render_bridge::{METRES_PER_CELL, cells_to_metres};
 use sf_render::glb::{LoadedPack, MODELS_CONFIG, load_pack_model};
 use sf_render::scene::MeshKind;
 use sf_render::style::Shape;
 use sf_render::{IconAtlas, IconId, IconShape, ModelSet, Style};
-use sf_sim::Kind;
+use sf_sim::{Kind, WreckKind, WreckView};
 
 use crate::sandbox;
+use crate::wreck_looks::WreckLooks;
 
 /// Height of a placeholder structure in metres: this plus one metre per cell
 /// of its shorter side (so a 1 x 1 tower is 4 m, a 4 x 4 centre 7 m).
@@ -118,6 +117,9 @@ pub struct Roster {
     /// The looks that a faction's `models` entry gives a role, where it has one
     /// that could be used.
     faction_looks: BTreeMap<(u16, Faction), RoleLook>,
+    /// What destruction leaves (WP5.5): the looks of the wrecks of vehicles by their size and of rubble by
+    /// footprint, under reserved kind numbers. Not roles: they are not in [`Roster::looks`].
+    wreck_looks: BTreeMap<u16, RoleLook>,
     /// The size variants appended after the style's own shapes, with the shape
     /// whose level-of-detail chain each keeps.
     variants: Vec<(u8, Shape)>,
@@ -168,7 +170,8 @@ fn mm(metres: f32) -> i32 {
 
 /// What `Roster::build` knows about the role whose models it is resolving.
 struct RoleCtx<'a> {
-    def: &'a UnitDef,
+    /// The role's id, for the warnings.
+    id: &'a str,
     /// The role's `size`, for a primitive.
     size: sf_math::Fx,
     footprint: Option<(u8, u8)>,
@@ -240,8 +243,8 @@ impl Loader<'_> {
                     }
                     Err(e) => {
                         let who = match faction {
-                            Some(f) => format!("{} ({f:?})", role.def.id),
-                            None => role.def.id.clone(),
+                            Some(f) => format!("{} ({f:?})", role.id),
+                            None => role.id.to_owned(),
                         };
                         let then = if faction.is_some() {
                             "drawn with its generic model"
@@ -314,7 +317,7 @@ impl Roster {
                 ));
             }
             let role = RoleCtx {
-                def,
+                id: &def.id,
                 size: sim.size,
                 footprint: sim.footprint,
                 shape,
@@ -336,6 +339,62 @@ impl Roster {
                     sources.insert((def.kind, Some(*faction)), source);
                 }
             }
+        }
+        // What destruction leaves (WP5.5): the wrecks of vehicles by their size, the rubble of structures
+        // by their footprint. Presentation only, under kind numbers no role can have.
+        let mut extra_names: BTreeMap<u16, String> = BTreeMap::new();
+        let wreck_icon = icons.resolve(None, IconShape::Square);
+        let wreck_data = WreckLooks::shipped();
+        for (i, class) in wreck_data.vehicles.iter().enumerate() {
+            let kind = vehicle_wreck_kind(i);
+            let role = RoleCtx {
+                id: &class.id,
+                size: sf_math::Fx::from_ratio(class.size_tenths, 10),
+                footprint: None,
+                shape: IconShape::Triangle,
+                icon: wreck_icon,
+            };
+            let source = loader
+                .source(&role, None, &Model::Glb(class.model.clone()), base)
+                .unwrap_or_else(|| {
+                    placeholder(role.size, None, mesh_of(ModelShape::Cube), wreck_icon, base)
+                });
+            sources.insert((kind.0, None), source);
+            extra_names.insert(kind.0, class.id.clone());
+        }
+        let footprints: std::collections::BTreeSet<(u8, u8)> = defs
+            .units()
+            .iter()
+            .filter(|d| d.category == Category::Structure)
+            .filter_map(|d| defs.sim_unit(d.kind).and_then(|u| u.footprint))
+            .collect();
+        for (w, h) in footprints {
+            let (kind, id) = (rubble_kind(w, h), format!("rubble_{w}x{h}"));
+            let role = RoleCtx {
+                id: &id,
+                size: sf_math::Fx::ZERO,
+                footprint: Some((w, h)),
+                shape: IconShape::Square,
+                icon: wreck_icon,
+            };
+            let source = loader
+                .source(
+                    &role,
+                    None,
+                    &Model::Glb(wreck_data.rubble_file(w, h).to_owned()),
+                    base,
+                )
+                .unwrap_or_else(|| {
+                    placeholder(
+                        role.size,
+                        role.footprint,
+                        mesh_of(ModelShape::Cube),
+                        wreck_icon,
+                        base,
+                    )
+                });
+            sources.insert((kind.0, None), source);
+            extra_names.insert(kind.0, id);
         }
         let Loader {
             models,
@@ -379,21 +438,29 @@ impl Roster {
             ));
         }
         let mut looks = BTreeMap::new();
+        let mut wreck_looks = BTreeMap::new();
         let mut faction_looks = BTreeMap::new();
         for ((kind, faction), source) in kinds_by_source {
-            let def = defs
-                .unit_by_kind(kind)
-                .ok_or_else(|| format!("kind {kind}: no definition"))?;
+            let name = match defs.unit_by_kind(kind) {
+                Some(def) => def.id.clone(),
+                None => extra_names
+                    .get(&kind)
+                    .cloned()
+                    .ok_or_else(|| format!("kind {kind}: no definition"))?,
+            };
             let (shape, model) = match &source {
                 Source::Placeholder { .. } => (base_count + variant_at[&source], false),
                 Source::Model(i) => (model_base + i, true),
             };
             let look = RoleLook {
-                id: def.id.clone(),
+                id: name,
                 shape: shape as u8,
                 model,
             };
             match faction {
+                None if kind >= FIRST_WRECK_KIND => {
+                    wreck_looks.insert(kind, look);
+                }
                 None => {
                     looks.insert(kind, look);
                 }
@@ -426,6 +493,7 @@ impl Roster {
             });
         Ok(Roster {
             looks,
+            wreck_looks,
             faction_looks,
             variants,
             pack,
@@ -465,6 +533,18 @@ impl Roster {
         self.faction_looks
             .iter()
             .map(|(&(k, f), l)| (Kind(k), f, l))
+    }
+
+    /// The shape a wreck or a pile of rubble is drawn as (WP5.5): the model of its class (a vehicle's
+    /// by its size, rubble's by its footprint), or a dark primitive of its size if the model is not
+    /// there. `None` for rubble of a footprint no structure of the definitions has.
+    pub fn wreck_shape(&self, w: &WreckView) -> Option<u8> {
+        self.wreck_looks.get(&wreck_kind_of(w).0).map(|l| l.shape)
+    }
+
+    /// The looks of what destruction leaves, ascending by their reserved kind number (WP5.5).
+    pub fn wreck_looks(&self) -> impl Iterator<Item = (Kind, &RoleLook)> {
+        self.wreck_looks.iter().map(|(&k, l)| (Kind(k), l))
     }
 
     /// The id of the role (`light_tank`).
@@ -537,6 +617,33 @@ fn placeholder(
         base: chain as u8,
         icon,
         size_mm: size.map(mm),
+    }
+}
+
+/// The kind numbers of the looks of what destruction leaves: above any role (the definitions keep
+/// kind numbers well below `MAX_UNIT_KIND`).
+const FIRST_WRECK_KIND: u16 = 0xFE00;
+
+/// The kind number of the look of vehicle wreck class `i` of `wrecks.ron` (at most
+/// [`crate::wreck_looks::MAX_VEHICLE_CLASSES`], checked when the file is parsed).
+fn vehicle_wreck_kind(i: usize) -> Kind {
+    Kind(0xFFF0 + i as u16)
+}
+
+/// The kind number of the look of the rubble of a `w` x `h` structure.
+fn rubble_kind(w: u8, h: u8) -> Kind {
+    Kind(0xFE00 + u16::from(w) * 16 + u16::from(h))
+}
+
+/// The kind number of the look of this wreck or pile of rubble.
+pub fn wreck_kind_of(w: &WreckView) -> Kind {
+    match (w.kind, w.footprint) {
+        (WreckKind::Rubble, Some(f)) => rubble_kind(f.width, f.height),
+        _ => {
+            let tenths =
+                (w.size.raw() * 10 + (1 << (sf_math::FRAC_BITS - 1))) >> sf_math::FRAC_BITS;
+            vehicle_wreck_kind(WreckLooks::shipped().vehicle_class(tenths))
+        }
     }
 }
 
@@ -761,9 +868,10 @@ mod tests {
                     .map(|m| (format!("{m:?}"), d.footprint.map(|f| (f.width, f.height))))
             })
             .collect::<std::collections::BTreeSet<_>>();
+        // Plus one for each look of what destruction leaves (WP5.5), whose models are missing too.
         assert_eq!(
             roster.warnings.len(),
-            glb_files.len(),
+            glb_files.len() + roster.wreck_looks().count(),
             "{:?}",
             roster.warnings
         );

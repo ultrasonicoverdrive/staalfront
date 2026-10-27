@@ -244,6 +244,13 @@ tests). The scenario fields
 action `BuildStructure(kind, cell)` (the issuer is the timed command's `player`) are new and optional, so no
 earlier scenario changed.
 
+### With destruction (WP5.5)
+
+In a world with destruction settings a structure shot to zero is removed at the end of the tick: its cells are
+free for placement at once, and the rubble it leaves blocks nothing (`destruction.md`, "A wreck blocks nothing";
+a new building clears the rubble under it). A destroyed anchor is gone and no longer gives build range. Test:
+`placement::tests::a_destroyed_structure_frees_its_cells_and_a_destroyed_anchor_gives_no_range`.
+
 ## The shipped tech tree (placeholder)
 
 Nothing is built without the `construction_center`, which each player starts with (it has no cost). Arrows

@@ -333,6 +333,7 @@ pub mod buildings;
 pub mod checksum;
 pub mod command;
 pub mod crowd;
+pub mod destruction;
 mod entities;
 pub mod formation;
 pub mod ids;
@@ -358,6 +359,10 @@ pub use command::{Command, CommandQueue, ScheduleError};
 pub use crowd::{
     CollisionConfig, CrowdStats, DEFAULT_STUCK_ATTEMPTS, DEFAULT_STUCK_TICKS, DEFAULT_WAIT_TICKS,
 };
+pub use destruction::{
+    Credit, DEFAULT_RUBBLE_TICKS, DEFAULT_WRECK_MIN_SIZE_TENTHS, DEFAULT_WRECK_TICKS, Death,
+    DestructionConfig, MAX_WRECK_MIN_SIZE_TENTHS, MAX_WRECK_TICKS, Tally, Wreck, WreckKind,
+};
 pub use formation::{FormationConfig, FormationState, FormationStats, FormationView, MemberMode};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
@@ -380,7 +385,7 @@ pub use placement::{
     CellVerdict, ExitCell, PlacementError, PlacementPreview, PlacementRejection, exit_cell, gap,
 };
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
-pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
+pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView, WreckView};
 pub use targeting::{
     DEFAULT_PURSUIT_CELLS, DEFAULT_PURSUIT_RESET_TICKS, DEFAULT_SCAN_COOLDOWN, Engagement,
     MAX_PURSUIT_CELLS, MAX_PURSUIT_RESET_TICKS, MAX_SCAN_COOLDOWN, TargetingConfig,

@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `placement`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction` and `placement`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -57,6 +57,7 @@ const ARMOUR_SPLASH_EXPECTED: &str =
     include_str!("../../../assets/scenarios/armour_splash.expected");
 const TANKS_VS_INFANTRY_EXPECTED: &str =
     include_str!("../../../assets/scenarios/tanks_vs_infantry.expected");
+const DESTRUCTION_EXPECTED: &str = include_str!("../../../assets/scenarios/destruction.expected");
 const PLACEMENT_EXPECTED: &str = include_str!("../../../assets/scenarios/placement.expected");
 
 fn check(name: &str, expected_text: &str) {
@@ -243,11 +244,21 @@ fn armour_splash_matches_the_pinned_checksum() {
 
 /// Ten tanks against twenty infantry on automatic targeting (WP5.4): both sides attack-move onto the
 /// other's ground, the units pick their own targets, stop to fight and go on. The headless half of the
-/// phase-5 done-when. A new scenario: pinned when it was added; no value of an earlier scenario moved
-/// (`tests/tanks_vs_infantry.rs` runs it twice, asserts the outcome and the rules along the run).
+/// phase-5 done-when. Pinned when it was added; **re-pinned in WP5.5** from `0x53d3bcb0110a9479` because the
+/// scenario now has `destruction: true` (the dead are removed and the tanks leave wrecks): with the flag off
+/// the old value comes back, and the run is the same until the first removal
+/// (`tests/tanks_vs_infantry.rs::without_destruction_it_is_the_run_of_wp5_4`).
 #[test]
 fn tanks_vs_infantry_matches_the_pinned_checksum() {
     check("tanks_vs_infantry", TANKS_VS_INFANTRY_EXPECTED);
+}
+
+/// Destruction (WP5.5): structures that shut the gaps of a wall are shot down, their cells are free and a
+/// rifleman walks through; a tank is destroyed and leaves a wreck that expires. A new scenario: pinned when it
+/// was added (`tests/destruction.rs` asserts the story).
+#[test]
+fn destruction_matches_the_pinned_checksum() {
+    check("destruction", DESTRUCTION_EXPECTED);
 }
 
 /// 5,000 wanderers for 10,000 ticks: the milestone M0 scenario. Too slow for

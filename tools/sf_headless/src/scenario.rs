@@ -176,6 +176,13 @@ pub struct Scenario {
     /// to have any ore cell.
     #[serde(default)]
     pub ore: Option<OreSpec>,
+    /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
+    /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
+    /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
+    /// left out, so every scenario of the earlier phases is the world it was pinned with: a unit at
+    /// zero stays where it fell. Needs `combat`.
+    #[serde(default)]
+    pub destruction: bool,
     /// The weapon table read from `unit_defs` by [`Scenario::load`] when `combat` is on,
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
@@ -837,6 +844,10 @@ impl Scenario {
             p.push("targeting needs `combat` (a unit picks targets for its weapons)".to_string());
         }
 
+        if self.destruction && !self.combat {
+            p.push("destruction needs `combat` (nothing is destroyed without weapons)".to_string());
+        }
+
         if self.flowfield_threshold == Some(1) {
             p.push(
                 "flowfield_threshold 1 is not a group (use 0 to turn flowfields off, or 2 and up)"
@@ -1071,6 +1082,11 @@ impl Scenario {
                 if self.targeting {
                     world = world
                         .with_targeting(sf_sim::TargetingConfig::DEFAULT)
+                        .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+                }
+                if self.destruction {
+                    world = world
+                        .with_destruction(sf_sim::DestructionConfig::DEFAULT)
                         .map_err(|e| ScenarioError::Sim(e.to_string()))?;
                 }
             }

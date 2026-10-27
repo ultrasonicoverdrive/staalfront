@@ -8,7 +8,10 @@
 //! code (quality rule 6). Meridian (player 0) stands west of the middle of the
 //! map, Veyran (player 1) east of it and the neutral roles (player 2) north of
 //! it; those three seats are the only layout that is written here. Nothing
-//! moves: orders are WP3.4.
+//! moves until it is ordered to (WP3.4) or something comes into reach: since WP5.5 the game's
+//! world has weapons and its units shoot at whatever of another owner is in reach, so in a world
+//! that has a weapon table the sides are placed out of each other's reach ([`APART`]) and a fight
+//! starts when the player sends units across (or `--fight` does).
 //!
 //! Where things go is decided by the map, deterministically: a structure takes
 //! the free spot nearest to its base's anchor where every cell of its footprint
@@ -33,8 +36,18 @@ pub const VEYRAN: u8 = 1;
 /// The owner of the neutral roles (colour three of the palette).
 pub const NEUTRAL: u8 = 2;
 
-/// How far from the middle of the map a base is, in cells.
+/// How far from the middle of the map a base is, in cells, in a world without weapons.
 const BASE_OFFSET: i32 = 14;
+/// How many cells farther out each side's base stands in a world that has a weapon table. Since WP5.5 the
+/// game's sandbox fights (weapons, units that pick their own targets, destruction), so the two sides
+/// must stand far enough apart that nobody is in reach of the other when it starts: the units of a side
+/// gather `FRONT` cells in front of its base, so at `BASE_OFFSET + APART` (24) the nearest units of the
+/// two sides are about 2 * (24 - 7) = 34 cells apart less the width of a gathering (around ten), against
+/// the longest reach of a mobile unit of 10 cells (the howitzer). At the old 14 the two gatherings were
+/// six cells apart and would have fired on each other on the first tick. A world without weapons keeps the
+/// old layout, which the tests of formations in a base (`tests/formation_base.rs`) are measured on. A
+/// test checks that nothing fires in the first minute.
+const APART: i32 = 10;
 /// How far in front of its structures a side's units gather, in cells.
 const FRONT: i32 = 7;
 
@@ -123,7 +136,7 @@ pub fn schedule(world: &mut World, defs: &UnitDefs) -> Plan {
     let mut taken = Taken(BTreeSet::new());
     let mut plan = Plan::default();
     for side in &SIDES {
-        let anchor = (middle.0 + side.at.0, middle.1 + side.at.1);
+        let anchor = base_of(side, middle, !world.weapon_table().is_empty());
         let front = (anchor.0 + side.toward * FRONT, anchor.1 + 2 + FRONT / 3);
         let roles = defs.units().iter().filter(|d| belongs_to(d, side));
         // Structures first, so units are placed around them; both in kind order.
@@ -176,6 +189,53 @@ pub fn schedule(world: &mut World, defs: &UnitDefs) -> Plan {
         }
     }
     plan
+}
+
+/// Where a side's base is: its offset from the middle of the map, `APART` cells farther out in a world
+/// that has weapons.
+fn base_of(side: &Side, middle: (i32, i32), armed: bool) -> (i32, i32) {
+    let out = if armed { side.at.0.signum() * APART } else { 0 };
+    (middle.0 + side.at.0 + out, middle.1 + side.at.1)
+}
+
+/// Sends every armed mobile unit of the two sides on attack-move to the other side's base (`--fight`,
+/// WP5.5): the sandbox then fights without anyone giving an order, which is how the viewer shows shots,
+/// deaths, wrecks and rubble. Call it after the sandbox has been stepped once (the units exist); the orders
+/// are for the next tick. Returns how many units were sent.
+pub fn start_fight(world: &mut World) -> u32 {
+    let (width, height) = world.map_size();
+    let middle = (width as i32 / 2, height as i32 / 2);
+    let mut sent = 0;
+    for side in SIDES.iter().filter(|s| s.toward != 0) {
+        let ids: Vec<_> = world
+            .snapshot()
+            .iter()
+            .filter(|v| {
+                v.owner == PlayerId(side.owner)
+                    && world.stats_of(v.id).is_some_and(|s| {
+                        s.class() == sf_sim::UnitClass::Mobile && s.weapon_range > Fx::ZERO
+                    })
+            })
+            .map(|v| v.id)
+            .collect();
+        if ids.is_empty() {
+            continue;
+        }
+        sent += ids.len() as u32;
+        // The other side's base: it is on the other side of the middle.
+        let (bx, by) = base_of(side, middle, !world.weapon_table().is_empty());
+        let target = Vec2::from_ints(2 * middle.0 - bx, 2 * middle.1 - by);
+        send(
+            world,
+            side.owner,
+            Command::Order {
+                ids,
+                order: sf_sim::Order::AttackMove(target),
+                queued: false,
+            },
+        );
+    }
+    sent
 }
 
 fn send(world: &mut World, player: u8, command: Command) {
@@ -340,6 +400,35 @@ mod tests {
             "everything scheduled stands"
         );
         assert!(plan.structures + plan.units > 0);
+    }
+
+    #[test]
+    fn the_sandbox_does_not_attack_itself_once_the_world_has_weapons() {
+        // WP5.5: the game's world fires, chooses targets and destroys. Left alone, nothing of the
+        // sandbox is in reach of anything of another side, for a minute of game time, on several maps.
+        for seed in [1, 2, 7] {
+            let (world, defs) = world_for(256, seed);
+            let mut world = crate::playfield::with_combat(world, &defs);
+            assert!(world.destruction_config().is_some(), "the world has combat");
+            schedule(&mut world, &defs);
+            world.step();
+            let placed = world.snapshot().len();
+            let armed = world
+                .snapshot()
+                .iter()
+                .filter(|v| !world.weapon_table().loadout(v.kind).is_empty())
+                .count();
+            assert!(armed > 10, "there are armed units: {armed}");
+            let mut shots = 0;
+            for _ in 0..1200 {
+                let report = world.step();
+                shots += report.shots;
+                assert_eq!(report.deaths, 0, "seed {seed}");
+            }
+            assert_eq!(shots, 0, "seed {seed}: nobody fires");
+            assert_eq!(world.snapshot().len(), placed, "seed {seed}");
+            assert!(world.wrecks().is_empty());
+        }
     }
 
     #[test]

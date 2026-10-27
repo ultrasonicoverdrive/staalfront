@@ -627,6 +627,9 @@ pub(crate) struct Arsenal {
     /// Who hurt whom in the last tick, as (victim slot, attacker), for the return fire of
     /// [`crate::targeting`] (WP5.4). Filled only in a world with targeting; derived, not hashed.
     pub attacks: Vec<(u32, EntityId)>,
+    /// Every piece of damage of the last tick with its shooter, for the kill credit of
+    /// [`crate::destruction`] (WP5.5). Filled only in a world with destruction; derived, not hashed.
+    pub hurt: Vec<crate::destruction::Hurt>,
 }
 
 /// The spatial index of a splash's victims (the crowd pass's grid, built here from whatever can be hurt)
@@ -714,6 +717,7 @@ impl Arsenal {
             shots: Vec::new(),
             impacts: Vec::new(),
             attacks: Vec::new(),
+            hurt: Vec::new(),
         })
     }
 
@@ -947,10 +951,12 @@ pub(crate) fn update_all(
     tick: Tick,
     map: (u32, u32),
     record_attacks: bool,
+    record_hurt: bool,
 ) {
     arsenal.shots.clear();
     arsenal.impacts.clear();
     arsenal.attacks.clear();
+    arsenal.hurt.clear();
     if arsenal.is_empty() {
         return;
     }
@@ -964,6 +970,7 @@ pub(crate) fn update_all(
         shots,
         impacts,
         attacks,
+        hurt: hurt_list,
     } = arsenal;
     let mut hits: Vec<Hit> = Vec::new();
     let mut spent: Vec<u32> = Vec::new();
@@ -1136,6 +1143,16 @@ pub(crate) fn update_all(
                 &table.weapons[hit.weapon],
                 &mut damage,
             ));
+            if record_hurt {
+                for &(victim, damage) in &damage[from..] {
+                    hurt_list.push(crate::destruction::Hurt {
+                        victim,
+                        damage,
+                        shooter: hit.owner,
+                        player: hit.player,
+                    });
+                }
+            }
             if record_attacks {
                 // Whoever the hit hurt, apart from the shooter and its own side (a splash can reach
                 // both), was attacked by the shooter.
