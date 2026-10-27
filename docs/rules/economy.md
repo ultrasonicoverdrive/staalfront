@@ -466,7 +466,7 @@ These are relative numbers; the fps requirement is for the laptop benchmarks (PL
   and the queue stands in its approach. Measured by the reviewer of #78 with `crowd_scenario` (three
   refineries, 4000 ticks, the first n harvesters): 3 deliver 2400, 6 deliver 3200, 12 deliver 3200,
   24 deliver 2271, 48 deliver 618 (13 `Queued`, 26 `ToOre`, only one bay ever granted). Not fixed
-  in WP7.2; the fix is a choice by route length and queue length.
+  in WP7.2; the fix, a choice by route length and queue length, is WP7.5.
 * No alliances: a harvester uses only the refineries of its own player.
 * The refinery's exit cell is only checked when it is placed; one that is blocked later makes
   harvesters give that refinery up after three short walks (that path has no test of its own).

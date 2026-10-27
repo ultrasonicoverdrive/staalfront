@@ -90,3 +90,48 @@ fn the_shipped_grant_outlasts_the_drive_from_the_call_range() {
         .unwrap();
     assert!(i64::from(rules.grant_timeout) > 2 * drive, "{drive}");
 }
+
+/// Every field gets its own value, so a swap or a field fed from the wrong source fails here
+/// (the shipped numbers repeat: 20, 10 and 4 occur more than once).
+#[test]
+fn each_field_maps_to_its_own_field() {
+    let settings = HarvestSettings {
+        capacity: 101,
+        mine_amount: 102,
+        mine_period: 103,
+        unload_amount: 104,
+        unload_period: 105,
+        search_radius: 106,
+        retry_period: 107,
+        call_range: 108,
+        grant_timeout: 109,
+        call_timeout: 110,
+        max_tries: 111,
+        park_distance: 112,
+        park_spread: 113,
+        park_near_tenths: 114,
+        mine_start_tenths: 115,
+        mine_reach_tenths: 116,
+        mine_lose_tenths: 117,
+        dock_reach_tenths: 118,
+    };
+    let rules = harvest_rules(&settings);
+    assert_eq!(rules.capacity, 101);
+    assert_eq!(rules.mine_amount, 102);
+    assert_eq!(rules.mine_period, 103);
+    assert_eq!(rules.unload_amount, 104);
+    assert_eq!(rules.unload_period, 105);
+    assert_eq!(rules.search_radius, 106);
+    assert_eq!(rules.retry_period, 107);
+    assert_eq!(rules.call_range, 108);
+    assert_eq!(rules.grant_timeout, 109);
+    assert_eq!(rules.call_timeout, 110);
+    assert_eq!(rules.max_tries, 111);
+    assert_eq!(rules.park_distance, 112);
+    assert_eq!(rules.park_spread, 113);
+    assert_eq!(rules.park_near_tenths, 114);
+    assert_eq!(rules.mine_start_tenths, 115);
+    assert_eq!(rules.mine_reach_tenths, 116);
+    assert_eq!(rules.mine_lose_tenths, 117);
+    assert_eq!(rules.dock_reach_tenths, 118);
+}

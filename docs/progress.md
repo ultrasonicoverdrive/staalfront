@@ -2061,7 +2061,7 @@ Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.
   harvester goes to the same bay and the queue stands in its approach. The reviewer of #78 measured (three
   refineries, 4000 ticks): 3 harvesters deliver 2400, 6 deliver 3200, 12 deliver 3200, 24 deliver 2271, 48 deliver
   618. The 48/50-harvester measurements in `economy.md` (cost, minimap uploads) are therefore of a jammed system.
-  Not fixed in WP7.2.
+  Not fixed in WP7.2; the follow-up is WP7.5 (refinery choice and queues).
 - **Fix round (review of #78):** the grant timeout and a holder ordered away now have tests that fail under their
   mutations; `with_harvest` refuses a world without a building table and a later `with_units`/`with_buildings`;
   a lost same-tick claim keeps the player's field focus; the nine tuning knobs (`call_timeout`, `max_tries`, park

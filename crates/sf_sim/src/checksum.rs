@@ -546,7 +546,7 @@ impl World {
             self.destruction.write_hash(&mut h, e);
         }
 
-        // Buildings (WP6.1): the rules of the structure kinds. Last, and only in a world that was
+        // Buildings (WP6.1): the rules of the structure kinds. Only in a world that was
         // given a table, so every world without one hashes as before.
         if !self.buildings.is_empty() {
             h.write_u8(SECTION_BUILDINGS);
@@ -575,10 +575,10 @@ impl World {
             }
         }
 
-        // Ore (`E`, WP7.1: the rules, the number of field cells and a running sum over the amounts)
-        // is the last section and construction (`N`, WP6.3) comes just before it. Both are
+        // Construction (`N`, WP6.3), then ore (`E`, WP7.1: the rules, the number of field cells
+        // and a running sum over the amounts), then harvest (`H`, WP7.2) last. Each is
         // gated: `N` only while something is under construction, `E` only in a world that was given
-        // ore rules. So every world without them hashes as before and every pin of either WP stays.
+        // ore rules, `H` only with harvest rules. So every world without them hashes as before.
         if let Some(ore) = &self.ore {
             h.write_u8(SECTION_ORE);
             for word in ore.fingerprint() {
