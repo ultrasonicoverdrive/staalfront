@@ -16,6 +16,15 @@ fn the_shipped_harvest_numbers_are_pinned() {
     assert_eq!(s.retry_period, 100);
     assert_eq!(s.call_range, 6);
     assert_eq!(s.grant_timeout, 400);
+    assert_eq!(s.call_timeout, 10);
+    assert_eq!(s.max_tries, 3);
+    assert_eq!(s.park_distance, 4);
+    assert_eq!(s.park_spread, 5);
+    assert_eq!(s.park_near_tenths, 20);
+    assert_eq!(s.mine_start_tenths, 10);
+    assert_eq!(s.mine_reach_tenths, 15);
+    assert_eq!(s.mine_lose_tenths, 25);
+    assert_eq!(s.dock_reach_tenths, 20);
 }
 
 /// The timings the comments of the file state, worked out from the numbers.
@@ -55,13 +64,86 @@ fn the_grant_lasts_longer_than_the_drive_from_the_call_range() {
     );
 }
 
+/// The tuning numbers of the loop, as the shipped file has them.
+const TUNING: &str = "call_timeout: 10, max_tries: 3, park_distance: 4, park_spread: 5, \
+     park_near_tenths: 20, mine_start_tenths: 10, mine_reach_tenths: 15, mine_lose_tenths: 25, \
+     dock_reach_tenths: 20";
+
+/// The tuning numbers are checked on load: each within its bounds, and the three mining radii in
+/// order.
+#[test]
+fn bad_tuning_numbers_are_refused() {
+    let base = "capacity: 200, mine_amount: 4, mine_period: 8, unload_amount: 10, \
+                unload_period: 4, search_radius: 40, retry_period: 100, call_range: 6, \
+                grant_timeout: 400";
+    let with = |name: &str, value: u32| {
+        let tuning: Vec<String> = TUNING
+            .split(", ")
+            .map(|kv| {
+                if kv.starts_with(&format!("{name}:")) {
+                    format!("{name}: {value}")
+                } else {
+                    kv.to_string()
+                }
+            })
+            .collect();
+        HarvestSettings::from_ron(&format!("({base}, {})", tuning.join(", ")))
+    };
+    assert!(with("call_timeout", 10).is_ok());
+    for (name, most) in [
+        ("call_timeout", 1000),
+        ("max_tries", 20),
+        ("park_distance", 32),
+        ("park_spread", 32),
+        ("park_near_tenths", 320),
+        ("dock_reach_tenths", 320),
+    ] {
+        assert!(with(name, 1).is_ok(), "{name} 1");
+        assert!(with(name, most).is_ok(), "{name} {most}");
+        assert!(
+            matches!(with(name, 0), Err(HarvestError::Invalid(_))),
+            "{name} 0"
+        );
+        assert!(
+            matches!(with(name, most + 1), Err(HarvestError::Invalid(_))),
+            "{name} {}",
+            most + 1
+        );
+    }
+    // mine_start <= mine_reach < mine_lose <= 320.
+    assert!(with("mine_start_tenths", 15).is_ok());
+    assert!(matches!(
+        with("mine_start_tenths", 16),
+        Err(HarvestError::Invalid(_))
+    ));
+    assert!(matches!(
+        with("mine_start_tenths", 0),
+        Err(HarvestError::Invalid(_))
+    ));
+    assert!(with("mine_reach_tenths", 24).is_ok());
+    assert!(matches!(
+        with("mine_reach_tenths", 25),
+        Err(HarvestError::Invalid(_))
+    ));
+    assert!(with("mine_lose_tenths", 320).is_ok());
+    assert!(matches!(
+        with("mine_lose_tenths", 321),
+        Err(HarvestError::Invalid(_))
+    ));
+    // A missing tuning field is refused: the file has to give them all.
+    assert!(matches!(
+        HarvestSettings::from_ron(&format!("({base})")),
+        Err(HarvestError::Ron(_))
+    ));
+}
+
 #[test]
 fn bad_numbers_are_refused() {
     let with = |c: u16, ma: u16, mp: u16, ua: u16, up: u16, r: u16, rp: u16, cr: u16, gt: u16| {
         HarvestSettings::from_ron(&format!(
             "(capacity: {c}, mine_amount: {ma}, mine_period: {mp}, unload_amount: {ua}, \
              unload_period: {up}, search_radius: {r}, retry_period: {rp}, call_range: {cr}, \
-             grant_timeout: {gt})"
+             grant_timeout: {gt}, {TUNING})"
         ))
     };
     assert!(with(200, 4, 8, 10, 4, 40, 100, 6, 400).is_ok());
@@ -114,10 +196,11 @@ fn bad_numbers_are_refused() {
         Err(HarvestError::Ron(_))
     ));
     assert!(matches!(
-        HarvestSettings::from_ron(
+        HarvestSettings::from_ron(&format!(
             "(capacity: 200, mine_amount: 4, mine_period: 8, unload_amount: 10, unload_period: 4, \
-             search_radius: 40, retry_period: 100, call_range: 6, grant_timeout: 400, x: 1)"
-        ),
+             search_radius: 40, retry_period: 100, call_range: 6, grant_timeout: 400, x: 1, \
+             {TUNING})"
+        )),
         Err(HarvestError::Ron(_))
     ));
 }

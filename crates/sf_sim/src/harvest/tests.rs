@@ -23,6 +23,15 @@ const RULES: HarvestRules = HarvestRules {
     retry_period: 20,
     call_range: 6,
     grant_timeout: 200,
+    call_timeout: 10,
+    max_tries: 3,
+    park_distance: 4,
+    park_spread: 5,
+    park_near_tenths: 20,
+    mine_start_tenths: 10,
+    mine_reach_tenths: 15,
+    mine_lose_tenths: 25,
+    dock_reach_tenths: 20,
 };
 
 fn world() -> World {

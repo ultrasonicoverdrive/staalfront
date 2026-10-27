@@ -312,6 +312,15 @@ pub fn harvest_rules(settings: &HarvestSettings) -> sf_sim::HarvestRules {
         retry_period: settings.retry_period,
         call_range: settings.call_range,
         grant_timeout: settings.grant_timeout,
+        call_timeout: settings.call_timeout,
+        max_tries: settings.max_tries,
+        park_distance: settings.park_distance,
+        park_spread: settings.park_spread,
+        park_near_tenths: settings.park_near_tenths,
+        mine_start_tenths: settings.mine_start_tenths,
+        mine_reach_tenths: settings.mine_reach_tenths,
+        mine_lose_tenths: settings.mine_lose_tenths,
+        dock_reach_tenths: settings.dock_reach_tenths,
     }
 }
 

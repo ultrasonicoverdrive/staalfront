@@ -1916,7 +1916,7 @@ Status: WP6.1 is in; WP6.2 is built (in review); WP6.3 to WP6.8 are not started.
   accepts `PlaceStructure` and `SpawnUnit` (which carry their own `owner` and skip every placement rule) from any
   seat. The two commands are told apart in the checksum (tag 11).
 - **Follow-up (open, before any untrusted command stream: phase 14 multiplayer, replays from outside):** setup
-  commands (`PlaceStructure`, `SpawnUnit`) must be refused when they come from a player seat. Nothing exploits it
+  commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`) must be refused when they come from a player seat. Nothing exploits it
   today (the client sends only `BuildStructure` from input); no code changed for it in WP6.2.
 - **Decision for Tijmen from WP6.1, answered:** `factions` restricts what a player may *build*; pre-placed
   mission objects are not checked (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`). F1-M05's
@@ -2000,13 +2000,14 @@ Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.
   WP7.4 replace; numbers in `assets/config/harvest.ron`; checksum section `H`, only with harvest rules; a cargo
   bar under every harvester in the game; `sf_game --harvest`), `docs/rules/economy.md` ("Harvesters"). The scenario
   `harvest` is pinned (new frozen copy `harvest_defs`). No earlier pin moved. Measured numbers (the harvest stage
-  about 6 microseconds a tick with 48 harvesters; at most 10 minimap uploads a second, about 0.22 ms each on a
+  about 6 microseconds a tick with 48 harvesters, a jammed system, see the gap below; at most 10 minimap uploads a second, about 0.22 ms each on a
   software adapter) are in `economy.md`; screenshots in `docs/screenshots/wp7.2`.
 
 ### WP7.2 notes
 
 - **`Command::TakeOre` decision:** it stays as scaffolding for tests and scenarios, joins the setup commands that
-  must be refused from player seats before any untrusted command stream (phase 14); the harvester does not use it.
+  must be refused from player seats before any untrusted command stream (phase 14; it is in the list in the WP6.2
+  notes and in `buildings.md`, "Not done"); the harvester does not use it.
 - **WP6.3 (#76) must keep `World::is_standing` the one place that says "stands".** The harvester asks it for the
   docks (`placement.rs`, now `pub(crate)`); when #76 makes it mean "complete", a refinery under construction stops
   being a dock with no change here. The half that needs a structure under construction is untested in this PR.
@@ -2014,6 +2015,18 @@ Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.
   by straight-line distance, not route length or queue length; the harvester's own re-issue of a walk the crowd
   gave up (three tries) has no test of its own (the traffic test goes through the crowd's replan); no alliances;
   the sandbox without `--harvest` has no harvest rules.
+- **Gap: throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
+  harvester goes to the same bay and the queue stands in its approach. The reviewer of #78 measured (three
+  refineries, 4000 ticks): 3 harvesters deliver 2400, 6 deliver 3200, 12 deliver 3200, 24 deliver 2271, 48 deliver
+  618. The 48/50-harvester measurements in `economy.md` (cost, minimap uploads) are therefore of a jammed system.
+  Not fixed in WP7.2.
+- **Obligation for whichever of #76 (WP6.3) and #78 (WP7.2) lands second:** add a test that a refinery under
+  construction is not a dock, and becomes one when it is complete.
+- **Fix round (review of #78):** the grant timeout and a holder ordered away now have tests that fail under their
+  mutations; `with_harvest` refuses a world without a building table and a later `with_units`/`with_buildings`;
+  a lost same-tick claim keeps the player's field focus; the nine tuning knobs (`call_timeout`, `max_tries`, park
+  distances, reach radii) moved from `harvest.rs` into `harvest.ron` (validated, pinned), which re-pinned `harvest`
+  (`economy.md`, "Checksum").
 - **The decision I took that the brief did not name:** a harvester stops and mines when it is within one cell of its
   ore cell, and prefers cells with no neighbour claimed by another harvester (bodies are wider than a cell). Without
   the first, two harvesters at neighbouring cells held each other off for thousands of ticks; without the second
@@ -2031,7 +2044,7 @@ Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.
 - **`Command::TakeOre` is a player-issuable command** in the lockstep sense. Decided in WP7.2: it stays as test
   scaffolding (see the WP7.2 notes).
 - **Minimap upload cost: measured in WP7.2** (at most 10 uploads a second, about 0.22 ms each on a software
-  adapter, with 50 harvesters; the level comparison 1.4 microseconds a tick; `economy.md`, "The picture"). Left as it is.
+  adapter, with 50 harvesters, a jammed system: see the WP7.2 notes; the level comparison 1.4 microseconds a tick; `economy.md`, "The picture"). Left as it is.
 
 ## Open follow-ups
 

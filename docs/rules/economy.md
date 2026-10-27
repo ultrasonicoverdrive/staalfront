@@ -160,8 +160,11 @@ kind 11). A refinery is a structure whose building function is `HarvesterDock` (
 `refinery`, kind 2, exit side `PosX`). A world has them only if it was given
 `World::with_harvest(rules, harvester_kinds)` after its unit and building tables
 (`sf_bridge::harvest_rules` and `harvester_kinds` make both from the data; otherwise
-`ConfigError::Harvest`, also for invalid numbers and for a kind that is not a mobile unit); a
-world without it is untouched, checksum included, and its harvesters just stand.
+`ConfigError::Harvest`, also for a missing or empty building table, for invalid numbers and for
+a kind that is not a mobile unit). The harvest state takes which kinds harvest and which dock from
+the tables it is given, so a `with_units` or `with_buildings` after `with_harvest` is refused with
+`ConfigError::Harvest` too (`the_rules_must_be_valid_early_and_name_mobile_kinds`). A world
+without it is untouched, checksum included, and its harvesters just stand.
 
 ### The numbers (`assets/config/harvest.ron`, pinned by `sf_data/tests/harvest.rs`)
 
@@ -175,8 +178,24 @@ world without it is untouched, checksum included, and its harvesters just stand.
 | `call_range` | 6 | A harvester asks the refinery for a place at this many cells from its dock point. |
 | `grant_timeout` | 400 | Ticks a harvester that was granted the bay has to arrive. Must outlast the drive from `call_range` (a test holds the shipped numbers to twice the drive). |
 
-Every number is at least 1 and a bite no bigger than the load (`HarvestRules::is_valid`; a test
-per field). All are placeholders for phase 15 and the playtest of M1. One unit of ore is one credit
+The tuning of the loop (in the file since the WP7.2 fix round, PLAN section 5 rule 6; until then
+constants in `harvest.rs`, with the same values):
+
+| field | shipped | meaning |
+|---|---|---|
+| `call_timeout` | 10 | Ticks a harvester waits for the answer to its request before it asks again. 1 to 1000. |
+| `max_tries` | 3 | Walks to one goal (an ore cell, the dock point) that end short of it before the harvester gives that goal up. 1 to 20. |
+| `park_distance`, `park_spread` | 4, 5 | A harvester with nothing to do waits `park_distance` cells out from the dock point along the exit side, `slot % park_spread - park_spread / 2` cells sideways. 1 to 32 each. |
+| `park_near_tenths` | 20 | A parked harvester within this many tenths of a cell of its spot stays. 1 to 320. |
+| `mine_start_tenths`, `mine_reach_tenths`, `mine_lose_tenths` | 10, 15, 25 | Reach round the middle of the ore cell in tenths of a cell: stop and mine, count as there when the walk is over, drive back when pushed farther while mining. `1 <= start <= reach < lose <= 320`. |
+| `dock_reach_tenths` | 20 | How near to the dock point (tenths of a cell) a harvester counts as docked when its walk is over. 1 to 320. |
+
+Distances are tenths of a cell so that the file holds whole numbers; the simulation turns them into
+fixed point (`Fx::from_ratio(n, 10)`), no floats. Every number is at least 1, a bite no bigger than
+the load, the tuning within the bounds above (`HarvestRules::is_valid` and
+`HarvestSettings::from_ron` check the same; tests per field in `sf_sim/tests/harvest.rs` and
+`sf_data/tests/harvest.rs`). `sf_bridge/tests/harvest.rs` pins the data-to-sim mapping with
+literals. All are placeholders for phase 15 and the playtest of M1. One unit of ore is one credit
 for now.
 
 ### The loop
@@ -246,7 +265,13 @@ sent (harvesters write in ascending slot order), and they are part of the checks
 and `Unloading` after it. The queue is first come, first served (`the_queue_is_first_come_first_served`,
 `two_harvesters_on_one_refinery_take_turns_in_the_order_they_asked`). A grant that is not used
 within `grant_timeout` ticks is revoked and the next in the queue gets the bay
-(`a_grant_that_is_not_used_in_time_is_revoked_and_the_next_in_line_gets_the_bay`). A holder or a
+(`a_grant_that_is_not_used_in_time_is_revoked_and_the_next_in_line_gets_the_bay`: with a timeout
+of 10 ticks the first grant runs out before anyone unloads and before any ore is delivered, the first
+of the queue holds the bay in the same tick, and the revoked harvester asks again and gets in later).
+A holder that a player orders away (granted and driving in, or unloading) frees the bay with its
+`Cancel`, the first of the queue gets it within two ticks, and nothing more is taken off the departed
+harvester (`a_granted_holder_ordered_away_frees_the_bay_for_the_next_in_line`,
+`an_unloading_holder_ordered_away_frees_the_bay_for_the_next_in_line`). A holder or a
 queued harvester that has been destroyed is dropped from the dock on its next turn, and the bay
 goes on (`a_destroyed_harvester_frees_the_bay_and_its_ore_cell`).
 
@@ -305,7 +330,10 @@ Each has a test (`crates/sf_sim/tests/harvest.rs` unless named otherwise):
   (`Manual`) and when a `Move` ends the loop resumes where the harvester stands
   (`a_player_order_to_a_field_overrides_the_search`,
   `a_player_order_that_is_not_a_field_is_obeyed_and_the_loop_resumes_after_it`,
-  `a_player_order_cancels_the_check_in`). **Gap:** `Stop` ends a walk like any other, so a
+  `a_player_order_cancels_the_check_in`). Two harvesters sent to one ore cell in one tick: the
+  first keeps the cell, the second loses it in that tick's claim check and keeps the field as its
+  search focus, so it mines in the field the player chose and not in the one it stands next to
+  (`two_harvesters_ordered_to_one_ore_cell_in_one_tick_both_keep_the_field`). **Gap:** `Stop` ends a walk like any other, so a
   stopped harvester goes back to work at once; there is no way to park one.
 * **A harvester stuck in traffic re-plans.** The harvester asks for no route itself: the crowd
   pass (WP4.4, WP4.7) notices a unit that does not get on and asks for a new route round the
@@ -340,7 +368,10 @@ phase moved:** `golden.rs`, the `.expected` files of `wander_5000`, `command_mix
 `0x53aeb53ab44157d1` pass unchanged (none of those worlds has harvest rules, so none has the
 section; `wander_5000` ends on the same checksum, `0x38d5e3c43358a889`, in the `main` binary and in
 this branch). The new scenario `harvest` is pinned (`assets/scenarios/harvest.expected`,
-`tools/sf_headless/tests/harvest.rs`, the CI job `headless`). It runs on `harvest_defs`, a **new**
+`tools/sf_headless/tests/harvest.rs`, the CI job `headless`). **Re-pin in the fix round:**
+`0x60e1c19e00a28c45` became `0x655fd8c1472d1611` because the nine tuning numbers that moved from
+`harvest.rs` into the rules are hashed with the other rules; a build that leaves just those nine out
+of the hash gives `0x60e1c19e00a28c45` again (measured), so the run itself did not change. It runs on `harvest_defs`, a **new**
 frozen copy of the shipped definitions of WP7.2 (no existing copy was touched), and writes its ore
 and harvest rules in the scenario file, so editing `ore.ron` or `harvest.ron` never moves it.
 
@@ -384,6 +415,12 @@ of game time (3600 ticks), and times one upload on the software adapter (Mesa ll
 | 4 | 105 | 7 | 105 | 2216 |
 | 50 | 205 | 10 | 214 | 3168 |
 
+**The 50-harvester row measures a jammed system, not a harvesting load:** with that many harvesters
+every one picks the same nearest refinery and most stand queued or blocked in its approach (see "Not
+done"), so it moves less ore per harvester than a working economy would and the cells change slower.
+The upload stays sound anyway: even one upload every tick would be about 20 x 0.22 ms = 4.4 ms a second
+on llvmpipe.
+
 One upload of the 256 x 256 image took **209 to 237 microseconds** (five runs). The comparison of the
 levels, `OreView::changes`, which the presentation does for every new snapshot, took **1.4 to 1.5
 microseconds** a tick for the 215 field cells of the playfield (copying those cells into the snapshot
@@ -402,7 +439,9 @@ playfield, 4000 ticks), on a machine with a load average of 1.5 to 2 from other 
 
 * with the harvest rules **776.8 ms** (mean of 743 to 830), the same units without them (they
   stand where they are put) **160.2 ms**: 154 microseconds more per tick, **but that is the cost
-  of 48 harvesters moving, routing and pushing each other**, not of the harvest stage;
+  of 48 harvesters moving, routing and pushing each other**, not of the harvest stage. **These 48
+  harvesters are a jammed system** (one refinery gets them all, see "Not done"), so this measures a
+  crowd queueing at one bay, not 48 harvesters at work;
 * the harvest stage itself, timed from inside the world for the same runs (a scratch build with a
   clock around the stage, not committed, since the simulation has no clock): **23 to 30 ms for the
   4000 ticks, about 6 microseconds per tick** with 48 harvesters, every `nearest_ore_where` search
@@ -422,7 +461,11 @@ These are relative numbers; the fps requirement is for the laptop benchmarks (PL
   field; `Stop` cannot park one.
 * A refinery is chosen by straight-line distance to its dock point, not by the length of the
   route, and not by how busy it is: a harvester queues at the nearest standing one even if another
-  has no queue.
+  has no queue. **With many harvesters this collapses the throughput**: all of them go to one bay
+  and the queue stands in its approach. Measured by the reviewer of #78 with `crowd_scenario` (three
+  refineries, 4000 ticks, the first n harvesters): 3 deliver 2400, 6 deliver 3200, 12 deliver 3200,
+  24 deliver 2271, 48 deliver 618 (13 `Queued`, 26 `ToOre`, only one bay ever granted). Not fixed
+  in WP7.2; the fix is a choice by route length and queue length.
 * No alliances: a harvester uses only the refineries of its own player.
 * The refinery's exit cell is only checked when it is placed; one that is blocked later makes
   harvesters give that refinery up after three short walks (that path has no test of its own).

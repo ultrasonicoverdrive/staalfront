@@ -60,27 +60,11 @@ use crate::placement::exit_cell;
 use crate::terrain::{Cell, NO_CELL};
 use crate::world::World;
 
-/// A harvester that is this near (in cells) to the middle of its ore cell stops and mines, whatever
-/// is left of its walk: the ore is within its reach.
-const MINE_START: Fx = Fx::ONE;
-/// How near (in cells) to the middle of the ore cell a harvester has to be, when its walk is over,
-/// to count as there.
-const MINE_REACH: Fx = Fx::from_ratio(3, 2);
-/// A harvester that mines and is pushed farther than this from the cell's middle drives back.
-const MINE_LOSE: Fx = Fx::from_ratio(5, 2);
-/// How near (in cells) to the dock point a harvester has to be, when its walk is over, to count
-/// as docked.
-const DOCK_REACH: Fx = Fx::from_int(2);
-/// How far from the dock point a harvester without ore waits, along the exit side, in cells.
-const PARK_DISTANCE: i64 = 4;
-/// A parked harvester within this many cells of its parking spot stays where it is.
-const PARK_NEAR: Fx = Fx::from_int(2);
-/// Lateral spread of the parking spots: `slot % PARK_SPREAD - PARK_SPREAD / 2` cells.
-const PARK_SPREAD: i64 = 5;
-/// Ticks a harvester waits for the answer to its request before it asks again.
-const CALL_TIMEOUT: u16 = 10;
-/// Walks to one goal that end short of it before the harvester gives that goal up.
-const MAX_TRIES: u8 = 3;
+/// A distance in tenths of a cell (the reach and parking radii of [`HarvestRules`]) as a fixed-point
+/// number of cells.
+fn tenths(n: u16) -> Fx {
+    Fx::from_ratio(i64::from(n), 10)
+}
 
 /// The numbers of the harvesters and of the refinery's dock, data in `assets/config/harvest.ron`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -105,10 +89,35 @@ pub struct HarvestRules {
     pub call_range: u16,
     /// Ticks a harvester that was granted the bay has to arrive before the grant is withdrawn.
     pub grant_timeout: u16,
+    /// Ticks a harvester waits for the answer to its request before it asks again. 1 to 1000.
+    pub call_timeout: u16,
+    /// Walks to one goal that end short of it before the harvester gives that goal up. 1 to 20.
+    pub max_tries: u8,
+    /// How far from the dock point a harvester without ore waits, along the exit side, in cells.
+    /// 1 to 32.
+    pub park_distance: u16,
+    /// Lateral spread of the parking spots: `slot % park_spread - park_spread / 2` cells. 1 to 32.
+    pub park_spread: u16,
+    /// A parked harvester within this many tenths of a cell of its parking spot stays where it is.
+    /// 1 to 320.
+    pub park_near_tenths: u16,
+    /// A harvester this near (tenths of a cell) to the middle of its ore cell stops and mines,
+    /// whatever is left of its walk. At least 1, at most `mine_reach_tenths`.
+    pub mine_start_tenths: u16,
+    /// How near (tenths of a cell) to the middle of the ore cell a harvester has to be, when its
+    /// walk is over, to count as there. Below `mine_lose_tenths`.
+    pub mine_reach_tenths: u16,
+    /// A harvester that mines and is pushed farther than this (tenths of a cell) from the cell's
+    /// middle drives back. At most 320.
+    pub mine_lose_tenths: u16,
+    /// How near (tenths of a cell) to the dock point a harvester has to be, when its walk is over,
+    /// to count as docked. 1 to 320.
+    pub dock_reach_tenths: u16,
 }
 
 impl HarvestRules {
-    /// Whether the numbers fit together: every one at least 1 and a bite no bigger than the load.
+    /// Whether the numbers fit together: every one at least 1, a bite no bigger than the load, the
+    /// tuning numbers within their bounds and `mine_start <= mine_reach < mine_lose`.
     pub const fn is_valid(&self) -> bool {
         self.capacity >= 1
             && self.mine_amount >= 1
@@ -120,6 +129,22 @@ impl HarvestRules {
             && self.retry_period >= 1
             && self.call_range >= 1
             && self.grant_timeout >= 1
+            && self.call_timeout >= 1
+            && self.call_timeout <= 1000
+            && self.max_tries >= 1
+            && self.max_tries <= 20
+            && self.park_distance >= 1
+            && self.park_distance <= 32
+            && self.park_spread >= 1
+            && self.park_spread <= 32
+            && self.park_near_tenths >= 1
+            && self.park_near_tenths <= 320
+            && self.mine_start_tenths >= 1
+            && self.mine_start_tenths <= self.mine_reach_tenths
+            && self.mine_reach_tenths < self.mine_lose_tenths
+            && self.mine_lose_tenths <= 320
+            && self.dock_reach_tenths >= 1
+            && self.dock_reach_tenths <= 320
     }
 }
 
@@ -346,6 +371,9 @@ struct Plan {
     /// The cell in `core.cell` was chosen with room round it: if another harvester has claimed a
     /// neighbouring cell in this same pass, the choice is not kept.
     spaced: bool,
+    /// The field focus the search of this pass started from: if the cell it chose is not kept, the
+    /// focus is given back, so the next search still starts at the field the player chose.
+    focus: u32,
 }
 
 /// The harvest state of a world: the rules, the harvester kinds, one record per slot, the docks,
@@ -518,11 +546,12 @@ impl Harvest {
             Side::PosY => (0, 1),
             Side::NegY => (0, -1),
         };
-        let lateral = i64::from(slot) % PARK_SPREAD - PARK_SPREAD / 2;
-        let (ox, oy) = (
-            dx * PARK_DISTANCE + dy * lateral,
-            dy * PARK_DISTANCE + dx * lateral,
+        let (spread, distance) = (
+            i64::from(self.rules.park_spread),
+            i64::from(self.rules.park_distance),
         );
+        let lateral = i64::from(slot) % spread - spread / 2;
+        let (ox, oy) = (dx * distance + dy * lateral, dy * distance + dx * lateral);
         let (width, height) = (i64::from(w.config.width), i64::from(w.config.height));
         let x = (d.exit.0 + ox).clamp(0, width - 1);
         let y = (d.exit.1 + oy).clamp(0, height - 1);
@@ -556,7 +585,12 @@ impl Harvest {
         for i in 0..slots {
             let def = e.def[i];
             let alive = e.alive[i] && def != NO_DEF;
-            let is_harvester = alive && self.harvester_def[def as usize];
+            let is_harvester = alive
+                && self
+                    .harvester_def
+                    .get(def as usize)
+                    .copied()
+                    .unwrap_or(false);
             let c = &mut self.units[i].core;
             if c.bound && (!is_harvester || c.generation != e.generation[i]) {
                 if c.cell != NO_CELL {
@@ -575,7 +609,10 @@ impl Harvest {
                     };
                 }
                 live.push(i as u32);
-            } else if alive && self.dock_def[def as usize] && w.is_standing(i) {
+            } else if alive
+                && self.dock_def.get(def as usize).copied().unwrap_or(false)
+                && w.is_standing(i)
+            {
                 let id = EntityId::new(i as u32, e.generation[i]);
                 // The dock keeps its state while it stands; a new one starts free.
                 let kept = self.dock_index(id).map(|k| self.docks[k].clone());
@@ -754,6 +791,7 @@ impl Harvest {
     /// Looks for ore for harvester `i` and sets its next step in `plan`.
     fn search(&self, w: &World, i: usize, plan: &mut Plan) {
         let width = w.config.width;
+        plan.focus = plan.core.focus;
         let c = &mut plan.core;
         if c.load >= self.rules.capacity {
             return self.go_return(w, i, plan);
@@ -823,7 +861,7 @@ impl Harvest {
         c.focus = NO_CELL;
         if let Some(d) = self.nearest_dock(owner, pos) {
             let spot = self.park_point(w, d, i as u32);
-            if (spot - pos).length_squared() > PARK_NEAR.square() {
+            if (spot - pos).length_squared() > tenths(self.rules.park_near_tenths).square() {
                 c.own = Order::Move(spot);
                 plan.act = Act::Go(spot);
             }
@@ -872,6 +910,7 @@ impl Harvest {
             take: None,
             send: None,
             spaced: false,
+            focus: NO_CELL,
         };
 
         // (1) What was taken off the load (always true, whatever the harvester does now).
@@ -1000,7 +1039,9 @@ impl Harvest {
                 if w.ore_at(cell) == 0 {
                     plan.core.cell = NO_CELL;
                     self.search(w, i, &mut plan);
-                } else if (centre(index, width) - pos).length_squared() <= MINE_START.square() {
+                } else if (centre(index, width) - pos).length_squared()
+                    <= tenths(rules.mine_start_tenths).square()
+                {
                     // Close enough to reach the ore from where it stands: stop and mine.
                     let c = &mut plan.core;
                     c.phase = Phase::Mine;
@@ -1013,7 +1054,7 @@ impl Harvest {
                     }
                 } else if ended {
                     let to = centre(index, width);
-                    if (to - pos).length_squared() <= MINE_REACH.square() {
+                    if (to - pos).length_squared() <= tenths(rules.mine_reach_tenths).square() {
                         let c = &mut plan.core;
                         c.phase = Phase::Mine;
                         c.wait = 0;
@@ -1022,7 +1063,7 @@ impl Harvest {
                     } else {
                         let c = &mut plan.core;
                         c.tries += 1;
-                        if c.tries >= MAX_TRIES {
+                        if c.tries >= rules.max_tries {
                             c.bad = index;
                             c.cell = NO_CELL;
                             self.search(w, i, &mut plan);
@@ -1045,7 +1086,7 @@ impl Harvest {
                 } else if held == 0 {
                     plan.core.cell = NO_CELL;
                     self.search(w, i, &mut plan);
-                } else if (to - pos).length_squared() > MINE_LOSE.square() {
+                } else if (to - pos).length_squared() > tenths(rules.mine_lose_tenths).square() {
                     let c = &mut plan.core;
                     c.phase = Phase::ToOre;
                     c.tries = 0;
@@ -1074,7 +1115,7 @@ impl Harvest {
                         if dist_sq <= Fx::from_int(i32::from(rules.call_range)).square() {
                             plan.send = Some((dock_id, Msg::Request));
                             plan.core.phase = Phase::ToDock(Call::Called);
-                            plan.core.wait = CALL_TIMEOUT;
+                            plan.core.wait = rules.call_timeout;
                         } else if ended {
                             self.dock_walk_failed(&mut plan, dock_id, point, false, w, i);
                         }
@@ -1094,7 +1135,7 @@ impl Harvest {
                     }
                     Call::Granted => {
                         let idle = plan.core.own == Order::Idle;
-                        if idle && dist_sq <= DOCK_REACH.square() {
+                        if idle && dist_sq <= tenths(rules.dock_reach_tenths).square() {
                             plan.send = Some((dock_id, Msg::Arrived));
                             plan.core.phase = Phase::Unload;
                         } else if ended {
@@ -1128,7 +1169,7 @@ impl Harvest {
     }
 
     /// A walk to the dock point ended short of it: try the walk again (a new route), or give the
-    /// dock up after [`MAX_TRIES`].
+    /// dock up after `max_tries` of the rules.
     fn dock_walk_failed(
         &self,
         plan: &mut Plan,
@@ -1140,7 +1181,7 @@ impl Harvest {
     ) {
         let c = &mut plan.core;
         c.tries += 1;
-        if c.tries >= MAX_TRIES {
+        if c.tries >= self.rules.max_tries {
             if holds_place {
                 plan.send = Some((dock, Msg::Cancel));
             }
@@ -1176,6 +1217,7 @@ impl Harvest {
                 )
             {
                 plan.core.cell = NO_CELL;
+                plan.core.focus = plan.focus;
                 plan.core.phase = Phase::Search;
                 plan.core.wait = 0;
                 // Nothing was ordered: the order it has is the one it expects.
@@ -1233,6 +1275,15 @@ impl Harvest {
             r.retry_period,
             r.call_range,
             r.grant_timeout,
+            r.call_timeout,
+            u16::from(r.max_tries),
+            r.park_distance,
+            r.park_spread,
+            r.park_near_tenths,
+            r.mine_start_tenths,
+            r.mine_reach_tenths,
+            r.mine_lose_tenths,
+            r.dock_reach_tenths,
         ] {
             h.write_bytes(&v.to_le_bytes());
         }

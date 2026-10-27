@@ -243,6 +243,24 @@ pub struct HarvestSpec {
     pub call_range: u16,
     /// Ticks a granted harvester has to arrive.
     pub grant_timeout: u16,
+    /// Ticks a harvester waits for the refinery's answer before it asks again.
+    pub call_timeout: u16,
+    /// Walks to one goal that end short of it before the harvester gives that goal up.
+    pub max_tries: u8,
+    /// Cells from the dock point, along the exit side, where a harvester without ore waits.
+    pub park_distance: u16,
+    /// Lateral spread of the parking spots, in cells.
+    pub park_spread: u16,
+    /// Tenths of a cell from its parking spot within which a parked harvester stays.
+    pub park_near_tenths: u16,
+    /// Tenths of a cell from the ore cell's middle at which a harvester stops and mines.
+    pub mine_start_tenths: u16,
+    /// Tenths of a cell from the ore cell's middle that count as there when a walk is over.
+    pub mine_reach_tenths: u16,
+    /// Tenths of a cell from the ore cell's middle beyond which a mining harvester drives back.
+    pub mine_lose_tenths: u16,
+    /// Tenths of a cell from the dock point that count as docked when a walk is over.
+    pub dock_reach_tenths: u16,
 }
 
 impl HarvestSpec {
@@ -257,6 +275,15 @@ impl HarvestSpec {
             retry_period: self.retry_period,
             call_range: self.call_range,
             grant_timeout: self.grant_timeout,
+            call_timeout: self.call_timeout,
+            max_tries: self.max_tries,
+            park_distance: self.park_distance,
+            park_spread: self.park_spread,
+            park_near_tenths: self.park_near_tenths,
+            mine_start_tenths: self.mine_start_tenths,
+            mine_reach_tenths: self.mine_reach_tenths,
+            mine_lose_tenths: self.mine_lose_tenths,
+            dock_reach_tenths: self.dock_reach_tenths,
         }
     }
 }
@@ -883,7 +910,8 @@ impl Scenario {
             }
             if !h.rules().is_valid() {
                 p.push(
-                    "harvest: every number must be at least 1 and mine_amount at most capacity"
+                    "harvest: every number must be at least 1, mine_amount at most capacity and the tuning \
+                     numbers within their bounds (docs/rules/economy.md)"
                         .to_string(),
                 );
             }

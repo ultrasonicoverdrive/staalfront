@@ -31,6 +31,15 @@ const RULES: HarvestRules = HarvestRules {
     retry_period: 20,
     call_range: 6,
     grant_timeout: 200,
+    call_timeout: 10,
+    max_tries: 3,
+    park_distance: 4,
+    park_spread: 5,
+    park_near_tenths: 20,
+    mine_start_tenths: 10,
+    mine_reach_tenths: 15,
+    mine_lose_tenths: 25,
+    dock_reach_tenths: 20,
 };
 
 const ORE_RULES: OreRules = OreRules {
@@ -403,8 +412,8 @@ fn two_harvesters_on_one_refinery_take_turns_in_the_order_they_asked() {
 
 #[test]
 fn a_grant_that_is_not_used_in_time_is_revoked_and_the_next_in_line_gets_the_bay() {
-    // A short timeout: the first harvester is granted at the call range, 6 cells out, and needs
-    // about 100 ticks to arrive.
+    // A short timeout: a harvester is granted at the call range, 6 cells out, and needs about 100
+    // ticks to arrive, so its first grant runs out before it is ever in the bay.
     let rules = HarvestRules {
         grant_timeout: 10,
         ..RULES
@@ -413,19 +422,130 @@ fn a_grant_that_is_not_used_in_time_is_revoked_and_the_next_in_line_gets_the_bay
     place_refinery(&mut w, 0, (6, 20), P0);
     spawn_harvester(&mut w, 0, (14, 22), P0);
     spawn_harvester(&mut w, 0, (15, 24), P0);
-    let mut holders: Vec<EntityId> = Vec::new();
-    for _ in 0..3000 {
+    spawn_harvester(&mut w, 0, (16, 26), P0);
+    let mut prev = w.dock_of(id(0));
+    let mut first_revoke: Option<(EntityId, u64)> = None;
+    let mut handovers = 0;
+    let mut unloaded_before_revoke = false;
+    for _ in 0..4000 {
         w.step();
-        if let Some(h) = w.dock_of(id(0)).unwrap().holder
-            && holders.last() != Some(&h)
-        {
-            holders.push(h);
+        let cur = w.dock_of(id(0));
+        if let (Some(p), Some(c)) = (&prev, &cur) {
+            if c.unloading && first_revoke.is_none() {
+                unloaded_before_revoke = true;
+            }
+            // The holder lost a grant it never used: not unloading, still alive, not ordered.
+            if let Some(h) = p.holder
+                && !p.unloading
+                && c.holder != Some(h)
+            {
+                if first_revoke.is_none() {
+                    first_revoke = Some((h, w.ore_delivered(P0)));
+                    // It drives on: it was not taken away, only made to ask again.
+                    assert!(w.get(h).is_some());
+                }
+                // The first of the queue gets the bay in the same tick.
+                if let Some(&next) = p.queue.first() {
+                    assert_eq!(c.holder, Some(next), "{p:?} -> {c:?}");
+                    handovers += 1;
+                }
+            }
         }
+        prev = cur;
     }
-    // The holder changed more often than the two harvesters could have taken turns in: a grant
-    // ran out and the other harvester was given the bay.
-    let flips = holders.windows(2).filter(|p| p[0] != p[1]).count();
-    assert!(flips >= 3, "{holders:?}");
+    let (_, delivered) = first_revoke.expect("a grant ran out");
+    assert!(
+        !unloaded_before_revoke,
+        "someone unloaded before any grant ran out"
+    );
+    assert_eq!(delivered, 0, "ore delivered before the first grant ran out");
+    assert!(
+        handovers >= 1,
+        "a queued harvester never took over a lost grant"
+    );
+    // Revoked harvesters ask again and get in when they are near enough.
+    assert!(w.ore_delivered(P0) > 0);
+}
+
+/// Orders the dock's holder away as soon as `ready` holds with someone queued behind it, and
+/// checks that the bay goes to the first of the queue and that the holder gets nothing more.
+fn order_the_holder_away(ready: impl Fn(&sf_sim::DockView) -> bool) {
+    let mut w = world();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    spawn_harvester(&mut w, 0, (14, 22), P0);
+    spawn_harvester(&mut w, 0, (15, 24), P0);
+    spawn_harvester(&mut w, 0, (16, 26), P0);
+    run(&mut w, 2);
+    run_until(&mut w, 4000, |w| {
+        w.dock_of(id(0))
+            .is_some_and(|d| d.holder.is_some() && !d.queue.is_empty() && ready(&d))
+    });
+    let d = w.dock_of(id(0)).unwrap();
+    assert!(ready(&d) && !d.queue.is_empty(), "never ready: {d:?}");
+    let (holder, next) = (d.holder.unwrap(), d.queue[0]);
+    let tick = w.tick().0;
+    at(
+        &mut w,
+        tick,
+        Command::Order {
+            ids: vec![holder],
+            order: Order::Move(Vec2::from_ints(40, 5)),
+            queued: false,
+        },
+    );
+    w.step();
+    w.step();
+    let d = w.dock_of(id(0)).unwrap();
+    assert_eq!(d.holder, Some(next), "{d:?}");
+    assert!(!d.queue.contains(&holder));
+    assert_eq!(stage(&w, holder.index()), Some(HarvestStage::Manual));
+    // Nothing more is taken off the departed harvester.
+    let kept = load(&w, holder.index());
+    for _ in 0..200 {
+        w.step();
+        assert_eq!(load(&w, holder.index()), kept);
+    }
+}
+
+#[test]
+fn a_granted_holder_ordered_away_frees_the_bay_for_the_next_in_line() {
+    order_the_holder_away(|d| !d.unloading);
+}
+
+#[test]
+fn an_unloading_holder_ordered_away_frees_the_bay_for_the_next_in_line() {
+    order_the_holder_away(|d| d.unloading);
+}
+
+#[test]
+fn two_harvesters_ordered_to_one_ore_cell_in_one_tick_both_keep_the_field() {
+    // Both stand by the northern field; the player sends both to the southern one in one tick.
+    // The second loses the cell to the first in that tick and must still search the field the
+    // player chose, not the one it stands next to.
+    let mut w = world();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    spawn_harvester(&mut w, 0, (22, 20), P0);
+    spawn_harvester(&mut w, 0, (22, 22), P0);
+    run(&mut w, 3);
+    let target = Vec2::from_ints(25, 35) + Vec2::new(Fx::HALF, Fx::HALF);
+    let tick = w.tick().0;
+    at(
+        &mut w,
+        tick,
+        Command::Order {
+            ids: vec![id(1), id(2)],
+            order: Order::Move(target),
+            queued: false,
+        },
+    );
+    let south = |c: Option<Cell>| c.is_some_and(|c| (34..38).contains(&c.y));
+    for _ in 0..5 {
+        w.step();
+    }
+    for slot in [1, 2] {
+        let cell = w.harvester_of(id(slot)).and_then(|v| v.cell);
+        assert!(south(cell), "slot {slot} went to {cell:?}");
+    }
 }
 
 #[test]
@@ -927,6 +1047,75 @@ fn the_rules_must_be_valid_early_and_name_mobile_kinds() {
         grant_timeout: 0,
         ..RULES
     });
+    // The tuning numbers (harvest.ron since the fix round).
+    for rules in [
+        HarvestRules {
+            call_timeout: 0,
+            ..RULES
+        },
+        HarvestRules {
+            call_timeout: 1001,
+            ..RULES
+        },
+        HarvestRules {
+            max_tries: 0,
+            ..RULES
+        },
+        HarvestRules {
+            max_tries: 21,
+            ..RULES
+        },
+        HarvestRules {
+            park_distance: 0,
+            ..RULES
+        },
+        HarvestRules {
+            park_distance: 33,
+            ..RULES
+        },
+        HarvestRules {
+            park_spread: 0,
+            ..RULES
+        },
+        HarvestRules {
+            park_spread: 33,
+            ..RULES
+        },
+        HarvestRules {
+            park_near_tenths: 0,
+            ..RULES
+        },
+        HarvestRules {
+            park_near_tenths: 321,
+            ..RULES
+        },
+        HarvestRules {
+            mine_start_tenths: 0,
+            ..RULES
+        },
+        HarvestRules {
+            mine_start_tenths: 16,
+            ..RULES
+        },
+        HarvestRules {
+            mine_reach_tenths: 25,
+            ..RULES
+        },
+        HarvestRules {
+            mine_lose_tenths: 321,
+            ..RULES
+        },
+        HarvestRules {
+            dock_reach_tenths: 0,
+            ..RULES
+        },
+        HarvestRules {
+            dock_reach_tenths: 321,
+            ..RULES
+        },
+    ] {
+        bad(rules);
+    }
     // No kinds, a structure, an unknown kind.
     assert_eq!(
         base().with_harvest(RULES, &[]).err(),
@@ -953,6 +1142,27 @@ fn the_rules_must_be_valid_early_and_name_mobile_kinds() {
             .unwrap()
             .with_harvest(RULES, &[HARVESTER])
             .err(),
+        Some(ConfigError::Harvest)
+    );
+    // Without a building table: there would be no refinery to find.
+    assert_eq!(
+        World::new(WorldConfig::new(1).with_map_size(16, 16))
+            .unwrap()
+            .with_units(units())
+            .unwrap()
+            .with_harvest(RULES, &[HARVESTER])
+            .err(),
+        Some(ConfigError::Harvest)
+    );
+    // A unit or building table after the rules: the harvester and dock kinds were taken from the
+    // tables the rules were given with.
+    let harvesting = || base().with_harvest(RULES, &[HARVESTER]).unwrap();
+    assert_eq!(
+        harvesting().with_units(units()).err(),
+        Some(ConfigError::Harvest)
+    );
+    assert_eq!(
+        harvesting().with_buildings(buildings()).err(),
         Some(ConfigError::Harvest)
     );
 }

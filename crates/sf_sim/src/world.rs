@@ -159,8 +159,9 @@ pub enum ConfigError {
     /// valid ([`OreRules::is_valid`]).
     OreRules,
     /// The harvest rules were given to a world that has already started, before the unit or the
-    /// building table, with invalid numbers, or with a harvester kind that is not a mobile unit of
-    /// the table (WP7.2).
+    /// building table (or with an empty one), with invalid numbers, or with a harvester kind that
+    /// is not a mobile unit of the table; or a unit or building table was given after the harvest
+    /// rules, which froze the harvester and dock kinds from the tables (WP7.2).
     Harvest,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
@@ -384,6 +385,10 @@ impl World {
         if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
             return Err(ConfigError::UnitsAfterStart);
         }
+        // The harvest state froze which kinds harvest and dock from the tables it was given.
+        if self.harvest.is_some() {
+            return Err(ConfigError::Harvest);
+        }
         self.units = units;
         self.crowd
             .set_tables(&self.units, &self.movement, self.map_size());
@@ -417,6 +422,9 @@ impl World {
     pub fn with_buildings(mut self, table: BuildingTable) -> Result<World, ConfigError> {
         if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
             return Err(ConfigError::BuildingsAfterStart);
+        }
+        if self.harvest.is_some() {
+            return Err(ConfigError::Harvest);
         }
         for b in table.iter() {
             let Some(unit) = self.units.get(b.kind) else {
@@ -463,7 +471,9 @@ impl World {
     /// kinds search ore, mine it, drive to a refinery (a standing structure with the
     /// `HarvesterDock` function) and unload there, over and over. Call it after the unit table and
     /// the building table and before anything is scheduled ([`ConfigError::Harvest`] otherwise, for
-    /// invalid numbers and for a kind that is not a mobile unit of the table). Without an ore state
+    /// a missing or empty unit or building table, for invalid numbers and for a kind that is not a
+    /// mobile unit of the table). A later [`World::with_units`] or [`World::with_buildings`] is
+    /// refused with [`ConfigError::Harvest`]. Without an ore state
     /// ([`World::with_ore`]) the harvesters find nothing. The delivered ore is counted per player
     /// ([`World::ore_delivered`]); a world without the rules hashes as before.
     pub fn with_harvest(
@@ -477,6 +487,7 @@ impl World {
             || !rules.is_valid()
             || harvesters.is_empty()
             || self.units.is_empty()
+            || self.buildings.is_empty()
         {
             return Err(ConfigError::Harvest);
         }

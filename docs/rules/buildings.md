@@ -200,7 +200,8 @@ footprint always extends east and south from its anchor and the exit side is the
 the exit side. If rotated placement is ever added, the exit side rotates with it and `exit_cell` takes the
 facing.
 
-**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`) are accepted from any player seat; they
+**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`, see
+`economy.md`) are accepted from any player seat; they
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
 only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
 put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
