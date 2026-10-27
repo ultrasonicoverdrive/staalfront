@@ -574,7 +574,28 @@ mod tests {
         assert!(far > 0 && far < near / 2, "{far} vs {near}");
     }
 
-    /// The cost of the sound selection in a heavy fight: `FxSound::plan_events` (what `play_frame` runs on the
+    #[test]
+    fn zooming_out_makes_a_steady_stream_less_frequent_through_the_game_path() {
+        let heard = |cam: f32| {
+            let (mut fx, mut sound) = setup();
+            let mut audio = all_names_audio("zoomstream");
+            let mut n = 0;
+            for t in 0..60u32 {
+                fx.push_events(&[fire_at(weapon("cannon"), [42.0, 12.0], u64::from(t))]);
+                n += game_frame(&mut fx, &mut sound, &mut audio, t + 1, listener(cam))
+                    .0
+                    .len();
+            }
+            n
+        };
+        let (close, middle, far) = (heard(30.0), heard(100.0), heard(400.0));
+        assert!(
+            close > middle && middle > far && far > 0,
+            "{close} {middle} {far}"
+        );
+    }
+
+    /// The cost of the sound selection in a heavy fight:`FxSound::plan_events` (what `play_frame` runs on the
     /// shown events) plus the `play_at` calls, on 620 events a frame for 40 frames. Run with `--release
     /// --nocapture` to see the numbers. The particle pool is left out (`FxPlayer::frame` is slow in a debug
     /// build and is not what is measured). No assertion about speed beyond a very loose one.

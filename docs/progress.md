@@ -2051,6 +2051,38 @@ Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
   every field cell per ore version (`SimSnapshot::capture`, `OreView::changes`), O(field cells), also unmeasured.
   Measure both, and upload only the changed texels if it shows.
 
+## WP11.3 notes: positional sound
+
+Branch `wp/11.3-positional-sound`. The shots, hits and deaths the picture shows are now heard at their place, louder
+near and when zoomed in, quieter and rarer far away and zoomed out. Rules: `docs/rules/audio.md`.
+
+- **What is built.** `sf_audio::config` (`AudioConfig`: `ra_audio`, `spatial`, `mix`, `positional`) reads
+  `assets/config/audio.ron`, which is also compiled in as the fallback; the numbers of `spatial.rs` (radii, zoom
+  near/floor, pan width and growth, max pan, audible gain) moved there, `SpatialParams::default()` is the shipped file and
+  `AUDIBLE_GAIN` is gone (`Mix::is_audible(&params)`). `sf_audio::positional::Planner` picks the playbacks of a frame
+  (quiet, priority then loudness, merge within a tick and radius, voice limit, spacing that grows towards
+  `far_spacing_ticks` as the gain falls, so zooming out makes sounds rarer too). `sf_game::fx_sound::FxSound::play_frame`
+  is what the runner calls after `FxPlayer::frame` and the listener; `FxPlayer::shown()` gives it the events the picture
+  just showed. `AudioSystem` got `has_sound` (never warns), `listener()` and `set_trace`/`take_trace` (what it would play,
+  also without a device).
+- **Seen in the game** (Xvfb, Mesa lavapipe, release, `sf_game --sandbox --fight --exit-after 30`, no audio device):
+  with the shipped bank the 130 fight events of the run are all silent and give no message (`summary: fight sounds
+  SoundTotals { requested: 130, silent: 130, ... }`). With a scratch copy of the assets (`SF_ASSETS`) whose bank names
+  all 18 event sounds (the CC0 click) the same run gives `requested: 130, merged: 2, spaced: 11, played: 117`. No
+  screenshots: nothing on the screen changes.
+- **Cost** (release, relative; shared container, load average 4.7 to 5.3): `the_cost_of_a_heavy_fight_frame` runs 620
+  events a frame (300 shots, 300 hits, 20 deaths) through `plan_events` and the `play_at` calls: **mean 116 us, worst
+  185 us** over 40 frames (11 played, 21 merged, 198 limited, 388 spaced). A debug build: mean 1.3 ms. There is no
+  "before" (the step is new); the frame budget is 16.7 ms. Not measured: the real mixer cost of 11 voices a frame, and
+  `sf_demo --bench --fight` (WP5.6b).
+- **Gaps.** (1) The bank has no weapon, impact or explosion sounds; only `explosion.small` has a Red Alert mapping, so
+  without the player's files nothing of the fight is heard yet. No sound was added. (2) The sim has no event for selecting
+  or ordering a unit, placing or finishing a structure or unloading; none was added (WP11.2 and later). (3) The call in
+  `Runner::frame` and the wiring of `audio.ron` into `AudioSystem` at start are not covered by a test (the runner needs
+  a window); the game run above shows they work. (4) `audio.ron` is not hot-reloaded. (5) `PlanStats` of the run is
+  printed at exit (`summary: fight sounds`) but not in the F1 panel. (6) The numbers in `audio.ron` are first guesses
+  to be tuned by ear once there are sounds.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
