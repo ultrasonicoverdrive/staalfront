@@ -5,7 +5,7 @@ close-up to the whole map and cartoon cutscenes. Inspired by the game rules of
 Command & Conquer: Red Alert, without its name, world, units or media.*
 
 Drawn up 14-10-2026. Source: `docs/red-alert-analysis.md` (functional analysis of
-the EA source code). Execution: Sonnet 5 agents at effort medium, [xhigh] work packages on Opus at effort low, fix rounds on Opus at effort low (see §12; since 24-10-2026 and 25-10-2026).
+the EA source code). Execution: Sonnet 5 agents at effort medium, [xhigh] work packages on Opus at effort low, fix rounds on Opus at effort low (see §12; fix rounds since 24-10-2026, [xhigh] since 25-10-2026).
 
 ---
 
