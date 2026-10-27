@@ -141,6 +141,17 @@ pub enum Command {
         /// What the turrets aim at.
         target: Option<EntityId>,
     },
+    /// Take up to `amount` of ore from `cell` (WP7.1, `docs/rules/economy.md`). The
+    /// harvester (WP7.2) takes ore by itself inside the tick; this command is the same take
+    /// for scenarios and tests, so that depletion and regrowth can be pinned without a
+    /// harvester. It counts as ignored in a world without ore rules and when the cell gave
+    /// nothing (empty, not a field cell, off the map). It changes no money (WP7.4).
+    TakeOre {
+        /// The cell to take from.
+        cell: Cell,
+        /// The most to take; the cell gives what it has if that is less.
+        amount: u16,
+    },
     /// Remove an entity.
     Despawn {
         /// The entity.

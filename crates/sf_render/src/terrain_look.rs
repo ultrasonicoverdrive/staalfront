@@ -86,11 +86,58 @@ pub struct Edge {
     pub shore_amount: f32,
 }
 
+/// How a resource cell looks at one fill level (WP7.1): the ore cell is drawn from the first
+/// level whose `up_to_percent` is at least the cell's fill, so a field shows what is left in it.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceLevel {
+    /// The highest fill, in percent of the cell maximum, this level shows. 0 is an empty cell;
+    /// the last level is 100.
+    pub up_to_percent: u8,
+    /// Base colour of the ground at this level, sRGB.
+    pub color: [u8; 3],
+    /// How many of the bright flecks of the look's `Flecks` pattern are drawn, in percent
+    /// (0: none, 100: as the look itself).
+    pub flecks_percent: u8,
+    /// The flat colour of a cell of this level on the minimap, sRGB.
+    pub minimap: [u8; 3],
+}
+
+/// The looks of a resource terrain type by fill level (WP7.1, `docs/rules/economy.md`).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceLooks {
+    /// The terrain type (by name) whose cells show their fill. Its own look has the
+    /// `Flecks` pattern.
+    pub terrain: String,
+    /// From empty to full.
+    pub levels: Vec<ResourceLevel>,
+}
+
+impl ResourceLooks {
+    /// The level a cell shows when it holds `amount` of at most `max`: the first level whose
+    /// `up_to_percent` is at least the fill (a non-empty cell shows at least 1 percent).
+    pub fn level_of(&self, amount: u16, max: u16) -> usize {
+        let max = u32::from(max.max(1));
+        let percent = if amount == 0 {
+            0
+        } else {
+            (u32::from(amount) * 100 / max).max(1)
+        };
+        self.levels
+            .iter()
+            .position(|l| u32::from(l.up_to_percent) >= percent)
+            .unwrap_or(self.levels.len() - 1)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LookFile {
     edge: Edge,
     looks: Vec<TerrainLook>,
+    #[serde(default)]
+    resource: Option<ResourceLooks>,
 }
 
 /// Why a looks file was refused.
@@ -110,6 +157,7 @@ impl std::error::Error for LookError {}
 pub struct TerrainLooks {
     pub edge: Edge,
     looks: Vec<TerrainLook>,
+    resource: Option<ResourceLooks>,
 }
 
 impl TerrainLooks {
@@ -150,15 +198,53 @@ impl TerrainLooks {
                 return Err(LookError(format!("{} appears twice", l.terrain)));
             }
         }
+        if let Some(r) = &file.resource {
+            let ls = &r.levels;
+            let ok = (1..=8).contains(&ls.len())
+                && ls[0].up_to_percent == 0
+                && ls.last().is_some_and(|l| l.up_to_percent == 100)
+                && ls
+                    .windows(2)
+                    .all(|w| w[0].up_to_percent < w[1].up_to_percent)
+                && ls.iter().all(|l| l.flecks_percent <= 100);
+            if !ok {
+                return Err(LookError(format!(
+                    "{}: resource levels must be 1 to 8, start at up_to_percent 0, end at 100, \
+                     rise strictly, with flecks_percent at most 100",
+                    r.terrain
+                )));
+            }
+            let flecks = file
+                .looks
+                .iter()
+                .any(|l| l.terrain == r.terrain && matches!(l.pattern, Pattern::Flecks { .. }));
+            if !flecks {
+                return Err(LookError(format!(
+                    "{}: a resource needs a look with the Flecks pattern",
+                    r.terrain
+                )));
+            }
+        }
         Ok(Self {
             edge: e,
             looks: file.looks,
+            resource: file.resource,
         })
+    }
+
+    /// The fill levels of the resource terrain type, if the file has them.
+    pub fn resource(&self) -> Option<&ResourceLooks> {
+        self.resource.as_ref()
     }
 
     /// Every entry names a type of `types`: a misspelt name would silently
     /// leave its type in the derived colour.
     pub fn check_names(&self, types: &TerrainTypes) -> Result<(), LookError> {
+        if let Some(r) = &self.resource
+            && types.id_of(&r.terrain).is_none()
+        {
+            return Err(LookError(format!("{}: no such terrain type", r.terrain)));
+        }
         match self
             .looks
             .iter()
@@ -222,13 +308,26 @@ impl TerrainLook {
     /// mip level 0. It repeats every `TILE_METERS` (4 m: one gameplay cell,
     /// aligned to the cells).
     pub fn texture(&self) -> Vec<u8> {
+        self.texture_with_flecks(100)
+    }
+
+    /// The texture of a fill level of a resource look (WP7.1): the look with `level`'s ground
+    /// colour and its share of flecks. The fleck pattern is the same, so the flecks that remain
+    /// stay where they were.
+    pub fn level_texture(&self, level: &ResourceLevel) -> Vec<u8> {
+        let mut look = self.clone();
+        look.color = level.color;
+        look.texture_with_flecks(u32::from(level.flecks_percent))
+    }
+
+    fn texture_with_flecks(&self, fleck_percent: u32) -> Vec<u8> {
         let seed = name_hash(&self.terrain);
         let n = TEXTURE_SIZE;
         let mut out = Vec::with_capacity((n * n * 4) as usize);
         for y in 0..n {
             for x in 0..n {
                 let (u, v) = (x as f32 / n as f32, y as f32 / n as f32);
-                let rgb = self.texel(seed, u, v);
+                let rgb = self.texel(seed, u, v, fleck_percent);
                 out.extend_from_slice(&rgb);
                 out.push(255);
             }
@@ -236,7 +335,7 @@ impl TerrainLook {
         out
     }
 
-    fn texel(&self, seed: u32, u: f32, v: f32) -> [u8; 3] {
+    fn texel(&self, seed: u32, u: f32, v: f32, fleck_percent: u32) -> [u8; 3] {
         let coarse = tile_noise(seed, u, v, 4);
         let medium = tile_noise(seed ^ 1, u, v, 16);
         let fine = tile_noise(seed ^ 2, u, v, 64);
@@ -276,7 +375,9 @@ impl TerrainLook {
             }
             Pattern::Flecks { color: fleck } => {
                 let speck = tile_noise(seed ^ 5, u, v, 24);
-                let k = ((speck - 0.64) / 0.06).clamp(0.0, 1.0);
+                // 100 percent is the threshold of the look itself (0.64); fewer flecks raise it.
+                let threshold = 1.0 - 0.36 * fleck_percent as f32 / 100.0;
+                let k = ((speck - threshold) / 0.06).clamp(0.0, 1.0);
                 for (ch, f) in color.iter_mut().zip(fleck) {
                     *ch += (f32::from(*f) - *ch) * k;
                 }
@@ -308,6 +409,21 @@ pub struct TerrainSurface {
     /// Shore line colour (linear) and strength.
     pub shore: [f32; 3],
     pub shore_amount: f32,
+    /// The resource type's fill levels (WP7.1): the texture-array layer of the first level (the
+    /// others follow it), the terrain type id whose cells they replace and the style bits of
+    /// that type. `None` without a terrain layer or without `resource` in the looks.
+    pub resource: Option<ResourceLayers>,
+}
+
+/// Where the fill levels of the resource type are in the texture array.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResourceLayers {
+    /// The terrain type id of the resource (`ore`).
+    pub type_id: u8,
+    /// The layer of level 0; level `n` is `first_layer + n`.
+    pub first_layer: u8,
+    /// The style bits of the type, kept in the index texel.
+    pub style: u8,
 }
 
 /// The surface of a map: from its terrain layer if it has one (the table of
@@ -330,6 +446,7 @@ pub fn terrain_surface(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) ->
             wobble: 0.0,
             shore: edge.shore,
             shore_amount: 0.0,
+            resource: None,
         };
     };
     let mut layer_of = [0_u8; 256];
@@ -341,6 +458,20 @@ pub fn terrain_surface(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) ->
         style_of[usize::from(t.id)] = look.style_bits();
         layers.push(look.texture());
     }
+    // The fill levels of the resource type: extra layers after the types'.
+    let resource = looks.resource().and_then(|r| {
+        let type_id = types.id_of(&r.terrain)?;
+        let look = looks.look_for(&r.terrain);
+        let first_layer = layers.len() as u8;
+        for level in &r.levels {
+            layers.push(look.level_texture(level));
+        }
+        Some(ResourceLayers {
+            type_id,
+            first_layer,
+            style: look.style_bits(),
+        })
+    });
     debug_assert!(
         terrain.ids().iter().all(|&id| types.get(id).is_some()),
         "the terrain layer holds an id that is not in the table of terrain types"
@@ -359,6 +490,7 @@ pub fn terrain_surface(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) ->
         wobble: edge.wobble_m / cell,
         shore: edge.shore,
         shore_amount: edge.shore_amount,
+        resource,
     }
 }
 

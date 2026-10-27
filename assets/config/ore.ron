@@ -1,0 +1,24 @@
+// Ore on the map (WP7.1): how much a field cell holds and how fast it grows back.
+// Read by sf_data::ore; sf_bridge::ore_rules hands the numbers to the world
+// (World::with_ore). The rules are in docs/rules/economy.md.
+//
+// The numbers are placeholders chosen so that a field of about 50 cells holds
+// about 6000 (the size of the larger fields in content/missions: F1-M04 6000
+// in 8 x 6 cells, F1-M08 about 6000 and about 12000). The economy is tuned in
+// WP7.2 to WP7.4 and in the playtest of M1.
+//
+// Amounts are whole units of ore. What a unit of ore is worth in money is the
+// refinery's rule (WP7.4); today one unit is one credit.
+(
+    // What every ore cell of the terrain holds when the world is made.
+    start: 120,
+    // The most a cell can hold. Growth stops here. At least 1, not below `start`.
+    max: 160,
+    // What a cell below the maximum gains each time its turn comes.
+    // 0 turns regrowth off.
+    regrow_amount: 1,
+    // Ticks between two turns of the same cell (20 ticks are a second, so 200 ticks are ten
+    // seconds: a cell that was emptied is back to 120 after 24 minutes). A tick touches about
+    // `cells / regrow_period` cells, not the whole map. 1 to 72000.
+    regrow_period: 200,
+)

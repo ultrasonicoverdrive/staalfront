@@ -34,6 +34,22 @@
         shore: (0.80, 0.93, 0.96),
         shore_amount: 0.40,
     ),
+    // How much ore a cell holds (WP7.1, docs/rules/economy.md): a cell of the `terrain` type
+    // below is drawn from the first level whose `up_to_percent` is at least its fill (percent
+    // of the cell maximum in ore.ron), on the map and on the minimap. The ground colour and
+    // the share of bright flecks fall with the fill; an empty cell is bare ground. The type
+    // needs a look with the Flecks pattern. Level 0 is the empty cell (up_to_percent 0), the
+    // last level ends at 100. Only a world with ore rules shows the levels; a map drawn
+    // without ore state keeps the plain look of the type.
+    resource: (
+        terrain: "ore",
+        levels: [
+            (up_to_percent: 0, color: (84, 64, 44), flecks_percent: 0, minimap: (84, 64, 44)),
+            (up_to_percent: 33, color: (90, 63, 38), flecks_percent: 30, minimap: (104, 76, 40)),
+            (up_to_percent: 66, color: (94, 65, 36), flecks_percent: 65, minimap: (122, 88, 40)),
+            (up_to_percent: 100, color: (98, 66, 34), flecks_percent: 100, minimap: (138, 100, 39)),
+        ],
+    ),
     looks: [
         (
             terrain: "grass",

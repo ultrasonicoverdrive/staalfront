@@ -69,6 +69,11 @@ pub struct SimSnapshot {
     gave_up: Vec<Option<Tick>>,
     /// Every cell a structure occupies (WP2.4), in entity order.
     structures: Vec<(u32, u32)>,
+    /// The ore of the world (WP7.1): its version, the cell maximum and every field cell with what
+    /// it holds, `(x, y, amount)` in row-major order. Copied only when the version changed.
+    ore_version: Option<u64>,
+    ore_max: u16,
+    ore: Vec<(u32, u32, u16)>,
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
@@ -86,6 +91,9 @@ impl SimSnapshot {
             orders: Vec::new(),
             gave_up: Vec::new(),
             structures: Vec::new(),
+            ore_version: None,
+            ore_max: 0,
+            ore: Vec::new(),
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
@@ -130,6 +138,23 @@ impl SimSnapshot {
                         }
                     }
                 }
+            }
+        }
+        // The ore: the amounts are copied only when something changed since this buffer was last
+        // filled (a take, a growth), so a field at rest costs one comparison.
+        match world.ore() {
+            Some(ore) => {
+                if self.ore_version != Some(ore.version()) {
+                    self.ore_version = Some(ore.version());
+                    self.ore_max = ore.rules().max;
+                    self.ore.clear();
+                    self.ore
+                        .extend(ore.cells().map(|(c, amount)| (c.x, c.y, amount)));
+                }
+            }
+            None => {
+                self.ore_version = None;
+                self.ore.clear();
             }
         }
         // The table never changes after the world is made: share one copy.
@@ -223,6 +248,22 @@ impl SimSnapshot {
     /// (`World::occupant_at`), `(x, y)`. Units occupy no cells.
     pub fn structure_cells(&self) -> &[(u32, u32)] {
         &self.structures
+    }
+
+    /// The version of the world's ore state as of this snapshot (`Ore::version`); `None` for a
+    /// world without ore. Equal versions mean equal amounts.
+    pub fn ore_version(&self) -> Option<u64> {
+        self.ore_version
+    }
+
+    /// The most a cell can hold (`OreRules::max`); zero for a world without ore.
+    pub fn ore_max(&self) -> u16 {
+        self.ore_max
+    }
+
+    /// Every field cell with the ore it holds, `(x, y, amount)`, row-major.
+    pub fn ore_cells(&self) -> &[(u32, u32, u16)] {
+        &self.ore
     }
 
     /// The cell a position lies in; `None` outside the map.

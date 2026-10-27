@@ -153,6 +153,13 @@ pub struct Scenario {
     /// that have victims standing still, are the worlds they were pinned with. Needs `combat`.
     #[serde(default)]
     pub targeting: bool,
+    /// Ore on the map (WP7.1, `docs/rules/economy.md`): the rules of the ore, written out in the
+    /// scenario so that editing the shipped `assets/config/ore.ron` never moves its checksum.
+    /// Every harvestable cell of the terrain then holds `start`. Left out: the world has no ore
+    /// state, which is every scenario of the earlier phases. Needs a terrain layer (`map_name`)
+    /// to have any ore cell.
+    #[serde(default)]
+    pub ore: Option<OreSpec>,
     /// The weapon table read from `unit_defs` by [`Scenario::load`] when `combat` is on,
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
@@ -166,6 +173,31 @@ pub struct Scenario {
     /// Commands for later ticks.
     #[serde(default)]
     pub commands: Vec<TimedCommand>,
+}
+
+/// The ore rules of a scenario (`sf_sim::OreRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OreSpec {
+    /// What every ore cell holds at the start.
+    pub start: u16,
+    /// The most a cell can hold.
+    pub max: u16,
+    /// What a cell below the maximum gains in its turn.
+    pub regrow_amount: u16,
+    /// Ticks between two turns of a cell.
+    pub regrow_period: u32,
+}
+
+impl OreSpec {
+    fn rules(self) -> sf_sim::OreRules {
+        sf_sim::OreRules {
+            start: self.start,
+            max: self.max,
+            regrow_amount: self.regrow_amount,
+            regrow_period: self.regrow_period,
+        }
+    }
 }
 
 /// The map size in cells.
@@ -359,6 +391,14 @@ pub enum Action {
         /// What the turrets aim at; none lets them return to the hull.
         #[serde(default)]
         target: Option<(u32, u32)>,
+    },
+    /// `Command::TakeOre` (WP7.1): take up to `amount` of ore from `cell`, as a harvester will.
+    /// Ignored by the simulation without `ore`, on an empty cell and off a field.
+    TakeOre {
+        /// The cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+        /// The most to take.
+        amount: u16,
     },
     /// `Command::Despawn` for each id.
     Despawn {
@@ -858,6 +898,17 @@ impl Scenario {
                     id_problems(&at, ids, &mut p);
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
+                Action::TakeOre { cell, .. } => {
+                    if map_ok && (cell.0 >= width || cell.1 >= height) {
+                        p.push(format!(
+                            "{at}: cell ({}, {}) lies outside the {width}x{height} map",
+                            cell.0, cell.1
+                        ));
+                    }
+                    if self.ore.is_none() {
+                        p.push(format!("{at}: TakeOre needs `ore`"));
+                    }
+                }
                 Action::Place { cell, .. }
                 | Action::SpawnUnit { cell, .. }
                 | Action::PlaceStructure { cell, .. } => {
@@ -950,6 +1001,11 @@ impl Scenario {
                     .with_movement(movement)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
             }
+        }
+        if let Some(ore) = self.ore {
+            world = world
+                .with_ore(ore.rules())
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {
             world = world
@@ -1080,6 +1136,13 @@ impl Scenario {
                             .schedule(tick, player, Command::Despawn { id })
                             .map_err(sim)?;
                     }
+                }
+                Action::TakeOre { cell, amount } => {
+                    let command = Command::TakeOre {
+                        cell: Cell::new(cell.0, cell.1),
+                        amount: *amount,
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
                 }
                 Action::Place { kind, owner, cell } => {
                     let command = Command::Place {

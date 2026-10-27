@@ -34,8 +34,9 @@ What the flags mean, and who reads them:
 
 * `buildable`: whether a structure may stand on the cell. Read by `Command::Place`
   (below) and `Command::PlaceStructure`; WP6.x building placement will read it too.
-* `harvestable`: whether harvesters can take resources from the cell. Nothing reads it
-  yet (phase 7).
+* `harvestable`: whether harvesters can take resources from the cell. Since WP7.1 the
+  cells with this flag are the **field cells** of the ore state, which holds an amount per
+  cell (`economy.md`); an emptied cell keeps its type.
 
 Which cells a unit may enter and its speed there: `World::cost(class, cell)` and
 `World::passable(class, cell)` (`movement.md`). The sim's `TerrainFlags` also has a derived
@@ -108,6 +109,8 @@ are not involved.
 | rock | mid grey with dark cracks | |
 | ore | dark ochre with gold flecks | |
 | bridge | light wood, 8 planks per 4 m with dark gaps | flat |
+
+Since WP7.1 an ore cell is drawn by how much ore it holds (four fill levels of the look, `terrain_look.ron` `resource`; `economy.md`): the table above is the full cell.
 
 * **The minimap** (WP2.3) draws every cell in one flat colour of its type, taken from the
   same look: `minimap: (r, g, b)` if the entry names one, otherwise its base `color`. The

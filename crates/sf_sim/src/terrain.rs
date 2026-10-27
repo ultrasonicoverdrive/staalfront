@@ -77,7 +77,8 @@ pub struct TerrainId(pub u8);
 /// What a terrain type allows. `buildable` is read by
 /// [`Command::Place`](crate::Command::Place) and
 /// [`Command::PlaceStructure`](crate::Command::PlaceStructure), `harvestable`
-/// by nothing yet (phase 7). Movement is not a flag: see [`crate::movement`].
+/// since WP7.1 by the ore state, which has an amount for every harvestable cell
+/// ([`crate::ore`]). Movement is not a flag: see [`crate::movement`].
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
 pub struct TerrainFlags {
     /// A structure may stand on it.

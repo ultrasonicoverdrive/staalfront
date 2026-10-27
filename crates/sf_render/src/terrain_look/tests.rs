@@ -144,7 +144,9 @@ fn a_map_with_terrain_is_drawn_from_its_types_not_its_material_map() {
     let map = map_with(vec![0, 2, 5, 1, 3, 4], 3, 2, &types);
     let s = terrain_surface(&map, &types, &looks);
     assert_eq!(s.size, (3, 2));
-    assert_eq!(s.layers.len(), types.len());
+    // One layer per type, then one per fill level of the ore (WP7.1).
+    let levels = looks.resource().map_or(0, |r| r.levels.len());
+    assert_eq!(s.layers.len(), types.len() + levels);
     assert_eq!(s.index.len(), 3 * 2 * 2);
     assert_eq!(s.index_meters, 4.0);
     // Layers are in id order: layer = position in the table.
@@ -178,7 +180,8 @@ fn a_new_type_is_drawn_before_anybody_chose_its_colours() {
     assert!(looks.get("lava").is_none());
     let map = map_with(vec![9, 0, 0, 0], 2, 2, &types);
     let s = terrain_surface(&map, &types, &looks);
-    assert_eq!(s.layers.len(), 7);
+    let levels = looks.resource().map_or(0, |r| r.levels.len());
+    assert_eq!(s.layers.len(), 7 + levels, "7 types, then the ore levels");
     // id 9 sits at position 6 of the table.
     assert_eq!(s.index[0], 6);
     let lava = looks.look_for("lava");

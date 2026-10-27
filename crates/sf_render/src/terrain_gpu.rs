@@ -59,9 +59,76 @@ pub struct TerrainGpu {
     pub planner: LodPlanner,
     /// Debug: fixed level per chunk instead of the automatic selection.
     pub level_override: Option<Vec<u8>>,
+    /// The cell index texture and its CPU copy (two bytes per texel), kept so that single
+    /// cells can be rewritten (the fill level of ore, WP7.1).
+    cell_texture: wgpu::Texture,
+    index: Vec<u8>,
+    index_width: u32,
+    resource: Option<crate::terrain_look::ResourceLayers>,
 }
 
 impl TerrainGpu {
+    /// Show the fill of resource cells (WP7.1): each `(x, y, level)` makes cell `(x, y)` use the
+    /// texture of fill level `level` of the resource type. Only the rows that changed are
+    /// uploaded, in one write. A change that leaves the cell as it was uploads nothing.
+    /// Returns the number of rows uploaded; zero without resource looks.
+    pub fn set_resource_levels(&mut self, queue: &wgpu::Queue, cells: &[(u32, u32, u8)]) -> u32 {
+        let Some(res) = self.resource else {
+            return 0;
+        };
+        let width = self.index_width as usize;
+        let (mut first, mut last) = (u32::MAX, 0_u32);
+        for &(x, y, level) in cells {
+            let at = (y as usize * width + x as usize) * 2;
+            if at + 1 >= self.index.len() || x >= self.index_width {
+                continue;
+            }
+            let texel = [res.first_layer + level, res.style];
+            if self.index[at..at + 2] != texel {
+                self.index[at..at + 2].copy_from_slice(&texel);
+                first = first.min(y);
+                last = last.max(y);
+            }
+        }
+        if first == u32::MAX {
+            return 0;
+        }
+        let rows = last - first + 1;
+        let row_bytes = width * 2;
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.cell_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: first,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &self.index[first as usize * row_bytes..(last as usize + 1) * row_bytes],
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row_bytes as u32),
+                rows_per_image: Some(rows),
+            },
+            wgpu::Extent3d {
+                width: self.index_width,
+                height: rows,
+                depth_or_array_layers: 1,
+            },
+        );
+        rows
+    }
+
+    /// The layer and style bits the index holds for cell `(x, y)` (for tests).
+    pub fn cell_texel(&self, x: u32, y: u32) -> Option<[u8; 2]> {
+        let at = (y as usize * self.index_width as usize + x as usize) * 2;
+        (x < self.index_width)
+            .then(|| self.index.get(at..at + 2).map(|t| [t[0], t[1]]))
+            .flatten()
+    }
+
     /// Update the debug visualisation flags in the terrain uniform.
     pub fn write_debug_view(&self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
         let params = TerrainParams {
@@ -347,5 +414,9 @@ pub fn build(
         config: *config,
         planner,
         level_override: None,
+        cell_texture,
+        index: surface.index.clone(),
+        index_width: surface.size.0,
+        resource: surface.resource,
     }
 }
