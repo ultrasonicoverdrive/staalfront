@@ -3,19 +3,18 @@
 //! The benchmark flies a fixed camera path ([`crate::bench`]) over 5,000 wandering units. For M0c the same
 //! crowd and the same path are used, and a fight is added where the path looks: shots, hits, deaths, wrecks
 //! and smoke are what the frames then have to draw on top of the crowd. The fight is **fixed**: the sites, the
-//! roles, the places and the ticks are constants of this file, so every run (and every machine) plays the
-//! same skirmish and the checksums of the world are comparable. `tests/bench_scene.rs` and the tests of
-//! `bench_scene` pin them.
+//! roles, the places and the ticks are the data of `assets/config/skirmish.ron` (`sf_data::skirmish`), so every
+//! run (and every machine) plays the same skirmish and the checksums of the world are comparable.
+//! `tests/bench_scene.rs` pins them.
 //!
 //! # What is placed
 //!
-//! Three sites, one under each phase of the flight that is to show a fight: the map centre (the `close_up`
-//! phase looks there), the place of the `mid_hold` phase and the middle of the `low_pass`. At each site, every
-//! [`WAVE_EVERY`] ticks from tick 0 to [`LAST_WAVE`], a **wave** of [`WAVE`] units of each side appears face to face
-//! at [`GAP_TENTHS`]/10 cells, inside the reach of the weapons (cannons 5 cells, rifles 4). Nobody is given an
-//! order: the units pick their own targets and fire back (WP5.4), which is what the game does, so the waves
-//! keep the fight going for the whole flight (a wave that has died is replaced) and make the shots, hits,
-//! deaths and wrecks the effects are to draw.
+//! Sites under the phases of the flight that are to show a fight (the map centre for `close_up`, then the
+//! place of `mid_hold` and the middle of the `low_pass`). At each site, every `wave_every_ticks` from tick 0 to
+//! `last_wave_tick`, a **wave** of units of each side appears face to face at `gap_tenths`/10 cells, inside the
+//! reach of the weapons (cannons 5 cells, rifles 4). Nobody is given an order: the units pick their own targets
+//! and fire back (WP5.4), which is what the game does, so the waves keep the fight going for the whole flight
+//! (a wave that has died is replaced) and make the shots, hits, deaths and wrecks the effects are to draw.
 //!
 //! The units are made by `SpawnUnit` commands scheduled on the world before it starts, from the unit
 //! definitions (`unit_defs.ron`) and the combat of the world ([`crate::playfield::with_combat`]); nothing writes
@@ -27,149 +26,52 @@
 //! owners). They are not armed (they have no unit definition), so the skirmish does not touch them and they
 //! do not take part in it.
 
+use sf_data::skirmish::Skirmish;
 use sf_data::units::UnitDefs;
 use sf_math::{Fx, Vec2};
 use sf_sim::{Command, Kind, PlayerId, Tick, World};
 
-use crate::sandbox::{MERIDIAN, VEYRAN};
+/// The map the sites of the file are written for, cells a side (the camera path of the benchmark is too).
+pub const PATH_MAP_CELLS: i32 = 256;
 
-/// Ticks between two waves at a site.
-pub const WAVE_EVERY: u64 = 100;
-
-/// The tick of the last wave (the benchmark's flight is about 1,500 ticks long).
-pub const LAST_WAVE: u64 = 1400;
-
-/// Tenths of a cell between the two front lines of a wave.
-pub const GAP_TENTHS: i32 = 36;
-
-/// One place of the skirmish, in cells on the map of 256 x 256 cells the benchmark path is written for
-/// (a smaller map scales it, as the camera path does).
-#[derive(Clone, Copy, Debug)]
-pub struct Site {
-    /// What the site is for.
-    pub name: &'static str,
-    /// The middle between the two sides, cells on the 256-cell map.
-    pub at: (i32, i32),
-}
-
-/// The three sites. The `close_up` phase of the flight looks at (500..530 m, 500..520 m) = cells (125..132,
-/// 125..130); the `mid_hold` at (700..690 m, 380..400 m) = cells (175..172, 95..100); the `low_pass` flies from
-/// (300 m, 650 m) to (820 m, 720 m), so cells (140, 171) are about its middle.
-pub const SITES: [Site; 3] = [
-    Site {
-        name: "centre",
-        at: (128, 128),
-    },
-    Site {
-        name: "mid_hold",
-        at: (174, 97),
-    },
-    Site {
-        name: "low_pass",
-        at: (140, 171),
-    },
-];
-
-/// One unit of a wave: its role, and where it stands in tenths of a cell: `along` is the distance behind the
-/// side's front line, `across` the offset sideways.
-struct Slot {
-    role: &'static str,
-    along: i32,
-    across: i32,
-}
-
-/// The wave of one side: infantry in front (they reach the other side's front line), the tanks behind them.
-/// Eight units: three riflemen and two rocket troopers, a heavy tank (two muzzles) and two light tanks (one
-/// muzzle each).
-const WAVE_SLOTS: [Slot; 8] = [
-    Slot {
-        role: "rifleman",
-        along: 0,
-        across: -12,
-    },
-    Slot {
-        role: "rifleman",
-        along: 0,
-        across: 0,
-    },
-    Slot {
-        role: "rifleman",
-        along: 0,
-        across: 12,
-    },
-    Slot {
-        role: "rocket_trooper",
-        along: 0,
-        across: -24,
-    },
-    Slot {
-        role: "rocket_trooper",
-        along: 0,
-        across: 24,
-    },
-    Slot {
-        role: "heavy_tank",
-        along: 16,
-        across: 0,
-    },
-    Slot {
-        role: "light_tank",
-        along: 16,
-        across: -28,
-    },
-    Slot {
-        role: "light_tank",
-        along: 16,
-        across: 28,
-    },
-];
-
-/// Units in a wave of one side.
-pub const WAVE: usize = WAVE_SLOTS.len();
-
-/// How many waves a site gets.
-pub const fn waves() -> u64 {
-    LAST_WAVE / WAVE_EVERY + 1
-}
-
-/// The shipped definitions' roles of the skirmish, by kind number.
-fn kind_of(defs: &UnitDefs, role: &str) -> Option<Kind> {
-    defs.kind_of(role).map(Kind)
-}
-
-/// Schedules every wave of every site on `world`, which must have the unit table and the combat of `defs`
-/// (`with_units` and [`crate::playfield::with_combat`]) and must not have started. Returns how many units were
-/// scheduled (`3 * waves * 2 * WAVE`). A role the definitions lack is left out and not counted.
+/// Schedules every wave of every site of the shipped `skirmish.ron` on `world`, which must have the unit table and
+/// the combat of `defs` (`with_units` and [`crate::playfield::with_combat`]) and must not have started. `cells` is
+/// the map's size: the sites scale with it as the camera path does. Returns how many units were scheduled
+/// (`Skirmish::units`; a role the definitions lack is left out and not counted).
+///
+/// # Panics
+///
+/// If the shipped file does not match `defs`, which a test rules out for the shipped definitions.
 pub fn schedule(world: &mut World, defs: &UnitDefs, cells: (u32, u32)) -> u32 {
+    let skirmish = Skirmish::embedded();
+    skirmish
+        .check_against(defs)
+        .unwrap_or_else(|e| panic!("the skirmish matches the unit definitions: {e}"));
     let mut scheduled = 0;
-    for site in &SITES {
+    for site in &skirmish.sites {
         // The camera path scales with the map; so does the fight.
-        let cx = site.at.0 * cells.0 as i32 / 256;
-        let cy = site.at.1 * cells.1 as i32 / 256;
-        for wave in 0..waves() {
-            let tick = Tick(wave * WAVE_EVERY);
+        let cx = site.at.0 * cells.0 as i32 / PATH_MAP_CELLS;
+        let cy = site.at.1 * cells.1 as i32 / PATH_MAP_CELLS;
+        for wave in 0..skirmish.waves() {
+            let tick = Tick(wave * skirmish.wave_every_ticks);
             // A little sideways shift per wave, so that a survivor of the last wave is not stood on.
             let shift = (wave % 3) as i32 * 4 - 4;
-            for (side, owner, dir) in [("meridian", MERIDIAN, -1), ("veyran", VEYRAN, 1)] {
-                let _ = side;
-                for slot in &WAVE_SLOTS {
-                    let Some(kind) = kind_of(defs, slot.role) else {
+            for side in &skirmish.sides {
+                for slot in &skirmish.wave {
+                    let Some(kind) = defs.kind_of(&slot.role) else {
                         continue;
                     };
-                    let front = GAP_TENTHS / 2 + slot.along;
-                    let x = cx * 10 + dir * front;
+                    let front = skirmish.gap_tenths / 2 + slot.along;
+                    let x = cx * 10 + side.direction * front;
                     let y = cy * 10 + slot.across + shift;
-                    let pos = Vec2::new(
-                        Fx::from_ratio(i64::from(x), 10),
-                        Fx::from_ratio(i64::from(y), 10),
-                    );
+                    let tenth = |v: i32| Fx::from_ratio(i64::from(v), 10);
                     let command = Command::SpawnUnit {
-                        kind,
-                        pos,
-                        owner: PlayerId(owner),
+                        kind: Kind(kind),
+                        pos: Vec2::new(tenth(x), tenth(y)),
+                        owner: PlayerId(side.owner),
                     };
                     world
-                        .schedule(tick, PlayerId(owner), command)
+                        .schedule(tick, PlayerId(side.owner), command)
                         .expect("a world that has not started takes commands for any tick");
                     scheduled += 1;
                 }
@@ -183,26 +85,39 @@ pub fn schedule(world: &mut World, defs: &UnitDefs, cells: (u32, u32)) -> u32 {
 mod tests {
     use super::*;
 
+    /// The scheduling counts what the file says, and a smaller map scales the sites (the first wave at tick 0
+    /// is there after one step).
     #[test]
-    fn a_wave_has_eight_units_and_there_are_fifteen_waves() {
-        assert_eq!(WAVE, 8);
-        assert_eq!(waves(), 15);
-        assert_eq!(
-            SITES.map(|s| s.at),
-            [(128, 128), (174, 97), (140, 171)],
-            "the sites under the three phases of the flight"
-        );
-    }
-
-    #[test]
-    fn every_role_of_a_wave_is_in_the_shipped_definitions_and_armed() {
+    fn the_shipped_skirmish_schedules_its_units_and_scales_with_the_map() {
         let defs = UnitDefs::embedded();
-        for slot in &WAVE_SLOTS {
-            assert!(kind_of(&defs, slot.role).is_some(), "{}", slot.role);
-            let def = defs
-                .unit(slot.role)
-                .unwrap_or_else(|| panic!("{}", slot.role));
-            assert!(!def.weapons.is_empty(), "{} is armed", slot.role);
+        let skirmish = Skirmish::embedded();
+        for cells in [256_u32, 128] {
+            let world =
+                World::new(sf_sim::WorldConfig::new(1).with_map_size(cells, cells)).unwrap();
+            let mut world = crate::bench_scene::armed(world, &defs);
+            let scheduled = schedule(&mut world, &defs, (cells, cells));
+            assert_eq!(u64::from(scheduled), skirmish.units(), "{cells} cells");
+            world.step();
+            let first_wave = skirmish.sites.len() * skirmish.sides.len() * skirmish.wave.len();
+            assert_eq!(world.len(), first_wave, "{cells} cells");
+            // Every unit of the first wave is within 6 cells of its (scaled) site.
+            let scaled: Vec<(f32, f32)> = skirmish
+                .sites
+                .iter()
+                .map(|s| {
+                    let f = cells as f32 / PATH_MAP_CELLS as f32;
+                    (s.at.0 as f32 * f, s.at.1 as f32 * f)
+                })
+                .collect();
+            for v in world.snapshot().iter() {
+                let [x, y] = sf_math::render_bridge::vec2_to_f32(v.pos);
+                assert!(
+                    scaled
+                        .iter()
+                        .any(|s| (x - s.0).abs() < 6.0 && (y - s.1).abs() < 6.0),
+                    "a unit at ({x}, {y}) on {cells} cells"
+                );
+            }
         }
     }
 }

@@ -264,7 +264,7 @@ snapshot: both tracer tests.
 | `an_anchor_under_a_pruned_part_moves_to_its_nearest_kept_ancestor`, `anchors_follow_the_axis_and_unit_conversion_and_scaling`, `a_muzzle_named_mesh_is_geometry_not_an_anchor` | the loader's rules of the section above |
 | `set_v4_anchor_counts_are_these_numbers`, `the_test_pack_and_set_v3_have_no_muzzle_anchors_and_fall_back` | 194 files, 44 with `muzzle`, 119 with `fx_`, 283 anchors; test pack 14 files and set v3 30 files with no `muzzle`, four v3 files with `fx_` |
 | the four instancer tests of section 5 | an anchor is where the drawn barrel carries it; a quarter turn of the turret is a quarter turn of the anchor about the pivot; slots, wrecks, rising or not |
-| `a_flash_starts_at_the_muzzle_anchor_when_the_model_has_one`, `a_model_without_a_muzzle_gets_the_bounding_box_rule`, `a_burst_alternates_between_the_muzzles_by_shooter_and_slot`, `drawn_anchors_do_not_answer_for_a_wreck_slot`, `a_death_bursts_a_little_higher_than_a_hit` | what `FxPlayer` asks the picture and does with the answer (a fake `Anchors`, and the real heavy tank in an instancer) |
+| `a_flash_starts_at_the_muzzle_anchor_when_the_model_has_one`, `a_model_without_a_muzzle_gets_the_bounding_box_rule`, `a_burst_alternates_between_the_muzzles_by_shooter_and_slot`, `drawn_anchors_do_not_answer_for_a_wreck_slot`, `a_shot_seen_from_afar_looks_up_no_anchor_and_counts_no_flash`, `a_death_bursts_a_little_higher_than_a_hit` | what `FxPlayer` asks the picture and does with the answer (a fake `Anchors`, and the real heavy tank in an instancer) |
 | `fx_events.rs` `a_shot_points_along_its_mount_turret_or_hull` | gained: every `Fire` carries the attacker's slot, nothing else has a shooter |
 | `a_flash_starts_at_the_barrel_tip_and_a_twin_cannon_alternates_its_muzzles`, `a_single_muzzle_tank_with_its_turret_turned_flashes_at_the_barrel` | through `record`, `frame_with`, `DrawnAnchors` and the real renderer: the particles of each shot start within 0.3 m of the instancer's answer for that muzzle (the second shot of a burst at the other one, 0.912 m apart), the turret is 40 steps off its hull, the picture changes brightly there; the light tank's barrel tip is 2.6 m from the rule's point (the test asserts more than 1 m) |
 | `bench_scene.rs` (five tests) | the checksums of the benchmark worlds, section 10 |
@@ -277,7 +277,8 @@ anchors not moved to the nearest kept ancestor with the pruned frame folded in: 
 `a_turret_64_steps_off_the_hull_...`; slots always taken as rising: `an_anchor_is_found_by_slot_...` (the first version of that
 test did **not** catch it, two units cannot tell; it now has four unsorted ones); `n` without the shot counter:
 `a_burst_alternates_between_the_muzzles_...` and the heavy-tank screenshot test; no cut at the first wreck slot:
-`drawn_anchors_do_not_answer_for_a_wreck_slot`; no death lift: `a_death_bursts_a_little_higher_than_a_hit`; `death_lift_m` 0.5
+`drawn_anchors_do_not_answer_for_a_wreck_slot`; shots at strategic zoom looked up anyway:
+`a_shot_seen_from_afar_looks_up_no_anchor_and_counts_no_flash`; no death lift: `a_death_bursts_a_little_higher_than_a_hit`; `death_lift_m` 0.5
 changed to 0.6 in the RON: `the_shipped_limits_are_these_numbers`; `record` without the shooter: `a_shot_points_along_its_mount_...`
 and both anchor screenshot tests; skirmish gap 3.6 cells changed to 4.0: `the_fight_benchmark_ends_at_these_checksums_...`;
 `DEMO_SPEED` 1.5 changed to 2: all three checksum tests; the skirmish scheduled before the crowd:
@@ -321,7 +322,8 @@ effects_screenshot -- --ignored --nocapture` and `--test fx_events -- --ignored 
 what to read is `docs/bench/README.md`. The skirmish (`sf_game::skirmish`) is fixed: three sites (the map centre, the place of
 `mid_hold`, the middle of `low_pass`), a wave of 8 units per side every 100 ticks from tick 0 to 1400 (720 units in all), face
 to face at 3.6 cells, no orders (the units pick their own targets, WP5.4), made by scheduled `SpawnUnit` commands on a world
-given the unit table and `playfield::with_combat`. The crowd is the demo's own (same seed, kinds, owners; checked equal entity by
+given the unit table and `playfield::with_combat`. All of it is `assets/config/skirmish.ron` (`sf_data::skirmish`: checked at
+load, against the unit definitions, and every number pinned: `every_shipped_number_is_this_number`). The crowd is the demo's own (same seed, kinds, owners; checked equal entity by
 entity at tick 0), drawn with the test pack; the roles are drawn with their set v4 models (so the muzzle anchors are in the
 benchmark), the crowd's pack models after them in the instancer (`Population::with_pack_shapes_from`).
 

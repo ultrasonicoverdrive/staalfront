@@ -174,7 +174,8 @@ pub struct LoadedPart {
 
 /// Node names that mark an anchor: a point of the model that is not drawn but that the game needs
 /// the place of (WP5.6b). `muzzle`, `muzzle_l`, ... is where a shot leaves, `fx_smoke`, `fx_fire`, ...
-/// where damage smoke and fire start.
+/// where damage smoke and fire start. The names are the art brief's, a convention of the model files like the
+/// `turret` and `barrel` part names above: part of the format, not a tunable, so they stay in code.
 pub const ANCHOR_PREFIXES: [&str; 2] = ["muzzle", "fx_"];
 
 /// Whether a node name (without its LOD suffix) is an anchor's.

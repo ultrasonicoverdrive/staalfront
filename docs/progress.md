@@ -1743,7 +1743,7 @@ M0c laptop run. Rules and numbers are in `docs/rules/effects.md` (sections 5 and
   `Anchors` trait (`DrawnAnchors` on the instancer); `n = weapon slot + shots already shown`, so a burst alternates; a slot from the
   first wreck slot on is never a shooter's; no anchor: the WP5.6a rule. `placement.death_lift_m` 0.5 in `effects.ron` (the
   observation of the WP5.6a review).
-* **The benchmark**: `bench_scene` (the world, shared by the runner and the tests), `skirmish` (3 sites, waves of 8 units per
+* **The benchmark**: `bench_scene` (the world, shared by the runner and the tests), `skirmish` and `assets/config/skirmish.ron` (read by `sf_data::skirmish`, checked and pinned; 3 sites, waves of 8 units per
   side every 100 ticks, 720 units), `fight_scene` in the runner (roles drawn with their set v4 models, the crowd's test pack after
   them), `scene.combat`, `scene.skirmish_units`, the `effects` block and `phases[].effect_instances` in the JSON. The sites are
   under the `close_up`, `mid_hold` and `low_pass` phases (the brief says "the map centre", but those three phases look at three

@@ -234,10 +234,11 @@ fn the_fight_benchmark_has_the_crowd_of_the_plain_one_and_the_skirmish_at_its_si
         "the skirmish is made from the definitions"
     );
     // Every skirmish unit stands within 6 cells of one of the three sites; each site gets 16.
+    let sites = sf_data::skirmish::Skirmish::embedded().sites;
     let mut per_site = [0; 3];
     for v in armed {
         let [x, y] = sf_math::render_bridge::vec2_to_f32(v.pos);
-        let site = sf_game::skirmish::SITES
+        let site = sites
             .iter()
             .position(|s| (x - s.at.0 as f32).abs() < 6.0 && (y - s.at.1 as f32).abs() < 6.0)
             .unwrap_or_else(|| panic!("a unit at ({x}, {y}) is at no site"));

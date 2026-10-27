@@ -72,9 +72,9 @@ at tick 1500. So the simulation of the crowd is what M0 measured; only the check
 How many ticks a flight reaches depends on the clock (a 75 s flight is about 1,500 ticks); compare the checksums at equal
 ticks, as above.
 
-## The skirmish (`crates/sf_game/src/skirmish.rs`)
+## The skirmish (`assets/config/skirmish.ron`, placed by `crates/sf_game/src/skirmish.rs`)
 
-Fixed, no randomness: three sites, one under each phase of the flight that is to show a fight (the map centre for
+Fixed, no randomness, every number in the RON file (checked at load, pinned by `sf_data::skirmish` tests): three sites, one under each phase of the flight that is to show a fight (the map centre for
 `close_up`, the place of `mid_hold`, the middle of the `low_pass`), and at each site every 100 ticks from tick 0 to 1400 a wave
 of 8 units per side (3 riflemen, 2 rocket troopers, a heavy tank, 2 light tanks), face to face at 3.6 cells, inside the
 reach of the weapons. Nobody gets an order: the units pick their own targets and fire back (WP5.4), so the fight goes on all

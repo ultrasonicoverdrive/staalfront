@@ -2174,7 +2174,7 @@ fn fight_scene(
         crate::bench_scene::populate(&mut world, &population, units, cells, Some(&defs));
     println!(
         "fight: {armed} armed units in waves at {} sites on top of {units} wanderers",
-        crate::skirmish::SITES.len()
+        sf_data::skirmish::Skirmish::embedded().sites.len()
     );
     SceneStart {
         world,

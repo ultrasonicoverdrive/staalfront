@@ -76,7 +76,9 @@ impl Anchors for DrawnAnchors<'_> {
     }
 }
 
-/// The anchor name a flash starts at.
+/// The anchor name a flash starts at: the node name the art brief gives a barrel's end. Like the `turret` and `barrel`
+/// part names of the glb loader it is a convention of the model files, not a tunable number, so it stays in code
+/// (`sf_render::glb::ANCHOR_PREFIXES` is the loader's side of the same names).
 pub const MUZZLE_PREFIX: &str = "muzzle";
 
 /// What a frame knows of the camera and the zoom.
@@ -401,6 +403,11 @@ impl FxPlayer {
         let [x, z] = ev.pos;
         let y = ground.height(f64::from(x), f64::from(z)) as f32;
         let (position, radius_m) = match ev.kind {
+            FxKind::Fire { .. } if band == ZoomBand::Strategic => {
+                // Icons only: a shot makes nothing, so nothing is looked up (a fight seen from the whole map is
+                // hundreds of shots a second) and no flash is counted.
+                return;
+            }
             FxKind::Fire { slot } => {
                 // The flash starts at the muzzle anchor of the shooter's drawn model, the one its burst is
                 // on (a burst alternates between `muzzle_l` and `muzzle_r`); without one, out along the
@@ -1160,6 +1167,22 @@ mod tests {
         // Shooter 4 slot 0: 0, 1, 2 (left, right, left of two muzzles); shooter 7: 0; shooter 4 slot 1:
         // 1 + 0, 1 + 1.
         assert_eq!(asked, [(4, 0), (4, 1), (4, 2), (7, 0), (4, 1), (4, 2)]);
+    }
+
+    /// From the whole map (icons only) a shot makes no flash and asks the picture for no anchor.
+    #[test]
+    fn a_shot_seen_from_afar_looks_up_no_anchor_and_counts_no_flash() {
+        let ground = FlatGround::default();
+        let mut p = player();
+        let anchors = fixed(Some([30.0, 2.5, 44.0]));
+        p.push_events(&[shot_by(9, 0, weapon("rifle"))]);
+        let drawn = p
+            .frame_with(&snapshot_at(1), &ground, &anchors, &frame(0.0, 5.0))
+            .len();
+        assert_eq!(drawn, 0);
+        assert!(anchors.asked.borrow().is_empty(), "no lookup from afar");
+        let c = p.counters();
+        assert_eq!((c.flashes_at_anchor, c.flashes_by_rule, c.shown), (0, 0, 1));
     }
 
     /// A death bursts `death_lift_m` higher than the same burst would at the hit height, and a hit does not.
