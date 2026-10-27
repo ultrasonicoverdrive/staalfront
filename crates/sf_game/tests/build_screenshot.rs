@@ -24,6 +24,7 @@ use sf_game::placement_view::GhostFrame;
 use sf_game::playfield::{make_world, with_buildings, with_movement};
 use sf_game::population::Population;
 use sf_game::roster::{MODELS_FILE, Roster};
+use sf_game::runner;
 use sf_game::sandbox::{self, MERIDIAN, VEYRAN};
 use sf_game::sim_snapshot::SimSnapshot;
 use sf_math::render_bridge::vec2_cells_to_metres;
@@ -33,7 +34,7 @@ use sf_render::model::EyeView;
 use sf_render::pick::project_px;
 use sf_render::{
     Blend, Camera, CameraConfig, FrameView, Frustum, GpuOptions, Ground, Instancer, ModelSet,
-    Motion, Renderer, Style, TerrainGround, UnitId,
+    Renderer, Style, TerrainGround,
 };
 use sf_sim::{Cell, Command, EntityId, Kind, PlayerId, World, WorldConfig};
 use sf_ui::{Ui, UiConfig, UiInput, UiRenderer};
@@ -191,18 +192,7 @@ impl Scene {
     fn sync(&mut self) -> SimSnapshot {
         let snap = SimSnapshot::capture(&self.world);
         let looks = &self.looks;
-        self.instancer.update_tick(snap.views().iter().map(|v| {
-            let building = snap.construction_of(v.id).map(|c| c.permille());
-            Motion::from_fixed(
-                looks.shape_at(v, building),
-                v.owner.0,
-                v.prev_pos,
-                v.pos,
-                v.prev_facing,
-                v.facing,
-            )
-            .with_id(UnitId::from_parts(v.id.index(), v.id.generation()))
-        }));
+        self.instancer.update_tick(runner::motions_of(looks, &snap));
         snap
     }
 
@@ -239,9 +229,8 @@ impl Scene {
             ui_scale: 1.0,
         };
         let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
-        let bar = self.looks.roster().unwrap().stages().bar;
         let mut layer = ui.world_layer();
-        construction_view::draw_bars(&mut layer, &frame, &height, snap, &bar);
+        construction_view::draw_for(&mut layer, &frame, &height, snap, &self.looks);
         let quads = layer.quad_count();
         r.upload_units(&self.instancer);
         let mut ur = UiRenderer::new(&r.gpu().device, r.color_format());
@@ -390,4 +379,53 @@ fn the_decoy_and_the_bunker_have_their_stages_too() {
         assert_eq!(quads, 0);
         assert!(changed(&img, &done, scene.crop(&cam, id)) > 50, "{role}");
     }
+}
+
+/// The game's own wiring (no GPU): `runner::motion_of` gives a structure under construction the
+/// shape of its stage, and `construction_view::draw_for` draws its bar, both from the snapshot.
+#[test]
+fn the_game_draws_the_stage_and_the_bar_the_snapshot_says() {
+    let mut scene = Scene::new();
+    let id = scene.build("power_plant", MERIDIAN);
+    let v = scene.world.get(id).unwrap();
+    let [fx, fz] = vec2_cells_to_metres(v.pos);
+    let cam = scene.camera(0.1, [fx, fz]);
+    let frame = GhostFrame {
+        view_proj: cam.view_proj(),
+        viewport: [W as f32, H as f32],
+        ui_scale: 1.0,
+    };
+    let ground = Arc::clone(&scene.ground);
+    let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+    let bars = |snap: &SimSnapshot, looks: &Looks| {
+        let mut ui = Ui::new(UiConfig::default());
+        ui.begin_frame(UiInput::default(), (W, H), 1.0);
+        let mut layer = ui.world_layer();
+        construction_view::draw_for(&mut layer, &frame, &height, snap, looks)
+    };
+    let mut shapes = Vec::new();
+    for permille in [100, 700, 1000] {
+        scene.run_to(id, permille);
+        let snap = SimSnapshot::capture(&scene.world);
+        let view = snap.get(id).unwrap();
+        let shape = runner::motion_of(&scene.looks, &snap, &view).shape;
+        let finished = scene.looks.shape_at(&view, None);
+        match snap.construction_of(id) {
+            Some(c) => {
+                assert_eq!(shape, scene.looks.shape_at(&view, Some(c.permille())));
+                assert_ne!(
+                    shape, finished,
+                    "at {permille}: the stage, not the finished model"
+                );
+                assert_eq!(bars(&snap, &scene.looks), 1, "a bar at {permille}");
+            }
+            None => {
+                assert_eq!(shape, finished);
+                assert_eq!(bars(&snap, &scene.looks), 0, "no bar when complete");
+            }
+        }
+        shapes.push(shape);
+    }
+    // Foundation, scaffolding and finished are three different shapes.
+    assert!(shapes[0] != shapes[1] && shapes[1] != shapes[2] && shapes[0] != shapes[2]);
 }

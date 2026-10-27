@@ -12,15 +12,9 @@ use sf_render::glam::Vec3;
 use sf_render::pick::project_px;
 use sf_ui::{Color, Layer};
 
+use crate::looks::Looks;
 use crate::placement_view::GhostFrame;
 use crate::sim_snapshot::SimSnapshot;
-
-/// A bar narrower than this many logical pixels is not drawn.
-const MIN_WIDTH_PX: f32 = 18.0;
-/// A bar wider than this many logical pixels is drawn this wide (a close-up of a big structure).
-const MAX_WIDTH_PX: f32 = 220.0;
-/// Gap between the footprint's edge and the bar, logical pixels.
-const GAP_PX: f32 = 4.0;
 
 /// The two rectangles of a bar, as the corners of quads on the screen (clockwise from top left).
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -36,24 +30,25 @@ fn rect(x0: f32, y0: f32, x1: f32, y1: f32) -> [(f32, f32); 4] {
 }
 
 /// Where the bar of a structure goes, given the screen positions of the two ends of the front
-/// edge of its footprint, how far along it is (thousandths), the bar's height in logical pixels
-/// and the UI scale. `None` when the edge is too small on the screen or not left to right.
+/// edge of its footprint, how far along it is (thousandths), the bar's look (height, minimum and
+/// maximum width, gap, in logical pixels) and the UI scale. `None` when the edge is too small on
+/// the screen or not left to right.
 pub fn bar_rects(
     left: [f32; 2],
     right: [f32; 2],
     permille: u16,
-    height_px: f32,
+    look: &BarLook,
     ui_scale: f32,
 ) -> Option<BarRects> {
     let width = right[0] - left[0];
-    if width < MIN_WIDTH_PX * ui_scale {
+    if width < f32::from(look.min_width_px) * ui_scale {
         return None;
     }
-    let width = width.min(MAX_WIDTH_PX * ui_scale);
+    let width = width.min(f32::from(look.max_width_px) * ui_scale);
     let mid = (left[0] + right[0]) * 0.5;
     let (x0, x1) = (mid - width * 0.5, mid + width * 0.5);
-    let y0 = (left[1] + right[1]) * 0.5 + GAP_PX * ui_scale;
-    let y1 = y0 + height_px * ui_scale;
+    let y0 = (left[1] + right[1]) * 0.5 + f32::from(look.gap_px) * ui_scale;
+    let y1 = y0 + f32::from(look.height_px) * ui_scale;
     let done = x0 + width * f32::from(permille.min(1000)) / 1000.0;
     Some(BarRects {
         back: rect(x0, y0, x1, y1),
@@ -98,13 +93,8 @@ pub fn draw_bars(
         let (Some(left), Some(right)) = (at(centre.0 - half_w), at(centre.0 + half_w)) else {
             continue;
         };
-        let Some(rects) = bar_rects(
-            left,
-            right,
-            construction.permille(),
-            f32::from(look.height_px),
-            frame.ui_scale,
-        ) else {
+        let Some(rects) = bar_rects(left, right, construction.permille(), look, frame.ui_scale)
+        else {
             continue;
         };
         let (b, f) = (look.back, look.fill);
@@ -117,13 +107,40 @@ pub fn draw_bars(
     drawn
 }
 
+/// What the game draws each frame: the bars of `snap` in the look of `looks`' build-stage table.
+/// Nothing without a roster (the placeholder looks have no stages). Returns the number drawn.
+pub fn draw_for(
+    layer: &mut Layer<'_>,
+    frame: &GhostFrame,
+    height: &dyn Fn(f32, f32) -> f32,
+    snap: &SimSnapshot,
+    looks: &Looks,
+) -> usize {
+    if snap.constructions().is_empty() {
+        return 0;
+    }
+    let Some(roster) = looks.roster() else {
+        return 0;
+    };
+    draw_bars(layer, frame, height, snap, &roster.stages().bar)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const LOOK: BarLook = BarLook {
+        fill: (0, 0, 0, 0),
+        back: (0, 0, 0, 0),
+        height_px: 6,
+        min_width_px: 18,
+        max_width_px: 220,
+        gap_px: 4,
+    };
+
     #[test]
     fn the_fill_is_the_progress_of_the_bar() {
-        let r = bar_rects([100.0, 300.0], [200.0, 300.0], 250, 6.0, 1.0).unwrap();
+        let r = bar_rects([100.0, 300.0], [200.0, 300.0], 250, &LOOK, 1.0).unwrap();
         assert_eq!(r.back[0].0, 100.0);
         assert_eq!(r.back[1].0, 200.0);
         let fill = r.fill.unwrap();
@@ -134,20 +151,20 @@ mod tests {
     #[test]
     fn nothing_is_filled_at_zero_and_a_far_structure_has_no_bar() {
         assert_eq!(
-            bar_rects([100.0, 0.0], [200.0, 0.0], 0, 6.0, 1.0)
+            bar_rects([100.0, 0.0], [200.0, 0.0], 0, &LOOK, 1.0)
                 .unwrap()
                 .fill,
             None
         );
-        assert_eq!(bar_rects([100.0, 0.0], [110.0, 0.0], 500, 6.0, 1.0), None);
+        assert_eq!(bar_rects([100.0, 0.0], [110.0, 0.0], 500, &LOOK, 1.0), None);
         // The UI scale makes the minimum bigger.
-        assert_eq!(bar_rects([100.0, 0.0], [130.0, 0.0], 500, 6.0, 2.0), None);
-        assert!(bar_rects([100.0, 0.0], [130.0, 0.0], 500, 6.0, 1.0).is_some());
+        assert_eq!(bar_rects([100.0, 0.0], [130.0, 0.0], 500, &LOOK, 2.0), None);
+        assert!(bar_rects([100.0, 0.0], [130.0, 0.0], 500, &LOOK, 1.0).is_some());
     }
 
     #[test]
     fn a_close_up_is_capped_in_width() {
-        let r = bar_rects([0.0, 0.0], [2000.0, 0.0], 500, 6.0, 1.0).unwrap();
-        assert_eq!(r.back[1].0 - r.back[0].0, MAX_WIDTH_PX);
+        let r = bar_rects([0.0, 0.0], [2000.0, 0.0], 500, &LOOK, 1.0).unwrap();
+        assert_eq!(r.back[1].0 - r.back[0].0, 220.0);
     }
 }

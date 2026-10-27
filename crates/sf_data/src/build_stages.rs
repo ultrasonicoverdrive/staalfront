@@ -50,6 +50,12 @@ pub struct BarLook {
     pub back: (u8, u8, u8, u8),
     /// Height of the bar in logical pixels.
     pub height_px: u16,
+    /// A bar narrower than this many logical pixels is not drawn (a structure far away).
+    pub min_width_px: u16,
+    /// A bar wider than this many logical pixels is drawn this wide (a close-up of a big one).
+    pub max_width_px: u16,
+    /// Gap between the footprint's front edge and the bar, logical pixels.
+    pub gap_px: u16,
 }
 
 /// The table.
@@ -60,6 +66,8 @@ pub struct BuildStages {
     pub stages: Vec<Stage>,
     /// The progress bar.
     pub bar: BarLook,
+    /// The placeholder box of a stage is never lower than this, in millimetres (no sliver).
+    pub fallback_min_height_mm: u16,
 }
 
 impl BuildStages {
@@ -119,6 +127,15 @@ impl BuildStages {
         if self.bar.height_px == 0 {
             return Err("bar.height_px must be above 0".into());
         }
+        if self.bar.min_width_px == 0 || self.bar.max_width_px < self.bar.min_width_px {
+            return Err(format!(
+                "bar.min_width_px {} must be above 0 and at most bar.max_width_px {}",
+                self.bar.min_width_px, self.bar.max_width_px
+            ));
+        }
+        if self.fallback_min_height_mm == 0 {
+            return Err("fallback_min_height_mm must be above 0".into());
+        }
         Ok(())
     }
 
@@ -149,7 +166,9 @@ mod tests {
             (id: "a", from_permille: 0, suffix: "_a", fallback_height_permille: 100),
             (id: "b", from_permille: 400, suffix: "_b", fallback_height_permille: 600),
         ],
-        bar: (fill: (1, 2, 3, 4), back: (5, 6, 7, 8), height_px: 5),
+        bar: (fill: (1, 2, 3, 4), back: (5, 6, 7, 8), height_px: 5,
+              min_width_px: 10, max_width_px: 100, gap_px: 2),
+        fallback_min_height_mm: 150,
     )"#;
 
     fn err(text: &str) -> String {
@@ -162,6 +181,16 @@ mod tests {
         assert_eq!(t.stages.len(), 2);
         assert_eq!(t.stages[0].id, "foundation");
         assert_eq!(t.stages[1].id, "scaffolding");
+        assert_eq!(
+            (
+                t.bar.height_px,
+                t.bar.min_width_px,
+                t.bar.max_width_px,
+                t.bar.gap_px
+            ),
+            (6, 18, 220, 4)
+        );
+        assert_eq!(t.fallback_min_height_mm, 200);
     }
 
     #[test]
@@ -190,9 +219,15 @@ mod tests {
         assert!(err(&GOOD.replace("400", "1000")).contains("finished"));
         assert!(err(&GOOD.replace("600", "0")).contains("fallback_height_permille"));
         assert!(err(&GOOD.replace("height_px: 5", "height_px: 0")).contains("height_px"));
+        assert!(err(&GOOD.replace("min_width_px: 10", "min_width_px: 0")).contains("min_width_px"));
         assert!(
-            err("(stages: [], bar: (fill: (0,0,0,0), back: (0,0,0,0), height_px: 1))")
-                .contains("no stages")
+            err(&GOOD.replace("max_width_px: 100", "max_width_px: 9")).contains("min_width_px")
         );
+        assert!(
+            err(&GOOD.replace("fallback_min_height_mm: 150", "fallback_min_height_mm: 0"))
+                .contains("fallback_min_height_mm")
+        );
+        let empty = format!("(stages: [], {}", &GOOD[GOOD.find("bar:").unwrap()..]);
+        assert!(err(&empty).contains("no stages"));
     }
 }

@@ -312,7 +312,7 @@ impl Loader<'_> {
                 // As high as the stage says, but never a sliver.
                 let height =
                     i64::from(size_mm[1]) * i64::from(stage.fallback_height_permille) / 1000;
-                size_mm[1] = height.max(200) as i32;
+                size_mm[1] = height.max(i64::from(stages.fallback_min_height_mm)) as i32;
                 Source::Placeholder {
                     base: chain,
                     icon,
