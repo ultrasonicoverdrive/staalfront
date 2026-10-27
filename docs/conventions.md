@@ -223,7 +223,8 @@ PLAN.md §3 WP1.10 has this WP fix the engine convention here:
 - Anchors (WP5.6b): an empty node (no mesh) named `muzzle`, `muzzle_l`, `muzzle_r`, ... marks where a shot leaves, one named
   `fx_smoke`, `fx_fire`, ... where damage smoke and fire start. The loader keeps them as named points in the frame of their parent
   part (a muzzle under the `barrel` follows the turret's yaw and the barrel's pitch; one under a part with no geometry moves up
-  to the nearest part that stays). The order in the file is the order a burst alternates in. `docs/rules/effects.md` section 5.
+  to the nearest part that stays, so a muzzle under a `barrel` joint with no geometry moves to the turret and loses the
+  barrel's pitch: give the barrel a mesh). The order in the file is the order a burst alternates in. `docs/rules/effects.md` section 5.
 
 ### Levels of detail in the file (art set v4)
 

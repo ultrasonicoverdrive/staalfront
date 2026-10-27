@@ -178,6 +178,10 @@ anchor 90 degrees about the pivot, `(x, z)` to `(-z, x)`, on a hull that itself 
 * **Wrecks and units are told apart by slot.** The picture numbers wrecks from the first slot no live entity has
   (`looks::first_wreck_slot`). `DrawnAnchors` answers only for slots **below** it, so a shooter that died after it fired is never
   looked for under the wreck that took its slot number (`drawn_anchors_do_not_answer_for_a_wreck_slot`).
+* **The shot count is never pruned.** `shots_shown` keeps one counter per (slot, weapon slot) ever seen, so it is bounded by
+  slots times weapon slots and does not grow without end. A new unit that takes a dead unit's slot starts its burst at the
+  muzzle the old count leaves (left or right instead of always left). Cosmetic only, and the picture of a burst still alternates;
+  not built.
 * **The flash follows the drawn pose at the frame it is shown**, interpolated at the frame's alpha, not the pose of the tick of
   the shot: a unit that drives on between the shot and the frame has its flash at its barrel as drawn.
 * Counters `flashes_at_anchor` and `flashes_by_rule` (F1 and the bench JSON): in the combat benchmark of 45 s on lavapipe,

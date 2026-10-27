@@ -4,10 +4,14 @@
 //! same path over the same crowd with an armed skirmish added ([`crate::skirmish`]). The runner builds
 //! those worlds with the functions of this module, and the tests build them with the same functions and step
 //! them with no window and no GPU: a **headless twin** of the benchmark scene. That is what makes the
-//! benchmark's checksums checkable: `tests/bench_scene.rs` pins the plain benchmark's checksum at tick 1500
-//! (`0x9e196a6ced2ef024`, the one M0 recorded, `docs/bench/m0-2026-10-22.json`) and the fight benchmark's
-//! checksums every 100 ticks, so M0, M0b and M0c stay comparable and a change to the scene or the simulation
-//! that moves them fails a test.
+//! benchmark's checksums checkable. `tests/bench_scene.rs` pins three lists of checksums, one every 100 ticks up
+//! to tick 1500: `M0` (what the laptop run of M0 recorded, `docs/bench/m0-2026-10-22.json`, ending
+//! `0x9e196a6ced2ef024`), `PLAIN` (today's `sf_demo --bench`) and `FIGHT` (today's `sf_demo --bench --fight`).
+//! M0's list holds only for the world **without ore**: since WP7.1 the map's ore is in the world and in its
+//! checksum, so today's plain benchmark ends at `PLAIN`'s value, not at M0's; the test rebuilds the world
+//! without ore to show M0's values come back (the measured cause). M0, M0b and M0c are therefore compared on
+//! their timings, not on their checksums; a change to the scene or the simulation that moves `PLAIN` or `FIGHT`
+//! fails a test.
 //!
 //! The functions here do exactly what `Runner::new` did inline before WP5.6b for the crowd scene, in the same
 //! order (the plain scene's checksums did not move).

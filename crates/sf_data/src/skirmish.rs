@@ -74,6 +74,9 @@ pub struct Skirmish {
     pub last_wave_tick: u64,
     /// Tenths of a cell between the two front lines.
     pub gap_tenths: i32,
+    /// The sideways shift of a wave, tenths of a cell: wave `n` takes entry `n % len`, so a survivor of the last
+    /// wave is not stood on.
+    pub wave_shift_tenths: Vec<i32>,
     /// The two sides.
     pub sides: Vec<Side>,
     /// The sites.
@@ -113,6 +116,16 @@ impl Skirmish {
         }
         if !(1..=200).contains(&self.gap_tenths) {
             return err("gap_tenths must be 1 to 200 (0.1 to 20 cells)");
+        }
+        if self.wave_shift_tenths.is_empty() || self.wave_shift_tenths.len() > 16 {
+            return err("wave_shift_tenths has 1 to 16 entries");
+        }
+        if self
+            .wave_shift_tenths
+            .iter()
+            .any(|v| !(-50..=50).contains(v))
+        {
+            return err("wave_shift_tenths entries must be -50 to 50 tenths of a cell");
         }
         if self.sides.len() != 2 {
             return err("two sides are needed");
@@ -160,6 +173,11 @@ impl Skirmish {
         self.last_wave_tick / self.wave_every_ticks + 1
     }
 
+    /// The sideways shift of wave `wave`, tenths of a cell (`wave_shift_tenths`, repeated).
+    pub fn wave_shift(&self, wave: u64) -> i32 {
+        self.wave_shift_tenths[(wave % self.wave_shift_tenths.len() as u64) as usize]
+    }
+
     /// How many units the whole skirmish makes: waves, sites, sides and units of a wave.
     pub fn units(&self) -> u64 {
         self.waves() * self.sites.len() as u64 * self.sides.len() as u64 * self.wave.len() as u64
@@ -196,6 +214,10 @@ mod tests {
             (s.wave_every_ticks, s.last_wave_tick, s.gap_tenths),
             (100, 1400, 36)
         );
+        assert_eq!(s.wave_shift_tenths, vec![-4, 0, 4]);
+        // The shift of a wave repeats every three waves (the pre-RON code was `(wave % 3) * 4 - 4`).
+        let shifts: Vec<i32> = (0..7).map(|w| s.wave_shift(w)).collect();
+        assert_eq!(shifts, vec![-4, 0, 4, -4, 0, 4, -4]);
         assert_eq!(
             s.sides,
             [
@@ -276,6 +298,17 @@ mod tests {
         assert!(bad("last_wave_tick: 1400", "last_wave_tick: 999999").contains("last_wave_tick"));
         assert!(bad("wave_every_ticks: 100", "wave_every_ticks: 1").contains("1000 waves"));
         assert!(bad("gap_tenths: 36", "gap_tenths: 0").contains("gap_tenths"));
+        assert!(
+            bad("wave_shift_tenths: [-4, 0, 4]", "wave_shift_tenths: []")
+                .contains("wave_shift_tenths")
+        );
+        assert!(
+            bad(
+                "wave_shift_tenths: [-4, 0, 4]",
+                "wave_shift_tenths: [-4, 0, 99]"
+            )
+            .contains("wave_shift_tenths")
+        );
         assert!(bad("(owner: 1, direction: 1)", "(owner: 0, direction: 1)").contains("owners"));
         assert!(bad("(owner: 1, direction: 1)", "(owner: 1, direction: 0)").contains("direction"));
         assert!(bad("(owner: 1, direction: 1)", "(owner: 1, direction: -1)").contains("opposite"));

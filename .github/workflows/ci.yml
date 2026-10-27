@@ -70,6 +70,9 @@ jobs:
           grep -q '"samples": 300' demo-out/bench-fight.json
           grep -q '"combat": true' demo-out/bench-fight.json
           grep -q '"skirmish_units": 720' demo-out/bench-fight.json
+          # The fight produced something and the event queue did not overflow.
+          grep -q '"fx_events": [1-9]' demo-out/bench-fight.json
+          grep -Eq '"fx_dropped": 0(,|$)' demo-out/bench-fight.json
       # WP3.2: the same for `sf_game`, which starts in the sandbox (units and
       # structures of each side spawned from the unit definitions, drawn with
       # the models and shapes the definitions name): three screenshots.

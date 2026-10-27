@@ -54,8 +54,8 @@ pub fn schedule(world: &mut World, defs: &UnitDefs, cells: (u32, u32)) -> u32 {
         let cy = site.at.1 * cells.1 as i32 / PATH_MAP_CELLS;
         for wave in 0..skirmish.waves() {
             let tick = Tick(wave * skirmish.wave_every_ticks);
-            // A little sideways shift per wave, so that a survivor of the last wave is not stood on.
-            let shift = (wave % 3) as i32 * 4 - 4;
+            // A little sideways shift per wave (`wave_shift_tenths`), so a survivor of the last wave is not stood on.
+            let shift = skirmish.wave_shift(wave);
             for side in &skirmish.sides {
                 for slot in &skirmish.wave {
                     let Some(kind) = defs.kind_of(&slot.role) else {
@@ -119,5 +119,23 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `schedule` places wave 0 with the file's first `wave_shift_tenths` entry (-4): the centre's middle rifleman
+    /// of side 0 stands at (128 - 1.8, 128 - 0.4) cells after the first step.
+    #[test]
+    fn the_first_wave_stands_shifted_by_the_files_first_entry() {
+        let defs = UnitDefs::embedded();
+        let skirmish = Skirmish::embedded();
+        assert_eq!(skirmish.wave_shift(0), -4);
+        let world = World::new(sf_sim::WorldConfig::new(1).with_map_size(256, 256)).unwrap();
+        let mut world = crate::bench_scene::armed(world, &defs);
+        schedule(&mut world, &defs, (256, 256));
+        world.step();
+        let want = Vec2::new(Fx::from_ratio(1262, 10), Fx::from_ratio(1276, 10));
+        assert!(
+            world.snapshot().iter().any(|v| v.pos == want),
+            "no unit at (126.2, 127.6)"
+        );
     }
 }

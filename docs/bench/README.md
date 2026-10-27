@@ -72,6 +72,15 @@ at tick 1500. So the simulation of the crowd is what M0 measured; only the check
 How many ticks a flight reaches depends on the clock (a 75 s flight is about 1,500 ticks); compare the checksums at equal
 ticks, as above.
 
+**M0b and M0c: compare the timings, not the checksums.** An M0b run (plain `sf_demo --bench`) on today's main ends at
+`PLAIN`'s value (`0x8e57352fc4bdec7b` at the time of writing), **not** at M0's `0x9e196a6ced2ef024`; that is expected.
+M0b and M0c are compared with M0 on `frame_ms`, `gpu_ms` and `sim.tick_ms`; the checksums only show that the run played
+the pinned world.
+
+**Re-pinning.** Any WP that moves the world's checksum (for example WP7.2, #78) re-pins `PLAIN` and `FIGHT` in
+`crates/sf_game/tests/bench_scene.rs` in its own PR, with a measured cause, and updates the end values quoted above in the
+same change. The test `the_readme_quotes_the_pinned_end_values` fails if this README and the constants disagree.
+
 ## The skirmish (`assets/config/skirmish.ron`, placed by `crates/sf_game/src/skirmish.rs`)
 
 Fixed, no randomness, every number in the RON file (checked at load, pinned by `sf_data::skirmish` tests): three sites, one under each phase of the flight that is to show a fight (the map centre for

@@ -16,7 +16,9 @@
 //!   the skirmish of `skirmish`).
 //!
 //! A change to the scene, the skirmish or the simulation that moves one of them fails here, and the change that
-//! moved it has to say why (checklist line 3).
+//! moved it has to say why (checklist line 3). Any WP that moves the world's checksum (WP7.2, #78, for example)
+//! re-pins `PLAIN` and `FIGHT` here in its own PR, with a measured cause, and updates the end values quoted in
+//! `docs/bench/README.md` in the same change (`the_readme_quotes_the_pinned_end_values` checks them).
 
 use sf_data::map::generate::generate_cells;
 use sf_data::units::UnitDefs;
@@ -248,4 +250,17 @@ fn the_fight_benchmark_has_the_crowd_of_the_plain_one_and_the_skirmish_at_its_si
     // Both sides: the owners are Meridian (0) and Veyran (1).
     assert!(armed.iter().all(|v| v.owner.0 <= 1));
     assert_eq!(armed.iter().filter(|v| v.owner.0 == 0).count(), 24);
+}
+
+/// `docs/bench/README.md` quotes the tick-1500 values of `PLAIN`, `FIGHT` and `M0`; they must be these constants.
+#[test]
+fn the_readme_quotes_the_pinned_end_values() {
+    let readme = include_str!("../../../docs/bench/README.md");
+    for (name, list) in [("PLAIN", &PLAIN), ("FIGHT", &FIGHT), ("M0", &M0)] {
+        let end = format!("`{:#018x}`", list[14]);
+        assert!(
+            readme.contains(&end),
+            "the README does not quote {name}'s end {end}"
+        );
+    }
 }
