@@ -1,6 +1,8 @@
 // Placement (WP6.2, docs/rules/buildings.md "Placement"): two bases on the 256 by 256
 // cell playfield (assets/maps/playfield256) build with BuildStructure, one command per
-// tick, and every rule of the placement refuses something at least once.
+// tick. Every refusal a scenario can reach refuses something at least once; the ones
+// that need a malformed setup (UnknownKind, NoBuildingRules, NoFaction) are covered by
+// the sf_sim tests (crates/sf_sim/tests/placement.rs).
 // CI runs it on Linux and Windows and requires the checksum in placement.expected;
 // tools/sf_headless/tests/placement.rs asserts, tick by tick, which build stood and why
 // each other one was refused.
@@ -62,8 +64,12 @@ Scenario(
         (tick: 16, player: 1, command: BuildStructure(kind: 10, cell: (106, 42))),
         // 17: refused, the Meridian base is 66 cells from the Veyran anchor.
         (tick: 17, player: 1, command: BuildStructure(kind: 1, cell: (34, 44))),
+        // 18: refused, the plant's second column would be x 256, off the 256-cell map.
+        (tick: 18, player: 1, command: BuildStructure(kind: 1, cell: (255, 36))),
+        // 19: refused, the barracks' exit cell (30, 48) is under the decoy of 10.
+        (tick: 19, player: 0, command: BuildStructure(kind: 3, cell: (28, 47))),
         // --- a mission object is placed without the rules ---
-        // 20: a Veyran decoy PLACED beside the Meridian base: no faction, no radius.
+        // 20: a Veyran decoy PLACED at (60, 100), far from both bases: no faction, no radius.
         (tick: 20, command: PlaceStructure(kind: 9, owner: 1, cell: (60, 100))),
     ],
 )

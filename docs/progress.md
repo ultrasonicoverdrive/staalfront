@@ -1719,7 +1719,12 @@ Status: WP6.1 is in; WP6.2 is built (in review); WP6.3 to WP6.8 are not started.
   said "checked when a PlaceStructure executes"): the scenarios, the sandbox and the mission setup place with
   `PlaceStructure` and must not be checked (pre-placed F1-M05 decoys, a sandbox that places every role of every side),
   and the command has no way to say which of the two it is. The owner of a `BuildStructure` is the player who sent
-  it, so a peer cannot build for another. The two commands are told apart in the checksum (tag 11).
+  it, so a `BuildStructure` cannot build for another player. That is not a guard against a player: the sim still
+  accepts `PlaceStructure` and `SpawnUnit` (which carry their own `owner` and skip every placement rule) from any
+  seat. The two commands are told apart in the checksum (tag 11).
+- **Follow-up (open, before any untrusted command stream: phase 14 multiplayer, replays from outside):** setup
+  commands (`PlaceStructure`, `SpawnUnit`) must be refused when they come from a player seat. Nothing exploits it
+  today (the client sends only `BuildStructure` from input); no code changed for it in WP6.2.
 - **Decision for Tijmen from WP6.1, answered:** `factions` restricts what a player may *build*; pre-placed
   mission objects are not checked (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`). F1-M05's
   decoys for Enemy 1 stay as they are.

@@ -740,7 +740,7 @@ impl Runner {
     /// `assets/config/input.ron` (`OrderMove`, `OrderQueue`, `OrderStop`,
     /// `OrderScatter`, `OrderHold`). They only schedule commands for the next
     /// tick; the simulation does the rest.
-    fn handle_orders(&mut self, ctx: &Context) {
+    fn handle_orders(&mut self, ctx: &Context, right_click: RightClick) {
         let actions = ctx.actions();
         let queued = actions.held(Action::OrderQueue);
         let ui_busy = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
@@ -749,7 +749,7 @@ impl Runner {
         // nothing is ordered.
         if actions.pressed(Action::OrderMove)
             && !ui_busy
-            && !self.build.is_active()
+            && right_click == RightClick::Order
             && let Some(command) = commands::right_click(
                 &self.snap,
                 &self.selection,
@@ -1719,9 +1719,12 @@ impl App for Runner {
             self.terrain = renderer.terrain_stats();
             self.draw_calls = renderer.draw_stats().total_draw_calls();
         }
+        // Decided once, before the handlers: the click that puts the structure
+        // away must not also order the selection (handle_build ends build mode).
+        let right_click = RightClick::for_frame(self.build.is_active());
         self.handle_build(ctx, now);
         self.handle_selection(ctx);
-        self.handle_orders(ctx);
+        self.handle_orders(ctx, right_click);
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {
             ctx.toggle_fullscreen();
@@ -2096,12 +2099,50 @@ pub fn load_pack(name: &str) -> Result<LoadedPack, String> {
     Ok(pack)
 }
 
+/// What a right click does in one frame (WP6.2). Decided from the build mode at
+/// the start of the frame, before any handler changes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RightClick {
+    /// Build mode was active: the click puts the structure away and nothing else.
+    PutAway,
+    /// No build mode: the click orders the selection.
+    Order,
+}
+
+impl RightClick {
+    fn for_frame(build_active: bool) -> Self {
+        if build_active {
+            RightClick::PutAway
+        } else {
+            RightClick::Order
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::args::Preset;
     use sf_data::map::generate::generate_cells;
     use sf_sim::{Command, Kind, PlayerId, Tick};
+
+    /// Finding 1 of the WP6.2 review: the right click that puts the structure
+    /// away ends build mode inside `handle_build`, so a check made after that
+    /// handler would order the selection with the same click.
+    #[test]
+    fn the_right_click_that_puts_the_structure_away_orders_nothing() {
+        let defs = sf_data::units::UnitDefs::embedded();
+        let mut build = BuildMode::for_faction(&defs, sf_data::units::Faction::Meridian);
+        build.cycle();
+        assert!(build.is_active());
+        // The frame: decide first, then the build handler cancels.
+        let right_click = RightClick::for_frame(build.is_active());
+        build.cancel();
+        assert!(!build.is_active());
+        assert_eq!(right_click, RightClick::PutAway);
+        // Without build mode the same click is an order.
+        assert_eq!(RightClick::for_frame(build.is_active()), RightClick::Order);
+    }
 
     #[test]
     fn screenshots_draw_the_game_cursor_only_where_hover_puts_it() {

@@ -123,11 +123,13 @@ Where a player may build. One pure function over the world as it is when the com
 footprint, a verdict for each cell and the exit cell of a factory. `World::check_placement` is its verdict.
 
 **The commands.** `Command::BuildStructure { kind, cell }` is the player's build: the owner is the player who
-sent the command (never a field of it), the rules below are checked, and a refusal is **reported**, not dropped:
+sent the command (never a field of it, so this command cannot build for another player), the rules below are checked, and a refusal is **reported**, not dropped:
 the command counts as ignored, `StepReport::placements_rejected` counts it and `World::placement_rejections()`
 lists it (tick, player, kind, cell, reason) until the next step. `Command::PlaceStructure` is what it was: the
 unchecked placement of scenario setup and mission objects (the sandbox, a mission's pre-placed enemy decoys).
-It checks the terrain and the overlap, as it always did, and nothing else; `content/units.md` says the
+It checks the terrain and the overlap, as it always did, and nothing else. It is **not** an authority boundary:
+today the simulation accepts `PlaceStructure` (and `SpawnUnit`) from any player seat, with any `owner`, so a
+player who sent one would skip every rule below (see "Not done"); `content/units.md` says the
 decoy is "Meridian only as a buildable structure" and F1-M05 places enemy decoys as mission objects, which is
 exactly this split (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`).
 
@@ -198,7 +200,8 @@ footprint always extends east and south from its anchor and the exit side is the
 the exit side. If rotated placement is ever added, the exit side rotates with it and `exit_cell` takes the
 facing.
 
-**Not done (gaps).** The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
+**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`) are accepted from any player seat; they
+must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
 only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
 put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
 charged and nothing takes time (phase 7, WP6.3). `fortified_bunker` is built by a combat engineer in the field
@@ -234,7 +237,9 @@ The outline is green or red by the verdict. Screenshots: `docs/screenshots/wp6.2
 
 `placement` (`assets/scenarios/placement.ron`, on the frozen copy `placement_defs/`, which is a copy of the shipped
 definitions of WP6.2 with their building blocks, the one frozen copy that has them): two bases build with
-`BuildStructure`, one command per tick, and every rule refuses something at least once. The scenario fields
+`BuildStructure`, one command per tick, and every refusal that a well-formed setup can reach happens at least
+once (`UnknownKind`, `NoBuildingRules` and `NoFaction` need a malformed setup and are covered by the sf_sim
+tests). The scenario fields
 `buildings: true` (the world is given the building rules of `unit_defs`), `factions: [(player, Faction)]` and the
 action `BuildStructure(kind, cell)` (the issuer is the timed command's `player`) are new and optional, so no
 earlier scenario changed.

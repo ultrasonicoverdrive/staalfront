@@ -15,6 +15,6 @@ shapes. The ghost is drawn by `placement_view::draw_ghost` from `World::preview_
 
 `ingame_*.png`: the real `sf_game` binary under Xvfb + lavapipe (`--sandbox --map-cells 64 --build barracks --hover x,y`,
 captured with `import -window root`, about tick 170, debug build, so about 12 fps): the ghost, the line under the top bar
-with the simulation's reason, the cursor. `ingame_too_far_barracks.png` actually shows a structure in the way (red cells),
-`ingame_valid_barracks.png` and `ingame_valid_barracks_2.png` show places refused because the exit is blocked (amber cells,
-red exit cell). A place that is fully valid is in the test screenshots above; the in-game runs did not hit one.
+with the simulation's reason, the cursor. `ingame_occupied_barracks.png` shows a structure in the way (red cells),
+`ingame_exit_blocked_barracks.png` and `ingame_exit_blocked_barracks_2.png` show places refused because the exit is blocked
+(amber cells, red exit cell). A place that is fully valid is in the test screenshots above; the in-game runs did not hit one.

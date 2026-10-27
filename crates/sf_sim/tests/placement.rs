@@ -1059,19 +1059,22 @@ fn the_factions_and_the_build_radius_are_in_the_checksum() {
     assert_ne!(base, plain(None, 8).checksum());
     assert_eq!(base, plain(Some(&[own[1], own[0]]), 8).checksum());
     // A pending build is state: it is hashed like every pending command.
-    let pending = |y| {
+    let pending = |kind, x, y| {
         let mut w = plain(Some(&own), 8);
         w.schedule(
             Tick(3),
             PlayerId(0),
             Command::BuildStructure {
-                kind: PLANT,
-                cell: Cell::new(1, y),
+                kind,
+                cell: Cell::new(x, y),
             },
         )
         .unwrap();
         w.checksum()
     };
-    assert_ne!(base, pending(1));
-    assert_ne!(pending(1), pending(2));
+    assert_ne!(base, pending(PLANT, 1, 1));
+    // Each field of the pending build on its own: kind, x and y.
+    assert_ne!(pending(PLANT, 1, 1), pending(BUNKER, 1, 1));
+    assert_ne!(pending(PLANT, 1, 1), pending(PLANT, 2, 1));
+    assert_ne!(pending(PLANT, 1, 1), pending(PLANT, 1, 2));
 }

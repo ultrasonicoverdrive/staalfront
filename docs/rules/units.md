@@ -223,12 +223,13 @@ whole game and a digest of it is in the checksum.
 
 What a kind is follows from its data: **mobile** (it has a movement class: infantry, a
 vehicle, a vessel), **structure** (it has a footprint) or **object** (neither: a crate,
-an ore field). Two commands create them, through the command queue like everything else:
+an ore field). Three commands create them, through the command queue like everything else:
 
 | Command | Makes | Where | Ignored (counts as a command that changed nothing) when |
 |---|---|---|---|
 | `SpawnUnit { kind, pos, owner }` | a mobile unit or an object | at `pos`, in cells | the table has no such kind; the kind is a structure; `pos` is outside the map or on a cell a structure occupies; a mobile unit's movement class cannot enter the cell (`movement.md`); the entity limit is reached |
 | `PlaceStructure { kind, cell, owner }` | a structure | its footprint **anchored** on `cell`: the cell with the smallest x and y, the footprint extending east and south | the table has no such kind; the kind is not a structure; any cell of the footprint is outside the map, not `buildable` (`docs/rules/terrain.md`) or already occupied; the entity limit is reached |
+| `BuildStructure { kind, cell }` (WP6.2) | a structure for the player who sent it | as `PlaceStructure` | any placement rule of `docs/rules/buildings.md` fails; the refusal is reported in `World::placement_rejections()` |
 
 A refused command creates nothing: no entity, no occupied cell, no slot. A structure is
 placed **all or nothing**. Unknown kinds are refused, never guessed at.

@@ -275,7 +275,7 @@ fn the_shipped_building_table_digest_is_pinned() {
     let digest = table.digest();
     // The table the world takes is the same one.
     let w = world(&defs).with_buildings(table).unwrap();
-    assert_eq!(w.buildings().digest(), digest);
+    assert_eq!(w.building_table().digest(), digest);
     assert_eq!(digest, SHIPPED_BUILDINGS_DIGEST, "digest {digest:#018x}");
 }
 
@@ -316,7 +316,7 @@ fn f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base() {
         );
     }
     // The decoy's prerequisites are all in the player's starting base.
-    let table = w.buildings();
+    let table = w.building_table();
     let decoy = table.get(kind(&defs, "decoy_emplacement")).unwrap();
     for r in &decoy.requires {
         assert!(

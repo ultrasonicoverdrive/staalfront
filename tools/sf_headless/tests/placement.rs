@@ -51,6 +51,8 @@ fn every_rule_refuses_what_it_should_and_nothing_else() {
         (12, 0, 0, PlacementError::CannotBeBuilt),
         (15, 1, 9, PlacementError::WrongFaction),
         (17, 1, power.0, PlacementError::TooFarFromBase),
+        (18, 1, power.0, PlacementError::OffMap),
+        (19, 0, 3, PlacementError::ExitBlocked),
     ];
     assert_eq!(refused, expected);
 

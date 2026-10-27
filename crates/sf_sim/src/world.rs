@@ -371,11 +371,6 @@ impl World {
         Ok(self)
     }
 
-    /// The building table the world was given ([`World::with_buildings`]).
-    pub fn buildings(&self) -> &BuildingTable {
-        &self.buildings
-    }
-
     /// The same world with the building rules of its structure kinds (WP6.1,
     /// `docs/rules/buildings.md`): function, exit side, build time, price, power,
     /// factions and prerequisites. Nothing acts on them yet. Call it right after
