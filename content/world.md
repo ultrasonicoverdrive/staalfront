@@ -27,7 +27,9 @@ Grounded, tense, and occasionally dryly ironic. The world should feel like a cla
 - **Black Basin:** foundries, command relays, and the final coordination hub.
 
 ## 5. Technology level
-Late-industrial alternate history. Conventional infantry, tanks, artillery, trucks, engineers, radar, limited aircraft and coastal craft are possible. No magic, aliens, or supernatural technology. Advanced automated defence exists only as a late-campaign prototype and must be foreshadowed.
+Late-industrial alternate history. Conventional infantry, tanks, artillery, trucks, engineers, radar, limited aircraft and coastal craft are possible. No magic, aliens, or supernatural technology. Advanced automated defence exists only as a late-campaign prototype. F2-M09 introduces unmanned_artillery: remotely coordinated prototype batteries dependent on the uplink and power relays. F2-M10 uses automated_gun: a larger fixed hub-defence variant of the same fire-control programme, with local target selection and no recognition of either army as friendly. These are related variants, not interchangeable unit roles.
+
+**Network terminology.** The private logistics-and-intelligence network is the umbrella organisation behind the coordinated provocations. The logistics broker is its commercial intermediary, not a separate army or a synonym for every member. Shell companies handle payments and shipments; the intelligence network handles forged orders and routing. A coordination centre or hub is a physical facility, not the organisation itself. The regional control centre in F1-M10 is a separate military archive holding received deployment orders; the abandoned coordination hub in F2-M10 holds the network's original transmission keys, templates and correspondence. The broker's mark identifies a commercial link, not the full membership of the network.
 
 ## 6. Things we never do
 No real-world nations or real political leaders. No characters, dialogue, mission titles, named weapons, cutscenes, or plot twists copied from existing games. No glorification of atrocities. Civilians are people to protect, not disposable set dressing.
