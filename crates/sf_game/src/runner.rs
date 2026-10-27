@@ -1964,6 +1964,7 @@ impl App for Runner {
         let exit = self.sim.stop().clone();
         let tick_ms = Samples(self.sim.tick_ms_since(0));
         println!("exit after {} ticks", exit.ticks);
+        println!("summary: fight sounds {:?}", self.fx_sound.totals());
         // Summary for the stress test (software rendering: no fps claim).
         println!(
             "summary: {} units requested, {} in the world, {} frames",

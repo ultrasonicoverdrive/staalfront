@@ -542,7 +542,10 @@ mod tests {
         fx.push_events(&[fire_at(weapon("cannon"), [12.0, 12.0], 50)]);
         let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 51, listener(30.0));
         assert_eq!(trace.len(), 1);
-        sound.play_frame(&mut fx, &mut audio);
+        // The shown events are taken by the audio: a frame that does not call `FxPlayer::frame` has none, and
+        // a planner with no memory of the spacing (a new one) hears nothing either.
+        assert!(fx.shown().is_empty());
+        FxSound::new(&AudioConfig::embedded()).play_frame(&mut fx, &mut audio);
         assert!(audio.take_trace().is_empty());
         let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 52, listener(30.0));
         assert!(trace.is_empty());
