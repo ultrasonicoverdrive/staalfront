@@ -113,7 +113,7 @@ checksum is unchanged. The new scenario `ore_256` is pinned
 ticks, so 600 ticks show regrowth), so editing `ore.ron` never moves it; the shipped
 numbers are pinned separately.
 
-`Command::TakeOre` is hashed in the queue (tag 11).
+`Command::TakeOre` is hashed in the queue (tag 12; 11 is `BuildStructure`).
 
 ## What the player sees
 

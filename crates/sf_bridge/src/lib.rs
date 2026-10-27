@@ -128,6 +128,8 @@ pub fn building_stats_of(building: &SimBuildingDef) -> BuildingStats {
         power: building.power,
         factions: building.factions,
         requires: building.requires.iter().map(|&k| Kind(k)).collect(),
+        // Whole cells: a fraction of a cell of radius does not count (docs/rules/buildings.md).
+        build_radius: u16::try_from(building.build_radius.floor_int().max(0)).unwrap_or(u16::MAX),
     }
 }
 

@@ -15,6 +15,7 @@ use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
 use crate::ore::{Ore, OreRules};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
+use crate::placement::PlacementState;
 use crate::projectiles::ProjectileId;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 use crate::targeting::{self, Engagement, Targeting, TargetingConfig};
@@ -152,6 +153,10 @@ pub enum ConfigError {
     /// The ore rules were given to a world that has already started, or are not
     /// valid ([`OreRules::is_valid`]).
     OreRules,
+    /// The player factions were given to a world that has already started.
+    PlayersAfterStart,
+    /// A player faction is not exactly one faction bit, or a player is listed twice.
+    PlayerFaction(PlayerId),
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -203,6 +208,12 @@ impl fmt::Display for ConfigError {
             ConfigError::OreRules => {
                 "the ore rules must be given before the world starts and be valid"
             }
+            ConfigError::PlayersAfterStart => {
+                "the player factions must be given before the world starts"
+            }
+            ConfigError::PlayerFaction(_) => {
+                "a player faction must be exactly one faction bit, once per player"
+            }
             ConfigError::MovementGap { .. } => {
                 "a movement class has no cost for a terrain type of the map"
             }
@@ -232,6 +243,9 @@ pub struct StepReport {
     /// Projectiles that went off in that tick, hit or miss. They are listed by [`World::impacts`] until
     /// the next step.
     pub impacts: u32,
+    /// [`Command::BuildStructure`] commands refused in that tick (WP6.2); they are listed by
+    /// [`World::placement_rejections`] until the next step. Also counted in `commands_ignored`.
+    pub placements_rejected: u32,
 }
 
 /// The complete simulation state. See the crate documentation for the design.
@@ -277,6 +291,8 @@ pub struct World {
     /// The ore on the map (WP7.1): an amount per field cell. `None` for a world
     /// that was given no ore rules.
     pub(crate) ore: Option<Ore>,
+    /// Who is which faction, and the builds refused in the last tick (WP6.2).
+    pub(crate) placement: PlacementState,
     /// Target selection and return fire (WP5.4): the settings, if the world was given any.
     pub(crate) targeting: Targeting,
     pub(crate) queue: CommandQueue,
@@ -363,11 +379,6 @@ impl World {
         }
         self.arsenal = Arsenal::new(table, &self.units).map_err(ConfigError::Weapons)?;
         Ok(self)
-    }
-
-    /// The building table the world was given ([`World::with_buildings`]).
-    pub fn buildings(&self) -> &BuildingTable {
-        &self.buildings
     }
 
     /// The same world with the building rules of its structure kinds (WP6.1,
@@ -591,6 +602,7 @@ impl World {
             arsenal: Arsenal::default(),
             buildings: BuildingTable::empty(),
             ore: None,
+            placement: PlacementState::default(),
             targeting: Targeting::default(),
             queue: CommandQueue::new(),
             history: Vec::new(),
@@ -1140,8 +1152,9 @@ impl World {
 
         let mut executed: u32 = 0;
         let mut ignored: u32 = 0;
-        while let Some((_player, command)) = self.queue.pop_due(tick) {
-            if self.apply(command) {
+        self.placement.rejections.clear();
+        while let Some((player, command)) = self.queue.pop_due(tick) {
+            if self.apply_from(player, command) {
                 executed = executed.saturating_add(1);
             } else {
                 ignored = ignored.saturating_add(1);
@@ -1245,6 +1258,7 @@ impl World {
                 })
                 .count() as u32,
             impacts: self.arsenal.impacts.len() as u32,
+            placements_rejected: self.placement.rejections.len() as u32,
         }
     }
 
@@ -1436,7 +1450,12 @@ impl World {
     /// Places a structure from the unit table. `None` (nothing happens) for a
     /// kind the table does not define, for a kind that is not a structure, and
     /// for everything [`World::place_footprint`] refuses.
-    fn place_structure(&mut self, kind: Kind, cell: Cell, owner: PlayerId) -> Option<EntityId> {
+    pub(crate) fn place_structure(
+        &mut self,
+        kind: Kind,
+        cell: Cell,
+        owner: PlayerId,
+    ) -> Option<EntityId> {
         let def = self.units.index_of(kind)?;
         let stats = *self.units.at(def);
         let footprint = stats.footprint?;
@@ -1533,14 +1552,14 @@ impl World {
     }
 
     /// The unit table entry of the entity in slot `i`, if it has one.
-    fn stats_at(&self, i: usize) -> Option<&UnitStats> {
+    pub(crate) fn stats_at(&self, i: usize) -> Option<&UnitStats> {
         let def = self.entities.def[i];
         (def != NO_DEF).then(|| self.units.at(def as usize))
     }
 
     /// The footprint of the structure in slot `i`: its table entry's, or one
     /// cell for a legacy structure.
-    fn footprint_at(&self, i: usize) -> Footprint {
+    pub(crate) fn footprint_at(&self, i: usize) -> Footprint {
         self.stats_at(i)
             .and_then(|s| s.footprint)
             .unwrap_or(Footprint::ONE)
@@ -1592,7 +1611,7 @@ impl World {
     }
 
     /// Runs one command. True if it changed anything.
-    fn apply(&mut self, command: Command) -> bool {
+    pub(crate) fn apply(&mut self, command: Command) -> bool {
         match command {
             Command::Spawn { kind, pos, owner } => self.spawn(kind, pos, owner).is_some(),
             Command::Place { kind, cell, owner } => self.place(kind, cell, owner).is_some(),
@@ -1600,6 +1619,8 @@ impl World {
             Command::PlaceStructure { kind, cell, owner } => {
                 self.place_structure(kind, cell, owner).is_some()
             }
+            // Needs to know who sent it: `World::apply_from` runs it (placement.rs).
+            Command::BuildStructure { .. } => false,
             Command::Despawn { id } => self.despawn(id),
             Command::Order { ids, order, queued } => {
                 let (pos_min, pos_max) = self.pos_range();

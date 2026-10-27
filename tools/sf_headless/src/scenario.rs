@@ -43,11 +43,12 @@ use serde::Deserialize;
 use sf_data::map::Map;
 use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
-use sf_data::units::UnitDefs;
+use sf_data::units::{Faction, UnitDefs};
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
-    Area, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind, MAX_ENTITIES, MAX_MAP_SIDE,
-    MovementTable, Order, PlayerId, Terrain, Tick, UnitTable, WeaponTable, World, WorldConfig,
+    Area, BuildingTable, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind,
+    MAX_ENTITIES, MAX_MAP_SIDE, MovementTable, Order, PlayerId, Terrain, Tick, UnitTable,
+    WeaponTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -107,6 +108,21 @@ pub struct Scenario {
     /// copy of the definitions freezes the costs too.
     #[serde(skip)]
     pub movement_table: Option<MovementTable>,
+    /// Whether the world is given the building rules of the `unit_defs` directory (WP6.2,
+    /// `docs/rules/buildings.md`): the building table and, with `factions`, who is which
+    /// faction. `BuildStructure` is checked against them; without it a build is refused as
+    /// "no building rules". Off when left out, so every scenario of the earlier phases is the
+    /// world it was pinned with. Needs `unit_defs`.
+    #[serde(default)]
+    pub buildings: bool,
+    /// The faction of each player (WP6.2), as `(player, Meridian | Veyran | Neutral)`;
+    /// a player left out has none and builds nothing. Needs `buildings`.
+    #[serde(default)]
+    pub factions: Vec<(u8, Faction)>,
+    /// The building table read from `unit_defs` by [`Scenario::load`] when `buildings` is on,
+    /// handed to the world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub building_table: Option<BuildingTable>,
     /// The nodes of path search work the world may do in one tick (WP4.2,
     /// `docs/rules/pathfinding.md`); the simulation's default
     /// ([`sf_sim::DEFAULT_NODE_BUDGET`]) when left out. It decides when a unit
@@ -431,6 +447,17 @@ pub enum Action {
         /// The anchor cell `(x, y)`, inside the map.
         cell: (u32, u32),
     },
+    /// `Command::BuildStructure` (WP6.2): the player who sends the command (`player` of the
+    /// timed command) builds a structure of `kind` with its footprint anchored on `cell`.
+    /// Needs `buildings`. Unlike `PlaceStructure` it is checked against the placement rules
+    /// (terrain, overlap, base radius, prerequisites, faction, exit); a refusal counts as
+    /// ignored and is listed in the run's rejections.
+    BuildStructure {
+        /// The permanent kind number of the role.
+        kind: u16,
+        /// The anchor cell `(x, y)`, inside the map.
+        cell: (u32, u32),
+    },
     /// `Command::Place`: a standing structure on a cell. Refused by the
     /// simulation (the command counts as ignored) on terrain that is not
     /// buildable and on an occupied cell. The entity takes the next free id,
@@ -484,7 +511,8 @@ fn load_unit_defs(
     name: &str,
     scenario_file: &Path,
     combat: bool,
-) -> Result<(UnitTable, WeaponTable, MovementTable, MovementCosts), ScenarioError> {
+    buildings: bool,
+) -> Result<LoadedDefs, ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
         problems: vec![format!("unit_defs \"{name}\": {problem}")],
@@ -501,8 +529,25 @@ fn load_unit_defs(
     let costs = MovementCosts::from_defs(&defs, &TerrainTypes::embedded())
         .map_err(|e| invalid(e.to_string()))?;
     let movement = sf_bridge::movement_table(&costs).map_err(invalid)?;
-    Ok((units, weapons, movement, costs))
+    // Built only for a scenario with `buildings`, like the weapons: a frozen copy that predates
+    // the block still loads for the scenarios that never build.
+    let building_table = if buildings {
+        Some(sf_bridge::building_table(&defs).map_err(invalid)?)
+    } else {
+        None
+    };
+    Ok((units, weapons, movement, costs, building_table))
 }
+
+/// What [`load_unit_defs`] reads: the unit, weapon and movement tables, the movement costs they
+/// came from, and the building table of a scenario with `buildings`.
+type LoadedDefs = (
+    UnitTable,
+    WeaponTable,
+    MovementTable,
+    MovementCosts,
+    Option<BuildingTable>,
+);
 
 /// The middle of a cell, in cells: where an order sends a unit.
 fn cell_middle(cell: (i32, i32)) -> Vec2 {
@@ -627,8 +672,10 @@ impl Scenario {
         // The unit definitions first: their costs decide the terrain's summary.
         let mut own_costs = None;
         if let Some(name) = scenario.unit_defs.clone() {
-            let (units, weapons, movement, costs) = load_unit_defs(&name, path, scenario.combat)?;
+            let (units, weapons, movement, costs, buildings) =
+                load_unit_defs(&name, path, scenario.combat, scenario.buildings)?;
             scenario.unit_table = Some(units);
+            scenario.building_table = buildings;
             scenario.weapon_table = scenario.combat.then_some(weapons);
             scenario.movement_table = Some(movement);
             own_costs = Some(costs);
@@ -759,6 +806,31 @@ impl Scenario {
             p.push(
                 "combat needs `unit_defs` (the weapons are part of the definitions)".to_string(),
             );
+        }
+
+        if self.buildings && self.unit_defs.is_none() {
+            p.push(
+                "buildings needs `unit_defs` (the rules are part of the definitions)".to_string(),
+            );
+        }
+
+        if !self.factions.is_empty() && !self.buildings {
+            p.push(
+                "factions needs `buildings` (they are checked when a player builds)".to_string(),
+            );
+        }
+
+        let mut seen = Vec::new();
+        for (player, faction) in &self.factions {
+            if seen.contains(player) {
+                p.push(format!("factions: player {player} is listed twice"));
+            }
+            seen.push(*player);
+            if *faction == Faction::Neutral {
+                p.push(format!(
+                    "factions: player {player} cannot be Neutral (nobody plays it)"
+                ));
+            }
         }
 
         if self.targeting && !self.combat {
@@ -911,6 +983,7 @@ impl Scenario {
                 }
                 Action::Place { cell, .. }
                 | Action::SpawnUnit { cell, .. }
+                | Action::BuildStructure { cell, .. }
                 | Action::PlaceStructure { cell, .. } => {
                     if map_ok && (cell.0 >= width || cell.1 >= height) {
                         p.push(format!(
@@ -921,12 +994,17 @@ impl Scenario {
                     if self.unit_defs.is_none()
                         && matches!(
                             c.command,
-                            Action::SpawnUnit { .. } | Action::PlaceStructure { .. }
+                            Action::SpawnUnit { .. }
+                                | Action::PlaceStructure { .. }
+                                | Action::BuildStructure { .. }
                         )
                     {
                         p.push(format!(
-                            "{at}: SpawnUnit and PlaceStructure need `unit_defs`"
+                            "{at}: SpawnUnit, PlaceStructure and BuildStructure need `unit_defs`"
                         ));
+                    }
+                    if !self.buildings && matches!(c.command, Action::BuildStructure { .. }) {
+                        p.push(format!("{at}: BuildStructure needs `buildings`"));
                     }
                 }
             }
@@ -999,6 +1077,29 @@ impl Scenario {
             if let Some(movement) = self.movement_table.clone() {
                 world = world
                     .with_movement(movement)
+                    .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+            }
+            if self.buildings {
+                let Some(table) = self.building_table.clone() else {
+                    return Err(ScenarioError::Invalid {
+                        path: None,
+                        problems: vec![
+                            "buildings: the rules are read from the files next to the scenario, \
+                             so the scenario must be loaded with Scenario::load"
+                                .into(),
+                        ],
+                    });
+                };
+                world = world
+                    .with_buildings(table)
+                    .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+                let players: Vec<(PlayerId, u8)> = self
+                    .factions
+                    .iter()
+                    .map(|&(player, faction)| (PlayerId(player), faction.bit()))
+                    .collect();
+                world = world
+                    .with_player_factions(&players)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
             }
         }
@@ -1160,6 +1261,13 @@ impl Scenario {
                             Fx::from_i64(i64::from(cell.1)) + Fx::HALF,
                         ),
                         owner: PlayerId(*owner),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::BuildStructure { kind, cell } => {
+                    let command = Command::BuildStructure {
+                        kind: Kind(*kind),
+                        cell: Cell::new(cell.0, cell.1),
                     };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }

@@ -82,6 +82,11 @@ pub struct Options {
     pub grid: bool,
     pub lod_tint: bool,
     pub hover: Option<(f32, f32)>,
+    /// `--build <role>`: start with this structure chosen to build, as if B had been pressed
+    /// until it came up (WP6.2). Sandbox only; a role the local faction does not build is reported.
+    pub build: Option<String>,
+    /// `--build-at x,y`: the ghost sits on this cell whatever the cursor does (screenshots).
+    pub build_at: Option<(u32, u32)>,
     pub unit_display: UnitDisplay,
     pub zoom: Option<f64>,
     pub focus: Option<(f64, f64)>,
@@ -126,6 +131,8 @@ impl Options {
             grid: false,
             lod_tint: false,
             hover: None,
+            build: None,
+            build_at: None,
             unit_display: UnitDisplay::Auto,
             zoom: None,
             focus: None,
@@ -209,6 +216,16 @@ impl Options {
                         let (x, y) = v.split_once(',')?;
                         Some((x.parse().ok()?, y.parse().ok()?))
                     });
+                }
+                "--build" => o.build = value(&mut o.warnings),
+                "--build-at" => {
+                    o.build_at = value(&mut o.warnings).and_then(|v| {
+                        let (x, y) = v.split_once(',')?;
+                        Some((x.parse().ok()?, y.parse().ok()?))
+                    });
+                    if o.build_at.is_none() {
+                        o.warnings.push("--build-at: expected x,y in cells".into());
+                    }
                 }
                 "--unit-display" => {
                     o.unit_display = match value(&mut o.warnings).as_deref() {
