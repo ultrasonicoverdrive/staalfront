@@ -43,6 +43,7 @@ use crate::args::{BenchOptions, Options, Scene};
 use crate::bench::{self, FrameSample, Recorder, Report};
 use crate::build_mode::BuildMode;
 use crate::commands;
+use crate::construction_view;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::hud::{Hud, HudStats};
@@ -371,7 +372,7 @@ impl Runner {
         if pack.is_some() || looks.roster().is_some_and(|r| r.pack().is_some()) {
             instancer.set_aim(Some([0.5 * map_metres.0, 0.5 * map_metres.1]));
         }
-        instancer.update_tick(snap.views().iter().map(|v| motion_of(&looks, v)));
+        instancer.update_tick(snap.views().iter().map(|v| motion_of(&looks, &snap, v)));
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let camera_config = CameraConfig {
@@ -525,9 +526,11 @@ fn order_text(order: sf_sim::Order, world: &SimSnapshot) -> String {
 
 /// A sim entity as the instancer wants it. The positions are in cells;
 /// `Motion::from_fixed` is where they become metres (B12).
-fn motion_of(looks: &Looks, v: &EntityView) -> Motion {
+fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
+    // A structure under construction is drawn as the stage its progress is in (WP6.3).
+    let building = snap.construction_of(v.id).map(|c| c.permille());
     let motion = Motion::from_fixed(
-        looks.shape_of(v),
+        looks.shape_at(v, building),
         v.owner.0,
         v.prev_pos,
         v.pos,
@@ -888,6 +891,28 @@ impl Runner {
         placement_view::draw_ghost(&mut layer, &frame, &terrain, answer);
     }
 
+    /// The progress bars of the structures under construction (WP6.3), from the snapshot's state.
+    fn draw_construction_bars(&mut self) {
+        if self.snap.constructions().is_empty() {
+            return;
+        }
+        let Some(roster) = self.looks.roster() else {
+            return;
+        };
+        let look = roster.stages().bar;
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        construction_view::draw_bars(&mut layer, &frame, &terrain, &snap, &look);
+    }
+
     /// Replace the camera with one built from `config`, keeping where it
     /// looks, how far it is zoomed and the terrain it picks against (the
     /// camera has no setter for its tunables; they only change here, from the
@@ -947,8 +972,12 @@ impl Runner {
         // metres and bucketed by map tile.
         let started = Instant::now();
         let looks = &self.looks;
-        self.instancer
-            .update_tick(self.snap.views().iter().map(|v| motion_of(looks, v)));
+        self.instancer.update_tick(
+            self.snap
+                .views()
+                .iter()
+                .map(|v| motion_of(looks, &self.snap, v)),
+        );
         self.tick_ms.push(started.elapsed());
     }
 
@@ -1682,6 +1711,7 @@ impl App for Runner {
             self.build_units(alpha, cursor);
             self.mark_selection();
             self.draw_ghost();
+            self.draw_construction_bars();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();

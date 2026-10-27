@@ -246,7 +246,11 @@ fn build_the_tree(player: PlayerId, faction: Faction) {
                         assert!(!w.stands(at), "{id} stands before its build time");
                         w.step();
                     }
-                    assert!(w.stands(at), "{id} does not stand after {} ticks", b.build_ticks);
+                    assert!(
+                        w.stands(at),
+                        "{id} does not stand after {} ticks",
+                        b.build_ticks
+                    );
                     built.push(id);
                 }
             }

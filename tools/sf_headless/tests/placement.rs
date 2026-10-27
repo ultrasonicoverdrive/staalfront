@@ -39,7 +39,10 @@ fn run_with_completions() -> (
         for r in world.placement_rejections() {
             refused.push((r.tick.0, r.player.0, r.kind.0, r.reason));
         }
-        assert_eq!(world.completions().len(), report.structures_completed as usize);
+        assert_eq!(
+            world.completions().len(),
+            report.structures_completed as usize
+        );
         for c in world.completions() {
             done.push((c.tick.0, c.kind.0, c.owner.0));
         }

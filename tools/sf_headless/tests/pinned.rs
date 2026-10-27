@@ -58,8 +58,7 @@ const ARMOUR_SPLASH_EXPECTED: &str =
 const TANKS_VS_INFANTRY_EXPECTED: &str =
     include_str!("../../../assets/scenarios/tanks_vs_infantry.expected");
 const PLACEMENT_EXPECTED: &str = include_str!("../../../assets/scenarios/placement.expected");
-const CONSTRUCTION_EXPECTED: &str =
-    include_str!("../../../assets/scenarios/construction.expected");
+const CONSTRUCTION_EXPECTED: &str = include_str!("../../../assets/scenarios/construction.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)

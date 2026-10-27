@@ -169,7 +169,12 @@ fn a_built_structure_is_complete_after_exactly_its_build_ticks() {
     let events = w.completions();
     assert_eq!(events.len(), 1);
     assert_eq!(
-        (events[0].tick, events[0].id, events[0].kind, events[0].owner),
+        (
+            events[0].tick,
+            events[0].id,
+            events[0].kind,
+            events[0].owner
+        ),
         (done.tick, plant, PLANT, PlayerId(0))
     );
     // The list is for one step only, and a complete structure never fires again.
@@ -256,7 +261,10 @@ fn the_command_of_the_completing_tick_sees_the_structure_standing() {
         },
     );
     assert_eq!(r.tick.0, completes_in);
-    assert_eq!(r.structures_completed, 1, "the plant completed in this step");
+    assert_eq!(
+        r.structures_completed, 1,
+        "the plant completed in this step"
+    );
     assert_eq!(r.commands_executed, 1, "and the tower was accepted in it");
     assert_eq!(r.placements_rejected, 0);
 }

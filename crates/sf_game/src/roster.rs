@@ -58,6 +58,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use sf_data::build_stages::BuildStages;
 use sf_data::units::{
     Category, Faction, IconShape as DataIcon, Model, ModelShape, UnitDef, UnitDefs,
 };
@@ -123,6 +124,11 @@ pub struct Roster {
     variants: Vec<(u8, Shape)>,
     /// The glTF models of the roles, after the variants.
     pack: Option<LoadedPack>,
+    /// The looks of a structure under construction, stage by stage (WP6.3), for the roles that can
+    /// be built: one per stage of `stages`, in order, for the generic look and each faction look.
+    stage_looks: BTreeMap<LookKey, Vec<RoleLook>>,
+    /// The stages (`assets/config/build_stages.ron`) the looks above follow.
+    stages: BuildStages,
     /// Roles whose model could not be used and fell back to a primitive.
     pub warnings: Vec<String>,
 }
@@ -268,6 +274,53 @@ impl Loader<'_> {
     }
 }
 
+impl Loader<'_> {
+    /// The source of every stage of a structure under construction (WP6.3), handed to `put` with
+    /// the stage's index: the stage's glTF model when `model` is a glTF file whose staged file
+    /// exists (the finished file name and the stage's suffix, `build_stages.ron`) and loads, else a
+    /// box of the footprint, as high as the stage says.
+    fn stage_sources(
+        &mut self,
+        role: &RoleCtx<'_>,
+        faction: Option<Faction>,
+        model: &Model,
+        base: &Style,
+        stages: &BuildStages,
+        mut put: impl FnMut(usize, Source),
+    ) {
+        for (idx, stage) in stages.stages.iter().enumerate() {
+            let staged = match model {
+                Model::Glb(path) if self.use_models => stages
+                    .model_of(path, idx)
+                    .filter(|file| self.assets.join(file).is_file()),
+                _ => None,
+            };
+            let from_model =
+                staged.and_then(|file| self.source(role, faction, &Model::Glb(file), base));
+            let source = from_model.unwrap_or_else(|| {
+                let Source::Placeholder {
+                    base: chain,
+                    icon,
+                    mut size_mm,
+                } = placeholder(role.size, role.footprint, MeshKind::Cube, role.icon, base)
+                else {
+                    unreachable!("placeholder() makes a placeholder")
+                };
+                // As high as the stage says, but never a sliver.
+                let height =
+                    i64::from(size_mm[1]) * i64::from(stage.fallback_height_permille) / 1000;
+                size_mm[1] = height.max(200) as i32;
+                Source::Placeholder {
+                    base: chain,
+                    icon,
+                    size_mm,
+                }
+            });
+            put(idx, source);
+        }
+    }
+}
+
 impl Roster {
     /// The looks of all roles of `defs` on `base`, the style of the
     /// placeholder shapes (cube, cylinder and cone at vehicle size).
@@ -287,6 +340,27 @@ impl Roster {
         models_ron: &str,
         use_models: bool,
     ) -> Result<Roster, String> {
+        Roster::build_with(
+            defs,
+            base,
+            icons,
+            assets,
+            models_ron,
+            use_models,
+            &BuildStages::embedded(),
+        )
+    }
+
+    /// [`Roster::build`] with the construction stages given (a test with a table of its own).
+    pub fn build_with(
+        defs: &UnitDefs,
+        base: &Style,
+        icons: &IconAtlas,
+        assets: &Path,
+        models_ron: &str,
+        use_models: bool,
+        stages: &BuildStages,
+    ) -> Result<Roster, String> {
         let mut loader = Loader {
             assets,
             models_ron,
@@ -298,6 +372,8 @@ impl Roster {
         };
         // What every role (and every faction's entry of a role) is drawn with.
         let mut sources: BTreeMap<LookKey, Source> = BTreeMap::new();
+        // What a structure that can be built is drawn with while it goes up: per look and stage.
+        let mut stage_sources: BTreeMap<(u16, Option<Faction>, usize), Source> = BTreeMap::new();
 
         for def in defs.units() {
             let sim = defs
@@ -329,11 +405,29 @@ impl Roster {
                     placeholder(sim.size, sim.footprint, mesh, icon, base)
                 });
             sources.insert((def.kind, None), generic);
+            let buildable = def.category == Category::Structure && sim.build_ticks > 0;
+            if buildable {
+                loader.stage_sources(&role, None, &def.model, base, stages, |idx, source| {
+                    stage_sources.insert((def.kind, None, idx), source);
+                });
+            }
             // A faction's own model: a look only if it can be used; otherwise
             // that faction's units are drawn with the generic one.
             for (faction, model) in &def.models {
                 if let Some(source) = loader.source(&role, Some(*faction), model, base) {
                     sources.insert((def.kind, Some(*faction)), source);
+                    if buildable {
+                        loader.stage_sources(
+                            &role,
+                            Some(*faction),
+                            model,
+                            base,
+                            stages,
+                            |idx, source| {
+                                stage_sources.insert((def.kind, Some(*faction), idx), source);
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -350,7 +444,11 @@ impl Roster {
         // Ascending by kind and then faction, so the numbers do not depend on
         // the order of the file.
         let kinds_by_source: Vec<(LookKey, Source)> = sources.into_iter().collect();
-        for (_, source) in &kinds_by_source {
+        for source in kinds_by_source
+            .iter()
+            .map(|(_, source)| source)
+            .chain(stage_sources.values())
+        {
             if let Source::Placeholder {
                 base: chain,
                 icon,
@@ -403,6 +501,26 @@ impl Roster {
             }
         }
 
+        // The stage looks, by role and look, in the order of the stages.
+        let mut stage_looks: BTreeMap<LookKey, Vec<RoleLook>> = BTreeMap::new();
+        for ((kind, faction, _), source) in &stage_sources {
+            let def = defs
+                .unit_by_kind(*kind)
+                .ok_or_else(|| format!("kind {kind}: no definition"))?;
+            let (shape, model) = match source {
+                Source::Placeholder { .. } => (base_count + variant_at[source], false),
+                Source::Model(i) => (model_base + i, true),
+            };
+            stage_looks
+                .entry((*kind, *faction))
+                .or_default()
+                .push(RoleLook {
+                    id: def.id.clone(),
+                    shape: shape as u8,
+                    model,
+                });
+        }
+
         // The models as one pack: the loaded models in order, then one shape per
         // entry: its model's chain (the meshes are shared) and its icon.
         let pack = models
@@ -429,8 +547,45 @@ impl Roster {
             faction_looks,
             variants,
             pack,
+            stage_looks,
+            stages: stages.clone(),
             warnings,
         })
+    }
+
+    /// The stages the construction looks follow.
+    pub fn stages(&self) -> &BuildStages {
+        &self.stages
+    }
+
+    /// The shape of a structure of this kind owned by `faction` while it is `permille` thousandths
+    /// built (WP6.3): the stage model, or the box that stands in for it. `None` for a role that
+    /// cannot be built; the caller then draws the finished look.
+    pub fn shape_under_construction(
+        &self,
+        kind: Kind,
+        faction: Option<Faction>,
+        permille: u16,
+    ) -> Option<u8> {
+        let stage = self.stages.stage_at(permille);
+        let looks = faction
+            .and_then(|f| self.stage_looks.get(&(kind.0, Some(f))))
+            .or_else(|| self.stage_looks.get(&(kind.0, None)))?;
+        looks.get(stage).map(|l| l.shape)
+    }
+
+    /// The look a structure has at stage `stage`, for a test or a tool: like
+    /// [`Roster::shape_under_construction`] by stage index.
+    pub fn stage_look(
+        &self,
+        kind: Kind,
+        faction: Option<Faction>,
+        stage: usize,
+    ) -> Option<&RoleLook> {
+        faction
+            .and_then(|f| self.stage_looks.get(&(kind.0, Some(f))))
+            .or_else(|| self.stage_looks.get(&(kind.0, None)))
+            .and_then(|v| v.get(stage))
     }
 
     /// The generic look of the role with this kind number (its `model`).
@@ -1142,6 +1297,108 @@ mod tests {
         assert_eq!(owners.len(), 3);
         assert_eq!(faction_of_owner(3), None);
         assert_eq!(faction_of_owner(255), None);
+    }
+
+    /// Every structure a player can build has a foundation and a scaffolding model for each of
+    /// its looks, from the files of the art set (no stand-in box), and the three stages are three
+    /// different shapes (WP6.3).
+    #[test]
+    fn every_buildable_structure_has_stage_models_from_the_art_set() {
+        let (defs, roster) = built(true);
+        let mut checked = 0;
+        for def in defs.units() {
+            let buildable = def.category == Category::Structure && def.cost.is_some();
+            let kind = Kind(def.kind);
+            if !buildable {
+                assert!(
+                    roster.shape_under_construction(kind, None, 0).is_none(),
+                    "{} is not built, so it has no stages",
+                    def.id
+                );
+                continue;
+            }
+            let factions: Vec<Option<Faction>> = if def.models.is_empty() {
+                vec![None]
+            } else {
+                def.models.keys().map(|f| Some(*f)).collect()
+            };
+            for faction in factions {
+                let finished = roster.look_for(kind, faction).unwrap();
+                let foundation = roster.stage_look(kind, faction, 0).unwrap();
+                let scaffolding = roster.stage_look(kind, faction, 1).unwrap();
+                let who = format!("{} {faction:?}", def.id);
+                assert!(foundation.model && scaffolding.model, "{who}: stage models");
+                assert!(finished.model, "{who}: finished model");
+                let mut shapes = [finished.shape, foundation.shape, scaffolding.shape];
+                shapes.sort_unstable();
+                assert!(shapes.windows(2).all(|w| w[0] != w[1]), "{who}: {shapes:?}");
+                checked += 1;
+            }
+        }
+        // Eight structures with a model per faction (the shared tree) and the decoy and the bunker with
+        // one generic model each: 8 * 2 + 2.
+        assert_eq!(checked, 18);
+        assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
+    }
+
+    /// The stage follows the thousandths of the data: the last stage that has begun.
+    #[test]
+    fn the_stage_shown_follows_the_thresholds_of_the_data() {
+        let (defs, roster) = built(true);
+        let plant = Kind(defs.kind_of("power_plant").unwrap());
+        let at = |p| roster.shape_under_construction(plant, Some(Faction::Meridian), p);
+        let stage = |i| {
+            roster
+                .stage_look(plant, Some(Faction::Meridian), i)
+                .map(|l| l.shape)
+        };
+        let from = roster.stages().stages[1].from_permille;
+        assert_eq!((from, at(0)), (400, stage(0)));
+        assert_eq!(at(from - 1), stage(0));
+        assert_eq!(at(from), stage(1));
+        assert_eq!(at(999), stage(1));
+        assert_ne!(stage(0), stage(1));
+        let rifleman = Kind(defs.kind_of("rifleman").unwrap());
+        assert_eq!(roster.shape_under_construction(rifleman, None, 0), None);
+    }
+
+    /// A structure whose stage models do not exist is a box of its footprint, as high as the stage
+    /// says: the simple fallback.
+    #[test]
+    fn a_structure_without_stage_models_is_a_box_as_high_as_the_stage_says() {
+        let defs = UnitDefs::embedded();
+        let mut stages = BuildStages::embedded();
+        for stage in &mut stages.stages {
+            stage.suffix = "_not_in_the_art_set".into();
+        }
+        let roster = Roster::build_with(
+            &defs,
+            &base(),
+            &icons(),
+            &assets(),
+            &models_ron(),
+            true,
+            &stages,
+        )
+        .unwrap();
+        let style = roster.style(&base());
+        let plant = Kind(defs.kind_of("power_plant").unwrap());
+        let finished = roster.look_for(plant, Some(Faction::Meridian)).unwrap();
+        assert!(finished.model, "the finished model is still the art set's");
+        let height = |i| {
+            let look = roster
+                .stage_look(plant, Some(Faction::Meridian), i)
+                .unwrap();
+            assert!(!look.model, "stage {i} is a box");
+            style.shape(look.shape).size
+        };
+        let (foundation, scaffolding) = (height(0), height(1));
+        // The footprint is the structure's (2 x 3 cells of 4 m), the height the data's share of
+        // the box: 3 m + 2 m (the shorter side) = 5 m, 80 and 550 thousandths of it.
+        assert_eq!([foundation[0], foundation[2]], [8.0, 12.0]);
+        assert_eq!([scaffolding[0], scaffolding[2]], [8.0, 12.0]);
+        assert!((foundation[1] - 0.4).abs() < 0.01, "{foundation:?}");
+        assert!((scaffolding[1] - 2.75).abs() < 0.01, "{scaffolding:?}");
     }
 
     #[test]
