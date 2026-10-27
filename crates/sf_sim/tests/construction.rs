@@ -406,3 +406,151 @@ fn progress_in_thousandths_never_reaches_a_thousand_before_it_is_complete() {
     assert_eq!(c(1, 3000), 999);
     assert_eq!(c(1, 10_000), 999);
 }
+
+// --- destruction (WP5.5) and construction ---
+
+mod shot_down {
+    use super::*;
+    use sf_sim::{
+        DestructionConfig, Loadout, Mount, Order, ProjectileKind, WeaponStats, WeaponTable,
+    };
+
+    const GUNNER: Kind = Kind(20);
+    const GUN: u16 = 1;
+
+    fn world() -> World {
+        let unit = |kind: Kind, hp: u32, footprint: Option<Footprint>, range: i32| UnitStats {
+            kind,
+            hp,
+            movement_class: footprint.is_none().then_some(0),
+            speed_per_tick: if footprint.is_none() {
+                sf_sim::per_tick(Fx::from_int(2))
+            } else {
+                Fx::ZERO
+            },
+            turn_per_tick: 255,
+            size: Fx::from_ratio(4, 10),
+            footprint,
+            weapon_range: Fx::from_int(range),
+            turret_per_tick: 0,
+        };
+        let fp = |w, h| {
+            Some(Footprint {
+                width: w,
+                height: h,
+            })
+        };
+        let gun = WeaponStats {
+            kind: GUN,
+            range: Fx::from_int(8),
+            min_range: Fx::ZERO,
+            reload_ticks: 10,
+            burst: 1,
+            burst_delay_ticks: 0,
+            damage: 20,
+            damage_type: 0,
+            projectile: ProjectileKind::Instant,
+            projectile_speed_per_tick: Fx::ZERO,
+            flight_height: Fx::ZERO,
+            guide_turn_per_tick: 0,
+            splash_radius: Fx::ZERO,
+            splash_inner: Fx::ZERO,
+            friendly_fire: true,
+            mount: Mount::Hull,
+            fire_arc: 128,
+        };
+        // The plant has 40 hit points here: two shots of 20.
+        let mut plant = unit(PLANT, 40, fp(2, 2), 0);
+        plant.hp = 40;
+        World::new(WorldConfig::new(3).with_map_size(40, 30))
+            .unwrap()
+            .with_units(
+                UnitTable::new(vec![
+                    unit(ANCHOR, 500, fp(2, 2), 0),
+                    plant,
+                    unit(GUNNER, 50, None, 8),
+                ])
+                .unwrap(),
+            )
+            .unwrap()
+            .with_weapons(
+                WeaponTable::new(
+                    vec![gun],
+                    vec![Loadout {
+                        unit: GUNNER,
+                        weapons: vec![GUN],
+                    }],
+                )
+                .unwrap(),
+            )
+            .unwrap()
+            .with_destruction(DestructionConfig::DEFAULT)
+            .unwrap()
+            .with_buildings(
+                BuildingTable::new(vec![
+                    entry(ANCHOR, (2, 2), BuildingFunction::Anchor, &[], 4),
+                    entry(PLANT, (2, 2), BuildingFunction::PowerPlant, &[], 0),
+                ])
+                .unwrap(),
+            )
+            .unwrap()
+            .with_player_factions(&[(PlayerId(0), 1)])
+            .unwrap()
+    }
+
+    #[test]
+    fn a_structure_shot_down_while_it_goes_up_never_completes() {
+        let mut w = world();
+        send(
+            &mut w,
+            Command::PlaceStructure {
+                kind: ANCHOR,
+                cell: Cell::new(10, 10),
+                owner: PlayerId(0),
+            },
+        );
+        build(&mut w, PLANT, 14, 10);
+        let plant = at(&w, 14, 10);
+        assert!(w.construction_of(plant).is_some());
+        // An enemy gunner takes the half-built plant under fire (an attack order names it).
+        let tick = w.tick();
+        w.schedule(
+            tick,
+            PlayerId(1),
+            Command::SpawnUnit {
+                kind: GUNNER,
+                pos: sf_math::Vec2::from_ints(20, 11),
+                owner: PlayerId(1),
+            },
+        )
+        .unwrap();
+        w.step();
+        let gunner = w
+            .snapshot()
+            .iter()
+            .find(|v| v.kind == GUNNER)
+            .map(|v| v.id)
+            .unwrap();
+        send(
+            &mut w,
+            Command::Order {
+                ids: vec![gunner],
+                order: Order::Attack(plant),
+                queued: false,
+            },
+        );
+        // Two shots of 20 against 40 hit points, 10 ticks apart: gone well before 40 ticks.
+        let mut completed = 0;
+        for _ in 0..200 {
+            completed += w.step().structures_completed;
+        }
+        assert!(!w.is_alive(plant), "the plant was destroyed");
+        assert_eq!(completed, 0, "a destroyed structure never completes");
+        assert_eq!(w.under_construction(), 0, "its state went with it");
+        assert_eq!(w.construction_of(plant), None);
+        assert!(!w.stands(plant));
+        // The cells are free again; nothing is left to finish.
+        assert!(w.occupant_at(Cell::new(14, 10)).is_none());
+        assert!(w.completions().is_empty());
+    }
+}

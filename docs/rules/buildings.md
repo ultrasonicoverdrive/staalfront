@@ -248,6 +248,13 @@ earlier scenario changed.
 commands moved to the ticks the builds finish) and `placement.expected` was re-pinned `0x523c7fcc0105b96f` to
 `0x9c83a43fc19af879`, with the cause measured (`docs/rules/construction.md`, "`placement.expected` re-pinned").
 
+### With destruction (WP5.5)
+
+In a world with destruction settings a structure shot to zero is removed at the end of the tick: its cells are
+free for placement at once, and the rubble it leaves blocks nothing (`destruction.md`, "A wreck blocks nothing";
+a new building clears the rubble under it). A destroyed anchor is gone and no longer gives build range. Test:
+`placement::tests::a_destroyed_structure_frees_its_cells_and_a_destroyed_anchor_gives_no_range`.
+
 ## The shipped tech tree (placeholder)
 
 Nothing is built without the `construction_center`, which each player starts with (it has no cost). Arrows

@@ -235,10 +235,11 @@ sees to it). `weapons_defs` (WP5.1) has the speeds already; `projectiles_defs` i
   [`targeting.md`](targeting.md) (a projectile already has a
   ground-point target: a guided one whose target died is one).
 * Armor, splash, damage types: done in WP5.3 ([`armour.md`](armour.md)).
-* A destroyed unit leaving the world, kill credit: WP5.5 (see the `hp_after` note).
+* A destroyed unit leaving the world, kill credit: done in WP5.5 ([`destruction.md`](destruction.md); the credit
+  is settled from the damage of the tick, never from `hp_after`).
 * Drawing projectiles, muzzle flashes, explosions: WP5.6 (the snapshot is ready).
 * Projectiles hitting what is in the way (a wall, a friendly unit), line of sight, terrain height: later.
-* `sf_game` still has no weapon table (nothing would show a shot): one line when WP5.5 and WP5.6 land.
+* `sf_game` has a weapon table since WP5.5; drawing the projectiles is WP5.6.
 
 ## Tests
 

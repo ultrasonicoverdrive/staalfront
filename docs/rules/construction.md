@@ -67,18 +67,23 @@ points left** (or cannot be damaged, `hp` 0 in the table). It is what these ask:
 A structure under construction must give no power and produce nothing; those work packages have to call
 `stands` and not look at hit points alone.
 
-## A structure at zero hit points does not finish
+## Hurt and destroyed while it goes up (WP5.5, WP5.4)
 
-Until WP5.5 lands (it removes a structure at zero hit points and leaves rubble), a structure shot to zero hit
-points stays where it fell. Construction does not advance on it and no completion fires: a wreck must not
-"complete" (`a_structure_at_zero_hit_points_does_not_finish_building_and_fires_no_event`). If hit points come
-back (repair, WP6.6) it carries on from where it stopped. When WP5.5 despawns it, the state is dropped with the
-slot (`Entities::fill` and `clear` reset it).
+A structure under construction is a structure like any other for damage: it has its full hit points from the
+start and an attack order can name it. In a world with destruction settings (WP5.5, `destruction.md`) a structure
+shot to zero is removed at the end of the tick, leaving rubble: its cells are free, and its construction state
+goes with the slot (`Entities::fill` and `clear` reset it), so no completion ever fires for it
+(`shot_down::a_structure_shot_down_while_it_goes_up_never_completes`: a gunner with an attack order takes a half-built
+plant down in two shots, 200 ticks run on, no `Completion`, no state left, the cells free).
 
-Interaction with targeting (WP5.4): structures do not choose or take targets yet (WP6.7 for defences), so
-nothing in the simulation damages a structure under construction today; the rule above is tested by setting
-hit points directly. **Gap:** a structure has its full hit points while it goes up. Whether it should be fragile
-at first (hit points rising with progress) is balance for phase 15; it would be one more column, not a
+In a world **without** destruction settings (the pinned earlier scenarios, the unit tests of placement) a structure at
+zero hit points stays where it fell. Construction does not advance on it and no completion fires: a wreck must not
+"complete" (`a_structure_at_zero_hit_points_does_not_finish_building_and_fires_no_event`). If hit points come back
+(repair, WP6.6) it carries on from where it stopped.
+
+Targeting (WP5.4): structures do not choose or take targets by themselves yet (WP6.7 for defences), so only an
+explicit attack order hurts one. **Gap:** a structure has its full hit points while it goes up. Whether it should be
+fragile at first (hit points rising with progress) is balance for phase 15; it would be one more column, not a
 change of the rule.
 
 ## The checksum

@@ -154,6 +154,30 @@ fn the_checksum_sees_the_table_and_only_when_there_is_one() {
     assert_ne!(changed.checksum(), with.checksum());
 }
 
+/// Merge of WP5.5 into WP6.1: the destruction settings and the building table are two
+/// independent parts of a world; either order of the builders gives the same world, with
+/// both checksum sections (`X` and `B`).
+#[test]
+fn destruction_and_buildings_compose_in_either_order() {
+    let defs = defs();
+    let d = sf_sim::DestructionConfig::DEFAULT;
+    let mut a = with_buildings(&defs).with_destruction(d).unwrap();
+    let mut b = world(&defs)
+        .with_destruction(d)
+        .unwrap()
+        .with_buildings(building_table(&defs).unwrap())
+        .unwrap();
+    assert_eq!(a.checksum(), b.checksum());
+    assert_ne!(a.checksum(), with_buildings(&defs).checksum());
+    assert_ne!(
+        a.checksum(),
+        world(&defs).with_destruction(d).unwrap().checksum()
+    );
+    for _ in 0..5 {
+        assert_eq!(a.step().checksum, b.step().checksum);
+    }
+}
+
 #[test]
 fn placing_a_structure_is_the_same_with_or_without_the_table() {
     // Nothing acts on the table yet (placement is WP6.2): the world's state, apart from the

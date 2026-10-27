@@ -571,4 +571,41 @@ mod tests {
         );
         assert_eq!(w.check_placement(HUT, near_second, PlayerId(0)), Ok(()));
     }
+
+    /// Destruction and placement (WP5.5 with WP6.2): a structure that destroyed is
+    /// removed frees its cells for building, rubble on them blocks nothing (the
+    /// destruction rules: a wreck blocks nothing, a building clears the rubble
+    /// under it), and a destroyed anchor no longer gives build range.
+    #[test]
+    fn a_destroyed_structure_frees_its_cells_and_a_destroyed_anchor_gives_no_range() {
+        let mut w = world()
+            .with_destruction(crate::destruction::DestructionConfig::default())
+            .unwrap();
+        put(&mut w, ANCHOR, 10, 10);
+        put(&mut w, HUT, 13, 10);
+        put(&mut w, ANCHOR, 22, 22);
+        let hut_cell = Cell::new(13, 10);
+        let near_second = Cell::new(25, 22);
+        assert_eq!(
+            w.check_placement(HUT, hut_cell, PlayerId(0)),
+            Err(PlacementError::Occupied)
+        );
+        assert_eq!(w.check_placement(HUT, near_second, PlayerId(0)), Ok(()));
+        // The hut and the second anchor are shot to zero; the next tick removes them.
+        for i in 0..w.entities.len() {
+            let c = w.occupancy.cell(w.entities.cell[i]);
+            if c == hut_cell || c == Cell::new(22, 22) {
+                w.entities.hp[i] = 0;
+            }
+        }
+        w.step();
+        assert_eq!(w.wrecks().len(), 2, "both left rubble");
+        // The hut's cells are free, rubble and all, and the first anchor still reaches them.
+        assert_eq!(w.check_placement(HUT, hut_cell, PlayerId(0)), Ok(()));
+        // The destroyed anchor gives no range any more.
+        assert_eq!(
+            w.check_placement(HUT, near_second, PlayerId(0)),
+            Err(PlacementError::TooFarFromBase)
+        );
+    }
 }

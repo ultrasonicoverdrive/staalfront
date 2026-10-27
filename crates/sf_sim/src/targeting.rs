@@ -589,7 +589,8 @@ fn check(e: &mut Entities, i: usize, victim: EntityId, cx: &Context<'_>) {
 }
 
 /// A unit at zero hit points loses its orders and stays where it fell (`HoldPosition`, which
-/// nobody pushes), until destruction (WP5.5) takes it out of the world.
+/// nobody pushes). Only in a world without destruction settings: with them (WP5.5) a unit at zero is
+/// removed in the same tick, before this runs again.
 fn fall(e: &mut Entities, i: usize, cx: &Context<'_>) {
     if e.order[i] != Order::HoldPosition || !e.queue[i].is_empty() || e.eng[i].resume.is_some() {
         orders::give(e, i, Order::HoldPosition, false, cx.tick, cx.bounds);

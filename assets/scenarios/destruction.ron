@@ -1,0 +1,82 @@
+// Destruction (WP5.5, docs/rules/destruction.md): what is shot to zero leaves the world. Two stories on the
+// 96 by 64 cell map of the `pathing` scenario (assets/maps/pathing; the rock wall x 70..71, rows 27..63, with
+// two gaps, rows 44..47 and rows 56..59, east of the river), with explicit attack orders only (no automatic
+// targeting: what happens is what is written here). `combat: true` gives the world the weapons, `destruction:
+// true` the death stage; the settings are the simulation's own (the numbers of sim.ron: a vehicle wreck lies
+// 600 ticks, rubble 1200).
+//
+// 1. THE GAP. Two structures close each gap of the wall (relay_transmitter, 2 by 2 cells, 400 hit points):
+//    slots 0 and 1 the first gap, slots 2 and 3 the second. Three light tanks (4, 5, 6) stand five cells west
+//    of the first gap, in reach of it, and shoot its two structures down. When they fall their cells are free,
+//    the routes over them are rebuilt, and a rifleman (slot 7), for whom the east bank was a walk of some 130
+//    cells round the lake while both gaps were shut (the wall ends at the lake), is sent there afterwards and
+//    walks through the gap that was a wall of structures. The second gap stays shut. The rubble of the two
+//    structures lies where they stood and goes after 1200 ticks.
+//
+// 2. THE WRECK. Two light tanks and two riflemen (8, 9, 10, 11 of owner 0) against four rocket troopers
+//    (12 to 15 of owner 1). The troopers all fire at the first tank (8), which fires back; the riflemen shoot
+//    a trooper. The tank is destroyed and leaves a wreck for 600 ticks; a trooper that falls leaves nothing.
+//    The kill goes to the shooter that did the most damage in the tick the victim fell, the others who hit
+//    it that tick are assists, ties by where they stood.
+//
+// CI runs it on Linux and Windows and requires the checksum in destruction.expected;
+// tools/sf_headless/tests/destruction.rs asserts the story along the run.
+//
+// `unit_defs` names a FROZEN copy of the shipped definitions (tanks_vs_infantry_defs/, the set of WP5.4), so a
+// rebalance of assets/config/ does not move this checksum.
+//
+// Entity ids, all at generation 0, in the order the spawns are written. Owners: 0 Meridian, 1 Veyran.
+//    0  relay_transmitter (32, 400 hp)  owner 1  cell (70, 44)   the first gap, north half
+//    1  relay_transmitter               owner 1  cell (70, 46)   the first gap, south half
+//    2  relay_transmitter               owner 1  cell (70, 56)   the second gap, north half
+//    3  relay_transmitter               owner 1  cell (70, 58)   the second gap, south half
+//    4  light_tank (19, 400 hp)         owner 0  cell (65, 44)   attacks 0
+//    5  light_tank                      owner 0  cell (65, 46)   attacks 0
+//    6  light_tank                      owner 0  cell (65, 48)   attacks 1
+//    7  rifleman (12)                   owner 0  cell (62, 50)   moves to (90, 46) at tick 800
+//    8  light_tank                      owner 0  cell (20, 50)   attacks 13
+//    9  light_tank                      owner 0  cell (20, 52)   attacks 12
+//   10  rifleman                        owner 0  cell (21, 48)   attacks 12
+//   11  rifleman                        owner 0  cell (21, 54)   attacks 12
+//   12 to 15  rocket_trooper (13)       owner 1  cells (26, 48) to (26, 51)   attack 8
+Scenario(
+    name: "destruction",
+    seed: 0x0D57_0055,
+    map: (width: 96, height: 64),
+    map_name: Some("pathing"),
+    unit_defs: Some("tanks_vs_infantry_defs"),
+    combat: true,
+    destruction: true,
+    ticks: 2000,
+    commands: [
+        // --- the gaps, shut ---
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 1, cell: (70, 44))),
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 1, cell: (70, 46))),
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 1, cell: (70, 56))),
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 1, cell: (70, 58))),
+
+        // --- the three tanks and the rifleman west of the wall ---
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (65, 44))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (65, 46))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (65, 48))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (62, 50))),
+
+        // --- the fight: two tanks and two riflemen against four rocket troopers ---
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (20, 50))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (20, 52))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 48))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 0, cell: (21, 54))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (26, 48))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (26, 49))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (26, 50))),
+        (tick: 0, command: SpawnUnit(kind: 13, owner: 1, cell: (26, 51))),
+
+        // --- the orders ---
+        (tick: 1, command: OrderAttack(ids: [Id(4, 0), Id(5, 0)], target: (0, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(6, 0)], target: (1, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(8, 0)], target: (13, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(9, 0), Id(10, 0), Id(11, 0)], target: (12, 0))),
+        (tick: 1, command: OrderAttack(ids: [Id(12, 0), Id(13, 0), Id(14, 0), Id(15, 0)], target: (8, 0))),
+        (tick: 800, command: OrderMove(ids: [Id(7, 0)], target: (90, 46))),
+    ],
+)

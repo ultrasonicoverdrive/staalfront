@@ -98,6 +98,13 @@ pub struct Options {
     /// `--shots <dir>`: write three screenshots (close-up, middle, whole map)
     /// into `dir` and exit (CI smoke test).
     pub shots: Option<PathBuf>,
+    /// `--shots-tick N`: the screenshots of `--shots` begin only once the simulation has reached tick N
+    /// (so that a fight started with `--fight` has happened); 0 = at once.
+    pub shots_tick: u64,
+    /// `--fight` (sandbox scene): at the start every armed mobile unit of each side is sent on attack-move
+    /// to the other side's base, so the sandbox fights without anyone giving an order (WP5.5): to see
+    /// shots, deaths, wrecks and rubble in the viewer. Without it the sides stand still, out of reach.
+    pub fight: bool,
     pub screen: ScreenMode,
     pub present: Present,
     /// Allocate the unit instance buffers at their largest size at load
@@ -142,6 +149,8 @@ impl Options {
             ra_audio: None,
             bench: None,
             shots: None,
+            shots_tick: 0,
+            fight: false,
             screen: ScreenMode::Windowed,
             present: Present::Vsync,
             reserve: true,
@@ -272,6 +281,15 @@ impl Options {
                     }
                 }
                 "--shots" => o.shots = value(&mut o.warnings).map(PathBuf::from),
+                "--shots-tick" => {
+                    if let Some(v) = value(&mut o.warnings) {
+                        match v.parse() {
+                            Ok(n) => o.shots_tick = n,
+                            Err(_) => o.warnings.push(format!("--shots-tick {v}: not a number")),
+                        }
+                    }
+                }
+                "--fight" => o.fight = true,
                 "--windowed" => {
                     o.screen = ScreenMode::Windowed;
                     screen_given = true;

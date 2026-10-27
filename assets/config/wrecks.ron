@@ -1,0 +1,27 @@
+// How what destruction leaves is drawn (WP5.5). Read by sf_game::wreck_looks, compiled into the game
+// like units.ron (sf_render's EMBEDDED_STYLE), and checked when it is parsed. Presentation only: how
+// long a wreck lies and which vehicles leave one are simulation settings in sim.ron.
+(
+    // The player colour wrecks and rubble are drawn in (sRGB): a dark grey that stays apart from the
+    // four player colours of units.ron. A model keeps its own materials; team parts and primitives take it.
+    colour: (70, 66, 62),
+    // The wrecks of vehicles, light to heavy. A vehicle whose body is at most `up_to_tenths` tenths of a
+    // cell across leaves that wreck; the last class has no bound and takes everything bigger. The bounds
+    // must rise. `size_tenths` is the size of the vehicle the primitive stands in for when the model is
+    // missing. Art set v3: set v4 has the rubble but no vehicle wrecks that pass its checks.
+    vehicles: [
+        (id: "wreck_light_vehicle", model: "set_v3/neutral_wreck_light_vehicle.glb", size_tenths: 12, up_to_tenths: Some(12)),
+        (id: "wreck_medium_vehicle", model: "set_v3/neutral_wreck_medium_vehicle.glb", size_tenths: 13, up_to_tenths: Some(13)),
+        (id: "wreck_heavy_vehicle", model: "set_v3/neutral_wreck_heavy_vehicle.glb", size_tenths: 15, up_to_tenths: None),
+    ],
+    // The rubble models of art set v4 by footprint (cells wide, cells deep). A structure of another
+    // footprint takes the nearest by area (the smaller on a tie), scaled to fit its footprint.
+    rubble: [
+        (footprint: (1, 1), model: "set_v4/neutral_rubble_1x1.glb"),
+        (footprint: (2, 2), model: "set_v4/neutral_rubble_2x2.glb"),
+        (footprint: (2, 3), model: "set_v4/neutral_rubble_2x3.glb"),
+        (footprint: (3, 4), model: "set_v4/neutral_rubble_3x4.glb"),
+        (footprint: (4, 4), model: "set_v4/neutral_rubble_4x4.glb"),
+        (footprint: (4, 5), model: "set_v4/neutral_rubble_4x5.glb"),
+    ],
+)

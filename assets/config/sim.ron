@@ -113,6 +113,22 @@
 // away, however long it keeps hitting. 1 to 2000.
 // Tests and scenarios that do not give them use the simulation's own defaults, which are the same
 // numbers.
+//
+// Destruction (WP5.5, docs/rules/destruction.md): a unit or structure whose hit points the weapons take to
+// zero is removed from the world; a vehicle leaves a wreck and a structure rubble the size of its
+// footprint. Neither blocks anything: they are only drawn, and gone after a number of ticks. A world
+// that is not given these settings destroys nothing.
+//
+// wreck_ticks: how long a vehicle wreck lies where the vehicle was destroyed (20 ticks are a second).
+// 1 to 72000.
+//
+// rubble_ticks: how long the rubble of a structure lies where it stood. 1 to 72000.
+//
+// wreck_min_size_tenths: the smallest body, in tenths of a cell across (`size` of unit_defs.ron), of a
+// mobile unit that leaves a wreck. The infantry (0.4 to 0.6 cells) leave none, the vehicles (1.2 and up)
+// do. 0 means every mobile unit does; at most 80.
+// Tests and scenarios that do not give them use the simulation's own defaults, which are the same
+// numbers.
 (
     path_node_budget: 4096,
     flowfield_threshold: 8,
@@ -136,4 +152,7 @@
     scan_cooldown: 10,
     pursuit_cells: 6,
     pursuit_reset_ticks: 100,
+    wreck_ticks: 600,
+    rubble_ticks: 1200,
+    wreck_min_size_tenths: 10,
 )

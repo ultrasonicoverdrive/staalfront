@@ -2503,6 +2503,7 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "egui-winit",
+ "ron",
  "serde",
  "serde_json",
  "sf_ai",
