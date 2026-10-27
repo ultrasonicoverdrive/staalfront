@@ -11,6 +11,7 @@ use crate::crowd::{CollisionConfig, Crowd, CrowdStats};
 use crate::destruction::{Death, Destruction, DestructionConfig, Tally, Wreck};
 use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::formation::{FormationConfig, FormationStats, FormationView, Formations};
+use crate::harvest::{DockView, Harvest, HarvestRules, HarvesterView};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
@@ -157,6 +158,10 @@ pub enum ConfigError {
     /// The ore rules were given to a world that has already started, or are not
     /// valid ([`OreRules::is_valid`]).
     OreRules,
+    /// The harvest rules were given to a world that has already started, before the unit or the
+    /// building table, with invalid numbers, or with a harvester kind that is not a mobile unit of
+    /// the table (WP7.2).
+    Harvest,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -214,6 +219,10 @@ impl fmt::Display for ConfigError {
             ConfigError::Buildings(_) => "the building table does not fit the unit table",
             ConfigError::OreRules => {
                 "the ore rules must be given before the world starts and be valid"
+            }
+            ConfigError::Harvest => {
+                "the harvest rules must be given before the world starts, after the unit and building tables, \
+                 with valid numbers and mobile harvester kinds"
             }
             ConfigError::PlayersAfterStart => {
                 "the player factions must be given before the world starts"
@@ -301,6 +310,9 @@ pub struct World {
     /// The ore on the map (WP7.1): an amount per field cell. `None` for a world
     /// that was given no ore rules.
     pub(crate) ore: Option<Ore>,
+    /// The harvesters and the refinery docks (WP7.2). `None` for a world that was given no harvest
+    /// rules.
+    pub(crate) harvest: Option<Box<Harvest>>,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
     /// Target selection and return fire (WP5.4): the settings, if the world was given any.
@@ -444,6 +456,44 @@ impl World {
             return Err(ConfigError::OreRules);
         }
         self.ore = Some(Ore::new(rules, &self.terrain));
+        Ok(self)
+    }
+
+    /// The same world with harvesters (WP7.2, `docs/rules/economy.md`): the units of the given
+    /// kinds search ore, mine it, drive to a refinery (a standing structure with the
+    /// `HarvesterDock` function) and unload there, over and over. Call it after the unit table and
+    /// the building table and before anything is scheduled ([`ConfigError::Harvest`] otherwise, for
+    /// invalid numbers and for a kind that is not a mobile unit of the table). Without an ore state
+    /// ([`World::with_ore`]) the harvesters find nothing. The delivered ore is counted per player
+    /// ([`World::ore_delivered`]); a world without the rules hashes as before.
+    pub fn with_harvest(
+        mut self,
+        rules: HarvestRules,
+        harvesters: &[Kind],
+    ) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !rules.is_valid()
+            || harvesters.is_empty()
+            || self.units.is_empty()
+        {
+            return Err(ConfigError::Harvest);
+        }
+        let mobile = |k: &Kind| {
+            self.units
+                .get(*k)
+                .is_some_and(|s| s.class() == UnitClass::Mobile)
+        };
+        if !harvesters.iter().all(mobile) {
+            return Err(ConfigError::Harvest);
+        }
+        self.harvest = Some(Box::new(Harvest::new(
+            rules,
+            harvesters.to_vec(),
+            &self.units,
+            &self.buildings,
+        )));
         Ok(self)
     }
 
@@ -634,6 +684,7 @@ impl World {
             arsenal: Arsenal::default(),
             buildings: BuildingTable::empty(),
             ore: None,
+            harvest: None,
             placement: PlacementState::default(),
             targeting: Targeting::default(),
             destruction: Destruction::default(),
@@ -691,6 +742,38 @@ impl World {
         accept: impl FnMut(Cell) -> bool,
     ) -> Option<Cell> {
         self.ore.as_ref()?.nearest_where(from, max_radius, accept)
+    }
+
+    /// The harvest rules (WP7.2); `None` for a world that was given none.
+    pub fn harvest_rules(&self) -> Option<&HarvestRules> {
+        self.harvest.as_deref().map(Harvest::rules)
+    }
+
+    /// The kinds that harvest, ascending; empty without harvest rules.
+    pub fn harvester_kinds(&self) -> &[Kind] {
+        self.harvest.as_deref().map_or(&[], Harvest::kinds)
+    }
+
+    /// The units of ore the refineries have taken off the harvesters of `player` so far
+    /// (WP7.2). Zero without harvest rules. WP7.3 (storage) and WP7.4 (money) replace or extend
+    /// this counter; see `docs/rules/economy.md`.
+    pub fn ore_delivered(&self, player: PlayerId) -> u64 {
+        self.harvest.as_deref().map_or(0, |h| h.delivered(player))
+    }
+
+    /// What harvester `id` is doing and how much it carries; `None` for anything that is not a
+    /// live harvester of a world with harvest rules (and for a harvester that was spawned in the
+    /// current tick, before the first tick has run).
+    pub fn harvester_of(&self, id: EntityId) -> Option<HarvesterView> {
+        self.live_index(id)?;
+        self.harvest.as_deref()?.view_of(id, self.config.width)
+    }
+
+    /// The bay and the queue of the refinery `id`; `None` for anything that is not a standing
+    /// dock that the harvest stage has seen.
+    pub fn dock_of(&self, id: EntityId) -> Option<DockView> {
+        self.live_index(id)?;
+        self.harvest.as_deref()?.dock_view(id)
     }
 
     /// The terrain type of `cell`; `None` outside the map.
@@ -1229,6 +1312,14 @@ impl World {
             ore.regrow(tick.0);
         }
 
+        // The harvesters and the refinery docks (WP7.2): the docks answer, the harvesters decide,
+        // then the decisions are carried out. Before the units move, so the orders it gives are
+        // walked in this tick.
+        if let Some(mut harvest) = self.harvest.take() {
+            harvest.tick(self);
+            self.harvest = Some(harvest);
+        }
+
         // The path service first: it gives the requests of units that asked
         // earlier their routes (within the budget), going round the slots.
         self.pathing.serve(&mut self.entities, &self.units);
@@ -1367,7 +1458,7 @@ impl World {
 
     /// The smallest and largest valid position: the far edge of the map is
     /// exclusive, so the maximum is one raw unit inside it.
-    fn pos_range(&self) -> (Vec2, Vec2) {
+    pub(crate) fn pos_range(&self) -> (Vec2, Vec2) {
         let far = self.bounds().max - Vec2::splat(Fx::EPSILON);
         (Vec2::ZERO, far)
     }

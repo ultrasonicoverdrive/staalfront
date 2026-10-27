@@ -31,7 +31,8 @@
 //! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
 //! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
 //! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1). |
-//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). It is the last section; the sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
+//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
+//! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -200,6 +201,7 @@ const SECTION_TARGETING: u8 = b'A';
 const SECTION_DESTRUCTION: u8 = b'X';
 const SECTION_BUILDINGS: u8 = b'B';
 const SECTION_ORE: u8 = b'E';
+const SECTION_HARVEST: u8 = b'H';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -565,6 +567,14 @@ impl World {
             for word in ore.fingerprint() {
                 h.write_u64(word);
             }
+        }
+
+        // Harvesters (WP7.2): the rules, the ore delivered, every harvester's state and every
+        // dock's bay and queue. After the ore section, and only in a world that was given harvest
+        // rules, so every world without them hashes as before.
+        if let Some(harvest) = &self.harvest {
+            h.write_u8(SECTION_HARVEST);
+            harvest.write_hash(&mut h);
         }
 
         h.finish()

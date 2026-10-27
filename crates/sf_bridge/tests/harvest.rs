@@ -1,0 +1,83 @@
+//! The harvest rules through the bridge (WP7.2): the data numbers arrive in the world unchanged,
+//! the harvester kinds are the roles with the `harvests` flag, and the shipped refinery is the dock.
+
+use sf_bridge::{building_table, harvest_rules, harvester_kinds, unit_table};
+use sf_data::harvest::HarvestSettings;
+use sf_data::units::UnitDefs;
+use sf_sim::{BuildingFunction, HarvestRules, Kind, World, WorldConfig};
+
+#[test]
+fn the_sim_numbers_equal_the_data_numbers() {
+    let rules = harvest_rules(&HarvestSettings::embedded());
+    assert_eq!(
+        rules,
+        HarvestRules {
+            capacity: 200,
+            mine_amount: 4,
+            mine_period: 8,
+            unload_amount: 10,
+            unload_period: 4,
+            search_radius: 40,
+            retry_period: 100,
+            call_range: 6,
+            grant_timeout: 400,
+        }
+    );
+    assert!(rules.is_valid());
+}
+
+#[test]
+fn the_harvester_is_the_role_with_the_flag() {
+    let defs = UnitDefs::embedded();
+    assert_eq!(
+        harvester_kinds(&defs),
+        [Kind(defs.kind_of("harvester").unwrap())]
+    );
+    assert_eq!(harvester_kinds(&defs), [Kind(11)]);
+}
+
+#[test]
+fn the_shipped_refinery_is_the_dock() {
+    let defs = UnitDefs::embedded();
+    let table = building_table(&defs).unwrap();
+    let docks: Vec<Kind> = table
+        .iter()
+        .filter(|b| b.function == BuildingFunction::HarvesterDock)
+        .map(|b| b.kind)
+        .collect();
+    assert_eq!(docks, [Kind(defs.kind_of("refinery").unwrap())]);
+}
+
+#[test]
+fn a_world_from_the_shipped_data_takes_the_harvest_rules() {
+    let defs = UnitDefs::embedded();
+    let world = World::new(WorldConfig::new(1).with_map_size(32, 32))
+        .unwrap()
+        .with_units(unit_table(&defs).unwrap())
+        .unwrap()
+        .with_buildings(building_table(&defs).unwrap())
+        .unwrap()
+        .with_harvest(
+            harvest_rules(&HarvestSettings::embedded()),
+            &harvester_kinds(&defs),
+        )
+        .unwrap();
+    assert_eq!(world.harvester_kinds(), [Kind(11)]);
+    assert_eq!(world.harvest_rules().unwrap().capacity, 200);
+}
+
+/// The rules say the grant outlasts the drive from the call range; the shipped harvester is slow
+/// enough that this holds with room to spare (`sf_data/tests/harvest.rs` holds the same against the
+/// raw numbers; this one goes through the world's own table).
+#[test]
+fn the_shipped_grant_outlasts_the_drive_from_the_call_range() {
+    let defs = UnitDefs::embedded();
+    let table = unit_table(&defs).unwrap();
+    let speed = table.get(Kind(11)).unwrap().speed_per_tick;
+    let rules = harvest_rules(&HarvestSettings::embedded());
+    // The ticks a straight drive of `call_range` cells takes.
+    let drive = (1..=10_000_i64)
+        .find(|&t| speed.mul_int(t).floor_int() >= i64::from(rules.call_range))
+        .unwrap();
+    assert!(i64::from(rules.grant_timeout) > 2 * drive, "{drive}");
+}

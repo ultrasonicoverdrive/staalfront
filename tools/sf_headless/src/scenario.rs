@@ -176,6 +176,13 @@ pub struct Scenario {
     /// to have any ore cell.
     #[serde(default)]
     pub ore: Option<OreSpec>,
+    /// Harvesters (WP7.2, `docs/rules/economy.md`): the harvest rules and the unit kinds that
+    /// harvest, written out in the scenario so that editing the shipped
+    /// `assets/config/harvest.ron` never moves its checksum. The refineries are the structures of
+    /// the `buildings` table with the `HarvesterDock` function. Left out: no unit harvests, which
+    /// is every scenario of the earlier phases. Needs `unit_defs` and `buildings`.
+    #[serde(default)]
+    pub harvest: Option<HarvestSpec>,
     /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
     /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
     /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
@@ -210,6 +217,48 @@ pub struct OreSpec {
     pub regrow_amount: u16,
     /// Ticks between two turns of a cell.
     pub regrow_period: u32,
+}
+
+/// The harvest rules of a scenario (`sf_sim::HarvestRules`) and the kinds that harvest.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HarvestSpec {
+    /// The unit kinds that harvest (permanent kind numbers of the `unit_defs`), not empty.
+    pub harvesters: Vec<u16>,
+    /// Units of ore a harvester carries.
+    pub capacity: u16,
+    /// Ore taken in one bite.
+    pub mine_amount: u16,
+    /// Ticks between two bites.
+    pub mine_period: u16,
+    /// Ore the refinery takes off a harvester in one bite.
+    pub unload_amount: u16,
+    /// Ticks between two unloading bites.
+    pub unload_period: u16,
+    /// How far, in cells, a harvester looks for ore.
+    pub search_radius: u16,
+    /// Ticks between two looks of a harvester that found nothing.
+    pub retry_period: u16,
+    /// Cells from the refinery at which a harvester asks for a place.
+    pub call_range: u16,
+    /// Ticks a granted harvester has to arrive.
+    pub grant_timeout: u16,
+}
+
+impl HarvestSpec {
+    fn rules(&self) -> sf_sim::HarvestRules {
+        sf_sim::HarvestRules {
+            capacity: self.capacity,
+            mine_amount: self.mine_amount,
+            mine_period: self.mine_period,
+            unload_amount: self.unload_amount,
+            unload_period: self.unload_period,
+            search_radius: self.search_radius,
+            retry_period: self.retry_period,
+            call_range: self.call_range,
+            grant_timeout: self.grant_timeout,
+        }
+    }
 }
 
 impl OreSpec {
@@ -821,6 +870,25 @@ impl Scenario {
             );
         }
 
+        if let Some(h) = &self.harvest {
+            if self.unit_defs.is_none() || !self.buildings {
+                p.push(
+                    "harvest needs `unit_defs` and `buildings` (the refineries are structures of \
+                     the building table)"
+                        .to_string(),
+                );
+            }
+            if h.harvesters.is_empty() {
+                p.push("harvest: `harvesters` must name at least one unit kind".to_string());
+            }
+            if !h.rules().is_valid() {
+                p.push(
+                    "harvest: every number must be at least 1 and mine_amount at most capacity"
+                        .to_string(),
+                );
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -1122,6 +1190,12 @@ impl Scenario {
         if let Some(ore) = self.ore {
             world = world
                 .with_ore(ore.rules())
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(harvest) = &self.harvest {
+            let kinds: Vec<Kind> = harvest.harvesters.iter().map(|&k| Kind(k)).collect();
+            world = world
+                .with_harvest(harvest.rules(), &kinds)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {

@@ -436,7 +436,7 @@ impl World {
 
     /// Whether the structure in slot `i` stands: it has hit points left, or
     /// cannot be damaged at all (zero in the table).
-    fn is_standing(&self, i: usize) -> bool {
+    pub(crate) fn is_standing(&self, i: usize) -> bool {
         self.entities.hp[i] > 0 || self.stats_at(i).is_some_and(|s| s.hp == 0)
     }
 

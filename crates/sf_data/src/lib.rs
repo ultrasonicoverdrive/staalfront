@@ -13,6 +13,7 @@
 //! the settings of the simulation itself ([`sim_settings`], `sim.ron`): today the
 //! node budget of the path service.
 
+pub mod harvest;
 pub mod map;
 pub mod movement;
 pub mod ore;
