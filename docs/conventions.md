@@ -217,6 +217,10 @@ PLAN.md §3 WP1.10 has this WP fix the engine convention here:
   (`assets/testpack_v1`) was authored front `+X`.
 - Part joints: a turret turns about its local `+Y` (positive = front towards `+Z`,
   the facing sense), a barrel tilts about its local `+Z` (positive = muzzle up).
+- Anchors (WP5.6b): an empty node (no mesh) named `muzzle`, `muzzle_l`, `muzzle_r`, ... marks where a shot leaves, one named
+  `fx_smoke`, `fx_fire`, ... where damage smoke and fire start. The loader keeps them as named points in the frame of their parent
+  part (a muzzle under the `barrel` follows the turret's yaw and the barrel's pitch; one under a part with no geometry moves up
+  to the nearest part that stays). The order in the file is the order a burst alternates in. `docs/rules/effects.md` section 5.
 
 ### Levels of detail in the file (art set v4)
 

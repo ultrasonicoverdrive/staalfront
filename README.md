@@ -129,6 +129,10 @@ the instance-buffer pre-allocation off (follow-up 14). `--shots <dir>` (three
 screenshots) is the only mode that lets the window be copied out; `--bench`
 leaves the surface as it is.
 
+**`--fight`** (WP5.6b) adds an armed skirmish to the crowd: `--bench --fight` is the combat benchmark of M0c (the same
+camera path and the same 5,000 units, plus shots, hits, deaths, wrecks and smoke where the path looks), and `--fight --shots <dir>
+--shots-tick 330` takes the screenshots of it. How to run M0c and what to read in its JSON: [`docs/bench/README.md`](docs/bench/README.md).
+
 ## Original Red Alert audio (optional)
 
 Staalfront ships only its own CC0 sounds. If you own Red Alert, it can play

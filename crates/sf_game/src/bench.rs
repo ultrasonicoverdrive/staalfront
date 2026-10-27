@@ -168,6 +168,8 @@ pub struct FrameSample {
     pub triangles: u32,
     /// Instance buffers created or grown during this frame.
     pub buffer_allocs: u32,
+    /// Effect instances (particles and tracer dots) drawn in this frame (WP5.6b).
+    pub effect_instances: u32,
     pub segment: u8,
 }
 
@@ -279,6 +281,33 @@ pub struct Report {
     pub phases: Vec<Phase>,
     pub hitches: Hitches,
     pub sim: SimInfo,
+    /// What the visual effects did over the flight (WP5.6b); all zero for the plain benchmark.
+    pub effects: EffectsInfo,
+}
+
+/// The effects of a run: the events the sim thread made, the particle pool's counters and the instances per
+/// frame. `particles_peak`, `particles_dropped`, `smoke_refused`, the tracer and the flash counters are the
+/// effects' own, counted from the start of the run (the warm-up frames included); `fx_events` and `fx_dropped`
+/// are counted over the measured flight.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct EffectsInfo {
+    /// Shots, hits and deaths the sim thread recorded for the picture.
+    pub fx_events: u64,
+    /// Of those, dropped because the queue (4,096) was full.
+    pub fx_dropped: u64,
+    /// The most particles alive at once.
+    pub particles_peak: u32,
+    /// Particles pushed out of the full pool before their time.
+    pub particles_dropped: u64,
+    /// Smoke particles refused because the pool was more than 75 % full.
+    pub smoke_refused: u64,
+    /// Tracer dots left out because the dot budget was spent.
+    pub tracer_dots_dropped: u64,
+    /// Flashes that started at a model's muzzle anchor, and flashes that used the bounding-box rule.
+    pub flashes_at_anchor: u64,
+    pub flashes_by_rule: u64,
+    /// Effect instances (particles and tracer dots) drawn per frame over the whole flight.
+    pub effect_instances: Counts,
 }
 
 #[derive(Serialize)]
@@ -320,6 +349,12 @@ pub struct Scene {
     pub map_metres: (u32, u32),
     pub metres_per_cell: u32,
     pub instance_buffers_reserved: bool,
+    /// An armed skirmish is part of the scene (`--fight`, WP5.6b): shots, hits, deaths, wrecks and smoke are
+    /// drawn on top of the crowd. False for the plain benchmark of M0 and M0b.
+    pub combat: bool,
+    /// Units the skirmish adds to the crowd's (the waves of every site over the whole flight; not all of
+    /// them are alive at once). Zero without `combat`.
+    pub skirmish_units: u32,
 }
 
 #[derive(Serialize)]
@@ -368,6 +403,8 @@ pub struct Phase {
     pub draw_calls: Counts,
     pub triangles: Counts,
     pub buffer_allocs: u32,
+    /// Effect instances drawn per frame in this phase (WP5.6b).
+    pub effect_instances: Counts,
 }
 
 #[derive(Serialize)]
@@ -452,6 +489,8 @@ pub struct RunFacts {
     pub software_adapter: bool,
     pub ticks: u64,
     pub sim: SimRun,
+    /// The effects' counters; the per-frame `effect_instances` of the report come from the frames.
+    pub effects: EffectsInfo,
 }
 
 impl Report {
@@ -488,6 +527,7 @@ impl Report {
                     units_in_view: Counts::of(frames.clone().map(|s| s.units_in_view)),
                     draw_calls: Counts::of(frames.clone().map(|s| s.draw_calls)),
                     triangles: Counts::of(frames.clone().map(|s| s.triangles)),
+                    effect_instances: Counts::of(frames.clone().map(|s| s.effect_instances)),
                     buffer_allocs: frames.map(|s| s.buffer_allocs).sum(),
                 }
             })
@@ -611,6 +651,10 @@ impl Report {
                 worst,
             },
             sim,
+            effects: EffectsInfo {
+                effect_instances: Counts::of(rec.frames.iter().map(|s| s.effect_instances)),
+                ..facts.effects
+            },
         }
     }
 
@@ -712,6 +756,8 @@ mod tests {
                 map_metres: (1024, 1024),
                 metres_per_cell: 4,
                 instance_buffers_reserved: true,
+                combat: false,
+                skirmish_units: 0,
             },
             flight: FlightInfo {
                 progress_by: "time",
@@ -729,6 +775,7 @@ mod tests {
                 late_publishes: 1,
                 ..SimRun::default()
             },
+            effects: EffectsInfo::default(),
         }
     }
 
@@ -769,9 +816,23 @@ mod tests {
             "phases",
             "hitches",
             "sim",
+            "effects",
         ] {
             assert!(v.get(key).is_some(), "missing {key}");
         }
+        // The plain benchmark says it has no combat, and the effects keys of the fight benchmark (WP5.6b) are
+        // there, zero.
+        assert_eq!(v["scene"]["combat"], false);
+        for key in [
+            "fx_events",
+            "fx_dropped",
+            "particles_peak",
+            "particles_dropped",
+            "effect_instances",
+        ] {
+            assert!(v["effects"].get(key).is_some(), "missing effects.{key}");
+        }
+        assert!(v["phases"][0]["effect_instances"].get("max").is_some());
         assert_eq!(v["frame_ms"]["samples"], 200);
         assert_eq!(v["frame_ms"]["max"], 40.0);
         assert_eq!(v["frame_ms"]["p50"], 8.0);
@@ -791,6 +852,49 @@ mod tests {
         assert_eq!(v["gpu_ms"]["available"], false);
         assert!(v["gpu_ms"]["note"].as_str().unwrap().starts_with("n/a"));
         assert!(v["gpu_ms"]["stats"].is_null());
+    }
+
+    /// The fight benchmark's numbers arrive in the JSON where the documentation says: `scene.combat`, the
+    /// effects block, and the instances per frame (overall and per phase).
+    #[test]
+    fn the_fight_benchmark_reports_its_effects() {
+        let mut f = facts(false, false);
+        f.scene.combat = true;
+        f.scene.skirmish_units = 720;
+        f.effects = EffectsInfo {
+            fx_events: 1234,
+            fx_dropped: 2,
+            particles_peak: 567,
+            particles_dropped: 3,
+            smoke_refused: 4,
+            tracer_dots_dropped: 5,
+            flashes_at_anchor: 6,
+            flashes_by_rule: 7,
+            effect_instances: Counts::default(),
+        };
+        let mut rec = recorder();
+        for (i, s) in rec.frames.iter_mut().enumerate() {
+            s.effect_instances = i as u32;
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&Report::build(&rec, f).to_json()).expect("valid JSON");
+        assert_eq!(v["scene"]["combat"], true);
+        assert_eq!(v["scene"]["skirmish_units"], 720);
+        let e = &v["effects"];
+        assert_eq!(
+            (
+                e["fx_events"].as_u64(),
+                e["fx_dropped"].as_u64(),
+                e["particles_peak"].as_u64(),
+                e["particles_dropped"].as_u64()
+            ),
+            (Some(1234), Some(2), Some(567), Some(3))
+        );
+        // The per-frame counts come from the frames: 0..199 over the flight, 25 frames a phase.
+        assert_eq!(e["effect_instances"]["max"], 199);
+        assert_eq!(e["effect_instances"]["avg"], 99.5);
+        assert_eq!(v["phases"][0]["effect_instances"]["max"], 24);
+        assert_eq!(v["phases"][1]["effect_instances"]["max"], 49);
     }
 
     #[test]

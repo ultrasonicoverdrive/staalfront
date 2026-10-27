@@ -77,6 +77,8 @@ pub struct Limits {
 pub struct Placement {
     /// Height above the ground of a hit, a death and wreck smoke, metres.
     pub hit_height_m: f32,
+    /// A death bursts this much higher than a hit, metres (the blast of a body starts above its wreck).
+    pub death_lift_m: f32,
     /// Height above the ground a projectile that flies on the ground is drawn at, metres.
     pub projectile_lift_m: f32,
     /// Hit burst radius as a fraction of the size the event carries.
@@ -316,6 +318,7 @@ impl Effects {
         in_range("limits.tracer_taper", l.tracer_taper, 0.0, 1.0)?;
         let p = &self.placement;
         in_range("placement.hit_height_m", p.hit_height_m, 0.0, 10.0)?;
+        in_range("placement.death_lift_m", p.death_lift_m, 0.0, 10.0)?;
         in_range(
             "placement.projectile_lift_m",
             p.projectile_lift_m,
@@ -547,12 +550,13 @@ mod tests {
         assert_eq!(
             (
                 p.hit_height_m,
+                p.death_lift_m,
                 p.projectile_lift_m,
                 p.impact_radius_fraction,
                 p.death_radius_fraction,
                 p.min_burst_radius_m
             ),
-            (0.6, 1.0, 0.5, 0.4, 0.3)
+            (0.6, 0.5, 1.0, 0.5, 0.4, 0.3)
         );
         assert_eq!(shipped().wreck_smoke.radius_fraction, 0.25);
         let m = shipped().muzzle;

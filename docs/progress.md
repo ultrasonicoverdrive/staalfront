@@ -1100,7 +1100,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a, which is in, and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`), which is not started.
+Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a, which is in, and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`), which is built and under review (see "WP5.6b notes"); the M0c laptop run (Tijmen) comes after it.
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -1138,6 +1138,12 @@ Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a, which is
   load, every number pinned; one particle pool of 4096 drawn in one instanced premultiplied-alpha call counted in
   `DrawStats`; zoom rules; wreck smoke; projectile tracers; the dotted audio event names; `sf_sim` untouched, no pin
   moved), `docs/rules/effects.md`: done, see "WP5.6a notes"
+- WP5.6b Visual effects, part two (`muzzle*` and `fx_*` nodes kept by the glb loader as anchors, re-parented when their
+  part is pruned; the flash starts at the drawn model's muzzle, a burst alternating between `muzzle_l` and `muzzle_r`, the
+  bounding-box rule kept for models without one; `death_lift_m` in `effects.ron`; `sf_demo --bench --fight` with a fixed
+  armed skirmish and the effects block in the bench JSON; a headless twin of the benchmark scene pinning the checksums;
+  `docs/bench/README.md` for the M0c laptop run; `sf_sim` untouched, no pin moved), `docs/rules/effects.md`: built, see
+  "WP5.6b notes"
 
 ### WP5.1 notes
 
@@ -1711,7 +1717,7 @@ so). Everything is in `docs/rules/effects.md`; this is the short version and wha
   destruction fight (45 turret shots with the turret off its hull, 9 hull or infantry shots); it catches
   `Mount::Turret => from.hull`. The screenshot test reads the muzzle rule from `Effects::embedded()`.
 * **Not done** (deliberately):
-  1. Muzzle and fx anchors in the models, and `--bench --fight` for M0c: WP5.6b.
+  1. Muzzle and fx anchors in the models, and `--bench --fight` for M0c: WP5.6b (done there).
   2. Sound: only the event names are in `effects.ron`; the audio is WP11.7.
   3. Smoke and fire on damaged buildings: WP6.8.
   4. An instant hit on a target that is gone in the same tick is counted in `fx_unresolved` and not drawn.
@@ -1720,7 +1726,46 @@ so). Everything is in `docs/rules/effects.md`; this is the short version and wha
   7. No wreck fade (the wreck model disappears at the end of its life; only its smoke fades).
 * **For M0c** (reviewer's advice): record `particles_peak` and `effect_instances` in the bench JSON; if frame p99
   fails, lower `max_particles` to 2048 before touching `max_px` (a smaller `max_px` makes close-up explosions smaller
-  than the tank they come from).
+  than the tank they come from). Done in WP5.6b.
+
+### WP5.6b notes
+
+**What it is.** The second half of WP5.6: the flash starts at the model's muzzle, and `sf_demo --bench --fight` exists for the
+M0c laptop run. Rules and numbers are in `docs/rules/effects.md` (sections 5 and 10); how Tijmen runs M0c is
+`docs/bench/README.md`. `git diff origin/main -- crates/sf_sim` is empty; `sf_bridge`, the scenario lists and every
+`assets/scenarios/*` file are untouched.
+
+* **The loader** (`sf_render::glb`): `muzzle*` and `fx_*` nodes without a mesh are kept as `Anchor`s on `LoadedLevel`, before
+  pruning, and moved to the nearest kept ancestor with the matrix folded in when their part is pruned; `ModelLods::anchors`,
+  `Instancer::anchor_world` (the same pose function as the draw, `joint_angles`). Set v4: 44 of 194 files with `muzzle`, 119 with
+  `fx_`; the test pack none, set v3 only `fx_` on four wrecks.
+* **The flash**: `FxEvent::shooter` (the attacker's slot, in the event's padding, still 32 bytes), `FxPlayer::frame_with` and the
+  `Anchors` trait (`DrawnAnchors` on the instancer); `n = weapon slot + shots already shown`, so a burst alternates; a slot from the
+  first wreck slot on is never a shooter's; no anchor: the WP5.6a rule. `placement.death_lift_m` 0.5 in `effects.ron` (the
+  observation of the WP5.6a review).
+* **The benchmark**: `bench_scene` (the world, shared by the runner and the tests), `skirmish` (3 sites, waves of 8 units per
+  side every 100 ticks, 720 units), `fight_scene` in the runner (roles drawn with their set v4 models, the crowd's test pack after
+  them), `scene.combat`, `scene.skirmish_units`, the `effects` block and `phases[].effect_instances` in the JSON. The sites are
+  under the `close_up`, `mid_hold` and `low_pass` phases (the brief says "the map centre", but those three phases look at three
+  places; the first site is the centre, the other two are where the other phases look).
+* **Finding: the plain benchmark's checksum had already moved.** The brief expected `sf_demo --bench` to end at
+  `0x9e196a6ced2ef024` at tick 1500 (M0, 22-10). On `main` it ends at `0x8e57352fc4bdec7b`, a real run and the headless twin
+  agree on every checkpoint they share. Cause, measured: the world without the ore gives all 15 of M0's checkpoints back; WP7.1
+  (27-10) put the ore in the world and so in its checksum. Nothing of this WP moved it. `tests/bench_scene.rs` pins both lists
+  (and the M0 list against the recorded JSON) and the fight's. **WP7.2 and any later change to the world's checksum will move
+  `PLAIN` and `FIGHT` and has to re-pin them with a measured cause.** M0c's timings are what is compared with M0, not its
+  checksum list.
+* **Seen** (`docs/screenshots/wp5.6b/`): the flash at the barrel tip of a Veyran heavy tank with its turret turned, first and
+  second shot at the left and the right muzzle (tick 5 and 10), a light tank's (tick 9); and the game, `sf_demo --fight --shots
+  <dir> --shots-tick 330`, at close zoom (the twin barrel's flash in the corner, tick 360), middle zoom with the F1 panels
+  ("effects: 90 drawn (8 tracer dots), pool 235/4096", tick 438) and the whole map (tick 516).
+* **Measured**: a 45 s `sf_demo --bench --fight --windowed` under Xvfb and lavapipe (1280 x 720, debug build, so the frame times
+  mean nothing): 7,075 events, nothing dropped, pool peak 1,513 of 4,096, 3,559 flashes at an anchor and 16 by the rule, up to 421
+  effect instances in a frame in `mid_hold`. The cost of the lookup: `effects.md` section 9.
+* **Not done** (deliberately): the M0c laptop run itself (Tijmen); smoke and fire from the `fx_*` anchors (WP6.8); a muzzle
+  per weapon for a unit with hull and turret weapons on a model with several muzzles (no shipped unit has both); sound positions
+  from the anchors (WP11.7, `Anchors` is the hook); the skirmish is a light load (up to 32 events a tick), not the design's
+  100 to 500 for 5,000 units all fighting.
 
 ## Phase 1 report (draft, WP1.14)
 

@@ -331,6 +331,15 @@ fn a_shot_points_along_its_mount_turret_or_hull() {
                 }
             }
             assert!(ev.size > 0.0);
+            // The picture finds the shooter's drawn model by this slot (WP5.6b).
+            assert_eq!(ev.shooter, shot.attacker.index(), "the shooter's slot");
+        }
+        // Only a shot has a shooter.
+        for ev in events
+            .iter()
+            .filter(|e| !matches!(e.kind, FxKind::Fire { .. }))
+        {
+            assert_eq!(ev.shooter, sf_game::fx_events::NO_SHOOTER);
         }
     }
     println!("turret shots off the hull: {turned_turret}, hull or infantry shots: {on_hull}");
