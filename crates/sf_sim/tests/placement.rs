@@ -295,6 +295,16 @@ fn build(w: &mut World, player: u8, kind: Kind, x: u32, y: u32) -> StepReport {
     w.step()
 }
 
+/// A build that runs to the end: the structure is complete (and so stands for the rules) when this
+/// returns. The shipped numbers of this file's table are 100 ticks.
+fn build_done(w: &mut World, player: u8, kind: Kind, x: u32, y: u32) {
+    let r = build(w, player, kind, x, y);
+    assert_eq!(r.commands_executed, 1, "build of {kind:?} was refused");
+    for _ in 0..100 {
+        w.step();
+    }
+}
+
 fn stands(w: &World, x: u32, y: u32) -> bool {
     w.occupant_at(Cell::new(x, y)).is_some()
 }
@@ -652,7 +662,7 @@ fn the_prerequisites_must_stand_for_the_player() {
     );
     assert_eq!(check(&w, 1, TOWER, 24, 16), Ok(()));
     // Its own plant does.
-    build(&mut w, 0, PLANT, 6, 12);
+    build_done(&mut w, 0, PLANT, 6, 12);
     assert_eq!(check(&w, 0, TOWER, 18, 12), Ok(()));
     let r = build(&mut w, 0, TOWER, 18, 12);
     assert_eq!(r.commands_executed, 1);
@@ -670,7 +680,7 @@ fn the_missing_prerequisite_named_does_not_depend_on_the_order_of_the_list() {
         );
     }
     // With the plant standing the other one is named.
-    build(&mut w, 0, PLANT, 6, 12);
+    build_done(&mut w, 0, PLANT, 6, 12);
     for kind in [NEEDS_TWO_A, NEEDS_TWO_B] {
         assert_eq!(
             check(&w, 0, kind, 18, 12),
@@ -693,7 +703,7 @@ fn the_last_row_and_column_of_the_map_are_inside_it() {
 #[test]
 fn a_prerequisite_whose_structure_is_gone_no_longer_counts() {
     let mut w = rig(&[]);
-    build(&mut w, 0, PLANT, 6, 12);
+    build_done(&mut w, 0, PLANT, 6, 12);
     assert_eq!(check(&w, 0, TOWER, 18, 12), Ok(()));
     let plant = w.occupant_at(Cell::new(6, 12)).unwrap();
     let tick = w.tick();
@@ -833,7 +843,7 @@ fn a_factory_needs_a_free_passable_exit_cell() {
     // The factory (3 x 4) on (18, 12) covers x 18..21 and its exit is (21, 14).
     let free = rig(&[]);
     let mut w = free.clone();
-    build(&mut w, 0, PLANT, 6, 12);
+    build_done(&mut w, 0, PLANT, 6, 12);
     let p = w.preview_placement(FACTORY, Cell::new(18, 12), PlayerId(0));
     assert_eq!(p.verdict, Ok(()));
     assert_eq!(
@@ -845,7 +855,7 @@ fn a_factory_needs_a_free_passable_exit_cell() {
     // Rock too. Neither is the factory's own footprint, which is fine.
     for terrain in [WATER, ROCK] {
         let mut blocked = rig(&[(21, 14, terrain)]);
-        build(&mut blocked, 0, PLANT, 6, 12);
+        build_done(&mut blocked, 0, PLANT, 6, 12);
         assert_eq!(
             check(&blocked, 0, FACTORY, 18, 12),
             Err(PlacementError::ExitBlocked)
@@ -856,21 +866,21 @@ fn a_factory_needs_a_free_passable_exit_cell() {
     }
     // A road is passable although it is not buildable: the exit may be on it.
     let mut road = rig(&[(21, 14, ROAD)]);
-    build(&mut road, 0, PLANT, 6, 12);
+    build_done(&mut road, 0, PLANT, 6, 12);
     assert_eq!(check(&road, 0, FACTORY, 18, 12), Ok(()));
 
     // A structure on the exit cell.
     let mut walled = rig(&[]);
-    build(&mut walled, 0, PLANT, 6, 12);
-    build(&mut walled, 0, DECOY, 21, 14);
+    build_done(&mut walled, 0, PLANT, 6, 12);
+    build_done(&mut walled, 0, DECOY, 21, 14);
     assert_eq!(
         check(&walled, 0, FACTORY, 18, 12),
         Err(PlacementError::ExitBlocked)
     );
     // The cell beside the exit does not matter: a structure on (21, 13) leaves it free.
     let mut beside = rig(&[]);
-    build(&mut beside, 0, PLANT, 6, 12);
-    build(&mut beside, 0, DECOY, 21, 13);
+    build_done(&mut beside, 0, PLANT, 6, 12);
+    build_done(&mut beside, 0, DECOY, 21, 13);
     assert_eq!(check(&beside, 0, FACTORY, 18, 12), Ok(()));
 
     // The exit off the map.
@@ -897,7 +907,7 @@ fn a_factory_needs_a_free_passable_exit_cell() {
 
     // A unit standing on the exit does not block it: units move away.
     let mut crowded = rig(&[]);
-    build(&mut crowded, 0, PLANT, 6, 12);
+    build_done(&mut crowded, 0, PLANT, 6, 12);
     rifleman(&mut crowded, 21, 14);
     assert_eq!(check(&crowded, 0, FACTORY, 18, 12), Ok(()));
 }

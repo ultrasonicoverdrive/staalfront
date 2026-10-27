@@ -67,6 +67,19 @@ pub enum Looks {
 impl Looks {
     /// The shape (an index into the instancer's style) of an entity.
     pub fn shape_of(&self, v: &EntityView) -> u8 {
+        self.shape_at(v, None)
+    }
+
+    /// The shape of an entity that is `building` thousandths built (WP6.3), `None` when it is
+    /// complete or no structure. Which stage that is, and what it looks like, is data
+    /// (`build_stages.ron`); a role without stage looks keeps its finished one.
+    pub fn shape_at(&self, v: &EntityView, building: Option<u16>) -> u8 {
+        if let (Looks::Roster { roster, .. }, Some(permille), true) = (self, building, v.has_stats)
+            && let Some(shape) =
+                roster.shape_under_construction(v.kind, faction_of_owner(v.owner.0), permille)
+        {
+            return shape;
+        }
         match self {
             Looks::Crowd(population) => population.shape_of(v.kind),
             Looks::Roster { roster, crowd } => {
