@@ -107,6 +107,8 @@ pub mod cell_overlay;
 pub mod commands;
 pub mod cursor;
 pub mod debug_ui;
+pub mod fx;
+pub mod fx_events;
 pub mod hud;
 pub mod looks;
 pub mod placement_view;
