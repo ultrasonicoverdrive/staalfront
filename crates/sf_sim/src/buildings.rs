@@ -133,6 +133,11 @@ pub struct BuildingStats {
     pub factions: u8,
     /// The structures its owner must have standing, in any order.
     pub requires: Vec<Kind>,
+    /// For the base anchor: the whole cells around its footprint in which its
+    /// owner may build (WP6.2); zero for everything else. Not in
+    /// [`BuildingTable::digest`] (that one is pinned since WP6.1) but in
+    /// [`BuildingTable::placement_digest`].
+    pub build_radius: u16,
 }
 
 /// Why a list of building stats was refused.
@@ -222,6 +227,9 @@ pub struct BuildingTable {
     stats: Vec<BuildingStats>,
     /// Hash of everything above; zero when empty.
     digest: u64,
+    /// Hash of what placement reads that the digest does not cover (WP6.2);
+    /// zero when empty.
+    placement_digest: u64,
 }
 
 impl fmt::Debug for BuildingTable {
@@ -282,7 +290,16 @@ impl BuildingTable {
         } else {
             digest_of(&stats)
         };
-        Ok(BuildingTable { stats, digest })
+        let placement_digest = if stats.is_empty() {
+            0
+        } else {
+            placement_digest_of(&stats)
+        };
+        Ok(BuildingTable {
+            stats,
+            digest,
+            placement_digest,
+        })
     }
 
     /// True if there are no kinds.
@@ -313,6 +330,27 @@ impl BuildingTable {
     pub fn digest(&self) -> u64 {
         self.digest
     }
+
+    /// A hash of the numbers placement reads that [`BuildingTable::digest`]
+    /// does not cover (the build radius of each kind, WP6.2); zero for an
+    /// empty table. Part of the world checksum, after the digest.
+    pub fn placement_digest(&self) -> u64 {
+        self.placement_digest
+    }
+}
+
+/// Written first into the placement digest; bump when its layout changes.
+const PLACEMENT_TAG: &[u8] = b"sf_sim/buildings/placement/v1";
+
+fn placement_digest_of(stats: &[BuildingStats]) -> u64 {
+    let mut h = Fnv1a64::new();
+    h.write_bytes(PLACEMENT_TAG);
+    h.write_u64(u64::try_from(stats.len()).unwrap_or(u64::MAX));
+    for s in stats {
+        h.write_bytes(&s.kind.0.to_le_bytes());
+        h.write_bytes(&s.build_radius.to_le_bytes());
+    }
+    h.finish()
 }
 
 /// The first kind (lowest number) that lies on a cycle of `requires`, if any.
@@ -394,6 +432,7 @@ mod tests {
             power: 0,
             factions: 3,
             requires: requires.iter().map(|&k| Kind(k)).collect(),
+            build_radius: 0,
         }
     }
 
@@ -423,6 +462,15 @@ mod tests {
             Box::new(|s| s.factions = 1),
             Box::new(|s| s.requires.clear()),
         ];
+        // The build radius is not in the pinned digest but in its own.
+        let radius = |r: u16| {
+            let mut second = b(2, &[1]);
+            second.build_radius = r;
+            BuildingTable::new(vec![b(1, &[]), second]).unwrap()
+        };
+        assert_eq!(radius(0).digest(), radius(9).digest());
+        assert_ne!(radius(0).placement_digest(), radius(9).placement_digest());
+        assert_eq!(BuildingTable::empty().placement_digest(), 0);
         for (n, m) in mutants.iter().enumerate() {
             let mut second = b(2, &[1]);
             m(&mut second);

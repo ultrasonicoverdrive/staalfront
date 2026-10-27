@@ -263,6 +263,12 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
             h.write_u32(cell.y);
             h.write_u8(owner.0);
         }
+        Command::BuildStructure { kind, cell } => {
+            h.write_u8(11);
+            h.write_bytes(&kind.0.to_le_bytes());
+            h.write_u32(cell.x);
+            h.write_u32(cell.y);
+        }
         Command::Order { ids, order, queued } => {
             h.write_u8(8);
             h.write_u64(len64(ids.len()));
@@ -533,6 +539,14 @@ impl World {
         if !self.buildings.is_empty() {
             h.write_u8(SECTION_BUILDINGS);
             h.write_u64(self.buildings.digest());
+            // Placement (WP6.2): the build radii and who is which faction. After the digest of
+            // WP6.1, which is unchanged.
+            h.write_u64(self.buildings.placement_digest());
+            h.write_u64(len64(self.placement.players.len()));
+            for &(player, bit) in &self.placement.players {
+                h.write_u8(player.0);
+                h.write_u8(bit);
+            }
         }
 
         h.finish()

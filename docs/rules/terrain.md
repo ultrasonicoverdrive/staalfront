@@ -33,7 +33,8 @@ class for every type here (`docs/rules/movement.md`; since WP4.1 it replaced the
 What the flags mean, and who reads them:
 
 * `buildable`: whether a structure may stand on the cell. Read by `Command::Place`
-  (below) and `Command::PlaceStructure`; WP6.x building placement will read it too.
+  (below) and `Command::PlaceStructure`; WP6.2 building placement
+  (`Command::BuildStructure`, `docs/rules/buildings.md`) reads it too.
 * `harvestable`: whether harvesters can take resources from the cell. Nothing reads it
   yet (phase 7).
 

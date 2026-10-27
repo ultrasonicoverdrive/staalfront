@@ -333,6 +333,7 @@ pub mod ids;
 pub mod movement;
 pub mod orders;
 pub mod path;
+pub mod placement;
 pub mod projectiles;
 pub mod snapshot;
 pub mod targeting;
@@ -370,6 +371,9 @@ pub use path::{
     DEFAULT_REPLAN_MAX, DEFAULT_RETARGET_COOLDOWN, FIELD_IDLE_TICKS, FIELD_POOL, FIELD_SECTORS,
     MAX_FIELD_SLOTS, MAX_REPLAN_COOLDOWN, MAX_REPLAN_MAX, MIN_NODE_BUDGET, OVERLAY_CAP, PathStats,
     PlannedRoute, RING_CAP, ReplanConfig, RouteStatus, RouteView, SECTOR_SIZE,
+};
+pub use placement::{
+    CellVerdict, ExitCell, PlacementError, PlacementPreview, PlacementRejection, exit_cell, gap,
 };
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
 pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView, WreckView};

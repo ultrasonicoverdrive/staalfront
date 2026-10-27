@@ -20,7 +20,10 @@
 //! * the passability of every cell for every movement class, which is all the
 //!   cursor asks of the terrain ([`Statics`]: shared, read once);
 //! * the tick number, the checksum of the world after that tick and how the
-//!   tick went ([`Pace`]).
+//!   tick went ([`Pace`]);
+//! * the answer to the placement question the presentation asked last
+//!   ([`GhostAnswer`], WP6.2): the sim thread asks the world, the rules stay in the
+//!   simulation, and the picture only paints what comes back.
 //!
 //! The methods carry the names of the [`World`] methods they stand in for
 //! (`get`, `is_alive`, `stats_of`, `order_of`, `cell_at`, `passable`), so the
@@ -31,8 +34,31 @@ use std::time::{Duration, Instant};
 
 use sf_math::Vec2;
 use sf_sim::{
-    Cell, Death, EntityId, EntityView, Order, Tick, UnitStats, UnitTable, World, WreckView,
+    Cell, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId, Tick, UnitStats,
+    UnitTable, World, WreckView,
 };
+
+/// A placement question for the ghost under the cursor (WP6.2): may `player` build `kind` with
+/// its footprint anchored on `cell`? The sim thread answers it against the world as it is, with
+/// `World::preview_placement`, in every snapshot until the question changes.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct GhostQuery {
+    /// What would be built.
+    pub kind: Kind,
+    /// The anchor cell (smallest x and y).
+    pub cell: Cell,
+    /// Who would build it.
+    pub player: PlayerId,
+}
+
+/// The answer to a [`GhostQuery`], from the world of the snapshot's tick.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GhostAnswer {
+    /// The question that was asked.
+    pub query: GhostQuery,
+    /// What the simulation said.
+    pub preview: PlacementPreview,
+}
 
 /// How a tick went, for the interpolation and the F1 panel.
 #[derive(Copy, Clone, Debug)]
@@ -78,6 +104,8 @@ pub struct SimSnapshot {
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
     pace: Pace,
+    /// The answer to the placement question being asked, if one is (WP6.2).
+    ghost: Option<GhostAnswer>,
 }
 
 impl SimSnapshot {
@@ -97,6 +125,7 @@ impl SimSnapshot {
             units: Arc::new(UnitTable::empty()),
             ground: Arc::new(GroundMap::open(0, 0)),
             pace: Pace::now(),
+            ghost: None,
         }
     }
 
@@ -148,6 +177,22 @@ impl SimSnapshot {
         self.units = Arc::clone(&statics.units);
         self.ground = Arc::clone(&statics.ground);
         self.pace = pace;
+        // A refilled buffer answers nothing until it is asked ([`SimSnapshot::answer`]).
+        self.ghost = None;
+    }
+
+    /// Asks `world` the placement question `query` and keeps the answer in this snapshot (WP6.2).
+    /// The one place the presentation's ghost gets its verdict: `World::preview_placement`, the
+    /// function the `BuildStructure` command runs.
+    pub(crate) fn answer(&mut self, world: &World, query: GhostQuery) {
+        let preview = world.preview_placement(query.kind, query.cell, query.player);
+        self.ghost = Some(GhostAnswer { query, preview });
+    }
+
+    /// The simulation's answer to the placement question asked last, if one was asked
+    /// ([`GhostQuery`]).
+    pub fn ghost(&self) -> Option<&GhostAnswer> {
+        self.ghost.as_ref()
     }
 
     /// Ticks executed so far: also the number of the next tick, as

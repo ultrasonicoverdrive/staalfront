@@ -299,16 +299,16 @@ fn the_shipped_building_table_digest_is_pinned() {
     let digest = table.digest();
     // The table the world takes is the same one.
     let w = world(&defs).with_buildings(table).unwrap();
-    assert_eq!(w.buildings().digest(), digest);
+    assert_eq!(w.building_table().digest(), digest);
     assert_eq!(digest, SHIPPED_BUILDINGS_DIGEST, "digest {digest:#018x}");
 }
 
 #[test]
 fn f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base() {
     // F1-M05 places 8 decoy_emplacement for Enemy 1 (Veyran) although the decoy is
-    // `factions: [Meridian]`. In WP6.1 `factions` is hashed data only: the sim has no faction
-    // per player and `PlaceStructure` checks no faction or prerequisite, so a pre-placed decoy
-    // of another owner is accepted. Whether that stays so is a follow-up (docs/progress.md).
+    // `factions: [Meridian]`. `PlaceStructure` is the placement of scenario setup and mission
+    // objects and checks no faction or prerequisite (WP6.2: only `BuildStructure` does,
+    // `tests/placement.rs`), so a pre-placed decoy of another owner is accepted.
     let defs = defs();
     let mut w = with_buildings(&defs);
     let player = sf_sim::PlayerId(0);
@@ -340,7 +340,7 @@ fn f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base() {
         );
     }
     // The decoy's prerequisites are all in the player's starting base.
-    let table = w.buildings();
+    let table = w.building_table();
     let decoy = table.get(kind(&defs, "decoy_emplacement")).unwrap();
     for r in &decoy.requires {
         assert!(

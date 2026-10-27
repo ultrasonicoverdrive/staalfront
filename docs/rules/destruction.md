@@ -149,7 +149,7 @@ presentation is WP5.6a's effects event queue in `sf_game`, filled in the sim thr
 
 ## The checksum
 
-A new section `X` is written **only in a world with destruction settings**, after the targeting section:
+A new section `X` is written **only in a world with destruction settings**:
 the settings, every wreck (kind, unit, owner, place, facing, size, footprint and anchor, born, expires), the
 tally of each player, and the kills of each live unit. It comes after the targeting section and before the buildings section `B`. The deaths of the last tick are not hashed. A world
 without the settings hashes as before. Tests: `destruction::tests::every_part_of_the_state_is_in_the_checksum`

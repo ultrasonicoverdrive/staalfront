@@ -18,7 +18,7 @@ use sf_data::movement::MovementCosts;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
-use sf_sim::{Terrain, TerrainDef, World, WorldConfig};
+use sf_sim::{PlayerId, Terrain, TerrainDef, World, WorldConfig};
 
 /// The simulation's table of terrain types: ids and flags, no names. The
 /// `ground` summary is derived from the shipped movement costs.
@@ -87,6 +87,30 @@ pub fn with_combat(world: World, defs: &UnitDefs) -> World {
         .expect("the shipped targeting settings are ones a world takes")
         .with_destruction(sf_bridge::destruction_config(&settings))
         .expect("the shipped destruction settings are ones a world takes")
+}
+
+/// `world` with the building rules of `defs` (WP6.2): the building table (footprints, prices,
+/// prerequisites, who may build what, the base radius) and the faction of each seat of the
+/// sandbox, so that `BuildStructure` is checked. `PlaceStructure`, which the sandbox and mission
+/// setup use, stays unchecked. Call it after the unit table, before the world starts.
+///
+/// # Panics
+///
+/// If the building table is refused or the world has started; the definitions' own checks rule
+/// the first out for any definitions that loaded, and the sandbox has not started its world.
+pub fn with_buildings(world: World, defs: &UnitDefs) -> World {
+    let table = sf_bridge::building_table(defs).expect("the building rules make a valid table");
+    let seats: Vec<(PlayerId, u8)> = [crate::sandbox::MERIDIAN, crate::sandbox::VEYRAN]
+        .into_iter()
+        .filter_map(|owner| {
+            crate::sandbox::faction_of_owner(owner).map(|f| (PlayerId(owner), f.bit()))
+        })
+        .collect();
+    world
+        .with_buildings(table)
+        .expect("a world that has not started takes its building table after the units")
+        .with_player_factions(&seats)
+        .expect("the seats are one faction each")
 }
 
 /// The terrain of `map` for the simulation: `None` for a map without a

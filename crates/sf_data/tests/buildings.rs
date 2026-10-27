@@ -402,6 +402,11 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 
 // ---- the frozen copies ---------------------------------------------------------------------------
 
+/// The frozen copies that were made after WP6.1 and carry the building blocks of the shipped file
+/// on purpose: the scenarios that build (`BuildStructure`, WP6.2) need the tech tree, the exit sides
+/// and the base radius. Every other copy predates the block.
+const COPIES_WITH_BLOCKS: [&str; 1] = ["placement_defs"];
+
 #[test]
 fn the_frozen_copies_of_the_scenarios_load_with_no_building_blocks() {
     let root = repo().join("assets");
@@ -409,6 +414,9 @@ fn the_frozen_copies_of_the_scenarios_load_with_no_building_blocks() {
     for entry in std::fs::read_dir(root.join("scenarios")).unwrap() {
         let path = entry.unwrap().path();
         if !path.is_dir() || !path.to_string_lossy().ends_with("_defs") {
+            continue;
+        }
+        if COPIES_WITH_BLOCKS.iter().any(|c| path.ends_with(c)) {
             continue;
         }
         let defs = UnitDefs::load(&path, &root).unwrap();
@@ -425,6 +433,21 @@ fn the_frozen_copies_of_the_scenarios_load_with_no_building_blocks() {
         checked += 1;
     }
     assert!(checked >= 8, "found {checked} frozen copies");
+}
+
+#[test]
+fn the_copy_that_builds_keeps_the_blocks_it_was_made_with() {
+    // `placement_defs` is a copy of the shipped file made for WP6.2. Its table is pinned in the
+    // headless test of the scenario (`the_frozen_definitions_are_the_wp6_1_tree`); here only that
+    // the blocks and the base radius are there.
+    let root = repo().join("assets");
+    let copy = UnitDefs::load(&root.join("scenarios/placement_defs"), &root).unwrap();
+    let anchor = copy
+        .sim_building(copy.kind_of("construction_center").unwrap())
+        .unwrap();
+    assert_eq!(anchor.function, BuildingFunction::Anchor);
+    assert_eq!(anchor.build_radius.floor_int(), 8);
+    assert!(copy.units().iter().filter(|u| u.building.is_some()).count() >= 10);
 }
 
 // ---- data only -------------------------------------------------------------------------------------

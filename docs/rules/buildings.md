@@ -38,12 +38,12 @@ conscious choice. Adding a structure is a new record and no Rust change (a test 
 | Field | Where | Meaning |
 |---|---|---|
 | `footprint: (width, height)` | record | Cells, 1 to 16 each. Anchored at the cell with the smallest x and y, extending east (+x) and south (+y). |
-| `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. Where on that side, and the free spot beyond it, is WP6.5. |
+| `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. The exit cell is the cell next to the middle of that side and must be usable when a factory is placed (WP6.2, "Placement"); where on that side units appear, and the free spot beyond it, is WP6.5. The structure is never rotated. |
 | `build_seconds` | record | Game seconds, a whole number of 20 Hz ticks, required with a `cost`, **not negative** (refused with its own message). Becomes `build_ticks`. |
 | `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). The economy of phase 7 spends it; nothing does yet. |
 | `power` | record | Produced (+) or used (-). WP6.4 sums it. |
-| `factions` | record | Who may build it: `[Meridian]`, `[Veyran]`, `[Meridian, Veyran]` or `[Neutral]`. This is the per-faction availability. |
-| `building.requires` | block | Ids of structures the owner must have **standing** before this one can be built (the tech tree). Besides these, everything buildable needs the owner's `construction_center` (WP6.2), which is not repeated in every list. |
+| `factions` | record | Who may **build** it: `[Meridian]`, `[Veyran]`, `[Meridian, Veyran]` or `[Neutral]`. This is the per-faction availability. Checked by `BuildStructure` only (WP6.2): a mission may place any role for any owner with `PlaceStructure`. |
+| `building.requires` | block | Ids of structures the owner must have **standing** before this one can be built (the tech tree). Besides these, everything buildable has to be within the build radius of the owner's `construction_center` (WP6.2), which is not repeated in every list. |
 | `building.function` | block | What it is for, below. |
 
 ### The function
@@ -103,14 +103,153 @@ sorts by kind, so the order of the input is irrelevant; it refuses a duplicate k
 factory without a side, a side without a use, a cost without a time (or the reverse), prerequisites on
 something that cannot be built, an unknown prerequisite and a cycle. Nothing is a float.
 
-**No behaviour yet.** The world only stores the table and answers `World::building_table()`. A
-`PlaceStructure` is exactly what it was.
+The table answers `World::building_table()`. Since WP6.2 placement reads it ("Placement" below); power (WP6.4)
+and production (WP6.5) will too. `BuildingStats` has one field that is not in the data table's digest, the
+`build_radius` of the anchor in whole cells (from the `build_radius` flag of the record, the fraction of a
+decimal dropped); it has a digest of its own (`BuildingTable::placement_digest`) so the WP6.1 digest below stays
+as it was pinned.
 
 **Checksum.** A world given a table hashes one more section, tag `B`, after all the others: the table's digest
-(every field above). A world without a table hashes exactly as before, so no pinned checksum of an earlier
-phase moved (the `golden.rs` constants and every `assets/scenarios/*.expected` are unchanged: no scenario is
-given a table). The game and the headless runner are not wired to it yet; WP6.2 will do that together with
-the first rule that reads it, and the scenarios of that WP will be pinned with the section.
+(every field above), since WP6.2 followed by the placement digest (the build radii) and the faction of each
+player (`(player, faction bit)`, ascending by player; nothing when no faction was given). A world without a
+table hashes exactly as before, so no pinned checksum of an earlier phase moved (the `golden.rs` constants and
+every `assets/scenarios/*.expected` that existed before WP6.2 are unchanged: none of them is given a table).
+The one new scenario, `placement`, is pinned with the section.
+
+## Placement (WP6.2)
+
+Where a player may build. One pure function over the world as it is when the command runs,
+`World::preview_placement(kind, cell, player)`, answers with a `PlacementPreview`: the verdict for the whole
+footprint, a verdict for each cell and the exit cell of a factory. `World::check_placement` is its verdict.
+
+**The commands.** `Command::BuildStructure { kind, cell }` is the player's build: the owner is the player who
+sent the command (never a field of it, so this command cannot build for another player), the rules below are checked, and a refusal is **reported**, not dropped:
+the command counts as ignored, `StepReport::placements_rejected` counts it and `World::placement_rejections()`
+lists it (tick, player, kind, cell, reason) until the next step. `Command::PlaceStructure` is what it was: the
+unchecked placement of scenario setup and mission objects (the sandbox, a mission's pre-placed enemy decoys).
+It checks the terrain and the overlap, as it always did, and nothing else. It is **not** an authority boundary:
+today the simulation accepts `PlaceStructure` (and `SpawnUnit`) from any player seat, with any `owner`, so a
+player who sent one would skip every rule below (see "Not done"); `content/units.md` says the
+decoy is "Meridian only as a buildable structure" and F1-M05 places enemy decoys as mission objects, which is
+exactly this split (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`).
+
+**The rules**, in the order they are reported (the first that fails is the verdict):
+
+| Rule | Refusal | Detail |
+|---|---|---|
+| the kind is a structure of the unit table | `UnknownKind` | a unit, an object or a number nobody defined |
+| the world has building rules | `NoBuildingRules` | no `with_buildings` |
+| the structure has a price | `CannotBeBuilt` | the anchor and the mission structures have none |
+| the player has a faction | `NoFaction` | `World::with_player_factions`, below |
+| the structure's `factions` name it | `WrongFaction` | the faction bit of the player is in the structure's mask |
+| every structure of `requires` stands for the player | `MissingPrerequisite(kind)` | the first missing one, by kind |
+| every cell of the footprint is on the map | `OffMap` | the arithmetic saturates: no cell wraps round |
+| every cell is buildable terrain | `BadTerrain` | the `buildable` flag of the terrain table: shipped, only grass; **water, road, rock, ore and bridge are not** |
+| no cell is occupied by a structure | `Occupied` | any owner's, any size |
+| no unit stands on a cell | `UnitInTheWay` | a mobile unit of the unit table whose position is in the cell; see below |
+| the footprint is within reach of a base | `TooFarFromBase` | see "Proximity" |
+| a factory has a usable exit cell | `ExitBlocked` | see "The exit" |
+
+When several cells are wrong, the verdict names the worst by rank: off the map, then terrain, then a structure,
+then a unit. The rules before the cells (kind, price, faction, prerequisites) come first, so the ghost of a
+structure the player may not build says so instead of showing a red cell.
+
+**Proximity.** The owner may build within `build_radius` of one of its **standing anchors** (the structures
+whose function is `Anchor`; `construction_center`, radius 8). The distance is the **gap** between the two
+footprints: the number of whole empty cells between the anchor's rectangle and the new one along x and along y,
+the larger of the two (the chessboard distance of the rectangles; zero when they touch). A place is near when
+`gap <= build_radius`. So the reach is a square round the anchor, 8 cells of free ground on each side, measured
+from the anchor's own edge and to the new footprint's near edge: a 2-wide plant may start 8 cells beyond the
+anchor and end 8 cells before it (`the_build_radius_reaches_exactly_eight_cells_from_every_side`). The reach
+of several anchors adds up (any one will do); an enemy's anchor does not count, and neither does any other
+structure (`a_structure_that_is_not_an_anchor_gives_no_reach_and_a_removed_anchor_none`). Fractions of a cell in
+the data are dropped.
+
+**Standing.** A structure stands for the prerequisites and the base when it exists in the world and has hit
+points left, or has none in the table (it cannot be damaged). A structure at zero hit points does not stand
+(`a_structure_at_zero_hit_points_does_not_stand_but_one_that_cannot_be_hurt_does`). There is no build state
+yet: WP6.3 adds the construction animation, and until it says otherwise a structure stands from the tick it was
+placed. The commands of one tick run in order, so a second build of the same tick sees the first
+(`two_builds_in_one_tick_see_each_other`); "the state when the command runs", not a snapshot of the tick's
+start, is the state the rule reads, and it is the same on every machine.
+
+**Units.** Units occupy no cell in the simulation (`docs/rules/cell_overlay.md`); for placement the cell of a
+mobile unit's position counts as occupied by it, so a structure is not put on top of a tank. A unit's body
+radius is ignored (the crowd pass pushes bodies out of structures), and objects (a crate, an ore field) do not
+block. A unit on the factory's **exit** cell does not block: it moves away.
+
+**Factions.** `factions` restricts what a player may build, never what is placed. The simulation had no faction
+per player, so the minimal data was added: `World::with_player_factions(&[(PlayerId, bit)])`, the bit being the
+data's own (`Faction::bit`: Meridian 1, Veyran 2, Neutral 4; exactly one bit per player, a player listed once,
+before the world starts, hashed in section `B`). A player who was given none builds nothing. The game gives its
+two seats (`sandbox::faction_of_owner`) theirs in `playfield::with_buildings`; a scenario says
+`factions: [(0, Meridian), (1, Veyran)]`.
+
+**The exit.** A factory (`InfantryFactory`, `VehicleFactory`, `VesselFactory`) needs an exit cell: the cell
+next to the **middle** of its `exit_side` (`exit_cell`: for `PosX`, `(x + width, y + height / 2)`; `NegX`
+`(x - 1, y + height / 2)`; `PosY` `(x + width / 2, y + height)`; `NegY` `(x + width / 2, y - 1)`, the halves
+rounded down). It must be on the map, free of structures and, for infantry and vehicle factories, ground every
+ground class can enter (the terrain's `ground` summary, so a road is fine and water or rock are not); for the
+vessel factory the terrain is not checked (which water a vessel may use is WP6.5's, it has no flag yet). One
+cell, fixed, so that the ghost can show it and WP6.5 has a place to start; **where on that side and the free
+spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too
+but no rule yet (phase 7).
+
+**Rotation (the WP6.1 follow-up).** A structure is **not rotated**: `BuildStructure` has no facing, the
+footprint always extends east and south from its anchor and the exit side is the data's. So nothing rotates
+the exit side. If rotated placement is ever added, the exit side rotates with it and `exit_cell` takes the
+facing.
+
+**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`) are accepted from any player seat; they
+must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
+only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
+put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
+charged and nothing takes time (phase 7, WP6.3). `fortified_bunker` is built by a combat engineer in the field
+(`content/units.md`); here it is a base structure behind the barracks, as in WP6.1.
+
+### The ghost under the cursor (game)
+
+`sf_game` shows the structure being placed. **B** chooses the next structure the local faction may build
+(shipped: nine each, by kind; `BuildMode::for_faction`), then none; **left click** places it
+(`BuildStructure` for the ghost's cell), **right click** puts it away; selecting and ordering are off while one is
+chosen. `--build <role>` starts with one chosen and `--build-at x,y` pins the ghost on a cell (screenshots).
+The ghost is the footprint centred on the cell under the cursor, snapped to cells.
+
+**There are no rules in the client.** The main thread tells the sim thread which question to answer
+(`SimHandle::set_ghost(GhostQuery)`, sent when the cell under the cursor changes); the sim thread asks the world
+(`World::preview_placement`, the function `BuildStructure` runs) and every snapshot carries the answer
+(`SimSnapshot::ghost()`); `placement_view` only paints it. The picture therefore trails the cursor by up to one
+or two ticks, and a click is checked again by the simulation when it runs. The refusals of the world are
+kept by the sim thread (`SimHandle::rejected_builds`) and the game says them on the console and in the line
+under the top bar.
+
+| Tint | Means |
+|---|---|
+| green | the place is allowed, this cell too |
+| red | this cell is the problem (off the map, terrain, a structure, a unit) |
+| amber | this cell is fine, but the place is refused for another reason (too far from the base, a prerequisite, the faction, the exit) |
+| blue | the factory's exit cell, usable |
+| red (exit) | the factory's exit cell, blocked |
+
+The outline is green or red by the verdict. Screenshots: `docs/screenshots/wp6.2/`.
+
+### Scenarios
+
+`placement` (`assets/scenarios/placement.ron`, on the frozen copy `placement_defs/`, which is a copy of the shipped
+definitions of WP6.2 with their building blocks, the one frozen copy that has them): two bases build with
+`BuildStructure`, one command per tick, and every refusal that a well-formed setup can reach happens at least
+once (`UnknownKind`, `NoBuildingRules` and `NoFaction` need a malformed setup and are covered by the sf_sim
+tests). The scenario fields
+`buildings: true` (the world is given the building rules of `unit_defs`), `factions: [(player, Faction)]` and the
+action `BuildStructure(kind, cell)` (the issuer is the timed command's `player`) are new and optional, so no
+earlier scenario changed.
+
+### With destruction (WP5.5)
+
+In a world with destruction settings a structure shot to zero is removed at the end of the tick: its cells are
+free for placement at once, and the rubble it leaves blocks nothing (`destruction.md`, "A wreck blocks nothing";
+a new building clears the rubble under it). A destroyed anchor is gone and no longer gives build range. Test:
+`placement::tests::a_destroyed_structure_frees_its_cells_and_a_destroyed_anchor_gives_no_range`.
 
 ## The shipped tech tree (placeholder)
 
@@ -184,3 +323,8 @@ from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Foot
 * `crates/sf_sim/src/buildings.rs` (unit tests): input order, every field in the digest, every refusal, the cycle.
 * `crates/sf_bridge/tests/buildings.rs`: the conversion in ticks and cells, the world taking the table at the
   right moment, an entry that does not fit the unit table, the checksum section, `PlaceStructure` unchanged.
+* WP6.2: `crates/sf_sim/tests/placement.rs` (every rule, on a hand-made table), `crates/sf_sim/src/placement.rs`
+  (the hit-point rule), `crates/sf_bridge/tests/placement.rs` (the shipped numbers and both factions building the
+  whole tree with commands), `tools/sf_headless/tests/placement.rs` and the scenario `placement`,
+  `crates/sf_game/tests/placement_ghost.rs` (the answer through the sim thread), `crates/sf_game/tests/placement_screenshot.rs`
+  (the picture, through the real renderer), and the unit tests of `build_mode` and `placement_view`.
