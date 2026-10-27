@@ -197,14 +197,22 @@ fn every_field_cell_grows_once_per_period_on_its_own_tick() {
     for _ in 0..2 * u64::from(RULES.regrow_period) {
         let tick = world.tick().0;
         world.step();
+        let mut touched = 0usize;
         for (k, &c) in cells.iter().enumerate() {
             let now = world.ore_at(c);
             if now != last[k] {
                 assert_eq!(now, last[k] + 5, "one step of 5");
                 grown_at[k].push(tick);
                 last[k] = now;
+                touched += 1;
             }
         }
+        // A tick never touches more than ceil(cells / period) cells (here 2 of 12).
+        let period = usize::try_from(RULES.regrow_period).unwrap();
+        assert!(
+            touched <= cells.len().div_ceil(period),
+            "tick {tick}: {touched}"
+        );
     }
     for (k, ticks) in grown_at.iter().enumerate() {
         // Position k of the field list grows in the ticks with tick % 10 == k % 10.
@@ -213,7 +221,6 @@ fn every_field_cell_grows_once_per_period_on_its_own_tick() {
             .collect();
         assert_eq!(ticks, &expected, "cell {k} {:?}", cells[k]);
     }
-    // And a tick never touches more than ceil(cells / period) cells (here 2 of 12).
 }
 
 #[test]
@@ -466,17 +473,21 @@ fn a_take_and_a_growth_move_the_checksum_and_the_same_history_repeats_it() {
 
 #[test]
 fn regrowth_in_a_full_field_changes_nothing() {
-    // A field at its maximum is not touched: its sum, its version and its checksum are steady
-    // apart from the tick counter.
+    // A field at its maximum is not touched: its total, its running sum and its version are
+    // steady.
     let mut world = field_world(OreRules {
         start: 120,
         ..RULES
     });
-    let version = world.ore().unwrap().version();
+    let ore = world.ore().unwrap();
+    let (version, total, sum) = (ore.version(), ore.total(), ore.running_sum());
     for _ in 0..100 {
         world.step();
     }
-    assert_eq!(world.ore().unwrap().version(), version);
+    let ore = world.ore().unwrap();
+    assert_eq!(ore.version(), version);
+    assert_eq!(ore.total(), total);
+    assert_eq!(ore.running_sum(), sum);
 }
 
 /// The cost of the ore on a map made entirely of ore (the worst case: 65,536 field cells),

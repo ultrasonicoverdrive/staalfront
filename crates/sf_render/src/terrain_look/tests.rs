@@ -145,8 +145,17 @@ fn a_map_with_terrain_is_drawn_from_its_types_not_its_material_map() {
     let s = terrain_surface(&map, &types, &looks);
     assert_eq!(s.size, (3, 2));
     // One layer per type, then one per fill level of the ore (WP7.1).
-    let levels = looks.resource().map_or(0, |r| r.levels.len());
-    assert_eq!(s.layers.len(), types.len() + levels);
+    // Pinned: the shipped look has 4 fill levels, so a lost `resource` block fails here.
+    assert_eq!(looks.resource().map(|r| r.levels.len()), Some(4));
+    assert_eq!(s.layers.len(), types.len() + 4);
+    let res = s.resource.expect("the ore has fill-level layers");
+    assert_eq!(res.levels, 4);
+    assert_eq!(res.first_layer as usize, types.len());
+    // A level the look has maps to its layer; one past the last is refused.
+    assert_eq!(res.texel(0), Some([res.first_layer, res.style]));
+    assert_eq!(res.texel(3), Some([res.first_layer + 3, res.style]));
+    assert_eq!(res.texel(4), None);
+    assert_eq!(res.texel(u8::MAX), None);
     assert_eq!(s.index.len(), 3 * 2 * 2);
     assert_eq!(s.index_meters, 4.0);
     // Layers are in id order: layer = position in the table.
@@ -180,8 +189,7 @@ fn a_new_type_is_drawn_before_anybody_chose_its_colours() {
     assert!(looks.get("lava").is_none());
     let map = map_with(vec![9, 0, 0, 0], 2, 2, &types);
     let s = terrain_surface(&map, &types, &looks);
-    let levels = looks.resource().map_or(0, |r| r.levels.len());
-    assert_eq!(s.layers.len(), 7 + levels, "7 types, then the ore levels");
+    assert_eq!(s.layers.len(), 7 + 4, "7 types, then the 4 ore levels");
     // id 9 sits at position 6 of the table.
     assert_eq!(s.index[0], 6);
     let lava = looks.look_for("lava");

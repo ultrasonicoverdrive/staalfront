@@ -2,7 +2,7 @@
 
 use sf_bridge::ore_rules;
 use sf_data::ore::{MAX_REGROW_PERIOD, OreSettings};
-use sf_sim::{Cell, OreRules, Terrain, TerrainDef, TerrainFlags, TerrainId, World, WorldConfig};
+use sf_sim::{Cell, OreRules, Terrain, TerrainDef, World, WorldConfig};
 
 #[test]
 fn the_sim_numbers_equal_the_data_numbers() {
@@ -41,5 +41,4 @@ fn shipped_ore_cells_start_full() {
         .unwrap();
     let amounts: Vec<u16> = (0..4).map(|x| world.ore_at(Cell::new(x, 0))).collect();
     assert_eq!(amounts, [0, 120, 120, 0]);
-    let _ = (TerrainFlags::OPEN, TerrainId(0));
 }

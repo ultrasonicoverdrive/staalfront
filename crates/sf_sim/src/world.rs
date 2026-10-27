@@ -1202,7 +1202,8 @@ impl World {
     /// Runs exactly one tick and returns what happened.
     ///
     /// In order: (1) every command scheduled for this tick runs, in
-    /// `(player, insertion)` order; (2) every live entity runs its behaviour,
+    /// `(player, insertion)` order; (1a) the ore grows back on the cells whose
+    /// turn it is (WP7.1, only in a world with ore rules); (2) every live entity runs its behaviour,
     /// in ascending slot order, after recording its previous position and
     /// facing (the path service has served its requests just before); (3) the
     /// crowd pass pushes overlapping bodies apart and looks after the units that

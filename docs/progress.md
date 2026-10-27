@@ -1942,6 +1942,11 @@ Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
 - **`Command::TakeOre` is a player-issuable command** in the lockstep sense: it is there so scenarios can mine
   without a harvester. When WP7.2 lands, decide whether it stays (tests only) or is gated; nothing but scenarios
   schedules it today.
+- **Minimap upload cost is unmeasured.** Every change of a fill level repaints the changed cells on the CPU image,
+  but `Hud::paint_minimap` then calls `set_minimap`, which recreates the whole minimap texture and bind group. While
+  regrowth runs that can happen almost every tick; it was not measured. The presentation side also copies and scans
+  every field cell per ore version (`SimSnapshot::capture`, `OreView::changes`), O(field cells), also unmeasured.
+  Measure both, and upload only the changed texels if it shows.
 
 ## Open follow-ups
 

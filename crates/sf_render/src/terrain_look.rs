@@ -424,6 +424,19 @@ pub struct ResourceLayers {
     pub first_layer: u8,
     /// The style bits of the type, kept in the index texel.
     pub style: u8,
+    /// The number of fill levels: valid levels are `0..levels`.
+    pub levels: u8,
+}
+
+impl ResourceLayers {
+    /// The index texel `[layer, style]` of fill level `level`, or `None` for a level the look
+    /// does not have (so a bad level never points past the level layers or overflows).
+    pub fn texel(&self, level: u8) -> Option<[u8; 2]> {
+        if level >= self.levels {
+            return None;
+        }
+        Some([self.first_layer.checked_add(level)?, self.style])
+    }
 }
 
 /// The surface of a map: from its terrain layer if it has one (the table of
@@ -462,7 +475,11 @@ pub fn terrain_surface(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) ->
     let resource = looks.resource().and_then(|r| {
         let type_id = types.id_of(&r.terrain)?;
         let look = looks.look_for(&r.terrain);
-        let first_layer = layers.len() as u8;
+        // Checked: more than 256 layers in all cannot be indexed by a u8 texel, so the fill levels
+        // are then left out rather than pointing at the wrong layer.
+        let first_layer = u8::try_from(layers.len()).ok()?;
+        let levels = u8::try_from(r.levels.len()).ok()?;
+        u8::try_from(layers.len() + r.levels.len() - 1).ok()?;
         for level in &r.levels {
             layers.push(look.level_texture(level));
         }
@@ -470,6 +487,7 @@ pub fn terrain_surface(map: &Map, types: &TerrainTypes, looks: &TerrainLooks) ->
             type_id,
             first_layer,
             style: look.style_bits(),
+            levels,
         })
     });
     debug_assert!(

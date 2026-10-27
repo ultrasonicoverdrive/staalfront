@@ -83,7 +83,9 @@ impl TerrainGpu {
             if at + 1 >= self.index.len() || x >= self.index_width {
                 continue;
             }
-            let texel = [res.first_layer + level, res.style];
+            let Some(texel) = res.texel(level) else {
+                continue;
+            };
             if self.index[at..at + 2] != texel {
                 self.index[at..at + 2].copy_from_slice(&texel);
                 first = first.min(y);

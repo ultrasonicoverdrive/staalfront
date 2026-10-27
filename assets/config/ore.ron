@@ -18,7 +18,7 @@
     // 0 turns regrowth off.
     regrow_amount: 1,
     // Ticks between two turns of the same cell (20 ticks are a second, so 200 ticks are ten
-    // seconds: a cell that was emptied is back to 120 after 24 minutes). A tick touches about
+    // seconds: a cell that was emptied is back to 120 after 20 minutes). A tick touches about
     // `cells / regrow_period` cells, not the whole map. 1 to 72000.
     regrow_period: 200,
 )
