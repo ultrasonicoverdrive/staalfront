@@ -228,6 +228,7 @@ fn units_md_rows() -> Vec<Row> {
             let first = cells[0].as_str();
             if first == "Role"
                 || first == "After"
+                || first == "Mission"
                 || first.starts_with('-')
                 || first.starts_with(':')
             {
