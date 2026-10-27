@@ -44,6 +44,7 @@
 //! assert_eq!(tank.speed_per_tick, Fx::from_ratio(1, 10)); // what the sim moves by
 //! ```
 
+mod building;
 mod classes;
 mod decimal;
 mod error;
@@ -54,6 +55,7 @@ mod weapon;
 
 use std::path::Path;
 
+pub use building::{BANNED_IDS, BuildingDef, BuildingFunction, Side};
 pub use classes::{
     ArmorType, ClassTables, DamageType, MAX_ARMOR_PERCENT, MAX_CLASS_KIND, MAX_COST_PERMILLE,
     MAX_DRIVE_TOLERANCE, MIN_COST_PERMILLE, MovementClass, TerrainCost, TurnMode, TurningDef,
@@ -61,7 +63,7 @@ pub use classes::{
 pub use decimal::{Decimal, TICK_MILLIS, TICKS_PER_SECOND};
 pub use error::DefError;
 pub use kinds::Retired;
-pub use sim::{SimFlags, SimUnitDef, SimWeaponDef};
+pub use sim::{SimBuildingDef, SimFlags, SimUnitDef, SimWeaponDef};
 pub use unit::{
     Category, DeathBlast, Faction, Flags, Footprint, IconShape, MAX_UNIT_KIND, MAX_UNITS, Model,
     ModelShape, UnitDef,
@@ -162,6 +164,7 @@ pub struct UnitDefs {
     retired_units: Vec<Retired>,
     sim_weapons: Vec<SimWeaponDef>,
     sim_units: Vec<SimUnitDef>,
+    sim_buildings: Vec<SimBuildingDef>,
 }
 
 impl UnitDefs {
@@ -194,6 +197,8 @@ impl UnitDefs {
             .map_err(|e| units_src.error(format!("internal: converting weapons: {e}")))?;
         let sim_units = sim::convert_units(&units, &weapons, &classes)
             .map_err(|e| units_src.error(format!("internal: converting units: {e}")))?;
+        let sim_buildings = sim::convert_buildings(&units)
+            .map_err(|e| units_src.error(format!("internal: converting buildings: {e}")))?;
         Ok(UnitDefs {
             classes,
             weapons,
@@ -202,6 +207,7 @@ impl UnitDefs {
             retired_units,
             sim_weapons,
             sim_units,
+            sim_buildings,
         })
     }
 
@@ -316,6 +322,21 @@ impl UnitDefs {
             .binary_search_by_key(&kind, |u| u.kind)
             .ok()
             .map(|i| &self.sim_units[i])
+    }
+
+    /// The structures converted for the simulation (WP6.1), sorted by kind:
+    /// footprint, function, exit side, build time, price, power, factions and
+    /// prerequisites of every role with a footprint.
+    pub fn sim_buildings(&self) -> &[SimBuildingDef] {
+        &self.sim_buildings
+    }
+
+    /// The converted structure with this kind number.
+    pub fn sim_building(&self, kind: u16) -> Option<&SimBuildingDef> {
+        self.sim_buildings
+            .binary_search_by_key(&kind, |b| b.kind)
+            .ok()
+            .map(|i| &self.sim_buildings[i])
     }
 
     /// The weapons converted for the simulation, sorted by kind.

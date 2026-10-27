@@ -24,6 +24,14 @@
 // (the models of art set v4 stand in until real art, WP11.6; a role without
 // one uses a primitive shape or an older stand-in, see below).
 //
+// Structures (WP6.1, docs/rules/buildings.md): the optional `building: (function: ...,
+// exit_side: ..., requires: [...])` of a Structure says what it is for (an enum the rules key
+// on), the footprint side where units come out or go in (+x is PosX, the side the art faces; a
+// factory and the harvester dock need one) and which structures must stand before it can be
+// built (the tech tree: ids of buildable structures, or the construction_center). Footprint,
+// cost, build_seconds, power and factions stay in the record. A record without the block has no
+// function, no side and no prerequisites. All the edges and numbers are placeholders.
+//
 // Models (docs/rules/units.md): `model` is what a role is drawn with; the
 // optional `models: { Meridian: Glb(..), Veyran: Glb(..) }` gives a faction
 // its own look for the same role (a unit is drawn with its owner's entry, else
@@ -46,6 +54,7 @@
         // ---- Shared structures -------------------------------------------
         (
             kind: 0, id: "construction_center", factions: [Meridian, Veyran], category: Structure,
+            building: (function: Anchor),
             hp: 1500, armor: "structure", footprint: (width: 4, height: 4), sight: 10,
             flags: (build_radius: 8),
             model: Shape(Cube), strategic_icon: Square,
@@ -58,6 +67,7 @@
         ),
         (
             kind: 1, id: "power_plant", factions: [Meridian, Veyran], category: Structure,
+            building: (function: PowerPlant),
             cost: 300, build_seconds: 15, hp: 600, armor: "structure", power: 100,
             footprint: (width: 2, height: 3), sight: 5,
             model: Glb("testpack_v1/models/energiecentrale.glb"), strategic_icon: Square,
@@ -70,6 +80,7 @@
         ),
         (
             kind: 2, id: "refinery", factions: [Meridian, Veyran], category: Structure,
+            building: (function: HarvesterDock, exit_side: PosX, requires: ["power_plant"]),
             cost: 1200, build_seconds: 40, hp: 900, armor: "structure", power: -30,
             footprint: (width: 3, height: 4), sight: 5,
             flags: (comes_with: "harvester"),
@@ -83,6 +94,7 @@
         ),
         (
             kind: 3, id: "barracks", factions: [Meridian, Veyran], category: Structure,
+            building: (function: InfantryFactory, exit_side: PosX, requires: ["power_plant"]),
             cost: 400, build_seconds: 20, hp: 700, armor: "structure", power: -20,
             footprint: (width: 2, height: 3), sight: 5,
             model: Shape(Cube), strategic_icon: Square,
@@ -95,6 +107,7 @@
         ),
         (
             kind: 4, id: "vehicle_factory", factions: [Meridian, Veyran], category: Structure,
+            building: (function: VehicleFactory, exit_side: PosX, requires: ["refinery"]),
             cost: 1500, build_seconds: 50, hp: 1000, armor: "structure", power: -40,
             footprint: (width: 3, height: 4), sight: 5,
             model: Glb("testpack_v1/models/voertuigfabriek.glb"), strategic_icon: Square,
@@ -107,6 +120,7 @@
         ),
         (
             kind: 5, id: "radar", factions: [Meridian, Veyran], category: Structure,
+            building: (function: Radar, requires: ["vehicle_factory"]),
             cost: 900, build_seconds: 35, hp: 700, armor: "structure", power: -50,
             footprint: (width: 2, height: 2), sight: 12,
             flags: (minimap: true),
@@ -120,6 +134,7 @@
         ),
         (
             kind: 6, id: "defence_tower", factions: [Meridian, Veyran], category: Structure,
+            building: (function: Defence, requires: ["barracks"]),
             cost: 500, build_seconds: 20, hp: 600, armor: "structure", power: -20,
             footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"],
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
@@ -132,6 +147,7 @@
         ),
         (
             kind: 7, id: "advanced_defences", factions: [Meridian, Veyran], category: Structure,
+            building: (function: Defence, requires: ["defence_tower", "radar"]),
             cost: 900, build_seconds: 35, hp: 800, armor: "structure", power: -40,
             footprint: (width: 2, height: 2), sight: 8, weapons: ["emplacement_gun"],
             model: Shape(Cube), strategic_icon: Square,
@@ -144,6 +160,7 @@
         ),
         (
             kind: 8, id: "shipyard", factions: [Meridian, Veyran], category: Structure,
+            building: (function: VesselFactory, exit_side: PosX, requires: ["vehicle_factory"]),
             cost: 1000, build_seconds: 40, hp: 900, armor: "structure", power: -40,
             footprint: (width: 4, height: 5), sight: 5,
             flags: (needs_water: true),
@@ -157,6 +174,7 @@
         ),
         (
             kind: 9, id: "decoy_emplacement", factions: [Meridian], category: Structure,
+            building: (function: Decoy, requires: ["barracks"]),
             cost: 150, build_seconds: 8, hp: 150, armor: "structure",
             footprint: (width: 1, height: 1), sight: 5,
             flags: (disguise_as: "defence_tower"),
@@ -166,6 +184,7 @@
         ),
         (
             kind: 10, id: "fortified_bunker", factions: [Veyran], category: Structure,
+            building: (function: Defence, requires: ["barracks"]),
             cost: 600, build_seconds: 25, hp: 1200, armor: "structure",
             footprint: (width: 2, height: 2), sight: 7,
             flags: (garrison: 5),
@@ -408,6 +427,7 @@
         // the hit points (and the notes of units.md) are design targets.
         (
             kind: 32, id: "relay_transmitter", factions: [Neutral], category: Structure,
+            building: (),
             hp: 400, armor: "structure", footprint: (width: 2, height: 2), sight: 5,
             model: Glb("set_v4/neutral_relay_transmitter.glb"), strategic_icon: Square,
             icon: "relay_transmitter",
@@ -415,6 +435,7 @@
         ),
         (
             kind: 33, id: "fuel_depot", factions: [Neutral], category: Structure,
+            building: (),
             hp: 500, armor: "structure", footprint: (width: 2, height: 2), sight: 4,
             flags: (death_blast: (radius: 3, damage: 200)),
             model: Glb("set_v4/neutral_fuel_depot.glb"), strategic_icon: Square,
@@ -423,6 +444,7 @@
         ),
         (
             kind: 34, id: "archive_building", factions: [Neutral], category: Structure,
+            building: (),
             hp: 800, armor: "structure", footprint: (width: 3, height: 3), sight: 5,
             model: Glb("set_v4/neutral_archive_building.glb"), strategic_icon: Square,
             icon: "archive_building",
@@ -445,18 +467,21 @@
         ),
         (
             kind: 37, id: "bridge_segment", factions: [Neutral], category: Structure,
+            building: (),
             hp: 500, armor: "structure", footprint: (width: 1, height: 1), sight: 3,
             model: Glb("set_v4/neutral_bridge_segment.glb"), strategic_icon: Square,
             // placeholder: footprint, sight, model. Engineers destroy and repair it.
         ),
         (
             kind: 38, id: "rail_spur", factions: [Neutral], category: Structure,
+            building: (),
             hp: 600, armor: "structure", footprint: (width: 1, height: 1), sight: 3,
             model: Glb("set_v4/neutral_rail_spur.glb"), strategic_icon: Square,
             // placeholder: footprint, sight, model. Demolition target.
         ),
         (
             kind: 39, id: "automated_gun", factions: [Neutral], category: Structure,
+            building: (function: Defence),
             hp: 700, armor: "structure", footprint: (width: 1, height: 1), sight: 8,
             weapons: ["automated_gun"],
             flags: (fires_at_all: true),
@@ -466,6 +491,7 @@
         ),
         (
             kind: 40, id: "generator", factions: [Neutral], category: Structure,
+            building: (function: PowerPlant),
             hp: 400, armor: "structure", power: 50, footprint: (width: 1, height: 1), sight: 3,
             model: Glb("set_v4/neutral_generator.glb"), strategic_icon: Square,
             icon: "generator",
@@ -473,6 +499,7 @@
         ),
         (
             kind: 41, id: "unmanned_artillery", factions: [Neutral], category: Structure,
+            building: (function: Defence),
             hp: 300, armor: "structure", footprint: (width: 2, height: 2), sight: 6,
             weapons: ["battery_shell"],
             model: Glb("set_v4/network_unmanned_artillery.glb"), strategic_icon: Square,

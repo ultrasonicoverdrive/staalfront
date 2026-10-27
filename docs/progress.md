@@ -1689,6 +1689,58 @@ footprint (`units.md`); a footprint decision, not an art one. The whole pack, wi
 and the decor, is `sf_game --crowd --models set_v4` (the sandbox draws its roles through the roster
 and does not read `--models`).
 
+## Phase 6 — Buildings, building and power
+
+Status: WP6.1 is in; WP6.2 to WP6.8 are not started.
+
+- WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
+  record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
+  there; the function is an enum with permanent numbers; the prerequisites are the tech tree; `sf_bridge::building_table`
+  turns them into `sf_sim::BuildingTable`, which a world is given with `World::with_buildings`; a new last
+  checksum section `B` that exists only with a table; no behaviour yet; no pinned checksum moved),
+  `docs/rules/buildings.md`: done
+
+### WP6.1 notes
+
+- **Where the data lives.** In `unit_defs.ron`, as a block in the structure's own record, not a new file: the
+  kind numbers, the tombstones (`retired_units`) and the footprint, price, time and power are already there,
+  and a second file would have written them twice and made a second id space. The block is optional, so the
+  frozen copies in `assets/scenarios/*_defs/` load unchanged and are not touched.
+- **Clean-room.** Every function, edge and number is invented (`buildings.md`); the build times, prices and
+  power are the placeholders of WP3.1, unchanged. `content/units.md` is unchanged.
+- **Not done, on purpose.** Nothing reads the table: placement (WP6.2), power (WP6.4) and production (WP6.5) do.
+  No unit prerequisites (which factory a rifleman needs; WP6.5). The game and the headless runner do not give
+  their worlds the table yet, so no scenario has section `B`; WP6.2 wires it with the first rule that reads it.
+  The campaign unlock order stays mission data (phase 10); a test only checks that the tree and the unlock rows
+  of `content/units.md` do not contradict each other.
+- **To decide, owner Tijmen:** the prerequisite edges (for example a radar needs a vehicle factory, advanced
+  defences need a tower and a radar) are guesses for the first skirmish; change them in
+  `unit_defs.ron` and in `the_shipped_tech_tree_is_the_documented_one`.
+- **Review round 1 (PR #69).** `decoy_emplacement` now requires `barracks` instead of `defence_tower`
+  (decision orchestrator): F1-M05 starts with power_plant, barracks and vehicle_factory and no tower, and
+  teaches the decoy from 0:30 (`f1_m05_can_build_the_decoy_from_its_starting_structures`, which reads section
+  E of `content/missions/F1-M05.md`). The hashed numbers of `BuildingFunction` and `Side` are pinned on both
+  sides and against the bridge (`sim_numbers_equal_the_data_numbers_for_every_variant`), and the digest of the
+  shipped table is pinned (`the_shipped_building_table_digest_is_pinned`, `0x53aeb53ab44157d1`). A
+  self-referencing `requires` is reported on the `requires` line, no longer on the `id:` line.
+- **Follow-ups from the review, not built in WP6.1:**
+  - `exit_side` rotation: the side is fixed in the footprint's frame; if WP6.2 allows rotated placement, the
+    exit side has to rotate with it.
+  - `fortified_bunker` is built in the field by a combat_engineer (`content/units.md`); the data cannot express
+    a builder unit yet, it is now a base structure behind the barracks.
+  - WP6.4: switching Defence off on a power shortage must key on `power < 0`, because the bunker is a Defence
+    with power 0 (and the decoy is a Decoy with power 0).
+- **To decide, owner Tijmen: Veyran decoys in F1-M05.** F1-M05 places 8 `decoy_emplacement` for Enemy 1 (the
+  Veyran Directorate), but the decoy is `factions: [Meridian]`. In WP6.1 `factions` restricts nothing in the
+  simulation: it is hashed data only, the sim has no faction per player and `PlaceStructure` checks neither
+  faction nor prerequisites, so a pre-placed decoy of another owner is accepted
+  (`f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base`). When WP6.2 makes `factions` restrict
+  building, it must say whether it also restricts pre-placed mission objects. Options: open the decoy to
+  Veyran, give Veyran its own decoy role, or keep `[Meridian]` for building and allow mission placement of any
+  role. The faction list is not changed in this round. Main's content revision of 27-10 (#72) already reads
+  it as the last option (`content/units.md`: "Meridian only as a buildable structure", the 8 are network-supplied
+  mission objects); what Tijmen still decides is that WP6.2 then checks `factions` only when building.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

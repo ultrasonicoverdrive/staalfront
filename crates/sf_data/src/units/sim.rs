@@ -22,6 +22,7 @@
 
 use sf_math::Fx;
 
+use super::building::{BuildingFunction, Side};
 use super::classes::ClassTables;
 use super::decimal::Decimal;
 use super::unit::{Category, Faction, Flags, UnitDef};
@@ -174,6 +175,68 @@ impl SimUnitDef {
     pub const fn available_to(&self, faction: Faction) -> bool {
         self.factions & faction.bit() != 0
     }
+}
+
+/// A structure for the simulation (WP6.1): what placement, power and production
+/// will read. Integers only; the function and the side are the permanent
+/// numbers of the enums.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SimBuildingDef {
+    /// The permanent kind number of the role.
+    pub kind: u16,
+    /// Bit mask of the factions that can use it ([`Faction::bit`]).
+    pub factions: u8,
+    /// Footprint `(width, height)` in cells.
+    pub footprint: (u8, u8),
+    /// What it does.
+    pub function: BuildingFunction,
+    /// The side units come out of or go in by; `Some` exactly for a factory or
+    /// the harvester dock.
+    pub exit_side: Option<Side>,
+    /// Build time in ticks (zero if it cannot be built).
+    pub build_ticks: u32,
+    /// Price in credits; `None` if it cannot be bought (phase 7 reads it).
+    pub cost: Option<u32>,
+    /// Power produced (positive) or used (negative).
+    pub power: i32,
+    /// Kind numbers of the buildings it needs, ascending.
+    pub requires: Vec<u16>,
+}
+
+/// Converts the structures (the roles with a footprint).
+pub(crate) fn convert_buildings(units: &[UnitDef]) -> Result<Vec<SimBuildingDef>, String> {
+    let mut out = Vec::new();
+    for u in units.iter().filter(|u| u.category == Category::Structure) {
+        let fp = u
+            .footprint
+            .ok_or_else(|| format!("structure {} has no footprint", u.id))?;
+        let b = u.building.clone().unwrap_or_default();
+        let mut requires = b
+            .requires
+            .iter()
+            .map(|r| {
+                units
+                    .iter()
+                    .find(|d| d.id == *r)
+                    .map(|d| d.kind)
+                    .ok_or_else(|| format!("unit {}: requires {r}", u.id))
+            })
+            .collect::<Result<Vec<u16>, String>>()?;
+        requires.sort_unstable();
+        out.push(SimBuildingDef {
+            kind: u.kind,
+            factions: u.factions.iter().fold(0, |m, f| m | f.bit()),
+            footprint: (fp.width, fp.height),
+            function: b.function,
+            exit_side: b.exit_side,
+            build_ticks: ticks(u.build_seconds, &u.id)?,
+            cost: u.cost,
+            power: u.power,
+            requires,
+        });
+    }
+    out.sort_by_key(|b| b.kind);
+    Ok(out)
 }
 
 /// Converts the weapons. Validation has already checked every number, so a
