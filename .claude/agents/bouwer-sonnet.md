@@ -57,4 +57,16 @@ last commit, and put the list in your report and the PR body with ✓ or ✗ and
     `cargo test --workspace` green locally; PLAN §5 rules for `sf_sim` kept; a new rule written
     down in `docs/rules/`.
 11. **Time split.** Minutes spent on (a) cargo build/test/clippy/fmt/scenario runs, (b) waiting
-    for CI, (c) the rest.
+    for CI, (c) the rest. Take them from `date` stamps before and after every cargo run and from
+    the CI check times, not from an estimate.
+12. **Presentation data in RON (PLAN §5 rule 6).** Every number, colour, size, threshold or
+    model/file name that tunes what the player sees lives in a RON file, checked when it loads
+    and pinned by a test, not as a constant in Rust. Only a true engine constant may stay in
+    code, with a comment saying why. (Added 27-10-2026: three of five PRs that day were sent
+    back for this.)
+13. **Tests call the production code.** A test of a mapping or wiring (snapshot to picture,
+    input to command, event to effect) calls the same function the game uses; it never
+    re-implements that logic. Show that a mutation in the game's own path makes a test fail.
+14. **Numbers pinned against the data.** Every number or enum value that enters the checksum
+    or a data file is pinned by a test against the data, so a renumbering or a changed value
+    fails a test.
