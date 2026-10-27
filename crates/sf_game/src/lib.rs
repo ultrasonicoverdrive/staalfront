@@ -102,6 +102,7 @@
 
 pub mod args;
 pub mod bench;
+pub mod bench_scene;
 pub mod build_mode;
 pub mod cell_overlay;
 pub mod commands;
@@ -123,6 +124,7 @@ pub mod selection;
 pub mod selection_view;
 pub mod sim_snapshot;
 pub mod sim_thread;
+pub mod skirmish;
 mod sound_browser;
 pub mod wreck_looks;
 

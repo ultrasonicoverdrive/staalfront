@@ -258,13 +258,18 @@ impl Scene {
     }
 
     fn shoot(&mut self, r: &mut Renderer, cam: &Camera, blend: Blend) -> Rgba8 {
+        self.shoot_at(r, cam, blend, 0.0)
+    }
+
+    /// [`Scene::shoot`] with the units interpolated to `alpha` (1 = the state of the last tick).
+    fn shoot_at(&mut self, r: &mut Renderer, cam: &Camera, blend: Blend, alpha: f32) -> Rgba8 {
         let vp = cam.view_proj();
         r.set_view_proj(vp);
         let frustum = Frustum::from_view_proj(vp);
         let eye = EyeView::from_view_proj(vp, H as f32);
         let ground = &self.ground;
         self.instancer
-            .build_frame(&FrameView::new(&frustum, 0.0, eye, blend, 1.0), |x, z| {
+            .build_frame(&FrameView::new(&frustum, alpha, eye, blend, 1.0), |x, z| {
                 ground.height(f64::from(x), f64::from(z)) as f32
             });
         r.upload_units(&self.instancer);
@@ -583,6 +588,260 @@ fn shots_hits_and_deaths_are_drawn_close_up_and_fade_to_a_flash_from_afar() {
     // The pool saw the whole fight and was never pushed out.
     let stats = eyes[0].fx.pool_stats();
     assert!(stats.spawned > 10 && stats.dropped == 0, "{stats:?}");
+}
+
+/// WP5.6b: the flash starts at the barrel tip of the drawn model. A Veyran heavy tank (set v4, a twin cannon with
+/// two muzzles) stands with its hull facing east and a Meridian light tank four cells north of it, so its turret
+/// must turn about 90 degrees off the hull to fire. Every shot of the heavy tank is followed through the
+/// real path (`record`, `FxPlayer::frame_with`, `DrawnAnchors` on the instancer) and checked against the
+/// instancer's own answer for the muzzle it should come from; the picture (lavapipe) shows a bright change
+/// there. The first two shots of a burst come from different muzzles.
+#[test]
+fn a_flash_starts_at_the_barrel_tip_and_a_twin_cannon_alternates_its_muzzles() {
+    use sf_game::fx::DrawnAnchors;
+    use sf_game::fx_events::NO_SHOOTER;
+    let mut scene = Scene::new();
+    let mut r = renderer(&scene.map);
+    let (heavy, light) = (scene.kind("heavy_tank"), scene.kind("light_tank"));
+    let tick = scene.world.tick();
+    let spawn = |w: &mut World, kind, at: (i32, i32), owner| {
+        w.schedule(
+            tick,
+            PlayerId(owner),
+            Command::SpawnUnit {
+                kind,
+                pos: Vec2::from_ints(at.0, at.1).add_scalar_half(),
+                owner: PlayerId(owner),
+            },
+        )
+        .unwrap()
+    };
+    spawn(&mut scene.world, heavy, (30, 30), VEYRAN);
+    spawn(&mut scene.world, light, (30, 26), MERIDIAN);
+    scene.world.step();
+    let tank = scene
+        .world
+        .snapshot()
+        .iter()
+        .find(|v| v.kind == heavy)
+        .expect("the heavy tank")
+        .id;
+    let focus = vec2_cells_to_metres(Vec2::from_ints(30, 29));
+    let cam = scene.camera(0.06, focus);
+    let (blend, f) = scene.zoom_of(&cam);
+    assert_eq!(f.model_weight, 1.0, "models only");
+    let mut fx = FxPlayer::embedded();
+    let ground = scene.ground.clone();
+    // (tick, the instances of the frame, the pool instances this shot made, the shot's muzzle number)
+    let mut shots: Vec<(u64, Vec<EffectInstance>, usize, usize)> = Vec::new();
+    let mut events = Vec::new();
+    for _ in 0..400 {
+        scene.world.step();
+        events.clear();
+        record(&scene.world, &mut events);
+        let snap = SimSnapshot::capture(&scene.world);
+        scene.sync();
+        let mine: Vec<FxEvent> = events
+            .iter()
+            .filter(|e| matches!(e.kind, FxKind::Fire { .. }) && e.shooter == tank.index())
+            .copied()
+            .collect();
+        assert!(
+            events
+                .iter()
+                .all(|e| e.shooter == NO_SHOOTER || matches!(e.kind, FxKind::Fire { .. }))
+        );
+        let view = scene.world.get(tank).expect("alive");
+        let off = view
+            .turret
+            .map(|t| t.facing.signed_diff(view.facing))
+            .unwrap_or(0);
+        // Only the heavy tank's own shots, so the particles counted below are all its flash and smoke (the
+        // light tank shoots back from four cells away).
+        fx.push_events(&mine);
+        let before = fx.pool_stats().spawned;
+        let anchors = DrawnAnchors {
+            instancer: &scene.instancer,
+            ground: &*ground,
+            first_wreck_slot: sf_game::looks::first_wreck_slot(&snap),
+        };
+        let inst = fx.frame_with(&snap, &*ground, &anchors, &f).to_vec();
+        if mine.is_empty() {
+            continue;
+        }
+        let made = (fx.pool_stats().spawned - before) as usize;
+        let dots = fx.counters().tracer_dots as usize;
+        println!(
+            "tick {}: heavy tank fires, turret {off} steps off the hull, {made} particles",
+            snap.tick().0
+        );
+        assert!(
+            off.unsigned_abs() >= 40,
+            "the turret is turned off the hull: {off}"
+        );
+        shots.push((
+            snap.tick().0,
+            inst[..inst.len() - dots].to_vec(),
+            made,
+            shots.len(),
+        ));
+        if shots.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(shots.len(), 2, "the twin cannon fired a burst of two");
+    // One tank, one weapon slot: the n-th shot comes from muzzle n.
+    let mut centres = Vec::new();
+    for (tick, inst, made, n) in &shots {
+        let want = scene
+            .instancer
+            .anchor_world(tank.index(), "muzzle", *n, 1.0, |x, z| {
+                ground.height(f64::from(x), f64::from(z)) as f32
+            })
+            .expect("the heavy tank has its muzzle anchors");
+        let fresh = &inst[inst.len() - made..];
+        let near =
+            |p: &[f32; 3], q: [f32; 3]| ((p[0] - q[0]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+        let worst = fresh
+            .iter()
+            .map(|i| near(&i.position, want))
+            .fold(0.0, f32::max);
+        println!(
+            "tick {tick}: shot {n}: {made} new particles within {worst:.3} m of the anchor {want:?}"
+        );
+        assert!(
+            worst < 0.3,
+            "shot {n}: a particle {worst} m from its muzzle"
+        );
+        centres.push((want, fresh.to_vec()));
+    }
+    // The two muzzles are the two ends of the 0.912 m wide barrel mouth, one turret turn apart from rest.
+    let apart = ((centres[0].0[0] - centres[1].0[0]).powi(2)
+        + (centres[0].0[2] - centres[1].0[2]).powi(2))
+    .sqrt();
+    assert!(
+        (apart - 0.912).abs() < 0.05,
+        "the two muzzles are {apart} m apart"
+    );
+    // The pictures: the same instant with and without the effects, and the change at the muzzle.
+    for (tick, inst, _, n) in &shots {
+        let want = centres[*n].0;
+        let at = project_px(&f.view_proj, want.into(), [W as f32, H as f32])
+            .expect("in view")
+            .0;
+        let rect = crop(at, 30.0, 30.0);
+        r.set_effects(&[]);
+        let base = scene.shoot_at(&mut r, &cam, blend, 1.0);
+        assert_eq!(r.set_effects(inst), 0);
+        let with = scene.shoot_at(&mut r, &cam, blend, 1.0);
+        save(&format!("anchor_t{tick:04}_heavy_muzzle{n}.png"), &with);
+        let (c, b) = (changed(&base, &with, rect), brighter(&base, &with, rect));
+        println!("tick {tick}: muzzle {n} at {at:?}: {c} pixels changed, {b} brighter");
+        assert!(c > 40 && b > 15, "{c} changed, {b} brighter");
+    }
+}
+
+/// A light tank (one `muzzle` node) with its turret turned: the flash is at the barrel, ahead of the turret and
+/// not at the hull's rule point.
+#[test]
+fn a_single_muzzle_tank_with_its_turret_turned_flashes_at_the_barrel() {
+    use sf_game::fx::DrawnAnchors;
+    let mut scene = Scene::new();
+    let light = scene.kind("light_tank");
+    let tick = scene.world.tick();
+    for (at, owner) in [((30, 30), VEYRAN), ((26, 30), MERIDIAN)] {
+        scene
+            .world
+            .schedule(
+                tick,
+                PlayerId(owner),
+                Command::SpawnUnit {
+                    kind: light,
+                    pos: Vec2::from_ints(at.0, at.1).add_scalar_half(),
+                    owner: PlayerId(owner),
+                },
+            )
+            .unwrap();
+    }
+    scene.world.step();
+    let tank = scene
+        .world
+        .snapshot()
+        .iter()
+        .find(|v| v.owner == PlayerId(VEYRAN))
+        .unwrap()
+        .id;
+    let ground = scene.ground.clone();
+    let mut r = renderer(&scene.map);
+    let cam = scene.camera(0.06, vec2_cells_to_metres(Vec2::from_ints(29, 30)));
+    let (blend, f) = scene.zoom_of(&cam);
+    let mut fx = FxPlayer::embedded();
+    let mut events = Vec::new();
+    for _ in 0..400 {
+        scene.world.step();
+        events.clear();
+        record(&scene.world, &mut events);
+        let snap = SimSnapshot::capture(&scene.world);
+        scene.sync();
+        let Some(ev) = events
+            .iter()
+            .find(|e| matches!(e.kind, FxKind::Fire { .. }) && e.shooter == tank.index())
+            .copied()
+        else {
+            continue;
+        };
+        fx.push_events(&[ev]);
+        let anchors = DrawnAnchors {
+            instancer: &scene.instancer,
+            ground: &*ground,
+            first_wreck_slot: sf_game::looks::first_wreck_slot(&snap),
+        };
+        let inst = fx.frame_with(&snap, &*ground, &anchors, &f).to_vec();
+        let want = scene
+            .instancer
+            .anchor_world(tank.index(), "muzzle", 0, 1.0, |x, z| {
+                ground.height(f64::from(x), f64::from(z)) as f32
+            })
+            .expect("the light tank has a muzzle");
+        let rule = muzzle_of(&ev);
+        let flat =
+            |p: [f32; 3], q: [f32; 3]| ((p[0] - q[0]).powi(2) + (p[2] - q[2]).powi(2)).sqrt();
+        let nearest = inst
+            .iter()
+            .map(|i| flat(i.position, want))
+            .fold(f32::MAX, f32::min);
+        println!(
+            "tick {}: anchor {want:?}, the rule's point {rule:?}, nearest particle {nearest:.3} m from the anchor",
+            snap.tick().0
+        );
+        assert!(nearest < 0.3, "{nearest}");
+        assert_eq!(fx.counters().flashes_at_anchor, 1);
+        // The barrel tip is well off the rule's point (it is 2.5 m higher): the rule would start the flash in
+        // the hull.
+        let apart = ((want[0] - rule[0]).powi(2)
+            + (want[1] - rule[1]).powi(2)
+            + (want[2] - rule[2]).powi(2))
+        .sqrt();
+        assert!(apart > 1.0, "{want:?} vs {rule:?}: {apart} m");
+        // The picture: a bright change at the barrel tip.
+        let at = project_px(&f.view_proj, want.into(), [W as f32, H as f32])
+            .expect("in view")
+            .0;
+        r.set_effects(&[]);
+        let base = scene.shoot_at(&mut r, &cam, blend, 1.0);
+        assert_eq!(r.set_effects(&inst), 0);
+        let with = scene.shoot_at(&mut r, &cam, blend, 1.0);
+        save(
+            &format!("anchor_t{:04}_light_muzzle.png", snap.tick().0),
+            &with,
+        );
+        let rect = crop(at, 30.0, 30.0);
+        let (c, b) = (changed(&base, &with, rect), brighter(&base, &with, rect));
+        println!("light tank: {c} pixels changed, {b} brighter at the barrel tip {at:?}");
+        assert!(c > 30 && b > 10, "{c} changed, {b} brighter");
+        return;
+    }
+    panic!("the light tank never fired");
 }
 
 /// Relative cost of the effects: not a test that can fail, a measurement (`--ignored --nocapture`, release

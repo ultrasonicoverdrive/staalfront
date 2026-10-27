@@ -27,12 +27,59 @@ use sf_render::effects::{
 };
 use sf_sim::ProjectileKind;
 
-use crate::fx_events::{FxEvent, FxKind};
+use crate::fx_events::{FxEvent, FxKind, NO_SHOOTER};
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::SimHandle;
 
 /// The longest frame time the particles are moved by, seconds (a stall does not fling them across the map).
 const MAX_DT: f32 = 0.1;
+
+/// Where the anchors of the drawn models are (WP5.6b): the one question the effects ask the picture, so
+/// that a flash starts at the barrel the model has, not at a guess from its length. The runner answers it
+/// from the instancer (`Instancer::anchor_world`); a game without models, and most tests, use
+/// [`NoAnchors`].
+pub trait Anchors {
+    /// The world position of the `n`-th anchor whose name starts with `prefix` on the unit in `slot` (the
+    /// index half of its id), as the unit is drawn at `alpha`. `None` when there is no such unit or
+    /// anchor, and the effect then falls back to the rule of `effects.ron` (`muzzle`).
+    fn anchor(&self, slot: u32, prefix: &str, n: usize, alpha: f32) -> Option<[f32; 3]>;
+}
+
+/// No model has anchors: every flash uses the bounding-box rule of `effects.ron`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoAnchors;
+
+impl Anchors for NoAnchors {
+    fn anchor(&self, _: u32, _: &str, _: usize, _: f32) -> Option<[f32; 3]> {
+        None
+    }
+}
+
+/// The anchors of the units the instancer drew (WP5.6b): [`Instancer::anchor_world`] on the terrain
+/// height of the game, for the slots of live entities only. A slot from `first_wreck_slot` on is a wreck's
+/// (`crate::looks::first_wreck_slot`): a shooter that has died since it fired is not found there, so a
+/// dead shooter's flash is never started on the wreck that took its slot number.
+pub struct DrawnAnchors<'a> {
+    pub instancer: &'a sf_render::Instancer,
+    pub ground: &'a dyn Ground,
+    pub first_wreck_slot: u32,
+}
+
+impl Anchors for DrawnAnchors<'_> {
+    fn anchor(&self, slot: u32, prefix: &str, n: usize, alpha: f32) -> Option<[f32; 3]> {
+        if slot >= self.first_wreck_slot {
+            return None;
+        }
+        self.instancer.anchor_world(slot, prefix, n, alpha, |x, z| {
+            self.ground.height(f64::from(x), f64::from(z)) as f32
+        })
+    }
+}
+
+/// The anchor name a flash starts at: the node name the art brief gives a barrel's end. Like the `turret` and `barrel`
+/// part names of the glb loader it is a convention of the model files, not a tunable number, so it stays in code
+/// (`sf_render::glb::ANCHOR_PREFIXES` is the loader's side of the same names).
+pub const MUZZLE_PREFIX: &str = "muzzle";
 
 /// What a frame knows of the camera and the zoom.
 #[derive(Clone, Copy, Debug)]
@@ -72,6 +119,10 @@ pub struct FxCounters {
     pub instances: u32,
     /// Tracer dots among them.
     pub tracer_dots: u32,
+    /// Flashes that started at a muzzle anchor of the model (WP5.6b).
+    pub flashes_at_anchor: u64,
+    /// Flashes that used the bounding-box rule (no anchor: another model, or no model drawn).
+    pub flashes_by_rule: u64,
 }
 
 /// `effects.ron` resolved against the definitions: names are numbers, links are lists of numbers.
@@ -194,6 +245,9 @@ pub struct FxPlayer {
     ready: Vec<FxEvent>,
     instances: Vec<EffectInstance>,
     counters: FxCounters,
+    /// How many shots each `(shooter slot, weapon slot)` has had shown: a burst alternates between the
+    /// model's muzzles by it.
+    shots_shown: BTreeMap<(u32, u8), usize>,
 }
 
 impl FxPlayer {
@@ -213,6 +267,7 @@ impl FxPlayer {
             ready: Vec::with_capacity(crate::fx_events::FX_QUEUE_CAP),
             instances: Vec::with_capacity((l.max_particles + l.max_tracer_dots) as usize),
             counters: FxCounters::default(),
+            shots_shown: BTreeMap::new(),
             tables,
         })
     }
@@ -267,10 +322,22 @@ impl FxPlayer {
         ground: &dyn Ground,
         f: &FxFrame,
     ) -> &[EffectInstance] {
+        self.frame_with(snap, ground, &NoAnchors, f)
+    }
+
+    /// [`FxPlayer::frame`] with the anchors of the drawn models: a flash starts at the muzzle anchor of
+    /// the shooter's model when `anchors` has one.
+    pub fn frame_with(
+        &mut self,
+        snap: &SimSnapshot,
+        ground: &dyn Ground,
+        anchors: &dyn Anchors,
+        f: &FxFrame,
+    ) -> &[EffectInstance] {
         let dt = f.dt.clamp(0.0, MAX_DT);
         let limits = self.tables.effects.limits.clone();
         let band = ZoomBand::of(f.model_weight, f.reference_px, &limits);
-        self.release(snap, ground, band);
+        self.release(snap, ground, anchors, f.alpha, band);
         self.wreck_smoke(snap, ground, band, dt);
         self.pool.update(dt);
         let view = EmitView {
@@ -290,7 +357,14 @@ impl FxPlayer {
     }
 
     /// The events whose tick the picture has reached become bursts.
-    fn release(&mut self, snap: &SimSnapshot, ground: &dyn Ground, band: ZoomBand) {
+    fn release(
+        &mut self,
+        snap: &SimSnapshot,
+        ground: &dyn Ground,
+        anchors: &dyn Anchors,
+        alpha: f32,
+        band: ZoomBand,
+    ) {
         let now = snap.tick().0;
         let mut batch = std::mem::take(&mut self.ready);
         batch.clear();
@@ -312,39 +386,83 @@ impl FxPlayer {
                 continue;
             }
             self.counters.shown += 1;
-            self.spawn(ev, ground, band);
+            self.spawn(ev, ground, anchors, alpha, band);
         }
         self.ready = batch;
     }
 
     /// The bursts of one event.
-    fn spawn(&mut self, ev: &FxEvent, ground: &dyn Ground, band: ZoomBand) {
-        let t = &self.tables;
-        let limits = &t.effects.limits;
+    fn spawn(
+        &mut self,
+        ev: &FxEvent,
+        ground: &dyn Ground,
+        anchors: &dyn Anchors,
+        alpha: f32,
+        band: ZoomBand,
+    ) {
         let [x, z] = ev.pos;
         let y = ground.height(f64::from(x), f64::from(z)) as f32;
-        let pl = &t.effects.placement;
         let (position, radius_m) = match ev.kind {
-            FxKind::Fire { .. } => {
-                // The flash starts at the muzzle, found without the model: out along the mount's facing
-                // from the unit's middle, at a height that follows its length (WP5.6b has the anchors).
-                let m = &t.effects.muzzle;
-                let reach = (m.reach_fraction * ev.size).max(m.min_reach_m);
-                let (s, c) = (f32::from(ev.facing) * (std::f32::consts::TAU / 256.0)).sin_cos();
-                let (mx, mz) = (x + c * reach, z + s * reach);
-                let my = ground.height(f64::from(mx), f64::from(mz)) as f32
-                    + m.height_fraction * ev.size;
-                ([mx, my, mz], 0.0)
+            FxKind::Fire { .. } if band == ZoomBand::Strategic => {
+                // Icons only: a shot makes nothing, so nothing is looked up (a fight seen from the whole map is
+                // hundreds of shots a second) and no flash is counted.
+                return;
             }
-            FxKind::Impact { .. } => (
-                [x, y + pl.hit_height_m, z],
-                (ev.size * pl.impact_radius_fraction).max(pl.min_burst_radius_m),
-            ),
-            FxKind::Death { .. } => (
-                [x, y + pl.hit_height_m, z],
-                (ev.size * pl.death_radius_fraction).max(pl.min_burst_radius_m),
-            ),
+            FxKind::Fire { slot } => {
+                // The flash starts at the muzzle anchor of the shooter's drawn model, the one its burst is
+                // on (a burst alternates between `muzzle_l` and `muzzle_r`); without one, out along the
+                // mount's facing by the rule of `effects.ron` (the test pack, set v3, placeholder shapes).
+                let key = (ev.shooter, slot);
+                let shown = *self.shots_shown.get(&key).unwrap_or(&0);
+                let at = (ev.shooter != NO_SHOOTER)
+                    .then(|| {
+                        anchors.anchor(
+                            ev.shooter,
+                            MUZZLE_PREFIX,
+                            usize::from(slot).wrapping_add(shown),
+                            alpha,
+                        )
+                    })
+                    .flatten();
+                if ev.shooter != NO_SHOOTER {
+                    self.shots_shown.insert(key, shown.wrapping_add(1));
+                }
+                match at {
+                    Some(p) => {
+                        self.counters.flashes_at_anchor += 1;
+                        (p, 0.0)
+                    }
+                    None => {
+                        self.counters.flashes_by_rule += 1;
+                        let m = &self.tables.effects.muzzle;
+                        let reach = (m.reach_fraction * ev.size).max(m.min_reach_m);
+                        let (s, c) =
+                            (f32::from(ev.facing) * (std::f32::consts::TAU / 256.0)).sin_cos();
+                        let (mx, mz) = (x + c * reach, z + s * reach);
+                        let my = ground.height(f64::from(mx), f64::from(mz)) as f32
+                            + m.height_fraction * ev.size;
+                        ([mx, my, mz], 0.0)
+                    }
+                }
+            }
+            FxKind::Impact { .. } => {
+                let pl = &self.tables.effects.placement;
+                (
+                    [x, y + pl.hit_height_m, z],
+                    (ev.size * pl.impact_radius_fraction).max(pl.min_burst_radius_m),
+                )
+            }
+            FxKind::Death { .. } => {
+                // A little higher than a hit: the blast of a body starts above the wreck it leaves.
+                let pl = &self.tables.effects.placement;
+                (
+                    [x, y + pl.hit_height_m + pl.death_lift_m, z],
+                    (ev.size * pl.death_radius_fraction).max(pl.min_burst_radius_m),
+                )
+            }
         };
+        let t = &self.tables;
+        let limits = &t.effects.limits;
         let death = matches!(ev.kind, FxKind::Death { .. });
         if band == ZoomBand::Strategic {
             if death {
@@ -535,6 +653,7 @@ mod tests {
             pos: [12.0, 12.0],
             facing: 0,
             size: 6.0,
+            shooter: crate::fx_events::NO_SHOOTER,
         }
     }
 
@@ -931,5 +1050,209 @@ mod tests {
         q.frame(&snapshot_at(1), &ground, &frame(1.0, 200.0));
         let at = q.pool.positions().next().unwrap();
         assert!((at[0] - 12.8).abs() < 1e-3, "min reach 0.8 m: {}", at[0]);
+    }
+
+    /// Answers the muzzle question with a fixed point and writes down what it was asked.
+    struct Fixed {
+        at: Option<[f32; 3]>,
+        asked: std::cell::RefCell<Vec<(u32, String, usize, f32)>>,
+    }
+
+    impl Anchors for Fixed {
+        fn anchor(&self, slot: u32, prefix: &str, n: usize, alpha: f32) -> Option<[f32; 3]> {
+            self.asked
+                .borrow_mut()
+                .push((slot, prefix.to_owned(), n, alpha));
+            self.at
+        }
+    }
+
+    fn fixed(at: Option<[f32; 3]>) -> Fixed {
+        Fixed {
+            at,
+            asked: Default::default(),
+        }
+    }
+
+    fn shot_by(shooter: u32, slot: u8, weapon: u16) -> FxEvent {
+        FxEvent {
+            kind: FxKind::Fire { slot },
+            shooter,
+            ..fire(weapon)
+        }
+    }
+
+    /// With an anchor the flash starts there, not at the bounding-box rule; the question names the shooter's
+    /// slot, the prefix `muzzle` and the frame's alpha.
+    #[test]
+    fn a_flash_starts_at_the_muzzle_anchor_when_the_model_has_one() {
+        let ground = FlatGround::default();
+        let mut p = player();
+        let anchors = fixed(Some([30.0, 2.5, 44.0]));
+        p.push_events(&[shot_by(9, 0, weapon("rifle"))]);
+        let f = FxFrame {
+            alpha: 0.25,
+            ..frame(1.0, 200.0)
+        };
+        p.frame_with(&snapshot_at(1), &ground, &anchors, &f);
+        assert_eq!(*anchors.asked.borrow(), [(9, "muzzle".to_owned(), 0, 0.25)]);
+        let at = p.pool.positions().next().expect("a flash");
+        // Moved on by the frame's 0.05 s only (a flash does not rise); the point, not the rule's.
+        assert!(
+            (at[0] - 30.0).abs() < 1e-3 && (at[2] - 44.0).abs() < 1e-3,
+            "{at:?}"
+        );
+        assert!((at[1] - 2.5).abs() < 0.2, "height {}", at[1]);
+        let c = p.counters();
+        assert_eq!((c.flashes_at_anchor, c.flashes_by_rule), (1, 0));
+    }
+
+    /// No anchor (another model), no shooter, or the anchor lookup refusing: the rule of `effects.ron`.
+    #[test]
+    fn a_model_without_a_muzzle_gets_the_bounding_box_rule() {
+        let ground = FlatGround::default();
+        let rule = |shooter: u32, anchors: &dyn Anchors| {
+            let mut p = player();
+            p.push_events(&[FxEvent {
+                facing: 64,
+                ..shot_by(shooter, 0, weapon("rifle"))
+            }]);
+            p.frame_with(&snapshot_at(1), &ground, anchors, &frame(1.0, 200.0));
+            let at = p.pool.positions().next().unwrap();
+            ((at[0], at[2]), p.counters())
+        };
+        // The rule's place for a 6 m unit at (12, 12) aiming along +z: (12, 15).
+        for (shooter, anchors) in [
+            (9, &fixed(None) as &dyn Anchors),
+            (NO_SHOOTER, &fixed(Some([30.0, 2.5, 44.0]))),
+            (9, &NoAnchors),
+        ] {
+            let ((x, z), c) = rule(shooter, anchors);
+            assert!(
+                (x - 12.0).abs() < 1e-3 && (z - 15.0).abs() < 1e-3,
+                "{x} {z}"
+            );
+            assert_eq!((c.flashes_at_anchor, c.flashes_by_rule), (0, 1));
+        }
+        // A shot without a shooter never asks.
+        let anchors = fixed(Some([30.0, 2.5, 44.0]));
+        rule(NO_SHOOTER, &anchors);
+        assert!(anchors.asked.borrow().is_empty());
+    }
+
+    /// A burst alternates between the model's muzzles: the n-th shot of a shooter's weapon slot asks for
+    /// anchor `slot + n`, and another shooter or another slot counts on its own.
+    #[test]
+    fn a_burst_alternates_between_the_muzzles_by_shooter_and_slot() {
+        let ground = FlatGround::default();
+        let mut p = player();
+        let anchors = fixed(Some([30.0, 2.5, 44.0]));
+        let w = weapon("twin_cannon");
+        let shots = [
+            shot_by(4, 0, w),
+            shot_by(4, 0, w),
+            shot_by(4, 0, w),
+            shot_by(7, 0, w),
+            shot_by(4, 1, w),
+            shot_by(4, 1, w),
+        ];
+        p.push_events(&shots);
+        p.frame_with(&snapshot_at(1), &ground, &anchors, &frame(1.0, 200.0));
+        let asked: Vec<(u32, usize)> = anchors
+            .asked
+            .borrow()
+            .iter()
+            .map(|(slot, _, n, _)| (*slot, *n))
+            .collect();
+        // Shooter 4 slot 0: 0, 1, 2 (left, right, left of two muzzles); shooter 7: 0; shooter 4 slot 1:
+        // 1 + 0, 1 + 1.
+        assert_eq!(asked, [(4, 0), (4, 1), (4, 2), (7, 0), (4, 1), (4, 2)]);
+    }
+
+    /// From the whole map (icons only) a shot makes no flash and asks the picture for no anchor.
+    #[test]
+    fn a_shot_seen_from_afar_looks_up_no_anchor_and_counts_no_flash() {
+        let ground = FlatGround::default();
+        let mut p = player();
+        let anchors = fixed(Some([30.0, 2.5, 44.0]));
+        p.push_events(&[shot_by(9, 0, weapon("rifle"))]);
+        let drawn = p
+            .frame_with(&snapshot_at(1), &ground, &anchors, &frame(0.0, 5.0))
+            .len();
+        assert_eq!(drawn, 0);
+        assert!(anchors.asked.borrow().is_empty(), "no lookup from afar");
+        let c = p.counters();
+        assert_eq!((c.flashes_at_anchor, c.flashes_by_rule, c.shown), (0, 0, 1));
+    }
+
+    /// A death bursts `death_lift_m` higher than the same burst would at the hit height, and a hit does not.
+    #[test]
+    fn a_death_bursts_a_little_higher_than_a_hit() {
+        let ground = FlatGround::default();
+        let height = |lift: f32, ev: FxEvent| {
+            let mut effects = Effects::embedded();
+            effects.placement.death_lift_m = lift;
+            let mut p = FxPlayer::new(effects, &UnitDefs::embedded()).unwrap();
+            p.push_events(&[ev]);
+            p.frame(&snapshot_at(1), &ground, &frame(1.0, 200.0));
+            let ys: Vec<f32> = p.pool.positions().map(|q| q[1]).collect();
+            ys.iter().sum::<f32>() / ys.len() as f32
+        };
+        let lift = Effects::embedded().placement.death_lift_m;
+        assert_eq!(lift, 0.5, "the shipped lift");
+        let d = death(6.0, false);
+        assert!((height(lift, d) - height(0.0, d) - lift).abs() < 1e-4);
+        let h = hit(weapon("cannon"), true, false);
+        assert!(
+            (height(lift, h) - height(0.0, h)).abs() < 1e-6,
+            "a hit is not lifted"
+        );
+    }
+
+    /// A slot from the first wreck slot on is a wreck's, never a shooter's: a shooter that died after it
+    /// fired is not looked for under the wreck that took its slot number.
+    #[test]
+    fn drawn_anchors_do_not_answer_for_a_wreck_slot() {
+        use sf_render::glb::{AxisConvention, DEFAULT_SWITCH_PX, load_glb_file, model_set};
+        use sf_render::{Instancer, Motion, Style, UnitId};
+        let ground = FlatGround::default();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/set_v4/veyran_heavy_tank.glb");
+        let model = load_glb_file(&path, &AxisConvention::ENGINE).unwrap();
+        let mut inst = Instancer::new(Style::embedded(), (64.0, 64.0));
+        inst.set_models(model_set(&[model], &DEFAULT_SWITCH_PX).unwrap());
+        let tank = |slot| {
+            Motion::from_fixed(
+                0,
+                0,
+                sf_math::Vec2::from_ints(5, 5),
+                sf_math::Vec2::from_ints(5, 5),
+                sf_math::Facing::new(0),
+                sf_math::Facing::new(0),
+            )
+            .with_id(UnitId::from_parts(slot, 0))
+        };
+        // Two tanks in slots 2 and 5; the snapshot's live entities end at slot 5, so wrecks start at 6.
+        inst.update_tick([tank(2), tank(5)]);
+        let drawn = |first_wreck_slot| DrawnAnchors {
+            instancer: &inst,
+            ground: &ground,
+            first_wreck_slot,
+        };
+        let a = drawn(6);
+        let at = a.anchor(5, "muzzle", 1, 0.0).expect("the tank in slot 5");
+        // 5 cells = 20 m; the muzzle is 4.2 m ahead and 1.77 m up (muzzle_r of the heavy tank).
+        assert!(
+            (at[0] - 24.212).abs() < 1e-3 && (at[1] - 1.769).abs() < 1e-3,
+            "{at:?}"
+        );
+        assert!(a.anchor(2, "muzzle", 0, 0.0).is_some());
+        // The same instancer, when slot 5 is a wreck's (the entities end at slot 2): nothing is found there.
+        let b = drawn(3);
+        assert!(b.anchor(5, "muzzle", 0, 0.0).is_none());
+        assert!(b.anchor(2, "muzzle", 0, 0.0).is_some());
+        // And the cut is the snapshot's: the first wreck slot is one past the last live entity.
+        let snap = snapshot_at(1);
+        assert_eq!(crate::looks::first_wreck_slot(&snap), 0, "an empty world");
     }
 }

@@ -53,7 +53,7 @@ use serde::Deserialize;
 use crate::mesh::{MeshData, Vertex};
 use crate::model::{
     BUILTIN_MESHES, Joint, MAX_LODS, MAX_PARTS, MeshId, ModelBounds, ModelError, ModelLods,
-    ModelSet, PartAngles, RigPart, pose_parts,
+    ModelSet, PartAngles, RigAnchor, RigPart, pose_parts,
 };
 
 /// A signed coordinate axis.
@@ -172,10 +172,35 @@ pub struct LoadedPart {
     pub mesh: MeshData,
 }
 
-/// One level of detail: its parts, parents before children.
+/// Node names that mark an anchor: a point of the model that is not drawn but that the game needs
+/// the place of (WP5.6b). `muzzle`, `muzzle_l`, ... is where a shot leaves, `fx_smoke`, `fx_fire`, ...
+/// where damage smoke and fire start. The names are the art brief's, a convention of the model files like the
+/// `turret` and `barrel` part names above: part of the format, not a tunable, so they stay in code.
+pub const ANCHOR_PREFIXES: [&str; 2] = ["muzzle", "fx_"];
+
+/// Whether a node name (without its LOD suffix) is an anchor's.
+pub fn is_anchor_name(name: &str) -> bool {
+    ANCHOR_PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// A named point of a level (WP5.6b), in the frame of a part.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Anchor {
+    /// The node name without its `_LOD<n>` suffix (`muzzle_l`).
+    pub name: String,
+    /// Index of the part whose frame it is in; `None` = the unit itself. A node whose own parent part
+    /// was dropped (no geometry below it) is in the frame of its nearest kept ancestor, with the
+    /// matrices of the dropped parts folded into `local`.
+    pub parent: Option<usize>,
+    /// From the anchor's frame to its parent's, in engine axes.
+    pub local: Mat4,
+}
+
+/// One level of detail: its parts, parents before children, and its anchors in the order of the file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadedLevel {
     pub parts: Vec<LoadedPart>,
+    pub anchors: Vec<Anchor>,
 }
 
 /// A loaded model: its levels, finest first.
@@ -200,6 +225,10 @@ impl LoadedModel {
                 for v in &mut part.mesh.vertices {
                     v.position = v.position.map(|c| c * factor);
                 }
+            }
+            for anchor in &mut level.anchors {
+                anchor.local.w_axis =
+                    (anchor.local.w_axis.truncate() * factor).extend(anchor.local.w_axis.w);
             }
         }
         model
@@ -452,6 +481,8 @@ fn node_matrix(node: &gltf::Node<'_>) -> Mat4 {
 #[derive(Default)]
 struct Level {
     parts: Vec<LoadedPart>,
+    /// Anchors met so far (`muzzle*`, `fx_*`), in source axes, each in the frame of the part it names.
+    anchors: Vec<Anchor>,
     /// Nodes already met in this level: a node that is its own child, a
     /// cycle or a node used twice is refused instead of recursing forever.
     seen: std::collections::BTreeSet<usize>,
@@ -491,6 +522,14 @@ impl Level {
             let carries = (i + 1..n).any(|j| keep[j] && self.parts[j].parent == Some(i));
             keep[i] = !self.parts[i].mesh.indices.is_empty() || carries;
         }
+        // An anchor whose part goes away moves up to the nearest part that stays, with the dropped
+        // parts' frames folded into its matrix (a muzzle under an empty `barrel` keeps its place).
+        for anchor in &mut self.anchors {
+            while let Some(p) = anchor.parent.filter(|&p| !keep[p]) {
+                anchor.local = self.parts[p].rest * anchor.local;
+                anchor.parent = self.parts[p].parent;
+            }
+        }
         let mut new_index = vec![None; n];
         let mut kept = Vec::new();
         for (i, part) in std::mem::take(&mut self.parts).into_iter().enumerate() {
@@ -503,6 +542,9 @@ impl Level {
             }
         }
         self.parts = kept;
+        for anchor in &mut self.anchors {
+            anchor.parent = anchor.parent.and_then(|p| new_index[p]);
+        }
     }
 
     fn add_part(
@@ -574,6 +616,22 @@ impl Level {
         depth: usize,
     ) -> Result<(), GlbError> {
         self.enter(node, depth)?;
+        // A `muzzle*` or `fx_*` node without geometry is an anchor, not a part: it is kept (before
+        // the empty parts are pruned) as a named point in the frame of its parent.
+        let name = strip_lod_suffix(node.name().unwrap_or(""));
+        if node.mesh().is_none() && is_anchor_name(name) {
+            if !to_parent.is_finite() {
+                return Err(GlbError::Invalid("an anchor matrix is not finite".into()));
+            }
+            self.anchors.push(Anchor {
+                name: name.to_owned(),
+                parent,
+                local: to_parent,
+            });
+            if node.children().next().is_none() {
+                return Ok(());
+            }
+        }
         // A node without a mesh or with children is a part (a frame). So is
         // a turret or barrel, even a childless mesh node: it has to turn or
         // tilt on its own, and folding it into its parent would lose that.
@@ -704,6 +762,14 @@ impl Level {
         let scale = rot.col(0).length();
         let rot = rot * (1.0 / scale);
         LoadedLevel {
+            anchors: self
+                .anchors
+                .into_iter()
+                .map(|mut a| {
+                    a.local = s * a.local * s_inv;
+                    a
+                })
+                .collect(),
             parts: self
                 .parts
                 .into_iter()
@@ -732,7 +798,19 @@ pub fn model_set(models: &[LoadedModel], switch_px: &[f32]) -> Result<ModelSet, 
     let mut chains = Vec::new();
     for model in models {
         let mut levels = Vec::new();
+        let mut anchors = Vec::new();
         for level in &model.levels {
+            anchors.push(
+                level
+                    .anchors
+                    .iter()
+                    .map(|a| RigAnchor {
+                        name: a.name.clone(),
+                        parent: a.parent.map(|p| p as u8),
+                        local: a.local,
+                    })
+                    .collect::<Vec<_>>(),
+            );
             let mut parts = Vec::new();
             for part in &level.parts {
                 let mesh = MeshId(
@@ -754,11 +832,10 @@ pub fn model_set(models: &[LoadedModel], switch_px: &[f32]) -> Result<ModelSet, 
             return Err(ModelError::SwitchCount);
         }
         let bounds = bounds_of(model);
-        chains.push(ModelLods::with_parts(
-            levels,
-            switch_px[..n - 1].to_vec(),
-            bounds,
-        )?);
+        chains.push(
+            ModelLods::with_parts(levels, switch_px[..n - 1].to_vec(), bounds)?
+                .with_anchors(anchors),
+        );
     }
     ModelSet::new(extra, chains)
 }
@@ -1361,5 +1438,7 @@ pub fn load_pack_model(
     })
 }
 
+#[cfg(test)]
+mod anchor_tests;
 #[cfg(test)]
 mod tests;
