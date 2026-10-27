@@ -13,6 +13,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use super::building::{self, BANNED_IDS, BuildingDef};
 use super::classes::{ClassTables, is_valid_name};
 use super::decimal::Decimal;
 use super::error::{DefError, Source};
@@ -288,6 +289,10 @@ pub struct UnitDef {
     /// Abilities.
     #[serde(default)]
     pub flags: Flags,
+    /// What a Structure is for and what it needs (WP6.1, `building.rs`); absent
+    /// means no function, no exit side and no prerequisites.
+    #[serde(default)]
+    pub building: Option<BuildingDef>,
 }
 
 /// The `models` map, refusing a faction that is listed twice (a plain map
@@ -440,6 +445,16 @@ pub(crate) fn parse(
                 format!("unit id \"{id}\" is not snake_case (a-z, 0-9, _)"),
             ));
         }
+        if BANNED_IDS.contains(&id) {
+            return Err(src.error_at_record(
+                "id",
+                id,
+                0,
+                format!(
+                    "unit id \"{id}\" is a banned name (this game says construction_center and shipyard)"
+                ),
+            ));
+        }
         if units[..i].iter().any(|o| o.id == u.id) {
             let nth = units[..i].iter().filter(|o| o.id == u.id).count();
             return Err(src.error_at_record(
@@ -459,6 +474,10 @@ pub(crate) fn parse(
         };
         ctx.check()?;
     }
+    for u in &units {
+        building::check_record(src, &units, u)?;
+    }
+    building::check_cycles(src, &units)?;
     let live: Vec<Live<'_>> = units
         .iter()
         .map(|u| Live {
@@ -528,6 +547,9 @@ impl Ctx<'_> {
                 "hp {} must be 1 to {MAX_BIG} (0 is only allowed for an Object)",
                 u.hp
             )));
+        }
+        if u.build_seconds.is_negative() {
+            return Err(self.here(format!("build_seconds {} is negative", u.build_seconds)));
         }
         match u.cost {
             Some(c) => {

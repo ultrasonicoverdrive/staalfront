@@ -17,6 +17,9 @@
 //! ([`weapon_table`]), and since WP5.3 that table carries the armor table (damage type times armor
 //! type, and the armor type of every role) when the definitions have one ([`armor_table`]).
 //!
+//! Since WP6.1 it also turns the structure definitions (function, exit side, build time, price,
+//! power, prerequisites) into the simulation's [`BuildingTable`] ([`building_table`]).
+//!
 //! Since WP4.1 it also carries the terrain half: [`movement_table`] copies the
 //! terrain cost of every movement class into a [`MovementTable`], and
 //! [`terrain_defs`] turns the terrain types into the simulation's definitions,
@@ -35,12 +38,13 @@ use sf_data::movement::MovementCosts;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{
-    Projectile, SimUnitDef, SimWeaponDef, TerrainCost, TurnMode, TurningDef, UnitDefs, WeaponMount,
+    BuildingFunction as DataFunction, Projectile, Side as DataSide, SimBuildingDef, SimUnitDef,
+    SimWeaponDef, TerrainCost, TurnMode, TurningDef, UnitDefs, WeaponMount,
 };
 use sf_sim::{
-    ArmorTable, ClassCosts, Cost, Footprint, Kind, Loadout, Mount, MovementTable, ProjectileKind,
-    TerrainDef, TerrainFlags, TerrainId, TurnMode as SimTurnMode, Turning, UnitStats, UnitTable,
-    WeaponStats, WeaponTable,
+    ArmorTable, BuildingFunction, BuildingStats, BuildingTable, ClassCosts, Cost, Footprint, Kind,
+    Loadout, Mount, MovementTable, ProjectileKind, TerrainDef, TerrainFlags, TerrainId,
+    TurnMode as SimTurnMode, Turning, UnitStats, UnitTable, WeaponStats, WeaponTable,
 };
 
 /// What the rules read about one role, copied from its converted definition.
@@ -80,6 +84,59 @@ pub fn unit_stats(defs: &UnitDefs) -> Vec<UnitStats> {
 /// rule that out for any definitions that loaded).
 pub fn unit_table(defs: &UnitDefs) -> Result<UnitTable, String> {
     UnitTable::new(unit_stats(defs)).map_err(|e| e.to_string())
+}
+
+/// The function of a structure, renamed for the simulation.
+pub fn building_function(function: DataFunction) -> BuildingFunction {
+    match function {
+        DataFunction::None => BuildingFunction::None,
+        DataFunction::Anchor => BuildingFunction::Anchor,
+        DataFunction::PowerPlant => BuildingFunction::PowerPlant,
+        DataFunction::HarvesterDock => BuildingFunction::HarvesterDock,
+        DataFunction::InfantryFactory => BuildingFunction::InfantryFactory,
+        DataFunction::VehicleFactory => BuildingFunction::VehicleFactory,
+        DataFunction::VesselFactory => BuildingFunction::VesselFactory,
+        DataFunction::Radar => BuildingFunction::Radar,
+        DataFunction::Defence => BuildingFunction::Defence,
+        DataFunction::Decoy => BuildingFunction::Decoy,
+    }
+}
+
+/// A side of a footprint, renamed for the simulation.
+pub fn building_side(side: DataSide) -> sf_sim::Side {
+    match side {
+        DataSide::PosX => sf_sim::Side::PosX,
+        DataSide::NegX => sf_sim::Side::NegX,
+        DataSide::PosY => sf_sim::Side::PosY,
+        DataSide::NegY => sf_sim::Side::NegY,
+    }
+}
+
+/// One structure of the data, as the simulation has it (WP6.1): a rename of every field.
+pub fn building_stats_of(building: &SimBuildingDef) -> BuildingStats {
+    BuildingStats {
+        kind: Kind(building.kind),
+        footprint: Footprint {
+            width: building.footprint.0,
+            height: building.footprint.1,
+        },
+        function: building_function(building.function),
+        exit_side: building.exit_side.map(building_side),
+        build_ticks: building.build_ticks,
+        cost: building.cost,
+        power: building.power,
+        factions: building.factions,
+        requires: building.requires.iter().map(|&k| Kind(k)).collect(),
+    }
+}
+
+/// The simulation's building table for `defs`, to hand to
+/// [`World::with_buildings`](sf_sim::World::with_buildings) after the unit table. Fails with the
+/// simulation's reason if the table is refused (the definitions' own checks rule that out for
+/// any definitions that loaded).
+pub fn building_table(defs: &UnitDefs) -> Result<BuildingTable, String> {
+    BuildingTable::new(defs.sim_buildings().iter().map(building_stats_of).collect())
+        .map_err(|e| e.to_string())
 }
 
 /// One weapon of the data, as the simulation has it (WP5.1): every number is already in cells,

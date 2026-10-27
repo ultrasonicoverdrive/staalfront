@@ -158,7 +158,7 @@ The additions land in WP10.1 (object hit points, `inspect_only`, diplomacy matri
 |---|---|---|
 | WP10.1–10.3 have no terrain-state action (flood, scuttle, bridge, landslide); §3a lists it as "needs to be added to WP10.3" with WP2.1/WP4.7 | F1-M03, F1-M04, F1-M06, F2-M04, F2-M06, F2-M08 twists cannot be built as written | Decide in P1; fallback is blocking structures. |
 | Seven primitives in §3a are not in PLAN (terrain state change, hit-point override, inspect-without-capture, conditional immunity, ownership transfer, count-in-zone, area damage) | WP10.1–10.3 grow before P1 can start | Put the P1 rows of §3a in the WP10.1–10.3 acceptance criteria; the rest can follow with P2/P3. |
-| Speeds are retuned (cells per second); briefing lines with a travel time or a distance no longer match (F2-M06 "three minutes for armour", F2-M08 "twenty-two minutes") | Dialogue and map disagree | Decision for Tijmen (see the PR). |
+| Speeds are retuned (cells per second); briefing lines with a travel time or a distance no longer match | Dialogue and map disagree | Resolved for F2-M06 ("under a minute for armour, two on foot") and F2-M08 (the 22 minutes is the storm deadline) on 27-10-2026; any new line with a time or distance gets a timing check. |
 | Escort AI makes convoys unplayable | F1-M03, F2-M03, F2-M07, F2-M08 | Convoy units move only on player order ("follow" mode) rather than scripted paths. Decide in P1. |
 | Three-player final (F2-M10) with a hostile-to-all Hub | WP10.1 may not support a non-aligned third AI | Alternative: automated_guns as player-neutral structures with "fire at everyone" flag, no third player. |
 | Message count (≈120 lines) outgrows voice budget | polish | Operations lines can be text-only. |

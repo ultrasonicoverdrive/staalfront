@@ -5,6 +5,7 @@ use core::fmt;
 use sf_math::{Facing, Fx, Rng, Vec2};
 
 use crate::behavior::{self, Area, Behavior, Motion};
+use crate::buildings::{BuildingTable, BuildingsError};
 use crate::command::{Command, CommandQueue, ScheduleError};
 use crate::crowd::{CollisionConfig, Crowd, CrowdStats};
 use crate::destruction::{Death, Destruction, DestructionConfig, Tally, Wreck};
@@ -145,6 +146,12 @@ pub enum ConfigError {
     WeaponsAfterStart,
     /// The weapon table is not valid, or does not fit the unit table.
     Weapons(WeaponsError),
+    /// The building table was given to a world that has already started. Given
+    /// before the unit table, it is refused as
+    /// [`BuildingsError::NotAStructure`] instead.
+    BuildingsAfterStart,
+    /// The building table is not valid, or does not fit the unit table.
+    Buildings(BuildingsError),
     /// The movement table has no cost for a terrain type of the map: a class
     /// would not know what to do on such a cell.
     MovementGap {
@@ -192,6 +199,10 @@ impl fmt::Display for ConfigError {
                 "the weapon table must be given before the world starts, after its unit table"
             }
             ConfigError::Weapons(_) => "the weapon table does not fit the unit table",
+            ConfigError::BuildingsAfterStart => {
+                "the building table must be given before the world starts, after its unit table"
+            }
+            ConfigError::Buildings(_) => "the building table does not fit the unit table",
             ConfigError::MovementGap { .. } => {
                 "a movement class has no cost for a terrain type of the map"
             }
@@ -263,6 +274,9 @@ pub struct World {
     /// The weapons (WP5.1): their table, and the shots of the last tick. Empty (nothing
     /// fires) for a world that was given no table.
     pub(crate) arsenal: Arsenal,
+    /// What the structure kinds are for (WP6.1). Fixed at creation; empty for a
+    /// world without building rules.
+    pub(crate) buildings: BuildingTable,
     /// Target selection and return fire (WP5.4): the settings, if the world was given any.
     pub(crate) targeting: Targeting,
     /// Destruction (WP5.5): the settings, the wrecks and the scores. Nothing is destroyed in a world
@@ -351,6 +365,47 @@ impl World {
             return Err(ConfigError::WeaponsAfterStart);
         }
         self.arsenal = Arsenal::new(table, &self.units).map_err(ConfigError::Weapons)?;
+        Ok(self)
+    }
+
+    /// The building table the world was given ([`World::with_buildings`]).
+    pub fn buildings(&self) -> &BuildingTable {
+        &self.buildings
+    }
+
+    /// The same world with the building rules of its structure kinds (WP6.1,
+    /// `docs/rules/buildings.md`): function, exit side, build time, price, power,
+    /// factions and prerequisites. Nothing acts on them yet. Call it right after
+    /// [`World::with_units`] and before anything is scheduled
+    /// ([`ConfigError::BuildingsAfterStart`] otherwise); every entry has to be a
+    /// structure of the unit table with the same footprint
+    /// ([`ConfigError::Buildings`]). `sf_bridge::building_table` converts the
+    /// definitions.
+    pub fn with_buildings(mut self, table: BuildingTable) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
+            return Err(ConfigError::BuildingsAfterStart);
+        }
+        for b in table.iter() {
+            let Some(unit) = self.units.get(b.kind) else {
+                return Err(ConfigError::Buildings(BuildingsError::NotAStructure(
+                    b.kind,
+                )));
+            };
+            match unit.footprint {
+                None => {
+                    return Err(ConfigError::Buildings(BuildingsError::NotAStructure(
+                        b.kind,
+                    )));
+                }
+                Some(fp) if fp != b.footprint => {
+                    return Err(ConfigError::Buildings(BuildingsError::FootprintMismatch(
+                        b.kind,
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+        self.buildings = table;
         Ok(self)
     }
 
@@ -539,6 +594,7 @@ impl World {
             crowd,
             formations: Formations::new(),
             arsenal: Arsenal::default(),
+            buildings: BuildingTable::empty(),
             targeting: Targeting::default(),
             destruction: Destruction::default(),
             queue: CommandQueue::new(),
@@ -609,6 +665,12 @@ impl World {
     /// units).
     pub fn unit_table(&self) -> &UnitTable {
         &self.units
+    }
+
+    /// The building table the world was made with (empty without building
+    /// rules, WP6.1).
+    pub fn building_table(&self) -> &BuildingTable {
+        &self.buildings
     }
 
     /// The weapon table the world was made with (empty without weapons).

@@ -322,6 +322,7 @@
 
 pub mod armor;
 pub mod behavior;
+pub mod buildings;
 pub mod checksum;
 pub mod command;
 pub mod crowd;
@@ -344,6 +345,7 @@ pub mod world;
 
 pub use armor::{ArmorError, ArmorTable, MAX_PERCENT as MAX_ARMOR_PERCENT};
 pub use behavior::{ALIGN_TOLERANCE, Area, Behavior};
+pub use buildings::{BuildingFunction, BuildingStats, BuildingTable, BuildingsError, Side};
 pub use command::{Command, CommandQueue, ScheduleError};
 pub use crowd::{
     CollisionConfig, CrowdStats, DEFAULT_STUCK_ATTEMPTS, DEFAULT_STUCK_TICKS, DEFAULT_WAIT_TICKS,

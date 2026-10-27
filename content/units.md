@@ -32,7 +32,7 @@ Canonical role names. Mission documents, team tables and triggers must only use 
 | defence_tower | 500 | −20 | 600 | Anti-infantry/light vehicle, range 6. Unlocked F1-M04 / F2-M04. |
 | advanced_defences | 900 | −40 | 800 | Anti-armour gun emplacement, range 7. Unlocked F1-M09 / F2-M09. |
 | shipyard | 1000 | −40 | 900 | Only on coastal maps (F1-M06, F2-M06). |
-| decoy_emplacement | 150 | 0 | 150 | Meridian only. Looks like defence_tower to enemy AI; draws fire. Unlocked F1-M05. |
+| decoy_emplacement | 150 | 0 | 150 | Meridian only as a buildable structure. Looks like defence_tower to enemy AI; draws fire. Unlocked F1-M05. Exception: F1-M05 places 8 for the enemy as mission objects (network-supplied props, not a Veyran unlock); to the player they look like defence_tower until within 3 cells. |
 | fortified_bunker | 600 | 0 | 1200 | Veyran only. Garrison 5 infantry. Unlocked F2-M04. |
 
 ## Shared units
@@ -79,7 +79,9 @@ Canonical role names. Mission documents, team tables and triggers must only use 
 
 ## Tech tree per campaign (cumulative)
 
-| After | Meridian (F1) | Veyran (F2) |
+Unlocks listed for a mission apply during that mission unless its setup explicitly says otherwise. A no-production mission introduces starting units only; production begins at the next mission with the required facilities. Radar remains locked for the Player in F1-M07 and F2-M07 and becomes buildable in M08; enemy mission objects do not grant Player unlocks.
+
+| Mission | Meridian (F1) | Veyran (F2) |
 |---|---|---|
 | M01 | power_plant, barracks, refinery, rifleman, harvester | same |
 | M02 | engineer, scout | engineer, scout |

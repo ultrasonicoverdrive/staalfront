@@ -87,9 +87,11 @@ F1-M10,MSG_02,MIRA,Secure the data room before the evacuation protocol wipes it.
 F1-M10,MSG_03,MIRA,Marshalling yard north-east of the centre. That is the offensive: heavy armour fuelling now. Intercepts say they move in fifteen minutes. Hit the yard before then or meet it at the gate.
 F1-M10,MSG_04,MIRA,"You are inside the inner wall and the centre knows it. Evacuation protocol has started. Six minutes until the archive erases itself. The protocol is running off the generator beside the archive; kill the generator and the clock stops, but the doors stay sealed until an engineer is inside."
 F1-M10,MSG_05,MIRA,Three minutes on the wipe. Do not shell the archive. Everything we have fought for is in that building.
-F1-M10,MSG_06,CAPTAIN ELIAN,The offensive is moving. Everything you have at the south gate. The archive can wait six minutes; the base cannot.
+F1-M10,MSG_06,CAPTAIN ELIAN,The offensive is moving. Everything you have at the south gate. The archive can wait; the base cannot.
 F1-M10,MSG_07,MIRA,"Data room is ours and the wipe is stopped. Elian, these deployment orders were not written here. The routing header is the private network from the relay logs, and the same header is on orders addressed to our side."
 F1-M10,MSG_08,OPERATIONS,Archive erased. Regional command centre destroyed. No records recovered.
+F1-M10,MSG_09,OPERATIONS,Protocol power already cut. Capture the archive with an engineer.
+F1-M10,MSG_10,OPERATIONS,Protocol generator destroyed before activation. The archive still requires engineer capture.
 F2-M01,MSG_01,DRAVEC,"Tracks lead north, but the snow has hidden their numbers."
 F2-M01,MSG_02,COMMANDER SAVA,Establish a foothold and clear the junction. Expect a second group to emerge once we commit.
 F2-M01,MSG_03,COMMANDER SAVA,"Power and a barracks. That is a foothold. Now the junction: their outpost sits on the north road, four structures, light guard. Take it down."
@@ -110,7 +112,7 @@ F2-M03,MSG_01,COMMANDER SAVA,We have one transport and a small escort. There is 
 F2-M03,MSG_02,COMMANDER SAVA,"Open the shoreline route, repair the ferry engine, and escort everyone to the evacuation point."
 F2-M03,MSG_03,DRAVEC,"Landing is clear. Ferry is casting off from the north pier — eight families aboard, four minutes across. Keep the bank clear until she docks."
 F2-M03,MSG_04,DRAVEC,"She's stopped. Engine's dead, thirty metres out, drifting. The crew says they can't fix it alone. Get an engineer onto the ferry — and the Compact has seen her stop. Hold that shoreline, three minutes, whatever it costs."
-F2-M03,MSG_05,DRAVEC,Ninety seconds. They are pushing the tree line on the east road. Do not let a tank reach the water.
+F2-M03,MSG_05,DRAVEC,Second assault from the headland. Keep them off the landing and the evacuation road.
 F2-M03,MSG_06,DRAVEC,"Engine's turning. She's docking. Get those people into the trucks and out of here — five to a truck, two runs or two trucks."
 F2-M03,MSG_07,DRAVEC,"That's everyone we could bring. Some of them stayed on the bank. Write it down, Commander. Somebody should."
 F2-M03,MSG_08,COMMANDER SAVA,The ferry is lost with the families aboard. There is no second crossing. Withdraw the escort.
@@ -180,7 +182,7 @@ F2-M09,MSG_10,COMMANDER SAVA,Our base is gone under that barrage. Nothing left t
 F2-M09,MSG_11,LENKA,"Those are the battery blueprints. Automated fire control, no operator. If there is a bigger one somewhere, we will want these."
 F2-M10,MSG_01,COMMANDER SAVA,Its defence system has no flag recognition. It will fire on whoever enters.
 F2-M10,MSG_02,LENKA,"Secure the vault and disable the automated guns. We need the evidence intact, and we need it before the hub self-destructs."
-F2-M10,MSG_03,LENKA,"Those are the batteries from the blueprints, full size. Six guns, three entrances, range eight. There is a control bunker somewhere inside the ring; an engineer in there shuts all of them down."
+F2-M10,MSG_03,LENKA,"Same fire-control design as the Iron Choir batteries, built into a larger fixed defence ring. Six guns, three entrances, range eight. There is a control bunker somewhere inside; an engineer in there shuts all of them down."
 F2-M10,MSG_04,OPERATIONS,Vault demolition sequence armed. Eight minutes.
 F2-M10,MSG_05,COMMANDER SAVA,That countdown is the vault wiring itself to blow. Touching the ring started it. An engineer inside the vault can stop it; nothing else can.
 F2-M10,MSG_06,LENKA,"Meridian column crossing the west boundary. They are coming for the same vault — and the guns will hit them as hard as us. Let the ring do its work, then move."

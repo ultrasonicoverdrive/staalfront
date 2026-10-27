@@ -130,6 +130,7 @@ the file does not matter.
 | `strategic_icon` | `Square`, `Circle`, `Triangle` or `HalfCircle`: the base shape at strategic zoom, one per kind of role (structure, infantry, vehicle, vessel); what the role is drawn as when it has no `icon` (WP1.9, WP3.6) |
 | `icon` | optional name of the role's strategic icon (WP3.6): a picture of the icon set in `assets/icons`, `a-z 0-9 _`, at most 48 characters; see [`icons.md`](icons.md). Only the spelling is checked in `sf_data`; a name the set does not have is a warning when the game loads and the role is drawn as its `strategic_icon`. (The build menu picture of WP11.1 will be a field of its own.) |
 | `flags` | abilities, below; every flag defaults to off |
+| `building` | structures only, optional (WP6.1): `(function: ..., exit_side: ..., requires: [...])`, what a structure is for and which structures must stand before it can be built; [`buildings.md`](buildings.md) |
 
 ### Flags
 
@@ -159,8 +160,9 @@ Generic data fields that later work packages read. A flag that needs a moving un
 | `pickup` | is picked up by infantry walking onto it |
 | `fires_at_all` | fires at every faction, its own included |
 
-What the file does **not** carry: the campaign mission that unlocks a role (the tech
-tree is in `content/units.md`; it becomes data with building requirements in WP6.1),
+What the file does **not** carry: the campaign mission that unlocks a role (the campaign
+unlock order is in `content/units.md`; since WP6.1 the building prerequisites are data, the `requires` of the
+`building` block, see [`buildings.md`](buildings.md)),
 and mission logic such as "fires while the uplink is alive". Which faction a role
 belongs to is checked against the tech tree by a test.
 
@@ -360,7 +362,9 @@ per second and per tick, times in ticks, names as kind numbers, a faction mask).
 float type crosses (a test checks the conversion module). They stay in `sf_data`;
 `sf_sim` takes its own `UnitStats` (see "Spawning"). The 20 Hz constants (`TICKS_PER_SECOND`,
 `TICK_MILLIS`) are in `sf_math`, which `sf_sim` re-exports and `sf_data` uses, so the
-two crates need no dependency on each other.
+two crates need no dependency on each other. Since WP6.1 every Structure also converts to a
+`SimBuildingDef` (`UnitDefs::sim_buildings()`: footprint, function, exit side, build ticks, price, power,
+factions, prerequisites), which `sf_bridge::building_table` hands to the world ([`buildings.md`](buildings.md)).
 
 ## Where it is tested
 

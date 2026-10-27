@@ -17,4 +17,5 @@ You run one fix round of a work package (WP) from PLAN.md whose PR got `CHANGES 
 - Push to the existing PR (open no new one) and update its body: what changed in this round, how it was tested, what was deliberately not done.
 - No new dependency without motivation, no asset without a license line in assets/LICENSES.md.
 - Work only in the repo; never on the home server.
+- Clean-room (PLAN.md §0 B5, docs/conventions.md §8): never read EA or OpenRA code or data. Facts checked against them come only from an `onderzoeker` or `reviewer` report; you may write such a single fact into the repo, never a list or table from those sources.
 - Before you report, go through the done-checklist in `.claude/agents/bouwer-sonnet.md` and report it with ✓/✗ and evidence, for the lines this round touches.
