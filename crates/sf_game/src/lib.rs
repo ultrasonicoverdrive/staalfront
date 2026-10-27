@@ -109,6 +109,7 @@ pub mod cursor;
 pub mod debug_ui;
 pub mod hud;
 pub mod looks;
+pub mod ore_view;
 pub mod placement_view;
 pub mod playfield;
 pub mod population;

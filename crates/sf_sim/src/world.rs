@@ -14,6 +14,7 @@ use crate::formation::{FormationConfig, FormationStats, FormationView, Formation
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
+use crate::ore::{Ore, OreRules};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::placement::PlacementState;
 use crate::projectiles::ProjectileId;
@@ -153,6 +154,9 @@ pub enum ConfigError {
     BuildingsAfterStart,
     /// The building table is not valid, or does not fit the unit table.
     Buildings(BuildingsError),
+    /// The ore rules were given to a world that has already started, or are not
+    /// valid ([`OreRules::is_valid`]).
+    OreRules,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -208,6 +212,9 @@ impl fmt::Display for ConfigError {
                 "the building table must be given before the world starts, after its unit table"
             }
             ConfigError::Buildings(_) => "the building table does not fit the unit table",
+            ConfigError::OreRules => {
+                "the ore rules must be given before the world starts and be valid"
+            }
             ConfigError::PlayersAfterStart => {
                 "the player factions must be given before the world starts"
             }
@@ -291,6 +298,9 @@ pub struct World {
     /// What the structure kinds are for (WP6.1). Fixed at creation; empty for a
     /// world without building rules.
     pub(crate) buildings: BuildingTable,
+    /// The ore on the map (WP7.1): an amount per field cell. `None` for a world
+    /// that was given no ore rules.
+    pub(crate) ore: Option<Ore>,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
     /// Target selection and return fire (WP5.4): the settings, if the world was given any.
@@ -417,6 +427,23 @@ impl World {
             }
         }
         self.buildings = table;
+        Ok(self)
+    }
+
+    /// The same world with ore on its map (WP7.1, `docs/rules/economy.md`): every
+    /// harvestable cell of the terrain holds `rules.start`, and the cells grow back by
+    /// the rules. Call it right after the world is made, before anything is scheduled
+    /// ([`ConfigError::OreRules`] otherwise, and for invalid numbers). A world without
+    /// ore rules has no ore state and hashes as before.
+    pub fn with_ore(mut self, rules: OreRules) -> Result<World, ConfigError> {
+        if self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || !rules.is_valid()
+        {
+            return Err(ConfigError::OreRules);
+        }
+        self.ore = Some(Ore::new(rules, &self.terrain));
         Ok(self)
     }
 
@@ -606,6 +633,7 @@ impl World {
             formations: Formations::new(),
             arsenal: Arsenal::default(),
             buildings: BuildingTable::empty(),
+            ore: None,
             placement: PlacementState::default(),
             targeting: Targeting::default(),
             destruction: Destruction::default(),
@@ -635,6 +663,34 @@ impl World {
     /// changes after the world is created.
     pub fn terrain(&self) -> &Terrain {
         &self.terrain
+    }
+
+    /// The ore state (WP7.1); `None` for a world that was given no ore rules.
+    pub fn ore(&self) -> Option<&Ore> {
+        self.ore.as_ref()
+    }
+
+    /// The ore `cell` holds; zero outside the map, on a cell that is no field cell and in a
+    /// world without ore rules.
+    pub fn ore_at(&self, cell: Cell) -> u16 {
+        self.ore.as_ref().map_or(0, |o| o.amount_at(cell))
+    }
+
+    /// The nearest cell with ore from `from` within `max_radius` cells: see
+    /// [`Ore::nearest_where`] for the order. `None` in a world without ore.
+    pub fn nearest_ore(&self, from: Cell, max_radius: u32) -> Option<Cell> {
+        self.nearest_ore_where(from, max_radius, |_| true)
+    }
+
+    /// [`World::nearest_ore`] among the cells `accept` takes (a harvester skips the cells
+    /// another one has claimed).
+    pub fn nearest_ore_where(
+        &self,
+        from: Cell,
+        max_radius: u32,
+        accept: impl FnMut(Cell) -> bool,
+    ) -> Option<Cell> {
+        self.ore.as_ref()?.nearest_where(from, max_radius, accept)
     }
 
     /// The terrain type of `cell`; `None` outside the map.
@@ -1146,7 +1202,8 @@ impl World {
     /// Runs exactly one tick and returns what happened.
     ///
     /// In order: (1) every command scheduled for this tick runs, in
-    /// `(player, insertion)` order; (2) every live entity runs its behaviour,
+    /// `(player, insertion)` order; (1a) the ore grows back on the cells whose
+    /// turn it is (WP7.1, only in a world with ore rules); (2) every live entity runs its behaviour,
     /// in ascending slot order, after recording its previous position and
     /// facing (the path service has served its requests just before); (3) the
     /// crowd pass pushes overlapping bodies apart and looks after the units that
@@ -1164,6 +1221,12 @@ impl World {
             } else {
                 ignored = ignored.saturating_add(1);
             }
+        }
+
+        // The ore grows back (WP7.1): after the commands of this tick, so a take and the
+        // growth of the same cell in one tick are seen in that order.
+        if let Some(ore) = &mut self.ore {
+            ore.regrow(tick.0);
         }
 
         // The path service first: it gives the requests of units that asked
@@ -1711,6 +1774,10 @@ impl World {
                 }
                 changed
             }
+            Command::TakeOre { cell, amount } => self
+                .ore
+                .as_mut()
+                .is_some_and(|ore| ore.take(cell, amount) > 0),
             Command::AimTurret { ids, target } => {
                 let mut changed = false;
                 for id in ids {

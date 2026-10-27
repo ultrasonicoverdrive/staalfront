@@ -15,6 +15,7 @@
 
 pub mod map;
 pub mod movement;
+pub mod ore;
 pub mod sim_settings;
 pub mod terrain;
 pub mod units;

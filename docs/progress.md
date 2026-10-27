@@ -1921,6 +1921,33 @@ Status: WP6.1 is in; WP6.2 is built (in review); WP6.3 to WP6.8 are not started.
   it as the last option (`content/units.md`: "Meridian only as a buildable structure", the 8 are network-supplied
   mission objects); what Tijmen still decides is that WP6.2 then checks `factions` only when building.
 
+## Phase 7 — Economy
+
+Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
+
+- WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
+  staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
+  `nearest_ore_where`, a new last checksum section `E` that exists only with ore rules; numbers in
+  `assets/config/ore.ron`; the ore shown as four fill levels on the terrain and on the minimap, from
+  `terrain_look.ron`), `docs/rules/economy.md`: done. The scenario `ore_256` is pinned. No earlier pin moved.
+
+### WP7.1 notes
+
+- **An emptied cell stays an `ore` cell and grows back** (decision in `economy.md`): the terrain is immutable, so
+  "depleted" is an amount of zero and a look, not a type.
+- **Not done, on purpose.** No harvester, refinery, claiming of cells or money (WP7.2 to WP7.4). A mission gives a
+  total per field (3000 on the F1-M01 ridge); the world has one start amount per cell, so fitting a field to its
+  total (a zone and a number) is for the mission loader. The cell grid overlay does not show amounts. The numbers
+  in `ore.ron` are placeholders.
+- **`Command::TakeOre` is a player-issuable command** in the lockstep sense: it is there so scenarios can mine
+  without a harvester. When WP7.2 lands, decide whether it stays (tests only) or is gated; nothing but scenarios
+  schedules it today.
+- **Minimap upload cost is unmeasured.** Every change of a fill level repaints the changed cells on the CPU image,
+  but `Hud::paint_minimap` then calls `set_minimap`, which recreates the whole minimap texture and bind group. While
+  regrowth runs that can happen almost every tick; it was not measured. The presentation side also copies and scans
+  every field cell per ore version (`SimSnapshot::capture`, `OreView::changes`), O(field cells), also unmeasured.
+  Measure both, and upload only the changed texels if it shows.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

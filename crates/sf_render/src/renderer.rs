@@ -1025,6 +1025,22 @@ impl Renderer {
         self.set_terrain_with(map, &TerrainConfig::embedded());
     }
 
+    /// Show how much ore the cells hold (WP7.1): each `(x, y, level)` draws cell `(x, y)` with
+    /// the texture of fill level `level` of the resource look (`terrain_look.ron`, `resource`;
+    /// see `ResourceLooks::level_of`). Uploads only the rows that changed. Returns the rows
+    /// uploaded; zero without terrain, without resource looks, or when nothing changed.
+    pub fn update_resource_levels(&mut self, cells: &[(u32, u32, u8)]) -> u32 {
+        match &mut self.terrain {
+            Some(t) => t.set_resource_levels(&self.gpu.queue, cells),
+            None => 0,
+        }
+    }
+
+    /// The layer and style the terrain index holds for a cell (for tests).
+    pub fn terrain_cell_texel(&self, x: u32, y: u32) -> Option<[u8; 2]> {
+        self.terrain.as_ref()?.cell_texel(x, y)
+    }
+
     /// Like [`Renderer::set_terrain`] with explicit settings.
     pub fn set_terrain_with(&mut self, map: &sf_data::map::Map, config: &TerrainConfig) {
         // The map was checked against the shipped table when it was loaded

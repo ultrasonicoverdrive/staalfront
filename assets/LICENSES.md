@@ -17,6 +17,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `maps/formation/*` | Generated for WP4.6 by `cargo run -p sf_headless --example gen_formation_map -- assets/maps/formation` (`tools/sf_headless/examples/gen_formation_map.rs`): a hand-drawn flat 112x48 cell map (open ground, a rock wall with a three-cell passage, open ground behind it); the scenario `formation_move` loads it | Project license (see workspace `Cargo.toml`) |
 | `maps/playfield256/*` | Generated for WP2.1 by `cargo run --release -p sf_data --example gen_map -- assets/maps/playfield256 1024 1024 1 flat`: the terrain layer of the generator's 256x256 cell map (seed 1) on a flat map (no relief, one material) to keep the files small; the scenario `terrain_256` loads it | Project license (see workspace `Cargo.toml`) |
 | `config/terrain_types.ron` | Written for this project (WP2.1: terrain types and their flags; WP4.1: the movement half moved to the costs of the movement classes) | Project license (see workspace `Cargo.toml`) |
+| `config/ore.ron` | Written for this project (WP7.1: start amount, maximum and regrowth of the ore per cell; placeholders) | Project license (see workspace `Cargo.toml`) |
 | `config/terrain_look.ron` | Written for this project (WP2.2: the colours and procedural patterns of the terrain types, invented here; the textures are generated in code at start-up, no third-party pictures) | Project license (see workspace `Cargo.toml`) |
 | `audio/bank.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `audio/sfx/test_click.wav` | Synthesized for this repository by the generator in `crates/sf_audio/tests/test_sound.rs` (integer maths, no samples, no third-party material); author: Claude (Anthropic), WP1.13 | CC0 1.0 (public domain dedication) |
@@ -248,6 +249,7 @@ The models below are procedural geometry made by "Copilot" at the user's request
 | `set_v4/README.md` | Orchestrator note on top (21-10-2026), then the delivery's README, unchanged | Project license (see workspace `Cargo.toml`) for the note; the delivery's text as the models |
 | `../docs/screenshots/set_v4/delivery_contact_sheet.png` | `controleblad.png` of the delivery: software renders of eight delivered models, four views each, made by its own script (licensed as the models) | Same as the models: project license (see workspace `Cargo.toml`), decision Tijmen 22-10-2026 |
 | `../docs/screenshots/set_v4/*.jpg` | Screenshots of `sf_game` (sandbox scene, `--unit-display models`) under Xvfb with Mesa lavapipe, made for this PR; they show the models above | Project license (see workspace `Cargo.toml`) for the picture; the models in it as above |
+| `../docs/screenshots/wp7.1/*.png` | Pictures made by `crates/sf_game/tests/ore_screenshot.rs` (offscreen render with Mesa lavapipe) of the playfield256 map: an ore field full, part emptied and regrown, with the minimap image of each moment | Project license (see workspace `Cargo.toml`) |
 
 ## Third-party code and fonts compiled into the binary (WP1.11)
 
