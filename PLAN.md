@@ -268,6 +268,9 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 - WP7.2 Harvester: search, harvest, drive back, check in at refinery via **messages** (analysis §11, §13), unload, repeat.
 - WP7.3 Storage capacity and silos, fill level visible.
 - WP7.4 Money in the UI, deducting costs during production.
+- WP7.5 Refinery choice and queues: a harvester picks the refinery by expected wait (queue length plus travel), not by straight-line distance alone; queued harvesters wait clear of the approach, so many harvesters keep delivering.
+
+_Note 27-10-2026: WP7.5 added by the orchestrator after the WP7.2 review measured that throughput collapses with many harvesters (6 harvesters deliver 3200 ore in 4000 ticks, 48 deliver 618): the straight-line choice sends every harvester to the same bay and the queue blocks its approach. WP7.2 records it as a gap; WP7.5 touches `sf_sim` and comes after WP7.3 and WP7.4._
 
 **Milestone M1 — vertical slice (end of phase 7):** one skirmish map, you against
 a static opponent: build a base, harvest, make units, attack,
@@ -448,7 +451,7 @@ Decision Tijmen 14-10-2026.
 
 ### 12.3 Parallelism
 Normally 3-4 agents at a time, 5 at most (decision Tijmen 22-10-2026; was 3), only on WPs without overlap in crates (see §4).
-Work packages that change `sf_sim` (and with it the shared `crates/sf_sim/src/checksum.rs`, `world.rs`, `lib.rs` and the
+Work packages that change `sf_sim` (and with it the shared `crates/sf_sim/src/checksum.rs`, `crates/sf_sim/src/world.rs`, `crates/sf_sim/src/lib.rs` and the
 scenario lists in `.github/workflows/ci.yml` and `tools/sf_headless/tests/pinned.rs`) are built one after another, not in parallel; the other slots go to work in other crates, reviews
 and research (decision Tijmen 27-10-2026: on 27-10 four merge rounds between parallel sf_sim WPs cost about 380k tokens).
 Conflicts in `Cargo.lock`/shared types are resolved by the orchestrator.
