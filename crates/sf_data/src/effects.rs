@@ -61,6 +61,30 @@ pub struct Limits {
     pub strategic_flash_alpha: f32,
     /// Events older than this many ticks are dropped when the picture takes them.
     pub max_event_age_ticks: u32,
+    /// A particle rises at `rise_mps` times a factor spread evenly over `1 ± rise_jitter / 2`.
+    pub rise_jitter: f32,
+    /// Smoke's alpha comes in over the first `1 / smoke_fade_in` of its life.
+    pub smoke_fade_in: f32,
+    /// A death flash holds its alpha over this share of its life, then fades out.
+    pub flash_hold: f32,
+    /// The last tracer dot is `1 - tracer_taper` of the head's size and alpha.
+    pub tracer_taper: f32,
+}
+
+/// Where a burst starts and how wide it is, without the model.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Placement {
+    /// Height above the ground of a hit, a death and wreck smoke, metres.
+    pub hit_height_m: f32,
+    /// Height above the ground a projectile that flies on the ground is drawn at, metres.
+    pub projectile_lift_m: f32,
+    /// Hit burst radius as a fraction of the size the event carries.
+    pub impact_radius_fraction: f32,
+    /// Death burst radius as a fraction of the body length.
+    pub death_radius_fraction: f32,
+    /// Least burst radius of a hit or a death, metres.
+    pub min_burst_radius_m: f32,
 }
 
 /// Where a flash starts without a muzzle anchor in the model.
@@ -151,6 +175,8 @@ pub struct WreckSmoke {
     pub per_second: f32,
     /// The last share of the wreck's life over which it stops.
     pub fade_fraction: f32,
+    /// The puffs start in a disc of this fraction of the wreck's length.
+    pub radius_fraction: f32,
 }
 
 /// How one kind of projectile is drawn.
@@ -195,6 +221,8 @@ pub struct Effects {
     pub limits: Limits,
     /// The muzzle fallback.
     pub muzzle: Muzzle,
+    /// Where hits, deaths and projectiles are drawn.
+    pub placement: Placement,
     /// The named bursts.
     pub effects: BTreeMap<String, EffectDef>,
     /// By damage type name.
@@ -282,6 +310,36 @@ impl Effects {
         if !(1..=1000).contains(&l.max_event_age_ticks) {
             return err("limits.max_event_age_ticks must be 1 to 1000");
         }
+        in_range("limits.rise_jitter", l.rise_jitter, 0.0, 2.0)?;
+        in_range("limits.smoke_fade_in", l.smoke_fade_in, 1.0, 100.0)?;
+        in_range("limits.flash_hold", l.flash_hold, 0.0, 0.95)?;
+        in_range("limits.tracer_taper", l.tracer_taper, 0.0, 1.0)?;
+        let p = &self.placement;
+        in_range("placement.hit_height_m", p.hit_height_m, 0.0, 10.0)?;
+        in_range(
+            "placement.projectile_lift_m",
+            p.projectile_lift_m,
+            0.0,
+            10.0,
+        )?;
+        in_range(
+            "placement.impact_radius_fraction",
+            p.impact_radius_fraction,
+            0.0,
+            2.0,
+        )?;
+        in_range(
+            "placement.death_radius_fraction",
+            p.death_radius_fraction,
+            0.0,
+            2.0,
+        )?;
+        in_range(
+            "placement.min_burst_radius_m",
+            p.min_burst_radius_m,
+            0.0,
+            10.0,
+        )?;
         let m = &self.muzzle;
         in_range("muzzle.reach_fraction", m.reach_fraction, 0.0, 2.0)?;
         in_range("muzzle.height_fraction", m.height_fraction, 0.0, 2.0)?;
@@ -367,6 +425,12 @@ impl Effects {
             self.wreck_smoke.per_second,
             0.0,
             60.0,
+        )?;
+        in_range(
+            "wreck_smoke.radius_fraction",
+            self.wreck_smoke.radius_fraction,
+            0.0,
+            2.0,
         )?;
         in_range(
             "wreck_smoke.fade_fraction",
@@ -475,6 +539,22 @@ mod tests {
         assert_eq!(l.smoke_refuse_percent, 75);
         assert_eq!(l.strategic_flash_alpha, 0.6);
         assert_eq!(l.max_event_age_ticks, 40);
+        assert_eq!(
+            (l.rise_jitter, l.smoke_fade_in, l.flash_hold, l.tracer_taper),
+            (0.4, 8.0, 0.5, 0.6)
+        );
+        let p = shipped().placement;
+        assert_eq!(
+            (
+                p.hit_height_m,
+                p.projectile_lift_m,
+                p.impact_radius_fraction,
+                p.death_radius_fraction,
+                p.min_burst_radius_m
+            ),
+            (0.6, 1.0, 0.5, 0.4, 0.3)
+        );
+        assert_eq!(shipped().wreck_smoke.radius_fraction, 0.25);
         let m = shipped().muzzle;
         assert_eq!(
             (m.reach_fraction, m.height_fraction, m.min_reach_m),

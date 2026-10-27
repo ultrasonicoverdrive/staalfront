@@ -30,6 +30,13 @@
         // An event older than this many ticks when the picture takes it is dropped (a window that was
         // minimised does not set off a backlog of explosions).
         max_event_age_ticks: 40,
+        // Curve shapes. A particle rises at rise_mps times a factor in 1 ± rise_jitter / 2; smoke's alpha comes
+        // in over the first 1 / smoke_fade_in of its life; a death flash holds over the first flash_hold of its
+        // life; the last tracer dot is (1 - tracer_taper) of the head's size and alpha.
+        rise_jitter: 0.4,
+        smoke_fade_in: 8.0,
+        flash_hold: 0.5,
+        tracer_taper: 0.6,
     ),
 
     // Where the flash starts when the model has no muzzle anchor (WP5.6b adds those): from the unit's middle,
@@ -37,6 +44,17 @@
     // `min_reach_m`), at `height_fraction` of the body length above the ground. The body length is the
     // unit's size in the definitions (cells times 4 m): the bounding box's length without reading the model.
     muzzle: (reach_fraction: 0.5, height_fraction: 0.22, min_reach_m: 0.8),
+
+    // Where hits and deaths burst: hit_height_m above the ground (wreck smoke too), in a disc of the event's
+    // size times impact_radius_fraction (a hit) or death_radius_fraction (a death), at least min_burst_radius_m.
+    // A projectile that flies on the ground is drawn projectile_lift_m up, the muzzle's height.
+    placement: (
+        hit_height_m: 0.6,
+        projectile_lift_m: 1.0,
+        impact_radius_fraction: 0.5,
+        death_radius_fraction: 0.4,
+        min_burst_radius_m: 0.3,
+    ),
 
     effects: {
         // Muzzle flashes (fire).
@@ -103,8 +121,8 @@
     ),
 
     // A wreck or rubble gives off `per_second` puffs of `effect` while it lies, and stops over the last
-    // `fade_fraction` of its life.
-    wreck_smoke: (effect: "smoke_wreck", per_second: 3.0, fade_fraction: 0.2),
+    // `fade_fraction` of its life. The puffs start in a disc of `radius_fraction` of the wreck's length.
+    wreck_smoke: (effect: "smoke_wreck", per_second: 3.0, fade_fraction: 0.2, radius_fraction: 0.25),
 
     // How a projectile in flight is drawn, by the way it flies: `dots` glowing dots `spacing_m` apart behind
     // its head, and a `trail` of puffs at `trail_per_s` per second.

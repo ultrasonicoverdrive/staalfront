@@ -176,6 +176,7 @@ pub struct ParticlePool {
     particles: VecDeque<Particle>,
     capacity: usize,
     smoke_limit: usize,
+    rise_jitter: f32,
     rng: u64,
     stats: PoolStats,
 }
@@ -188,6 +189,7 @@ impl ParticlePool {
             particles: VecDeque::with_capacity(capacity),
             capacity,
             smoke_limit: capacity * limits.smoke_refuse_percent as usize / 100,
+            rise_jitter: limits.rise_jitter,
             rng: 0x9E37_79B9_7F4A_7C15,
             stats: PoolStats::default(),
         }
@@ -264,7 +266,7 @@ impl ParticlePool {
             let speed = self.next_unit() * d.spread_mps;
             let angle2 = self.next_unit() * std::f32::consts::TAU;
             let (s2, c2) = angle2.sin_cos();
-            let lift = 0.8 + 0.4 * self.next_unit();
+            let lift = 1.0 - 0.5 * self.rise_jitter + self.rise_jitter * self.next_unit();
             self.particles.push_back(Particle {
                 pos: [
                     burst.position[0] + c * r,
@@ -308,12 +310,13 @@ impl ParticlePool {
             let curve = if p.flags & GLOW != 0 {
                 1.0 - t
             } else {
-                (t * 8.0).min(1.0) * (1.0 - t)
+                (t * view.limits.smoke_fade_in).min(1.0) * (1.0 - t)
             };
             let (alpha, size_cap) = if flash {
                 // Held at the strategic alpha for the first half, then it goes (so its peak is the number
                 // in the file), and never bigger than an icon.
-                let hold = if t < 0.5 { 1.0 } else { 2.0 * (1.0 - t) };
+                let h = view.limits.flash_hold;
+                let hold = if t < h { 1.0 } else { (1.0 - t) / (1.0 - h) };
                 (
                     view.limits
                         .strategic_flash_alpha
@@ -419,7 +422,7 @@ pub fn tracer_dots(
             head[1] - dir[1] * back,
             head[2] - dir[2] * back,
         ];
-        let taper = 1.0 - 0.6 * i as f32 / tracer.dots as f32;
+        let taper = 1.0 - view.limits.tracer_taper * i as f32 / tracer.dots as f32;
         let alpha = tracer.alpha * taper * view.model_weight;
         if alpha <= 0.0 {
             break;

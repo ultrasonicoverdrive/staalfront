@@ -59,14 +59,15 @@ seconds, speeds metres per second.
 
 | Part | What it says |
 |---|---|
-| `limits` | `max_particles` 4096 (the pool), `max_tracer_dots` 2048, `min_px` 2 and `max_px` 64 (the size on the screen), `middle_below_px` 60, `middle_factor` 0.5, `smoke_refuse_percent` 75, `strategic_flash_alpha` 0.6, `max_event_age_ticks` 40. Pool and dots together must fit the GPU buffer (8192 instances; a test keeps `EFFECT_CAPACITY` and `MAX_INSTANCES` equal). |
+| `limits` | `max_particles` 4096 (the pool), `max_tracer_dots` 2048, `min_px` 2 and `max_px` 64 (the size on the screen), `middle_below_px` 60, `middle_factor` 0.5, `smoke_refuse_percent` 75, `strategic_flash_alpha` 0.6, `max_event_age_ticks` 40; the curve shapes `rise_jitter` 0.4 (rise times 0.8 to 1.2), `smoke_fade_in` 8 (smoke comes in over the first eighth of its life), `flash_hold` 0.5 (a death flash holds over the first half), `tracer_taper` 0.6 (the last dot is 0.4 of the head). Pool and dots together must fit the GPU buffer (8192 instances; a test keeps `EFFECT_CAPACITY` and `MAX_INSTANCES` equal). |
 | `muzzle` | where a flash starts when the model has no muzzle anchor (section 5): `reach_fraction` 0.5 of the body length out, at least `min_reach_m` 0.8, `height_fraction` 0.22 of the body length up. |
+| `placement` | `hit_height_m` 0.6 (a hit, a death and wreck smoke start this high), `projectile_lift_m` 1.0 (a projectile on the ground is drawn this high), burst radius `impact_radius_fraction` 0.5 / `death_radius_fraction` 0.4 of the size, at least `min_burst_radius_m` 0.3. |
 | `effects` | 23 named bursts: `count`, `life_s`, `size_m`, `growth_mps`, `colour` (sRGB), `alpha`, `glow`, `rise_mps`, `spread_mps`, `sound`. `glow: true` is additive light; `false` is the **smoke class**. |
 | `by_damage_type` | per damage type of `unit_classes.ron`: the `fire` and `impact` lists. Every damage type has one. |
 | `by_weapon` | per weapon **id** of `weapon_defs.ron`: a `fire` and/or `impact` list that replaces the damage type's (an empty list keeps it). Shipped: `howitzer` fires `flash_howitzer`. |
 | `miss` | what a projectile that went off on nothing makes (dust). |
 | `death` | `infantry_below_cells` 1.0 and `small_below_cells` 1.3 split the mobile bodies by size; four lists: infantry, small vehicle, vehicle, structure. |
-| `wreck_smoke` | the puff, `per_second` 3 and `fade_fraction` 0.2 (a wreck stops over the last fifth of its life). |
+| `wreck_smoke` | the puff, `per_second` 3 and `fade_fraction` 0.2 (a wreck stops over the last fifth of its life), `radius_fraction` 0.25 (puffs start in a disc of a quarter of the wreck's length). |
 | `tracers` | per way of flying (`straight`, `arc`, `guided`, `falling`): `dots`, `spacing_m`, `size_m`, `colour`, `alpha`, a `trail` of puffs and `trail_per_s`. |
 
 **Linking.** The event carries the weapon's kind number; the definitions give its id and damage type; `by_weapon`
@@ -164,7 +165,7 @@ All of it is decided by two numbers a frame already has: the **model weight** of
 * **Tracers.** `SimSnapshot::projectiles()` (from `Snapshot::collect_projectiles_into`) are drawn every frame as a row of
   glowing dots behind the head, in the same instance list and the same draw call: the head is the interpolated position
   (previous to current tick, by the same alpha as the units); a projectile that flies on the ground is lifted 1 m (the
-  muzzle's height, `PROJECTILE_LIFT_M`), an arc or a drop uses its own height. A guided one leaves a trail of puffs.
+  muzzle's height, `placement.projectile_lift_m`), an arc or a drop uses its own height. A guided one leaves a trail of puffs.
   Dots are budgeted by `max_tracer_dots`; a projectile that does not fit is counted (`tracer_dots_dropped`) and skipped.
   Tests: `a_projectile_in_flight_is_drawn_as_a_tracer`, `a_guided_projectile_leaves_a_trail`, `a_tracer_is_a_row_of_tapering_dots_behind_the_head`.
 

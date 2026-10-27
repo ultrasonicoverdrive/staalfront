@@ -348,12 +348,16 @@ struct Eye {
 }
 
 /// The ground point (metres) where the first flash of a `Fire` event starts: out along the mount's facing
-/// from the middle of the shooter by the muzzle rule of `effects.ron` (half the body length, at least 0.8 m),
-/// at 0.22 of the body length up.
+/// from the middle of the shooter by the muzzle rule of `effects.ron`.
 fn muzzle_of(ev: &FxEvent) -> [f32; 3] {
-    let reach = (0.5 * ev.size).max(0.8);
+    let m = sf_data::effects::Effects::embedded().muzzle;
+    let reach = (m.reach_fraction * ev.size).max(m.min_reach_m);
     let (s, c) = (f32::from(ev.facing) * (std::f32::consts::TAU / 256.0)).sin_cos();
-    [ev.pos[0] + c * reach, 0.22 * ev.size, ev.pos[1] + s * reach]
+    [
+        ev.pos[0] + c * reach,
+        m.height_fraction * ev.size,
+        ev.pos[1] + s * reach,
+    ]
 }
 
 #[test]

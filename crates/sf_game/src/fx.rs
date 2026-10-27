@@ -31,11 +31,6 @@ use crate::fx_events::{FxEvent, FxKind};
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::SimHandle;
 
-/// How high above the ground a hit or a death starts its burst, metres.
-const HIT_HEIGHT_M: f32 = 0.6;
-/// How high above the ground a projectile that flies on the ground (a straight shot, a guided one) is drawn,
-/// metres: the muzzle's height, so the tracer leaves the barrel and does not skim the grass.
-const PROJECTILE_LIFT_M: f32 = 1.0;
 /// The longest frame time the particles are moved by, seconds (a stall does not fling them across the map).
 const MAX_DT: f32 = 0.1;
 
@@ -328,6 +323,7 @@ impl FxPlayer {
         let limits = &t.effects.limits;
         let [x, z] = ev.pos;
         let y = ground.height(f64::from(x), f64::from(z)) as f32;
+        let pl = &t.effects.placement;
         let (position, radius_m) = match ev.kind {
             FxKind::Fire { .. } => {
                 // The flash starts at the muzzle, found without the model: out along the mount's facing
@@ -340,8 +336,14 @@ impl FxPlayer {
                     + m.height_fraction * ev.size;
                 ([mx, my, mz], 0.0)
             }
-            FxKind::Impact { .. } => ([x, y + HIT_HEIGHT_M, z], (ev.size * 0.5).max(0.3)),
-            FxKind::Death { .. } => ([x, y + HIT_HEIGHT_M, z], (ev.size * 0.4).max(0.3)),
+            FxKind::Impact { .. } => (
+                [x, y + pl.hit_height_m, z],
+                (ev.size * pl.impact_radius_fraction).max(pl.min_burst_radius_m),
+            ),
+            FxKind::Death { .. } => (
+                [x, y + pl.hit_height_m, z],
+                (ev.size * pl.death_radius_fraction).max(pl.min_burst_radius_m),
+            ),
         };
         let death = matches!(ev.kind, FxKind::Death { .. });
         if band == ZoomBand::Strategic {
@@ -405,14 +407,15 @@ impl FxPlayer {
                 continue;
             }
             let [x, z] = vec2_cells_to_metres(wreck.pos);
-            let y = ground.height(f64::from(x), f64::from(z)) as f32 + HIT_HEIGHT_M;
+            let y =
+                ground.height(f64::from(x), f64::from(z)) as f32 + t.effects.placement.hit_height_m;
             let length_m = match wreck.footprint {
                 Some(fp) => f32::from(fp.width.max(fp.height)) * METRES_PER_CELL,
                 None => cells_to_metres(wreck.size),
             };
             self.pool.spawn(&Burst {
                 position: [x, y, z],
-                radius_m: 0.25 * length_m,
+                radius_m: w.radius_fraction * length_m,
                 count: n,
                 def,
                 flash: false,
@@ -454,7 +457,11 @@ impl FxPlayer {
             let [qx, qz] = vec2_cells_to_metres(p.prev_pos);
             let (hx, hz) = (lerp(qx, px), lerp(qz, pz));
             let height = lerp(cells_to_metres(p.prev_height), cells_to_metres(p.height));
-            let lift = if height > 0.0 { 0.0 } else { PROJECTILE_LIFT_M };
+            let lift = if height > 0.0 {
+                0.0
+            } else {
+                self.tables.effects.placement.projectile_lift_m
+            };
             let ground_y = ground.height(f64::from(hx), f64::from(hz)) as f32;
             let head = [hx, ground_y + height + lift, hz];
             // The way it flies: along its ground track, climbing or falling with its height.

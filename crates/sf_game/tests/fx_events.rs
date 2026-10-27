@@ -15,7 +15,7 @@ use std::time::Duration;
 use sf_game::fx_events::{FX_QUEUE_CAP, FxEvent, FxKind, record};
 use sf_game::sim_thread::{MAX_CATCH_UP_TICKS, SimConfig, SimHandle};
 use sf_headless::scenario::Scenario;
-use sf_sim::{Command, PlayerId, ProjectileKind, Tick, World};
+use sf_sim::{Command, Mount, PlayerId, ProjectileKind, Tick, World};
 
 fn scenario() -> Scenario {
     let path: PathBuf =
@@ -287,4 +287,56 @@ fn what_recording_costs_the_sim_thread() {
         med(&rec),
         events
     );
+}
+
+/// A shot's flash points along the weapon's mount (review of #77): a turret weapon along the turret's facing,
+/// even when the turret is turned away from its hull, and a hull weapon (or an infantry rifle) along the hull,
+/// with the shooter's body length as its size. Checked on a real fight through `record`, shot by shot against
+/// the world's own shooter, and the fight must contain both cases, or the test proves nothing.
+#[test]
+fn a_shot_points_along_its_mount_turret_or_hull() {
+    let s = scenario();
+    let mut world = s.build_world().unwrap();
+    let (mut turned_turret, mut on_hull) = (0, 0);
+    for _ in 0..900 {
+        world.step();
+        let mut events = Vec::new();
+        record(&world, &mut events);
+        let fires: Vec<&FxEvent> = events
+            .iter()
+            .filter(|e| matches!(e.kind, FxKind::Fire { .. }))
+            .collect();
+        let shooters: Vec<_> = world
+            .shots()
+            .iter()
+            .filter_map(|shot| Some((shot, world.get(shot.attacker)?)))
+            .collect();
+        assert_eq!(
+            fires.len(),
+            shooters.len(),
+            "every living shooter fires once"
+        );
+        for (ev, (shot, v)) in fires.iter().zip(&shooters) {
+            let weapon = world.weapon_table().weapon(shot.weapon).unwrap();
+            match (weapon.mount, v.turret) {
+                (Mount::Turret, Some(t)) => {
+                    assert_eq!(ev.facing, t.facing.raw(), "a turret shot uses the turret");
+                    if t.facing != v.facing {
+                        turned_turret += 1;
+                    }
+                }
+                _ => {
+                    assert_eq!(ev.facing, v.facing.raw(), "a hull shot uses the hull");
+                    on_hull += 1;
+                }
+            }
+            assert!(ev.size > 0.0);
+        }
+    }
+    println!("turret shots off the hull: {turned_turret}, hull or infantry shots: {on_hull}");
+    assert!(
+        turned_turret > 0,
+        "no turret shot with the turret off its hull"
+    );
+    assert!(on_hull > 0, "no hull or infantry shot");
 }

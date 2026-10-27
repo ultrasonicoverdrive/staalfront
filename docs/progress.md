@@ -1704,6 +1704,23 @@ so). Everything is in `docs/rules/effects.md`; this is the short version and wha
   recording on the sim thread is 0.05 us per tick against a 25.6 us step in the test scenario; a quiet `FxPlayer::frame`
   is 0.24 us; a full pool plus 300 tracers about 110 us; on the software rasterizer 500 instances cost +0.3 to +1.0 ms of
   a 22 ms frame and the worst frame the buffer allows (6144 instances at 64 px) +15 ms.
+* **Fix round 1** (review of #77): the placement numbers (hit height, projectile lift, burst radii, wreck smoke
+  radius) and the four curve shapes (rise jitter, smoke fade-in, flash hold, tracer taper) moved from Rust into
+  `effects.ron` (`placement`, `limits`, `wreck_smoke.radius_fraction`), range-checked and pinned; only `MAX_DT` (a
+  frame-time guard) stays in code. New test `a_shot_points_along_its_mount_turret_or_hull` runs `record` on the
+  destruction fight (45 turret shots with the turret off its hull, 9 hull or infantry shots); it catches
+  `Mount::Turret => from.hull`. The screenshot test reads the muzzle rule from `Effects::embedded()`.
+* **Not done** (deliberately):
+  1. Muzzle and fx anchors in the models, and `--bench --fight` for M0c: WP5.6b.
+  2. Sound: only the event names are in `effects.ron`; the audio is WP11.7.
+  3. Smoke and fire on damaged buildings: WP6.8.
+  4. An instant hit on a target that is gone in the same tick is counted in `fx_unresolved` and not drawn.
+  5. No particle sorting (back to front).
+  6. No hot reload of `effects.ron` (compiled in).
+  7. No wreck fade (the wreck model disappears at the end of its life; only its smoke fades).
+* **For M0c** (reviewer's advice): record `particles_peak` and `effect_instances` in the bench JSON; if frame p99
+  fails, lower `max_particles` to 2048 before touching `max_px` (a smaller `max_px` makes close-up explosions smaller
+  than the tank they come from).
 
 ## Phase 1 report (draft, WP1.14)
 
