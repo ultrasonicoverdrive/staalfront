@@ -445,8 +445,8 @@ Decision Tijmen 14-10-2026.
 
 ### 12.3 Parallelism
 Normally 3-4 agents at a time, 5 at most (decision Tijmen 22-10-2026; was 3), only on WPs without overlap in crates (see §4).
-Work packages that change `sf_sim` (and with it the shared `checksum.rs`, `world.rs`, `lib.rs` and the scenario lists in
-`ci.yml` and `pinned.rs`) are built one after another, not in parallel; the other slots go to work in other crates, reviews
+Work packages that change `sf_sim` (and with it the shared `crates/sf_sim/src/checksum.rs`, `world.rs`, `lib.rs` and the
+scenario lists in `.github/workflows/ci.yml` and `tools/sf_headless/tests/pinned.rs`) are built one after another, not in parallel; the other slots go to work in other crates, reviews
 and research (decision Tijmen 27-10-2026: on 27-10 four merge rounds between parallel sf_sim WPs cost about 380k tokens).
 Conflicts in `Cargo.lock`/shared types are resolved by the orchestrator.
 
