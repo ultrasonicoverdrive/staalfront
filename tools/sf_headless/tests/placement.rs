@@ -17,9 +17,20 @@ fn scenario() -> Scenario {
 /// The ticks that refuse a build, with the player, the kind and the reason, from a run of the
 /// whole scenario, plus the world at the end.
 fn run() -> (World, Vec<(u64, u8, u16, PlacementError)>) {
+    let (world, refused, _) = run_with_completions();
+    (world, refused)
+}
+
+/// The same run, and the structures that became complete: `(tick, kind, owner)`.
+fn run_with_completions() -> (
+    World,
+    Vec<(u64, u8, u16, PlacementError)>,
+    Vec<(u64, u16, u8)>,
+) {
     let mut world = scenario().build_world().unwrap();
     let mut refused = Vec::new();
-    for _ in 0..60 {
+    let mut done = Vec::new();
+    for _ in 0..scenario().ticks {
         let report = world.step();
         assert_eq!(
             world.placement_rejections().len(),
@@ -28,8 +39,12 @@ fn run() -> (World, Vec<(u64, u8, u16, PlacementError)>) {
         for r in world.placement_rejections() {
             refused.push((r.tick.0, r.player.0, r.kind.0, r.reason));
         }
+        assert_eq!(world.completions().len(), report.structures_completed as usize);
+        for c in world.completions() {
+            done.push((c.tick.0, c.kind.0, c.owner.0));
+        }
     }
-    (world, refused)
+    (world, refused, done)
 }
 
 fn stands(world: &World, x: u32, y: u32) -> bool {
@@ -47,12 +62,17 @@ fn every_rule_refuses_what_it_should_and_nothing_else() {
         (4, 0, power.0, PlacementError::UnitInTheWay),
         (5, 0, power.0, PlacementError::TooFarFromBase),
         (6, 0, 4, PlacementError::MissingPrerequisite(Kind(2))),
-        (11, 0, 10, PlacementError::WrongFaction),
+        // The refinery needs the power plant, which is only going up (WP6.3): refused at tick 7
+        // and at tick 300, one tick before the plant is complete; accepted at 301.
+        (7, 0, 2, PlacementError::MissingPrerequisite(power)),
         (12, 0, 0, PlacementError::CannotBeBuilt),
+        (14, 1, 3, PlacementError::MissingPrerequisite(power)),
         (15, 1, 9, PlacementError::WrongFaction),
         (17, 1, power.0, PlacementError::TooFarFromBase),
         (18, 1, power.0, PlacementError::OffMap),
-        (19, 0, 3, PlacementError::ExitBlocked),
+        (300, 0, 2, PlacementError::MissingPrerequisite(power)),
+        (703, 0, 10, PlacementError::WrongFaction),
+        (704, 0, 3, PlacementError::ExitBlocked),
     ];
     assert_eq!(refused, expected);
 
@@ -87,13 +107,35 @@ fn every_rule_refuses_what_it_should_and_nothing_else() {
 #[test]
 fn the_vehicle_factory_is_refused_until_the_refinery_stands() {
     let (world, _) = run();
-    // Same cells, ticks 6 and 8: the first refused, the second stands.
+    // Same cells, ticks 6 and 1102: the first refused, the second stands.
     assert!(stands(&world, 19, 40));
 }
 
 #[test]
+fn a_structure_is_complete_after_its_build_time_and_not_before() {
+    let (world, _, done) = run_with_completions();
+    // Build seconds of the frozen definitions at 20 ticks a second, from the tick of the command:
+    // plant 300 (1 -> 301, 13 -> 313), barracks 400 (301 -> 701, 313 -> 713), decoy 160
+    // (702 -> 862), refinery 800 (301 -> 1101), bunker 500 (714 -> 1214), factory 1000 (1102 -> 2102).
+    assert_eq!(
+        done,
+        vec![
+            (301, 1, 0),
+            (313, 1, 1),
+            (701, 3, 0),
+            (713, 3, 1),
+            (862, 9, 0),
+            (1101, 2, 0),
+            (1214, 10, 1),
+            (2102, 4, 0),
+        ]
+    );
+    assert_eq!(world.under_construction(), 0);
+}
+
+#[test]
 fn a_placed_structure_of_another_faction_stands_and_a_scenario_needs_the_rules_to_build() {
-    // The decoy placed at tick 20 is a Veyran decoy, Meridian-only to build: PlaceStructure
+    // The decoy placed at tick 20 (complete at once) is a Veyran decoy, Meridian-only to build: PlaceStructure
     // does not check it (a mission places what it likes).
     let (world, _) = run();
     let id = world.occupant_at(Cell::new(60, 100)).unwrap();

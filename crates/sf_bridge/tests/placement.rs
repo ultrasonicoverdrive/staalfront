@@ -238,6 +238,15 @@ fn build_the_tree(player: PlayerId, faction: Faction) {
                     assert_eq!(r.commands_executed, 1, "round {round}: {id} at ({x}, {y})");
                     let at = w.occupant_at(Cell::new(x, y)).unwrap();
                     assert_eq!(w.get(at).unwrap().owner, player);
+                    // WP6.3: it goes up first; it counts as built (for the next round) once it
+                    // has run its build time from the data, not before.
+                    assert!(!w.stands(at), "{id} stands the moment it is placed");
+                    assert_eq!(w.construction_of(at).map(|c| c.total), Some(b.build_ticks));
+                    for _ in 0..b.build_ticks {
+                        assert!(!w.stands(at), "{id} stands before its build time");
+                        w.step();
+                    }
+                    assert!(w.stands(at), "{id} does not stand after {} ticks", b.build_ticks);
                     built.push(id);
                 }
             }

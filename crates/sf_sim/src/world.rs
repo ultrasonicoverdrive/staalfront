@@ -7,6 +7,7 @@ use sf_math::{Facing, Fx, Rng, Vec2};
 use crate::behavior::{self, Area, Behavior, Motion};
 use crate::buildings::{BuildingTable, BuildingsError};
 use crate::command::{Command, CommandQueue, ScheduleError};
+use crate::construction::Completion;
 use crate::crowd::{CollisionConfig, Crowd, CrowdStats};
 use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::formation::{FormationConfig, FormationStats, FormationView, Formations};
@@ -239,6 +240,9 @@ pub struct StepReport {
     /// [`Command::BuildStructure`] commands refused in that tick (WP6.2); they are listed by
     /// [`World::placement_rejections`] until the next step. Also counted in `commands_ignored`.
     pub placements_rejected: u32,
+    /// Structures that became complete in that tick (WP6.3); they are listed by
+    /// [`World::completions`] until the next step.
+    pub structures_completed: u32,
 }
 
 /// The complete simulation state. See the crate documentation for the design.
@@ -283,6 +287,8 @@ pub struct World {
     pub(crate) buildings: BuildingTable,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
+    /// The structures that became complete in the last tick (WP6.3); replaced by every step.
+    pub(crate) completions: Vec<Completion>,
     /// Target selection and return fire (WP5.4): the settings, if the world was given any.
     pub(crate) targeting: Targeting,
     pub(crate) queue: CommandQueue,
@@ -575,6 +581,7 @@ impl World {
             arsenal: Arsenal::default(),
             buildings: BuildingTable::empty(),
             placement: PlacementState::default(),
+            completions: Vec::new(),
             targeting: Targeting::default(),
             queue: CommandQueue::new(),
             history: Vec::new(),
@@ -1097,6 +1104,9 @@ impl World {
         let mut executed: u32 = 0;
         let mut ignored: u32 = 0;
         self.placement.rejections.clear();
+        // The state first (WP6.3): structures under construction advance and the ones that
+        // finish are recorded, so the commands of this tick already see them standing.
+        self.advance_construction();
         while let Some((player, command)) = self.queue.pop_due(tick) {
             if self.apply_from(player, command) {
                 executed = executed.saturating_add(1);
@@ -1197,6 +1207,7 @@ impl World {
                 .count() as u32,
             impacts: self.arsenal.impacts.len() as u32,
             placements_rejected: self.placement.rejections.len() as u32,
+            structures_completed: self.completions.len() as u32,
         }
     }
 
@@ -1245,7 +1256,7 @@ impl World {
     }
 
     /// The slot of `id` if it names a live entity.
-    fn live_index(&self, id: EntityId) -> Option<usize> {
+    pub(crate) fn live_index(&self, id: EntityId) -> Option<usize> {
         let i = id.index() as usize;
         let live = *self.entities.alive.get(i)? && self.entities.generation[i] == id.generation();
         live.then_some(i)

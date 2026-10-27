@@ -1,0 +1,37 @@
+// Construction (WP6.3, docs/rules/construction.md): a structure that is built goes up for its
+// build time and counts for nothing until it is complete. One Meridian base on the 256 by 256
+// cell playfield (assets/maps/playfield256); the structures of the start state are PLACED and
+// stand from the first tick, the others are BUILT.
+//
+// `unit_defs` is the frozen copy `placement_defs` of WP6.2 (a scenario may share a frozen copy;
+// nobody edits it): power plant 15 s = 300 ticks, refinery 40 s = 800 ticks, decoy 8 s = 160
+// ticks. Kinds: 0 construction_center, 1 power_plant, 2 refinery, 3 barracks, 9 decoy_emplacement.
+// CI runs it on Linux and Windows and requires the checksum in construction.expected;
+// tools/sf_headless/tests/construction.rs asserts the tick each structure completes and what
+// is refused until then.
+Scenario(
+    name: "construction",
+    seed: 0x5EED_0063,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("placement_defs"),
+    buildings: true,
+    factions: [(0, Meridian)],
+    ticks: 1110,
+    commands: [
+        // The start state: the base and a barracks, complete from the first tick.
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (22, 44))),
+        (tick: 0, command: PlaceStructure(kind: 3, owner: 0, cell: (26, 49))),
+        // 1: the decoy needs only the barracks, which stands: it goes up (complete after tick 161).
+        (tick: 1, player: 0, command: BuildStructure(kind: 9, cell: (30, 48))),
+        // 1: the power plant goes up (complete after tick 301).
+        (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (30, 40))),
+        // 2: refused, the refinery needs a power plant and the plant is only going up.
+        (tick: 2, player: 0, command: BuildStructure(kind: 2, cell: (22, 49))),
+        // 300: refused still, the plant has one tick to go.
+        (tick: 300, player: 0, command: BuildStructure(kind: 2, cell: (22, 49))),
+        // 301: the plant completes in this tick and the refinery is accepted in it (complete after
+        // tick 1101).
+        (tick: 301, player: 0, command: BuildStructure(kind: 2, cell: (22, 49))),
+    ],
+)
