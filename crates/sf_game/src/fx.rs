@@ -192,6 +192,8 @@ pub struct FxPlayer {
     pending: Vec<FxEvent>,
     /// Scratch for the events released in a frame (reused).
     ready: Vec<FxEvent>,
+    /// The events the last [`frame`](FxPlayer::frame) showed (not the expired ones): what the audio plays.
+    shown_now: Vec<FxEvent>,
     instances: Vec<EffectInstance>,
     counters: FxCounters,
 }
@@ -211,6 +213,7 @@ impl FxPlayer {
             pool: ParticlePool::new(l),
             pending: Vec::with_capacity(crate::fx_events::FX_QUEUE_CAP),
             ready: Vec::with_capacity(crate::fx_events::FX_QUEUE_CAP),
+            shown_now: Vec::with_capacity(crate::fx_events::FX_QUEUE_CAP),
             instances: Vec::with_capacity((l.max_particles + l.max_tracer_dots) as usize),
             counters: FxCounters::default(),
             tables,
@@ -260,6 +263,18 @@ impl FxPlayer {
             .find(|s| !s.is_empty())
     }
 
+    /// The events the last [`frame`](Self::frame) showed, in the order they happened (the audio plays
+    /// these, so a sound is in step with its flash and an expired event is silent too).
+    pub fn shown(&self) -> &[FxEvent] {
+        &self.shown_now
+    }
+
+    /// Forgets the shown events once the audio has taken them (a frame that does not call
+    /// [`frame`](Self::frame) must not play them again).
+    pub fn clear_shown(&mut self) {
+        self.shown_now.clear();
+    }
+
     /// The frame: release the events that are due, spawn, move, and write the instances to draw.
     pub fn frame(
         &mut self,
@@ -306,12 +321,14 @@ impl FxPlayer {
         }
         self.pending.truncate(keep);
         let max_age = u64::from(self.tables.effects.limits.max_event_age_ticks);
+        self.shown_now.clear();
         for ev in &batch {
             if now.saturating_sub(ev.tick) > max_age {
                 self.counters.expired += 1;
                 continue;
             }
             self.counters.shown += 1;
+            self.shown_now.push(*ev);
             self.spawn(ev, ground, band);
         }
         self.ready = batch;

@@ -21,8 +21,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use sf_audio::ra::{AudioConfig, RaAudioConfig};
-use sf_audio::{AudioSystem, Listener};
+use sf_audio::ra::RaAudioConfig;
+use sf_audio::{AudioConfig, AudioSystem, Category, Listener};
 use sf_data::map::{Map, generate::generate_cells};
 use sf_data::units::UnitDefs;
 use sf_engine::winit::event::MouseButton;
@@ -47,6 +47,7 @@ use crate::construction_view;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::fx::{FxFrame, FxPlayer};
+use crate::fx_sound::FxSound;
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::placement_view::{self, GhostFrame};
@@ -219,6 +220,8 @@ pub struct Runner {
     /// Muzzle flashes, hits, explosions, smoke and tracers (WP5.6a): fed by the sim thread's event queue,
     /// drawn in one call after the units.
     fx: FxPlayer,
+    /// The sounds of the fight (WP11.3), played from the events `fx` showed.
+    fx_sound: FxSound,
     /// The glTF models the units are drawn with, after the placeholders.
     pack: Option<LoadedPack>,
     /// How an entity is drawn (and named in the F1 panel).
@@ -452,6 +455,7 @@ impl Runner {
             behind_seen: None,
             instancer,
             fx: FxPlayer::embedded(),
+            fx_sound: FxSound::new(&AudioConfig::embedded()),
             pack,
             looks,
             buildings,
@@ -1631,6 +1635,10 @@ impl App for Runner {
             };
         }
         audio.enable_original_audio(&audio_config.ra_audio);
+        // The distance, zoom and volume numbers and the rules of the fight's sounds: audio.ron.
+        audio.set_spatial_params(audio_config.spatial.params());
+        audio.set_category_volume(Category::Sfx, audio_config.mix.sfx_volume);
+        self.fx_sound = FxSound::new(&audio_config);
         println!(
             "audio: {}",
             if audio.is_silent() {
@@ -1816,6 +1824,8 @@ impl App for Runner {
                 self.camera.distance() as f32,
             ));
             audio.update();
+            // The shots, hits and deaths the picture showed this frame, heard from where the camera is.
+            self.fx_sound.play_frame(&mut self.fx, audio);
         }
         if let Some(renderer) = &mut self.renderer {
             // The GPU time of this frame arrives frames later; the number

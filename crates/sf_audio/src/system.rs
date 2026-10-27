@@ -46,6 +46,17 @@ pub struct AudioSystem {
     stats: Stats,
     warned: BTreeSet<String>,
     ra: Ra,
+    /// `Some` = recording what would be played (tests, debug); see [`AudioSystem::set_trace`].
+    trace: Option<Vec<PlayTrace>>,
+}
+
+/// One accepted play request as the output would get it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayTrace {
+    pub name: String,
+    /// Base volume x category volume x spatial gain.
+    pub gain: f32,
+    pub pan: f32,
 }
 
 /// Original Red Alert audio (WP11.7): off, loading on a background thread,
@@ -120,6 +131,7 @@ impl AudioSystem {
             stats: Stats::default(),
             warned: BTreeSet::new(),
             ra: Ra::Off,
+            trace: None,
         };
         sys.load_bank();
         sys
@@ -194,6 +206,11 @@ impl AudioSystem {
         self.listener = listener;
     }
 
+    /// The listener as last set.
+    pub fn listener(&self) -> Listener {
+        self.listener
+    }
+
     pub fn set_spatial_params(&mut self, params: SpatialParams) {
         self.params = params;
     }
@@ -241,23 +258,49 @@ impl AudioSystem {
         self.play_with(name, Some(world_pos));
     }
 
+    /// Whether `name` has a sound to play: in the bank, or replaced by a
+    /// mapped Red Alert sound. Unlike [`play`](Self::play) it never warns.
+    pub fn has_sound(&self, name: &str) -> bool {
+        self.bank.get(name).is_some()
+            || matches!(&self.ra, Ra::Ready { events, .. } if events.contains(name))
+    }
+
+    /// Start (`true`) or stop (`false`) recording the play requests that get
+    /// past the lookup and the audibility check, with the gain and pan the
+    /// output would get. Works without a device; for tests and a debug view.
+    pub fn set_trace(&mut self, on: bool) {
+        self.trace = on.then(Vec::new);
+    }
+
+    /// The recorded requests since the last call (empty when not tracing).
+    pub fn take_trace(&mut self) -> Vec<PlayTrace> {
+        self.trace.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
     fn play_with(&mut self, name: &str, pos: Option<[f32; 3]>) {
         // Look the name up first so unknown names warn even without a device.
         let Some((def, path)) = self.resolve(name) else {
             return;
         };
-        if self.player.is_none() {
+        if self.player.is_none() && self.trace.is_none() {
             return;
         }
         let (mut gain, mut pan) = (self.base_gain(&def), 0.0);
         if let Some(pos) = pos {
             let m = spatial::mix(&self.listener, pos, &self.params);
-            if !m.is_audible() {
+            if !m.is_audible(&self.params) {
                 self.stats.inaudible += 1;
                 return;
             }
             gain *= m.gain;
             pan = m.pan;
+        }
+        if let Some(t) = &mut self.trace {
+            t.push(PlayTrace {
+                name: name.to_string(),
+                gain,
+                pan,
+            });
         }
         let rate = self.rate_for(&def);
         let outcome = self.player.as_mut().map(|p| {
@@ -529,6 +572,38 @@ mod tests {
     }
 
     #[test]
+    fn has_sound_never_warns_and_the_trace_records_gain_and_pan() {
+        let mut s = AudioSystem::silent(assets());
+        assert!(s.has_sound("test_click"));
+        assert!(!s.has_sound("weapon.fire.cannon"));
+        assert_eq!(s.stats().unknown, 0, "asking is not playing");
+        // Not tracing: nothing recorded.
+        s.play_at("test_click", [1.0, 0.0, 1.0]);
+        assert!(s.take_trace().is_empty());
+        // Tracing works without a device and records what the output would get: base volume (0.8)
+        // x the model's gain, and the model's pan.
+        s.set_trace(true);
+        let l = Listener::new([0.0; 3], [1.0, 0.0, 0.0], 120.0);
+        s.set_listener(l);
+        s.play_at("test_click", [30.0, 0.0, 0.0]);
+        s.play_at("test_click", [900.0, 0.0, 0.0]); // inaudible: not recorded
+        s.play_at("no_such_sound", [0.0; 3]); // unknown: not recorded
+        let m = spatial::mix(&l, [30.0, 0.0, 0.0], &SpatialParams::default());
+        assert_eq!(
+            s.take_trace(),
+            vec![PlayTrace {
+                name: "test_click".into(),
+                gain: 0.8 * m.gain,
+                pan: m.pan,
+            }]
+        );
+        assert!(s.take_trace().is_empty());
+        s.set_trace(false);
+        s.play_at("test_click", [30.0, 0.0, 0.0]);
+        assert!(s.take_trace().is_empty());
+    }
+
+    #[test]
     fn loads_the_shipped_bank() {
         let sys = AudioSystem::silent(assets());
         assert!(sys.bank().get("test_click").is_some());
@@ -749,6 +824,9 @@ mod tests {
         });
         wait_for_ra(&mut s);
         assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 2 });
+        // Mapped events have a sound for the positional planner (WP11.3), mapped-but-missing and unmapped do not.
+        assert!(s.has_sound("unit.move") && s.has_sound("ui.click"));
+        assert!(!s.has_sound("unit.attack") && !s.has_sound("weapon.fire.cannon"));
         // Mapped, with and without a CC0 entry: both play.
         s.play("ui.click");
         s.play("unit.move");
