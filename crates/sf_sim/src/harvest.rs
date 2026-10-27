@@ -89,17 +89,17 @@ pub struct HarvestRules {
     pub call_range: u16,
     /// Ticks a harvester that was granted the bay has to arrive before the grant is withdrawn.
     pub grant_timeout: u16,
-    /// Ticks a harvester waits for the answer to its request before it asks again. 1 to 1000.
+    /// Ticks a harvester waits for the answer to its request before it asks again. at least 1, at most 1000 (inclusive).
     pub call_timeout: u16,
-    /// Walks to one goal that end short of it before the harvester gives that goal up. 1 to 20.
+    /// Walks to one goal that end short of it before the harvester gives that goal up. at least 1, at most 20 (inclusive).
     pub max_tries: u8,
     /// How far from the dock point a harvester without ore waits, along the exit side, in cells.
-    /// 1 to 32.
+    /// at least 1, at most 32 (inclusive).
     pub park_distance: u16,
-    /// Lateral spread of the parking spots: `slot % park_spread - park_spread / 2` cells. 1 to 32.
+    /// Lateral spread of the parking spots: `slot % park_spread - park_spread / 2` cells. at least 1, at most 32 (inclusive).
     pub park_spread: u16,
     /// A parked harvester within this many tenths of a cell of its parking spot stays where it is.
-    /// 1 to 320.
+    /// at least 1, at most 320 (inclusive).
     pub park_near_tenths: u16,
     /// A harvester this near (tenths of a cell) to the middle of its ore cell stops and mines,
     /// whatever is left of its walk. At least 1, at most `mine_reach_tenths`.
@@ -108,10 +108,10 @@ pub struct HarvestRules {
     /// walk is over, to count as there. Below `mine_lose_tenths`.
     pub mine_reach_tenths: u16,
     /// A harvester that mines and is pushed farther than this (tenths of a cell) from the cell's
-    /// middle drives back. At most 320.
+    /// middle drives back. Not above 320 (inclusive).
     pub mine_lose_tenths: u16,
     /// How near (tenths of a cell) to the dock point a harvester has to be, when its walk is over,
-    /// to count as docked. 1 to 320.
+    /// to count as docked. at least 1, at most 320 (inclusive).
     pub dock_reach_tenths: u16,
 }
 
