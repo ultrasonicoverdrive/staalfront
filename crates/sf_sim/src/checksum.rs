@@ -200,10 +200,8 @@ const SECTION_PROJECTILES: u8 = b'J';
 const SECTION_TARGETING: u8 = b'A';
 const SECTION_DESTRUCTION: u8 = b'X';
 const SECTION_BUILDINGS: u8 = b'B';
-//! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
-//! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3). It is the last section |
-//! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1). |
-//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). It is the last section; the sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
+const SECTION_CONSTRUCTION: u8 = b'N';
+const SECTION_ORE: u8 = b'E';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -575,8 +573,8 @@ impl World {
             }
         }
 
-        // Ore (WP7.1), after construction (merge of WP6.3 and WP7.1): the rules, the number of field cells and a running sum over the amounts.
-        // Last, and only in a world that was given ore rules, so every world without them
+        // Ore (WP7.1): the rules, the number of field cells and a running sum over the amounts.
+        // After construction (`N`, WP6.3), so every pin of either WP stays put. Last, and only in a world that was given ore rules, so every world without them
         // hashes as before.
         if let Some(ore) = &self.ore {
             h.write_u8(SECTION_ORE);
