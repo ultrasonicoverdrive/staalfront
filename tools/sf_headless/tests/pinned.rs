@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash` and `tanks_vs_infantry`. A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry` and `placement`. A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;
@@ -57,6 +57,7 @@ const ARMOUR_SPLASH_EXPECTED: &str =
     include_str!("../../../assets/scenarios/armour_splash.expected");
 const TANKS_VS_INFANTRY_EXPECTED: &str =
     include_str!("../../../assets/scenarios/tanks_vs_infantry.expected");
+const PLACEMENT_EXPECTED: &str = include_str!("../../../assets/scenarios/placement.expected");
 
 fn check(name: &str, expected_text: &str) {
     let expected = parse_checksum(expected_text)
@@ -194,6 +195,14 @@ fn formation_move_matches_the_pinned_checksum() {
     check("formation_move", FORMATION_MOVE_EXPECTED);
 }
 
+/// Two bases build with `BuildStructure`, and every placement rule refuses something (WP6.2). A new
+/// scenario: pinned when it was added; the others did not change. `tests/placement.rs` asserts which
+/// build stands and why each other is refused.
+#[test]
+fn placement_matches_the_pinned_checksum() {
+    check("placement", PLACEMENT_EXPECTED);
+}
+
 /// Weapons and reload (WP5.1): riflemen, two tanks and two howitzers fire at what their attack
 /// orders name, one shot per reload window, a burst of two, a minimum range, a victim shot down to
 /// zero. Pinned in WP5.1; re-pinned in WP5.2 (`0x5a1bca1ebf1efa16` to `0x20a067e16e098d0b`) **only**
@@ -325,6 +334,10 @@ fn a_change_to_the_shipped_costs_leaves_the_frozen_scenarios_alone() {
         pinned(FORMATION_MOVE_EXPECTED)
     );
     assert_eq!(final_checksum("orders", &altered), pinned(ORDERS_EXPECTED));
+    assert_eq!(
+        final_checksum("placement", &altered),
+        pinned(PLACEMENT_EXPECTED)
+    );
     // The scenario on the shipped definitions (no `unit_defs`) does move: the
     // test would prove nothing if the change reached nobody.
     assert_eq!(

@@ -30,6 +30,10 @@
         // Held: a right-click on the ground attack-moves instead of moving
         // (WP3.5). A is the camera's pan left, so the modifier is F.
         OrderAttackMove: [(trigger: Key(KeyF))],
+        // Building (WP6.2). B chooses the next structure to build and, after the last
+        // one, none; with one chosen the ghost follows the cursor, the select button
+        // (left) places it and the order button (right) puts it away.
+        BuildCycle: [(trigger: Key(KeyB))],
         // Selection (WP3.3). SelectClick: a click selects, a drag draws the
         // selection rectangle (own mobile units in it), a double-click
         // selects the units of the same kind in view. SelectAdd (held): a

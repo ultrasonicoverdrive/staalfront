@@ -48,6 +48,10 @@ pub enum Action {
     /// that waits for the next click, so the cursor can show it while it is
     /// held. Not on A: A is the camera's pan left.
     OrderAttackMove,
+    /// Choose the next structure to build, and after the last one none (WP6.2). With one
+    /// chosen the ghost follows the cursor, the select button places it and the order button
+    /// puts it away.
+    BuildCycle,
     /// Left button: click selects, drag draws the selection rectangle,
     /// double-click selects the units of the same kind in view (WP3.3).
     SelectClick,
@@ -84,7 +88,7 @@ impl Action {
         Action::Group9,
     ];
 
-    pub const ALL: [Action; 31] = [
+    pub const ALL: [Action; 32] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -104,6 +108,7 @@ impl Action {
         Action::OrderScatter,
         Action::OrderHold,
         Action::OrderAttackMove,
+        Action::BuildCycle,
         Action::SelectClick,
         Action::SelectAdd,
         Action::GroupAssign,
@@ -523,6 +528,15 @@ mod tests {
                 seen.push((binding.clone(), a));
             }
         }
+    }
+
+    #[test]
+    fn the_build_key_is_b_and_no_camera_or_order_key() {
+        let b = Bindings::builtin();
+        assert_eq!(
+            b.for_action(Action::BuildCycle),
+            [Binding::new(Trigger::Key(KeyCode::KeyB))]
+        );
     }
 
     #[test]

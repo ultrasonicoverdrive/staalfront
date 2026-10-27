@@ -102,12 +102,14 @@
 
 pub mod args;
 pub mod bench;
+pub mod build_mode;
 pub mod cell_overlay;
 pub mod commands;
 pub mod cursor;
 pub mod debug_ui;
 pub mod hud;
 pub mod looks;
+pub mod placement_view;
 pub mod playfield;
 pub mod population;
 pub mod roster;

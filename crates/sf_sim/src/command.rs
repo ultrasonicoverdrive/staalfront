@@ -104,6 +104,20 @@ pub enum Command {
         /// Who owns it.
         owner: PlayerId,
     },
+    /// A player builds a structure of `kind` with its footprint anchored on
+    /// `cell` (WP6.2): the rules of `docs/rules/buildings.md` ("Placement")
+    /// are checked, the owner is the player who sent the command, and a refusal
+    /// is reported ([`World::placement_rejections`](crate::World::placement_rejections),
+    /// [`StepReport::placements_rejected`](crate::StepReport::placements_rejected))
+    /// and counts as ignored. This is the command of the player's build menu;
+    /// [`Command::PlaceStructure`] remains the unchecked placement of scenario
+    /// setup and mission objects.
+    BuildStructure {
+        /// What to build.
+        kind: Kind,
+        /// The anchor cell.
+        cell: Cell,
+    },
     /// Give the units an order (WP3.4, `docs/rules/orders.md`): replace their
     /// current order and queue with `order`, or, with `queued`, add it behind
     /// the orders they have (a unit with none starts on it at once). A unit

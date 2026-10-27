@@ -1691,7 +1691,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1 is in; WP6.2 to WP6.8 are not started.
+Status: WP6.1 is in; WP6.2 is built (in review); WP6.3 to WP6.8 are not started.
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -1699,6 +1699,55 @@ Status: WP6.1 is in; WP6.2 to WP6.8 are not started.
   turns them into `sf_sim::BuildingTable`, which a world is given with `World::with_buildings`; a new last
   checksum section `B` that exists only with a table; no behaviour yet; no pinned checksum moved),
   `docs/rules/buildings.md`: done
+
+- WP6.2 Placement: `Command::BuildStructure` is checked (footprint on the map, buildable terrain, no structure or unit
+  in the way, within the `build_radius` of one of the owner's anchors, the prerequisites standing, the faction may
+  build it, a factory has a usable exit cell) and a refusal is reported (`StepReport::placements_rejected`,
+  `World::placement_rejections`); `PlaceStructure` stays the unchecked placement of setup and mission objects; the
+  sim has a faction per player now (`World::with_player_factions`); the game shows a ghost under the cursor
+  (B chooses, left click places, right click puts away) whose verdict is the simulation's, asked through the sim
+  thread; a new scenario `placement`; `docs/rules/buildings.md`, "Placement": done
+
+### WP6.2 notes
+
+- **One rule for the sim and the picture.** `World::preview_placement` is the only place the rules live. The command
+  runs it, the sim thread runs it for the ghost (`SimHandle::set_ghost`, the answer is in
+  `SimSnapshot::ghost()`), `placement_view` paints the answer. `the_preview_and_the_command_never_disagree` (sf_sim)
+  compares verdict and outcome for 3 players x 7 kinds x a grid of cells; `what_the_ghost_shows_is_what_the_build_command_does`
+  (sf_game) does it through the sim thread.
+- **`BuildStructure` is a new command, `PlaceStructure` is not changed** (decision of the builder, brief of the orchestrator
+  said "checked when a PlaceStructure executes"): the scenarios, the sandbox and the mission setup place with
+  `PlaceStructure` and must not be checked (pre-placed F1-M05 decoys, a sandbox that places every role of every side),
+  and the command has no way to say which of the two it is. The owner of a `BuildStructure` is the player who sent
+  it, so a `BuildStructure` cannot build for another player. That is not a guard against a player: the sim still
+  accepts `PlaceStructure` and `SpawnUnit` (which carry their own `owner` and skip every placement rule) from any
+  seat. The two commands are told apart in the checksum (tag 11).
+- **Follow-up (open, before any untrusted command stream: phase 14 multiplayer, replays from outside):** setup
+  commands (`PlaceStructure`, `SpawnUnit`) must be refused when they come from a player seat. Nothing exploits it
+  today (the client sends only `BuildStructure` from input); no code changed for it in WP6.2.
+- **Decision for Tijmen from WP6.1, answered:** `factions` restricts what a player may *build*; pre-placed
+  mission objects are not checked (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`). F1-M05's
+  decoys for Enemy 1 stay as they are.
+- **Proximity** is the gap between the two footprints, the larger of the x and y gaps (a square of 8 free cells round the
+  anchor's edge); measured by `the_build_radius_reaches_exactly_eight_cells_from_every_side`. The reach is the data's
+  `build_radius` of the standing anchor, whole cells. If a round reach is wanted instead, the function is `gap` and one
+  test.
+- **Exit side rotation (WP6.1 follow-up): there is none.** A structure has no facing, so the exit side is the data's and
+  the exit cell is the cell next to the middle of that side. Written down in `buildings.md`.
+- **No legacy pin moved.** The golden constants and every `.expected` of an earlier phase are unchanged (the pinned tests
+  are green). The WP6.1 table digest `0x53aeb53ab44157d1` is unchanged; the build radius has a digest of its own
+  (`placement_digest`) and, with the factions, goes into section `B`, which exists only in a world given a table, and no
+  earlier scenario is given one. New: `placement.expected` and the headless scenario `placement`.
+- **Frozen copy.** `assets/scenarios/placement_defs/` is a new copy, byte for byte the shipped files of this WP, and the
+  only one with building blocks; `the_frozen_copies_of_the_scenarios_load_with_no_building_blocks` skips it by name and
+  `the_copy_that_builds_keeps_the_blocks_it_was_made_with` and `the_frozen_definitions_are_the_wp6_1_tree` pin it.
+- **Gaps, not done:** the shipyard's `needs_water` is not checked; a blocked exit is checked when the factory is placed
+  and not afterwards (WP6.5); the harvester dock's exit has no rule (phase 7); nothing is charged and nothing takes
+  time (WP6.3, phase 7); the ghost trails the cursor by one or two ticks; the ghost is drawn as tinted cells, not as a
+  translucent model of the structure; the build menu is the B key (a sidebar is later work); there is no sound or
+  voice for a refusal yet.
+- **WP6.3, WP6.5 can use:** `World::check_placement`, `exit_cell` (the cell a produced unit starts from) and the
+  `Preview.exit` of a placed factory; `BuildStructure` is where the build animation (WP6.3) will hook in.
 
 ### WP6.1 notes
 
