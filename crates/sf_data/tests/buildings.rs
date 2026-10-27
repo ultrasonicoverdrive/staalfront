@@ -134,7 +134,7 @@ const TREE: &[(&str, BuildingFunction, Option<Side>, &[&str])] = &[
         "decoy_emplacement",
         BuildingFunction::Decoy,
         None,
-        &["defence_tower"],
+        &["barracks"],
     ),
     (
         "fortified_bunker",
@@ -500,11 +500,26 @@ fn a_prerequisite_nobody_can_build_is_refused_unless_it_is_the_anchor() {
 
 #[test]
 fn a_building_may_not_need_itself_or_list_a_prerequisite_twice() {
-    refused(
+    let e = refused(
         r#"function: Radar, requires: ["vehicle_factory"]),"#,
         r#"function: Radar, requires: ["radar"]),"#,
         "requires itself",
     );
+    // The line of `requires:`, not the `id:` line above it.
+    let text = lf(EMBEDDED_UNITS);
+    let id_line = text
+        .lines()
+        .position(|l| l.contains("id: \"radar\""))
+        .unwrap()
+        + 1;
+    let req_line = id_line
+        + text
+            .lines()
+            .skip(id_line)
+            .position(|l| l.contains("function: Radar"))
+            .unwrap()
+        + 1;
+    assert_eq!(e.line, Some(req_line), "{e}");
     refused(
         r#"function: Radar, requires: ["vehicle_factory"]),"#,
         r#"function: Radar, requires: ["vehicle_factory", "vehicle_factory"]),"#,
@@ -701,4 +716,55 @@ fn a_duplicate_or_reused_id_or_number_is_refused() {
         "retired_units: [(kind: 77, name: \"radar\")],",
         "retired",
     );
+}
+
+/// The structures the player starts with in a mission, read from section "E. Starting setup" of
+/// `content/missions/<mission>.md` (rows `| Player | <role> | <count> | ...`).
+fn player_starting_structures(defs: &UnitDefs, mission: &str) -> Vec<String> {
+    let path = repo().join(format!("content/missions/{mission}.md"));
+    let text = lf(&std::fs::read_to_string(&path).unwrap());
+    let section = text
+        .split("## E. Starting setup")
+        .nth(1)
+        .unwrap_or_else(|| panic!("{mission}: no starting setup"));
+    let section = section.split("\n## ").next().unwrap();
+    section
+        .lines()
+        .filter_map(|l| {
+            let cells: Vec<&str> = l.split('|').map(str::trim).collect();
+            (cells.len() > 3 && cells[1] == "Player").then(|| cells[2].to_string())
+        })
+        .filter(|id| {
+            defs.unit(id)
+                .is_some_and(|u| u.category == Category::Structure)
+        })
+        .collect()
+}
+
+#[test]
+fn f1_m05_can_build_the_decoy_from_its_starting_structures() {
+    // F1-M05 teaches the decoy (MSG_04, "New to build") on a fixed budget of 2000 credits
+    // and no ore; T_PROBE comes at 0:30. So the decoy must be buildable from the start.
+    let defs = shipped();
+    let start = player_starting_structures(&defs, "F1-M05");
+    assert_eq!(
+        start,
+        [
+            "construction_center",
+            "power_plant",
+            "barracks",
+            "vehicle_factory"
+        ],
+        "the starting setup of F1-M05 changed; check the decoy against it"
+    );
+    let decoy = defs.unit("decoy_emplacement").unwrap();
+    assert!(decoy.factions.contains(&Faction::Meridian));
+    for r in &decoy.building.as_ref().unwrap().requires {
+        assert!(
+            start.contains(r),
+            "decoy_emplacement needs {r}, which F1-M05 does not start with"
+        );
+    }
+    let cost = decoy.cost.unwrap();
+    assert!(cost * 4 <= 2000, "a few decoys fit the budget: {cost}");
 }

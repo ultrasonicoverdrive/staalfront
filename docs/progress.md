@@ -1651,6 +1651,28 @@ Status: WP6.1 is in; WP6.2 to WP6.8 are not started.
 - **To decide, owner Tijmen:** the prerequisite edges (for example a radar needs a vehicle factory, advanced
   defences need a tower and a radar) are guesses for the first skirmish; change them in
   `unit_defs.ron` and in `the_shipped_tech_tree_is_the_documented_one`.
+- **Review round 1 (PR #69).** `decoy_emplacement` now requires `barracks` instead of `defence_tower`
+  (decision orchestrator): F1-M05 starts with power_plant, barracks and vehicle_factory and no tower, and
+  teaches the decoy from 0:30 (`f1_m05_can_build_the_decoy_from_its_starting_structures`, which reads section
+  E of `content/missions/F1-M05.md`). The hashed numbers of `BuildingFunction` and `Side` are pinned on both
+  sides and against the bridge (`sim_numbers_equal_the_data_numbers_for_every_variant`), and the digest of the
+  shipped table is pinned (`the_shipped_building_table_digest_is_pinned`, `0x53aeb53ab44157d1`). A
+  self-referencing `requires` is reported on the `requires` line, no longer on the `id:` line.
+- **Follow-ups from the review, not built in WP6.1:**
+  - `exit_side` rotation: the side is fixed in the footprint's frame; if WP6.2 allows rotated placement, the
+    exit side has to rotate with it.
+  - `fortified_bunker` is built in the field by a combat_engineer (`content/units.md`); the data cannot express
+    a builder unit yet, it is now a base structure behind the barracks.
+  - WP6.4: switching Defence off on a power shortage must key on `power < 0`, because the bunker is a Defence
+    with power 0 (and the decoy is a Decoy with power 0).
+- **To decide, owner Tijmen: Veyran decoys in F1-M05.** F1-M05 places 8 `decoy_emplacement` for Enemy 1 (the
+  Veyran Directorate), but the decoy is `factions: [Meridian]`. In WP6.1 `factions` restricts nothing in the
+  simulation: it is hashed data only, the sim has no faction per player and `PlaceStructure` checks neither
+  faction nor prerequisites, so a pre-placed decoy of another owner is accepted
+  (`f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base`). When WP6.2 makes `factions` restrict
+  building, it must say whether it also restricts pre-placed mission objects. Options: open the decoy to
+  Veyran, give Veyran its own decoy role, or keep `[Meridian]` for building and allow mission placement of any
+  role. The faction list is not changed in this round.
 
 ## Open follow-ups
 

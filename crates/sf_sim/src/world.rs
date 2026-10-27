@@ -142,8 +142,9 @@ pub enum ConfigError {
     WeaponsAfterStart,
     /// The weapon table is not valid, or does not fit the unit table.
     Weapons(WeaponsError),
-    /// The building table was given to a world that has already started, or
-    /// before its unit table.
+    /// The building table was given to a world that has already started. Given
+    /// before the unit table, it is refused as
+    /// [`BuildingsError::NotAStructure`] instead.
     BuildingsAfterStart,
     /// The building table is not valid, or does not fit the unit table.
     Buildings(BuildingsError),
@@ -352,6 +353,11 @@ impl World {
         }
         self.arsenal = Arsenal::new(table, &self.units).map_err(ConfigError::Weapons)?;
         Ok(self)
+    }
+
+    /// The building table the world was given ([`World::with_buildings`]).
+    pub fn buildings(&self) -> &BuildingTable {
+        &self.buildings
     }
 
     /// The same world with the building rules of its structure kinds (WP6.1,

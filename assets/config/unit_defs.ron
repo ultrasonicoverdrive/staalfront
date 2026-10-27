@@ -174,7 +174,7 @@
         ),
         (
             kind: 9, id: "decoy_emplacement", factions: [Meridian], category: Structure,
-            building: (function: Decoy, requires: ["defence_tower"]),
+            building: (function: Decoy, requires: ["barracks"]),
             cost: 150, build_seconds: 8, hp: 150, armor: "structure",
             footprint: (width: 1, height: 1), sight: 5,
             flags: (disguise_as: "defence_tower"),

@@ -138,6 +138,36 @@ impl<'a> Source<'a> {
         self.error_at(offset, message)
     }
 
+    /// An error at the first `needle` (quoted) after the first `after` inside
+    /// the record `key: "value"`; for a needle that also occurs earlier in the
+    /// record, such as a building that lists its own id in `requires:`. Falls
+    /// back to [`error_in_record`](Self::error_in_record) when `after` is not there.
+    pub fn error_in_record_after(
+        &self,
+        key: &str,
+        value: &str,
+        after: &str,
+        needle: &str,
+        message: impl Into<String>,
+    ) -> DefError {
+        let offset = self.pairs(key, value).first().and_then(|&start| {
+            let end = self.text[start + 1..]
+                .find("id:")
+                .map_or(self.text.len(), |rel| start + 1 + rel);
+            let from = start + self.text[start..end].find(after)?;
+            let quoted = format!("\"{needle}\"");
+            Some(
+                self.text[from..end]
+                    .find(&quoted)
+                    .map_or(from, |rel| from + rel),
+            )
+        });
+        match offset {
+            Some(_) => self.error_at(offset, message),
+            None => self.error_in_record(key, value, needle, message),
+        }
+    }
+
     /// Refuses a number literal with more than three decimals or with an
     /// exponent anywhere in the file (comments and strings are skipped).
     ///

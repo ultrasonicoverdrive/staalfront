@@ -181,3 +181,147 @@ fn placing_a_structure_is_the_same_with_or_without_the_table() {
         );
     }
 }
+
+/// Every data function, by an exhaustive match: a new variant does not compile until it is
+/// added here (and so pinned below).
+fn all_data_functions() -> Vec<sf_data::units::BuildingFunction> {
+    use sf_data::units::BuildingFunction as F;
+    let all = [
+        F::None,
+        F::Anchor,
+        F::PowerPlant,
+        F::HarvesterDock,
+        F::InfantryFactory,
+        F::VehicleFactory,
+        F::VesselFactory,
+        F::Radar,
+        F::Defence,
+        F::Decoy,
+    ];
+    for f in all {
+        match f {
+            F::None
+            | F::Anchor
+            | F::PowerPlant
+            | F::HarvesterDock
+            | F::InfantryFactory
+            | F::VehicleFactory
+            | F::VesselFactory
+            | F::Radar
+            | F::Defence
+            | F::Decoy => {}
+        }
+    }
+    all.to_vec()
+}
+
+fn all_data_sides() -> Vec<sf_data::units::Side> {
+    use sf_data::units::Side as S;
+    let all = [S::PosX, S::NegX, S::PosY, S::NegY];
+    for s in all {
+        match s {
+            S::PosX | S::NegX | S::PosY | S::NegY => {}
+        }
+    }
+    all.to_vec()
+}
+
+#[test]
+fn sim_numbers_equal_the_data_numbers_for_every_variant() {
+    use sf_bridge::{building_function, building_side};
+    // The hashed numbers, written out: a renumbering on either side fails here.
+    let functions: [(&str, u8); 10] = [
+        ("None", 0),
+        ("Anchor", 1),
+        ("PowerPlant", 2),
+        ("HarvesterDock", 3),
+        ("InfantryFactory", 4),
+        ("VehicleFactory", 5),
+        ("VesselFactory", 6),
+        ("Radar", 7),
+        ("Defence", 8),
+        ("Decoy", 9),
+    ];
+    let data = all_data_functions();
+    assert_eq!(data.len(), functions.len());
+    for (d, (name, n)) in data.into_iter().zip(functions) {
+        let s = building_function(d);
+        assert_eq!(format!("{d:?}"), name);
+        assert_eq!(format!("{s:?}"), name, "the bridge maps {d:?} to {s:?}");
+        assert_eq!(d.number(), n, "data number of {name}");
+        assert_eq!(s.number(), n, "sim number of {name}");
+    }
+    let sides: [(&str, u8); 4] = [("PosX", 0), ("NegX", 1), ("PosY", 2), ("NegY", 3)];
+    let data = all_data_sides();
+    assert_eq!(data.len(), sides.len());
+    for (d, (name, n)) in data.into_iter().zip(sides) {
+        let s = building_side(d);
+        assert_eq!(format!("{d:?}"), name);
+        assert_eq!(format!("{s:?}"), name, "the bridge maps {d:?} to {s:?}");
+        assert_eq!(d.number(), n, "data number of {name}");
+        assert_eq!(s.number(), n, "sim number of {name}");
+    }
+}
+
+/// The digest of the shipped building table (sf_data -> building_table -> World::with_buildings).
+/// It moves with any change of the shipped structures or of a hashed number; a move needs a
+/// deliberate data change and a note in `docs/rules/buildings.md`.
+const SHIPPED_BUILDINGS_DIGEST: u64 = 0x53ae_b53a_b441_57d1;
+
+#[test]
+fn the_shipped_building_table_digest_is_pinned() {
+    let defs = defs();
+    let table = building_table(&defs).unwrap();
+    let digest = table.digest();
+    // The table the world takes is the same one.
+    let w = world(&defs).with_buildings(table).unwrap();
+    assert_eq!(w.buildings().digest(), digest);
+    assert_eq!(digest, SHIPPED_BUILDINGS_DIGEST, "digest {digest:#018x}");
+}
+
+#[test]
+fn f1_m05_start_state_takes_an_enemy_decoy_and_the_players_base() {
+    // F1-M05 places 8 decoy_emplacement for Enemy 1 (Veyran) although the decoy is
+    // `factions: [Meridian]`. In WP6.1 `factions` is hashed data only: the sim has no faction
+    // per player and `PlaceStructure` checks no faction or prerequisite, so a pre-placed decoy
+    // of another owner is accepted. Whether that stays so is a follow-up (docs/progress.md).
+    let defs = defs();
+    let mut w = with_buildings(&defs);
+    let player = sf_sim::PlayerId(0);
+    let enemy = sf_sim::PlayerId(1);
+    let place = [
+        ("construction_center", player, 2, 2),
+        ("power_plant", player, 8, 2),
+        ("barracks", player, 12, 2),
+        ("vehicle_factory", player, 16, 2),
+        ("decoy_emplacement", enemy, 30, 30),
+    ];
+    for (id, owner, x, y) in place {
+        w.schedule(
+            sf_sim::Tick::ZERO,
+            owner,
+            Command::PlaceStructure {
+                kind: kind(&defs, id),
+                cell: sf_sim::Cell::new(x, y),
+                owner,
+            },
+        )
+        .unwrap();
+    }
+    w.step();
+    for (id, _, x, y) in place {
+        assert!(
+            w.occupant_at(sf_sim::Cell::new(x, y)).is_some(),
+            "{id} stands"
+        );
+    }
+    // The decoy's prerequisites are all in the player's starting base.
+    let table = w.buildings();
+    let decoy = table.get(kind(&defs, "decoy_emplacement")).unwrap();
+    for r in &decoy.requires {
+        assert!(
+            place[..4].iter().any(|&(id, ..)| kind(&defs, id) == *r),
+            "decoy needs {r:?}"
+        );
+    }
+}

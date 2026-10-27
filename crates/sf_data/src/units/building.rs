@@ -206,7 +206,13 @@ pub(crate) fn check_record(
             return Err(at(r, format!("requires: \"{r}\" is not a Structure")));
         }
         if p.id == u.id {
-            return Err(at(r, "requires itself".into()));
+            return Err(src.error_in_record_after(
+                "id",
+                &u.id,
+                "requires:",
+                r,
+                format!("unit \"{}\": requires itself", u.id),
+            ));
         }
         let anchor = p
             .building

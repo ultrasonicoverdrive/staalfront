@@ -155,8 +155,8 @@ pub enum BuildingsError {
     CostAndTime(Kind),
     /// A structure with prerequisites cannot be built.
     RequiresWithoutCost(Kind),
-    /// A kind of the unit table that is not a structure, or whose footprint
-    /// differs (`World::with_buildings`).
+    /// A kind that is not in the unit table (also every kind when the unit
+    /// table is not set yet) or is not a structure there (`World::with_buildings`).
     NotAStructure(Kind),
     /// A footprint that is not the unit table's (`World::with_buildings`).
     FootprintMismatch(Kind),

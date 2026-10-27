@@ -50,7 +50,9 @@ conscious choice. Adding a structure is a new record and no Rust change (a test 
 
 An enum, `BuildingFunction` (`sf_data::units`, mirrored as `sf_sim::BuildingFunction`). Later work packages
 match on it, never on an id. The numbers are permanent (they are hashed): a new function takes the next free
-number, an old one is never renumbered (a test pins them).
+number, an old one is never renumbered. `the_numbers_of_functions_and_sides_are_permanent` (sf_data) and
+`sim_numbers_equal_the_data_numbers_for_every_variant` (sf_bridge) pin both enums, and
+`the_shipped_building_table_digest_is_pinned` pins the digest of the whole shipped table.
 
 | # | Function | For | Needs in the record |
 |---|---|---|---|
@@ -137,7 +139,7 @@ flowchart TD
     BA --> DT
     DT --> AD
     RA --> AD
-    DT --> DE
+    BA --> DE
     BA --> FB
 ```
 
@@ -152,11 +154,13 @@ flowchart TD
 | defence_tower | yes | yes | Defence | | barracks | 500 | 20 | -20 |
 | advanced_defences | yes | yes | Defence | | defence_tower, radar | 900 | 35 | -40 |
 | shipyard | yes | yes | VesselFactory | +x | vehicle_factory | 1000 | 40 | -40 |
-| decoy_emplacement | **yes** | no | Decoy | | defence_tower | 150 | 8 | 0 |
+| decoy_emplacement | **yes** | no | Decoy | | barracks | 150 | 8 | 0 |
 | fortified_bunker | no | **yes** | Defence | | barracks | 600 | 25 | 0 |
 
 The two factions share one tree and differ only in the last two rows: the Meridian decoy and the Veyran bunker
-hang on the shared defences. Footprints are the art brief's. The mission structures (`relay_transmitter`,
+hang on the shared barracks. The decoy needs only the barracks (decision orchestrator, review of PR #69) so
+that mission F1-M05, which starts with power_plant, barracks and vehicle_factory but no tower, can build it
+from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Footprints are the art brief's. The mission structures (`relay_transmitter`,
 `fuel_depot`, `archive_building`, `bridge_segment`, `rail_spur`, `automated_gun`, `generator`,
 `unmanned_artillery`) are Neutral, cannot be built and have no prerequisites; `automated_gun` and
 `unmanned_artillery` are `Defence`, `generator` is a `PowerPlant`, the rest `None`.
