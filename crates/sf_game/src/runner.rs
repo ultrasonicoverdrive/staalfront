@@ -21,8 +21,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use sf_audio::ra::RaAudioConfig;
-use sf_audio::{AudioConfig, AudioSystem, Category, Listener};
+use sf_audio::{AudioConfig, AudioSystem, Listener};
 use sf_data::map::{Map, generate::generate_cells};
 use sf_data::units::UnitDefs;
 use sf_engine::winit::event::MouseButton;
@@ -47,7 +46,7 @@ use crate::construction_view;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::fx::{FxFrame, FxPlayer};
-use crate::fx_sound::FxSound;
+use crate::fx_sound::{FxSound, start_audio};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::placement_view::{self, GhostFrame};
@@ -1623,22 +1622,17 @@ impl App for Runner {
             ctx.assets().root().display()
         );
         let mut audio = AudioSystem::new(ctx.assets().root());
-        // Original Red Alert audio (WP11.7): config file, `--ra-audio` wins.
-        let (mut audio_config, warning) = AudioConfig::load(ctx.assets().root());
+        // audio.ron (`--ra-audio` wins over its ra_audio): original audio, spatial numbers, volume, the
+        // fight-sound rules. Tested in fx_sound.rs (`start_audio_follows_the_file_on_disk`).
+        let (fx_sound, warning) = start_audio(
+            ctx.assets().root(),
+            self.options.ra_audio.clone(),
+            &mut audio,
+        );
         if let Some(w) = warning {
             eprintln!("sf_audio: {w}");
         }
-        if let Some(path) = self.options.ra_audio.clone() {
-            audio_config.ra_audio = RaAudioConfig {
-                enabled: true,
-                path,
-            };
-        }
-        audio.enable_original_audio(&audio_config.ra_audio);
-        // The distance, zoom and volume numbers and the rules of the fight's sounds: audio.ron.
-        audio.set_spatial_params(audio_config.spatial.params());
-        audio.set_category_volume(Category::Sfx, audio_config.mix.sfx_volume);
-        self.fx_sound = FxSound::new(&audio_config);
+        self.fx_sound = fx_sound;
         println!(
             "audio: {}",
             if audio.is_silent() {

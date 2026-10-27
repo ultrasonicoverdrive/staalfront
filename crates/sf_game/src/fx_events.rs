@@ -277,6 +277,22 @@ pub fn record(world: &World, out: &mut Vec<FxEvent>) -> u64 {
     unresolved
 }
 
+/// A `Fire` of weapon kind zero at the origin in tick zero, every number zero. Tests build their events from
+/// it with `..FxEvent::default()`, so a new field is added here once and not in every test.
+impl Default for FxEvent {
+    fn default() -> Self {
+        FxEvent {
+            tick: 0,
+            kind: FxKind::Fire { slot: 0 },
+            weapon: 0,
+            player: 0,
+            pos: [0.0; 2],
+            facing: 0,
+            size: 0.0,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

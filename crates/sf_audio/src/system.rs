@@ -215,6 +215,12 @@ impl AudioSystem {
         self.params = params;
     }
 
+    /// The spatial numbers as last set: the one copy the output and the
+    /// fight-sound planner both use.
+    pub fn spatial_params(&self) -> SpatialParams {
+        self.params
+    }
+
     /// Default crossfade/fade-out time for [`play_music`](Self::play_music)
     /// and [`stop_music`](Self::stop_music).
     pub fn set_crossfade(&mut self, d: Duration) {

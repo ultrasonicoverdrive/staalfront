@@ -2,7 +2,14 @@
 
 Presentation only: nothing here reaches the simulation, so no checksum depends on it. The numbers are in
 `assets/config/audio.ron` (read by `sf_audio::config::AudioConfig`, compiled in as the fallback, range-checked when it
-is parsed; a broken file gives a warning on stderr and the shipped numbers).
+is parsed). A file that does not parse or fails a range check gives a warning on stderr and the shipped `spatial`,
+`mix` and `positional` (those three fall back together), but keeps the file's `ra_audio` when that section reads on
+its own, so a bad tuning number or an older file without the newer sections does not switch the original audio off
+(`a_bad_tuning_value_or_a_missing_section_keeps_ra_audio`). The runner's start-up is `fx_sound::start_audio`.
+
+The spatial numbers exist once, in the `AudioSystem`: `FxSound::play_frame` reads `AudioSystem::spatial_params()`
+every frame and hands them to `Planner::plan`, so a later `set_spatial_params` (the settings screen, WP11.5) changes
+the plan and the output together (`the_planner_follows_spatial_params_set_after_start`).
 
 ## 1. One model for volume and pan
 
@@ -56,18 +63,21 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
 ## 3. Tests
 
 * `sf_audio` `config::tests`: the shipped file against literals, the prefix lookup, every refusal of `validate`, a
-  broken file.
+  broken file, a bad tuning value or missing section that keeps `ra_audio`.
 * `sf_audio` `positional::tests`: merge, voice limit, priority, spacing (near vs far, zoom), order independence,
   a tick counter that starts over.
 * `sf_game` `fx_sound::tests` run events through `FxPlayer::frame` and `FxSound::play_frame` into a silent
   `AudioSystem` that records what it would play (`set_trace`): each of the 14 kinds of event gets its sound at the
   model's gain and pan, a name with no sound is silent without an `unknown` count, zooming out is never louder for a
   grid of positions, a volley merges, a heavy fight stays inside its budgets and gives the same sounds twice, an
-  expired event and a frame shown twice are silent.
+  expired event and a frame shown twice are silent. `start_audio_follows_the_file_on_disk` runs the runner's
+  start-up on a scratch `audio.ron` (other pan, volume and spacing) and checks the traced gain and pan and the number
+  of cues follow it. The single `play_frame` call in `Runner::frame` is covered by the live run only.
 
 ## 4. Gaps
 
-* The bank has no weapon, impact or explosion sounds yet; only `explosion.small` has a Red Alert mapping.
+* The bank has no weapon, impact or explosion sounds yet; only `explosion.small` has a Red Alert mapping. Follow-up
+  31 in `docs/progress.md`: WP11.3b adds CC0 fight sounds, a WP11.7 follow-up extends `ra_mapping.ron`.
 * The sim emits no event for a unit being selected or ordered, a structure placed or finished, or a harvester
   unloading: those are WP11.2 (voices) and later; nothing was added to `sf_sim`.
 * Music (WP11.4) and the settings screen (WP11.5) are not part of this; `mix.sfx_volume` is the only volume setting.

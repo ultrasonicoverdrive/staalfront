@@ -2179,3 +2179,8 @@ fixed, delete the entry in the same PR.
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
 
 30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. With PR #66 merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.
+31. **The fight is silent in the shipped game** (WP11.3, PR #82): every fight sound event is `silent` because
+    `assets/audio/bank.ron` has no weapon, impact or explosion sounds. A new small WP, **WP11.3b CC0 fight sounds**,
+    adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
+    original-audio side, `assets/audio/ra_mapping.ron` beyond `explosion.small`, is a **WP11.7 follow-up**, done
+    after Tijmen's `ra-dryrun.txt`.

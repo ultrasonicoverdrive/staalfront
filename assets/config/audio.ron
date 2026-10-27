@@ -46,10 +46,11 @@
     //   2. sorted: higher `priority` first, then the louder (nearer, more zoomed in), then the earlier.
     //   3. merged: an event of the same tick and sound within `merge_radius_m` of one already chosen is folded
     //      into it (one playback at the louder one's place).
-    //   4. thinned: at most `max_per_batch` playbacks of the event in the frame, at least `min_spacing_ticks`
-    //      (20 ticks are a second) since the event last played - the spacing grows towards `far_spacing_ticks`
-    //      as the gain falls to nothing, so a far sound is also less frequent - and at most
+    //   4. limited: at most `max_per_batch` playbacks of the event in the frame and at most
     //      `max_cues_per_frame` playbacks over all events.
+    //   5. spaced: at least `min_spacing_ticks` (20 ticks are a second) since the event last played - the
+    //      spacing grows towards `far_spacing_ticks` as the gain falls to nothing, so a far sound is also
+    //      less frequent.
     // The bank's `max_instances` still caps the voices alive at once.
     positional: (
         max_cues_per_frame: 16,

@@ -12,7 +12,12 @@
 //!
 //! Nothing here reaches the simulation: it only reads the events the sim thread queued for the picture.
 
-use sf_audio::{AudioConfig, AudioSystem, Cue, Listener, PlanStats, Planner, Request};
+use std::path::Path;
+
+use sf_audio::ra::RaAudioConfig;
+use sf_audio::{
+    AudioConfig, AudioSystem, Category, Cue, Listener, PlanStats, Planner, Request, SpatialParams,
+};
 
 use crate::fx::FxPlayer;
 use crate::fx_events::FxEvent;
@@ -41,6 +46,28 @@ impl SoundTotals {
     }
 }
 
+/// The audio start-up the runner does once: read `<asset_root>/config/audio.ron`, let `ra_override`
+/// (`--ra-audio`) win over its `ra_audio`, switch the original audio on or off, give `audio` the file's
+/// spatial numbers and sfx volume, and build the fight-sound planner from the file's rules. Returns the
+/// planner and the config warning, if any (the caller prints it).
+pub fn start_audio(
+    asset_root: &Path,
+    ra_override: Option<String>,
+    audio: &mut AudioSystem,
+) -> (FxSound, Option<String>) {
+    let (mut config, warning) = AudioConfig::load(asset_root);
+    if let Some(path) = ra_override {
+        config.ra_audio = RaAudioConfig {
+            enabled: true,
+            path,
+        };
+    }
+    audio.enable_original_audio(&config.ra_audio);
+    audio.set_spatial_params(config.spatial.params());
+    audio.set_category_volume(Category::Sfx, config.mix.sfx_volume);
+    (FxSound::new(&config), warning)
+}
+
 /// Turns the shown events into sounds. See the module documentation.
 pub struct FxSound {
     planner: Planner,
@@ -48,10 +75,11 @@ pub struct FxSound {
 }
 
 impl FxSound {
-    /// Rules and spatial numbers from `config` (the same the [`AudioSystem`] is given).
+    /// The rules from `config`. The spatial numbers are not kept here: each frame they come from the
+    /// [`AudioSystem`] (`spatial_params`), so the plan and the output use one copy.
     pub fn new(config: &AudioConfig) -> FxSound {
         FxSound {
-            planner: Planner::new(config.positional.clone(), config.spatial.params()),
+            planner: Planner::new(config.positional.clone()),
             totals: SoundTotals::default(),
         }
     }
@@ -71,6 +99,7 @@ impl FxSound {
         fx: &'a FxPlayer,
         events: &[FxEvent],
         listener: &Listener,
+        params: &SpatialParams,
         has_sound: impl Fn(&str) -> bool,
         out: &mut Vec<Cue<'a>>,
     ) -> PlanStats {
@@ -89,7 +118,9 @@ impl FxSound {
                 })
             })
             .collect();
-        let stats = self.planner.plan(listener, &requests, has_sound, out);
+        let stats = self
+            .planner
+            .plan(listener, params, &requests, has_sound, out);
         self.totals.add(&stats);
         stats
     }
@@ -99,11 +130,13 @@ impl FxSound {
     /// plan is made all the same and nothing is heard.
     pub fn play_frame(&mut self, fx: &mut FxPlayer, audio: &mut AudioSystem) -> PlanStats {
         let listener = audio.listener();
+        let params = audio.spatial_params();
         let mut cues = Vec::new();
         let stats = self.plan_events(
             fx,
             fx.shown(),
             &listener,
+            &params,
             |name| audio.has_sound(name),
             &mut cues,
         );
@@ -118,7 +151,7 @@ impl FxSound {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use super::*;
     use crate::fx::FxFrame;
@@ -155,8 +188,17 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets")
     }
 
+    /// A scratch asset root under the temp dir, removed when dropped.
+    struct TempRoot(PathBuf);
+
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     /// An asset root whose bank has a sound for each of `names` (the CC0 click, copied; nothing else).
-    fn root_with(tag: &str, names: &[&str]) -> PathBuf {
+    fn root_with(tag: &str, names: &[&str]) -> TempRoot {
         let d = std::env::temp_dir().join(format!("sf_game_fxsound_{}_{tag}", std::process::id()));
         std::fs::create_dir_all(d.join("audio/sfx")).unwrap();
         std::fs::copy(
@@ -170,7 +212,7 @@ mod tests {
         }
         bank += "})\n";
         std::fs::write(d.join("audio/bank.ron"), bank).unwrap();
-        d
+        TempRoot(d)
     }
 
     /// A system without output that records what it would play.
@@ -180,10 +222,37 @@ mod tests {
         a
     }
 
-    fn all_names_audio(tag: &str) -> AudioSystem {
+    /// A tracing system together with the scratch root it reads, which goes when this does.
+    struct Traced {
+        audio: AudioSystem,
+        _root: TempRoot,
+    }
+
+    impl std::ops::Deref for Traced {
+        type Target = AudioSystem;
+        fn deref(&self) -> &AudioSystem {
+            &self.audio
+        }
+    }
+
+    impl std::ops::DerefMut for Traced {
+        fn deref_mut(&mut self) -> &mut AudioSystem {
+            &mut self.audio
+        }
+    }
+
+    fn all_names_root(tag: &str) -> TempRoot {
         let mut names = NAMES.to_vec();
         names.push("explosion.large");
-        tracing_audio(&root_with(tag, &names))
+        root_with(tag, &names)
+    }
+
+    fn all_names_audio(tag: &str) -> Traced {
+        let root = all_names_root(tag);
+        Traced {
+            audio: tracing_audio(&root.0),
+            _root: root,
+        }
     }
 
     fn weapon(id: &str) -> u16 {
@@ -193,12 +262,10 @@ mod tests {
     fn fire_at(weapon: u16, pos: [f32; 2], tick: u64) -> FxEvent {
         FxEvent {
             tick,
-            kind: FxKind::Fire { slot: 0 },
             weapon,
-            player: 0,
             pos,
-            facing: 0,
             size: 6.0,
+            ..FxEvent::default()
         }
     }
 
@@ -595,6 +662,91 @@ mod tests {
         );
     }
 
+    /// Gain, pan and number of cues of a 30-frame stream of cannon shots 20 m right of the focus.
+    fn stream_through(sound: &mut FxSound, audio: &mut AudioSystem) -> (f32, f32, usize) {
+        let mut fx = FxPlayer::embedded();
+        let mut first = None;
+        let mut n = 0;
+        for t in 0..30u32 {
+            fx.push_events(&[fire_at(weapon("cannon"), [32.0, 12.0], u64::from(t))]);
+            let (trace, _) = game_frame(&mut fx, sound, audio, t + 1, listener(30.0));
+            if first.is_none() {
+                first = trace.first().map(|c| (c.gain, c.pan));
+            }
+            n += trace.len();
+        }
+        let (g, p) = first.expect("the first shot is heard");
+        (g, p, n)
+    }
+
+    #[test]
+    fn start_audio_follows_the_file_on_disk() {
+        // The runner's start-up (`start_audio`) on a scratch root whose audio.ron differs from the shipped one:
+        // half the pan width, half the sfx volume, and every event spaced 1000 ticks apart.
+        let scratch = all_names_root("startup");
+        let spacing = |s: &str, key: &str| {
+            let mut out = String::new();
+            for line in s.lines() {
+                match line.find(key) {
+                    Some(i) => {
+                        let rest = &line[i + key.len()..];
+                        let end = rest.find(',').unwrap();
+                        out += &format!("{}{key}1000{}\n", &line[..i], &rest[end..]);
+                    }
+                    None => out += &format!("{line}\n"),
+                }
+            }
+            out
+        };
+        let text = sf_audio::config::EMBEDDED_CONFIG
+            .replace("max_pan: 0.9", "max_pan: 0.45")
+            .replace("sfx_volume: 1.0", "sfx_volume: 0.5");
+        let text = spacing(
+            &spacing(&text, "min_spacing_ticks: "),
+            "far_spacing_ticks: ",
+        );
+        assert_ne!(text, sf_audio::config::EMBEDDED_CONFIG);
+        std::fs::create_dir_all(scratch.0.join("config")).unwrap();
+        std::fs::write(scratch.0.join("config/audio.ron"), &text).unwrap();
+        let mut audio = tracing_audio(&scratch.0);
+        let (mut sound, warning) = start_audio(&scratch.0, None, &mut audio);
+        assert_eq!(warning, None, "the scratch file is valid");
+        let (gain, pan, cues) = stream_through(&mut sound, &mut audio);
+
+        // The same root without the file: the shipped numbers.
+        std::fs::remove_file(scratch.0.join("config/audio.ron")).unwrap();
+        let mut shipped_audio = tracing_audio(&scratch.0);
+        let (mut shipped, w) = start_audio(&scratch.0, None, &mut shipped_audio);
+        assert_eq!(w, None);
+        let (g0, p0, n0) = stream_through(&mut shipped, &mut shipped_audio);
+
+        assert!((pan - p0 * 0.5).abs() < 1e-5, "pan {pan} vs shipped {p0}");
+        assert!(
+            (gain - g0 * 0.5).abs() < 1e-5,
+            "gain {gain} vs shipped {g0}"
+        );
+        assert_eq!(cues, 1, "1000 ticks of spacing: one shot in 30 frames");
+        assert!(n0 > 10, "shipped spacing lets the stream through: {n0}");
+    }
+
+    #[test]
+    fn the_planner_follows_spatial_params_set_after_start() {
+        // A later `set_spatial_params` (the settings screen) is what the planner uses too: here every sound is
+        // made inaudible to the planner by raising `audible_gain`, so nothing is planned.
+        let mut audio = all_names_audio("later");
+        let (mut fx, mut sound) = setup();
+        fx.push_events(&[fire_at(weapon("cannon"), [32.0, 12.0], 0)]);
+        let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 1, listener(30.0));
+        assert_eq!(trace.len(), 1);
+        let mut p = audio.spatial_params();
+        p.audible_gain = 2.0;
+        audio.set_spatial_params(p);
+        fx.push_events(&[fire_at(weapon("cannon"), [32.0, 12.0], 40)]);
+        let (trace, stats) = game_frame(&mut fx, &mut sound, &mut audio, 41, listener(30.0));
+        assert!(trace.is_empty(), "{trace:?}");
+        assert_eq!((stats.inaudible, stats.planned), (1, 0), "{stats:?}");
+    }
+
     /// The cost of the sound selection in a heavy fight:`FxSound::plan_events` (what `play_frame` runs on the
     /// shown events) plus the `play_at` calls, on 620 events a frame for 40 frames. Run with `--release
     /// --nocapture` to see the numbers. The particle pool is left out (`FxPlayer::frame` is slow in a debug
@@ -619,7 +771,14 @@ mod tests {
                 })
                 .collect();
             let started = std::time::Instant::now();
-            sound.plan_events(&fx, &events, &l, |n| audio.has_sound(n), &mut cues);
+            sound.plan_events(
+                &fx,
+                &events,
+                &l,
+                &audio.spatial_params(),
+                |n| audio.has_sound(n),
+                &mut cues,
+            );
             for c in &cues {
                 audio.play_at(c.sound, c.pos);
             }

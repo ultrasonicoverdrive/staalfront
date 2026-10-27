@@ -9,7 +9,8 @@
 //! The shipped file is also compiled in ([`AudioConfig::embedded`]) and is
 //! the fallback when the file on disk is missing or broken, so there are no
 //! tuning numbers in Rust. [`AudioConfig::validate`] refuses nonsense; the
-//! loader then keeps the shipped numbers and returns a warning.
+//! loader then keeps the shipped tuning numbers (and the file's `ra_audio` if
+//! it reads) and returns a warning.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -125,6 +126,14 @@ impl PositionalConfig {
     }
 }
 
+/// Only the `ra_audio` section of the file; the other sections are skipped
+/// unread, so it survives a broken or missing tuning section.
+#[derive(Deserialize)]
+struct RaAudioOnly {
+    #[serde(default)]
+    ra_audio: RaAudioConfig,
+}
+
 impl Default for AudioConfig {
     fn default() -> Self {
         AudioConfig::embedded()
@@ -143,8 +152,12 @@ impl AudioConfig {
     }
 
     /// Read `<asset_root>/config/audio.ron`. A missing file gives the
-    /// shipped numbers; a file that does not parse or fails
-    /// [`validate`](Self::validate) gives them with a warning.
+    /// shipped numbers. A file that does not parse or fails
+    /// [`validate`](Self::validate) gives the shipped `spatial`, `mix` and
+    /// `positional` (those three fall back together) with a warning, but a
+    /// readable `ra_audio` of the file is kept: a bad tuning value or an
+    /// older file without the newer sections does not turn the player's
+    /// original audio off.
     pub fn load(asset_root: &Path) -> (AudioConfig, Option<String>) {
         let path = asset_root.join(CONFIG_FILE);
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -152,13 +165,21 @@ impl AudioConfig {
         };
         match Self::parse(&text) {
             Ok(c) => (c, None),
-            Err(e) => (
-                AudioConfig::embedded(),
-                Some(format!(
-                    "cannot use {}: {e}; using the shipped defaults",
+            Err(e) => {
+                let mut c = AudioConfig::embedded();
+                let kept = match ron::from_str::<RaAudioOnly>(&text) {
+                    Ok(r) => {
+                        c.ra_audio = r.ra_audio;
+                        "; ra_audio of the file kept"
+                    }
+                    Err(_) => "; ra_audio unreadable too, original audio off",
+                };
+                let w = format!(
+                    "cannot use {}: {e}; using the shipped spatial, mix and positional defaults{kept}",
                     path.display()
-                )),
-            ),
+                );
+                (c, Some(w))
+            }
         }
     }
 
@@ -392,10 +413,34 @@ mod tests {
         std::fs::write(dir.join("config/audio.ron"), "(spatial: (").unwrap();
         let (c, w) = AudioConfig::load(&dir);
         assert_eq!(c, AudioConfig::embedded());
-        assert!(w.unwrap().contains("shipped defaults"));
+        assert!(
+            w.unwrap()
+                .contains("positional defaults; ra_audio unreadable too")
+        );
         // unknown fields are refused too
         let text = EMBEDDED_CONFIG.replace("sfx_volume: 1.0", "sfx_volume: 1.0, loudness: 3");
         assert!(AudioConfig::parse(&text).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bad_tuning_value_or_a_missing_section_keeps_ra_audio() {
+        let dir = std::env::temp_dir().join(format!("sf_audio_cfg_ra_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("config")).unwrap();
+        let ra = "ra_audio: (enabled: true, path: \"/games/ra\"),";
+        // an out-of-range number, and an older file with ra_audio only
+        for text in [
+            format!("({ra} spatial: (max_pan: 7.0), mix: (sfx_volume: 1.0))"),
+            format!("({ra})"),
+        ] {
+            std::fs::write(dir.join("config/audio.ron"), &text).unwrap();
+            let (c, w) = AudioConfig::load(&dir);
+            assert!(c.ra_audio.enabled, "{text}");
+            assert_eq!(c.ra_audio.path, "/games/ra");
+            assert_eq!(c.spatial, AudioConfig::embedded().spatial);
+            assert_eq!(c.positional, AudioConfig::embedded().positional);
+            assert!(w.unwrap().contains("ra_audio of the file kept"));
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

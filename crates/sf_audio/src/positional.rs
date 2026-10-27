@@ -87,16 +87,14 @@ struct Candidate {
 #[derive(Debug)]
 pub struct Planner {
     config: PositionalConfig,
-    params: SpatialParams,
     last_played: BTreeMap<String, u64>,
     scratch: Vec<Candidate>,
 }
 
 impl Planner {
-    pub fn new(config: PositionalConfig, params: SpatialParams) -> Self {
+    pub fn new(config: PositionalConfig) -> Self {
         Self {
             config,
-            params,
             last_played: BTreeMap::new(),
             scratch: Vec::new(),
         }
@@ -109,10 +107,13 @@ impl Planner {
 
     /// Choose the cues of one frame; they are appended to `out` (cleared
     /// first) in the order they were chosen. `has_sound` says whether a
-    /// name has a sound to play.
+    /// name has a sound to play. `params` are the spatial numbers the output
+    /// uses (`AudioSystem::spatial_params`), passed in every frame so the
+    /// planner never keeps a copy that could disagree with the output.
     pub fn plan<'a>(
         &mut self,
         listener: &Listener,
+        params: &SpatialParams,
         requests: &[Request<'a>],
         has_sound: impl Fn(&str) -> bool,
         out: &mut Vec<Cue<'a>>,
@@ -129,8 +130,8 @@ impl Planner {
                 stats.silent += 1;
                 continue;
             }
-            let m = spatial::mix(listener, r.pos, &self.params);
-            if !m.is_audible(&self.params) {
+            let m = spatial::mix(listener, r.pos, params);
+            if !m.is_audible(params) {
                 stats.inaudible += 1;
                 continue;
             }
@@ -235,7 +236,7 @@ mod tests {
 
     fn planner() -> Planner {
         let c = AudioConfig::embedded();
-        Planner::new(c.positional, c.spatial.params())
+        Planner::new(c.positional)
     }
 
     fn rule(priority: u8, max: u32, min_sp: u32, far_sp: u32, merge: f32) -> EventRule {
@@ -253,7 +254,7 @@ mod tests {
         let mut c = AudioConfig::embedded().positional;
         c.max_cues_per_frame = cap;
         c.events = rules.iter().map(|(n, r)| (n.to_string(), *r)).collect();
-        Planner::new(c, AudioConfig::embedded().spatial.params())
+        Planner::new(c)
     }
 
     fn listener() -> Listener {
@@ -275,7 +276,13 @@ mod tests {
 
     fn run<'a>(p: &mut Planner, l: &Listener, reqs: &[Request<'a>]) -> (Vec<Cue<'a>>, PlanStats) {
         let mut out = Vec::new();
-        let s = p.plan(l, reqs, all, &mut out);
+        let s = p.plan(
+            l,
+            &AudioConfig::embedded().spatial.params(),
+            reqs,
+            all,
+            &mut out,
+        );
         (out, s)
     }
 
@@ -293,7 +300,13 @@ mod tests {
         let mut p = planner();
         let mut out = Vec::new();
         let reqs = [req("weapon.fire.bullet", 1.0, 5), req("ui.click", 1.0, 5)];
-        let s = p.plan(&listener(), &reqs, |n| n == "ui.click", &mut out);
+        let s = p.plan(
+            &listener(),
+            &AudioConfig::embedded().spatial.params(),
+            &reqs,
+            |n| n == "ui.click",
+            &mut out,
+        );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].sound, "ui.click");
         assert_eq!((s.silent, s.planned), (1, 1));
