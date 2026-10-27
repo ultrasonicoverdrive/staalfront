@@ -7,6 +7,7 @@ use std::ops::Range;
 use glam::Mat4;
 use wgpu::util::DeviceExt;
 
+use crate::effects::EffectInstance;
 use crate::frustum::Frustum;
 use crate::gpu::{Gpu, GpuOptions, HeadlessSlot, RenderError};
 use crate::gpu_timer::GpuTimer;
@@ -32,6 +33,14 @@ pub const EMBEDDED_SHADER: &str = include_str!("../../../assets/shaders/scene.wg
 /// hot-reloaded: it is small and stable, and the scene shader's reload
 /// path rebuilds a different pipeline.
 pub const ICON_SHADER: &str = include_str!("../../../assets/shaders/icon.wgsl");
+
+/// The particle and tracer shader (WP5.6a).
+pub const EFFECT_SHADER: &str = include_str!("../../../assets/shaders/effect.wgsl");
+
+/// How many effect instances (particles and tracer dots) one frame can draw: the buffer is made once at
+/// this size, so drawing them never allocates. `sf_data::effects::MAX_INSTANCES` is the same number (a test
+/// keeps them equal).
+pub const EFFECT_CAPACITY: u32 = 8192;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Format of the offscreen target (sRGB, so shader output is linear light).
@@ -115,6 +124,10 @@ pub struct DrawStats {
     /// Draw calls of the cell grid overlay (WP2.4): the terrain's draws once
     /// more, 0 when the overlay is off.
     pub cell_overlay_draw_calls: u32,
+    /// Particles and tracer dots drawn (WP5.6a).
+    pub effect_instances: u32,
+    /// Draw calls for them: 1 when there are any, else 0. One call for every effect.
+    pub effect_draw_calls: u32,
 }
 
 impl DrawStats {
@@ -124,6 +137,7 @@ impl DrawStats {
             + self.terrain_draw_calls
             + self.icon_draw_calls
             + self.cell_overlay_draw_calls
+            + self.effect_draw_calls
     }
 }
 
@@ -161,6 +175,13 @@ pub struct Renderer {
     background: wgpu::Color,
     icon_sizes: IconParams,
     icons: DynamicInstances,
+    /// The particles and tracers (WP5.6a): one pipeline, one buffer made once at [`EFFECT_CAPACITY`]
+    /// instances, one draw call, drawn after the units and the icons.
+    effect_pipeline: wgpu::RenderPipeline,
+    effect_params: wgpu::Buffer,
+    effect_bind_group: wgpu::BindGroup,
+    effect_buffer: wgpu::Buffer,
+    effect_count: u32,
     camera: PlaceholderCamera,
     /// When set, replaces the placeholder camera (see [`Renderer::set_view_proj`]).
     view_proj: Option<Mat4>,
@@ -428,6 +449,51 @@ impl Renderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        // Particles and tracers: a uniform with the viewport next to the shared globals, one pipeline and
+        // one instance buffer for the largest frame, made now and never again.
+        let effect_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("effect params layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let effect_params = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("effect params"),
+            size: std::mem::size_of::<[f32; 4]>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let effect_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("effect params bind group"),
+            layout: &effect_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: effect_params.as_entire_binding(),
+            }],
+        });
+        let effect_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("effect pipeline layout"),
+                bind_group_layouts: &[Some(&bind_group_layout), Some(&effect_layout)],
+                immediate_size: 0,
+            });
+        let effect_pipeline =
+            build_effect_pipeline(device, &effect_pipeline_layout, EFFECT_SHADER, format)
+                .unwrap_or_else(|e| panic!("embedded shader effect.wgsl is invalid: {e}"));
+        let effect_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("effect instances"),
+            size: u64::from(EFFECT_CAPACITY) * std::mem::size_of::<EffectInstance>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let meshes = MeshKind::ALL
             .iter()
             .map(|kind| {
@@ -473,6 +539,11 @@ impl Renderer {
             background: CLEAR,
             icon_sizes: IconConfig::default().params(1.0),
             icons: DynamicInstances::default(),
+            effect_pipeline,
+            effect_params,
+            effect_bind_group,
+            effect_buffer,
+            effect_count: 0,
             camera,
             view_proj: None,
             lighting,
@@ -892,6 +963,23 @@ impl Renderer {
         );
     }
 
+    /// Replace the frame's particles and tracer dots (WP5.6a): copied into the buffer that was made at
+    /// start-up, drawn in one call after the units and the icons. At most [`EFFECT_CAPACITY`] are
+    /// taken; the rest are cut off and the number cut is returned (the game keeps its budget under it, so it
+    /// is zero). Allocates nothing.
+    pub fn set_effects(&mut self, instances: &[EffectInstance]) -> usize {
+        let taken = instances.len().min(EFFECT_CAPACITY as usize);
+        self.effect_count = taken as u32;
+        if taken > 0 {
+            self.gpu.queue.write_buffer(
+                &self.effect_buffer,
+                0,
+                bytemuck::cast_slice(&instances[..taken]),
+            );
+        }
+        instances.len() - taken
+    }
+
     /// Upload everything the instancer built for the frame: the extra model
     /// meshes if the model set changed, every instance list (one draw call
     /// each) and the icons.
@@ -1142,6 +1230,12 @@ impl Renderer {
         self.gpu
             .queue
             .write_buffer(&self.icon_params, 0, bytemuck::bytes_of(&icon));
+        // Effects: the viewport, to size the quads in pixels.
+        self.gpu.queue.write_buffer(
+            &self.effect_params,
+            0,
+            bytemuck::bytes_of(&[self.size.0 as f32, self.size.1 as f32, 0.0, 0.0]),
+        );
         if let Some(t) = &mut self.terrain {
             let view = LodView::from_view_proj(view_proj, self.size.1 as f32);
             let frustum = Frustum::from_view_proj(view_proj);
@@ -1230,6 +1324,17 @@ impl Renderer {
             pass.set_index_buffer(self.icon_indices.slice(..), wgpu::IndexFormat::Uint16);
             pass.draw(DrawGroup::Icons, 0..6, 0..self.icons.count);
         }
+        // Particles and tracers (WP5.6a), last: one instanced quad each, premultiplied alpha, depth tested
+        // against the scene. After the icons, so that the flash of a death at strategic zoom is not
+        // hidden under the icon of the wreck that lies where it happened.
+        if self.effect_count > 0 {
+            pass.set_pipeline(&self.effect_pipeline);
+            pass.set_bind_group(0, &self.bind_group);
+            pass.set_bind_group(1, &self.effect_bind_group);
+            pass.set_vertex_buffer(0, self.effect_buffer.slice(..));
+            pass.set_index_buffer(self.icon_indices.slice(..), wgpu::IndexFormat::Uint16);
+            pass.draw(DrawGroup::Effects, 0..6, 0..self.effect_count);
+        }
         let mut stats = pass.finish();
         if let Some(t) = &self.terrain {
             // Which chunks were culled is the planner's business, not a draw call's.
@@ -1258,6 +1363,7 @@ enum DrawGroup {
     Units,
     Icons,
     CellOverlay,
+    Effects,
 }
 
 /// A render pass whose only way to draw is [`CountedPass::draw`], which
@@ -1317,6 +1423,10 @@ impl<'a> CountedPass<'a> {
                 s.icon_instances += n;
             }
             DrawGroup::CellOverlay => s.cell_overlay_draw_calls += 1,
+            DrawGroup::Effects => {
+                s.effect_draw_calls += 1;
+                s.effect_instances += n;
+            }
         }
     }
 
@@ -1773,9 +1883,85 @@ fn build_icon_pipeline(
     }
 }
 
+/// An effect instance: world position with the side in pixels, premultiplied colour.
+const EFFECT_ATTRS: [wgpu::VertexAttribute; 2] =
+    wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4];
+
+/// The particle pipeline: instance data only (the quad's corners come from the vertex index), premultiplied
+/// alpha blending (`One, OneMinusSrcAlpha`, so light with blend alpha 0 is additive), depth tested against
+/// the scene but not written, no culling.
+fn build_effect_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    wgsl: &str,
+    format: wgpu::TextureFormat,
+) -> Result<wgpu::RenderPipeline, String> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("effect.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("effect pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<EffectInstance>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &EFFECT_ATTRS,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    match pollster::block_on(scope.pop()) {
+        Some(e) => Err(e.to_string()),
+        None => Ok(pipeline),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The effect buffer holds what the data file allows, and the file's limits fit it.
+    #[test]
+    fn the_effect_buffer_is_as_big_as_the_data_allows() {
+        assert_eq!(EFFECT_CAPACITY, sf_data::effects::MAX_INSTANCES);
+        let l = sf_data::effects::Effects::embedded().limits;
+        assert!(l.max_particles + l.max_tracer_dots <= EFFECT_CAPACITY);
+        // The shader's instance attributes are the struct's layout.
+        assert_eq!(EFFECT_ATTRS[0].offset, 0);
+        assert_eq!(EFFECT_ATTRS[1].offset, 16);
+        assert_eq!(std::mem::size_of::<EffectInstance>(), 32);
+    }
 
     /// The model's cross-fade weight is the alpha of the instance color: it
     /// must step per instance (every vertex of an instance carries the same

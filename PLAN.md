@@ -244,11 +244,14 @@ _Note: this replaces "≤ 1 % outside 5 cells (20 m)" by the orchestrator decisi
 - WP5.3 Armor table: damage × armor type → percentage; splash damage with falloff.
 - WP5.4 Target selection and automatic return fire, priorities, range check.
 - WP5.5 Destruction: free up cells, wrecks/rubble, effects.
-- WP5.6 Visual effects: muzzle flash, impact, explosions, smoke (particles), scale with zoom.
+- WP5.6a Visual effects, part one: an effects event queue (lossless, sim thread to picture), a particle pool and one instanced pipeline, `assets/config/effects.ron` (muzzle flash, impact, explosions, smoke by damage type and weapon id), zoom behaviour (pixel clamp, fade with the icon cross-fade, fewer particles at middle zoom, a death flash kept at strategic zoom) and projectile tracers. Presentation only: `sf_sim` is not touched.
+- WP5.6b Visual effects, part two: muzzle and fx anchors in the glb loader (the flash starts at the model's muzzle node) and `sf_demo --bench --fight` (the combat scene for the M0c benchmark).
+
+_Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smoke (particles), scale with zoom") is split into WP5.6a and WP5.6b. Decided by the orchestrator with Tijmen's approval. Part one needs nothing from the model loader and can be built and tested on the finished combat; part two needs the loader and the benchmark scene. The M0c benchmark (below) runs after WP5.6b._
 
 **Done when:** headless "10 tanks vs 20 infantry" gives the same outcome and checksum every run; it looks that way in the game too.
 
-**Laptop benchmark M0c (decision Tijmen 22-10-2026):** after WP5.6 the same laptop run again, with combat and effects in the demo scene; p99 frame time ≤ 16.7 ms and `sim.tick_ms` p99 well within the 50 ms tick, compared with M0 and M0b.
+**Laptop benchmark M0c (decision Tijmen 22-10-2026):** after WP5.6b (was: after WP5.6) the same laptop run again, with combat and effects in the demo scene; p99 frame time ≤ 16.7 ms and `sim.tick_ms` p99 well within the 50 ms tick, compared with M0 and M0b.
 
 ### Phase 6 — Buildings, building and power
 - WP6.1 Building definitions: footprint, build time, power, requirements (tech tree), function.
@@ -365,7 +368,7 @@ alongside the system they belong to; editor (WP10.4) alongside F8–F9.
 |---|---|---|
 | Determinism leaks (float, hash order, threads) | Replays/multiplayer broken, discovered only late | From F0 checksum tests on Linux and Windows in CI |
 | Pathfinding with many units | Hangs, slow | Flowfields + headless stress tests from F4 |
-| Zoom breaks performance | Stuttering when zoomed out | LOD/instancing/icons in the engine (F1), fps benchmark from M0, re-run on the laptop as M0b (after WP2.4) and M0c (after WP5.6) |
+| Zoom breaks performance | Stuttering when zoomed out | LOD/instancing/icons in the engine (F1), fps benchmark from M0, re-run on the laptop as M0b (after WP2.4) and M0c (after WP5.6b) |
 | Art is missing | Game keeps looking "programmer-made" | Decide early who makes models and cartoons (§10) |
 | Agents diverge | Inconsistent code | Fixed conventions in `CLAUDE.md`, review gate per phase (§12) |
 | Legal | Trademark/GPL | Clean-room, own name and content (B5) |
@@ -445,6 +448,9 @@ Decision Tijmen 14-10-2026.
 
 ### 12.3 Parallelism
 Normally 3-4 agents at a time, 5 at most (decision Tijmen 22-10-2026; was 3), only on WPs without overlap in crates (see §4).
+Work packages that change `sf_sim` (and with it the shared `crates/sf_sim/src/checksum.rs`, `world.rs`, `lib.rs` and the
+scenario lists in `.github/workflows/ci.yml` and `tools/sf_headless/tests/pinned.rs`) are built one after another, not in parallel; the other slots go to work in other crates, reviews
+and research (decision Tijmen 27-10-2026: on 27-10 four merge rounds between parallel sf_sim WPs cost about 380k tokens).
 Conflicts in `Cargo.lock`/shared types are resolved by the orchestrator.
 
 ### 12.4 What an agent does not do

@@ -45,6 +45,7 @@ use crate::build_mode::BuildMode;
 use crate::commands;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
+use crate::fx::{FxFrame, FxPlayer};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::placement_view::{self, GhostFrame};
@@ -214,6 +215,9 @@ pub struct Runner {
     /// the F1 panel keeps saying "sim behind" for a second after.
     behind_seen: Option<Instant>,
     instancer: Instancer,
+    /// Muzzle flashes, hits, explosions, smoke and tracers (WP5.6a): fed by the sim thread's event queue,
+    /// drawn in one call after the units.
+    fx: FxPlayer,
     /// The glTF models the units are drawn with, after the placeholders.
     pack: Option<LoadedPack>,
     /// How an entity is drawn (and named in the F1 panel).
@@ -446,6 +450,7 @@ impl Runner {
             ),
             behind_seen: None,
             instancer,
+            fx: FxPlayer::embedded(),
             pack,
             looks,
             buildings,
@@ -997,6 +1002,7 @@ impl Runner {
                 .saturating_sub(20),
         );
         let pace = self.snap.pace();
+        let (fx, pool) = (self.fx.counters(), self.fx.pool_stats());
         SimPanel {
             tick_ms: pace.step.as_secs_f32() * 1e3,
             slowest_ms: last.iter().copied().fold(0.0, f64::max) as f32,
@@ -1008,6 +1014,18 @@ impl Runner {
             late_commands: counters.late_commands,
             late_publishes: counters.late_publishes,
             stopped: !self.sim.is_running(),
+            fx_recorded: counters.fx_recorded,
+            fx_dropped: counters.fx_dropped,
+            fx_unresolved: counters.fx_unresolved,
+            fx_expired: fx.expired,
+            fx_pending: fx.pending,
+            particles: pool.alive,
+            particle_cap: self.fx.limits().max_particles,
+            particles_peak: pool.peak,
+            particles_dropped: pool.dropped,
+            smoke_refused: pool.smoke_refused,
+            effect_instances: fx.instances,
+            tracer_dots: fx.tracer_dots,
         }
     }
 
@@ -1175,6 +1193,30 @@ impl Runner {
             ui_scale: scale,
             hovered,
         };
+    }
+
+    /// This frame's particles and tracers (WP5.6a): the events the sim thread queued since the last
+    /// frame, the wrecks and the projectiles of the snapshot, at the zoom `build_units` just chose,
+    /// handed to the renderer.
+    fn build_effects(&mut self, alpha: f32, dt: f32) {
+        let view_proj = self.camera.view_proj();
+        let (width, height) = self.viewport;
+        let eye = EyeView::from_view_proj(view_proj, height as f32);
+        self.fx.take(&self.sim);
+        let frame = FxFrame {
+            view_proj,
+            focal_px: eye.focal_px,
+            viewport: [width as f32, height as f32],
+            model_weight: self.unit_view.model_weight,
+            reference_px: self.unit_view.reference_px,
+            icon_px: self.instancer.icon_params().size_px,
+            dt,
+            alpha,
+        };
+        let instances = self.fx.frame(&self.snap, &*self.ground, &frame);
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_effects(instances);
+        }
     }
 
     /// The selection feedback of this frame (WP3.3): the selected icons get
@@ -1742,6 +1784,7 @@ impl App for Runner {
                     .map(|(x, y)| (x as f32, y as f32))
             });
             self.build_units(alpha, cursor);
+            self.build_effects(alpha, dt as f32);
             self.mark_selection();
             self.draw_cargo();
             self.draw_ghost();

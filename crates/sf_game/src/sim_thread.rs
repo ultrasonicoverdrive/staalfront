@@ -69,6 +69,14 @@
 //! interpolates inside the newest one; a frame that comes between two
 //! publishes draws the same snapshot with a larger alpha ([`interpolation_alpha`]).
 //!
+//! # Effects events
+//!
+//! The world's report of shots, impacts and deaths covers one tick, and a pass of several ticks publishes
+//! one snapshot, so a snapshot cannot carry them (follow-up 31). Right after every `World::step` the thread
+//! calls [`crate::fx_events::record`] and appends the result to a queue in [`Shared`]
+//! ([`SimHandle::drain_fx`] empties it, once per frame); it holds at most
+//! [`crate::fx_events::FX_QUEUE_CAP`] events and counts what it drops ([`SimCounters::fx_dropped`]).
+//!
 //! # Determinism
 //!
 //! Nothing here touches the rules: the thread only calls `World::schedule`
@@ -93,6 +101,7 @@ use std::time::{Duration, Instant};
 
 use sf_sim::{Command, PlacementRejection, PlayerId, TICK_MILLIS, Tick, World};
 
+use crate::fx_events::{self, FxEvent, FxQueue};
 use crate::sim_snapshot::{GhostQuery, Pace, SimSnapshot, Statics};
 
 /// One sim tick of wall time (20 Hz).
@@ -255,6 +264,12 @@ pub struct SimCounters {
     /// The most ticks one pass has stepped: never more than
     /// `1 + max_catch_up`.
     pub max_pass_ticks: u64,
+    /// Effects events recorded (WP5.6a), the dropped ones included.
+    pub fx_recorded: u64,
+    /// Effects events dropped because the queue was full ([`crate::fx_events::FX_QUEUE_CAP`]).
+    pub fx_dropped: u64,
+    /// Effects events that could not be given a position.
+    pub fx_unresolved: u64,
 }
 
 enum Msg {
@@ -290,11 +305,16 @@ struct Shared {
     late_commands: AtomicU64,
     late_publishes: AtomicU64,
     max_pass_ticks: AtomicU64,
+    fx_recorded: AtomicU64,
+    fx_dropped: AtomicU64,
+    fx_unresolved: AtomicU64,
     /// Commands that were moved to a later tick, the last [`MOVED_LOG_CAP`].
     moved: Mutex<Vec<LoggedCommand>>,
     /// Every `BuildStructure` the world refused (WP6.2): how many in all, and the last
     /// [`REJECTED_LOG_CAP`] of them.
     rejected: Mutex<(u64, Vec<PlacementRejection>)>,
+    /// The effects events of every tick, until the main thread takes them (WP5.6a).
+    fx: Mutex<FxQueue>,
 }
 
 /// A lock that a panic elsewhere does not poison for good: the data behind
@@ -331,8 +351,12 @@ impl SimHandle {
             late_commands: AtomicU64::new(0),
             late_publishes: AtomicU64::new(0),
             max_pass_ticks: AtomicU64::new(0),
+            fx_recorded: AtomicU64::new(0),
+            fx_dropped: AtomicU64::new(0),
+            fx_unresolved: AtomicU64::new(0),
             moved: Mutex::new(Vec::new()),
             rejected: Mutex::new((0, Vec::new())),
+            fx: Mutex::new(FxQueue::new()),
         });
         let (tx, rx) = mpsc::channel();
         let period = config.period;
@@ -347,6 +371,7 @@ impl SimHandle {
             ghost: None,
             log: Vec::new(),
             last_step: Duration::ZERO,
+            fx_scratch: Vec::with_capacity(256),
         };
         let join = thread::Builder::new()
             .name("sf-sim".into())
@@ -401,6 +426,14 @@ impl SimHandle {
         lock(&self.shared.rejected).clone()
     }
 
+    /// Moves every effects event recorded since the last call to the end of `out`, in tick order (WP5.6a).
+    /// Each event is delivered once; none is lost to a catch-up pass or a snapshot nobody read, apart from
+    /// the ones a full queue dropped ([`SimCounters::fx_dropped`]). Call it once per frame, with a vector
+    /// that is reused.
+    pub fn drain_fx(&self, out: &mut Vec<FxEvent>) {
+        lock(&self.shared.fx).drain_into(out);
+    }
+
     /// Starts the clock of a thread made with [`SimConfig::start_paused`].
     pub fn start(&self) {
         let _ = self.tx.send(Msg::Start);
@@ -440,6 +473,9 @@ impl SimHandle {
             late_publishes: s.late_publishes.load(Ordering::Relaxed),
             step_micros: s.step_micros.load(Ordering::Relaxed),
             max_pass_ticks: s.max_pass_ticks.load(Ordering::Relaxed),
+            fx_recorded: s.fx_recorded.load(Ordering::Relaxed),
+            fx_dropped: s.fx_dropped.load(Ordering::Relaxed),
+            fx_unresolved: s.fx_unresolved.load(Ordering::Relaxed),
         }
     }
 
@@ -545,6 +581,8 @@ struct Sim {
     ghost: Option<GhostQuery>,
     log: Vec<LoggedCommand>,
     last_step: Duration,
+    /// Where [`fx_events::record`] puts a tick's events before they join the queue (reused).
+    fx_scratch: Vec<FxEvent>,
 }
 
 impl Sim {
@@ -718,6 +756,7 @@ impl Sim {
         let began = Instant::now();
         let number = self.world.tick().0;
         let report = self.world.step();
+        self.record_fx();
         if report.placements_rejected > 0 {
             let mut kept = lock(&self.shared.rejected);
             kept.0 += u64::from(report.placements_rejected);
@@ -754,6 +793,31 @@ impl Sim {
         if ran.is_multiple_of(CHECKPOINT_EVERY) {
             lock(&shared.checkpoints).push((ran, report.checksum));
         }
+    }
+
+    /// The effects events of the tick that has just run, into the queue (WP5.6a). Read-only on the world.
+    fn record_fx(&mut self) {
+        self.fx_scratch.clear();
+        let unresolved = fx_events::record(&self.world, &mut self.fx_scratch);
+        if self.fx_scratch.is_empty() && unresolved == 0 {
+            return;
+        }
+        let mut queue = lock(&self.shared.fx);
+        let (dropped_before, recorded_before) = (queue.dropped(), queue.recorded());
+        for event in self.fx_scratch.drain(..) {
+            queue.push(event);
+        }
+        queue.add_unresolved(unresolved);
+        let shared = &self.shared;
+        shared
+            .fx_recorded
+            .fetch_add(queue.recorded() - recorded_before, Ordering::Relaxed);
+        shared
+            .fx_dropped
+            .fetch_add(queue.dropped() - dropped_before, Ordering::Relaxed);
+        shared
+            .fx_unresolved
+            .fetch_add(unresolved, Ordering::Relaxed);
     }
 
     /// Builds the snapshot of the world as it is and makes it the newest.

@@ -39,11 +39,16 @@
 //! colour, `team` = player colour), and parts (hull, turret, barrel) posed per
 //! instance ([`model::pose_parts`]), one draw call per part per level.
 //!
+//! WP5.6a adds the effects ([`effects`]): a particle pool and tracer dots drawn as screen-facing soft discs
+//! in one instanced, premultiplied-alpha call, with the zoom rules (pixel clamp, fade with the icon
+//! cross-fade, fewer particles at middle zoom, a death flash kept at strategic zoom).
+//!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
 
 pub mod camera;
 pub mod cell_overlay;
+pub mod effects;
 pub mod frustum;
 pub mod glb;
 pub mod gpu;
@@ -68,6 +73,7 @@ mod terrain_gpu;
 pub mod terrain_look;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
+pub use effects::{EffectInstance, EmitView, ParticlePool, ZoomBand};
 pub use frustum::{Aabb, Frustum, Visibility};
 /// Re-exported so the game can name the `Mat4` and `Vec3` of the camera and the picking without a second dependency.
 pub use glam;
