@@ -1,0 +1,79 @@
+// Ore on the map (WP7.1): amounts per cell, taking, depletion and slow regrowth on the
+// 256 by 256 cell playfield (assets/maps/playfield256, 215 ore cells in eight fields).
+// Pinned by ore_256.expected; the test tools/sf_headless/tests/ore.rs asserts the amounts.
+// The ore rules are written out here (a frozen copy of the idea of assets/config/ore.ron, with
+// a short regrowth period so that 600 ticks show it): editing the shipped file never moves
+// this checksum.
+//
+//   field A  28 cells around (118, 82): emptied at tick 5 (take 500 from every cell)
+//   field B  27 cells around (46, 118): 80 taken from every cell at tick 5 (40 left)
+//   field C  47 cells around (53, 234): untouched
+//   (the other five fields are untouched too)
+//
+// A cell grows by 2 every 20 ticks, in the ticks t with t % 20 == its place in the list of the
+// 215 ore cells (row-major) % 20, up to 160. There are no entities.
+Scenario(
+    name: "ore_256",
+    seed: 0x0E57_0071,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    ore: Some((start: 120, max: 160, regrow_amount: 2, regrow_period: 20)),
+    ticks: 600,
+    commands: [
+        (tick: 5, command: TakeOre(cell: (118, 79), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (116, 80), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (117, 80), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (118, 80), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (119, 80), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (120, 80), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (116, 81), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (117, 81), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (118, 81), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (119, 81), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (120, 81), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (115, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (116, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (117, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (118, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (119, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (120, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (121, 82), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (116, 83), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (117, 83), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (118, 83), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (119, 83), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (120, 83), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (116, 84), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (117, 84), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (118, 84), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (119, 84), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (120, 84), amount: 500)),
+        (tick: 5, command: TakeOre(cell: (45, 115), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (43, 116), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (44, 116), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (45, 116), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (46, 116), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (47, 116), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (43, 117), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (44, 117), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (45, 117), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (46, 117), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (47, 117), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (44, 118), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (45, 118), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (46, 118), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (47, 118), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (48, 118), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (43, 119), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (44, 119), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (45, 119), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (46, 119), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (47, 119), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (43, 120), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (44, 120), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (45, 120), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (46, 120), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (47, 120), amount: 80)),
+        (tick: 5, command: TakeOre(cell: (45, 121), amount: 80)),
+    ],
+)

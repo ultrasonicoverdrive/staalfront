@@ -134,9 +134,11 @@ pub fn sim_terrain(map: &Map) -> Result<Option<Terrain>, String> {
 /// reports it and stops (`sf_game` exits with status 1).
 pub fn make_world(config: WorldConfig, map: &Map) -> Result<World, String> {
     match sim_terrain(map).map_err(|e| format!("terrain layer refused: {e}"))? {
-        Some(terrain) => {
-            World::with_terrain(config, terrain).map_err(|e| format!("terrain layer refused: {e}"))
-        }
+        Some(terrain) => World::with_terrain(config, terrain)
+            .map_err(|e| format!("terrain layer refused: {e}"))?
+            // The ore of the map (WP7.1): every ore cell holds its start amount and grows back.
+            .with_ore(sf_bridge::ore_rules(&sf_data::ore::OreSettings::embedded()))
+            .map_err(|e| format!("ore rules refused: {e}")),
         None => World::new(config).map_err(|e| format!("map size refused: {e}")),
     }
 }

@@ -314,6 +314,13 @@
 //! them, by taking an [`Order::Pursue`] on it and going back to the order they had afterwards. The rules
 //! are in `docs/rules/targeting.md`.
 //!
+//! # Ore
+//!
+//! A world given [`OreRules`] ([`World::with_ore`]) keeps an amount of ore per harvestable cell
+//! ([`ore`], `docs/rules/economy.md`): taken by [`Command::TakeOre`] (and later by the harvester),
+//! growing back slowly on a fixed schedule, found with [`World::nearest_ore`]. The terrain type of
+//! an emptied cell does not change. A world without the rules has no ore state and hashes as before.
+//!
 //! # Not here yet
 //!
 //! The destruction of what is shot down (WP5.5), and
@@ -332,6 +339,7 @@ pub mod formation;
 pub mod ids;
 pub mod movement;
 pub mod orders;
+pub mod ore;
 pub mod path;
 pub mod placement;
 pub mod projectiles;
@@ -366,6 +374,7 @@ pub use orders::{
     ARRIVE_TOLERANCE, GUARD_CLOSE, GUARD_LEASH, GuardTarget, ORDER_QUEUE_CAP, Order, SCATTER_MAX,
     SCATTER_MIN, scatter_offset,
 };
+pub use ore::{Ore, OreRules};
 pub use path::{
     ABS_CAP, DEFAULT_FLOWFIELD_THRESHOLD, DEFAULT_NODE_BUDGET, DEFAULT_REPLAN_COOLDOWN,
     DEFAULT_REPLAN_MAX, DEFAULT_RETARGET_COOLDOWN, FIELD_IDLE_TICKS, FIELD_POOL, FIELD_SECTORS,

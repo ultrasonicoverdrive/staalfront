@@ -35,6 +35,7 @@
 //! ```
 
 use sf_data::movement::MovementCosts;
+use sf_data::ore::OreSettings;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{
@@ -286,6 +287,16 @@ pub fn path_budget(settings: &SimSettings) -> u32 {
 /// (which refuses one).
 pub fn flowfield_threshold(settings: &SimSettings) -> u32 {
     settings.flowfield_threshold
+}
+
+/// The ore rules of the world (WP7.1) from the settings of `ore.ron`.
+pub fn ore_rules(settings: &OreSettings) -> sf_sim::OreRules {
+    sf_sim::OreRules {
+        start: settings.start,
+        max: settings.max,
+        regrow_amount: settings.regrow_amount,
+        regrow_period: settings.regrow_period,
+    }
 }
 
 /// The collision settings from the settings of `sim.ron`, to hand to
