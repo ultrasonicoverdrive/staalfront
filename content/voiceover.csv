@@ -87,9 +87,11 @@ F1-M10,MSG_02,MIRA,Secure the data room before the evacuation protocol wipes it.
 F1-M10,MSG_03,MIRA,Marshalling yard north-east of the centre. That is the offensive: heavy armour fuelling now. Intercepts say they move in fifteen minutes. Hit the yard before then or meet it at the gate.
 F1-M10,MSG_04,MIRA,"You are inside the inner wall and the centre knows it. Evacuation protocol has started. Six minutes until the archive erases itself. The protocol is running off the generator beside the archive; kill the generator and the clock stops, but the doors stay sealed until an engineer is inside."
 F1-M10,MSG_05,MIRA,Three minutes on the wipe. Do not shell the archive. Everything we have fought for is in that building.
-F1-M10,MSG_06,CAPTAIN ELIAN,The offensive is moving. Everything you have at the south gate. The archive can wait six minutes; the base cannot.
+F1-M10,MSG_06,CAPTAIN ELIAN,The offensive is moving. Everything you have at the south gate. The archive can wait; the base cannot.
 F1-M10,MSG_07,MIRA,"Data room is ours and the wipe is stopped. Elian, these deployment orders were not written here. The routing header is the private network from the relay logs, and the same header is on orders addressed to our side."
 F1-M10,MSG_08,OPERATIONS,Archive erased. Regional command centre destroyed. No records recovered.
+F1-M10,MSG_09,OPERATIONS,Protocol power already cut. Capture the archive with an engineer.
+F1-M10,MSG_10,OPERATIONS,Protocol generator destroyed before activation. The archive still requires engineer capture.
 F2-M01,MSG_01,DRAVEC,"Tracks lead north, but the snow has hidden their numbers."
 F2-M01,MSG_02,COMMANDER SAVA,Establish a foothold and clear the junction. Expect a second group to emerge once we commit.
 F2-M01,MSG_03,COMMANDER SAVA,"Power and a barracks. That is a foothold. Now the junction: their outpost sits on the north road, four structures, light guard. Take it down."

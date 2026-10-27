@@ -15,7 +15,7 @@ This package is the complete design plan for the Staalfront campaigns: world bib
 - `production.md`: phases, pipeline, mapping onto PLAN.md (§2a), engine data and trigger primitives against PLAN (§3, §3a), audio/art scope, testing, risks, open decisions.
 - `scripts/validate.py`: `python3 -I content/scripts/validate.py` checks every mission document (references resolve, roles exist, objectives have completing triggers, win/lose present, MSG speakers are in `cast.md`) and every briefing (cues are in `cast.md`, speakers are in the room or marked (V.O.)/(O.S.), transitions other than `TO:` start with `>`), and scans all of `content/` for names that belong to other games (B5). Templates and examples are skipped unless named. Run before each commit.
 - `scripts/export_messages.py`: exports all in-mission lines to `voiceover.csv` for the recording session or the voice tool.
-- `voiceover.csv`: current export (193 lines, 16 of them OPERATIONS).
+- `voiceover.csv`: current export (195 lines, 18 of them OPERATIONS).
 
 ## Implementation status
 All 20 mission documents carry mission-specific maps (zones, points, size in cells), players, starting setups, variables/timers in seconds, teams, triggers, objectives, flow and test scenarios. All 40 mission and briefing files pass `scripts/validate.py` with zero errors.
