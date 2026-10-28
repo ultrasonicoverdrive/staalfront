@@ -278,7 +278,20 @@ fn shipped_mapping_names_are_pinned() {
         ("unit.move", "ACKNO.V01"),
         ("unit.attack", "AFFIRM1.V01"),
         ("building.placed", "PLACBLDG.AUD"),
-        ("explosion.small", "KABOOM1.AUD"),
+        ("explosion.small", "KABOOM15.AUD"),
+        ("weapon.fire.bullet", "GUN11.AUD"),
+        ("weapon.fire.precision", "GUN5.AUD"),
+        ("weapon.fire.cannon", "CANNON1.AUD"),
+        ("weapon.fire.rocket", "MISSILE6.AUD"),
+        ("weapon.fire.shell", "TURRET1.AUD"),
+        ("weapon.fire.howitzer", "TANK5.AUD"),
+        ("impact.cannon", "KABOOM12.AUD"),
+        ("impact.rocket", "KABOOM25.AUD"),
+        ("impact.shell", "KABOOM15.AUD"),
+        ("impact.demolition", "KABOOM22.AUD"),
+        ("explosion.medium", "KABOOM22.AUD"),
+        ("explosion.large", "KABOOM22.AUD"),
+        ("unit.destroyed.infantry", "DEDMAN1.AUD"),
     ];
     assert_eq!(m.sounds.len(), want.len(), "{:?}", m.sounds);
     for (event, name) in want {
