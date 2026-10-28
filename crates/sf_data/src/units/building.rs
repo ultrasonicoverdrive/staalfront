@@ -138,7 +138,15 @@ pub struct BuildingDef {
     /// (one with a cost); each must be a Structure that is buildable or the
     /// base anchor, and available to every faction this one is.
     pub requires: Vec<String>,
+    /// Units of ore this structure stores for its owner while it stands (WP7.3,
+    /// `docs/rules/economy.md`, "Storage"). Default 0: it stores nothing. At most
+    /// [`MAX_STORAGE`].
+    pub storage: u32,
 }
+
+/// The largest `storage` a structure may have: a hundred full harvester loads of today's data,
+/// far above any placeholder, and small enough that a player's sum never comes near `u64`.
+pub const MAX_STORAGE: u32 = 1_000_000;
 
 /// The checks of one record's `building` block (everything but the cycle).
 pub(crate) fn check_record(
@@ -170,6 +178,12 @@ pub(crate) fn check_record(
             ));
         }
         _ => {}
+    }
+    if b.storage > MAX_STORAGE {
+        return Err(at(
+            "storage",
+            format!("storage {} is above the maximum {MAX_STORAGE}", b.storage),
+        ));
     }
     let bad = |what: &str| at(&u.id, format!("function {f:?} needs {what}"));
     match f {

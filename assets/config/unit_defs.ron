@@ -80,7 +80,7 @@
         ),
         (
             kind: 2, id: "refinery", factions: [Meridian, Veyran], category: Structure,
-            building: (function: HarvesterDock, exit_side: PosX, requires: ["power_plant"]),
+            building: (function: HarvesterDock, exit_side: PosX, requires: ["power_plant"], storage: 2000),
             cost: 1200, build_seconds: 40, hp: 900, armor: "structure", power: -30,
             footprint: (width: 3, height: 4), sight: 5,
             flags: (comes_with: "harvester"),
@@ -90,7 +90,7 @@
                 Veyran: Glb("set_v4/veyran_refinery.glb"),
             },
             icon: "refinery",
-            // placeholder: build_seconds, sight.
+            // placeholder: build_seconds, sight, storage (ten harvester loads).
         ),
         (
             kind: 3, id: "barracks", factions: [Meridian, Veyran], category: Structure,

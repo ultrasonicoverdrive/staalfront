@@ -164,6 +164,9 @@ pub enum ConfigError {
     /// is not a mobile unit of the table; or a unit or building table was given after the harvest
     /// rules, which froze the harvester and dock kinds from the tables (WP7.2).
     Harvest,
+    /// The storage capacities were given without harvest rules, twice, after the start, or with a
+    /// kind that is not a structure of the building table, a kind twice or a zero (WP7.3).
+    Storage,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -221,6 +224,10 @@ impl fmt::Display for ConfigError {
             ConfigError::Buildings(_) => "the building table does not fit the unit table",
             ConfigError::OreRules => {
                 "the ore rules must be given before the world starts and be valid"
+            }
+            ConfigError::Storage => {
+                "the storage capacities must be given once, after the harvest rules and before the world \
+                 starts, for structures of the building table, each kind once and above zero"
             }
             ConfigError::Harvest => {
                 "the harvest rules must be given before the world starts, after the unit and building tables, \
@@ -514,6 +521,32 @@ impl World {
         Ok(self)
     }
 
+    /// The same world with ore storage (WP7.3, `docs/rules/economy.md`, "Storage"): each
+    /// standing structure of a kind in `capacities` holds that many units of ore for its owner,
+    /// and a refinery takes off a harvester only what still fits. Call it after
+    /// [`World::with_harvest`] and before anything is scheduled. Refused with
+    /// [`ConfigError::Storage`] without harvest rules, after the start, given twice, or for a kind
+    /// that is not a structure of the building table, a kind listed twice or a capacity of zero
+    /// (leave such a kind out). A world without it has no limit and hashes as before.
+    pub fn with_storage(mut self, capacities: &[(Kind, u32)]) -> Result<World, ConfigError> {
+        let mut table = capacities.to_vec();
+        table.sort_unstable_by_key(|&(k, _)| k);
+        let structure = |k: Kind| self.buildings.get(k).is_some();
+        let bad = self.tick != Tick::ZERO
+            || self.entities.len() != 0
+            || !self.queue.is_empty()
+            || table.windows(2).any(|p| p[0].0 == p[1].0)
+            || table.iter().any(|&(k, n)| n == 0 || !structure(k));
+        let units = &self.units;
+        match self.harvest.as_deref_mut() {
+            Some(h) if !bad && !h.has_storage() => {
+                h.set_storage(table, units);
+                Ok(self)
+            }
+            _ => Err(ConfigError::Storage),
+        }
+    }
+
     /// The same world with the terrain costs of the movement classes (WP4.1,
     /// [`MovementTable`]). Call it right after the world is made, before
     /// anything is scheduled ([`ConfigError::MovementAfterStart`] otherwise).
@@ -777,6 +810,23 @@ impl World {
     /// this counter; see `docs/rules/economy.md`.
     pub fn ore_delivered(&self, player: PlayerId) -> u64 {
         self.harvest.as_deref().map_or(0, |h| h.delivered(player))
+    }
+
+    /// The ore `player` has stored (WP7.3). Zero without storage rules. Nothing spends it yet
+    /// (money is WP7.4), so with storage it equals [`World::ore_delivered`].
+    pub fn ore_stored(&self, player: PlayerId) -> u64 {
+        self.harvest.as_deref().map_or(0, |h| h.stored(player))
+    }
+
+    /// The storage capacity of `player` (WP7.3): the sum over its standing structures, as of the
+    /// last tick. Zero without storage rules.
+    pub fn storage_capacity(&self, player: PlayerId) -> u64 {
+        self.harvest.as_deref().map_or(0, |h| h.capacity(player))
+    }
+
+    /// Whether the world was given storage rules ([`World::with_storage`]).
+    pub fn has_storage(&self) -> bool {
+        self.harvest.as_deref().is_some_and(Harvest::has_storage)
     }
 
     /// What harvester `id` is doing and how much it carries; `None` for anything that is not a

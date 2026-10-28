@@ -33,7 +33,8 @@
 //! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
 //! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
 //! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
-//! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2). It is the last section |
+//! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2) |
+//! | storage (`V`), only in a world given storage rules (and so harvest rules) | the capacity table (kind and units, ascending), then per player the ore stored and the capacity of its standing buildings at the last sync (WP7.3). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -204,6 +205,7 @@ const SECTION_BUILDINGS: u8 = b'B';
 const SECTION_CONSTRUCTION: u8 = b'N';
 const SECTION_ORE: u8 = b'E';
 const SECTION_HARVEST: u8 = b'H';
+const SECTION_STORAGE: u8 = b'V';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -592,6 +594,12 @@ impl World {
         if let Some(harvest) = &self.harvest {
             h.write_u8(SECTION_HARVEST);
             harvest.write_hash(&mut h);
+            // Storage (`V`, WP7.3): only in a world given storage rules, after `H`, so a harvest
+            // world without storage hashes as before.
+            if harvest.has_storage() {
+                h.write_u8(SECTION_STORAGE);
+                harvest.write_storage_hash(&mut h);
+            }
         }
 
         h.finish()

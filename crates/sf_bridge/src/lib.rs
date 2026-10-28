@@ -324,6 +324,17 @@ pub fn harvest_rules(settings: &HarvestSettings) -> sf_sim::HarvestRules {
     }
 }
 
+/// The storage capacities of the structures (WP7.3): every structure of `defs` with a `storage`
+/// above zero, as `(kind, units of ore)`, ascending by kind. To hand to
+/// [`World::with_storage`](sf_sim::World::with_storage) after the harvest rules.
+pub fn storage_capacities(defs: &UnitDefs) -> Vec<(Kind, u32)> {
+    defs.sim_buildings()
+        .iter()
+        .filter(|b| b.storage > 0)
+        .map(|b| (Kind(b.kind), b.storage))
+        .collect()
+}
+
 /// The kinds that harvest (WP7.2): the roles of `defs` with the `harvests` flag, ascending by
 /// kind. To hand to [`World::with_harvest`](sf_sim::World::with_harvest) with the rules.
 pub fn harvester_kinds(defs: &UnitDefs) -> Vec<Kind> {

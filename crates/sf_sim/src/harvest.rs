@@ -396,6 +396,43 @@ pub(crate) struct Harvest {
     delivered: Vec<(PlayerId, u64)>,
     /// Scratch: the live harvester slots of this tick.
     live: Vec<u32>,
+    /// Storage (WP7.3): `None` for a world without storage rules, whose docks take every load.
+    storage: Option<Storage>,
+}
+
+/// Ore storage (WP7.3, `docs/rules/economy.md`, "Storage"): what each standing building holds
+/// and what each player has stored.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct Storage {
+    /// The capacities as given: kind and units of ore, ascending by kind, no zeros.
+    table: Vec<(Kind, u32)>,
+    /// Per position in the unit table: the capacity of that kind (zero for most).
+    per_def: Vec<u32>,
+    /// Ore stored per player (ascending). Nothing spends it yet (WP7.4).
+    stored: Vec<(PlayerId, u64)>,
+    /// The capacity per player (ascending), summed over the standing buildings in the sync pass
+    /// of this tick.
+    capacity: Vec<(PlayerId, u64)>,
+}
+
+fn add_to(v: &mut Vec<(PlayerId, u64)>, player: PlayerId, n: u64) {
+    match v.binary_search_by_key(&player, |&(p, _)| p) {
+        Ok(k) => v[k].1 = v[k].1.saturating_add(n),
+        Err(k) => v.insert(k, (player, n)),
+    }
+}
+
+fn get_of(v: &[(PlayerId, u64)], player: PlayerId) -> u64 {
+    v.binary_search_by_key(&player, |&(p, _)| p)
+        .map_or(0, |k| v[k].1)
+}
+
+fn hash_pairs(h: &mut Fnv1a64, v: &[(PlayerId, u64)]) {
+    h.write_u64(v.len() as u64);
+    for &(player, n) in v {
+        h.write_u8(player.0);
+        h.write_u64(n);
+    }
 }
 
 fn centre(index: u32, width: u32) -> Vec2 {
@@ -438,7 +475,50 @@ impl Harvest {
             claims: BTreeMap::new(),
             delivered: Vec::new(),
             live: Vec::new(),
+            storage: None,
         }
+    }
+
+    /// Turns storage on (WP7.3) with the capacity of each kind in `table`; kinds not in the
+    /// table hold nothing. `table` is ascending by kind without duplicates or zeros (the caller,
+    /// `World::with_storage`, checks that).
+    pub(crate) fn set_storage(&mut self, table: Vec<(Kind, u32)>, units: &crate::units::UnitTable) {
+        let per_def = units
+            .iter()
+            .map(|s| {
+                table
+                    .binary_search_by_key(&s.kind, |&(k, _)| k)
+                    .map_or(0, |j| table[j].1)
+            })
+            .collect();
+        self.storage = Some(Storage {
+            table,
+            per_def,
+            stored: Vec::new(),
+            capacity: Vec::new(),
+        });
+    }
+
+    pub(crate) fn has_storage(&self) -> bool {
+        self.storage.is_some()
+    }
+
+    /// Ore stored by `player`; zero without storage rules.
+    pub(crate) fn stored(&self, player: PlayerId) -> u64 {
+        self.storage.as_ref().map_or(0, |s| get_of(&s.stored, player))
+    }
+
+    /// The storage capacity of `player` as of the last tick; zero without storage rules.
+    pub(crate) fn capacity(&self, player: PlayerId) -> u64 {
+        self.storage
+            .as_ref()
+            .map_or(0, |s| get_of(&s.capacity, player))
+    }
+
+    /// Room left for `player`: `None` without storage rules (no limit).
+    fn room(&self, player: PlayerId) -> Option<u64> {
+        let s = self.storage.as_ref()?;
+        Some(get_of(&s.capacity, player).saturating_sub(get_of(&s.stored, player)))
     }
 
     pub(crate) fn rules(&self) -> &HarvestRules {
@@ -456,9 +536,9 @@ impl Harvest {
     }
 
     fn credit(&mut self, player: PlayerId, n: u64) {
-        match self.delivered.binary_search_by_key(&player, |&(p, _)| p) {
-            Ok(k) => self.delivered[k].1 = self.delivered[k].1.saturating_add(n),
-            Err(k) => self.delivered.insert(k, (player, n)),
+        add_to(&mut self.delivered, player, n);
+        if let Some(s) = &mut self.storage {
+            add_to(&mut s.stored, player, n);
         }
     }
 
@@ -582,9 +662,25 @@ impl Harvest {
         let mut live = std::mem::take(&mut self.live);
         live.clear();
         let mut docks: Vec<Dock> = Vec::new();
+        let mut capacity = self
+            .storage
+            .as_mut()
+            .map(|s| std::mem::take(&mut s.capacity));
+        if let Some(c) = &mut capacity {
+            c.clear();
+        }
         for i in 0..slots {
             let def = e.def[i];
             let alive = e.alive[i] && def != NO_DEF;
+            // Storage counts the standing buildings only (complete, with hit points).
+            if alive
+                && let (Some(c), Some(s)) = (&mut capacity, &self.storage)
+                && let Some(&cap) = s.per_def.get(def as usize)
+                && cap > 0
+                && w.is_standing(i)
+            {
+                add_to(c, e.owner[i], u64::from(cap));
+            }
             let is_harvester = alive
                 && self
                     .harvester_def
@@ -628,6 +724,9 @@ impl Harvest {
         }
         self.docks = docks;
         self.live = live;
+        if let (Some(s), Some(c)) = (&mut self.storage, capacity) {
+            s.capacity = c;
+        }
     }
 
     fn new_dock(&self, w: &World, i: usize, id: EntityId) -> Option<Dock> {
@@ -747,7 +846,12 @@ impl Harvest {
             if wait == 0 {
                 let slot = who.index() as usize;
                 let load = self.units[slot].core.load;
-                let n = load.min(rules.unload_amount);
+                // A full store takes nothing: the harvester stays in the bay, holding the rest of
+                // its load, and the dock tries again after `unload_period` (WP7.3).
+                let room = self
+                    .room(w.entities.owner[slot])
+                    .map_or(u16::MAX, |r| u16::try_from(r).unwrap_or(u16::MAX));
+                let n = load.min(rules.unload_amount).min(room);
                 if n > 0 {
                     self.credit(w.entities.owner[slot], u64::from(n));
                     self.reply(who, Reply::Unloaded(n));
@@ -1263,6 +1367,20 @@ impl Harvest {
 
     // ---- hashing --------------------------------------------------------------------------
 
+    /// The storage section (WP7.3); writes nothing without storage rules.
+    pub(crate) fn write_storage_hash(&self, h: &mut Fnv1a64) {
+        let Some(s) = &self.storage else {
+            return;
+        };
+        h.write_u64(s.table.len() as u64);
+        for &(k, n) in &s.table {
+            h.write_bytes(&k.0.to_le_bytes());
+            h.write_bytes(&n.to_le_bytes());
+        }
+        hash_pairs(h, &s.stored);
+        hash_pairs(h, &s.capacity);
+    }
+
     pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         let r = &self.rules;
         for v in [
@@ -1291,11 +1409,7 @@ impl Harvest {
         for k in &self.kinds {
             h.write_bytes(&k.0.to_le_bytes());
         }
-        h.write_u64(self.delivered.len() as u64);
-        for &(player, n) in &self.delivered {
-            h.write_u8(player.0);
-            h.write_u64(n);
-        }
+        hash_pairs(h, &self.delivered);
         let bound = self.units.iter().filter(|hv| hv.core.bound).count();
         h.write_u64(bound as u64);
         for (slot, hv) in self.units.iter().enumerate() {
