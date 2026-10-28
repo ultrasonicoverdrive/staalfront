@@ -10,7 +10,17 @@
 //           raw id "#1A2B3C4D" the F1 sound browser shows for entries whose
 //           name it does not know.
 //   names:  extra file names the sound browser should show instead of ids.
-//
+//   music:  which Red Alert tracks play in the calm and the combat mood (WP11.4). Shipped EMPTY on purpose:
+//           Staalfront ships no list of Red Alert file names. An empty list means every track of the music
+//           archive (SCORES.MIX, also as a subfolder of an extracted WAV folder), so Red Alert music works
+//           out of the box; with both lists empty, calm and combat play the same tracks. To tune the
+//           moods, open the F1 sound browser, play the tracks of SCORES.MIX, and list the names (or the
+//           "#1A2B3C4D" ids it shows) here, for example
+//               music: (calm: ["SOME_TRACK.AUD"], combat: ["#1A2B3C4D", "OTHER_TRACK"]),
+//           (made-up names). A name without extension means "<name>.AUD". Several tracks in a list play
+//           shuffled. A name that is not found is skipped with one warning; a mood without a playable
+//           track uses the default music of audio.ron (`music.fallback`), or silence.
+
 // Voice lines (select, move, attack) never exist as a bare ".AUD" in Red
 // Alert: they carry a variant as extension. ".Vnn" is the Allied accent and
 // ".Rnn" the Soviet accent; infantry lines use the odd variants (01, 03),
@@ -38,4 +48,8 @@
         "CONQUER.MIX",
         "SCORES.MIX",
     ],
+    music: (
+        calm: [],
+        combat: [],
+    ),
 )

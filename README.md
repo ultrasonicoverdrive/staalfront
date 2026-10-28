@@ -136,7 +136,7 @@ camera path and the same 5,000 units, plus shots, hits, deaths, wrecks and smoke
 ## Original Red Alert audio (optional)
 
 Staalfront ships only its own CC0 sounds. If you own Red Alert, it can play
-the original sound effects instead, read at runtime from **your own files**;
+the original sound effects, voices and music instead, read at runtime from **your own files**;
 nothing of Red Alert is ever part of Staalfront.
 
 1. Get the game files. EA released Red Alert as freeware in 2008; the official
@@ -151,6 +151,22 @@ nothing of Red Alert is ever part of Staalfront.
    `assets/audio/ra_mapping.ron`. The F1 panel's *Sound browser* lists every
    archive and sound found, plays them, and shows the names (or `#id`s) to put
    in the mapping.
+
+The same switch turns on the original **music** (dynamic: calm or combat). The
+mood follows the fight on screen: a few shots stay calm, a real skirmish near the
+camera turns the music to combat, and it returns to calm only after a quiet
+spell (the numbers are in the `music` section of `assets/config/audio.ron`).
+Without a mapping, every mood plays the tracks of the music archive
+(`SCORES.MIX`, found inside `MAIN.MIX` on the CD, or as a `SCORES.MIX` or
+`#E39A0C20` folder in an extracted WAV folder), shuffled, one after the other.
+With the shipped empty `music` section in `assets/audio/ra_mapping.ron`,
+calm and combat therefore play the same tracks until you map them: play the
+tracks in the F1 *Sound browser*, then list the names (or `#id`s) you want for
+each mood, for example `music: (calm: ["#1A2B3C4D"], combat: ["#0A0B0C0D", "#0E0F1011"])`.
+A track is decoded when it is about to play (on a background thread, about
+30 MiB of memory for a three-minute track), never all at once. Without the
+files, or with the switch off, the default music plays: silence, as there is
+no music in the sound bank yet (`music.fallback` in `audio.ron` can name a bank sound).
 
 Missing, unreadable or unknown files are fine: those events keep their CC0
 sound and the game prints one warning.

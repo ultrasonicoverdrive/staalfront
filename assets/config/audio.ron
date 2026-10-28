@@ -3,7 +3,7 @@
 // nothing here reaches the simulation. What the rules mean: docs/rules/audio.md.
 //
 // ra_audio: "Use original Red Alert audio" (WP11.7). Off by default; the CC0 sounds of assets/audio/bank.ron
-// always work. When on, the sounds named in assets/audio/ra_mapping.ron are read from the player's own Red
+// always work. When on, the music of SCORES.MIX plays too (see `music` below) and the sounds named in assets/audio/ra_mapping.ron are read from the player's own Red
 // Alert files under `path` (the install directory or the freeware download, or a folder of WAV files made by
 // `sf_ra_extract`; MIX archives and WAV files are searched a few directory levels deep). Missing or broken
 // files fall back to the CC0 sounds with one warning. `sf_game --ra-audio <path>` turns it on for one run.
@@ -37,6 +37,31 @@
     // Volumes, linear.
     mix: (
         sfx_volume: 1.0,
+        music_volume: 0.6,
+    ),
+
+    // Dynamic music (WP11.4). Calm or combat music is picked from what the game shows. Ticks are 20 per second.
+    //   crossfade_ms   crossfade between two tracks (and the fade-out of a stopped one)
+    //   mood.radius_m  only shots, hits and deaths within this many metres of the camera focus count
+    //   mood.weights   what one event of that kind counts for
+    //   mood.window_ticks, enter_score   calm turns to combat when the counted weights of the last
+    //                  window_ticks add up to enter_score
+    //   mood.min_hold_ticks, calm_after_ticks   combat turns back to calm only after at least min_hold_ticks
+    //                  in combat and calm_after_ticks without a counted event (so it does not flip back and forth)
+    //   fallback       the default music of a mood when no original Red Alert track is available: the name of
+    //                  a sound of bank.ron (a CC0 track), or None for silence. There is no music in the bank yet.
+    // Which Red Alert tracks play: assets/audio/ra_mapping.ron (`music`), only with ra_audio on.
+    music: (
+        crossfade_ms: 2500,
+        mood: (
+            radius_m: 80.0,
+            window_ticks: 100,
+            enter_score: 6,
+            min_hold_ticks: 200,
+            calm_after_ticks: 300,
+            weights: (fire: 1, impact: 1, death: 3),
+        ),
+        fallback: (calm: None, combat: None),
     ),
 
     // The sounds of the game's events (shots, hits, deaths): which of them play in a frame. The event names

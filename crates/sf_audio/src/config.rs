@@ -5,6 +5,7 @@
 //! - `mix`: volumes.
 //! - `positional`: which in-game sounds play, how many, how often
 //!   ([`crate::positional`]).
+//! - `music`: the calm/combat mood and the crossfade (WP11.4, [`crate::music`]).
 //!
 //! The shipped file is also compiled in ([`AudioConfig::embedded`]) and is
 //! the fallback when the file on disk is missing or broken, so there are no
@@ -17,6 +18,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::music::MusicConfig;
 use crate::ra::{CONFIG_FILE, RaAudioConfig};
 use crate::spatial::SpatialParams;
 
@@ -32,6 +34,7 @@ pub struct AudioConfig {
     pub spatial: SpatialConfig,
     pub mix: MixConfig,
     pub positional: PositionalConfig,
+    pub music: MusicConfig,
 }
 
 /// The numbers of [`SpatialParams`], in metres.
@@ -76,6 +79,7 @@ impl SpatialConfig {
 #[serde(deny_unknown_fields)]
 pub struct MixConfig {
     pub sfx_volume: f32,
+    pub music_volume: f32,
 }
 
 /// How one sound event is thinned out (see [`crate::positional`]).
@@ -232,6 +236,11 @@ impl AudioConfig {
         if !(v.is_finite() && (0.0..=2.0).contains(&v)) {
             return Err("mix.sfx_volume must be in [0, 2]".into());
         }
+        let v = self.mix.music_volume;
+        if !(v.is_finite() && (0.0..=2.0).contains(&v)) {
+            return Err("mix.music_volume must be in [0, 2]".into());
+        }
+        self.music.validate()?;
         let p = &self.positional;
         if p.max_cues_per_frame == 0 {
             return Err("positional.max_cues_per_frame must be at least 1".into());
@@ -304,7 +313,32 @@ mod tests {
                 audible_gain: 0.003,
             }
         );
-        assert_eq!(c.mix, MixConfig { sfx_volume: 1.0 });
+        assert_eq!(
+            c.mix,
+            MixConfig {
+                sfx_volume: 1.0,
+                music_volume: 0.6
+            }
+        );
+        use crate::music::{EventWeights, MoodConfig};
+        assert_eq!(c.music.crossfade_ms, 2500);
+        assert_eq!(
+            c.music.mood,
+            MoodConfig {
+                radius_m: 80.0,
+                window_ticks: 100,
+                enter_score: 6,
+                min_hold_ticks: 200,
+                calm_after_ticks: 300,
+                weights: EventWeights {
+                    fire: 1,
+                    impact: 1,
+                    death: 3
+                },
+            }
+        );
+        assert_eq!(c.music.fallback.calm, None);
+        assert_eq!(c.music.fallback.combat, None);
         let p = &c.positional;
         assert_eq!(p.max_cues_per_frame, 16);
         assert_eq!(p.fallback, rule(1, 3, 1, 6, 6.0));
@@ -379,6 +413,12 @@ mod tests {
             ("audible", Box::new(|c| c.spatial.audible_gain = 0.0)),
             ("nan", Box::new(|c| c.spatial.pan_growth = f32::NAN)),
             ("vol", Box::new(|c| c.mix.sfx_volume = -0.1)),
+            ("mvol", Box::new(|c| c.mix.music_volume = 3.0)),
+            ("mradius", Box::new(|c| c.music.mood.radius_m = 0.0)),
+            ("mwindow", Box::new(|c| c.music.mood.window_ticks = 0)),
+            ("mscore", Box::new(|c| c.music.mood.enter_score = 0)),
+            ("mcalm", Box::new(|c| c.music.mood.calm_after_ticks = 0)),
+            ("mfade", Box::new(|c| c.music.crossfade_ms = 31_000)),
             ("cap", Box::new(|c| c.positional.max_cues_per_frame = 0)),
             (
                 "max0",
@@ -430,7 +470,7 @@ mod tests {
         let ra = "ra_audio: (enabled: true, path: \"/games/ra\"),";
         // an out-of-range number, and an older file with ra_audio only
         for text in [
-            format!("({ra} spatial: (max_pan: 7.0), mix: (sfx_volume: 1.0))"),
+            format!("({ra} spatial: (max_pan: 7.0), mix: (sfx_volume: 1.0, music_volume: 0.6))"),
             format!("({ra})"),
         ] {
             std::fs::write(dir.join("config/audio.ron"), &text).unwrap();

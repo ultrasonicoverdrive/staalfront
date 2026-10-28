@@ -14,13 +14,15 @@
 
 use std::path::Path;
 
+use sf_audio::music::EventWeights;
 use sf_audio::ra::RaAudioConfig;
 use sf_audio::{
-    AudioConfig, AudioSystem, Category, Cue, Listener, PlanStats, Planner, Request, SpatialParams,
+    AudioConfig, AudioSystem, Category, Cue, Listener, Mood, MoodTracker, PlanStats, Planner,
+    Request, SpatialParams,
 };
 
 use crate::fx::FxPlayer;
-use crate::fx_events::FxEvent;
+use crate::fx_events::{FxEvent, FxKind};
 
 /// What the sound of the fight did, summed over the run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,6 +67,9 @@ pub fn start_audio(
     audio.enable_original_audio(&config.ra_audio);
     audio.set_spatial_params(config.spatial.params());
     audio.set_category_volume(Category::Sfx, config.mix.sfx_volume);
+    // Dynamic music (WP11.4): crossfade, default tracks, volume.
+    audio.set_music_config(&config.music);
+    audio.set_category_volume(Category::Music, config.mix.music_volume);
     (FxSound::new(&config), warning)
 }
 
@@ -72,6 +77,16 @@ pub fn start_audio(
 pub struct FxSound {
     planner: Planner,
     totals: SoundTotals,
+    mood: MoodTracker,
+}
+
+/// What one shown event counts for towards combat (`music.mood.weights` of `audio.ron`).
+pub fn mood_weight(kind: &FxKind, w: &EventWeights) -> u32 {
+    match kind {
+        FxKind::Fire { .. } => w.fire,
+        FxKind::Impact { .. } => w.impact,
+        FxKind::Death { .. } => w.death,
+    }
 }
 
 impl FxSound {
@@ -81,6 +96,7 @@ impl FxSound {
         FxSound {
             planner: Planner::new(config.positional.clone()),
             totals: SoundTotals::default(),
+            mood: MoodTracker::new(config.music.mood),
         }
     }
 
@@ -91,6 +107,36 @@ impl FxSound {
     /// Forget when things last played (a new game).
     pub fn reset(&mut self) {
         self.planner.reset();
+        self.mood.reset();
+    }
+
+    /// The mood of the music after the shown `events`, at sim tick `now`, with the camera looking at `focus`
+    /// (metres, `[x, z]`). Only events within `music.mood.radius_m` of the focus count. Device-free; the tests
+    /// call it.
+    pub fn mood_after(&mut self, events: &[FxEvent], focus: [f32; 2], now: u64) -> Mood {
+        let cfg = *self.mood.config();
+        let r2 = cfg.radius_m * cfg.radius_m;
+        for ev in events {
+            let (dx, dz) = (ev.pos[0] - focus[0], ev.pos[1] - focus[1]);
+            if dx * dx + dz * dz <= r2 {
+                self.mood.add(ev.tick, mood_weight(&ev.kind, &cfg.weights));
+            }
+        }
+        self.mood.update(now)
+    }
+
+    /// What the runner calls once a frame, **before** [`play_frame`](Self::play_frame) (which forgets the shown
+    /// events): the mood from the shown events, handed to the music. Returns the mood.
+    pub fn music_frame(
+        &mut self,
+        fx: &FxPlayer,
+        focus: [f32; 2],
+        now: u64,
+        audio: &mut AudioSystem,
+    ) -> Mood {
+        let mood = self.mood_after(fx.shown(), focus, now);
+        audio.set_music_mood(mood);
+        mood
     }
 
     /// The sounds the frame's shown events make, device-free. `has_sound` says which names have a sound.
@@ -804,5 +850,96 @@ mod tests {
             t.silent / n,
         );
         assert!(total / frames < std::time::Duration::from_millis(20));
+    }
+
+    // ---- the music mood (WP11.4) -------------------------------------------------------------------------
+
+    #[test]
+    fn the_weights_of_the_shipped_file_per_kind() {
+        let w = AudioConfig::embedded().music.mood.weights;
+        assert_eq!(mood_weight(&fire_at(1, [0.0; 2], 0).kind, &w), 1);
+        assert_eq!(
+            mood_weight(&hit_at(1, true, false, [0.0; 2], 0).kind, &w),
+            1
+        );
+        assert_eq!(mood_weight(&death_at(4.0, false, [0.0; 2], 0).kind, &w), 3);
+    }
+
+    #[test]
+    fn only_events_near_the_camera_focus_count() {
+        let (_, mut sound) = setup();
+        let cannon = weapon("cannon");
+        // 80 m is the shipped radius: ten shots just inside count, ten just outside do not.
+        let far: Vec<FxEvent> = (0..10)
+            .map(|t| fire_at(cannon, [12.0 + 80.5, 12.0], t))
+            .collect();
+        assert_eq!(sound.mood_after(&far, [12.0, 12.0], 10), Mood::Calm);
+        let near: Vec<FxEvent> = (0..10)
+            .map(|t| fire_at(cannon, [12.0 + 79.5, 12.0], t))
+            .collect();
+        assert_eq!(sound.mood_after(&near, [12.0, 12.0], 10), Mood::Combat);
+    }
+
+    /// A scripted fight through the game's own path (events -> `FxPlayer::frame` -> `music_frame` ->
+    /// `AudioSystem`): calm, a skirmish at ticks 100 to 160, calm again. The log lines are the evidence in the PR.
+    #[test]
+    fn a_scripted_fight_switches_the_music_with_hysteresis() {
+        let root = root_with("mood_fight", &["calm_theme", "combat_theme"]);
+        let mut cfg = AudioConfig::embedded();
+        cfg.music.fallback.calm = Some("calm_theme".into());
+        cfg.music.fallback.combat = Some("combat_theme".into());
+        let mut audio = AudioSystem::silent(&root.0);
+        audio.set_music_config(&cfg.music);
+        audio.set_music_trace(true);
+        let mut sound = FxSound::new(&cfg);
+        let mut fx = FxPlayer::embedded();
+        let cannon = weapon("cannon");
+        let mut world = World::new(WorldConfig::new(1).with_map_size(8, 8)).unwrap();
+        let mut log = Vec::new();
+        for t in 0..800u64 {
+            world.step();
+            let mut ev = Vec::new();
+            if (100..160).contains(&t) && t % 4 == 0 {
+                ev.push(fire_at(cannon, [32.0, 12.0], t));
+                ev.push(hit_at(cannon, true, false, [32.0, 12.0], t));
+            }
+            if t == 140 {
+                ev.push(death_at(4.0, false, [30.0, 14.0], t));
+            }
+            if t == 120 {
+                ev.push(fire_at(cannon, [2000.0, 2000.0], t)); // out of sight: not counted
+            }
+            fx.push_events(&ev);
+            fx.frame(
+                &SimSnapshot::capture(&world),
+                &FlatGround::default(),
+                &fx_frame(),
+            );
+            let now = world.tick().0;
+            sound.music_frame(&fx, [12.0, 12.0], now, &mut audio);
+            for tr in audio.take_music_trace() {
+                log.push(format!(
+                    "tick {now}: mood {} -> track {}",
+                    tr.mood.name(),
+                    tr.track
+                ));
+            }
+            fx.clear_shown();
+        }
+        for l in &log {
+            println!("{l}");
+        }
+        // Pinned: calm from the start; combat when the skirmish adds up to 6 (three volleys of shot plus hit,
+        // ticks 100 to 108, shown at snapshot tick 109); calm 300 ticks after the last counted event (the
+        // volley of tick 156; the far shot of tick 120 never counted). The skirmish itself, with 15 volleys
+        // and a death, does not flip it back and forth.
+        assert_eq!(
+            log,
+            [
+                "tick 1: mood calm -> track calm_theme",
+                "tick 109: mood combat -> track combat_theme",
+                "tick 456: mood calm -> track calm_theme",
+            ]
+        );
     }
 }

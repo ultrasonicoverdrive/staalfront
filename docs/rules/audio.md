@@ -74,12 +74,32 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
   start-up on a scratch `audio.ron` (other pan, volume and spacing) and checks the traced gain and pan and the number
   of cues follow it. The single `play_frame` call in `Runner::frame` is covered by the live run only.
 
+## 3b. Music (WP11.4)
+
+* Mood: shots, hits and deaths within `music.mood.radius_m` (80 m) of the camera focus count 1, 1 and 3. Calm turns to
+  combat at a score of 6 within 100 ticks (5 s). Combat turns back to calm after at least 200 ticks and 300 ticks
+  (15 s) without a counted event. Ticks are the sim's, 20 per second; the unit tests `sf_audio` `music::tests` and
+  `sf_game` `fx_sound::tests` (`a_scripted_fight_switches_the_music_with_hysteresis`, with tick labels) pin it.
+* Tracks: `ra_mapping.ron` `music` (empty = every track of `SCORES.MIX`), shuffled per mood, never the same twice in a
+  row. Without Red Alert files or with the switch off: `music.fallback` of `audio.ron` (a bank sound; shipped
+  `None` = silence), no error, no extra warning.
+* Loading: a track is decoded on a background thread when it is chosen. Measured in a release build on the dev
+  laptop (3-minute stereo 22.05 kHz IMA fixture, 3.9 MiB compressed): the archive scan 11 ms for three tracks (none
+  decoded), decode 37 to 38 ms per track on the thread, 30.3 MiB in memory per track, and the worst main-thread cost of a
+  `set_music_mood` + `update` call 0.12 ms over 80 calls (`music_switch_cost`, an `--ignored` test that prints the numbers).
+
 ## 4. Gaps
 
 * The bank has no weapon, impact or explosion sounds yet; only `explosion.small` has a Red Alert mapping. Follow-up
   31 in `docs/progress.md`: WP11.3b adds CC0 fight sounds, a WP11.7 follow-up extends `ra_mapping.ron`.
 * The sim emits no event for a unit being selected or ordered, a structure placed or finished, or a harvester
   unloading: those are WP11.2 (voices) and later; nothing was added to `sf_sim`.
-* Music (WP11.4) and the settings screen (WP11.5) are not part of this; `mix.sfx_volume` is the only volume setting.
+* The settings screen (WP11.5) is not part of this; `mix.sfx_volume` and `mix.music_volume` are set in the file.
 * `audio.ron` is read once at start; no hot reload.
 * A moving unit's sound stops at the place it had when the event happened (no Doppler, no following).
+* Music is decoded whole on a background thread, not streamed from disk: 30 MiB per running track, and the track starts a
+  few tens of milliseconds after the mood changes (the old one plays on until then). A streaming decoder would cut the memory.
+* With the shipped empty `music` section calm and combat draw from the same pool, so a mood change plays another track of
+  it. Tune by ear in the F1 sound browser and fill the lists in `ra_mapping.ron`.
+* The wiring in `Runner::frame` (one `music_frame` call) is covered by the live run only; the pieces it calls are unit-tested.
+* The end of a fight and a track change share one fade time (`music.crossfade_ms`).

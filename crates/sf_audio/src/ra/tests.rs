@@ -35,6 +35,7 @@ fn mapping(pairs: &[(&str, &str)]) -> Mapping {
             .map(|(a, b)| (a.to_string(), b.to_string()))
             .collect(),
         names: vec!["SOUNDS.MIX".into()],
+        ..Mapping::default()
     }
 }
 
@@ -140,7 +141,10 @@ fn load_resolves_the_mapping_by_name_and_id() {
     let got: Vec<&str> = l.sounds.keys().map(String::as_str).collect();
     assert_eq!(got, ["explosion.small", "ui.click", "unit.move"]);
     let w = l.warning.unwrap();
-    assert!(w.starts_with("2 of 5 mapped"), "{w}");
+    assert!(
+        w.starts_with("2 mapped Red Alert sounds or tracks not found"),
+        "{w}"
+    );
     assert!(w.contains("MISSING.AUD") && w.contains("BAD.AUD"), "{w}");
     std::fs::remove_dir_all(d).ok();
 }
@@ -357,5 +361,174 @@ fn overlapping_nested_entries_are_visited_once() {
     assert_eq!(entries, 200);
     assert!(entries <= MAX_ENTRIES && c.archives.len() <= MAX_ARCHIVES);
     assert_eq!(c.sound_count(), 50, "listed 50 times, decoded once");
+    std::fs::remove_dir_all(d).ok();
+}
+
+// ---- music (WP11.4) --------------------------------------------------------
+
+fn music_mapping(calm: &[&str], combat: &[&str]) -> Mapping {
+    Mapping {
+        music: MusicMapping {
+            calm: calm.iter().map(|s| s.to_string()).collect(),
+            combat: combat.iter().map(|s| s.to_string()).collect(),
+        },
+        ..mapping(&[])
+    }
+}
+
+/// `MAIN.MIX` > `SCORES.MIX` with three made-up tracks, and a sound archive
+/// that must not count as music.
+fn music_install(dir: &Path) {
+    let (_, private) = test_keypair();
+    let a = encode(&beep(1500), Compression::Ima);
+    let b = encode(&beep(2500), Compression::Westwood);
+    let scores = write_mix(
+        &[
+            (mix_id("ZZTRACK1.AUD"), &a),
+            (mix_id("ZZTRACK2.AUD"), &b),
+            (mix_id("ZZTRACK3.AUD"), &a),
+        ],
+        MixFormat::Plain,
+    );
+    let sounds = write_mix(&[(mix_id("CLICK.AUD"), &a)], MixFormat::Plain);
+    let main = write_mix(
+        &[
+            (mix_id("SCORES.MIX"), &scores),
+            (mix_id("SOUNDS.MIX"), &sounds),
+        ],
+        MixFormat::Encrypted {
+            private: &private,
+            blowfish: [0x42; BLOWFISH_KEY_LEN],
+        },
+    );
+    std::fs::write(dir.join("MAIN.MIX"), main).unwrap();
+}
+
+fn names(v: &[EntryInfo]) -> Vec<String> {
+    v.iter().map(EntryInfo::label).collect()
+}
+
+#[test]
+fn the_music_archive_id_is_the_one_in_the_label_constant() {
+    assert_eq!(
+        format!("#{:08X}", mix_id(MUSIC_ARCHIVE)),
+        MUSIC_ARCHIVE_ID_LABEL
+    );
+}
+
+#[test]
+fn shipped_music_mapping_is_empty() {
+    let m = Mapping::load(&assets()).unwrap();
+    assert_eq!(m.music, MusicMapping::default());
+    assert!(m.music.calm.is_empty() && m.music.combat.is_empty());
+}
+
+#[test]
+fn an_empty_mood_list_means_every_track_of_the_music_archive() {
+    let (public, _) = test_keypair();
+    let d = scratch("music_all");
+    music_install(&d);
+    let l = load(&d, &music_mapping(&[], &[]), &public);
+    assert!(l.warning.is_none(), "{:?}", l.warning);
+    // The test mapping does not name the archive's tracks: they show as ids.
+    let mut got = names(&l.music.calm);
+    got.sort();
+    let mut want: Vec<String> = ["ZZTRACK1.AUD", "ZZTRACK2.AUD", "ZZTRACK3.AUD"]
+        .iter()
+        .map(|n| format!("#{:08X}", mix_id(n)))
+        .collect();
+    want.sort();
+    assert_eq!(got, want);
+    assert_eq!(l.music.calm, l.music.combat, "same tracks until mapped");
+    std::fs::remove_dir_all(d).ok();
+}
+
+#[test]
+fn the_default_also_works_for_an_extracted_wav_folder() {
+    let (public, _) = test_keypair();
+    // the folder names an extraction can produce: by name, by id, nested
+    for (case, sub) in [
+        ("a", "SCORES.MIX"),
+        ("b", "#E39A0C20"),
+        ("c", "MAIN.MIX/SCORES.MIX"),
+        ("d", "MAIN.MIX/#E39A0C20"),
+        ("e", "main.mix/scores.mix"),
+    ] {
+        let d = scratch(&format!("music_wav_{case}"));
+        let dir = d.join(sub);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("ZZTRACK1.wav"), super::wav::write(&beep(900))).unwrap();
+        std::fs::write(dir.join("#0A0B0C0D.wav"), super::wav::write(&beep(800))).unwrap();
+        // not music: a sound in another folder
+        std::fs::create_dir_all(d.join("SOUNDS.MIX")).unwrap();
+        std::fs::write(
+            d.join("SOUNDS.MIX/CLICK.wav"),
+            super::wav::write(&beep(100)),
+        )
+        .unwrap();
+        let l = load(&d, &music_mapping(&[], &["ZZTRACK1"]), &public);
+        assert_eq!(l.music.calm.len(), 2, "{sub}: {:?}", names(&l.music.calm));
+        assert_eq!(
+            names(&l.music.combat),
+            ["ZZTRACK1.AUD"],
+            "{sub}: a bare name is <name>.AUD"
+        );
+        std::fs::remove_dir_all(d).ok();
+    }
+}
+
+#[test]
+fn mapped_tracks_by_name_bare_name_and_id_with_one_warning_for_the_missing() {
+    let (public, _) = test_keypair();
+    let d = scratch("music_map");
+    music_install(&d);
+    let id2 = format!("#{:08X}", mix_id("ZZTRACK2.AUD"));
+    let m = music_mapping(
+        &["ZZTRACK1", &id2, "ZZTRACK1.AUD"],
+        &["NOSUCH", "ALSO_NOSUCH.AUD"],
+    );
+    let l = load(&d, &m, &public);
+    assert_eq!(l.music.calm.len(), 2, "the same track twice counts once");
+    assert!(l.music.combat.is_empty(), "no track found: default music");
+    let w = l.warning.unwrap();
+    assert!(
+        w.starts_with("2 mapped Red Alert sounds or tracks not found"),
+        "{w}"
+    );
+    assert!(w.contains("NOSUCH") && w.contains("ALSO_NOSUCH.AUD"), "{w}");
+    std::fs::remove_dir_all(d).ok();
+}
+
+#[test]
+fn no_red_alert_files_means_no_tracks_and_the_usual_single_warning() {
+    let (public, _) = test_keypair();
+    let d = scratch("music_none");
+    let l = load(&d, &music_mapping(&[], &[]), &public);
+    assert!(l.music.calm.is_empty() && l.music.combat.is_empty());
+    assert!(l.warning.unwrap().contains("no original Red Alert sounds"));
+    std::fs::remove_dir_all(d).ok();
+}
+
+#[test]
+fn a_long_aud_is_classified_from_its_header_and_decoded_when_played() {
+    let (public, _) = test_keypair();
+    let d = scratch("music_big");
+    // 700,000 frames of IMA ADPCM: ~350 KB, over LARGE_AUD_BYTES.
+    let full = encode(&beep(700_000), Compression::Ima);
+    assert!(full.len() as u32 > LARGE_AUD_BYTES);
+    // A damaged copy, cut short: a scan that decoded it would call it Broken;
+    // the header-only scan lists it and the failure shows when it is played.
+    let cut = &full[..(LARGE_AUD_BYTES as usize + 1000)];
+    std::fs::write(d.join("LONG.AUD"), cut).unwrap();
+    std::fs::write(d.join("FINE.AUD"), &full).unwrap();
+    let c = scan(&d, &public, &["LONG.AUD".into(), "FINE.AUD".into()]);
+    let long = c.find("LONG.AUD").expect("listed from the header");
+    let EntryKind::Aud { millis, .. } = long.kind else {
+        panic!("{:?}", long.kind)
+    };
+    assert_eq!(millis, 700_000 * 1000 / 22050);
+    assert!(decode_entry(long).is_err(), "decoding happens at play time");
+    let fine = decode_entry(c.find("FINE.AUD").unwrap()).unwrap();
+    assert_eq!(fine.frames(), 700_000);
     std::fs::remove_dir_all(d).ok();
 }
