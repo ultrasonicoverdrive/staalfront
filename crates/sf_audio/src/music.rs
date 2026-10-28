@@ -179,7 +179,8 @@ impl MoodTracker {
 
 /// Plays every track of a pool once in random order before any repeats (a
 /// shuffled bag), and never the same track twice in a row. Presentation-side
-/// random numbers: a small xorshift, no clock.
+/// random numbers: a small xorshift, the seed comes from the caller (per launch in `AudioSystem::new`).
+#[derive(Clone)]
 pub struct Shuffle {
     rng: u32,
     bag: Vec<usize>,

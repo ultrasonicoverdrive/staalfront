@@ -171,6 +171,17 @@ fn default_def(key: &Path) -> SoundDef {
     }
 }
 
+/// A seed that differs per launch: the clock mixed with the OS-seeded
+/// `RandomState` hasher. Presentation only (music shuffle), never in sf_sim.
+fn launch_seed() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    if let Ok(t) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        h.write_u128(t.as_nanos());
+    }
+    h.finish()
+}
+
 impl AudioSystem {
     /// Open the default output device and load `<asset_root>/audio/bank.ron`.
     /// Without a usable device (no sound card, CI, a headless container) this
@@ -186,7 +197,20 @@ impl AudioSystem {
             Ok(Err(e)) => eprintln!("sf_audio: no audio output ({e}); running silently"),
             Err(_) => eprintln!("sf_audio: audio backend panicked; running silently"),
         }
+        // A fresh shuffle order per launch (presentation only; sf_sim never sees it).
+        sys.reseed_music(launch_seed());
         sys
+    }
+
+    /// Reseed the per-mood shuffles. [`silent`](Self::silent) and the test
+    /// constructors keep fixed seeds, so their order is reproducible.
+    pub fn reseed_music(&mut self, seed: u64) {
+        let lo = seed as u32;
+        let hi = (seed >> 32) as u32;
+        self.music.shuffle = [
+            Shuffle::new(lo ^ 0x2545_F491),
+            Shuffle::new(hi ^ 0x9E37_79B1),
+        ];
     }
 
     /// A system without output: accepts the whole API and does nothing
@@ -592,7 +616,11 @@ impl AudioSystem {
                 self.play_music(&n);
                 self.music.current = Some((mood, Some(n)));
             }
-            None => self.music.current = Some((mood, None)),
+            None => {
+                // Silence: fade out whatever the previous mood left running.
+                self.stop_music();
+                self.music.current = Some((mood, None));
+            }
         }
     }
 
@@ -1360,11 +1388,7 @@ mod tests {
         c.fallback.calm = Some("not_in_the_bank".into());
         s.set_music_config(&c);
         s.set_music_mood(Mood::Calm);
-        assert_eq!(
-            s.current_music(),
-            Some("combat_theme"),
-            "nothing to switch to"
-        );
+        assert_eq!(s.current_music(), None, "the combat theme fades to silence");
         std::fs::remove_dir_all(d).ok();
     }
 
@@ -1437,6 +1461,20 @@ mod tests {
         name: Option<String>,
         ended: Arc<std::sync::atomic::AtomicBool>,
         started: Arc<std::sync::Mutex<Vec<String>>>,
+        gains: Arc<std::sync::Mutex<Vec<f32>>>,
+    }
+
+    fn fake(
+        ended: &Arc<std::sync::atomic::AtomicBool>,
+        started: &Arc<std::sync::Mutex<Vec<String>>>,
+        gains: &Arc<std::sync::Mutex<Vec<f32>>>,
+    ) -> Box<Fake> {
+        Box::new(Fake {
+            name: None,
+            ended: Arc::clone(ended),
+            started: Arc::clone(started),
+            gains: Arc::clone(gains),
+        })
     }
 
     impl Player for Fake {
@@ -1449,8 +1487,12 @@ mod tests {
             self.started.lock().unwrap().push(p.name.to_string());
             Outcome::Played
         }
-        fn stop_music(&mut self, _: Duration) {}
-        fn set_music_gain(&mut self, _: f32) {}
+        fn stop_music(&mut self, _: Duration) {
+            self.name = None;
+        }
+        fn set_music_gain(&mut self, g: f32) {
+            self.gains.lock().unwrap().push(g);
+        }
         fn music_name(&self) -> Option<&str> {
             if self.ended.load(std::sync::atomic::Ordering::SeqCst) {
                 None
@@ -1468,14 +1510,8 @@ mod tests {
         let (d, install) = music_root("music_next", "(sounds: {})", 3, false);
         let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let started = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut s = AudioSystem::with_player(
-            &d,
-            Box::new(Fake {
-                name: None,
-                ended: Arc::clone(&ended),
-                started: Arc::clone(&started),
-            }),
-        );
+        let gains = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut s = AudioSystem::with_player(&d, fake(&ended, &started, &gains));
         ra_on(&mut s, &install);
         for _ in 0..6 {
             settle(&mut s, Mood::Calm);
@@ -1512,13 +1548,61 @@ mod tests {
     #[test]
     fn music_volume_reaches_a_running_red_alert_track() {
         let (d, install) = music_root("music_vol", "(sounds: {})", 1, false);
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let started = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let gains = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut s = AudioSystem::with_player(&d, fake(&ended, &started, &gains));
+        ra_on(&mut s, &install);
+        settle(&mut s, Mood::Calm);
+        assert!(s.music.ra_track);
+        assert_eq!(started.lock().unwrap().len(), 1);
+        s.set_category_volume(Category::Music, 0.25);
+        assert_eq!(
+            *gains.lock().unwrap(),
+            vec![0.25],
+            "the running track got the gain"
+        );
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn a_red_alert_track_fades_to_silence_when_the_new_mood_has_none() {
+        // One track, mapped to calm only; combat names a missing track, no fallback.
+        let mapping = "(sounds: {}, music: (calm: [\"ZZTRACK1\"], combat: [\"NOT_THERE\"]))";
+        let (d, install) = music_root("music_to_silence", mapping, 1, false);
         let mut s = mock_at(&d);
         ra_on(&mut s, &install);
         settle(&mut s, Mood::Calm);
         assert!(s.music.ra_track);
-        s.set_category_volume(Category::Music, 0.25);
-        assert_eq!(s.category_volume(Category::Music), 0.25);
+        assert!(s.current_music().is_some());
+        settle(&mut s, Mood::Combat);
+        assert_eq!(
+            s.current_music(),
+            None,
+            "the calm track must not play through combat"
+        );
+        assert!(!s.music.ra_track);
         std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn production_reseeding_changes_the_order_tests_stay_fixed() {
+        let a = AudioSystem::silent(assets());
+        let b = AudioSystem::silent(assets());
+        let mut x = a.music.shuffle[0].clone();
+        let mut y = b.music.shuffle[0].clone();
+        assert_eq!(x.next(8), y.next(8), "fixed seeds without reseeding");
+        let mut c = AudioSystem::silent(assets());
+        let order = |s: &AudioSystem| {
+            let mut sh = s.music.shuffle[0].clone();
+            (0..8).map(|_| sh.next(8)).collect::<Vec<_>>()
+        };
+        let base = order(&c);
+        let differs = (1..20u64).any(|k| {
+            c.reseed_music(k * 0x1234_5678_9ABC);
+            order(&c) != base
+        });
+        assert!(differs);
     }
 
     /// Measurement for the PR (not run in CI): three 3-minute stereo 22.05 kHz tracks in a fake SCORES.MIX.

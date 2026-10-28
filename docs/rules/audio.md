@@ -81,8 +81,8 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
   (15 s) without a counted event. Ticks are the sim's, 20 per second; the unit tests `sf_audio` `music::tests` and
   `sf_game` `fx_sound::tests` (`a_scripted_fight_switches_the_music_with_hysteresis`, with tick labels) pin it.
 * Tracks: `ra_mapping.ron` `music` (empty = every track of `SCORES.MIX`), shuffled per mood, never the same twice in a
-  row. Without Red Alert files or with the switch off: `music.fallback` of `audio.ron` (a bank sound; shipped
-  `None` = silence), no error, no extra warning.
+  row; the order is seeded per launch (`AudioSystem::new`), fixed in tests. Without Red Alert files or with the switch off: `music.fallback` of `audio.ron` (a bank sound; shipped
+  `None` = silence; the running music fades out), no error, no extra warning.
 * Loading: a track is decoded on a background thread when it is chosen. Measured in a release build on the dev
   laptop (3-minute stereo 22.05 kHz IMA fixture, 3.9 MiB compressed): the archive scan 11 ms for three tracks (none
   decoded), decode 37 to 38 ms per track on the thread, 30.3 MiB in memory per track, and the worst main-thread cost of a
@@ -97,7 +97,8 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
 * The settings screen (WP11.5) is not part of this; `mix.sfx_volume` and `mix.music_volume` are set in the file.
 * `audio.ron` is read once at start; no hot reload.
 * A moving unit's sound stops at the place it had when the event happened (no Doppler, no following).
-* Music is decoded whole on a background thread, not streamed from disk: 30 MiB per running track, and the track starts a
+* Music is decoded whole on a background thread, not streamed from disk: 30 MiB per running track (normally two
+  in memory, running + fading; briefly three plus the 16-bit copy when the mood flips back during a fade), and the track starts a
   few tens of milliseconds after the mood changes (the old one plays on until then). A streaming decoder would cut the memory.
 * With the shipped empty `music` section calm and combat draw from the same pool, so a mood change plays another track of
   it. Tune by ear in the F1 sound browser and fill the lists in `ra_mapping.ron`.

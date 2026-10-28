@@ -756,13 +756,15 @@ no separate music setting. Three parts, all presentation side (`sf_sim` is untou
   one warning. `ra::load` only *resolves* tracks; it does not decode them.
 - *Playing* (`AudioSystem::set_music_mood`, called every frame, cheap): when the mood changed or the running
   track ended, the mood's next track comes from a shuffled bag (`music::Shuffle`: each track once per round, never
-  the same twice in a row; a small xorshift, no clock) and is decoded on a background thread; the old track
+  the same twice in a row; a small xorshift, seeded per launch from the clock and the OS hasher in
+  `AudioSystem::new`, fixed seeds in `silent` and the tests) and is decoded on a background thread; the old track
   keeps playing meanwhile and then crossfades (`music.crossfade_ms`). A track is a whole `StaticSoundData`
-  (8 bytes per frame: about 30 MiB for three minutes of 22.05 kHz stereo); at most the running track and its
-  fading predecessor are in memory (two inject slots). A scan classifies a long AUD (over 256 KiB) from its header
+  (8 bytes per frame: about 30 MiB for three minutes of 22.05 kHz stereo); normally two tracks are in memory
+  (the running one and its fading predecessor, two inject slots), briefly up to three plus the worker's 16-bit
+  copy when the mood flips back during a fade or an outdated decode finishes after its mood changed. A scan classifies a long AUD (over 256 KiB) from its header
   only (`LARGE_AUD_BYTES`), so listing `SCORES.MIX` does not decode every track. True streaming from disk was not
   built (see the gaps in `docs/rules/audio.md`). A mood without a playable track uses `music.fallback` (a bank
-  sound, shipped `None`) or stays silent; a track that fails to decode is skipped with one warning.
+  sound, shipped `None`) or fades the running music out to silence; a track that fails to decode is skipped with one warning.
 
 **Clean-room (B5).** Written only from public format descriptions, never from
 the EA source release or OpenRA (both GPL), and without following the code

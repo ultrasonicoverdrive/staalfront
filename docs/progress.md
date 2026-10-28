@@ -2135,7 +2135,7 @@ player's own Red Alert music (B11, scope change of 28-10-2026). Rules: `docs/rul
 `docs/architecture.md` section 16.
 
 - **What is built.** `sf_audio::music` (`MoodTracker`: calm to combat at a weighted score inside a tick window, back only
-  after a hold time and a quiet spell; `Shuffle`: a shuffled bag, no immediate repeat). `audio.ron` got `music` (crossfade,
+  after a hold time and a quiet spell; `Shuffle`: a shuffled bag, no immediate repeat, seeded per launch). `audio.ron` got `music` (crossfade,
   mood numbers, default tracks) and `mix.music_volume`. `ra_mapping.ron` got `music: (calm: [], combat: [])`, shipped
   empty: no Red Alert file names are in the repo; an empty list means every track of `SCORES.MIX` (by name or `#E39A0C20`,
   in a MIX or an extracted WAV folder, nested or not; the test `the_music_archive_id_is_the_one_in_the_label_constant`
@@ -2153,8 +2153,9 @@ player's own Red Alert music (B11, scope change of 28-10-2026). Rules: `docs/rul
   three 3-minute stereo 22.05 kHz tracks: scan of the archive 11 ms (none decoded), decode 37 to 38 ms per track on the
   thread, 30.3 MiB in memory per track, worst main-thread cost of a `set_music_mood` + `update` call 0.12 ms (80 calls, 25 of
   them while a track loaded). Alternating before/after runs do not apply: the path is new.
-- **Gaps.** (1) Not streamed from disk: a running track is 30 MiB (8 bytes per frame) and the thread briefly holds the 16-bit
-  PCM as well. (2) The shipped mapping is empty, so calm and combat play the same pool until the owner maps tracks by ear in the
+- **Gaps.** (1) Not streamed from disk: a running track is 30 MiB (8 bytes per frame); normally two tracks are in memory
+  (running + fading), briefly up to three plus the thread's 16-bit copy when the mood flips back during a fade or an
+  outdated decode finishes. (2) The shipped mapping is empty, so calm and combat play the same pool until the owner maps tracks by ear in the
   F1 sound browser. (3) The `music_frame` call in `Runner::frame` is covered by the live run above, not by a test. (4) There is
   no CC0 music in the bank, so without Red Alert files the music is silent (`music.fallback` is `None`). (5) Not tried with a
   real Red Alert disc here, so real `SCORES.MIX` contents (and that AUD music is what that archive holds) are unverified.
