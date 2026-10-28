@@ -251,7 +251,7 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 
 **Done when:** headless "10 tanks vs 20 infantry" gives the same outcome and checksum every run; it looks that way in the game too.
 
-**Laptop benchmark M0c (decision Tijmen 22-10-2026):** after WP5.6b (was: after WP5.6) the same laptop run again, with combat and effects in the demo scene; p99 frame time ≤ 16.7 ms and `sim.tick_ms` p99 well within the 50 ms tick, compared with M0 and M0b.
+**Laptop benchmark M0c (decision Tijmen 22-10-2026):** after WP5.6b (was: after WP5.6) the same laptop run again, with combat and effects in the demo scene; p99 frame time ≤ 16.7 ms and `sim.tick_ms` p99 well within the 50 ms tick, compared with M0 and M0b. Met 28-10-2026: p99 4.42 and 4.35 ms, `sim.tick_ms` p99 3.2 ms (`docs/bench/README.md`, "M0c result").
 
 ### Phase 6 — Buildings, building and power
 - WP6.1 Building definitions: footprint, build time, power, requirements (tech tree), function.
