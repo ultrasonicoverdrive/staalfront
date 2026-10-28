@@ -2131,6 +2131,72 @@ Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.
 - **Minimap upload cost: measured in WP7.2** (at most 10 uploads a second, about 0.22 ms each on a software
   adapter, with 50 harvesters, a jammed system: see the WP7.2 notes; the level comparison 1.4 microseconds a tick; `economy.md`, "The picture"). Left as it is.
 
+## WP11.3 notes: positional sound
+
+Branch `wp/11.3-positional-sound`. The shots, hits and deaths the picture shows are now heard at their place, louder
+near and when zoomed in, quieter and rarer far away and zoomed out. Rules: `docs/rules/audio.md`.
+
+- **What is built.** `sf_audio::config` (`AudioConfig`: `ra_audio`, `spatial`, `mix`, `positional`) reads
+  `assets/config/audio.ron`, which is also compiled in as the fallback; the numbers of `spatial.rs` (radii, zoom
+  near/floor, pan width and growth, max pan, audible gain) moved there, `SpatialParams::default()` is the shipped file and
+  `AUDIBLE_GAIN` is gone (`Mix::is_audible(&params)`). `sf_audio::positional::Planner` picks the playbacks of a frame
+  (quiet, priority then loudness, merge within a tick and radius, voice limit, spacing that grows towards
+  `far_spacing_ticks` as the gain falls, so zooming out makes sounds rarer too). `sf_game::fx_sound::FxSound::play_frame`
+  is what the runner calls after `FxPlayer::frame` and the listener; `FxPlayer::shown()` gives it the events the picture
+  just showed. `AudioSystem` got `has_sound` (never warns), `listener()` and `set_trace`/`take_trace` (what it would play,
+  also without a device).
+- **Seen in the game** (Xvfb, Mesa lavapipe, release, `sf_game --sandbox --fight --exit-after 30`, no audio device):
+  with the shipped bank the 130 fight events of the run are all silent and give no message (`summary: fight sounds
+  SoundTotals { requested: 130, silent: 130, ... }`). With a scratch copy of the assets (`SF_ASSETS`) whose bank names
+  all 18 event sounds (the CC0 click) the same run gives `requested: 130, merged: 2, spaced: 11, played: 117`. No
+  screenshots: nothing on the screen changes.
+- **Cost** (release, relative; shared container, load average 4.7 to 5.3): `the_cost_of_a_heavy_fight_frame` runs 620
+  events a frame (300 shots, 300 hits, 20 deaths) through `plan_events` and the `play_at` calls: **mean 116 us, worst
+  185 us** over 40 frames (11 played, 21 merged, 198 limited, 388 spaced). A debug build: mean 1.3 ms. There is no
+  "before" (the step is new); the frame budget is 16.7 ms. Not measured: the real mixer cost of 11 voices a frame, and
+  `sf_demo --bench --fight` (WP5.6b).
+- **Gaps.** (1) The bank has no weapon, impact or explosion sounds; only `explosion.small` has a Red Alert mapping, so
+  without the player's files nothing of the fight is heard yet. No sound was added. (Since PR #87 the Red Alert mapping
+  covers the fight events; see follow-up 31.) (2) The sim has no event for selecting
+  or ordering a unit, placing or finishing a structure or unloading; none was added (WP11.2 and later). (3) The call in
+  `Runner::frame` and the wiring of `audio.ron` into `AudioSystem` at start are not covered by a test (the runner needs
+  a window); the game run above shows they work. (4) `audio.ron` is not hot-reloaded. (5) `PlanStats` of the run is
+  printed at exit (`summary: fight sounds`) but not in the F1 panel. (6) The numbers in `audio.ron` are first guesses
+  to be tuned by ear once there are sounds.
+
+## WP11.4 notes: dynamic music (calm/combat)
+
+Branch `wp/11.4-music`. The music follows the fight on screen and, with "Use original Red Alert audio" on, plays the
+player's own Red Alert music (B11, scope change of 28-10-2026). Rules: `docs/rules/audio.md` section 3b; design:
+`docs/architecture.md` section 16.
+
+- **What is built.** `sf_audio::music` (`MoodTracker`: calm to combat at a weighted score inside a tick window, back only
+  after a hold time and a quiet spell; `Shuffle`: a shuffled bag, no immediate repeat, seeded per launch). `audio.ron` got `music` (crossfade,
+  mood numbers, default tracks) and `mix.music_volume`. `ra_mapping.ron` got `music: (calm: [], combat: [])`, shipped
+  empty: no Red Alert file names are in the repo; an empty list means every track of `SCORES.MIX` (by name or `#E39A0C20`,
+  in a MIX or an extracted WAV folder, nested or not; the test `the_music_archive_id_is_the_one_in_the_label_constant`
+  checks that `mix_id("SCORES.MIX")` is that id). `AudioSystem::set_music_mood` picks the track and decodes it on a
+  background thread; `sf_game::fx_sound::FxSound::music_frame` feeds the mood from the shown events, called in `Runner::frame`
+  before `play_frame`. `ra::scan` now classifies an AUD over 256 KiB from its header only, so listing the music archive does
+  not decode the tracks (before: every AUD was fully decoded at scan time, on the loader thread).
+- **Seen in the game** (Windows, GTX 1650 laptop, release, `sf_game --sandbox --fight --exit-after 45 --ra-audio <fixture>`,
+  a fixture `SCORES.MIX` of three 20-second tones made by the ignored test `write_music_fixture_for_a_manual_run`): `audio:
+  device open`; `music: tick 3 mood calm`, `tick 149 mood combat` (the fight starts), `tick 550` the next combat track after the
+  first ended; each track `decoded on a background thread in 5 to 6 ms, 441000 frames (3.4 MiB)`. The scripted unit test
+  gives the same shape with fixed ticks (calm 1, combat 109, calm 456). I did not listen to it: the fixture is test tones and
+  the default Red Alert tracks were not available here.
+- **Cost** (release, relative; `music_switch_cost`, an `--ignored` test, run alone on the dev laptop, no other load noted):
+  three 3-minute stereo 22.05 kHz tracks: scan of the archive 11 ms (none decoded), decode 37 to 38 ms per track on the
+  thread, 30.3 MiB in memory per track, worst main-thread cost of a `set_music_mood` + `update` call 0.12 ms (80 calls, 25 of
+  them while a track loaded). Alternating before/after runs do not apply: the path is new.
+- **Gaps.** (1) Not streamed from disk: a running track is 30 MiB (8 bytes per frame); normally two tracks are in memory
+  (running + fading), briefly up to three plus the thread's 16-bit copy when the mood flips back during a fade or an
+  outdated decode finishes. (2) The shipped mapping is empty, so calm and combat play the same pool until the owner maps tracks by ear in the
+  F1 sound browser. (3) The `music_frame` call in `Runner::frame` is covered by the live run above, not by a test. (4) There is
+  no CC0 music in the bank, so without Red Alert files the music is silent (`music.fallback` is `None`). (5) Not tried with a
+  real Red Alert disc here, so real `SCORES.MIX` contents (and that AUD music is what that archive holds) are unverified.
+  (6) Mood radius, weights and times in `audio.ron` are first guesses.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -2227,3 +2293,8 @@ fixed, delete the entry in the same PR.
     fixed file arrives, store it, move its role to it in `unit_defs.ron` and shorten this entry.
 
 30. **Cell overlay colours from `terrain_look.ron`** (WP2.4, PR #67): the overlay's per-type tints are a separate table in `assets/config/cell_overlay.ron`. With PR #66 merged, `assets/config/terrain_look.ron` is the single source of per-type colour; derive the overlay tint from it (the minimap does the same) and keep only the occupancy colours in `cell_overlay.ron`.
+31. **The fight is silent in the shipped game** (WP11.3, PR #82): every fight sound event is `silent` because
+    `assets/audio/bank.ron` has no weapon, impact or explosion sounds. A new small WP, **WP11.3b CC0 fight sounds**,
+    adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
+    original-audio side is done (PR #87, 28-10-2026): `ra_mapping.ron` maps every fight event by role except
+    `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`, which have no Red Alert sound.

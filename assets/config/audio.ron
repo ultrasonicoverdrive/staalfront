@@ -1,16 +1,108 @@
-// Audio settings.
+// Audio settings. Read by sf_audio::config::AudioConfig, compiled into the game as the fallback, and checked
+// when it is parsed (ranges; a broken file gives a warning and these shipped numbers). Presentation only:
+// nothing here reaches the simulation. What the rules mean: docs/rules/audio.md.
 //
-// ra_audio: "Use original Red Alert audio" (WP11.7). Off by default; the CC0
-// sounds of assets/audio/bank.ron always work. When on, the sounds named in
-// assets/audio/ra_mapping.ron are read from the player's own Red Alert files
-// under `path` (the install directory or the freeware download, or a folder of
-// WAV files made by `sf_ra_extract`; MIX archives and WAV files are searched a
-// few directory levels deep). Missing or broken files fall back
-// to the CC0 sounds with one warning. `sf_game --ra-audio <path>` turns it on
-// for one run.
+// ra_audio: "Use original Red Alert audio" (WP11.7). Off by default; the CC0 sounds of assets/audio/bank.ron
+// always work. When on, the music of SCORES.MIX plays too (see `music` below) and the sounds named in assets/audio/ra_mapping.ron are read from the player's own Red
+// Alert files under `path` (the install directory or the freeware download, or a folder of WAV files made by
+// `sf_ra_extract`; MIX archives and WAV files are searched a few directory levels deep). Missing or broken
+// files fall back to the CC0 sounds with one warning. `sf_game --ra-audio <path>` turns it on for one run.
 (
     ra_audio: (
         enabled: false,
         path: "",
+    ),
+
+    // How loud and where a sound at a world position is heard (WP1.13, WP11.3). Metres, horizontal; the
+    // height of the source does not count.
+    //   ref_radius_m     full volume within this distance of the point the camera looks at
+    //   max_radius_m     silent beyond it (a squared fade in between)
+    //   near_distance_m  up to this camera distance no zoom attenuation; beyond it the gain is
+    //                    near_distance_m / camera distance ("quieter when zoomed out") ...
+    //   min_zoom_gain    ... but not below this
+    //   pan_width_m, pan_growth   the half-width of the stereo image: pan_width_m + pan_growth * camera distance
+    //   max_pan          the largest |pan| (no hard left or right)
+    //   audible_gain     below this total gain a sound is not worth a voice and is dropped
+    spatial: (
+        ref_radius_m: 25.0,
+        max_radius_m: 125.0,
+        near_distance_m: 40.0,
+        min_zoom_gain: 0.2,
+        pan_width_m: 10.0,
+        pan_growth: 1.0,
+        max_pan: 0.9,
+        audible_gain: 0.003,
+    ),
+
+    // Volumes, linear.
+    mix: (
+        sfx_volume: 1.0,
+        music_volume: 0.6,
+    ),
+
+    // Dynamic music (WP11.4). Calm or combat music is picked from what the game shows. Ticks are 20 per second.
+    //   crossfade_ms   crossfade between two tracks (and the fade-out of a stopped one)
+    //   mood.radius_m  only shots, hits and deaths within this many metres of the camera focus count
+    //   mood.weights   what one event of that kind counts for
+    //   mood.window_ticks, enter_score   calm turns to combat when the counted weights of the last
+    //                  window_ticks add up to enter_score
+    //   mood.min_hold_ticks, calm_after_ticks   combat turns back to calm only after at least min_hold_ticks
+    //                  in combat and calm_after_ticks without a counted event (so it does not flip back and forth)
+    //   fallback       the default music of a mood when no original Red Alert track is available: the name of
+    //                  a sound of bank.ron (a CC0 track), or None for silence. There is no music in the bank yet.
+    // Which Red Alert tracks play: assets/audio/ra_mapping.ron (`music`), only with ra_audio on.
+    music: (
+        crossfade_ms: 2500,
+        mood: (
+            radius_m: 80.0,
+            window_ticks: 100,
+            enter_score: 6,
+            min_hold_ticks: 200,
+            calm_after_ticks: 300,
+            weights: (fire: 1, impact: 1, death: 3),
+        ),
+        fallback: (calm: None, combat: None),
+    ),
+
+    // The sounds of the game's events (shots, hits, deaths): which of them play in a frame. The event names
+    // are the `sound` fields of effects.ron. An event whose name is not in the sound bank is silent without a
+    // message. Per frame the events go through, in this order:
+    //   1. too quiet at the listener (spatial.audible_gain): dropped.
+    //   2. sorted: higher `priority` first, then the louder (nearer, more zoomed in), then the earlier.
+    //   3. merged: an event of the same tick and sound within `merge_radius_m` of one already chosen is folded
+    //      into it (one playback at the louder one's place).
+    //   4. limited: at most `max_per_batch` playbacks of the event in the frame and at most
+    //      `max_cues_per_frame` playbacks over all events.
+    //   5. spaced: at least `min_spacing_ticks` (20 ticks are a second) since the event last played - the
+    //      spacing grows towards `far_spacing_ticks` as the gain falls to nothing, so a far sound is also
+    //      less frequent.
+    // The bank's `max_instances` still caps the voices alive at once.
+    positional: (
+        max_cues_per_frame: 16,
+        fallback: (priority: 1, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 6, merge_radius_m: 6.0),
+        // A name covers the names below it ("weapon.fire" covers "weapon.fire.bullet"); the longest wins.
+        events: {
+            // Shots. Small arms are many and cheap; guns and rockets carry more.
+            "weapon.fire":            (priority: 1, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 8, merge_radius_m: 8.0),
+            "weapon.fire.precision":  (priority: 2, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 8.0),
+            "weapon.fire.cannon":     (priority: 2, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 8, merge_radius_m: 8.0),
+            "weapon.fire.rocket":     (priority: 2, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 8, merge_radius_m: 8.0),
+            "weapon.fire.shell":      (priority: 3, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 10.0),
+            "weapon.fire.howitzer":   (priority: 3, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 10.0),
+            "weapon.fire.demolition": (priority: 3, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 10.0),
+
+            // Hits.
+            "impact":                 (priority: 0, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 8, merge_radius_m: 6.0),
+            "impact.miss":            (priority: 0, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 6.0),
+            "impact.cannon":          (priority: 1, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 8, merge_radius_m: 6.0),
+            "impact.rocket":          (priority: 1, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 8, merge_radius_m: 6.0),
+            "impact.shell":           (priority: 2, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 8.0),
+            "impact.demolition":      (priority: 2, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 10, merge_radius_m: 8.0),
+
+            // Deaths: the ones the player must not miss.
+            "unit.destroyed":         (priority: 4, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 6, merge_radius_m: 8.0),
+            "explosion":              (priority: 4, max_per_batch: 3, min_spacing_ticks: 1, far_spacing_ticks: 6, merge_radius_m: 10.0),
+            "explosion.large":        (priority: 5, max_per_batch: 2, min_spacing_ticks: 2, far_spacing_ticks: 8, merge_radius_m: 14.0),
+        },
     ),
 )

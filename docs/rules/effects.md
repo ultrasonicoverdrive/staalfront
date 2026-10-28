@@ -88,10 +88,10 @@ and no two effects share one.
 `the_links_and_the_rest_are_these_numbers` (the damage-type links, the override, the miss, the deaths, the wreck smoke,
 the four tracers) and `every_shipped_weapon_resolves_to_a_fire_and_an_impact_effect` (all 15 shipped weapons).
 
-## 3. The audio hook (not built)
+## 3. The audio hook
 
-Each effect has a `sound`: the **event name** WP11.7's mapping (`assets/audio/ra_mapping.ron`) hooks onto; nothing plays
-it yet. `FxPlayer::sound_name(&FxEvent)` is the one function from event to name: the first effect of the event's list with
+Each effect has a `sound`: the **event name** WP11.7's mapping (`assets/audio/ra_mapping.ron`) hooks onto and WP11.3
+plays at the event's position (`audio.md`; a name without a sound in the bank or the mapping is silent). `FxPlayer::sound_name(&FxEvent)` is the one function from event to name: the first effect of the event's list with
 a sound.
 
 | Event | Name |
@@ -350,7 +350,7 @@ lavapipe: the plain benchmark's checkpoints 100 to 400 and the fight's 100 to 30
 * **Smoke and fire from the `fx_*` anchors** (the loader keeps them, nothing reads them): WP6.8 for damaged buildings.
 * **Which muzzle belongs to which weapon** when a unit has weapons on the hull and on the turret and a model with several
   muzzles: the flash alternates over all of them (no shipped unit has both).
-* The sounds themselves: WP11.7 (the names are in the file; an audio position can use `Anchors` the way the flash does).
+* The sounds themselves: the positional playing is WP11.3 (`audio.md`); the sound files and the original-audio mapping are WP11.7.
 * **Building damage display, smoke and fire on damaged buildings**: WP6.8. Wrecks give off smoke now; a live building
   does not.
 * An `Impact` of an instant weapon whose target died in the same tick is placed from the tick's deaths; one whose target

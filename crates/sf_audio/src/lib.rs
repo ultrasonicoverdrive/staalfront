@@ -7,7 +7,10 @@
 //!   file, base volume, pitch variation, voice limit and category.
 //! - [`spatial`]: pure volume/pan maths for positional sound relative to the
 //!   camera, including "quieter when zoomed out".
+//! - [`config`]: `assets/config/audio.ron`, every tunable of the audio.
+//! - [`positional`]: which in-game sounds play (merge, space, limit).
 //! - [`voices`]: voice limiting.
+//! - [`music`]: the calm/combat mood tracker and the shuffled track order (WP11.4).
 //!
 //! - [`ra`]: optional original Red Alert audio (WP11.7): MIX/AUD readers,
 //!   the event mapping and the sound-browser catalog, loaded on a
@@ -17,12 +20,20 @@
 //! [`Listener`] derived from the camera each frame.
 
 pub mod bank;
+pub mod config;
 mod live;
+pub mod music;
+pub mod positional;
 pub mod ra;
 pub mod spatial;
 mod system;
 pub mod voices;
 
 pub use bank::{Bank, BankError, Category, SoundDef};
+pub use config::AudioConfig;
+pub use music::{Mood, MoodTracker};
+pub use positional::{Cue, PlanStats, Planner, Request};
 pub use spatial::{Listener, Mix, SpatialParams};
-pub use system::{AudioSystem, BANK_FILE, DEFAULT_CROSSFADE, RaStatus, Stats};
+pub use system::{
+    AudioSystem, BANK_FILE, DEFAULT_CROSSFADE, MusicLoad, MusicTrace, PlayTrace, RaStatus, Stats,
+};

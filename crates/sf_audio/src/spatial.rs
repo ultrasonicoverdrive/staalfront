@@ -14,6 +14,7 @@
 //! - **Monotonic by construction**: total gain = distance gain (independent
 //!   of the camera distance) x zoom gain (non-increasing in it), so for any
 //!   fixed world position, zooming out never makes a sound louder.
+//! - **Data**: every number is in `assets/config/audio.ron` ([`crate::config`]).
 //! - **Pan**: the source offset projected on the camera's right vector,
 //!   relative to a width that grows with camera distance (about the
 //!   half-width of the picture), clamped to `±max_pan`. Pan does not affect
@@ -84,19 +85,15 @@ pub struct SpatialParams {
     pub pan_growth: f32,
     /// Largest `|pan|` (keeps a sound from being hard-left/right).
     pub max_pan: f32,
+    /// Gain below which a sound is not worth a voice.
+    pub audible_gain: f32,
 }
 
 impl Default for SpatialParams {
+    /// The numbers of the shipped `assets/config/audio.ron` (compiled in);
+    /// there are none in Rust.
     fn default() -> Self {
-        Self {
-            ref_radius: 25.0,
-            max_radius: 125.0,
-            near_distance: 40.0,
-            min_zoom_gain: 0.2,
-            pan_width: 10.0,
-            pan_growth: 1.0,
-            max_pan: 0.9,
-        }
+        crate::config::AudioConfig::embedded().spatial.params()
     }
 }
 
@@ -109,12 +106,10 @@ pub struct Mix {
     pub pan: f32,
 }
 
-/// Gain below which a sound is not worth a voice.
-pub const AUDIBLE_GAIN: f32 = 0.003;
-
 impl Mix {
-    pub fn is_audible(&self) -> bool {
-        self.gain >= AUDIBLE_GAIN
+    /// Whether the sound is loud enough to be worth a voice.
+    pub fn is_audible(&self, p: &SpatialParams) -> bool {
+        self.gain >= p.audible_gain
     }
 }
 
@@ -176,6 +171,7 @@ mod tests {
         pan_width: 10.0,
         pan_growth: 1.0,
         max_pan: 0.9,
+        audible_gain: 0.003,
     };
 
     fn at(distance: f32) -> Listener {
@@ -210,7 +206,7 @@ mod tests {
         }
         assert!(near(mix(&l, [100.0 + 125.0, 0.0, 100.0], &P).gain, 0.0));
         assert!(near(mix(&l, [100.0 + 500.0, 0.0, 100.0], &P).gain, 0.0));
-        assert!(!mix(&l, [100.0 + 500.0, 0.0, 100.0], &P).is_audible());
+        assert!(!mix(&l, [100.0 + 500.0, 0.0, 100.0], &P).is_audible(&P));
     }
 
     #[test]
@@ -283,7 +279,7 @@ mod tests {
         // 140 m away is beyond the max radius: silent at every zoom level.
         let src = [240.0, 0.0, 100.0];
         for cam in [10.0, 100.0, 1000.0] {
-            assert!(!mix(&at(cam), src, &P).is_audible(), "cam {cam}");
+            assert!(!mix(&at(cam), src, &P).is_audible(&P), "cam {cam}");
         }
     }
 

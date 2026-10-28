@@ -6,21 +6,53 @@
 // or `sf_game --ra-audio <path>`). An event whose file is not found keeps
 // its CC0 sound from bank.ron (or stays silent if it has none yet).
 //
-//   sounds: event -> file name inside the MIX archives ("NAME.AUD"), or the
+//   sounds: event -> file name inside the MIX archives ("NAME.AUD", or "NAME.V01" for a voice line), or the
 //           raw id "#1A2B3C4D" the F1 sound browser shows for entries whose
 //           name it does not know.
 //   names:  extra file names the sound browser should show instead of ids.
-//
-// The file names below are first guesses; check them in the F1 sound browser
-// (Sound browser > play) and correct them there.
+//   music:  which Red Alert tracks play in the calm and the combat mood (WP11.4). Shipped EMPTY on purpose:
+//           Staalfront ships no list of Red Alert file names. An empty list means every track of the music
+//           archive (SCORES.MIX, also as a subfolder of an extracted WAV folder), so Red Alert music works
+//           out of the box; with both lists empty, calm and combat play the same tracks. To tune the
+//           moods, open the F1 sound browser, play the tracks of SCORES.MIX, and list the names (or the
+//           "#1A2B3C4D" ids it shows) here, for example
+//               music: (calm: ["SOME_TRACK.AUD"], combat: ["#1A2B3C4D", "OTHER_TRACK"]),
+//           (made-up names). A name without extension means "<name>.AUD". Several tracks in a list play
+//           shuffled. A name that is not found is skipped with one warning; a mood without a playable
+//           track uses the default music of audio.ron (`music.fallback`), or silence.
+
+// Voice lines (select, move, attack) never exist as a bare ".AUD" in Red
+// Alert: they carry a variant as extension. ".Vnn" is the Allied accent and
+// ".Rnn" the Soviet accent; infantry lines use the odd variants (01, 03),
+// vehicle lines the even ones (00, 02). The loader looks a name up as
+// written, so the extension is part of the name. V01 is a default: pick the
+// variant by ear in the F1 sound browser (Sound browser > play) and change it
+// here.
 (
     sounds: {
-        "ui.click": "CLICK.AUD",
-        "unit.select": "AWAIT1.AUD",
-        "unit.move": "ACKNO.AUD",
-        "unit.attack": "AFFIRM1.AUD",
+        "ui.click": "RAMENU1.AUD",
+        "unit.select": "AWAIT1.V01",
+        "unit.move": "ACKNO.V01",
+        "unit.attack": "AFFIRM1.V01",
         "building.placed": "PLACBLDG.AUD",
-        "explosion.small": "KABOOM1.AUD",
+        // Fight sounds (28-10-2026): each event matched by role (who fires it, see weapon_defs.ron) to the
+        // Red Alert sound of the same role, one fact at a time, checked by onderzoeker; tried by ear by Tijmen.
+        // Red Alert has no sound for placing a demolition charge, for bullet hits or for a miss, so
+        // weapon.fire.demolition, impact.bullet, impact.precision and impact.miss stay unmapped.
+        "explosion.small": "KABOOM15.AUD",
+        "weapon.fire.bullet": "GUN11.AUD",
+        "weapon.fire.precision": "GUN5.AUD",
+        "weapon.fire.cannon": "CANNON1.AUD",
+        "weapon.fire.rocket": "MISSILE6.AUD",
+        "weapon.fire.shell": "TURRET1.AUD",
+        "weapon.fire.howitzer": "TANK5.AUD",
+        "impact.cannon": "KABOOM12.AUD",
+        "impact.rocket": "KABOOM25.AUD",
+        "impact.shell": "KABOOM15.AUD",
+        "impact.demolition": "KABOOM22.AUD",
+        "explosion.medium": "KABOOM22.AUD",
+        "explosion.large": "KABOOM22.AUD",
+        "unit.destroyed.infantry": "DEDMAN1.AUD",
     },
     names: [
         "MAIN.MIX",
@@ -33,4 +65,8 @@
         "CONQUER.MIX",
         "SCORES.MIX",
     ],
+    music: (
+        calm: [],
+        combat: [],
+    ),
 )
