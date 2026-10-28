@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use sf_data::units::{
     BANNED_IDS, BuildingFunction, Category, DefError, DefFile, DefSources, EMBEDDED_CLASSES,
-    EMBEDDED_UNITS, EMBEDDED_WEAPONS, Faction, Side, UnitDefs,
+    EMBEDDED_UNITS, EMBEDDED_WEAPONS, Faction, MAX_STORAGE, Side, UnitDefs,
 };
 
 fn repo() -> PathBuf {
@@ -808,4 +808,64 @@ fn f1_m05_can_build_the_decoy_from_its_starting_structures() {
     }
     let cost = decoy.cost.unwrap();
     assert!(cost * 4 <= 2000, "a few decoys fit the budget: {cost}");
+}
+
+// ---- storage (WP7.3) -------------------------------------------------------------------------------
+
+#[test]
+fn only_the_refinery_stores_ore_and_it_stores_the_shipped_amount() {
+    let defs = shipped();
+    let storing: Vec<(&str, u32)> = defs
+        .units()
+        .iter()
+        .filter_map(|u| {
+            let s = u.building.as_ref().map_or(0, |b| b.storage);
+            (s > 0).then_some((u.id.as_str(), s))
+        })
+        .collect();
+    assert_eq!(storing, vec![("refinery", 2000)]);
+    // The conversion keeps it, and every other structure stores nothing.
+    for b in defs.sim_buildings() {
+        let want = if Some(b.kind) == defs.kind_of("refinery") {
+            2000
+        } else {
+            0
+        };
+        assert_eq!(b.storage, want, "kind {}", b.kind);
+    }
+}
+
+#[test]
+fn storage_is_a_whole_number_up_to_the_maximum() {
+    let refinery = "requires: [\"power_plant\"], storage: 2000)";
+    let at_max = change(
+        refinery,
+        &format!("requires: [\"power_plant\"], storage: {MAX_STORAGE})"),
+    )
+    .unwrap();
+    let kind = at_max.kind_of("refinery").unwrap();
+    assert_eq!(at_max.sim_building(kind).unwrap().storage, MAX_STORAGE);
+    refused(
+        refinery,
+        &format!("requires: [\"power_plant\"], storage: {})", MAX_STORAGE + 1),
+        "storage 1000001 is above the maximum 1000000",
+    );
+    // Not a number, negative: refused by the reader.
+    assert!(change(refinery, "requires: [\"power_plant\"], storage: -1)").is_err());
+    assert!(change(refinery, "requires: [\"power_plant\"], storage: 2.5)").is_err());
+    // Left out: zero.
+    let none = change(refinery, "requires: [\"power_plant\"])").unwrap();
+    assert_eq!(none.sim_building(kind).unwrap().storage, 0);
+}
+
+#[test]
+fn the_frozen_copies_store_nothing() {
+    let root = repo().join("assets");
+    for name in ["harvest_defs", "placement_defs"] {
+        let defs = UnitDefs::load(&root.join("scenarios").join(name), &root).unwrap();
+        assert!(
+            defs.sim_buildings().iter().all(|b| b.storage == 0),
+            "{name}"
+        );
+    }
 }

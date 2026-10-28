@@ -1249,12 +1249,11 @@ fn a_clone_runs_on_identically() {
 
 // ---- construction (WP6.3) -----------------------------------------------------------------
 
-#[test]
-fn a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete() {
-    // The obligation of whichever of #76 and #78 landed second: a refinery that a player builds
-    // with `BuildStructure` starts under construction (WP6.3); harvest asks `World::is_standing`,
-    // which is "complete and with hit points", so it is no dock until it is done.
-    const YARD: Kind = Kind(1);
+const YARD: Kind = Kind(1);
+
+/// The test world with a base anchor (`YARD`, kind 1) in the tables and player 0's faction, so
+/// that player 0 can build with `BuildStructure` (WP6.3).
+fn yard_world() -> World {
     let mut stats: Vec<UnitStats> = units().iter().cloned().collect();
     stats.push(UnitStats {
         kind: YARD,
@@ -1291,7 +1290,7 @@ fn a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete() {
         .map(|(x, y)| if is_ore(x, y) { ORE } else { GRASS })
         .collect();
     let terrain = Terrain::from_layer(64, 48, &ids, &terrain_defs()).unwrap();
-    let mut w = World::with_terrain(WorldConfig::new(7).with_map_size(64, 48), terrain)
+    World::with_terrain(WorldConfig::new(7).with_map_size(64, 48), terrain)
         .unwrap()
         .with_units(UnitTable::new(stats).unwrap())
         .unwrap()
@@ -1302,7 +1301,15 @@ fn a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete() {
         .with_ore(ORE_RULES)
         .unwrap()
         .with_harvest(RULES, &[HARVESTER])
-        .unwrap();
+        .unwrap()
+}
+
+#[test]
+fn a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete() {
+    // The obligation of whichever of #76 and #78 landed second: a refinery that a player builds
+    // with `BuildStructure` starts under construction (WP6.3); harvest asks `World::is_standing`,
+    // which is "complete and with hit points", so it is no dock until it is done.
+    let mut w = yard_world();
     at(
         &mut w,
         0,
@@ -1343,4 +1350,174 @@ fn a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete() {
         w.ore_delivered(P0) >= u64::from(RULES.capacity)
     });
     assert_eq!(w.ore_delivered(P0), RULES.capacity.into());
+}
+
+// ---- storage (WP7.3) ----------------------------------------------------------------------
+
+/// `one_harvester` with storage: each refinery stores `cap`.
+fn stored(cap: u32) -> World {
+    let mut w = world().with_storage(&[(REFINERY, cap)]).unwrap();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    spawn_harvester(&mut w, 0, (14, 22), P0);
+    w
+}
+
+#[test]
+fn storage_is_given_once_after_the_harvest_rules_and_before_the_start() {
+    let table = [(REFINERY, 100)];
+    // Without harvest rules.
+    let plain = World::new(WorldConfig::new(7))
+        .unwrap()
+        .with_units(units())
+        .unwrap()
+        .with_buildings(buildings())
+        .unwrap();
+    assert_eq!(
+        plain.with_storage(&table).unwrap_err(),
+        ConfigError::Storage
+    );
+    // Twice.
+    let once = world().with_storage(&table).unwrap();
+    assert!(once.has_storage());
+    assert_eq!(once.with_storage(&table).unwrap_err(), ConfigError::Storage);
+    // After the start.
+    let mut started = world();
+    started.step();
+    assert_eq!(
+        started.with_storage(&table).unwrap_err(),
+        ConfigError::Storage
+    );
+    // A kind that is not a structure of the building table, a kind twice, a zero.
+    for bad in [
+        vec![(HARVESTER, 100)],
+        vec![(REFINERY, 100), (REFINERY, 50)],
+        vec![(REFINERY, 0)],
+    ] {
+        assert_eq!(
+            world().with_storage(&bad).unwrap_err(),
+            ConfigError::Storage,
+            "{bad:?}"
+        );
+    }
+    // An empty table is storage with no capacity anywhere.
+    let none = world().with_storage(&[]).unwrap();
+    assert!(none.has_storage());
+    assert!(!world().has_storage());
+}
+
+#[test]
+fn a_full_store_takes_nothing_and_the_harvester_waits_in_the_bay_with_its_load() {
+    // 50 of room, a load of 100 in bites of 20: 20, 20, then a bite cut to the 10 that fit.
+    let mut w = stored(50);
+    run_until(&mut w, 2000, |w| w.ore_stored(P0) == 50);
+    assert_eq!(w.storage_capacity(P0), 50);
+    let mut seen = Vec::new();
+    for _ in 0..200 {
+        w.step();
+        seen.push((stage(&w, 1), load(&w, 1), w.ore_stored(P0)));
+    }
+    // It stays in the bay with the 50 that did not fit, and nothing more is taken.
+    assert!(
+        seen.iter()
+            .all(|&s| s == (Some(HarvestStage::Unloading), 50, 50)),
+        "{:?}",
+        &seen[..3]
+    );
+    assert_eq!(w.ore_delivered(P0), 50);
+    // The dock still holds it: the bay is not given to anyone else.
+    let dock = w.dock_of(id(0)).unwrap();
+    assert_eq!((dock.holder, dock.unloading), (Some(id(1)), true));
+}
+
+#[test]
+fn the_last_bite_is_cut_to_the_room_left() {
+    let mut w = stored(50);
+    let mut stores = Vec::new();
+    run_until(&mut w, 2000, |w| {
+        let s = w.ore_stored(P0);
+        if stores.last() != Some(&s) {
+            stores.push(s);
+        }
+        s == 50
+    });
+    assert_eq!(stores, vec![0, 20, 40, 50]);
+}
+
+#[test]
+fn a_second_refinery_raises_the_capacity_and_the_waiting_harvester_unloads() {
+    let mut w = stored(50);
+    run_until(&mut w, 2000, |w| w.ore_stored(P0) == 50);
+    run(&mut w, 20);
+    let now = w.tick().0;
+    place_refinery(&mut w, now, (6, 30), P0);
+    w.step();
+    assert_eq!(w.storage_capacity(P0), 100);
+    // The one in the bay unloads its 50 into the new room and goes back to work.
+    run_until(&mut w, 100, |w| w.ore_stored(P0) == 100);
+    run_until(&mut w, 10, |w| stage(w, 1) != Some(HarvestStage::Unloading));
+    assert_eq!(load(&w, 1), 0);
+}
+
+#[test]
+fn a_lost_refinery_lowers_the_capacity_and_the_store_keeps_its_ore() {
+    let mut w = world().with_storage(&[(REFINERY, 60)]).unwrap();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    place_refinery(&mut w, 0, (6, 30), P0);
+    spawn_harvester(&mut w, 0, (14, 22), P0);
+    run_until(&mut w, 4000, |w| w.ore_stored(P0) == 120);
+    assert_eq!(w.storage_capacity(P0), 120);
+    let now = w.tick().0;
+    at(&mut w, now, Command::Despawn { id: id(1) });
+    w.step();
+    // 60 of capacity, 120 kept: nothing is lost and nothing more goes in.
+    assert_eq!((w.storage_capacity(P0), w.ore_stored(P0)), (60, 120));
+    run(&mut w, 1500);
+    assert_eq!(w.ore_stored(P0), 120);
+    assert_eq!(w.ore_delivered(P0), 120);
+}
+
+#[test]
+fn storage_counts_only_the_standing_buildings_of_the_owner() {
+    let mut w = world().with_storage(&[(REFINERY, 70)]).unwrap();
+    place_refinery(&mut w, 0, (6, 20), P0);
+    place_refinery(&mut w, 0, (6, 30), P1);
+    w.step();
+    assert_eq!(w.storage_capacity(P0), 70);
+    assert_eq!(w.storage_capacity(P1), 70);
+    assert_eq!(w.storage_capacity(PlayerId(2)), 0);
+    // A world without storage rules reports none and stores nothing, with no limit.
+    let mut free = one_harvester();
+    run(&mut free, 1500);
+    assert_eq!(free.storage_capacity(P0), 0);
+    assert_eq!(free.ore_stored(P0), 0);
+    assert!(free.ore_delivered(P0) >= 100);
+}
+
+#[test]
+fn a_refinery_under_construction_stores_nothing_until_it_is_complete() {
+    let mut w = yard_world().with_storage(&[(REFINERY, 90)]).unwrap();
+    at(
+        &mut w,
+        0,
+        Command::PlaceStructure {
+            kind: YARD,
+            cell: Cell::new(3, 20),
+            owner: P0,
+        },
+    );
+    at(
+        &mut w,
+        1,
+        Command::BuildStructure {
+            kind: REFINERY,
+            cell: Cell::new(6, 20),
+        },
+    );
+    run(&mut w, 3);
+    let refinery = id(1);
+    assert!(w.construction_of(refinery).is_some());
+    assert_eq!(w.storage_capacity(P0), 0);
+    run_until(&mut w, 1000, |w| w.stands(refinery));
+    w.step();
+    assert_eq!(w.storage_capacity(P0), 90);
 }

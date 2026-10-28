@@ -129,6 +129,20 @@ pub fn with_harvest(world: World, defs: &UnitDefs) -> World {
         .expect("a world with its unit and building tables that has not started takes the harvest rules")
 }
 
+/// `world` with ore storage (WP7.3): each standing structure stores the `storage` of its building
+/// block in `defs` (the shipped refinery: 2000), and a refinery takes off a harvester only what
+/// still fits. Call it right after [`with_harvest`].
+///
+/// # Panics
+///
+/// If the world has no harvest rules or has started; the sandbox, its one caller, has neither
+/// problem.
+pub fn with_storage(world: World, defs: &UnitDefs) -> World {
+    world
+        .with_storage(&sf_bridge::storage_capacities(defs))
+        .expect("a world with harvest rules that has not started takes the storage capacities")
+}
+
 /// The terrain of `map` for the simulation: `None` for a map without a
 /// terrain layer. The layer was checked against the shipped table when the map
 /// was loaded (`Map::load`) or generated, so an error here means the map was

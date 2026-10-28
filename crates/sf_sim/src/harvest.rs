@@ -503,9 +503,20 @@ impl Harvest {
         self.storage.is_some()
     }
 
+    /// The capacity of one structure of `kind`; zero without storage rules.
+    pub(crate) fn storage_of_kind(&self, kind: Kind) -> u32 {
+        self.storage.as_ref().map_or(0, |s| {
+            s.table
+                .binary_search_by_key(&kind, |&(k, _)| k)
+                .map_or(0, |j| s.table[j].1)
+        })
+    }
+
     /// Ore stored by `player`; zero without storage rules.
     pub(crate) fn stored(&self, player: PlayerId) -> u64 {
-        self.storage.as_ref().map_or(0, |s| get_of(&s.stored, player))
+        self.storage
+            .as_ref()
+            .map_or(0, |s| get_of(&s.stored, player))
     }
 
     /// The storage capacity of `player` as of the last tick; zero without storage rules.

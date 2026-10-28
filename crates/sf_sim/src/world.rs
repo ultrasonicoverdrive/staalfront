@@ -824,6 +824,14 @@ impl World {
         self.harvest.as_deref().map_or(0, |h| h.capacity(player))
     }
 
+    /// What one standing structure of `kind` stores (WP7.3); zero for a kind that stores nothing
+    /// and without storage rules.
+    pub fn storage_of_kind(&self, kind: Kind) -> u32 {
+        self.harvest
+            .as_deref()
+            .map_or(0, |h| h.storage_of_kind(kind))
+    }
+
     /// Whether the world was given storage rules ([`World::with_storage`]).
     pub fn has_storage(&self) -> bool {
         self.harvest.as_deref().is_some_and(Harvest::has_storage)

@@ -928,7 +928,9 @@ impl Scenario {
                 p.push("storage needs `harvest` (only refineries fill a store)".to_string());
             }
             if st.iter().any(|&(_, n)| n == 0) {
-                p.push("storage: every capacity must be above zero (leave the kind out)".to_string());
+                p.push(
+                    "storage: every capacity must be above zero (leave the kind out)".to_string(),
+                );
             }
         }
 

@@ -68,7 +68,13 @@ fn the_store_fills_blocks_grows_with_a_refinery_and_shrinks_without_losing_ore()
     // Nothing is ever taken into a store that is full: every rise ends at or below the capacity.
     for w in rows.windows(2) {
         if w[1].1 > w[0].1 {
-            assert!(w[1].1 <= w[1].2, "tick {}: stored {} over {}", w[1].0, w[1].1, w[1].2);
+            assert!(
+                w[1].1 <= w[1].2,
+                "tick {}: stored {} over {}",
+                w[1].0,
+                w[1].1,
+                w[1].2
+            );
         }
         // Stored never falls (nothing spends, a smaller capacity keeps what is in).
         assert!(w[1].1 >= w[0].1);
@@ -85,10 +91,16 @@ fn the_store_fills_blocks_grows_with_a_refinery_and_shrinks_without_losing_ore()
         let r = at(&rows, t);
         r.4 == Some(HarvestStage::Unloading) && r.6 == 200
     });
-    assert!(blocked, "slot 2 waits in the bay with its load while the store is full");
+    assert!(
+        blocked,
+        "slot 2 waits in the bay with its load while the store is full"
+    );
     // (2) The second refinery raises the capacity to 1200 and the store fills to it.
     assert_eq!(at(&rows, 2601).2, 1200);
-    assert!(at(&rows, 2700).1 > 600, "the blocked harvester unloads once there is room");
+    assert!(
+        at(&rows, 2700).1 > 600,
+        "the blocked harvester unloads once there is room"
+    );
     assert_eq!(at(&rows, 4199).1, 1200);
     // (3) Its removal lowers the capacity to 600; the 1200 stored are kept and nothing more is
     // taken: one harvester waits in the bay with a full load, the other queues behind it.

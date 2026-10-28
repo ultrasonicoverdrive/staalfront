@@ -21,6 +21,7 @@ pub mod movement;
 pub mod ore;
 pub mod sim_settings;
 pub mod skirmish;
+pub mod storage_look;
 pub mod terrain;
 pub mod units;
 

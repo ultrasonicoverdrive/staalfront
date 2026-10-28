@@ -947,6 +947,30 @@ impl Runner {
         construction_view::draw_for(&mut layer, &frame, &terrain, &snap, &self.looks);
     }
 
+    /// The fill bars of the structures that store ore (WP7.3), from the snapshot's state.
+    fn draw_storage_bars(&mut self) {
+        if self.snap.stores().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        crate::storage_view::draw_bars(
+            &mut layer,
+            &frame,
+            &terrain,
+            &snap,
+            crate::storage_view::shipped_look(),
+        );
+    }
+
     /// Replace the camera with one built from `config`, keeping where it
     /// looks, how far it is zoomed and the terrain it picks against (the
     /// camera has no setter for its tunables; they only change here, from the
@@ -982,6 +1006,12 @@ impl Runner {
                 .as_ref()
                 .and_then(AudioSystem::original_audio_catalog),
             ra_play_error: self.ra_play_error.clone(),
+            storage: self
+                .snap
+                .storage()
+                .iter()
+                .map(|&(p, stored, cap)| crate::storage_view::readout(p.0, stored, cap))
+                .collect(),
         }
     }
 
@@ -1851,6 +1881,7 @@ impl App for Runner {
             self.draw_cargo();
             self.draw_ghost();
             self.draw_construction_bars();
+            self.draw_storage_bars();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
@@ -2292,6 +2323,8 @@ fn sandbox_scene(
             // WP7.2 (`--harvest`): the harvesters work. Off by default, so the sandbox stands as it did.
             if options.harvest {
                 world = crate::playfield::with_harvest(world, &defs);
+                // WP7.3: and their ore goes into the refineries' storage.
+                world = crate::playfield::with_storage(world, &defs);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
