@@ -3,8 +3,8 @@
 Work packages WP7.1 and WP7.2 (PLAN.md phase 7). This page holds the rules of the **ore on the
 map** (WP7.1): how much a cell holds, how it is taken, how it grows back, how a harvester finds
 it; and of the **harvesters** (WP7.2, from "Harvesters" below): the loop of search, mine, drive
-back, check in at the refinery by messages, unload. Storage (WP7.3) and money (WP7.4) are later
-work packages and will add their rules to this page. Rules in our own words.
+back, check in at the refinery by messages, unload. Storage (WP7.3, "Storage" below) caps what a
+player keeps; money (WP7.4) is a later work package and will add its rules to this page. Rules in our own words.
 
 ## What is where
 
@@ -352,10 +352,10 @@ Each has a test (`crates/sf_sim/tests/harvest.rs` unless named otherwise):
 ### Where the ore goes: `ore_delivered`
 
 `World::ore_delivered(player) -> u64` is the ore the refineries have taken off the harvesters of
-a player so far. It is the **placeholder** for the economy: WP7.3 (storage and silos) will cap it
-by the storage a player has, and WP7.4 (money) will turn it into credits with the price of a unit
-of ore and replace it (or keep it as a statistic). Until then it is a plain counter, kept per
-player in a sorted vector, hashed in the checksum, and nothing spends it.
+a player so far: a **statistic**, a plain counter kept per player in a sorted vector, hashed in the
+checksum. Since WP7.3 the ore also goes into the player's **store** (`World::ore_stored`, "Storage"
+below), which is capped; with storage rules every unit delivered is a unit stored, so the two are
+equal until WP7.4 (money) spends from the store.
 
 ### Checksum
 
@@ -503,3 +503,106 @@ builds, so the numbers are relative):
   minimap shows all ore now).
 * **M1** (the vertical slice): a skirmish map with fields the player and the static
   opponent harvest.
+
+## Storage (WP7.3)
+
+A player's ore goes into one **store**, held together by all the player's standing buildings that
+store ore. The store has a **capacity**; a refinery takes off a harvester only what still fits.
+
+### What stores how much
+
+* **The data:** the building block of a structure in `unit_defs.ron` has `storage`, the units of
+  ore one such standing building holds for its owner (a whole number, default 0, at most
+  `MAX_STORAGE` = 1 000 000; `sf_data::units::building`, refused at the line otherwise). As
+  shipped only the **refinery** stores, **2000** (ten harvester loads; a placeholder for phase 15).
+  A silo (WP7.3b, after the tech tree is approved) will be a record with a `storage` number and no
+  Rust change. Pinned: `sf_data/tests/buildings.rs`
+  (`only_the_refinery_stores_ore_and_it_stores_the_shipped_amount`,
+  `storage_is_a_whole_number_up_to_the_maximum`); the frozen copies have no `storage` and store
+  nothing (`the_frozen_copies_store_nothing`).
+* **To the world:** `sf_bridge::storage_capacities(defs)` gives `(kind, units)` for every structure
+  with `storage` above zero, ascending (pinned with the literal `[(Kind(2), 2000)]` in
+  `sf_bridge/tests/harvest.rs`), and `World::with_storage(&table)` turns storage on. It must come
+  after `World::with_harvest` and before the world starts, once, with kinds of the building table,
+  each once and above zero (`ConfigError::Storage` otherwise;
+  `storage_is_given_once_after_the_harvest_rules_and_before_the_start`). **A world without it has
+  no limit** and hashes as before: that is every scenario before WP7.3, `harvest` included. The
+  sandbox gives it with `--harvest` (`sf_game::playfield::with_storage`).
+* **The capacity** of a player is the sum of the storage of its **standing** buildings: complete
+  and with hit points (`World::is_standing`, as for the docks). A building under construction holds
+  nothing until it is complete; a building at zero hit points holds nothing. It is summed in the
+  sync pass of the harvest stage (before the docks run), in ascending slot order, every tick
+  (`World::storage_capacity`). Tests: `storage_counts_only_the_standing_buildings_of_the_owner`,
+  `a_refinery_under_construction_stores_nothing_until_it_is_complete`,
+  `harvest::tests::a_refinery_at_zero_hit_points_stores_nothing`.
+
+### When the store is full
+
+The dock works out its bite as before (`unload_amount`, at most the load) and **cuts it to the room
+left** (capacity minus stored). So the last bite before full is short
+(`the_last_bite_is_cut_to_the_room_left`: 20, 20, then 10 into a store of 50). A bite of zero
+takes nothing and sends no `Unloaded`; the harvester **stays in the bay, docked, holding the rest of
+its load**, and the dock tries again every `unload_period`. The bay stays its own, so the harvesters
+behind it **wait in the queue** as they do behind any unloading harvester. As soon as there is room
+(a new refinery, a silo, later spending) the next bite goes in, and the loop goes on
+(`a_full_store_takes_nothing_and_the_harvester_waits_in_the_bay_with_its_load`,
+`a_second_refinery_raises_the_capacity_and_the_waiting_harvester_unloads`). Why: it is the
+smallest change to the dock (one `min`), it keeps every unit of ore somewhere (in the store or on a
+harvester), and the player sees the cause at the refinery: a full bar and a harvester that stays.
+
+### When the store shrinks
+
+A refinery that is destroyed, sold or removed takes its capacity with it from the next sync, but
+**the ore stays in the store**: nothing is clamped or lost, the store may hold more than its
+capacity, and nothing more goes in until it is below the capacity again (WP7.4 spends from it). Why:
+it is the simplest deterministic rule (no choice of what to throw away, no rounding), and no ore
+vanishes. Test: `a_lost_refinery_lowers_the_capacity_and_the_store_keeps_its_ore` (120 stored, the
+capacity drops to 60, after 1500 ticks still 120).
+
+### Checksum
+
+A new section **`V`**, written right after `H` and **only in a world given storage rules**: the
+capacity table (kind and units), then per player the ore stored and the capacity of the last sync
+(`checksum.rs` table; `harvest::tests::the_storage_state_is_in_the_checksum` changes each in turn,
+`a_world_without_storage_rules_has_no_storage_section` shows the hash without the section is the
+old one). `ore_delivered` stays in `H` as it was. **No pinned value moved:** `harvest` ends on
+`0x655fd8c1472d1611` as before (it has no storage rules), and so do all the other `.expected` files
+and `golden.rs`.
+
+### The scenario
+
+`storage` (6000 ticks, the harvest playfield, field and rock patch; `harvest_defs` with the
+capacities written in the scenario as `storage: Some([(2, 600)])`, so the shipped data never moves
+it): one refinery of 600, two harvesters; a second refinery at tick 2600, removed at tick 4200. The
+test (`tools/sf_headless/tests/storage.rs`) asserts: the store reaches 600 before tick 2400 and
+stays there; from tick 2400 to 2600 harvester 2 waits in the bay holding its full 200; the second
+refinery makes the capacity 1200 at tick 2601, the waiting harvester unloads, and the store is at
+1200 by tick 4199; from tick 4201 to the end the capacity is 600 and 1200 stay stored; at the end
+one harvester is in the bay with 200 and the other queued with 200; stored equals delivered; no
+rise ever ends above the capacity and the store never falls. Pinned in
+`assets/scenarios/storage.expected`, run in the CI job `headless`.
+
+### The picture
+
+* **Storage bar.** `sf_game::storage_view`: under the front edge of every standing structure that
+  stores ore, where the construction bar lies (which a complete structure no longer has), a bar
+  filled by the owner's stored / capacity (one store, so every refinery of a player shows the same
+  fill), in its own colour when full. A store with ore and no capacity left is full. The look
+  (colours, sizes) is `assets/config/storage_look.ron` (`sf_data::storage_look`, pinned in its unit
+  tests). The snapshot carries the store per player and the storing structures
+  (`SimSnapshot::storage_of`, `stores`). Test: `crates/sf_game/tests/storage_screenshot.rs` (real
+  renderer on a software adapter: empty, half, full in the full colour, then a second refinery
+  halves both bars); frames in `docs/screenshots/wp7.3`.
+* **Readout.** The F1 panel, section Simulation, has one line per player with a store:
+  `ore store player 0: 600 / 2000`, with `(full)` when nothing more fits
+  (`the_panel_shows_each_ore_store`).
+
+### Not done
+
+* No money and nothing spends the store (WP7.4). With the shipped 2000 and no spending, the sandbox
+  store fills after ten loads and the harvesters then wait at the refinery for good.
+* No silo (WP7.3b). The construction centre stores nothing.
+* The readout is in the F1 debug panel, not in a player HUD (the money bar of WP7.4 is the place).
+* A harvester waiting in a full refinery's bay keeps that bay; it never leaves for another
+  refinery by itself (refinery choice is WP7.5). The store is one per player, so another refinery
+  would be full too.
