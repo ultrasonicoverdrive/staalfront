@@ -743,6 +743,29 @@ the CC0 sounds keep playing; no reader panics (a fuzz-style test feeds random
 and mutated input), and a scan visits each archive region once and stops at
 fixed caps on archives, entries and decoded bytes.
 
+**Music (WP11.4, 28-10-2026).** The same switch (`ra_audio`, `--ra-audio`) turns on original music; there is
+no separate music setting. Three parts, all presentation side (`sf_sim` is untouched):
+- *Mood* (`sf_audio::music::MoodTracker`, fed by `sf_game::fx_sound::FxSound::mood_after`): the shots, hits and
+  deaths the picture shows, within `music.mood.radius_m` of the camera focus, add their weights; calm turns to
+  combat at `enter_score` inside `window_ticks`, and combat turns back only after `min_hold_ticks` and
+  `calm_after_ticks` without an event (hysteresis). Every number is in `assets/config/audio.ron`, `music`.
+- *Tracks* (`ra_mapping.ron`, `music: (calm: [...], combat: [...])`, shipped empty, no Red Alert names in the
+  repo): `Catalog::resolve_music` turns the names (`NAME` = `NAME.AUD`, or `#id`) into catalog entries; an empty
+  list gives every playable entry of the archive `SCORES.MIX` (matched by name or by `#E39A0C20` in the archive
+  label, so also in an extracted WAV folder, nested or not). Names not found are skipped with the loader's
+  one warning. `ra::load` only *resolves* tracks; it does not decode them.
+- *Playing* (`AudioSystem::set_music_mood`, called every frame, cheap): when the mood changed or the running
+  track ended, the mood's next track comes from a shuffled bag (`music::Shuffle`: each track once per round, never
+  the same twice in a row; a small xorshift, seeded per launch from the clock and the OS hasher in
+  `AudioSystem::new`, fixed seeds in `silent` and the tests) and is decoded on a background thread; the old track
+  keeps playing meanwhile and then crossfades (`music.crossfade_ms`). A track is a whole `StaticSoundData`
+  (8 bytes per frame: about 30 MiB for three minutes of 22.05 kHz stereo); normally two tracks are in memory
+  (the running one and its fading predecessor, two inject slots), briefly up to three plus the worker's 16-bit
+  copy when the mood flips back during a fade or an outdated decode finishes after its mood changed. A scan classifies a long AUD (over 256 KiB) from its header
+  only (`LARGE_AUD_BYTES`), so listing `SCORES.MIX` does not decode every track. True streaming from disk was not
+  built (see the gaps in `docs/rules/audio.md`). A mood without a playable track uses `music.fallback` (a bank
+  sound, shipped `None`) or fades the running music out to silence; a track that fails to decode is skipped with one warning.
+
 **Clean-room (B5).** Written only from public format descriptions, never from
 the EA source release or OpenRA (both GPL), and without following the code
 links some of these pages carry:

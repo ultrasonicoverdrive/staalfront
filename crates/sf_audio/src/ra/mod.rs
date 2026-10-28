@@ -33,6 +33,7 @@ use std::path::{Path, PathBuf};
 use kira::sound::static_sound::StaticSoundData;
 use serde::Deserialize;
 
+use crate::music::Mood;
 use aud::{Compression, Pcm};
 use crypto::RsaKey;
 use mix::{MixArchive, id_for, read_index};
@@ -80,6 +81,51 @@ pub struct Mapping {
     /// Extra file names the sound browser shows instead of a bare id.
     #[serde(default)]
     pub names: Vec<String>,
+    /// Which Red Alert tracks play in which mood (WP11.4).
+    #[serde(default)]
+    pub music: MusicMapping,
+}
+
+/// `music` of `ra_mapping.ron`: file names (or `#hex` ids) per mood. Shipped
+/// empty; an empty list means every track of the music archive.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MusicMapping {
+    #[serde(default)]
+    pub calm: Vec<String>,
+    #[serde(default)]
+    pub combat: Vec<String>,
+}
+
+impl MusicMapping {
+    pub fn list(&self, mood: Mood) -> &[String] {
+        match mood {
+            Mood::Calm => &self.calm,
+            Mood::Combat => &self.combat,
+        }
+    }
+}
+
+/// The music archive of Red Alert; its tracks are the default of an empty
+/// mood list. Matched in an archive label (`MAIN.MIX > SCORES.MIX`, a folder
+/// of extracted WAVs named after it) by name or by its hexadecimal id.
+pub const MUSIC_ARCHIVE: &str = "SCORES.MIX";
+pub const MUSIC_ARCHIVE_ID_LABEL: &str = "#E39A0C20";
+
+/// The tracks that can play per mood (found, playable, not yet decoded).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MusicTracks {
+    pub calm: Vec<EntryInfo>,
+    pub combat: Vec<EntryInfo>,
+}
+
+impl MusicTracks {
+    pub fn get(&self, mood: Mood) -> &[EntryInfo] {
+        match mood {
+            Mood::Calm => &self.calm,
+            Mood::Combat => &self.combat,
+        }
+    }
 }
 
 impl Mapping {
@@ -100,8 +146,14 @@ impl Mapping {
             .sounds
             .values()
             .chain(&self.names)
+            .chain(&self.music.calm)
+            .chain(&self.music.combat)
             .filter(|n| !n.starts_with('#'))
-            .cloned()
+            .flat_map(|n| {
+                // a bare track name is `<NAME>.AUD`
+                let bare = (!n.contains('.')).then(|| format!("{n}.AUD"));
+                std::iter::once(n.clone()).chain(bare)
+            })
             .collect();
         v.sort();
         v.dedup();
@@ -197,6 +249,68 @@ impl Catalog {
     }
 }
 
+impl Catalog {
+    /// A music track by name: as written, else `<name>.AUD` (a track is
+    /// written without extension when it is a bare name).
+    pub fn find_track(&self, name: &str) -> Option<&EntryInfo> {
+        self.find(name).or_else(|| {
+            (!name.starts_with('#') && !name.contains('.'))
+                .then(|| self.find(&format!("{name}.AUD")))
+                .flatten()
+        })
+    }
+
+    /// Every playable entry of the music archive (`SCORES.MIX`), in catalog
+    /// order.
+    pub fn music_archive_tracks(&self) -> Vec<EntryInfo> {
+        self.archives
+            .iter()
+            .filter(|a| {
+                let l = a.label.to_ascii_uppercase();
+                l.contains(MUSIC_ARCHIVE) || l.contains(MUSIC_ARCHIVE_ID_LABEL)
+            })
+            .flat_map(|a| a.entries.iter())
+            .filter(|e| e.kind.playable())
+            .cloned()
+            .collect()
+    }
+
+    /// The tracks per mood for `mapping`, and the mapped names that were not
+    /// found. An empty list gives the music archive's tracks. Nothing is
+    /// decoded here.
+    pub fn resolve_music(&self, mapping: &MusicMapping) -> (MusicTracks, Vec<String>) {
+        let mut missing = Vec::new();
+        let mut archive: Option<Vec<EntryInfo>> = None;
+        let mut pick = |mood: Mood| -> Vec<EntryInfo> {
+            let names = mapping.list(mood);
+            if names.is_empty() {
+                return archive
+                    .get_or_insert_with(|| self.music_archive_tracks())
+                    .clone();
+            }
+            let mut out: Vec<EntryInfo> = Vec::new();
+            for n in names {
+                match self.find_track(n) {
+                    Some(e) => {
+                        if !out.iter().any(|o| o.id == e.id && o.path == e.path) {
+                            out.push(e.clone());
+                        }
+                    }
+                    None => missing.push(n.clone()),
+                }
+            }
+            out
+        };
+        let tracks = MusicTracks {
+            calm: pick(Mood::Calm),
+            combat: pick(Mood::Combat),
+        };
+        missing.sort();
+        missing.dedup();
+        (tracks, missing)
+    }
+}
+
 impl EntryKind {
     /// AUD or WAV that decodes.
     pub fn playable(&self) -> bool {
@@ -273,6 +387,10 @@ fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// An AUD larger than this (compressed) is classified from its header only.
+/// A sound effect is a few tens of KiB; a music track is hundreds.
+pub const LARGE_AUD_BYTES: u32 = 256 * 1024;
+
 /// Bytes of a WAV file read to classify it (chunks before `data`).
 const WAV_HEADER_BYTES: u32 = 64 * 1024;
 
@@ -310,6 +428,20 @@ fn classify(path: &Path, offset: u64, size: u32, key: &RsaKey) -> EntryKind {
     let n = (size as usize).min(head.len());
     if f.seek(SeekFrom::Start(offset)).is_err() || f.read_exact(&mut head[..n]).is_err() {
         return EntryKind::Other;
+    }
+    if let Ok(h) = aud::parse_header(&head[..n])
+        && size > LARGE_AUD_BYTES
+    {
+        // A music track (minutes long): trust the header here and decode it
+        // when it is played, so a scan does not decode every track.
+        let bytes_per_sample = if h.sixteen_bit { 2 } else { 1 };
+        let per_second = u64::from(h.sample_rate) * u64::from(h.channels()) * bytes_per_sample;
+        return EntryKind::Aud {
+            sample_rate: u32::from(h.sample_rate),
+            channels: h.channels(),
+            millis: u64::from(h.out_size) * 1000 / per_second.max(1),
+            compression: h.compression,
+        };
     }
     if aud::parse_header(&head[..n]).is_ok() {
         return match read_at(path, offset, size)
@@ -535,6 +667,9 @@ pub struct Loaded {
     pub catalog: Catalog,
     /// Event name -> decoded sound.
     pub sounds: BTreeMap<String, StaticSoundData>,
+    /// The music tracks per mood: found, not decoded (they are decoded when
+    /// they play).
+    pub music: MusicTracks,
     /// One summary line when something is missing (`None` = all mapped
     /// sounds found).
     pub warning: Option<String>,
@@ -555,6 +690,8 @@ pub fn load(root: &Path, mapping: &Mapping, key: &RsaKey) -> Loaded {
             None => missing.push(ra_name.clone()),
         }
     }
+    let (music, missing_tracks) = catalog.resolve_music(&mapping.music);
+    missing.extend(missing_tracks);
     let warning = if catalog.sound_count() == 0 {
         Some(format!(
             "no original Red Alert sounds found under '{}'{}; using the CC0 sounds",
@@ -567,9 +704,8 @@ pub fn load(root: &Path, mapping: &Mapping, key: &RsaKey) -> Loaded {
         ))
     } else if !missing.is_empty() {
         Some(format!(
-            "{} of {} mapped Red Alert sounds not found ({}); those use the CC0 sounds",
+            "{} mapped Red Alert sounds or tracks not found ({}); sounds use the CC0 sounds, a mood without a track uses the default music",
             missing.len(),
-            mapping.sounds.len(),
             missing.join(", ")
         ))
     } else {
@@ -578,6 +714,7 @@ pub fn load(root: &Path, mapping: &Mapping, key: &RsaKey) -> Loaded {
     Loaded {
         catalog,
         sounds,
+        music,
         warning,
     }
 }

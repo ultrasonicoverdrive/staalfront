@@ -2128,6 +2128,39 @@ near and when zoomed in, quieter and rarer far away and zoomed out. Rules: `docs
   printed at exit (`summary: fight sounds`) but not in the F1 panel. (6) The numbers in `audio.ron` are first guesses
   to be tuned by ear once there are sounds.
 
+## WP11.4 notes: dynamic music (calm/combat)
+
+Branch `wp/11.4-music`. The music follows the fight on screen and, with "Use original Red Alert audio" on, plays the
+player's own Red Alert music (B11, scope change of 28-10-2026). Rules: `docs/rules/audio.md` section 3b; design:
+`docs/architecture.md` section 16.
+
+- **What is built.** `sf_audio::music` (`MoodTracker`: calm to combat at a weighted score inside a tick window, back only
+  after a hold time and a quiet spell; `Shuffle`: a shuffled bag, no immediate repeat, seeded per launch). `audio.ron` got `music` (crossfade,
+  mood numbers, default tracks) and `mix.music_volume`. `ra_mapping.ron` got `music: (calm: [], combat: [])`, shipped
+  empty: no Red Alert file names are in the repo; an empty list means every track of `SCORES.MIX` (by name or `#E39A0C20`,
+  in a MIX or an extracted WAV folder, nested or not; the test `the_music_archive_id_is_the_one_in_the_label_constant`
+  checks that `mix_id("SCORES.MIX")` is that id). `AudioSystem::set_music_mood` picks the track and decodes it on a
+  background thread; `sf_game::fx_sound::FxSound::music_frame` feeds the mood from the shown events, called in `Runner::frame`
+  before `play_frame`. `ra::scan` now classifies an AUD over 256 KiB from its header only, so listing the music archive does
+  not decode the tracks (before: every AUD was fully decoded at scan time, on the loader thread).
+- **Seen in the game** (Windows, GTX 1650 laptop, release, `sf_game --sandbox --fight --exit-after 45 --ra-audio <fixture>`,
+  a fixture `SCORES.MIX` of three 20-second tones made by the ignored test `write_music_fixture_for_a_manual_run`): `audio:
+  device open`; `music: tick 3 mood calm`, `tick 149 mood combat` (the fight starts), `tick 550` the next combat track after the
+  first ended; each track `decoded on a background thread in 5 to 6 ms, 441000 frames (3.4 MiB)`. The scripted unit test
+  gives the same shape with fixed ticks (calm 1, combat 109, calm 456). I did not listen to it: the fixture is test tones and
+  the default Red Alert tracks were not available here.
+- **Cost** (release, relative; `music_switch_cost`, an `--ignored` test, run alone on the dev laptop, no other load noted):
+  three 3-minute stereo 22.05 kHz tracks: scan of the archive 11 ms (none decoded), decode 37 to 38 ms per track on the
+  thread, 30.3 MiB in memory per track, worst main-thread cost of a `set_music_mood` + `update` call 0.12 ms (80 calls, 25 of
+  them while a track loaded). Alternating before/after runs do not apply: the path is new.
+- **Gaps.** (1) Not streamed from disk: a running track is 30 MiB (8 bytes per frame); normally two tracks are in memory
+  (running + fading), briefly up to three plus the thread's 16-bit copy when the mood flips back during a fade or an
+  outdated decode finishes. (2) The shipped mapping is empty, so calm and combat play the same pool until the owner maps tracks by ear in the
+  F1 sound browser. (3) The `music_frame` call in `Runner::frame` is covered by the live run above, not by a test. (4) There is
+  no CC0 music in the bank, so without Red Alert files the music is silent (`music.fallback` is `None`). (5) Not tried with a
+  real Red Alert disc here, so real `SCORES.MIX` contents (and that AUD music is what that archive holds) are unverified.
+  (6) Mood radius, weights and times in `audio.ron` are first guesses.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
