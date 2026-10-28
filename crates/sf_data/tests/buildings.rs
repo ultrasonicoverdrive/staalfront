@@ -404,8 +404,9 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 
 /// The frozen copies that were made after WP6.1 and carry the building blocks of the shipped file
 /// on purpose: the scenarios that build (`BuildStructure`, WP6.2) need the tech tree, the exit sides
-/// and the base radius. Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 1] = ["placement_defs"];
+/// and the base radius, and the harvest scenario (WP7.2) needs the refinery's `HarvesterDock`
+/// function and exit side. Every other copy predates the block.
+const COPIES_WITH_BLOCKS: [&str; 2] = ["placement_defs", "harvest_defs"];
 
 #[test]
 fn the_frozen_copies_of_the_scenarios_load_with_no_building_blocks() {
@@ -448,6 +449,23 @@ fn the_copy_that_builds_keeps_the_blocks_it_was_made_with() {
     assert_eq!(anchor.function, BuildingFunction::Anchor);
     assert_eq!(anchor.build_radius.floor_int(), 8);
     assert!(copy.units().iter().filter(|u| u.building.is_some()).count() >= 10);
+}
+
+#[test]
+fn the_harvest_copy_has_the_refinery_dock_and_the_harvesting_flag() {
+    // `harvest_defs` is a copy of the shipped files made for WP7.2.
+    let root = repo().join("assets");
+    let copy = UnitDefs::load(&root.join("scenarios/harvest_defs"), &root).unwrap();
+    let refinery = copy
+        .sim_building(copy.kind_of("refinery").unwrap())
+        .unwrap();
+    assert_eq!(refinery.function, BuildingFunction::HarvesterDock);
+    assert!(refinery.exit_side.is_some());
+    let harvester = copy.sim_unit(copy.kind_of("harvester").unwrap()).unwrap();
+    assert!(harvester.flags.harvests);
+    // The scenario names the kinds by number.
+    assert_eq!(copy.kind_of("refinery"), Some(2));
+    assert_eq!(copy.kind_of("harvester"), Some(11));
 }
 
 // ---- data only -------------------------------------------------------------------------------------

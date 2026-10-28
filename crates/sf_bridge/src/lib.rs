@@ -34,6 +34,7 @@
 //! assert!(world.unit_table().get(Kind(12)).is_some()); // the rifleman
 //! ```
 
+use sf_data::harvest::HarvestSettings;
 use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
 use sf_data::sim_settings::SimSettings;
@@ -297,6 +298,40 @@ pub fn ore_rules(settings: &OreSettings) -> sf_sim::OreRules {
         regrow_amount: settings.regrow_amount,
         regrow_period: settings.regrow_period,
     }
+}
+
+/// The harvest rules of the world (WP7.2) from the settings of `harvest.ron`.
+pub fn harvest_rules(settings: &HarvestSettings) -> sf_sim::HarvestRules {
+    sf_sim::HarvestRules {
+        capacity: settings.capacity,
+        mine_amount: settings.mine_amount,
+        mine_period: settings.mine_period,
+        unload_amount: settings.unload_amount,
+        unload_period: settings.unload_period,
+        search_radius: settings.search_radius,
+        retry_period: settings.retry_period,
+        call_range: settings.call_range,
+        grant_timeout: settings.grant_timeout,
+        call_timeout: settings.call_timeout,
+        max_tries: settings.max_tries,
+        park_distance: settings.park_distance,
+        park_spread: settings.park_spread,
+        park_near_tenths: settings.park_near_tenths,
+        mine_start_tenths: settings.mine_start_tenths,
+        mine_reach_tenths: settings.mine_reach_tenths,
+        mine_lose_tenths: settings.mine_lose_tenths,
+        dock_reach_tenths: settings.dock_reach_tenths,
+    }
+}
+
+/// The kinds that harvest (WP7.2): the roles of `defs` with the `harvests` flag, ascending by
+/// kind. To hand to [`World::with_harvest`](sf_sim::World::with_harvest) with the rules.
+pub fn harvester_kinds(defs: &UnitDefs) -> Vec<Kind> {
+    defs.sim_units()
+        .iter()
+        .filter(|role| role.flags.harvests)
+        .map(|role| Kind(role.kind))
+        .collect()
 }
 
 /// The collision settings from the settings of `sim.ron`, to hand to

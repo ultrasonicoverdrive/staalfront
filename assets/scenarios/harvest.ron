@@ -1,0 +1,65 @@
+// Harvesters (WP7.2, docs/rules/economy.md): a refinery, harvesters and an ore field on the
+// 256 by 256 cell playfield (assets/maps/playfield256), a few full cycles each: search, drive,
+// mine, drive back, ask the refinery by message, queue, unload, repeat.
+//
+// `unit_defs` names a FROZEN copy of the shipped definitions of WP7.2 (harvest_defs, a copy of
+// assets/config/{unit_defs,unit_classes,weapon_defs}.ron). The harvest and ore rules are written
+// out below, so editing the shipped harvest.ron or ore.ron never moves this checksum. Kinds are
+// the permanent numbers of the records: 2 refinery, 11 harvester.
+//
+//   slot 0  the refinery of player 0 on (96, 86): 3 by 4 cells, exit cell (99, 88), so the dock
+//           point is (99.5, 88.5)
+//   slot 1  a harvester of player 0 on (104, 90), tick 0
+//   slot 2  a harvester of player 0 on (106, 92), tick 0: it reaches the refinery a little
+//           after slot 1 and queues behind it
+//   slot 3  a harvester of player 1 on (104, 96), tick 0: its player has no refinery, so it
+//           mines a load and then waits holding it (nothing is delivered for player 1)
+//   slot 4  a harvester of player 0 on (94, 91), tick 600: three on one refinery
+//
+// The ore: the field of 28 cells around (118, 82), x 115 to 121, y 79 to 84, 120 each, with the
+// regrowth of the shipped ore.ron (1 per 200 ticks per cell). A rock patch (x 100 to 106,
+// y 79 to 86) lies between the refinery and the field: the route goes round it.
+//
+// tools/sf_headless/tests/harvest.rs asserts the cycle (stage by stage), that the delivered ore
+// plus the loads carried equals what left the ore cells, the delivered total, the queue and the
+// pinned checksum. CI runs the scenario on Linux and Windows and requires the checksum in
+// harvest.expected.
+Scenario(
+    name: "harvest",
+    seed: 0x0007_0072,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("harvest_defs"),
+    buildings: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+    )),
+    ticks: 4500,
+    commands: [
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (96, 86))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (104, 90))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (106, 92))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 1, cell: (104, 96))),
+        (tick: 600, command: SpawnUnit(kind: 11, owner: 0, cell: (94, 91))),
+    ],
+)

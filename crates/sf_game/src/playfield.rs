@@ -113,6 +113,22 @@ pub fn with_buildings(world: World, defs: &UnitDefs) -> World {
         .expect("the seats are one faction each")
 }
 
+/// `world` with the harvest rules (WP7.2): the units with the `harvests` flag of `defs` search ore, mine it
+/// and unload at the refineries (the structures with the `HarvesterDock` function), with the numbers of the
+/// shipped `harvest.ron`. Call it after the unit table and the building table ([`with_buildings`]), before
+/// the world starts. A world with ore is what they need; without it they find nothing.
+///
+/// # Panics
+///
+/// If the unit or building table is missing or the world has started; the sandbox, its one caller, has
+/// neither problem.
+pub fn with_harvest(world: World, defs: &UnitDefs) -> World {
+    let rules = sf_bridge::harvest_rules(&sf_data::harvest::HarvestSettings::embedded());
+    world
+        .with_harvest(rules, &sf_bridge::harvester_kinds(defs))
+        .expect("a world with its unit and building tables that has not started takes the harvest rules")
+}
+
 /// The terrain of `map` for the simulation: `None` for a map without a
 /// terrain layer. The layer was checked against the shipped table when the map
 /// was loaded (`Map::load`) or generated, so an error here means the map was

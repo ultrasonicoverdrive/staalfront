@@ -2002,7 +2002,7 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
   accepts `PlaceStructure` and `SpawnUnit` (which carry their own `owner` and skip every placement rule) from any
   seat. The two commands are told apart in the checksum (tag 11).
 - **Follow-up (open, before any untrusted command stream: phase 14 multiplayer, replays from outside):** setup
-  commands (`PlaceStructure`, `SpawnUnit`) must be refused when they come from a player seat. Nothing exploits it
+  commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`) must be refused when they come from a player seat. Nothing exploits it
   today (the client sends only `BuildStructure` from input); no code changed for it in WP6.2.
 - **Decision for Tijmen from WP6.1, answered:** `factions` restricts what a player may *build*; pre-placed
   mission objects are not checked (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`). F1-M05's
@@ -2071,13 +2071,52 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
 
 ## Phase 7 — Economy
 
-Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
+Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.3 and WP7.4 are not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
   `nearest_ore_where`, a new last checksum section `E` that exists only with ore rules; numbers in
   `assets/config/ore.ron`; the ore shown as four fill levels on the terrain and on the minimap, from
   `terrain_look.ron`), `docs/rules/economy.md`: done. The scenario `ore_256` is pinned. No earlier pin moved.
+
+- WP7.2 Harvester (`sf_sim::harvest`: the loop search, mine, drive back, check in at the refinery by **messages**
+  (request, grant or queue, arrived, cancel, revoked, unloaded, released), unload over ticks, repeat; claims on
+  ore cells; one bay per refinery with a first-come queue and a grant timeout; the nearest standing refinery;
+  a player order to a field overrides the search; a per-player `World::ore_delivered` counter that WP7.3 and
+  WP7.4 replace; numbers in `assets/config/harvest.ron`; checksum section `H`, only with harvest rules; a cargo
+  bar under every harvester in the game; `sf_game --harvest`), `docs/rules/economy.md` ("Harvesters"). The scenario
+  `harvest` is pinned (new frozen copy `harvest_defs`). No earlier pin moved. Measured numbers (the harvest stage
+  about 6 microseconds a tick with 48 harvesters, a jammed system, see the gap below; at most 10 minimap uploads a second, about 0.22 ms each on a
+  software adapter) are in `economy.md`; screenshots in `docs/screenshots/wp7.2`.
+
+### WP7.2 notes
+
+- **`Command::TakeOre` decision:** it stays as scaffolding for tests and scenarios, joins the setup commands that
+  must be refused from player seats before any untrusted command stream (phase 14; it is in the list in the WP6.2
+  notes and in `buildings.md`, "Not done"); the harvester does not use it.
+- **WP6.3 (#76) must keep `World::is_standing` the one place that says "stands".** The harvester asks it for the
+  docks (`placement.rs`, now `pub(crate)`); when #76 makes it mean "complete", a refinery under construction stops
+  being a dock with no change here. Since the merge of #76 in the fix round this is tested end to end with
+  `BuildStructure`: `a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete`.
+- **Gaps, written down:** `Stop` cannot park a harvester; no order "unload at this refinery"; the refinery is chosen
+  by straight-line distance, not route length or queue length; the harvester's own re-issue of a walk the crowd
+  gave up (three tries) has no test of its own (the traffic test goes through the crowd's replan); no alliances;
+  the sandbox without `--harvest` has no harvest rules.
+- **Gap: throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
+  harvester goes to the same bay and the queue stands in its approach. The reviewer of #78 measured (three
+  refineries, 4000 ticks): 3 harvesters deliver 2400, 6 deliver 3200, 12 deliver 3200, 24 deliver 2271, 48 deliver
+  618. The 48/50-harvester measurements in `economy.md` (cost, minimap uploads) are therefore of a jammed system.
+  Not fixed in WP7.2; the follow-up is WP7.5 (refinery choice and queues).
+- **Fix round (review of #78):** the grant timeout and a holder ordered away now have tests that fail under their
+  mutations; `with_harvest` refuses a world without a building table and a later `with_units`/`with_buildings`;
+  a lost same-tick claim keeps the player's field focus; the nine tuning knobs (`call_timeout`, `max_tries`, park
+  distances, reach radii) moved from `harvest.rs` into `harvest.ron` (validated, pinned), which re-pinned `harvest`
+  (`economy.md`, "Checksum").
+- **The decision I took that the brief did not name:** a harvester stops and mines when it is within one cell of its
+  ore cell, and prefers cells with no neighbour claimed by another harvester (bodies are wider than a cell). Without
+  the first, two harvesters at neighbouring cells held each other off for thousands of ticks; without the second
+  they packed into one corner of the field.
+- **The minimap upload gap of WP7.1 is measured and stays:** see `economy.md`.
 
 ### WP7.1 notes
 
@@ -2087,14 +2126,10 @@ Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
   total per field (3000 on the F1-M01 ridge); the world has one start amount per cell, so fitting a field to its
   total (a zone and a number) is for the mission loader. The cell grid overlay does not show amounts. The numbers
   in `ore.ron` are placeholders.
-- **`Command::TakeOre` is a player-issuable command** in the lockstep sense: it is there so scenarios can mine
-  without a harvester. When WP7.2 lands, decide whether it stays (tests only) or is gated; nothing but scenarios
-  schedules it today.
-- **Minimap upload cost is unmeasured.** Every change of a fill level repaints the changed cells on the CPU image,
-  but `Hud::paint_minimap` then calls `set_minimap`, which recreates the whole minimap texture and bind group. While
-  regrowth runs that can happen almost every tick; it was not measured. The presentation side also copies and scans
-  every field cell per ore version (`SimSnapshot::capture`, `OreView::changes`), O(field cells), also unmeasured.
-  Measure both, and upload only the changed texels if it shows.
+- **`Command::TakeOre` is a player-issuable command** in the lockstep sense. Decided in WP7.2: it stays as test
+  scaffolding (see the WP7.2 notes).
+- **Minimap upload cost: measured in WP7.2** (at most 10 uploads a second, about 0.22 ms each on a software
+  adapter, with 50 harvesters, a jammed system: see the WP7.2 notes; the level comparison 1.4 microseconds a tick; `economy.md`, "The picture"). Left as it is.
 
 ## WP11.3 notes: positional sound
 

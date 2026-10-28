@@ -15,6 +15,7 @@
 
 pub mod build_stages;
 pub mod effects;
+pub mod harvest;
 pub mod map;
 pub mod movement;
 pub mod ore;

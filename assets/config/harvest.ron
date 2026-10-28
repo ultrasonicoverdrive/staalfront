@@ -1,0 +1,58 @@
+// Harvesters and the refinery's dock (WP7.2): how much a harvester carries, how fast it mines and
+// is unloaded, how far it looks for ore and how it checks in. Read by sf_data::harvest;
+// sf_bridge::harvest_rules hands the numbers to the world (World::with_harvest). Which units
+// harvest is the `harvests` flag of unit_defs.ron; the refinery is the structure with the
+// `HarvesterDock` function. The rules are in docs/rules/economy.md.
+//
+// The numbers are placeholders for the balance rounds of phase 15 and the playtest of M1.
+// Amounts are whole units of ore (one unit is one credit for now, see ore.ron); a tick is
+// 1/20 of a second.
+(
+    // Units of ore a harvester carries before it drives back.
+    capacity: 200,
+    // Ore taken in one bite, and the ticks between two bites: 4 per 8 ticks is 10 per second,
+    // so a full load takes 400 ticks (20 seconds) and one 120-unit ore cell lasts 12 seconds.
+    mine_amount: 4,
+    mine_period: 8,
+    // Ore the refinery takes off a harvester in one bite and the ticks between two bites (also
+    // the wait before the first one): 10 per 4 ticks is 50 per second, so a full load is unloaded
+    // in 80 ticks (4 seconds).
+    unload_amount: 10,
+    unload_period: 4,
+    // How far, in cells, a harvester looks for ore (and the most it will drive for it).
+    search_radius: 40,
+    // Ticks between two searches of a harvester that found nothing, and between two looks for a
+    // refinery of one that has none (100 ticks are 5 seconds).
+    retry_period: 100,
+    // A harvester asks the refinery for a place when it is this many cells from it (6 cells are
+    // about 5 seconds of driving at the harvester's speed).
+    call_range: 6,
+    // Ticks a harvester that was granted the bay has to arrive before the grant is withdrawn
+    // (400 ticks are 20 seconds). Must be longer than call_range cells take to drive, or no one
+    // would ever arrive.
+    grant_timeout: 400,
+    // The tuning of the loop (moved here from sf_sim in the WP7.2 fix round, PLAN §5 rule 6).
+    // Ticks a harvester waits for the refinery's answer to its request before it asks again.
+    // 1 to 1000.
+    call_timeout: 10,
+    // Walks to one goal (an ore cell, the dock point) that end short of it before the harvester
+    // gives that goal up and picks another. 1 to 20.
+    max_tries: 3,
+    // Where a harvester that has nothing to do waits: park_distance cells out from the dock point
+    // along the refinery's exit side, spread sideways over park_spread cells by its slot so that
+    // they do not stand on one spot; one within park_near_tenths tenths of a cell of its spot
+    // stays where it is. Distances 1 to 32 cells, the radius 1 to 320 tenths.
+    park_distance: 4,
+    park_spread: 5,
+    park_near_tenths: 20,
+    // Reach round the middle of the ore cell, in tenths of a cell: a harvester this near stops
+    // and mines whatever is left of its walk (mine_start), counts as there when its walk is over
+    // (mine_reach), and drives back when it is pushed farther away while mining (mine_lose).
+    // mine_start <= mine_reach < mine_lose <= 320.
+    mine_start_tenths: 10,
+    mine_reach_tenths: 15,
+    mine_lose_tenths: 25,
+    // How near to the dock point, in tenths of a cell, a harvester has to be when its walk is
+    // over to count as docked. 1 to 320.
+    dock_reach_tenths: 20,
+)
