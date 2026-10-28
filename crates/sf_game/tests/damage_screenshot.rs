@@ -450,7 +450,7 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
         assert_eq!(max, 600, "the power plant has 600 hit points");
         let v = scene.world.get(plant).unwrap();
         let [fx_m, fz_m] = sf_math::render_bridge::vec2_cells_to_metres(v.pos);
-        let cam = scene.camera(0.1, [fx_m, fz_m]);
+        let cam = scene.camera(0.16, [fx_m, fz_m]);
         let rect = scene.crop(&cam, plant, 20.0);
         let body = scene.crop(&cam, plant, 6.0);
         let (blend, frame) = scene.zoom_of(&cam);
