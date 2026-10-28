@@ -56,13 +56,7 @@ pub const MAX_ENTRIES: usize = 100_000;
 /// Bytes of AUD data read and decoded per scan.
 pub const MAX_DECODED_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-/// `assets/config/audio.ron`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AudioConfig {
-    #[serde(default)]
-    pub ra_audio: RaAudioConfig,
-}
+pub use crate::config::AudioConfig;
 
 /// "Use original Red Alert audio" and where the player's files are.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -74,27 +68,6 @@ pub struct RaAudioConfig {
     /// folder of WAV files written by `sf_ra_extract`.
     #[serde(default)]
     pub path: String,
-}
-
-impl AudioConfig {
-    /// Read `<asset_root>/config/audio.ron`; on any problem the defaults
-    /// (Red Alert audio off) and a warning.
-    pub fn load(asset_root: &Path) -> (AudioConfig, Option<String>) {
-        let path = asset_root.join(CONFIG_FILE);
-        match std::fs::read_to_string(&path) {
-            Ok(text) => match ron::from_str(&text) {
-                Ok(c) => (c, None),
-                Err(e) => (
-                    AudioConfig::default(),
-                    Some(format!(
-                        "cannot parse {}: {e}; using defaults",
-                        path.display()
-                    )),
-                ),
-            },
-            Err(_) => (AudioConfig::default(), None),
-        }
-    }
 }
 
 /// `assets/audio/ra_mapping.ron`: Staalfront sound event -> Red Alert file
