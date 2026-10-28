@@ -262,6 +262,70 @@ fn shipped_mapping_and_config_parse() {
     assert!(Mapping::parse("(sounds: {").is_err());
 }
 
+/// The shipped names, as literals: these files exist on the discs (checked by
+/// hand by the owner with `sf_ra_extract --dry-run`), a rename must be on
+/// purpose.
+#[test]
+fn shipped_mapping_names_are_pinned() {
+    let m = Mapping::load(&assets()).unwrap();
+    let want = [
+        ("ui.click", "RAMENU1.AUD"),
+        ("unit.select", "AWAIT1.V01"),
+        ("unit.move", "ACKNO.V01"),
+        ("unit.attack", "AFFIRM1.V01"),
+        ("building.placed", "PLACBLDG.AUD"),
+        ("explosion.small", "KABOOM1.AUD"),
+    ];
+    assert_eq!(m.sounds.len(), want.len(), "{:?}", m.sounds);
+    for (event, name) in want {
+        assert_eq!(
+            m.sounds.get(event).map(String::as_str),
+            Some(name),
+            "{event}"
+        );
+    }
+}
+
+/// A name with its own extension is looked up as written (`AWAIT1.V01`), a
+/// bare WAV stem from `sf_ra_extract` still becomes `.AUD`.
+#[test]
+fn names_with_a_variant_extension_resolve_as_written() {
+    assert_eq!(
+        wav_name("AWAIT1.V01.wav"),
+        (mix_id("AWAIT1.V01"), Some("AWAIT1.V01".into()))
+    );
+    assert_eq!(
+        wav_name("ramenu1.wav"),
+        (mix_id("RAMENU1.AUD"), Some("RAMENU1.AUD".into()))
+    );
+    assert_ne!(mix_id("AWAIT1.V01"), mix_id("AWAIT1.V01.AUD"));
+
+    let (public, _) = test_keypair();
+    let ima = encode(&beep(500), Compression::Ima);
+    let d = scratch("variant");
+    let mix = write_mix(
+        &[
+            (mix_id("AWAIT1.V01"), &ima),
+            (mix_id("RAMENU1.AUD"), &ima),
+            (mix_id("AWAIT1.V01.AUD"), &ima[..10]),
+        ],
+        MixFormat::Plain,
+    );
+    std::fs::write(d.join("SOUNDS.MIX"), mix).unwrap();
+    let m = mapping(&[("unit.select", "AWAIT1.V01"), ("ui.click", "RAMENU1.AUD")]);
+    let l = load(&d, &m, &public);
+    assert_eq!(l.sounds.len(), 2, "{:?}", l.warning);
+    assert!(l.warning.is_none(), "{:?}", l.warning);
+    std::fs::remove_dir_all(d).ok();
+
+    // The same through a WAV folder written by the extract tool.
+    let d = scratch("variant_wav");
+    std::fs::write(d.join("AWAIT1.V01.wav"), super::wav::write(&beep(500))).unwrap();
+    let l = load(&d, &mapping(&[("unit.select", "AWAIT1.V01")]), &public);
+    assert_eq!(l.sounds.len(), 1, "{:?}", l.warning);
+    std::fs::remove_dir_all(d).ok();
+}
+
 /// An old-format archive whose `n` entries all cover the same bytes.
 fn overlapping(n: u32, payload: &[u8]) -> Vec<u8> {
     let mut v = Vec::new();

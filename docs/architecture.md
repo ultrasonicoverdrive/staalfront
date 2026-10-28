@@ -791,7 +791,7 @@ ancestor, and again on the canonical path once the folder is created; if that
 last check fails, the folders it created are removed again and nothing is
 written. On the game side `ra::scan` lists every directory with `.wav`
 files as an archive "<dir> (WAV folder)" (`EntryKind::Wav`), `wav_name` maps
-`CLICK.wav` to `CLICK.AUD` and `#1A2B3C4D.wav` to that id, and
+`CLICK.wav` to `CLICK.AUD` (a stem with its own extension, as the voice lines `AWAIT1.V01.wav`, keeps it) and `#1A2B3C4D.wav` to that id, and
 `Catalog::find` prefers a WAV entry over a MIX entry. The scan classifies a
 WAV from its first 64 KiB (`wav::header`), so a folder of music tracks is
 listed without reading the samples; they are read when played.
