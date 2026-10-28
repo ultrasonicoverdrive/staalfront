@@ -14,6 +14,7 @@
 //! node budget of the path service.
 
 pub mod build_stages;
+pub mod damage;
 pub mod effects;
 pub mod map;
 pub mod movement;

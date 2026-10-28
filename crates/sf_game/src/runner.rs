@@ -549,8 +549,10 @@ fn order_text(order: sf_sim::Order, world: &SimSnapshot) -> String {
 pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
     // A structure under construction is drawn as the stage its progress is in (WP6.3).
     let building = snap.construction_of(v.id).map(|c| c.permille());
+    // A damaged or heavily damaged structure is drawn with that stage's model where the art has one (WP6.8).
+    let stage = looks.damage_stage(snap, v);
     let motion = Motion::from_fixed(
-        looks.shape_at(v, building),
+        looks.shape_in_state(v, building, stage),
         v.owner.0,
         v.prev_pos,
         v.pos,
