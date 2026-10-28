@@ -90,8 +90,10 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
 
 ## 4. Gaps
 
-* The bank has no weapon, impact or explosion sounds yet; only `explosion.small` has a Red Alert mapping. Follow-up
-  31 in `docs/progress.md`: WP11.3b adds CC0 fight sounds, a WP11.7 follow-up extends `ra_mapping.ron`.
+* The bank has no weapon, impact or explosion sounds yet, so without the player's Red Alert files the fight is silent
+  (follow-up 31 in `docs/progress.md`: WP11.3b adds CC0 fight sounds). With them, `ra_mapping.ron` maps every fight
+  event by role (PR #87) except `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`:
+  Red Alert has no sound for those, so they stay silent until WP11.3b.
 * The sim emits no event for a unit being selected or ordered, a structure placed or finished, or a harvester
   unloading: those are WP11.2 (voices) and later; nothing was added to `sf_sim`.
 * The settings screen (WP11.5) is not part of this; `mix.sfx_volume` and `mix.music_volume` are set in the file.

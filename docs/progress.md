@@ -2121,7 +2121,8 @@ near and when zoomed in, quieter and rarer far away and zoomed out. Rules: `docs
   "before" (the step is new); the frame budget is 16.7 ms. Not measured: the real mixer cost of 11 voices a frame, and
   `sf_demo --bench --fight` (WP5.6b).
 - **Gaps.** (1) The bank has no weapon, impact or explosion sounds; only `explosion.small` has a Red Alert mapping, so
-  without the player's files nothing of the fight is heard yet. No sound was added. (2) The sim has no event for selecting
+  without the player's files nothing of the fight is heard yet. No sound was added. (Since PR #87 the Red Alert mapping
+  covers the fight events; see follow-up 31.) (2) The sim has no event for selecting
   or ordering a unit, placing or finishing a structure or unloading; none was added (WP11.2 and later). (3) The call in
   `Runner::frame` and the wiring of `audio.ron` into `AudioSystem` at start are not covered by a test (the runner needs
   a window); the game run above shows they work. (4) `audio.ron` is not hot-reloaded. (5) `PlanStats` of the run is
@@ -2260,5 +2261,5 @@ fixed, delete the entry in the same PR.
 31. **The fight is silent in the shipped game** (WP11.3, PR #82): every fight sound event is `silent` because
     `assets/audio/bank.ron` has no weapon, impact or explosion sounds. A new small WP, **WP11.3b CC0 fight sounds**,
     adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
-    original-audio side, `assets/audio/ra_mapping.ron` beyond `explosion.small`, is a **WP11.7 follow-up**, done
-    after Tijmen's `ra-dryrun.txt`.
+    original-audio side is done (PR #87, 28-10-2026): `ra_mapping.ron` maps every fight event by role except
+    `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`, which have no Red Alert sound.
