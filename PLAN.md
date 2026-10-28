@@ -23,7 +23,7 @@ the EA source code). Execution: Sonnet 5 agents at effort medium, [xhigh] work p
 | B8 | Language of the game | **English** (menus, UI texts, voices, subtitles); all game texts in language files, not in code | Decision Tijmen 14-10-2026. Language files keep translating possible later. |
 | B9 | Language of code and documentation | **English**: code, comments, docs, commit messages, PRs | Decision Tijmen 14-10-2026. |
 | B10 | Reference hardware | **Windows laptop with NVIDIA GTX 1650**, 1920×1080 | Decision Tijmen 14-10-2026, card corrected 15-10-2026 (the laptop has a GTX 1650, not a 1050). The fps requirements apply on this card; VRAM budget 2 GB kept (headroom below the 1650's 4 GB). |
-| B11 | Original Red Alert audio | **Optional, loaded at runtime from the player's own Red Alert files** (like OpenRA); never in the repo, a release or a CI artifact | Decision Tijmen 14-10-2026. EA released the code, not the media; the 2008 freeware download does not allow redistribution. Reading the player's own copy keeps the repo clean. Staalfront always works without it (CC0 sounds are the default). See WP11.7. |
+| B11 | Original Red Alert audio (sound effects, voices and music) | **Optional, loaded at runtime from the player's own Red Alert files** (like OpenRA); never in the repo, a release or a CI artifact | Decision Tijmen 14-10-2026; music included by decision Tijmen 28-10-2026. EA released the code, not the media; the 2008 freeware download does not allow redistribution. Reading the player's own copy keeps the repo clean. Staalfront always works without it (CC0 sounds are the default; music falls back to silence/CC0). See WP11.7 and WP11.4. |
 | B12 | Cell size | **1 gameplay cell = 4 m**; maps 64×64 up to 256×256 cells (256 m up to 1,024 m). The visual terrain keeps its 1 m resolution (heightmap and materials per metre); gameplay data (terrain type, occupancy, pathfinding, building footprints, fog) is per 4 m cell. | Decided by the orchestrator on Tijmen's instruction, 17-10-2026. Vehicles are 4–8 m long and buildings 4.5–14 m (test pack v1 `manifest.json`), so a tank takes about one or two cells and a building 2×2 to 4×3 cells, the proportion RTS games are built on. At 1 m per cell a 256-cell map is only ~35 tanks wide and buildings take 20–154 cells; growing the map instead would multiply pathfinding and fog work by 16. The engine already handles a 1,024 m terrain (WP1.8 test on mirrored synthetic hills: 17 terrain draw calls at whole-map zoom). **Scale at the boundary:** sim positions are in cells (`Fx::ONE` = 1 cell); the presentation converts with one constant, 4 m per cell, at the sim→render boundary, and the terrain is 4 samples per cell side (done in WP1.14). Revisit only with a measured reason. |
 
 ---
@@ -303,7 +303,7 @@ Layered (analysis §12, §22G):
 - WP11.1 Sidebar à la classic RTS: build tabs, queue, money, power bar. The build menu needs its own picture field in `unit_defs.ron`, separate from `icon` (since WP3.6 `icon` is the name of the strategic map icon).
 - WP11.2 Voice responses on selecting, moving, attacking (analysis §15), with a brake against spam.
 - WP11.3 Sound: positional, volume by zoom (farther away = quieter and less).
-- WP11.4 Music: dynamic (calm/combat).
+- WP11.4 Music: dynamic (calm/combat). Optionally plays original Red Alert music (B11) through the WP11.7 loader, from the same "Use original Red Alert audio" path: a mapping file in RON assigns Red Alert tracks (names or `#id`s) to the calm and combat moods. Without Red Alert files the default (silence/CC0) plays, without error. Tests use only generated fixtures, never real Red Alert files.
 - WP11.5 Menus, settings (keys, sound, graphics), accessibility (colorblind colors, UI scale).
 - WP11.6 Real models and textures replace the placeholders (see §10 assets).
 - WP11.7 Original Red Alert audio (B11), optional, in `sf_audio`: reader for `.mix` archives (including Red Alert's encrypted headers: RSA-wrapped Blowfish key) and decoder for `.aud` (Westwood ADPCM and IMA ADPCM) to PCM; a mapping file in RON from Red Alert sound names to Staalfront sound-bank events; setting "Use original Red Alert audio" with the path to the player's install or freeware download. Missing or unknown files fall back to the CC0 sounds without error. Tests use only fixtures generated in the test itself (own encoder), never real Red Alert files; CI never needs them.
@@ -415,7 +415,7 @@ Placeholders (geometric figures) keep the work going in the meantime.
 | Effects | own GPU particles | same, tuned |
 | Sound | CC0 (freesound) or Pixabay sounds (Pixabay Content License); record license, source URL and creator per file. No rips from Red Alert or other games in the repo, even if they are on Pixabay. Exception: original Red Alert audio via the runtime loader (B11, WP11.7), read from the player's own files | own recordings/purchase |
 | Voices | text-to-speech placeholder | voice actors |
-| Music | silence/CC0 | composer |
+| Music | silence/CC0. Exception: original Red Alert music via the runtime loader (B11, WP11.4), read from the player's own files | composer |
 | Cartoons | geometric figures | artist |
 
 Record the license per asset in `assets/LICENSES.md` — from the first file onward.

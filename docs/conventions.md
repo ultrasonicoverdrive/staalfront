@@ -156,13 +156,15 @@ is in PLAN.md §1.0.
 - Sound: CC0 (freesound) or Pixabay (Pixabay Content License); record license,
   source URL and creator per file. No rips from Red Alert or other games in the
   repo, even if they are on Pixabay (§10).
-- **B11:** original Red Alert audio is optional and loaded at runtime from the
-  player's own files (WP11.7); never in the repo, a release or a CI artifact.
-  Staalfront always works without it. WP11.7 tests use only fixtures generated in
-  the test itself. `.gitignore` excludes `*.mix`, `*.aud`, `*.vqa` and
+- **B11:** original Red Alert audio (sound effects, voices and, since
+  28-10-2026, music) is optional and loaded at runtime from the player's own
+  files (WP11.7, WP11.4); never in the repo, a release or a CI artifact.
+  Staalfront always works without it. WP11.7 and WP11.4 tests use only fixtures
+  generated in the test itself. `.gitignore` excludes `*.mix`, `*.aud`, `*.vqa` and
   `/ra-original/`.
 - **B5 clean-room:** use only the functional analysis, never read-and-retype EA
-  code (EA code is GPL). Own name, units, graphics and music are mandatory.
+  code (EA code is GPL). Own name, units, graphics and music are mandatory
+  (exception for original audio, music included: B11).
   Fact check against GPL sources (decision Tijmen 26-10-2026): `onderzoeker` and
   `reviewer` may consult EA or OpenRA code and data (for example OpenRA's sound
   YAML) to check single facts, such as which Red Alert file name belongs to which
