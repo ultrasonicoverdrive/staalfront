@@ -2071,7 +2071,7 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
 
 ## Phase 7 — Economy
 
-Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.3 and WP7.4 are not started.
+Status: WP7.1 and WP7.2 are in; WP7.3 is built on branch `wp/7.3-storage` (PR open); WP7.3b and WP7.4 are not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2088,6 +2088,27 @@ Status: WP7.1 is in; WP7.2 is built on branch `wp/7.2-harvester` (PR open); WP7.
   `harvest` is pinned (new frozen copy `harvest_defs`). No earlier pin moved. Measured numbers (the harvest stage
   about 6 microseconds a tick with 48 harvesters, a jammed system, see the gap below; at most 10 minimap uploads a second, about 0.22 ms each on a
   software adapter) are in `economy.md`; screenshots in `docs/screenshots/wp7.2`.
+
+- WP7.3 Storage (split 28-10-2026: the silo building is WP7.3b; PLAN.md phase 7): a `storage` number in the
+  building block of `unit_defs.ron` (refinery 2000, everything else 0), `sf_bridge::storage_capacities`,
+  `World::with_storage`; a player's store is capped by the storage of its standing buildings, the dock cuts its bite
+  to the room left and a harvester waits in the bay when full; a lost refinery lowers the capacity and the store
+  keeps its ore; `World::ore_stored`, `storage_capacity`; checksum section `V`, only with storage rules; a fill bar
+  under every storing structure (`storage_view`, `storage_look.ron`) and an `ore store` line per player in the F1
+  panel; `docs/rules/economy.md` ("Storage"). Branch `wp/7.3-storage`. New pinned scenario `storage`; no earlier pin
+  moved. Screenshots in `docs/screenshots/wp7.3`.
+
+### WP7.3 notes
+
+- **Decisions (economy.md):** full store = bite cut to the room, a zero bite leaves the harvester docked with its
+  load, the queue waits behind it; shrinking = keep the ore, nothing goes in until it is below the capacity.
+- **Cost:** `storage_cost` (ignored test, release, 50 harvesters, 4000 ticks, 7 alternating rounds, load average
+  4.5 to 5.6): 516.7 ms with storage, 517.3 ms without; the difference is below the run-to-run noise (about 5
+  microseconds a tick).
+- **Gaps:** nothing spends the store (WP7.4), so with `--harvest` the sandbox fills after ten loads and the
+  harvesters then wait for good; no silo (WP7.3b); the readout is in the F1 debug panel, not a player HUD; a
+  waiting harvester never leaves for another refinery (WP7.5); the mutation that drops "standing" from the
+  capacity sum is caught by the zero-hit-point test, not by the under-construction test.
 
 ### WP7.2 notes
 
