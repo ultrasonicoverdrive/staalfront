@@ -1170,6 +1170,30 @@ impl Instancer {
         }
     }
 
+    /// Report where the units of the last frame with `is_wanted(id)` are drawn, without marking
+    /// anything (WP7.2: the cargo bars of the harvesters). One pass over the frame's units, no
+    /// allocation.
+    pub fn visit_drawn(
+        &self,
+        is_wanted: impl Fn(UnitId) -> bool,
+        mut visit: impl FnMut(DrawnUnit),
+    ) {
+        let lift = self.icon_config.lift;
+        for rec in &self.records {
+            if !is_wanted(rec.id) {
+                continue;
+            }
+            let geom = self.geom(rec.shape);
+            visit(DrawnUnit {
+                id: rec.id,
+                centre: offset_point(Vec3::from(rec.pos), rec.steps, geom.offset).to_array(),
+                steps: rec.steps,
+                size: geom.size,
+                icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
+            });
+        }
+    }
+
     /// Mark the picked unit in the instance lists of the last build (before
     /// they are uploaded): its model is tinted towards white, its icon gets
     /// the highlight flag (a white outline). Does nothing if the pick is

@@ -102,6 +102,11 @@ pub struct SimSnapshot {
     ore_version: Option<u64>,
     ore_max: u16,
     ore: Vec<(u32, u32, u16)>,
+    /// The ore each harvester carries (WP7.2), parallel to `views`; `None` for everything that is
+    /// not a harvester. Empty (all `None`) in a world without harvest rules.
+    cargo: Vec<Option<u16>>,
+    /// The most a harvester carries (`HarvestRules::capacity`); zero without harvest rules.
+    cargo_capacity: u16,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
     /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
@@ -134,6 +139,8 @@ impl SimSnapshot {
             ore_version: None,
             ore_max: 0,
             ore: Vec::new(),
+            cargo: Vec::new(),
+            cargo_capacity: 0,
             wrecks: Vec::new(),
             deaths: Vec::new(),
             projectiles: Vec::new(),
@@ -249,6 +256,16 @@ impl SimSnapshot {
                 self.ore.clear();
             }
         }
+        // The harvesters' loads (WP7.2): nothing to look up in a world without harvest rules.
+        self.cargo.clear();
+        self.cargo_capacity = world.harvest_rules().map_or(0, |r| r.capacity);
+        if self.cargo_capacity > 0 {
+            self.cargo.extend(
+                self.views
+                    .iter()
+                    .map(|v| world.harvester_of(v.id).map(|h| h.load)),
+            );
+        }
         self.wrecks.clear();
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
@@ -326,6 +343,18 @@ impl SimSnapshot {
     /// Every live entity, in ascending slot order.
     pub fn views(&self) -> &[EntityView] {
         &self.views
+    }
+
+    /// The ore harvester `id` carries and the most it can carry (WP7.2); `None` for anything that
+    /// is not a harvester of this snapshot, and for a stale id.
+    pub fn cargo_of(&self, id: EntityId) -> Option<(u16, u16)> {
+        let load = (*self.cargo.get(self.find(id)?)?)?;
+        Some((load, self.cargo_capacity))
+    }
+
+    /// Whether this snapshot has any harvester: the cargo bars skip their pass when it has none.
+    pub fn has_harvesters(&self) -> bool {
+        self.cargo.iter().any(Option::is_some)
     }
 
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie. Not entities: they

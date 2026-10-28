@@ -192,15 +192,16 @@ rounded down). It must be on the map, free of structures and, for infantry and v
 ground class can enter (the terrain's `ground` summary, so a road is fine and water or rock are not); for the
 vessel factory the terrain is not checked (which water a vessel may use is WP6.5's, it has no flag yet). One
 cell, fixed, so that the ghost can show it and WP6.5 has a place to start; **where on that side and the free
-spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too
-but no rule yet (phase 7).
+spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too:
+the same cell is the dock point where harvesters unload (`economy.md`, "Harvesters"; WP7.2).
 
 **Rotation (the WP6.1 follow-up).** A structure is **not rotated**: `BuildStructure` has no facing, the
 footprint always extends east and south from its anchor and the exit side is the data's. So nothing rotates
 the exit side. If rotated placement is ever added, the exit side rotates with it and `exit_cell` takes the
 facing.
 
-**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`) are accepted from any player seat; they
+**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`, see
+`economy.md`) are accepted from any player seat; they
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
 only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
 put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is

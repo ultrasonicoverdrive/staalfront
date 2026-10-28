@@ -32,7 +32,8 @@
 //! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
 //! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
 //! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
-//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). It is the last section; the sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
+//! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
+//! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -202,6 +203,7 @@ const SECTION_DESTRUCTION: u8 = b'X';
 const SECTION_BUILDINGS: u8 = b'B';
 const SECTION_CONSTRUCTION: u8 = b'N';
 const SECTION_ORE: u8 = b'E';
+const SECTION_HARVEST: u8 = b'H';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -544,7 +546,7 @@ impl World {
             self.destruction.write_hash(&mut h, e);
         }
 
-        // Buildings (WP6.1): the rules of the structure kinds. Last, and only in a world that was
+        // Buildings (WP6.1): the rules of the structure kinds. Only in a world that was
         // given a table, so every world without one hashes as before.
         if !self.buildings.is_empty() {
             h.write_u8(SECTION_BUILDINGS);
@@ -573,15 +575,23 @@ impl World {
             }
         }
 
-        // Ore (`E`, WP7.1: the rules, the number of field cells and a running sum over the amounts)
-        // is the last section and construction (`N`, WP6.3) comes just before it. Both are
+        // Construction (`N`, WP6.3), then ore (`E`, WP7.1: the rules, the number of field cells
+        // and a running sum over the amounts), then harvest (`H`, WP7.2) last. Each is
         // gated: `N` only while something is under construction, `E` only in a world that was given
-        // ore rules. So every world without them hashes as before and every pin of either WP stays.
+        // ore rules, `H` only with harvest rules. So every world without them hashes as before.
         if let Some(ore) = &self.ore {
             h.write_u8(SECTION_ORE);
             for word in ore.fingerprint() {
                 h.write_u64(word);
             }
+        }
+
+        // Harvesters (WP7.2): the rules, the ore delivered, every harvester's state and every
+        // dock's bay and queue. After the ore section, and only in a world that was given harvest
+        // rules, so every world without them hashes as before.
+        if let Some(harvest) = &self.harvest {
+            h.write_u8(SECTION_HARVEST);
+            harvest.write_hash(&mut h);
         }
 
         h.finish()

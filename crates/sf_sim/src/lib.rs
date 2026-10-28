@@ -324,6 +324,14 @@
 //! growing back slowly on a fixed schedule, found with [`World::nearest_ore`]. The terrain type of
 //! an emptied cell does not change. A world without the rules has no ore state and hashes as before.
 //!
+//! # Harvesters
+//!
+//! A world given [`HarvestRules`] ([`World::with_harvest`]) lets its harvester kinds run a loop:
+//! search ore, drive there, mine, drive to the nearest standing refinery, check in with it by
+//! messages (a request, a grant or a place in the queue, unloading over ticks, a release),
+//! unload and begin again. The unloaded ore is counted per player ([`World::ore_delivered`]).
+//! The rules are in `docs/rules/economy.md`; the module is [`harvest`].
+//!
 //! # Not here yet
 //!
 //! The destruction of what is shot down (WP5.5), and
@@ -340,6 +348,7 @@ pub mod crowd;
 pub mod destruction;
 mod entities;
 pub mod formation;
+pub mod harvest;
 pub mod ids;
 pub mod movement;
 pub mod orders;
@@ -369,6 +378,7 @@ pub use destruction::{
     DestructionConfig, MAX_WRECK_MIN_SIZE_TENTHS, MAX_WRECK_TICKS, Tally, Wreck, WreckKind,
 };
 pub use formation::{FormationConfig, FormationState, FormationStats, FormationView, MemberMode};
+pub use harvest::{DockView, HarvestRules, HarvestStage, HarvesterView};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
 };
