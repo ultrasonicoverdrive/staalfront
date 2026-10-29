@@ -18,6 +18,7 @@
 
 use std::collections::BTreeMap;
 
+use sf_data::damage::Damage;
 use sf_data::effects::{EffectDef, Effects, EffectsError, Limits};
 use sf_data::units::UnitDefs;
 use sf_math::render_bridge::{METRES_PER_CELL, cells_to_metres, vec2_cells_to_metres};
@@ -123,6 +124,16 @@ pub struct FxCounters {
     pub flashes_at_anchor: u64,
     /// Flashes that used the bounding-box rule (no anchor: another model, or no model drawn).
     pub flashes_by_rule: u64,
+    /// Damaged objects that gave off smoke or fire in the last frame (WP6.8).
+    pub damage_sources: u32,
+    /// Damaged objects skipped for being past `damage.ron`'s `max_sources` in a frame, in all.
+    pub damage_sources_capped: u64,
+    /// Puffs of smoke and fire made, in all.
+    pub damage_puffs: u64,
+    /// Puffs that started at an `fx_*` anchor of the drawn model.
+    pub damage_puffs_at_anchor: u64,
+    /// Puffs that started by the rule of `damage.ron` (no anchor: another model, or no model drawn).
+    pub damage_puffs_by_rule: u64,
 }
 
 /// `effects.ron` resolved against the definitions: names are numbers, links are lists of numbers.
@@ -250,6 +261,10 @@ pub struct FxPlayer {
     /// How many shots each `(shooter slot, weapon slot)` has had shown: a burst alternates between the
     /// model's muzzles by it.
     shots_shown: BTreeMap<(u32, u8), usize>,
+    /// How damage shows (WP6.8): the thresholds, rates and rules of `damage.ron`.
+    damage: Damage,
+    /// The smoke and fire puff of `damage.ron`, resolved against `effects.ron` once.
+    damage_puffs: (BurstDef, BurstDef),
 }
 
 impl FxPlayer {
@@ -261,7 +276,23 @@ impl FxPlayer {
 
     /// `effects` checked against `defs`; the pool and the frame's vector are made here, once.
     pub fn new(effects: Effects, defs: &UnitDefs) -> Result<FxPlayer, EffectsError> {
+        FxPlayer::with_damage(effects, defs, Damage::embedded())
+    }
+
+    /// [`FxPlayer::new`] with the damage table given (a test with a table of its own); it is checked
+    /// against `effects` too.
+    pub fn with_damage(
+        effects: Effects,
+        defs: &UnitDefs,
+        damage: Damage,
+    ) -> Result<FxPlayer, EffectsError> {
+        damage.check_against(&effects).map_err(EffectsError)?;
         let tables = Tables::new(effects, defs)?;
+        let burst = |name: &str| BurstDef::from(&tables.effects.effects[name]);
+        let damage_puffs = (
+            burst(&damage.emitters.smoke_effect),
+            burst(&damage.emitters.fire_effect),
+        );
         let l = &tables.effects.limits;
         Ok(FxPlayer {
             pool: ParticlePool::new(l),
@@ -271,6 +302,8 @@ impl FxPlayer {
             instances: Vec::with_capacity((l.max_particles + l.max_tracer_dots) as usize),
             counters: FxCounters::default(),
             shots_shown: BTreeMap::new(),
+            damage,
+            damage_puffs,
             tables,
         })
     }
@@ -354,6 +387,7 @@ impl FxPlayer {
         let band = ZoomBand::of(f.model_weight, f.reference_px, &limits);
         self.release(snap, ground, anchors, f.alpha, band);
         self.wreck_smoke(snap, ground, band, dt);
+        self.damage_smoke(snap, ground, anchors, band, f);
         self.pool.update(dt);
         let view = EmitView {
             view_proj: f.view_proj,
@@ -555,6 +589,132 @@ impl FxPlayer {
                 def,
                 flash: false,
             });
+        }
+    }
+
+    /// Smoke on damaged objects and smoke and fire on heavily damaged ones (WP6.8), from the snapshot's
+    /// hit points: no event and no memory, so an object repaired above a threshold stops at once and a
+    /// dead one is gone from the snapshot (its wreck's smoke takes over). Puffs start at the drawn
+    /// model's `fx_smoke` / `fx_fire` anchor, else by the rule of `damage.ron` above the middle of the
+    /// body. Nothing at strategic zoom, the middle factor at middle zoom; objects off the screen are
+    /// skipped, and at most `max_sources` give off puffs in one frame.
+    fn damage_smoke(
+        &mut self,
+        snap: &SimSnapshot,
+        ground: &dyn Ground,
+        anchors: &dyn Anchors,
+        band: ZoomBand,
+        f: &FxFrame,
+    ) {
+        self.counters.damage_sources = 0;
+        if band == ZoomBand::Strategic {
+            return;
+        }
+        let d = &self.damage;
+        let density = if band == ZoomBand::Middle {
+            self.tables.effects.limits.middle_factor
+        } else {
+            1.0
+        };
+        let margin = d.limits.cull_margin;
+        let (w, h) = (f.viewport[0], f.viewport[1]);
+        for v in snap.views() {
+            let Some(rates) = d.rates(snap.damage_stage(d, v)) else {
+                continue;
+            };
+            let Some(stats) = snap.stats_for(v) else {
+                continue;
+            };
+            // Where the body is, and how long: a structure's longer footprint side, a unit's size.
+            let (length_m, structure) = match stats.footprint {
+                Some(fp) => (f32::from(fp.width.max(fp.height)) * METRES_PER_CELL, true),
+                None => (cells_to_metres(stats.size), false),
+            };
+            if !structure && length_m < d.emitters.min_body_cells * METRES_PER_CELL {
+                continue;
+            }
+            let (a, b) = (
+                vec2_cells_to_metres(v.prev_pos),
+                vec2_cells_to_metres(v.pos),
+            );
+            let (x, z) = (
+                a[0] + (b[0] - a[0]) * f.alpha,
+                a[1] + (b[1] - a[1]) * f.alpha,
+            );
+            let y = ground.height(f64::from(x), f64::from(z)) as f32;
+            // Off the screen (or behind the camera): nothing to see, so no lookup and no puffs.
+            let on_screen = sf_render::pick::project_px(
+                &f.view_proj,
+                sf_render::glam::Vec3::new(x, y, z),
+                f.viewport,
+            )
+            .is_some_and(|(p, _)| {
+                p[0] >= -margin * w
+                    && p[0] <= w * (1.0 + margin)
+                    && p[1] >= -margin * h
+                    && p[1] <= h * (1.0 + margin)
+            });
+            if !on_screen {
+                continue;
+            }
+            if self.counters.damage_sources >= d.limits.max_sources {
+                self.counters.damage_sources_capped += 1;
+                continue;
+            }
+            self.counters.damage_sources += 1;
+            let fb = &d.fallback;
+            let by_rule = [
+                x,
+                y + (fb.height_fraction * length_m).max(fb.min_height_m),
+                z,
+            ];
+            let rule_radius = (fb.radius_fraction * length_m).max(fb.min_radius_m);
+            let slot = v.id.index();
+            for (rate, prefix, def) in [
+                (
+                    rates.smoke_per_s,
+                    &d.emitters.smoke_anchor,
+                    self.damage_puffs.0,
+                ),
+                (
+                    rates.fire_per_s,
+                    &d.emitters.fire_anchor,
+                    self.damage_puffs.1,
+                ),
+            ] {
+                if rate <= 0.0 {
+                    continue;
+                }
+                let expected = rate * f.dt.clamp(0.0, MAX_DT) * density;
+                let mut n = expected.floor() as u32;
+                if self.pool.chance(expected.fract()) {
+                    n += 1;
+                }
+                if n == 0 {
+                    continue;
+                }
+                let (position, radius_m) = match anchors.anchor(slot, prefix, 0, f.alpha) {
+                    Some(p) => {
+                        self.counters.damage_puffs_at_anchor += u64::from(n);
+                        (
+                            [p[0], p[1] + d.emitters.anchor_lift_m, p[2]],
+                            d.emitters.anchor_radius_m,
+                        )
+                    }
+                    None => {
+                        self.counters.damage_puffs_by_rule += u64::from(n);
+                        (by_rule, rule_radius)
+                    }
+                };
+                self.counters.damage_puffs += u64::from(n);
+                self.pool.spawn(&Burst {
+                    position,
+                    radius_m,
+                    count: n,
+                    def,
+                    flash: false,
+                });
+            }
         }
     }
 
@@ -1271,5 +1431,451 @@ mod tests {
         // And the cut is the snapshot's: the first wreck slot is one past the last live entity.
         let snap = snapshot_at(1);
         assert_eq!(crate::looks::first_wreck_slot(&snap), 0, "an empty world");
+    }
+
+    // ---- Damage: smoke and fire (WP6.8) ----
+
+    use sf_sim::EntityView;
+
+    /// The views of live objects `(role, cell x, cell y, hit points)` of owner 0 (see
+    /// `SimSnapshot::test_views`).
+    fn damaged_views(
+        items: &[(&str, i32, i32, u32)],
+    ) -> (Vec<EntityView>, std::sync::Arc<sf_sim::UnitTable>) {
+        let items: Vec<_> = items
+            .iter()
+            .map(|&(role, x, y, hp)| (role, 0, x, y, hp))
+            .collect();
+        SimSnapshot::test_views(&items)
+    }
+
+    fn damaged_world(items: &[(&str, i32, i32, u32)]) -> SimSnapshot {
+        let (views, table) = damaged_views(items);
+        SimSnapshot::of_views(views, table)
+    }
+
+    /// Runs `frames` frames of 0.1 s.
+    fn run_damage(
+        p: &mut FxPlayer,
+        snap: &SimSnapshot,
+        anchors: &dyn Anchors,
+        frame: &FxFrame,
+        frames: u32,
+    ) {
+        let ground = FlatGround::default();
+        let f = FxFrame { dt: 0.1, ..*frame };
+        for _ in 0..frames {
+            p.frame_with(snap, &ground, anchors, &f);
+        }
+    }
+
+    /// The power plant has 600 hit points: 660 thousandths is 396 of them, 330 thousandths 198. An
+    /// object above the first threshold gives off nothing, at or below it smoke, at or below the second
+    /// smoke and fire. Through the same `frame_with` the game calls.
+    #[test]
+    fn the_stage_of_the_hit_points_decides_what_an_object_gives_off() {
+        let at = |hp: u32| {
+            let mut p = player();
+            let anchors = fixed(Some([12.0, 6.0, 12.0]));
+            run_damage(
+                &mut p,
+                &damaged_world(&[("power_plant", 3, 3, hp)]),
+                &anchors,
+                &frame(1.0, 200.0),
+                100,
+            );
+            (p.counters(), anchors.asked.borrow().clone())
+        };
+        let (intact, asked) = at(600);
+        assert_eq!((intact.damage_puffs, intact.damage_sources), (0, 0));
+        assert!(asked.is_empty(), "no lookup for an intact object");
+        // 397 of 600 is 661 thousandths: still intact.
+        assert_eq!(at(397).0.damage_puffs, 0);
+        // 396 is 660: damaged. Smoke only: the fire anchor is never asked.
+        let (damaged, asked) = at(396);
+        assert_eq!(damaged.damage_sources, 1);
+        assert!(damaged.damage_puffs > 0);
+        assert!(asked.iter().all(|a| a.1 == "fx_smoke"), "{asked:?}");
+        // 199 is 331 thousandths: still only damaged. 198 is 330: heavily damaged, smoke and fire.
+        let (still, asked) = at(199);
+        assert!(asked.iter().all(|a| a.1 == "fx_smoke"), "{asked:?}");
+        let smoke_only = still.damage_puffs;
+        let (heavy, asked) = at(198);
+        assert!(asked.iter().any(|a| a.1 == "fx_smoke"));
+        assert!(asked.iter().any(|a| a.1 == "fx_fire"), "{asked:?}");
+        assert!(
+            heavy.damage_puffs > smoke_only,
+            "smoke and fire are more puffs than smoke alone"
+        );
+        // Over 100 frames of 0.1 s: 4 smoke puffs a second is 40 puffs, 8 + 7 a second 150 (the pool's
+        // own generator decides the fractions).
+        assert!((28..=54).contains(&smoke_only), "{smoke_only}");
+        assert!(
+            (120..=185).contains(&heavy.damage_puffs),
+            "{}",
+            heavy.damage_puffs
+        );
+        // Every puff of the anchored model started at its anchor, none by the rule.
+        assert_eq!(heavy.damage_puffs_by_rule, 0);
+        assert_eq!(heavy.damage_puffs_at_anchor, heavy.damage_puffs);
+    }
+
+    /// A model without the anchor gets the rule of `damage.ron`: above the middle of the body at 0.6 of
+    /// its length (the plant's longer side is 3 cells, 12 m, so 7.2 m up), within 0.15 of its length.
+    #[test]
+    fn a_model_without_anchors_gets_the_rule_of_damage_ron() {
+        let mut p = player();
+        run_damage(
+            &mut p,
+            &damaged_world(&[("power_plant", 3, 3, 100)]),
+            &NoAnchors,
+            &frame(1.0, 200.0),
+            3,
+        );
+        let c = p.counters();
+        assert!(c.damage_puffs > 0);
+        assert_eq!(c.damage_puffs_at_anchor, 0);
+        assert_eq!(c.damage_puffs_by_rule, c.damage_puffs);
+        // The middle of cell (3, 3) is (14, 14) m. Puffs rise a little in the frames shown (smoke
+        // 2.6 m/s, fire 2.0 m/s, 0.3 s at most, jitter 1.2); the disc is 1.8 m.
+        for [x, y, z] in p.pool.positions() {
+            assert!(
+                (x - 14.0).abs() <= 1.8 + 0.5 && (z - 14.0).abs() <= 1.8 + 0.5,
+                "{x} {z}"
+            );
+            assert!((7.2..=7.2 + 1.2).contains(&y), "height {y}");
+        }
+    }
+
+    /// With an anchor the puffs start at it, lifted by `anchor_lift_m` (1 m), in the anchor's disc (0.4 m):
+    /// the anchor of the drawn model, not the rule.
+    #[test]
+    fn puffs_start_at_the_anchor_a_little_above_it() {
+        let mut p = player();
+        let anchors = fixed(Some([30.0, 6.0, 20.0]));
+        // The object is on screen (cell 3, 3 is 14 m from the origin); the anchor is somewhere else.
+        run_damage(
+            &mut p,
+            &damaged_world(&[("power_plant", 3, 3, 100)]),
+            &anchors,
+            &frame(1.0, 200.0),
+            3,
+        );
+        let c = p.counters();
+        assert!(c.damage_puffs > 0);
+        assert_eq!(c.damage_puffs_at_anchor, c.damage_puffs);
+        assert_eq!(c.damage_puffs_by_rule, 0);
+        for [x, y, z] in p.pool.positions() {
+            assert!(
+                (x - 30.0).abs() <= 0.4 + 0.5 && (z - 20.0).abs() <= 0.4 + 0.5,
+                "{x} {z}"
+            );
+            assert!((7.0..=7.0 + 1.2).contains(&y), "height {y}");
+        }
+    }
+
+    /// Repaired above the threshold, the object stops at once; an object that is gone from the snapshot
+    /// (dead) does not smoke either.
+    #[test]
+    fn repair_above_the_threshold_or_death_stops_the_effect() {
+        let mut p = player();
+        let f = frame(1.0, 200.0);
+        let hurt = damaged_world(&[("power_plant", 3, 3, 100)]);
+        run_damage(&mut p, &hurt, &NoAnchors, &f, 20);
+        let made = p.counters().damage_puffs;
+        assert!(made > 0);
+        // Repaired to 500 of 600 (833 thousandths): not one more puff.
+        let repaired = damaged_world(&[("power_plant", 3, 3, 500)]);
+        run_damage(&mut p, &repaired, &NoAnchors, &f, 50);
+        assert_eq!(p.counters().damage_puffs, made);
+        assert_eq!(p.counters().damage_sources, 0);
+        // Damaged again, then dead (not in the snapshot): nothing more.
+        run_damage(&mut p, &hurt, &NoAnchors, &f, 20);
+        let again = p.counters().damage_puffs;
+        assert!(again > made);
+        run_damage(&mut p, &damaged_world(&[]), &NoAnchors, &f, 50);
+        assert_eq!(p.counters().damage_puffs, again);
+    }
+
+    /// Units smoke too, by the rule; infantry (under a cell) and objects made without the unit table do not.
+    #[test]
+    fn a_damaged_vehicle_smokes_but_infantry_does_not() {
+        let f = frame(1.0, 200.0);
+        let mut p = player();
+        // 100 of 400 hit points: heavily damaged.
+        let tank = damaged_world(&[("light_tank", 3, 3, 100)]);
+        run_damage(&mut p, &tank, &NoAnchors, &f, 50);
+        assert!(p.counters().damage_puffs > 0, "a vehicle smokes");
+        let mut p = player();
+        let rifle = damaged_world(&[("rifleman", 3, 3, 5)]);
+        run_damage(&mut p, &rifle, &NoAnchors, &f, 50);
+        assert_eq!(p.counters().damage_puffs, 0, "infantry does not");
+        // A placeholder (made without the table) has no hit points to speak of.
+        let (mut views, table) = damaged_views(&[("light_tank", 3, 3, 100)]);
+        views[0].has_stats = false;
+        let mut p = player();
+        run_damage(
+            &mut p,
+            &SimSnapshot::of_views(views, table),
+            &NoAnchors,
+            &f,
+            50,
+        );
+        assert_eq!(p.counters().damage_puffs, 0);
+    }
+
+    /// The zoom: nothing from afar (icons only), half the rate in the middle, whole at close range.
+    #[test]
+    fn damage_effects_follow_the_zoom_like_the_rest() {
+        let snap = damaged_world(&[("power_plant", 3, 3, 100)]);
+        let puffs = |model_weight: f32, reference_px: f32| {
+            let mut p = player();
+            let f = frame(model_weight, reference_px);
+            run_damage(&mut p, &snap, &NoAnchors, &f, 200);
+            p.counters()
+        };
+        let close = puffs(1.0, 200.0);
+        let middle = puffs(1.0, 40.0);
+        let far = puffs(0.0, 4.0);
+        assert_eq!((far.damage_puffs, far.damage_sources), (0, 0));
+        assert!(close.damage_puffs > 0);
+        let ratio = middle.damage_puffs as f32 / close.damage_puffs as f32;
+        assert!((0.35..=0.65).contains(&ratio), "middle/close = {ratio}");
+    }
+
+    /// An object off the screen is skipped without a lookup; and at most `max_sources` give off puffs in a
+    /// frame, the rest counted.
+    #[test]
+    fn off_screen_objects_are_skipped_and_the_sources_are_capped() {
+        let f = frame(1.0, 200.0);
+        // Cell (200, 200) is far off the 960 x 540 picture of the camera at (12, 12) m.
+        let mut p = player();
+        let anchors = fixed(Some([800.0, 2.0, 800.0]));
+        let far = damaged_world(&[("power_plant", 200, 200, 100)]);
+        run_damage(&mut p, &far, &anchors, &f, 20);
+        assert_eq!(p.counters().damage_puffs, 0);
+        assert!(anchors.asked.borrow().is_empty(), "no lookup off screen");
+        // Ten on screen against a cap of 4.
+        let capped = Damage::parse(
+            &sf_data::damage::EMBEDDED_DAMAGE.replace("max_sources: 256", "max_sources: 4"),
+        )
+        .unwrap();
+        let mut p =
+            FxPlayer::with_damage(Effects::embedded(), &UnitDefs::embedded(), capped).unwrap();
+        let items: Vec<_> = (0..10)
+            .map(|i| ("power_plant", 1 + i % 5, 2 + i / 5, 100))
+            .collect();
+        run_damage(&mut p, &damaged_world(&items), &NoAnchors, &f, 1);
+        let c = p.counters();
+        assert_eq!((c.damage_sources, c.damage_sources_capped), (4, 6));
+    }
+
+    /// The pool's budget holds with 200 burning objects on screen.
+    #[test]
+    fn many_burning_objects_stay_inside_the_pool() {
+        let items: Vec<_> = (0..200)
+            .map(|i| ("power_plant", 1 + i % 20, 1 + i / 20, 50))
+            .collect();
+        let snap = damaged_world(&items);
+        let mut p = player();
+        run_damage(&mut p, &snap, &NoAnchors, &frame(1.0, 200.0), 400);
+        let stats = p.pool_stats();
+        let cap = p.limits().max_particles;
+        assert!(stats.alive <= cap && stats.peak <= cap, "{stats:?}");
+        assert!(stats.spawned > 0);
+        assert!(p.counters().damage_sources <= 200);
+    }
+
+    // ---- What the damage effects cost (WP6.8): measurements, run by hand in release ----
+
+    /// 5,000 objects of the fight scale: 4,800 tanks over 240 x 240 m, of which `hurt_tanks` are heavily
+    /// damaged, and `burning` power plants (heavily damaged) in a block at the middle.
+    fn crowd_of(hurt_tanks: usize, burning: usize) -> SimSnapshot {
+        let mut items: Vec<(&str, i32, i32, u32)> = Vec::new();
+        for i in 0..4800usize {
+            let (x, y) = ((i % 80) as i32 * 3, (i / 80) as i32 * 3);
+            // Every `4800 / hurt_tanks`-th tank is heavily damaged (of 400 hit points).
+            let hurt = hurt_tanks > 0 && i % (4800 / hurt_tanks) == 0;
+            items.push(("light_tank", x, y, if hurt { 50 } else { 400 }));
+        }
+        for i in 0..burning {
+            items.push((
+                "power_plant",
+                30 + (i % 20) as i32 * 4,
+                40 + (i / 20) as i32 * 4,
+                50,
+            ));
+        }
+        // Ascending slots are the order given, whatever the cells.
+        damaged_world(&items)
+    }
+
+    /// A camera 300 m up looking straight down at the middle of that area.
+    fn frame_overhead() -> FxFrame {
+        let eye = Vec3::new(120.0, 300.0, 121.0);
+        let view = sf_render::glam::camera::rh::view::look_at_mat4(
+            eye,
+            Vec3::new(120.0, 0.0, 120.0),
+            Vec3::Y,
+        );
+        let proj =
+            sf_render::glam::camera::rh::proj::directx::perspective(0.8, 16.0 / 9.0, 0.1, 800.0);
+        FxFrame {
+            view_proj: proj * view,
+            focal_px: 0.5 * 540.0 / (0.4_f32).tan(),
+            viewport: [960.0, 540.0],
+            model_weight: 1.0,
+            reference_px: 200.0,
+            icon_px: 18.0,
+            dt: 0.05,
+            alpha: 1.0,
+        }
+    }
+
+    /// The table with the damage thresholds so low that nothing ever counts as damaged: the same code path
+    /// with the feature switched off (the baseline of the measurement).
+    fn damage_off() -> Damage {
+        Damage::parse(
+            &sf_data::damage::EMBEDDED_DAMAGE
+                .replace("damaged_at_permille: 660", "damaged_at_permille: 2")
+                .replace("heavy_at_permille: 330", "heavy_at_permille: 1"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    #[ignore = "a measurement, run by hand: cargo test --release -p sf_game --lib what_the_damage_effects_cost -- --ignored --nocapture"]
+    fn what_the_damage_effects_cost() {
+        let ground = FlatGround::default();
+        let f = frame_overhead();
+        let defs = UnitDefs::embedded();
+        let scenes = [
+            ("5,000 objects, none damaged", crowd_of(0, 0)),
+            ("5,000 + 200 burning buildings", crowd_of(0, 200)),
+            ("5,000 + 200 burning + 480 hurt tanks", crowd_of(480, 200)),
+        ];
+        println!(
+            "load average before: {}",
+            std::fs::read_to_string("/proc/loadavg")
+                .unwrap_or_default()
+                .trim()
+        );
+        for (name, snap) in &scenes {
+            let mut rows = Vec::new();
+            for round in 0..5 {
+                let time = |damage: Damage| {
+                    let mut p = FxPlayer::with_damage(Effects::embedded(), &defs, damage).unwrap();
+                    for _ in 0..100 {
+                        p.frame_with(snap, &ground, &NoAnchors, &f);
+                    }
+                    let t = std::time::Instant::now();
+                    for _ in 0..200 {
+                        p.frame_with(snap, &ground, &NoAnchors, &f);
+                    }
+                    let us = t.elapsed().as_secs_f64() * 1e6 / 200.0;
+                    (us, p.counters(), p.pool_stats())
+                };
+                let (off, _, _) = time(damage_off());
+                let (on, c, stats) = time(Damage::embedded());
+                rows.push((off, on));
+                if round == 4 {
+                    println!(
+                        "  last round: sources {} (capped {} in all), instances {}, pool alive {} peak {} smoke refused {} dropped {}",
+                        c.damage_sources,
+                        c.damage_sources_capped,
+                        c.instances,
+                        stats.alive,
+                        stats.peak,
+                        stats.smoke_refused,
+                        stats.dropped
+                    );
+                }
+            }
+            let med = |mut v: Vec<f64>| {
+                v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                v[v.len() / 2]
+            };
+            println!(
+                "{name}: frame_with off {:.1} us, on {:.1} us (medians of 5 alternating rounds; per round off/on: {})",
+                med(rows.iter().map(|r| r.0).collect()),
+                med(rows.iter().map(|r| r.1).collect()),
+                rows.iter()
+                    .map(|r| format!("{:.0}/{:.0}", r.0, r.1))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+        }
+        println!(
+            "load average after: {}",
+            std::fs::read_to_string("/proc/loadavg")
+                .unwrap_or_default()
+                .trim()
+        );
+    }
+
+    /// The software rasterizer's time for the particles of 200 burning buildings in a 960 x 540 frame
+    /// (nothing else drawn), against the same frame with no effects: how the draw cost grows, not what a
+    /// GPU does.
+    #[test]
+    #[ignore = "a measurement, run by hand: cargo test --release -p sf_game --lib what_the_damage_particles_cost_to_draw -- --ignored --nocapture"]
+    fn what_the_damage_particles_cost_to_draw() {
+        let ground = FlatGround::default();
+        let defs = UnitDefs::embedded();
+        // A closer camera than the CPU measurement: the block of 200 buildings (304 x 144 m) fills the picture.
+        let eye = Vec3::new(274.0, 190.0, 310.0);
+        let view = sf_render::glam::camera::rh::view::look_at_mat4(
+            eye,
+            Vec3::new(274.0, 0.0, 232.0),
+            Vec3::Y,
+        );
+        let proj =
+            sf_render::glam::camera::rh::proj::directx::perspective(0.8, 16.0 / 9.0, 0.1, 800.0);
+        let f = FxFrame {
+            view_proj: proj * view,
+            ..frame_overhead()
+        };
+        let snap = crowd_of(0, 200);
+        let mut p = FxPlayer::with_damage(Effects::embedded(), &defs, Damage::embedded()).unwrap();
+        let mut last = Vec::new();
+        for _ in 0..300 {
+            last = p.frame_with(&snap, &ground, &NoAnchors, &f).to_vec();
+        }
+        let mut r = sf_render::Renderer::headless(960, 540, &sf_render::GpuOptions::software())
+            .unwrap_or_else(|e| panic!("NO GPU ADAPTER AVAILABLE: {e}"));
+        println!("adapter: {}", r.adapter_summary());
+        r.set_scene(&[]);
+        r.set_view_proj(f.view_proj);
+        println!(
+            "{} instances of {} pool, load average before: {}",
+            last.len(),
+            p.limits().max_particles,
+            std::fs::read_to_string("/proc/loadavg")
+                .unwrap_or_default()
+                .trim()
+        );
+        let mut rows = Vec::new();
+        for _ in 0..5 {
+            let mut time = |instances: &[EffectInstance]| {
+                r.set_effects(instances);
+                r.render_to_image().unwrap();
+                let t = std::time::Instant::now();
+                for _ in 0..10 {
+                    r.render_to_image().unwrap();
+                }
+                t.elapsed().as_secs_f64() * 1e3 / 10.0
+            };
+            let off = time(&[]);
+            let on = time(&last);
+            rows.push((off, on));
+        }
+        for (off, on) in &rows {
+            println!("  frame without effects {off:.1} ms, with {on:.1} ms");
+        }
+        println!(
+            "load average after: {}",
+            std::fs::read_to_string("/proc/loadavg")
+                .unwrap_or_default()
+                .trim()
+        );
     }
 }

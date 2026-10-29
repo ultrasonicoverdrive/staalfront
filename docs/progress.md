@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are not started.
+Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.8 is built (in review); WP6.4 to WP6.7 are not started.
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -1953,6 +1953,22 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
   finished model, a progress bar) is worked out from the snapshot's state, with the stages and thresholds in
   `assets/config/build_stages.ron` and a box as the fallback; pre-placed structures start complete; scenario
   `construction`, `placement.expected` re-pinned with a measured cause; `docs/rules/construction.md`: done
+
+- WP6.8 Damage display: the stage of an object (intact, damaged, heavily damaged) is worked out from the snapshot's hit
+  points over the unit table's maximum with the thresholds of `assets/config/damage.ron` (presentation only, no state,
+  nothing in `sf_sim`); a damaged or heavily damaged structure is drawn with its `_damaged` / `_heavily_damaged` model where
+  the art has one (otherwise the finished model); smoke (damaged) and smoke plus fire (heavily damaged) come from the
+  model's `fx_smoke` / `fx_fire` anchor or a RON rule, through WP5.6's particle pool, zoom bands and a source cap, and stop
+  the frame the hit points rise above the threshold or the object dies; screenshots of both factions in
+  `docs/screenshots/wp6.8/`; `docs/rules/damage.md`: done
+  Gaps: no damaged models for units (smoke and fire only; the art has none); no sound; the thresholds and rates are
+  placeholders for Tijmen to tune; the cost was measured on software only (`damage.md`), not on the laptop (M0c).
+  **Open before Phase 6 closes:** re-run M0c on the GTX 1650 laptop with damage on (`sf_demo --bench --fight`) and
+  compare with the 28-10 M0c run (p99 4.42 / 4.35 ms), against the 16.7 ms budget; the risk is overdraw from the
+  2.8–3.2 m smoke and fire discs at close zoom.
+  Shapes: the 42 damaged structure models bring the roster to 189 of the 255 u8 shape ids; damaged unit models later
+  share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
+  on 660/330 per mille can flip stage.
 
 ### WP6.3 notes
 
