@@ -14,7 +14,8 @@
 //! ahead of the rule, and the rule never waits for the picture). In [`World::step`]:
 //!
 //! (1) the structures under construction advance by one tick ([`World::advance_construction`]),
-//!    in ascending slot order; one that reaches zero is complete and a [`Completion`] is recorded
+//!    in ascending slot order, each paying for the tick first in a world with money rules (one
+//!    that cannot pay waits, `crate::money`); one that reaches zero is complete and a [`Completion`] is recorded
 //!    for this tick ([`World::completions`], counted in `StepReport::structures_completed`);
 //! (2) then the commands of the tick run: a structure that completed in step 1 already stands for
 //!    a `BuildStructure` of the same tick (a prerequisite, a base anchor);
@@ -124,11 +125,19 @@ impl World {
     /// that reaches zero is complete and recorded.
     pub(crate) fn advance_construction(&mut self) {
         self.completions.clear();
+        self.stalled.clear();
         for i in 0..self.entities.len() {
             if !self.entities.alive[i]
                 || self.entities.build_left[i] == 0
                 || !self.has_hit_points(i)
             {
+                continue;
+            }
+            // Money (WP7.4): the tick is paid for first; without the money the structure waits.
+            let charge = self.construction_charge(i);
+            if charge > 0 && !self.pay(self.entities.owner[i], charge) {
+                self.stalled
+                    .push(EntityId::new(i as u32, self.entities.generation[i]));
                 continue;
             }
             self.entities.build_left[i] -= 1;

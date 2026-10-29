@@ -350,6 +350,7 @@ mod entities;
 pub mod formation;
 pub mod harvest;
 pub mod ids;
+pub mod money;
 pub mod movement;
 pub mod orders;
 pub mod ore;
@@ -382,6 +383,7 @@ pub use harvest::{DockView, HarvestRules, HarvestStage, HarvesterView};
 pub use ids::{
     EntityId, Kind, PlayerId, TICK_DURATION, TICK_MILLIS, TICKS_PER_SECOND, Tick, per_tick,
 };
+pub use money::{MAX_CREDITS_PER_ORE, MAX_STARTING_CREDITS, MoneyRules, tick_cost};
 pub use movement::{
     ClassCosts, Cost, FULL_PERMILLE, MAX_STEP, MovementTable, MovementTableError, scale_step,
 };

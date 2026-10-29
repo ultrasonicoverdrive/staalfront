@@ -14,6 +14,7 @@ use crate::entities::{Entities, NO_DEF, NewEntity};
 use crate::formation::{FormationConfig, FormationStats, FormationView, Formations};
 use crate::harvest::{DockView, Harvest, HarvestRules, HarvesterView};
 use crate::ids::{EntityId, Kind, PlayerId, Tick, per_tick};
+use crate::money::Money;
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
 use crate::ore::{Ore, OreRules};
@@ -167,6 +168,9 @@ pub enum ConfigError {
     /// The storage capacities were given without harvest rules, twice, after the start, or with a
     /// kind that is not a structure of the building table, a kind twice or a zero (WP7.3).
     Storage,
+    /// The money rules were given without storage rules, twice, after the start, with a price per
+    /// unit of ore outside 1 to 1000, a starting sum above a billion, or a player twice (WP7.4).
+    Money,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -228,6 +232,10 @@ impl fmt::Display for ConfigError {
             ConfigError::Storage => {
                 "the storage capacities must be given once, after the harvest rules and before the world \
                  starts, for structures of the building table, each kind once and above zero"
+            }
+            ConfigError::Money => {
+                "the money rules must be given once, after the storage rules and before the world starts, \
+                 with a price per unit of ore from 1 to 1000, at most a billion starting credits and each player once"
             }
             ConfigError::Harvest => {
                 "the harvest rules must be given before the world starts, after the unit and building tables, \
@@ -325,6 +333,12 @@ pub struct World {
     /// The harvesters and the refinery docks (WP7.2). `None` for a world that was given no harvest
     /// rules.
     pub(crate) harvest: Option<Box<Harvest>>,
+    /// The money rules and what was spent (WP7.4). `None` for a world that was given none; then
+    /// structures are built for free.
+    pub(crate) money: Option<Money>,
+    /// The structures under construction that did not advance in the last tick for lack of money
+    /// (WP7.4); replaced by every step, not hashed (it follows from the hashed state).
+    pub(crate) stalled: Vec<EntityId>,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
     /// The structures that became complete in the last tick (WP6.3); replaced by every step.
@@ -735,6 +749,8 @@ impl World {
             buildings: BuildingTable::empty(),
             ore: None,
             harvest: None,
+            money: None,
+            stalled: Vec::new(),
             placement: PlacementState::default(),
             completions: Vec::new(),
             targeting: Targeting::default(),
@@ -812,8 +828,9 @@ impl World {
         self.harvest.as_deref().map_or(0, |h| h.delivered(player))
     }
 
-    /// The ore `player` has stored (WP7.3). Zero without storage rules. Nothing spends it yet
-    /// (money is WP7.4), so with storage it equals [`World::ore_delivered`].
+    /// The ore `player` has stored (WP7.3). Zero without storage rules. Without money rules
+    /// nothing spends it, so it equals [`World::ore_delivered`]; with them it is the credits
+    /// ([`World::credits`]), the same number.
     pub fn ore_stored(&self, player: PlayerId) -> u64 {
         self.harvest.as_deref().map_or(0, |h| h.stored(player))
     }
