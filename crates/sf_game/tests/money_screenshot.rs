@@ -291,6 +291,8 @@ fn count(img: &Rgba8, c: (u8, u8, u8, u8), tol: i32) -> usize {
 
 /// The corner of the credits readout and its strip: right of x = W - 240, above y = 90.
 const CORNER: (u32, u32, u32, u32) = (W - 270, 0, W, 90);
+/// The strip that says a build is paused: under the readout (6 + 32 + 4 from the top, 32 high).
+const STRIP: (u32, u32, u32, u32) = (W - 270, 42, W, 74);
 
 #[test]
 fn the_bar_pauses_when_the_money_is_gone_and_the_readout_follows_the_credits() {
@@ -337,8 +339,14 @@ fn the_bar_pauses_when_the_money_is_gone_and_the_readout_follows_the_credits() {
         "the warning colour, with the strip"
     );
     assert_eq!(count_in(&paused, CORNER, money.text, 20), 0);
-    // The strip is a second panel under the readout: more pixels in the corner than without it.
-    assert!(count_in(&paused, CORNER, money.low, 40) > count_in(&running, CORNER, money.low, 40),);
+    // The strip is a second panel under the readout, with its words in the warning colour; it is
+    // not there while the structure is paid.
+    assert!(
+        count_in(&paused, STRIP, money.low, 40) > 100,
+        "the strip says it"
+    );
+    assert_eq!(count_in(&running, STRIP, money.low, 40), 0);
+    assert_eq!(count_in(&running, STRIP, money.text, 40), 0);
 
     // Ore arrives: the structure goes on, the bar has its own colours again.
     let t2 = scene.run_until(3000, |w| {
