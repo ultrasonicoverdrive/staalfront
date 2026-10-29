@@ -440,6 +440,46 @@ fn run_to_stage(scene: &mut Scene, cam: &Camera, id: EntityId, stage: Stage) -> 
     panic!("the plant never reached {stage:?}");
 }
 
+/// The same plant at the zoom the game starts at (`CameraConfig::default().start_zoom`, middle band):
+/// the camera ticks on long enough that every puff made for the close camera has died, the stage holds,
+/// and the picture is saved. Returns the pixels the effects change around the plant and the light added
+/// near the fire anchor.
+fn at_start_zoom(
+    scene: &mut Scene,
+    r: &mut Renderer,
+    plant: EntityId,
+    stage: Stage,
+    name: &str,
+) -> (usize, usize) {
+    let v = scene.world.get(plant).unwrap();
+    let focus = sf_math::render_bridge::vec2_cells_to_metres(v.pos);
+    let cam = scene.camera(CameraConfig::default().start_zoom, focus);
+    let (blend, frame) = scene.zoom_of(&cam);
+    assert!(
+        blend.model() >= 1.0 && frame.reference_px < 60.0,
+        "the start zoom is the middle band, models drawn ({})",
+        frame.reference_px
+    );
+    let mut last = Vec::new();
+    // 80 ticks of 0.05 s: longer than the longest damage puff lives (3 s).
+    for _ in 0..80 {
+        let (snap, fx) = scene.tick(&cam);
+        assert_eq!(scene.stage_of(&snap, plant), stage, "{name}: the stage holds");
+        last = fx;
+    }
+    let tick = scene.world.tick().0;
+    let plain = scene.shoot(r, &cam, &[]);
+    let shot = scene.shoot(r, &cam, &last);
+    save(&format!("{name}_start_zoom_tick{tick}.png"), &shot);
+    let effects = changed(&plain, &shot, scene.crop(&cam, plant, 20.0));
+    let fire_at = scene
+        .anchor_px(&cam, plant, "fx_fire")
+        .expect("the model has fx_fire_0");
+    let glow = glow_pixels(&shot, &plain, around(fire_at, 40.0));
+    println!("{name} at start zoom: effects {effects} px, light near the fire anchor {glow} px");
+    (effects, glow)
+}
+
 #[test]
 fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
     let mut scene = Scene::new();
@@ -530,6 +570,16 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             .anchor_px(&cam, plant, "fx_smoke")
             .expect("the model has fx_smoke_0");
         assert!(changed(&damaged_plain, &damaged, around(at, 120.0)) > 50);
+        // Where the player looks: the start zoom of the game.
+        let (smoke, glow) = at_start_zoom(
+            &mut scene,
+            &mut r,
+            plant,
+            Stage::Damaged,
+            &format!("{faction}_power_plant_damaged"),
+        );
+        assert!(smoke > 150, "{faction}: smoke at the start zoom ({smoke})");
+        assert!(glow < 20, "{faction}: no fire when damaged at the start zoom ({glow})");
 
         // Shot on to heavily damaged.
         let tanks = scene.attackers(enemy, plant);
@@ -576,6 +626,16 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             "{faction}: damaged is smoke, no light ({glow_damaged})"
         );
 
+        let (smoke, glow) = at_start_zoom(
+            &mut scene,
+            &mut r,
+            plant,
+            Stage::Heavy,
+            &format!("{faction}_power_plant_heavy"),
+        );
+        assert!(smoke > 200, "{faction}: smoke and fire at the start zoom ({smoke})");
+        assert!(glow > 40, "{faction}: fire at the start zoom ({glow})");
+
         // Destroyed: the damage effect stops (the entity is gone from the snapshot) and the wreck's
         // smoke takes over.
         let tanks = scene.attackers(enemy, plant);
@@ -588,15 +648,20 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             }
         }
         assert!(gone, "it was destroyed");
-        let made = scene.fx.counters().damage_puffs;
+        // The plant was the only object with anchors that smoked: the hurt sandbox units have no
+        // `fx_smoke`/`fx_fire` nodes and smoke by the rule. So after its death no puff may start at an
+        // anchor, while the tanks may go on smoking by the rule.
+        let at_anchor = scene.fx.counters().damage_puffs_at_anchor;
         let spawned = scene.fx.pool_stats().spawned;
         scene.order(enemy, &tanks, away);
         for _ in 0..40 {
-            scene.tick(&cam);
+            let (snap, _) = scene.tick(&cam);
+            assert!(snap.get(plant).is_none(), "the plant stays gone");
         }
-        assert!(
-            scene.fx.counters().damage_puffs - made <= 60,
-            "no new damage puffs once the plant is gone (other damaged objects aside)"
+        assert_eq!(
+            scene.fx.counters().damage_puffs_at_anchor,
+            at_anchor,
+            "{faction}: no damage puff at the dead plant's anchors"
         );
         assert!(
             !scene.world.snapshot().wrecks().next().is_none(),
