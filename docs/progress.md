@@ -2087,7 +2087,7 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.8 is built (in
 
 ## Phase 7 — Economy
 
-Status: WP7.1 and WP7.2 are in; WP7.3 is built on branch `wp/7.3-storage` (PR #89); WP7.4 is built on branch `wp/7.4-money`, stacked on it (PR open); WP7.3b is not started.
+Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch `wp/7.4-money` (PR #90); WP7.3b is not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2170,7 +2170,7 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is built on branch `wp/7.3-storage` (PR #8
 - **Minimap upload cost: measured in WP7.2** (at most 10 uploads a second, about 0.22 ms each on a software
   adapter, with 50 harvesters, a jammed system: see the WP7.2 notes; the level comparison 1.4 microseconds a tick; `economy.md`, "The picture"). Left as it is.
 
-- WP7.4 Money (stacked on WP7.3): the store is the money pool; `credits_per_ore` and `starting_credits` in
+- WP7.4 Money: the store is the money pool; `credits_per_ore` and `starting_credits` in
   `assets/config/money.ron`, `World::with_money`, `credits`, `credits_spent`, `stalled`; a structure is paid tick by tick
   over its build time (`C * (k + 1) / T - C * k / T`, exact in total, no extra state) and waits without credits; no refund;
   `PlaceStructure` free; worlds without money rules build for free and hash as before; checksum section `M`; a credits
