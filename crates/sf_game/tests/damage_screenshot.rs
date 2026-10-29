@@ -464,7 +464,11 @@ fn at_start_zoom(
     // 80 ticks of 0.05 s: longer than the longest damage puff lives (3 s).
     for _ in 0..80 {
         let (snap, fx) = scene.tick(&cam);
-        assert_eq!(scene.stage_of(&snap, plant), stage, "{name}: the stage holds");
+        assert_eq!(
+            scene.stage_of(&snap, plant),
+            stage,
+            "{name}: the stage holds"
+        );
         last = fx;
     }
     let tick = scene.world.tick().0;
@@ -578,8 +582,11 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             Stage::Damaged,
             &format!("{faction}_power_plant_damaged"),
         );
-        assert!(smoke > 150, "{faction}: smoke at the start zoom ({smoke})");
-        assert!(glow < 20, "{faction}: no fire when damaged at the start zoom ({glow})");
+        assert!(smoke > 1000, "{faction}: smoke at the start zoom ({smoke})");
+        assert!(
+            glow < 20,
+            "{faction}: no fire when damaged at the start zoom ({glow})"
+        );
 
         // Shot on to heavily damaged.
         let tanks = scene.attackers(enemy, plant);
@@ -633,8 +640,11 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             Stage::Heavy,
             &format!("{faction}_power_plant_heavy"),
         );
-        assert!(smoke > 200, "{faction}: smoke and fire at the start zoom ({smoke})");
-        assert!(glow > 40, "{faction}: fire at the start zoom ({glow})");
+        assert!(
+            smoke > 2000,
+            "{faction}: smoke and fire at the start zoom ({smoke})"
+        );
+        assert!(glow > 200, "{faction}: fire at the start zoom ({glow})");
 
         // Destroyed: the damage effect stops (the entity is gone from the snapshot) and the wreck's
         // smoke takes over.

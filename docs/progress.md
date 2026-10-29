@@ -1963,6 +1963,12 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.8 is built (in
   `docs/screenshots/wp6.8/`; `docs/rules/damage.md`: done
   Gaps: no damaged models for units (smoke and fire only; the art has none); no sound; the thresholds and rates are
   placeholders for Tijmen to tune; the cost was measured on software only (`damage.md`), not on the laptop (M0c).
+  **Open before Phase 6 closes:** re-run M0c on the GTX 1650 laptop with damage on (`sf_demo --bench --fight`) and
+  compare with the 28-10 M0c run (p99 4.42 / 4.35 ms), against the 16.7 ms budget; the risk is overdraw from the
+  2.8–3.2 m smoke and fire discs at close zoom.
+  Shapes: the 42 damaged structure models bring the roster to 189 of the 255 u8 shape ids; damaged unit models later
+  share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
+  on 660/330 per mille can flip stage.
 
 ### WP6.3 notes
 
