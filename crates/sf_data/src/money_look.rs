@@ -28,8 +28,8 @@ pub struct PanelLook {
     pub pad_px: u16,
     /// Size of the text.
     pub text_px: u16,
-    /// Background (sRGB, alpha last).
-    pub back: (u8, u8, u8, u8),
+    /// Gap between the panel and the strip under it that says a build is paused.
+    pub gap_px: u16,
 }
 
 /// The progress bar of a structure that waits for money.
@@ -102,12 +102,12 @@ mod tests {
         assert_eq!(
             look.panel,
             PanelLook {
-                width_px: 210,
+                width_px: 250,
                 height_px: 32,
                 margin_px: 6,
                 pad_px: 12,
                 text_px: 18,
-                back: (10, 14, 20, 200),
+                gap_px: 4,
             }
         );
         assert_eq!(look.label, "Credits");
@@ -130,11 +130,11 @@ mod tests {
     #[test]
     fn a_look_with_a_zero_size_or_an_empty_word_is_refused() {
         let text = EMBEDDED_MONEY_LOOK;
-        assert!(MoneyLook::parse(&text.replace("width_px: 210", "width_px: 0")).is_err());
+        assert!(MoneyLook::parse(&text.replace("width_px: 250", "width_px: 0")).is_err());
         assert!(
             MoneyLook::parse(&text.replace("stroke_width_px: 3", "stroke_width_px: 0")).is_err()
         );
         assert!(MoneyLook::parse(&text.replace("label: \"Credits\"", "label: \"\"")).is_err());
-        assert!(MoneyLook::parse(&text.replace("(10, 14, 20, 200)", "oops")).is_err());
+        assert!(MoneyLook::parse(&text.replace("gap_px: 4", "gap_px: -4")).is_err());
     }
 }

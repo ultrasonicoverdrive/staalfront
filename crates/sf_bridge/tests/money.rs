@@ -47,11 +47,11 @@ fn the_shipped_money_reaches_the_world() {
         )
         .unwrap();
     // Literal pin of the shipped numbers, as the world sees them.
+    assert_eq!(world.money_rules(), Some(MoneyRules { credits_per_ore: 1 }));
     assert_eq!(
-        world.money_rules(),
-        Some(MoneyRules { credits_per_ore: 1 })
+        (world.credits(PlayerId(0)), world.credits(PlayerId(1))),
+        (1000, 1000)
     );
-    assert_eq!((world.credits(PlayerId(0)), world.credits(PlayerId(1))), (1000, 1000));
 }
 
 #[test]

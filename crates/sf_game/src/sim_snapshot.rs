@@ -113,6 +113,10 @@ pub struct SimSnapshot {
     /// The standing structures that store ore, ascending by slot: each carries the fill bar of
     /// its owner's store.
     stores: Vec<EntityId>,
+    /// Whether the world has money rules (WP7.4): then the store of a player is its credits.
+    has_money: bool,
+    /// The structures under construction that wait for money (WP7.4), ascending by slot.
+    stalled: Vec<EntityId>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
     /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
@@ -149,6 +153,8 @@ impl SimSnapshot {
             cargo_capacity: 0,
             storage: Vec::new(),
             stores: Vec::new(),
+            has_money: false,
+            stalled: Vec::new(),
             wrecks: Vec::new(),
             deaths: Vec::new(),
             projectiles: Vec::new(),
@@ -250,6 +256,10 @@ impl SimSnapshot {
                     .map(|v| v.id),
             );
         }
+        // The money (WP7.4): the credits are the stored amount above; what waits for them.
+        self.has_money = world.has_money();
+        self.stalled.clear();
+        self.stalled.extend_from_slice(world.stalled());
         self.wrecks.clear();
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
@@ -348,6 +358,25 @@ impl SimSnapshot {
     /// Every player's store as `(player, stored, capacity)`, ascending by player (WP7.3).
     pub fn storage(&self) -> &[(PlayerId, u64, u64)] {
         &self.storage
+    }
+
+    /// The credits `player` holds (WP7.4); `None` in a world without money rules. A player with
+    /// neither a store nor a structure has none to show, which reads as zero.
+    pub fn credits_of(&self, player: PlayerId) -> Option<u64> {
+        self.has_money
+            .then(|| self.storage_of(player).map_or(0, |(stored, _)| stored))
+    }
+
+    /// The structures under construction that wait for money (WP7.4), ascending by slot.
+    pub fn stalled(&self) -> &[EntityId] {
+        &self.stalled
+    }
+
+    /// Whether any structure of `player` under construction waits for money (WP7.4).
+    pub fn waits_for_money(&self, player: PlayerId) -> bool {
+        self.stalled
+            .iter()
+            .any(|&id| self.get(id).is_some_and(|v| v.owner == player))
     }
 
     /// The standing structures that store ore (WP7.3), ascending by slot.

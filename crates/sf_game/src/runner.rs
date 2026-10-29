@@ -889,6 +889,15 @@ impl Runner {
         }
     }
 
+    /// The credits of the local player and whether one of its builds waits for them (WP7.4).
+    fn money_hud(&self) -> Option<crate::money_view::MoneyHud> {
+        let player = commands::LOCAL_PLAYER;
+        Some(crate::money_view::MoneyHud {
+            credits: self.snap.credits_of(player)?,
+            waiting: self.snap.waits_for_money(player),
+        })
+    }
+
     /// The second line of the top bar: the chosen structure and the verdict of the ghost, or the
     /// last refusal for a few seconds.
     fn build_line(&self, now: Instant) -> Option<String> {
@@ -1848,6 +1857,7 @@ impl App for Runner {
             inspecting: self.selection.inspected().is_some(),
             tick: self.snap.tick().0,
             build_line: self.build_line(now),
+            money: self.money_hud(),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);
@@ -2325,6 +2335,8 @@ fn sandbox_scene(
                 world = crate::playfield::with_harvest(world, &defs);
                 // WP7.3: and their ore goes into the refineries' storage.
                 world = crate::playfield::with_storage(world, &defs);
+                // WP7.4: and the store is the player's money; structures are paid while they go up.
+                world = crate::playfield::with_money(world);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),

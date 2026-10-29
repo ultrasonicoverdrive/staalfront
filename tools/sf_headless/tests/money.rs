@@ -92,7 +92,13 @@ fn the_books_balance_and_every_credit_spent_is_a_tick_of_construction() {
         } else {
             u64::from(400 - r.left[2])
         };
-        let plants = |left: u32| if left == 0 { 300 } else { u64::from(300 - left) };
+        let plants = |left: u32| {
+            if left == 0 {
+                300
+            } else {
+                u64::from(300 - left)
+            }
+        };
         // A plant that is complete has left 0 as has one that is not yet placed (tick 0 only).
         let paid = barracks
             + if r.tick >= 2 {
@@ -173,10 +179,17 @@ fn spending_makes_room_in_a_full_store_and_the_waiting_harvester_unloads() {
     let before = at(&rows, BARRACKS_TICK);
     assert_eq!(before.credits, 600);
     assert_eq!(before.harvesters[1], Some((HarvestStage::Unloading, 100)));
-    assert_eq!(before.harvesters[0].map(|h| h.0), Some(HarvestStage::Queued));
+    assert_eq!(
+        before.harvesters[0].map(|h| h.0),
+        Some(HarvestStage::Queued)
+    );
     for t in BARRACKS_TICK - 50..=BARRACKS_TICK {
         let r = at(&rows, t);
-        assert_eq!((r.credits, r.delivered), (600, before.delivered), "tick {t}");
+        assert_eq!(
+            (r.credits, r.delivered),
+            (600, before.delivered),
+            "tick {t}"
+        );
         assert_eq!(r.harvesters[1], Some((HarvestStage::Unloading, 100)));
     }
     // The payments for the barracks free room and ore goes in while it is going up.
