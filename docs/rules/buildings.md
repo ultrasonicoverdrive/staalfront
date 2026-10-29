@@ -40,7 +40,7 @@ conscious choice. Adding a structure is a new record and no Rust change (a test 
 | `footprint: (width, height)` | record | Cells, 1 to 16 each. Anchored at the cell with the smallest x and y, extending east (+x) and south (+y). |
 | `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. The exit cell is the cell next to the middle of that side and must be usable when a factory is placed (WP6.2, "Placement"); where on that side units appear, and the free spot beyond it, is WP6.5. The structure is never rotated. |
 | `build_seconds` | record | Game seconds, a whole number of 20 Hz ticks, required with a `cost`, **not negative** (refused with its own message). Becomes `build_ticks`. |
-| `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). The economy of phase 7 spends it; nothing does yet. |
+| `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). With money rules (WP7.4) it is paid over the build time, `economy.md` "Money". |
 | `power` | record | Produced (+) or used (-). WP6.4 sums it. |
 | `factions` | record | Who may **build** it: `[Meridian]`, `[Veyran]`, `[Meridian, Veyran]` or `[Neutral]`. This is the per-faction availability. Checked by `BuildStructure` only (WP6.2): a mission may place any role for any owner with `PlaceStructure`. |
 | `building.requires` | block | Ids of structures the owner must have **standing** before this one can be built (the tech tree). Besides these, everything buildable has to be within the build radius of the owner's `construction_center` (WP6.2), which is not repeated in every list. |
@@ -205,7 +205,7 @@ facing.
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
 only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
 put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
-charged (phase 7, WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
+charged tick by tick in a world with money rules (WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
 (`content/units.md`); here it is a base structure behind the barracks, as in WP6.1.
 
 ### The ghost under the cursor (game)

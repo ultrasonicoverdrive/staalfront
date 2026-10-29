@@ -527,10 +527,7 @@ fn money_cost() {
                 plain.commands.push(TimedCommand {
                     tick: 1,
                     player: 0,
-                    command: Action::BuildStructure {
-                        kind: 1,
-                        cell,
-                    },
+                    command: Action::BuildStructure { kind: 1, cell },
                 });
             }
         }
@@ -543,8 +540,20 @@ fn money_cost() {
         for _ in 0..2 {
             probe.step();
         }
-        println!("under construction: {}, refused: {:?}", probe.under_construction(), probe.placement_rejections().iter().map(|r| (r.cell, r.reason)).collect::<Vec<_>>());
-        assert_eq!(probe.under_construction(), 12, "all twelve plants are accepted");
+        println!(
+            "under construction: {}, refused: {:?}",
+            probe.under_construction(),
+            probe
+                .placement_rejections()
+                .iter()
+                .map(|r| (r.cell, r.reason))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            probe.under_construction(),
+            12,
+            "all twelve plants are accepted"
+        );
         let mut rows = Vec::new();
         for round in 0..7 {
             let (with, _, d1) = timed(&money);
@@ -578,7 +587,11 @@ fn money_cost() {
             let (without, _, _) = timed(&plants_plain);
             rows.push((with, without));
         }
-        let (with, without) = (mean(|r| r.0), mean(|r| r.1));
+        let n = rows.len() as f64;
+        let (with, without) = (
+            rows.iter().map(|r| r.0).sum::<f64>() / n,
+            rows.iter().map(|r| r.1).sum::<f64>() / n,
+        );
         println!(
             "plants only, 300 ticks, 40 rounds, mean: {with:.2} ms with, {without:.2} ms without: {:.3} microseconds per tick more",
             (with - without) * 1e3 / ticks as f64

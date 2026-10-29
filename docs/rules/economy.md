@@ -4,7 +4,7 @@ Work packages WP7.1 and WP7.2 (PLAN.md phase 7). This page holds the rules of th
 map** (WP7.1): how much a cell holds, how it is taken, how it grows back, how a harvester finds
 it; and of the **harvesters** (WP7.2, from "Harvesters" below): the loop of search, mine, drive
 back, check in at the refinery by messages, unload. Storage (WP7.3, "Storage" below) caps what a
-player keeps; money (WP7.4) is a later work package and will add its rules to this page. Rules in our own words.
+player keeps; money (WP7.4, "Money" below) spends from that store. Rules in our own words.
 
 ## What is where
 
@@ -355,7 +355,7 @@ Each has a test (`crates/sf_sim/tests/harvest.rs` unless named otherwise):
 a player so far: a **statistic**, a plain counter kept per player in a sorted vector, hashed in the
 checksum. Since WP7.3 the ore also goes into the player's **store** (`World::ore_stored`, "Storage"
 below), which is capped; with storage rules every unit delivered is a unit stored, so the two are
-equal until WP7.4 (money) spends from the store.
+equal until money rules (WP7.4, "Money") spend from the store.
 
 ### Checksum
 
@@ -554,7 +554,7 @@ harvester), and the player sees the cause at the refinery: a full bar and a harv
 
 A refinery that is destroyed, sold or removed takes its capacity with it from the next sync, but
 **the ore stays in the store**: nothing is clamped or lost, the store may hold more than its
-capacity, and nothing more goes in until it is below the capacity again (WP7.4 spends from it). Why:
+capacity, and nothing more goes in until it is below the capacity again (money, WP7.4, spends from it). Why:
 it is the simplest deterministic rule (no choice of what to throw away, no rounding), and no ore
 vanishes. Test: `a_lost_refinery_lowers_the_capacity_and_the_store_keeps_its_ore` (120 stored, the
 capacity drops to 60, after 1500 ticks still 120).
@@ -599,10 +599,122 @@ rise ever ends above the capacity and the store never falls. Pinned in
 
 ### Not done
 
-* No money and nothing spends the store (WP7.4). With the shipped 2000 and no spending, the sandbox
-  store fills after ten loads and the harvesters then wait at the refinery for good.
+* Nothing spends the store in a world without money rules. With the shipped 2000 and no spending, such a
+  world's store fills after ten loads and the harvesters then wait at the refinery for good; with money
+  rules (WP7.4) spending frees room, see "Money".
 * No silo (WP7.3b). The construction centre stores nothing.
-* The readout is in the F1 debug panel, not in a player HUD (the money bar of WP7.4 is the place).
+* The storage readout is in the F1 debug panel; the player HUD (WP7.4) shows the credits, not the capacity.
 * A harvester waiting in a full refinery's bay keeps that bay; it never leaves for another
   refinery by itself (refinery choice is WP7.5). The store is one per player, so another refinery
   would be full too.
+
+## Money (WP7.4)
+
+Credits come from the ore store; a structure is paid for while it is built. The module is
+`sf_sim::money`, the world turns it on with `World::with_money`.
+
+### The pool
+
+* **The store is the money pool.** A unit of ore the refinery takes goes into the player's store as
+  `credits_per_ore` credits (shipped 1, `assets/config/money.ron`, one unit of ore is one credit for
+  now), and what is spent comes out of the same number. `World::credits(player)` is that number (and
+  `World::ore_stored`, which it equals; with a price above 1 the store counts credits, not units).
+  Why: one number, no conversion rule, and the WP7.3 "harvesters wait for good" state ends by itself:
+  spending makes room, so the next bite goes in. Test
+  (`spending_makes_room_and_a_waiting_harvester_unloads`): a store of 100 full of starting credits, a
+  harvester waiting in the bay with 100 ore; a tower is built and ore goes in while it goes up.
+* **The capacity is counted in credits.** The dock's bite is cut to the whole units of ore that fit,
+  `room / credits_per_ore` rounded down (`a_unit_of_ore_is_worth_its_price_and_the_store_counts_credits`:
+  price 3, capacity 400, the store ends at 399 with 133 units delivered).
+* **Starting credits** are put into the store when the world is made, per player
+  (`World::with_money(rules, &[(player, credits)])`; a player not listed starts with 0). The shipped
+  `starting_credits` is 1000 for each seat of the sandbox (`playfield::with_money`); a scenario writes
+  its own (`money: Some((credits_per_ore: 1, starting: [(0, 300)]))`). The store may then hold more than
+  its capacity (no refinery yet, or a refinery lost): nothing is clamped and nothing goes in until
+  spending brings it below (`starting_credits_above_the_capacity_stay_and_fill_nothing_more`).
+* **Configuration.** After `with_storage` (the store must exist), before the start, once; refused with
+  `ConfigError::Money` otherwise, for a price outside 1 to 1000, more than 1,000,000,000 starting credits
+  or a player twice (`money_is_given_once_after_the_storage_rules_and_before_the_start`). **A world without
+  it builds for free and hashes as before** (below). In the sandbox it exists with `--harvest`, which is
+  what gives the world a store; without `--harvest` structures stay free and the HUD shows no credits.
+
+### Paying while building
+
+A structure of price `C` and `T` build ticks costs, for the tick that takes it from `k` to `k + 1` ticks
+done, `C * (k + 1) / T - C * k / T` (integer division; `money::tick_cost`). The costs add up to exactly
+`C` (`the_ticks_of_a_build_add_up_to_exactly_the_price`, including `u32::MAX` over 5000), no tick costs
+more than `C / T` rounded up, and the remainder falls on the later ticks (7 over 3 is 2, 2, 3). The cost
+of a tick depends on `k` alone, so **no state is kept next to `build_left`**.
+
+* **When.** In `advance_construction`, the first thing a step does, in ascending slot order, each
+  structure pays its tick before it advances. The structure placed by a command of tick `t` pays first in
+  tick `t + 1`.
+* **No money, no progress.** If the owner's store holds less than the tick costs, nothing is paid (not a
+  part), `build_left` does not move, and the structure is listed in `World::stalled()` (replaced by every
+  step, not hashed: it follows from the hashed state); it tries again next tick, so it resumes when ore
+  arrives. With too little for several, the older slot is served first, and a younger one that still
+  fits in what is left is served too (`with_too_little_money_for_two_the_older_slot_is_paid_first`).
+* **The owner pays**, from its own store (`it_is_the_owner_who_pays`). `BuildStructure` is still accepted
+  with no money at all: it is placed and waits (gap: placement is not refused for lack of funds).
+* **Destroyed or removed mid-build: no refund.** What was paid stays spent
+  (`what_was_paid_for_a_structure_destroyed_half_built_is_not_refunded`: removed after 21 ticks, 52 of 100
+  stay spent).
+* **`PlaceStructure` costs nothing** (mission objects and start states, `mission_objects_cost_nothing`).
+* **A hit-point-less wreck under construction** does not advance and so does not pay.
+* The building table guarantees a structure has a price exactly when it has build ticks, so "free" can
+  only be a structure that cannot be built.
+* **Units** cost money when production exists (WP6.5). The hook is `World::pay(player, n)`
+  (`pub(crate)`): it takes all of `n` or nothing. Nothing calls it for units yet.
+* `World::credits_spent(player)` is a statistic (hashed).
+
+### Checksum
+
+A new section **`M`**, after `V`, written **only in a world given money rules**: the price per unit of
+ore, then the credits each player has spent (ascending). The credits themselves are the stored amount of
+`V`. Tests: `harvest::tests::the_money_state_is_in_the_checksum` (price, spent, who spent),
+`a_world_without_money_rules_has_no_money_section`. **No pinned value moved**: `golden.rs` and every
+`.expected` of an earlier scenario, `harvest` and `storage` included, pass unchanged (none has money
+rules); the bench PLAIN and FIGHT lists are pinned by `tests/bench_scene.rs`, unchanged. The new
+scenario `money` is pinned (`assets/scenarios/money.expected`, `tools/sf_headless/tests/money.rs`, CI job
+`headless`).
+
+### The scenario
+
+`money` (5400 ticks, the storage playfield, refinery capacity 600, two harvesters, player 0 starts with
+300 credits): two power plants (300 credits over 300 ticks each) at tick 1; a barracks (400 over 400) at
+tick 4650. Asserted: the credits fall 2 a tick for 150 ticks to 0 (`the_credits_drain...`); then both
+plants stand still at 150 ticks to go, with 0 credits, until the first ore (after tick 800 on this layout), go on in bursts as
+loads are unloaded, and are complete before tick 1500; at every tick credits = 300 + delivered - spent and
+spent = one credit per tick of construction done; the store is full (600) with a harvester waiting in the
+bay with 100 for 50 ticks before tick 4650, and ore goes in within 20 ticks of the barracks being placed.
+
+### The picture
+
+* **Readout.** `sf_game::money_view`: a panel in the top right corner, `Credits 1000`, in the warning
+  colour when below `low_below` or while a build waits, with a strip under it (`build paused: no
+  credits`) while a structure of the local player waits. The panel is drawn by the HUD (`Hud::frame`)
+  from `HudStats::money`, which the runner fills from the snapshot (`SimSnapshot::credits_of`,
+  `waits_for_money`); only in a world with money rules.
+* **Paused bar.** A structure in `World::stalled()` gets the construction bar in other colours and two
+  small pause strokes at the right end (`construction_view::draw_bars`, `money_view::pause_strokes`).
+* **Look.** Every number, colour and word is `assets/config/money_look.ron` (`sf_data::money_look`,
+  pinned). Test `crates/sf_game/tests/money_screenshot.rs` (real renderer on a software adapter: building,
+  paused, resumed; pixel checks of the colours; the readout is drawn by `money_view::draw_panel`, the
+  function the HUD calls, not through the window); frames in `docs/screenshots/wp7.4`.
+
+### Cost
+
+`money_cost` (ignored test, release, 50 harvesters and twelve plants going up, 7 alternating rounds,
+load average 1 to 4 from other work, so relative): the means with and without money rules differ by
+-10 to +47 microseconds per tick between runs of the same binary, i.e. **below the run-to-run noise** of
+about 5 percent (about 35 ms of 750); no extra cost can be shown at this resolution. The work added per
+tick is, per structure under construction, one table lookup and one store update.
+
+### Not done
+
+* No unit costs (WP6.5), no refund, sell or repair (WP6.6), no silo (WP7.3b), no refinery choice (WP7.5), no
+  sidebar (WP11.1).
+* `BuildStructure` is not refused for lack of funds; it waits.
+* Money exists only with `--harvest` in the sandbox, and a player that owns nothing shows no credits.
+* The model of a structure under construction is not part of the screenshot test (the harness draws the
+  roster's models, not the build stages).
