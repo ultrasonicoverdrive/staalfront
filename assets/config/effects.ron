@@ -88,6 +88,10 @@
         "explosion_large":    (count: 14, life_s: 0.90, size_m: 6.0, growth_mps: 10.0, colour: (255, 140, 50),  alpha: 1.0, glow: true,  rise_mps: 2.0, spread_mps: 9.0, sound: "explosion.large"),
         "smoke_death":        (count: 5,  life_s: 1.80, size_m: 3.0, growth_mps: 3.5,  colour: (80, 78, 75),    alpha: 0.55, glow: false, rise_mps: 2.5, spread_mps: 3.0, sound: ""),
 
+        // What a damaged object gives off while it stands (WP6.8, damage.ron): dark smoke that climbs slowly, and
+        // flames that flicker up and are gone.
+        "damage_smoke":       (count: 1,  life_s: 3.00, size_m: 3.2, growth_mps: 1.8,  colour: (40, 38, 36),    alpha: 0.70, glow: false, rise_mps: 2.6, spread_mps: 0.5, sound: ""),
+        "damage_fire":        (count: 1,  life_s: 0.80, size_m: 2.8, growth_mps: 0.8,  colour: (255, 150, 50),  alpha: 1.0,  glow: true,  rise_mps: 2.0, spread_mps: 0.5, sound: ""),
         // What a wreck gives off while it lies, and what a rocket leaves behind it.
         "smoke_wreck":        (count: 1,  life_s: 2.00, size_m: 2.0, growth_mps: 2.0,  colour: (70, 68, 66),    alpha: 0.35, glow: false, rise_mps: 2.0, spread_mps: 0.5, sound: ""),
         "trail_smoke":        (count: 1,  life_s: 0.80, size_m: 0.6, growth_mps: 1.5,  colour: (190, 190, 190), alpha: 0.35, glow: false, rise_mps: 0.3, spread_mps: 0.3, sound: ""),

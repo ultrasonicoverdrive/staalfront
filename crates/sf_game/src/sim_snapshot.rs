@@ -152,6 +152,50 @@ impl SimSnapshot {
         }
     }
 
+    /// A snapshot of exactly these views (ascending by slot) over this unit table, for a test of how the
+    /// picture maps hit points: the damage stage needs a chosen number of hit points, which a world
+    /// only reaches by fighting.
+    #[cfg(test)]
+    pub(crate) fn of_views(views: Vec<EntityView>, units: Arc<UnitTable>) -> SimSnapshot {
+        let mut snap = SimSnapshot::blank();
+        snap.orders = vec![Order::Idle; views.len()];
+        snap.gave_up = vec![None; views.len()];
+        snap.views = views;
+        snap.units = units;
+        snap
+    }
+
+    /// The views of live objects `(role id, owner, cell x, cell y, hit points)` in ascending slots, the
+    /// middle of the cell, with the hit points as given, and the shipped unit table: the input of
+    /// [`SimSnapshot::of_views`].
+    #[cfg(test)]
+    pub(crate) fn test_views(
+        items: &[(&str, u8, i32, i32, u32)],
+    ) -> (Vec<EntityView>, Arc<UnitTable>) {
+        let defs = sf_data::units::UnitDefs::embedded();
+        let table = Arc::new(sf_bridge::unit_table(&defs).unwrap());
+        let views = items
+            .iter()
+            .enumerate()
+            .map(|(slot, &(role, owner, x, y, hp))| {
+                let at = Vec2::from_ints(x, y) + Vec2::new(sf_math::Fx::HALF, sf_math::Fx::HALF);
+                EntityView {
+                    id: EntityId::new(slot as u32, 0),
+                    kind: sf_sim::Kind(defs.kind_of(role).unwrap()),
+                    owner: sf_sim::PlayerId(owner),
+                    prev_pos: at,
+                    pos: at,
+                    prev_facing: sf_math::Facing::default(),
+                    facing: sf_math::Facing::default(),
+                    has_stats: true,
+                    hp,
+                    turret: None,
+                }
+            })
+            .collect();
+        (views, table)
+    }
+
     /// A snapshot of `world` as it is. Used for the first snapshot, in tests
     /// and wherever there is no sim thread; the sim thread itself reuses its
     /// buffers with [`SimSnapshot::fill`].
@@ -363,6 +407,34 @@ impl SimSnapshot {
         } else {
             None
         }
+    }
+
+    /// The most hit points an entity of this kind can have (WP6.8): the unit table's `hp`, zero for
+    /// an entity made without the table (a placeholder) and for a kind that cannot be damaged. With
+    /// `EntityView::hp` this is all the picture needs to tell how damaged an object is.
+    pub fn max_hp(&self, v: &EntityView) -> u32 {
+        self.stats_for(v).map_or(0, |s| s.hp)
+    }
+
+    /// The unit table entry of a view of this snapshot (no lookup of the id); `None` for an entity
+    /// made without the table.
+    pub fn stats_for(&self, v: &EntityView) -> Option<&UnitStats> {
+        if v.has_stats {
+            self.units.get(v.kind)
+        } else {
+            None
+        }
+    }
+
+    /// How damaged an entity looks (WP6.8): its hit points over its kind's maximum, by the thresholds
+    /// of `damage`. The one place that turns the snapshot's hit points into a stage; the model
+    /// choice (`Looks::shape_in_state`) and the smoke and fire (`FxPlayer`) both call it.
+    pub fn damage_stage(
+        &self,
+        damage: &sf_data::damage::Damage,
+        v: &EntityView,
+    ) -> sf_data::damage::Stage {
+        damage.stage(v.hp, self.max_hp(v))
     }
 
     /// The current order of an entity; `None` for a stale id.

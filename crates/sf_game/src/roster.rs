@@ -59,6 +59,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use sf_data::build_stages::BuildStages;
+use sf_data::damage::{Damage, Stage as DamageStage};
 use sf_data::units::{Category, Faction, IconShape as DataIcon, Model, ModelShape, UnitDefs};
 use sf_math::render_bridge::{METRES_PER_CELL, cells_to_metres};
 use sf_render::glb::{LoadedPack, MODELS_CONFIG, load_pack_model};
@@ -131,6 +132,12 @@ pub struct Roster {
     stage_looks: BTreeMap<LookKey, Vec<RoleLook>>,
     /// The stages (`assets/config/build_stages.ron`) the looks above follow.
     stages: BuildStages,
+    /// The damaged and heavily damaged models of the roles that have them (WP6.8), by role, look and
+    /// stage. Only models: a role without such a file has no entry and keeps its finished look (the
+    /// smoke and fire still show). Never a placeholder, so it adds no shape but the model's own.
+    damage_looks: BTreeMap<(u16, Option<Faction>, DamageStage), RoleLook>,
+    /// The thresholds and file names (`assets/config/damage.ron`) the looks above follow.
+    damage: Damage,
     /// Roles whose model could not be used and fell back to a primitive.
     pub warnings: Vec<String>,
 }
@@ -278,6 +285,31 @@ impl Loader<'_> {
 }
 
 impl Loader<'_> {
+    /// The damaged or heavily damaged model of a role (WP6.8): the finished model's file with the
+    /// stage's suffix when `model` is a glTF file and that file exists and loads. `None` otherwise,
+    /// and the caller keeps the finished look; a missing file is no warning and no error.
+    fn damage_source(
+        &mut self,
+        role: &RoleCtx<'_>,
+        faction: Option<Faction>,
+        model: &Model,
+        base: &Style,
+        damage: &Damage,
+        stage: DamageStage,
+    ) -> Option<Source> {
+        let Model::Glb(path) = model else {
+            return None;
+        };
+        if !self.use_models {
+            return None;
+        }
+        let file = damage.model_of(path, stage)?;
+        if !self.assets.join(&file).is_file() {
+            return None;
+        }
+        self.source(role, faction, &Model::Glb(file), base)
+    }
+
     /// The source of every stage of a structure under construction (WP6.3), handed to `put` with
     /// the stage's index: the stage's glTF model when `model` is a glTF file whose staged file
     /// exists (the finished file name and the stage's suffix, `build_stages.ron`) and loads, else a
@@ -364,6 +396,30 @@ impl Roster {
         use_models: bool,
         stages: &BuildStages,
     ) -> Result<Roster, String> {
+        Roster::build_full(
+            defs,
+            base,
+            icons,
+            assets,
+            models_ron,
+            use_models,
+            stages,
+            &Damage::embedded(),
+        )
+    }
+
+    /// [`Roster::build_with`] with the damage table given too (a test with a table of its own).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_full(
+        defs: &UnitDefs,
+        base: &Style,
+        icons: &IconAtlas,
+        assets: &Path,
+        models_ron: &str,
+        use_models: bool,
+        stages: &BuildStages,
+        damage: &Damage,
+    ) -> Result<Roster, String> {
         let mut loader = Loader {
             assets,
             models_ron,
@@ -377,6 +433,9 @@ impl Roster {
         let mut sources: BTreeMap<LookKey, Source> = BTreeMap::new();
         // What a structure that can be built is drawn with while it goes up: per look and stage.
         let mut stage_sources: BTreeMap<(u16, Option<Faction>, usize), Source> = BTreeMap::new();
+        // The damaged models of the roles that have a file for them (WP6.8).
+        let mut damage_sources: BTreeMap<(u16, Option<Faction>, DamageStage), Source> =
+            BTreeMap::new();
 
         for def in defs.units() {
             let sim = defs
@@ -408,6 +467,13 @@ impl Roster {
                     placeholder(sim.size, sim.footprint, mesh, icon, base)
                 });
             sources.insert((def.kind, None), generic);
+            for stage in DamageStage::DAMAGED {
+                if let Some(source) =
+                    loader.damage_source(&role, None, &def.model, base, damage, stage)
+                {
+                    damage_sources.insert((def.kind, None, stage), source);
+                }
+            }
             let buildable = def.category == Category::Structure && sim.build_ticks > 0;
             if buildable {
                 loader.stage_sources(&role, None, &def.model, base, stages, |idx, source| {
@@ -419,6 +485,13 @@ impl Roster {
             for (faction, model) in &def.models {
                 if let Some(source) = loader.source(&role, Some(*faction), model, base) {
                     sources.insert((def.kind, Some(*faction)), source);
+                    for stage in DamageStage::DAMAGED {
+                        if let Some(source) =
+                            loader.damage_source(&role, Some(*faction), model, base, damage, stage)
+                        {
+                            damage_sources.insert((def.kind, Some(*faction), stage), source);
+                        }
+                    }
                     if buildable {
                         loader.stage_sources(
                             &role,
@@ -588,6 +661,25 @@ impl Roster {
                 });
         }
 
+        // The damaged looks: models only, so each is its model entry's shape.
+        let mut damage_looks = BTreeMap::new();
+        for ((kind, faction, stage), source) in &damage_sources {
+            let Source::Model(i) = source else {
+                unreachable!("a damage source is a model")
+            };
+            let def = defs
+                .unit_by_kind(*kind)
+                .ok_or_else(|| format!("kind {kind}: no definition"))?;
+            damage_looks.insert(
+                (*kind, *faction, *stage),
+                RoleLook {
+                    id: def.id.clone(),
+                    shape: (model_base + i) as u8,
+                    model: true,
+                },
+            );
+        }
+
         // The models as one pack: the loaded models in order, then one shape per
         // entry: its model's chain (the meshes are shared) and its icon.
         let pack = models
@@ -617,6 +709,8 @@ impl Roster {
             pack,
             stage_looks,
             stages: stages.clone(),
+            damage_looks,
+            damage: damage.clone(),
             warnings,
         })
     }
@@ -624,6 +718,36 @@ impl Roster {
     /// The stages the construction looks follow.
     pub fn stages(&self) -> &BuildStages {
         &self.stages
+    }
+
+    /// The damage table (`assets/config/damage.ron`) the damaged looks follow.
+    pub fn damage(&self) -> &Damage {
+        &self.damage
+    }
+
+    /// The shape of a damaged or heavily damaged object of this kind owned by `faction` (WP6.8): the
+    /// stage's model of the look the object has (the faction's own model, or the role's generic one;
+    /// a faction look never borrows the other look's damaged model). `None` for an intact object and
+    /// for a role with no such model; the caller then draws the finished look.
+    pub fn shape_damaged(
+        &self,
+        kind: Kind,
+        faction: Option<Faction>,
+        stage: DamageStage,
+    ) -> Option<u8> {
+        let own = faction.filter(|f| self.faction_looks.contains_key(&(kind.0, *f)));
+        self.damage_looks
+            .get(&(kind.0, own, stage))
+            .map(|l| l.shape)
+    }
+
+    /// The damaged looks, ascending by kind, then look, then stage (a test, a tool).
+    pub fn damage_looks(
+        &self,
+    ) -> impl Iterator<Item = (Kind, Option<Faction>, DamageStage, &RoleLook)> {
+        self.damage_looks
+            .iter()
+            .map(|(&(k, f, s), l)| (Kind(k), f, s, l))
     }
 
     /// The shape of a structure of this kind owned by `faction` while it is `permille` thousandths
@@ -808,6 +932,8 @@ pub const MODELS_FILE: &str = MODELS_CONFIG;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::looks::Looks;
+    use crate::sim_snapshot::SimSnapshot;
 
     fn assets() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets")
@@ -1507,6 +1633,193 @@ mod tests {
         assert_eq!([scaffolding[0], scaffolding[2]], [8.0, 12.0]);
         assert!((foundation[1] - 0.4).abs() < 0.01, "{foundation:?}");
         assert!((scaffolding[1] - 2.75).abs() < 0.01, "{scaffolding:?}");
+    }
+
+    /// The damaged and heavily damaged models of the art set are the roster's damaged looks: every role and
+    /// look whose finished file has a `_damaged` / `_heavily_damaged` sibling on disk has that look, nothing
+    /// else has one, and the list is pinned (WP6.8).
+    #[test]
+    fn the_damaged_looks_are_the_art_sets_damaged_files() {
+        let (defs, roster) = built(true);
+        let id = |kind: Kind| defs.unit_by_kind(kind.0).unwrap().id.clone();
+        let got: Vec<(String, Option<Faction>, DamageStage)> = roster
+            .damage_looks()
+            .map(|(kind, faction, stage, look)| {
+                assert!(look.model, "a damaged look is a model");
+                (id(kind), faction, stage)
+            })
+            .collect();
+        // The cross-check against the disk, from the role definitions' own model paths.
+        let mut from_disk = Vec::new();
+        for def in defs.units() {
+            let mut looks: Vec<(Option<Faction>, &sf_data::units::Model)> =
+                vec![(None, &def.model)];
+            looks.extend(def.models.iter().map(|(f, m)| (Some(*f), m)));
+            for (faction, model) in looks {
+                let sf_data::units::Model::Glb(path) = model else {
+                    continue;
+                };
+                for (stage, suffix) in [
+                    (DamageStage::Damaged, "_damaged"),
+                    (DamageStage::Heavy, "_heavily_damaged"),
+                ] {
+                    let file = path.replace(".glb", &format!("{suffix}.glb"));
+                    if assets().join(&file).is_file() {
+                        from_disk.push((def.id.clone(), faction, stage));
+                    }
+                }
+            }
+        }
+        // A role with a faction model of its own is drawn with it, never with the generic `model`.
+        let mut sorted = got.clone();
+        sorted.sort();
+        from_disk.sort();
+        let generic_of_factioned: Vec<_> = from_disk
+            .iter()
+            .filter(|(id, f, _)| {
+                f.is_none()
+                    && !defs
+                        .units()
+                        .iter()
+                        .find(|d| &d.id == id)
+                        .unwrap()
+                        .models
+                        .is_empty()
+            })
+            .cloned()
+            .collect();
+        from_disk.retain(|e| !generic_of_factioned.contains(e));
+        assert_eq!(sorted, from_disk);
+        // And the pinned numbers: nine structures with a model per faction (damaged and heavy), the decoy
+        // and the bunker with one generic model (damaged and heavy), and four mission objects (the
+        // archive both stages, the relay transmitter, the fuel depot and the bridge segment damaged only).
+        assert_eq!(got.len(), 9 * 2 * 2 + 2 * 2 + 2 + 1 + 1 + 1);
+        let has = |id: &str, f: Option<Faction>, s: DamageStage| {
+            got.iter().any(|g| g.0 == id && g.1 == f && g.2 == s)
+        };
+        assert!(has(
+            "power_plant",
+            Some(Faction::Meridian),
+            DamageStage::Heavy
+        ));
+        assert!(has(
+            "power_plant",
+            Some(Faction::Veyran),
+            DamageStage::Damaged
+        ));
+        assert!(has("fortified_bunker", None, DamageStage::Heavy));
+        assert!(has("bridge_segment", None, DamageStage::Damaged));
+        assert!(
+            !has("bridge_segment", None, DamageStage::Heavy),
+            "no such file"
+        );
+        assert!(roster.warnings.is_empty(), "{:?}", roster.warnings);
+    }
+
+    /// The three looks of a structure are three different shapes, and a faction's damaged look is its own,
+    /// never the other faction's (the finished models differ).
+    #[test]
+    fn a_damaged_look_is_its_own_shape_and_its_factions() {
+        let (defs, roster) = built(true);
+        let plant = Kind(defs.kind_of("power_plant").unwrap());
+        let mut all = Vec::new();
+        for f in [Faction::Meridian, Faction::Veyran] {
+            all.push(roster.shape_for(plant, Some(f)).unwrap());
+            for stage in DamageStage::DAMAGED {
+                all.push(roster.shape_damaged(plant, Some(f), stage).unwrap());
+            }
+        }
+        all.sort_unstable();
+        assert!(all.windows(2).all(|w| w[0] != w[1]), "{all:?}");
+        // No faction (an owner that is no seat) gets the generic role's, which the plant has none of.
+        assert_eq!(roster.shape_damaged(plant, None, DamageStage::Heavy), None);
+        // An intact object has no damaged shape.
+        assert_eq!(
+            roster.shape_damaged(plant, Some(Faction::Meridian), DamageStage::Intact),
+            None
+        );
+    }
+
+    /// A missing damaged model is never an error: the role keeps its finished look (a tank has no such
+    /// files; the bridge has no heavily damaged one), and it builds without a warning.
+    #[test]
+    fn a_role_without_a_damaged_model_keeps_its_look() {
+        let (defs, roster) = built(true);
+        let tank = Kind(defs.kind_of("light_tank").unwrap());
+        for stage in DamageStage::DAMAGED {
+            assert_eq!(
+                roster.shape_damaged(tank, Some(Faction::Veyran), stage),
+                None
+            );
+        }
+        let bridge = Kind(defs.kind_of("bridge_segment").unwrap());
+        assert!(
+            roster
+                .shape_damaged(bridge, None, DamageStage::Damaged)
+                .is_some()
+        );
+        assert_eq!(roster.shape_damaged(bridge, None, DamageStage::Heavy), None);
+        // Models off: every role is a primitive and has no damaged look at all.
+        let (_, plain) = built(false);
+        assert_eq!(plain.damage_looks().count(), 0);
+    }
+
+    /// `Looks::shape_in_state` is what the game draws: the stage's model for a complete, damaged structure
+    /// of the owner's faction, the finished one when intact, without such a model, under construction, or
+    /// for a placeholder; and `runner::motion_of` (the function the game and the instancer use) carries it.
+    #[test]
+    fn the_game_draws_the_stage_model_of_a_damaged_structure() {
+        use crate::runner::motion_of;
+        let (defs, roster) = built(true);
+        let looks = Looks::Roster {
+            roster: Box::new(roster),
+            crowd: crate::population::Population::new(None),
+        };
+        let roster = looks.roster().unwrap();
+        let plant = Kind(defs.kind_of("power_plant").unwrap());
+        let (m, v) = (sandbox::MERIDIAN, sandbox::VEYRAN);
+        let (views, table) = SimSnapshot::test_views(&[
+            // The plant has 600 hit points: 660 thousandths is 396, 330 thousandths 198.
+            ("power_plant", m, 3, 3, 600),
+            ("power_plant", m, 6, 3, 397),
+            ("power_plant", m, 9, 3, 396),
+            ("power_plant", v, 12, 3, 199),
+            ("power_plant", v, 15, 3, 198),
+            ("light_tank", v, 18, 3, 100),
+        ]);
+        let snap = SimSnapshot::of_views(views, table);
+        let shape = |i: usize| motion_of(&looks, &snap, &snap.views()[i]).shape;
+        let meridian = Some(Faction::Meridian);
+        let veyran = Some(Faction::Veyran);
+        let want = |f, s| roster.shape_damaged(plant, f, s).unwrap();
+        assert_eq!(shape(0), roster.shape_for(plant, meridian).unwrap());
+        assert_eq!(
+            shape(1),
+            roster.shape_for(plant, meridian).unwrap(),
+            "661 thousandths"
+        );
+        assert_eq!(shape(2), want(meridian, DamageStage::Damaged), "660");
+        assert_eq!(shape(3), want(veyran, DamageStage::Damaged), "331");
+        assert_eq!(shape(4), want(veyran, DamageStage::Heavy), "330");
+        // The tank has no damaged model: its own finished look.
+        let tank = Kind(defs.kind_of("light_tank").unwrap());
+        assert_eq!(shape(5), roster.shape_for(tank, veyran).unwrap());
+        // Under construction the stage models rule, however hurt: the first stage of the plant.
+        let hurt = snap.views()[4];
+        assert_eq!(
+            looks.shape_in_state(&hurt, Some(100), DamageStage::Heavy),
+            roster.shape_under_construction(plant, veyran, 100).unwrap()
+        );
+        // A placeholder (made without the unit table) keeps the crowd's mapping.
+        let mut placeholder = hurt;
+        placeholder.has_stats = false;
+        assert_eq!(
+            looks.shape_in_state(&placeholder, None, DamageStage::Heavy),
+            looks.shape_at(&placeholder, None)
+        );
+        // The crowd has no hit points to speak of.
+        let crowd = Looks::Crowd(crate::population::Population::new(None));
+        assert_eq!(crowd.damage_stage(&snap, &hurt), DamageStage::Intact);
     }
 
     #[test]

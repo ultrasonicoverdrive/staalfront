@@ -1,0 +1,62 @@
+// How damage shows (WP6.8, docs/rules/damage.md). Read by sf_data::damage, compiled into the game, and
+// checked when it is parsed and against effects.ron. Presentation only: the numbers here decide what the
+// player sees, never what happens. The picture works out an object's stage from the hit points the
+// snapshot carries (its own hit points over the unit table's maximum) every time it draws; nothing is
+// kept between frames and nothing flows back into the simulation.
+(
+    // The stage of an object by the share of its hit points left, in thousandths. At or below
+    // `damaged_at_permille` it is damaged, at or below `heavy_at_permille` heavily damaged; above the
+    // first it is intact. An object that cannot be damaged (maximum 0) is always intact. Repair above a
+    // threshold therefore ends the stage at once, with no memory (so an object hovering exactly on a
+    // threshold can flip; hit points move in steps, which makes that rare).
+    stages: (
+        damaged_at_permille: 660,
+        heavy_at_permille: 330,
+    ),
+    // The model of a stage: the suffix goes before ".glb" in the finished model's file name
+    // ("set_v4/meridian_barracks.glb" + "_damaged"). A role whose file does not exist keeps its
+    // finished model for that stage and shows the smoke and fire alone; that is no error.
+    models: (
+        damaged_suffix: "_damaged",
+        heavy_suffix: "_heavily_damaged",
+    ),
+    // The smoke and fire. `smoke_effect` and `fire_effect` name entries of effects.ron; the rates are
+    // puffs per second and source. A model's own anchor (a node whose name starts with `smoke_anchor`
+    // or `fire_anchor`, set v4 has `fx_smoke_0` and `fx_fire_0` on every structure) gives the place;
+    // without one the rule of `fallback` does. Heavily damaged objects give off smoke and fire,
+    // damaged ones smoke only.
+    emitters: (
+        smoke_effect: "damage_smoke",
+        fire_effect: "damage_fire",
+        smoke_anchor: "fx_smoke",
+        fire_anchor: "fx_fire",
+        damaged: (smoke_per_s: 4.0, fire_per_s: 0.0),
+        heavy: (smoke_per_s: 8.0, fire_per_s: 7.0),
+        // Puffs start in a disc of this radius around an anchor, metres, this much above it (a puff
+        // is a disc facing the screen and is depth-tested: on the surface of a roof half of it
+        // would be cut off).
+        anchor_radius_m: 0.4,
+        anchor_lift_m: 1.0,
+        // A mobile object smaller than this many cells (infantry) shows no smoke or fire. A structure
+        // is never excluded.
+        min_body_cells: 1.0,
+    ),
+    // Where the puffs start on an object whose model has no such anchor: above the middle of the
+    // body at `height_fraction` of its length (a structure's longer footprint side, a unit's size), at
+    // least `min_height_m`; in a disc of `radius_fraction` of the length, at least `min_radius_m`.
+    fallback: (
+        height_fraction: 0.6,
+        min_height_m: 1.0,
+        radius_fraction: 0.15,
+        min_radius_m: 0.3,
+    ),
+    // The budgets. At most `max_sources` damaged objects give off smoke in one frame (the rest are
+    // skipped and counted); an object whose position is outside the screen by more than `cull_margin`
+    // of the screen's width or height is skipped without a lookup. The particle pool, its 75 % smoke
+    // refusal and the zoom bands of effects.ron apply on top: nothing at strategic zoom, the middle
+    // factor at middle zoom.
+    limits: (
+        max_sources: 256,
+        cull_margin: 0.3,
+    ),
+)
