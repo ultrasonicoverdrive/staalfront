@@ -498,3 +498,90 @@ fn storage_cost() {
         (with - without) * 1e3 / f64::from(ticks as u32)
     );
 }
+
+/// Prints the relative cost of money (WP7.4) with 50 harvesters and twelve power plants going up
+/// at once (three construction centres, four plants each): alternating runs of the crowd scenario
+/// with storage (1,000,000 per refinery) with and without money rules. Player 0 starts with
+/// 1,000,000 credits, so nothing ever waits and both runs do the same work apart from the
+/// bookkeeping (the harvesters deliver the same, the plants are the same). Two lengths: 4000 ticks
+/// (the plants are done after 300), and 300 ticks (the plants are going up the whole time).
+/// Run it in release:
+/// `cargo test --release -p sf_headless --test harvest -- --ignored --nocapture money_cost`.
+#[test]
+#[ignore]
+fn money_cost() {
+    for ticks in [4000u64, 300] {
+        let mut plain = crowd_scenario(true, ticks);
+        plain.storage = Some(vec![(2, 1_000_000)]);
+        for (x, y) in [(60, 60), (76, 60), (60, 44)] {
+            plain.commands.push(TimedCommand {
+                tick: 0,
+                player: 0,
+                command: Action::PlaceStructure {
+                    kind: 0,
+                    owner: 0,
+                    cell: (x, y),
+                },
+            });
+            for cell in [(x + 5, y), (x + 5, y + 3), (x - 3, y), (x - 3, y + 3)] {
+                plain.commands.push(TimedCommand {
+                    tick: 1,
+                    player: 0,
+                    command: Action::BuildStructure {
+                        kind: 1,
+                        cell,
+                    },
+                });
+            }
+        }
+        let mut money = plain.clone();
+        money.money = Some(sf_headless::scenario::MoneySpec {
+            credits_per_ore: 1,
+            starting: vec![(0, 1_000_000)],
+        });
+        let mut probe = money.build_world().unwrap();
+        for _ in 0..2 {
+            probe.step();
+        }
+        println!("under construction: {}, refused: {:?}", probe.under_construction(), probe.placement_rejections().iter().map(|r| (r.cell, r.reason)).collect::<Vec<_>>());
+        assert_eq!(probe.under_construction(), 12, "all twelve plants are accepted");
+        let mut rows = Vec::new();
+        for round in 0..7 {
+            let (with, _, d1) = timed(&money);
+            let (without, _, d0) = timed(&plain);
+            assert_eq!(d0, d1, "nothing waits, so the runs deliver the same");
+            println!(
+                "{ticks} ticks, round {round}: {with:8.1} ms with money, {without:8.1} ms without"
+            );
+            rows.push((with, without));
+        }
+        let mean = |f: fn(&(f64, f64)) -> f64| rows.iter().map(f).sum::<f64>() / rows.len() as f64;
+        let (with, without) = (mean(|r| r.0), mean(|r| r.1));
+        println!(
+            "{ticks} ticks, mean: {with:.1} ms with, {without:.1} ms without: {:.2} microseconds per tick more",
+            (with - without) * 1e3 / ticks as f64
+        );
+        if ticks != 300 {
+            continue;
+        }
+        // The same without the harvesters: the plants and the refineries alone, where the payments
+        // are not drowned in the crowd's routing. 40 alternating rounds.
+        let mut plants_money = money.clone();
+        let mut plants_plain = plain.clone();
+        for s in [&mut plants_money, &mut plants_plain] {
+            s.commands
+                .retain(|c| !matches!(c.command, Action::SpawnUnit { .. }));
+        }
+        let mut rows = Vec::new();
+        for _ in 0..40 {
+            let (with, _, _) = timed(&plants_money);
+            let (without, _, _) = timed(&plants_plain);
+            rows.push((with, without));
+        }
+        let (with, without) = (mean(|r| r.0), mean(|r| r.1));
+        println!(
+            "plants only, 300 ticks, 40 rounds, mean: {with:.2} ms with, {without:.2} ms without: {:.3} microseconds per tick more",
+            (with - without) * 1e3 / ticks as f64
+        );
+    }
+}
