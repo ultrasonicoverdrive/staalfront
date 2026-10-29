@@ -35,6 +35,7 @@
 //! ```
 
 use sf_data::harvest::HarvestSettings;
+use sf_data::money::MoneySettings;
 use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
 use sf_data::sim_settings::SimSettings;
@@ -332,6 +333,26 @@ pub fn storage_capacities(defs: &UnitDefs) -> Vec<(Kind, u32)> {
         .iter()
         .filter(|b| b.storage > 0)
         .map(|b| (Kind(b.kind), b.storage))
+        .collect()
+}
+
+/// The money rules of the world (WP7.4) from the settings of `money.ron`. To hand to
+/// [`World::with_money`](sf_sim::World::with_money) after the storage rules, with
+/// [`starting_credits`].
+pub fn money_rules(settings: &MoneySettings) -> sf_sim::MoneyRules {
+    sf_sim::MoneyRules {
+        credits_per_ore: settings.credits_per_ore,
+    }
+}
+
+/// What each of `players` starts with (WP7.4): `starting_credits` of `money.ron` for every one.
+pub fn starting_credits(
+    settings: &MoneySettings,
+    players: &[sf_sim::PlayerId],
+) -> Vec<(sf_sim::PlayerId, u64)> {
+    players
+        .iter()
+        .map(|&p| (p, settings.starting_credits))
         .collect()
 }
 

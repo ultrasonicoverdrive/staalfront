@@ -1,0 +1,67 @@
+// Money (WP7.4, docs/rules/economy.md, "Money"): the storage scenario's playfield, field and rock
+// patch, with credits. The store is the money pool: the ore a refinery takes goes in as credits and
+// the structures the player builds are paid out of it, tick by tick, while they go up.
+//
+// `unit_defs` names the FROZEN copy of WP7.2 (harvest_defs); the ore, harvest, storage and money
+// numbers are written out below, so editing the shipped ore.ron, harvest.ron, unit_defs.ron or
+// money.ron never moves this checksum. Kinds: 0 construction_center (build radius 8), 1 power_plant
+// (2 x 3, 300 credits, 300 ticks), 2 refinery, 3 barracks (2 x 3, 400 credits, 400 ticks, needs a
+// power plant), 11 harvester.
+//
+//   slot 0  the construction centre of player 0 on (84, 74), complete from the first tick
+//   slot 1  the refinery of player 0 on (96, 86): capacity 600
+//   slot 2, 3  harvesters of player 0 on (104, 90) and (106, 92), tick 0
+//   tick 1     a power plant on (90, 74) and another on (90, 78): 1 credit per tick each; player 0
+//              starts with 300 credits, so the plants run for 150 ticks together and then wait
+//              for the first load of ore
+//   tick 4650  a barracks on (84, 80): 1 credit per tick, while the store is full (600) and a
+//              harvester waits in the bay with its load; the payments make room and the load goes in
+//
+// What happens (tools/sf_headless/tests/money.rs asserts it): the credits drain 2 a tick to zero,
+// the plants stop (build_left does not move) while there are none, they go on in bursts as the
+// harvesters unload (2.5 credits a tick while a load goes in), both are complete, harvesting
+// fills the store to 600, a harvester waits, and the barracks opens the room. CI runs the scenario
+// on Linux and Windows and requires the checksum in money.expected.
+Scenario(
+    name: "money",
+    seed: 0x0007_0074,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("harvest_defs"),
+    buildings: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+    )),
+    storage: Some([(2, 600)]),
+    money: Some((credits_per_ore: 1, starting: [(0, 300)])),
+    ticks: 5400,
+    commands: [
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (84, 74))),
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (96, 86))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (104, 90))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (106, 92))),
+        (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (90, 74))),
+        (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (90, 78))),
+        (tick: 4650, player: 0, command: BuildStructure(kind: 3, cell: (84, 80))),
+    ],
+)
