@@ -135,3 +135,27 @@ fn each_field_maps_to_its_own_field() {
     assert_eq!(rules.mine_lose_tenths, 117);
     assert_eq!(rules.dock_reach_tenths, 118);
 }
+
+// ---- storage (WP7.3) ---------------------------------------------------------------------------
+
+#[test]
+fn the_shipped_storage_reaches_the_world() {
+    let defs = UnitDefs::embedded();
+    let table = sf_bridge::storage_capacities(&defs);
+    // Literal pin: only the refinery (kind 2) stores, 2000 units.
+    assert_eq!(table, vec![(Kind(2), 2000)]);
+    let world = World::new(WorldConfig::new(1))
+        .unwrap()
+        .with_units(sf_bridge::unit_table(&defs).unwrap())
+        .unwrap()
+        .with_buildings(sf_bridge::building_table(&defs).unwrap())
+        .unwrap()
+        .with_harvest(
+            harvest_rules(&HarvestSettings::embedded()),
+            &sf_bridge::harvester_kinds(&defs),
+        )
+        .unwrap()
+        .with_storage(&table)
+        .unwrap();
+    assert!(world.has_storage());
+}

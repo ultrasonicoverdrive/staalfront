@@ -468,3 +468,33 @@ fn harvest_cost() {
         with * 1e3 / f64::from(ticks as u32)
     );
 }
+
+/// Prints the relative cost of storage (WP7.3) with 50 harvesters: alternating runs of the crowd
+/// scenario with the harvest rules, with and without storage rules (1,000,000 per refinery, so the
+/// store never fills and both runs do the same work apart from the bookkeeping). Run it in release:
+/// `cargo test --release -p sf_headless --test harvest -- --ignored --nocapture storage_cost`.
+#[test]
+#[ignore]
+fn storage_cost() {
+    let ticks = 4000;
+    let plain = crowd_scenario(true, ticks);
+    let mut stored = plain.clone();
+    stored.storage = Some(vec![(2, 1_000_000)]);
+    let mut rows = Vec::new();
+    for round in 0..7 {
+        let (with, _, d1) = timed(&stored);
+        let (without, _, d0) = timed(&plain);
+        assert_eq!(
+            d0, d1,
+            "the store never fills, so the runs deliver the same"
+        );
+        println!("round {round}: {with:8.1} ms with storage, {without:8.1} ms without");
+        rows.push((with, without));
+    }
+    let mean = |f: fn(&(f64, f64)) -> f64| rows.iter().map(f).sum::<f64>() / rows.len() as f64;
+    let (with, without) = (mean(|r| r.0), mean(|r| r.1));
+    println!(
+        "mean: {with:.1} ms with, {without:.1} ms without: {:.2} microseconds per tick more",
+        (with - without) * 1e3 / f64::from(ticks as u32)
+    );
+}

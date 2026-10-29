@@ -67,30 +67,7 @@ pub fn draw_bars(
 ) -> usize {
     let mut drawn = 0;
     for &(id, construction) in snap.constructions() {
-        let (Some(view), Some(footprint)) =
-            (snap.get(id), snap.stats_of(id).and_then(|s| s.footprint))
-        else {
-            continue;
-        };
-        // The front edge: the footprint is centred on the entity.
-        let (half_w, half_h) = (
-            f32::from(footprint.width) * 0.5 * METRES_PER_CELL,
-            f32::from(footprint.height) * 0.5 * METRES_PER_CELL,
-        );
-        let centre = (
-            sf_math::render_bridge::cells_to_metres(view.pos.x),
-            sf_math::render_bridge::cells_to_metres(view.pos.y),
-        );
-        let z = centre.1 + half_h;
-        let at = |x: f32| {
-            project_px(
-                &frame.view_proj,
-                Vec3::new(x, height(x, z), z),
-                frame.viewport,
-            )
-            .map(|(p, _)| p)
-        };
-        let (Some(left), Some(right)) = (at(centre.0 - half_w), at(centre.0 + half_w)) else {
+        let Some((left, right)) = front_edge(frame, height, snap, id) else {
             continue;
         };
         let Some(rects) = bar_rects(left, right, construction.permille(), look, frame.ui_scale)
@@ -105,6 +82,38 @@ pub fn draw_bars(
         drawn += 1;
     }
     drawn
+}
+
+/// The screen positions of the two ends of the front (south) edge of the footprint of structure
+/// `id` of `snap`, where its bars go; `None` for anything without a footprint or off the screen.
+/// `height(x, z)` is the terrain height in metres. Shared with the storage bar (WP7.3).
+pub(crate) fn front_edge(
+    frame: &GhostFrame,
+    height: &dyn Fn(f32, f32) -> f32,
+    snap: &SimSnapshot,
+    id: sf_sim::EntityId,
+) -> Option<([f32; 2], [f32; 2])> {
+    let view = snap.get(id)?;
+    let footprint = snap.stats_of(id).and_then(|s| s.footprint)?;
+    // The front edge: the footprint is centred on the entity.
+    let (half_w, half_h) = (
+        f32::from(footprint.width) * 0.5 * METRES_PER_CELL,
+        f32::from(footprint.height) * 0.5 * METRES_PER_CELL,
+    );
+    let centre = (
+        sf_math::render_bridge::cells_to_metres(view.pos.x),
+        sf_math::render_bridge::cells_to_metres(view.pos.y),
+    );
+    let z = centre.1 + half_h;
+    let at = |x: f32| {
+        project_px(
+            &frame.view_proj,
+            Vec3::new(x, height(x, z), z),
+            frame.viewport,
+        )
+        .map(|(p, _)| p)
+    };
+    Some((at(centre.0 - half_w)?, at(centre.0 + half_w)?))
 }
 
 /// What the game draws each frame: the bars of `snap` in the look of `looks`' build-stage table.

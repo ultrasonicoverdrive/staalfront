@@ -212,3 +212,76 @@ fn the_ore_delivered_so_far_is_in_the_checksum() {
     c.harvest.as_mut().unwrap().credit(PlayerId(0), 6);
     assert_ne!(b.checksum(), c.checksum());
 }
+
+// ---- storage (WP7.3) ------------------------------------------------------------------------
+
+fn stored_world() -> World {
+    let mut w = world().with_storage(&[(REFINERY, 300)]).unwrap();
+    place(&mut w, (6, 20));
+    place(&mut w, (6, 30));
+    w.step();
+    w
+}
+
+#[test]
+fn a_refinery_at_zero_hit_points_stores_nothing() {
+    let mut w = stored_world();
+    assert_eq!(w.storage_capacity(PlayerId(0)), 600);
+    w.entities.hp[1] = 0;
+    w.step();
+    assert_eq!(w.storage_capacity(PlayerId(0)), 300);
+}
+
+#[test]
+fn the_storage_state_is_in_the_checksum() {
+    let a = stored_world();
+    let base = a.checksum();
+    // The stored amount alone (the delivered counter is left as it is), and how much.
+    let mut b = a.clone();
+    {
+        let s = b.harvest.as_mut().unwrap().storage.as_mut().unwrap();
+        add_to(&mut s.stored, PlayerId(0), 5);
+    }
+    assert_ne!(base, b.checksum());
+    let mut c = a.clone();
+    {
+        let s = c.harvest.as_mut().unwrap().storage.as_mut().unwrap();
+        add_to(&mut s.stored, PlayerId(0), 6);
+    }
+    assert_ne!(b.checksum(), c.checksum());
+    // The capacity of the last sync.
+    let mut d = a.clone();
+    d.harvest
+        .as_mut()
+        .unwrap()
+        .storage
+        .as_mut()
+        .unwrap()
+        .capacity[0]
+        .1 += 1;
+    assert_ne!(base, d.checksum());
+    // The table.
+    let mut e = a.clone();
+    e.harvest.as_mut().unwrap().storage.as_mut().unwrap().table[0].1 += 1;
+    assert_ne!(base, e.checksum());
+}
+
+#[test]
+fn a_world_without_storage_rules_has_no_storage_section() {
+    let mut a = world();
+    place(&mut a, (6, 20));
+    let mut b = a.clone();
+    a.step();
+    b.step();
+    // Turning storage on afterwards (a test-only shortcut) moves the hash; turning it off again
+    // brings the old one back: the section is written only with storage rules.
+    let before = a.checksum();
+    a.harvest
+        .as_mut()
+        .unwrap()
+        .set_storage(vec![(REFINERY, 300)], &b.units);
+    assert_ne!(before, a.checksum());
+    a.harvest.as_mut().unwrap().storage = None;
+    assert_eq!(before, a.checksum());
+    assert_eq!(b.checksum(), before);
+}

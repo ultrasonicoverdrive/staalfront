@@ -43,6 +43,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `scenarios/*.ron`, `scenarios/*.expected`, `scenarios/*_defs/*.ron` | Written for this project (headless scenarios, their pinned checksums and the frozen copies of the unit definitions some of them run on, WP1.3, WP3.2, WP3.4, WP4.1, WP5.1, WP5.5: `destruction`, WP6.2, WP7.2: `harvest`, whose `harvest_defs` is a copy of the shipped definitions of that day) | Project license (see workspace `Cargo.toml`) |
 | `config/terrain.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `config/build_stages.ron` | Written for this project (WP6.3: the stages and progress bar of a structure under construction) | Project license (see workspace `Cargo.toml`) |
+| `config/storage_look.ron` | Written for this project (WP7.3: the fill bar of the ore storage) | Project license (see workspace `Cargo.toml`) |
 | `config/cell_overlay.ron` | Written for this project (WP2.4: colours of the cell grid overlay) | Project license (see workspace `Cargo.toml`) |
 | `fonts/Inter-Medium-subset.otf` | Subset (Basic Latin, Latin-1 Supplement, Latin Extended-A, common punctuation and arrows; no hinting; made with `pyftsubset`) of Inter Medium by The Inter Project Authors, https://github.com/rsms/inter. The font declares no Reserved Font Name. 52 KB. | SIL Open Font License 1.1, full text in `fonts/OFL.txt` |
 | `fonts/OFL.txt` | License text of the Inter font (copied from the Debian `fonts-inter` package) | SIL Open Font License 1.1 |

@@ -107,6 +107,12 @@ pub struct SimSnapshot {
     cargo: Vec<Option<u16>>,
     /// The most a harvester carries (`HarvestRules::capacity`); zero without harvest rules.
     cargo_capacity: u16,
+    /// The ore storage (WP7.3): per player that stores or can store anything, ascending, the ore
+    /// stored and the capacity. Empty without storage rules.
+    storage: Vec<(PlayerId, u64, u64)>,
+    /// The standing structures that store ore, ascending by slot: each carries the fill bar of
+    /// its owner's store.
+    stores: Vec<EntityId>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
     /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
@@ -141,6 +147,8 @@ impl SimSnapshot {
             ore: Vec::new(),
             cargo: Vec::new(),
             cargo_capacity: 0,
+            storage: Vec::new(),
+            stores: Vec::new(),
             wrecks: Vec::new(),
             deaths: Vec::new(),
             projectiles: Vec::new(),
@@ -266,6 +274,26 @@ impl SimSnapshot {
                     .map(|v| world.harvester_of(v.id).map(|h| h.load)),
             );
         }
+        // The storage (WP7.3): nothing to look up in a world without storage rules.
+        self.storage.clear();
+        self.stores.clear();
+        if world.has_storage() {
+            let mut players: Vec<PlayerId> = self.views.iter().map(|v| v.owner).collect();
+            players.sort_unstable();
+            players.dedup();
+            for p in players {
+                let (stored, capacity) = (world.ore_stored(p), world.storage_capacity(p));
+                if stored > 0 || capacity > 0 {
+                    self.storage.push((p, stored, capacity));
+                }
+            }
+            self.stores.extend(
+                self.views
+                    .iter()
+                    .filter(|v| world.storage_of_kind(v.kind) > 0 && world.stands(v.id))
+                    .map(|v| v.id),
+            );
+        }
         self.wrecks.clear();
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
@@ -350,6 +378,25 @@ impl SimSnapshot {
     pub fn cargo_of(&self, id: EntityId) -> Option<(u16, u16)> {
         let load = (*self.cargo.get(self.find(id)?)?)?;
         Some((load, self.cargo_capacity))
+    }
+
+    /// The ore `player` has stored and the capacity of its standing buildings (WP7.3); `None`
+    /// without storage rules or for a player with neither.
+    pub fn storage_of(&self, player: PlayerId) -> Option<(u64, u64)> {
+        self.storage
+            .iter()
+            .find(|&&(p, _, _)| p == player)
+            .map(|&(_, s, c)| (s, c))
+    }
+
+    /// Every player's store as `(player, stored, capacity)`, ascending by player (WP7.3).
+    pub fn storage(&self) -> &[(PlayerId, u64, u64)] {
+        &self.storage
+    }
+
+    /// The standing structures that store ore (WP7.3), ascending by slot.
+    pub fn stores(&self) -> &[EntityId] {
+        &self.stores
     }
 
     /// Whether this snapshot has any harvester: the cargo bars skip their pass when it has none.

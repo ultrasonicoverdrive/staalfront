@@ -183,6 +183,12 @@ pub struct Scenario {
     /// is every scenario of the earlier phases. Needs `unit_defs` and `buildings`.
     #[serde(default)]
     pub harvest: Option<HarvestSpec>,
+    /// Ore storage (WP7.3, `docs/rules/economy.md`, "Storage"): `(kind, units of ore)` per
+    /// structure kind that stores ore, written out in the scenario so that editing the shipped
+    /// `storage` of `unit_defs.ron` never moves its checksum. Left out: no limit, which is every
+    /// scenario of the earlier phases (`harvest` included). Needs `harvest`.
+    #[serde(default)]
+    pub storage: Option<Vec<(u16, u32)>>,
     /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
     /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
     /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
@@ -917,6 +923,17 @@ impl Scenario {
             }
         }
 
+        if let Some(st) = &self.storage {
+            if self.harvest.is_none() {
+                p.push("storage needs `harvest` (only refineries fill a store)".to_string());
+            }
+            if st.iter().any(|&(_, n)| n == 0) {
+                p.push(
+                    "storage: every capacity must be above zero (leave the kind out)".to_string(),
+                );
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -1224,6 +1241,12 @@ impl Scenario {
             let kinds: Vec<Kind> = harvest.harvesters.iter().map(|&k| Kind(k)).collect();
             world = world
                 .with_harvest(harvest.rules(), &kinds)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(storage) = &self.storage {
+            let table: Vec<(Kind, u32)> = storage.iter().map(|&(k, n)| (Kind(k), n)).collect();
+            world = world
+                .with_storage(&table)
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {

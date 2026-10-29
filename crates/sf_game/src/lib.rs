@@ -128,6 +128,7 @@ pub mod sim_snapshot;
 pub mod sim_thread;
 pub mod skirmish;
 mod sound_browser;
+pub mod storage_view;
 pub mod wreck_looks;
 
 use std::sync::Arc;
