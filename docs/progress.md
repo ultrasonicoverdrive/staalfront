@@ -2107,8 +2107,10 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is built on branch `wp/7.3-storage` (PR op
   microseconds a tick).
 - **Gaps:** nothing spends the store (WP7.4), so with `--harvest` the sandbox fills after ten loads and the
   harvesters then wait for good; no silo (WP7.3b); the readout is in the F1 debug panel, not a player HUD; a
-  waiting harvester never leaves for another refinery (WP7.5); the mutation that drops "standing" from the
-  capacity sum is caught by the zero-hit-point test, not by the under-construction test.
+  waiting harvester never leaves for another refinery (WP7.5).
+- **Fix round 1:** the mutation that drops "standing" from the capacity sum is caught by both the
+  zero-hit-point and the under-construction test; the rule that only a standing structure carries a
+  storage bar (`SimSnapshot::stores`) is now tested in `crates/sf_game/tests/storage_snapshot.rs`.
 
 ### WP7.2 notes
 

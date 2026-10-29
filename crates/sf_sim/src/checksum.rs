@@ -578,9 +578,10 @@ impl World {
         }
 
         // Construction (`N`, WP6.3), then ore (`E`, WP7.1: the rules, the number of field cells
-        // and a running sum over the amounts), then harvest (`H`, WP7.2) last. Each is
-        // gated: `N` only while something is under construction, `E` only in a world that was given
-        // ore rules, `H` only with harvest rules. So every world without them hashes as before.
+        // and a running sum over the amounts), then harvest (`H`, WP7.2), then storage (`V`, WP7.3)
+        // last. Each is gated: `N` only while something is under construction, `E` only in a world
+        // that was given ore rules, `H` only with harvest rules, `V` only with storage rules. So every
+        // world without them hashes as before.
         if let Some(ore) = &self.ore {
             h.write_u8(SECTION_ORE);
             for word in ore.fingerprint() {

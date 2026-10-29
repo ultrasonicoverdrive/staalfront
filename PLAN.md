@@ -273,7 +273,7 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 
 _Note 27-10-2026: WP7.5 added by the orchestrator after the WP7.2 review measured that throughput collapses with many harvesters (6 harvesters deliver 3200 ore in 4000 ticks, 48 deliver 618): the straight-line choice sends every harvester to the same bay and the queue blocks its approach. WP7.2 records it as a gap; WP7.5 touches `sf_sim` and comes after WP7.3 and WP7.4._
 
-_Note 28-10-2026: WP7.3 ("storage capacity and silos, fill level visible") is split into WP7.3 and WP7.3b. Decided by the orchestrator. The silo is a new structure role: the campaign uses none (`content/production.md`) and the tech tree in `docs/rules/buildings.md` still waits on Tijmen's approval. WP7.3 builds the storage mechanism and a storage capacity per building in the data, so a silo later is a record in `unit_defs.ron` with a `storage` number; WP7.3b adds that silo once the tech tree is approved._
+_Note 28-10-2026: WP7.3 ("storage capacity and silos, fill level visible") is split into WP7.3 and WP7.3b. Decided by the orchestrator (Tijmen delegated WP splits to the orchestrator on 27-10-2026). The silo is a new structure role: the campaign uses none (`content/production.md`) and the tech tree in `docs/rules/buildings.md` still waits on Tijmen's approval. WP7.3 builds the storage mechanism and a storage capacity per building in the data, so a silo later is a record in `unit_defs.ron` with a `storage` number; WP7.3b adds that silo once the tech tree is approved._
 
 **Milestone M1 — vertical slice (end of phase 7):** one skirmish map, you against
 a static opponent: build a base, harvest, make units, attack,
