@@ -58,8 +58,11 @@ Heavily damaged: smoke (8/s) and fire (7/s). The puffs are the entries `damage_s
 `tests/damage_screenshot.rs` (real renderer on lavapipe or WARP, the production path: the sandbox world with combat,
 `runner::motions_of`, `fx_events::record`, `FxPlayer::frame_with` with the instancer's anchors) shoots a power plant
 of each faction with three tanks until it is damaged, heavily damaged and destroyed, and asserts the stage model, the
-smoke at the anchor, the fire glow and that the damage effect is gone once it is destroyed. The images with tick
-labels are in `docs/screenshots/wp6.8/` (`SF_SAVE_SHOTS=<dir>` writes them; no golden image).
+smoke at the anchor, the fire glow and that no damage puff starts at the dead plant's anchors after its death. It
+does so twice: at a close camera (zoom 0.16, chosen to frame the plant and the smoke column above it) and at the game's
+start zoom (`CameraConfig::default().start_zoom`, the middle band, where the player normally looks). The images are in
+`docs/screenshots/wp6.8/` (`SF_SAVE_SHOTS=<dir>` writes them; no golden image); the tick is in the file name only, not
+drawn in the picture.
 
 Cost (release build, container, load average 1.8 to 3.3, relative numbers only; the fps requirement is the laptop's,
 `docs/bench/README.md`): `cargo test --release -p sf_game --lib what_the_damage_effects_cost -- --ignored --nocapture`,
