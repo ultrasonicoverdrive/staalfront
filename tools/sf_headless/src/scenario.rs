@@ -289,6 +289,22 @@ pub struct HarvestSpec {
     pub mine_lose_tenths: u16,
     /// Tenths of a cell from the dock point that count as docked when a walk is over.
     pub dock_reach_tenths: u16,
+    /// Choice of refinery: ticks one cell of straight-line distance to the dock point is worth.
+    pub travel_cost: u16,
+    /// Ticks every harvester already committed to a refinery adds to the expected wait there.
+    pub queue_cost: u16,
+    /// Ticks a refinery has to be cheaper than the one a driving harvester is bound for before it switches.
+    pub switch_margin: u16,
+    /// Ticks between two looks of a driving harvester at the other refineries.
+    pub recheck_period: u16,
+    /// Cells beside the approach where queued harvesters wait; 0 leaves them where they stand.
+    pub queue_gap: u16,
+    /// Cells out from the dock point of the first row of queue spots.
+    pub queue_start: u16,
+    /// Cells between two rows of queue spots.
+    pub queue_step: u16,
+    /// Rows of queue spots (two a row); a longer queue shares the last row.
+    pub queue_rows: u16,
 }
 
 impl HarvestSpec {
@@ -312,6 +328,14 @@ impl HarvestSpec {
             mine_reach_tenths: self.mine_reach_tenths,
             mine_lose_tenths: self.mine_lose_tenths,
             dock_reach_tenths: self.dock_reach_tenths,
+            travel_cost: self.travel_cost,
+            queue_cost: self.queue_cost,
+            switch_margin: self.switch_margin,
+            recheck_period: self.recheck_period,
+            queue_gap: self.queue_gap,
+            queue_start: self.queue_start,
+            queue_step: self.queue_step,
+            queue_rows: self.queue_rows,
         }
     }
 }

@@ -430,6 +430,39 @@ fn crowd_scenario(harvest: bool, ticks: u64) -> Scenario {
     s
 }
 
+/// The crowd scenario with only the first `n` of its harvesters (the WP7.2 review's measurement).
+fn crowd_of(n: usize, ticks: u64) -> Scenario {
+    let mut s = crowd_scenario(true, ticks);
+    let mut seen = 0;
+    s.commands.retain(|c| match c.command {
+        Action::SpawnUnit { .. } => {
+            seen += 1;
+            seen <= n
+        }
+        _ => true,
+    });
+    s
+}
+
+/// Ore delivered to player 0 by the end of `scenario`.
+fn delivered_by(scenario: &Scenario) -> u64 {
+    let mut world = scenario.build_world().unwrap();
+    for _ in 0..scenario.ticks {
+        world.step();
+    }
+    world.ore_delivered(P0)
+}
+
+/// Prints the delivery of 3, 6, 12, 24 and 48 harvesters on three refineries in 4000 ticks.
+/// `cargo test --release -p sf_headless --test harvest -- --ignored --nocapture throughput_table`.
+#[test]
+#[ignore]
+fn throughput_table() {
+    for n in [3, 6, 12, 24, 48] {
+        println!("{n:2} harvesters: {} ore", delivered_by(&crowd_of(n, 4000)));
+    }
+}
+
 /// Milliseconds a run of `scenario` takes, and the harvesters alive at the end.
 fn timed(scenario: &Scenario) -> (f64, usize, u64) {
     let mut world = scenario.build_world().unwrap();

@@ -322,6 +322,14 @@ pub fn harvest_rules(settings: &HarvestSettings) -> sf_sim::HarvestRules {
         mine_reach_tenths: settings.mine_reach_tenths,
         mine_lose_tenths: settings.mine_lose_tenths,
         dock_reach_tenths: settings.dock_reach_tenths,
+        travel_cost: settings.travel_cost,
+        queue_cost: settings.queue_cost,
+        switch_margin: settings.switch_margin,
+        recheck_period: settings.recheck_period,
+        queue_gap: settings.queue_gap,
+        queue_start: settings.queue_start,
+        queue_step: settings.queue_step,
+        queue_rows: settings.queue_rows,
     }
 }
 
