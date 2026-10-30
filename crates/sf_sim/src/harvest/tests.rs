@@ -511,6 +511,48 @@ fn queue_spots_lie_in_rows_beside_the_approach() {
 }
 
 #[test]
+fn a_queued_harvester_takes_a_spot_on_its_own_side_and_the_next_row_after_those_ahead() {
+    let rules = HarvestRules {
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        ..RULES
+    };
+    // Slots 2 and 3 stand on the positive side (y above the dock point 22.5), slot 4 on the
+    // negative side; the queue is 2, 3, 4.
+    let mut w = stepped(rules, &[(20, 26), (20, 27), (20, 18)]);
+    let spots = with_state(&mut w, |h, w| {
+        h.docks[0].queue = vec![id(2), id(3), id(4)];
+        let dock = h.docks[0].clone();
+        let mut spots = Vec::new();
+        for slot in [2usize, 3, 4] {
+            let mut plan = Plan {
+                core: Core {
+                    bound: true,
+                    phase: Phase::ToDock(Call::Queued),
+                    dock: Some(id(0)),
+                    ..h.units[slot].core
+                },
+                act: Act::Keep,
+                take: None,
+                send: None,
+                spaced: false,
+                focus: NO_CELL,
+            };
+            h.queue_walk(w, &dock, id(slot as u32), pos_of(w, slot), false, &mut plan);
+            let Act::Go(p) = plan.act else {
+                panic!("slot {slot} was not sent to a spot: {:?}", plan.act)
+            };
+            spots.push((p.x.raw() as f64 / 65536.0, p.y.raw() as f64 / 65536.0));
+            // The spot is remembered: the same place again orders nothing.
+            h.units[slot].core.spot = plan.core.spot;
+        }
+        spots
+    });
+    assert_eq!(spots, [(10.5, 25.5), (12.5, 25.5), (10.5, 19.5)]);
+}
+
+#[test]
 fn a_driving_harvester_switches_only_when_the_other_refinery_is_cheaper_by_more_than_the_margin() {
     // Bound for A with one other committed there (load 2 with itself): A costs 77 + 300, B 136.
     // B is cheaper by 241.

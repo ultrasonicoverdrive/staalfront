@@ -190,6 +190,17 @@ constants in `harvest.rs`, with the same values):
 | `mine_start_tenths`, `mine_reach_tenths`, `mine_lose_tenths` | 10, 15, 25 | Reach round the middle of the ore cell in tenths of a cell: stop and mine, count as there when the walk is over, drive back when pushed farther while mining. `1 <= start <= reach < lose <= 320`. |
 | `dock_reach_tenths` | 20 | How near to the dock point (tenths of a cell) a harvester counts as docked when its walk is over. 1 to 320. |
 
+The choice of refinery and the queue (WP7.5, "Refinery choice and queues" below):
+
+| field | shipped | meaning |
+|---|---|---|
+| `travel_cost` | 16 | Ticks one cell of straight-line distance to a dock point is worth (about the harvester's speed). 1 to 1000. |
+| `queue_cost` | 100 | Ticks every harvester already committed to a refinery adds to the expected wait there (a full unloading is 80 ticks, and the way in and out). 0 to 10000; 0 chooses by distance alone. |
+| `switch_margin` | 100 | Ticks another refinery has to be cheaper by before a driving harvester switches. 0 to 10000. |
+| `recheck_period` | 20 | Ticks between two looks of a driving harvester at the other refineries. 1 to 1000. |
+| `queue_gap` | 3 | Cells to the side of the approach where the queue waits. 0 to 32; 0 leaves queued harvesters where they stand (the rule of WP7.2). |
+| `queue_start`, `queue_step`, `queue_rows` | 1, 2, 8 | The first row of queue spots is `queue_start` cells out from the dock point along the exit side, the rows are `queue_step` cells apart, and from `queue_rows` rows on the places share the last row. 0 to 32, 1 to 8, 1 to 32. |
+
 Distances are tenths of a cell so that the file holds whole numbers; the simulation turns them into
 fixed point (`Fx::from_ratio(n, 10)`), no floats. Every number is at least 1, a bite no bigger than
 the load, the tuning within the bounds above (`HarvestRules::is_valid` and
@@ -205,8 +216,8 @@ for now.
 | `Searching` | Looks for ore (below). Never seen for more than a tick: the search runs in the same turn. | It finds a cell: `ToOre`. None, load 0: `Parked`. None, some load: back to the refinery. Full: back to the refinery. |
 | `ToOre` | Drives to the middle of its claimed cell. | Within 1 cell of the middle (it stops there, whatever is left of its walk): `Mining`. Its walk ended short: asks for a new route; after 3 tries it skips that cell and searches. The cell is empty: searches. |
 | `Mining` | Takes a bite every `mine_period` ticks (`min(mine_amount, room, what the cell holds)`). | Full, or the cell is empty. Pushed more than 2.5 cells from the middle: `ToOre` again. |
-| `ToRefinery` | Drives to the dock point of the nearest standing refinery; at `call_range` it sends its request. | Granted: `Granted`. Queued: `Queued`. |
-| `Queued` | Stands where it is and waits. | The dock grants it the bay. |
+| `ToRefinery` | Drives to the dock point of the standing refinery with the lowest expected wait (below); at `call_range` it sends its request. Until then it looks at the other refineries again every `recheck_period` ticks. | Granted: `Granted`. Queued: `Queued`. |
+| `Queued` | Walks to its queue spot beside the approach and waits there (below); walks on when the queue moves up. | The dock grants it the bay. |
 | `Granted` | Drives into the bay. | Within 2 cells of the dock point: sends `Arrived`, `Unloading`. |
 | `Unloading` | Sits in the bay while the dock takes the load off in bites. | `Released`: back to the search, in the same turn. |
 | `Parked` | Stands 4 cells out from its refinery along the exit side (spread sideways by `slot % 5`, so that they do not stand on one spot), and looks again every `retry_period`. | The next search. |
@@ -217,9 +228,9 @@ for now.
 for `PosX` the cell next to the middle of the east side). The harvester drives to it and unloads
 there.
 
-**Choosing a refinery:** the nearest **standing** refinery of the harvester's own player: the
-smallest squared straight-line distance from the harvester to the dock point, a tie to the lower
-slot. "Standing" is `World::is_standing` (the rule `placement.rs` and the tech tree use): hit
+**Choosing a refinery** (WP7.5, "Refinery choice and queues" below): among the **standing** refineries of the
+harvester's own player, the one with the lowest expected wait: the straight-line distance times `travel_cost`
+plus `queue_cost` for every harvester already committed to it. "Standing" is `World::is_standing` (the rule `placement.rs` and the tech tree use): hit
 points left, or a structure that cannot be damaged, and since WP6.3 also complete: a refinery a
 player builds with `BuildStructure` is no dock while it is under construction and becomes one when
 it is complete (`a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete`); the
@@ -253,7 +264,7 @@ its own box on its own turn.
 | To the harvester | Sent when | The harvester |
 |---|---|---|
 | `Granted` | The bay is its own. | Drives in (a queued harvester starts again). |
-| `Queued(place)` | The bay is taken. | Stops and waits. |
+| `Queued(place)` | The bay is taken. | Walks to its queue spot and waits (a queue spot is beside the approach, below). |
 | `Revoked` | The grant ran out before it arrived. | Asks again. |
 | `Unloaded(n)` | The dock took `n` off its load in this bite. | Lowers its load by `n`. |
 | `Released` | The load is gone, the bay is free. | Looks for ore. |
@@ -321,8 +332,9 @@ Each has a test (`crates/sf_sim/tests/harvest.rs` unless named otherwise):
   and the bay are freed (`a_destroyed_harvester_loses_its_load`).
 * **Two or more harvesters on one refinery:** they take turns, one in the bay, the rest queued and
   standing (`two_harvesters_on_one_refinery_...`; the `harvest` scenario has three).
-* **Several refineries:** the nearest standing one (`the_nearest_standing_refinery_wins`; the
-  zero-hit-point case above).
+* **Several refineries:** the one with the lowest expected wait, which is the nearest one while nobody is
+  committed to it (`the_nearest_standing_refinery_wins`; the zero-hit-point case above); the rule and its
+  tests are in "Refinery choice and queues".
 * **A player order to a field overrides the search.** A harvester whose current order is not its
   own (it compares what it ordered with what it has) was given one. A `Move` to a cell that holds
   ore, while the harvester is not full, makes it search **from that cell**, so it mines there (or at
