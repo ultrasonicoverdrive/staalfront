@@ -3,7 +3,7 @@
 Work package WP6.3 (PLAN.md phase 6). A structure a player builds with `Command::BuildStructure` is not
 finished when it is placed: it is **under construction** for its `build_ticks` (the data's `build_seconds` at 20
 Hz, `docs/rules/buildings.md`), and counts for nothing until it is complete. This file is the rule, the order
-inside a tick, what is hashed and how the picture follows. Nothing here costs credits (phase 7, WP7.4).
+inside a tick, what is hashed and how the picture follows. Credits are charged tick by tick in a world with money rules (WP7.4, `economy.md`, "Money").
 
 All numbers are invented placeholders (clean-room: nothing comes from another game). The idea that animation
 and game state are coupled but not identical, and that the state must be updated in a deliberate order
@@ -138,8 +138,9 @@ Screenshots with the tick in the name: `docs/screenshots/wp6.3/` (`build_screens
 
 ## Not done (gaps)
 
-* **Nothing is charged** and nothing is refunded (phase 7, WP7.4). `BuildStructure` is free; a build cannot be
-  cancelled or paused, and there is no builder unit or queue: the player places it and it goes up by itself.
+* **Money (WP7.4).** In a world with money rules a build is paid tick by tick and waits when the owner has no
+  credits (`economy.md`, "Money"); nothing is refunded. In a world without them `BuildStructure` is free. A build cannot be
+  cancelled or paused by the player, and there is no builder unit or queue: the player places it and it goes up by itself.
   Rate of build is the table's `build_ticks` alone: no power shortage slows it (WP6.4).
 * A structure under construction is not repaired, sold or cancelled (WP6.6).
 * Hit points do not rise with progress (above).

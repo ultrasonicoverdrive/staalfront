@@ -34,7 +34,8 @@
 //! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
 //! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
 //! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2) |
-//! | storage (`V`), only in a world given storage rules (and so harvest rules) | the capacity table (kind and units, ascending), then per player the ore stored and the capacity of its standing buildings at the last sync (WP7.3). It is the last section |
+//! | storage (`V`), only in a world given storage rules (and so harvest rules) | the capacity table (kind and units, ascending), then per player the ore stored and the capacity of its standing buildings at the last sync (WP7.3). |
+//! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V`. It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -206,6 +207,7 @@ const SECTION_CONSTRUCTION: u8 = b'N';
 const SECTION_ORE: u8 = b'E';
 const SECTION_HARVEST: u8 = b'H';
 const SECTION_STORAGE: u8 = b'V';
+const SECTION_MONEY: u8 = b'M';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -578,9 +580,9 @@ impl World {
         }
 
         // Construction (`N`, WP6.3), then ore (`E`, WP7.1: the rules, the number of field cells
-        // and a running sum over the amounts), then harvest (`H`, WP7.2), then storage (`V`, WP7.3)
+        // and a running sum over the amounts), then harvest (`H`, WP7.2), then storage (`V`, WP7.3), then money (`M`, WP7.4)
         // last. Each is gated: `N` only while something is under construction, `E` only in a world
-        // that was given ore rules, `H` only with harvest rules, `V` only with storage rules. So every
+        // that was given ore rules, `H` only with harvest rules, `V` only with storage rules, `M` only with money rules. So every
         // world without them hashes as before.
         if let Some(ore) = &self.ore {
             h.write_u8(SECTION_ORE);
@@ -600,6 +602,12 @@ impl World {
             if harvest.has_storage() {
                 h.write_u8(SECTION_STORAGE);
                 harvest.write_storage_hash(&mut h);
+                // Money (`M`, WP7.4): only in a world given money rules, after `V`; the credits
+                // themselves are the stored amount of `V`.
+                if self.money.is_some() {
+                    h.write_u8(SECTION_MONEY);
+                    self.write_money_hash(&mut h);
+                }
             }
         }
 

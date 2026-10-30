@@ -1,0 +1,36 @@
+// How money is shown (WP7.4, docs/rules/economy.md, "Money"). Read by sf_data::money_look,
+// compiled into the game, checked when it is parsed. Presentation only: no checksum depends on it.
+//
+// The readout is a small panel in the top right corner of the window. Colours sRGB, alpha last.
+// Sizes in logical pixels (the UI scale is applied on top).
+(
+    panel: (
+        // Size of the panel, and its distance from the top and right edges of the window.
+        width_px: 250,
+        height_px: 32,
+        margin_px: 6,
+        // Left padding of the text inside the panel, and the size of the text.
+        pad_px: 12,
+        text_px: 18,
+        // Gap between the credits panel and the strip under it that says a build is paused.
+        gap_px: 4,
+    ),
+    // The word in front of the number.
+    label: "Credits",
+    text: (240, 200, 70, 255),
+    // The number is drawn in this colour when the player holds fewer credits than `low_below`, or
+    // when a structure waits for money.
+    low: (255, 110, 80, 255),
+    low_below: 100,
+    // What the panel says under the credits while any structure of the player waits for money.
+    waiting: "build paused: no credits",
+    // The progress bar of a structure under construction that waits for money: another fill and
+    // back colour, and two small pause strokes at the right end of the bar.
+    paused: (
+        fill: (255, 110, 80, 245),
+        back: (60, 20, 16, 210),
+        stroke_width_px: 3,
+        stroke_gap_px: 3,
+        stroke_extra_px: 3,
+    ),
+)

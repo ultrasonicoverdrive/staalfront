@@ -7,6 +7,7 @@
 //! small on the screen (zoomed out) gets none.
 
 use sf_data::build_stages::BarLook;
+use sf_data::money_look::PausedLook;
 use sf_math::render_bridge::METRES_PER_CELL;
 use sf_render::glam::Vec3;
 use sf_render::pick::project_px;
@@ -57,13 +58,15 @@ pub fn bar_rects(
 }
 
 /// Draws the bar of every structure under construction in `snap` on `layer`. `height(x, z)` is the
-/// terrain height in metres. Returns the number of bars drawn.
+/// terrain height in metres. A structure that waits for money (WP7.4, [`SimSnapshot::stalled`]) gets
+/// the colours and the pause strokes of `paused` instead. Returns the number of bars drawn.
 pub fn draw_bars(
     layer: &mut Layer<'_>,
     frame: &GhostFrame,
     height: &dyn Fn(f32, f32) -> f32,
     snap: &SimSnapshot,
     look: &BarLook,
+    paused: &PausedLook,
 ) -> usize {
     let mut drawn = 0;
     for &(id, construction) in snap.constructions() {
@@ -74,10 +77,22 @@ pub fn draw_bars(
         else {
             continue;
         };
-        let (b, f) = (look.back, look.fill);
-        layer.fill_quad(rects.back, Color(b.0, b.1, b.2, b.3));
-        if let Some(fill) = rects.fill {
-            layer.fill_quad(fill, Color(f.0, f.1, f.2, f.3));
+        let waits = snap.stalled().contains(&id);
+        let (back, fill) = if waits {
+            let (fill, back) = crate::money_view::paused_colors(paused);
+            (back, fill)
+        } else {
+            let (b, f) = (look.back, look.fill);
+            (Color(b.0, b.1, b.2, b.3), Color(f.0, f.1, f.2, f.3))
+        };
+        layer.fill_quad(rects.back, back);
+        if let Some(part) = rects.fill {
+            layer.fill_quad(part, fill);
+        }
+        if waits {
+            for stroke in crate::money_view::pause_strokes(&rects, paused, frame.ui_scale) {
+                layer.fill_quad(stroke, fill);
+            }
         }
         drawn += 1;
     }
@@ -131,7 +146,14 @@ pub fn draw_for(
     let Some(roster) = looks.roster() else {
         return 0;
     };
-    draw_bars(layer, frame, height, snap, &roster.stages().bar)
+    draw_bars(
+        layer,
+        frame,
+        height,
+        snap,
+        &roster.stages().bar,
+        &crate::money_view::shipped_look().paused,
+    )
 }
 
 #[cfg(test)]

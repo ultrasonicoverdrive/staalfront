@@ -1,0 +1,15 @@
+// Money (WP7.4, docs/rules/economy.md, "Money"): what a unit of ore is worth and what a player
+// starts with. Read by sf_data::money; sf_bridge::money_rules hands it to the world
+// (World::with_money). The store of a player is its money pool: the ore a refinery takes off a
+// harvester goes into it as credits, and the structures a player builds are paid out of it while
+// they go up. Placeholders for the balance rounds of phase 15.
+//
+// Money exists only in a world that has storage rules; the sandbox has them with `--harvest`.
+(
+    // Credits one unit of ore is worth when the refinery takes it (1 to 1000). One unit of ore is
+    // one credit for now (ore.ron).
+    credits_per_ore: 1,
+    // Credits every player starts with, in its store (0 to 1,000,000,000). The store may hold
+    // more than its capacity: until it is spent below it the harvesters wait at the refinery.
+    starting_credits: 1000,
+)

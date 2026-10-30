@@ -408,8 +408,11 @@ struct Storage {
     table: Vec<(Kind, u32)>,
     /// Per position in the unit table: the capacity of that kind (zero for most).
     per_def: Vec<u32>,
-    /// Ore stored per player (ascending). Nothing spends it yet (WP7.4).
+    /// The store of each player (ascending): the money pool (WP7.4). A unit of ore delivered adds
+    /// `price` to it; construction spends from it ([`Harvest::spend`]).
     stored: Vec<(PlayerId, u64)>,
+    /// Credits one unit of ore is worth (WP7.4): 1 without money rules.
+    price: u32,
     /// The capacity per player (ascending), summed over the standing buildings in the sync pass
     /// of this tick.
     capacity: Vec<(PlayerId, u64)>,
@@ -495,8 +498,37 @@ impl Harvest {
             table,
             per_def,
             stored: Vec::new(),
+            price: 1,
             capacity: Vec::new(),
         });
+    }
+
+    /// Turns money on (WP7.4): a unit of ore is worth `price` credits, and each player in
+    /// `starting` begins with that many credits in the store. The caller
+    /// (`World::with_money`) has checked that storage exists, `price` is above zero and the
+    /// players are ascending without duplicates.
+    pub(crate) fn set_money(&mut self, price: u32, starting: &[(PlayerId, u64)]) {
+        if let Some(s) = &mut self.storage {
+            s.price = price;
+            for &(player, n) in starting {
+                add_to(&mut s.stored, player, n);
+            }
+        }
+    }
+
+    /// Takes `n` credits out of the store of `player` if it holds that many; `false` and nothing
+    /// changed otherwise. This is the one way money leaves the store (WP7.4).
+    pub(crate) fn spend(&mut self, player: PlayerId, n: u64) -> bool {
+        let Some(s) = &mut self.storage else {
+            return false;
+        };
+        match s.stored.binary_search_by_key(&player, |&(p, _)| p) {
+            Ok(k) if s.stored[k].1 >= n => {
+                s.stored[k].1 -= n;
+                true
+            }
+            _ => n == 0,
+        }
     }
 
     pub(crate) fn has_storage(&self) -> bool {
@@ -526,10 +558,13 @@ impl Harvest {
             .map_or(0, |s| get_of(&s.capacity, player))
     }
 
-    /// Room left for `player`: `None` without storage rules (no limit).
+    /// Room left for `player`, in units of ore: `None` without storage rules (no limit). The room
+    /// is counted in credits; a unit of ore needs `price` of them, and a part of a unit is not
+    /// taken (WP7.4).
     fn room(&self, player: PlayerId) -> Option<u64> {
         let s = self.storage.as_ref()?;
-        Some(get_of(&s.capacity, player).saturating_sub(get_of(&s.stored, player)))
+        let credits = get_of(&s.capacity, player).saturating_sub(get_of(&s.stored, player));
+        Some(credits / u64::from(s.price))
     }
 
     pub(crate) fn rules(&self) -> &HarvestRules {
@@ -549,7 +584,7 @@ impl Harvest {
     fn credit(&mut self, player: PlayerId, n: u64) {
         add_to(&mut self.delivered, player, n);
         if let Some(s) = &mut self.storage {
-            add_to(&mut s.stored, player, n);
+            add_to(&mut s.stored, player, n.saturating_mul(u64::from(s.price)));
         }
     }
 

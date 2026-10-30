@@ -143,6 +143,28 @@ pub fn with_storage(world: World, defs: &UnitDefs) -> World {
         .expect("a world with harvest rules that has not started takes the storage capacities")
 }
 
+/// `world` with money (WP7.4): the store is the money pool, a unit of ore is worth `credits_per_ore`
+/// credits and each seat of the sandbox starts with `starting_credits` (`money.ron`), and the
+/// structures players build are paid for while they go up. Call it right after [`with_storage`].
+///
+/// # Panics
+///
+/// If the world has no storage rules or has started; the sandbox, its one caller, has neither
+/// problem.
+pub fn with_money(world: World) -> World {
+    let settings = sf_data::money::MoneySettings::embedded();
+    let seats = [
+        PlayerId(crate::sandbox::MERIDIAN),
+        PlayerId(crate::sandbox::VEYRAN),
+    ];
+    world
+        .with_money(
+            sf_bridge::money_rules(&settings),
+            &sf_bridge::starting_credits(&settings, &seats),
+        )
+        .expect("a world with storage rules that has not started takes the money rules")
+}
+
 /// The terrain of `map` for the simulation: `None` for a map without a
 /// terrain layer. The layer was checked against the shipped table when the map
 /// was loaded (`Map::load`) or generated, so an error here means the map was

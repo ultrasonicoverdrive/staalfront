@@ -189,6 +189,12 @@ pub struct Scenario {
     /// scenario of the earlier phases (`harvest` included). Needs `harvest`.
     #[serde(default)]
     pub storage: Option<Vec<(u16, u32)>>,
+    /// Money (WP7.4, `docs/rules/economy.md`, "Money"): what a unit of ore is worth and what each
+    /// player starts with, written out in the scenario so that editing the shipped `money.ron`
+    /// never moves its checksum. Left out: structures are built for free, which is every
+    /// scenario of the earlier phases. Needs `storage` (the store is the pool).
+    #[serde(default)]
+    pub money: Option<MoneySpec>,
     /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
     /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
     /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
@@ -223,6 +229,22 @@ pub struct OreSpec {
     pub regrow_amount: u16,
     /// Ticks between two turns of a cell.
     pub regrow_period: u32,
+}
+
+/// The money rules of a scenario (`sf_sim::MoneyRules`) and the credits each player starts with.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoneySpec {
+    /// Credits one unit of ore is worth. Left out: 1.
+    #[serde(default = "one")]
+    pub credits_per_ore: u32,
+    /// `(player, credits)` at the start. A player not listed starts with nothing.
+    #[serde(default)]
+    pub starting: Vec<(u8, u64)>,
+}
+
+fn one() -> u32 {
+    1
 }
 
 /// The harvest rules of a scenario (`sf_sim::HarvestRules`) and the kinds that harvest.
@@ -934,6 +956,15 @@ impl Scenario {
             }
         }
 
+        if let Some(m) = &self.money {
+            if self.storage.is_none() {
+                p.push("money needs `storage` (the store is the money pool)".to_string());
+            }
+            if m.credits_per_ore == 0 {
+                p.push("money: credits_per_ore must be above zero".to_string());
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -1247,6 +1278,18 @@ impl Scenario {
             let table: Vec<(Kind, u32)> = storage.iter().map(|&(k, n)| (Kind(k), n)).collect();
             world = world
                 .with_storage(&table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(m) = &self.money {
+            let starting: Vec<(PlayerId, u64)> =
+                m.starting.iter().map(|&(p, n)| (PlayerId(p), n)).collect();
+            world = world
+                .with_money(
+                    sf_sim::MoneyRules {
+                        credits_per_ore: m.credits_per_ore,
+                    },
+                    &starting,
+                )
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {

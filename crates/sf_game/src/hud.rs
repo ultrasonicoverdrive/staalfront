@@ -51,6 +51,9 @@ pub struct HudStats {
     /// A second line under the top bar: what is being built and whether the ghost's place is
     /// allowed (WP6.2). Nothing while no structure is chosen.
     pub build_line: Option<String>,
+    /// The credits of the local player and whether a build waits for them (WP7.4); `None` in a
+    /// world without money rules.
+    pub money: Option<crate::money_view::MoneyHud>,
 }
 
 pub struct Hud {
@@ -169,6 +172,9 @@ impl Hud {
         if let Some(line) = &stats.build_line {
             let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (520.0, 26.0));
             ui.text_in(strip, Anchor::Left, (12.0, 0.0), line, text);
+        }
+        if let Some(money) = &stats.money {
+            crate::money_view::draw_panel(ui, money, crate::money_view::shipped_look());
         }
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {

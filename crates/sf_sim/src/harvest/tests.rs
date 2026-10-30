@@ -285,3 +285,76 @@ fn a_world_without_storage_rules_has_no_storage_section() {
     assert_eq!(before, a.checksum());
     assert_eq!(b.checksum(), before);
 }
+
+#[test]
+fn the_money_state_is_in_the_checksum() {
+    // Money rules on top of storage (WP7.4): the price and what each player has spent are hashed,
+    // the credits themselves are the stored amount of `V`.
+    let mut a = world().with_storage(&[(REFINERY, 300)]).unwrap();
+    a = a
+        .with_money(
+            crate::MoneyRules { credits_per_ore: 2 },
+            &[(PlayerId(0), 50)],
+        )
+        .unwrap();
+    place(&mut a, (6, 20));
+    a.step();
+    let base = a.checksum();
+    // The price.
+    let mut b = a.clone();
+    b.money.as_mut().unwrap().rules.credits_per_ore = 3;
+    assert_ne!(base, b.checksum());
+    // What was spent, and how much of it, and by whom.
+    let mut c = a.clone();
+    assert!(c.pay(PlayerId(0), 7));
+    assert_ne!(base, c.checksum());
+    let mut d = a.clone();
+    assert!(d.pay(PlayerId(0), 8));
+    assert_ne!(c.checksum(), d.checksum());
+    let mut e = a.clone();
+    e.money.as_mut().unwrap().spent.push((PlayerId(1), 7));
+    assert_ne!(c.checksum(), e.checksum());
+    // Spending changes the stored amount as well, so spent alone is checked on its own.
+    let mut f = a.clone();
+    f.money.as_mut().unwrap().spent.push((PlayerId(0), 7));
+    assert_ne!(base, f.checksum());
+}
+
+#[test]
+fn a_world_without_money_rules_has_no_money_section() {
+    let mut a = stored_world();
+    let before = a.checksum();
+    // A test-only shortcut: money switched on afterwards moves the hash, switched off again it
+    // brings the old one back.
+    a.money = Some(crate::money::Money {
+        rules: crate::MoneyRules { credits_per_ore: 1 },
+        spent: Vec::new(),
+    });
+    assert_ne!(before, a.checksum());
+    a.money = None;
+    assert_eq!(before, a.checksum());
+}
+
+#[test]
+fn a_payment_larger_than_the_store_pays_nothing() {
+    let mut w = world().with_storage(&[(REFINERY, 300)]).unwrap();
+    w = w
+        .with_money(
+            crate::MoneyRules { credits_per_ore: 1 },
+            &[(PlayerId(0), 10)],
+        )
+        .unwrap();
+    assert!(!w.pay(PlayerId(0), 11));
+    assert_eq!(
+        (w.credits(PlayerId(0)), w.credits_spent(PlayerId(0))),
+        (10, 0)
+    );
+    assert!(w.pay(PlayerId(0), 10));
+    assert_eq!(
+        (w.credits(PlayerId(0)), w.credits_spent(PlayerId(0))),
+        (0, 10)
+    );
+    // A world without money rules never pays.
+    let mut plain = stored_world();
+    assert!(!plain.pay(PlayerId(0), 0));
+}
