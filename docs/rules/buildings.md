@@ -319,7 +319,8 @@ from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Foot
   before one of its prerequisites (a test holds the unlock missions of `content/units.md` against the tree).
 * It carries **no unit prerequisites** (which factory a rifleman needs). That is WP6.5, which will read the
   factory functions; a unit's `requires` would be the same field.
-* The edges are invented. Balance is phase 15; changing one is a data edit and a test row
+* The edges are our own and were approved by Tijmen on 30-10-2026; changing one now needs his approval.
+  Balance is phase 15; a change is a data edit and a test row
   (`the_shipped_tech_tree_is_the_documented_one`) plus this table.
 
 ## Where it is tested
