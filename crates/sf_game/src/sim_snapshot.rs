@@ -115,6 +115,9 @@ pub struct SimSnapshot {
     stores: Vec<EntityId>,
     /// Whether the world has money rules (WP7.4): then the store of a player is its credits.
     has_money: bool,
+    /// The credits of every player that holds any (WP7.4), ascending by player; read from the
+    /// world for every possible player, so a player that owns no entity still has its money.
+    credits: Vec<(PlayerId, u64)>,
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
     stalled: Vec<EntityId>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
@@ -154,6 +157,7 @@ impl SimSnapshot {
             storage: Vec::new(),
             stores: Vec::new(),
             has_money: false,
+            credits: Vec::new(),
             stalled: Vec::new(),
             wrecks: Vec::new(),
             deaths: Vec::new(),
@@ -302,6 +306,15 @@ impl SimSnapshot {
         }
         // The money (WP7.4): the credits are the stored amount above; what waits for them.
         self.has_money = world.has_money();
+        self.credits.clear();
+        if self.has_money {
+            // Every id a player can have: the money is the world's, not the views'.
+            self.credits.extend(
+                (0..=u8::MAX)
+                    .map(|p| (PlayerId(p), world.credits(PlayerId(p))))
+                    .filter(|&(_, c)| c > 0),
+            );
+        }
         self.stalled.clear();
         self.stalled.extend_from_slice(world.stalled());
         self.wrecks.clear();
@@ -404,11 +417,14 @@ impl SimSnapshot {
         &self.storage
     }
 
-    /// The credits `player` holds (WP7.4); `None` in a world without money rules. A player with
-    /// neither a store nor a structure has none to show, which reads as zero.
+    /// The credits `player` holds (WP7.4), straight from [`World::credits`], also for a player
+    /// that owns no entity; `None` in a world without money rules.
     pub fn credits_of(&self, player: PlayerId) -> Option<u64> {
-        self.has_money
-            .then(|| self.storage_of(player).map_or(0, |(stored, _)| stored))
+        self.has_money.then(|| {
+            self.credits
+                .binary_search_by_key(&player, |&(p, _)| p)
+                .map_or(0, |k| self.credits[k].1)
+        })
     }
 
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
