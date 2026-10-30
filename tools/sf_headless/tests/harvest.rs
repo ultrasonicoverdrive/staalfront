@@ -432,7 +432,18 @@ fn crowd_scenario(harvest: bool, ticks: u64) -> Scenario {
 
 /// The crowd scenario with only the first `n` of its harvesters (the WP7.2 review's measurement).
 fn crowd_of(n: usize, ticks: u64) -> Scenario {
+    crowd_with_ore(n, ticks, 120)
+}
+
+/// [`crowd_of`] with `ore` units in every ore cell at the start (and as the most a cell holds):
+/// 120 is the shipped amount, which the near field runs out of in 4000 ticks with 12 harvesters;
+/// a richer field shows what the bays can unload.
+fn crowd_with_ore(n: usize, ticks: u64, ore: u16) -> Scenario {
     let mut s = crowd_scenario(true, ticks);
+    if let Some(o) = &mut s.ore {
+        o.start = ore;
+        o.max = o.max.max(ore);
+    }
     let mut seen = 0;
     s.commands.retain(|c| match c.command {
         Action::SpawnUnit { .. } => {
@@ -458,8 +469,37 @@ fn delivered_by(scenario: &Scenario) -> u64 {
 #[test]
 #[ignore]
 fn throughput_table() {
-    for n in [3, 6, 12, 24, 48] {
-        println!("{n:2} harvesters: {} ore", delivered_by(&crowd_of(n, 4000)));
+    for (n, ore) in [3, 6, 12, 24, 48]
+        .into_iter()
+        .flat_map(|n| [(n, 120), (n, 2000)])
+    {
+        let scenario = crowd_with_ore(n, 4000, ore);
+        let mut world = scenario.build_world().unwrap();
+        let mut busy = [0u64; 3];
+        for _ in 0..scenario.ticks {
+            world.step();
+            for (slot, b) in busy.iter_mut().enumerate() {
+                *b += u64::from(world.dock_of(id(slot as u32)).is_some_and(|d| d.unloading));
+            }
+        }
+        let mut stages = std::collections::BTreeMap::new();
+        let mut carried = 0u64;
+        for slot in 3..(3 + n as u32) {
+            let v = world.harvester_of(id(slot)).unwrap();
+            *stages.entry(format!("{:?}", v.stage)).or_insert(0u32) += 1;
+            carried += u64::from(v.load);
+        }
+        let mut left = 0u64;
+        for y in 70..95 {
+            for x in 105..130 {
+                left += u64::from(world.ore_at(Cell::new(x, y)));
+            }
+        }
+        println!(
+            "{n:2} harvesters, {ore} ore a cell: {} ore delivered, {carried} carried, {left} in the field; bays unloading {busy:?} of {} ticks; {stages:?}",
+            world.ore_delivered(P0),
+            scenario.ticks
+        );
     }
 }
 
@@ -629,5 +669,95 @@ fn money_cost() {
             "plants only, 300 ticks, 40 rounds, mean: {with:.2} ms with, {without:.2} ms without: {:.3} microseconds per tick more",
             (with - without) * 1e3 / ticks as f64
         );
+    }
+}
+
+/// Scratch: bay-limited regime (a load is mined in a few ticks).
+#[test]
+#[ignore]
+fn scratch_fast() {
+    for n in [3, 6, 12, 24, 48] {
+        let mut s = crowd_with_ore(n, 4000, 2000);
+        let h = s.harvest.as_mut().unwrap();
+        h.mine_amount = 40;
+        h.mine_period = 2;
+        println!("FAST {n:2} harvesters: {} ore", delivered_by(&s));
+    }
+}
+
+/// Scratch: a sweep of the new knobs.
+#[test]
+#[ignore]
+fn scratch_sweep() {
+    let run = |n: usize, ore: u16, f: &dyn Fn(&mut sf_headless::scenario::HarvestSpec)| {
+        let mut s = crowd_with_ore(n, 4000, ore);
+        f(s.harvest.as_mut().unwrap());
+        if ore == 1 {
+            let mut s = crowd_with_ore(n, 4000, 2000);
+            let h = s.harvest.as_mut().unwrap();
+            h.mine_amount = 40;
+            h.mine_period = 2;
+            f(h);
+            return delivered_by(&s);
+        }
+        delivered_by(&s)
+    };
+    type Spec = sf_headless::scenario::HarvestSpec;
+    let variants: Vec<(&str, Box<dyn Fn(&mut Spec)>)> = vec![
+        ("shipped", Box::new(|_| {})),
+        ("queue_cost 0", Box::new(|h| h.queue_cost = 0)),
+        ("gap 0", Box::new(|h| h.queue_gap = 0)),
+        (
+            "queue_cost 0, gap 0 (old rule)",
+            Box::new(|h| {
+                h.queue_cost = 0;
+                h.queue_gap = 0
+            }),
+        ),
+        ("queue_cost 50", Box::new(|h| h.queue_cost = 50)),
+        ("queue_cost 200", Box::new(|h| h.queue_cost = 200)),
+        ("queue_cost 400", Box::new(|h| h.queue_cost = 400)),
+        ("margin 0", Box::new(|h| h.switch_margin = 0)),
+        ("margin 300", Box::new(|h| h.switch_margin = 300)),
+        ("gap 4", Box::new(|h| h.queue_gap = 4)),
+        ("gap 2", Box::new(|h| h.queue_gap = 2)),
+    ];
+    for (name, f) in &variants {
+        println!(
+            "{name:34} 24/120: {:5} 48/120: {:5} 24/fast: {:5} 48/fast: {:5} 12/fast: {:5}",
+            run(24, 120, f),
+            run(48, 120, f),
+            run(24, 1, f),
+            run(48, 1, f),
+            run(12, 1, f)
+        );
+    }
+}
+
+/// Scratch: where the 48 harvesters stand at some ticks.
+#[test]
+#[ignore]
+fn scratch_where_they_stand() {
+    let scenario = crowd_with_ore(48, 4000, 2000);
+    let mut world = scenario.build_world().unwrap();
+    for t in 1..=4000u64 {
+        world.step();
+        if t % 1000 == 0 {
+            println!("--- tick {t}");
+            for slot in 3..51u32 {
+                let v = world.harvester_of(id(slot)).unwrap();
+                let e = world.get(id(slot)).unwrap();
+                println!(
+                    "{slot:2} {:?} dock {:?} load {} at ({:.1},{:.1}) order {:?} stuck {:?}",
+                    v.stage,
+                    v.dock.map(|d| d.index()),
+                    v.load,
+                    e.pos.x.raw() as f64 / 65536.0,
+                    e.pos.y.raw() as f64 / 65536.0,
+                    world.order_of(id(slot)).unwrap(),
+                    world.stuck_ticks_of(id(slot))
+                );
+            }
+        }
     }
 }

@@ -418,6 +418,71 @@ fn two_harvesters_on_one_refinery_take_turns_in_the_order_they_asked() {
     assert!(w.ore_delivered(P0) >= 200);
 }
 
+/// Five harvesters, all bound for the one refinery (`queue_cost: 0` chooses by distance alone),
+/// with `queue_gap` as given; returns what the run saw: the standing queued harvesters'
+/// (y distance from the approach, place) observations, the holders in order, and the delivered ore.
+fn queue_run(queue_gap: u16) -> (Vec<(f64, usize)>, Vec<EntityId>, u64) {
+    let rules = HarvestRules {
+        queue_cost: 0,
+        queue_gap,
+        ..RULES
+    };
+    let mut w = world_with(rules, Some(ORE_RULES), true);
+    place_refinery(&mut w, 0, (6, 20), P0);
+    for y in [22, 24, 26, 28, 30] {
+        spawn_harvester(&mut w, 0, (14, y), P0);
+    }
+    let mut standing = Vec::new();
+    let mut holders: Vec<EntityId> = Vec::new();
+    for _ in 0..3000 {
+        w.step();
+        let d = w.dock_of(id(0)).unwrap();
+        if let Some(h) = d.holder
+            && holders.last() != Some(&h)
+        {
+            holders.push(h);
+        }
+        for (place, &q) in d.queue.iter().enumerate() {
+            let at_rest = w.order_of(q) == Some(Order::Idle);
+            let pos = w.get(q).unwrap().pos;
+            let near_dock = (pos - d.point).length_squared() < Fx::from_int(8).square();
+            if stage(&w, q.index()) == Some(HarvestStage::Queued) && at_rest && near_dock {
+                let y = pos.y.raw() as f64 / 65536.0;
+                standing.push(((y - 22.5).abs(), place));
+            }
+        }
+    }
+    (standing, holders, w.ore_delivered(P0))
+}
+
+#[test]
+fn queued_harvesters_wait_beside_the_approach_and_everyone_still_unloads() {
+    let (standing, holders, delivered) = queue_run(3);
+    assert!(standing.len() >= 20, "{} observations", standing.len());
+    // The approach is the row of the dock point, y 22.5; a harvester is a cell and a half wide. A
+    // standing queued harvester is on one of the spots, three cells to the side.
+    let nearest = standing.iter().map(|&(dy, _)| dy).fold(f64::MAX, f64::min);
+    assert!(
+        nearest >= 2.0,
+        "a queued harvester stood {nearest} cells off the approach"
+    );
+    // Every harvester got the bay (the holder reaches it from its spot) and unloaded.
+    for slot in 1..=5 {
+        assert!(
+            holders.contains(&id(slot)),
+            "{slot} never held the bay: {holders:?}"
+        );
+    }
+    assert!(delivered >= 5 * 100, "{delivered}");
+}
+
+#[test]
+fn without_queue_spots_queued_harvesters_stand_in_the_approach() {
+    // The same run with queue_gap 0: they stand where they were told to wait.
+    let (standing, _, _) = queue_run(0);
+    assert!(standing.iter().any(|&(dy, _)| dy < 1.5), "{standing:?}");
+}
+
 #[test]
 fn a_grant_that_is_not_used_in_time_is_revoked_and_the_next_in_line_gets_the_bay() {
     // A short timeout: a harvester is granted at the call range, 6 cells out, and needs about 100
@@ -721,7 +786,13 @@ fn a_refinery_destroyed_under_a_docked_harvester_leaves_it_the_rest_of_its_load(
 
 #[test]
 fn a_refinery_destroyed_under_a_queued_harvester_sends_it_to_the_next_one() {
-    let mut w = world();
+    // `queue_cost: 0` chooses by distance alone, so both go to the nearer refinery and the second
+    // stands in its queue (with the shipped weights it would take the other refinery at once).
+    let rules = HarvestRules {
+        queue_cost: 0,
+        ..RULES
+    };
+    let mut w = world_with(rules, Some(ORE_RULES), true);
     place_refinery(&mut w, 0, (6, 20), P0);
     place_refinery(&mut w, 0, (6, 30), P0);
     spawn_harvester(&mut w, 0, (14, 22), P0);

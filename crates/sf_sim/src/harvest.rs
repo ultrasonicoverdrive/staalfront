@@ -303,9 +303,9 @@ struct Core {
     /// The order the harvester gave itself and still expects to find as its current one.
     own: Order,
     tries: u8,
-    /// Queued (WP7.5): the place in the queue (1 is the head) the harvester last walked to a
-    /// queue spot for, or 0 when it has not yet.
-    place: u8,
+    /// Queued (WP7.5): the queue spot the harvester last walked to, `1 + 2 * row + side` (side 1
+    /// is the negative lateral side), or 0 when it has none yet.
+    spot: u8,
 }
 
 impl Core {
@@ -321,7 +321,7 @@ impl Core {
         dock: None,
         own: Order::Idle,
         tries: 0,
-        place: 0,
+        spot: 0,
     };
 }
 
@@ -759,24 +759,19 @@ impl Harvest {
         load
     }
 
-    /// The spot where the harvester at place `k` (0 is the head) of the queue at `d` waits: beside
-    /// the approach, `queue_gap` cells to the left of it for an even place and to the right for an
-    /// odd one, in rows `queue_step` apart from `queue_start` cells out along the exit side, the
-    /// row of the place being `k / 2` (the last row, `queue_rows`, takes the rest).
-    fn queue_point(&self, w: &World, d: &Dock, k: usize) -> Vec2 {
-        let (dx, dy): (i64, i64) = match d.side {
-            Side::PosX => (1, 0),
-            Side::NegX => (-1, 0),
-            Side::PosY => (0, 1),
-            Side::NegY => (0, -1),
-        };
+    /// The queue spot in row `row` on the positive (`minus` false) or the negative side of the
+    /// approach of `d`: `queue_gap` cells to the side of the line out from the dock point along
+    /// the exit side, `queue_start + row * queue_step` cells out (the last row, `queue_rows`,
+    /// takes the rest).
+    fn queue_point(&self, w: &World, d: &Dock, row: usize, minus: bool) -> Vec2 {
+        let (dx, dy) = side_vector(d.side);
         let r = &self.rules;
-        let row = (k / 2).min(usize::from(r.queue_rows) - 1) as i64;
+        let row = row.min(usize::from(r.queue_rows) - 1) as i64;
         let along = i64::from(r.queue_start) + row * i64::from(r.queue_step);
-        let lateral = if k % 2 == 0 {
-            i64::from(r.queue_gap)
-        } else {
+        let lateral = if minus {
             -i64::from(r.queue_gap)
+        } else {
+            i64::from(r.queue_gap)
         };
         let (ox, oy) = (dx * along + dy * lateral, dy * along + dx * lateral);
         let (width, height) = (i64::from(w.config.width), i64::from(w.config.height));
@@ -785,15 +780,17 @@ impl Harvest {
         Vec2::new(Fx::from_i64(x) + Fx::HALF, Fx::from_i64(y) + Fx::HALF)
     }
 
+    /// Which side of the approach of `d` the position `pos` is on: `true` for the negative side.
+    fn on_minus_side(d: &Dock, pos: Vec2) -> bool {
+        let (dx, dy) = side_vector(d.side);
+        let from = pos - d.point;
+        (from.x.mul_int(dy) + from.y.mul_int(dx)).is_negative()
+    }
+
     /// Where a harvester without ore waits: a few cells out from the dock along its exit side,
     /// spread sideways by the harvester's slot so that they do not stand on one spot.
     fn park_point(&self, w: &World, d: &Dock, slot: u32) -> Vec2 {
-        let (dx, dy): (i64, i64) = match d.side {
-            Side::PosX => (1, 0),
-            Side::NegX => (-1, 0),
-            Side::PosY => (0, 1),
-            Side::NegY => (0, -1),
-        };
+        let (dx, dy) = side_vector(d.side);
         let (spread, distance) = (
             i64::from(self.rules.park_spread),
             i64::from(self.rules.park_distance),
@@ -1160,7 +1157,7 @@ impl Harvest {
                 c.phase = Phase::ToDock(Call::Driving);
                 c.dock = Some(d.id);
                 c.wait = self.rules.recheck_period;
-                c.place = 0;
+                c.spot = 0;
                 c.own = Order::Move(d.point);
                 plan.act = Act::Go(d.point);
             }
@@ -1269,13 +1266,13 @@ impl Harvest {
                             }
                             c.phase = Phase::ToDock(Call::Granted);
                             c.tries = 0;
-                            c.place = 0;
+                            c.spot = 0;
                         }
                     }
                     Reply::Queued(_) => {
                         if matches!(c.phase, Phase::ToDock(Call::Called | Call::Driving)) {
                             c.phase = Phase::ToDock(Call::Queued);
-                            c.place = 0;
+                            c.spot = 0;
                             c.tries = 0;
                             // Without queue spots it stands where it is; with them the walk to its
                             // spot is ordered below.
@@ -1431,7 +1428,7 @@ impl Harvest {
                         if !d.knows(id) {
                             // The dock does not remember us: ask again.
                             plan.core.phase = Phase::ToDock(Call::Driving);
-                            plan.core.place = 0;
+                            plan.core.spot = 0;
                             plan.core.wait = rules.recheck_period;
                         } else {
                             self.queue_walk(w, d, id, pos, ended, &mut plan);
@@ -1472,9 +1469,11 @@ impl Harvest {
         plan
     }
 
-    /// A queued harvester walks to its queue spot, and again when the queue moves up and its spot
-    /// changes. A walk that ends short of the spot is tried again `max_tries` times for the same
-    /// place and then given up: the harvester stands where it is until its place changes.
+    /// A queued harvester walks to its queue spot, and again when the queue moves up and its
+    /// spot changes. It keeps the side of the approach it came from (so it never crosses the
+    /// approach), and takes the next row after the harvesters ahead of it on that side. A walk
+    /// that ends short of the spot is tried again `max_tries` times for the same spot and then
+    /// given up: the harvester stands where it is until its spot changes.
     fn queue_walk(
         &self,
         w: &World,
@@ -1490,15 +1489,34 @@ impl Harvest {
         let Some(k) = d.queue.iter().position(|&q| q == id) else {
             return;
         };
-        let place = place(k);
-        let spot = self.queue_point(w, d, k);
         let c = &mut plan.core;
+        let minus = if c.spot == 0 {
+            Self::on_minus_side(d, pos)
+        } else {
+            (c.spot - 1) & 1 == 1
+        };
+        // The row: the harvesters ahead of it in the queue that wait on the same side.
+        let row = d.queue[..k]
+            .iter()
+            .filter(|&&q| {
+                let ahead = &self.units[q.index() as usize].core;
+                let ahead_minus = if ahead.spot != 0 {
+                    (ahead.spot - 1) & 1 == 1
+                } else {
+                    Self::on_minus_side(d, w.entities.pos[q.index() as usize])
+                };
+                ahead_minus == minus
+            })
+            .count();
+        let row = row.min(usize::from(self.rules.queue_rows) - 1);
+        let spot = (1 + row * 2 + usize::from(minus)) as u8;
+        let target = self.queue_point(w, d, row, minus);
         let near = tenths(self.rules.park_near_tenths).square();
-        if c.place != place {
-            c.place = place;
+        if c.spot != spot {
+            c.spot = spot;
             c.tries = 0;
         } else if ended {
-            if (spot - pos).length_squared() <= near {
+            if (target - pos).length_squared() <= near {
                 return;
             }
             c.tries += 1;
@@ -1508,9 +1526,9 @@ impl Harvest {
         } else {
             return;
         }
-        if (spot - pos).length_squared() > near {
-            c.own = Order::Move(spot);
-            plan.act = Act::Go(spot);
+        if (target - pos).length_squared() > near {
+            c.own = Order::Move(target);
+            plan.act = Act::Go(target);
         } else if c.own != Order::Idle {
             c.own = Order::Idle;
             plan.act = Act::Clear;
@@ -1706,7 +1724,7 @@ impl Harvest {
             write_option_id(h, c.dock);
             c.own.write_hash(h);
             h.write_u8(c.tries);
-            h.write_u8(c.place);
+            h.write_u8(c.spot);
             h.write_u64(hv.mail.len() as u64);
             for m in &hv.mail {
                 match *m {
@@ -1754,6 +1772,16 @@ impl Harvest {
                 });
             }
         }
+    }
+}
+
+/// The unit vector out of a refinery's exit side.
+fn side_vector(side: Side) -> (i64, i64) {
+    match side {
+        Side::PosX => (1, 0),
+        Side::NegX => (-1, 0),
+        Side::PosY => (0, 1),
+        Side::NegY => (0, -1),
     }
 }
 

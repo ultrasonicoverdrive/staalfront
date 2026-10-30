@@ -43,6 +43,10 @@ const RULES: HarvestRules = HarvestRules {
 };
 
 fn world() -> World {
+    world_with(RULES)
+}
+
+fn world_with(rules: HarvestRules) -> World {
     let defs = vec![
         TerrainDef {
             id: TerrainId(0),
@@ -119,7 +123,7 @@ fn world() -> World {
             regrow_period: 10,
         })
         .unwrap()
-        .with_harvest(RULES, &[HARVESTER])
+        .with_harvest(rules, &[HARVESTER])
         .unwrap()
 }
 
@@ -365,4 +369,234 @@ fn a_payment_larger_than_the_store_pays_nothing() {
     // A world without money rules never pays.
     let mut plain = stored_world();
     assert!(!plain.pay(PlayerId(0), 0));
+}
+
+// ---- the choice of refinery and the queue spots (WP7.5) ------------------------------------------
+//
+// Refinery A (slot 0) has its dock point on (9.5, 22.5), refinery B (slot 1) on (9.5, 38.5). The
+// harvesters stand east of them. Every weight below is a different number, so a field read from the
+// wrong place gives another cost.
+
+/// The two refineries and one harvester per `at` (slots 2, 3, ...), stepped once so that the
+/// docks and the harvesters are registered.
+fn stepped(rules: HarvestRules, at: &[(i32, i32)]) -> World {
+    let mut w = world_with(rules);
+    place(&mut w, (6, 20));
+    place(&mut w, (6, 36));
+    for &(x, y) in at {
+        let spawn = Command::SpawnUnit {
+            kind: HARVESTER,
+            pos: Vec2::new(
+                Fx::from_int(x) + Fx::HALF,
+                Fx::from_int(y) + Fx::HALF,
+            ),
+            owner: PlayerId(0),
+        };
+        w.schedule(Tick(0), PlayerId(0), spawn).unwrap();
+    }
+    w.step();
+    w
+}
+
+/// Runs `f` on the harvest state of `w` (taken out of the world for the call, as the tick does).
+fn with_state<R>(w: &mut World, f: impl FnOnce(&mut Harvest, &World) -> R) -> R {
+    let mut h = w.harvest.take().unwrap();
+    let r = f(&mut h, w);
+    w.harvest = Some(h);
+    r
+}
+
+fn pos_of(w: &World, slot: usize) -> Vec2 {
+    w.entities.pos[slot]
+}
+
+#[test]
+fn a_cost_is_the_cells_times_travel_cost_plus_the_committed_times_queue_cost() {
+    let rules = HarvestRules {
+        travel_cost: 7,
+        queue_cost: 300,
+        ..RULES
+    };
+    let mut w = stepped(rules, &[(20, 22)]);
+    let pos = pos_of(&w, 2);
+    with_state(&mut w, |h, _| {
+        // 11 cells to A and sqrt(121 + 256) = 19.42 cells to B, at 7 ticks a cell.
+        assert_eq!(h.dock_cost(0, pos, None, &[0, 0]), 77);
+        assert_eq!(h.dock_cost(1, pos, None, &[0, 0]), 136);
+        // Two committed to A: 2 x 300 more. None to B.
+        assert_eq!(h.dock_cost(0, pos, None, &[2, 0]), 677);
+        assert_eq!(h.dock_cost(1, pos, None, &[2, 0]), 136);
+        // The harvester itself, already bound for A, is not counted against it.
+        assert_eq!(h.dock_cost(0, pos, Some(id(0)), &[2, 0]), 377);
+        assert_eq!(h.dock_cost(1, pos, Some(id(0)), &[2, 0]), 136);
+    });
+}
+
+#[test]
+fn the_cheapest_refinery_is_chosen_and_a_tie_goes_to_the_nearer_then_the_lower_slot() {
+    let at = |queue_cost: u16| HarvestRules {
+        travel_cost: 7,
+        queue_cost,
+        ..RULES
+    };
+    let owner = PlayerId(0);
+    // One committed to A. A costs 77 + q, B 136: q = 59 is a tie on the cost, which goes to the
+    // nearer dock point (A); q = 60 makes A dearer and B wins; q = 58 keeps A.
+    for (q, want) in [(58, 0), (59, 0), (60, 1)] {
+        let mut w = stepped(at(q), &[(20, 22)]);
+        let pos = pos_of(&w, 2);
+        let got = with_state(&mut w, |h, _| h.choose_dock(owner, pos, None, &[1, 0]));
+        assert_eq!(got.map(|(k, _)| k), Some(want), "queue_cost {q}");
+    }
+    // Equal cost and equal distance (the harvester halfway between): the lower slot.
+    let mut w = stepped(at(59), &[(20, 30)]);
+    let pos = pos_of(&w, 2);
+    let (k, cost) = with_state(&mut w, |h, _| h.choose_dock(owner, pos, None, &[0, 0]).unwrap());
+    assert_eq!((k, cost), (0, 95));
+    // A different owner has no refinery here.
+    let none = with_state(&mut w, |h, _| h.choose_dock(PlayerId(1), pos, None, &[0, 0]));
+    assert_eq!(none, None);
+}
+
+#[test]
+fn queue_spots_lie_in_rows_beside_the_approach() {
+    let rules = HarvestRules {
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 3,
+        ..RULES
+    };
+    let mut w = stepped(rules, &[]);
+    // The exit cell of A is (9, 22), the dock point (9.5, 22.5), the exit side +x.
+    let spot = |h: &Harvest, w: &World, row: usize, minus: bool| {
+        let p = h.queue_point(w, &h.docks[0], row, minus);
+        (p.x.raw() as f64 / 65536.0, p.y.raw() as f64 / 65536.0)
+    };
+    with_state(&mut w, |h, w| {
+        // (row, minus side) and where it is: the positive side is +y for this refinery.
+        let want = [
+            (0, false, (10.5, 25.5)),
+            (0, true, (10.5, 19.5)),
+            (1, false, (12.5, 25.5)),
+            (1, true, (12.5, 19.5)),
+            (2, false, (14.5, 25.5)),
+            (2, true, (14.5, 19.5)),
+            // Past the last row (queue_rows 3) they share it.
+            (7, false, (14.5, 25.5)),
+            (7, true, (14.5, 19.5)),
+        ];
+        for (row, minus, want) in want {
+            assert_eq!(spot(h, w, row, minus), want, "row {row} minus {minus}");
+        }
+        // None is in the approach, on either side.
+        for row in 0..40 {
+            for minus in [false, true] {
+                let (_, y) = spot(h, w, row, minus);
+                assert!((y - 22.5).abs() >= 3.0, "row {row} at y {y}");
+            }
+        }
+        // The side a position is on.
+        let dock = &h.docks[0];
+        assert!(!Harvest::on_minus_side(dock, Vec2::new(Fx::from_int(20), Fx::from_int(23))));
+        assert!(Harvest::on_minus_side(dock, Vec2::new(Fx::from_int(20), Fx::from_int(22))));
+    });
+}
+
+#[test]
+fn a_driving_harvester_switches_only_when_the_other_refinery_is_cheaper_by_more_than_the_margin() {
+    // Bound for A with one other committed there (load 2 with itself): A costs 77 + 300, B 136.
+    // B is cheaper by 241.
+    for (margin, switches) in [(240, true), (241, false), (0, true), (1000, false)] {
+        let rules = HarvestRules {
+            travel_cost: 7,
+            queue_cost: 300,
+            switch_margin: margin,
+            ..RULES
+        };
+        let mut w = stepped(rules, &[(20, 22)]);
+        let mut load = [2u16, 0];
+        let plan = with_state(&mut w, |h, w| {
+            let mut plan = Plan {
+                core: Core {
+                    bound: true,
+                    generation: 0,
+                    phase: Phase::ToDock(Call::Driving),
+                    dock: Some(id(0)),
+                    own: Order::Move(h.docks[0].point),
+                    ..Core::NONE
+                },
+                act: Act::Keep,
+                take: None,
+                send: None,
+                spaced: false,
+                focus: NO_CELL,
+            };
+            let own = h.docks[0].clone();
+            h.recheck(w, 2, &own, &mut plan, &mut load);
+            plan
+        });
+        if switches {
+            assert_eq!(plan.core.dock, Some(id(1)), "margin {margin}");
+            assert_eq!(plan.act, Act::Go(Vec2::new(Fx::from_ratio(19, 2), Fx::from_ratio(77, 2))));
+            assert_eq!(load, [1, 1], "margin {margin}");
+        } else {
+            assert_eq!(plan.core.dock, Some(id(0)), "margin {margin}");
+            assert_eq!(plan.act, Act::Keep);
+            assert_eq!(load, [2, 0], "margin {margin}");
+        }
+    }
+}
+
+#[test]
+fn harvesters_that_set_out_in_one_tick_see_each_others_choice() {
+    let rules = HarvestRules {
+        travel_cost: 7,
+        queue_cost: 300,
+        ..RULES
+    };
+    // Two full harvesters a cell apart: both are nearer to A, but the second finds the first
+    // already bound for it in the same pass and takes B.
+    let mut w = stepped(rules, &[(20, 22), (20, 23)]);
+    let plans = with_state(&mut w, |h, w| {
+        for slot in [2, 3] {
+            let c = &mut h.units[slot].core;
+            c.phase = Phase::Mine;
+            c.load = rules.capacity;
+        }
+        h.decide_all(w)
+    });
+    let docks: Vec<_> = plans.iter().map(|(_, p)| p.core.dock).collect();
+    assert_eq!(docks, [Some(id(0)), Some(id(1))]);
+}
+
+#[test]
+fn harvesters_bound_for_a_dock_count_against_it_whatever_their_step() {
+    let mut w = stepped(RULES, &[(20, 22), (20, 23), (20, 24), (20, 25)]);
+    let load = with_state(&mut w, |h, _| {
+        for (slot, call) in [Call::Driving, Call::Queued, Call::Granted].into_iter().enumerate() {
+            let c = &mut h.units[2 + slot].core;
+            c.phase = Phase::ToDock(call);
+            c.dock = Some(id(0));
+        }
+        let c = &mut h.units[5].core;
+        c.phase = Phase::Unload;
+        c.dock = Some(id(1));
+        h.committed()
+    });
+    assert_eq!(load, [3, 1]);
+}
+
+#[test]
+fn the_new_numbers_are_in_the_checksum_each_on_its_own() {
+    let base = world().checksum();
+    let moved = |rules: HarvestRules| world_with(rules).checksum() != base;
+    assert!(moved(HarvestRules { travel_cost: 17, ..RULES }));
+    assert!(moved(HarvestRules { queue_cost: 101, ..RULES }));
+    assert!(moved(HarvestRules { switch_margin: 101, ..RULES }));
+    assert!(moved(HarvestRules { recheck_period: 21, ..RULES }));
+    assert!(moved(HarvestRules { queue_gap: 4, ..RULES }));
+    assert!(moved(HarvestRules { queue_start: 2, ..RULES }));
+    assert!(moved(HarvestRules { queue_step: 3, ..RULES }));
+    assert!(moved(HarvestRules { queue_rows: 9, ..RULES }));
 }
