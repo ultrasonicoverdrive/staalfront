@@ -479,10 +479,10 @@ fn a_tick_that_cannot_be_paid_in_full_is_not_paid_in_part() {
 }
 
 #[test]
-fn with_too_little_money_for_two_the_older_slot_is_paid_first() {
+fn with_too_little_money_for_two_the_lower_slot_is_paid_first() {
     // A tower is 250 over 30 ticks: the running total after 1, 2, 3 ticks is 8, 16, 25, so the
     // ticks cost 8, 8, 9. With 25 credits: in the first tick both pay 8 (9 left), in the second
-    // the older slot pays 8 (1 left) and the younger cannot, and from then on neither can.
+    // the lower slot pays 8 (1 left) and the higher cannot, and from then on neither can.
     let mut w = world(25);
     let first = build(&mut w, P0, TOWER, (34, 6));
     let second = build(&mut w, P0, TOWER, (36, 6));

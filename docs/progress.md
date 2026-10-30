@@ -2185,6 +2185,8 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch 
   tick between runs of the same binary, about 5 percent run-to-run).
 - **Gaps:** no unit costs (hook `World::pay`, WP6.5); not refused for lack of funds; money only with `--harvest` in
   the sandbox; no refund, sell or repair; the screenshot harness shows no stage models.
+- **Fix round 1:** the HUD reads the credits from `World::credits` for every player id, so a player that owns no
+  entity shows its money (it showed 0 before); construction payment is documented as greedy by lowest slot, not fair.
 
 ## WP11.3 notes: positional sound
 

@@ -15,7 +15,8 @@
 //! owner does not hold that much the structure does not advance in that tick (it is *stalled*;
 //! [`World::stalled`]) and nothing is paid; it tries again next tick. Structures under
 //! construction are served in ascending slot order from the same store, so with too little money
-//! for all, the older slot is paid first.
+//! for all, the lower slot is paid first: greedy and deterministic, not fair (with a trickle of
+//! income the lowest slot is served every tick it can pay; a higher slot gets what is left).
 //!
 //! Nothing is refunded: a structure that is destroyed or removed half built keeps what was paid
 //! for it. [`Command::PlaceStructure`](crate::Command::PlaceStructure) (mission objects) is not

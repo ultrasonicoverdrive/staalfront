@@ -652,8 +652,10 @@ of a tick depends on `k` alone, so **no state is kept next to `build_left`**.
 * **No money, no progress.** If the owner's store holds less than the tick costs, nothing is paid (not a
   part), `build_left` does not move, and the structure is listed in `World::stalled()` (replaced by every
   step, not hashed: it follows from the hashed state); it tries again next tick, so it resumes when ore
-  arrives. With too little for several, the older slot is served first, and a younger one that still
-  fits in what is left is served too (`with_too_little_money_for_two_the_older_slot_is_paid_first`).
+  arrives. With too little for several, the lower slot is served first, and a higher one that still
+  fits in what is left is served too (`with_too_little_money_for_two_the_lower_slot_is_paid_first`). Slots are reused, so the lower slot
+  is not necessarily the older structure. The rule is greedy and deterministic, not fair: with a trickle
+  of income the lowest slot is served every tick it can pay, and a higher slot only gets what is left.
 * **The owner pays**, from its own store (`it_is_the_owner_who_pays`). `BuildStructure` is still accepted
   with no money at all: it is placed and waits (gap: placement is not refused for lack of funds).
 * **Destroyed or removed mid-build: no refund.** What was paid stays spent
@@ -715,6 +717,7 @@ tick is, per structure under construction, one table lookup and one store update
 * No unit costs (WP6.5), no refund, sell or repair (WP6.6), no silo (WP7.3b), no refinery choice (WP7.5), no
   sidebar (WP11.1).
 * `BuildStructure` is not refused for lack of funds; it waits.
-* Money exists only with `--harvest` in the sandbox, and a player that owns nothing shows no credits.
+* Money exists only with `--harvest` in the sandbox, and the HUD shows a player's credits also when it owns
+  no entity (they are read from `World::credits`, not from the views).
 * The model of a structure under construction is not part of the screenshot test (the harness draws the
   roster's models, not the build stages).

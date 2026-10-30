@@ -113,3 +113,16 @@ fn a_world_without_money_rules_has_no_credits_to_show() {
     assert_eq!(snap.credits_of(ME), None);
     assert!(!snap.waits_for_money(ME));
 }
+
+#[test]
+fn a_player_that_owns_nothing_still_shows_its_credits() {
+    // A money world before any placement: no views at all, yet each seat holds the shipped 1000.
+    let (world, _) = base();
+    let world = with_money(world);
+    assert_eq!(world.credits(ME), 1000);
+    let snap = SimSnapshot::capture(&world);
+    assert_eq!(snap.credits_of(ME), Some(1000));
+    assert_eq!(snap.credits_of(THEM), Some(1000));
+    // A seat the money rules do not know holds nothing.
+    assert_eq!(snap.credits_of(PlayerId(7)), Some(0));
+}
