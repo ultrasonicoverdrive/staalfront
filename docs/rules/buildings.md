@@ -256,7 +256,9 @@ free for placement at once, and the rubble it leaves blocks nothing (`destructio
 a new building clears the rubble under it). A destroyed anchor is gone and no longer gives build range. Test:
 `placement::tests::a_destroyed_structure_frees_its_cells_and_a_destroyed_anchor_gives_no_range`.
 
-## The shipped tech tree (placeholder)
+## The shipped tech tree
+
+_Approved by Tijmen on 30-10-2026: the tree below (arrows and the "Needs" column) is the agreed tech tree. Costs, build times and power stay placeholders for the playtest of M1 and phase 15. The ore silo (WP7.3b) is not part of the approved tree; its place is proposed in the WP7.3b PR and confirmed by Tijmen there._
 
 Nothing is built without the `construction_center`, which each player starts with (it has no cost). Arrows
 point from the prerequisite to the building. Build time and price are in `unit_defs.ron`.
