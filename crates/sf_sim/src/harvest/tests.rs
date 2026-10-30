@@ -392,6 +392,11 @@ fn stepped(rules: HarvestRules, at: &[(i32, i32)]) -> World {
         w.schedule(Tick(0), PlayerId(0), spawn).unwrap();
     }
     w.step();
+    // The harvesters have taken their first steps; put them back where they were spawned, so that
+    // the distances below are the ones the comments work out.
+    for (k, &(x, y)) in at.iter().enumerate() {
+        w.entities.pos[2 + k] = Vec2::new(Fx::from_int(x) + Fx::HALF, Fx::from_int(y) + Fx::HALF);
+    }
     w
 }
 
@@ -550,6 +555,30 @@ fn a_queued_harvester_takes_a_spot_on_its_own_side_and_the_next_row_after_those_
         spots
     });
     assert_eq!(spots, [(10.5, 25.5), (12.5, 25.5), (10.5, 19.5)]);
+}
+
+#[test]
+fn a_queued_harvester_called_in_while_walking_to_its_spot_turns_to_the_dock_point() {
+    let mut w = stepped(RULES, &[(20, 26)]);
+    let (spot, point) = with_state(&mut w, |h, w| {
+        let dock = h.docks[0].clone();
+        h.docks[0].queue = vec![id(2)];
+        (h.queue_point(w, &dock, 0, false), dock.point)
+    });
+    // The harvester is queued and on its way to the spot; the order it has is the one it expects.
+    w.entities.order[2] = Order::Move(spot);
+    let plan = with_state(&mut w, |h, w| {
+        let c = &mut h.units[2].core;
+        c.phase = Phase::ToDock(Call::Queued);
+        c.dock = Some(id(0));
+        c.spot = 1;
+        c.own = Order::Move(spot);
+        h.units[2].mail = vec![Reply::Granted];
+        h.decide(w, 2, &mut [0u16, 0])
+    });
+    assert_eq!(plan.core.phase, Phase::ToDock(Call::Granted));
+    assert_eq!(plan.act, Act::Go(point));
+    assert_eq!(plan.core.own, Order::Move(point));
 }
 
 #[test]
