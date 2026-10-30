@@ -373,8 +373,8 @@ fn a_payment_larger_than_the_store_pays_nothing() {
 
 // ---- the choice of refinery and the queue spots (WP7.5) ------------------------------------------
 //
-// Refinery A (slot 0) has its dock point on (9.5, 22.5), refinery B (slot 1) on (9.5, 38.5). The
-// harvesters stand east of them. Every weight below is a different number, so a field read from the
+// Refinery A (slot 0) has its dock point in the middle of cell (9, 22), refinery B (slot 1) in the
+// middle of cell (9, 38). The harvesters stand east of them. Every weight below is a different number, so a field read from the
 // wrong place gives another cost.
 
 /// The two refineries and one harvester per `at` (slots 2, 3, ...), stepped once so that the
@@ -408,6 +408,11 @@ fn with_state<R>(w: &mut World, f: impl FnOnce(&mut Harvest, &World) -> R) -> R 
     r
 }
 
+/// The point `(x2 / 2, y2 / 2)`: places in half cells, so that no float is needed.
+fn half(x2: i64, y2: i64) -> Vec2 {
+    Vec2::new(Fx::from_ratio(x2, 2), Fx::from_ratio(y2, 2))
+}
+
 fn pos_of(w: &World, slot: usize) -> Vec2 {
     w.entities.pos[slot]
 }
@@ -422,7 +427,7 @@ fn a_cost_is_the_cells_times_travel_cost_plus_the_committed_times_queue_cost() {
     let mut w = stepped(rules, &[(20, 22)]);
     let pos = pos_of(&w, 2);
     with_state(&mut w, |h, _| {
-        // 11 cells to A and sqrt(121 + 256) = 19.42 cells to B, at 7 ticks a cell.
+        // 11 cells to A and the root of 121 + 256 (a little under 20) to B, at 7 ticks a cell.
         assert_eq!(h.dock_cost(0, pos, None, &[0, 0]), 77);
         assert_eq!(h.dock_cost(1, pos, None, &[0, 0]), 136);
         // Two committed to A: 2 x 300 more. None to B.
@@ -474,23 +479,22 @@ fn queue_spots_lie_in_rows_beside_the_approach() {
         ..RULES
     };
     let mut w = stepped(rules, &[]);
-    // The exit cell of A is (9, 22), the dock point (9.5, 22.5), the exit side +x.
-    let spot = |h: &Harvest, w: &World, row: usize, minus: bool| {
-        let p = h.queue_point(w, &h.docks[0], row, minus);
-        (p.x.raw() as f64 / 65536.0, p.y.raw() as f64 / 65536.0)
-    };
+    // The exit cell of A is (9, 22), the dock point the middle of it, the exit side +x. Places are
+    // given in half cells (`half(21, 51)` is the middle of cell (10, 25)).
+    let spot =
+        |h: &Harvest, w: &World, row: usize, minus: bool| h.queue_point(w, &h.docks[0], row, minus);
     with_state(&mut w, |h, w| {
         // (row, minus side) and where it is: the positive side is +y for this refinery.
         let want = [
-            (0, false, (10.5, 25.5)),
-            (0, true, (10.5, 19.5)),
-            (1, false, (12.5, 25.5)),
-            (1, true, (12.5, 19.5)),
-            (2, false, (14.5, 25.5)),
-            (2, true, (14.5, 19.5)),
+            (0, false, half(21, 51)),
+            (0, true, half(21, 39)),
+            (1, false, half(25, 51)),
+            (1, true, half(25, 39)),
+            (2, false, half(29, 51)),
+            (2, true, half(29, 39)),
             // Past the last row (queue_rows 3) they share it.
-            (7, false, (14.5, 25.5)),
-            (7, true, (14.5, 19.5)),
+            (7, false, half(29, 51)),
+            (7, true, half(29, 39)),
         ];
         for (row, minus, want) in want {
             assert_eq!(spot(h, w, row, minus), want, "row {row} minus {minus}");
@@ -498,8 +502,12 @@ fn queue_spots_lie_in_rows_beside_the_approach() {
         // None is in the approach, on either side.
         for row in 0..40 {
             for minus in [false, true] {
-                let (_, y) = spot(h, w, row, minus);
-                assert!((y - 22.5).abs() >= 3.0, "row {row} at y {y}");
+                let p = spot(h, w, row, minus);
+                let off = (p.y - Fx::from_ratio(45, 2)).abs();
+                assert!(
+                    off >= Fx::from_int(3),
+                    "row {row} is {off:?} off the approach"
+                );
             }
         }
         // The side a position is on.
@@ -523,8 +531,8 @@ fn a_queued_harvester_takes_a_spot_on_its_own_side_and_the_next_row_after_those_
         queue_step: 2,
         ..RULES
     };
-    // Slots 2 and 3 stand on the positive side (y above the dock point 22.5), slot 4 on the
-    // negative side; the queue is 2, 3, 4.
+    // Slots 2 and 3 stand on the positive side (y above the dock point), slot 4 on the negative
+    // side; the queue holds slots 2, 3 and 4 in that order.
     let mut w = stepped(rules, &[(20, 26), (20, 27), (20, 18)]);
     let spots = with_state(&mut w, |h, w| {
         h.docks[0].queue = vec![id(2), id(3), id(4)];
@@ -548,13 +556,13 @@ fn a_queued_harvester_takes_a_spot_on_its_own_side_and_the_next_row_after_those_
             let Act::Go(p) = plan.act else {
                 panic!("slot {slot} was not sent to a spot: {:?}", plan.act)
             };
-            spots.push((p.x.raw() as f64 / 65536.0, p.y.raw() as f64 / 65536.0));
+            spots.push(p);
             // The spot is remembered: the same place again orders nothing.
             h.units[slot].core.spot = plan.core.spot;
         }
         spots
     });
-    assert_eq!(spots, [(10.5, 25.5), (12.5, 25.5), (10.5, 19.5)]);
+    assert_eq!(spots, [half(21, 51), half(25, 51), half(21, 39)]);
 }
 
 #[test]
@@ -583,8 +591,8 @@ fn a_queued_harvester_called_in_while_walking_to_its_spot_turns_to_the_dock_poin
 
 #[test]
 fn a_driving_harvester_switches_only_when_the_other_refinery_is_cheaper_by_more_than_the_margin() {
-    // Bound for A with one other committed there (load 2 with itself): A costs 77 + 300, B 136.
-    // B is cheaper by 241.
+    // Bound for A with one other committed there (load 2 with itself): A costs 77 + 300 and
+    // B costs 136: B is cheaper by 241 ticks.
     for (margin, switches) in [(240, true), (241, false), (0, true), (1000, false)] {
         let rules = HarvestRules {
             travel_cost: 7,

@@ -510,7 +510,8 @@ fn delivered_by(scenario: &Scenario) -> u64 {
 #[test]
 #[ignore]
 fn throughput_table() {
-    let regimes: [(&str, fn(usize) -> Scenario); 3] = [
+    type Make = fn(usize) -> Scenario;
+    let regimes: [(&str, Make); 3] = [
         ("shipped ore (120 a cell)", |n| crowd_of(n, 4000)),
         ("2000 ore a cell", |n| crowd_with_ore(n, 4000, 2000)),
         ("bay-limited", bay_limited),
