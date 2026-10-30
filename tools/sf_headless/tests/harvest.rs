@@ -159,8 +159,9 @@ fn the_delivered_total_is_asserted_and_nothing_is_lost_or_made() {
     // The total that was unloaded is the sum of the unloading bites seen.
     let bites: u64 = log.unload_bites.iter().map(|&(_, _, n)| u64::from(n)).sum();
     assert_eq!(delivered, bites);
-    // Eight whole loads and 80 units of the ninth (the bay is mid-unload at the last tick).
-    assert_eq!(delivered, 1680);
+    // Nine whole loads. (Before WP7.5 it was eight and 80 units of the ninth: the queued harvesters
+    // stood in the approach; see `without_queue_spots_the_scenario_delivers_the_old_total`.)
+    assert_eq!(delivered, 1800);
     // Conservation: the ore left in the cells plus the loads carried plus the ore delivered only
     // ever rises by the regrowth, and never falls. The tick's growth is the number of field
     // cells whose turn it is, one unit each: at most `215 / 200 + 1` cells per tick here.
@@ -176,6 +177,36 @@ fn the_delivered_total_is_asserted_and_nothing_is_lost_or_made() {
             "ore appeared: {} to {}",
             pair[0],
             pair[1]
+        );
+    }
+}
+
+/// The same scenario with `queue_gap: 0` (queued harvesters stand where they were told to wait, as
+/// before WP7.5) delivers the total of WP7.2: that is the whole difference to the pinned run (the
+/// scenario has one refinery, so the choice of refinery cannot matter).
+#[test]
+fn without_queue_spots_the_scenario_delivers_the_old_total() {
+    let mut s = scenario();
+    s.harvest.as_mut().unwrap().queue_gap = 0;
+    let mut world = s.build_world().unwrap();
+    for _ in 0..s.ticks {
+        world.step();
+    }
+    assert_eq!(world.ore_delivered(P0), 1680);
+    // And the choice weights alone change nothing with one refinery (the checksum differs, since the
+    // weights are part of it; the harvesters do not).
+    let mut s = scenario();
+    s.harvest.as_mut().unwrap().queue_gap = 0;
+    s.harvest.as_mut().unwrap().queue_cost = 0;
+    let mut other = s.build_world().unwrap();
+    for _ in 0..s.ticks {
+        other.step();
+    }
+    for slot in 1..=4 {
+        assert_eq!(other.harvester_of(id(slot)), world.harvester_of(id(slot)));
+        assert_eq!(
+            other.get(id(slot)).unwrap().pos,
+            world.get(id(slot)).unwrap().pos
         );
     }
 }
@@ -455,6 +486,16 @@ fn crowd_with_ore(n: usize, ticks: u64, ore: u16) -> Scenario {
     s
 }
 
+/// The crowd with `n` harvesters that fill a load in 10 ticks (40 ore every 2 ticks) from a field
+/// of 2000 a cell, so that the refineries, not the mining, limit the delivery.
+fn bay_limited(n: usize) -> Scenario {
+    let mut s = crowd_with_ore(n, 4000, 2000);
+    let h = s.harvest.as_mut().unwrap();
+    h.mine_amount = 40;
+    h.mine_period = 2;
+    s
+}
+
 /// Ore delivered to player 0 by the end of `scenario`.
 fn delivered_by(scenario: &Scenario) -> u64 {
     let mut world = scenario.build_world().unwrap();
@@ -469,11 +510,16 @@ fn delivered_by(scenario: &Scenario) -> u64 {
 #[test]
 #[ignore]
 fn throughput_table() {
-    for (n, ore) in [3, 6, 12, 24, 48]
+    let regimes: [(&str, fn(usize) -> Scenario); 3] = [
+        ("shipped ore (120 a cell)", |n| crowd_of(n, 4000)),
+        ("2000 ore a cell", |n| crowd_with_ore(n, 4000, 2000)),
+        ("bay-limited", bay_limited),
+    ];
+    for ((ore, make), n) in regimes
         .into_iter()
-        .flat_map(|n| [(n, 120), (n, 2000)])
+        .flat_map(|r| [3, 6, 12, 24, 48].map(|n| (r, n)))
     {
-        let scenario = crowd_with_ore(n, 4000, ore);
+        let scenario = make(n);
         let mut world = scenario.build_world().unwrap();
         let mut busy = [0u64; 3];
         for _ in 0..scenario.ticks {
@@ -496,7 +542,7 @@ fn throughput_table() {
             }
         }
         println!(
-            "{n:2} harvesters, {ore} ore a cell: {} ore delivered, {carried} carried, {left} in the field; bays unloading {busy:?} of {} ticks; {stages:?}",
+            "{n:2} harvesters, {ore}: {} ore delivered, {carried} carried, {left} in the field; bays unloading {busy:?} of {} ticks; {stages:?}",
             world.ore_delivered(P0),
             scenario.ticks
         );
@@ -672,92 +718,23 @@ fn money_cost() {
     }
 }
 
-/// Scratch: bay-limited regime (a load is mined in a few ticks).
+/// WP7.5: more harvesters do not collapse the delivery (the WP7.2 review measured 3, 6, 12, 24 and
+/// 48 harvesters on three refineries delivering 2400, 3200, 3200, 2271 and 618 in 4000 ticks).
+///
+/// Two regimes. With the shipped mining the near field (28 cells of 120) is the limit and runs
+/// out, and with 48 harvesters the field itself is crowded; the numbers there are floors a
+/// regression must not fall below, 10 to 20 percent under the measured ones. With harvesters that
+/// fill a load in 10 ticks the bays are the limit: the delivery rises with the number of
+/// harvesters up to 24 (measured 5180, 7510, 9050, 9990; with the old rule 3800, 3600, 3000,
+/// 2600), and 48 are not far under the best.
 #[test]
-#[ignore]
-fn scratch_fast() {
-    for n in [3, 6, 12, 24, 48] {
-        let mut s = crowd_with_ore(n, 4000, 2000);
-        let h = s.harvest.as_mut().unwrap();
-        h.mine_amount = 40;
-        h.mine_period = 2;
-        println!("FAST {n:2} harvesters: {} ore", delivered_by(&s));
-    }
-}
-
-/// Scratch: a sweep of the new knobs.
-#[test]
-#[ignore]
-fn scratch_sweep() {
-    let run = |n: usize, ore: u16, f: &dyn Fn(&mut sf_headless::scenario::HarvestSpec)| {
-        let mut s = crowd_with_ore(n, 4000, ore);
-        f(s.harvest.as_mut().unwrap());
-        if ore == 1 {
-            let mut s = crowd_with_ore(n, 4000, 2000);
-            let h = s.harvest.as_mut().unwrap();
-            h.mine_amount = 40;
-            h.mine_period = 2;
-            f(h);
-            return delivered_by(&s);
-        }
-        delivered_by(&s)
-    };
-    type Spec = sf_headless::scenario::HarvestSpec;
-    let variants: Vec<(&str, Box<dyn Fn(&mut Spec)>)> = vec![
-        ("shipped", Box::new(|_| {})),
-        ("queue_cost 0", Box::new(|h| h.queue_cost = 0)),
-        ("gap 0", Box::new(|h| h.queue_gap = 0)),
-        (
-            "queue_cost 0, gap 0 (old rule)",
-            Box::new(|h| {
-                h.queue_cost = 0;
-                h.queue_gap = 0
-            }),
-        ),
-        ("queue_cost 50", Box::new(|h| h.queue_cost = 50)),
-        ("queue_cost 200", Box::new(|h| h.queue_cost = 200)),
-        ("queue_cost 400", Box::new(|h| h.queue_cost = 400)),
-        ("margin 0", Box::new(|h| h.switch_margin = 0)),
-        ("margin 300", Box::new(|h| h.switch_margin = 300)),
-        ("gap 4", Box::new(|h| h.queue_gap = 4)),
-        ("gap 2", Box::new(|h| h.queue_gap = 2)),
-    ];
-    for (name, f) in &variants {
-        println!(
-            "{name:34} 24/120: {:5} 48/120: {:5} 24/fast: {:5} 48/fast: {:5} 12/fast: {:5}",
-            run(24, 120, f),
-            run(48, 120, f),
-            run(24, 1, f),
-            run(48, 1, f),
-            run(12, 1, f)
-        );
-    }
-}
-
-/// Scratch: where the 48 harvesters stand at some ticks.
-#[test]
-#[ignore]
-fn scratch_where_they_stand() {
-    let scenario = crowd_with_ore(48, 4000, 2000);
-    let mut world = scenario.build_world().unwrap();
-    for t in 1..=4000u64 {
-        world.step();
-        if t % 1000 == 0 {
-            println!("--- tick {t}");
-            for slot in 3..51u32 {
-                let v = world.harvester_of(id(slot)).unwrap();
-                let e = world.get(id(slot)).unwrap();
-                println!(
-                    "{slot:2} {:?} dock {:?} load {} at ({:.1},{:.1}) order {:?} stuck {:?}",
-                    v.stage,
-                    v.dock.map(|d| d.index()),
-                    v.load,
-                    e.pos.x.raw() as f64 / 65536.0,
-                    e.pos.y.raw() as f64 / 65536.0,
-                    world.order_of(id(slot)).unwrap(),
-                    world.stuck_ticks_of(id(slot))
-                );
-            }
-        }
-    }
+fn many_harvesters_keep_delivering() {
+    let shipped = |n| delivered_by(&crowd_of(n, 4000));
+    assert!(shipped(24) >= 2500, "24 harvesters");
+    assert!(shipped(48) >= 2000, "48 harvesters");
+    let bays = |n| delivered_by(&bay_limited(n));
+    let (d6, d24, d48) = (bays(6), bays(24), bays(48));
+    assert!(d24 > d6, "24 harvesters {d24} against 6 {d6}");
+    assert!(d24 >= 8500, "24 harvesters {d24}");
+    assert!(d48 >= 5500, "48 harvesters {d48}");
 }

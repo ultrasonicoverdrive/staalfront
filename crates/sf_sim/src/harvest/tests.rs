@@ -386,10 +386,7 @@ fn stepped(rules: HarvestRules, at: &[(i32, i32)]) -> World {
     for &(x, y) in at {
         let spawn = Command::SpawnUnit {
             kind: HARVESTER,
-            pos: Vec2::new(
-                Fx::from_int(x) + Fx::HALF,
-                Fx::from_int(y) + Fx::HALF,
-            ),
+            pos: Vec2::new(Fx::from_int(x) + Fx::HALF, Fx::from_int(y) + Fx::HALF),
             owner: PlayerId(0),
         };
         w.schedule(Tick(0), PlayerId(0), spawn).unwrap();
@@ -451,10 +448,14 @@ fn the_cheapest_refinery_is_chosen_and_a_tie_goes_to_the_nearer_then_the_lower_s
     // Equal cost and equal distance (the harvester halfway between): the lower slot.
     let mut w = stepped(at(59), &[(20, 30)]);
     let pos = pos_of(&w, 2);
-    let (k, cost) = with_state(&mut w, |h, _| h.choose_dock(owner, pos, None, &[0, 0]).unwrap());
+    let (k, cost) = with_state(&mut w, |h, _| {
+        h.choose_dock(owner, pos, None, &[0, 0]).unwrap()
+    });
     assert_eq!((k, cost), (0, 95));
     // A different owner has no refinery here.
-    let none = with_state(&mut w, |h, _| h.choose_dock(PlayerId(1), pos, None, &[0, 0]));
+    let none = with_state(&mut w, |h, _| {
+        h.choose_dock(PlayerId(1), pos, None, &[0, 0])
+    });
     assert_eq!(none, None);
 }
 
@@ -498,8 +499,14 @@ fn queue_spots_lie_in_rows_beside_the_approach() {
         }
         // The side a position is on.
         let dock = &h.docks[0];
-        assert!(!Harvest::on_minus_side(dock, Vec2::new(Fx::from_int(20), Fx::from_int(23))));
-        assert!(Harvest::on_minus_side(dock, Vec2::new(Fx::from_int(20), Fx::from_int(22))));
+        assert!(!Harvest::on_minus_side(
+            dock,
+            Vec2::new(Fx::from_int(20), Fx::from_int(23))
+        ));
+        assert!(Harvest::on_minus_side(
+            dock,
+            Vec2::new(Fx::from_int(20), Fx::from_int(22))
+        ));
     });
 }
 
@@ -538,7 +545,10 @@ fn a_driving_harvester_switches_only_when_the_other_refinery_is_cheaper_by_more_
         });
         if switches {
             assert_eq!(plan.core.dock, Some(id(1)), "margin {margin}");
-            assert_eq!(plan.act, Act::Go(Vec2::new(Fx::from_ratio(19, 2), Fx::from_ratio(77, 2))));
+            assert_eq!(
+                plan.act,
+                Act::Go(Vec2::new(Fx::from_ratio(19, 2), Fx::from_ratio(77, 2)))
+            );
             assert_eq!(load, [1, 1], "margin {margin}");
         } else {
             assert_eq!(plan.core.dock, Some(id(0)), "margin {margin}");
@@ -574,7 +584,10 @@ fn harvesters_that_set_out_in_one_tick_see_each_others_choice() {
 fn harvesters_bound_for_a_dock_count_against_it_whatever_their_step() {
     let mut w = stepped(RULES, &[(20, 22), (20, 23), (20, 24), (20, 25)]);
     let load = with_state(&mut w, |h, _| {
-        for (slot, call) in [Call::Driving, Call::Queued, Call::Granted].into_iter().enumerate() {
+        for (slot, call) in [Call::Driving, Call::Queued, Call::Granted]
+            .into_iter()
+            .enumerate()
+        {
             let c = &mut h.units[2 + slot].core;
             c.phase = Phase::ToDock(call);
             c.dock = Some(id(0));
@@ -591,12 +604,36 @@ fn harvesters_bound_for_a_dock_count_against_it_whatever_their_step() {
 fn the_new_numbers_are_in_the_checksum_each_on_its_own() {
     let base = world().checksum();
     let moved = |rules: HarvestRules| world_with(rules).checksum() != base;
-    assert!(moved(HarvestRules { travel_cost: 17, ..RULES }));
-    assert!(moved(HarvestRules { queue_cost: 101, ..RULES }));
-    assert!(moved(HarvestRules { switch_margin: 101, ..RULES }));
-    assert!(moved(HarvestRules { recheck_period: 21, ..RULES }));
-    assert!(moved(HarvestRules { queue_gap: 4, ..RULES }));
-    assert!(moved(HarvestRules { queue_start: 2, ..RULES }));
-    assert!(moved(HarvestRules { queue_step: 3, ..RULES }));
-    assert!(moved(HarvestRules { queue_rows: 9, ..RULES }));
+    assert!(moved(HarvestRules {
+        travel_cost: 17,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        queue_cost: 101,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        switch_margin: 101,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        recheck_period: 21,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        queue_gap: 4,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        queue_start: 2,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        queue_step: 3,
+        ..RULES
+    }));
+    assert!(moved(HarvestRules {
+        queue_rows: 9,
+        ..RULES
+    }));
 }
