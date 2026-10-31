@@ -66,9 +66,9 @@ is presentation only.
 | `mid_hold`: frame p99 / effect instances avg | 4.555 / 191.8 | 4.528 / 185.3 | 4.349 / 217.2 | 4.439 / 212.2 |
 
 * **Criterion met**: frame p99 4.34 ms in both runs against 16.7 ms; every phase's p99 is between 4.03 and 4.57 ms.
-* **What the damage display costs**: nothing measurable. About 9 more effect instances per frame on average (25 to 30
-  more in `mid_hold`, the phase that looks at the fight), with gpu p99 unchanged at 0.60 ms and frame p99 within the
-  spread of the 28-10 runs. The overdraw of the 2.8 to 3.2 m smoke and fire discs is not visible on the GTX 1650.
+* **What the damage display costs**: nothing measurable. About 9 more effect instances per frame on average (in
+  `mid_hold`, the phase that looks at the fight, 25.4 and 26.9 more, run 1 against run 1 and run 2 against run 2), with
+  gpu p99 unchanged at 0.60 ms and frame p99 no higher than on 28-10 (4.337 / 4.342 against 4.42 / 4.35 ms). The overdraw of the 2.8 to 3.2 m smoke and fire discs is not visible on the GTX 1650.
 * **Effects**: `fx_dropped`, `particles_dropped`, `smoke_refused` and `tracer_dots_dropped` all 0; `particles_peak`
   1,977 and 2,015 of 4,096.
 
