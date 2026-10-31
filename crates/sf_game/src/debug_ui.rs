@@ -97,6 +97,8 @@ pub struct PanelData {
     pub ra_catalog: Option<std::sync::Arc<sf_audio::ra::Catalog>>,
     /// Why the last sound-browser play failed.
     pub ra_play_error: Option<String>,
+    /// One line per player's ore store, stored / capacity (WP7.3); empty without storage.
+    pub storage: Vec<String>,
 }
 
 /// The simulation thread as the F1 panel shows it (WP1.15).
@@ -384,6 +386,9 @@ fn simulation(ui: &mut egui::Ui, data: &PanelData) {
         None => ui.label("checksum -"),
     };
     ui.label(format!("{} entities", data.entities));
+    for line in &data.storage {
+        ui.label(line);
+    }
     let sim = &data.sim;
     ui.label(format!(
         "sim thread: tick {:.1} ms, slowest of the last second {:.1} ms (budget 50)",
@@ -790,6 +795,21 @@ mod tests {
             "{texts:?}"
         );
         assert_eq!(hp_text(Some((0, 50))), "HP 0/50");
+    }
+
+    #[test]
+    fn the_panel_shows_each_ore_store() {
+        let ctx = egui::Context::default();
+        let mut state = PanelState::new(CameraConfig::default());
+        let mut data = sample_data();
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(!texts.iter().any(|t| t.contains("ore store")), "{texts:?}");
+        data.storage = vec![crate::storage_view::readout(0, 600, 2000)];
+        let (texts, _) = pass(&ctx, &data, &mut state);
+        assert!(
+            texts.iter().any(|t| t == "ore store player 0: 600 / 2000"),
+            "{texts:?}"
+        );
     }
 
     #[test]

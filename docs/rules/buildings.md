@@ -40,7 +40,7 @@ conscious choice. Adding a structure is a new record and no Rust change (a test 
 | `footprint: (width, height)` | record | Cells, 1 to 16 each. Anchored at the cell with the smallest x and y, extending east (+x) and south (+y). |
 | `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. The exit cell is the cell next to the middle of that side and must be usable when a factory is placed (WP6.2, "Placement"); where on that side units appear, and the free spot beyond it, is WP6.5. The structure is never rotated. |
 | `build_seconds` | record | Game seconds, a whole number of 20 Hz ticks, required with a `cost`, **not negative** (refused with its own message). Becomes `build_ticks`. |
-| `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). The economy of phase 7 spends it; nothing does yet. |
+| `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). With money rules (WP7.4) it is paid over the build time, `economy.md` "Money". |
 | `power` | record | Produced (+) or used (-). WP6.4 sums it. |
 | `factions` | record | Who may **build** it: `[Meridian]`, `[Veyran]`, `[Meridian, Veyran]` or `[Neutral]`. This is the per-faction availability. Checked by `BuildStructure` only (WP6.2): a mission may place any role for any owner with `PlaceStructure`. |
 | `building.requires` | block | Ids of structures the owner must have **standing** before this one can be built (the tech tree). Besides these, everything buildable has to be within the build radius of the owner's `construction_center` (WP6.2), which is not repeated in every list. |
@@ -192,19 +192,20 @@ rounded down). It must be on the map, free of structures and, for infantry and v
 ground class can enter (the terrain's `ground` summary, so a road is fine and water or rock are not); for the
 vessel factory the terrain is not checked (which water a vessel may use is WP6.5's, it has no flag yet). One
 cell, fixed, so that the ghost can show it and WP6.5 has a place to start; **where on that side and the free
-spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too
-but no rule yet (phase 7).
+spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too:
+the same cell is the dock point where harvesters unload (`economy.md`, "Harvesters"; WP7.2).
 
 **Rotation (the WP6.1 follow-up).** A structure is **not rotated**: `BuildStructure` has no facing, the
 footprint always extends east and south from its anchor and the exit side is the data's. So nothing rotates
 the exit side. If rotated placement is ever added, the exit side rotates with it and `exit_cell` takes the
 facing.
 
-**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`) are accepted from any player seat; they
+**Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`, see
+`economy.md`) are accepted from any player seat; they
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
 only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
 put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
-charged (phase 7, WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
+charged tick by tick in a world with money rules (WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
 (`content/units.md`); here it is a base structure behind the barracks, as in WP6.1.
 
 ### The ghost under the cursor (game)
@@ -255,7 +256,9 @@ free for placement at once, and the rubble it leaves blocks nothing (`destructio
 a new building clears the rubble under it). A destroyed anchor is gone and no longer gives build range. Test:
 `placement::tests::a_destroyed_structure_frees_its_cells_and_a_destroyed_anchor_gives_no_range`.
 
-## The shipped tech tree (placeholder)
+## The shipped tech tree
+
+_Approved by Tijmen on 30-10-2026: the tree below (arrows and the "Needs" column) is the agreed tech tree. Costs, build times and power stay placeholders for the playtest of M1 and phase 15. The ore silo (WP7.3b) is not part of the approved tree; its place is proposed in the WP7.3b PR and confirmed by Tijmen there._
 
 Nothing is built without the `construction_center`, which each player starts with (it has no cost). Arrows
 point from the prerequisite to the building. Build time and price are in `unit_defs.ron`.
@@ -316,7 +319,8 @@ from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Foot
   before one of its prerequisites (a test holds the unlock missions of `content/units.md` against the tree).
 * It carries **no unit prerequisites** (which factory a rifleman needs). That is WP6.5, which will read the
   factory functions; a unit's `requires` would be the same field.
-* The edges are invented. Balance is phase 15; changing one is a data edit and a test row
+* The edges are our own and were approved by Tijmen on 30-10-2026; changing one now needs his approval.
+  Balance is phase 15; a change is a data edit and a test row
   (`the_shipped_tech_tree_is_the_documented_one`) plus this table.
 
 ## Where it is tested

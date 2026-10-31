@@ -238,6 +238,88 @@ pub fn start_fight(world: &mut World) -> u32 {
     sent
 }
 
+/// What [`start_harvest`] set up, for the console and for the screenshots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HarvestSetup {
+    /// The ore cell nearest the middle of the map: the field is round it.
+    pub field: (u32, u32),
+    /// The anchor of the refinery placed for Meridian.
+    pub refinery: (u32, u32),
+    /// Harvesters spawned.
+    pub harvesters: u32,
+}
+
+/// How many harvesters `--harvest` adds beside the refinery.
+pub const HARVESTERS: u32 = 3;
+/// How far west of the field the refinery stands, in cells.
+const REFINERY_OFFSET: i32 = 16;
+
+/// `--harvest` (WP7.2): a refinery and [`HARVESTERS`] harvesters for Meridian beside the ore field nearest
+/// the middle of the map, so that the loop can be watched. Call it after the sandbox has been stepped once
+/// (the structures stand, so the new ones keep clear of them); the commands are for the next tick. `None`
+/// if the world has no ore, the unit definitions have no refinery or harvester, or the map has no room.
+pub fn start_harvest(world: &mut World, defs: &UnitDefs) -> Option<HarvestSetup> {
+    let (width, height) = world.map_size();
+    let middle = (i64::from(width) / 2, i64::from(height) / 2);
+    let field = world.ore()?.cells().map(|(c, _)| c).min_by_key(|c| {
+        let (dx, dy) = (i64::from(c.x) - middle.0, i64::from(c.y) - middle.1);
+        (dx * dx + dy * dy, c.y, c.x)
+    })?;
+    let refinery = Kind(defs.kind_of("refinery")?);
+    let harvester = Kind(defs.kind_of("harvester")?);
+    let (w, h) = defs.sim_unit(refinery.0)?.footprint?;
+    // Keep clear of what stands: the footprints of the structures, and a cell of room round each.
+    let mut taken = Taken(BTreeSet::new());
+    for v in world.snapshot().iter() {
+        if let (Some(at), Some(fp)) = (world.cell_of(v.id), world.footprint_of(v.id)) {
+            for y in at.y as i32 - 1..(at.y + u32::from(fp.height)) as i32 + 1 {
+                for x in at.x as i32 - 1..(at.x + u32::from(fp.width)) as i32 + 1 {
+                    taken.0.insert((x, y));
+                }
+            }
+        }
+    }
+    let near = (field.x as i32 - REFINERY_OFFSET, field.y as i32);
+    let (rx, ry) = find_structure(world, &taken, near, w, h)?;
+    send(
+        world,
+        MERIDIAN,
+        Command::PlaceStructure {
+            kind: refinery,
+            cell: Cell::new(rx as u32, ry as u32),
+            owner: PlayerId(MERIDIAN),
+        },
+    );
+    // The harvesters start a few cells east of the refinery, on the lattice of open ground.
+    let mut spawned = 0;
+    for _ in 0..HARVESTERS {
+        let Some(cell) = find_unit(world, &taken, (rx + i32::from(w) + 5, ry + i32::from(h)))
+        else {
+            break;
+        };
+        taken.0.insert(cell);
+        let pos = Vec2::new(
+            Fx::from_int(cell.0) + Fx::HALF,
+            Fx::from_int(cell.1) + Fx::HALF,
+        );
+        send(
+            world,
+            MERIDIAN,
+            Command::SpawnUnit {
+                kind: harvester,
+                pos,
+                owner: PlayerId(MERIDIAN),
+            },
+        );
+        spawned += 1;
+    }
+    Some(HarvestSetup {
+        field: (field.x, field.y),
+        refinery: (rx as u32, ry as u32),
+        harvesters: spawned,
+    })
+}
+
 fn send(world: &mut World, player: u8, command: Command) {
     world
         .schedule(world.tick(), PlayerId(player), command)

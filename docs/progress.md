@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are not started.
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -1953,6 +1953,22 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
   finished model, a progress bar) is worked out from the snapshot's state, with the stages and thresholds in
   `assets/config/build_stages.ron` and a box as the fallback; pre-placed structures start complete; scenario
   `construction`, `placement.expected` re-pinned with a measured cause; `docs/rules/construction.md`: done
+
+- WP6.8 Damage display: the stage of an object (intact, damaged, heavily damaged) is worked out from the snapshot's hit
+  points over the unit table's maximum with the thresholds of `assets/config/damage.ron` (presentation only, no state,
+  nothing in `sf_sim`); a damaged or heavily damaged structure is drawn with its `_damaged` / `_heavily_damaged` model where
+  the art has one (otherwise the finished model); smoke (damaged) and smoke plus fire (heavily damaged) come from the
+  model's `fx_smoke` / `fx_fire` anchor or a RON rule, through WP5.6's particle pool, zoom bands and a source cap, and stop
+  the frame the hit points rise above the threshold or the object dies; screenshots of both factions in
+  `docs/screenshots/wp6.8/`; `docs/rules/damage.md`: done
+  Gaps: no damaged models for units (smoke and fire only; the art has none); no sound; the thresholds and rates are
+  placeholders for Tijmen to tune; the cost was measured on software only (`damage.md`), not on the laptop (M0c).
+  **Open before Phase 6 closes:** re-run M0c on the GTX 1650 laptop with damage on (`sf_demo --bench --fight`) and
+  compare with the 28-10 M0c run (p99 4.42 / 4.35 ms), against the 16.7 ms budget; the risk is overdraw from the
+  2.8–3.2 m smoke and fire discs at close zoom.
+  Shapes: the 42 damaged structure models bring the roster to 189 of the 255 u8 shape ids; damaged unit models later
+  share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
+  on 660/330 per mille can flip stage.
 
 ### WP6.3 notes
 
@@ -2002,7 +2018,7 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
   accepts `PlaceStructure` and `SpawnUnit` (which carry their own `owner` and skip every placement rule) from any
   seat. The two commands are told apart in the checksum (tag 11).
 - **Follow-up (open, before any untrusted command stream: phase 14 multiplayer, replays from outside):** setup
-  commands (`PlaceStructure`, `SpawnUnit`) must be refused when they come from a player seat. Nothing exploits it
+  commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`) must be refused when they come from a player seat. Nothing exploits it
   today (the client sends only `BuildStructure` from input); no code changed for it in WP6.2.
 - **Decision for Tijmen from WP6.1, answered:** `factions` restricts what a player may *build*; pre-placed
   mission objects are not checked (`f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand`). F1-M05's
@@ -2071,13 +2087,75 @@ Status: WP6.1 is in; WP6.2 is in; WP6.3 is built (in review); WP6.4 to WP6.8 are
 
 ## Phase 7 — Economy
 
-Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
+Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch `wp/7.4-money` (PR #90); WP7.3b is not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
   `nearest_ore_where`, a new last checksum section `E` that exists only with ore rules; numbers in
   `assets/config/ore.ron`; the ore shown as four fill levels on the terrain and on the minimap, from
   `terrain_look.ron`), `docs/rules/economy.md`: done. The scenario `ore_256` is pinned. No earlier pin moved.
+
+- WP7.2 Harvester (`sf_sim::harvest`: the loop search, mine, drive back, check in at the refinery by **messages**
+  (request, grant or queue, arrived, cancel, revoked, unloaded, released), unload over ticks, repeat; claims on
+  ore cells; one bay per refinery with a first-come queue and a grant timeout; the nearest standing refinery;
+  a player order to a field overrides the search; a per-player `World::ore_delivered` counter that WP7.3 and
+  WP7.4 replace; numbers in `assets/config/harvest.ron`; checksum section `H`, only with harvest rules; a cargo
+  bar under every harvester in the game; `sf_game --harvest`), `docs/rules/economy.md` ("Harvesters"). The scenario
+  `harvest` is pinned (new frozen copy `harvest_defs`). No earlier pin moved. Measured numbers (the harvest stage
+  about 6 microseconds a tick with 48 harvesters, a jammed system, see the gap below; at most 10 minimap uploads a second, about 0.22 ms each on a
+  software adapter) are in `economy.md`; screenshots in `docs/screenshots/wp7.2`.
+
+- WP7.3 Storage (split 28-10-2026: the silo building is WP7.3b; PLAN.md phase 7): a `storage` number in the
+  building block of `unit_defs.ron` (refinery 2000, everything else 0), `sf_bridge::storage_capacities`,
+  `World::with_storage`; a player's store is capped by the storage of its standing buildings, the dock cuts its bite
+  to the room left and a harvester waits in the bay when full; a lost refinery lowers the capacity and the store
+  keeps its ore; `World::ore_stored`, `storage_capacity`; checksum section `V`, only with storage rules; a fill bar
+  under every storing structure (`storage_view`, `storage_look.ron`) and an `ore store` line per player in the F1
+  panel; `docs/rules/economy.md` ("Storage"). Branch `wp/7.3-storage`. New pinned scenario `storage`; no earlier pin
+  moved. Screenshots in `docs/screenshots/wp7.3`.
+
+### WP7.3 notes
+
+- **Decisions (economy.md):** full store = bite cut to the room, a zero bite leaves the harvester docked with its
+  load, the queue waits behind it; shrinking = keep the ore, nothing goes in until it is below the capacity.
+- **Cost:** `storage_cost` (ignored test, release, 50 harvesters, 4000 ticks, 7 alternating rounds, load average
+  4.5 to 5.6): 516.7 ms with storage, 517.3 ms without; the difference is below the run-to-run noise (about 5
+  microseconds a tick).
+- **Gaps:** nothing spends the store (WP7.4), so with `--harvest` the sandbox fills after ten loads and the
+  harvesters then wait for good; no silo (WP7.3b); the readout is in the F1 debug panel, not a player HUD; a
+  waiting harvester never leaves for another refinery (WP7.5).
+- **Fix round 1:** the mutation that drops "standing" from the capacity sum is caught by both the
+  zero-hit-point and the under-construction test; the rule that only a standing structure carries a
+  storage bar (`SimSnapshot::stores`) is now tested in `crates/sf_game/tests/storage_snapshot.rs`.
+
+### WP7.2 notes
+
+- **`Command::TakeOre` decision:** it stays as scaffolding for tests and scenarios, joins the setup commands that
+  must be refused from player seats before any untrusted command stream (phase 14; it is in the list in the WP6.2
+  notes and in `buildings.md`, "Not done"); the harvester does not use it.
+- **WP6.3 (#76) must keep `World::is_standing` the one place that says "stands".** The harvester asks it for the
+  docks (`placement.rs`, now `pub(crate)`); when #76 makes it mean "complete", a refinery under construction stops
+  being a dock with no change here. Since the merge of #76 in the fix round this is tested end to end with
+  `BuildStructure`: `a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete`.
+- **Gaps, written down:** `Stop` cannot park a harvester; no order "unload at this refinery"; the refinery is chosen
+  by straight-line distance, not route length or queue length; the harvester's own re-issue of a walk the crowd
+  gave up (three tries) has no test of its own (the traffic test goes through the crowd's replan); no alliances;
+  the sandbox without `--harvest` has no harvest rules.
+- **Gap: throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
+  harvester goes to the same bay and the queue stands in its approach. The reviewer of #78 measured (three
+  refineries, 4000 ticks): 3 harvesters deliver 2400, 6 deliver 3200, 12 deliver 3200, 24 deliver 2271, 48 deliver
+  618. The 48/50-harvester measurements in `economy.md` (cost, minimap uploads) are therefore of a jammed system.
+  Not fixed in WP7.2; the follow-up is WP7.5 (refinery choice and queues).
+- **Fix round (review of #78):** the grant timeout and a holder ordered away now have tests that fail under their
+  mutations; `with_harvest` refuses a world without a building table and a later `with_units`/`with_buildings`;
+  a lost same-tick claim keeps the player's field focus; the nine tuning knobs (`call_timeout`, `max_tries`, park
+  distances, reach radii) moved from `harvest.rs` into `harvest.ron` (validated, pinned), which re-pinned `harvest`
+  (`economy.md`, "Checksum").
+- **The decision I took that the brief did not name:** a harvester stops and mines when it is within one cell of its
+  ore cell, and prefers cells with no neighbour claimed by another harvester (bodies are wider than a cell). Without
+  the first, two harvesters at neighbouring cells held each other off for thousands of ticks; without the second
+  they packed into one corner of the field.
+- **The minimap upload gap of WP7.1 is measured and stays:** see `economy.md`.
 
 ### WP7.1 notes
 
@@ -2087,14 +2165,28 @@ Status: WP7.1 is in (branch `wp/7.1-ore`); WP7.2 to WP7.4 are not started.
   total per field (3000 on the F1-M01 ridge); the world has one start amount per cell, so fitting a field to its
   total (a zone and a number) is for the mission loader. The cell grid overlay does not show amounts. The numbers
   in `ore.ron` are placeholders.
-- **`Command::TakeOre` is a player-issuable command** in the lockstep sense: it is there so scenarios can mine
-  without a harvester. When WP7.2 lands, decide whether it stays (tests only) or is gated; nothing but scenarios
-  schedules it today.
-- **Minimap upload cost is unmeasured.** Every change of a fill level repaints the changed cells on the CPU image,
-  but `Hud::paint_minimap` then calls `set_minimap`, which recreates the whole minimap texture and bind group. While
-  regrowth runs that can happen almost every tick; it was not measured. The presentation side also copies and scans
-  every field cell per ore version (`SimSnapshot::capture`, `OreView::changes`), O(field cells), also unmeasured.
-  Measure both, and upload only the changed texels if it shows.
+- **`Command::TakeOre` is a player-issuable command** in the lockstep sense. Decided in WP7.2: it stays as test
+  scaffolding (see the WP7.2 notes).
+- **Minimap upload cost: measured in WP7.2** (at most 10 uploads a second, about 0.22 ms each on a software
+  adapter, with 50 harvesters, a jammed system: see the WP7.2 notes; the level comparison 1.4 microseconds a tick; `economy.md`, "The picture"). Left as it is.
+
+- WP7.4 Money: the store is the money pool; `credits_per_ore` and `starting_credits` in
+  `assets/config/money.ron`, `World::with_money`, `credits`, `credits_spent`, `stalled`; a structure is paid tick by tick
+  over its build time (`C * (k + 1) / T - C * k / T`, exact in total, no extra state) and waits without credits; no refund;
+  `PlaceStructure` free; worlds without money rules build for free and hash as before; checksum section `M`; a credits
+  readout in the HUD and a paused construction bar (`money_view`, `money_look.ron`); new pinned scenario `money`;
+  `docs/rules/economy.md` ("Money"). No earlier pin moved. Screenshots in `docs/screenshots/wp7.4`.
+
+### WP7.4 notes
+
+- **Decisions (economy.md):** the store is the pool (spending makes room, which ends the WP7.3 wait); the capacity
+  is in credits and the bite is cut to whole units; no refund; `BuildStructure` waits rather than being refused.
+- **Cost:** `money_cost` (ignored test, release, 50 harvesters, 12 plants): below the noise (-10 to +47 microseconds per
+  tick between runs of the same binary, about 5 percent run-to-run).
+- **Gaps:** no unit costs (hook `World::pay`, WP6.5); not refused for lack of funds; money only with `--harvest` in
+  the sandbox; no refund, sell or repair; the screenshot harness shows no stage models.
+- **Fix round 1:** the HUD reads the credits from `World::credits` for every player id, so a player that owns no
+  entity shows its money (it showed 0 before); construction payment is documented as greedy by lowest slot, not fair.
 
 ## WP11.3 notes: positional sound
 
@@ -2121,7 +2213,8 @@ near and when zoomed in, quieter and rarer far away and zoomed out. Rules: `docs
   "before" (the step is new); the frame budget is 16.7 ms. Not measured: the real mixer cost of 11 voices a frame, and
   `sf_demo --bench --fight` (WP5.6b).
 - **Gaps.** (1) The bank has no weapon, impact or explosion sounds; only `explosion.small` has a Red Alert mapping, so
-  without the player's files nothing of the fight is heard yet. No sound was added. (2) The sim has no event for selecting
+  without the player's files nothing of the fight is heard yet. No sound was added. (Since PR #87 the Red Alert mapping
+  covers the fight events; see follow-up 31.) (2) The sim has no event for selecting
   or ordering a unit, placing or finishing a structure or unloading; none was added (WP11.2 and later). (3) The call in
   `Runner::frame` and the wiring of `audio.ron` into `AudioSystem` at start are not covered by a test (the runner needs
   a window); the game run above shows they work. (4) `audio.ron` is not hot-reloaded. (5) `PlanStats` of the run is
@@ -2260,5 +2353,5 @@ fixed, delete the entry in the same PR.
 31. **The fight is silent in the shipped game** (WP11.3, PR #82): every fight sound event is `silent` because
     `assets/audio/bank.ron` has no weapon, impact or explosion sounds. A new small WP, **WP11.3b CC0 fight sounds**,
     adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
-    original-audio side, `assets/audio/ra_mapping.ron` beyond `explosion.small`, is a **WP11.7 follow-up**, done
-    after Tijmen's `ra-dryrun.txt`.
+    original-audio side is done (PR #87, 28-10-2026): `ra_mapping.ron` maps every fight event by role except
+    `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`, which have no Red Alert sound.

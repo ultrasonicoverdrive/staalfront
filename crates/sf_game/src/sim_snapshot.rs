@@ -102,6 +102,24 @@ pub struct SimSnapshot {
     ore_version: Option<u64>,
     ore_max: u16,
     ore: Vec<(u32, u32, u16)>,
+    /// The ore each harvester carries (WP7.2), parallel to `views`; `None` for everything that is
+    /// not a harvester. Empty (all `None`) in a world without harvest rules.
+    cargo: Vec<Option<u16>>,
+    /// The most a harvester carries (`HarvestRules::capacity`); zero without harvest rules.
+    cargo_capacity: u16,
+    /// The ore storage (WP7.3): per player that stores or can store anything, ascending, the ore
+    /// stored and the capacity. Empty without storage rules.
+    storage: Vec<(PlayerId, u64, u64)>,
+    /// The standing structures that store ore, ascending by slot: each carries the fill bar of
+    /// its owner's store.
+    stores: Vec<EntityId>,
+    /// Whether the world has money rules (WP7.4): then the store of a player is its credits.
+    has_money: bool,
+    /// The credits of every player that holds any (WP7.4), ascending by player; read from the
+    /// world for every possible player, so a player that owns no entity still has its money.
+    credits: Vec<(PlayerId, u64)>,
+    /// The structures under construction that wait for money (WP7.4), ascending by slot.
+    stalled: Vec<EntityId>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
     /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
@@ -134,6 +152,13 @@ impl SimSnapshot {
             ore_version: None,
             ore_max: 0,
             ore: Vec::new(),
+            cargo: Vec::new(),
+            cargo_capacity: 0,
+            storage: Vec::new(),
+            stores: Vec::new(),
+            has_money: false,
+            credits: Vec::new(),
+            stalled: Vec::new(),
             wrecks: Vec::new(),
             deaths: Vec::new(),
             projectiles: Vec::new(),
@@ -143,6 +168,50 @@ impl SimSnapshot {
             ghost: None,
             builds: Vec::new(),
         }
+    }
+
+    /// A snapshot of exactly these views (ascending by slot) over this unit table, for a test of how the
+    /// picture maps hit points: the damage stage needs a chosen number of hit points, which a world
+    /// only reaches by fighting.
+    #[cfg(test)]
+    pub(crate) fn of_views(views: Vec<EntityView>, units: Arc<UnitTable>) -> SimSnapshot {
+        let mut snap = SimSnapshot::blank();
+        snap.orders = vec![Order::Idle; views.len()];
+        snap.gave_up = vec![None; views.len()];
+        snap.views = views;
+        snap.units = units;
+        snap
+    }
+
+    /// The views of live objects `(role id, owner, cell x, cell y, hit points)` in ascending slots, the
+    /// middle of the cell, with the hit points as given, and the shipped unit table: the input of
+    /// [`SimSnapshot::of_views`].
+    #[cfg(test)]
+    pub(crate) fn test_views(
+        items: &[(&str, u8, i32, i32, u32)],
+    ) -> (Vec<EntityView>, Arc<UnitTable>) {
+        let defs = sf_data::units::UnitDefs::embedded();
+        let table = Arc::new(sf_bridge::unit_table(&defs).unwrap());
+        let views = items
+            .iter()
+            .enumerate()
+            .map(|(slot, &(role, owner, x, y, hp))| {
+                let at = Vec2::from_ints(x, y) + Vec2::new(sf_math::Fx::HALF, sf_math::Fx::HALF);
+                EntityView {
+                    id: EntityId::new(slot as u32, 0),
+                    kind: sf_sim::Kind(defs.kind_of(role).unwrap()),
+                    owner: sf_sim::PlayerId(owner),
+                    prev_pos: at,
+                    pos: at,
+                    prev_facing: sf_math::Facing::default(),
+                    facing: sf_math::Facing::default(),
+                    has_stats: true,
+                    hp,
+                    turret: None,
+                }
+            })
+            .collect();
+        (views, table)
     }
 
     /// A snapshot of `world` as it is. Used for the first snapshot, in tests
@@ -205,6 +274,49 @@ impl SimSnapshot {
                 self.ore.clear();
             }
         }
+        // The harvesters' loads (WP7.2): nothing to look up in a world without harvest rules.
+        self.cargo.clear();
+        self.cargo_capacity = world.harvest_rules().map_or(0, |r| r.capacity);
+        if self.cargo_capacity > 0 {
+            self.cargo.extend(
+                self.views
+                    .iter()
+                    .map(|v| world.harvester_of(v.id).map(|h| h.load)),
+            );
+        }
+        // The storage (WP7.3): nothing to look up in a world without storage rules.
+        self.storage.clear();
+        self.stores.clear();
+        if world.has_storage() {
+            let mut players: Vec<PlayerId> = self.views.iter().map(|v| v.owner).collect();
+            players.sort_unstable();
+            players.dedup();
+            for p in players {
+                let (stored, capacity) = (world.ore_stored(p), world.storage_capacity(p));
+                if stored > 0 || capacity > 0 {
+                    self.storage.push((p, stored, capacity));
+                }
+            }
+            self.stores.extend(
+                self.views
+                    .iter()
+                    .filter(|v| world.storage_of_kind(v.kind) > 0 && world.stands(v.id))
+                    .map(|v| v.id),
+            );
+        }
+        // The money (WP7.4): the credits are the stored amount above; what waits for them.
+        self.has_money = world.has_money();
+        self.credits.clear();
+        if self.has_money {
+            // Every id a player can have: the money is the world's, not the views'.
+            self.credits.extend(
+                (0..=u8::MAX)
+                    .map(|p| (PlayerId(p), world.credits(PlayerId(p))))
+                    .filter(|&(_, c)| c > 0),
+            );
+        }
+        self.stalled.clear();
+        self.stalled.extend_from_slice(world.stalled());
         self.wrecks.clear();
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
@@ -284,6 +396,59 @@ impl SimSnapshot {
         &self.views
     }
 
+    /// The ore harvester `id` carries and the most it can carry (WP7.2); `None` for anything that
+    /// is not a harvester of this snapshot, and for a stale id.
+    pub fn cargo_of(&self, id: EntityId) -> Option<(u16, u16)> {
+        let load = (*self.cargo.get(self.find(id)?)?)?;
+        Some((load, self.cargo_capacity))
+    }
+
+    /// The ore `player` has stored and the capacity of its standing buildings (WP7.3); `None`
+    /// without storage rules or for a player with neither.
+    pub fn storage_of(&self, player: PlayerId) -> Option<(u64, u64)> {
+        self.storage
+            .iter()
+            .find(|&&(p, _, _)| p == player)
+            .map(|&(_, s, c)| (s, c))
+    }
+
+    /// Every player's store as `(player, stored, capacity)`, ascending by player (WP7.3).
+    pub fn storage(&self) -> &[(PlayerId, u64, u64)] {
+        &self.storage
+    }
+
+    /// The credits `player` holds (WP7.4), straight from [`World::credits`], also for a player
+    /// that owns no entity; `None` in a world without money rules.
+    pub fn credits_of(&self, player: PlayerId) -> Option<u64> {
+        self.has_money.then(|| {
+            self.credits
+                .binary_search_by_key(&player, |&(p, _)| p)
+                .map_or(0, |k| self.credits[k].1)
+        })
+    }
+
+    /// The structures under construction that wait for money (WP7.4), ascending by slot.
+    pub fn stalled(&self) -> &[EntityId] {
+        &self.stalled
+    }
+
+    /// Whether any structure of `player` under construction waits for money (WP7.4).
+    pub fn waits_for_money(&self, player: PlayerId) -> bool {
+        self.stalled
+            .iter()
+            .any(|&id| self.get(id).is_some_and(|v| v.owner == player))
+    }
+
+    /// The standing structures that store ore (WP7.3), ascending by slot.
+    pub fn stores(&self) -> &[EntityId] {
+        &self.stores
+    }
+
+    /// Whether this snapshot has any harvester: the cargo bars skip their pass when it has none.
+    pub fn has_harvesters(&self) -> bool {
+        self.cargo.iter().any(Option::is_some)
+    }
+
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie. Not entities: they
     /// cannot be picked or ordered.
     pub fn wrecks(&self) -> &[WreckView] {
@@ -334,6 +499,34 @@ impl SimSnapshot {
         } else {
             None
         }
+    }
+
+    /// The most hit points an entity of this kind can have (WP6.8): the unit table's `hp`, zero for
+    /// an entity made without the table (a placeholder) and for a kind that cannot be damaged. With
+    /// `EntityView::hp` this is all the picture needs to tell how damaged an object is.
+    pub fn max_hp(&self, v: &EntityView) -> u32 {
+        self.stats_for(v).map_or(0, |s| s.hp)
+    }
+
+    /// The unit table entry of a view of this snapshot (no lookup of the id); `None` for an entity
+    /// made without the table.
+    pub fn stats_for(&self, v: &EntityView) -> Option<&UnitStats> {
+        if v.has_stats {
+            self.units.get(v.kind)
+        } else {
+            None
+        }
+    }
+
+    /// How damaged an entity looks (WP6.8): its hit points over its kind's maximum, by the thresholds
+    /// of `damage`. The one place that turns the snapshot's hit points into a stage; the model
+    /// choice (`Looks::shape_in_state`) and the smoke and fire (`FxPlayer`) both call it.
+    pub fn damage_stage(
+        &self,
+        damage: &sf_data::damage::Damage,
+        v: &EntityView,
+    ) -> sf_data::damage::Stage {
+        damage.stage(v.hp, self.max_hp(v))
     }
 
     /// The current order of an entity; `None` for a stale id.

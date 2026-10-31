@@ -549,8 +549,10 @@ fn order_text(order: sf_sim::Order, world: &SimSnapshot) -> String {
 pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
     // A structure under construction is drawn as the stage its progress is in (WP6.3).
     let building = snap.construction_of(v.id).map(|c| c.permille());
+    // A damaged or heavily damaged structure is drawn with that stage's model where the art has one (WP6.8).
+    let stage = looks.damage_stage(snap, v);
     let motion = Motion::from_fixed(
-        looks.shape_at(v, building),
+        looks.shape_in_state(v, building, stage),
         v.owner.0,
         v.prev_pos,
         v.pos,
@@ -889,6 +891,15 @@ impl Runner {
         }
     }
 
+    /// The credits of the local player and whether one of its builds waits for them (WP7.4).
+    fn money_hud(&self) -> Option<crate::money_view::MoneyHud> {
+        let player = commands::LOCAL_PLAYER;
+        Some(crate::money_view::MoneyHud {
+            credits: self.snap.credits_of(player)?,
+            waiting: self.snap.waits_for_money(player),
+        })
+    }
+
     /// The second line of the top bar: the chosen structure and the verdict of the ghost, or the
     /// last refusal for a few seconds.
     fn build_line(&self, now: Instant) -> Option<String> {
@@ -947,6 +958,30 @@ impl Runner {
         construction_view::draw_for(&mut layer, &frame, &terrain, &snap, &self.looks);
     }
 
+    /// The fill bars of the structures that store ore (WP7.3), from the snapshot's state.
+    fn draw_storage_bars(&mut self) {
+        if self.snap.stores().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        crate::storage_view::draw_bars(
+            &mut layer,
+            &frame,
+            &terrain,
+            &snap,
+            crate::storage_view::shipped_look(),
+        );
+    }
+
     /// Replace the camera with one built from `config`, keeping where it
     /// looks, how far it is zoomed and the terrain it picks against (the
     /// camera has no setter for its tunables; they only change here, from the
@@ -982,6 +1017,12 @@ impl Runner {
                 .as_ref()
                 .and_then(AudioSystem::original_audio_catalog),
             ra_play_error: self.ra_play_error.clone(),
+            storage: self
+                .snap
+                .storage()
+                .iter()
+                .map(|&(p, stored, cap)| crate::storage_view::readout(p.0, stored, cap))
+                .collect(),
         }
     }
 
@@ -1294,6 +1335,24 @@ impl Runner {
         }
     }
 
+    /// The ore the harvesters carry (WP7.2): a fill bar under each. With no harvester in the snapshot it
+    /// does nothing.
+    fn draw_cargo(&mut self) {
+        if !self.snap.has_harvesters() {
+            return;
+        }
+        let (width, height) = self.viewport;
+        let frame = FrameGeometry {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+            blend: self.instancer.blend(),
+            icon_px: self.instancer.icon_params().size_px,
+        };
+        let mut layer = self.hud.world_layer();
+        crate::cargo_view::draw(&self.instancer, &self.snap, &frame, &mut layer);
+    }
+
     /// Debug builds: `assets/config/units.ron` changed on disk. A broken
     /// file is reported and the old look stays.
     fn reload_style(&mut self, ctx: &Context, path: &std::path::Path) {
@@ -1346,7 +1405,9 @@ impl Runner {
         }
         if let Some(shot) = &self.shots {
             let zoom = SHOTS[shot.step.min(SHOTS.len() - 1)].1;
-            return Some((zoom, (map.0 * 0.5, map.1 * 0.5), 0));
+            // `--focus x,z` (metres) decides where the shots look; the middle of the map without it.
+            let focus = self.options.focus.unwrap_or((map.0 * 0.5, map.1 * 0.5));
+            return Some((zoom, focus, 0));
         }
         None
     }
@@ -1798,6 +1859,7 @@ impl App for Runner {
             inspecting: self.selection.inspected().is_some(),
             tick: self.snap.tick().0,
             build_line: self.build_line(now),
+            money: self.money_hud(),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);
@@ -1828,8 +1890,10 @@ impl App for Runner {
             self.build_units(alpha, cursor);
             self.build_effects(alpha, dt as f32);
             self.mark_selection();
+            self.draw_cargo();
             self.draw_ghost();
             self.draw_construction_bars();
+            self.draw_storage_bars();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
@@ -2268,6 +2332,14 @@ fn sandbox_scene(
                 .expect("a world that has not started takes its unit table");
             // WP6.2: `BuildStructure` is checked; the sandbox itself places with `PlaceStructure`.
             world = crate::playfield::with_buildings(world, &defs);
+            // WP7.2 (`--harvest`): the harvesters work. Off by default, so the sandbox stands as it did.
+            if options.harvest {
+                world = crate::playfield::with_harvest(world, &defs);
+                // WP7.3: and their ore goes into the refineries' storage.
+                world = crate::playfield::with_storage(world, &defs);
+                // WP7.4: and the store is the player's money; structures are paid while they go up.
+                world = crate::playfield::with_money(world);
+            }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
     }
@@ -2280,6 +2352,15 @@ fn sandbox_scene(
     crowd.spawn(&mut world, options.units, cells);
     let mut views = Vec::new();
     let report = world.step();
+    if options.harvest {
+        match crate::sandbox::start_harvest(&mut world, &defs) {
+            Some(setup) => println!(
+                "harvest: a refinery on {:?} and {} harvesters beside the ore field round {:?}",
+                setup.refinery, setup.harvesters, setup.field
+            ),
+            None => eprintln!("sf_game: --harvest: no room for a refinery beside an ore field"),
+        }
+    }
     if options.fight {
         let sent = crate::sandbox::start_fight(&mut world);
         println!("fight: {sent} armed units sent on attack-move to the other side's base");

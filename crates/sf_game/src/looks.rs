@@ -13,6 +13,7 @@
 //!   when the role has one per faction). Placeholder wanderers added with
 //!   `--units` have no role and keep the population's mapping.
 
+use sf_data::damage::Stage as DamageStage;
 use sf_render::{Motion, Style, UnitId};
 use sf_sim::{EntityView, WreckView};
 
@@ -93,6 +94,33 @@ impl Looks {
                 }
             }
         }
+    }
+
+    /// How damaged an entity looks (WP6.8), by the thresholds of the roster's `damage.ron`. Always
+    /// intact in the crowd, whose placeholders have no hit points.
+    pub fn damage_stage(
+        &self,
+        snap: &crate::sim_snapshot::SimSnapshot,
+        v: &EntityView,
+    ) -> DamageStage {
+        match self {
+            Looks::Roster { roster, .. } => snap.damage_stage(roster.damage(), v),
+            Looks::Crowd(_) => DamageStage::Intact,
+        }
+    }
+
+    /// [`Looks::shape_at`] with the damage stage (WP6.8): a complete structure that is damaged or
+    /// heavily damaged is drawn with that stage's model where its role has one; without one (or
+    /// intact, or still under construction, which has its own stage models) it keeps the shape
+    /// `shape_at` gives. A missing damaged model is never an error.
+    pub fn shape_in_state(&self, v: &EntityView, building: Option<u16>, stage: DamageStage) -> u8 {
+        if let (Looks::Roster { roster, .. }, None, true) = (self, building, v.has_stats)
+            && stage != DamageStage::Intact
+            && let Some(shape) = roster.shape_damaged(v.kind, faction_of_owner(v.owner.0), stage)
+        {
+            return shape;
+        }
+        self.shape_at(v, building)
     }
 
     /// What an entity is called: the role id (`light_tank`), or

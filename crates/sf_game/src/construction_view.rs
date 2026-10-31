@@ -7,6 +7,7 @@
 //! small on the screen (zoomed out) gets none.
 
 use sf_data::build_stages::BarLook;
+use sf_data::money_look::PausedLook;
 use sf_math::render_bridge::METRES_PER_CELL;
 use sf_render::glam::Vec3;
 use sf_render::pick::project_px;
@@ -57,54 +58,77 @@ pub fn bar_rects(
 }
 
 /// Draws the bar of every structure under construction in `snap` on `layer`. `height(x, z)` is the
-/// terrain height in metres. Returns the number of bars drawn.
+/// terrain height in metres. A structure that waits for money (WP7.4, [`SimSnapshot::stalled`]) gets
+/// the colours and the pause strokes of `paused` instead. Returns the number of bars drawn.
 pub fn draw_bars(
     layer: &mut Layer<'_>,
     frame: &GhostFrame,
     height: &dyn Fn(f32, f32) -> f32,
     snap: &SimSnapshot,
     look: &BarLook,
+    paused: &PausedLook,
 ) -> usize {
     let mut drawn = 0;
     for &(id, construction) in snap.constructions() {
-        let (Some(view), Some(footprint)) =
-            (snap.get(id), snap.stats_of(id).and_then(|s| s.footprint))
-        else {
-            continue;
-        };
-        // The front edge: the footprint is centred on the entity.
-        let (half_w, half_h) = (
-            f32::from(footprint.width) * 0.5 * METRES_PER_CELL,
-            f32::from(footprint.height) * 0.5 * METRES_PER_CELL,
-        );
-        let centre = (
-            sf_math::render_bridge::cells_to_metres(view.pos.x),
-            sf_math::render_bridge::cells_to_metres(view.pos.y),
-        );
-        let z = centre.1 + half_h;
-        let at = |x: f32| {
-            project_px(
-                &frame.view_proj,
-                Vec3::new(x, height(x, z), z),
-                frame.viewport,
-            )
-            .map(|(p, _)| p)
-        };
-        let (Some(left), Some(right)) = (at(centre.0 - half_w), at(centre.0 + half_w)) else {
+        let Some((left, right)) = front_edge(frame, height, snap, id) else {
             continue;
         };
         let Some(rects) = bar_rects(left, right, construction.permille(), look, frame.ui_scale)
         else {
             continue;
         };
-        let (b, f) = (look.back, look.fill);
-        layer.fill_quad(rects.back, Color(b.0, b.1, b.2, b.3));
-        if let Some(fill) = rects.fill {
-            layer.fill_quad(fill, Color(f.0, f.1, f.2, f.3));
+        let waits = snap.stalled().contains(&id);
+        let (back, fill) = if waits {
+            let (fill, back) = crate::money_view::paused_colors(paused);
+            (back, fill)
+        } else {
+            let (b, f) = (look.back, look.fill);
+            (Color(b.0, b.1, b.2, b.3), Color(f.0, f.1, f.2, f.3))
+        };
+        layer.fill_quad(rects.back, back);
+        if let Some(part) = rects.fill {
+            layer.fill_quad(part, fill);
+        }
+        if waits {
+            for stroke in crate::money_view::pause_strokes(&rects, paused, frame.ui_scale) {
+                layer.fill_quad(stroke, fill);
+            }
         }
         drawn += 1;
     }
     drawn
+}
+
+/// The screen positions of the two ends of the front (south) edge of the footprint of structure
+/// `id` of `snap`, where its bars go; `None` for anything without a footprint or off the screen.
+/// `height(x, z)` is the terrain height in metres. Shared with the storage bar (WP7.3).
+pub(crate) fn front_edge(
+    frame: &GhostFrame,
+    height: &dyn Fn(f32, f32) -> f32,
+    snap: &SimSnapshot,
+    id: sf_sim::EntityId,
+) -> Option<([f32; 2], [f32; 2])> {
+    let view = snap.get(id)?;
+    let footprint = snap.stats_of(id).and_then(|s| s.footprint)?;
+    // The front edge: the footprint is centred on the entity.
+    let (half_w, half_h) = (
+        f32::from(footprint.width) * 0.5 * METRES_PER_CELL,
+        f32::from(footprint.height) * 0.5 * METRES_PER_CELL,
+    );
+    let centre = (
+        sf_math::render_bridge::cells_to_metres(view.pos.x),
+        sf_math::render_bridge::cells_to_metres(view.pos.y),
+    );
+    let z = centre.1 + half_h;
+    let at = |x: f32| {
+        project_px(
+            &frame.view_proj,
+            Vec3::new(x, height(x, z), z),
+            frame.viewport,
+        )
+        .map(|(p, _)| p)
+    };
+    Some((at(centre.0 - half_w)?, at(centre.0 + half_w)?))
 }
 
 /// What the game draws each frame: the bars of `snap` in the look of `looks`' build-stage table.
@@ -122,7 +146,14 @@ pub fn draw_for(
     let Some(roster) = looks.roster() else {
         return 0;
     };
-    draw_bars(layer, frame, height, snap, &roster.stages().bar)
+    draw_bars(
+        layer,
+        frame,
+        height,
+        snap,
+        &roster.stages().bar,
+        &crate::money_view::shipped_look().paused,
+    )
 }
 
 #[cfg(test)]

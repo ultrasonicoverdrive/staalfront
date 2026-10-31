@@ -300,6 +300,11 @@ impl Ui {
         (self.cfg.font_size * self.scale).round()
     }
 
+    /// Size of `text` in physical pixels at `px` physical pixels (em size).
+    pub fn measure_px(&self, text: &str, px: f32) -> (f32, f32) {
+        self.font.measure(text, px.round())
+    }
+
     /// Size of `text` in physical pixels at the default text size.
     pub fn measure(&self, text: &str) -> (f32, f32) {
         self.font.measure(text, self.text_px())

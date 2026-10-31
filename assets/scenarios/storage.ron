@@ -1,0 +1,59 @@
+// Ore storage (WP7.3, docs/rules/economy.md, "Storage"): the harvest scenario's playfield, field
+// and rock patch, with storage. Each refinery stores 600 units of ore (three loads) for its owner.
+//
+// `unit_defs` names the FROZEN copy of WP7.2 (harvest_defs); its refinery has no `storage` field,
+// which is why the capacities are written out below (`storage`), as the ore and harvest rules are,
+// so editing the shipped unit_defs.ron, harvest.ron or ore.ron never moves this checksum. Kinds:
+// 2 refinery, 11 harvester.
+//
+//   slot 0  the refinery of player 0 on (96, 86), dock point (99.5, 88.5): capacity 600
+//   slot 1  a harvester of player 0 on (104, 90), tick 0
+//   slot 2  a harvester of player 0 on (106, 92), tick 0
+//   slot 3  a second refinery of player 0 on (96, 70), tick 2600: capacity 1200
+//   tick 4200  slot 3 is removed (Despawn): capacity 600 again, below what is stored
+//
+// What happens: the store fills to 600, the harvester in the bay keeps its load and waits there,
+// the other queues behind it; the second refinery raises the capacity and the store fills to
+// 1200; when it goes the capacity drops to 600, the 1200 stored are kept and nothing more is
+// taken. tools/sf_headless/tests/storage.rs asserts those stages and the pinned checksum; CI runs
+// the scenario on Linux and Windows and requires the checksum in storage.expected.
+Scenario(
+    name: "storage",
+    seed: 0x0007_0073,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("harvest_defs"),
+    buildings: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+    )),
+    storage: Some([(2, 600)]),
+    ticks: 6000,
+    commands: [
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (96, 86))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (104, 90))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (106, 92))),
+        (tick: 2600, command: PlaceStructure(kind: 2, owner: 0, cell: (96, 70))),
+        (tick: 4200, command: Despawn(ids: [Id(3, 0)])),
+    ],
+)

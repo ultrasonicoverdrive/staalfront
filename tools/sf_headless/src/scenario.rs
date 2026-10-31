@@ -176,6 +176,25 @@ pub struct Scenario {
     /// to have any ore cell.
     #[serde(default)]
     pub ore: Option<OreSpec>,
+    /// Harvesters (WP7.2, `docs/rules/economy.md`): the harvest rules and the unit kinds that
+    /// harvest, written out in the scenario so that editing the shipped
+    /// `assets/config/harvest.ron` never moves its checksum. The refineries are the structures of
+    /// the `buildings` table with the `HarvesterDock` function. Left out: no unit harvests, which
+    /// is every scenario of the earlier phases. Needs `unit_defs` and `buildings`.
+    #[serde(default)]
+    pub harvest: Option<HarvestSpec>,
+    /// Ore storage (WP7.3, `docs/rules/economy.md`, "Storage"): `(kind, units of ore)` per
+    /// structure kind that stores ore, written out in the scenario so that editing the shipped
+    /// `storage` of `unit_defs.ron` never moves its checksum. Left out: no limit, which is every
+    /// scenario of the earlier phases (`harvest` included). Needs `harvest`.
+    #[serde(default)]
+    pub storage: Option<Vec<(u16, u32)>>,
+    /// Money (WP7.4, `docs/rules/economy.md`, "Money"): what a unit of ore is worth and what each
+    /// player starts with, written out in the scenario so that editing the shipped `money.ron`
+    /// never moves its checksum. Left out: structures are built for free, which is every
+    /// scenario of the earlier phases. Needs `storage` (the store is the pool).
+    #[serde(default)]
+    pub money: Option<MoneySpec>,
     /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
     /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
     /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
@@ -210,6 +229,91 @@ pub struct OreSpec {
     pub regrow_amount: u16,
     /// Ticks between two turns of a cell.
     pub regrow_period: u32,
+}
+
+/// The money rules of a scenario (`sf_sim::MoneyRules`) and the credits each player starts with.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MoneySpec {
+    /// Credits one unit of ore is worth. Left out: 1.
+    #[serde(default = "one")]
+    pub credits_per_ore: u32,
+    /// `(player, credits)` at the start. A player not listed starts with nothing.
+    #[serde(default)]
+    pub starting: Vec<(u8, u64)>,
+}
+
+fn one() -> u32 {
+    1
+}
+
+/// The harvest rules of a scenario (`sf_sim::HarvestRules`) and the kinds that harvest.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HarvestSpec {
+    /// The unit kinds that harvest (permanent kind numbers of the `unit_defs`), not empty.
+    pub harvesters: Vec<u16>,
+    /// Units of ore a harvester carries.
+    pub capacity: u16,
+    /// Ore taken in one bite.
+    pub mine_amount: u16,
+    /// Ticks between two bites.
+    pub mine_period: u16,
+    /// Ore the refinery takes off a harvester in one bite.
+    pub unload_amount: u16,
+    /// Ticks between two unloading bites.
+    pub unload_period: u16,
+    /// How far, in cells, a harvester looks for ore.
+    pub search_radius: u16,
+    /// Ticks between two looks of a harvester that found nothing.
+    pub retry_period: u16,
+    /// Cells from the refinery at which a harvester asks for a place.
+    pub call_range: u16,
+    /// Ticks a granted harvester has to arrive.
+    pub grant_timeout: u16,
+    /// Ticks a harvester waits for the refinery's answer before it asks again.
+    pub call_timeout: u16,
+    /// Walks to one goal that end short of it before the harvester gives that goal up.
+    pub max_tries: u8,
+    /// Cells from the dock point, along the exit side, where a harvester without ore waits.
+    pub park_distance: u16,
+    /// Lateral spread of the parking spots, in cells.
+    pub park_spread: u16,
+    /// Tenths of a cell from its parking spot within which a parked harvester stays.
+    pub park_near_tenths: u16,
+    /// Tenths of a cell from the ore cell's middle at which a harvester stops and mines.
+    pub mine_start_tenths: u16,
+    /// Tenths of a cell from the ore cell's middle that count as there when a walk is over.
+    pub mine_reach_tenths: u16,
+    /// Tenths of a cell from the ore cell's middle beyond which a mining harvester drives back.
+    pub mine_lose_tenths: u16,
+    /// Tenths of a cell from the dock point that count as docked when a walk is over.
+    pub dock_reach_tenths: u16,
+}
+
+impl HarvestSpec {
+    fn rules(&self) -> sf_sim::HarvestRules {
+        sf_sim::HarvestRules {
+            capacity: self.capacity,
+            mine_amount: self.mine_amount,
+            mine_period: self.mine_period,
+            unload_amount: self.unload_amount,
+            unload_period: self.unload_period,
+            search_radius: self.search_radius,
+            retry_period: self.retry_period,
+            call_range: self.call_range,
+            grant_timeout: self.grant_timeout,
+            call_timeout: self.call_timeout,
+            max_tries: self.max_tries,
+            park_distance: self.park_distance,
+            park_spread: self.park_spread,
+            park_near_tenths: self.park_near_tenths,
+            mine_start_tenths: self.mine_start_tenths,
+            mine_reach_tenths: self.mine_reach_tenths,
+            mine_lose_tenths: self.mine_lose_tenths,
+            dock_reach_tenths: self.dock_reach_tenths,
+        }
+    }
 }
 
 impl OreSpec {
@@ -821,6 +925,46 @@ impl Scenario {
             );
         }
 
+        if let Some(h) = &self.harvest {
+            if self.unit_defs.is_none() || !self.buildings {
+                p.push(
+                    "harvest needs `unit_defs` and `buildings` (the refineries are structures of \
+                     the building table)"
+                        .to_string(),
+                );
+            }
+            if h.harvesters.is_empty() {
+                p.push("harvest: `harvesters` must name at least one unit kind".to_string());
+            }
+            if !h.rules().is_valid() {
+                p.push(
+                    "harvest: every number must be at least 1, mine_amount at most capacity and the tuning \
+                     numbers within their bounds (docs/rules/economy.md)"
+                        .to_string(),
+                );
+            }
+        }
+
+        if let Some(st) = &self.storage {
+            if self.harvest.is_none() {
+                p.push("storage needs `harvest` (only refineries fill a store)".to_string());
+            }
+            if st.iter().any(|&(_, n)| n == 0) {
+                p.push(
+                    "storage: every capacity must be above zero (leave the kind out)".to_string(),
+                );
+            }
+        }
+
+        if let Some(m) = &self.money {
+            if self.storage.is_none() {
+                p.push("money needs `storage` (the store is the money pool)".to_string());
+            }
+            if m.credits_per_ore == 0 {
+                p.push("money: credits_per_ore must be above zero".to_string());
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -1122,6 +1266,30 @@ impl Scenario {
         if let Some(ore) = self.ore {
             world = world
                 .with_ore(ore.rules())
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(harvest) = &self.harvest {
+            let kinds: Vec<Kind> = harvest.harvesters.iter().map(|&k| Kind(k)).collect();
+            world = world
+                .with_harvest(harvest.rules(), &kinds)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(storage) = &self.storage {
+            let table: Vec<(Kind, u32)> = storage.iter().map(|&(k, n)| (Kind(k), n)).collect();
+            world = world
+                .with_storage(&table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(m) = &self.money {
+            let starting: Vec<(PlayerId, u64)> =
+                m.starting.iter().map(|&(p, n)| (PlayerId(p), n)).collect();
+            world = world
+                .with_money(
+                    sf_sim::MoneyRules {
+                        credits_per_ore: m.credits_per_ore,
+                    },
+                    &starting,
+                )
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {

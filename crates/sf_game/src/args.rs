@@ -107,6 +107,11 @@ pub struct Options {
     /// In the crowd scene (`sf_demo`, `sf_game --crowd`) it adds the armed skirmish of the combat benchmark
     /// of M0c, waves of units at three sites over the same crowd (WP5.6b, `crate::skirmish`).
     pub fight: bool,
+    /// `--harvest` (sandbox scene): the world is given the harvest rules (WP7.2) and, besides what the
+    /// sandbox places, Meridian gets a refinery and three harvesters beside the ore field nearest the
+    /// middle of the map, so that the loop can be watched: mining, driving back, queueing, unloading.
+    /// Without it the sandbox has no harvest rules and its harvesters stand where they are put.
+    pub harvest: bool,
     pub screen: ScreenMode,
     pub present: Present,
     /// Allocate the unit instance buffers at their largest size at load
@@ -153,6 +158,7 @@ impl Options {
             shots: None,
             shots_tick: 0,
             fight: false,
+            harvest: false,
             screen: ScreenMode::Windowed,
             present: Present::Vsync,
             reserve: true,
@@ -292,6 +298,7 @@ impl Options {
                     }
                 }
                 "--fight" => o.fight = true,
+                "--harvest" => o.harvest = true,
                 "--windowed" => {
                     o.screen = ScreenMode::Windowed;
                     screen_given = true;

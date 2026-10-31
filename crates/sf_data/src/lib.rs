@@ -14,12 +14,17 @@
 //! node budget of the path service.
 
 pub mod build_stages;
+pub mod damage;
 pub mod effects;
+pub mod harvest;
 pub mod map;
+pub mod money;
+pub mod money_look;
 pub mod movement;
 pub mod ore;
 pub mod sim_settings;
 pub mod skirmish;
+pub mod storage_look;
 pub mod terrain;
 pub mod units;
 

@@ -113,6 +113,58 @@ pub fn with_buildings(world: World, defs: &UnitDefs) -> World {
         .expect("the seats are one faction each")
 }
 
+/// `world` with the harvest rules (WP7.2): the units with the `harvests` flag of `defs` search ore, mine it
+/// and unload at the refineries (the structures with the `HarvesterDock` function), with the numbers of the
+/// shipped `harvest.ron`. Call it after the unit table and the building table ([`with_buildings`]), before
+/// the world starts. A world with ore is what they need; without it they find nothing.
+///
+/// # Panics
+///
+/// If the unit or building table is missing or the world has started; the sandbox, its one caller, has
+/// neither problem.
+pub fn with_harvest(world: World, defs: &UnitDefs) -> World {
+    let rules = sf_bridge::harvest_rules(&sf_data::harvest::HarvestSettings::embedded());
+    world
+        .with_harvest(rules, &sf_bridge::harvester_kinds(defs))
+        .expect("a world with its unit and building tables that has not started takes the harvest rules")
+}
+
+/// `world` with ore storage (WP7.3): each standing structure stores the `storage` of its building
+/// block in `defs` (the shipped refinery: 2000), and a refinery takes off a harvester only what
+/// still fits. Call it right after [`with_harvest`].
+///
+/// # Panics
+///
+/// If the world has no harvest rules or has started; the sandbox, its one caller, has neither
+/// problem.
+pub fn with_storage(world: World, defs: &UnitDefs) -> World {
+    world
+        .with_storage(&sf_bridge::storage_capacities(defs))
+        .expect("a world with harvest rules that has not started takes the storage capacities")
+}
+
+/// `world` with money (WP7.4): the store is the money pool, a unit of ore is worth `credits_per_ore`
+/// credits and each seat of the sandbox starts with `starting_credits` (`money.ron`), and the
+/// structures players build are paid for while they go up. Call it right after [`with_storage`].
+///
+/// # Panics
+///
+/// If the world has no storage rules or has started; the sandbox, its one caller, has neither
+/// problem.
+pub fn with_money(world: World) -> World {
+    let settings = sf_data::money::MoneySettings::embedded();
+    let seats = [
+        PlayerId(crate::sandbox::MERIDIAN),
+        PlayerId(crate::sandbox::VEYRAN),
+    ];
+    world
+        .with_money(
+            sf_bridge::money_rules(&settings),
+            &sf_bridge::starting_credits(&settings, &seats),
+        )
+        .expect("a world with storage rules that has not started takes the money rules")
+}
+
 /// The terrain of `map` for the simulation: `None` for a map without a
 /// terrain layer. The layer was checked against the shipped table when the map
 /// was loaded (`Map::load`) or generated, so an error here means the map was
