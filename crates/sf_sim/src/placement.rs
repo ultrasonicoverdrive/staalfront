@@ -450,6 +450,13 @@ impl World {
     /// rules need to know who sent it; everything else is [`World::apply`].
     pub(crate) fn apply_from(&mut self, player: PlayerId, command: Command) -> bool {
         let Command::BuildStructure { kind, cell } = command else {
+            // The production commands (WP6.5) need to know who sent them too.
+            if matches!(
+                command,
+                Command::QueueUnit { .. } | Command::CancelUnit { .. } | Command::SetRally { .. }
+            ) {
+                return self.apply_production(player, command);
+            }
             return self.apply(command);
         };
         let verdict = self.check_placement(kind, cell, player);

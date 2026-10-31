@@ -20,6 +20,7 @@ use crate::orders::{self, GuardTarget, Order};
 use crate::ore::{Ore, OreRules};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::placement::PlacementState;
+use crate::production::Production;
 use crate::projectiles::ProjectileId;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 use crate::targeting::{self, Engagement, Targeting, TargetingConfig};
@@ -171,6 +172,10 @@ pub enum ConfigError {
     /// The money rules were given without storage rules, twice, after the start, with a price per
     /// unit of ore outside 1 to 1000, a starting sum above a billion, or a player twice (WP7.4).
     Money,
+    /// The production rules were given twice, after the start, before the unit or building
+    /// table, with numbers out of bounds or a table that does not fit the unit and building
+    /// tables; or a unit or building table was given after them (WP6.5).
+    Production,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -237,6 +242,11 @@ impl fmt::Display for ConfigError {
                 "the money rules must be given once, after the storage rules and before the world starts, \
                  with a price per unit of ore from 1 to 1000, at most a billion starting credits and each player once"
             }
+            ConfigError::Production => {
+                "the production rules must be given once, before the world starts, after the unit and building \
+                 tables, with a queue limit of 1 to 20, an exit radius of 1 to 8 and units, factories, \
+                 prerequisites and free units that the tables know"
+            }
             ConfigError::Harvest => {
                 "the harvest rules must be given before the world starts, after the unit and building tables, \
                  with valid numbers and mobile harvester kinds"
@@ -285,6 +295,11 @@ pub struct StepReport {
     /// Structures that became complete in that tick (WP6.3); they are listed by
     /// [`World::completions`] until the next step.
     pub structures_completed: u32,
+    /// Production commands refused in that tick (WP6.5); listed by
+    /// [`World::production_rejections`] until the next step. Also counted in `commands_ignored`.
+    pub production_rejected: u32,
+    /// Units that left a factory in that tick (WP6.5); listed by [`World::produced`].
+    pub units_produced: u32,
 }
 
 /// The complete simulation state. See the crate documentation for the design.
@@ -339,6 +354,9 @@ pub struct World {
     /// The structures under construction that did not advance in the last tick for lack of money
     /// (WP7.4); replaced by every step, not hashed (it follows from the hashed state).
     pub(crate) stalled: Vec<EntityId>,
+    /// The queues of the factories, the rally points and the rules of production (WP6.5). `None`
+    /// for a world that was given no production rules.
+    pub(crate) production: Option<Box<Production>>,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
     /// The structures that became complete in the last tick (WP6.3); replaced by every step.
@@ -416,6 +434,9 @@ impl World {
         if self.harvest.is_some() {
             return Err(ConfigError::Harvest);
         }
+        if self.production.is_some() {
+            return Err(ConfigError::Production);
+        }
         self.units = units;
         self.crowd
             .set_tables(&self.units, &self.movement, self.map_size());
@@ -452,6 +473,9 @@ impl World {
         }
         if self.harvest.is_some() {
             return Err(ConfigError::Harvest);
+        }
+        if self.production.is_some() {
+            return Err(ConfigError::Production);
         }
         for b in table.iter() {
             let Some(unit) = self.units.get(b.kind) else {
@@ -751,6 +775,7 @@ impl World {
             harvest: None,
             money: None,
             stalled: Vec::new(),
+            production: None,
             placement: PlacementState::default(),
             completions: Vec::new(),
             targeting: Targeting::default(),
@@ -1392,6 +1417,9 @@ impl World {
         let mut executed: u32 = 0;
         let mut ignored: u32 = 0;
         self.placement.rejections.clear();
+        if let Some(p) = self.production.as_deref_mut() {
+            p.rejections.clear();
+        }
         // The state first (WP6.3): structures under construction advance and the ones that
         // finish are recorded, so the commands of this tick already see them standing.
         self.advance_construction();
@@ -1402,6 +1430,11 @@ impl World {
                 ignored = ignored.saturating_add(1);
             }
         }
+
+        // Production (WP6.5): the queues pay and advance, finished units go out. After the
+        // commands (a unit queued this tick already gains its first progress) and before the
+        // harvesters and the movement, so a unit that came out walks to its rally point in this tick.
+        self.advance_production();
 
         // The ore grows back (WP7.1): after the commands of this tick, so a take and the
         // growth of the same cell in one tick are seen in that order.
@@ -1514,6 +1547,8 @@ impl World {
             impacts: self.arsenal.impacts.len() as u32,
             placements_rejected: self.placement.rejections.len() as u32,
             structures_completed: self.completions.len() as u32,
+            production_rejected: self.production_rejections().len() as u32,
+            units_produced: self.produced().len() as u32,
         }
     }
 
@@ -1785,7 +1820,12 @@ impl World {
     /// its movement class cannot enter (WP4.1), and at the entity limit.
     /// The unit occupies no cell and starts idle, a mobile one with a random
     /// facing, an object with facing zero.
-    fn spawn_unit(&mut self, kind: Kind, pos: Vec2, owner: PlayerId) -> Option<EntityId> {
+    pub(crate) fn spawn_unit(
+        &mut self,
+        kind: Kind,
+        pos: Vec2,
+        owner: PlayerId,
+    ) -> Option<EntityId> {
         let def = self.units.index_of(kind)?;
         let stats = *self.units.at(def);
         if stats.class() == UnitClass::Structure {
@@ -1877,7 +1917,10 @@ impl World {
                 self.place_structure(kind, cell, owner).is_some()
             }
             // Needs to know who sent it: `World::apply_from` runs it (placement.rs).
-            Command::BuildStructure { .. } => false,
+            Command::BuildStructure { .. }
+            | Command::QueueUnit { .. }
+            | Command::CancelUnit { .. }
+            | Command::SetRally { .. } => false,
             Command::Despawn { id } => self.despawn(id),
             Command::Order { ids, order, queued } => {
                 let (pos_min, pos_max) = self.pos_range();
