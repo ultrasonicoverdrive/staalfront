@@ -2087,7 +2087,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
 
 ## Phase 7 — Economy
 
-Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch `wp/7.4-money` (PR #90); WP7.5 is built on branch `wp/7.5-refinery-choice`, stacked on it; WP7.3b is not started.
+Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP7.5 is built on branch `wp/7.5-refinery-choice` (PR #92); WP7.3b is not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2209,7 +2209,8 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch 
 - **Decision:** a harvester in the queue never leaves for another refinery (it would give up its place); choice
   happens on leaving the field and while driving. The side of the queue spot is the side the harvester came from.
 - **Cost:** `harvest_cost` +8 microseconds a tick on 150 (inside the run-to-run spread); `wander_5000`, which has no
-  harvest rules, ran 3.5 percent slower in eight alternating pairs (same checksum), cause not found (layout).
+  harvest rules, ran 3.5 percent slower in eight alternating pairs (same checksum); cause: `turning::steer` was no longer
+  inlined into `behavior::walk` (+3.1 percent instructions, cachegrind); fixed with `#[inline]` on `steer`.
 - **Flaky under load:** `sim_thread::a_slow_sim_does_not_delay_the_frames` (wall clock) failed once in a full
   workspace run while the machine was busy and passed alone; see item 28 above for the same kind.
 

@@ -307,6 +307,9 @@ gives are walked in the same tick):
 3. **Decide.** Every harvester, in ascending slot order, works out what it does from the state at
    the start of this pass, and **changes nothing**: the result is a plan (its next state, a
    change of its order, a bite of ore, a message).
+   One exception: the committed count per dock (how many harvesters have chosen it). A choice
+   made earlier in this same decide pass counts at once for the harvesters after it. It is a
+   local scratch vector, not world state, updated in ascending slot order, so it is deterministic.
 4. **Apply.** The plans are carried out in ascending slot order. Where order could matter, it is
    decided here and by one rule: a cell two harvesters chose in the same tick goes to the lower
    slot (the other keeps its state and searches again next tick:
@@ -904,10 +907,10 @@ Release, alternating runs on one machine (load average 1.2 to 3 from other work,
 * `wander_5000` (no harvest rules, same checksum `0x38d5e3c43358a889`), eight alternating runs of the
   release binary: base 805, 798, 800, 779, 740, 798, 770, 791 ticks/s (mean 785), this branch 778, 769,
   755, 768, 734, 739, 744, 771 (mean 757): **3.5 percent slower, in all eight pairs**. That world's
-  code path did not change (the harvest stage is one `Option::take`), so it is not the rules; the likely
-  cause is the layout of the bigger `harvest.rs` in the binary (an `#[inline(never)]` on the stage did
-  not remove it, and was dropped). Not explained further; the laptop benchmarks M0b/M0c are where to look
-  (PLAN section 13).
+  code path did not change (the harvest stage is one `Option::take`), so it is not the rules. Measured
+  cause (cachegrind, reviewer of #92): +3.1 percent instructions, because the compiler stopped inlining
+  `turning::steer` into `behavior::walk` once `harvest.rs` grew. Fix: `#[inline]` on `steer`, which gives
+  the instruction count of main and the same checksum; numbers after the fix: see the PR (fix round 1).
 
 ### Not done
 
@@ -920,3 +923,6 @@ Release, alternating runs on one machine (load average 1.2 to 3 from other work,
 * No cost for the time a harvester needs to turn round at the dock, and no separate weight for a bay
   that is mid-unload (the harvester in the bay is one of the committed).
 * `recheck_period` has no test of its own.
+* Queue spots are not checked for passability (a spot can land on rock or a building; the harvester
+  then stands where its walk stopped), and the map-edge clamp in `queue_point` can put a spot back
+  on the approach. Nobody gets stuck: the grant always sends the harvester to the dock point.
