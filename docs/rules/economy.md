@@ -190,6 +190,17 @@ constants in `harvest.rs`, with the same values):
 | `mine_start_tenths`, `mine_reach_tenths`, `mine_lose_tenths` | 10, 15, 25 | Reach round the middle of the ore cell in tenths of a cell: stop and mine, count as there when the walk is over, drive back when pushed farther while mining. `1 <= start <= reach < lose <= 320`. |
 | `dock_reach_tenths` | 20 | How near to the dock point (tenths of a cell) a harvester counts as docked when its walk is over. 1 to 320. |
 
+The choice of refinery and the queue (WP7.5, "Refinery choice and queues" below):
+
+| field | shipped | meaning |
+|---|---|---|
+| `travel_cost` | 16 | Ticks one cell of straight-line distance to a dock point is worth (about the harvester's speed). 1 to 1000. |
+| `queue_cost` | 100 | Ticks every harvester already committed to a refinery adds to the expected wait there (a full unloading is 80 ticks, and the way in and out). 0 to 10000; 0 chooses by distance alone. |
+| `switch_margin` | 100 | Ticks another refinery has to be cheaper by before a driving harvester switches. 0 to 10000. |
+| `recheck_period` | 20 | Ticks between two looks of a driving harvester at the other refineries. 1 to 1000. |
+| `queue_gap` | 3 | Cells to the side of the approach where the queue waits. 0 to 32; 0 leaves queued harvesters where they stand (the rule of WP7.2). |
+| `queue_start`, `queue_step`, `queue_rows` | 1, 2, 8 | The first row of queue spots is `queue_start` cells out from the dock point along the exit side, the rows are `queue_step` cells apart, and from `queue_rows` rows on the places share the last row. 0 to 32, 1 to 8, 1 to 32. |
+
 Distances are tenths of a cell so that the file holds whole numbers; the simulation turns them into
 fixed point (`Fx::from_ratio(n, 10)`), no floats. Every number is at least 1, a bite no bigger than
 the load, the tuning within the bounds above (`HarvestRules::is_valid` and
@@ -205,8 +216,8 @@ for now.
 | `Searching` | Looks for ore (below). Never seen for more than a tick: the search runs in the same turn. | It finds a cell: `ToOre`. None, load 0: `Parked`. None, some load: back to the refinery. Full: back to the refinery. |
 | `ToOre` | Drives to the middle of its claimed cell. | Within 1 cell of the middle (it stops there, whatever is left of its walk): `Mining`. Its walk ended short: asks for a new route; after 3 tries it skips that cell and searches. The cell is empty: searches. |
 | `Mining` | Takes a bite every `mine_period` ticks (`min(mine_amount, room, what the cell holds)`). | Full, or the cell is empty. Pushed more than 2.5 cells from the middle: `ToOre` again. |
-| `ToRefinery` | Drives to the dock point of the nearest standing refinery; at `call_range` it sends its request. | Granted: `Granted`. Queued: `Queued`. |
-| `Queued` | Stands where it is and waits. | The dock grants it the bay. |
+| `ToRefinery` | Drives to the dock point of the standing refinery with the lowest expected wait (below); at `call_range` it sends its request. Until then it looks at the other refineries again every `recheck_period` ticks. | Granted: `Granted`. Queued: `Queued`. |
+| `Queued` | Walks to its queue spot beside the approach and waits there (below); walks on when the queue moves up. | The dock grants it the bay. |
 | `Granted` | Drives into the bay. | Within 2 cells of the dock point: sends `Arrived`, `Unloading`. |
 | `Unloading` | Sits in the bay while the dock takes the load off in bites. | `Released`: back to the search, in the same turn. |
 | `Parked` | Stands 4 cells out from its refinery along the exit side (spread sideways by `slot % 5`, so that they do not stand on one spot), and looks again every `retry_period`. | The next search. |
@@ -217,9 +228,9 @@ for now.
 for `PosX` the cell next to the middle of the east side). The harvester drives to it and unloads
 there.
 
-**Choosing a refinery:** the nearest **standing** refinery of the harvester's own player: the
-smallest squared straight-line distance from the harvester to the dock point, a tie to the lower
-slot. "Standing" is `World::is_standing` (the rule `placement.rs` and the tech tree use): hit
+**Choosing a refinery** (WP7.5, "Refinery choice and queues" below): among the **standing** refineries of the
+harvester's own player, the one with the lowest expected wait: the straight-line distance times `travel_cost`
+plus `queue_cost` for every harvester already committed to it. "Standing" is `World::is_standing` (the rule `placement.rs` and the tech tree use): hit
 points left, or a structure that cannot be damaged, and since WP6.3 also complete: a refinery a
 player builds with `BuildStructure` is no dock while it is under construction and becomes one when
 it is complete (`a_refinery_under_construction_is_not_a_dock_and_becomes_one_when_complete`); the
@@ -253,7 +264,7 @@ its own box on its own turn.
 | To the harvester | Sent when | The harvester |
 |---|---|---|
 | `Granted` | The bay is its own. | Drives in (a queued harvester starts again). |
-| `Queued(place)` | The bay is taken. | Stops and waits. |
+| `Queued(place)` | The bay is taken. | Walks to its queue spot and waits (a queue spot is beside the approach, below). |
 | `Revoked` | The grant ran out before it arrived. | Asks again. |
 | `Unloaded(n)` | The dock took `n` off its load in this bite. | Lowers its load by `n`. |
 | `Released` | The load is gone, the bay is free. | Looks for ore. |
@@ -296,6 +307,9 @@ gives are walked in the same tick):
 3. **Decide.** Every harvester, in ascending slot order, works out what it does from the state at
    the start of this pass, and **changes nothing**: the result is a plan (its next state, a
    change of its order, a bite of ore, a message).
+   One exception: the committed count per dock (how many harvesters have chosen it). A choice
+   made earlier in this same decide pass counts at once for the harvesters after it. It is a
+   local scratch vector, not world state, updated in ascending slot order, so it is deterministic.
 4. **Apply.** The plans are carried out in ascending slot order. Where order could matter, it is
    decided here and by one rule: a cell two harvesters chose in the same tick goes to the lower
    slot (the other keeps its state and searches again next tick:
@@ -321,8 +335,9 @@ Each has a test (`crates/sf_sim/tests/harvest.rs` unless named otherwise):
   and the bay are freed (`a_destroyed_harvester_loses_its_load`).
 * **Two or more harvesters on one refinery:** they take turns, one in the bay, the rest queued and
   standing (`two_harvesters_on_one_refinery_...`; the `harvest` scenario has three).
-* **Several refineries:** the nearest standing one (`the_nearest_standing_refinery_wins`; the
-  zero-hit-point case above).
+* **Several refineries:** the one with the lowest expected wait, which is the nearest one while nobody is
+  committed to it (`the_nearest_standing_refinery_wins`; the zero-hit-point case above); the rule and its
+  tests are in "Refinery choice and queues".
 * **A player order to a field overrides the search.** A harvester whose current order is not its
   own (it compares what it ordered with what it has) was given one. A `Move` to a cell that holds
   ore, while the harvester is not full, makes it search **from that cell**, so it mines there (or at
@@ -413,14 +428,14 @@ of game time (3600 ticks), and times one upload on the software adapter (Mesa ll
 
 | harvesters | ticks with a change (uploads) | at most in one second | cells changed | ore taken |
 |---|---|---|---|---|
-| 4 | 105 | 7 | 105 | 2216 |
-| 50 | 205 | 10 | 214 | 3168 |
+| 4 | 126 | 8 | 128 | 2380 |
+| 50 | 152 | 10 | 159 | 3348 |
 
-**The 50-harvester row measures a jammed system, not a harvesting load:** with that many harvesters
-every one picks the same nearest refinery and most stand queued or blocked in its approach (see "Not
-done"), so it moves less ore per harvester than a working economy would and the cells change slower.
-The upload stays sound anyway: even one upload every tick would be about 20 x 0.22 ms = 4.4 ms a second
-on llvmpipe.
+(Re-measured in WP7.5 with the choice of refinery and the queue spots; the WP7.2 numbers, with the
+jammed bay, were 105, 7, 105, 2216 and 205, 10, 214, 3168.) The 50-harvester row is still **not a
+harvesting load of 50 working harvesters**: the sandbox has one refinery and one near field, and with that
+many harvesters most are crowded in the field (see "Refinery choice and queues", "Throughput"). The upload
+stays sound anyway: even one upload every tick would be about 20 x 0.22 ms = 4.4 ms a second on llvmpipe.
 
 One upload of the 256 x 256 image took **209 to 237 microseconds** (five runs). The comparison of the
 levels, `OreView::changes`, which the presentation does for every new snapshot, took **1.4 to 1.5
@@ -440,9 +455,9 @@ playfield, 4000 ticks), on a machine with a load average of 1.5 to 2 from other 
 
 * with the harvest rules **776.8 ms** (mean of 743 to 830), the same units without them (they
   stand where they are put) **160.2 ms**: 154 microseconds more per tick, **but that is the cost
-  of 48 harvesters moving, routing and pushing each other**, not of the harvest stage. **These 48
-  harvesters are a jammed system** (one refinery gets them all, see "Not done"), so this measures a
-  crowd queueing at one bay, not 48 harvesters at work;
+  of 48 harvesters moving, routing and pushing each other**, not of the harvest stage. (These 48
+  harvesters were a jammed system in WP7.2: one refinery got them all. Since WP7.5 they use all
+  three, see "Refinery choice and queues", "Cost".);
 * the harvest stage itself, timed from inside the world for the same runs (a scratch build with a
   clock around the stage, not committed, since the simulation has no clock): **23 to 30 ms for the
   4000 ticks, about 6 microseconds per tick** with 48 harvesters, every `nearest_ore_where` search
@@ -460,13 +475,10 @@ These are relative numbers; the fps requirement is for the laptop benchmarks (PL
   (production is WP6.5). Storage and credits are WP7.3 and WP7.4.
 * A harvester is not ordered **onto a refinery** by the player to unload there, nor held on a
   field; `Stop` cannot park one.
-* A refinery is chosen by straight-line distance to its dock point, not by the length of the
-  route, and not by how busy it is: a harvester queues at the nearest standing one even if another
-  has no queue. **With many harvesters this collapses the throughput**: all of them go to one bay
-  and the queue stands in its approach. Measured by the reviewer of #78 with `crowd_scenario` (three
-  refineries, 4000 ticks, the first n harvesters): 3 deliver 2400, 6 deliver 3200, 12 deliver 3200,
-  24 deliver 2271, 48 deliver 618 (13 `Queued`, 26 `ToOre`, only one bay ever granted). Not fixed
-  in WP7.2; the fix, a choice by route length and queue length, is WP7.5.
+* A refinery is chosen by the expected wait since WP7.5 ("Refinery choice and queues"); what is still
+  not done there: the drive is the straight-line distance, not the length of the route, so a refinery
+  behind a rock patch looks nearer than it is; and one small ore field cannot feed many harvesters (the
+  delivery of 48 harvesters on the shipped field is still below that of 12; measured in "Throughput").
 * No alliances: a harvester uses only the refineries of its own player.
 * The refinery's exit cell is only checked when it is placed; one that is blocked later makes
   harvesters give that refinery up after three short walks (that path has no test of its own).
@@ -605,8 +617,8 @@ rise ever ends above the capacity and the store never falls. Pinned in
 * No silo (WP7.3b). The construction centre stores nothing.
 * The storage readout is in the F1 debug panel; the player HUD (WP7.4) shows the credits, not the capacity.
 * A harvester waiting in a full refinery's bay keeps that bay; it never leaves for another
-  refinery by itself (refinery choice is WP7.5). The store is one per player, so another refinery
-  would be full too.
+  refinery by itself (WP7.5 chooses a refinery on the way, not from the bay). The store is one per
+  player, so another refinery would be full too.
 
 ## Money (WP7.4)
 
@@ -714,10 +726,205 @@ tick is, per structure under construction, one table lookup and one store update
 
 ### Not done
 
-* No unit costs (WP6.5), no refund, sell or repair (WP6.6), no silo (WP7.3b), no refinery choice (WP7.5), no
-  sidebar (WP11.1).
+* No unit costs (WP6.5), no refund, sell or repair (WP6.6), no silo (WP7.3b), no sidebar (WP11.1). (The refinery choice is WP7.5.)
 * `BuildStructure` is not refused for lack of funds; it waits.
 * Money exists only with `--harvest` in the sandbox, and the HUD shows a player's credits also when it owns
   no entity (they are read from `World::credits`, not from the views).
 * The model of a structure under construction is not part of the screenshot test (the harness draws the
   roster's models, not the build stages).
+
+## Refinery choice and queues (WP7.5)
+
+WP7.2 measured the collapse: with three refineries, 4000 ticks, the first n harvesters of the crowd
+scenario deliver 2400 (3), 3200 (6), 3200 (12), 2271 (24), 618 (48). Every harvester took the nearest
+refinery by straight line, so one bay got them all (in the 48 run the bays of the other two refineries
+were never used), and the queue stood in the approach to that bay. Two rules fix both halves; the dock
+protocol (request, grant, queue, revoke, cancel, release) is unchanged.
+
+### Choosing a refinery
+
+A harvester that is full (or has found no more ore and carries some) compares the standing refineries
+of its player by an integer cost in ticks and goes to the lowest:
+
+`cost = round(distance in cells x travel_cost) + committed x queue_cost`
+
+* **Distance** is the straight-line distance from the harvester to the dock point (`Vec2::length`, an
+  integer square root: no floats, no A\*; the same number on every platform). It is an estimate: it does
+  not see a rock patch in between. The queue term has to do the spreading, and does.
+* **Committed** is the number of harvesters bound for that dock at that moment: driving to it, called,
+  queued, granted or in the bay (`Harvest::committed`, one count over the harvesters at the start of the
+  decide pass). A harvester that chooses in the pass is counted at once, so the next one in slot order
+  sees it: two harvesters that set out in the same tick do not both take the same bay
+  (`harvesters_that_set_out_in_one_tick_see_each_others_choice`). There is no separate "bay busy" term:
+  the harvester in the bay is one of the committed.
+* **Ties** go to the smaller cost, then the smaller squared distance, then the lower slot of the
+  refinery (`the_cheapest_refinery_is_chosen_and_a_tie_goes_to_the_nearer_then_the_lower_slot`: cost 136
+  against 136 goes to the nearer one; equal cost and distance to slot 0).
+* With `queue_cost: 0` this is exactly the rule of WP7.2 (nearest, a tie to the lower slot).
+
+**When it is chosen again.** On leaving the field (`go_return`), and then every `recheck_period` ticks
+while the harvester is still driving, not yet within `call_range` of the dock point and not known to the
+dock. It switches only if the best other refinery is cheaper than its own (its own cost does not count
+the harvester itself) by **more than `switch_margin` ticks**: that is the hysteresis, so a harvester does
+not change its mind every time a queue gains or loses one
+(`a_driving_harvester_switches_only_when_the_other_refinery_is_cheaper_by_more_than_the_margin`: cheaper
+by 241 switches at margin 240 and stays at margin 241). Once it has asked (`Request`), it keeps its
+place: a harvester in the queue never leaves it for another refinery, because that would give up the
+first come, first served order and put it at the back of another queue. A refinery that stops standing
+sends its harvesters to a new choice at once, as before.
+
+### The queue beside the approach
+
+A harvester that is told `Queued` walks to a **queue spot** and waits there; when the queue moves up it
+walks to its new spot. The spots lie on both sides of the **approach** (the line out from the dock
+point along the exit side), `queue_gap` cells to the side, in rows `queue_step` cells apart, the first
+row `queue_start` cells out (shipped 3, 2 and 1: the first row is 3 cells to the side and 1 cell out,
+the next 3 cells out, and so on up to `queue_rows` rows).
+
+* **Its own side.** A harvester keeps the side it came from when it was queued, so it never crosses the
+  approach, and takes the next row after the harvesters ahead of it in the queue on that side
+  (`a_queued_harvester_takes_a_spot_on_its_own_side_and_the_next_row_after_those_ahead`). From
+  `queue_rows` rows on the places share the last row.
+* **The holder reaches the bay.** The harvester that is granted the bay drives from its spot straight to
+  the dock point; the approach holds only harvesters that are driving in. A queued harvester that is
+  granted while still walking to its spot turns to the dock point at once
+  (`a_queued_harvester_called_in_while_walking_to_its_spot_turns_to_the_dock_point`). The test
+  `queued_harvesters_wait_beside_the_approach_and_everyone_still_unloads` (five harvesters on one
+  refinery) records every standing queued harvester within 8 cells of the dock: none stood closer than 2
+  cells to the line of the approach, all five held the bay and at least five loads went in.
+* **A walk that ends short** of the spot (a jam gives it up) is tried again `max_tries` times for the
+  same spot and then given up: the harvester stands where it is until its spot changes.
+* `queue_gap: 0` switches the spots off: queued harvesters stand where they were told to wait, as in
+  WP7.2 (`without_queue_spots_queued_harvesters_stand_in_the_approach`).
+* The harvester's `spot` (row and side) is part of the checksum.
+* **In the picture** (`queued_harvesters_stand_beside_the_approach_in_the_picture`, real renderer,
+  models, seven harvesters on the one refinery; `docs/screenshots/wp7.5`): measured with the shipped
+  numbers, the four queued harvesters stood 1.3 to 4.4 cells off the line of the approach (one that the
+  crowd had stopped short of its spot at 1.3); with `queue_gap: 0` one stood 0.3 cells from it, in it.
+
+**Gap, not done:** parked harvesters (no ore in reach) still stand `park_distance` cells out along the exit
+side, spread over `park_spread` cells including the middle, i.e. partly in the approach.
+
+### Checksum and pins
+
+The eight new rules and the `spot` of a harvester are hashed with the other `H` section data, so every
+world with harvest rules hashes differently from before; worlds without harvest rules hash as before
+(`golden.rs`, `wander_5000` `0x38d5e3c43358a889`, `command_mix`, `terrain_256`, `units_spawn`,
+`construction`, `placement`, the benchmark lists: all unchanged). Test
+`the_new_numbers_are_in_the_checksum_each_on_its_own`.
+
+| scenario | before | after | measured cause |
+|---|---|---|---|
+| `harvest` | `0x655fd8c1472d1611` (1680 delivered) | `0xfdd484efbd0c9d55` (1800) | The queue spots. With `queue_gap: 0` the scenario delivers 1680 again, and `queue_cost: 0` against 100 changes no harvester (one refinery): `without_queue_spots_the_scenario_delivers_the_old_total`. |
+| `storage` | `0xe8092c6911bdf391` | `0x55dc456c2724d89d` | The queue spots (one refinery). |
+| `money` | `0xdc71e0b9c80a1e78` | `0x5d73660fc2a02030` | The queue spots (one refinery). |
+
+How the cause was measured: a scratch build that leaves the eight rules, the harvester's `spot` and the
+recheck timer (`wait` of a driving harvester) out of the hash, with `queue_gap: 0` and `queue_cost: 0` in
+the three scenario files, gives the old values (`0x655fd8c1472d1611`, `0xe8092c6911bdf391`,
+`0xdc71e0b9c80a1e78`); the same build with `queue_gap: 3` (and `queue_cost` 0 or 100) gives other values,
+and with `queue_gap: 0` and `queue_cost: 100` the old ones again. The release binary of the previous
+commit (`origin/wp/7.4-money`) gives the three old values on the old files. Only the scenario RON files
+wrote the harvest rules, so only they got the eight new lines; no `*_defs` copy was touched.
+
+### Throughput
+
+The review's measurement (`crowd_scenario`: a lattice of harvesters east of the rock patch, three
+refineries, 4000 ticks, the first n harvesters; release; the ignored test `throughput_table`), ore
+delivered to the player:
+
+| harvesters | 3 | 6 | 12 | 24 | 48 |
+|---|---|---|---|---|---|
+| shipped ore (120 a cell), before | 2400 | 3200 | 3200 | 2271 | 618 |
+| shipped ore, after | 2310 | 3642 | 3807 | 2805 | 2321 |
+| 2000 ore a cell, before | 2990 | 3270 | 2800 | 2800 | 800 |
+| 2000 ore a cell, after | 2900 | 4750 | 6400 | 5600 | 2392 |
+| bay-limited, before | 3800 | 3600 | 3000 | 2600 | 1400 |
+| bay-limited, after | 5180 | 7510 | 9050 | 9990 | 7310 |
+
+(Bay-limited = 2000 ore a cell and a load mined in 10 ticks, so that the refineries and not the mining
+limit the delivery. "Before" is the release binary of `origin/wp/7.4-money`, same scenarios.) Ticks of
+unloading of the three bays in the 24-harvester bay-limited run: before only the middle one was ever used;
+after `[1119, 1760, 1120]` of 4000 ticks.
+
+**What the table says.** The collapse at the refineries is gone: all three bays work, and in the
+bay-limited run the delivery rises with the number of harvesters from 3 to 24 (5180, 7510, 9050, 9990);
+48 harvesters deliver 7310 against 1400 under the old rule. On the shipped numbers 48 deliver 2321
+instead of 618, and 24 deliver 2805 instead of 2271.
+
+**What it does not say.** With the shipped mining, the delivery of 24 and 48 harvesters is still lower
+than that of 12 (3807). The cause is not the refineries. The near field has 28 cells and 3360 ore: 12
+harvesters take nearly all of it (3807 delivered, 101 carried, 12 left of the 3920 in the field over
+4000 ticks), so more harvesters cannot deliver more; and with 48 harvesters 22 to 28 stand in the field
+(`ToOre`, stuck behind each other: bodies 1.5 cells wide on cells of 1) while each bay is busy at most 15
+percent of the time (`[168, 608, 216]` ticks unloading of 4000). That crowding of one
+small field is **not fixed here**. The chaotic traffic there also makes the numbers move by 10 to 30
+percent with any change to the rules: a sweep of `queue_cost` 0 to 400, `queue_gap` 0 to 4 and
+`switch_margin` 0 to 300 gave 48 shipped-ore harvesters between 1293 and 2625, and every setting with
+`queue_cost` above 0 kept the bay-limited 24 harvesters between 8000 and 10,630 (`queue_cost: 0` gave
+4850, `queue_gap: 0` 8000, both off, the old rule, 2600). The shipped weights were not tuned to a
+peak.
+
+**Pinned:** `many_harvesters_keep_delivering` (`tools/sf_headless/tests/harvest.rs`, 5 runs of 4000
+ticks): shipped ore, 24 harvesters at least 2500 and 48 at least 2000 (measured 2805 and 2321); bay-limited,
+24 harvesters deliver more than 6 and at least 8500, 48 at least 5500 (measured 9990 against 7510, and
+7310).
+
+### Mutations
+
+Each was made in the source, run against the tests, and reverted:
+
+| mutation | the tests that fail |
+|---|---|
+| a tie on cost goes to the last of the equals (`<=` for `<`) | `the_cheapest_refinery_is_chosen_and_a_tie_goes_to_the_nearer_then_the_lower_slot` |
+| a tie on cost goes to the farther dock | the same |
+| the queue term ignored (`committed x 0`) | `a_cost_is_the_cells_times_travel_cost_plus_the_committed_times_queue_cost`, `the_cheapest_refinery_is_chosen_...`, `harvesters_that_set_out_in_one_tick_see_each_others_choice`, `a_driving_harvester_switches_only_...` |
+| hysteresis off (`cost >= here` for `cost + margin >= here`) | `a_driving_harvester_switches_only_when_the_other_refinery_is_cheaper_by_more_than_the_margin` |
+| the queue spot on the approach (lateral 0) | `queue_spots_lie_in_rows_beside_the_approach`, `a_queued_harvester_takes_a_spot_on_its_own_side_...`, and in the world `queued_harvesters_wait_beside_the_approach_and_everyone_still_unloads` ("stood 0.0006 cells off the approach") |
+| a choice not counted in its own pass | `harvesters_that_set_out_in_one_tick_see_each_others_choice` |
+| only the queued count as committed | `harvesters_bound_for_a_dock_count_against_it_whatever_their_step` |
+| `queue_gap` left out of the hash | `the_new_numbers_are_in_the_checksum_each_on_its_own` |
+| the side by the parity of the place (crosses the approach) | `a_queued_harvester_takes_a_spot_on_its_own_side_and_the_next_row_after_those_ahead` |
+| a granted harvester keeps walking to its spot | `a_queued_harvester_called_in_while_walking_to_its_spot_turns_to_the_dock_point` |
+| `sf_bridge` maps `queue_gap` from `queue_start` | `sf_bridge` `each_field_maps_to_its_own_field` and `the_sim_numbers_equal_the_data_numbers` |
+| the scenario maps `queue_cost` from `travel_cost` | `scenario::tests::each_harvest_field_maps_to_its_own_rule` |
+
+The mapping tests give every field its own value (119 to 126 for the new ones) so that a swap or a field
+fed from the wrong place fails. **Not covered by a test of its own:** `recheck_period` (that a driving
+harvester looks again after that many ticks; the switch itself is tested through `recheck`).
+
+### Cost
+
+Release, alternating runs on one machine (load average 1.2 to 3 from other work, so relative):
+
+* `harvest_cost` (48 harvesters, 3 refineries, 4000 ticks), three alternations of the binary of
+  `origin/wp/7.4-money` and this branch: the time of the whole run **786, 732, 727 ms (base) and 816, 868,
+  825 ms (this branch)**; the cost of the harvesting over the same units without harvest rules (the
+  difference inside one binary, so the crowd's movement is in both) **157.6, 146.2, 143.5 against 153.6,
+  162.0, 156.5 microseconds per tick**, i.e. about +8 microseconds a tick on 150, inside the 12 percent
+  spread between runs of the same binary. The run is also not the same work: since the harvesters use
+  three bays and queue beside the approach, they deliver about 3.8 times more ore in it (2321 against 618).
+* `wander_5000` (no harvest rules, same checksum `0x38d5e3c43358a889`), eight alternating runs of the
+  release binary: base 805, 798, 800, 779, 740, 798, 770, 791 ticks/s (mean 785), this branch 778, 769,
+  755, 768, 734, 739, 744, 771 (mean 757): **3.5 percent slower, in all eight pairs**. That world's
+  code path did not change (the harvest stage is one `Option::take`), so it is not the rules. Measured
+  cause (cachegrind, reviewer of #92): +3.1 percent instructions, because the compiler stopped inlining
+  `turning::steer` into `behavior::walk` once `harvest.rs` grew. Fix: `#[inline]` on `steer`, which gives
+  the instruction count of main (cachegrind, `--ticks 400`: 2,584,654,955 against 2,584,650,596) and
+  the same checksum. Eleven alternating release runs after the fix: main 983.6, this branch 969.5 ticks/s
+  mean (1.4 percent, PR slower in 7 of 11 pairs), i.e. within the run-to-run spread.
+
+### Not done
+
+* The drive in the cost is the straight line: a refinery behind a rock patch looks nearer than it is.
+  A route length would need the path service per harvester per choice, which is what this rule avoids.
+* One small ore field cannot feed many harvesters (above); no cap on the harvesters that go to one
+  field, no second field chosen when the first is crowded.
+* Parked harvesters still stand partly in the approach (above).
+* A queued harvester never leaves for another refinery (above, on purpose).
+* No cost for the time a harvester needs to turn round at the dock, and no separate weight for a bay
+  that is mid-unload (the harvester in the bay is one of the committed).
+* `recheck_period` has no test of its own.
+* Queue spots are not checked for passability (a spot can land on rock or a building; the harvester
+  then stands where its walk stopped), and the map-edge clamp in `queue_point` can put a spot back
+  on the approach. Nobody gets stuck: the grant always sends the harvester to the dock point.

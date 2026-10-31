@@ -55,4 +55,28 @@
     // How near to the dock point, in tenths of a cell, a harvester has to be when its walk is
     // over to count as docked. 1 to 320.
     dock_reach_tenths: 20,
+    // Choice of refinery (WP7.5): a harvester that is full drives to the refinery with the lowest
+    // expected wait, in ticks: the straight-line distance in cells times travel_cost, plus
+    // queue_cost for every harvester already committed to it (driving there, queued, granted or
+    // in the bay). Ties go to the nearer dock point, then to the lower slot. 16 ticks a cell is
+    // the harvester's speed; 100 ticks are a full unloading (80) and the move in and out.
+    // travel_cost 1 to 1000, queue_cost 0 to 10000 (0: choose by distance alone).
+    travel_cost: 16,
+    queue_cost: 100,
+    // A harvester still driving (not yet within call_range) looks at the refineries again every
+    // recheck_period ticks and switches only when another is cheaper by more than switch_margin
+    // ticks, so that they do not change their mind every tick. Once it has asked, it keeps its
+    // place. recheck_period 1 to 1000, switch_margin 0 to 10000.
+    switch_margin: 100,
+    recheck_period: 20,
+    // Where the queue waits: queued harvesters stand beside the approach, not in it. Place 1 is
+    // queue_gap cells to one side of the line out from the dock point along the exit side, queue_start
+    // cells out; place 2 is the same on the other side; places 3 and 4 are the next row, queue_step
+    // cells farther out; from queue_rows rows on they share the last row. queue_gap 0 leaves them
+    // standing where they were told to wait. queue_gap and queue_start 0 to 32, queue_step 1 to 8,
+    // queue_rows 1 to 32.
+    queue_gap: 3,
+    queue_start: 1,
+    queue_step: 2,
+    queue_rows: 8,
 )

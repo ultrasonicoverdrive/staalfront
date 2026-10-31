@@ -677,6 +677,14 @@ fn each_harvest_field_maps_to_its_own_rule() {
         mine_reach_tenths: 116,
         mine_lose_tenths: 117,
         dock_reach_tenths: 118,
+        travel_cost: 119,
+        queue_cost: 120,
+        switch_margin: 121,
+        recheck_period: 122,
+        queue_gap: 123,
+        queue_start: 124,
+        queue_step: 125,
+        queue_rows: 126,
     };
     let rules = spec.rules();
     assert_eq!(rules.capacity, 101);
@@ -697,4 +705,12 @@ fn each_harvest_field_maps_to_its_own_rule() {
     assert_eq!(rules.mine_reach_tenths, 116);
     assert_eq!(rules.mine_lose_tenths, 117);
     assert_eq!(rules.dock_reach_tenths, 118);
+    assert_eq!(rules.travel_cost, 119);
+    assert_eq!(rules.queue_cost, 120);
+    assert_eq!(rules.switch_margin, 121);
+    assert_eq!(rules.recheck_period, 122);
+    assert_eq!(rules.queue_gap, 123);
+    assert_eq!(rules.queue_start, 124);
+    assert_eq!(rules.queue_step, 125);
+    assert_eq!(rules.queue_rows, 126);
 }
