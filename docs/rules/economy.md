@@ -910,7 +910,9 @@ Release, alternating runs on one machine (load average 1.2 to 3 from other work,
   code path did not change (the harvest stage is one `Option::take`), so it is not the rules. Measured
   cause (cachegrind, reviewer of #92): +3.1 percent instructions, because the compiler stopped inlining
   `turning::steer` into `behavior::walk` once `harvest.rs` grew. Fix: `#[inline]` on `steer`, which gives
-  the instruction count of main and the same checksum; numbers after the fix: see the PR (fix round 1).
+  the instruction count of main (cachegrind, `--ticks 400`: 2,584,654,955 against 2,584,650,596) and
+  the same checksum. Eleven alternating release runs after the fix: main 983.6, this branch 969.5 ticks/s
+  mean (1.4 percent, PR slower in 7 of 11 pairs), i.e. within the run-to-run spread.
 
 ### Not done
 
