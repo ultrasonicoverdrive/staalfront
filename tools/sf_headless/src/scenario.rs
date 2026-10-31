@@ -47,8 +47,8 @@ use sf_data::units::{Faction, UnitDefs};
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
     Area, BuildingTable, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind,
-    MAX_ENTITIES, MAX_MAP_SIDE, MovementTable, Order, PlayerId, Terrain, Tick, UnitTable,
-    WeaponTable, World, WorldConfig,
+    MAX_ENTITIES, MAX_MAP_SIDE, MovementTable, Order, PlayerId, ProductionTable, Terrain, Tick,
+    UnitTable, WeaponTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -195,6 +195,17 @@ pub struct Scenario {
     /// scenario of the earlier phases. Needs `storage` (the store is the pool).
     #[serde(default)]
     pub money: Option<MoneySpec>,
+    /// Production (WP6.5, `docs/rules/production.md`): the queue limit and the exit search radius,
+    /// written out in the scenario so that editing the shipped `production.ron` never moves its
+    /// checksum. What each unit costs and which factory builds it come from the `unit_defs`
+    /// directory (a frozen copy freezes them). Left out: the factories build nothing, which is
+    /// every scenario of the earlier phases. Needs `buildings`; without `money` units are free.
+    #[serde(default)]
+    pub production: Option<ProductionSpec>,
+    /// The production table read from `unit_defs` by [`Scenario::load`] when `production` is on,
+    /// handed to the world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub production_table: Option<ProductionTable>,
     /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
     /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
     /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
@@ -229,6 +240,26 @@ pub struct OreSpec {
     pub regrow_amount: u16,
     /// Ticks between two turns of a cell.
     pub regrow_period: u32,
+}
+
+/// The production rules of a scenario (`sf_sim::ProductionRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProductionSpec {
+    /// Most items in one factory's queue, the one being built included.
+    pub queue_limit: u8,
+    /// Cells round the exit cell in which a finished unit looks for a free spot.
+    pub exit_radius: u8,
+}
+
+impl ProductionSpec {
+    /// The simulation's rules for these numbers.
+    pub fn rules(self) -> sf_sim::ProductionRules {
+        sf_sim::ProductionRules {
+            queue_limit: self.queue_limit,
+            exit_radius: self.exit_radius,
+        }
+    }
 }
 
 /// The money rules of a scenario (`sf_sim::MoneyRules`) and the credits each player starts with.
@@ -593,6 +624,31 @@ pub enum Action {
         /// The anchor cell `(x, y)`, inside the map.
         cell: (u32, u32),
     },
+    /// `Command::QueueUnit` (WP6.5): the player who sends the command queues a unit of `kind`
+    /// at the factory `factory`, an entity as `(index, generation)`. Needs `production`.
+    QueueUnit {
+        /// The factory.
+        factory: (u32, u32),
+        /// The permanent kind number of the unit.
+        kind: u16,
+    },
+    /// `Command::CancelUnit` (WP6.5): take the item at place `index` (0 is the one being built)
+    /// out of the queue of `factory` and give back what was paid. Needs `production`.
+    CancelUnit {
+        /// The factory.
+        factory: (u32, u32),
+        /// The place in the queue.
+        index: u8,
+    },
+    /// `Command::SetRally` (WP6.5): where the units of `factory` walk to; none clears it.
+    /// Needs `production`.
+    SetRally {
+        /// The factory.
+        factory: (u32, u32),
+        /// The rally cell `(x, y)`, inside the map.
+        #[serde(default)]
+        cell: Option<(u32, u32)>,
+    },
     /// `Command::Place`: a standing structure on a cell. Refused by the
     /// simulation (the command counts as ignored) on terrain that is not
     /// buildable and on an occupied cell. The entity takes the next free id,
@@ -647,6 +703,7 @@ fn load_unit_defs(
     scenario_file: &Path,
     combat: bool,
     buildings: bool,
+    production: bool,
 ) -> Result<LoadedDefs, ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
@@ -671,18 +728,33 @@ fn load_unit_defs(
     } else {
         None
     };
-    Ok((units, weapons, movement, costs, building_table))
+    // Built only for a scenario with `production`, for the same reason.
+    let production_table = if production {
+        Some(sf_bridge::production_table(&defs).map_err(invalid)?)
+    } else {
+        None
+    };
+    Ok(LoadedDefs {
+        units,
+        weapons,
+        movement,
+        costs,
+        buildings: building_table,
+        production: production_table,
+    })
 }
 
 /// What [`load_unit_defs`] reads: the unit, weapon and movement tables, the movement costs they
-/// came from, and the building table of a scenario with `buildings`.
-type LoadedDefs = (
-    UnitTable,
-    WeaponTable,
-    MovementTable,
-    MovementCosts,
-    Option<BuildingTable>,
-);
+/// came from, the building table of a scenario with `buildings` and the production table of one
+/// with `production`.
+struct LoadedDefs {
+    units: UnitTable,
+    weapons: WeaponTable,
+    movement: MovementTable,
+    costs: MovementCosts,
+    buildings: Option<BuildingTable>,
+    production: Option<ProductionTable>,
+}
 
 /// The middle of a cell, in cells: where an order sends a unit.
 fn cell_middle(cell: (i32, i32)) -> Vec2 {
@@ -807,13 +879,19 @@ impl Scenario {
         // The unit definitions first: their costs decide the terrain's summary.
         let mut own_costs = None;
         if let Some(name) = scenario.unit_defs.clone() {
-            let (units, weapons, movement, costs, buildings) =
-                load_unit_defs(&name, path, scenario.combat, scenario.buildings)?;
-            scenario.unit_table = Some(units);
-            scenario.building_table = buildings;
-            scenario.weapon_table = scenario.combat.then_some(weapons);
-            scenario.movement_table = Some(movement);
-            own_costs = Some(costs);
+            let loaded = load_unit_defs(
+                &name,
+                path,
+                scenario.combat,
+                scenario.buildings,
+                scenario.production.is_some(),
+            )?;
+            scenario.unit_table = Some(loaded.units);
+            scenario.building_table = loaded.buildings;
+            scenario.production_table = loaded.production;
+            scenario.weapon_table = scenario.combat.then_some(loaded.weapons);
+            scenario.movement_table = Some(loaded.movement);
+            own_costs = Some(loaded.costs);
         }
         if let Some(name) = scenario.map_name.clone() {
             let costs = match (own_costs, shipped) {
@@ -989,6 +1067,17 @@ impl Scenario {
             }
         }
 
+        if let Some(pr) = &self.production {
+            if !self.buildings {
+                p.push("production needs `buildings` (the factories are structures)".to_string());
+            }
+            if !pr.rules().is_valid() {
+                p.push(
+                    "production: queue_limit must be 1 to 20 and exit_radius 1 to 8".to_string(),
+                );
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -1149,6 +1238,39 @@ impl Scenario {
                     id_problems(&at, ids, &mut p);
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
+                Action::QueueUnit { factory, .. } | Action::CancelUnit { factory, .. } => {
+                    if self.production.is_none() {
+                        p.push(format!("{at}: production commands need `production`"));
+                    }
+                    if factory.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: factory ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            factory.0
+                        ));
+                    }
+                }
+                Action::SetRally { factory, cell } => {
+                    if self.production.is_none() {
+                        p.push(format!("{at}: production commands need `production`"));
+                    }
+                    if factory.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: factory ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            factory.0
+                        ));
+                    }
+                    if let Some(cell) = cell
+                        && map_ok
+                        && (cell.0 >= width || cell.1 >= height)
+                    {
+                        p.push(format!(
+                            "{at}: cell ({}, {}) lies outside the {width}x{height} map",
+                            cell.0, cell.1
+                        ));
+                    }
+                }
                 Action::TakeOre { cell, .. } => {
                     if map_ok && (cell.0 >= width || cell.1 >= height) {
                         p.push(format!(
@@ -1316,6 +1438,21 @@ impl Scenario {
                 )
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
+        if let Some(pr) = self.production {
+            let Some(table) = self.production_table.clone() else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "production: the table is read from the files next to the scenario, \
+                         so the scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
+            world = world
+                .with_production(pr.rules(), table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
         if let Some(budget) = self.path_budget {
             world = world
                 .with_path_budget(budget)
@@ -1476,6 +1613,27 @@ impl Scenario {
                     let command = Command::BuildStructure {
                         kind: Kind(*kind),
                         cell: Cell::new(cell.0, cell.1),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::QueueUnit { factory, kind } => {
+                    let command = Command::QueueUnit {
+                        factory: EntityId::new(factory.0, factory.1),
+                        kind: Kind(*kind),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::CancelUnit { factory, index } => {
+                    let command = Command::CancelUnit {
+                        factory: EntityId::new(factory.0, factory.1),
+                        index: *index,
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::SetRally { factory, cell } => {
+                    let command = Command::SetRally {
+                        factory: EntityId::new(factory.0, factory.1),
+                        cell: cell.map(|c| Cell::new(c.0, c.1)),
                     };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }

@@ -1,0 +1,94 @@
+// Production (WP6.5, docs/rules/production.md): two factories build from queues of their own, the
+// money drains and runs out, units come out on a free spot by the exit and walk to a rally point,
+// a blocked exit holds the queue, and a factory that is destroyed loses its queue.
+//
+// `unit_defs` names the FROZEN copy of WP7.2 (harvest_defs); the ore, harvest, storage, money and
+// production numbers are written out below, so editing the shipped ore.ron, harvest.ron,
+// unit_defs.ron, money.ron or production.ron never moves this checksum. Kinds: 0 construction_center,
+// 1 power_plant (2 x 3), 2 refinery (3 x 4, capacity 600), 3 barracks (2 x 3, exit side +x),
+// 4 vehicle_factory (3 x 4), 11 harvester, 12 rifleman (100 credits over 100 ticks), 19 light_tank
+// (700 credits over 400 ticks). Player 0 starts with 400 credits.
+//
+//   slot 0  the construction centre of player 0 on (84, 74)
+//   slot 1  a barracks on (76, 80), the one that will be destroyed
+//   slot 2  the barracks on (84, 80): exit cell (86, 81)
+//   slot 3  the vehicle factory on (90, 74): exit cell (93, 76)
+//   slot 4  the refinery on (96, 86), slots 5 and 6 two harvesters (as in `money`)
+//   tick 1     rally points (80, 92) for the barracks and (92, 92) for the vehicle factory; the
+//              doomed barracks queues 2 riflemen, the barracks 3, the vehicle factory 2 light tanks
+//   tick 60    the doomed barracks is destroyed with a rifleman half built and one waiting: its
+//              queue is gone and the 60 credits paid for it stay spent
+//   tick 250   a power plant (2 x 3) is put on (86, 80): with an exit radius of 1 it closes every
+//              free cell by the exit of the barracks
+//   later      the power plant is removed again and the queue goes on
+//
+// What happens (tools/sf_headless/tests/production.rs asserts it): both factories pay in their own
+// queues at once; the money is gone after about 180 ticks and both wait until the harvesters
+// unload; the first rifleman stands on the exit cell and walks to its rally point; the next one
+// finishes behind the closed exit and waits inside (the queue holds, nothing more is paid) until the
+// block is removed. CI runs the scenario on Linux and Windows and requires the checksum in
+// production.expected.
+Scenario(
+    name: "production",
+    seed: 0x0006_0005,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("harvest_defs"),
+    buildings: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 600)]),
+    money: Some((credits_per_ore: 1, starting: [(0, 400)])),
+    production: Some((queue_limit: 5, exit_radius: 1)),
+    ticks: 4200,
+    commands: [
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (84, 74))),
+        (tick: 0, command: PlaceStructure(kind: 3, owner: 0, cell: (76, 80))),
+        (tick: 0, command: PlaceStructure(kind: 3, owner: 0, cell: (84, 80))),
+        (tick: 0, command: PlaceStructure(kind: 4, owner: 0, cell: (90, 74))),
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (96, 86))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (104, 90))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (106, 92))),
+        (tick: 1, player: 0, command: SetRally(factory: (2, 0), cell: Some((80, 92)))),
+        (tick: 1, player: 0, command: SetRally(factory: (3, 0), cell: Some((92, 92)))),
+        (tick: 1, player: 0, command: QueueUnit(factory: (1, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (1, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (3, 0), kind: 19)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (3, 0), kind: 19)),
+        (tick: 60, command: Despawn(ids: [Id(1, 0)])),
+        (tick: 250, command: PlaceStructure(kind: 1, owner: 0, cell: (86, 80))),
+        (tick: 1500, command: Despawn(ids: [Id(7, 0)])),
+    ],
+)
