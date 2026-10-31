@@ -84,13 +84,16 @@ pub fn draw_bars(
     drawn
 }
 
+/// The corners of a quad on the screen, clockwise from top left.
+pub type Quad = [(f32, f32); 4];
+
 /// The corners of the pole and of the flag of a rally flag standing at screen position `foot`
 /// (the middle of the cell), as quads (clockwise from top left).
 pub fn flag_quads(
     foot: [f32; 2],
     look: &sf_data::production_look::RallyLook,
     ui_scale: f32,
-) -> ([(f32, f32); 4], [(f32, f32); 4]) {
+) -> (Quad, Quad) {
     let (pw, ph) = (
         f32::from(look.pole_width_px) * ui_scale,
         f32::from(look.pole_height_px) * ui_scale,

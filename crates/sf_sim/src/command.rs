@@ -136,7 +136,7 @@ pub enum Command {
     CancelUnit {
         /// The factory.
         factory: EntityId,
-        /// The place in the queue, from 0.
+        /// The place in the queue, counted from zero.
         index: u8,
     },
     /// Set where the units of the factory walk to once they are out, or with `None` let them stay on
