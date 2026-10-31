@@ -167,7 +167,11 @@ mod tests {
                 .contains("pole")
         );
         let no_text = good.replacen("text_px: 15", "text_px: 0", 1);
-        assert!(ProductionLook::parse(&no_text).unwrap_err().contains("panel"));
+        assert!(
+            ProductionLook::parse(&no_text)
+                .unwrap_err()
+                .contains("panel")
+        );
         assert!(ProductionLook::parse("(bar: 3)").is_err());
         let extra = good.replacen("waiting:", "extra: 1,\n    waiting:", 1);
         assert!(ProductionLook::parse(&extra).is_err());

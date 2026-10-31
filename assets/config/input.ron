@@ -34,6 +34,13 @@
         // one, none; with one chosen the ghost follows the cursor, the select button
         // (left) places it and the order button (right) puts it away.
         BuildCycle: [(trigger: Key(KeyB))],
+        // Production (WP6.5), for the selected factory. Q and E rotate the camera, so the keys
+        // are U (queue the unit on offer), I (the next unit on offer), O (take the last one out
+        // of the queue) and G (rally point on the cell under the cursor).
+        ProduceQueue: [(trigger: Key(KeyU))],
+        ProduceCycle: [(trigger: Key(KeyI))],
+        ProduceCancel: [(trigger: Key(KeyO))],
+        RallySet: [(trigger: Key(KeyG))],
         // Selection (WP3.3). SelectClick: a click selects, a drag draws the
         // selection rectangle (own mobile units in it), a double-click
         // selects the units of the same kind in view. SelectAdd (held): a

@@ -54,6 +54,8 @@ pub struct HudStats {
     /// The credits of the local player and whether a build waits for them (WP7.4); `None` in a
     /// world without money rules.
     pub money: Option<crate::money_view::MoneyHud>,
+    /// The queue readout of the selected factory (WP6.5); empty when none is selected.
+    pub production: Vec<(String, crate::production_view::Tone)>,
 }
 
 pub struct Hud {
@@ -175,6 +177,13 @@ impl Hud {
         }
         if let Some(money) = &stats.money {
             crate::money_view::draw_panel(ui, money, crate::money_view::shipped_look());
+        }
+        if !stats.production.is_empty() {
+            crate::production_view::draw_panel(
+                ui,
+                &stats.production,
+                crate::production_view::shipped_look(),
+            );
         }
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {

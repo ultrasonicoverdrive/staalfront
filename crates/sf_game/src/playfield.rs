@@ -165,6 +165,22 @@ pub fn with_money(world: World) -> World {
         .expect("a world with storage rules that has not started takes the money rules")
 }
 
+/// `world` with production (WP6.5): the factories build the units of `defs` from queues
+/// (`production.ron`, `docs/rules/production.md`). Call it after [`with_money`], so that the
+/// units are paid for; the unit and building tables must be in already.
+///
+/// # Panics
+///
+/// If the world has no unit or building table or has started; the sandbox, its one caller, has
+/// neither problem.
+pub fn with_production(world: World, defs: &UnitDefs) -> World {
+    let settings = sf_data::production::ProductionSettings::embedded();
+    let table = sf_bridge::production_table(defs).expect("the shipped definitions give a table");
+    world
+        .with_production(sf_bridge::production_rules(&settings), table)
+        .expect("a world with unit and building tables that has not started takes production")
+}
+
 /// The terrain of `map` for the simulation: `None` for a map without a
 /// terrain layer. The layer was checked against the shipped table when the map
 /// was loaded (`Map::load`) or generated, so an error here means the map was

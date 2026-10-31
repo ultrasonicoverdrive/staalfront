@@ -52,6 +52,15 @@ pub enum Action {
     /// chosen the ghost follows the cursor, the select button places it and the order button
     /// puts it away.
     BuildCycle,
+    /// Add the unit on offer to the queue of the selected factory (WP6.5).
+    ProduceQueue,
+    /// Choose the next unit the selected factory offers (WP6.5).
+    ProduceCycle,
+    /// Take the last unit out of the queue of the selected factory, and give back what was paid
+    /// for it (WP6.5).
+    ProduceCancel,
+    /// Set the rally point of the selected factory to the cell under the cursor (WP6.5).
+    RallySet,
     /// Left button: click selects, drag draws the selection rectangle,
     /// double-click selects the units of the same kind in view (WP3.3).
     SelectClick,
@@ -88,7 +97,7 @@ impl Action {
         Action::Group9,
     ];
 
-    pub const ALL: [Action; 32] = [
+    pub const ALL: [Action; 36] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -109,6 +118,10 @@ impl Action {
         Action::OrderHold,
         Action::OrderAttackMove,
         Action::BuildCycle,
+        Action::ProduceQueue,
+        Action::ProduceCycle,
+        Action::ProduceCancel,
+        Action::RallySet,
         Action::SelectClick,
         Action::SelectAdd,
         Action::GroupAssign,
