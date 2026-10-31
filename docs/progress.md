@@ -89,7 +89,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
   `terrain_look.ron`, baked per cell, light relief shading; notes below): in review (PR #65)
 - WP2.4 Cell grid overlay by terrain type and occupancy: done (branch `wp/2.4-cell-overlay`), see "WP2.4 notes"
 
-M0b status (23-10-2026): M0b becomes due once WP2.2-2.4 are on main; then the laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is due from Tijmen.
+M0b status (23-10-2026): M0b becomes due once WP2.2-2.4 are on main; then the laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is due from Tijmen. Met (31-10-2026): the plain run of 28-10-2026, p99 3.993 ms, counts as M0b by Tijmen's decision (`docs/bench/README.md`, "M0b and M0c result").
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
 headless test checks terrain types and occupancy per cell. The headless half is met
@@ -1100,7 +1100,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a, which is in, and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`), which is built and under review (see "WP5.6b notes"); the M0c laptop run (Tijmen) comes after it.
+Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`, #80), both in (see "WP5.6b notes"). M0c is met: the laptop runs of 28-10-2026 gave a p99 frame time of 4.42 and 4.35 ms with the fight and a `sim.tick_ms` p99 of 3.2 ms (`docs/bench/README.md`, "M0b and M0c result"; `docs/bench/m0c-2026-10-28-*.json`).
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
@@ -1704,7 +1704,7 @@ so). Everything is in `docs/rules/effects.md`; this is the short version and wha
   particles) and `test_t0194_strategic_death_flash.jpg` (one small flash on the wreck's icon). The game frames are
   the three zooms of `--shots` at whatever tick the fight is at; they do not catch every effect, which is why the test
   takes its pictures at the tick of the event.
-* **Not measured**: the GPU cost on the reference card (M0c, after WP5.6b); the cap flooded in a running game; Windows
+* **Not measured**: the GPU cost on the reference card (M0c, after WP5.6b; measured 28-10-2026: gpu p99 0.6 ms with the fight, unchanged against the plain run, `docs/bench/README.md`); the cap flooded in a running game; Windows
   (CI).
 * **Cost** (release, relative, shared container, load 2.7 to 3.6, alternating runs): see `effects.md` section 9. The
   recording on the sim thread is 0.05 us per tick against a 25.6 us step in the test scenario; a quiet `FxPlayer::frame`
@@ -1762,7 +1762,7 @@ M0c laptop run. Rules and numbers are in `docs/rules/effects.md` (sections 5 and
 * **Measured**: a 45 s `sf_demo --bench --fight --windowed` under Xvfb and lavapipe (1280 x 720, debug build, so the frame times
   mean nothing): 7,075 events, nothing dropped, pool peak 1,513 of 4,096, 3,559 flashes at an anchor and 16 by the rule, up to 421
   effect instances in a frame in `mid_hold`. The cost of the lookup: `effects.md` section 9.
-* **Not done** (deliberately): the M0c laptop run itself (Tijmen); smoke and fire from the `fx_*` anchors (WP6.8); a muzzle
+* **Not done** (deliberately): the M0c laptop run itself (Tijmen; done 28-10-2026, met, see the phase 5 status); smoke and fire from the `fx_*` anchors (WP6.8); a muzzle
   per weapon for a unit with hull and turret weapons on a model with several muzzles (no shipped unit has both); sound positions
   from the anchors (WP11.7, `Anchors` is the hook); the skirmish is a light load (up to 32 events a tick), not the design's
   100 to 500 for 5,000 units all fighting.

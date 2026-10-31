@@ -8,8 +8,41 @@ over the **same 5,000 wandering units**; what is added between them is what make
 | Run | Command | What is in the scene | Result file |
 |---|---|---|---|
 | M0 (22-10-2026) | `sf_demo --bench` | the crowd, the test pack's models, nothing else | `m0-2026-10-22.json` (p99 3.895 ms) |
-| M0b (after WP2.4) | `sf_demo --bench` | the same, with the terrain materials and the cell grid | (not in this folder) |
-| **M0c (after WP5.6b)** | `sf_demo --bench --fight` | the same crowd and path, plus the **armed skirmish**: shots, hits, deaths, wrecks, smoke and tracers | the files Tijmen runs below |
+| M0b (after WP2.4) | `sf_demo --bench` | the same, with the terrain materials and the cell grid | `plain-2026-10-28.json` (p99 3.993 ms): the plain run of the M0c day counts as M0b (decision Tijmen 31-10-2026); no separate M0b run was made |
+| **M0c (after WP5.6b)** | `sf_demo --bench --fight` | the same crowd and path, plus the **armed skirmish**: shots, hits, deaths, wrecks, smoke and tracers | `m0c-2026-10-28-1.json` (p99 4.42 ms), `m0c-2026-10-28-2.json` (p99 4.35 ms); see "M0b and M0c result" |
+
+## M0b and M0c result (28-10-2026): met
+
+Run on the reference laptop (GTX 1650, DX12, 1920 x 1080 borderless, no vsync, release) from main `ddf6113` (WP11.3),
+built with `cargo build --release -p sf_demo -p sf_game -p sf_ra_extract`, then started after Tijmen's cool-down pause
+(its length was not timed); the two fight runs one after the other, then the plain run. Whether the laptop was on mains
+power and the Windows GPU setting were not recorded (the adapter in the JSON is the NVIDIA card). All three runs reached
+tick 1500 with the end values pinned at that commit (`FIGHT` and `PLAIN` below).
+
+**M0b.** No run was made right after WP2.4. The plain `sf_demo --bench` run of 28-10-2026 has the same scene as M0b (the
+crowd with the terrain materials and the cell grid) on a later main; Tijmen decided on 31-10-2026 that it counts as M0b.
+Its frame p99 is 3.993 ms against 16.7 ms, 0.1 ms above M0's 3.895 ms.
+
+| | M0 (22-10) | M0b: plain (28-10) | M0c run 1 | M0c run 2 |
+|---|---|---|---|---|
+| frames in 75 s | 26,880 | 26,874 | 24,110 | 24,458 |
+| frame ms p50 / p95 / **p99** / max | 2.955 / 3.634 / **3.895** / 10.27 | 2.967 / 3.779 / **3.993** / 5.558 | 3.206 / 4.056 / **4.42** / 16.743 | 3.148 / 4.012 / **4.35** / 6.046 |
+| cpu ms p99 | 3.677 | 3.777 | 4.208 | 4.156 |
+| gpu ms p99 | 0.726 | 0.588 | 0.600 | 0.599 |
+| hitches > 25 ms | 0 | 0 | 0 | 0 |
+| sim tick ms p50 / **p99** / max | 1.38 / **2.126** / 3.044 | 1.505 / **2.224** / 2.65 | 2.085 / **3.238** / 6.789 | 2.063 / **3.233** / 5.611 |
+| late publishes / behind passes | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+* **Criterion met**: frame p99 4.42 and 4.35 ms against 16.7 ms; every phase's p99 is between 4.06 and 4.56 ms, the fight
+  phases (`close_up`, `mid_hold`, `low_pass`) included. `sim.tick_ms` p99 3.2 ms against the 50 ms tick.
+* **What the fight costs**, against the plain run of the same day: about +0.4 ms frame p99, almost all CPU (+0.4 ms cpu
+  p99; gpu p99 unchanged at 0.6 ms), and +1.0 ms sim tick p99.
+* **Effects**: about 12,360 events per run, `fx_dropped`, `particles_dropped`, `smoke_refused` and `tracer_dots_dropped`
+  all 0; `particles_peak` 2,027 and 2,014 of 4,096; 3,436 and 3,428 flashes at an anchor against 12 by the rule; up to
+  491 effect instances in a frame. No reason to lower `max_particles`.
+* **The 16.7 ms max of run 1** is one CPU spike early in `close_up`: `frame_ms` is the time since the previous frame
+  started, and the callback before frame 411 took 16.5 ms of CPU (`cpu_ms.max` 16.536), not a GPU or present stall.
+  Run 2's max is 6.0 ms. Both stay under the 25 ms hitch threshold.
 
 ## M0c, step by step (Tijmen, Windows laptop, PowerShell)
 
