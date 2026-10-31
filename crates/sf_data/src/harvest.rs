@@ -56,6 +56,22 @@ pub struct HarvestSettings {
     pub mine_lose_tenths: u16,
     /// Tenths of a cell from the dock point that count as docked when a walk is over.
     pub dock_reach_tenths: u16,
+    /// Choice of refinery: ticks one cell of straight-line distance to the dock point is worth.
+    pub travel_cost: u16,
+    /// Ticks every harvester already committed to a refinery adds to the expected wait there.
+    pub queue_cost: u16,
+    /// Ticks a refinery has to be cheaper than the one a driving harvester is bound for before it switches.
+    pub switch_margin: u16,
+    /// Ticks between two looks of a driving harvester at the other refineries.
+    pub recheck_period: u16,
+    /// Cells beside the approach where queued harvesters wait; 0 leaves them where they stand.
+    pub queue_gap: u16,
+    /// Cells out from the dock point of the first row of queue spots.
+    pub queue_start: u16,
+    /// Cells between two rows of queue spots.
+    pub queue_step: u16,
+    /// Rows of queue spots (two a row); a longer queue shares the last row.
+    pub queue_rows: u16,
 }
 
 /// Why a harvest file was refused.
@@ -110,11 +126,30 @@ impl HarvestSettings {
             ("mine_reach_tenths", s.mine_reach_tenths, 320),
             ("mine_lose_tenths", s.mine_lose_tenths, 320),
             ("dock_reach_tenths", s.dock_reach_tenths, 320),
+            ("travel_cost", s.travel_cost, 1000),
+            ("recheck_period", s.recheck_period, 1000),
+            ("queue_step", s.queue_step, 8),
+            ("queue_rows", s.queue_rows, 32),
         ];
         for (name, value, most) in bounded {
             if value == 0 || value > most {
                 return Err(HarvestError::Invalid(format!(
                     "{name} must be 1 to {most}, not {value}"
+                )));
+            }
+        }
+        // These may be 0 (off): no queue term, no hysteresis, queued harvesters stay where they
+        // stand, the first row of spots at the dock point.
+        let from_zero = [
+            ("queue_cost", s.queue_cost, 10_000),
+            ("switch_margin", s.switch_margin, 10_000),
+            ("queue_gap", s.queue_gap, 32),
+            ("queue_start", s.queue_start, 32),
+        ];
+        for (name, value, most) in from_zero {
+            if value > most {
+                return Err(HarvestError::Invalid(format!(
+                    "{name} must be 0 to {most}, not {value}"
                 )));
             }
         }

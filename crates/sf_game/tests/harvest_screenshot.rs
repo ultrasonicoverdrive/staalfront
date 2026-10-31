@@ -20,7 +20,7 @@ use sf_data::map::Map;
 use sf_data::units::UnitDefs;
 use sf_game::cargo_view;
 use sf_game::ore_view::OreView;
-use sf_game::playfield::{make_world, with_buildings, with_harvest, with_movement};
+use sf_game::playfield::{make_world, with_buildings, with_movement};
 use sf_game::roster::Roster;
 use sf_game::selection_view::FrameGeometry;
 use sf_game::sim_snapshot::SimSnapshot;
@@ -96,6 +96,12 @@ struct Scene {
 
 impl Scene {
     fn new() -> Scene {
+        Scene::build(&[(104, 90), (106, 92), (94, 91)], None)
+    }
+
+    /// The same refinery with harvesters at `spawns` (slots 1, 2, ...), and the shipped harvest
+    /// rules unless `edit` changes them.
+    fn build(spawns: &[(i32, i32)], edit: Option<fn(&mut sf_sim::HarvestRules)>) -> Scene {
         let map = map();
         let ground = Arc::new(TerrainGround::new(&map));
         let defs = UnitDefs::embedded();
@@ -104,7 +110,14 @@ impl Scene {
             .unwrap()
             .with_units(sf_bridge::unit_table(&defs).unwrap())
             .unwrap();
-        let mut world = with_harvest(with_buildings(with_movement(world, &defs), &defs), &defs);
+        let world = with_buildings(with_movement(world, &defs), &defs);
+        let mut rules = sf_bridge::harvest_rules(&sf_data::harvest::HarvestSettings::embedded());
+        if let Some(edit) = edit {
+            edit(&mut rules);
+        }
+        let mut world = world
+            .with_harvest(rules, &sf_bridge::harvester_kinds(&defs))
+            .expect("the harvest rules");
         let kind = |name: &str| Kind(defs.kind_of(name).unwrap());
         let at = |c: i32, r: i32| {
             sf_math::Vec2::new(
@@ -123,7 +136,7 @@ impl Scene {
                 },
             )
             .unwrap();
-        for (x, y) in [(104, 90), (106, 92), (94, 91)] {
+        for &(x, y) in spawns {
             world
                 .schedule(
                     Tick(0),
@@ -341,4 +354,72 @@ fn the_cargo_bars_follow_the_load_and_the_ore_cells_drain() {
     // Fewer fill pixels at the refinery than when the same two stood there full: the bay's bar
     // is part of the way down.
     assert!(amber(&unloading) + count(&unloading, cargo_view::FULL, 12) > 0);
+}
+
+/// Seven harvesters on the one refinery, shot when the queue stands: with the queue spots
+/// (WP7.5) the queued harvesters stand beside the approach, with `queue_gap: 0` (the rule of
+/// WP7.2) they stand in it. The tick is in the file name.
+#[test]
+fn queued_harvesters_stand_beside_the_approach_in_the_picture() {
+    let spawns = [
+        (104, 90),
+        (106, 92),
+        (106, 88),
+        (108, 90),
+        (108, 94),
+        (104, 94),
+        (110, 92),
+    ];
+    let mut r = None;
+    // The dock point is (99.5, 88.5); the approach is the row y = 88.5 to the east of it.
+    let mut shoot_queue = |gap_off: bool, name: &str| -> (u64, Vec<(f64, f64)>) {
+        let edit: Option<fn(&mut sf_sim::HarvestRules)> = if gap_off {
+            Some(|rules| rules.queue_gap = 0)
+        } else {
+            None
+        };
+        let mut scene = Scene::build(&spawns, edit);
+        let r = r.get_or_insert_with(|| renderer(&scene.map));
+        let t = scene.run_until(9000, |w| {
+            w.dock_of(EntityId::new(0, 0))
+                .is_some_and(|d| d.queue.len() >= 3)
+        });
+        // Let the queue settle: the ones queued walk to their spots.
+        for _ in 0..120 {
+            scene.world.step();
+        }
+        scene.sync();
+        let dock = scene.world.dock_of(EntityId::new(0, 0)).unwrap();
+        let standing: Vec<(f64, f64)> = dock
+            .queue
+            .iter()
+            .map(|&q| {
+                let p = scene.world.get(q).unwrap().pos;
+                (
+                    p.x.raw() as f64 / 65536.0 - 99.5,
+                    p.y.raw() as f64 / 65536.0 - 88.5,
+                )
+            })
+            .collect();
+        let cam = scene.camera(0.25, (104.0, 88.0));
+        let img = scene.shoot(r, &cam, true);
+        let tick = scene.world.tick().0;
+        save(&format!("queue_t{tick:05}_{name}.png"), &img);
+        println!("{name} (t {t} to {tick}): {standing:?}");
+        (tick, standing)
+    };
+    let (_, with_spots) = shoot_queue(false, "beside_the_approach");
+    let (_, without) = shoot_queue(true, "in_the_approach_old_rule");
+    // With the spots no queued harvester stands on the line of the approach: the spots are three
+    // cells to the side, and a harvester pushed by the crowd or stopped short of its spot is still
+    // more than a cell off the line (measured: 1.3 to 4.4 cells). Without them one stands in it
+    // (measured: 0.3 cells).
+    assert!(with_spots.len() >= 3);
+    for &(_, dy) in &with_spots {
+        assert!(
+            dy.abs() >= 1.0,
+            "queued at {dy} cells from the approach: {with_spots:?}"
+        );
+    }
+    assert!(without.iter().any(|&(_, dy)| dy.abs() < 1.0), "{without:?}");
 }

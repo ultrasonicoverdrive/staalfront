@@ -113,6 +113,31 @@ pub struct HarvestRules {
     /// How near (tenths of a cell) to the dock point a harvester has to be, when its walk is over,
     /// to count as docked. At least 1, at most 320 (inclusive).
     pub dock_reach_tenths: u16,
+    /// Choice of refinery (WP7.5): ticks one cell of straight-line distance to the dock point is
+    /// worth. At least 1, at most 1000 (inclusive).
+    pub travel_cost: u16,
+    /// Ticks every harvester already committed to a refinery (driving to it, queued, granted or in
+    /// the bay) adds to the expected wait there. At most 10000 (inclusive); 0 chooses by distance
+    /// alone.
+    pub queue_cost: u16,
+    /// Ticks a refinery has to be cheaper than the one a driving harvester is bound for before it
+    /// switches. At most 10000 (inclusive).
+    pub switch_margin: u16,
+    /// Ticks between two looks of a driving harvester at the other refineries. At least 1, at
+    /// most 1000 (inclusive).
+    pub recheck_period: u16,
+    /// Cells to the side of the approach (the line out from the dock point along the exit side)
+    /// where the queued harvesters wait; 0 leaves them standing where they were told to wait. At
+    /// most 32 (inclusive).
+    pub queue_gap: u16,
+    /// Cells out from the dock point along the exit side of the first row of queue spots. At most
+    /// 32 (inclusive).
+    pub queue_start: u16,
+    /// Cells between two rows of queue spots. At least 1, at most 8 (inclusive).
+    pub queue_step: u16,
+    /// Rows of queue spots (two spots a row, one on each side); a longer queue shares the last
+    /// row. At least 1, at most 32 (inclusive).
+    pub queue_rows: u16,
 }
 
 impl HarvestRules {
@@ -145,6 +170,18 @@ impl HarvestRules {
             && self.mine_lose_tenths <= 320
             && self.dock_reach_tenths >= 1
             && self.dock_reach_tenths <= 320
+            && self.travel_cost >= 1
+            && self.travel_cost <= 1000
+            && self.queue_cost <= 10_000
+            && self.switch_margin <= 10_000
+            && self.recheck_period >= 1
+            && self.recheck_period <= 1000
+            && self.queue_gap <= 32
+            && self.queue_start <= 32
+            && self.queue_step >= 1
+            && self.queue_step <= 8
+            && self.queue_rows >= 1
+            && self.queue_rows <= 32
     }
 }
 
@@ -266,6 +303,9 @@ struct Core {
     /// The order the harvester gave itself and still expects to find as its current one.
     own: Order,
     tries: u8,
+    /// Queued (WP7.5): the queue spot the harvester last walked to, `1 + 2 * row + side` (side 1
+    /// is the negative lateral side), or 0 when it has none yet.
+    spot: u8,
 }
 
 impl Core {
@@ -281,6 +321,7 @@ impl Core {
         dock: None,
         own: Order::Idle,
         tries: 0,
+        spot: 0,
     };
 }
 
@@ -663,15 +704,93 @@ impl Harvest {
         best.map(|(_, d)| d)
     }
 
+    /// What it is expected to cost harvester `pos` to unload at dock `k`, in ticks: the drive
+    /// (straight-line cells times `travel_cost`) plus `queue_cost` for every harvester already
+    /// committed to it, not counting `current` (a harvester that is already bound for it) itself.
+    fn dock_cost(&self, k: usize, pos: Vec2, current: Option<EntityId>, load: &[u16]) -> i64 {
+        let d = &self.docks[k];
+        let travel = (d.point - pos)
+            .length()
+            .mul_int(i64::from(self.rules.travel_cost))
+            .round_int();
+        let others = load[k].saturating_sub(u16::from(current == Some(d.id)));
+        travel.saturating_add(i64::from(others) * i64::from(self.rules.queue_cost))
+    }
+
+    /// The standing dock of `owner` with the lowest expected cost for a harvester at `pos`
+    /// ([`Self::dock_cost`]): returns its index in `self.docks` and the cost. A tie goes to the
+    /// nearer dock point (the smaller squared distance), then to the lower slot.
+    fn choose_dock(
+        &self,
+        owner: PlayerId,
+        pos: Vec2,
+        current: Option<EntityId>,
+        load: &[u16],
+    ) -> Option<(usize, i64)> {
+        let mut best: Option<(i64, Fx, usize)> = None;
+        for (k, d) in self.docks.iter().enumerate() {
+            if d.owner != owner {
+                continue;
+            }
+            let key = (
+                self.dock_cost(k, pos, current, load),
+                (d.point - pos).length_squared(),
+            );
+            if best.is_none_or(|(c, dist, _)| key < (c, dist)) {
+                best = Some((key.0, key.1, k));
+            }
+        }
+        best.map(|(cost, _, k)| (k, cost))
+    }
+
+    /// How many harvesters are committed to each dock (driving to it, queued, granted or in the
+    /// bay), per position in `self.docks`, at the start of the decide pass.
+    fn committed(&self) -> Vec<u16> {
+        let mut load = vec![0u16; self.docks.len()];
+        for &i in &self.live {
+            let c = &self.units[i as usize].core;
+            if matches!(c.phase, Phase::ToDock(_) | Phase::Unload)
+                && let Some(dock) = c.dock
+                && let Some(k) = self.dock_index(dock)
+            {
+                load[k] = load[k].saturating_add(1);
+            }
+        }
+        load
+    }
+
+    /// The queue spot in row `row` on the positive (`minus` false) or the negative side of the
+    /// approach of `d`: `queue_gap` cells to the side of the line out from the dock point along
+    /// the exit side, `queue_start + row * queue_step` cells out (the last row, `queue_rows`,
+    /// takes the rest).
+    fn queue_point(&self, w: &World, d: &Dock, row: usize, minus: bool) -> Vec2 {
+        let (dx, dy) = side_vector(d.side);
+        let r = &self.rules;
+        let row = row.min(usize::from(r.queue_rows) - 1) as i64;
+        let along = i64::from(r.queue_start) + row * i64::from(r.queue_step);
+        let lateral = if minus {
+            -i64::from(r.queue_gap)
+        } else {
+            i64::from(r.queue_gap)
+        };
+        let (ox, oy) = (dx * along + dy * lateral, dy * along + dx * lateral);
+        let (width, height) = (i64::from(w.config.width), i64::from(w.config.height));
+        let x = (d.exit.0 + ox).clamp(0, width - 1);
+        let y = (d.exit.1 + oy).clamp(0, height - 1);
+        Vec2::new(Fx::from_i64(x) + Fx::HALF, Fx::from_i64(y) + Fx::HALF)
+    }
+
+    /// Which side of the approach of `d` the position `pos` is on: `true` for the negative side.
+    fn on_minus_side(d: &Dock, pos: Vec2) -> bool {
+        let (dx, dy) = side_vector(d.side);
+        let from = pos - d.point;
+        (from.x.mul_int(dy) + from.y.mul_int(dx)).is_negative()
+    }
+
     /// Where a harvester without ore waits: a few cells out from the dock along its exit side,
     /// spread sideways by the harvester's slot so that they do not stand on one spot.
     fn park_point(&self, w: &World, d: &Dock, slot: u32) -> Vec2 {
-        let (dx, dy): (i64, i64) = match d.side {
-            Side::PosX => (1, 0),
-            Side::NegX => (-1, 0),
-            Side::PosY => (0, 1),
-            Side::NegY => (0, -1),
-        };
+        let (dx, dy) = side_vector(d.side);
         let (spread, distance) = (
             i64::from(self.rules.park_spread),
             i64::from(self.rules.park_distance),
@@ -932,19 +1051,23 @@ impl Harvest {
     // ---- deciding -------------------------------------------------------------------------
 
     fn decide_all(&self, w: &World) -> Vec<(u32, Plan)> {
-        self.live
-            .iter()
-            .map(|&i| (i, self.decide(w, i as usize)))
-            .collect()
+        // The harvesters committed to each dock; a harvester that chooses a dock in this pass is
+        // counted at once, so the ones after it (in slot order) see it.
+        let mut load = self.committed();
+        let mut plans = Vec::with_capacity(self.live.len());
+        for &i in &self.live {
+            plans.push((i, self.decide(w, i as usize, &mut load)));
+        }
+        plans
     }
 
     /// Looks for ore for harvester `i` and sets its next step in `plan`.
-    fn search(&self, w: &World, i: usize, plan: &mut Plan) {
+    fn search(&self, w: &World, i: usize, plan: &mut Plan, load: &mut [u16]) {
         let width = w.config.width;
         plan.focus = plan.core.focus;
         let c = &mut plan.core;
         if c.load >= self.rules.capacity {
-            return self.go_return(w, i, plan);
+            return self.go_return(w, i, plan, load);
         }
         let from = if c.focus != NO_CELL {
             cell_of_index(c.focus, width)
@@ -979,7 +1102,7 @@ impl Harvest {
                 c.own = Order::Move(to);
                 plan.act = Act::Go(to);
             }
-            None if c.load > 0 => self.go_return(w, i, plan),
+            None if c.load > 0 => self.go_return(w, i, plan, load),
             None => self.park(w, i, plan),
         }
     }
@@ -1018,19 +1141,23 @@ impl Harvest {
         }
     }
 
-    /// Carrying ore: drive to the nearest standing refinery, or wait for one.
-    fn go_return(&self, w: &World, i: usize, plan: &mut Plan) {
+    /// Carrying ore: drive to the standing refinery with the lowest expected cost
+    /// ([`Self::choose_dock`]), or wait for one.
+    fn go_return(&self, w: &World, i: usize, plan: &mut Plan, load: &mut [u16]) {
         let pos = w.entities.pos[i];
         let owner = w.entities.owner[i];
         let c = &mut plan.core;
         c.cell = NO_CELL;
         c.focus = NO_CELL;
         c.tries = 0;
-        match self.nearest_dock(owner, pos) {
-            Some(d) => {
+        match self.choose_dock(owner, pos, None, load) {
+            Some((k, _)) => {
+                let d = &self.docks[k];
+                load[k] = load[k].saturating_add(1);
                 c.phase = Phase::ToDock(Call::Driving);
                 c.dock = Some(d.id);
-                c.wait = 0;
+                c.wait = self.rules.recheck_period;
+                c.spot = 0;
                 c.own = Order::Move(d.point);
                 plan.act = Act::Go(d.point);
             }
@@ -1046,7 +1173,7 @@ impl Harvest {
         }
     }
 
-    fn decide(&self, w: &World, i: usize) -> Plan {
+    fn decide(&self, w: &World, i: usize, load: &mut [u16]) -> Plan {
         let e = &w.entities;
         let hv = &self.units[i];
         let id = EntityId::new(i as u32, e.generation[i]);
@@ -1129,14 +1256,27 @@ impl Harvest {
                     }
                     Reply::Granted => {
                         if matches!(c.phase, Phase::ToDock(_)) {
+                            // Called out of the queue while walking to its spot: drive in now.
+                            if c.phase == Phase::ToDock(Call::Queued)
+                                && c.own != Order::Idle
+                                && let Some(d) = c.dock.and_then(|d| self.dock_of(d))
+                            {
+                                c.own = Order::Move(d.point);
+                                plan.act = Act::Go(d.point);
+                            }
                             c.phase = Phase::ToDock(Call::Granted);
                             c.tries = 0;
+                            c.spot = 0;
                         }
                     }
                     Reply::Queued(_) => {
                         if matches!(c.phase, Phase::ToDock(Call::Called | Call::Driving)) {
                             c.phase = Phase::ToDock(Call::Queued);
-                            if c.own != Order::Idle {
+                            c.spot = 0;
+                            c.tries = 0;
+                            // Without queue spots it stands where it is; with them the walk to its
+                            // spot is ordered below.
+                            if self.rules.queue_gap == 0 && c.own != Order::Idle {
                                 c.own = Order::Idle;
                                 plan.act = Act::Clear;
                             }
@@ -1165,7 +1305,7 @@ impl Harvest {
                 if plan.core.wait > 0 {
                     plan.core.wait -= 1;
                 } else {
-                    self.search(w, i, &mut plan);
+                    self.search(w, i, &mut plan, load);
                 }
             }
             Phase::Park => {
@@ -1173,14 +1313,14 @@ impl Harvest {
                     plan.core.wait -= 1;
                 } else {
                     plan.core.phase = Phase::Search;
-                    self.search(w, i, &mut plan);
+                    self.search(w, i, &mut plan, load);
                 }
             }
             Phase::NoDock => {
                 if plan.core.wait > 0 {
                     plan.core.wait -= 1;
                 } else {
-                    self.go_return(w, i, &mut plan);
+                    self.go_return(w, i, &mut plan, load);
                 }
             }
             Phase::ToOre => {
@@ -1188,7 +1328,7 @@ impl Harvest {
                 let cell = cell_of_index(index, width);
                 if w.ore_at(cell) == 0 {
                     plan.core.cell = NO_CELL;
-                    self.search(w, i, &mut plan);
+                    self.search(w, i, &mut plan, load);
                 } else if (centre(index, width) - pos).length_squared()
                     <= tenths(rules.mine_start_tenths).square()
                 {
@@ -1216,7 +1356,7 @@ impl Harvest {
                         if c.tries >= rules.max_tries {
                             c.bad = index;
                             c.cell = NO_CELL;
-                            self.search(w, i, &mut plan);
+                            self.search(w, i, &mut plan, load);
                         } else {
                             // The walk ended short (a jam gave it up): ask for a new route.
                             c.own = Order::Move(to);
@@ -1232,10 +1372,10 @@ impl Harvest {
                 let held = w.ore_at(cell);
                 if plan.core.load >= rules.capacity {
                     plan.core.cell = NO_CELL;
-                    self.go_return(w, i, &mut plan);
+                    self.go_return(w, i, &mut plan, load);
                 } else if held == 0 {
                     plan.core.cell = NO_CELL;
-                    self.search(w, i, &mut plan);
+                    self.search(w, i, &mut plan, load);
                 } else if (to - pos).length_squared() > tenths(rules.mine_lose_tenths).square() {
                     let c = &mut plan.core;
                     c.phase = Phase::ToOre;
@@ -1254,7 +1394,7 @@ impl Harvest {
             Phase::ToDock(call) => {
                 let Some(d) = dock_pt(plan.core.dock) else {
                     // The refinery is gone (destroyed, not standing): keep the load, choose again.
-                    self.go_return(w, i, &mut plan);
+                    self.go_return(w, i, &mut plan, load);
                     return plan;
                 };
                 let dock_id = d.id;
@@ -1268,6 +1408,13 @@ impl Harvest {
                             plan.core.wait = rules.call_timeout;
                         } else if ended {
                             self.dock_walk_failed(&mut plan, dock_id, point, false, w, i);
+                        } else if plan.core.wait > 0 {
+                            plan.core.wait -= 1;
+                        } else {
+                            plan.core.wait = rules.recheck_period;
+                            if !d.knows(id) {
+                                self.recheck(w, i, d, &mut plan, load);
+                            }
                         }
                     }
                     Call::Called => {
@@ -1281,6 +1428,10 @@ impl Harvest {
                         if !d.knows(id) {
                             // The dock does not remember us: ask again.
                             plan.core.phase = Phase::ToDock(Call::Driving);
+                            plan.core.spot = 0;
+                            plan.core.wait = rules.recheck_period;
+                        } else {
+                            self.queue_walk(w, d, id, pos, ended, &mut plan);
                         }
                     }
                     Call::Granted => {
@@ -1305,7 +1456,7 @@ impl Harvest {
                         plan.core.wait = 0;
                         plan.core.dock = None;
                     } else {
-                        self.go_return(w, i, &mut plan);
+                        self.go_return(w, i, &mut plan, load);
                     }
                 }
                 Some(d) => {
@@ -1316,6 +1467,97 @@ impl Harvest {
             },
         }
         plan
+    }
+
+    /// A queued harvester walks to its queue spot, and again when the queue moves up and its
+    /// spot changes. It keeps the side of the approach it came from (so it never crosses the
+    /// approach), and takes the next row after the harvesters ahead of it on that side. A walk
+    /// that ends short of the spot is tried again `max_tries` times for the same spot and then
+    /// given up: the harvester stands where it is until its spot changes.
+    fn queue_walk(
+        &self,
+        w: &World,
+        d: &Dock,
+        id: EntityId,
+        pos: Vec2,
+        ended: bool,
+        plan: &mut Plan,
+    ) {
+        if self.rules.queue_gap == 0 {
+            return;
+        }
+        let Some(k) = d.queue.iter().position(|&q| q == id) else {
+            return;
+        };
+        let c = &mut plan.core;
+        let minus = if c.spot == 0 {
+            Self::on_minus_side(d, pos)
+        } else {
+            (c.spot - 1) & 1 == 1
+        };
+        // The row: the harvesters ahead of it in the queue that wait on the same side.
+        let row = d.queue[..k]
+            .iter()
+            .filter(|&&q| {
+                let ahead = &self.units[q.index() as usize].core;
+                let ahead_minus = if ahead.spot != 0 {
+                    (ahead.spot - 1) & 1 == 1
+                } else {
+                    Self::on_minus_side(d, w.entities.pos[q.index() as usize])
+                };
+                ahead_minus == minus
+            })
+            .count();
+        let row = row.min(usize::from(self.rules.queue_rows) - 1);
+        let spot = (1 + row * 2 + usize::from(minus)) as u8;
+        let target = self.queue_point(w, d, row, minus);
+        let near = tenths(self.rules.park_near_tenths).square();
+        if c.spot != spot {
+            c.spot = spot;
+            c.tries = 0;
+        } else if ended {
+            if (target - pos).length_squared() <= near {
+                return;
+            }
+            c.tries += 1;
+            if c.tries >= self.rules.max_tries {
+                return;
+            }
+        } else {
+            return;
+        }
+        if (target - pos).length_squared() > near {
+            c.own = Order::Move(target);
+            plan.act = Act::Go(target);
+        } else if c.own != Order::Idle {
+            c.own = Order::Idle;
+            plan.act = Act::Clear;
+        }
+    }
+
+    /// A harvester driving to a refinery (not yet near enough to ask) looks at the others: if one
+    /// is cheaper than its own by more than `switch_margin` ticks, it drives there instead.
+    fn recheck(&self, w: &World, i: usize, own: &Dock, plan: &mut Plan, load: &mut [u16]) {
+        let owner = own.owner;
+        let pos = w.entities.pos[i];
+        let Some(mine) = self.dock_index(own.id) else {
+            return;
+        };
+        let Some((best, cost)) = self.choose_dock(owner, pos, Some(own.id), load) else {
+            return;
+        };
+        let here = self.dock_cost(mine, pos, Some(own.id), load);
+        if best == mine || cost.saturating_add(i64::from(self.rules.switch_margin)) >= here {
+            return;
+        }
+        let d = &self.docks[best];
+        load[best] = load[best].saturating_add(1);
+        load[mine] = load[mine].saturating_sub(1);
+        let c = &mut plan.core;
+        c.dock = Some(d.id);
+        c.tries = 0;
+        c.own = Order::Move(d.point);
+        plan.act = Act::Go(d.point);
     }
 
     /// A walk to the dock point ended short of it: try the walk again (a new route), or give the
@@ -1448,6 +1690,14 @@ impl Harvest {
             r.mine_reach_tenths,
             r.mine_lose_tenths,
             r.dock_reach_tenths,
+            r.travel_cost,
+            r.queue_cost,
+            r.switch_margin,
+            r.recheck_period,
+            r.queue_gap,
+            r.queue_start,
+            r.queue_step,
+            r.queue_rows,
         ] {
             h.write_bytes(&v.to_le_bytes());
         }
@@ -1474,6 +1724,7 @@ impl Harvest {
             write_option_id(h, c.dock);
             c.own.write_hash(h);
             h.write_u8(c.tries);
+            h.write_u8(c.spot);
             h.write_u64(hv.mail.len() as u64);
             for m in &hv.mail {
                 match *m {
@@ -1521,6 +1772,16 @@ impl Harvest {
                 });
             }
         }
+    }
+}
+
+/// The unit vector out of a refinery's exit side.
+fn side_vector(side: Side) -> (i64, i64) {
+    match side {
+        Side::PosX => (1, 0),
+        Side::NegX => (-1, 0),
+        Side::PosY => (0, 1),
+        Side::NegY => (0, -1),
     }
 }
 

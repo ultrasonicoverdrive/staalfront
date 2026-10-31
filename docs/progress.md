@@ -2087,7 +2087,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
 
 ## Phase 7 — Economy
 
-Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch `wp/7.4-money` (PR #90); WP7.3b is not started.
+Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch `wp/7.4-money` (PR #90); WP7.5 is built on branch `wp/7.5-refinery-choice`, stacked on it; WP7.3b is not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2141,7 +2141,7 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch 
   by straight-line distance, not route length or queue length; the harvester's own re-issue of a walk the crowd
   gave up (three tries) has no test of its own (the traffic test goes through the crowd's replan); no alliances;
   the sandbox without `--harvest` has no harvest rules.
-- **Gap: throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
+- **Gap (closed by WP7.5, see its notes): throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
   harvester goes to the same bay and the queue stands in its approach. The reviewer of #78 measured (three
   refineries, 4000 ticks): 3 harvesters deliver 2400, 6 deliver 3200, 12 deliver 3200, 24 deliver 2271, 48 deliver
   618. The 48/50-harvester measurements in `economy.md` (cost, minimap uploads) are therefore of a jammed system.
@@ -2187,6 +2187,31 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch 
   the sandbox; no refund, sell or repair; the screenshot harness shows no stage models.
 - **Fix round 1:** the HUD reads the credits from `World::credits` for every player id, so a player that owns no
   entity shows its money (it showed 0 before); construction payment is documented as greedy by lowest slot, not fair.
+
+- WP7.5 Refinery choice and queues (stacked on WP7.4, PR against `main`): a full harvester goes to the refinery with the
+  lowest expected wait, `round(cells x travel_cost) + committed x queue_cost` ticks (ties: cost, distance, lower
+  slot), looks again every `recheck_period` ticks while driving and switches only past `switch_margin` ticks;
+  a queued harvester walks to a spot beside the approach (its own side, rows `queue_step` apart) so the holder
+  reaches the bay. Eight new numbers in `assets/config/harvest.ron` (validated, hashed, mapped through
+  `sf_data`, `sf_bridge` and the scenario spec), `docs/rules/economy.md` ("Refinery choice and queues").
+  Review measurement (3 refineries, 4000 ticks, 3, 6, 12, 24, 48 harvesters, shipped ore): 2310, 3642, 3807, 2805, 2321
+  against 2400, 3200, 3200, 2271, 618; with harvesters that fill in 10 ticks (the bays are the limit): 5180, 7510,
+  9050, 9990, 7310 against 3800, 3600, 3000, 2600, 1400. Pinned scenarios `harvest`, `storage`, `money` moved
+  (cause measured: the queue spots; `economy.md`, "Checksum and pins"); no earlier-phase pin moved.
+  Screenshots in `docs/screenshots/wp7.5`.
+
+### WP7.5 notes
+
+- **What is not fixed:** with the shipped mining, 24 and 48 harvesters on the one 28-cell field still deliver less
+  than 12 (the field is the limit and 22 to 28 harvesters crowd in it; the bays are busy at most 15 percent of the
+  time); the drive in the cost is a straight line, not a route; parked harvesters still stand partly in the
+  approach; `recheck_period` has no test of its own.
+- **Decision:** a harvester in the queue never leaves for another refinery (it would give up its place); choice
+  happens on leaving the field and while driving. The side of the queue spot is the side the harvester came from.
+- **Cost:** `harvest_cost` +8 microseconds a tick on 150 (inside the run-to-run spread); `wander_5000`, which has no
+  harvest rules, ran 3.5 percent slower in eight alternating pairs (same checksum), cause not found (layout).
+- **Flaky under load:** `sim_thread::a_slow_sim_does_not_delay_the_frames` (wall clock) failed once in a full
+  workspace run while the machine was busy and passed alone; see item 28 above for the same kind.
 
 ## WP11.3 notes: positional sound
 
