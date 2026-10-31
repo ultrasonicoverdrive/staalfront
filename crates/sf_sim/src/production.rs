@@ -945,3 +945,142 @@ fn table_fits(table: &ProductionTable, units: &UnitTable, buildings: &BuildingTa
         .iter()
         .all(|&(s, u)| buildings.get(s).is_some_and(|b| b.exit_side.is_some()) && mobile(u))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buildings::{BuildingStats, BuildingTable, Side};
+    use crate::units::{Footprint, UnitStats};
+    use sf_math::Fx;
+
+    const FACTORY: Kind = Kind(1);
+    const MAN: Kind = Kind(2);
+
+    fn world() -> World {
+        let fp = Footprint {
+            width: 2,
+            height: 2,
+        };
+        let man = UnitStats {
+            kind: MAN,
+            hp: 10,
+            movement_class: Some(1),
+            speed_per_tick: Fx::from_ratio(1, 10),
+            turn_per_tick: 8,
+            size: Fx::from_ratio(1, 2),
+            footprint: None,
+            weapon_range: Fx::ZERO,
+            turret_per_tick: 0,
+        };
+        let factory = UnitStats {
+            kind: FACTORY,
+            hp: 50,
+            movement_class: None,
+            speed_per_tick: Fx::ZERO,
+            turn_per_tick: 0,
+            size: Fx::ZERO,
+            footprint: Some(fp),
+            ..man
+        };
+        let building = BuildingStats {
+            kind: FACTORY,
+            footprint: fp,
+            function: BuildingFunction::InfantryFactory,
+            exit_side: Some(Side::PosX),
+            build_ticks: 10,
+            cost: Some(10),
+            power: 0,
+            factions: 1,
+            requires: Vec::new(),
+            build_radius: 0,
+        };
+        let table = ProductionTable::new(
+            vec![UnitBuild {
+                kind: MAN,
+                factory: BuildingFunction::InfantryFactory,
+                cost: 5,
+                build_ticks: 10,
+                factions: 1,
+                requires: Vec::new(),
+            }],
+            Vec::new(),
+        )
+        .unwrap();
+        World::new(crate::world::WorldConfig::new(1).with_map_size(32, 32))
+            .unwrap()
+            .with_units(UnitTable::new(vec![man, factory]).unwrap())
+            .unwrap()
+            .with_buildings(BuildingTable::new(vec![building]).unwrap())
+            .unwrap()
+            .with_production(
+                ProductionRules {
+                    queue_limit: 3,
+                    exit_radius: 2,
+                },
+                table,
+            )
+            .unwrap()
+            .with_player_factions(&[(PlayerId(0), 1)])
+            .unwrap()
+    }
+
+    fn send(w: &mut World, command: Command) {
+        let tick = w.tick();
+        w.schedule(tick, PlayerId(0), command).unwrap();
+        w.step();
+    }
+
+    #[test]
+    fn a_factory_at_zero_hit_points_stands_still_and_keeps_its_queue() {
+        let mut w = world();
+        send(
+            &mut w,
+            Command::PlaceStructure {
+                kind: FACTORY,
+                cell: Cell::new(10, 10),
+                owner: PlayerId(0),
+            },
+        );
+        let f = w.occupant_at(Cell::new(10, 10)).unwrap();
+        send(
+            &mut w,
+            Command::QueueUnit {
+                factory: f,
+                kind: MAN,
+            },
+        );
+        for _ in 0..3 {
+            w.step();
+        }
+        let done = w.production_of(f).unwrap().front_permille;
+        assert!(done > 0 && done < 1000);
+        // No destruction rules here: a wreck stays where it fell, and does not stand.
+        w.entities.hp[f.index() as usize] = 0;
+        for _ in 0..30 {
+            w.step();
+        }
+        let v = w.production_of(f).unwrap();
+        assert_eq!(v.status, FactoryStatus::NotStanding);
+        assert_eq!(v.front_permille, done);
+        assert_eq!(v.queue.len(), 1);
+        assert!(w.produced().is_empty());
+        // New orders are refused while it lies there.
+        send(
+            &mut w,
+            Command::QueueUnit {
+                factory: f,
+                kind: MAN,
+            },
+        );
+        assert_eq!(
+            w.production_rejections().last().map(|r| r.reason),
+            Some(ProductionError::NotStanding)
+        );
+        // Repaired, it goes on from where it stopped.
+        w.entities.hp[f.index() as usize] = 50;
+        for _ in 0..20 {
+            w.step();
+        }
+        assert!(w.production_of(f).unwrap().queue.is_empty());
+    }
+}

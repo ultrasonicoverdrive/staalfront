@@ -148,6 +148,92 @@ pub struct BuildingDef {
 /// far above any placeholder, and small enough that a player's sum never comes near `u64`.
 pub const MAX_STORAGE: u32 = 1_000_000;
 
+/// The function of the factory that builds a unit of `category` (WP6.5): infantry come out of
+/// the infantry factory, vehicles out of the vehicle factory, vessels out of the vessel factory.
+/// `None` for a structure and an object, which no factory builds. Derived rather than written in
+/// each record: the category already says it, and a second field could only disagree.
+pub const fn produced_by(category: Category) -> Option<BuildingFunction> {
+    match category {
+        Category::Infantry => Some(BuildingFunction::InfantryFactory),
+        Category::Vehicle => Some(BuildingFunction::VehicleFactory),
+        Category::Vessel => Some(BuildingFunction::VesselFactory),
+        Category::Structure | Category::Object => None,
+    }
+}
+
+/// The checks that make a unit producible (WP6.5): its `requires` list, and that a factory of the
+/// right function exists for every faction that may have it.
+pub(crate) fn check_unit_production(
+    src: Source<'_>,
+    units: &[UnitDef],
+    u: &UnitDef,
+) -> Result<(), DefError> {
+    let at = |needle: &str, msg: String| {
+        src.error_in_record("id", &u.id, needle, format!("unit \"{}\": {msg}", u.id))
+    };
+    if u.category == Category::Structure && !u.requires.is_empty() {
+        return Err(at(
+            "requires",
+            "requires on a Structure: say it in the building block".into(),
+        ));
+    }
+    if !u.requires.is_empty() && u.cost.is_none() {
+        return Err(at(
+            &u.requires[0],
+            "requires on a unit that cannot be built (no cost)".into(),
+        ));
+    }
+    for (i, r) in u.requires.iter().enumerate() {
+        if u.requires[..i].contains(r) {
+            return Err(at(r, format!("requires: \"{r}\" is listed twice")));
+        }
+        let Some(p) = units.iter().find(|d| d.id == *r) else {
+            return Err(at(
+                r,
+                format!("requires: unknown prerequisite \"{r}\" (not in unit_defs.ron)"),
+            ));
+        };
+        if p.category != Category::Structure {
+            return Err(at(r, format!("requires: \"{r}\" is not a Structure")));
+        }
+        let anchor = p
+            .building
+            .as_ref()
+            .is_some_and(|pb| pb.function == BuildingFunction::Anchor);
+        if p.cost.is_none() && !anchor {
+            return Err(at(
+                r,
+                format!("requires: \"{r}\" can never be built (no cost) and is not the anchor"),
+            ));
+        }
+        if let Some(missing) = u.factions.iter().find(|fa| !p.factions.contains(fa)) {
+            return Err(at(
+                r,
+                format!("requires: \"{r}\" is not available to {missing:?}, which this unit is"),
+            ));
+        }
+    }
+    // A unit with a price must be buildable: a factory of its function for each of its factions.
+    if u.cost.is_some()
+        && let Some(function) = produced_by(u.category)
+    {
+        for faction in &u.factions {
+            let has_factory = units.iter().any(|f| {
+                f.cost.is_some()
+                    && f.factions.contains(faction)
+                    && f.building.as_ref().is_some_and(|b| b.function == function)
+            });
+            if !has_factory {
+                return Err(at(
+                    &u.id,
+                    format!("no buildable {function:?} for {faction:?}: nothing could build it"),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The checks of one record's `building` block (everything but the cycle).
 pub(crate) fn check_record(
     src: Source<'_>,

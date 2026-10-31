@@ -38,6 +38,7 @@ use sf_data::harvest::HarvestSettings;
 use sf_data::money::MoneySettings;
 use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
+use sf_data::production::ProductionSettings;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{
@@ -372,6 +373,46 @@ pub fn harvester_kinds(defs: &UnitDefs) -> Vec<Kind> {
         .filter(|role| role.flags.harvests)
         .map(|role| Kind(role.kind))
         .collect()
+}
+
+/// The production rules of the world (WP6.5) from the settings of `production.ron`. To hand to
+/// [`World::with_production`](sf_sim::World::with_production) with [`production_table`].
+pub fn production_rules(settings: &ProductionSettings) -> sf_sim::ProductionRules {
+    sf_sim::ProductionRules {
+        queue_limit: settings.queue_limit,
+        exit_radius: settings.exit_radius,
+    }
+}
+
+/// What the factories can build (WP6.5): every role of `defs` with a price and a factory
+/// function (`produced_by`, derived from its category), with its cost, build ticks, factions and
+/// the structures it needs; and which structure comes with a free unit (the `comes_with` flag),
+/// ascending. To hand to [`World::with_production`](sf_sim::World::with_production) after the
+/// unit and building tables. Fails with the simulation's reason if the table is refused (the
+/// definitions' own checks rule that out for any definitions that loaded).
+pub fn production_table(defs: &UnitDefs) -> Result<sf_sim::ProductionTable, String> {
+    let builds = defs
+        .sim_units()
+        .iter()
+        .filter_map(|role| {
+            let factory = role.produced_by?;
+            let cost = role.cost?;
+            Some(sf_sim::UnitBuild {
+                kind: Kind(role.kind),
+                factory: building_function(factory),
+                cost,
+                build_ticks: role.build_ticks,
+                factions: role.factions,
+                requires: role.requires.iter().map(|&k| Kind(k)).collect(),
+            })
+        })
+        .collect();
+    let comes_with = defs
+        .sim_units()
+        .iter()
+        .filter_map(|role| Some((Kind(role.kind), Kind(role.flags.comes_with?))))
+        .collect();
+    sf_sim::ProductionTable::new(builds, comes_with).map_err(|e| e.to_string())
 }
 
 /// The collision settings from the settings of `sim.ron`, to hand to
