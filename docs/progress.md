@@ -2087,7 +2087,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
 
 ## Phase 7 — Economy
 
-Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP7.5 is built on branch `wp/7.5-refinery-choice` (PR #92); WP7.3b is not started.
+Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP7.5 is merged (#92); WP7.3b is not started.
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2213,6 +2213,25 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP
   inlined into `behavior::walk` (+3.1 percent instructions, cachegrind); fixed with `#[inline]` on `steer`.
 - **Flaky under load:** `sim_thread::a_slow_sim_does_not_delay_the_frames` (wall clock) failed once in a full
   workspace run while the machine was busy and passed alone; see item 28 above for the same kind.
+
+### WP6.5 notes: production (built before WP6.4, orchestrator decision 31-10-2026)
+
+- Done: `sf_sim::production` (one queue per factory, `QueueUnit`/`CancelUnit`/`SetRally`, pay per tick with the
+  structure rule through `World::pay`, exit cell and free-spot search, the queue holding behind a blocked exit,
+  the refinery's free harvester, the rally point, checksum section `Y` only with production rules); data in
+  `production.ron`, `produced_by` derived from the unit's category and unit `requires` in `sf_data`; the bridge
+  `production_table`; the pinned scenario `production` (`0x4d2f161c74d16308`, Linux and Windows in CI); the sandbox
+  readout, progress bars, rally flags and keys U / I / O / G (`sf_game::production_view`, `production_look.ron`) with
+  `--harvest`. Rules: `docs/rules/production.md`. Screenshots: `docs/screenshots/wp6.5`.
+- **Pins:** no earlier pin moved: all 24 earlier scenarios pass against their committed `.expected` after the merge
+  of main (`git diff origin/main -- assets/scenarios/*.expected` adds only `production.expected`); a world without
+  production rules writes no `Y` section.
+- **Gaps:** power does not slow production yet (the hook is fixed at 1000, WP6.4); no unit in the shipped data has a
+  `requires` (balance, phase 15); the sandbox keys act on the first selected factory only; the real game could not
+  be driven to a queue from outside the window, so the shots come from the test harness that draws with the same
+  functions the HUD calls (`production_screenshot.rs`), and a plain `sf_game --sandbox --harvest` run was only checked
+  to start and exit cleanly.
+- **Cost:** see the PR body (alternating runs against `origin/main`).
 
 ## WP11.3 notes: positional sound
 

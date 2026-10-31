@@ -263,6 +263,8 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 - WP6.7 Defensive buildings with turrets.
 - WP6.8 Damage display: damaged and heavily damaged model, smoke, fire.
 
+_Note 31-10-2026: WP6.5 (production) is built before WP6.4 (power), decided by the orchestrator. Milestone M1 ("build a base, harvest, make units, attack, win") needs units to be made and does not need power. WP6.4 later hooks into production through a speed factor that WP6.5 leaves as a documented hook, fixed at 1 (`docs/rules/production.md`)._
+
 ### Phase 7 — Economy
 - WP7.1 Ore on the map: fields, amount, slow regrowth.
 - WP7.2 Harvester: search, harvest, drive back, check in at refinery via **messages** (analysis §11, §13), unload, repeat.

@@ -1339,7 +1339,26 @@ fn queues_progress_rally_and_the_tuning_numbers_are_in_the_checksum() {
             },
         );
     });
-    let all = [plain, queued, other, twice, rallied, rallied_elsewhere];
+    let rallied_east = sum(&|w| {
+        let f = barracks(w);
+        send(
+            w,
+            P0,
+            Command::SetRally {
+                factory: f,
+                cell: Some(Cell::new(31, 30)),
+            },
+        );
+    });
+    let all = [
+        plain,
+        queued,
+        other,
+        twice,
+        rallied,
+        rallied_elsewhere,
+        rallied_east,
+    ];
     for i in 0..all.len() {
         for j in 0..i {
             assert_ne!(all[i], all[j], "{i} and {j}");

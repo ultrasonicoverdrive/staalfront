@@ -553,6 +553,19 @@ mod tests {
     }
 
     #[test]
+    fn the_production_keys_are_u_i_o_g_and_leave_the_camera_keys_alone() {
+        let b = Bindings::builtin();
+        for (action, key) in [
+            (Action::ProduceQueue, KeyCode::KeyU),
+            (Action::ProduceCycle, KeyCode::KeyI),
+            (Action::ProduceCancel, KeyCode::KeyO),
+            (Action::RallySet, KeyCode::KeyG),
+        ] {
+            assert_eq!(b.for_action(action), [Binding::new(Trigger::Key(key))]);
+        }
+    }
+
+    #[test]
     fn the_selection_bindings_are_actions() {
         let b = Bindings::builtin();
         assert_eq!(
