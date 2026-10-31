@@ -1962,10 +1962,11 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
   the frame the hit points rise above the threshold or the object dies; screenshots of both factions in
   `docs/screenshots/wp6.8/`; `docs/rules/damage.md`: done
   Gaps: no damaged models for units (smoke and fire only; the art has none); no sound; the thresholds and rates are
-  placeholders for Tijmen to tune; the cost was measured on software only (`damage.md`), not on the laptop (M0c).
-  **Open before Phase 6 closes:** re-run M0c on the GTX 1650 laptop with damage on (`sf_demo --bench --fight`) and
-  compare with the 28-10 M0c run (p99 4.42 / 4.35 ms), against the 16.7 ms budget; the risk is overdraw from the
-  2.8–3.2 m smoke and fire discs at close zoom.
+  placeholders for Tijmen to tune. Tijmen judged the Meridian fire at the start zoom good (31-10-2026), the weaker of the
+  two factions in the second review of #88.
+  **Laptop re-run done (31-10-2026), met:** M0c on the GTX 1650 with damage on (`sf_demo --bench --fight`, main
+  `002ff40`) gave frame p99 4.337 and 4.342 ms against 4.42 / 4.35 ms on 28-10, gpu p99 unchanged at 0.60 ms, 0 hitches,
+  nothing dropped; the overdraw of the smoke and fire discs is not measurable (`docs/bench/README.md`, "M0c with damage").
   Shapes: the 42 damaged structure models bring the roster to 189 of the 255 u8 shape ids; damaged unit models later
   share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
   on 660/330 per mille can flip stage.

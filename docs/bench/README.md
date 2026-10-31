@@ -10,6 +10,7 @@ over the **same 5,000 wandering units**; what is added between them is what make
 | M0 (22-10-2026) | `sf_demo --bench` | the crowd, the test pack's models, nothing else | `m0-2026-10-22.json` (p99 3.895 ms) |
 | M0b (after WP2.4) | `sf_demo --bench` | the same, with the terrain materials and the cell grid | `plain-2026-10-28.json` (p99 3.993 ms): the plain run of the M0c day counts as M0b (decision Tijmen 31-10-2026); no separate M0b run was made |
 | **M0c (after WP5.6b)** | `sf_demo --bench --fight` | the same crowd and path, plus the **armed skirmish**: shots, hits, deaths, wrecks, smoke and tracers | `m0c-2026-10-28-1.json` (p99 4.42 ms), `m0c-2026-10-28-2.json` (p99 4.35 ms); see "M0b and M0c result" |
+| M0c with damage (after WP6.8) | `sf_demo --bench --fight` | the same, plus the **damage display**: smoke and fire on damaged objects | `m0c-damage-2026-10-31-1.json` (p99 4.337 ms), `m0c-damage-2026-10-31-2.json` (p99 4.342 ms); see "M0c with damage" |
 
 ## M0b and M0c result (28-10-2026): met
 
@@ -43,6 +44,33 @@ Its frame p99 is 3.993 ms against 16.7 ms, 0.1 ms above M0's 3.895 ms.
 * **The 16.7 ms max of run 1** is one CPU spike early in `close_up`: `frame_ms` is the time since the previous frame
   started, and the callback before frame 411 took 16.5 ms of CPU (`cpu_ms.max` 16.536), not a GPU or present stall.
   Run 2's max is 6.0 ms. Both stay under the 25 ms hitch threshold.
+
+## M0c with damage (31-10-2026): met
+
+The re-run that `docs/progress.md` (WP6.8) asked for before Phase 6 closes: the 28-10 M0c runs were made at `ddf6113`,
+before WP6.8 (#88), so they had no damage smoke or fire. Same laptop and settings, release build of main `002ff40`
+(`cargo build --release -p sf_demo`, finished 16:40), started at 16:46 after a 5-minute pause with nothing running; the two
+`--bench --fight` runs one after the other. Mains power and the Windows GPU setting were not recorded (the adapter in
+the JSON is the NVIDIA card). Both runs reached tick 1500 at `FIGHT`'s end value `0x568d257d092daa7b`: the damage display
+is presentation only.
+
+| | M0c run 1 (28-10) | M0c run 2 (28-10) | damage run 1 | damage run 2 |
+|---|---|---|---|---|
+| frames in 75 s | 24,110 | 24,458 | 24,253 | 24,191 |
+| frame ms p50 / p95 / **p99** / max | 3.206 / 4.056 / **4.42** / 16.743 | 3.148 / 4.012 / **4.35** / 6.046 | 3.172 / 4.051 / **4.337** / 6.32 | 3.182 / 4.067 / **4.342** / 5.452 |
+| cpu ms p99 | 4.208 | 4.156 | 4.164 | 4.163 |
+| gpu ms p99 | 0.600 | 0.599 | 0.602 | 0.598 |
+| hitches > 25 ms | 0 | 0 | 0 | 0 |
+| sim tick ms p50 / **p99** / max | 2.085 / **3.238** / 6.789 | 2.063 / **3.233** / 5.611 | 1.957 / **3.14** / 6.006 | 1.946 / **3.085** / 5.568 |
+| effect instances per frame, avg / max | 38.6 / 490 | 37.6 / 491 | 47.1 / 558 | 47.2 / 517 |
+| `mid_hold`: frame p99 / effect instances avg | 4.555 / 191.8 | 4.528 / 185.3 | 4.349 / 217.2 | 4.439 / 212.2 |
+
+* **Criterion met**: frame p99 4.34 ms in both runs against 16.7 ms; every phase's p99 is between 4.03 and 4.57 ms.
+* **What the damage display costs**: nothing measurable. About 9 more effect instances per frame on average (25 to 30
+  more in `mid_hold`, the phase that looks at the fight), with gpu p99 unchanged at 0.60 ms and frame p99 within the
+  spread of the 28-10 runs. The overdraw of the 2.8 to 3.2 m smoke and fire discs is not visible on the GTX 1650.
+* **Effects**: `fx_dropped`, `particles_dropped`, `smoke_refused` and `tracer_dots_dropped` all 0; `particles_peak`
+  1,977 and 2,015 of 4,096.
 
 ## M0c, step by step (Tijmen, Windows laptop, PowerShell)
 
