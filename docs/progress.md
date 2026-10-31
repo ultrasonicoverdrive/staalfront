@@ -2231,7 +2231,7 @@ Phase 7 gives the sim a whole economy loop, every step gated and hashed in its o
   approach. With 48 harvesters on three refineries delivery went from 618 to 2321 ore in 4000 ticks
   (WP7.5, #92).
 
-**What it took.** Five WPs; every one came back from review at least once (WP7.2 three times). The recurring
+**What it took.** Five WPs; WP7.2 to WP7.5 each came back from review at least once (WP7.2 three times). The recurring
 findings were tunables left in Rust (§5 rule 6), tests that did not go through the production path, and
 data-to-sim mappings that a swap of two fields would pass. Each found its way into the builder checklist
 (lines 12 to 14). Measured on the laptop (M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.3 ms,
