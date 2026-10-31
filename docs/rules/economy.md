@@ -1,6 +1,6 @@
 # Economy: ore on the map and harvesters
 
-Work packages WP7.1 and WP7.2 (PLAN.md phase 7). This page holds the rules of the **ore on the
+Work packages WP7.1 to WP7.5 (PLAN.md phase 7). This page holds the rules of the **ore on the
 map** (WP7.1): how much a cell holds, how it is taken, how it grows back, how a harvester finds
 it; and of the **harvesters** (WP7.2, from "Harvesters" below): the loop of search, mine, drive
 back, check in at the refinery by messages, unload. Storage (WP7.3, "Storage" below) caps what a

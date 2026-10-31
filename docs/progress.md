@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is being built (branch `wp/6.5-production`); WP6.4, WP6.6 and WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -2087,7 +2087,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
 
 ## Phase 7 — Economy
 
-Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP7.5 is built on branch `wp/7.5-refinery-choice` (PR #92); WP7.3b is not started.
+Status: done (2026-10-31). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) waits for its place in the tech tree. The report is below the notes. Milestone M1 is not reached yet (see the report).
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2188,7 +2188,7 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP
 - **Fix round 1:** the HUD reads the credits from `World::credits` for every player id, so a player that owns no
   entity shows its money (it showed 0 before); construction payment is documented as greedy by lowest slot, not fair.
 
-- WP7.5 Refinery choice and queues (stacked on WP7.4, PR against `main`): a full harvester goes to the refinery with the
+- WP7.5 Refinery choice and queues (PR #92, a2b9719): a full harvester goes to the refinery with the
   lowest expected wait, `round(cells x travel_cost) + committed x queue_cost` ticks (ties: cost, distance, lower
   slot), looks again every `recheck_period` ticks while driving and switches only past `switch_margin` ticks;
   a queued harvester walks to a spot beside the approach (its own side, rows `queue_step` apart) so the holder
@@ -2213,6 +2213,45 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is merged (#90); WP
   inlined into `behavior::walk` (+3.1 percent instructions, cachegrind); fixed with `#[inline]` on `steer`.
 - **Flaky under load:** `sim_thread::a_slow_sim_does_not_delay_the_frames` (wall clock) failed once in a full
   workspace run while the machine was busy and passed alone; see item 28 above for the same kind.
+
+
+### Phase 7 report
+
+Phase 7 gives the sim a whole economy loop, every step gated and hashed in its own checksum section (`E` ore,
+`H` harvest, `V` storage, `M` money), so worlds without these rules hash as before:
+
+- **Ore** lies on the map in fields and grows back slowly (WP7.1, #75).
+- **Harvesters** search, mine, drive back and check in at a refinery by messages, with one bay, a first-come
+  queue and a grant timeout (WP7.2, #78).
+- **Storage**: a player's store is capped by the storage of its standing buildings; a full store stops the
+  unloading (WP7.3, #89).
+- **Money**: the store is the money pool; a structure is paid tick by tick while it is built and pauses
+  without money; the HUD shows `Credits N` (WP7.4, #90).
+- **Refinery choice**: a harvester picks the refinery with the lowest expected wait and queues beside the
+  approach. With 48 harvesters on three refineries delivery went from 618 to 2321 ore in 4000 ticks
+  (WP7.5, #92).
+
+**What it took.** Five WPs. WP7.2 and WP7.3 came back from review twice, WP7.4 and WP7.5 once. What
+recurred: rules without a test, so that a mutation survived (#78, #89); stale docs, status lines and comments
+(#89, #92); and the PR body or checklist not reporting what was asked (#89, #90, #92). Measured on the laptop
+(M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.2 ms,
+with combat; the economy itself costs a few microseconds a tick (see the WP notes).
+
+**Milestone M1 is not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
+opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
+sandbox (`sf_game --sandbox --harvest`). Still missing:
+
+- making units (WP6.5, production, on branch `wp/6.5-production`);
+- a skirmish map with both bases and a win condition (the scenario format of phase 10 or a sandbox rule);
+- a static opponent.
+
+For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).
+
+**Open from phase 7:**
+- WP7.3b, the silo, waits for its place in the approved tech tree.
+- Field totals per mission (WP7.1).
+- Refinery choice by route length instead of a straight line (WP7.5).
+- Queue spots not checked for passability (WP7.5).
 
 ## WP11.3 notes: positional sound
 
