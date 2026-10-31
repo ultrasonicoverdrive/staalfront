@@ -1,0 +1,747 @@
+{
+  "format": 1,
+  "tool": "sf_demo --bench",
+  "version": "0.1.0",
+  "build": "release",
+  "host": {
+    "os": "windows",
+    "arch": "x86_64",
+    "adapter": "NVIDIA GeForce GTX 1650 [DiscreteGpu, Dx12]",
+    "backend_env": null
+  },
+  "display": {
+    "requested": "1920x1080 fullscreen",
+    "actual": [
+      1920,
+      1080
+    ],
+    "screen_mode": "borderless",
+    "monitor": "\\\\.\\DISPLAY1",
+    "monitor_size": [
+      1920,
+      1080
+    ],
+    "refresh_hz": 60.0,
+    "note": null
+  },
+  "present": {
+    "mode": "Immediate",
+    "vsync": false,
+    "requested": "uncapped",
+    "note": null
+  },
+  "scene": {
+    "units": 5000,
+    "buildings": 24,
+    "models": "testpack",
+    "map_cells": [
+      256,
+      256
+    ],
+    "map_metres": [
+      1024,
+      1024
+    ],
+    "metres_per_cell": 4,
+    "instance_buffers_reserved": true,
+    "combat": true,
+    "skirmish_units": 720
+  },
+  "flight": {
+    "progress_by": "time",
+    "seconds": 75.0,
+    "frames_limit": null,
+    "warmup_frames": 90,
+    "segments": [
+      "close_up",
+      "glide_out",
+      "overview",
+      "glide_in",
+      "mid_hold",
+      "flick_out",
+      "overview_again",
+      "flick_in",
+      "low_pass"
+    ]
+  },
+  "frames": {
+    "count": 24110,
+    "seconds": 75.001,
+    "avg_fps": 321.463
+  },
+  "frame_ms": {
+    "samples": 24110,
+    "avg": 3.111,
+    "p50": 3.206,
+    "p95": 4.056,
+    "p99": 4.42,
+    "max": 16.743
+  },
+  "cpu_ms": {
+    "samples": 24110,
+    "avg": 2.942,
+    "p50": 3.039,
+    "p95": 3.863,
+    "p99": 4.208,
+    "max": 16.536
+  },
+  "gpu_ms": {
+    "available": true,
+    "note": null,
+    "stats": {
+      "samples": 24109,
+      "avg": 0.435,
+      "p50": 0.46,
+      "p95": 0.577,
+      "p99": 0.6,
+      "max": 0.635
+    }
+  },
+  "criterion": {
+    "name": "M0: p99 frame time over the whole flight with 5,000 units",
+    "p99_target_ms": 16.667,
+    "p99_ms": 4.42,
+    "met": true,
+    "caveats": []
+  },
+  "phases": [
+    {
+      "name": "close_up",
+      "frames": 1920,
+      "frame_ms": {
+        "samples": 1920,
+        "avg": 3.126,
+        "p50": 3.204,
+        "p95": 4.071,
+        "p99": 4.468,
+        "max": 16.743
+      },
+      "cpu_ms": {
+        "samples": 1920,
+        "avg": 2.958,
+        "p50": 3.042,
+        "p95": 3.885,
+        "p99": 4.273,
+        "max": 16.536
+      },
+      "gpu_ms": {
+        "samples": 1920,
+        "avg": 0.443,
+        "p50": 0.434,
+        "p95": 0.516,
+        "p99": 0.522,
+        "max": 0.535
+      },
+      "units_in_view": {
+        "avg": 209.93,
+        "max": 229
+      },
+      "draw_calls": {
+        "avg": 58.248,
+        "max": 59
+      },
+      "triangles": {
+        "avg": 21971.835,
+        "max": 26380
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 12.009,
+        "max": 38
+      }
+    },
+    {
+      "name": "glide_out",
+      "frames": 5277,
+      "frame_ms": {
+        "samples": 5277,
+        "avg": 3.127,
+        "p50": 3.254,
+        "p95": 4.082,
+        "p99": 4.392,
+        "max": 6.169
+      },
+      "cpu_ms": {
+        "samples": 5277,
+        "avg": 2.96,
+        "p50": 3.088,
+        "p95": 3.896,
+        "p99": 4.18,
+        "max": 5.845
+      },
+      "gpu_ms": {
+        "samples": 5277,
+        "avg": 0.481,
+        "p50": 0.475,
+        "p95": 0.591,
+        "p99": 0.602,
+        "max": 0.612
+      },
+      "units_in_view": {
+        "avg": 1894.377,
+        "max": 5167
+      },
+      "draw_calls": {
+        "avg": 76.486,
+        "max": 143
+      },
+      "triangles": {
+        "avg": 84972.027,
+        "max": 156032
+      },
+      "buffer_allocs": 5,
+      "effect_instances": {
+        "avg": 24.608,
+        "max": 181
+      }
+    },
+    {
+      "name": "overview",
+      "frames": 2781,
+      "frame_ms": {
+        "samples": 2781,
+        "avg": 3.236,
+        "p50": 3.244,
+        "p95": 3.898,
+        "p99": 4.187,
+        "max": 5.077
+      },
+      "cpu_ms": {
+        "samples": 2781,
+        "avg": 3.061,
+        "p50": 3.061,
+        "p95": 3.688,
+        "p99": 3.959,
+        "max": 4.735
+      },
+      "gpu_ms": {
+        "samples": 2781,
+        "avg": 0.477,
+        "p50": 0.477,
+        "p95": 0.481,
+        "p99": 0.486,
+        "max": 0.493
+      },
+      "units_in_view": {
+        "avg": 5174.154,
+        "max": 5209
+      },
+      "draw_calls": {
+        "avg": 98.877,
+        "max": 99
+      },
+      "triangles": {
+        "avg": 84632.0,
+        "max": 84632
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 3.04,
+        "max": 10
+      }
+    },
+    {
+      "name": "glide_in",
+      "frames": 5176,
+      "frame_ms": {
+        "samples": 5176,
+        "avg": 3.188,
+        "p50": 3.299,
+        "p95": 4.122,
+        "p99": 4.524,
+        "max": 5.427
+      },
+      "cpu_ms": {
+        "samples": 5176,
+        "avg": 3.019,
+        "p50": 3.13,
+        "p95": 3.928,
+        "p99": 4.28,
+        "max": 5.278
+      },
+      "gpu_ms": {
+        "samples": 5176,
+        "avg": 0.497,
+        "p50": 0.49,
+        "p95": 0.588,
+        "p99": 0.598,
+        "max": 0.606
+      },
+      "units_in_view": {
+        "avg": 2438.316,
+        "max": 5201
+      },
+      "draw_calls": {
+        "avg": 74.762,
+        "max": 118
+      },
+      "triangles": {
+        "avg": 86291.601,
+        "max": 179358
+      },
+      "buffer_allocs": 3,
+      "effect_instances": {
+        "avg": 73.891,
+        "max": 490
+      }
+    },
+    {
+      "name": "mid_hold",
+      "frames": 1394,
+      "frame_ms": {
+        "samples": 1394,
+        "avg": 3.229,
+        "p50": 3.265,
+        "p95": 4.169,
+        "p99": 4.555,
+        "max": 5.005
+      },
+      "cpu_ms": {
+        "samples": 1394,
+        "avg": 3.066,
+        "p50": 3.113,
+        "p95": 3.983,
+        "p99": 4.374,
+        "max": 4.846
+      },
+      "gpu_ms": {
+        "samples": 1394,
+        "avg": 0.445,
+        "p50": 0.451,
+        "p95": 0.46,
+        "p99": 0.468,
+        "max": 0.477
+      },
+      "units_in_view": {
+        "avg": 525.476,
+        "max": 575
+      },
+      "draw_calls": {
+        "avg": 64.006,
+        "max": 68
+      },
+      "triangles": {
+        "avg": 55312.577,
+        "max": 60416
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 191.786,
+        "max": 488
+      }
+    },
+    {
+      "name": "flick_out",
+      "frames": 938,
+      "frame_ms": {
+        "samples": 938,
+        "avg": 3.2,
+        "p50": 3.31,
+        "p95": 4.161,
+        "p99": 4.541,
+        "max": 5.303
+      },
+      "cpu_ms": {
+        "samples": 938,
+        "avg": 3.029,
+        "p50": 3.139,
+        "p95": 3.946,
+        "p99": 4.343,
+        "max": 5.105
+      },
+      "gpu_ms": {
+        "samples": 938,
+        "avg": 0.499,
+        "p50": 0.495,
+        "p95": 0.618,
+        "p99": 0.628,
+        "max": 0.635
+      },
+      "units_in_view": {
+        "avg": 2547.177,
+        "max": 5287
+      },
+      "draw_calls": {
+        "avg": 78.441,
+        "max": 141
+      },
+      "triangles": {
+        "avg": 109351.595,
+        "max": 190864
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 106.607,
+        "max": 392
+      }
+    },
+    {
+      "name": "overview_again",
+      "frames": 701,
+      "frame_ms": {
+        "samples": 701,
+        "avg": 3.208,
+        "p50": 3.179,
+        "p95": 3.89,
+        "p99": 4.222,
+        "max": 5.822
+      },
+      "cpu_ms": {
+        "samples": 701,
+        "avg": 3.036,
+        "p50": 3.012,
+        "p95": 3.701,
+        "p99": 3.996,
+        "max": 5.526
+      },
+      "gpu_ms": {
+        "samples": 701,
+        "avg": 0.481,
+        "p50": 0.481,
+        "p95": 0.486,
+        "p99": 0.489,
+        "max": 0.494
+      },
+      "units_in_view": {
+        "avg": 5271.0,
+        "max": 5281
+      },
+      "draw_calls": {
+        "avg": 98.91,
+        "max": 99
+      },
+      "triangles": {
+        "avg": 84632.0,
+        "max": 84632
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 3.665,
+        "max": 11
+      }
+    },
+    {
+      "name": "flick_in",
+      "frames": 969,
+      "frame_ms": {
+        "samples": 969,
+        "avg": 3.095,
+        "p50": 3.249,
+        "p95": 4.062,
+        "p99": 4.487,
+        "max": 6.124
+      },
+      "cpu_ms": {
+        "samples": 969,
+        "avg": 2.92,
+        "p50": 3.076,
+        "p95": 3.839,
+        "p99": 4.261,
+        "max": 4.828
+      },
+      "gpu_ms": {
+        "samples": 969,
+        "avg": 0.421,
+        "p50": 0.438,
+        "p95": 0.594,
+        "p99": 0.604,
+        "max": 0.612
+      },
+      "units_in_view": {
+        "avg": 2298.276,
+        "max": 5256
+      },
+      "draw_calls": {
+        "avg": 64.19,
+        "max": 115
+      },
+      "triangles": {
+        "avg": 74159.073,
+        "max": 172532
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 0.798,
+        "max": 5
+      }
+    },
+    {
+      "name": "low_pass",
+      "frames": 4954,
+      "frame_ms": {
+        "samples": 4954,
+        "avg": 2.877,
+        "p50": 2.926,
+        "p95": 3.863,
+        "p99": 4.331,
+        "max": 5.853
+      },
+      "cpu_ms": {
+        "samples": 4954,
+        "avg": 2.707,
+        "p50": 2.733,
+        "p95": 3.683,
+        "p99": 4.135,
+        "max": 5.647
+      },
+      "gpu_ms": {
+        "samples": 4953,
+        "avg": 0.277,
+        "p50": 0.262,
+        "p95": 0.361,
+        "p99": 0.423,
+        "max": 0.436
+      },
+      "units_in_view": {
+        "avg": 361.66,
+        "max": 668
+      },
+      "draw_calls": {
+        "avg": 39.168,
+        "max": 68
+      },
+      "triangles": {
+        "avg": 32533.082,
+        "max": 58268
+      },
+      "buffer_allocs": 0,
+      "effect_instances": {
+        "avg": 3.313,
+        "max": 117
+      }
+    }
+  ],
+  "hitches": {
+    "threshold_ms": 25.0,
+    "count": 0,
+    "worst": [
+      {
+        "frame": 411,
+        "phase": "close_up",
+        "frame_ms": 16.743,
+        "cpu_ms": 3.23,
+        "sim_ms": 0.0,
+        "build_ms": 0.111,
+        "upload_ms": 1.099,
+        "render_ms": 1.114,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 467,
+        "phase": "close_up",
+        "frame_ms": 6.908,
+        "cpu_ms": 3.976,
+        "sim_ms": 0.0,
+        "build_ms": 0.158,
+        "upload_ms": 0.956,
+        "render_ms": 2.189,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 4021,
+        "phase": "glide_out",
+        "frame_ms": 6.169,
+        "cpu_ms": 2.697,
+        "sim_ms": 0.0,
+        "build_ms": 0.125,
+        "upload_ms": 0.677,
+        "render_ms": 1.023,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 18749,
+        "phase": "flick_in",
+        "frame_ms": 6.124,
+        "cpu_ms": 3.686,
+        "sim_ms": 0.0,
+        "build_ms": 0.362,
+        "upload_ms": 1.575,
+        "render_ms": 1.4,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 21090,
+        "phase": "low_pass",
+        "frame_ms": 5.853,
+        "cpu_ms": 2.882,
+        "sim_ms": 0.0,
+        "build_ms": 0.293,
+        "upload_ms": 1.062,
+        "render_ms": 1.264,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 17607,
+        "phase": "overview_again",
+        "frame_ms": 5.822,
+        "cpu_ms": 3.611,
+        "sim_ms": 0.0,
+        "build_ms": 1.38,
+        "upload_ms": 0.11,
+        "render_ms": 1.402,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 3467,
+        "phase": "glide_out",
+        "frame_ms": 5.732,
+        "cpu_ms": 2.722,
+        "sim_ms": 0.0,
+        "build_ms": 0.159,
+        "upload_ms": 0.764,
+        "render_ms": 1.132,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 456,
+        "phase": "close_up",
+        "frame_ms": 5.607,
+        "cpu_ms": 2.896,
+        "sim_ms": 0.0,
+        "build_ms": 0.148,
+        "upload_ms": 0.902,
+        "render_ms": 0.975,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 4039,
+        "phase": "glide_out",
+        "frame_ms": 5.482,
+        "cpu_ms": 2.55,
+        "sim_ms": 0.0,
+        "build_ms": 0.192,
+        "upload_ms": 0.728,
+        "render_ms": 1.179,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 13482,
+        "phase": "glide_in",
+        "frame_ms": 5.427,
+        "cpu_ms": 2.906,
+        "sim_ms": 0.0,
+        "build_ms": 0.26,
+        "upload_ms": 1.046,
+        "render_ms": 1.008,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 6987,
+        "phase": "glide_out",
+        "frame_ms": 5.419,
+        "cpu_ms": 3.371,
+        "sim_ms": 0.0,
+        "build_ms": 0.815,
+        "upload_ms": 0.078,
+        "render_ms": 1.616,
+        "buffer_allocs": 0
+      },
+      {
+        "frame": 14923,
+        "phase": "glide_in",
+        "frame_ms": 5.417,
+        "cpu_ms": 2.407,
+        "sim_ms": 0.0,
+        "build_ms": 0.287,
+        "upload_ms": 0.686,
+        "render_ms": 0.966,
+        "buffer_allocs": 0
+      }
+    ]
+  },
+  "sim": {
+    "thread": true,
+    "note": "the simulation runs on its own thread since WP1.15: frame_ms and cpu_ms exclude it; runs from before that change are not comparable",
+    "tick_ms": {
+      "samples": 1500,
+      "avg": 2.136,
+      "p50": 2.085,
+      "p95": 2.769,
+      "p99": 3.238,
+      "max": 6.789
+    },
+    "behind_passes": 0,
+    "clock_resets": 0,
+    "late_commands": 0,
+    "late_publishes": 0,
+    "extra_tick_ms": 0.0,
+    "ticks": 1510,
+    "final_checksum": "0x568d257d092daa7b",
+    "checksums": [
+      {
+        "tick": 100,
+        "checksum": "0x1a05bef657f1e420"
+      },
+      {
+        "tick": 200,
+        "checksum": "0x7ca7774f19e37632"
+      },
+      {
+        "tick": 300,
+        "checksum": "0x25080df8e24caf75"
+      },
+      {
+        "tick": 400,
+        "checksum": "0xb8efc3612e4f1fd6"
+      },
+      {
+        "tick": 500,
+        "checksum": "0xd598f13f51556a32"
+      },
+      {
+        "tick": 600,
+        "checksum": "0x7a2531f7bb74348f"
+      },
+      {
+        "tick": 700,
+        "checksum": "0x8095ce5d07399cf8"
+      },
+      {
+        "tick": 800,
+        "checksum": "0xe2d72750daf289e9"
+      },
+      {
+        "tick": 900,
+        "checksum": "0x25cdece94206d875"
+      },
+      {
+        "tick": 1000,
+        "checksum": "0x507f72474aee9a32"
+      },
+      {
+        "tick": 1100,
+        "checksum": "0x32c3736dad00d1d6"
+      },
+      {
+        "tick": 1200,
+        "checksum": "0x634346427aeae431"
+      },
+      {
+        "tick": 1300,
+        "checksum": "0x6ce70653cce7c377"
+      },
+      {
+        "tick": 1400,
+        "checksum": "0xf8b808e3672a785a"
+      },
+      {
+        "tick": 1500,
+        "checksum": "0x568d257d092daa7b"
+      }
+    ]
+  },
+  "effects": {
+    "fx_events": 12365,
+    "fx_dropped": 0,
+    "particles_peak": 2027,
+    "particles_dropped": 0,
+    "smoke_refused": 0,
+    "tracer_dots_dropped": 0,
+    "flashes_at_anchor": 3436,
+    "flashes_by_rule": 12,
+    "effect_instances": {
+      "avg": 38.612,
+      "max": 490
+    }
+  }
+}
