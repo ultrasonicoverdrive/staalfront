@@ -18,7 +18,7 @@
 
 use std::collections::BTreeMap;
 
-use sf_data::damage::Damage;
+use sf_data::damage::{Damage, Stage};
 use sf_data::effects::{EffectDef, Effects, EffectsError, Limits};
 use sf_data::units::UnitDefs;
 use sf_math::render_bridge::{METRES_PER_CELL, cells_to_metres, vec2_cells_to_metres};
@@ -264,7 +264,8 @@ pub struct FxPlayer {
     /// How damage shows (WP6.8): the thresholds, rates and rules of `damage.ron`.
     damage: Damage,
     /// The smoke and fire puff of `damage.ron`, resolved against `effects.ron` once.
-    damage_puffs: (BurstDef, BurstDef),
+    /// Indexed by `structure as usize`: a mobile object's, then a structure's.
+    damage_puffs: [(BurstDef, BurstDef); 2],
 }
 
 impl FxPlayer {
@@ -289,10 +290,11 @@ impl FxPlayer {
         damage.check_against(&effects).map_err(EffectsError)?;
         let tables = Tables::new(effects, defs)?;
         let burst = |name: &str| BurstDef::from(&tables.effects.effects[name]);
-        let damage_puffs = (
-            burst(&damage.emitters.smoke_effect),
-            burst(&damage.emitters.fire_effect),
-        );
+        let puffs_of = |structure: bool| {
+            let (smoke, fire) = damage.puff_effects(structure);
+            (burst(smoke), burst(fire))
+        };
+        let damage_puffs = [puffs_of(false), puffs_of(true)];
         let l = &tables.effects.limits;
         Ok(FxPlayer {
             pool: ParticlePool::new(l),
@@ -619,9 +621,10 @@ impl FxPlayer {
         let margin = d.limits.cull_margin;
         let (w, h) = (f.viewport[0], f.viewport[1]);
         for v in snap.views() {
-            let Some(rates) = d.rates(snap.damage_stage(d, v)) else {
+            let stage = snap.damage_stage(d, v);
+            if stage == Stage::Intact {
                 continue;
-            };
+            }
             let Some(stats) = snap.stats_for(v) else {
                 continue;
             };
@@ -630,6 +633,11 @@ impl FxPlayer {
                 Some(fp) => (f32::from(fp.width.max(fp.height)) * METRES_PER_CELL, true),
                 None => (cells_to_metres(stats.size), false),
             };
+            // A structure burns with its own, bigger effects and rates (WP6.8b).
+            let Some(rates) = d.rates_of(stage, structure) else {
+                continue;
+            };
+            let puffs = self.damage_puffs[usize::from(structure)];
             if !structure && length_m < d.emitters.min_body_cells * METRES_PER_CELL {
                 continue;
             }
@@ -671,16 +679,8 @@ impl FxPlayer {
             let rule_radius = (fb.radius_fraction * length_m).max(fb.min_radius_m);
             let slot = v.id.index();
             for (rate, prefix, def) in [
-                (
-                    rates.smoke_per_s,
-                    &d.emitters.smoke_anchor,
-                    self.damage_puffs.0,
-                ),
-                (
-                    rates.fire_per_s,
-                    &d.emitters.fire_anchor,
-                    self.damage_puffs.1,
-                ),
+                (rates.smoke_per_s, &d.emitters.smoke_anchor, puffs.0),
+                (rates.fire_per_s, &d.emitters.fire_anchor, puffs.1),
             ] {
                 if rate <= 0.0 {
                     continue;
@@ -1507,11 +1507,11 @@ mod tests {
             heavy.damage_puffs > smoke_only,
             "smoke and fire are more puffs than smoke alone"
         );
-        // Over 100 frames of 0.1 s: 4 smoke puffs a second is 40 puffs, 8 + 7 a second 150 (the pool's
-        // own generator decides the fractions).
-        assert!((28..=54).contains(&smoke_only), "{smoke_only}");
+        // Over 100 frames of 0.1 s: a structure's 5 smoke puffs a second is 50 puffs, 10 + 10 a second
+        // 200 (the pool's own generator decides the fractions).
+        assert!((38..=64).contains(&smoke_only), "{smoke_only}");
         assert!(
-            (120..=185).contains(&heavy.damage_puffs),
+            (165..=235).contains(&heavy.damage_puffs),
             "{}",
             heavy.damage_puffs
         );
@@ -1686,6 +1686,92 @@ mod tests {
         assert!(p.counters().damage_sources <= 200);
     }
 
+    /// The same with the larger structure fires (WP6.8b): 200 burning buildings, with the structure
+    /// smoke living 3.5 s, fill the pool, hit the smoke refusal and still never pass the limit; 400
+    /// buildings are held to the 256-source cap.
+    #[test]
+    fn many_burning_buildings_with_the_big_fires_stay_inside_the_pool() {
+        for n in [200usize, 400] {
+            let items: Vec<_> = (0..n)
+                .map(|i| {
+                    (
+                        "power_plant",
+                        1 + (i % 20) as i32 * 2,
+                        1 + (i / 20) as i32 * 2,
+                        50,
+                    )
+                })
+                .collect();
+            let snap = damaged_world(&items);
+            let mut p = player();
+            run_damage(&mut p, &snap, &NoAnchors, &frame(1.0, 200.0), 400);
+            let stats = p.pool_stats();
+            let cap = p.limits().max_particles;
+            let c = p.counters();
+            println!(
+                "{n} buildings: pool alive {} peak {} of {cap}, smoke refused {}, dropped {}, sources {} (capped {})",
+                stats.alive,
+                stats.peak,
+                stats.smoke_refused,
+                stats.dropped,
+                c.damage_sources,
+                c.damage_sources_capped
+            );
+            assert!(stats.alive <= cap && stats.peak <= cap, "{n}: {stats:?}");
+            assert!(stats.spawned > 0);
+            assert!(c.damage_sources <= 256, "the source cap holds");
+        }
+    }
+
+    /// The glowing (fire) puffs of a frame run, the largest first, as the sizes on the screen.
+    fn flame_sizes(role: &str) -> Vec<f32> {
+        let mut p = player();
+        let snap = damaged_world(&[(role, 3, 3, 50)]);
+        // A third of the focal length: the flames stay below the 64 px clamp, so the sizes compare.
+        let base = frame(1.0, 200.0);
+        let f = FxFrame {
+            dt: 0.1,
+            focal_px: base.focal_px / 3.0,
+            ..base
+        };
+        let ground = FlatGround::default();
+        let mut sizes = Vec::new();
+        for _ in 0..60 {
+            // Smoke is not glowing: its blend alpha is the effect's, the fire's is 0.
+            sizes.extend(
+                p.frame_with(&snap, &ground, &NoAnchors, &f)
+                    .iter()
+                    .filter(|i| i.color[3] == 0.0)
+                    .map(|i| i.size_px),
+            );
+        }
+        sizes.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        sizes
+    }
+
+    /// A heavily damaged structure burns with the structure effect (about twice the flame of a vehicle's),
+    /// a heavily damaged vehicle with the vehicle effect. The objects stand on the same cell and the
+    /// camera is the same, so the size on the screen is the effect's.
+    #[test]
+    fn a_burning_structure_gets_the_big_fire_and_a_burning_vehicle_the_small_one() {
+        let building = flame_sizes("power_plant");
+        let tank = flame_sizes("light_tank");
+        assert!(!building.is_empty() && !tank.is_empty());
+        let (big, small) = (building[0], tank[0]);
+        // 5.6 m against 2.8 m at the start, and the growth ratio is about the same: about twice.
+        assert!(
+            big > 1.6 * small && big < 2.6 * small,
+            "building flame {big} px, tank flame {small} px"
+        );
+        // Both emit at their own rate: 10 fire puffs a second for a structure, 7 for a tank.
+        assert!(
+            building.len() > tank.len(),
+            "{} against {} flame puffs",
+            building.len(),
+            tank.len()
+        );
+    }
+
     // ---- What the damage effects cost (WP6.8): measurements, run by hand in release ----
 
     /// 5,000 objects of the fight scale: 4,800 tanks over 240 x 240 m, of which `hurt_tanks` are heavily
@@ -1743,6 +1829,31 @@ mod tests {
         .unwrap()
     }
 
+    /// The table as WP6.8 shipped it: structures burn with the vehicle effects and rates (the structure
+    /// entries pointed at the mobile ones). The "before" of the WP6.8b measurements.
+    fn vehicle_fire_for_all() -> Damage {
+        Damage::parse(
+            &sf_data::damage::EMBEDDED_DAMAGE
+                .replace(
+                    "structure_smoke_effect: \"damage_smoke_structure\"",
+                    "structure_smoke_effect: \"damage_smoke\"",
+                )
+                .replace(
+                    "structure_fire_effect: \"damage_fire_structure\"",
+                    "structure_fire_effect: \"damage_fire\"",
+                )
+                .replace(
+                    "structure_damaged: (smoke_per_s: 5.0",
+                    "structure_damaged: (smoke_per_s: 4.0",
+                )
+                .replace(
+                    "structure_heavy: (smoke_per_s: 10.0, fire_per_s: 10.0)",
+                    "structure_heavy: (smoke_per_s: 8.0, fire_per_s: 7.0)",
+                ),
+        )
+        .unwrap()
+    }
+
     #[test]
     #[ignore = "a measurement, run by hand: cargo test --release -p sf_game --lib what_the_damage_effects_cost -- --ignored --nocapture"]
     fn what_the_damage_effects_cost() {
@@ -1777,7 +1888,8 @@ mod tests {
                 };
                 let (off, _, _) = time(damage_off());
                 let (on, c, stats) = time(Damage::embedded());
-                rows.push((off, on));
+                let (was, _, _) = time(vehicle_fire_for_all());
+                rows.push((off, on, was));
                 if round == 4 {
                     println!(
                         "  last round: sources {} (capped {} in all), instances {}, pool alive {} peak {} smoke refused {} dropped {}",
@@ -1796,11 +1908,12 @@ mod tests {
                 v[v.len() / 2]
             };
             println!(
-                "{name}: frame_with off {:.1} us, on {:.1} us (medians of 5 alternating rounds; per round off/on: {})",
+                "{name}: frame_with off {:.1} us, on {:.1} us, WP6.8 vehicle fire on buildings {:.1} us (medians of 5 alternating rounds; per round off/on/was: {})",
                 med(rows.iter().map(|r| r.0).collect()),
                 med(rows.iter().map(|r| r.1).collect()),
+                med(rows.iter().map(|r| r.2).collect()),
                 rows.iter()
-                    .map(|r| format!("{:.0}/{:.0}", r.0, r.1))
+                    .map(|r| format!("{:.0}/{:.0}/{:.0}", r.0, r.1, r.2))
                     .collect::<Vec<_>>()
                     .join(" ")
             );
@@ -1840,6 +1953,14 @@ mod tests {
         for _ in 0..300 {
             last = p.frame_with(&snap, &ground, &NoAnchors, &f).to_vec();
         }
+        // The same scene with the WP6.8 vehicle fire on the buildings.
+        let mut p_was =
+            FxPlayer::with_damage(Effects::embedded(), &defs, vehicle_fire_for_all()).unwrap();
+        let mut was = Vec::new();
+        for _ in 0..300 {
+            was = p_was.frame_with(&snap, &ground, &NoAnchors, &f).to_vec();
+        }
+        println!("instances: now {}, WP6.8 {}", last.len(), was.len());
         let mut r = sf_render::Renderer::headless(960, 540, &sf_render::GpuOptions::software())
             .unwrap_or_else(|e| panic!("NO GPU ADAPTER AVAILABLE: {e}"));
         println!("adapter: {}", r.adapter_summary());
@@ -1866,10 +1987,13 @@ mod tests {
             };
             let off = time(&[]);
             let on = time(&last);
-            rows.push((off, on));
+            let before = time(&was);
+            rows.push((off, on, before));
         }
-        for (off, on) in &rows {
-            println!("  frame without effects {off:.1} ms, with {on:.1} ms");
+        for (off, on, before) in &rows {
+            println!(
+                "  frame without effects {off:.1} ms, with {on:.1} ms, with the WP6.8 vehicle fire {before:.1} ms"
+            );
         }
         println!(
             "load average after: {}",

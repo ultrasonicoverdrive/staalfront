@@ -1970,6 +1970,17 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
   share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
   on 660/330 per mille can flip stage.
 
+- WP6.8b Structure fire bigger than vehicle fire (Tijmen, 31-10-2026): `damage.ron` `emitters` gets
+  `structure_smoke_effect` / `structure_fire_effect` and `structure_damaged` / `structure_heavy` rates; `effects.ron` gets
+  `damage_smoke_structure` and `damage_fire_structure` (flame 5.6 m against 2.8 m, smoke 6.4 m against 3.2 m; heavy
+  10 fire puffs/s against 7); `FxPlayer` picks per object by the footprint it already used. Mobile objects keep their
+  effect and rates. Presentation only: `sf_sim`, `sf_bridge`, scenarios and `sf_headless` untouched, no checksum moved.
+  `docs/rules/damage.md`, screenshots in `docs/screenshots/wp6.8b/`: done
+  Gaps: **all the new numbers are placeholders for Tijmen to tune**; no sound; cost measured on software only.
+  **Open for Tijmen:** a short M0c check on the GTX 1650 laptop with the larger building fires (`sf_demo --bench --fight`),
+  compared with the 31-10 damage run (p99 4.34 ms, `docs/bench/README.md`, "M0c with damage", which lands with PR #93).
+  The larger structure smoke and fire discs raise the overdraw at close zoom; the budget is 16.7 ms.
+
 ### WP6.3 notes
 
 - **Order inside a tick.** The constructions advance first, then the commands run, so a `BuildStructure` of the
