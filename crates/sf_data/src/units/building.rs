@@ -214,7 +214,13 @@ pub(crate) fn check_unit_production(
         }
     }
     // A unit with a price must be buildable: a factory of its function for each of its factions.
-    if u.cost.is_some()
+    // Only in a file that has factories at all: the frozen copies of the early scenarios have no
+    // building blocks and so no factories, and are not production worlds.
+    let has_factories = units
+        .iter()
+        .any(|f| f.building.as_ref().is_some_and(|b| b.function.is_factory()));
+    if has_factories
+        && u.cost.is_some()
         && let Some(function) = produced_by(u.category)
     {
         for faction in &u.factions {
