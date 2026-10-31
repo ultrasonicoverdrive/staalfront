@@ -89,7 +89,7 @@ types) are next: the M0 laptop benchmark is met (22-10-2026), and M0b re-runs it
   `terrain_look.ron`, baked per cell, light relief shading; notes below): in review (PR #65)
 - WP2.4 Cell grid overlay by terrain type and occupancy: done (branch `wp/2.4-cell-overlay`), see "WP2.4 notes"
 
-M0b status (23-10-2026): M0b becomes due once WP2.2-2.4 are on main; then the laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is due from Tijmen.
+M0b status (23-10-2026): M0b becomes due once WP2.2-2.4 are on main; then the laptop re-run (`cargo run --release -p sf_demo -- --bench`, GTX 1650, p99 <= 16.7 ms) is due from Tijmen. Met (31-10-2026): the plain run of 28-10-2026, p99 3.993 ms, counts as M0b by Tijmen's decision (`docs/bench/README.md`, "M0b and M0c result").
 
 Done when (PLAN.md §3): a 256 x 256 cell playfield loads in sim and presentation;
 headless test checks terrain types and occupancy per cell. The headless half is met
@@ -1100,7 +1100,7 @@ Open follow-ups, carried over:
 
 ## Phase 5 — Combat
 
-Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`, #80), both in (see "WP5.6b notes"). M0c is met: the laptop runs of 28-10-2026 gave a p99 frame time of 4.42 and 4.35 ms with the fight and a `sim.tick_ms` p99 of 3.2 ms (`docs/bench/README.md`, "M0c result"; `docs/bench/m0c-2026-10-28-*.json`).
+Status: WP5.1 to WP5.5 are in; WP5.6 is split (27-10-2026) into WP5.6a and WP5.6b (muzzle anchors in the glb loader, `sf_demo --bench --fight`, #80), both in (see "WP5.6b notes"). M0c is met: the laptop runs of 28-10-2026 gave a p99 frame time of 4.42 and 4.35 ms with the fight and a `sim.tick_ms` p99 of 3.2 ms (`docs/bench/README.md`, "M0b and M0c result"; `docs/bench/m0c-2026-10-28-*.json`).
 
 - WP5.1 Weapons and bullet types as data (`weapon_defs.ron` gained the shape of a burst, the parameters of
   the projectile, the mount and the firing arc, and a fifth projectile kind, `Instant`; `sf_bridge::weapon_table`
