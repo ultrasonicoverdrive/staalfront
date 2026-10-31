@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is being built (branch `wp/6.5-production`); WP6.4, WP6.6 and WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -2231,21 +2231,21 @@ Phase 7 gives the sim a whole economy loop, every step gated and hashed in its o
   approach. With 48 harvesters on three refineries delivery went from 618 to 2321 ore in 4000 ticks
   (WP7.5, #92).
 
-**What it took.** Five WPs; WP7.2 to WP7.5 each came back from review at least once (WP7.2 three times). The recurring
-findings were tunables left in Rust (§5 rule 6), tests that did not go through the production path, and
-data-to-sim mappings that a swap of two fields would pass. Each found its way into the builder checklist
-(lines 12 to 14). Measured on the laptop (M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.3 ms,
+**What it took.** Five WPs. WP7.2 and WP7.3 came back from review twice, WP7.4 and WP7.5 once. What
+recurred: rules without a test, so that a mutation survived (#78, #89); stale docs, status lines and comments
+(#89, #92); and the PR body or checklist not reporting what was asked (#89, #90, #92). Measured on the laptop
+(M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.2 ms,
 with combat; the economy itself costs a few microseconds a tick (see the WP notes).
 
 **Milestone M1 is not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
 opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
 sandbox (`sf_game --sandbox --harvest`). Still missing:
 
-- making units (WP6.5, production, in progress);
+- making units (WP6.5, production, on branch `wp/6.5-production`);
 - a skirmish map with both bases and a win condition (the scenario format of phase 10 or a sandbox rule);
 - a static opponent.
 
-The orchestrator builds WP6.5 before WP6.4 (power) for this reason.
+For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).
 
 **Open from phase 7:**
 - WP7.3b, the silo, waits for its place in the approved tech tree.
