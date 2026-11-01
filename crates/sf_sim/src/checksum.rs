@@ -35,7 +35,9 @@
 //! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
 //! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2) |
 //! | storage (`V`), only in a world given storage rules (and so harvest rules) | the capacity table (kind and units, ascending), then per player the ore stored and the capacity of its standing buildings at the last sync (WP7.3). |
-//! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V`. It is the last section |
+//! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
+//! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
+//! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -209,6 +211,7 @@ const SECTION_HARVEST: u8 = b'H';
 const SECTION_STORAGE: u8 = b'V';
 const SECTION_MONEY: u8 = b'M';
 const SECTION_PRODUCTION: u8 = b'Y';
+const SECTION_OUTCOME: u8 = b'Z';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -643,6 +646,14 @@ impl World {
         if let Some(production) = &self.production {
             h.write_u8(SECTION_PRODUCTION);
             production.write_hash(&mut h);
+        }
+
+        // Outcome (`Z`, WP7.6): the players of the match, whether it began, the defeats and the result.
+        // After `Y`, and only in a world that was given match rules, so every world without them
+        // hashes as before.
+        if let Some(outcome) = &self.outcome {
+            h.write_u8(SECTION_OUTCOME);
+            outcome.write_hash(&mut h);
         }
 
         h.finish()

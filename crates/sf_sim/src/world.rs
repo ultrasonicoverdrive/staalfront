@@ -20,6 +20,7 @@ use crate::orders::{self, GuardTarget, Order};
 use crate::ore::{Ore, OreRules};
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::placement::PlacementState;
+use crate::outcome::Outcome;
 use crate::production::Production;
 use crate::projectiles::ProjectileId;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
@@ -176,6 +177,9 @@ pub enum ConfigError {
     /// table, with numbers out of bounds or a table that does not fit the unit and building
     /// tables; or a unit or building table was given after them (WP6.5).
     Production,
+    /// The match rules were given twice, after the start, before the unit table, the weapon table
+    /// or the destruction settings (WP7.6).
+    Match,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -246,6 +250,10 @@ impl fmt::Display for ConfigError {
                 "the production rules must be given once, before the world starts, after the unit and building \
                  tables, with a queue limit of 1 to 20, an exit radius of 1 to 8 and units, factories, \
                  prerequisites and free units that the tables know"
+            }
+            ConfigError::Match => {
+                "the match rules must be given once, last, before the world starts, after the unit table, the \
+                 weapon table and the destruction settings, with two to eight players, each once"
             }
             ConfigError::Harvest => {
                 "the harvest rules must be given before the world starts, after the unit and building tables, \
@@ -357,6 +365,9 @@ pub struct World {
     /// The queues of the factories, the rally points and the rules of production (WP6.5). `None`
     /// for a world that was given no production rules.
     pub(crate) production: Option<Box<Production>>,
+    /// Who takes part in the match, who is defeated and who won (WP7.6). `None` for a world that was
+    /// given no match rules.
+    pub(crate) outcome: Option<Box<Outcome>>,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
     /// The structures that became complete in the last tick (WP6.3); replaced by every step.
@@ -776,6 +787,7 @@ impl World {
             money: None,
             stalled: Vec::new(),
             production: None,
+            outcome: None,
             placement: PlacementState::default(),
             completions: Vec::new(),
             targeting: Targeting::default(),
@@ -1507,6 +1519,8 @@ impl World {
         );
         // What the weapons took to zero is destroyed now, after all the damage of the tick is in (WP5.5).
         self.reap(tick);
+        // Who is defeated and who has won, after the dead have gone (WP7.6).
+        self.evaluate_match(tick);
         // The units that were hurt turn on their attackers (WP5.4).
         if let Some(config) = aim {
             let mut attacks = std::mem::take(&mut self.arsenal.attacks);
@@ -1721,6 +1735,10 @@ impl World {
             );
         }
         self.entities.clear(i);
+        // Something left the world: the match, if there is one, looks again at the end of the tick.
+        if let Some(outcome) = self.outcome.as_deref_mut() {
+            outcome.dirty = true;
+        }
         if let Some(next) = self.entities.generation[i].checked_add(1) {
             self.entities.generation[i] = next;
             self.free.push(id.index());
