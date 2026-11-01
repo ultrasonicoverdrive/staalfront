@@ -222,6 +222,13 @@ impl Hud {
                 crate::production_view::shipped_look(),
             );
         }
+        if !stats.production.is_empty() {
+            crate::production_view::draw_panel(
+                ui,
+                &stats.production,
+                crate::production_view::shipped_look(),
+            );
+        }
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {
             "Dots: on"
