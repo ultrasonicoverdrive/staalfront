@@ -513,19 +513,24 @@ pub(crate) fn parse(
     for u in &units {
         building::check_record(src, &units, u)?;
         building::check_unit_production(src, &units, u)?;
-        if u.build_picture.is_some() && u.cost.is_none() {
-            return Err(src.error_in_record(
-                "id",
-                &u.id,
-                "build_picture",
-                format!(
-                    "unit \"{}\": build_picture on a role that cannot be built (no cost)",
-                    u.id
-                ),
-            ));
-        }
     }
     building::check_cycles(src, &units)?;
+    // After the production checks, which have the more telling message for a role whose price was
+    // taken away.
+    if let Some(u) = units
+        .iter()
+        .find(|u| u.build_picture.is_some() && u.cost.is_none())
+    {
+        return Err(src.error_in_record(
+            "id",
+            &u.id,
+            "build_picture",
+            format!(
+                "unit \"{}\": build_picture on a role that cannot be built (no cost)",
+                u.id
+            ),
+        ));
+    }
     let live: Vec<Live<'_>> = units
         .iter()
         .map(|u| Live {

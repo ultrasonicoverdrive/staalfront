@@ -563,3 +563,6 @@ pub fn model(
         power,
     }
 }
+
+#[cfg(test)]
+mod tests;
