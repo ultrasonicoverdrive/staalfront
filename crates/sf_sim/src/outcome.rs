@@ -18,7 +18,7 @@
 //!
 //! **The match begins** at the first check at which every player owns something that counts. Until
 //! then nobody can be defeated: the starting objects of a match enter the world through commands, and
-//! a world whose second player appears at tick 5 must not end at tick 0. A world in which some player
+//! a world whose second player appears a few ticks later must not end in its first tick. A world in which some player
 //! never owns anything has no result.
 //!
 //! **Cost.** The question is asked only after something was removed from the world (the `dirty` flag,
