@@ -507,6 +507,7 @@ fn an_empty_tab_says_what_it_needs() {
     let f = fixture();
     let model = f.model(&Situation::default(), Tab::Vessels);
     assert!(model.items.is_empty());
+    assert_eq!(model.empty_hint.as_deref(), Some("Needs a shipyard"));
     let mut state = SidebarState {
         tab: Tab::Vessels,
         scroll: 0,

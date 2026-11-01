@@ -25,8 +25,10 @@
     tab_height_px: 24,
     tab_columns: 2,
     tab_labels: ("Structures", "Infantry", "Vehicles", "Vessels"),
-    // What an empty tab says (nothing to build there yet), per tab.
-    empty_hints: ("Nothing to build", "Needs a barracks", "Needs a vehicle factory", "Needs a shipyard"),
+    // What an empty unit tab says while the factory for it does not stand, per tab (the structures
+    // tab has no factory: its first entry is not used). With the factory standing and nothing to
+    // build, the tab says `words.nothing`.
+    empty_hints: ("", "Needs a barracks", "Needs a vehicle factory", "Needs a shipyard"),
 
     // The build items, in a grid under the tabs.
     tile_columns: 2,
@@ -51,6 +53,7 @@
         exit_blocked: "exit blocked",
         stopped: "stopped",
         needs: "needs",
+        nothing: "Nothing to build",
     ),
 
     colors: (

@@ -812,3 +812,26 @@ fn the_power_bar_fills_with_what_is_used_against_what_is_made() {
     assert_eq!(power_fill(PowerReading { made: 0, used: 0 }), (0, false));
     assert_eq!(power_fill(PowerReading { made: 0, used: 40 }), (1000, true));
 }
+
+#[test]
+fn an_empty_tab_names_the_factory_it_misses_or_says_there_is_nothing() {
+    let mut r = rig(1000, 4);
+    r.place("power_plant", (30, 20));
+    let hint = |r: &Rig, tab| model(&r.catalog, &r.sit(&[]), tab, None, None, &r.look).empty_hint;
+    // No factory stands: each unit tab names the one it needs, a tab with items says nothing.
+    assert_eq!(hint(&r, Tab::Structures), None);
+    assert_eq!(hint(&r, Tab::Infantry).as_deref(), Some("Needs a barracks"));
+    assert_eq!(
+        hint(&r, Tab::Vehicles).as_deref(),
+        Some("Needs a vehicle factory")
+    );
+    assert_eq!(hint(&r, Tab::Vessels).as_deref(), Some("Needs a shipyard"));
+    // With the factories standing the infantry tab has items; the vessel tab of Meridian stays
+    // empty although its shipyard stands (Meridian has no vessel): then nothing is missing.
+    r.place("refinery", (30, 26));
+    r.place("barracks", (36, 20));
+    r.place("vehicle_factory", (36, 26));
+    r.place("shipyard", (44, 26));
+    assert_eq!(hint(&r, Tab::Infantry), None);
+    assert_eq!(hint(&r, Tab::Vessels).as_deref(), Some("Nothing to build"));
+}

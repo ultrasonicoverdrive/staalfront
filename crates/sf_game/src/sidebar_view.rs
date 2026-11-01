@@ -128,8 +128,8 @@ pub fn frame(
     draw_power(ui, &lay, model, look);
     draw_tabs(ui, &lay, model, state.tab, look, cursor);
     draw_items(ui, &lay, model, state.scroll, look, cursor);
-    if model.items.is_empty() {
-        draw_empty_hint(ui, &lay, state.tab, look);
+    if let Some(hint) = &model.empty_hint {
+        draw_empty_hint(ui, &lay, hint, look);
     }
 
     // The clicks. A press on a tab shows it; a press on an item is its action.
@@ -259,9 +259,8 @@ fn draw_items(
 }
 
 /// Draws the hint of an empty tab in the item area.
-fn draw_empty_hint(ui: &mut Ui, lay: &Layout, tab: Tab, look: &SidebarLook) {
+fn draw_empty_hint(ui: &mut Ui, lay: &Layout, text: &str, look: &SidebarLook) {
     let px = f32::from(look.small_px) * ui.scale();
-    let text = tab.pick(&look.empty_hints);
     let rect = Rect::new(
         lay.area.x,
         lay.area.y,
@@ -302,16 +301,6 @@ fn draw_tile(
         f32::from(look.label_px) * scale,
         color(c.text),
     );
-    // Progress in percent, top left.
-    if let Some(permille) = item.progress {
-        ui.text_px_at(
-            picture.x + (3.0 * scale).round(),
-            picture.y + (2.0 * scale).round(),
-            &format!("{}%", permille / 10),
-            small,
-            color(c.text),
-        );
-    }
     // The count of this item that is going up or waits in a queue, top right.
     if item.count > 0 {
         let text = item.count.to_string();
@@ -344,14 +333,20 @@ fn draw_tile(
         small,
         color(price_color),
     );
-    if let Some(words) = words {
-        let (w, _) = ui.measure_px(words, small);
+    // On the right: why it waits, else how far along it is in percent.
+    let right_text = match (words, item.progress) {
+        (Some(words), _) => Some((words.to_owned(), c.warn)),
+        (None, Some(permille)) => Some((format!("{}%", permille / 10), c.text)),
+        (None, None) => None,
+    };
+    if let Some((text, text_color)) = right_text {
+        let (w, _) = ui.measure_px(&text, small);
         ui.text_px_at(
             (rect.right() - w - (3.0 * scale).round()).round(),
             ty,
-            words,
+            &text,
             small,
-            color(c.warn),
+            color(text_color),
         );
     }
     // The progress bar along the bottom edge.

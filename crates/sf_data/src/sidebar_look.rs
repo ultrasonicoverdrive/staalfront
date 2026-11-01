@@ -37,6 +37,8 @@ pub struct Words {
     pub stopped: String,
     /// Before the name of the structure an item waits for.
     pub needs: String,
+    /// What an empty tab says when nothing is missing, there is just nothing to build.
+    pub nothing: String,
 }
 
 /// The colours of the sidebar.
@@ -105,7 +107,7 @@ pub struct SidebarLook {
     pub tab_columns: u8,
     /// The names of the tabs.
     pub tab_labels: PerTab<String>,
-    /// What an empty tab says.
+    /// What an empty unit tab says while the factory for it does not stand.
     pub empty_hints: PerTab<String>,
     /// Items per row.
     pub tile_columns: u8,
@@ -217,6 +219,8 @@ mod tests {
         assert_eq!(look.colors.bar_fill, (90, 200, 255, 235));
         assert_eq!(look.colors.bar_waiting, (255, 110, 80, 245));
         assert_eq!(look.words.waiting_credits, "no credits");
+        assert_eq!(look.words.nothing, "Nothing to build");
+        assert_eq!(look.empty_hints.2, "Needs a vehicle factory");
     }
 
     #[test]

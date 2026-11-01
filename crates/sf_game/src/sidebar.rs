@@ -80,6 +80,16 @@ pub const fn factory_for(category: Category) -> Option<BuildingFunction> {
     }
 }
 
+/// The factory a unit tab is built from; `None` for the structures tab.
+pub const fn factory_of_tab(tab: Tab) -> Option<BuildingFunction> {
+    match tab {
+        Tab::Structures => None,
+        Tab::Infantry => Some(BuildingFunction::InfantryFactory),
+        Tab::Vehicles => Some(BuildingFunction::VehicleFactory),
+        Tab::Vessels => Some(BuildingFunction::VesselFactory),
+    }
+}
+
 /// One role the player's faction can build, from the definitions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
@@ -528,6 +538,8 @@ pub struct SidebarModel {
     pub chosen: Option<Kind>,
     /// The power of the player; `None` while there are no power rules.
     pub power: Option<PowerReading>,
+    /// What an empty tab says; `None` while the tab has items.
+    pub empty_hint: Option<String>,
 }
 
 /// Builds the model of `tab` for this frame.
@@ -553,9 +565,19 @@ pub fn model(
                 .as_ref()
                 .is_some_and(|v| v.status == FactoryStatus::WaitingForMoney)
         });
+    let empty_hint = items.is_empty().then(|| {
+        let missing =
+            factory_of_tab(tab).is_some_and(|f| !sit.factories.iter().any(|x| x.function == f));
+        if missing {
+            tab.pick(&look.empty_hints).clone()
+        } else {
+            look.words.nothing.clone()
+        }
+    });
     SidebarModel {
         items,
         waiting_words,
+        empty_hint,
         counts: tab_counts(catalog, sit),
         credits: sit.credits,
         waiting_for_credits,
