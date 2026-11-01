@@ -208,6 +208,42 @@ mod tests {
     }
 
     #[test]
+    fn a_structure_still_going_up_does_not_keep_its_owner_in_the_match() {
+        // The human builds a power plant next to its construction centre; while it goes up the centre
+        // is lost: the plant under construction is not something that stands, so the human is
+        // defeated, and the opponent wins in that tick.
+        let (def, defs, map) = m1();
+        let mut w = world(&def, &defs, &map);
+        schedule(&mut w, &def, &defs).unwrap();
+        w.step();
+        let tick = w.tick();
+        let plant = sf_sim::Kind(defs.kind_of("power_plant").unwrap());
+        w.schedule(
+            tick,
+            PlayerId(0),
+            sf_sim::Command::BuildStructure {
+                kind: plant,
+                cell: sf_sim::Cell::new(8, 62),
+            },
+        )
+        .unwrap();
+        w.step();
+        assert_eq!(w.under_construction(), 1, "the plant goes up");
+        assert_eq!(w.match_result(), None, "the centre stands");
+        let tick = w.tick();
+        let centre = sf_sim::EntityId::new(0, 0);
+        w.schedule(tick, PlayerId(0), sf_sim::Command::Despawn { id: centre })
+            .unwrap();
+        w.step();
+        assert_eq!(w.under_construction(), 1, "the plant is still going up");
+        assert_eq!(w.defeat_tick(PlayerId(0)), Some(tick));
+        assert_eq!(
+            w.match_result().map(|r| r.verdict),
+            Some(Verdict::Won(PlayerId(1)))
+        );
+    }
+
+    #[test]
     fn a_match_the_game_cannot_play_is_refused_with_the_reason() {
         let (def, defs, map) = m1();
         let cells = map.size_in_cells();

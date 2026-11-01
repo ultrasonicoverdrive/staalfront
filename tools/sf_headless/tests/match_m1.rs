@@ -302,3 +302,39 @@ fn the_map_has_the_places_the_match_file_names() {
 const WATER_CELLS: usize = 253;
 const ROCK_CELLS: usize = 252;
 const ORE_CELLS: usize = 174;
+
+/// The cost of the outcome (WP7.6): the same scenario, with and without the match rules, alternating,
+/// in microseconds per tick. Run with `cargo test --release -p sf_headless --test match_m1 -- --ignored
+/// --nocapture cost_of_the_outcome`. A measurement, not an assertion on time (the machine decides).
+#[test]
+#[ignore]
+fn cost_of_the_outcome() {
+    let with = scenario();
+    let mut without = with.clone();
+    without.match_file = None;
+    let time = |s: &Scenario| {
+        let mut w = s.build_world().unwrap();
+        let t = std::time::Instant::now();
+        for _ in 0..s.ticks {
+            w.step();
+        }
+        t.elapsed().as_secs_f64() * 1e6 / s.ticks as f64
+    };
+    let mut a = Vec::new();
+    let mut b = Vec::new();
+    for _ in 0..7 {
+        a.push(time(&with));
+        b.push(time(&without));
+    }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        v[v.len() / 2]
+    };
+    println!("with the match rules:    {:?}", a);
+    println!("without the match rules: {:?}", b);
+    println!(
+        "median us per tick: with {:.3}, without {:.3}",
+        median(&mut a),
+        median(&mut b)
+    );
+}

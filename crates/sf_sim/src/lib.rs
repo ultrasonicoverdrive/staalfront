@@ -67,6 +67,8 @@
 //! * count the weapons down and fire them, move the projectiles in flight and detonate them, when the
 //!   world has a weapon table (WP5.1, WP5.2): every decision first, then all the damage at once, each
 //!   hit through the armor table and with its splash (WP5.3);
+//! * remove what the weapons took to zero (WP5.5) and, in a world with match rules, decide who is
+//!   defeated and who has won (WP7.6, [`outcome`]);
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!

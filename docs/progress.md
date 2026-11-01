@@ -2260,9 +2260,15 @@ with combat; the economy itself costs a few microseconds a tick (see the WP note
 opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
 sandbox (`sf_game --sandbox --harvest`). Still missing:
 
-- making units (WP6.5, production, in PR #96);
-- a skirmish map with both bases and a win condition (the scenario format of phase 10 or a sandbox rule);
-- a static opponent.
+- making units (WP6.5, production, in PR #96): built;
+- a skirmish map with both bases and a win condition: built in WP7.6 (the map `m1`, the match file, the fixed rule
+  of `sf_sim::outcome`, the banner), see "WP7.6 notes" below;
+- a static opponent: built in WP7.6 (it does not build, produce or attack; its units fire back).
+
+What is still missing for M1 after WP7.6: it has not been played by a person on the reference laptop (the
+scripted run in `tools/sf_headless/tests/match_m1.rs` wins at tick 5687; the screenshots come from the test
+harness, and a human playing the match is the point of the milestone: "the first moment to really play and adjust
+the design"). There is no menu, no restart and no pause behind the banner (phase 11).
 
 For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).
 
