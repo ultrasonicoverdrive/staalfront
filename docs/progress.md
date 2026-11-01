@@ -2087,7 +2087,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before 
 
 ## Phase 7 — Economy
 
-Status: done (2026-10-31). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) waits for its place in the tech tree. The report is below the notes. Milestone M1 is not reached yet (see the report).
+Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in review; see "WP7.6 notes"). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) waits for its place in the tech tree. The report is below the notes. Milestone M1 is not reached yet (see the report).
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2232,6 +2232,28 @@ Status: done (2026-10-31). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); 
   functions the HUD calls (`production_screenshot.rs`), and a plain `sf_game --sandbox --harvest` run was only checked
   to start and exit cleanly.
 - **Cost:** see the PR body (alternating runs against `origin/main`).
+
+
+### WP7.6 notes: the M1 match (stacked on WP6.5, orchestrator decision 01-11-2026)
+
+- Done: the **rule** (`sf_sim::outcome`: a player is defeated when it owns no standing structure and no armed
+  unit; the last one left wins in the tick of the last defeat; the last players falling together is a draw; once
+  decided it never changes; the match begins when every player owns something; harvesters, structures under
+  construction and objects do not count; checksum section `Z`, last, only in a world given match rules via
+  `World::with_match`); the **match file** (`assets/matches/m1.ron`, `sf_data::match_def`, checked against the
+  definitions and the map; `sf_bridge::match_rules`, `match_commands`, `match_factions`, `match_credits`); the
+  **map** `m1` (96 by 96 cells, `tools/sf_headless/examples/gen_match_map.rs`); the **static opponent** (no
+  command is ever given to it; its units fire back by WP5.4, its harvester mines by WP7.2); the game mode
+  `sf_game --match [FILE]` and the **result banner** (`match_view`, `match_look.ron`; the game keeps running behind
+  it); the pinned scenario `match` (`0x54a140fc12273e31`, Linux and Windows in CI) whose script wins at tick 5687;
+  `docs/rules/match.md`. Screenshots: `docs/screenshots/wp7.6`.
+- **Pins:** no earlier pin moved. All 26 earlier scenarios pass against their committed `.expected`
+  (`git diff origin/wp/6.5-production -- assets/scenarios/*.expected` adds only `match.expected`); `golden.rs` and the
+  benchmark's PLAIN and FIGHT checksums are unchanged; a world without match rules writes no `Z` section.
+- **Gaps:** no AI, triggers or scenario format (WP10.1 absorbs the match file); no fog, sidebar or menu; no restart,
+  no pause and no surrender; the local player is fixed at player 0; the opponent's harvester collects credits it
+  never spends; M1 has not been played by a person on the laptop (see the Phase 7 report).
+- **Cost:** see the PR body and `docs/rules/match.md` ("Measured").
 
 
 ### Phase 7 report
