@@ -293,6 +293,12 @@ pub struct UnitDef {
     /// means no function, no exit side and no prerequisites.
     #[serde(default)]
     pub building: Option<BuildingDef>,
+    /// Ids of the structures its owner must have standing before this unit can be built (WP6.5,
+    /// `docs/rules/production.md`), besides the factory that builds it
+    /// ([`produced_by`](super::building::produced_by), derived from the category). Only for a
+    /// unit with a cost; a Structure says it in `building.requires`. Default: none.
+    #[serde(default)]
+    pub requires: Vec<String>,
 }
 
 /// The `models` map, refusing a faction that is listed twice (a plain map
@@ -476,6 +482,7 @@ pub(crate) fn parse(
     }
     for u in &units {
         building::check_record(src, &units, u)?;
+        building::check_unit_production(src, &units, u)?;
     }
     building::check_cycles(src, &units)?;
     let live: Vec<Live<'_>> = units

@@ -356,6 +356,7 @@ pub mod orders;
 pub mod ore;
 pub mod path;
 pub mod placement;
+pub mod production;
 pub mod projectiles;
 pub mod snapshot;
 pub mod targeting;
@@ -400,6 +401,11 @@ pub use path::{
 };
 pub use placement::{
     CellVerdict, ExitCell, PlacementError, PlacementPreview, PlacementRejection, exit_cell, gap,
+};
+pub use production::{
+    FULL_SPEED_PERMILLE, FactoryStatus, FactoryView, MAX_EXIT_RADIUS, MAX_QUEUE_LIMIT, Produced,
+    ProductionError, ProductionRejection, ProductionRules, ProductionTable, ProductionTableError,
+    QueueItem, UnitBuild, paid_at,
 };
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
 pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView, WreckView};

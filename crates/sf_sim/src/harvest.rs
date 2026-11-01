@@ -572,6 +572,14 @@ impl Harvest {
         }
     }
 
+    /// Puts `n` credits back into the store of `player` (a cancelled unit), whatever the
+    /// capacity: it is money that was in the store a moment ago.
+    pub(crate) fn refund(&mut self, player: PlayerId, n: u64) {
+        if let Some(s) = &mut self.storage {
+            add_to(&mut s.stored, player, n);
+        }
+    }
+
     pub(crate) fn has_storage(&self) -> bool {
         self.storage.is_some()
     }

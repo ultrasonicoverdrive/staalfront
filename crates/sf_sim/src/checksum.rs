@@ -208,6 +208,7 @@ const SECTION_ORE: u8 = b'E';
 const SECTION_HARVEST: u8 = b'H';
 const SECTION_STORAGE: u8 = b'V';
 const SECTION_MONEY: u8 = b'M';
+const SECTION_PRODUCTION: u8 = b'Y';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -278,6 +279,31 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
             h.write_bytes(&kind.0.to_le_bytes());
             h.write_u32(cell.x);
             h.write_u32(cell.y);
+        }
+        Command::QueueUnit { factory, kind } => {
+            h.write_u8(13);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            h.write_bytes(&kind.0.to_le_bytes());
+        }
+        Command::CancelUnit { factory, index } => {
+            h.write_u8(14);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            h.write_u8(*index);
+        }
+        Command::SetRally { factory, cell } => {
+            h.write_u8(15);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            match cell {
+                Some(c) => {
+                    h.write_u8(1);
+                    h.write_u32(c.x);
+                    h.write_u32(c.y);
+                }
+                None => h.write_u8(0),
+            }
         }
         Command::Order { ids, order, queued } => {
             h.write_u8(8);
@@ -609,6 +635,14 @@ impl World {
                     self.write_money_hash(&mut h);
                 }
             }
+        }
+
+        // Production (`Y`, WP6.5): the rules and the table, then every queue, rally point and
+        // progress in slot order. Last, and only in a world that was given production rules, so
+        // every world without them hashes as before.
+        if let Some(production) = &self.production {
+            h.write_u8(SECTION_PRODUCTION);
+            production.write_hash(&mut h);
         }
 
         h.finish()

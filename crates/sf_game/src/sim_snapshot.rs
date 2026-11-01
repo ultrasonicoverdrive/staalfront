@@ -34,9 +34,63 @@ use std::time::{Duration, Instant};
 
 use sf_math::Vec2;
 use sf_sim::{
-    Cell, Construction, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId,
-    ProjectileView, Tick, UnitStats, UnitTable, World, WreckView,
+    BuildingFunction, Cell, Construction, Death, EntityId, EntityView, FactoryView, Kind, Order,
+    PlacementPreview, PlayerId, ProjectileView, Tick, UnitBuild, UnitStats, UnitTable, World,
+    WreckView,
 };
+
+/// What the factories can build and which structure is which factory (WP6.5): read from the world
+/// once, shared by every snapshot. The queue readout and the keys that queue a unit ask it; the
+/// rules (who may build what) stay in the simulation, which refuses what is not allowed.
+#[derive(Clone, Debug, Default)]
+pub struct ProductionMenu {
+    builds: Vec<UnitBuild>,
+    factories: Vec<(Kind, BuildingFunction)>,
+}
+
+impl ProductionMenu {
+    /// Reads the menu of `world`; empty for a world without production rules.
+    pub fn of(world: &World) -> ProductionMenu {
+        let Some(table) = world.production_table() else {
+            return ProductionMenu::default();
+        };
+        ProductionMenu {
+            builds: table.iter().cloned().collect(),
+            factories: world
+                .building_table()
+                .iter()
+                .filter(|b| b.function.is_factory())
+                .map(|b| (b.kind, b.function))
+                .collect(),
+        }
+    }
+
+    /// The function of the structure kind `kind` if it is a factory.
+    pub fn factory_function(&self, kind: Kind) -> Option<BuildingFunction> {
+        self.factories
+            .iter()
+            .find(|&&(k, _)| k == kind)
+            .map(|&(_, f)| f)
+    }
+
+    /// The unit kinds a factory of `function` builds for a player of the faction `faction_bit`, ascending
+    /// by kind.
+    pub fn units_for(&self, function: BuildingFunction, faction_bit: u8) -> Vec<Kind> {
+        self.builds
+            .iter()
+            .filter(|b| b.factory == function && b.factions & faction_bit != 0)
+            .map(|b| b.kind)
+            .collect()
+    }
+
+    /// The price and build time of a unit: `(credits, ticks)`.
+    pub fn price_of(&self, kind: Kind) -> Option<(u32, u32)> {
+        self.builds
+            .iter()
+            .find(|b| b.kind == kind)
+            .map(|b| (b.cost, b.build_ticks))
+    }
+}
 
 /// A placement question for the ghost under the cursor (WP6.2): may `player` build `kind` with
 /// its footprint anchored on `cell`? The sim thread answers it against the world as it is, with
@@ -120,6 +174,10 @@ pub struct SimSnapshot {
     credits: Vec<(PlayerId, u64)>,
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
     stalled: Vec<EntityId>,
+    /// The queue of every structure that has one or a rally point (WP6.5), ascending by slot.
+    factories: Vec<(EntityId, FactoryView)>,
+    /// What the factories can build (WP6.5); shared.
+    menu: Arc<ProductionMenu>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
     /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
@@ -159,6 +217,8 @@ impl SimSnapshot {
             has_money: false,
             credits: Vec::new(),
             stalled: Vec::new(),
+            factories: Vec::new(),
+            menu: Arc::new(ProductionMenu::default()),
             wrecks: Vec::new(),
             deaths: Vec::new(),
             projectiles: Vec::new(),
@@ -317,6 +377,14 @@ impl SimSnapshot {
         }
         self.stalled.clear();
         self.stalled.extend_from_slice(world.stalled());
+        // The queues (WP6.5): the simulation's state of this tick, a handful of records.
+        self.factories.clear();
+        self.factories.extend(
+            world
+                .factories()
+                .filter_map(|id| world.production_of(id).map(|v| (id, v))),
+        );
+        self.menu = Arc::clone(&statics.menu);
         self.wrecks.clear();
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
@@ -430,6 +498,26 @@ impl SimSnapshot {
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
     pub fn stalled(&self) -> &[EntityId] {
         &self.stalled
+    }
+
+    /// The queue of the factory `id`, if it has one or a rally point (WP6.5).
+    pub fn factory_of(&self, id: EntityId) -> Option<&FactoryView> {
+        self.factories
+            .binary_search_by_key(&id.index(), |(f, _)| f.index())
+            .ok()
+            .map(|k| &self.factories[k])
+            .filter(|(f, _)| *f == id)
+            .map(|(_, v)| v)
+    }
+
+    /// Every factory with a queue or a rally point, ascending by slot (WP6.5).
+    pub fn factories(&self) -> &[(EntityId, FactoryView)] {
+        &self.factories
+    }
+
+    /// What the factories can build (WP6.5).
+    pub fn menu(&self) -> &ProductionMenu {
+        &self.menu
     }
 
     /// Whether any structure of `player` under construction waits for money (WP7.4).
@@ -641,6 +729,7 @@ impl GroundMap {
 pub(crate) struct Statics {
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
+    menu: Arc<ProductionMenu>,
 }
 
 impl Statics {
@@ -672,6 +761,7 @@ impl Statics {
         Statics {
             units: Arc::new(world.unit_table().clone()),
             ground: Arc::new(map),
+            menu: Arc::new(ProductionMenu::of(world)),
         }
     }
 }

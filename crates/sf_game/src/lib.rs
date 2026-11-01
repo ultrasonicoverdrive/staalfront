@@ -120,6 +120,7 @@ pub mod ore_view;
 pub mod placement_view;
 pub mod playfield;
 pub mod population;
+pub mod production_view;
 pub mod roster;
 pub mod runner;
 pub mod sandbox;

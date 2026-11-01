@@ -55,7 +55,7 @@ mod weapon;
 
 use std::path::Path;
 
-pub use building::{BANNED_IDS, BuildingDef, BuildingFunction, MAX_STORAGE, Side};
+pub use building::{BANNED_IDS, BuildingDef, BuildingFunction, MAX_STORAGE, Side, produced_by};
 pub use classes::{
     ArmorType, ClassTables, DamageType, MAX_ARMOR_PERCENT, MAX_CLASS_KIND, MAX_COST_PERMILLE,
     MAX_DRIVE_TOLERANCE, MIN_COST_PERMILLE, MovementClass, TerrainCost, TurnMode, TurningDef,

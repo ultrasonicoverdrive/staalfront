@@ -286,6 +286,8 @@ pub struct Runner {
     cursor_art: Option<CursorArt>,
     /// The structure chosen to build, if one is (WP6.2, [`crate::build_mode`]).
     build: BuildMode,
+    /// Which of the units the selected factory offers the queue key adds (WP6.5); wraps.
+    produce_pick: usize,
     /// How many refused builds the console has been told about.
     rejected_seen: u64,
     /// The last refused build in words, and when, for the line under the top bar.
@@ -495,6 +497,7 @@ impl Runner {
             os_cursor_hidden: false,
             build,
             rejected_seen: 0,
+            produce_pick: 0,
             refusal: None,
             failed,
         })
@@ -979,6 +982,111 @@ impl Runner {
             &terrain,
             &snap,
             crate::storage_view::shipped_look(),
+        );
+    }
+
+    /// The units the selected factory offers the local player, ascending by kind.
+    fn production_menu(&self, function: sf_sim::BuildingFunction) -> Vec<sf_sim::Kind> {
+        self.snap
+            .menu()
+            .units_for(function, sf_data::units::Faction::Meridian.bit())
+    }
+
+    /// Production by key (WP6.5, [`crate::production_view`]): with a factory selected, U adds
+    /// the unit on offer to its queue, I picks the next unit on offer, O takes the last one out
+    /// and G sets the rally point to the cell under the cursor. The simulation checks every one
+    /// again and says a refusal on the console.
+    fn handle_production(&mut self, ctx: &Context) {
+        let Some((factory, function)) =
+            crate::production_view::selected_factory(&self.snap, &self.selection)
+        else {
+            return;
+        };
+        let actions = ctx.actions();
+        let menu = self.production_menu(function);
+        if actions.pressed(Action::ProduceCycle) && !menu.is_empty() {
+            self.produce_pick = (self.produce_pick + 1) % menu.len();
+        }
+        let pick = crate::production_view::menu_pick(&menu, self.produce_pick);
+        if actions.pressed(Action::ProduceQueue)
+            && let Some(kind) = pick
+        {
+            println!("production: queue {}", self.build.name_of(kind));
+            commands::issue(&self.sim, sf_sim::Command::QueueUnit { factory, kind });
+        }
+        if actions.pressed(Action::ProduceCancel)
+            && let Some(view) = self.snap.factory_of(factory)
+            && let Some(last) = view.queue.len().checked_sub(1)
+        {
+            commands::issue(
+                &self.sim,
+                sf_sim::Command::CancelUnit {
+                    factory,
+                    index: u8::try_from(last).unwrap_or(u8::MAX),
+                },
+            );
+        }
+        if actions.pressed(Action::RallySet) {
+            let cursor = self
+                .hover_at
+                .or_else(|| ctx.input().cursor().map(|(x, y)| (x as f32, y as f32)));
+            if let Some(cell) = self.cell_under(cursor) {
+                commands::issue(
+                    &self.sim,
+                    sf_sim::Command::SetRally {
+                        factory,
+                        cell: Some(cell),
+                    },
+                );
+            }
+        }
+    }
+
+    /// The lines of the queue readout of the selected factory (WP6.5).
+    fn production_lines(&self) -> Vec<(String, crate::production_view::Tone)> {
+        let Some((id, function)) =
+            crate::production_view::selected_factory(&self.snap, &self.selection)
+        else {
+            return Vec::new();
+        };
+        let menu = self.production_menu(function);
+        let next = crate::production_view::menu_pick(&menu, self.produce_pick).and_then(|k| {
+            let (cost, ticks) = self.snap.menu().price_of(k)?;
+            Some((self.build.name_of(k), cost, ticks))
+        });
+        let title = self
+            .snap
+            .get(id)
+            .map_or_else(String::new, |v| self.build.name_of(v.kind));
+        crate::production_view::panel_lines(
+            &title,
+            self.snap.factory_of(id),
+            next.as_ref().map(|(n, c, t)| (n.as_str(), *c, *t)),
+            &|k| self.build.name_of(k),
+        )
+    }
+
+    /// The progress bars under the factories and the rally flags (WP6.5).
+    fn draw_production(&mut self) {
+        if self.snap.factories().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let selected =
+            crate::production_view::selected_factory(&snap, &self.selection).map(|(id, _)| id);
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        let look = crate::production_view::shipped_look();
+        crate::production_view::draw_bars(&mut layer, &frame, &terrain, &snap, look);
+        crate::production_view::draw_rally_flags(
+            &mut layer, &frame, &terrain, &snap, selected, look,
         );
     }
 
@@ -1860,6 +1968,7 @@ impl App for Runner {
             tick: self.snap.tick().0,
             build_line: self.build_line(now),
             money: self.money_hud(),
+            production: self.production_lines(),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);
@@ -1894,6 +2003,7 @@ impl App for Runner {
             self.draw_ghost();
             self.draw_construction_bars();
             self.draw_storage_bars();
+            self.draw_production();
             let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
@@ -1957,6 +2067,7 @@ impl App for Runner {
         // away must not also order the selection (handle_build ends build mode).
         let right_click = RightClick::for_frame(self.build.is_active());
         self.handle_build(ctx, now);
+        self.handle_production(ctx);
         self.handle_selection(ctx);
         self.handle_orders(ctx, right_click);
         let actions = ctx.actions();
@@ -2339,6 +2450,8 @@ fn sandbox_scene(
                 world = crate::playfield::with_storage(world, &defs);
                 // WP7.4: and the store is the player's money; structures are paid while they go up.
                 world = crate::playfield::with_money(world);
+                // WP6.5: and the factories build units from queues, paid while they go up.
+                world = crate::playfield::with_production(world, &defs);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),

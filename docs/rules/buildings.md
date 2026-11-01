@@ -38,7 +38,7 @@ conscious choice. Adding a structure is a new record and no Rust change (a test 
 | Field | Where | Meaning |
 |---|---|---|
 | `footprint: (width, height)` | record | Cells, 1 to 16 each. Anchored at the cell with the smallest x and y, extending east (+x) and south (+y). |
-| `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. The exit cell is the cell next to the middle of that side and must be usable when a factory is placed (WP6.2, "Placement"); where on that side units appear, and the free spot beyond it, is WP6.5. The structure is never rotated. |
+| `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. The exit cell is the cell next to the middle of that side and must be usable when a factory is placed (WP6.2, "Placement"); where on that side units appear, and the free spot beyond it, are set by production since WP6.5 (`production.md`, "Exit and the free spot"). The structure is never rotated. |
 | `build_seconds` | record | Game seconds, a whole number of 20 Hz ticks, required with a `cost`, **not negative** (refused with its own message). Becomes `build_ticks`. |
 | `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). With money rules (WP7.4) it is paid over the build time, `economy.md` "Money". |
 | `power` | record | Produced (+) or used (-). WP6.4 sums it. |
@@ -103,8 +103,8 @@ sorts by kind, so the order of the input is irrelevant; it refuses a duplicate k
 factory without a side, a side without a use, a cost without a time (or the reverse), prerequisites on
 something that cannot be built, an unknown prerequisite and a cycle. Nothing is a float.
 
-The table answers `World::building_table()`. Since WP6.2 placement reads it ("Placement" below); power (WP6.4)
-and production (WP6.5) will too. `BuildingStats` has one field that is not in the data table's digest, the
+The table answers `World::building_table()`. Since WP6.2 placement reads it ("Placement" below); production reads it
+since WP6.5 (`production.md`) and power (WP6.4) will too. `BuildingStats` has one field that is not in the data table's digest, the
 `build_radius` of the anchor in whole cells (from the `build_radius` flag of the record, the fraction of a
 decimal dropped); it has a digest of its own (`BuildingTable::placement_digest`) so the WP6.1 digest below stays
 as it was pinned.
@@ -190,9 +190,10 @@ next to the **middle** of its `exit_side` (`exit_cell`: for `PosX`, `(x + width,
 `(x - 1, y + height / 2)`; `PosY` `(x + width / 2, y + height)`; `NegY` `(x + width / 2, y - 1)`, the halves
 rounded down). It must be on the map, free of structures and, for infantry and vehicle factories, ground every
 ground class can enter (the terrain's `ground` summary, so a road is fine and water or rock are not); for the
-vessel factory the terrain is not checked (which water a vessel may use is WP6.5's, it has no flag yet). One
-cell, fixed, so that the ghost can show it and WP6.5 has a place to start; **where on that side and the free
-spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too:
+vessel factory the terrain is not checked here; since WP6.5 a vessel comes out only on a cell a vessel can
+enter, and with no water in reach it waits (`production.md`, "Exit and the free spot"). One
+cell, fixed, so that the ghost can show it and production has a place to start; **where on that side and the free
+spot beyond it are production's** (since WP6.5 it searches outwards from this cell, `production.md`, "Exit and the free spot"). The harvester dock has an exit side too:
 the same cell is the dock point where harvesters unload (`economy.md`, "Harvesters"; WP7.2).
 
 **Rotation (the WP6.1 follow-up).** A structure is **not rotated**: `BuildStructure` has no facing, the
@@ -203,8 +204,8 @@ facing.
 **Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`, see
 `economy.md`) are accepted from any player seat; they
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
-only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
-put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
+only buildable terrain counts; its vessels then wait for water, `production.md`). A blocked exit is checked when the factory is placed, not later: a structure
+put in front of an existing factory leaves it standing (since WP6.5 a blocked exit holds the queue, `production.md`). Nothing is
 charged tick by tick in a world with money rules (WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
 (`content/units.md`); here it is a base structure behind the barracks, as in WP6.1.
 
@@ -317,8 +318,8 @@ from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Foot
   radar"). Which mission unlocks a role is mission data (phase 10), laid over this tree: a role must be both
   unlocked and have its prerequisites standing. The two agree: no structure is unlocked in the campaign
   before one of its prerequisites (a test holds the unlock missions of `content/units.md` against the tree).
-* It carries **no unit prerequisites** (which factory a rifleman needs). That is WP6.5, which will read the
-  factory functions; a unit's `requires` would be the same field.
+* It carries **no unit prerequisites** (which factory a rifleman needs). Since WP6.5 production
+  takes the factory from the unit's category and checks a unit's own `requires` on load (`production.md`).
 * The edges are our own and were approved by Tijmen on 30-10-2026; changing one now needs his approval.
   Balance is phase 15; a change is a data edit and a test row
   (`the_shipped_tech_tree_is_the_documented_one`) plus this table.
