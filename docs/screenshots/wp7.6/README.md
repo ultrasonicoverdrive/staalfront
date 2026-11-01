@@ -25,3 +25,8 @@ Red is the human (Meridian), blue the opponent (Veyran). The `sf_game_*.png` fil
   defeat.
 
 Not shown: a person playing the match in the real window (a click cannot be made from outside the window).
+
+* `sf_game_match_t00000_close_up.png`, `sf_game_match_whole_map.png`: the **real game window** (`xvfb-run sf_game --match --shots <dir>`,
+  debug build, lavapipe) 137 ticks in: the match map with `Credits 4000`, the minimap, the opponent's ten objects as strategic
+  icons (blue) and the human's construction centre (red) with the camera opened on it. The small marks on the lake and the
+  magenta square near the ridge are debug overlays of the window (pick and focus markers), not game objects (the top bar counts 11 units).
