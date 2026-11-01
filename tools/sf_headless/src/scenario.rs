@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sf_data::map::Map;
+use sf_data::match_def::MatchDef;
 use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{Faction, UnitDefs};
@@ -217,6 +218,23 @@ pub struct Scenario {
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
     pub weapon_table: Option<WeaponTable>,
+    /// A match file (WP7.6, `docs/rules/match.md`): the name of a file in the `unit_defs` directory
+    /// (a frozen copy of `assets/matches/m1.ron` next to the frozen definitions, so that editing the
+    /// shipped match never moves the checksum). It gives the world its match rules (who takes part,
+    /// hence the outcome section `Z`), the faction and the starting credits of each player and the
+    /// objects each starts with, which enter the world on tick 0 before everything else of the
+    /// scenario, in the order of the file. The map is the scenario's own `map_name`. Left out: no
+    /// match, which is every scenario of the earlier phases. Needs `unit_defs`, `buildings`, `combat`
+    /// and `destruction`; `factions` and the `starting` list of `money` stay empty (the file has them).
+    #[serde(default)]
+    pub match_file: Option<String>,
+    /// The match file read from `match_file` by [`Scenario::load`]. Not part of the file.
+    #[serde(skip)]
+    pub match_def: Option<MatchDef>,
+    /// The commands that make the starting objects of `match_def` (`sf_bridge::match_commands`), read
+    /// by [`Scenario::load`], scheduled for tick 0 by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub match_commands: Vec<(PlayerId, Command)>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -893,6 +911,9 @@ impl Scenario {
             scenario.movement_table = Some(loaded.movement);
             own_costs = Some(loaded.costs);
         }
+        if let (Some(dir), Some(file)) = (scenario.unit_defs.clone(), scenario.match_file.clone()) {
+            scenario.load_match(&dir, &file, path)?;
+        }
         if let Some(name) = scenario.map_name.clone() {
             let costs = match (own_costs, shipped) {
                 (Some(own), _) => own,
@@ -902,6 +923,27 @@ impl Scenario {
             scenario.terrain = Some(scenario.load_terrain(&name, path, &costs)?);
         }
         Ok(scenario)
+    }
+
+    /// Reads the match file `file` of the `unit_defs` directory `dir`, checks it against that
+    /// directory's definitions and the scenario's map size, and makes the commands of its starting
+    /// objects.
+    fn load_match(&mut self, dir: &str, file: &str, scenario_file: &Path) -> Result<(), ScenarioError> {
+        let invalid = |problem: String| ScenarioError::Invalid {
+            path: Some(scenario_file.to_path_buf()),
+            problems: vec![format!("match_file \"{file}\": {problem}")],
+        };
+        let scenarios = scenario_file.parent().unwrap_or(Path::new(""));
+        let text = std::fs::read_to_string(scenarios.join(dir).join(file))
+            .map_err(|e| invalid(e.to_string()))?;
+        let def = MatchDef::from_ron(&text).map_err(|e| invalid(e.to_string()))?;
+        let defs = UnitDefs::load(&scenarios.join(dir), &scenarios.join(".."))
+            .map_err(|e| invalid(e.to_string()))?;
+        def.check(&defs, (self.map.width, self.map.height))
+            .map_err(|e| invalid(e.to_string()))?;
+        self.match_commands = sf_bridge::match_commands(&def, &defs).map_err(invalid)?;
+        self.match_def = Some(def);
+        Ok(())
     }
 
     /// Reads the terrain layer of map `name`, which lives in
@@ -1094,6 +1136,36 @@ impl Scenario {
                 p.push(format!(
                     "factions: player {player} cannot be Neutral (nobody plays it)"
                 ));
+            }
+        }
+
+        if let Some(file) = &self.match_file {
+            if let Err(e) = sf_data::map::check_file_name("match_file", file) {
+                p.push(e.to_string());
+            } else if file.contains('/') {
+                p.push(format!(
+                    "match_file \"{file}\" must be the name of one file in the unit_defs directory, without '/'"
+                ));
+            }
+            if self.unit_defs.is_none()
+                || !self.buildings
+                || !self.combat
+                || !self.destruction
+            {
+                p.push(
+                    "match_file needs `unit_defs`, `buildings`, `combat` and `destruction` (a match is \
+                     decided by what is destroyed)"
+                        .to_string(),
+                );
+            }
+            if !self.factions.is_empty() {
+                p.push("match_file gives the factions: `factions` must be left out".to_string());
+            }
+            if self.money.as_ref().is_some_and(|m| !m.starting.is_empty()) {
+                p.push(
+                    "match_file gives the starting credits: `money.starting` must be left empty"
+                        .to_string(),
+                );
             }
         }
 
@@ -1399,11 +1471,14 @@ impl Scenario {
                 world = world
                     .with_buildings(table)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
-                let players: Vec<(PlayerId, u8)> = self
-                    .factions
-                    .iter()
-                    .map(|&(player, faction)| (PlayerId(player), faction.bit()))
-                    .collect();
+                let players: Vec<(PlayerId, u8)> = match &self.match_def {
+                    Some(def) => sf_bridge::match_factions(def),
+                    None => self
+                        .factions
+                        .iter()
+                        .map(|&(player, faction)| (PlayerId(player), faction.bit()))
+                        .collect(),
+                };
                 world = world
                     .with_player_factions(&players)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
@@ -1427,8 +1502,11 @@ impl Scenario {
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(m) = &self.money {
-            let starting: Vec<(PlayerId, u64)> =
+            let mut starting: Vec<(PlayerId, u64)> =
                 m.starting.iter().map(|&(p, n)| (PlayerId(p), n)).collect();
+            if let Some(def) = &self.match_def {
+                starting.extend(sf_bridge::match_credits(def));
+            }
             world = world
                 .with_money(
                     sf_sim::MoneyRules {
@@ -1481,7 +1559,29 @@ impl Scenario {
                 })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
+        // The match (WP7.6): its rules last, after everything they need; its starting objects first.
+        if self.match_file.is_some() {
+            let Some(def) = &self.match_def else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "match_file: the match is read from the file next to the definitions, so the \
+                         scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
+            let rules = sf_bridge::match_rules(def).map_err(ScenarioError::Sim)?;
+            world = world
+                .with_match(rules)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
+        for (player, command) in &self.match_commands {
+            world
+                .schedule(Tick(0), *player, command.clone())
+                .map_err(sim)?;
+        }
 
         let mut placement = Rng::with_stream(self.seed, PLACEMENT_STREAM);
         for g in &self.spawns {

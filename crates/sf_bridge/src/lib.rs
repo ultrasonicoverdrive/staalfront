@@ -35,6 +35,7 @@
 //! ```
 
 use sf_data::harvest::HarvestSettings;
+use sf_data::match_def::MatchDef;
 use sf_data::money::MoneySettings;
 use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
@@ -491,6 +492,72 @@ pub fn terrain_defs(types: &TerrainTypes, costs: &MovementCosts) -> Vec<TerrainD
             },
         })
         .collect()
+}
+
+// ---- the match (WP7.6) ------------------------------------------------------------------------
+
+/// The players of a match file as the simulation's match rules (`sf_sim::outcome`): every player
+/// listed takes part. The error is the simulation's refusal in words.
+pub fn match_rules(def: &MatchDef) -> Result<sf_sim::MatchRules, String> {
+    let players: Vec<sf_sim::PlayerId> = def.players.iter().map(|p| sf_sim::PlayerId(p.id)).collect();
+    sf_sim::MatchRules::new(&players).map_err(|e| format!("match rules refused: {e:?}"))
+}
+
+/// The faction bit of every player of a match file (`World::with_player_factions`), in the order of
+/// the file.
+pub fn match_factions(def: &MatchDef) -> Vec<(sf_sim::PlayerId, u8)> {
+    def.players
+        .iter()
+        .map(|p| (sf_sim::PlayerId(p.id), p.faction.bit()))
+        .collect()
+}
+
+/// The credits every player of a match file starts with (`World::with_money`), in the order of the
+/// file. A player who starts with nothing is listed with zero.
+pub fn match_credits(def: &MatchDef) -> Vec<(sf_sim::PlayerId, u64)> {
+    def.players
+        .iter()
+        .map(|p| (sf_sim::PlayerId(p.id), p.credits))
+        .collect()
+}
+
+/// The commands that put the starting objects of a match file in the world, for tick 0: a
+/// `PlaceStructure` for every structure (its footprint anchored on the cell) and a `SpawnUnit` for every
+/// unit (in the middle of the cell), player after player, object after object, in the order of the file.
+/// Each is sent by the player who owns the object. The roles are looked up in `defs`; the file is
+/// checked against them first ([`MatchDef::check`]), so an error here is a role that is not there.
+pub fn match_commands(
+    def: &MatchDef,
+    defs: &UnitDefs,
+) -> Result<Vec<(sf_sim::PlayerId, sf_sim::Command)>, String> {
+    let mut out = Vec::new();
+    for p in &def.players {
+        let owner = sf_sim::PlayerId(p.id);
+        for o in &p.objects {
+            let role = defs
+                .unit(&o.role)
+                .ok_or_else(|| format!("player {}: no role \"{}\"", p.id, o.role))?;
+            let kind = Kind(role.kind);
+            let command = if role.category == sf_data::units::Category::Structure {
+                sf_sim::Command::PlaceStructure {
+                    kind,
+                    cell: sf_sim::Cell::new(o.cell.0, o.cell.1),
+                    owner,
+                }
+            } else {
+                sf_sim::Command::SpawnUnit {
+                    kind,
+                    pos: sf_math::Vec2::new(
+                        sf_math::Fx::from_int(o.cell.0 as i32) + sf_math::Fx::HALF,
+                        sf_math::Fx::from_int(o.cell.1 as i32) + sf_math::Fx::HALF,
+                    ),
+                    owner,
+                }
+            };
+            out.push((owner, command));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
