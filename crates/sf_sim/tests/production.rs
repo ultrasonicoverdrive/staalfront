@@ -1061,7 +1061,6 @@ fn a_structure_under_construction_pays_before_a_factory_in_a_lower_slot() {
     assert_eq!(v.front_permille, 71, "one tick of 14, not two");
 }
 
-// ---- the exit ----
 // ---- the exit -------------------------------------------------------------------------------
 const SHIPYARD: Kind = Kind(26); // vessels, 3 x 3, exit +x
 const BOAT: Kind = Kind(34); // vessel, 40 credits over 8 ticks, movement class 2

@@ -471,8 +471,8 @@ These are relative numbers; the fps requirement is for the laptop benchmarks (PL
 
 ### Not done
 
-* No harvester is made: the refinery's `comes_with: "harvester"` flag is data nothing reads yet
-  (production is WP6.5). Storage and credits are WP7.3 and WP7.4.
+* Since WP6.5 the refinery's `comes_with: "harvester"` flag gives one harvester when the refinery is built
+  (`production.md`, "The refinery's free harvester"). Storage and credits are WP7.3 and WP7.4.
 * A harvester is not ordered **onto a refinery** by the player to unload there, nor held on a
   field; `Stop` cannot park one.
 * A refinery is chosen by the expected wait since WP7.5 ("Refinery choice and queues"); what is still
