@@ -51,6 +51,12 @@
 //! N` adds N of them to the sandbox, `--models none` draws the roles as shapes.
 //! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).
 //!
+//! **The sidebar (WP11.1).** The sandbox has a column on the right edge with the credits, the
+//! power-bar hook, four build tabs and a grid of items: a click on a structure starts the build
+//! mode, a click on a unit queues it at the primary factory, a right-click cancels
+//! ([`sidebar`] decides what a tab shows and what a click does, [`sidebar_layout`] where
+//! things are, [`sidebar_view`] draws it; `docs/rules/sidebar.md`).
+//!
 //! **Units (WP1.6).** An `sf_sim` world with `--units N` wanderers is stepped
 //! at 20 Hz and drawn instanced on top of the terrain, positions interpolated
 //! between the last two ticks, tile-culled against the camera frustum.

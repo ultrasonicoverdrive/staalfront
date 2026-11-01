@@ -2395,7 +2395,9 @@ fixed, delete the entry in the same PR.
     changes how `sf_game` looks.
 22. **A right-click on a unit inside the 4 px edge band gives no order** (PR #46; the band
     wins over everything and the cursor shows the scroll arrow, documented in `cursor.md`).
-    Owner: WP11.1, when the HUD and the edge scrolling are revisited.
+    **Decided in WP11.1 (see `docs/rules/sidebar.md`, "The edge band"): kept.** The scroll arrow is on the cursor
+    there and a right-click does what the cursor shows; the sidebar keeps out of the band (its margin is never less
+    than `edge_margin`, `the_sidebar_never_covers_the_edge_scroll_band`), so the two no longer fight.
 23. **Icon set.** The cost of the SDF icon quad on the GTX 1650: the M0 laptop run
     (22-10-2026) has gpu p99 0.496 ms in the overview phases (all 5,000 units in view, at the zoom where
     they are icons), so it is negligible there. The weakest pairs of the placeholders
