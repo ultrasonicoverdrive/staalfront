@@ -47,7 +47,8 @@ pub fn draw() -> Map {
         for y in 0..H as i32 {
             for x in 0..W as i32 {
                 let (dx, dy) = (x - cx, y - cy);
-                if dx * dx + dy * dy <= radius * radius && !(keep_bases && in_base(x as u32, y as u32))
+                if dx * dx + dy * dy <= radius * radius
+                    && !(keep_bases && in_base(x as u32, y as u32))
                 {
                     ids[(y as u32 * W + x as u32) as usize] = terrain;
                 }
@@ -57,14 +58,7 @@ pub fn draw() -> Map {
     // The lake, and its soft shore: a second, smaller disc is not needed, the edge is the disc.
     disc(46, 44, 9, water, true);
     // The ore: two fields at each base and one on each way round the lake.
-    for (cx, cy) in [
-        (27, 66),
-        (10, 86),
-        (64, 28),
-        (88, 10),
-        (44, 14),
-        (50, 78),
-    ] {
+    for (cx, cy) in [(27, 66), (10, 86), (64, 28), (88, 10), (44, 14), (50, 78)] {
         disc(cx, cy, 3, ore, false);
     }
     let mut rect = |x0: u32, y0: u32, x1: u32, y1: u32, terrain: u8| {

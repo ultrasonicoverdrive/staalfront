@@ -98,10 +98,17 @@ fn a_structure_is_placed_and_a_unit_is_spawned_for_its_owner_in_the_order_of_the
     );
     // And the kinds are the permanent numbers of the shipped file, not whatever the table has.
     assert_eq!(
-        [kind("power_plant").0, kind("rifleman").0, kind("light_tank").0],
+        [
+            kind("power_plant").0,
+            kind("rifleman").0,
+            kind("light_tank").0
+        ],
         [1, 12, 19]
     );
-    assert_eq!([kind("construction_center").0, kind("harvester").0], [0, 11]);
+    assert_eq!(
+        [kind("construction_center").0, kind("harvester").0],
+        [0, 11]
+    );
 }
 
 #[test]
@@ -118,5 +125,8 @@ fn a_role_that_is_not_there_is_an_error_not_a_skipped_object() {
 #[test]
 fn the_limits_of_the_file_are_the_limits_of_the_simulation() {
     assert_eq!(sf_data::match_def::MAX_PLAYERS, sf_sim::MAX_MATCH_PLAYERS);
-    assert_eq!(sf_data::match_def::MAX_CREDITS, sf_sim::MAX_STARTING_CREDITS);
+    assert_eq!(
+        sf_data::match_def::MAX_CREDITS,
+        sf_sim::MAX_STARTING_CREDITS
+    );
 }

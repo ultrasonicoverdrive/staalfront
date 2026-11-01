@@ -67,7 +67,10 @@ fn the_starting_objects_enter_in_the_order_of_the_match_file() {
     let mut w = s.build_world().unwrap();
     let report = w.step();
     // Tick 0: 1 object of the human and 10 of the opponent, as the file lists them.
-    assert_eq!(report.commands_executed, 11, "the objects of the match file");
+    assert_eq!(
+        report.commands_executed, 11,
+        "the objects of the match file"
+    );
     let owner_kind = |slot: u32| {
         let v = w
             .snapshot()
@@ -102,7 +105,11 @@ fn the_human_wins_in_the_tick_the_last_of_the_opponent_falls() {
     let s = scenario();
     let (w, rows) = play(&s);
     // Nothing is decided before.
-    assert!(rows.iter().take(DECIDED as usize - 1).all(|r| r.result.is_none()));
+    assert!(
+        rows.iter()
+            .take(DECIDED as usize - 1)
+            .all(|r| r.result.is_none())
+    );
     assert!(
         rows.iter()
             .take(DECIDED as usize - 1)
@@ -156,7 +163,10 @@ fn a_world_without_match_rules_plays_the_same_game_and_has_no_outcome() {
     assert_eq!(b.match_result(), None);
     assert!(b.defeats().is_empty());
     assert!(b.match_players().is_empty());
-    assert!(rows.iter().all(|r| r.result.is_none() && r.defeats.is_empty()));
+    assert!(
+        rows.iter()
+            .all(|r| r.result.is_none() && r.defeats.is_empty())
+    );
     // The match only watches: every entity is where it was and has the hit points it had.
     let state = |w: &World| -> Vec<(u32, u16, u8, i64, i64, Option<u32>)> {
         w.snapshot()

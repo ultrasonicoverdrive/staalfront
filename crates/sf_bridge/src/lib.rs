@@ -499,7 +499,8 @@ pub fn terrain_defs(types: &TerrainTypes, costs: &MovementCosts) -> Vec<TerrainD
 /// The players of a match file as the simulation's match rules (`sf_sim::outcome`): every player
 /// listed takes part. The error is the simulation's refusal in words.
 pub fn match_rules(def: &MatchDef) -> Result<sf_sim::MatchRules, String> {
-    let players: Vec<sf_sim::PlayerId> = def.players.iter().map(|p| sf_sim::PlayerId(p.id)).collect();
+    let players: Vec<sf_sim::PlayerId> =
+        def.players.iter().map(|p| sf_sim::PlayerId(p.id)).collect();
     sf_sim::MatchRules::new(&players).map_err(|e| format!("match rules refused: {e:?}"))
 }
 

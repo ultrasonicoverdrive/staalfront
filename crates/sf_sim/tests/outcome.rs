@@ -7,8 +7,8 @@
 use sf_math::{Fx, Vec2};
 use sf_sim::{
     Cell, Command, ConfigError, DestructionConfig, EntityId, Footprint, Kind, Loadout, MatchError,
-    MatchResult, MatchRules, Mount, Order, PlayerId, ProjectileKind, Tick,
-    UnitStats, UnitTable, Verdict, WeaponStats, WeaponTable, World, WorldConfig, per_tick,
+    MatchResult, MatchRules, Mount, Order, PlayerId, ProjectileKind, Tick, UnitStats, UnitTable,
+    Verdict, WeaponStats, WeaponTable, World, WorldConfig, per_tick,
 };
 
 const MAP: u32 = 40;
@@ -159,7 +159,8 @@ fn find(w: &World, kind: Kind, owner: PlayerId) -> EntityId {
 }
 
 fn remove(w: &mut World, id: EntityId) {
-    w.schedule(w.tick(), PlayerId(0), Command::Despawn { id }).unwrap();
+    w.schedule(w.tick(), PlayerId(0), Command::Despawn { id })
+        .unwrap();
 }
 
 /// Two players, each with a barn and a rifleman; the first tick has run and the match has begun.
@@ -181,9 +182,15 @@ fn rules_need_two_to_eight_players_each_once() {
     let nine: Vec<PlayerId> = (0..9).map(PlayerId).collect();
     assert_eq!(MatchRules::new(&nine), Err(MatchError::PlayerCount));
     assert_eq!(MatchRules::new(&nine[..8]).unwrap().players().len(), 8);
-    assert_eq!(MatchRules::new(&[P1, P0, P1]), Err(MatchError::Duplicate(P1)));
+    assert_eq!(
+        MatchRules::new(&[P1, P0, P1]),
+        Err(MatchError::Duplicate(P1))
+    );
     // Kept ascending whatever the order given.
-    assert_eq!(MatchRules::new(&[P3, P0, P2]).unwrap().players(), &[P0, P2, P3]);
+    assert_eq!(
+        MatchRules::new(&[P3, P0, P2]).unwrap().players(),
+        &[P0, P2, P3]
+    );
 }
 
 #[test]
@@ -203,9 +210,15 @@ fn a_world_takes_match_rules_once_and_last() {
         .unwrap()
         .with_weapons(weapons())
         .unwrap();
-    assert_eq!(no_destruction.with_match(r()).err(), Some(ConfigError::Match));
+    assert_eq!(
+        no_destruction.with_match(r()).err(),
+        Some(ConfigError::Match)
+    );
     // Twice.
-    assert_eq!(world(&[P0, P1]).with_match(r()).err(), Some(ConfigError::Match));
+    assert_eq!(
+        world(&[P0, P1]).with_match(r()).err(),
+        Some(ConfigError::Match)
+    );
     // After the start.
     let mut started = plain();
     started.step();
@@ -286,7 +299,10 @@ fn an_unarmed_unit_and_an_object_do_not_keep_a_player_in() {
         })
     );
     // The harvester is still there: it is no part of the rule.
-    assert_eq!(w.snapshot().iter().filter(|v| v.kind == HARVESTER).count(), 1);
+    assert_eq!(
+        w.snapshot().iter().filter(|v| v.kind == HARVESTER).count(),
+        1
+    );
 }
 
 #[test]

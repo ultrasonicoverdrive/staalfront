@@ -56,6 +56,9 @@ pub struct HudStats {
     pub money: Option<crate::money_view::MoneyHud>,
     /// The queue readout of the selected factory (WP6.5); empty when none is selected.
     pub production: Vec<(String, crate::production_view::Tone)>,
+    /// The end of the match (WP7.6): the banner once the result is decided; `None` before, and in a
+    /// world without a match.
+    pub banner: Option<crate::match_view::Banner>,
 }
 
 pub struct Hud {
@@ -184,6 +187,9 @@ impl Hud {
                 &stats.production,
                 crate::production_view::shipped_look(),
             );
+        }
+        if let Some(banner) = &stats.banner {
+            crate::match_view::draw_banner(ui, banner, crate::match_view::shipped_look());
         }
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {

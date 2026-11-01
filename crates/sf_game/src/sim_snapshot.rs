@@ -193,6 +193,8 @@ pub struct SimSnapshot {
     /// Usually empty. The picture picks the stage model and the progress bar from this and nothing
     /// else: the state is the simulation's.
     builds: Vec<(EntityId, Construction)>,
+    /// The decided result of the match (WP7.6); `None` before, and in a world without match rules.
+    result: Option<sf_sim::MatchResult>,
 }
 
 impl SimSnapshot {
@@ -227,6 +229,7 @@ impl SimSnapshot {
             pace: Pace::now(),
             ghost: None,
             builds: Vec::new(),
+            result: None,
         }
     }
 
@@ -377,6 +380,8 @@ impl SimSnapshot {
         }
         self.stalled.clear();
         self.stalled.extend_from_slice(world.stalled());
+        // The match (WP7.6): the result once it is decided.
+        self.result = world.match_result();
         // The queues (WP6.5): the simulation's state of this tick, a handful of records.
         self.factories.clear();
         self.factories.extend(
@@ -493,6 +498,11 @@ impl SimSnapshot {
                 .binary_search_by_key(&player, |&(p, _)| p)
                 .map_or(0, |k| self.credits[k].1)
         })
+    }
+
+    /// The result of the match, once decided (WP7.6); straight from [`World::match_result`].
+    pub fn match_result(&self) -> Option<sf_sim::MatchResult> {
+        self.result
     }
 
     /// The structures under construction that wait for money (WP7.4), ascending by slot.

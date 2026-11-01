@@ -161,7 +161,9 @@ impl MatchDef {
                     Category::Structure => defs
                         .sim_unit(def.kind)
                         .and_then(|u| u.footprint)
-                        .ok_or_else(|| MatchError(format!("{at}: a structure without a footprint")))?,
+                        .ok_or_else(|| {
+                            MatchError(format!("{at}: a structure without a footprint"))
+                        })?,
                     Category::Infantry | Category::Vehicle => (1, 1),
                     Category::Vessel | Category::Object => {
                         return err(format!(
@@ -214,10 +216,16 @@ mod tests {
     fn the_shipped_first_match_is_pinned() {
         // The literal values of assets/matches/m1.ron: a change to the file fails here, on purpose.
         let m = MatchDef::embedded();
-        assert_eq!((m.name.as_str(), m.map.as_str(), m.seed), ("m1", "m1", 458_758));
+        assert_eq!(
+            (m.name.as_str(), m.map.as_str(), m.seed),
+            ("m1", "m1", 458_758)
+        );
         assert_eq!(m.players.len(), 2);
         let (p0, p1) = (&m.players[0], &m.players[1]);
-        assert_eq!((p0.id, p0.faction, p0.credits), (0, Faction::Meridian, 4000));
+        assert_eq!(
+            (p0.id, p0.faction, p0.credits),
+            (0, Faction::Meridian, 4000)
+        );
         assert_eq!((p1.id, p1.faction, p1.credits), (1, Faction::Veyran, 0));
         let list = |p: &MatchPlayer| -> Vec<(String, u32, u32)> {
             p.objects
@@ -247,7 +255,9 @@ mod tests {
     fn the_shipped_first_match_fits_the_shipped_definitions_and_its_map() {
         let m = MatchDef::embedded();
         let map = crate::map::Map::load(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/maps").join(&m.map),
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../assets/maps")
+                .join(&m.map),
         )
         .unwrap();
         assert_eq!(map.size_in_cells(), (96, 96));
@@ -270,10 +280,19 @@ mod tests {
         let ok = object("power_plant", 40, 40);
         bad(file(&ok).replace("id: 1", "id: 0"), "listed twice");
         bad(file(&ok).replace("Veyran", "Neutral"), "Neutral");
-        bad(file(&ok).replace("credits: 0", "credits: 1000000001"), "above the limit");
-        bad(file("").replace("construction_center", "x"), "starts with nothing");
+        bad(
+            file(&ok).replace("credits: 0", "credits: 1000000001"),
+            "above the limit",
+        );
+        bad(
+            file("").replace("construction_center", "x"),
+            "starts with nothing",
+        );
         bad(file(&ok).replace("m1", "../x"), "map");
-        bad(file(&ok).replace("map: \"m1\"", "map: \"a/b\""), "without '/'");
+        bad(
+            file(&ok).replace("map: \"m1\"", "map: \"a/b\""),
+            "without '/'",
+        );
         bad(file(&ok).replace("name: \"t\"", "name: \" \""), "name");
         bad(file(&ok).replace("seed: 1", "seed: 1, extra: 2"), "extra");
         // One player is not a match.
@@ -289,19 +308,58 @@ mod tests {
     #[test]
     fn the_roles_are_checked_against_the_definitions() {
         let defs = UnitDefs::embedded();
-        let check = |second: &str| MatchDef::from_ron(&file(second)).unwrap().check(&defs, (96, 96));
-        assert!(check(&object("nonesuch", 40, 40)).unwrap_err().0.contains("no such role"));
+        let check = |second: &str| {
+            MatchDef::from_ron(&file(second))
+                .unwrap()
+                .check(&defs, (96, 96))
+        };
+        assert!(
+            check(&object("nonesuch", 40, 40))
+                .unwrap_err()
+                .0
+                .contains("no such role")
+        );
         // A Meridian-only role for the Veyran player.
-        assert!(check(&object("sniper", 40, 40)).unwrap_err().0.contains("not open to the faction"));
+        assert!(
+            check(&object("sniper", 40, 40))
+                .unwrap_err()
+                .0
+                .contains("not open to the faction")
+        );
         // A vessel cannot start a match, and an object (neutral) belongs to nobody.
-        assert!(check(&object("ore_field", 40, 40)).unwrap_err().0.contains("not open to the faction"));
-        assert!(check(&object("gunboat", 40, 40)).unwrap_err().0.contains("only structures"));
+        assert!(
+            check(&object("ore_field", 40, 40))
+                .unwrap_err()
+                .0
+                .contains("not open to the faction")
+        );
+        assert!(
+            check(&object("gunboat", 40, 40))
+                .unwrap_err()
+                .0
+                .contains("only structures")
+        );
         // Outside the map, also by the footprint (a power plant is 2 by 3).
-        assert!(check(&object("power_plant", 95, 10)).unwrap_err().0.contains("outside"));
-        assert!(check(&object("power_plant", 10, 94)).unwrap_err().0.contains("outside"));
+        assert!(
+            check(&object("power_plant", 95, 10))
+                .unwrap_err()
+                .0
+                .contains("outside")
+        );
+        assert!(
+            check(&object("power_plant", 10, 94))
+                .unwrap_err()
+                .0
+                .contains("outside")
+        );
         assert!(check(&object("power_plant", 94, 93)).is_ok());
         // Two structures on one cell: the construction center of player 0 is 4 by 4 at (4, 4).
-        assert!(check(&object("power_plant", 7, 6)).unwrap_err().0.contains("overlaps"));
+        assert!(
+            check(&object("power_plant", 7, 6))
+                .unwrap_err()
+                .0
+                .contains("overlaps")
+        );
         assert!(check(&object("power_plant", 8, 6)).is_ok());
     }
 }

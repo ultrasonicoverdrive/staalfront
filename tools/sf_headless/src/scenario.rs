@@ -928,7 +928,12 @@ impl Scenario {
     /// Reads the match file `file` of the `unit_defs` directory `dir`, checks it against that
     /// directory's definitions and the scenario's map size, and makes the commands of its starting
     /// objects.
-    fn load_match(&mut self, dir: &str, file: &str, scenario_file: &Path) -> Result<(), ScenarioError> {
+    fn load_match(
+        &mut self,
+        dir: &str,
+        file: &str,
+        scenario_file: &Path,
+    ) -> Result<(), ScenarioError> {
         let invalid = |problem: String| ScenarioError::Invalid {
             path: Some(scenario_file.to_path_buf()),
             problems: vec![format!("match_file \"{file}\": {problem}")],
@@ -1147,11 +1152,7 @@ impl Scenario {
                     "match_file \"{file}\" must be the name of one file in the unit_defs directory, without '/'"
                 ));
             }
-            if self.unit_defs.is_none()
-                || !self.buildings
-                || !self.combat
-                || !self.destruction
-            {
+            if self.unit_defs.is_none() || !self.buildings || !self.combat || !self.destruction {
                 p.push(
                     "match_file needs `unit_defs`, `buildings`, `combat` and `destruction` (a match is \
                      decided by what is destroyed)"

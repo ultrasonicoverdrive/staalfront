@@ -22,6 +22,9 @@ pub enum Scene {
     /// The sandbox (WP3.2): a few units and structures of each side from the
     /// unit definitions, spawned on the playfield ([`crate::sandbox`]).
     Sandbox,
+    /// The first match (WP7.6): the sandbox's controls on the map and with the starting objects of a
+    /// match file, against a static opponent, with a victory or a defeat ([`crate::matchplay`]).
+    Match,
 }
 
 /// Which binary is running: sets the defaults.
@@ -112,6 +115,10 @@ pub struct Options {
     /// middle of the map, so that the loop can be watched: mining, driving back, queueing, unloading.
     /// Without it the sandbox has no harvest rules and its harvesters stand where they are put.
     pub harvest: bool,
+    /// `--match [FILE]` (WP7.6): play the match of `FILE` (`assets/matches/m1.ron` when no file follows):
+    /// its map, its players, their credits and starting objects, against a static opponent. Sets the
+    /// scene to [`Scene::Match`]. `Some(None)` is the default match; `None` is no match.
+    pub match_file: Option<Option<PathBuf>>,
     pub screen: ScreenMode,
     pub present: Present,
     /// Allocate the unit instance buffers at their largest size at load
@@ -159,6 +166,7 @@ impl Options {
             shots_tick: 0,
             fight: false,
             harvest: false,
+            match_file: None,
             screen: ScreenMode::Windowed,
             present: Present::Vsync,
             reserve: true,
@@ -173,7 +181,7 @@ impl Options {
         let mut screen_given = false;
         let mut present_given = false;
 
-        let mut args = args.into_iter();
+        let mut args = args.into_iter().peekable();
         while let Some(arg) = args.next() {
             // The value of a flag; a missing one is reported once.
             let mut value = |warnings: &mut Vec<String>| {
@@ -203,6 +211,14 @@ impl Options {
                 }
                 "--crowd" => o.scene = Scene::Crowd,
                 "--sandbox" => o.scene = Scene::Sandbox,
+                "--match" => {
+                    // A file name follows, or the next flag does (or nothing): the default match.
+                    o.scene = Scene::Match;
+                    o.match_file = Some(
+                        args.next_if(|next| !next.starts_with("--"))
+                            .map(PathBuf::from),
+                    );
+                }
                 "--map" => o.map_dir = value(&mut o.warnings),
                 "--map-cells" => {
                     if let Some(v) = value(&mut o.warnings) {
@@ -423,6 +439,31 @@ mod tests {
         assert_eq!(o.models.as_deref(), Some(DEMO_PACK), "the same pack as M0");
         let plain = parse(Preset::Demo, "--bench");
         assert!(!plain.fight && plain.bench.is_some());
+    }
+
+    /// `--match` (WP7.6) starts the match scene; a file name after it is the match file, a flag after it
+    /// is not eaten, and without the flag there is no match.
+    #[test]
+    fn match_takes_an_optional_file_and_sets_the_scene() {
+        let plain = parse(Preset::Game, "");
+        assert_eq!((plain.scene, plain.match_file), (Scene::Sandbox, None));
+        let o = parse(Preset::Game, "--match");
+        assert_eq!((o.scene, o.match_file), (Scene::Match, Some(None)));
+        let o = parse(
+            Preset::Game,
+            "--match assets/matches/other.ron --exit-after 3",
+        );
+        assert_eq!(o.scene, Scene::Match);
+        assert_eq!(
+            o.match_file,
+            Some(Some(PathBuf::from("assets/matches/other.ron")))
+        );
+        assert_eq!(o.exit_after, Some(Duration::from_secs(3)));
+        // The next flag is not taken for a file name.
+        let o = parse(Preset::Game, "--match --harvest");
+        assert_eq!((o.scene, o.match_file), (Scene::Match, Some(None)));
+        assert!(o.harvest);
+        assert!(o.warnings.is_empty(), "{:?}", o.warnings);
     }
 
     #[test]
