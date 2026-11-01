@@ -62,7 +62,8 @@ points left** (or cannot be damaged, `hp` 0 in the table). It is what these ask:
 |---|---|
 | prerequisites (`requires`, WP6.1) | the structure must stand (`a_structure_under_construction_is_no_prerequisite_until_it_completes`, and on the shipped tree `meridian_builds_the_whole_shipped_tree_with_build_commands`) |
 | the base anchor of the build radius (WP6.2) | the anchor must stand (`a_base_under_construction_gives_no_reach`) |
-| power (WP6.4), production (WP6.5), repair and sell (WP6.6) | **to use `World::stands`**; nothing reads it yet |
+| production (WP6.5) | the front unit's prerequisites and the factory itself must stand (`production.md`) |
+| power (WP6.4), repair and sell (WP6.6) | **to use `World::stands`**; nothing reads it yet |
 
 A structure under construction must give no power and produce nothing; those work packages have to call
 `stands` and not look at hit points alone.
