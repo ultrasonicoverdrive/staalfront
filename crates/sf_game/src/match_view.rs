@@ -126,6 +126,19 @@ pub fn draw_banner(ui: &mut Ui, banner: &Banner, look: &MatchLook) {
     );
 }
 
+/// What the HUD draws for the state of the match: the banner for the result as the local player
+/// sees it, once it is decided, and nothing before. The one function the HUD calls
+/// (`hud::Hud::frame`) and the screenshot test calls. Returns whether a banner was drawn.
+pub fn draw_result(ui: &mut Ui, result: Option<MatchResult>, local: PlayerId) -> bool {
+    match banner_of(result, local) {
+        Some(banner) => {
+            draw_banner(ui, &banner, shipped_look());
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

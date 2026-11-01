@@ -338,3 +338,30 @@ fn cost_of_the_outcome() {
         median(&mut b)
     );
 }
+
+#[test]
+fn a_structure_still_going_up_does_not_keep_its_owner_in_the_match() {
+    let s = scenario();
+    let mut w = s.build_world().unwrap();
+    // Tick 1: the human's power plant (slot 11) starts to go up, and is complete at tick 301. At tick 50
+    // its construction centre (slot 0, the only other structure it has) is lost: what is left is a
+    // structure that does not stand yet, which is nothing to keep the human in the match.
+    w.schedule(
+        Tick(50),
+        P0,
+        sf_sim::Command::Despawn {
+            id: EntityId::new(0, 0),
+        },
+    )
+    .unwrap();
+    for _ in 0..60 {
+        w.step();
+    }
+    assert_eq!(w.under_construction(), 1, "the plant is still going up");
+    assert_eq!(w.defeat_tick(P0), Some(Tick(50)));
+    assert_eq!(
+        w.match_result().map(|r| r.verdict),
+        Some(Verdict::Won(P1)),
+        "the opponent wins in the tick the human is defeated"
+    );
+}

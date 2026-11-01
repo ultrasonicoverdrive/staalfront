@@ -1983,7 +1983,7 @@ impl App for Runner {
             build_line: self.build_line(now),
             money: self.money_hud(),
             production: self.production_lines(),
-            banner: crate::match_view::banner_of(self.snap.match_result(), commands::LOCAL_PLAYER),
+            result: self.snap.match_result(),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use sf_data::map::Map;
 use sf_data::units::UnitDefs;
 use sf_game::looks::Looks;
-use sf_game::match_view::{self, Banner, Standing};
+use sf_game::match_view;
 use sf_game::money_view::{self, MoneyHud};
 use sf_game::population::Population;
 use sf_game::roster::{MODELS_FILE, Roster};
@@ -197,9 +197,8 @@ impl Scene {
             },
             money_view::shipped_look(),
         );
-        if let Some(banner) = match_view::banner_of(self.world.match_result(), local) {
-            match_view::draw_banner(&mut ui, &banner, match_view::shipped_look());
-        }
+        let drawn = match_view::draw_result(&mut ui, self.world.match_result(), local);
+        assert_eq!(drawn, self.world.match_result().is_some());
         ui.end_frame();
         let mut ur = UiRenderer::new(&r.gpu().device, r.color_format());
         r.render_to_image_with(|t| ur.render(t, &mut ui))
@@ -349,8 +348,4 @@ fn the_start_the_fight_and_the_banner() {
     assert_eq!(scene.world.match_result(), Some(result));
     let later = scene.shoot(&mut r, &at_victory, P0);
     assert!(count_in(&later, banner_area(), look.victory.border, 30) > 400);
-    let _ = Banner {
-        standing: Standing::Victory,
-        tick: 0,
-    };
 }

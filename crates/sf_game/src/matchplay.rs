@@ -201,10 +201,19 @@ mod tests {
             w.schedule(tick, PlayerId(0), sf_sim::Command::Despawn { id })
                 .unwrap();
         }
+        // Before: nothing in the snapshot the HUD reads; after: the result of the world.
+        assert_eq!(
+            crate::sim_snapshot::SimSnapshot::capture(&w).match_result(),
+            None
+        );
         w.step();
         let result = w.match_result().expect("decided");
         assert_eq!(result.tick, tick);
         assert_eq!(result.verdict, Verdict::Won(PlayerId(0)));
+        assert_eq!(
+            crate::sim_snapshot::SimSnapshot::capture(&w).match_result(),
+            Some(result)
+        );
     }
 
     #[test]
