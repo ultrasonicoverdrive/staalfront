@@ -44,6 +44,11 @@
 // supply_truck (v4 has no neutral file) keeps its testpack_v1 model. Decor
 // (trees, rocks, ore stages, wrecks) is not a unit role and is not listed here.
 //
+// Build pictures (WP11.1, docs/rules/sidebar.md): `build_picture: (color: (r, g, b), label: "PWR", order: 10)`
+// is the role's tile in the sidebar's build menu (a coloured tile with a short name until there is art),
+// separate from `icon`. Only for a role with a cost; `order` is its place in its tab (unique within a
+// category). Optional: a role without one gets the default picture of its tab (config/sidebar.ron).
+//
 // Strategic icons (WP3.6): `strategic_icon` is the base shape of the role's
 // category (Square structures, Circle infantry, Triangle vehicles, HalfCircle
 // vessels) and what it is drawn as without an `icon`; `icon` names the picture

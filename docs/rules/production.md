@@ -91,9 +91,12 @@ not hashed. Every number has its own test (`queues_progress_rally_and_the_tuning
 The three commands have permanent numbers in the pending-command hash
 (`the_commands_have_permanent_numbers_in_the_pending_queue_hash`).
 
-## The picture (sandbox only; the sidebar is WP11.1)
+## The picture (the sandbox's readout and bars; the sidebar is WP11.1, `sidebar.md`)
 
-All numbers in `production_look.ron`. A **progress bar** under the front edge of every factory with a
+The player's way to queue units is the **sidebar** (WP11.1, `sidebar.md`): a click on a unit item sends
+`QueueUnit`, a right-click `CancelUnit`, with the progress, the queue count and the waiting words on the item. What
+follows is the sandbox's own readout and debug keys, which stay (the keys as debug keys). All numbers in
+`production_look.ron`. A **progress bar** under the front edge of every factory with a
 timed item (the construction bar's place and size; its fill turns to the `waiting` colour while it does not
 advance: money, exit or prerequisite). A **readout** of the selected factory on the left edge: status,
 the queue (the front item with its percentage and the credits paid), the rally cell and the unit the
@@ -114,6 +117,6 @@ destroyed with its queue. `tools/sf_headless/tests/production.rs` asserts each o
 ## Not done, on purpose
 
 Power and the speed factor other than 1 (WP6.4); repair and sell (WP6.6); defences (WP6.7); the AI's
-use of production (phase 9); the sidebar with icons and the hotkeys of the finished game (WP11.1);
+use of production (phase 9); the hotkeys of the finished game (the sidebar itself is WP11.1);
 unit `requires` in the shipped data (balance, phase 15); a queue that survives a lost factory;
 choosing which factory of several gets a unit; production of structures through a factory queue.
