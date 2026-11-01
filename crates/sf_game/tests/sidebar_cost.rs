@@ -106,8 +106,8 @@ impl Run {
         sidebar::model(&self.catalog, &sit, Tab::Structures, None, None, &self.look)
     }
 
-    fn quads(&self, model: &sidebar::SidebarModel) -> usize {
-        let mut ui = Ui::new(UiConfig::default());
+    /// One frame on `ui` (the HUD keeps its `Ui` between frames, so the timing does too); the quads.
+    fn frame(&self, ui: &mut Ui, model: &sidebar::SidebarModel) -> usize {
         let input = UiInput::default();
         ui.begin_frame(input, (1920, 1080), 1.0);
         let setup = sidebar_view::Setup {
@@ -116,7 +116,7 @@ impl Run {
             edge_band_px: 4.0,
             minimap: true,
         };
-        sidebar_view::frame(&mut ui, &input, &mut SidebarState::default(), model, &setup);
+        sidebar_view::frame(ui, &input, &mut SidebarState::default(), model, &setup);
         ui.end_frame();
         ui.draw_list().quad_count()
     }
@@ -130,7 +130,10 @@ fn the_number_of_quads_is_bounded_and_does_not_grow_with_the_world() {
     let (a, b) = (small.model(), big.model());
     assert_eq!(a, b, "the crowd changes nothing the sidebar shows");
     assert_eq!(a.items.len(), 9, "all nine structures can be built");
-    let (qa, qb) = (small.quads(&a), big.quads(&b));
+    let (qa, qb) = (
+        small.frame(&mut Ui::new(UiConfig::default()), &a),
+        big.frame(&mut Ui::new(UiConfig::default()), &b),
+    );
     assert_eq!(qa, qb);
     // A panel, the money block with its text, the power bar frame with its text, four tabs with
     // their text and nine items with a picture, a label, a price and a bar: a few hundred quads.
@@ -146,6 +149,7 @@ fn the_cost_of_the_sidebar_per_frame() {
         let r = run(crowd);
         let entities = r.snap.len();
         let model = r.model();
+        let mut ui = Ui::new(UiConfig::default());
         for round in 0..3 {
             let mut times = Vec::with_capacity(FRAMES as usize);
             for _ in 0..FRAMES {
@@ -161,7 +165,7 @@ fn the_cost_of_the_sidebar_per_frame() {
             let mut times = Vec::with_capacity(FRAMES as usize);
             for _ in 0..FRAMES {
                 let t = Instant::now();
-                std::hint::black_box(r.quads(&model));
+                std::hint::black_box(r.frame(&mut ui, &model));
                 times.push(t.elapsed().as_nanos() as u64);
             }
             times.sort_unstable();
@@ -176,7 +180,7 @@ fn the_cost_of_the_sidebar_per_frame() {
                 model_us.1,
                 ui_us.0,
                 ui_us.1,
-                r.quads(&model)
+                r.frame(&mut ui, &model)
             );
         }
     }

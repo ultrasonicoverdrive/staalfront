@@ -933,7 +933,18 @@ impl Runner {
                     }
                 }
                 Action::PutAway => self.build.cancel(),
-                Action::Send(command) => commands::issue(&self.sim, command),
+                Action::Send(command) => {
+                    match &command {
+                        sf_sim::Command::QueueUnit { kind, .. } => {
+                            println!("sidebar: queue {}", self.build.name_of(*kind));
+                        }
+                        sf_sim::Command::CancelUnit { index, .. } => {
+                            println!("sidebar: cancel the unit in place {index}");
+                        }
+                        _ => {}
+                    }
+                    commands::issue(&self.sim, command);
+                }
             }
         }
     }

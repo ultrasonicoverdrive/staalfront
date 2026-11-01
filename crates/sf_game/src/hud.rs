@@ -98,7 +98,7 @@ fn load_config(assets: &Path) -> UiConfig {
 /// The width of the edge-scroll band in `input.ron` (`edge_margin`), or the engine's default.
 fn load_edge_band(assets: &Path) -> f32 {
     sf_engine::Bindings::load(&assets.join("config/input.ron"))
-        .map_or_else(|_| sf_engine::Bindings::builtin(), |b| b)
+        .unwrap_or_else(|_| sf_engine::Bindings::builtin())
         .edge_margin as f32
 }
 

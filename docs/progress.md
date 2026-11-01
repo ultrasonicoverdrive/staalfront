@@ -2338,6 +2338,52 @@ player's own Red Alert music (B11, scope change of 28-10-2026). Rules: `docs/rul
   real Red Alert disc here, so real `SCORES.MIX` contents (and that AUD music is what that archive holds) are unverified.
   (6) Mood radius, weights and times in `audio.ron` are first guesses.
 
+### WP11.1 notes: the sidebar (brought forward before M1, orchestrator decision 01-11-2026)
+
+Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-production`): the sidebar needs production. When #96 merges, `origin/main` is merged into this branch (a merge commit, no rebase). Rules: `docs/rules/sidebar.md`; screenshots: `docs/screenshots/wp11.1`.
+
+- **Done.** A column on the right edge of the sandbox window: the credits (moved from the corner), the power-bar hook, four
+  build tabs and a grid of items with a picture, price, progress, queue count and the waiting words; a click on a structure
+  starts the build mode of WP6.2, a click on a unit sends `QueueUnit` to the primary factory (the selected one of that
+  function, else the lowest slot), a right-click puts the structure away or sends `CancelUnit` for the last item of that
+  kind. Items that cannot be built yet are hidden. The picture is the new `build_picture` field of `unit_defs.ron`
+  (`color`, `label`, `order`), validated on load, optional (the frozen copies load unchanged), separate from `icon`. All sizes,
+  words and colours are in `assets/config/sidebar.ron`. New code: `sf_game::{sidebar, sidebar_layout, sidebar_view}` and
+  `sf_data::sidebar_look`; `hud.rs` and `runner.rs` got a few self-contained lines (WP7.6 touches the same files).
+- **No sim change, no pin moved.** `sf_sim` is untouched; `git diff origin/wp/6.5-production -- crates/sf_sim assets/scenarios`
+  is empty, and the release `sf_headless --expect` run passes all scenarios (numbers in the PR body).
+- **Progress item 22 decided: kept.** A right-click on a unit in the 4 px band gives no order (the scroll arrow is on the
+  cursor and a click does what it shows). The sidebar no longer shares the band: its margin is never less than `edge_margin`.
+- **Mutations** (each applied to a scratch change of the source, the failing tests read, then reverted):
+  - M1 swap infantry and vehicle tabs: `a_click_on_a_unit_queues_it_and_a_right_click_cancels_the_last_one_of_its_kind, a_click_on_a_unit_without_a_factory_does_nothing, a_finished_unit_with_no_free_exit_says_the_exit_is_blocked (+12 more)`
+  - M2 prerequisites ignored: `a_structure_that_is_still_going_up_does_not_count_as_standing, a_unit_with_prerequisites_waits_for_them, only_the_local_players_structures_count (+3 more)`
+  - M3 a structure under construction counts as standing: `a_structure_going_up_shows_its_own_progress_and_count, a_structure_that_is_still_going_up_does_not_count_as_standing, a_structure_that_waits_for_credits_says_so (+1 more)`
+  - M4 selection ignored for the primary factory: `the_primary_factory_is_the_selected_one_else_the_lowest_slot`
+  - M5 right click cancels the first of its kind: `a_click_on_a_unit_queues_it_and_a_right_click_cancels_the_last_one_of_its_kind, a_queued_unit_shows_its_own_progress_and_count`
+  - M6 left and right buttons swapped: `a_click_on_a_structure_chooses_it_and_a_right_click_puts_it_away, a_click_on_a_unit_queues_it_and_a_right_click_cancels_the_last_one_of_its_kind, the_primary_factory_is_the_selected_one_else_the_lowest_slot (+1 more)`
+  - M7 waiting shown on every queued item of the kind: `a_queued_unit_shows_its_own_progress_and_count, a_unit_that_waits_for_credits_says_so_on_the_item_at_the_front_only`
+  - M8 order by kind number instead of the picture order: `a_role_without_a_picture_gets_the_default_of_its_tab_and_comes_last, the_order_follows_the_order_of_the_pictures_not_the_kind_numbers`
+  - M9 margin may be smaller than the edge band: `layout:the_sidebar_never_covers_the_edge_scroll_band`
+  - M10 the column does not block the pointer: `view:a_press_on_a_structure_chooses_it_and_the_ui_keeps_the_click, view:a_press_on_a_tab_shows_it_and_a_right_press_does_not, view:a_press_on_a_unit_queues_it_and_a_right_press_cancels_one (+4 more)`
+  - M11 progress bar always full: `view:the_progress_bar_is_as_long_as_the_progress_and_turns_to_the_waiting_colour`
+  - M12 price and time swapped in the catalog: `a_price_the_player_cannot_pay_is_marked_but_the_item_stays, every_entry_has_the_price_and_time_the_simulation_will_charge`
+  - M13 picture orders may repeat: `an_order_above_the_limit_or_repeated_in_a_category_is_refused`
+  - M14 wheel scrolls the wrong way: `layout:the_wheel_scrolls_a_row_at_a_time_and_stays_inside_the_list, view:the_wheel_scrolls_the_items_over_the_column_only`
+  - M15 scrolling ignored by the hit test: `layout:scrolling_moves_the_items_under_the_slots, view:the_wheel_scrolls_the_items_over_the_column_only`
+  - M16 a label of any length is accepted: `a_bad_label_is_refused`
+  - M17 a build picture on an unbuildable role is accepted: `a_picture_on_a_role_that_cannot_be_built_is_refused`
+  - M18 sidebar chooses the wrong structure (by position, not kind): `build_mode:the_sidebar_chooses_a_structure_by_kind_and_the_click_places_that_kind`
+  - M19 right-click on a structure item does nothing but chooses: `a_click_on_a_structure_chooses_it_and_a_right_click_puts_it_away, view:a_right_press_on_a_structure_puts_the_chosen_one_away_and_orders_nothing`
+  - M20 empty tab always says nothing to build: `an_empty_tab_names_the_factory_it_misses_or_says_there_is_nothing, view:an_empty_tab_says_what_it_needs`
+- **Cost** (the sidebar adds nothing to the sim): release build, this container, **load average about 10 (busy, other agents running)**, 4000 frames per round, three rounds: `Situation::read` + `sidebar::model` mean 1.2 us with 8 entities and 17 to 30 us with 5,008 (p99 42 to 56 us); building the UI for the full structures tab (159 quads: panel, credits, power bar, four tabs, nine items) on a reused `Ui` mean 19 to 30 us (p99 39 to 74 us), the same with 8 and with 5,008 entities. About 0.05 ms of a 16.7 ms frame. Not measured on the laptop (relative numbers only; the container cannot measure the fps requirement, PLAN section 13). The first run of this test built a new `Ui` per iteration and read 190 us: that was the font setup, not the sidebar. Command: `cargo test --release -p sf_game --test sidebar_cost -- --ignored --nocapture`. The sim thread is untouched, so there is no before/after of the tick.
+- **Gaps.** The power bar is a neutral frame until WP6.4 (`sidebar::power_reading` is the hook, `power_fill` is tested but no
+  world gives a reading). Hidden items cannot be discovered before they unlock (decision; greyed items would show the whole tree).
+  The tile is a coloured box with a short name (art is WP11.6); there is no tooltip. The factory a click goes to is the selected
+  one or the lowest slot; the sidebar shows only that factory's queue. A click was not driven in the real window (there is no
+  `xdotool` here): clicks are tested with `UiInput` through `sidebar_view::frame`, the commands by running them in a world, and the
+  runner's three handlers read `pointer_over_ui` as they did before. The edge-band width is read from `input.ron` when the HUD
+  starts. A `QueueUnit` the simulation refuses (queue full) is silent: the count on the item shows 5. The sidebar is built for the faction of `LOCAL_PLAYER` (Meridian) only; there are no seats yet.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
