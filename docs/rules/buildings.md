@@ -190,7 +190,8 @@ next to the **middle** of its `exit_side` (`exit_cell`: for `PosX`, `(x + width,
 `(x - 1, y + height / 2)`; `PosY` `(x + width / 2, y + height)`; `NegY` `(x + width / 2, y - 1)`, the halves
 rounded down). It must be on the map, free of structures and, for infantry and vehicle factories, ground every
 ground class can enter (the terrain's `ground` summary, so a road is fine and water or rock are not); for the
-vessel factory the terrain is not checked (which water a vessel may use is WP6.5's, it has no flag yet). One
+vessel factory the terrain is not checked here; since WP6.5 a vessel comes out only on a cell a vessel can
+enter, and with no water in reach it waits (`production.md`, "Exit and the free spot"). One
 cell, fixed, so that the ghost can show it and WP6.5 has a place to start; **where on that side and the free
 spot beyond it are WP6.5's** (it will walk outwards from this cell). The harvester dock has an exit side too:
 the same cell is the dock point where harvesters unload (`economy.md`, "Harvesters"; WP7.2).
@@ -203,8 +204,8 @@ facing.
 **Not done (gaps).** Setup commands (`PlaceStructure`, `SpawnUnit`, and since WP7.2 `TakeOre`, see
 `economy.md`) are accepted from any player seat; they
 must be refused from player seats before any untrusted command stream (phase 14, replays from outside). The vessel factory's `needs_water` flag is not checked (a shipyard can stand on land, since
-only buildable terrain counts). A blocked exit is checked when the factory is placed, not later: a structure
-put in front of an existing factory leaves it standing (WP6.5 decides what production does then). Nothing is
+only buildable terrain counts; its vessels then wait for water, `production.md`). A blocked exit is checked when the factory is placed, not later: a structure
+put in front of an existing factory leaves it standing (since WP6.5 a blocked exit holds the queue, `production.md`). Nothing is
 charged tick by tick in a world with money rules (WP7.4); the time a build takes is WP6.3 (`docs/rules/construction.md`). `fortified_bunker` is built by a combat engineer in the field
 (`content/units.md`); here it is a base structure behind the barracks, as in WP6.1.
 

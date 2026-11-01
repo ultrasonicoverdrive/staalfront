@@ -11,11 +11,11 @@
 
 use sf_math::{Fx, Vec2};
 use sf_sim::{
-    BuildingFunction, BuildingStats, BuildingTable, Cell, Command, ConfigError, EntityId,
-    FULL_SPEED_PERMILLE, FactoryStatus, Footprint, HarvestRules, Kind, MAX_EXIT_RADIUS,
-    MAX_QUEUE_LIMIT, MoneyRules, PlayerId, ProductionError, ProductionRules, ProductionTable,
-    ProductionTableError, Side, StepReport, UnitBuild, UnitStats, UnitTable, World, WorldConfig,
-    paid_at, per_tick, tick_cost,
+    BuildingFunction, BuildingStats, BuildingTable, Cell, ClassCosts, Command, ConfigError, Cost,
+    EntityId, FULL_SPEED_PERMILLE, FactoryStatus, Footprint, HarvestRules, Kind, MAX_EXIT_RADIUS,
+    MAX_QUEUE_LIMIT, MoneyRules, MovementTable, PlayerId, ProductionError, ProductionRules,
+    ProductionTable, ProductionTableError, Side, StepReport, Terrain, TerrainDef, TerrainFlags,
+    TerrainId, UnitBuild, UnitStats, UnitTable, World, WorldConfig, paid_at, per_tick, tick_cost,
 };
 
 const ANCHOR: Kind = Kind(20);
@@ -1021,7 +1021,163 @@ fn the_lower_slot_is_paid_first_when_money_is_short() {
     );
 }
 
+#[test]
+fn a_structure_under_construction_pays_before_a_factory_in_a_lower_slot() {
+    // Structures first, then factories, each in slot order (`production.md`, "Pay, wait, speed").
+    // The barracks has a lower slot than a radar built now. Tick 0: the radar is placed (it pays
+    // from the next tick) and the rifle takes 5, 5 credits are left. Tick 1: the radar takes 2
+    // first, and the 3 that are left are too few for the rifle's 5.
+    let mut w = paid_world(10, 5, 4);
+    let b = barracks(&w);
+    let tick = w.tick();
+    w.schedule(
+        tick,
+        P0,
+        Command::BuildStructure {
+            kind: RADAR,
+            cell: Cell::new(20, 10),
+        },
+    )
+    .unwrap();
+    w.schedule(
+        tick,
+        P0,
+        Command::QueueUnit {
+            factory: b,
+            kind: RIFLE,
+        },
+    )
+    .unwrap();
+    w.step();
+    let radar = w.occupant_at(Cell::new(20, 10)).unwrap();
+    assert!(radar.index() > b.index(), "the factory has the lower slot");
+    assert_eq!(w.credits(P0), 5);
+    assert_eq!(w.construction_of(radar).unwrap().left, 20);
+    w.step();
+    assert_eq!(w.credits(P0), 3, "the structure took its 2");
+    assert_eq!(w.construction_of(radar).unwrap().left, 19);
+    let v = w.production_of(b).unwrap();
+    assert_eq!(v.status, FactoryStatus::WaitingForMoney);
+    assert_eq!(v.front_permille, 71, "one tick of 14, not two");
+}
+
+// ---- the exit ----
 // ---- the exit -------------------------------------------------------------------------------
+const SHIPYARD: Kind = Kind(26); // vessels, 3 x 3, exit +x
+const BOAT: Kind = Kind(34); // vessel, 40 credits over 8 ticks, movement class 2
+
+/// A world with a shipyard on (10, 30) (exit cell (13, 31)) on grass, and water on `water`
+/// (columns `x0..=x1`, every row). Class 1 walks on grass, class 2 (the boat) sails on water.
+fn shipyard_world(water: (u32, u32)) -> World {
+    let (grass, sea) = (TerrainId(0), TerrainId(1));
+    let defs = [
+        TerrainDef {
+            id: grass,
+            flags: TerrainFlags::OPEN,
+        },
+        TerrainDef {
+            id: sea,
+            flags: TerrainFlags::default(),
+        },
+    ];
+    let mut layer = vec![0u8; 64 * 48];
+    for y in 0..48u32 {
+        for x in water.0..=water.1 {
+            layer[(y * 64 + x) as usize] = 1;
+        }
+    }
+    let terrain = Terrain::from_layer(64, 48, &layer, &defs).unwrap();
+    let movement = MovementTable::new(vec![
+        ClassCosts {
+            class: 1,
+            costs: vec![(grass, Cost::Speed(1000)), (sea, Cost::Impassable)],
+        },
+        ClassCosts {
+            class: 2,
+            costs: vec![(grass, Cost::Impassable), (sea, Cost::Speed(1000))],
+        },
+    ])
+    .unwrap();
+    let mut boat = mobile(BOAT);
+    boat.movement_class = Some(2);
+    let mut kinds = vec![
+        structure(ANCHOR, 2, 2),
+        structure(SHIPYARD, 3, 3),
+        mobile(RIFLE),
+    ];
+    kinds.push(boat);
+    let mut w = World::with_terrain(WorldConfig::new(5).with_map_size(64, 48), terrain)
+        .unwrap()
+        .with_units(UnitTable::new(kinds).unwrap())
+        .unwrap()
+        .with_movement(movement)
+        .unwrap()
+        .with_buildings(
+            BuildingTable::new(vec![
+                entry(ANCHOR, (2, 2), BuildingFunction::Anchor, 0, None),
+                entry(
+                    SHIPYARD,
+                    (3, 3),
+                    BuildingFunction::VesselFactory,
+                    90,
+                    Some(800),
+                ),
+            ])
+            .unwrap(),
+        )
+        .unwrap()
+        .with_production(
+            rules(5, 4),
+            ProductionTable::new(
+                vec![build_of(
+                    BOAT,
+                    BuildingFunction::VesselFactory,
+                    40,
+                    8,
+                    3,
+                    vec![],
+                )],
+                vec![],
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .with_player_factions(&[(P0, 1), (P1, 2)])
+        .unwrap();
+    place(&mut w, P0, ANCHOR, (4, 4));
+    place(&mut w, P0, SHIPYARD, (10, 30));
+    w.step();
+    w
+}
+
+#[test]
+fn a_vessel_comes_out_on_water_and_without_water_in_reach_it_waits() {
+    // Water from x = 15: within reach of the exit cell (13, 31) at radius 4. Ring 0 and ring 1
+    // are grass; ring 2 goes row by row from the north-west, so (15, 29) is the first water cell.
+    let mut w = shipyard_world((15, 20));
+    let yard = w.occupant_at(Cell::new(10, 30)).unwrap();
+    queue(&mut w, yard, BOAT);
+    run_until(&mut w, 40, |w| !w.produced().is_empty());
+    let p = w.produced()[0];
+    assert_eq!(p.factory, yard);
+    assert_eq!((p.cell.x, p.cell.y), (15, 29));
+    assert_eq!(w.terrain_at(p.cell), Some(TerrainId(1)), "on water");
+    assert_eq!(cell_of(&w, p.unit), p.cell);
+
+    // Water only from x = 30: nothing in reach. The boat is built, then waits inside; the queue
+    // holds and nothing is lost.
+    let mut w = shipyard_world((30, 40));
+    let yard = w.occupant_at(Cell::new(10, 30)).unwrap();
+    queue(&mut w, yard, BOAT);
+    queue(&mut w, yard, BOAT);
+    run(&mut w, 60);
+    let v = w.production_of(yard).unwrap();
+    assert_eq!(v.status, FactoryStatus::WaitingForExit);
+    assert_eq!(v.queue.len(), 2, "the queue holds");
+    assert_eq!(v.front_permille, 1000, "the boat is finished");
+    assert!(units_of(&w, BOAT, P0).is_empty());
+    assert!(w.produced().is_empty());
+}
 
 #[test]
 fn a_unit_appears_on_the_exit_cell_and_the_next_on_the_first_free_cell_beyond() {
@@ -1374,6 +1530,21 @@ fn queues_progress_rally_and_the_tuning_numbers_are_in_the_checksum() {
         w.checksum_history().to_vec()
     };
     assert_eq!(run_it(6), run_it(6));
+    // Two worlds at the same tick with the same queue and the same everything else, but one
+    // queued a tick later: only the progress (`done`) of the front item differs, and so does the hash.
+    let queued_at = |delay: u64| {
+        let mut w = free_world(5, 4);
+        let f = barracks(&w);
+        run(&mut w, delay);
+        queue(&mut w, f, RIFLE);
+        run(&mut w, 4 - delay);
+        (w.tick(), w.production_of(f).unwrap(), w.checksum())
+    };
+    let (early, late) = (queued_at(0), queued_at(1));
+    assert_eq!(early.0, late.0, "the same tick");
+    assert_eq!(early.1.queue, late.1.queue, "the same queue");
+    assert_ne!(early.1.front_permille, late.1.front_permille);
+    assert_ne!(early.2, late.2, "progress is in the checksum");
     // The tuning numbers and the table are in it.
     assert_ne!(free_world(5, 4).checksum(), free_world(6, 4).checksum());
     assert_ne!(free_world(5, 4).checksum(), free_world(5, 3).checksum());

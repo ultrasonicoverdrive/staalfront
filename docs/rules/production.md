@@ -45,7 +45,11 @@ Work package WP6.5 (PLAN.md phase 6). Built before WP6.4 (power) by the orchestr
 * The credits come through `World::pay`, which `docs/rules/economy.md` describes. With too few
   credits for the next tick nothing is taken and the progress does not move: the factory is
   `WaitingForMoney`. When several factories wait for the same credits the lower slot pays first
-  (`the_lower_slot_is_paid_first_when_money_is_short`). A world **without** money rules builds for free.
+  (`the_lower_slot_is_paid_first_when_money_is_short`). **Structures first, then factories, each in
+  slot order**: structures under construction pay in `advance_construction`, before the commands of the
+  tick, and the factories pay in `advance_production`, after them. So with money for one payment a
+  structure under construction is paid before a factory, even a factory in a lower slot
+  (`a_structure_under_construction_pays_before_a_factory_in_a_lower_slot`). A world **without** money rules builds for free.
 * **The speed hook for WP6.4.** `World::production_speed_permille()` returns `FULL_SPEED_PERMILLE`
   (1000) and nothing else yet. Power will make it smaller; at 0 the status is `Stopped`. The hook is
   tested at full speed only (`the_speed_factor_is_a_hook_fixed_at_full_speed`).
@@ -69,8 +73,13 @@ Work package WP6.5 (PLAN.md phase 6). Built before WP6.4 (power) by the orchestr
 * If no cell in reach is free the finished unit **waits inside**: status `WaitingForExit`, the queue
   holds, nothing more is paid and nothing is lost; it comes out on the tick a spot is free
   (`a_blocked_exit_holds_the_queue_and_loses_nothing`).
+* **Vessels need water in reach.** The same search applies to a vessel factory: a cell is free for a
+  vessel only when a vessel can enter it (water). A shipyard with no water within `exit_radius` of its
+  exit cell (it can stand on land, `buildings.md`) still takes the vessel and is paid in full; the
+  finished vessel then waits in `WaitingForExit` until it is cancelled (refund as above) and nothing is
+  lost (`a_vessel_comes_out_on_water_and_without_water_in_reach_it_waits`).
 * **The refinery's free harvester** (`comes_with`): when a refinery is *built* (it completes under
-  `BuildStructure`) a harvester is put at the head of its queue at no price and no build time and comes
+  `BuildStructure`) a harvester is put at the back of its queue at no price and no build time and comes
   out the same way. A refinery that is *placed* (`PlaceStructure`, the scenarios) brings none
   (`a_refinery_that_is_built_brings_a_harvester_out_and_one_that_is_placed_does_not`).
 
