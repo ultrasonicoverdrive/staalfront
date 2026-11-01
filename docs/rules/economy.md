@@ -678,7 +678,9 @@ of a tick depends on `k` alone, so **no state is kept next to `build_left`**.
 * The building table guarantees a structure has a price exactly when it has build ticks, so "free" can
   only be a structure that cannot be built.
 * **Units** cost money when production exists (WP6.5). The hook is `World::pay(player, n)`
-  (`pub(crate)`): it takes all of `n` or nothing. Nothing calls it for units yet.
+  (`pub(crate)`): it takes all of `n` or nothing. Production pays through it; unit costs, the refund on
+  cancel and no refund for a lost factory are in `production.md`. **Structures first, then factories, each in
+  slot order**: `advance_construction` pays before the commands of a tick, `advance_production` after them.
 * `World::credits_spent(player)` is a statistic (hashed).
 
 ### Checksum
@@ -726,7 +728,7 @@ tick is, per structure under construction, one table lookup and one store update
 
 ### Not done
 
-* No unit costs (WP6.5), no refund, sell or repair (WP6.6), no silo (WP7.3b), no sidebar (WP11.1). (The refinery choice is WP7.5.)
+* Unit costs, the refund on cancel and the lost factory (no refund) are WP6.5's, see `production.md`. No refund for structures, sell or repair (WP6.6), no silo (WP7.3b), no sidebar (WP11.1). (The refinery choice is WP7.5.)
 * `BuildStructure` is not refused for lack of funds; it waits.
 * Money exists only with `--harvest` in the sandbox, and the HUD shows a player's credits also when it owns
   no entity (they are read from `World::credits`, not from the views).
