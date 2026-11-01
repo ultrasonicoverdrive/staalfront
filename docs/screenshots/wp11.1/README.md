@@ -24,5 +24,10 @@ riflemen go into the barracks queue (200) and a light tank into the vehicle fact
   shipyard".
 * `sidebar_t00296_structures.png`: the structures tab again at the later tick.
 
-Not shown: the minimap and the top bar (the harness draws neither); a mouse pointer (the harness has none: the clicks are
+* `game_t00047_sandbox.png`: **the real game** (`sf_game --sandbox --harvest --shots <dir>` under Xvfb on lavapipe, 1280 x 720, close-up
+  shot at tick 47): the HUD's own sidebar with the credits (1000), the neutral power bar, the structures tab with nine
+  items (the sandbox's base has every prerequisite standing, so the advanced defences show too), the minimap under the
+  column and the top bar centred. The sandbox is not the test scene: no queue is running here.
+
+Not shown: the top bar in the harness shots (the harness draws neither it nor the minimap); a mouse pointer (the harness has none: the clicks are
 tested with `UiInput`, `sidebar_view/tests.rs`).
