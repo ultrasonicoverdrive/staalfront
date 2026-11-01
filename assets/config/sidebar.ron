@@ -1,0 +1,82 @@
+// The sidebar (WP11.1, docs/rules/sidebar.md). Read by sf_data::sidebar_look, compiled into the game,
+// checked when it is parsed. Presentation only: no checksum depends on it.
+//
+// A column on the right edge of the window: the credits, the power bar, four build tabs and a grid of
+// build items; the minimap stays under it. Sizes in logical pixels (the UI scale is applied on top),
+// colours sRGB with alpha last. What each item costs and how long it takes is `unit_defs.ron`; the
+// picture of an item is the `build_picture` of its record there (a role without one gets the default
+// picture of its tab below).
+(
+    // The column. `margin_px` is the distance from the right and the top edge of the window: it is at
+    // least the width of the edge-scroll band of `input.ron` (`edge_margin`, 4 px), so the sidebar
+    // never covers the pixels that scroll the camera (progress item 22). `bottom_reserve_px` is the
+    // room left under the column for the minimap (its 200 px and its margin) and the gap above it.
+    width_px: 200,
+    margin_px: 6,
+    bottom_reserve_px: 210,
+    // Space between the parts, and inside the column.
+    gap_px: 4,
+    pad_px: 4,
+
+    money_height_px: 26,
+    power_height_px: 16,
+
+    // The tabs, in a grid.
+    tab_height_px: 24,
+    tab_columns: 2,
+    tab_labels: ("Structures", "Infantry", "Vehicles", "Vessels"),
+    // What an empty tab says (nothing to build there yet), per tab.
+    empty_hints: ("Nothing to build", "Needs a barracks", "Needs a vehicle factory", "Needs a shipyard"),
+
+    // The build items, in a grid under the tabs.
+    tile_columns: 2,
+    tile_height_px: 62,
+    // The progress bar along the bottom edge of an item.
+    bar_height_px: 5,
+    // Text sizes.
+    text_px: 14,
+    small_px: 12,
+    label_px: 17,
+
+    // The picture of a role without a `build_picture`: one colour per tab (structures, infantry,
+    // vehicles, vessels). Its label is the first letters of the id.
+    default_colors: ((80, 100, 140), (80, 130, 90), (140, 110, 70), (70, 120, 140)),
+    default_label_chars: 4,
+
+    // Words on the sidebar.
+    words: (
+        power: "Power",
+        power_none: "no power rules",
+        waiting_credits: "no credits",
+        exit_blocked: "exit blocked",
+        stopped: "stopped",
+        needs: "needs",
+    ),
+
+    colors: (
+        tab: (46, 58, 80, 255),
+        tab_hover: (64, 82, 116, 255),
+        tab_active: (92, 126, 184, 255),
+        // A tab with nothing to build.
+        tab_empty_text: (130, 136, 146, 255),
+        tile_back: (20, 24, 32, 255),
+        tile_hover: (255, 255, 255, 40),
+        // The ring round the structure that is chosen to be placed.
+        tile_chosen: (255, 220, 90, 255),
+        text: (236, 240, 246, 255),
+        text_dim: (170, 176, 188, 255),
+        // The price of an item the player cannot pay now, and the state words of a waiting item.
+        warn: (255, 110, 80, 255),
+        // The progress bar: the part that is done, its back, and the part while the item waits.
+        bar_fill: (90, 200, 255, 235),
+        bar_back: (10, 14, 20, 190),
+        bar_waiting: (255, 110, 80, 245),
+        badge_back: (10, 14, 20, 220),
+        // The power bar: its back, the neutral frame while no power rules exist, the fill and the fill
+        // when more power is used than made.
+        power_back: (16, 20, 28, 255),
+        power_neutral: (70, 76, 88, 255),
+        power_fill: (120, 220, 120, 255),
+        power_low: (255, 110, 80, 255),
+    ),
+)

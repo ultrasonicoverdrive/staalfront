@@ -134,6 +134,17 @@ impl BuildMode {
         }
     }
 
+    /// Chooses the structure of kind `kind`; false if the faction does not build it.
+    pub fn choose_kind(&mut self, kind: Kind) -> bool {
+        match self.choices.iter().position(|c| c.kind == kind) {
+            Some(i) => {
+                self.chosen = Some(i);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Puts the structure away.
     pub fn cancel(&mut self) {
         self.chosen = None;

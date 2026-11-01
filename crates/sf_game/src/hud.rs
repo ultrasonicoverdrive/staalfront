@@ -56,6 +56,9 @@ pub struct HudStats {
     pub money: Option<crate::money_view::MoneyHud>,
     /// The queue readout of the selected factory (WP6.5); empty when none is selected.
     pub production: Vec<(String, crate::production_view::Tone)>,
+    /// The sidebar of this frame (WP11.1); `None` in a scene without building and production (the
+    /// crowd). It then replaces the credits readout in the corner.
+    pub sidebar: Option<crate::sidebar::SidebarModel>,
 }
 
 pub struct Hud {
@@ -63,6 +66,12 @@ pub struct Hud {
     gpu: Option<UiRenderer>,
     minimap: Option<Minimap>,
     show_dots: bool,
+    /// The tab and scroll of the sidebar (WP11.1).
+    sidebar: crate::sidebar_view::SidebarState,
+    /// What the sidebar's clicks asked for in the last frame; the runner takes them.
+    sidebar_actions: Vec<crate::sidebar::Action>,
+    /// The edge-scroll band of `input.ron`, in physical pixels: the sidebar keeps out of it.
+    edge_band: f32,
 }
 
 /// `assets/config/ui.ron`, or the defaults when it is missing or broken.
@@ -84,6 +93,13 @@ fn load_config(assets: &Path) -> UiConfig {
             UiConfig::default()
         }
     }
+}
+
+/// The width of the edge-scroll band in `input.ron` (`edge_margin`), or the engine's default.
+fn load_edge_band(assets: &Path) -> f32 {
+    sf_engine::Bindings::load(&assets.join("config/input.ron"))
+        .map_or_else(|_| sf_engine::Bindings::builtin(), |b| b)
+        .edge_margin as f32
 }
 
 /// This frame's pointer input in the UI's terms.
@@ -110,6 +126,9 @@ impl Hud {
             gpu: None,
             minimap: None,
             show_dots: true,
+            sidebar: crate::sidebar_view::SidebarState::default(),
+            sidebar_actions: Vec::new(),
+            edge_band: load_edge_band(assets),
         }
     }
 
@@ -149,7 +168,8 @@ impl Hud {
     ) {
         let size = ctx.size();
         let ui = &mut self.ui;
-        ui.begin_frame(ui_input(ctx), (size.width, size.height), ctx.scale_factor());
+        let input = ui_input(ctx);
+        ui.begin_frame(input, (size.width, size.height), ctx.scale_factor());
 
         // Top bar: a label and a button.
         let bar = ui.panel(Anchor::Top, (0.0, EDGE), (520.0, 32.0));
@@ -175,8 +195,25 @@ impl Hud {
             let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (520.0, 26.0));
             ui.text_in(strip, Anchor::Left, (12.0, 0.0), line, text);
         }
-        if let Some(money) = &stats.money {
-            crate::money_view::draw_panel(ui, money, crate::money_view::shipped_look());
+        // The sidebar shows the credits itself; without one the readout stays in the corner.
+        self.sidebar_actions.clear();
+        match &stats.sidebar {
+            Some(model) => {
+                let setup = crate::sidebar_view::Setup {
+                    look: crate::sidebar_view::shipped_look(),
+                    money: crate::money_view::shipped_look(),
+                    edge_band_px: self.edge_band,
+                    minimap: self.minimap.is_some(),
+                };
+                let actions =
+                    crate::sidebar_view::frame(ui, &input, &mut self.sidebar, model, &setup);
+                self.sidebar_actions = actions;
+            }
+            None => {
+                if let Some(money) = &stats.money {
+                    crate::money_view::draw_panel(ui, money, crate::money_view::shipped_look());
+                }
+            }
         }
         if !stats.production.is_empty() {
             crate::production_view::draw_panel(
@@ -225,6 +262,16 @@ impl Hud {
             }
         }
         ui.end_frame();
+    }
+
+    /// The tab the sidebar shows (WP11.1): the model of the next frame is built for it.
+    pub fn sidebar_tab(&self) -> crate::sidebar::Tab {
+        self.sidebar.tab
+    }
+
+    /// What the sidebar's clicks of the last frame asked for; taken once.
+    pub fn take_sidebar_actions(&mut self) -> Vec<crate::sidebar::Action> {
+        std::mem::take(&mut self.sidebar_actions)
     }
 
     /// Whether the UI took this frame's wheel movement.

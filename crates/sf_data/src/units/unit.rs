@@ -206,6 +206,29 @@ pub struct Flags {
     pub fires_at_all: bool,
 }
 
+/// The picture of a role in the sidebar's build menu (WP11.1): a coloured tile with a short name
+/// until there is art, and where the role stands in its tab. Presentation only: the simulation never
+/// sees it. Separate from [`UnitDef::icon`], which since WP3.6 is the name of the *strategic map*
+/// icon. `docs/rules/sidebar.md` has the rules.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuildPicture {
+    /// The colour of the tile, sRGB.
+    pub color: (u8, u8, u8),
+    /// The short name written on the tile: 1 to [`MAX_PICTURE_LABEL`] printable ASCII characters,
+    /// no space at either end.
+    pub label: String,
+    /// Where the role stands among the roles of its category in the menu, ascending: 0 to
+    /// [`MAX_PICTURE_ORDER`], unique within the category. A role without a picture follows
+    /// after all that have one, by kind.
+    pub order: u16,
+}
+
+/// Longest label of a build picture, in characters.
+pub const MAX_PICTURE_LABEL: usize = 6;
+/// Largest `order` of a build picture.
+pub const MAX_PICTURE_ORDER: u16 = 999;
+
 /// One role, as written in the file.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -286,6 +309,12 @@ pub struct UnitDef {
     /// `strategic_icon` for a name it does not have.
     #[serde(default)]
     pub icon: Option<String>,
+    /// The picture in the sidebar's build menu (WP11.1), separate from `icon`. Only for a role with a
+    /// `cost` (only those are built). Optional: a role without one is shown with the default picture
+    /// of its tab (`sidebar.ron`) and the first letters of its id, after the roles that have one;
+    /// this is also what keeps the frozen copies of the definitions loading unchanged.
+    #[serde(default)]
+    pub build_picture: Option<BuildPicture>,
     /// Abilities.
     #[serde(default)]
     pub flags: Flags,
@@ -480,9 +509,21 @@ pub(crate) fn parse(
         };
         ctx.check()?;
     }
+    check_picture_orders(src, &units)?;
     for u in &units {
         building::check_record(src, &units, u)?;
         building::check_unit_production(src, &units, u)?;
+        if u.build_picture.is_some() && u.cost.is_none() {
+            return Err(src.error_in_record(
+                "id",
+                &u.id,
+                "build_picture",
+                format!(
+                    "unit \"{}\": build_picture on a role that cannot be built (no cost)",
+                    u.id
+                ),
+            ));
+        }
     }
     building::check_cycles(src, &units)?;
     let live: Vec<Live<'_>> = units
@@ -495,6 +536,28 @@ pub(crate) fn parse(
     kinds::check(src, "unit", "id", MAX_UNIT_KIND, &live, &file.retired_units)?;
     units.sort_by_key(|u| u.kind);
     Ok((units, file.retired_units))
+}
+
+/// The `order` of a build picture is unique among the roles of one category: two roles at the same
+/// place in a tab would be shown in whatever order the file happens to have.
+fn check_picture_orders(src: Source<'_>, units: &[UnitDef]) -> Result<(), DefError> {
+    for (i, u) in units.iter().enumerate() {
+        let Some(p) = &u.build_picture else { continue };
+        if let Some(other) = units[..i].iter().find(|o| {
+            o.category == u.category && o.build_picture.as_ref().is_some_and(|q| q.order == p.order)
+        }) {
+            return Err(src.error_in_record(
+                "id",
+                &u.id,
+                "build_picture",
+                format!(
+                    "unit \"{}\": build_picture order {} is also used by \"{}\" ({:?})",
+                    u.id, p.order, other.id, u.category
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Everything the checks of one record need.
@@ -728,6 +791,31 @@ impl Ctx<'_> {
                 name,
                 format!("icon \"{name}\": a name is 1 to 48 of a-z 0-9 _ (not a file path)"),
             ));
+        }
+        if let Some(p) = &u.build_picture {
+            let bad_label = p.label.is_empty()
+                || p.label.chars().count() > MAX_PICTURE_LABEL
+                || !p.label.chars().all(|c| c.is_ascii_graphic() || c == ' ')
+                || p.label.starts_with(' ')
+                || p.label.ends_with(' ');
+            if bad_label {
+                return Err(self.at(
+                    &p.label,
+                    format!(
+                        "build_picture label \"{}\": 1 to {MAX_PICTURE_LABEL} printable ASCII characters, no space at either end",
+                        p.label
+                    ),
+                ));
+            }
+            if p.order > MAX_PICTURE_ORDER {
+                return Err(self.at(
+                    "build_picture",
+                    format!(
+                        "build_picture order {} is above {MAX_PICTURE_ORDER}",
+                        p.order
+                    ),
+                ));
+            }
         }
         Ok(())
     }
