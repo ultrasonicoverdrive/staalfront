@@ -546,6 +546,7 @@ fn the_defeats_and_the_result_are_in_the_checksum() {
 /// sf_sim --test outcome -- --ignored --nocapture worst_case_cost`.
 #[test]
 #[ignore]
+#[allow(clippy::cast_precision_loss)]
 fn worst_case_cost() {
     const N: u32 = 20_000;
     let build = |with_rules: bool| {

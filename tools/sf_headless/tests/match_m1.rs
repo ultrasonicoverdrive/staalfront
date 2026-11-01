@@ -308,6 +308,7 @@ const ORE_CELLS: usize = 174;
 /// --nocapture cost_of_the_outcome`. A measurement, not an assertion on time (the machine decides).
 #[test]
 #[ignore]
+#[allow(clippy::cast_precision_loss)]
 fn cost_of_the_outcome() {
     let with = scenario();
     let mut without = with.clone();

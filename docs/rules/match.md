@@ -57,7 +57,7 @@ structure that stops standing and a unit that stops having hit points are remove
 test. A tick with one scans the slots in ascending order and **stops as soon as every player still in the
 match has been found once** (usually within the first slots: the starting objects of both sides are the
 lowest slots), so the scan is not a pass over all entities per tick. Before the match has begun the scan
-runs every tick (for the first tick or two). Measured: see "Measured" below.
+runs every tick (for the first tick or two). Measured: see "Measured" below (the worst case adds under one percent).
 
 ## The checksum
 
@@ -148,15 +148,48 @@ must be left out.
 | Test | What it shows |
 |---|---|
 | `crates/sf_sim/tests/outcome.rs` (14) | the rules are refused when wrong; a structure or an armed unit keeps a player in, a harvester and an object do not; the last player standing wins in the tick of the last defeat; a simultaneous end is a draw; three players; nobody is defeated before everyone has something; a world with a player who never has anything has no result; once decided never changes; a structure shot down defeats its owner in the tick it died; independent of spawn order; the defeats and result are in the checksum; a world without match rules has no section. |
-| `tools/sf_headless/tests/match_m1.rs` (9) | the pinned checksum; the starting objects in the order of the file; the win tick 5687 and nothing decided before it; nothing changes in the 1,313 ticks after; the same game without the rules differs only by the section; the opponent stays put, fires back and never gains an entity; the harvest pays; the committed map is what the generator draws, and its places and counts. |
+| `tools/sf_headless/tests/match_m1.rs` (10) | the pinned checksum; the starting objects in the order of the file; the win tick 5687 and nothing decided before it; nothing changes in the 1,313 ticks after; the same game without the rules differs only by the section; the opponent stays put, fires back and never gains an entity; the harvest pays; the committed map is what the generator draws, and its places and counts. |
 | `crates/sf_data` (`match_def`, `match_look`), `crates/sf_bridge/tests/match_def.rs` | the file's shape and checks; the shipped file pinned as literals; each number arrives in the world as itself (distinct values). |
 | `crates/sf_game` (`match_view`, `args`, `tests/match_screenshot.rs`) | the standing from the winner, the clock, the words from the look; the flag; the real renderer. |
 
-MUTATIONS_PLACEHOLDER
+Twelve mutations, each applied in a scratch copy of the tree and reverted:
+
+| # | Mutation (scratch copy, reverted) | Tests that fail |
+|---|---|---|
+| 1 | the armed check removed (any mobile unit with hit points counts) | `an_unarmed_unit_and_an_object_do_not_keep_a_player_in`, `the_result_does_not_depend_on_the_order_things_were_made_in` (sf_sim). The pinned scenario does **not** catch it: the script kills the opponent's harvester too. |
+| 2 | the result may change after it is decided | `once_decided_the_result_never_changes` |
+| 3 | section `Z` written without match rules | `a_world_without_match_rules_has_no_outcome_and_no_section`, `golden.rs` `small_scenario_checkpoints` and `tiny_scenario_history`, 20 of 21 tests of `pinned.rs` |
+| 4 | `despawn` does not flag the match | `the_human_wins_in_the_tick_the_last_of_the_opponent_falls`, `nothing_changes_after_the_outcome`, `the_final_checksum_is_the_pinned_value`, `a_structure_still_going_up_does_not_keep_its_owner_in_the_match` |
+| 5 | the match begins before everyone owns something | `nobody_is_defeated_before_every_player_has_something`, `a_world_in_which_a_player_never_owns_anything_has_no_result` |
+| 6 | a structure under construction counts | `a_structure_still_going_up_does_not_keep_its_owner_in_the_match` (`match_m1.rs`) |
+| 7 | the win is recorded one tick late | `the_human_wins_in_the_tick_the_last_of_the_opponent_falls`, `the_final_checksum_is_the_pinned_value` |
+| 8 | faction bits swapped in `match_factions` | `each_faction_and_credit_arrives_with_its_own_player` |
+| 9 | every starting object sent for player 0 | `a_structure_is_placed_and_a_unit_is_spawned_for_its_owner_in_the_order_of_the_file` |
+| 10 | winner and loser swapped on the banner | `the_standing_is_the_local_players`, `there_is_no_banner_before_the_result` |
+| 11 | the snapshot does not carry the result | `the_match_is_won_in_the_world_the_game_makes` |
+| 12 | the clock counts ticks as tenths of a second | `the_clock_counts_game_seconds_at_twenty_ticks_to_the_second`, `the_words_come_from_the_look` |
+
+Not covered by a test: the one line in `Hud::frame` that calls `match_view::draw_result` and the line in the
+runner that copies the snapshot's result into `HudStats` (both need the window's `Context`); the screenshot
+test calls the same `draw_result` and the snapshot test the same `match_result`.
 
 ## Measured
 
-MEASURED_PLACEHOLDER
+Release, same machine (4 cores, shared with other jobs: load average 1 to 4 during the runs), alternating runs.
+
+* **A world without match rules** (the cost of the hook in every other world): the scenarios `production`, `harvest`
+  and `wander_5000` on the base (`origin/wp/6.5-production`) and on this branch, 6 to 8 alternating runs each, ticks per second,
+  medians: production 6817 / 7628, harvest 8600 / 8625, wander_5000 853 / 840 (a first series), and in a three-way
+  series with the end-of-tick call switched off: 846 / 842 / 851. The spread between runs (about 3 percent) is as large as
+  every difference: no cost is shown, and none is claimed. The hook is one test of an `Option` per tick
+  (`evaluate_match` is `#[inline]` and the work is in a function of its own, which removed a 1.5 percent dip that an
+  earlier layout of the function showed against the version with the call removed).
+* **A world with match rules**: the `match` scenario (25 entities, 7000 ticks) with and without the rules, 7 alternating
+  runs, median microseconds per tick: 27.18 with, 27.20 without (`cost_of_the_outcome`, `--ignored`).
+* **The worst case of the scan**: 40,000 unarmed units, the only thing each player owns that counts at the highest slots,
+  one unit removed in every tick, so every tick walks all slots (`worst_case_cost`, `--ignored`): median 7073 microseconds
+  per tick with the rules, 7008 without, a tick being 7 ms of work for 40,000 units: the full scan adds under one percent.
+
 
 ## What is not done
 
