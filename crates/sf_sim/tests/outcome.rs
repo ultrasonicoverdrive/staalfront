@@ -537,3 +537,76 @@ fn the_defeats_and_the_result_are_in_the_checksum() {
     assert_eq!(b.match_result().unwrap().tick, Tick(2));
     assert_ne!(a.checksum(), b.checksum());
 }
+
+/// The worst case of the check (WP7.6), a measurement and not an assertion on time: 20,000 unarmed units
+/// of player 0 and 20,000 of player 1 fill the low slots, and the one thing each player owns that
+/// counts (a barn) has the highest slots, so the scan of a tick that removed something has to walk
+/// every slot before it finds them; one unarmed unit is removed in every tick, so every tick scans.
+/// Compared with the same world without match rules, alternating. Run with `cargo test --release -p
+/// sf_sim --test outcome -- --ignored --nocapture worst_case_cost`.
+#[test]
+#[ignore]
+fn worst_case_cost() {
+    const N: u32 = 20_000;
+    let build = |with_rules: bool| {
+        let base = World::new(WorldConfig::new(7).with_map_size(MAP, MAP))
+            .unwrap()
+            .with_units(units())
+            .unwrap()
+            .with_weapons(weapons())
+            .unwrap()
+            .with_destruction(DestructionConfig::DEFAULT)
+            .unwrap();
+        let mut w = if with_rules {
+            base.with_match(rules(&[P0, P1])).unwrap()
+        } else {
+            base
+        };
+        for i in 0..N {
+            for owner in [P0, P1] {
+                let (x, y) = ((i % 38) as i32, (i / 38 % 38) as i32);
+                put(&mut w, 0, HARVESTER, owner, x, y);
+            }
+        }
+        put(&mut w, 0, BARN, P0, 2, 5);
+        put(&mut w, 0, BARN, P1, 30, 5);
+        w.step();
+        w
+    };
+    let run = |with_rules: bool| {
+        let mut w = build(with_rules);
+        let ids: Vec<EntityId> = w
+            .snapshot()
+            .iter()
+            .filter(|v| v.kind == HARVESTER)
+            .map(|v| v.id)
+            .collect();
+        let t = std::time::Instant::now();
+        let ticks = 2000;
+        for id in ids.into_iter().take(ticks) {
+            w.schedule(w.tick(), PlayerId(0), Command::Despawn { id })
+                .unwrap();
+            w.step();
+        }
+        (
+            t.elapsed().as_secs_f64() * 1e6 / ticks as f64,
+            w.match_result(),
+        )
+    };
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for _ in 0..5 {
+        a.push(run(true).0);
+        b.push(run(false).0);
+    }
+    let median = |v: &mut Vec<f64>| {
+        v.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        v[v.len() / 2]
+    };
+    println!("with the match rules:    {a:.1?}");
+    println!("without the match rules: {b:.1?}");
+    println!(
+        "median us per tick (40,000 units, one removed every tick, full scan every tick): with {:.1}, without {:.1}",
+        median(&mut a),
+        median(&mut b)
+    );
+}

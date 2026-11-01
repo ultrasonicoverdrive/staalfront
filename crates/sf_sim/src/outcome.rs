@@ -222,8 +222,20 @@ impl World {
         }
     }
 
-    /// The end of a tick (WP7.6): decides defeats and the win. Cheap when nothing was removed.
+    /// The end of a tick (WP7.6): decides defeats and the win. A world without match rules pays one test
+    /// of an `Option` here (the work is in a function of its own, so that this one stays small in the
+    /// middle of `World::step`).
+    #[inline]
     pub(crate) fn evaluate_match(&mut self, tick: Tick) {
+        if self.outcome.is_some() {
+            self.evaluate_match_rules(tick);
+        }
+    }
+
+    /// The end of a tick in a world that has match rules: looks again if something was removed (or the
+    /// match has not begun), otherwise only clears the flag.
+    #[inline(never)]
+    fn evaluate_match_rules(&mut self, tick: Tick) {
         let Some(mut outcome) = self.outcome.take() else {
             return;
         };
