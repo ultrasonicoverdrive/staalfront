@@ -30,11 +30,8 @@ const H: u32 = 96;
 /// The two bases keep their ground free of rock and water: (x0, y0, x1, y1), inclusive.
 const BASES: [(u32, u32, u32, u32); 2] = [(4, 56, 33, 90), (62, 6, 93, 40)];
 
-fn main() {
-    let Some(dir) = std::env::args().nth(1).map(PathBuf::from) else {
-        eprintln!("usage: gen_match_map <map_dir>");
-        std::process::exit(2);
-    };
+/// The map, as it is drawn (and as `tests/match_m1.rs` draws it again to compare with the files).
+pub fn draw() -> Map {
     let types = TerrainTypes::embedded();
     let id = |name: &str| types.id_of(name).expect("a shipped terrain type");
     let (grass, water, rock, ore) = (id("grass"), id("water"), id("rock"), id("ore"));
@@ -98,7 +95,7 @@ fn main() {
     // One material sample per metre, four per cell side: all grass.
     let (mw, mh) = (W * 4, H * 4);
     let layer = TerrainLayer::new(W, H, ids).expect("W x H ids");
-    let map = Map::from_parts(
+    Map::from_parts(
         mw,
         mh,
         0.0,
@@ -108,7 +105,15 @@ fn main() {
     )
     .expect("a valid flat map")
     .with_terrain(layer, &types)
-    .expect("a valid layer");
+    .expect("a valid layer")
+}
+
+fn main() {
+    let Some(dir) = std::env::args().nth(1).map(PathBuf::from) else {
+        eprintln!("usage: gen_match_map <map_dir>");
+        std::process::exit(2);
+    };
+    let map = draw();
     map.save(&dir).expect("write the map");
     println!("wrote the {W}x{H} cell map to {}", dir.display());
 }
