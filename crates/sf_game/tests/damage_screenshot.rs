@@ -16,7 +16,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use sf_data::damage::Stage;
+use sf_data::damage::{Damage, EMBEDDED_DAMAGE, Stage};
+use sf_data::effects::Effects;
 use sf_data::map::{Map, generate::generate_cells};
 use sf_data::units::UnitDefs;
 use sf_game::fx::{DrawnAnchors, FxFrame, FxPlayer};
@@ -141,6 +142,47 @@ impl Scene {
         }
     }
 
+    /// The player as WP6.8 shipped it: structures burn with the vehicle effects and rates (the table
+    /// with the structure entries pointed at the mobile ones). The baseline of "bigger than before".
+    fn vehicle_fire_player(&self) -> FxPlayer {
+        let table = Damage::parse(
+            &EMBEDDED_DAMAGE
+                .replace(
+                    "structure_smoke_effect: \"damage_smoke_structure\"",
+                    "structure_smoke_effect: \"damage_smoke\"",
+                )
+                .replace(
+                    "structure_fire_effect: \"damage_fire_structure\"",
+                    "structure_fire_effect: \"damage_fire\"",
+                )
+                .replace(
+                    "structure_damaged: (smoke_per_s: 5.0",
+                    "structure_damaged: (smoke_per_s: 4.0",
+                )
+                .replace(
+                    "structure_heavy: (smoke_per_s: 10.0, fire_per_s: 10.0)",
+                    "structure_heavy: (smoke_per_s: 8.0, fire_per_s: 7.0)",
+                ),
+        )
+        .expect("the baseline table");
+        FxPlayer::with_damage(Effects::embedded(), &self.defs, table).expect("the baseline player")
+    }
+
+    /// The picture of the same scene with the baseline player (structures burn like vehicles): the
+    /// stage holds for `ticks` ticks first so that every puff is the baseline's. The real player is put
+    /// back afterwards. Returns the picture with the effects.
+    fn baseline_shot(&mut self, r: &mut Renderer, cam: &Camera, ticks: u32) -> Rgba8 {
+        let baseline = self.vehicle_fire_player();
+        let real = std::mem::replace(&mut self.fx, baseline);
+        let mut last = Vec::new();
+        for _ in 0..ticks {
+            last = self.tick(cam).1;
+        }
+        let shot = self.shoot(r, cam, &last);
+        self.fx = real;
+        shot
+    }
+
     fn kind(&self, role: &str) -> Kind {
         Kind(self.defs.kind_of(role).unwrap())
     }
@@ -196,7 +238,15 @@ impl Scene {
             .get(tank)
             .and_then(|s| s.movement_class)
             .expect("a tank has a movement class");
-        let at = self.world.cell_of(target).expect("the target stands");
+        let at = self.world.cell_of(target).unwrap_or_else(|| {
+            let (x, y) = self
+                .world
+                .get(target)
+                .expect("the target stands")
+                .pos
+                .cell();
+            Cell::new(x as u32, y as u32)
+        });
         // Three free, passable cells five to eight cells from the plant, two apart.
         let mut cells: Vec<Cell> = Vec::new();
         'search: for d in 5..=8u32 {
@@ -442,15 +492,15 @@ fn run_to_stage(scene: &mut Scene, cam: &Camera, id: EntityId, stage: Stage) -> 
 
 /// The same plant at the zoom the game starts at (`CameraConfig::default().start_zoom`, middle band):
 /// the camera ticks on long enough that every puff made for the close camera has died, the stage holds,
-/// and the picture is saved. Returns the pixels the effects change around the plant and the light added
-/// near the fire anchor.
+/// and the picture is saved. Returns the pixels the effects change around the plant, the light added
+/// near the fire anchor and the light the same scene gives with the vehicle fire (WP6.8 as shipped).
 fn at_start_zoom(
     scene: &mut Scene,
     r: &mut Renderer,
     plant: EntityId,
     stage: Stage,
     name: &str,
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     let v = scene.world.get(plant).unwrap();
     let focus = sf_math::render_bridge::vec2_cells_to_metres(v.pos);
     let cam = scene.camera(CameraConfig::default().start_zoom, focus);
@@ -480,8 +530,12 @@ fn at_start_zoom(
         .anchor_px(&cam, plant, "fx_fire")
         .expect("the model has fx_fire_0");
     let glow = glow_pixels(&shot, &plain, around(fire_at, 40.0));
-    println!("{name} at start zoom: effects {effects} px, light near the fire anchor {glow} px");
-    (effects, glow)
+    let old_shot = scene.baseline_shot(r, &cam, 80);
+    let old_glow = glow_pixels(&old_shot, &plain, around(fire_at, 40.0));
+    println!(
+        "{name} at start zoom: effects {effects} px, light near the fire anchor {glow} px (vehicle fire: {old_glow} px)"
+    );
+    (effects, glow, old_glow)
 }
 
 #[test]
@@ -575,7 +629,7 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             .expect("the model has fx_smoke_0");
         assert!(changed(&damaged_plain, &damaged, around(at, 120.0)) > 50);
         // Where the player looks: the start zoom of the game.
-        let (smoke, glow) = at_start_zoom(
+        let (smoke, glow, _) = at_start_zoom(
             &mut scene,
             &mut r,
             plant,
@@ -628,12 +682,27 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
         assert!(model > 200, "{faction}: the heavy model differs ({model})");
         assert!(smoke > 150, "{faction}: smoke and fire are drawn ({smoke})");
         assert!(glow > 100, "{faction}: fire at the fire anchor ({glow})");
+        // Bigger than the vehicle fire the structure had before WP6.8b (same scene, same camera).
+        let old_shot = scene.baseline_shot(&mut r, &cam, 80);
+        // A wide window: the new flame is taller and broader than the 90 px square of the check above.
+        let wide = around(fire_at, 200.0);
+        let old_glow = glow_pixels(&old_shot, &heavy_plain, wide);
+        let glow = glow_pixels(&heavy, &heavy_plain, wide);
+        println!(
+            "{faction} heavy, close: flame light {glow} px, with the vehicle fire {old_glow} px"
+        );
+        // At least 1.2 times the light: the Veyran roof is bright and the additive glow saturates on it, and a
+        // vehicle flame already fills much of the close picture (measured: 2.4 times Meridian, 1.3 Veyran).
+        assert!(
+            glow * 10 > old_glow * 12,
+            "{faction}: the structure fire is clearly bigger at the close camera ({glow} against {old_glow})"
+        );
         assert!(
             glow_damaged < 50,
             "{faction}: damaged is smoke, no light ({glow_damaged})"
         );
 
-        let (smoke, glow) = at_start_zoom(
+        let (smoke, glow, old_glow) = at_start_zoom(
             &mut scene,
             &mut r,
             plant,
@@ -645,6 +714,10 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             "{faction}: smoke and fire at the start zoom ({smoke})"
         );
         assert!(glow > 200, "{faction}: fire at the start zoom ({glow})");
+        assert!(
+            glow * 10 > old_glow * 14,
+            "{faction}: the structure fire is clearly bigger at the start zoom ({glow} against {old_glow})"
+        );
 
         // Destroyed: the damage effect stops (the entity is gone from the snapshot) and the wreck's
         // smoke takes over.
@@ -688,4 +761,107 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             &rubble,
         );
     }
+}
+
+/// A heavily damaged tank beside a heavily damaged building at the game's start zoom (WP6.8b): the
+/// building's fire is the bigger one. The tank is shot first (three enemy tanks), then the plant.
+#[test]
+fn a_burning_tank_burns_smaller_than_the_burning_building_beside_it() {
+    let mut scene = Scene::new();
+    let mut r = renderer(&scene.map);
+    let (owner, enemy) = (MERIDIAN, VEYRAN);
+    let plant = scene.place_plant(owner);
+    // A tank of the plant's owner a few cells from it.
+    let tank_kind = scene.kind("light_tank");
+    let at = scene.world.cell_of(plant).unwrap();
+    let class = scene
+        .world
+        .unit_table()
+        .get(tank_kind)
+        .and_then(|s| s.movement_class)
+        .unwrap();
+    let cell = (4..=8u32)
+        .flat_map(|d| {
+            [
+                Cell::new(at.x + d, at.y),
+                Cell::new(at.x.saturating_sub(d), at.y),
+            ]
+        })
+        .find(|&c| scene.world.passable(class, c) && !scene.world.is_occupied(c))
+        .expect("a free cell beside the plant");
+    let pos = Vec2::from_ints(cell.x as i32, cell.y as i32)
+        + Vec2::new(sf_math::Fx::HALF, sf_math::Fx::HALF);
+    scene.send(
+        owner,
+        Command::SpawnUnit {
+            kind: tank_kind,
+            pos,
+            owner: PlayerId(owner),
+        },
+    );
+    scene.step();
+    let tank = scene
+        .world
+        .snapshot()
+        .iter()
+        .find(|v| {
+            v.kind == tank_kind
+                && v.owner == PlayerId(owner)
+                && v.pos.cell() == (cell.x as i32, cell.y as i32)
+        })
+        .map(|v| v.id)
+        .expect("the tank was spawned");
+    // It stays where it is whatever happens around it, so that it is in the picture.
+    scene.order(owner, &[tank], Order::HoldPosition);
+    let v = scene.world.get(plant).unwrap();
+    let focus = sf_math::render_bridge::vec2_cells_to_metres(v.pos);
+    let cam = scene.camera(CameraConfig::default().start_zoom, focus);
+    let away = Order::Move(Vec2::new(
+        sf_math::Fx::from_int(CELLS as i32 - 4),
+        sf_math::Fx::from_int(CELLS as i32 - 4),
+    ));
+    for target in [tank, plant] {
+        let attackers = scene.attackers(enemy, target);
+        let snap = run_to_stage(&mut scene, &cam, target, Stage::Heavy);
+        assert_eq!(scene.stage_of(&snap, target), Stage::Heavy, "{target:?}");
+        scene.order(enemy, &attackers, away);
+    }
+    // Hold both at heavy while the old puffs die.
+    let mut last = Vec::new();
+    for _ in 0..80 {
+        let (snap, fx) = scene.tick(&cam);
+        assert_eq!(scene.stage_of(&snap, tank), Stage::Heavy, "the tank holds");
+        assert_eq!(
+            scene.stage_of(&snap, plant),
+            Stage::Heavy,
+            "the plant holds"
+        );
+        last = fx;
+    }
+    let tick = scene.world.tick().0;
+    let plain = scene.shoot(&mut r, &cam, &[]);
+    let shot = scene.shoot(&mut r, &cam, &last);
+    save(
+        &format!("meridian_tank_beside_power_plant_both_burning_start_zoom_tick{tick}.png"),
+        &shot,
+    );
+    let fire_at = scene
+        .anchor_px(&cam, plant, "fx_fire")
+        .expect("the model has fx_fire_0");
+    let tank_world = scene.world.get(tank).unwrap();
+    let [tx, tz] = sf_math::render_bridge::vec2_cells_to_metres(tank_world.pos);
+    let ty = scene.ground.height(f64::from(tx), f64::from(tz)) as f32 + 1.5;
+    let tank_at = project_px(&cam.view_proj(), [tx, ty, tz].into(), [W as f32, H as f32])
+        .expect("in front of the camera")
+        .0;
+    let building = glow_pixels(&shot, &plain, around(fire_at, 40.0));
+    let vehicle = glow_pixels(&shot, &plain, around(tank_at, 40.0));
+    println!(
+        "start zoom: flame light at the building {building} px, at the tank {vehicle} px; fire anchor {fire_at:?}, tank {tank_at:?}"
+    );
+    assert!(vehicle > 50, "the tank burns too ({vehicle})");
+    assert!(
+        building * 10 > vehicle * 14,
+        "the building's fire is clearly bigger ({building} against {vehicle})"
+    );
 }
