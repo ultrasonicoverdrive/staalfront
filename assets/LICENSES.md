@@ -52,6 +52,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `config/money_look.ron` | Written for this project (WP7.4: the credits readout of the HUD and the colours of a structure that waits for money) | Project license (see workspace `Cargo.toml`) |
 | `config/match_look.ron` | Written for this project (WP7.6: the banner at the end of a match, the words Victory, Defeat and Draw and their colours; placeholders) | Project license (see workspace `Cargo.toml`) |
 | `matches/m1.ron` | Written for this project (WP7.6: the first match, milestone M1: the map, two players, their credits and starting objects; placeholders) | Project license (see workspace `Cargo.toml`) |
+| `config/sidebar.ron` | Written for this project (WP11.1: the size, words and colours of the sidebar and the default picture of a role without a `build_picture`) | Project license (see workspace `Cargo.toml`) |
 | `config/cell_overlay.ron` | Written for this project (WP2.4: colours of the cell grid overlay) | Project license (see workspace `Cargo.toml`) |
 | `fonts/Inter-Medium-subset.otf` | Subset (Basic Latin, Latin-1 Supplement, Latin Extended-A, common punctuation and arrows; no hinting; made with `pyftsubset`) of Inter Medium by The Inter Project Authors, https://github.com/rsms/inter. The font declares no Reserved Font Name. 52 KB. | SIL Open Font License 1.1, full text in `fonts/OFL.txt` |
 | `fonts/OFL.txt` | License text of the Inter font (copied from the Debian `fonts-inter` package) | SIL Open Font License 1.1 |

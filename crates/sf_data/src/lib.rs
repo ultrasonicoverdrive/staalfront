@@ -27,6 +27,7 @@ pub mod ore;
 pub mod power;
 pub mod production;
 pub mod production_look;
+pub mod sidebar_look;
 pub mod sim_settings;
 pub mod skirmish;
 pub mod storage_look;

@@ -44,6 +44,11 @@
 // supply_truck (v4 has no neutral file) keeps its testpack_v1 model. Decor
 // (trees, rocks, ore stages, wrecks) is not a unit role and is not listed here.
 //
+// Build pictures (WP11.1, docs/rules/sidebar.md): `build_picture: (color: (r, g, b), label: "PWR", order: 10)`
+// is the role's tile in the sidebar's build menu (a coloured tile with a short name until there is art),
+// separate from `icon`. Only for a role with a cost; `order` is its place in its tab (unique within a
+// category). Optional: a role without one gets the default picture of its tab (config/sidebar.ron).
+//
 // Strategic icons (WP3.6): `strategic_icon` is the base shape of the role's
 // category (Square structures, Circle infantry, Triangle vehicles, HalfCircle
 // vessels) and what it is drawn as without an `icon`; `icon` names the picture
@@ -76,6 +81,7 @@
                 Veyran: Glb("set_v4/veyran_power_plant.glb"),
             },
             icon: "power_plant",
+            build_picture: (color: (230, 190, 60), label: "PWR", order: 10),
             // placeholder: build_seconds, sight.
         ),
         (
@@ -90,6 +96,7 @@
                 Veyran: Glb("set_v4/veyran_refinery.glb"),
             },
             icon: "refinery",
+            build_picture: (color: (200, 140, 60), label: "REF", order: 20),
             // placeholder: build_seconds, sight, storage (ten harvester loads).
         ),
         (
@@ -103,6 +110,7 @@
                 Veyran: Glb("set_v4/veyran_barracks.glb"),
             },
             icon: "barracks",
+            build_picture: (color: (80, 140, 90), label: "BAR", order: 30),
             // placeholder: build_seconds, sight, model.
         ),
         (
@@ -116,6 +124,7 @@
                 Veyran: Glb("set_v4/veyran_vehicle_factory.glb"),
             },
             icon: "vehicle_factory",
+            build_picture: (color: (190, 120, 50), label: "VEH", order: 40),
             // placeholder: build_seconds, sight.
         ),
         (
@@ -130,6 +139,7 @@
                 Veyran: Glb("set_v4/veyran_radar.glb"),
             },
             icon: "radar",
+            build_picture: (color: (90, 160, 200), label: "RDR", order: 50),
             // placeholder: build_seconds, model. Sight 12 is "reveals 12-cell radius".
         ),
         (
@@ -143,6 +153,7 @@
                 Veyran: Glb("set_v4/veyran_defence_tower.glb"),
             },
             icon: "defence_tower",
+            build_picture: (color: (170, 80, 80), label: "TWR", order: 60),
             // placeholder: build_seconds, sight.
         ),
         (
@@ -156,6 +167,7 @@
                 Veyran: Glb("set_v4/veyran_advanced_defences.glb"),
             },
             icon: "advanced_defences",
+            build_picture: (color: (150, 60, 110), label: "ADV", order: 70),
             // placeholder: build_seconds, sight, model.
         ),
         (
@@ -170,6 +182,7 @@
                 Veyran: Glb("set_v4/veyran_shipyard.glb"),
             },
             icon: "shipyard",
+            build_picture: (color: (60, 140, 160), label: "YARD", order: 80),
             // placeholder: build_seconds, sight, model.
         ),
         (
@@ -180,6 +193,7 @@
             flags: (disguise_as: "defence_tower"),
             model: Glb("set_v4/meridian_decoy_emplacement.glb"), strategic_icon: Square,
             icon: "decoy_emplacement",
+            build_picture: (color: (130, 130, 150), label: "DECOY", order: 90),
             // placeholder: build_seconds, sight.
         ),
         (
@@ -190,6 +204,7 @@
             flags: (garrison: 5),
             model: Glb("set_v4/veyran_fortified_bunker.glb"), strategic_icon: Square,
             icon: "fortified_bunker",
+            build_picture: (color: (120, 100, 80), label: "BNKR", order: 100),
             // placeholder: build_seconds, sight, model.
         ),
 
@@ -205,6 +220,7 @@
                 Veyran: Glb("set_v4/veyran_harvester.glb"),
             },
             icon: "harvester",
+            build_picture: (color: (210, 150, 50), label: "HARV", order: 10),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -218,6 +234,7 @@
                 Veyran: Glb("set_v4/veyran_rifleman.glb"),
             },
             icon: "rifleman",
+            build_picture: (color: (90, 170, 100), label: "RIFLE", order: 10),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -231,6 +248,7 @@
                 Veyran: Glb("set_v4/veyran_rocket_trooper.glb"),
             },
             icon: "rocket_trooper",
+            build_picture: (color: (70, 150, 120), label: "ROCKT", order: 20),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -244,6 +262,7 @@
                 Veyran: Glb("set_v4/veyran_engineer.glb"),
             },
             icon: "engineer",
+            build_picture: (color: (200, 180, 90), label: "ENG", order: 30),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -258,6 +277,7 @@
                 Veyran: Glb("set_v4/veyran_scout.glb"),
             },
             icon: "scout",
+            build_picture: (color: (120, 190, 140), label: "SCOUT", order: 40),
             // placeholder: build_seconds, turn_rate, size. Sight 8 is from units.md.
         ),
         (
@@ -267,6 +287,7 @@
             weapons: ["long_rifle"],
             model: Glb("set_v4/meridian_sniper.glb"), strategic_icon: Circle,
             icon: "sniper",
+            build_picture: (color: (60, 120, 90), label: "SNIPE", order: 50),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -276,6 +297,7 @@
             flags: (heal_radius: 2),
             model: Glb("set_v4/veyran_medic.glb"), strategic_icon: Circle,
             icon: "medic",
+            build_picture: (color: (220, 220, 230), label: "MEDIC", order: 60),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -286,6 +308,7 @@
             flags: (consumed_on_use: true),
             model: Glb("set_v3/veyran_demolition_team.glb"), strategic_icon: Circle,
             icon: "demolition_team",
+            build_picture: (color: (190, 100, 70), label: "DEMO", order: 70),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -299,6 +322,7 @@
                 Veyran: Glb("set_v4/veyran_light_tank.glb"),
             },
             icon: "light_tank",
+            build_picture: (color: (180, 130, 70), label: "LTANK", order: 20),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -312,6 +336,7 @@
                 Veyran: Glb("set_v4/veyran_heavy_tank.glb"),
             },
             icon: "heavy_tank",
+            build_picture: (color: (150, 100, 60), label: "HTANK", order: 30),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -325,6 +350,7 @@
                 Veyran: Glb("set_v4/veyran_siege_artillery.glb"),
             },
             icon: "siege_artillery",
+            build_picture: (color: (160, 90, 90), label: "ARTY", order: 40),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -338,6 +364,7 @@
                 Veyran: Glb("set_v4/veyran_repair_truck.glb"),
             },
             icon: "repair_truck",
+            build_picture: (color: (200, 190, 110), label: "REPAIR", order: 50),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -347,6 +374,7 @@
             flags: (transports: 5),
             model: Glb("set_v4/veyran_transport_truck.glb"), strategic_icon: Triangle,
             icon: "transport_truck",
+            build_picture: (color: (140, 140, 110), label: "TRUCK", order: 60),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -356,6 +384,7 @@
             flags: (transports: 4),
             model: Glb("set_v4/meridian_light_transport.glb"), strategic_icon: Triangle,
             icon: "light_transport",
+            build_picture: (color: (130, 150, 130), label: "LTRAN", order: 70),
             // placeholder: build_seconds, armor, turn_rate, size, sight.
         ),
         (
@@ -365,6 +394,7 @@
             flags: (transports: 5, transports_vehicles: 1),
             model: Glb("set_v4/meridian_amphibious_transport.glb"), strategic_icon: Triangle,
             icon: "amphibious_transport",
+            build_picture: (color: (90, 150, 170), label: "AMPH", order: 80),
             // placeholder: build_seconds, armor, turn_rate, size, sight, model.
             // "Carries 5 infantry or 1 vehicle": the two capacities are alternatives.
         ),
@@ -376,6 +406,7 @@
             flags: (can_capture: true, repairs_structures: true, places_charges: true, builds: ["fortified_bunker"]),
             model: Glb("set_v4/veyran_combat_engineer.glb"), strategic_icon: Circle,
             icon: "combat_engineer",
+            build_picture: (color: (170, 160, 80), label: "CENG", order: 80),
             // placeholder: build_seconds, turn_rate, size, sight.
         ),
         (
@@ -386,6 +417,7 @@
             flags: (deploys: true),
             model: Shape(Cone), strategic_icon: Circle,
             icon: "heavy_gun_team",
+            build_picture: (color: (100, 130, 80), label: "HGUN", order: 90),
             // placeholder: build_seconds, turn_rate, size, sight, model.
         ),
         (
@@ -395,6 +427,7 @@
             weapons: ["naval_cannon"],
             model: Glb("set_v4/veyran_gunboat.glb"), strategic_icon: HalfCircle,
             icon: "gunboat",
+            build_picture: (color: (70, 130, 170), label: "GUNBT", order: 10),
             // placeholder: build_seconds, armor, turn_rate, size, sight, model.
         ),
         (
