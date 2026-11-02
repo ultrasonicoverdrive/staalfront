@@ -161,12 +161,12 @@ fn draw_money(
 ) {
     ui.fill(lay.money, color(look.colors.power_back));
     let Some(credits) = model.credits else { return };
-    let px = f32::from(look.text_px) * ui.scale() * 1.15;
+    let px = f32::from(look.text_px) * ui.scale() * f32::from(look.credits_text_pct) / 100.0;
     let text = money_view::readout_text(money, credits);
     let c = money_view::readout_color(money, credits, model.waiting_for_credits);
     let (_, h) = ui.measure_px(&text, px);
     ui.text_px_at(
-        lay.money.x + (6.0 * ui.scale()).round(),
+        lay.money.x + (f32::from(look.credits_inset_px) * ui.scale()).round(),
         (lay.money.y + (lay.money.h - h) * 0.5).round(),
         &text,
         px,
@@ -283,15 +283,17 @@ fn draw_tile(
     let scale = ui.scale();
     let small = f32::from(look.small_px) * scale;
     let bar_h = (f32::from(look.bar_height_px) * scale).round().max(1.0);
-    let strip_h = (small * 1.5).round();
+    let strip_h = (small * f32::from(look.strip_pct) / 100.0).round();
+    let inset = (f32::from(look.picture_inset_px) * scale).round();
+    let pad = (f32::from(look.text_pad_px) * scale).round();
 
     ui.fill(rect, color(c.tile_back));
     // The picture: a coloured tile with the short name.
     let picture = Rect::new(
-        rect.x + 1.0,
-        rect.y + 1.0,
-        rect.w - 2.0,
-        (rect.h - strip_h - bar_h - 1.0).max(0.0),
+        rect.x + inset,
+        rect.y + inset,
+        rect.w - 2.0 * inset,
+        (rect.h - strip_h - bar_h - inset).max(0.0),
     );
     ui.fill(picture, tile_color(item.picture.color));
     centered(
@@ -305,7 +307,6 @@ fn draw_tile(
     if item.count > 0 {
         let text = item.count.to_string();
         let (w, h) = ui.measure_px(&text, small);
-        let pad = (3.0 * scale).round();
         let badge = Rect::new(
             picture.right() - w - 2.0 * pad,
             picture.y,
@@ -322,12 +323,12 @@ fn draw_tile(
         );
     }
     // The strip under the picture: the price left, why it waits right.
-    let strip_y = picture.bottom() + 1.0;
+    let strip_y = picture.bottom() + inset;
     let (_, th) = ui.measure_px("0", small);
     let ty = (strip_y + (strip_h - th) * 0.5).round();
     let price_color = if item.affordable { c.text_dim } else { c.warn };
     ui.text_px_at(
-        rect.x + (3.0 * scale).round(),
+        rect.x + pad,
         ty,
         &item.cost.to_string(),
         small,
@@ -342,7 +343,7 @@ fn draw_tile(
     if let Some((text, text_color)) = right_text {
         let (w, _) = ui.measure_px(&text, small);
         ui.text_px_at(
-            (rect.right() - w - (3.0 * scale).round()).round(),
+            (rect.right() - w - pad).round(),
             ty,
             &text,
             small,
@@ -362,7 +363,12 @@ fn draw_tile(
         ui.fill(Rect::new(bar.x, bar.y, fill, bar.h), color(fill_color));
     }
     if chosen {
-        ring(ui, rect, (2.0 * scale).round(), color(c.tile_chosen));
+        ring(
+            ui,
+            rect,
+            (f32::from(look.chosen_ring_px) * scale).round(),
+            color(c.tile_chosen),
+        );
     }
     if cursor.is_some_and(|(x, y)| rect.contains(x, y)) {
         ui.fill(rect, color(c.tile_hover));

@@ -122,6 +122,9 @@ pub struct Catalog {
     entries: Vec<Entry>,
     /// The kinds of all structures of the definitions, ascending: what counts as "standing".
     structures: Vec<Kind>,
+    /// The kinds whose building function is the anchor (the construction centre), ascending: one of
+    /// them must stand before the simulation places any structure.
+    anchors: Vec<Kind>,
 }
 
 impl Catalog {
@@ -130,9 +133,16 @@ impl Catalog {
     pub fn build(defs: &UnitDefs, faction: Faction, look: &SidebarLook) -> Catalog {
         let mut entries = Vec::new();
         let mut structures = Vec::new();
+        let mut anchors = Vec::new();
         for d in defs.units() {
             if d.category == Category::Structure {
                 structures.push(Kind(d.kind));
+                if d.building
+                    .as_ref()
+                    .is_some_and(|b| b.function == sf_data::units::BuildingFunction::Anchor)
+                {
+                    anchors.push(Kind(d.kind));
+                }
             }
             let (Some(cost), Some(tab)) = (d.cost, Tab::of_category(d.category)) else {
                 continue;
@@ -184,9 +194,11 @@ impl Catalog {
         }
         entries.sort_by_key(|e| (e.tab, e.order, e.kind));
         structures.sort();
+        anchors.sort();
         Catalog {
             entries,
             structures,
+            anchors,
         }
     }
 
@@ -209,6 +221,11 @@ impl Catalog {
     /// Whether `kind` is a structure of the definitions.
     pub fn is_structure(&self, kind: Kind) -> bool {
         self.structures.binary_search(&kind).is_ok()
+    }
+
+    /// Whether `kind` is an anchor: the player builds round a standing one.
+    pub fn is_anchor(&self, kind: Kind) -> bool {
+        self.anchors.binary_search(&kind).is_ok()
     }
 }
 
@@ -248,6 +265,9 @@ pub struct Situation {
     pub buildings: Vec<Building>,
     /// The credits of the player; `None` in a world without money rules.
     pub credits: Option<u64>,
+    /// Whether an anchor of the player stands (a construction centre): without one the simulation
+    /// refuses every placement, so the structures tab shows nothing.
+    pub anchor: bool,
 }
 
 impl Situation {
@@ -272,8 +292,12 @@ impl Situation {
                     permille: c.permille(),
                     stalled: snap.stalled().contains(&v.id),
                 }),
+                // The simulation's `World::is_standing`: complete, and hit points left or a kind
+                // that cannot be damaged (0 in the unit table). A wreck-to-be at 0 HP stands not.
+                None if v.hp == 0 && !snap.stats_for(v).is_some_and(|t| t.hp == 0) => {}
                 None => {
                     s.standing.push(v.kind);
+                    s.anchor |= catalog.is_anchor(v.kind);
                     if let Some(function) = snap.menu().factory_function(v.kind) {
                         s.factories.push(OwnFactory {
                             id: v.id,
@@ -394,7 +418,8 @@ impl Item {
 /// Whether the player can build `entry` now: every structure it needs stands and, for a unit, a
 /// factory of its function stands. What is not available is not shown (`docs/rules/sidebar.md`).
 pub fn available(entry: &Entry, sit: &Situation) -> bool {
-    entry.requires.iter().all(|&r| sit.has_standing(r))
+    (entry.tab != Tab::Structures || sit.anchor)
+        && entry.requires.iter().all(|&r| sit.has_standing(r))
         && entry
             .factory
             .is_none_or(|f| sit.factories.iter().any(|x| x.function == f))
@@ -566,8 +591,10 @@ pub fn model(
                 .is_some_and(|v| v.status == FactoryStatus::WaitingForMoney)
         });
     let empty_hint = items.is_empty().then(|| {
-        let missing =
-            factory_of_tab(tab).is_some_and(|f| !sit.factories.iter().any(|x| x.function == f));
+        let missing = match factory_of_tab(tab) {
+            Some(f) => !sit.factories.iter().any(|x| x.function == f),
+            None => !sit.anchor,
+        };
         if missing {
             tab.pick(&look.empty_hints).clone()
         } else {

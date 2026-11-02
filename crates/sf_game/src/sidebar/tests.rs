@@ -20,6 +20,13 @@ fn kind(defs: &UnitDefs, id: &str) -> Kind {
 /// A 64 x 64 world with the shipped rules: buildings, money (`credits` for Meridian) and production
 /// with the given exit radius, and a construction centre of Meridian on (20, 20).
 fn rig(credits: u64, exit_radius: u8) -> Rig {
+    let mut rig = bare_rig(credits, exit_radius);
+    rig.place("construction_center", (20, 20));
+    rig
+}
+
+/// [`rig`] without the construction centre.
+fn bare_rig(credits: u64, exit_radius: u8) -> Rig {
     let defs = UnitDefs::embedded();
     let look = SidebarLook::embedded();
     let world = World::new(WorldConfig::new(7).with_map_size(64, 64))
@@ -44,14 +51,12 @@ fn rig(credits: u64, exit_radius: u8) -> Rig {
         )
         .unwrap();
     let catalog = Catalog::build(&defs, Faction::Meridian, &look);
-    let mut rig = Rig {
+    Rig {
         world,
         defs,
         catalog,
         look,
-    };
-    rig.place("construction_center", (20, 20));
-    rig
+    }
 }
 
 impl Rig {
@@ -103,6 +108,14 @@ impl Rig {
 
     fn sit(&self, selected: &[EntityId]) -> Situation {
         Situation::read(&self.snap(), ME, &self.catalog, selected)
+    }
+
+    /// [`Rig::sit`] on a snapshot in which the structure `id` has `hp` hit points (the sim of the
+    /// rig has no rules that take them away).
+    fn sit_with_hp(&self, id: EntityId, hp: u32, selected: &[EntityId]) -> Situation {
+        let mut snap = self.snap();
+        snap.set_hp_for_test(id, hp);
+        Situation::read(&snap, ME, &self.catalog, selected)
     }
 
     fn items(&self, tab: Tab) -> Vec<Item> {
@@ -834,4 +847,90 @@ fn an_empty_tab_names_the_factory_it_misses_or_says_there_is_nothing() {
     r.place("shipyard", (44, 26));
     assert_eq!(hint(&r, Tab::Infantry), None);
     assert_eq!(hint(&r, Tab::Vessels).as_deref(), Some("Nothing to build"));
+}
+
+#[test]
+fn a_factory_at_zero_hit_points_unlocks_nothing_and_is_never_the_primary() {
+    let mut r = rig(1000, 4);
+    r.place("power_plant", (30, 20));
+    r.place("barracks", (36, 20));
+    let first = r.id_of("barracks");
+    let plant = r.id_of("power_plant");
+    // The barracks at 0 HP does not stand (the sim's `is_standing`): no infantry, no tower.
+    let sit = r.sit_with_hp(first, 0, &[]);
+    assert!(items_for(&r.catalog, &sit, Tab::Infantry).is_empty());
+    assert!(!names(&items_for(&r.catalog, &sit, Tab::Structures)).contains(&"defence tower"));
+    assert_eq!(
+        model(&r.catalog, &sit, Tab::Infantry, None, None, &r.look)
+            .empty_hint
+            .as_deref(),
+        Some("Needs a barracks")
+    );
+    // A plant at 0 HP opens nothing either; at 1 HP it stands.
+    let sit = r.sit_with_hp(plant, 0, &[]);
+    let tab = items_for(&r.catalog, &sit, Tab::Structures);
+    let shown = names(&tab);
+    assert!(!shown.contains(&"refinery") && !shown.contains(&"barracks"));
+    let sit = r.sit_with_hp(plant, 1, &[]);
+    assert!(names(&items_for(&r.catalog, &sit, Tab::Structures)).contains(&"refinery"));
+    // A second barracks in a higher slot: the dead one in the lowest slot is not the primary,
+    // even when it is selected.
+    r.place("barracks", (36, 32));
+    let second = r
+        .snap()
+        .views()
+        .iter()
+        .filter(|v| v.kind == kind(&r.defs, "barracks") && v.id != first)
+        .map(|v| v.id)
+        .next()
+        .unwrap();
+    assert!(first.index() < second.index());
+    for selected in [&[][..], &[first][..]] {
+        let sit = r.sit_with_hp(first, 0, selected);
+        let rifleman = items_for(&r.catalog, &sit, Tab::Infantry)
+            .into_iter()
+            .find(|i| i.name == "rifleman")
+            .unwrap();
+        assert_eq!(rifleman.factory, Some(second));
+        assert_eq!(
+            sit.primary(BuildingFunction::InfantryFactory).map(|f| f.id),
+            Some(second)
+        );
+    }
+}
+
+#[test]
+fn without_a_standing_construction_centre_no_structure_is_offered() {
+    let mut r = bare_rig(1000, 4);
+    // Nothing stands: the sim would refuse every placement (no anchor in build radius).
+    assert!(r.items(Tab::Structures).is_empty());
+    let hint = |r: &Rig, sit: &Situation| {
+        model(&r.catalog, sit, Tab::Structures, None, None, &r.look).empty_hint
+    };
+    assert_eq!(
+        hint(&r, &r.sit(&[])).as_deref(),
+        Some("Needs a construction centre")
+    );
+    assert_eq!(
+        tab_counts(&r.catalog, &r.sit(&[]))[Tab::Structures.index()],
+        0
+    );
+    // A power plant and a barracks without the centre: still nothing to place, but the barracks
+    // still trains (a factory needs no anchor).
+    r.place("power_plant", (30, 20));
+    r.place("barracks", (36, 20));
+    assert!(r.items(Tab::Structures).is_empty());
+    assert!(!r.items(Tab::Infantry).is_empty());
+    // The centre stands: the tree is there again.
+    r.place("construction_center", (20, 20));
+    assert!(names(&r.items(Tab::Structures)).contains(&"defence tower"));
+    assert_eq!(hint(&r, &r.sit(&[])), None);
+    // A centre at 0 HP is no anchor.
+    let cc = r.id_of("construction_center");
+    let sit = r.sit_with_hp(cc, 0, &[]);
+    assert!(items_for(&r.catalog, &sit, Tab::Structures).is_empty());
+    assert_eq!(
+        hint(&r, &sit).as_deref(),
+        Some("Needs a construction centre")
+    );
 }

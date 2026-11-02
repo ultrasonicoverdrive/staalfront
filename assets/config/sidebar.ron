@@ -25,10 +25,10 @@
     tab_height_px: 24,
     tab_columns: 2,
     tab_labels: ("Structures", "Infantry", "Vehicles", "Vessels"),
-    // What an empty unit tab says while the factory for it does not stand, per tab (the structures
-    // tab has no factory: its first entry is not used). With the factory standing and nothing to
+    // What an empty tab says while the structure it needs does not stand, per tab: the structures
+    // tab needs a standing construction centre (the anchor), a unit tab the factory of its units. With the factory standing and nothing to
     // build, the tab says `words.nothing`.
-    empty_hints: ("", "Needs a barracks", "Needs a vehicle factory", "Needs a shipyard"),
+    empty_hints: ("Needs a construction centre", "Needs a barracks", "Needs a vehicle factory", "Needs a shipyard"),
 
     // The build items, in a grid under the tabs.
     tile_columns: 2,
@@ -39,6 +39,16 @@
     text_px: 14,
     small_px: 12,
     label_px: 17,
+    // The credits figure, in percent of `text_px`, and its distance from the left edge of its block.
+    credits_text_pct: 115,
+    credits_inset_px: 6,
+    // The strip under a picture (price and state), in percent of `small_px`.
+    strip_pct: 150,
+    // The frame of tile back left round a picture; the padding of the queue count and of the strip
+    // text; the width of the ring round the chosen structure.
+    picture_inset_px: 1,
+    text_pad_px: 3,
+    chosen_ring_px: 2,
 
     // The picture of a role without a `build_picture`: one colour per tab (structures, infantry,
     // vehicles, vessels). Its label is the first letters of the id.

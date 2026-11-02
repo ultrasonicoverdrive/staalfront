@@ -17,6 +17,11 @@ A column on the right edge of the window, 200 logical pixels wide, scaled with t
 1. **Credits** ("Credits 1000"), in the warning colour when the credits are few or a build waits for them: the
    readout and colours of `money_look.ron` (WP7.4), moved into the column. Without a sidebar (the crowd scene) the old
    readout in the top right corner stays. In a world without money rules the block is empty.
+   **The strip "build paused: no credits" of the old readout is gone from the column** (decided in WP11.1, fix
+   round 1): the column has no room for a second line, and the same news is shown twice already: the credits figure
+   turns the warning colour while any build of the player waits for credits (`SidebarModel::waiting_for_credits`, also
+   when the tab of the waiting item is closed), and the waiting item itself says "no credits" with the bar in the
+   waiting colour. A structure going up on the map keeps its pause strokes (`economy.md`, "Paused bar").
 2. **The power bar.** Power does not exist yet (WP6.4). `sidebar::power_reading` is the hook: it returns `None`, and
    the bar then draws a neutral frame saying "Power: no power rules". WP6.4 returns a `PowerReading { made, used }` and
    the bar fills with what is used against the larger of made and used, in the low colour when more is used than made
@@ -28,7 +33,11 @@ A column on the right edge of the window, 200 logical pixels wide, scaled with t
 5. **The minimap** stays where it was, bottom right, 200 px wide, under the column (`bottom_reserve_px` is the room
    it takes). It is not part of the sidebar's code and keeps working.
 
-All sizes, words and colours are `sidebar.ron`; the picture of an item is data (below). The layout is
+All sizes, words and colours are `sidebar.ron`, down to the credits figure's size and inset
+(`credits_text_pct`, `credits_inset_px`), the strip under a picture (`strip_pct`), the frame round a picture
+(`picture_inset_px`), the padding of the count and the strip text (`text_pad_px`) and the ring of the chosen structure
+(`chosen_ring_px`), all pinned in `the_shipped_look_is_pinned`; the halves and doubles left in `sidebar_view.rs` are
+geometry (centring, both sides of a padding), not looks; the picture of an item is data (below). The layout is
 `sidebar_layout::layout`, a pure function of the window, the scale and the look
 (`the_column_lies_on_the_right_edge_above_the_minimap`, `the_parts_stand_top_to_bottom_money_power_tabs_items`,
 `the_column_is_laid_out_in_physical_pixels_at_any_scale`, `a_tiny_window_gets_no_item_rows_and_does_not_panic`).
@@ -55,11 +64,17 @@ An item is a role with a price (`cost`) that the local faction may have (`factio
 (structure, infantry, vehicle, vessel; an object has no tab). The list is made by `Catalog::build` from the unit
 definitions, once, and filtered each frame by what stands (`items_for`):
 
-* a **structure** shows when every structure of its `building.requires` stands;
+* a **structure** shows when a construction centre of the player stands (any `Anchor` kind: the simulation places
+  nothing outside the build radius of a standing anchor, `buildings.md`) and every structure of its
+  `building.requires` stands. Without a standing anchor the structures tab is empty and says "Needs a construction
+  centre" (`empty_hints.0`), while the unit tabs of standing factories keep working
+  (`without_a_standing_construction_centre_no_structure_is_offered`);
 * a **unit** shows when a factory of its function stands (infantry: infantry factory, and so on, `produced_by`) and
   every structure of its `requires` stands.
 
-*Stands* is the simulation's word: finished and with hit points. A structure still going up counts for nothing
+*Stands* is the simulation's word (`World::is_standing`): finished, and with hit points left or of a kind that
+cannot be damaged (0 HP in the unit table). A structure at 0 HP unlocks nothing and is never the primary factory, even
+when selected (`a_factory_at_zero_hit_points_unlocks_nothing_and_is_never_the_primary`). A structure still going up counts for nothing
 (`a_structure_that_is_still_going_up_does_not_count_as_standing`, `a_unit_tab_needs_a_standing_factory_of_its_function`),
 and only the local player's structures count (`only_the_local_players_structures_count`).
 

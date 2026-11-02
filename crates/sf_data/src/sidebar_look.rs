@@ -121,6 +121,18 @@ pub struct SidebarLook {
     pub small_px: u16,
     /// Size of the label on a picture.
     pub label_px: u16,
+    /// Size of the credits figure, in percent of `text_px`.
+    pub credits_text_pct: u16,
+    /// Distance of the credits figure from the left edge of its block.
+    pub credits_inset_px: u16,
+    /// Height of the strip under a picture, in percent of `small_px`.
+    pub strip_pct: u16,
+    /// The tile back left round a picture.
+    pub picture_inset_px: u16,
+    /// Padding of the queue count and of the strip text.
+    pub text_pad_px: u16,
+    /// Width of the ring round the chosen structure.
+    pub chosen_ring_px: u16,
     /// The colour of the default picture, per tab.
     pub default_colors: PerTab<(u8, u8, u8)>,
     /// How many letters of the id the default picture shows.
@@ -145,6 +157,9 @@ impl SidebarLook {
             ("text_px", look.text_px),
             ("small_px", look.small_px),
             ("label_px", look.label_px),
+            ("credits_text_pct", look.credits_text_pct),
+            ("strip_pct", look.strip_pct),
+            ("chosen_ring_px", look.chosen_ring_px),
         ] {
             if v == 0 {
                 return Err(format!("{name} must be above 0"));
@@ -165,6 +180,12 @@ impl SidebarLook {
         let gaps = i32::from(look.gap_px) * (i32::from(look.tile_columns) - 1);
         if (inner - gaps) / i32::from(look.tile_columns) < 24 {
             return Err("width_px is too small for tile_columns".into());
+        }
+        if look.credits_text_pct > 300 || look.strip_pct > 300 {
+            return Err("credits_text_pct and strip_pct must be 1 to 300".into());
+        }
+        if look.picture_inset_px > 8 || look.text_pad_px > 16 || look.chosen_ring_px > 8 {
+            return Err("picture_inset_px, text_pad_px or chosen_ring_px is too large".into());
         }
         if look.bar_height_px >= look.tile_height_px {
             return Err("bar_height_px must be less than tile_height_px".into());
@@ -216,11 +237,72 @@ mod tests {
                 "Vessels".to_owned()
             )
         );
-        assert_eq!(look.colors.bar_fill, (90, 200, 255, 235));
-        assert_eq!(look.colors.bar_waiting, (255, 110, 80, 245));
-        assert_eq!(look.words.waiting_credits, "no credits");
-        assert_eq!(look.words.nothing, "Nothing to build");
-        assert_eq!(look.empty_hints.2, "Needs a vehicle factory");
+        assert_eq!((look.text_px, look.small_px, look.label_px), (14, 12, 17));
+        assert_eq!(
+            (
+                look.credits_text_pct,
+                look.credits_inset_px,
+                look.strip_pct,
+                look.picture_inset_px,
+                look.text_pad_px,
+                look.chosen_ring_px
+            ),
+            (115, 6, 150, 1, 3, 2)
+        );
+        assert_eq!(
+            look.default_colors,
+            (
+                (80, 100, 140),
+                (80, 130, 90),
+                (140, 110, 70),
+                (70, 120, 140)
+            )
+        );
+        assert_eq!(look.default_label_chars, 4);
+        assert_eq!(
+            look.words,
+            Words {
+                power: "Power".into(),
+                power_none: "no power rules".into(),
+                waiting_credits: "no credits".into(),
+                exit_blocked: "exit blocked".into(),
+                stopped: "stopped".into(),
+                needs: "needs".into(),
+                nothing: "Nothing to build".into(),
+            }
+        );
+        assert_eq!(
+            look.empty_hints,
+            (
+                "Needs a construction centre".to_owned(),
+                "Needs a barracks".to_owned(),
+                "Needs a vehicle factory".to_owned(),
+                "Needs a shipyard".to_owned()
+            )
+        );
+        assert_eq!(
+            look.colors,
+            Colors {
+                tab: (46, 58, 80, 255),
+                tab_hover: (64, 82, 116, 255),
+                tab_active: (92, 126, 184, 255),
+                tab_empty_text: (130, 136, 146, 255),
+                tile_back: (20, 24, 32, 255),
+                tile_hover: (255, 255, 255, 40),
+                tile_chosen: (255, 220, 90, 255),
+                text: (236, 240, 246, 255),
+                text_dim: (170, 176, 188, 255),
+                warn: (255, 110, 80, 255),
+                bar_fill: (90, 200, 255, 235),
+                bar_back: (10, 14, 20, 190),
+                bar_waiting: (255, 110, 80, 245),
+                badge_back: (10, 14, 20, 220),
+                power_back: (16, 20, 28, 255),
+                power_neutral: (70, 76, 88, 255),
+                power_fill: (120, 220, 120, 255),
+                power_low: (255, 110, 80, 255),
+            }
+        );
     }
 
     #[test]

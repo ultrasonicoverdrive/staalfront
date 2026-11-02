@@ -195,40 +195,14 @@ impl Hud {
             let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (520.0, 26.0));
             ui.text_in(strip, Anchor::Left, (12.0, 0.0), line, text);
         }
-        // The sidebar shows the credits itself; without one the readout stays in the corner.
-        self.sidebar_actions.clear();
-        match &stats.sidebar {
-            Some(model) => {
-                let setup = crate::sidebar_view::Setup {
-                    look: crate::sidebar_view::shipped_look(),
-                    money: crate::money_view::shipped_look(),
-                    edge_band_px: self.edge_band,
-                    minimap: self.minimap.is_some(),
-                };
-                let actions =
-                    crate::sidebar_view::frame(ui, &input, &mut self.sidebar, model, &setup);
-                self.sidebar_actions = actions;
-            }
-            None => {
-                if let Some(money) = &stats.money {
-                    crate::money_view::draw_panel(ui, money, crate::money_view::shipped_look());
-                }
-            }
-        }
-        if !stats.production.is_empty() {
-            crate::production_view::draw_panel(
-                ui,
-                &stats.production,
-                crate::production_view::shipped_look(),
-            );
-        }
-        if !stats.production.is_empty() {
-            crate::production_view::draw_panel(
-                ui,
-                &stats.production,
-                crate::production_view::shipped_look(),
-            );
-        }
+        self.sidebar_actions = draw_panels(
+            ui,
+            &input,
+            &stats,
+            &mut self.sidebar,
+            self.edge_band,
+            self.minimap.is_some(),
+        );
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {
             "Dots: on"
@@ -331,5 +305,84 @@ impl Hud {
             }
             None => renderer.render(),
         }
+    }
+}
+
+/// The panels of a frame below the top bar: the sidebar (which shows the credits itself) or, without
+/// one, the credits readout in the corner, then the production readout. Each once; returns what the
+/// sidebar's clicks asked for.
+fn draw_panels(
+    ui: &mut Ui,
+    input: &UiInput,
+    stats: &HudStats,
+    sidebar: &mut crate::sidebar_view::SidebarState,
+    edge_band_px: f32,
+    minimap: bool,
+) -> Vec<crate::sidebar::Action> {
+    let mut actions = Vec::new();
+    match &stats.sidebar {
+        Some(model) => {
+            let setup = crate::sidebar_view::Setup {
+                look: crate::sidebar_view::shipped_look(),
+                money: crate::money_view::shipped_look(),
+                edge_band_px,
+                minimap,
+            };
+            actions = crate::sidebar_view::frame(ui, input, sidebar, model, &setup);
+        }
+        None => {
+            if let Some(money) = &stats.money {
+                crate::money_view::draw_panel(ui, money, crate::money_view::shipped_look());
+            }
+        }
+    }
+    if !stats.production.is_empty() {
+        crate::production_view::draw_panel(
+            ui,
+            &stats.production,
+            crate::production_view::shipped_look(),
+        );
+    }
+    actions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::production_view::Tone;
+
+    fn quads(stats: &HudStats, only_production: bool) -> usize {
+        let mut ui = Ui::new(UiConfig::default());
+        let input = UiInput::default();
+        ui.begin_frame(input, (1280, 720), 1.0);
+        if only_production {
+            crate::production_view::draw_panel(
+                &mut ui,
+                &stats.production,
+                crate::production_view::shipped_look(),
+            );
+        } else {
+            let mut state = crate::sidebar_view::SidebarState::default();
+            draw_panels(&mut ui, &input, stats, &mut state, 4.0, false);
+        }
+        ui.draw_list().quad_count()
+    }
+
+    /// The merge of 7460c3b drew the production readout twice (a darker panel, text drawn over
+    /// itself): the panels of a frame lay it out exactly once.
+    #[test]
+    fn the_production_readout_is_drawn_once_per_frame() {
+        let stats = HudStats {
+            production: vec![
+                ("barracks: rifleman 40%".to_owned(), Tone::Plain),
+                ("vehicle factory: idle".to_owned(), Tone::Accent),
+            ],
+            ..HudStats::default()
+        };
+        let once = quads(&stats, true);
+        assert!(once > 0);
+        assert_eq!(quads(&stats, false), once);
+        // Nothing to show: nothing drawn.
+        assert_eq!(quads(&HudStats::default(), false), 0);
     }
 }

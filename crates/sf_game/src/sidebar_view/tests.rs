@@ -57,6 +57,7 @@ impl Fixture {
             }],
             buildings: Vec::new(),
             credits,
+            anchor: true,
         }
     }
 

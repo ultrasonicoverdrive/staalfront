@@ -113,8 +113,8 @@ are used when a file is missing.
   square, not an invisible icon.
 
 `icon` used to be the build menu picture (`testpack_v1/icons/...png` paths, read by
-nothing). It is the strategic icon's name now; the build menu (WP11.1) will get a field of
-its own.
+nothing). It is the strategic icon's name now; the build menu (the sidebar, WP11.1) has a field of
+its own, `build_picture`.
 
 ## How the engine draws it
 

@@ -2375,6 +2375,15 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   - M18 sidebar chooses the wrong structure (by position, not kind): `build_mode:the_sidebar_chooses_a_structure_by_kind_and_the_click_places_that_kind`
   - M19 right-click on a structure item does nothing but chooses: `a_click_on_a_structure_chooses_it_and_a_right_click_puts_it_away, view:a_right_press_on_a_structure_puts_the_chosen_one_away_and_orders_nothing`
   - M20 empty tab always says nothing to build: `an_empty_tab_names_the_factory_it_misses_or_says_there_is_nothing, view:an_empty_tab_says_what_it_needs`
+  - M21 (fix round 1) a structure at 0 HP stands: `a_factory_at_zero_hit_points_unlocks_nothing_and_is_never_the_primary, without_a_standing_construction_centre_no_structure_is_offered`
+  - M22 (fix round 1) the anchor ignored for the structures tab: `without_a_standing_construction_centre_no_structure_is_offered`
+  - M23 (fix round 1) the structures tab never names the missing anchor: `without_a_standing_construction_centre_no_structure_is_offered`
+  - M24 (fix round 1) the production readout drawn twice (the bad merge of 7460c3b): `hud::the_production_readout_is_drawn_once_per_frame`
+  - M25 (fix round 1) any look value of `sidebar.ron` changed (e.g. `chosen_ring_px` 3): `sidebar_look::the_shipped_look_is_pinned`
+- **Fix round 1** (review of PR #97): the duplicated production readout of the merge removed (`Hud::frame` now draws its
+  panels through `draw_panels`, tested once per frame); *standing* is the sim's rule with hit points; the structures tab
+  needs a standing construction centre ("Needs a construction centre"); the last look numbers of `sidebar_view.rs` are
+  in `sidebar.ron` and the whole file is pinned; the old "build paused" strip is documented as gone from the column.
 - **Cost** (the sidebar adds nothing to the sim): release build, this container, **load average about 10 (busy, other agents running)**, 4000 frames per round, three rounds: `Situation::read` + `sidebar::model` mean 1.2 us with 8 entities and 17 to 30 us with 5,008 (p99 42 to 56 us); building the UI for the full structures tab (159 quads: panel, credits, power bar, four tabs, nine items) on a reused `Ui` mean 19 to 30 us (p99 39 to 74 us), the same with 8 and with 5,008 entities. About 0.05 ms of a 16.7 ms frame. Not measured on the laptop (relative numbers only; the container cannot measure the fps requirement, PLAN section 13). The first run of this test built a new `Ui` per iteration and read 190 us: that was the font setup, not the sidebar. Command: `cargo test --release -p sf_game --test sidebar_cost -- --ignored --nocapture`. The sim thread is untouched, so there is no before/after of the tick.
 - **Gaps.** The power bar is a neutral frame until WP6.4 (`sidebar::power_reading` is the hook, `power_fill` is tested but no
   world gives a reading). Hidden items cannot be discovered before they unlock (decision; greyed items would show the whole tree).
@@ -2439,11 +2448,8 @@ fixed, delete the entry in the same PR.
     unit differs. Pass no cursor to `build_units` while `--shots` has no `--hover` (it also
     changes the `sf_demo` shots, which share the runner). Owner: WP4.5, the next WP that
     changes how `sf_game` looks.
-22. **A right-click on a unit inside the 4 px edge band gives no order** (PR #46; the band
-    wins over everything and the cursor shows the scroll arrow, documented in `cursor.md`).
-    **Decided in WP11.1 (see `docs/rules/sidebar.md`, "The edge band"): kept.** The scroll arrow is on the cursor
-    there and a right-click does what the cursor shows; the sidebar keeps out of the band (its margin is never less
-    than `edge_margin`, `the_sidebar_never_covers_the_edge_scroll_band`), so the two no longer fight.
+22. *(Closed in WP11.1: the edge band keeps winning; the decision is in the WP11.1 notes and in
+    `docs/rules/sidebar.md`, "The edge band". The number stays so the later items keep theirs.)*
 23. **Icon set.** The cost of the SDF icon quad on the GTX 1650: the M0 laptop run
     (22-10-2026) has gpu p99 0.496 ms in the overview phases (all 5,000 units in view, at the zoom where
     they are icons), so it is negligible there. The weakest pairs of the placeholders
