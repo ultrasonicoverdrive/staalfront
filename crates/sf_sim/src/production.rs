@@ -555,11 +555,11 @@ impl World {
     }
 
     /// How fast the factories of `player` build, in thousandths of a tick of progress per tick.
-    /// **The hook of power (WP6.4):** fixed at [`FULL_SPEED_PERMILLE`] until power exists. Zero
-    /// stops production without losing progress; the price follows the progress, so a slow
-    /// factory pays slowly.
-    pub fn production_speed_permille(&self, _player: PlayerId) -> u32 {
-        FULL_SPEED_PERMILLE
+    /// The speed power gives (WP6.4, `docs/rules/power.md`): [`FULL_SPEED_PERMILLE`] in a world without
+    /// power rules and for a player with enough power, less in a shortage. Zero stops production
+    /// without losing progress; the price follows the progress, so a slow factory pays slowly.
+    pub fn production_speed_permille(&self, player: PlayerId) -> u32 {
+        self.power_speed_permille(player)
     }
 
     /// Whether `player` has a standing structure of `kind`.

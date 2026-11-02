@@ -39,6 +39,7 @@ use sf_data::match_def::MatchDef;
 use sf_data::money::MoneySettings;
 use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
+use sf_data::power::PowerSettings;
 use sf_data::production::ProductionSettings;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
@@ -374,6 +375,16 @@ pub fn harvester_kinds(defs: &UnitDefs) -> Vec<Kind> {
         .filter(|role| role.flags.harvests)
         .map(|role| Kind(role.kind))
         .collect()
+}
+
+/// The power rules of the world (WP6.4) from the settings of `power.ron`. To hand to
+/// [`World::with_power`](sf_sim::World::with_power), after the unit and building tables and
+/// before the match rules.
+pub fn power_rules(settings: &PowerSettings) -> sf_sim::PowerRules {
+    sf_sim::PowerRules {
+        shortage_floor_permille: settings.shortage_floor_permille,
+        defence_cutoff_permille: settings.defence_cutoff_permille,
+    }
 }
 
 /// The production rules of the world (WP6.5) from the settings of `production.ron`. To hand to

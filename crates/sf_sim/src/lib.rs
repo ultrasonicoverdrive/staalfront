@@ -359,6 +359,7 @@ pub mod ore;
 pub mod outcome;
 pub mod path;
 pub mod placement;
+pub mod power;
 pub mod production;
 pub mod projectiles;
 pub mod snapshot;
@@ -406,6 +407,7 @@ pub use path::{
 pub use placement::{
     CellVerdict, ExitCell, PlacementError, PlacementPreview, PlacementRejection, exit_cell, gap,
 };
+pub use power::{PowerRules, PowerTotals, advances_on, speed_for};
 pub use production::{
     FULL_SPEED_PERMILLE, FactoryStatus, FactoryView, MAX_EXIT_RADIUS, MAX_QUEUE_LIMIT, Produced,
     ProductionError, ProductionRejection, ProductionRules, ProductionTable, ProductionTableError,

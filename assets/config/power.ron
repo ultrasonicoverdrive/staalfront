@@ -1,0 +1,15 @@
+// Power (WP6.4, docs/rules/power.md): the two tuning numbers of a shortage. Read by sf_data::power;
+// sf_bridge::power_rules hands them to the world (World::with_power). How much power a structure makes
+// (+) or uses (-) is its `power` in unit_defs.ron (the approved tech tree: power_plant +100, refinery -30,
+// barracks -20, ...); a producer makes `power * hit points / maximum hit points`, rounded down, so
+// damage lowers generation. Placeholders for the balance rounds of phase 15 and the playtest of M1.
+(
+    // The lowest speed, in thousandths, that a shortage brings production and construction down to
+    // (1 to 1000). In a shortage the speed is `made * 1000 / used`, but not below this: with 250 a base
+    // that has lost every plant still builds at a quarter of the normal pace, so it can always build a
+    // new one. (The simulation itself accepts 0, which stops everything; the shipped file does not.)
+    shortage_floor_permille: 250,
+    // Defences (WP6.7) have power while the speed is at least this (0 to 1000). 1000 switches them off
+    // in any shortage at all; nothing reads it before WP6.7.
+    defence_cutoff_permille: 1000,
+)

@@ -44,6 +44,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `scenarios/*.ron`, `scenarios/*.expected`, `scenarios/*_defs/*.ron` | Written for this project (headless scenarios, their pinned checksums and the frozen copies of the unit definitions some of them run on, WP1.3, WP3.2, WP3.4, WP4.1, WP5.1, WP5.5: `destruction`, WP6.2, WP7.2: `harvest`, whose `harvest_defs` is a copy of the shipped definitions of that day; WP7.6: `match`, whose `match_defs` is a copy of the shipped definitions of that day and of `assets/matches/m1.ron`) | Project license (see workspace `Cargo.toml`) |
 | `config/terrain.ron` | Written for this project | Project license (see workspace `Cargo.toml`) |
 | `config/build_stages.ron` | Written for this project (WP6.3: the stages and progress bar of a structure under construction) | Project license (see workspace `Cargo.toml`) |
+| `config/power.ron` | Written for this project (WP6.4: the shortage floor and the defence cutoff; placeholders) | Project license (see workspace `Cargo.toml`) |
 | `config/production.ron` | Written for this project (WP6.5: the queue limit and the exit search radius of the factories; placeholders) | Project license (see workspace `Cargo.toml`) |
 | `config/production_look.ron` | Written for this project (WP6.5: the queue readout, the progress bar under a factory and the rally flag) | Project license (see workspace `Cargo.toml`) |
 | `config/storage_look.ron` | Written for this project (WP7.3: the fill bar of the ore storage) | Project license (see workspace `Cargo.toml`) |

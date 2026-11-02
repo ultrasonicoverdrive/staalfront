@@ -37,6 +37,7 @@
 //! the entity.
 
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
+use crate::power::advances_on;
 use crate::world::World;
 
 /// How far along a structure under construction is.
@@ -131,6 +132,12 @@ impl World {
                 || self.entities.build_left[i] == 0
                 || !self.has_hit_points(i)
             {
+                continue;
+            }
+            // Power (WP6.4): in a shortage the structure advances on `speed` of every thousand
+            // ticks and waits on the others (nothing is paid on a tick it waits).
+            let owner = self.entities.owner[i];
+            if self.power.is_some() && !advances_on(self.tick, self.power_speed_permille(owner)) {
                 continue;
             }
             // Money (WP7.4): the tick is paid for first; without the money the structure waits.
