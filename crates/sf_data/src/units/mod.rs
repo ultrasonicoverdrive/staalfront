@@ -65,8 +65,8 @@ pub use error::DefError;
 pub use kinds::Retired;
 pub use sim::{SimBuildingDef, SimFlags, SimUnitDef, SimWeaponDef};
 pub use unit::{
-    Category, DeathBlast, Faction, Flags, Footprint, IconShape, MAX_UNIT_KIND, MAX_UNITS, Model,
-    ModelShape, UnitDef,
+    BuildPicture, Category, DeathBlast, Faction, Flags, Footprint, IconShape, MAX_PICTURE_LABEL,
+    MAX_PICTURE_ORDER, MAX_UNIT_KIND, MAX_UNITS, Model, ModelShape, UnitDef,
 };
 pub use weapon::{
     ALL_ROUND, DEFAULT_FIRE_ARC, MAX_BURST, MAX_GUIDE_TURN, MAX_WEAPON_KIND, Projectile, WeaponDef,
