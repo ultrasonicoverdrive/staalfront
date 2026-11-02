@@ -381,7 +381,7 @@ fn power_in_the_match_moves_the_pin_by_its_section_only() {
     let old = run(&without, &RunOptions::for_scenario(&without)).unwrap();
     assert_eq!(old.final_checksum, parse_checksum(BEFORE_POWER).unwrap());
     // With them, the game is the same game, tick by tick: the same entities in the same places with the
-    // same hit points, the same credits, and the human's speed never leaves full (no shortage in the script).
+    // same hit points, the same credits, and the speed never leaves full (no shortage in the script).
     let mut a = with.build_world().unwrap();
     let mut b = without.build_world().unwrap();
     let state = |w: &World| -> Vec<(u32, u16, u8, i64, i64, Option<u32>)> {
