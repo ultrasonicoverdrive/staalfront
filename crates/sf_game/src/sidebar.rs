@@ -265,6 +265,9 @@ pub struct Situation {
     pub buildings: Vec<Building>,
     /// The credits of the player; `None` in a world without money rules.
     pub credits: Option<u64>,
+    /// Whether the player is short of power, so that what it builds goes slower than at full speed
+    /// (the speed is below 1000, WP6.4). False when the world has no power rules.
+    pub slowed: bool,
     /// Whether an anchor of the player stands (a construction centre): without one the simulation
     /// refuses every placement, so the structures tab shows nothing.
     pub anchor: bool,
@@ -280,6 +283,7 @@ impl Situation {
     ) -> Situation {
         let mut s = Situation {
             credits: snap.credits_of(player),
+            slowed: snap.power_speed(player) < 1000,
             ..Situation::default()
         };
         for v in snap.views() {
@@ -336,7 +340,7 @@ pub enum Waiting {
     Credits,
     /// Finished, but no spot near the exit is free.
     Exit,
-    /// The factory is stopped (the power hook of WP6.4).
+    /// The factory is stopped: its player has no power at all and the shortage floor is zero (WP6.4).
     Stopped,
     /// A structure the unit needs no longer stands.
     Needs(Kind),
@@ -365,6 +369,10 @@ pub struct Item {
     pub count: u8,
     /// Why it does not advance.
     pub waiting: Option<Waiting>,
+    /// It is being built and advances more slowly than at full speed, because its player is short
+    /// of power (WP6.4). False when it waits for something else (that is `waiting`) or is not being
+    /// built.
+    pub low_power: bool,
     /// A unit: the factory a click goes to.
     pub factory: Option<EntityId>,
     /// A unit: the place in that queue a right-click takes out (the last of its kind; free items
@@ -458,6 +466,7 @@ fn item(e: &Entry, sit: &Situation) -> Item {
         progress: None,
         count: 0,
         waiting: None,
+        low_power: false,
         factory: None,
         cancel_index: None,
     };
@@ -506,6 +515,8 @@ fn item(e: &Entry, sit: &Situation) -> Item {
             }
         }
     }
+    // Power (WP6.4): something that is being built and not waiting still goes slowly in a shortage.
+    it.low_power = it.progress.is_some() && it.waiting.is_none() && sit.slowed;
     it
 }
 
@@ -532,10 +543,14 @@ pub struct PowerReading {
     pub used: u32,
 }
 
-/// The hook WP6.4 fills: what the power bar shows. `None` while the world has no power rules (all
-/// of today's): the bar then draws its neutral frame and says so.
-pub fn power_reading(_snap: &SimSnapshot, _player: PlayerId) -> Option<PowerReading> {
-    None
+/// What the power bar shows (WP6.4): the totals the simulation counted for `player`. `None` while the
+/// world has no power rules: the bar then draws its neutral frame and says so.
+pub fn power_reading(snap: &SimSnapshot, player: PlayerId) -> Option<PowerReading> {
+    let (made, used) = snap.power_of(player)?;
+    Some(PowerReading {
+        made: u32::try_from(made).unwrap_or(u32::MAX),
+        used: u32::try_from(used).unwrap_or(u32::MAX),
+    })
 }
 
 /// How full the power bar is, in thousandths, and whether it is in the low colour (more used than
@@ -582,6 +597,7 @@ pub fn model(
         .map(|i| {
             i.waiting
                 .map(|w| waiting_words(w, look, &|k| catalog.name_of(k)))
+                .or_else(|| i.low_power.then(|| look.words.low_power.clone()))
         })
         .collect();
     let waiting_for_credits = sit.buildings.iter().any(|b| b.stalled)

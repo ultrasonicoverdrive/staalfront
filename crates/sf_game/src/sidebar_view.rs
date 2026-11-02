@@ -357,6 +357,8 @@ fn draw_tile(
         let fill = (bar.w * f32::from(permille.min(1000)) / 1000.0).round();
         let fill_color = if item.waiting.is_some() {
             c.bar_waiting
+        } else if item.low_power {
+            c.bar_low
         } else {
             c.bar_fill
         };

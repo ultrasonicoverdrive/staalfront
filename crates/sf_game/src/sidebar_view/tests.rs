@@ -58,6 +58,7 @@ impl Fixture {
             buildings: Vec::new(),
             credits,
             anchor: true,
+            ..Situation::default()
         }
     }
 
@@ -425,6 +426,54 @@ fn the_progress_bar_is_as_long_as_the_progress_and_turns_to_the_waiting_colour()
     // Items without progress have no bar.
     let backs = quads_in(&out.ui, color_array(f.look.colors.bar_back));
     assert_eq!(backs.len(), 2);
+}
+
+#[test]
+fn an_item_in_a_power_shortage_has_its_own_bar_colour_and_says_so() {
+    let f = fixture();
+    let mut model = f.model(&f.situation(Some(100_000)), Tab::Structures);
+    // Item 0 is 40 % along at full speed, item 1 is 75 % along in a shortage, item 2 waits for credits.
+    model.items[0].progress = Some(400);
+    model.items[1].progress = Some(750);
+    model.items[1].low_power = true;
+    model.waiting_words[1] = Some("low power".to_owned());
+    model.items[2].progress = Some(200);
+    model.items[2].waiting = Some(Waiting::Credits);
+    model.waiting_words[2] = Some("no credits".to_owned());
+    let l = lay(&f, SIZE);
+    let mut state = SidebarState::default();
+    let out = run(&f, &mut state, &model, at(10.0, 10.0), SIZE);
+    let fill = quads_in(&out.ui, color_array(f.look.colors.bar_fill));
+    let low = quads_in(&out.ui, color_array(f.look.colors.bar_low));
+    let waiting = quads_in(&out.ui, color_array(f.look.colors.bar_waiting));
+    assert_eq!((fill.len(), low.len(), waiting.len()), (1, 1, 1));
+    assert_eq!(fill[0].x, l.slot(0).x);
+    assert_eq!(low[0].x, l.slot(1).x);
+    assert_eq!(low[0].w, (l.tile.0 * 0.75).round());
+    assert_eq!(waiting[0].x, l.slot(2).x);
+    // The words sit on the right of the price line, in the warning colour, like "no credits".
+    let warn = color_array(f.look.colors.warn);
+    let glyphs_in = |slot: usize| {
+        let s = l.slot(slot);
+        out.ui
+            .draw_list()
+            .vertices
+            .chunks(4)
+            .filter(|q| {
+                q.len() == 4
+                    && q[0].color == warn
+                    && q[0].pos[0] >= s.x
+                    && q[2].pos[0] <= s.right()
+                    && q[0].pos[1] >= s.y
+                    && q[2].pos[1] <= s.bottom()
+            })
+            .count()
+    };
+    // "low power" is eight letters (the space draws no quad), "no credits" is nine; the third item's
+    // price is not in the warning colour (everything is affordable), so only the words count.
+    assert_eq!(glyphs_in(1), "lowpower".len());
+    assert_eq!(glyphs_in(2), "nocredits".len());
+    assert_eq!(glyphs_in(0), 0);
 }
 
 #[test]
