@@ -159,7 +159,12 @@ fn at_every_tick_the_totals_and_the_speed_follow_the_rules() {
             "tick {}: speed",
             row.tick
         );
-        assert_eq!(row.defences, row.speed == 1000, "tick {}: defences", row.tick);
+        assert_eq!(
+            row.defences,
+            row.speed == 1000,
+            "tick {}: defences",
+            row.tick
+        );
     }
 }
 
@@ -169,14 +174,22 @@ fn the_story_in_numbers() {
     // A base with enough power.
     for t in [2, 50, 100, 150] {
         let x = row(&r, t);
-        assert_eq!((x.made, x.used, x.speed, x.defences), (100, 50, 1000, true), "{t}");
+        assert_eq!(
+            (x.made, x.used, x.speed, x.defences),
+            (100, 50, 1000, true),
+            "{t}"
+        );
     }
     // The radar and the vehicle factory are placed in the step of tick 150 (the tick counter says 151
     // after it): they count from the next step. 140 used of 100 made: 100 * 1000 / 140 = 714.
     assert_eq!(row(&r, 151).used, 50);
     for t in [152, 200, 300] {
         let x = row(&r, t);
-        assert_eq!((x.made, x.used, x.speed, x.defences), (100, 140, 714, false), "{t}");
+        assert_eq!(
+            (x.made, x.used, x.speed, x.defences),
+            (100, 140, 714, false),
+            "{t}"
+        );
     }
     // The plant is shot: 100 * 558 / 600 = 93; 100 * 285 / 600 = 47 (47.5 down), already at the floor.
     let x = row(&r, 400);
@@ -187,14 +200,22 @@ fn the_story_in_numbers() {
     assert_eq!(r.plant_gone, Some(1451));
     for t in [1452, 1453, 1600, 2349] {
         let x = row(&r, t);
-        assert_eq!((x.made, x.used, x.speed, x.defences), (0, 140, 400, false), "{t}");
+        assert_eq!(
+            (x.made, x.used, x.speed, x.defences),
+            (0, 140, 400, false),
+            "{t}"
+        );
     }
     // Two plants built at the floor speed: 300 ticks of work take 750.
     assert_eq!(r.completed, vec![(2350, 1), (2350, 11)]);
     assert_eq!(row(&r, 2350).made, 0, "counted from the next step");
     for t in [2351, 2400, 3200] {
         let x = row(&r, t);
-        assert_eq!((x.made, x.used, x.speed, x.defences), (200, 140, 1000, true), "{t}");
+        assert_eq!(
+            (x.made, x.used, x.speed, x.defences),
+            (200, 140, 1000, true),
+            "{t}"
+        );
     }
 }
 

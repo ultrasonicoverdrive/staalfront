@@ -50,9 +50,13 @@ Work package WP6.5 (PLAN.md phase 6). Built before WP6.4 (power) by the orchestr
   tick, and the factories pay in `advance_production`, after them. So with money for one payment a
   structure under construction is paid before a factory, even a factory in a lower slot
   (`a_structure_under_construction_pays_before_a_factory_in_a_lower_slot`). A world **without** money rules builds for free.
-* **The speed hook for WP6.4.** `World::production_speed_permille()` returns `FULL_SPEED_PERMILLE`
-  (1000) and nothing else yet. Power will make it smaller; at 0 the status is `Stopped`. The hook is
-  tested at full speed only (`the_speed_factor_is_a_hook_fixed_at_full_speed`).
+* **The speed (power, WP6.4).** `World::production_speed_permille(player)` is the speed power gives
+  (`power.md`): `FULL_SPEED_PERMILLE` (1000) in a world without power rules and for a player with enough power,
+  `made * 1000 / used` (not below the floor of `power.ron`) in a shortage; at 0 the status is `Stopped`, nothing is paid
+  and no progress is lost. A unit of 14 build ticks at 384 takes 37 ticks and its 70 credits are paid exactly
+  (`a_shortage_slows_a_factory_and_the_price_is_still_paid_exactly`, `tests/power.rs`; the progress per tick and the status
+  in `the_progress_and_the_status_follow_the_speed_and_a_rifleman_costs_nothing_more_to_wait`). Without power rules the speed
+  is full and the price adds up at any speed (`without_power_rules_the_speed_is_full_and_the_price_adds_up_at_any_speed`).
 * **Cancelling gives back exactly what was paid** for that item (`paid_at(done)`), into the store, even
   above its capacity (`cancelling_gives_back_exactly_what_was_paid`). A waiting item has paid nothing.
   The free harvester of a refinery cannot be cancelled (`NothingToCancel`).
@@ -125,7 +129,7 @@ destroyed with its queue. `tools/sf_headless/tests/production.rs` asserts each o
 
 ## Not done, on purpose
 
-Power and the speed factor other than 1 (WP6.4); repair and sell (WP6.6); defences (WP6.7); the AI's
+Repair and sell (WP6.6); defences (WP6.7); the AI's
 use of production (phase 9); the hotkeys of the finished game (the sidebar itself is WP11.1);
 unit `requires` in the shipped data (balance, phase 15); a queue that survives a lost factory;
 choosing which factory of several gets a unit; production of structures through a factory queue.

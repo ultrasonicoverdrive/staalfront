@@ -831,7 +831,13 @@ fn the_power_bar_reads_what_the_simulation_counted() {
     r.place("barracks", (36, 20));
     r.run(2);
     let reading = power_reading(&r.snap(), ME).unwrap();
-    assert_eq!(reading, PowerReading { made: 100, used: 50 });
+    assert_eq!(
+        reading,
+        PowerReading {
+            made: 100,
+            used: 50
+        }
+    );
     assert_eq!(power_fill(reading), (500, false));
     // The other player makes and uses nothing of ours.
     assert_eq!(
@@ -843,11 +849,24 @@ fn the_power_bar_reads_what_the_simulation_counted() {
     r.place("radar", (44, 20));
     r.run(2);
     let reading = power_reading(&r.snap(), ME).unwrap();
-    assert_eq!(reading, PowerReading { made: 100, used: 140 });
+    assert_eq!(
+        reading,
+        PowerReading {
+            made: 100,
+            used: 140
+        }
+    );
     assert_eq!(power_fill(reading), (1000, true));
     assert_eq!(r.snap().power_speed(ME), 714);
     // The model carries it to the bar.
-    let m = model(&r.catalog, &r.sit(&[]), Tab::Structures, None, Some(reading), &r.look);
+    let m = model(
+        &r.catalog,
+        &r.sit(&[]),
+        Tab::Structures,
+        None,
+        Some(reading),
+        &r.look,
+    );
     assert_eq!(m.power, Some(reading));
 }
 
@@ -866,7 +885,10 @@ fn an_item_that_is_being_built_in_a_shortage_says_low_power() {
     });
     r.run(10);
     let it = rifleman(&r);
-    assert_eq!((it.progress, it.low_power, it.waiting), (Some(100), false, None));
+    assert_eq!(
+        (it.progress, it.low_power, it.waiting),
+        (Some(100), false, None)
+    );
     let m = model(&r.catalog, &r.sit(&[]), Tab::Infantry, None, None, &r.look);
     assert_eq!(m.waiting_words[0], None);
     // A vehicle factory and a radar: 140 used of 100 made, speed 714. The rifleman goes on, slower.

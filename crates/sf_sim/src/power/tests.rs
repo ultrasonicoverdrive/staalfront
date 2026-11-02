@@ -54,7 +54,9 @@ fn building(kind: Kind, function: BuildingFunction, ticks: u32, power: i32) -> B
         kind,
         footprint: fp(),
         function,
-        exit_side: function.needs_exit().then_some(crate::buildings::Side::PosX),
+        exit_side: function
+            .needs_exit()
+            .then_some(crate::buildings::Side::PosX),
         build_ticks: ticks,
         cost: (ticks > 0).then_some(10),
         power,
@@ -220,7 +222,7 @@ fn damage_lowers_what_a_producer_makes_by_hit_points_rounded_down() {
     hp(&mut w, plant, 599);
     hp(&mut w, gen_, 1);
     w.step();
-    assert_eq!(totals(&w, P0), (99 + 0 + 10, 20));
+    assert_eq!(totals(&w, P0), (99 + 10, 20));
     // A damaged consumer is not cheaper to run.
     hp(&mut w, barracks, 1);
     w.step();
@@ -249,7 +251,8 @@ fn a_destroyed_structure_leaves_the_totals_at_the_next_step() {
     w.step();
     assert_eq!(totals(&w, P0), (155, 30));
     let tick = w.tick();
-    w.schedule(tick, P0, Command::Despawn { id: plant }).unwrap();
+    w.schedule(tick, P0, Command::Despawn { id: plant })
+        .unwrap();
     w.step();
     w.step();
     assert_eq!(totals(&w, P0), (55, 30));
@@ -264,19 +267,19 @@ fn the_speed_rule_with_distinct_numbers() {
     let t = |made, used| PowerTotals { made, used };
     // (made, used, floor) -> speed
     let cases = [
-        (0, 0, 250, 1000),   // nothing used: full, even with nothing made
-        (100, 50, 250, 1000), // plenty
+        (0, 0, 250, 1000),     // nothing used: full, even with nothing made
+        (100, 50, 250, 1000),  // plenty
         (100, 100, 250, 1000), // exactly enough
         (99, 100, 250, 990),
         (50, 100, 250, 500),
         (33, 100, 250, 330),
-        (1, 3, 250, 333),     // rounded down
-        (10, 100, 250, 250),  // the floor
+        (1, 3, 250, 333),    // rounded down
+        (10, 100, 250, 250), // the floor
         (0, 100, 250, 250),
         (10, 100, 0, 100),
-        (0, 100, 0, 0),       // floor 0: stopped
+        (0, 100, 0, 0), // floor 0: stopped
         (1, 1000, 0, 1),
-        (5, 100, 700, 700),   // a high floor wins over the ratio
+        (5, 100, 700, 700), // a high floor wins over the ratio
     ];
     for (made, used, floor, want) in cases {
         assert_eq!(
@@ -366,8 +369,12 @@ fn the_rules_are_given_once_after_the_tables_and_before_the_match() {
         ConfigError::Power,
         "twice"
     );
-    for (floor, cutoff, ok) in [(0, 0, true), (1000, 1000, true), (1001, 0, false), (0, 1001, false)]
-    {
+    for (floor, cutoff, ok) in [
+        (0, 0, true),
+        (1000, 1000, true),
+        (1001, 0, false),
+        (0, 1001, false),
+    ] {
         let rules = PowerRules {
             shortage_floor_permille: floor,
             defence_cutoff_permille: cutoff,
@@ -386,10 +393,7 @@ fn the_rules_are_given_once_after_the_tables_and_before_the_match() {
             },
         )
         .unwrap();
-    assert_eq!(
-        started.with_power(RULES).unwrap_err(),
-        ConfigError::Power
-    );
+    assert_eq!(started.with_power(RULES).unwrap_err(), ConfigError::Power);
 }
 
 // ---- the checksum ------------------------------------------------------------------------------
@@ -416,6 +420,15 @@ fn the_section_is_written_only_in_a_world_with_power_rules() {
     assert_eq!(without.checksum(), built(None).checksum());
     // A world without power rules has no state of power at all.
     assert!(without.power.is_none());
+}
+
+#[test]
+fn a_world_without_power_rules_hashes_to_this_value() {
+    // Measured on the base of this work package (`origin/wp/7.6-m1-match`, no power code at all) with the
+    // same world built by the public API: the value is the same, so a world without the rules writes
+    // nothing for power. The shipped pins (`golden.rs`, every `.expected` of an earlier phase) say the
+    // same about whole scenarios.
+    assert_eq!(built(None).checksum(), 6_550_792_836_568_588_549);
 }
 
 #[test]
@@ -455,7 +468,7 @@ fn both_tuning_numbers_and_every_total_are_in_the_checksum() {
 
 /// The cost of the recount: one pass over the slots, with 40 structures among 5,000 wanderers. Run with
 /// `cargo test --release -p sf_sim --lib power::tests::cost_of_the_recount -- --ignored --nocapture`.
-/// (Not a test of a rule: it prints microseconds per call and asserts only that it is far below a tick.)
+/// (Not a test of a rule: it prints nanoseconds per call and asserts only that it is far below a tick.)
 #[test]
 #[ignore = "timing; run by hand in release"]
 fn cost_of_the_recount() {
@@ -484,12 +497,12 @@ fn cost_of_the_recount() {
         for _ in 0..calls {
             w.refresh_power();
         }
-        times.push(start.elapsed().as_nanos() as f64 / f64::from(calls) / 1000.0);
+        times.push(start.elapsed().as_nanos() / u128::from(calls));
     }
-    println!("refresh_power with 40 structures among 5,040 entities, us per call: {times:?}");
-    let best = times.iter().copied().fold(f64::MAX, f64::min);
+    println!("refresh_power with 40 structures among 5,040 entities, ns per call: {times:?}");
+    let best = times.iter().copied().min().unwrap();
     assert!(
-        best < 500.0,
-        "a tick is 50,000 us; the recount took {best} us"
+        best < 500_000,
+        "a tick is 50,000,000 ns; the recount took {best} ns"
     );
 }

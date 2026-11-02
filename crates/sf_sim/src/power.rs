@@ -39,7 +39,6 @@ use crate::production::FULL_SPEED_PERMILLE;
 use crate::terrain::NO_CELL;
 use crate::world::{ConfigError, World};
 
-
 /// The tuning numbers of power (`assets/config/power.ron`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PowerRules {
@@ -55,7 +54,8 @@ pub struct PowerRules {
 impl PowerRules {
     /// Whether the numbers are inside their bounds.
     pub fn is_valid(self) -> bool {
-        self.shortage_floor_permille <= FULL_SPEED_PERMILLE && self.defence_cutoff_permille <= FULL_SPEED_PERMILLE
+        self.shortage_floor_permille <= FULL_SPEED_PERMILLE
+            && self.defence_cutoff_permille <= FULL_SPEED_PERMILLE
     }
 }
 
@@ -173,10 +173,7 @@ impl World {
         };
         p.totals.clear();
         for i in 0..self.entities.len() {
-            if !self.entities.alive[i]
-                || self.entities.cell[i] == NO_CELL
-                || !self.is_standing(i)
-            {
+            if !self.entities.alive[i] || self.entities.cell[i] == NO_CELL || !self.is_standing(i) {
                 continue;
             }
             let Some(b) = self.buildings.get(self.entities.kind[i]) else {

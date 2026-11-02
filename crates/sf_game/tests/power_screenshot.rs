@@ -26,6 +26,7 @@ use sf_game::sidebar::{self, Catalog, Situation, Tab};
 use sf_game::sidebar_layout;
 use sf_game::sidebar_view::{self, SidebarState};
 use sf_game::sim_snapshot::SimSnapshot;
+use sf_math::Vec2;
 use sf_render::camera::DVec2;
 use sf_render::image::{self, Rgba8};
 use sf_render::model::EyeView;
@@ -33,7 +34,6 @@ use sf_render::{
     Camera, CameraConfig, FrameView, Frustum, GpuOptions, Ground, Instancer, Motion, Renderer,
     Style, TerrainGround, UnitId,
 };
-use sf_math::Vec2;
 use sf_sim::{
     Cell, Command, EntityId, FactoryStatus, Kind, Order, PlayerId, Tick, World, WorldConfig,
 };
@@ -316,7 +316,6 @@ fn opaque(c: (u8, u8, u8)) -> (u8, u8, u8, u8) {
     (c.0, c.1, c.2, 255)
 }
 
-
 fn power_bar() -> Rect {
     sidebar_layout::layout(
         Rect::new(0.0, 0.0, W as f32, H as f32),
@@ -422,11 +421,12 @@ fn power_is_fine_then_short_and_the_sidebar_shows_it() {
         kind: scene.kind("power_plant"),
         cell,
     });
-    let t2 = scene.run_until(400, |w| {
-        w.constructions().any(|(_, c)| c.permille() >= 100)
-    });
+    let t2 = scene.run_until(400, |w| w.constructions().any(|(_, c)| c.permille() >= 100));
     let building = scene.shoot(&mut r, &cam, Tab::Structures);
-    save(&format!("power_t{t2:05}_shortage_structures.png"), &building);
+    save(
+        &format!("power_t{t2:05}_shortage_structures.png"),
+        &building,
+    );
     let plant = scene
         .catalog
         .entry(scene.kind("power_plant"))
@@ -469,7 +469,10 @@ fn a_damaged_plant_makes_less_and_the_bar_shows_it() {
     };
     // A spawn that lands on a cell a tank cannot stand on is ignored: try cells in the open ground north-west
     // of the base until four stand there.
-    for (x, y) in (60..76).step_by(2).flat_map(|x| (60..72).step_by(2).map(move |y| (x, y))) {
+    for (x, y) in (60..76)
+        .step_by(2)
+        .flat_map(|x| (60..72).step_by(2).map(move |y| (x, y)))
+    {
         if tanks_of(&scene.world).len() == 4 {
             break;
         }

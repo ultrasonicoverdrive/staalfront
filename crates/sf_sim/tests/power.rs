@@ -149,7 +149,14 @@ fn world(floor: u32, credits: u64) -> World {
             Some(900),
             -40,
         ),
-        entry(PLANT, (2, 2), BuildingFunction::PowerPlant, 30, Some(300), 100),
+        entry(
+            PLANT,
+            (2, 2),
+            BuildingFunction::PowerPlant,
+            30,
+            Some(300),
+            100,
+        ),
         entry(DRAIN, (2, 2), BuildingFunction::None, 10, Some(50), -100),
         entry(HUT, (2, 2), BuildingFunction::None, 20, Some(97), -30),
         entry(

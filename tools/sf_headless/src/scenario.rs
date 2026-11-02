@@ -1154,10 +1154,15 @@ impl Scenario {
 
         if let Some(pw) = &self.power {
             if !self.buildings {
-                p.push("power needs `buildings` (power is made and used by structures)".to_string());
+                p.push(
+                    "power needs `buildings` (power is made and used by structures)".to_string(),
+                );
             }
             if !pw.rules().is_valid() {
-                p.push("power: shortage_floor_permille and defence_cutoff_permille must be 0 to 1000".to_string());
+                p.push(
+                    "power: shortage_floor_permille and defence_cutoff_permille must be 0 to 1000"
+                        .to_string(),
+                );
             }
         }
 
