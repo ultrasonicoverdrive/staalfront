@@ -53,6 +53,7 @@ use crate::population::Population;
 use crate::roster::{self, Roster};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
 use crate::selection_view::{self, FrameGeometry, SelectionView};
+use crate::sidebar::Catalog;
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
 
@@ -286,6 +287,8 @@ pub struct Runner {
     cursor_art: Option<CursorArt>,
     /// The structure chosen to build, if one is (WP6.2, [`crate::build_mode`]).
     build: BuildMode,
+    /// What the sidebar offers (WP11.1); `None` in the scenes without a sidebar.
+    catalog: Option<Catalog>,
     /// Which of the units the selected factory offers the queue key adds (WP6.5); wraps.
     produce_pick: usize,
     /// How many refused builds the console has been told about.
@@ -365,6 +368,7 @@ impl Runner {
             skirmish_units,
             mut build,
             focus,
+            catalog,
         } = start;
         if let Some(role) = &options.build
             && !build.choose(role)
@@ -510,6 +514,7 @@ impl Runner {
             cursor_art,
             os_cursor_hidden: false,
             build,
+            catalog,
             rejected_seen: 0,
             produce_pick: 0,
             refusal: None,
@@ -905,6 +910,56 @@ impl Runner {
                 self.refusal = Some((words, now));
             }
             self.rejected_seen = total;
+        }
+    }
+
+    /// The sidebar of this frame (WP11.1, [`crate::sidebar`]): what the shown tab offers the local
+    /// player, read from the snapshot. `None` in the scenes without one.
+    fn sidebar_model(&self) -> Option<crate::sidebar::SidebarModel> {
+        let catalog = self.catalog.as_ref()?;
+        let player = commands::LOCAL_PLAYER;
+        let sit =
+            crate::sidebar::Situation::read(&self.snap, player, catalog, self.selection.ids());
+        Some(crate::sidebar::model(
+            catalog,
+            &sit,
+            self.hud.sidebar_tab(),
+            self.build.chosen().map(|c| c.kind),
+            crate::sidebar::power_reading(&self.snap, player),
+            crate::sidebar_view::shipped_look(),
+        ))
+    }
+
+    /// What the clicks on the sidebar asked for (WP11.1): choosing a structure starts the build mode
+    /// of WP6.2 (its own left click then sends `BuildStructure`), the other buttons put it away,
+    /// queue a unit or take one out. They send the commands of WP6.5; the simulation checks each
+    /// again at its tick.
+    fn handle_sidebar(&mut self) {
+        use crate::sidebar::Action;
+        for action in self.hud.take_sidebar_actions() {
+            match action {
+                Action::ChooseStructure(kind) => {
+                    if self.build.choose_kind(kind) {
+                        println!(
+                            "sidebar: build {} (left click places it)",
+                            self.build.name_of(kind)
+                        );
+                    }
+                }
+                Action::PutAway => self.build.cancel(),
+                Action::Send(command) => {
+                    match &command {
+                        sf_sim::Command::QueueUnit { kind, .. } => {
+                            println!("sidebar: queue {}", self.build.name_of(*kind));
+                        }
+                        sf_sim::Command::CancelUnit { index, .. } => {
+                            println!("sidebar: cancel the unit in place {index}");
+                        }
+                        _ => {}
+                    }
+                    commands::issue(&self.sim, command);
+                }
+            }
         }
     }
 
@@ -1984,6 +2039,7 @@ impl App for Runner {
             money: self.money_hud(),
             production: self.production_lines(),
             result: self.snap.match_result(),
+            sidebar: self.sidebar_model(),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);
@@ -2081,6 +2137,7 @@ impl App for Runner {
         // Decided once, before the handlers: the click that puts the structure
         // away must not also order the selection (handle_build ends build mode).
         let right_click = RightClick::for_frame(self.build.is_active());
+        self.handle_sidebar();
         self.handle_build(ctx, now);
         self.handle_production(ctx);
         self.handle_selection(ctx);
@@ -2337,6 +2394,8 @@ struct SceneStart {
     build: BuildMode,
     /// Where the camera looks at the start, in metres on the ground; `None`: the middle of the map.
     focus: Option<(f64, f64)>,
+    /// What the sidebar offers (WP11.1); none in the crowd scenes, which have no sidebar.
+    catalog: Option<Catalog>,
 }
 
 /// The engine demo's scene: a crowd of placeholder wanderers and, with a model
@@ -2360,6 +2419,7 @@ fn crowd_scene(
         skirmish_units: 0,
         build: BuildMode::empty(),
         focus: None,
+        catalog: None,
     }
 }
 
@@ -2439,6 +2499,7 @@ fn fight_scene(
         skirmish_units: armed,
         build: BuildMode::empty(),
         focus: None,
+        catalog: None,
     }
 }
 
@@ -2512,11 +2573,12 @@ fn sandbox_scene(
         units,
         buildings: plan.structures,
         skirmish_units: 0,
-        build: BuildMode::for_faction(
+        build: BuildMode::for_faction(&defs, local_faction()),
+        catalog: Some(Catalog::build(
             &defs,
-            crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
-                .unwrap_or(sf_data::units::Faction::Meridian),
-        ),
+            local_faction(),
+            crate::sidebar_view::shipped_look(),
+        )),
         focus: None,
     }
 }
@@ -2574,13 +2636,20 @@ fn match_scene(
             })
             .count() as u32,
         skirmish_units: 0,
-        build: BuildMode::for_faction(
+        build: BuildMode::for_faction(&defs, local_faction()),
+        catalog: Some(Catalog::build(
             &defs,
-            crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
-                .unwrap_or(sf_data::units::Faction::Meridian),
-        ),
+            local_faction(),
+            crate::sidebar_view::shipped_look(),
+        )),
         focus: crate::matchplay::focus_metres(&def, commands::LOCAL_PLAYER),
     })
+}
+
+/// The faction of the player at this keyboard.
+fn local_faction() -> sf_data::units::Faction {
+    crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
+        .unwrap_or(sf_data::units::Faction::Meridian)
 }
 
 /// Read the icon set from `assets/icons`. What cannot be read is reported and
