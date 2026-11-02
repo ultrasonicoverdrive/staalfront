@@ -42,11 +42,11 @@ use crate::world::{ConfigError, World};
 /// The tuning numbers of power (`assets/config/power.ron`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PowerRules {
-    /// The lowest speed a shortage can bring things down to, in thousandths: 0 to 1000. Zero means a
+    /// The lowest speed a shortage can bring things down to, in thousandths (0 to 1000). Zero means a
     /// player with no power at all is stopped; a world should keep it above zero, or a base that
     /// lost its last plant could never build another.
     pub shortage_floor_permille: u32,
-    /// Defences work while the speed is at least this: 0 to 1000. 1000 switches them off in any
+    /// Defences work while the speed is at least this (0 to 1000); 1000 switches them off in any
     /// shortage; 0 never switches them off.
     pub defence_cutoff_permille: u32,
 }

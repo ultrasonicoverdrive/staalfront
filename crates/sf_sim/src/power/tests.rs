@@ -212,13 +212,13 @@ fn damage_lowers_what_a_producer_makes_by_hit_points_rounded_down() {
     let iron = place(&mut w, P0, IRON, (22, 4));
     w.step();
     assert_eq!(totals(&w, P0), (165, 20));
-    // 450 of 600: 75; 399 of 400: 54 (54.86 down). The iron plant cannot be damaged: all of 10.
+    // 450 of 600: 75; 399 of 400: 54 (rounded down). The iron plant cannot be damaged: all of 10
     hp(&mut w, plant, 450);
     hp(&mut w, gen_, 399);
     hp(&mut w, iron, 5);
     w.step();
     assert_eq!(totals(&w, P0), (75 + 54 + 10, 20));
-    // 599 of 600 is 99, one hit point is 0.
+    // 599 of 600 is 99 and one hit point is 0
     hp(&mut w, plant, 599);
     hp(&mut w, gen_, 1);
     w.step();
@@ -319,7 +319,7 @@ fn the_speed_and_the_defence_hook_follow_the_totals() {
     assert_eq!(w.power_speed_permille(P0), 1000);
     assert_eq!(w.production_speed_permille(P0), 1000);
     assert!(w.defences_powered(P0));
-    // Three labs more: 155 used against 100 made, speed 645.
+    // Three labs more: 155 used against 100 made, speed 645
     for k in 0..3 {
         place(&mut w, P0, LAB, (18 + 4 * k, 4));
     }
@@ -424,7 +424,7 @@ fn the_section_is_written_only_in_a_world_with_power_rules() {
 
 #[test]
 fn a_world_without_power_rules_hashes_to_this_value() {
-    // Measured on the base of this work package (`origin/wp/7.6-m1-match`, no power code at all) with the
+    // Measured on the base of this work package (the branch of the first match, no power code at all) with the
     // same world built by the public API: the value is the same, so a world without the rules writes
     // nothing for power. The shipped pins (`golden.rs`, every `.expected` of an earlier phase) say the
     // same about whole scenarios.
