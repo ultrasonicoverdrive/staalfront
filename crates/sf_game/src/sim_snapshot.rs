@@ -233,6 +233,18 @@ impl SimSnapshot {
     /// A snapshot of exactly these views (ascending by slot) over this unit table, for a test of how the
     /// picture maps hit points: the damage stage needs a chosen number of hit points, which a world
     /// only reaches by fighting.
+    /// Sets the hit points of the view of `id` (tests of what reads them; a sim of the tests may
+    /// have no rules that take hit points away).
+    #[cfg(test)]
+    pub(crate) fn set_hp_for_test(&mut self, id: EntityId, hp: u32) {
+        let v = self
+            .views
+            .iter_mut()
+            .find(|v| v.id == id)
+            .expect("a live id");
+        v.hp = hp;
+    }
+
     #[cfg(test)]
     pub(crate) fn of_views(views: Vec<EntityView>, units: Arc<UnitTable>) -> SimSnapshot {
         let mut snap = SimSnapshot::blank();

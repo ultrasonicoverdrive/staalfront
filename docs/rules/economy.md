@@ -706,10 +706,12 @@ bay with 100 for 50 ticks before tick 4650, and ore goes in within 20 ticks of t
 
 ### The picture
 
-* **Readout.** `sf_game::money_view`: a panel in the top right corner, `Credits 1000`, in the warning
-  colour when below `low_below` or while a build waits, with a strip under it (`build paused: no
-  credits`) while a structure of the local player waits. The panel is drawn by the HUD (`Hud::frame`)
-  from `HudStats::money`, which the runner fills from the snapshot (`SimSnapshot::credits_of`,
+* **Readout.** `Credits 1000`, in the warning colour when below `low_below` or while a build waits.
+  In the sandbox it is the top block of the sidebar (WP11.1, `docs/rules/sidebar.md`); there the
+  strip `build paused: no credits` is gone, and the warning colour of the figure plus "no credits" on
+  the waiting item say it instead. Without a sidebar (the crowd scene) `sf_game::money_view` draws the
+  old panel in the top right corner, with that strip under it while a structure of the local player
+  waits. Both are drawn by the HUD (`Hud::frame`) from the snapshot (`SimSnapshot::credits_of`,
   `waits_for_money`); only in a world with money rules.
 * **Paused bar.** A structure in `World::stalled()` gets the construction bar in other colours and two
   small pause strokes at the right end (`construction_view::draw_bars`, `money_view::pause_strokes`).

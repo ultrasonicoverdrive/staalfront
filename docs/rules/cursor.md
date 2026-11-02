@@ -41,6 +41,9 @@ Inputs:
 
 ## The decision table
 
+*Since WP11.1 (`sidebar.md`) the sidebar keeps out of the edge-scroll band, so row 1 and the sidebar never meet on a
+pixel. Row 1 still wins over a unit under the cursor inside the band (progress item 22): decided and kept, see there.*
+
 The first row that matches wins.
 
 | # | Situation | Cursor | A right-click gives |
