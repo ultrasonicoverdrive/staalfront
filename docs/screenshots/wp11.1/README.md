@@ -24,8 +24,9 @@ riflemen go into the barracks queue (200) and a light tank into the vehicle fact
   shipyard".
 * `sidebar_t00296_structures.png`: the structures tab again at the later tick.
 
-* `game_t00047_sandbox.png`: **the real game** (`sf_game --sandbox --harvest --shots <dir>` under Xvfb on lavapipe, 1280 x 720, close-up
-  shot at tick 47): the HUD's own sidebar with the credits (1000), the neutral power bar, the structures tab with nine
+* `game_t00078_sandbox.png`: **the real game** (`sf_game --sandbox --harvest --shots-tick 47 --shots <dir>` under Xvfb on lavapipe,
+  1280 x 720, close-up shot at tick 78; retaken in fix round 1 from the head with the duplicate production readout removed;
+  no production line is shown in the sandbox at this tick, and the five harness shots came out byte-identical): the HUD's own sidebar with the credits (1000), the neutral power bar, the structures tab with nine
   items (the sandbox's base has every prerequisite standing, so the advanced defences show too), the minimap under the
   column and the top bar centred. The sandbox is not the test scene: no queue is running here.
 
