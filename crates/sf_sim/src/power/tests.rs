@@ -450,3 +450,46 @@ fn both_tuning_numbers_and_every_total_are_in_the_checksum() {
     w.power.as_mut().unwrap().totals[1].0 = PlayerId(5);
     assert_ne!(w.checksum(), base);
 }
+
+// ---- the cost ----------------------------------------------------------------------------------
+
+/// The cost of the recount: one pass over the slots, with 40 structures among 5,000 wanderers. Run with
+/// `cargo test --release -p sf_sim --lib power::tests::cost_of_the_recount -- --ignored --nocapture`.
+/// (Not a test of a rule: it prints microseconds per call and asserts only that it is far below a tick.)
+#[test]
+#[ignore = "timing; run by hand in release"]
+fn cost_of_the_recount() {
+    let mut w = world();
+    for k in 0..40u32 {
+        let kind = [PLANT, BARRACKS, HUT, LAB][(k % 4) as usize];
+        place(
+            &mut w,
+            PlayerId((k % 2) as u8),
+            kind,
+            (2 + 3 * (k % 20), 2 + 3 * (k / 20)),
+        );
+    }
+    for n in 0..5000u32 {
+        w.spawn(
+            Kind(9),
+            sf_math::Vec2::from_ints(1 + (n % 60) as i32, 20 + (n / 60) as i32 % 40),
+            PlayerId((n % 4) as u8),
+        )
+        .unwrap();
+    }
+    let calls = 20_000u32;
+    let mut times = Vec::new();
+    for _ in 0..5 {
+        let start = std::time::Instant::now();
+        for _ in 0..calls {
+            w.refresh_power();
+        }
+        times.push(start.elapsed().as_nanos() as f64 / f64::from(calls) / 1000.0);
+    }
+    println!("refresh_power with 40 structures among 5,040 entities, us per call: {times:?}");
+    let best = times.iter().copied().fold(f64::MAX, f64::min);
+    assert!(
+        best < 500.0,
+        "a tick is 50,000 us; the recount took {best} us"
+    );
+}
