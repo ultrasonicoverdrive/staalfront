@@ -1,0 +1,88 @@
+// Power (WP6.4, docs/rules/power.md): a base runs into a shortage, loses a plant to an attack and
+// recovers. Meridian (player 0) builds on the m1 map in the south-west; one Veyran light tank (player 1)
+// comes to shoot the power plant. The numbers: power_plant +100, refinery -30, barracks -20, radar -50,
+// vehicle_factory -40 (match_defs, the shipped tech tree of the day); the shortage floor is 400
+// thousandths and the defences go dark in any shortage (written out below, so editing the shipped
+// power.ron never moves this checksum).
+//
+// `unit_defs` names the FROZEN copy of WP7.6 (match_defs); the ore, harvest, storage, money, production
+// and power numbers are written out here. Kinds: 0 construction_center, 1 power_plant (2 x 3, 600 hp,
+// 300 credits over 300 ticks), 2 refinery (3 x 4), 3 barracks (2 x 3, exit +x), 4 vehicle_factory,
+// 5 radar, 12 rifleman (100 credits over 100 ticks), 19 light_tank (400 hp).
+//
+//   slot 0  the construction centre on (12, 68)
+//   slot 1  the power plant on (8, 62), +100
+//   slot 2  the barracks on (18, 74), -20
+//   slot 3  the refinery on (18, 62), -30        used 50 of 100 made: full speed
+//   tick 1     three riflemen are queued: 100 ticks each
+//   tick 150   a radar (slot 4, -50) and a vehicle factory (slot 5, -40) are put up: used 140 of 100,
+//              speed 714: the riflemen now take 140 ticks
+//   tick 300   the Veyran light tank (slot 6, on (24, 56)) is ordered to shoot the power plant: its output
+//              falls with its hit points, the shortage deepens, and the plant is destroyed
+//   tick 1000  Meridian builds a new power plant (slot 7) on (8, 56) while the speed is at the floor; it is
+//              built slowly, and when it stands the shortage ends
+Scenario(
+    name: "power",
+    seed: 0x0006_0004,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("match_defs"),
+    buildings: true,
+    combat: true,
+    targeting: false,
+    destruction: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 600)]),
+    money: Some((credits_per_ore: 1, starting: [(0, 3000)])),
+    production: Some((queue_limit: 5, exit_radius: 4)),
+    power: Some((shortage_floor_permille: 400, defence_cutoff_permille: 1000)),
+    ticks: 3200,
+    commands: [
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (12, 68))),
+        (tick: 0, command: PlaceStructure(kind: 1, owner: 0, cell: (8, 62))),
+        (tick: 0, command: PlaceStructure(kind: 3, owner: 0, cell: (18, 74))),
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (18, 62))),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 150, command: PlaceStructure(kind: 4, owner: 0, cell: (26, 72))),
+        (tick: 150, command: PlaceStructure(kind: 5, owner: 0, cell: (24, 58))),
+        (tick: 150, command: SpawnUnit(kind: 19, owner: 1, cell: (30, 58))),
+        (tick: 160, command: OrderAttack(ids: [Id(7, 0)], target: (1, 0))),
+        (tick: 1600, player: 0, command: BuildStructure(kind: 1, cell: (8, 58))),
+        (tick: 1600, player: 0, command: BuildStructure(kind: 1, cell: (12, 58))),
+        (tick: 2500, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+        (tick: 2500, player: 0, command: QueueUnit(factory: (2, 0), kind: 12)),
+    ],
+)

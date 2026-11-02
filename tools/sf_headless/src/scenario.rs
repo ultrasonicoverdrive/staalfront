@@ -203,6 +203,13 @@ pub struct Scenario {
     /// every scenario of the earlier phases. Needs `buildings`; without `money` units are free.
     #[serde(default)]
     pub production: Option<ProductionSpec>,
+    /// Power (WP6.4, `docs/rules/power.md`): the shortage floor and the defence cutoff, written out in
+    /// the scenario so that editing the shipped `power.ron` never moves its checksum. What each
+    /// structure makes or uses is `power` in the `unit_defs` directory. Left out: no power rules, which
+    /// is every scenario of the earlier phases (a section `I` in the checksum only when it is on).
+    /// Needs `buildings`.
+    #[serde(default)]
+    pub power: Option<PowerSpec>,
     /// The production table read from `unit_defs` by [`Scenario::load`] when `production` is on,
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
@@ -276,6 +283,26 @@ impl ProductionSpec {
         sf_sim::ProductionRules {
             queue_limit: self.queue_limit,
             exit_radius: self.exit_radius,
+        }
+    }
+}
+
+/// The power rules of a scenario (`sf_sim::PowerRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerSpec {
+    /// The lowest speed a shortage brings things down to, in thousandths (0 to 1000).
+    pub shortage_floor_permille: u32,
+    /// Defences work while the speed is at least this (0 to 1000).
+    pub defence_cutoff_permille: u32,
+}
+
+impl PowerSpec {
+    /// The simulation's rules for these numbers.
+    pub fn rules(self) -> sf_sim::PowerRules {
+        sf_sim::PowerRules {
+            shortage_floor_permille: self.shortage_floor_permille,
+            defence_cutoff_permille: self.defence_cutoff_permille,
         }
     }
 }
@@ -1125,6 +1152,15 @@ impl Scenario {
             }
         }
 
+        if let Some(pw) = &self.power {
+            if !self.buildings {
+                p.push("power needs `buildings` (power is made and used by structures)".to_string());
+            }
+            if !pw.rules().is_valid() {
+                p.push("power: shortage_floor_permille and defence_cutoff_permille must be 0 to 1000".to_string());
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -1530,6 +1566,12 @@ impl Scenario {
             };
             world = world
                 .with_production(pr.rules(), table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        // Power (WP6.4): after the tables, before the match rules.
+        if let Some(pw) = self.power {
+            world = world
+                .with_power(pw.rules())
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {
