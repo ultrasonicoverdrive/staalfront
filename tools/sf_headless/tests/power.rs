@@ -226,3 +226,31 @@ fn a_player_with_no_structures_is_not_in_a_shortage() {
     let t = r.world.power_of(P1).unwrap();
     assert_eq!((t.made, t.used), (0, 0));
 }
+
+/// The final checksum alone cannot see *when* things happened (every unit stands still at the end, in
+/// the same place however fast it was made), so the run is pinned along the way too: the checksum after
+/// these ticks, in the middle of the shortage, with the plant half shot, with it gone and after the
+/// recovery. (A rule that changed the pace of production or of construction moves them: see the
+/// mutations in the PR.)
+const ALONG_THE_RUN: [(u64, u64); 8] = [
+    (150, 0x077d_10e2_d3a1_3189),
+    (300, 0x119d_611e_bda5_b38d),
+    (700, 0x034e_cc87_cb98_d05b),
+    (1200, 0xae37_3421_8f45_99a9),
+    (1500, 0xe703_22ce_fb85_8b6d),
+    (2000, 0x5834_a7f0_1713_20e6),
+    (2400, 0x0aaa_5961_8d74_70b4),
+    (2650, 0x5c50_fb21_e6c5_89d5),
+];
+
+#[test]
+fn the_checksums_along_the_run_are_pinned() {
+    let r = play();
+    for (tick, want) in ALONG_THE_RUN {
+        assert_eq!(
+            r.world.checksum_after(sf_sim::Tick(tick)),
+            Some(want),
+            "after tick {tick}"
+        );
+    }
+}
