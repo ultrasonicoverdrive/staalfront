@@ -1,0 +1,11 @@
+(
+    width: 384,
+    height: 384,
+    height_scale: 0.0,
+    materials: [
+        "grass",
+    ],
+    heightmap: "height.png",
+    material_map: "materials.png",
+    terrain_map: Some("terrain.png"),
+)

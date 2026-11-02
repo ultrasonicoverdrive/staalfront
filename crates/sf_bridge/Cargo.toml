@@ -13,7 +13,10 @@ workspace = true
 # The one place that knows both sides. `sf_sim` may not depend on `sf_data`
 # (the simulation reads no files and no definitions of its own) and `sf_data`
 # may not depend on `sf_sim`, so the copy of the few fields the rules read
-# lives here, in a crate with no logic and no dependencies beyond the two.
+# lives here, in a crate with no logic and no dependencies beyond the two. `sf_math` (a workspace
+# crate both already use, no new external crate) is for one thing: the middle of a cell, where a
+# unit of a match file stands (`match_commands`, WP7.6).
 [dependencies]
+sf_math = { path = "../../crates/sf_math" }
 sf_sim = { path = "../../crates/sf_sim" }
 sf_data = { path = "../../crates/sf_data" }

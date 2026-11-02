@@ -302,6 +302,16 @@ pub struct Runner {
 
 /// The map of the options: a directory, or a generated square of cells.
 pub fn make_map(options: &Options) -> Result<Map, String> {
+    // A match brings its own map (WP7.6): the file names it.
+    if let Some(named) = &options.match_file {
+        if options.map_dir.is_some() {
+            eprintln!("sf_game: --map is ignored with --match: the match file names its map");
+        }
+        let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+        let def = crate::matchplay::load(&crate::matchplay::file_path(named.as_deref(), &assets))?;
+        let dir = crate::matchplay::map_dir(&def, &assets);
+        return Map::load(&dir).map_err(|e| format!("cannot load map {}: {e}", dir.display()));
+    }
     match &options.map_dir {
         Some(dir) => {
             Map::load(std::path::Path::new(dir)).map_err(|e| format!("cannot load map {dir}: {e}"))
@@ -345,6 +355,7 @@ impl Runner {
             }
             Scene::Crowd => crowd_scene(world, &options, pack.as_ref(), cells),
             Scene::Sandbox => sandbox_scene(world, &options, &style, &icons, cells),
+            Scene::Match => match_scene(world, &options, &style, &icons, cells)?,
         };
         let SceneStart {
             world,
@@ -353,6 +364,7 @@ impl Runner {
             buildings,
             skirmish_units,
             mut build,
+            focus,
         } = start;
         if let Some(role) = &options.build
             && !build.choose(role)
@@ -419,20 +431,22 @@ impl Runner {
         if let Some(zoom) = options.zoom {
             camera.set_zoom(zoom);
         }
-        if let Some((x, z)) = options.focus {
+        // A match opens on the local player's base unless told where to look (WP7.6).
+        if let Some((x, z)) = options.focus.or(focus) {
             camera.set_focus(DVec2::new(x, z));
         }
         let assets_root = sf_engine::AssetRoot::resolve().root().to_path_buf();
         let mut hud = Hud::new(&assets_root);
         // The game cursor belongs to the sandbox, the scene with selection and
         // orders; the benchmark and the engine demo's crowd show none.
-        let cursor_art = (options.scene == Scene::Sandbox && options.bench.is_none())
-            .then(|| CursorArt::load(&mut hud, &assets_root.join("ui/cursors")))
-            .and_then(|loaded| {
-                loaded
-                    .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
-                    .ok()
-            });
+        let cursor_art = (matches!(options.scene, Scene::Sandbox | Scene::Match)
+            && options.bench.is_none())
+        .then(|| CursorArt::load(&mut hud, &assets_root.join("ui/cursors")))
+        .and_then(|loaded| {
+            loaded
+                .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
+                .ok()
+        });
         Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -1969,6 +1983,7 @@ impl App for Runner {
             build_line: self.build_line(now),
             money: self.money_hud(),
             production: self.production_lines(),
+            result: self.snap.match_result(),
         };
         self.hud
             .frame(ctx, &mut self.camera, self.snap.views(), stats);
@@ -2320,6 +2335,8 @@ struct SceneStart {
     skirmish_units: u32,
     /// The structures the local player may build (WP6.2); none in the crowd scene.
     build: BuildMode,
+    /// Where the camera looks at the start, in metres on the ground; `None`: the middle of the map.
+    focus: Option<(f64, f64)>,
 }
 
 /// The engine demo's scene: a crowd of placeholder wanderers and, with a model
@@ -2342,6 +2359,7 @@ fn crowd_scene(
         buildings,
         skirmish_units: 0,
         build: BuildMode::empty(),
+        focus: None,
     }
 }
 
@@ -2420,6 +2438,7 @@ fn fight_scene(
         buildings,
         skirmish_units: armed,
         build: BuildMode::empty(),
+        focus: None,
     }
 }
 
@@ -2498,7 +2517,70 @@ fn sandbox_scene(
             crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
                 .unwrap_or(sf_data::units::Faction::Meridian),
         ),
+        focus: None,
     }
+}
+
+/// The match (WP7.6, `sf_game --match`): the map, the players, the credits and the starting objects of a
+/// match file, the sandbox's controls, a static opponent and a victory or a defeat. The world has the
+/// rules of the economy and of production the sandbox has with `--harvest`, and the match rules last.
+/// A match file the game cannot play (a role that is not there, a player missing) stops the start.
+fn match_scene(
+    mut world: World,
+    options: &Options,
+    style: &Style,
+    icons: &IconAtlas,
+    cells: (u32, u32),
+) -> Result<SceneStart, String> {
+    let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+    let defs = load_defs(&assets);
+    let named = options.match_file.as_ref().and_then(Option::as_deref);
+    let def = crate::matchplay::load(&crate::matchplay::file_path(named, &assets))?;
+    crate::matchplay::check(&def, &defs, cells, commands::LOCAL_PLAYER)?;
+    world = crate::matchplay::configure(world, &def, &defs)?;
+    let roster = load_roster(options, &defs, style, icons, &assets);
+    let start = crate::matchplay::schedule(&mut world, &def, &defs)?;
+    let mut views = Vec::new();
+    let report = world.step();
+    if report.commands_ignored > 0 {
+        return Err(format!(
+            "match {}: the world refused {} of the {} starting objects (is the ground under them buildable?)",
+            def.name, report.commands_ignored, start.objects
+        ));
+    }
+    world.snapshot().collect_into(&mut views);
+    println!(
+        "match {}: {} players, {} starting objects, map {}",
+        def.name,
+        def.players.len(),
+        start.objects,
+        def.map
+    );
+    let units = views.len() as u32;
+    Ok(SceneStart {
+        world,
+        looks: Looks::Roster {
+            roster: Box::new(roster),
+            crowd: Population::new(None),
+        },
+        units,
+        buildings: def
+            .players
+            .iter()
+            .flat_map(|p| &p.objects)
+            .filter(|o| {
+                defs.unit(&o.role)
+                    .is_some_and(|d| d.category == sf_data::units::Category::Structure)
+            })
+            .count() as u32,
+        skirmish_units: 0,
+        build: BuildMode::for_faction(
+            &defs,
+            crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
+                .unwrap_or(sf_data::units::Faction::Meridian),
+        ),
+        focus: crate::matchplay::focus_metres(&def, commands::LOCAL_PLAYER),
+    })
 }
 
 /// Read the icon set from `assets/icons`. What cannot be read is reported and

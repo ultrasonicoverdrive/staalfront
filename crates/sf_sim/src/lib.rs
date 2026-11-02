@@ -67,6 +67,8 @@
 //! * count the weapons down and fire them, move the projectiles in flight and detonate them, when the
 //!   world has a weapon table (WP5.1, WP5.2): every decision first, then all the damage at once, each
 //!   hit through the armor table and with its splash (WP5.3);
+//! * remove what the weapons took to zero (WP5.5) and, in a world with match rules, decide who is
+//!   defeated and who has won (WP7.6, [`outcome`]);
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!
@@ -354,6 +356,7 @@ pub mod money;
 pub mod movement;
 pub mod orders;
 pub mod ore;
+pub mod outcome;
 pub mod path;
 pub mod placement;
 pub mod production;
@@ -393,6 +396,7 @@ pub use orders::{
     SCATTER_MIN, scatter_offset,
 };
 pub use ore::{Ore, OreRules};
+pub use outcome::{MAX_MATCH_PLAYERS, MatchError, MatchResult, MatchRules, Verdict};
 pub use path::{
     ABS_CAP, DEFAULT_FLOWFIELD_THRESHOLD, DEFAULT_NODE_BUDGET, DEFAULT_REPLAN_COOLDOWN,
     DEFAULT_REPLAN_MAX, DEFAULT_RETARGET_COOLDOWN, FIELD_IDLE_TICKS, FIELD_POOL, FIELD_SECTORS,
