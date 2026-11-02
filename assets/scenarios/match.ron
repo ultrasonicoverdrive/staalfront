@@ -1,0 +1,80 @@
+// The first match (WP7.6, docs/rules/match.md): milestone M1 played by a script. The map
+// `assets/maps/m1` and the starting objects come from the match file (the frozen copy
+// `match_defs/match.ron`), the players' commands are written below: the human builds a power plant, a
+// refinery and a barracks, harvests, makes riflemen and sends them across the map, where the static
+// opponent's defenders fire back; the last of its structures and armed units falls and the human wins.
+//
+// `unit_defs` names a FROZEN copy of the shipped definitions (match_defs, made for WP7.6); the ore,
+// harvest, storage, money and production numbers are written out below, so editing the shipped
+// definitions, `ore.ron`, `harvest.ron`, `money.ron`, `production.ron` or `assets/matches/m1.ron` never
+// moves this checksum. Kinds: 0 construction_center, 1 power_plant (2 x 3), 2 refinery (3 x 4,
+// capacity 600), 3 barracks (2 x 3, exit side +x), 6 defence_tower, 11 harvester, 12 rifleman
+// (100 credits over 100 ticks), 19 light_tank.
+//
+// Slots: 0 the human's construction centre, 1 .. 10 the opponent's objects in the order of the match
+// file (1 power plant, 2 refinery, 3 barracks, 4 defence tower, 5 harvester, 6 .. 9 riflemen,
+// 10 light tank), then what the human builds and makes, in the order it appears.
+Scenario(
+    name: "match",
+    seed: 458758,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("match_defs"),
+    match_file: Some("match.ron"),
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 600)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4)),
+    ticks: 7000,
+    commands: [
+        (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (8, 62))),
+        (tick: 305, player: 0, command: BuildStructure(kind: 2, cell: (18, 62))),
+        (tick: 305, player: 0, command: BuildStructure(kind: 3, cell: (18, 74))),
+        (tick: 710, player: 0, command: SetRally(factory: (13, 0), cell: Some((34, 60)))),
+        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
+        (tick: 1010, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
+        (tick: 1010, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
+        (tick: 1010, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
+        (tick: 1120, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
+        (tick: 2400, player: 0, command: OrderAttackMove(ids: [Id(14, 0), Id(15, 0), Id(16, 0), Id(18, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0)], target: (67, 24))),
+        (tick: 4700, player: 0, command: OrderAttackMove(ids: [Id(14, 0), Id(15, 0), Id(16, 0), Id(18, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0)], target: (75, 22))),
+        (tick: 5400, player: 0, command: OrderAttackMove(ids: [Id(14, 0), Id(15, 0), Id(16, 0), Id(18, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0)], target: (79, 17))),
+    ],
+)

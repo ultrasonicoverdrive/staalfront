@@ -165,6 +165,34 @@ pub fn with_money(world: World) -> World {
         .expect("a world with storage rules that has not started takes the money rules")
 }
 
+/// `world` with money as [`with_money`] has it (the value of a unit of ore from `money.ron`), but with
+/// the credits each player starts with given (WP7.6: the match file says what each player begins
+/// with). Call it right after [`with_storage`].
+///
+/// # Panics
+///
+/// If the world has no storage rules or has started, or a player is listed twice.
+pub fn with_money_for(world: World, credits: &[(PlayerId, u64)]) -> World {
+    let settings = sf_data::money::MoneySettings::embedded();
+    world
+        .with_money(sf_bridge::money_rules(&settings), credits)
+        .expect("a world with storage rules that has not started takes the money rules")
+}
+
+/// `world` with the match rules of `def` (WP7.6): the players that take part, so that the world decides
+/// who is defeated and who wins (`sf_sim::outcome`). Call it last, after [`with_combat`] (a match is
+/// decided by what is destroyed).
+///
+/// # Errors
+///
+/// If the world refuses the rules: no weapons or no destruction, or it has started.
+pub fn with_match(world: World, def: &sf_data::match_def::MatchDef) -> Result<World, String> {
+    let rules = sf_bridge::match_rules(def)?;
+    world
+        .with_match(rules)
+        .map_err(|e| format!("match rules refused: {e}"))
+}
+
 /// `world` with production (WP6.5): the factories build the units of `defs` from queues
 /// (`production.ron`, `docs/rules/production.md`). Call it after [`with_money`], so that the
 /// units are paid for; the unit and building tables must be in already.

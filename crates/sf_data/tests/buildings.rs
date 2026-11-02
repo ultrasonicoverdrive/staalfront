@@ -405,8 +405,9 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 /// The frozen copies that were made after WP6.1 and carry the building blocks of the shipped file
 /// on purpose: the scenarios that build (`BuildStructure`, WP6.2) need the tech tree, the exit sides
 /// and the base radius, and the harvest scenario (WP7.2) needs the refinery's `HarvesterDock`
-/// function and exit side. Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 2] = ["placement_defs", "harvest_defs"];
+/// function and exit side, and the match scenario (WP7.6) builds the whole base (power plant, refinery,
+/// barracks) and has the opponent's structures. Every other copy predates the block.
+const COPIES_WITH_BLOCKS: [&str; 3] = ["placement_defs", "harvest_defs", "match_defs"];
 
 #[test]
 fn the_frozen_copies_of_the_scenarios_load_with_no_building_blocks() {
@@ -449,6 +450,54 @@ fn the_copy_that_builds_keeps_the_blocks_it_was_made_with() {
     assert_eq!(anchor.function, BuildingFunction::Anchor);
     assert_eq!(anchor.build_radius.floor_int(), 8);
     assert!(copy.units().iter().filter(|u| u.building.is_some()).count() >= 10);
+}
+
+#[test]
+fn the_match_copy_has_the_tree_the_match_script_builds_with() {
+    // `match_defs` is a copy of the shipped files made for WP7.6 (and of the match file next to
+    // them). Pinned as literals, so that the copy is not quietly edited: the script of the
+    // `match` scenario builds a power plant, a barracks and a refinery with these.
+    let root = repo().join("assets");
+    let copy = UnitDefs::load(&root.join("scenarios/match_defs"), &root).unwrap();
+    let building = |role: &str| copy.sim_building(copy.kind_of(role).unwrap()).unwrap();
+    assert_eq!(
+        building("construction_center").function,
+        BuildingFunction::Anchor
+    );
+    assert_eq!(building("construction_center").build_radius.floor_int(), 8);
+    assert_eq!(
+        building("power_plant").function,
+        BuildingFunction::PowerPlant
+    );
+    assert_eq!(
+        building("barracks").function,
+        BuildingFunction::InfantryFactory
+    );
+    assert_eq!(
+        building("refinery").function,
+        BuildingFunction::HarvesterDock
+    );
+    assert_eq!(building("refinery").storage, 2000);
+    assert_eq!(
+        [
+            copy.kind_of("construction_center"),
+            copy.kind_of("power_plant"),
+            copy.kind_of("refinery"),
+            copy.kind_of("barracks"),
+            copy.kind_of("harvester"),
+            copy.kind_of("rifleman"),
+            copy.kind_of("rocket_trooper"),
+        ],
+        [
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(11),
+            Some(12),
+            Some(13)
+        ]
+    );
 }
 
 #[test]

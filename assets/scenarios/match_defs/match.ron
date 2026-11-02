@@ -1,0 +1,54 @@
+// The first match (WP7.6, docs/rules/match.md): milestone M1, "build a base, harvest, make units,
+// attack, win", on the hand-drawn map `assets/maps/m1` (96 x 96 cells, made by
+// `cargo run -p sf_headless --example gen_match_map -- assets/maps/m1`; its layout is described in
+// that file). Read by sf_data::match_def, compiled into the game and the tests, checked when it is
+// read and against the unit definitions and the map.
+//
+// Two players take part. Player 0 is the human (the local player of the game), Meridian, in the
+// south-west with a construction centre and credits to start the economy with. Player 1 is the
+// static opponent (no AI before phase 9, docs/rules/match.md), Veyran, in the north-east: a small base
+// that does not build, produce or attack. Its units stand where they are and fire back on their own
+// (WP5.4), its harvester mines the ore field beside its refinery on its own (the harvest loop of
+// WP7.2), and the credits that brings are never spent.
+//
+// A player is defeated when it owns no standing structure and no armed unit; the last one left wins.
+// So the human wins by destroying the four structures of the opponent AND its riflemen and tank (the
+// harvester does not count: it cannot fight and, without a structure, cannot build).
+//
+// Objects enter the world on tick 0 through the commands PlaceStructure (a structure, its footprint
+// anchored on `cell`, the smallest x and y) and SpawnUnit (a unit, in the middle of `cell`), in the
+// order written here: the slots 0, 1, 2 ... follow it.
+(
+    name: "m1",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            // Enough for a power plant (300), a refinery (1200) and a barracks (400) and 2100 over for
+            // the first units; the refinery brings a free harvester and the ore does the rest.
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "power_plant", cell: (76, 20)),
+                (role: "refinery", cell: (70, 26)),
+                (role: "barracks", cell: (80, 14)),
+                (role: "defence_tower", cell: (66, 22)),
+                (role: "harvester", cell: (74, 31)),
+                (role: "rifleman", cell: (64, 24)),
+                (role: "rifleman", cell: (64, 26)),
+                (role: "rifleman", cell: (66, 28)),
+                (role: "rifleman", cell: (68, 20)),
+                (role: "light_tank", cell: (62, 22)),
+            ],
+        ),
+    ],
+)

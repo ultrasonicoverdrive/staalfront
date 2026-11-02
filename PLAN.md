@@ -272,10 +272,13 @@ _Note 31-10-2026: WP6.5 (production) is built before WP6.4 (power), decided by t
 - WP7.3b The silo as a building (a structure whose job is storage), after the tech tree in `docs/rules/buildings.md` is approved.
 - WP7.4 Money in the UI, deducting costs during production.
 - WP7.5 Refinery choice and queues: a harvester picks the refinery by expected wait (queue length plus travel), not by straight-line distance alone; queued harvesters wait clear of the approach, so many harvesters keep delivering.
+- WP7.6 The M1 match: one small map with two bases, a static opponent and a fixed win and loss rule in the sim, so that M1 can be played: a match file (`assets/matches/m1.ron`: map, players, credits, starting objects), a defeat and win rule in `sf_sim` (a player is defeated when it owns no standing structure and no armed unit; the last one left wins; its own checksum section, only in a world with match rules), a result banner ("Victory" / "Defeat") and `sf_game --match`; the pinned headless scenario `match`.
 
 _Note 27-10-2026: WP7.5 added by the orchestrator after the WP7.2 review measured that throughput collapses with many harvesters (6 harvesters deliver 3200 ore in 4000 ticks, 48 deliver 618): the straight-line choice sends every harvester to the same bay and the queue blocks its approach. WP7.2 records it as a gap; WP7.5 touches `sf_sim` and comes after WP7.3 and WP7.4._
 
 _Note 28-10-2026: WP7.3 ("storage capacity and silos, fill level visible") is split into WP7.3 and WP7.3b. Decided by the orchestrator (Tijmen delegated WP splits to the orchestrator on 27-10-2026). The silo is a new structure role: the campaign uses none (`content/production.md`) and the tech tree in `docs/rules/buildings.md` still waits on Tijmen's approval. WP7.3 builds the storage mechanism and a storage capacity per building in the data, so a silo later is a record in `unit_defs.ron` with a `storage` number; WP7.3b adds that silo once the tech tree is approved._
+
+_Note 01-11-2026: WP7.6 added by the orchestrator. PLAN.md put M1 at the end of phase 7, but no work package built the map, the opponent or the win condition. The full scenario format with triggers is phase 10 (WP10.1 to WP10.3) and M1 does not need triggers, so WP7.6 builds only the minimum: a match map file, a fixed win and loss rule in the sim and a static opponent (no AI before phase 9). WP10.1 later absorbs the match file into the scenario format. WP7.6 is built after WP6.5 and stacked on it (sf_sim work packages are built one after another, section 12.3); see `docs/rules/match.md`._
 
 **Milestone M1 — vertical slice (end of phase 7):** one skirmish map, you against
 a static opponent: build a base, harvest, make units, attack,
@@ -298,7 +301,7 @@ Layered (analysis §12, §22G):
 **Done when:** the normal AI beats a passive player and loses to a good one; headless tournament runs without hangs.
 
 ### Phase 10 — Missions and editor
-- WP10.1 (groundwork: `docs/mission-inspiration.md`) Scenario format: starting objects, players, goals, triggers (event → condition → action), teams.
+- WP10.1 (groundwork: `docs/mission-inspiration.md`) Scenario format: starting objects, players, goals, triggers (event → condition → action), teams. It absorbs the match file of WP7.6 (`assets/matches/m1.ron`: map, players, credits, starting objects) and turns the fixed win and loss rule of `sf_sim::outcome` into one goal among others.
 - WP10.2 Trigger system in the sim (deterministic): time, entering an area, object destroyed, money, etc.
 - WP10.3 Actions: messages, reinforcements, start cutscene, camera, victory/defeat.
 - WP10.4 `sf_editor`: painting terrain, placing objects, editing triggers, testing from the editor.

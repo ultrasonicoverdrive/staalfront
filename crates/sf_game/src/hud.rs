@@ -56,6 +56,9 @@ pub struct HudStats {
     pub money: Option<crate::money_view::MoneyHud>,
     /// The queue readout of the selected factory (WP6.5); empty when none is selected.
     pub production: Vec<(String, crate::production_view::Tone)>,
+    /// The result of the match once it is decided (WP7.6); `None` before, and in a world without a
+    /// match. The banner is drawn from it ([`crate::match_view::draw_result`]).
+    pub result: Option<sf_sim::MatchResult>,
     /// The sidebar of this frame (WP11.1); `None` in a scene without building and production (the
     /// crowd). It then replaces the credits readout in the corner.
     pub sidebar: Option<crate::sidebar::SidebarModel>,
@@ -203,6 +206,7 @@ impl Hud {
             self.edge_band,
             self.minimap.is_some(),
         );
+        crate::match_view::draw_result(ui, stats.result, crate::commands::LOCAL_PLAYER);
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {
             "Dots: on"

@@ -714,3 +714,63 @@ fn each_harvest_field_maps_to_its_own_rule() {
     assert_eq!(rules.queue_step, 125);
     assert_eq!(rules.queue_rows, 126);
 }
+
+/// A scenario with the given extra fields, for the `match_file` rules.
+fn with_fields(fields: &str) -> String {
+    format!("Scenario(seed: 1, map: (width: 16, height: 16), ticks: 10, {fields})")
+}
+
+const MATCH_RULES: &str =
+    "unit_defs: Some(\"defs\"), buildings: true, combat: true, destruction: true";
+
+#[test]
+fn a_match_file_needs_its_rules_and_leaves_factions_and_credits_to_the_file() {
+    // Without the definitions, the buildings, the combat and the destruction there is no match.
+    let p = problems(&with_fields("match_file: Some(\"match.ron\")"));
+    assert!(
+        has(
+            &p,
+            "match_file needs `unit_defs`, `buildings`, `combat` and `destruction`"
+        ),
+        "{p:?}"
+    );
+    // Each one of the four is needed.
+    for left_out in ["buildings: true", "combat: true", "destruction: true"] {
+        let rules = MATCH_RULES.replace(left_out, &left_out.replace("true", "false"));
+        let p = problems(&with_fields(&format!(
+            "{rules}, match_file: Some(\"match.ron\")"
+        )));
+        assert!(has(&p, "match_file needs"), "without {left_out}: {p:?}");
+    }
+    // The file gives the factions and the starting credits.
+    let p = problems(&with_fields(&format!(
+        "{MATCH_RULES}, match_file: Some(\"match.ron\"), factions: [(0, Meridian)]"
+    )));
+    assert!(has(&p, "`factions` must be left out"), "{p:?}");
+    let p = problems(&with_fields(&format!(
+        "{MATCH_RULES}, harvest: Some((harvesters: [11], capacity: 200, mine_amount: 4, mine_period: 8, \
+         unload_amount: 10, unload_period: 4, search_radius: 40, retry_period: 100, call_range: 6, \
+         grant_timeout: 400, call_timeout: 10, max_tries: 3, park_distance: 4, park_spread: 5, \
+         park_near_tenths: 20, mine_start_tenths: 10, mine_reach_tenths: 15, mine_lose_tenths: 25, \
+         dock_reach_tenths: 20, travel_cost: 16, queue_cost: 100, switch_margin: 100, recheck_period: 20, \
+         queue_gap: 3, queue_start: 1, queue_step: 2, queue_rows: 8)), storage: Some([(2, 600)]), \
+         money: Some((starting: [(0, 5)])), match_file: Some(\"match.ron\")"
+    )));
+    assert!(has(&p, "`money.starting` must be left empty"), "{p:?}");
+    // The name is one file of the definitions directory.
+    for bad in ["../match.ron", "dir/match.ron"] {
+        let p = problems(&with_fields(&format!(
+            "{MATCH_RULES}, match_file: Some(\"{bad}\")"
+        )));
+        assert!(has(&p, "match_file"), "{bad}: {p:?}");
+    }
+}
+
+#[test]
+fn a_scenario_without_a_match_file_has_no_match() {
+    let s = parse(&with_fields("")).unwrap();
+    assert_eq!(
+        (s.match_file, s.match_def.is_none(), s.match_commands.len()),
+        (None, true, 0)
+    );
+}
