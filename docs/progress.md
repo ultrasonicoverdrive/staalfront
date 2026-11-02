@@ -2247,8 +2247,8 @@ Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in revi
   `sf_game --match [FILE]` and the **result banner** (`match_view`, `match_look.ron`; the game keeps running behind
   it); the pinned scenario `match` (`0x54a140fc12273e31`, Linux and Windows in CI) whose script wins at tick 5687;
   `docs/rules/match.md`. Screenshots: `docs/screenshots/wp7.6`.
-- **Pins:** no earlier pin moved. All 26 earlier scenarios pass against their committed `.expected`
-  (`git diff origin/wp/6.5-production -- assets/scenarios/*.expected` adds only `match.expected`); `golden.rs` and the
+- **Pins:** no earlier pin moved. All 25 earlier scenarios pass against their committed `.expected`
+  (`git diff origin/main -- assets/scenarios/*.expected` adds only `match.expected`); `golden.rs` and the
   benchmark's PLAIN and FIGHT checksums are unchanged; a world without match rules writes no `Z` section.
 - **Gaps:** no AI, triggers or scenario format (WP10.1 absorbs the match file); no fog, sidebar or menu; no restart,
   no pause and no surrender; the local player is fixed at player 0; the opponent's harvester collects credits it
@@ -2289,7 +2289,8 @@ sandbox (`sf_game --sandbox --harvest`). Still missing:
 
 What is still missing for M1 after WP7.6: it has not been played by a person on the reference laptop (the
 scripted run in `tools/sf_headless/tests/match_m1.rs` wins at tick 5687; the screenshots come from the test
-harness, and a human playing the match is the point of the milestone: "the first moment to really play and adjust
+harness, plus two shots of the real game window from `sf_game --match --shots` that look at the map at ticks 19 and
+137 without input, and a human playing the match is the point of the milestone: "the first moment to really play and adjust
 the design"). There is no menu, no restart and no pause behind the banner (phase 11).
 
 For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).

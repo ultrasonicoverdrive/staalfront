@@ -45,7 +45,8 @@ last defeated player; they are recorded separately, `World::defeat_tick` and `Wo
 Defeats are kept in the order they happened: ascending tick, ascending player within a tick.
 
 **What a world needs.** `with_match` must come last, after the unit table, the weapon table and the
-destruction settings (`ConfigError::Match` otherwise, also after the start and twice). Without weapons
+destruction settings (`ConfigError::Match` otherwise, also after the start and twice; `with_units`, `with_weapons` and
+`with_destruction` refuse with `ConfigError::Match` once the match rules are in). Without weapons
 nobody is armed; without destruction nothing is ever removed, so the question would never be asked.
 
 ## Cost

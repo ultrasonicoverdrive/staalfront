@@ -20,13 +20,18 @@ Red is the human (Meridian), blue the opponent (Veyran). The `sf_game_*.png` fil
 * `match_t03940_fight_at_the_enemy_base.png`: tick 3940, 250 ticks after the first death: the human's riflemen (red) stand
   on the opponent's ore field in front of its light tank and defence tower (blue), which fire back.
 * `match_t05688_victory_banner.png`: the step after tick 5687, the tick the opponent's last structure fell: the banner
-  says "Victory" and "decided after 4:44 (tick 5687)"; the army stands in the ruins of the opponent's base.
+  says "Victory" and "decided after 4:44 (tick 5687)"; the army stands on the grass where the opponent's base was.
 * `match_t05688_defeat_banner_for_the_opponent.png`: the same tick for the other player: "Defeat" in the colours of a
   defeat.
 
 Not shown: a person playing the match in the real window (a click cannot be made from outside the window).
 
-* `sf_game_match_t00137_close_up.png`, `sf_game_match_whole_map.png`: the **real game window** (`xvfb-run sf_game --match --shots <dir>`,
-  debug build, lavapipe) 137 ticks in: the match map with `Credits 4000`, the minimap, the opponent's ten objects as strategic
-  icons (blue) and the human's construction centre (red) with the camera opened on it. A few small marks (on the lake, and a magenta square near the ridge) are not explained: I did not identify them; they are
-  not among the 11 units the top bar counts (an open question for the reviewer).
+* `sf_game_match_t00019_close_up.png` (HUD tick 19) and `sf_game_match_whole_map.png` (tick 137): the **real game
+  window** (`xvfb-run sf_game --match --shots <dir>`, debug build, lavapipe): the match map with `Credits 4000`, the
+  minimap, the opponent's ten objects as strategic icons (blue) and the human's construction centre (red). The
+  `--shots` run looks at the middle of the map (`--focus` was not given), not at the human's base, so the close-up
+  shows the lake at the map centre.
+  The small marks are the **scale landmarks** that every game scene draws since WP1.14 (#30,
+  `sf_render::scene::world_markers`), not part of the match: the grid of coloured 2 m pillars every 16 m (the dots,
+  toggled by the "Dots" button), a red block and a yellow pyramid at the map centre (here in the lake), and a magenta
+  8 by 8 m block at (150, 90) m next to the north-west ridge. Hiding them in `--match` is left for the playtest.

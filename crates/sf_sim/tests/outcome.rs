@@ -223,6 +223,21 @@ fn a_world_takes_match_rules_once_and_last() {
     let mut started = plain();
     started.step();
     assert_eq!(started.with_match(r()).err(), Some(ConfigError::Match));
+    // Last: no unit table, weapon table or destruction settings after the match rules.
+    assert_eq!(
+        world(&[P0, P1]).with_units(units()).err(),
+        Some(ConfigError::Match)
+    );
+    assert_eq!(
+        world(&[P0, P1]).with_weapons(weapons()).err(),
+        Some(ConfigError::Match)
+    );
+    assert_eq!(
+        world(&[P0, P1])
+            .with_destruction(DestructionConfig::DEFAULT)
+            .err(),
+        Some(ConfigError::Match)
+    );
     // And the accepted one reads back.
     assert_eq!(world(&[P1, P0]).match_players(), &[P0, P1]);
 }

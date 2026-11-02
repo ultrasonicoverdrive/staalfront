@@ -178,7 +178,7 @@ pub enum ConfigError {
     /// tables; or a unit or building table was given after them (WP6.5).
     Production,
     /// The match rules were given twice, after the start, before the unit table, the weapon table
-    /// or the destruction settings (WP7.6).
+    /// or the destruction settings; or one of those was given after them (WP7.6).
     Match,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
@@ -448,6 +448,10 @@ impl World {
         if self.production.is_some() {
             return Err(ConfigError::Production);
         }
+        // The match rules read who is armed from the unit and weapon tables: they come last.
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
+        }
         self.units = units;
         self.crowd
             .set_tables(&self.units, &self.movement, self.map_size());
@@ -465,6 +469,9 @@ impl World {
     pub fn with_weapons(mut self, table: WeaponTable) -> Result<World, ConfigError> {
         if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
             return Err(ConfigError::WeaponsAfterStart);
+        }
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
         }
         self.arsenal = Arsenal::new(table, &self.units).map_err(ConfigError::Weapons)?;
         Ok(self)
@@ -716,6 +723,9 @@ impl World {
             || !config.is_valid()
         {
             return Err(ConfigError::Destruction);
+        }
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
         }
         self.destruction.config = Some(config);
         Ok(self)
