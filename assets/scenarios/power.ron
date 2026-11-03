@@ -14,13 +14,15 @@
 //   slot 1  the power plant on (8, 62), +100
 //   slot 2  the barracks on (18, 74), -20
 //   slot 3  the refinery on (18, 62), -30        used 50 of 100 made: full speed
-//   tick 1     three riflemen are queued: 100 ticks each
-//   tick 150   a radar (slot 4, -50) and a vehicle factory (slot 5, -40) are put up: used 140 of 100,
-//              speed 714: the riflemen now take 140 ticks
-//   tick 300   the Veyran light tank (slot 6, on (24, 56)) is ordered to shoot the power plant: its output
-//              falls with its hit points, the shortage deepens, and the plant is destroyed
-//   tick 1000  Meridian builds a new power plant (slot 7) on (8, 56) while the speed is at the floor; it is
-//              built slowly, and when it stands the shortage ends
+//   tick 1     four riflemen are queued at the barracks: 100 ticks each (the first comes out as slot 4)
+//   tick 150   a vehicle factory (slot 5, on (26, 72), -40) and a radar (slot 6, on (24, 58), -50) are put
+//              up: used 140 of 100, speed 714, the riflemen now take 140 ticks; the Veyran light tank
+//              (slot 7) is spawned on (30, 58)
+//   tick 160   the light tank is ordered to shoot the power plant: its output falls with its hit points,
+//              the speed falls to the floor of 400, and the plant is destroyed (tick 1451)
+//   tick 1600  Meridian builds two new power plants, on (8, 58) and (12, 58), at the floor pace (750 ticks
+//              for 300); they stand at tick 2350 and everything is back at full speed
+//   tick 2500  two more riflemen are queued and come out at the normal pace (ticks 2600 and 2700)
 Scenario(
     name: "power",
     seed: 0x0006_0004,
