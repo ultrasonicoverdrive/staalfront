@@ -295,7 +295,11 @@ fn a_menu_takes_the_whole_window_and_the_game_under_it_sees_nothing() {
     assert!(over_ui, "the press is the UI's, wherever it is");
     let (_, reacted, over_ui) = open.run(released(at(40.0, 30.0)), game_button);
     assert!(!reacted && over_ui);
-    assert!(open.ui.press_consumed(sf_ui::MouseButton::Left) || over_ui);
+    // Where nothing at all is declared, beside the panel: the window is still the menu's.
+    let (_, _, over_ui) = open.run(pressed(at(900.0, 600.0)), game_button);
+    assert!(over_ui, "a press beside the panel is not the game's");
+    assert!(open.ui.press_consumed(sf_ui::MouseButton::Left));
+    open.run(released(at(900.0, 600.0)), game_button);
 
     let mut closed = Frame::new(menu());
     closed.run(at(40.0, 30.0), game_button);
@@ -322,6 +326,7 @@ fn a_menu_is_drawn_on_the_dimmed_window() {
         frame.ui.draw_list().quad_count()
     };
     let (a, b) = (quads(start), quads(settings));
+    println!("quads: start menu {a}, settings (keys) {b}");
     assert!(a > 10, "{a}");
     assert!(b > a, "{b} against {a}");
     // No menu: no menu quads (only the game button's).
@@ -381,6 +386,39 @@ fn the_sidebar_keeps_out_of_the_edge_band_at_every_ui_scale_of_the_settings() {
             assert!(c.bottom() <= h, "{w}x{h} scale {scale}");
         }
     }
+}
+
+/// What a closed menu costs a frame: the two calls the HUD makes around the game's panels, against the
+/// plain `begin_frame` and `end_frame` they replace. A timing, not a test of behaviour: run it with
+/// `cargo test --release -p sf_game --lib closed_menu -- --ignored --nocapture` (numbers in `docs/rules/menus.md`).
+#[test]
+#[ignore = "timing"]
+fn a_closed_menu_costs_a_frame_nothing_measurable() {
+    use std::time::Instant;
+    const FRAMES: u32 = 200_000;
+    let real = at(640.0, 360.0);
+    let run = |closed_menu_calls: bool| {
+        let mut ui = Ui::new(UiConfig::default());
+        let started = Instant::now();
+        for _ in 0..FRAMES {
+            if closed_menu_calls {
+                begin_frame(&mut ui, real, (1280, 720), 1.0, false);
+                std::hint::black_box(finish_frame(&mut ui, real, None));
+            } else {
+                ui.begin_frame(real, (1280, 720), 1.0);
+                ui.end_frame();
+            }
+        }
+        started.elapsed().as_nanos() as f64 / f64::from(FRAMES)
+    };
+    // Alternating runs, best of each, so a busy machine shows as noise and not as a difference.
+    let (mut plain, mut wrapped) = (f64::MAX, f64::MAX);
+    for _ in 0..5 {
+        plain = plain.min(run(false));
+        wrapped = wrapped.min(run(true));
+    }
+    println!("per frame: plain {plain:.1} ns, with the menu calls {wrapped:.1} ns");
+    assert!(wrapped < plain + 200.0, "{wrapped} against {plain}");
 }
 
 /// The tabs stand where they stood when another page is chosen: a click on a tab does not move the
