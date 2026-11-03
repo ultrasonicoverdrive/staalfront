@@ -194,3 +194,66 @@ fn only_an_idle_unit_a_hold_a_guard_and_an_attack_move_have_a_stance() {
     assert!(Stance::Idle.follows() && Stance::Guard.follows());
     assert!(!Stance::Hold.follows() && !Stance::Advance.follows());
 }
+
+/// A structure kind for the defences hash test: 1 x 1, with or without a weapon (range 5).
+fn tower_stats(kind: u16, armed: bool) -> crate::units::UnitStats {
+    crate::units::UnitStats {
+        kind: crate::ids::Kind(kind),
+        hp: 100,
+        movement_class: None,
+        speed_per_tick: Fx::ZERO,
+        turn_per_tick: 0,
+        size: Fx::ZERO,
+        footprint: Some(crate::units::Footprint {
+            width: 1,
+            height: 1,
+        }),
+        weapon_range: if armed { Fx::from_int(5) } else { Fx::ZERO },
+        turret_per_tick: if armed { 9 } else { 0 },
+    }
+}
+
+#[test]
+fn the_defences_section_is_written_only_for_a_world_with_an_armed_structure() {
+    use crate::weapons::{Loadout, WeaponTable};
+    let units = UnitTable::new(vec![tower_stats(1, true), tower_stats(2, false)]).unwrap();
+    let mut table_weapon = weapon(5, 1, 0, 10);
+    table_weapon.mount = Mount::Turret;
+    let table = WeaponTable::new(
+        vec![table_weapon],
+        vec![Loadout {
+            unit: crate::ids::Kind(1),
+            weapons: vec![1],
+        }],
+    )
+    .unwrap();
+    let arsenal = Arsenal::new(table, &units).unwrap();
+    let bytes = |e: &Entities| {
+        let mut h = Fnv1a64::new();
+        write_defence_hash(&mut h, e, &units, &arsenal);
+        h.finish()
+    };
+    let nothing = Fnv1a64::new().finish();
+    let mut e = Entities::default();
+    // A weaponless structure (kind 2, table position 1) and an empty slot: nothing is written.
+    let bunker = e.push_free_slot();
+    e.alive[bunker] = true;
+    e.def[bunker] = 1;
+    let free = e.push_free_slot();
+    assert_eq!(free, 1);
+    assert_eq!(bytes(&e), nothing, "no armed structure, no section");
+    // An armed structure (kind 1, table position 0): the section is there, and its target is in it.
+    let tower = e.push_free_slot();
+    e.alive[tower] = true;
+    e.def[tower] = 0;
+    let idle = bytes(&e);
+    assert_ne!(idle, nothing);
+    e.turret_target[tower] = Some(EntityId::new(0, 0));
+    let aiming = bytes(&e);
+    assert_ne!(aiming, idle, "the target is state");
+    e.turret_target[tower] = Some(EntityId::new(0, 1));
+    assert_ne!(bytes(&e), aiming, "and so is the generation of the target");
+    // A dead structure does not count.
+    e.alive[tower] = false;
+    assert_eq!(bytes(&e), nothing);
+}

@@ -3,7 +3,7 @@
 //!
 //! The human (player 0) builds a power plant (done at tick 301), a barracks (705) and a refinery (1105),
 //! makes four riflemen and five rocket troopers, sends them across the map at tick 2400, and the static
-//! opponent (player 1) is defeated at tick 5687. The harvest loop pays for the units; the opponent never
+//! opponent (player 1) is defeated at tick 5967 (5687 before WP6.7: its defence tower fires now). The harvest loop pays for the units; the opponent never
 //! builds, produces or attacks.
 
 mod common;
@@ -20,7 +20,7 @@ const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 
 /// The tick the match is decided in: the last of the opponent's structures and armed units falls.
-const DECIDED: u64 = 5687;
+const DECIDED: u64 = 5967;
 /// The tick the first fight begins in (the army arrives at the opponent's base).
 const FIRST_DEATH: u64 = 3689;
 
@@ -230,9 +230,10 @@ fn the_opponent_stays_put_fires_back_and_never_builds_or_produces() {
         farthest as f64 / 65536.0
     );
     assert!(human_hurt, "the opponent's defenders fired back");
-    // The human killed all ten things of the opponent; the opponent killed none of the human's.
+    // The human killed all ten things of the opponent. Before WP6.7 the opponent killed none of the
+    // human's; since its tower fires it kills six (four riflemen and two rocket troopers).
     assert_eq!(w.tally_of(P0).kills, 10);
-    assert_eq!(w.tally_of(P1).kills, 0);
+    assert_eq!(w.tally_of(P1).kills, 6);
     assert_eq!(w.tally_of(P1).losses, 10);
 }
 
@@ -367,19 +368,16 @@ fn a_structure_still_going_up_does_not_keep_its_owner_in_the_match() {
     );
 }
 
-/// Power (WP6.4) is on in the match, and the pin moved from this value (measured: the scenario with
-/// the `power` line taken out gives it back) to `match.expected`.
-const BEFORE_POWER: &str = "0x54a140fc12273e31";
-
+/// Power (WP6.4) is on in the match. It moved the pin once, from `0x54a140fc12273e31` (the scenario with
+/// the `power` line taken out) to the value of that day, by its section alone; the proof is below, as
+/// a comparison of the two worlds tick by tick. (Since WP6.7 the tower fires, so the world without the
+/// power line no longer ends at the WP7.6 value.)
 #[test]
 fn power_in_the_match_moves_the_pin_by_its_section_only() {
     let with = scenario();
     assert!(with.power.is_some());
     let mut without = with.clone();
     without.power = None;
-    // Without the power rules the match is the one WP7.6 pinned, byte for byte.
-    let old = run(&without, &RunOptions::for_scenario(&without)).unwrap();
-    assert_eq!(old.final_checksum, parse_checksum(BEFORE_POWER).unwrap());
     // With them, the game is the same game, tick by tick: the same entities in the same places with the
     // same hit points, the same credits, and the speed never leaves full (no shortage in the script).
     let mut a = with.build_world().unwrap();
@@ -419,4 +417,98 @@ fn power_in_the_match_moves_the_pin_by_its_section_only() {
     // And what the human made and used at the end is the plant against the refinery and the barracks.
     let t = a.power_of(P0).unwrap();
     assert_eq!((t.made, t.used), (100, 50));
+}
+
+/// The opponent's tower (slot 4) fires in the match (WP6.7): the first shot is at tick 3830, 140 ticks
+/// after the first fight began (the human's infantry has to come within its reach of 6 cells), it fires
+/// 40 shots, and it falls at tick 4509 to the human's rocket troopers. Those 40 shots (8 damage each) and the
+/// opponent's riflemen are what kill six of the human's nine.
+#[test]
+fn the_opponents_tower_fires_in_the_match() {
+    let s = scenario();
+    let mut w = s.build_world().unwrap();
+    let tower = EntityId::new(4, 0);
+    let (mut first, mut count, mut fell) = (None, 0, None);
+    for _ in 0..s.ticks {
+        let r = w.step();
+        let mine = w.shots().iter().filter(|sh| sh.attacker == tower).count();
+        if mine > 0 {
+            first.get_or_insert(r.tick.0);
+            count += mine;
+        }
+        if fell.is_none() && !w.is_alive(tower) {
+            fell = Some(r.tick.0);
+        }
+    }
+    assert_eq!(first, Some(3830));
+    assert_eq!(count, 40);
+    assert_eq!(fell, Some(TOWER_FELL));
+    assert!(
+        first.unwrap() > FIRST_DEATH,
+        "it fires after the first fight began"
+    );
+}
+
+/// The tick the opponent's tower is destroyed in.
+const TOWER_FELL: u64 = 4509;
+
+/// The tower uses 20 of the opponent's power: its plant (100 at 600 hit points), refinery (30), barracks
+/// (20) and tower (20) leave the player at full power while the plant makes at least 70, that is at 420 hit
+/// points or more. A human light tank is put at the plant from tick 100 to measure it: the defences go dark
+/// the first time the plant has less than 420 of its 600 hit points.
+#[test]
+fn the_opponents_tower_goes_dark_when_its_plant_is_below_420_of_600() {
+    let s = scenario();
+    let mut w = s.build_world().unwrap();
+    let plant = EntityId::new(1, 0);
+    for _ in 0..100 {
+        w.step();
+    }
+    assert!(w.defences_powered(P1));
+    let tick = w.tick();
+    w.schedule(
+        tick,
+        P0,
+        sf_sim::Command::SpawnUnit {
+            kind: sf_sim::Kind(19),
+            pos: sf_math::Vec2::from_ints(82, 24),
+            owner: P0,
+        },
+    )
+    .unwrap();
+    w.step();
+    let tank = w
+        .snapshot()
+        .iter()
+        .find(|v| v.owner == P0 && v.kind.0 == 19)
+        .unwrap()
+        .id;
+    let tick = w.tick();
+    w.schedule(
+        tick,
+        P0,
+        sf_sim::Command::Order {
+            ids: vec![tank],
+            order: sf_sim::Order::Attack(plant),
+            queued: false,
+        },
+    )
+    .unwrap();
+    let (mut last_powered_hp, mut dark_hp) = (None, None);
+    for _ in 0..3000 {
+        let hp_before = w.hp_of(plant).unwrap_or(0);
+        w.step();
+        // The totals of a step are counted from the state the step before left.
+        if w.defences_powered(P1) {
+            last_powered_hp = Some(hp_before);
+        } else if dark_hp.is_none() {
+            dark_hp = Some(hp_before);
+        }
+        if !w.is_alive(plant) {
+            break;
+        }
+    }
+    let (dark, lit) = (dark_hp.expect("it went dark"), last_powered_hp.unwrap());
+    assert!(dark < 420, "dark at {dark} hit points");
+    assert!(lit >= 420, "last lit at {lit} hit points");
 }

@@ -390,7 +390,10 @@ fn a_target_outside_the_arc_waits_for_the_turret() {
         assert_eq!(w.turret_of(tower), Some(turret), "tick {n}");
     }
     let expected = expected.unwrap();
-    assert!(expected >= 5, "the test needs a turret that has to turn: {expected}");
+    assert!(
+        expected >= 5,
+        "the test needs a turret that has to turn: {expected}"
+    );
     assert_eq!(fired_at, Some(expected));
 }
 
