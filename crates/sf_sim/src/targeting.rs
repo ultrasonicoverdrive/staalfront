@@ -385,11 +385,12 @@ impl Targeting {
             let stats = cx.units.at(e.def[i] as usize);
             if stats.class() == UnitClass::Structure {
                 // Defences (WP6.7): a weaponless structure (a bunker) does nothing at all.
-                if cx.arsenal.is_armed(e.def[i]) {
-                    if defence_check(e, i, cx) && e.turret_target[i].is_none() && e.eng[i].cool == 0
-                    {
-                        scanners.push(i);
-                    }
+                if cx.arsenal.is_armed(e.def[i])
+                    && defence_check(e, i, cx)
+                    && e.turret_target[i].is_none()
+                    && e.eng[i].cool == 0
+                {
+                    scanners.push(i);
                 }
                 continue;
             }
@@ -486,7 +487,7 @@ impl Targeting {
     fn scan(&mut self, e: &mut Entities, i: usize, cx: &Context<'_>) {
         e.eng[i].cool = cx.config.scan_cooldown;
         if let Some((j, reach)) = self.best_target(e, i, cx) {
-            if e.order[i] == Order::Idle && e.cell[i] != crate::terrain::NO_CELL {
+            if cx.units.at(e.def[i] as usize).class() == UnitClass::Structure {
                 // A structure (WP6.7): no order; the turret target is the target.
                 e.turret_target[i] = Some(EntityId::new(j as u32, e.generation[j]));
                 e.eng[i].aim = e.pos[j];

@@ -257,3 +257,165 @@ fn the_defences_section_is_written_only_for_a_world_with_an_armed_structure() {
     e.alive[tower] = false;
     assert_eq!(bytes(&e), nothing);
 }
+
+/// What `defence_check` says about one structure, with the world's pieces made by hand: a tower (kind 1,
+/// table position 0, uses 20 power, armed) of player 0 on slot 0 and an enemy (slot 1, table position 1).
+/// `change` edits the entities before the check, `dark` lists the players without power.
+fn check_defence(
+    change: impl Fn(&mut Entities),
+    dark: &[crate::ids::PlayerId],
+    power: i32,
+) -> (bool, Option<EntityId>) {
+    use crate::buildings::{BuildingFunction, BuildingStats, BuildingTable};
+    use crate::weapons::{Loadout, WeaponTable};
+    let units = UnitTable::new(vec![tower_stats(1, true), tower_stats(2, false)]).unwrap();
+    let mut gun = weapon(5, 1, 0, 10);
+    gun.mount = Mount::Turret;
+    let table = WeaponTable::new(
+        vec![gun],
+        vec![Loadout {
+            unit: crate::ids::Kind(1),
+            weapons: vec![1],
+        }],
+    )
+    .unwrap();
+    let arsenal = Arsenal::new(table, &units).unwrap();
+    let buildings = BuildingTable::new(vec![BuildingStats {
+        kind: crate::ids::Kind(1),
+        footprint: crate::units::Footprint {
+            width: 1,
+            height: 1,
+        },
+        function: BuildingFunction::Defence,
+        exit_side: None,
+        build_ticks: 10,
+        cost: Some(100),
+        power,
+        factions: 1,
+        requires: vec![],
+        build_radius: 0,
+    }])
+    .unwrap();
+    let mut e = Entities::default();
+    for (i, (kind, def, owner, x)) in [(1u16, 0u32, 0u8, 10), (2, 1, 1, 12)]
+        .into_iter()
+        .enumerate()
+    {
+        let slot = e.push_free_slot();
+        assert_eq!(slot, i);
+        e.alive[slot] = true;
+        e.kind[slot] = crate::ids::Kind(kind);
+        e.def[slot] = def;
+        e.owner[slot] = crate::ids::PlayerId(owner);
+        e.pos[slot] = Vec2::from_ints(x, 10);
+        e.hp[slot] = 100;
+    }
+    e.turret_target[0] = Some(EntityId::new(1, 0));
+    change(&mut e);
+    let cx = Context {
+        units: &units,
+        arsenal: &arsenal,
+        config: TargetingConfig::DEFAULT,
+        tick: Tick(0),
+        bounds: (Vec2::ZERO, Vec2::from_ints(64, 64)),
+        map: (64, 64),
+        buildings: &buildings,
+        unpowered: dark,
+    };
+    let may_look = defence_check(&mut e, 0, &cx);
+    (may_look, e.turret_target[0])
+}
+
+#[test]
+fn a_structure_keeps_a_target_in_reach_and_loses_it_when_it_may_not_fire() {
+    use crate::ids::PlayerId;
+    let victim = Some(EntityId::new(1, 0));
+    // Standing, powered, the enemy 2 cells away in a range of 5: it keeps the target and does not look.
+    assert_eq!(check_defence(|_| {}, &[], -20), (false, victim));
+    // Without a target it may look round.
+    assert_eq!(
+        check_defence(|e| e.turret_target[0] = None, &[], -20),
+        (true, None)
+    );
+    // The enemy out of reach (20 cells), at zero hit points, or gone: the target goes, and it looks again.
+    assert_eq!(
+        check_defence(|e| e.pos[1] = Vec2::from_ints(30, 10), &[], -20),
+        (true, None)
+    );
+    assert_eq!(check_defence(|e| e.hp[1] = 0, &[], -20), (true, None));
+    assert_eq!(
+        check_defence(|e| e.alive[1] = false, &[], -20),
+        (true, None)
+    );
+    // The enemy is the owner's own: not a target.
+    assert_eq!(
+        check_defence(|e| e.owner[1] = PlayerId(0), &[], -20),
+        (true, None)
+    );
+    // Each way a structure may not fire: it goes dark (its owner is on the list and it uses power), it is
+    // under construction, or it has no hit points left. The target is cleared and it does not look.
+    assert_eq!(check_defence(|_| {}, &[PlayerId(0)], -20), (false, None));
+    assert_eq!(
+        check_defence(|e| e.build_left[0] = 5, &[], -20),
+        (false, None)
+    );
+    assert_eq!(check_defence(|e| e.hp[0] = 0, &[], -20), (false, None));
+    // The power list is the owner's: another player being dark changes nothing for this one.
+    assert_eq!(check_defence(|_| {}, &[PlayerId(1)], -20), (false, victim));
+    // A defence that uses no power (power 0) or makes some is not switched off by the list.
+    assert_eq!(check_defence(|_| {}, &[PlayerId(0)], 0), (false, victim));
+    assert_eq!(check_defence(|_| {}, &[PlayerId(0)], 30), (false, victim));
+}
+
+#[test]
+fn a_weaponless_structure_is_left_alone_by_the_update() {
+    use crate::buildings::BuildingTable;
+    use crate::weapons::{Loadout, WeaponTable};
+    // Kind 1 is armed (position 0), kind 2 (position 1) is a bunker: no weapon, no scan, no cooldown.
+    let units = UnitTable::new(vec![tower_stats(1, true), tower_stats(2, false)]).unwrap();
+    let mut gun = weapon(5, 1, 0, 10);
+    gun.mount = Mount::Turret;
+    let table = WeaponTable::new(
+        vec![gun],
+        vec![Loadout {
+            unit: crate::ids::Kind(1),
+            weapons: vec![1],
+        }],
+    )
+    .unwrap();
+    let arsenal = Arsenal::new(table, &units).unwrap();
+    let buildings = BuildingTable::empty();
+    let mut e = Entities::default();
+    for (i, (kind, def, owner)) in [(2u16, 1u32, 0u8), (1, 0, 1)].into_iter().enumerate() {
+        let slot = e.push_free_slot();
+        assert_eq!(slot, i);
+        e.alive[slot] = true;
+        e.kind[slot] = crate::ids::Kind(kind);
+        e.def[slot] = def;
+        e.owner[slot] = crate::ids::PlayerId(owner);
+        e.pos[slot] = Vec2::from_ints(10 + 2 * slot as i32, 10);
+        e.hp[slot] = 100;
+    }
+    let cx = Context {
+        units: &units,
+        arsenal: &arsenal,
+        config: TargetingConfig::DEFAULT,
+        tick: Tick(0),
+        bounds: (Vec2::ZERO, Vec2::from_ints(64, 64)),
+        map: (64, 64),
+        buildings: &buildings,
+        unpowered: &[],
+    };
+    let mut t = Targeting::default();
+    for _ in 0..30 {
+        t.update(&mut e, &cx);
+    }
+    assert_eq!(
+        e.eng[0],
+        Engage::REST,
+        "the bunker has no cooldown to count"
+    );
+    assert_eq!(e.turret_target[0], None);
+    // The armed structure of the other player, 2 cells away and in range 5, does look and picks the bunker.
+    assert_eq!(e.turret_target[1], Some(EntityId::new(0, 0)));
+}
