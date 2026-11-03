@@ -1539,14 +1539,14 @@ fn a_turret_needs_a_movement_class() {
     .unwrap();
     let kind = defs.kind_of("siege_artillery").unwrap();
     assert_eq!(defs.sim_unit(kind).unwrap().turret_per_tick, 7);
-    // On a structure, which never moves, it is refused with the line.
+    // On a structure without a weapon it is refused with the line (an armed one may have it, WP6.7).
     let e = replace_units(
         "hp: 600, armor: \"structure\", power: 100,",
         "hp: 600, armor: \"structure\", power: 100, turret_rate: 4,",
     )
     .unwrap_err();
     assert!(
-        e.message.contains("turret_rate need a movement class"),
+        e.message.contains("turret_rate needs a movement class"),
         "{e}"
     );
     assert!(e.line.is_some(), "{e}");
