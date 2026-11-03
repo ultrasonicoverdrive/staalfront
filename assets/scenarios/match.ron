@@ -58,6 +58,7 @@ Scenario(
     storage: Some([(2, 600)]),
     money: Some((credits_per_ore: 1)),
     production: Some((queue_limit: 5, exit_radius: 4)),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
     ticks: 7000,
     commands: [
         (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (8, 62))),

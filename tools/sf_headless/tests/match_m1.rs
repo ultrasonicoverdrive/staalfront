@@ -366,3 +366,57 @@ fn a_structure_still_going_up_does_not_keep_its_owner_in_the_match() {
         "the opponent wins in the tick the human is defeated"
     );
 }
+
+/// Power (WP6.4) is on in the match, and the pin moved from this value (measured: the scenario with
+/// the `power` line taken out gives it back) to `match.expected`.
+const BEFORE_POWER: &str = "0x54a140fc12273e31";
+
+#[test]
+fn power_in_the_match_moves_the_pin_by_its_section_only() {
+    let with = scenario();
+    assert!(with.power.is_some());
+    let mut without = with.clone();
+    without.power = None;
+    // Without the power rules the match is the one WP7.6 pinned, byte for byte.
+    let old = run(&without, &RunOptions::for_scenario(&without)).unwrap();
+    assert_eq!(old.final_checksum, parse_checksum(BEFORE_POWER).unwrap());
+    // With them, the game is the same game, tick by tick: the same entities in the same places with the
+    // same hit points, the same credits, and the speed never leaves full (no shortage in the script).
+    let mut a = with.build_world().unwrap();
+    let mut b = without.build_world().unwrap();
+    let state = |w: &World| -> Vec<(u32, u16, u8, i64, i64, Option<u32>)> {
+        w.snapshot()
+            .iter()
+            .map(|v| {
+                (
+                    v.id.index(),
+                    v.kind.0,
+                    v.owner.0,
+                    v.pos.x.raw(),
+                    v.pos.y.raw(),
+                    w.hp_of(v.id),
+                )
+            })
+            .collect()
+    };
+    for t in 0..with.ticks {
+        a.step();
+        b.step();
+        assert_eq!(a.credits(P0), b.credits(P0), "tick {t}");
+        assert_eq!(a.credits(P1), b.credits(P1), "tick {t}");
+        assert_eq!(a.power_speed_permille(P0), 1000, "tick {t}");
+        // The opponent's plant is shot at from the first fight on: its output falls with its hit
+        // points and its (idle) factory slows down. That changes nothing in this game: it never builds.
+        if t < FIRST_DEATH - 100 {
+            assert_eq!(a.power_speed_permille(P1), 1000, "tick {t}");
+        }
+        if t % 25 == 0 {
+            assert_eq!(state(&a), state(&b), "tick {t}");
+        }
+    }
+    assert_eq!(a.match_result(), b.match_result());
+    assert_ne!(a.checksum(), b.checksum());
+    // And what the human made and used at the end is the plant against the refinery and the barracks.
+    let t = a.power_of(P0).unwrap();
+    assert_eq!((t.made, t.used), (100, 50));
+}

@@ -19,8 +19,8 @@
 //! (1) the front item of each queue pays for and gains its progress; (2) the front items that are
 //! finished are put on the map. Money is taken per tick with the same exact rule as a structure
 //! (`C * (k + 1) / T - C * k / T`, [`crate::tick_cost`]), only on a scale of thousandths of a tick
-//! so that the speed factor can slow it ([`World::production_speed_permille`], fixed at full speed
-//! for now; the hook of power, WP6.4). Without the money the item waits and nothing is paid.
+//! so that the speed factor can slow it ([`World::production_speed_permille`], which comes from the
+//! player's power: below full speed in a shortage, see `docs/rules/power.md`). Without the money the item waits and nothing is paid.
 
 use core::fmt;
 
@@ -41,7 +41,8 @@ use crate::world::{ConfigError, World};
 const DIGEST_TAG: &[u8] = b"sf_sim/production/v1";
 
 /// The production speed of a factory that is not slowed: thousandths of a tick of progress per
-/// tick. The hook of power (WP6.4): [`World::production_speed_permille`] returns this for now.
+/// tick: what [`World::production_speed_permille`] returns when the player has no power shortage
+/// (the shortage rule is in `docs/rules/power.md`).
 pub const FULL_SPEED_PERMILLE: u32 = 1000;
 /// The most items a queue may be given a room for (`queue_limit`).
 pub const MAX_QUEUE_LIMIT: u8 = 20;
@@ -329,7 +330,7 @@ pub enum FactoryStatus {
     WaitingForExit,
     /// A structure the front unit needs no longer stands.
     MissingPrerequisite(Kind),
-    /// The production speed is zero (the power hook).
+    /// The production speed is zero (no power at all, floor 0).
     Stopped,
     /// The factory is not standing (under construction, or no hit points left): nothing happens.
     NotStanding,
@@ -555,11 +556,11 @@ impl World {
     }
 
     /// How fast the factories of `player` build, in thousandths of a tick of progress per tick.
-    /// **The hook of power (WP6.4):** fixed at [`FULL_SPEED_PERMILLE`] until power exists. Zero
-    /// stops production without losing progress; the price follows the progress, so a slow
-    /// factory pays slowly.
-    pub fn production_speed_permille(&self, _player: PlayerId) -> u32 {
-        FULL_SPEED_PERMILLE
+    /// The speed power gives (WP6.4, `docs/rules/power.md`): [`FULL_SPEED_PERMILLE`] in a world without
+    /// power rules and for a player with enough power, less in a shortage. Zero stops production
+    /// without losing progress; the price follows the progress, so a slow factory pays slowly.
+    pub fn production_speed_permille(&self, player: PlayerId) -> u32 {
+        self.power_speed_permille(player)
     }
 
     /// Whether `player` has a standing structure of `kind`.

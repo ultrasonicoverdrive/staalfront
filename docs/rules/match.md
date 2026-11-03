@@ -140,6 +140,15 @@ tick 3689; the opponent's last structure falls at tick 5687, and that is the def
 the win tick of player 0.** The scenario runs to tick 7000. `tools/sf_headless/tests/match_m1.rs` pins the
 checksum and asserts all of the above (see "Tests").
 
+**Power (WP6.4).** The match is played with power rules (`matchplay::configure`, and the `power` line of the scenario):
+what the structures make and use is counted, a shortage slows building and production, damage lowers a plant's output
+(`power.md`). The script never has a shortage (the human's plant makes 100 and its refinery and barracks use 50), so the game
+is the same game, tick by tick; **`match.expected` moved** from `0x54a140fc12273e31` to `0x49f207148bde095c` for the new
+checksum section `I` alone. Measured: with the `power` line taken out of `match.ron` the old value comes back, and with
+it in, the entities, their hit points and the credits equal those of the world without it at every checked tick
+(`power_in_the_match_moves_the_pin_by_its_section_only`). The one visible effect is the opponent's: once the army shoots at
+its plant, its output falls with the hit points and its (idle) factories slow down; it never builds, so nothing changes.
+
 A scenario can name a `match_file` (a file in its `unit_defs` directory): it then gets the match rules,
 the factions, the credits and the starting objects from the file, and `factions` and `money.starting`
 must be left out.

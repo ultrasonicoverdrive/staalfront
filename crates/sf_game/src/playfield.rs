@@ -193,6 +193,21 @@ pub fn with_match(world: World, def: &sf_data::match_def::MatchDef) -> Result<Wo
         .map_err(|e| format!("match rules refused: {e}"))
 }
 
+/// `world` with power (WP6.4): what the structures make and use is counted per player, a shortage
+/// slows production and construction, and the defences get their hook (`power.ron`,
+/// `docs/rules/power.md`). Call it after the unit and building tables and before the match rules
+/// ([`with_match`]).
+///
+/// # Panics
+///
+/// If the world has no unit or building table or has started; the callers have neither problem.
+pub fn with_power(world: World) -> World {
+    let settings = sf_data::power::PowerSettings::embedded();
+    world
+        .with_power(sf_bridge::power_rules(&settings))
+        .expect("a world with unit and building tables that has not started takes power")
+}
+
 /// `world` with production (WP6.5): the factories build the units of `defs` from queues
 /// (`production.ron`, `docs/rules/production.md`). Call it after [`with_money`], so that the
 /// units are paid for; the unit and building tables must be in already.

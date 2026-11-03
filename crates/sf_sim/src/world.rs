@@ -21,6 +21,7 @@ use crate::ore::{Ore, OreRules};
 use crate::outcome::Outcome;
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::placement::PlacementState;
+use crate::power::Power;
 use crate::production::Production;
 use crate::projectiles::ProjectileId;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
@@ -177,6 +178,9 @@ pub enum ConfigError {
     /// table, with numbers out of bounds or a table that does not fit the unit and building
     /// tables; or a unit or building table was given after them (WP6.5).
     Production,
+    /// The power rules were given twice, after the start, before the unit or building table, after
+    /// the match rules, or with numbers out of bounds (WP6.4).
+    Power,
     /// The match rules were given twice, after the start, before the unit table, the weapon table
     /// or the destruction settings; or one of those was given after them (WP7.6).
     Match,
@@ -250,6 +254,10 @@ impl fmt::Display for ConfigError {
                 "the production rules must be given once, before the world starts, after the unit and building \
                  tables, with a queue limit of 1 to 20, an exit radius of 1 to 8 and units, factories, \
                  prerequisites and free units that the tables know"
+            }
+            ConfigError::Power => {
+                "the power rules must be given once, before the world starts, after the unit and building \
+                 tables and before the match rules, with the floor and the defence cutoff from 0 to 1000"
             }
             ConfigError::Match => {
                 "the match rules must be given once, last, before the world starts, after the unit table, the \
@@ -365,6 +373,9 @@ pub struct World {
     /// The queues of the factories, the rally points and the rules of production (WP6.5). `None`
     /// for a world that was given no production rules.
     pub(crate) production: Option<Box<Production>>,
+    /// The power rules and the totals of the last recount (WP6.4). `None` for a world that was given
+    /// none: nothing makes or uses power and the speed is always full.
+    pub(crate) power: Option<Power>,
     /// Who takes part in the match, who is defeated and who won (WP7.6). `None` for a world that was
     /// given no match rules.
     pub(crate) outcome: Option<Box<Outcome>>,
@@ -797,6 +808,7 @@ impl World {
             money: None,
             stalled: Vec::new(),
             production: None,
+            power: None,
             outcome: None,
             placement: PlacementState::default(),
             completions: Vec::new(),
@@ -1444,6 +1456,8 @@ impl World {
         }
         // The state first (WP6.3): structures under construction advance and the ones that
         // finish are recorded, so the commands of this tick already see them standing.
+        // Power (WP6.4): recounted from the state the last step left, before anything uses it.
+        self.refresh_power();
         self.advance_construction();
         while let Some((player, command)) = self.queue.pop_due(tick) {
             if self.apply_from(player, command) {

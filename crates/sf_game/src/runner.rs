@@ -2532,6 +2532,8 @@ fn sandbox_scene(
                 world = crate::playfield::with_money(world);
                 // WP6.5: and the factories build units from queues, paid while they go up.
                 world = crate::playfield::with_production(world, &defs);
+                // WP6.4: and what the structures make and use is power; a shortage slows both.
+                world = crate::playfield::with_power(world);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),

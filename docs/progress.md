@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4, WP6.6 and WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4 (power) is built and in review, main merged in (see "WP6.4 notes"); WP6.6 and WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -2226,7 +2226,7 @@ Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in revi
 - **Pins:** no earlier pin moved: all 24 earlier scenarios pass against their committed `.expected` after the merge
   of main (`git diff origin/main -- assets/scenarios/*.expected` adds only `production.expected`); a world without
   production rules writes no `Y` section.
-- **Gaps:** power does not slow production yet (the hook is fixed at 1000, WP6.4); no unit in the shipped data has a
+- **Gaps:** power does not slow production yet (the hook is fixed at 1000; done in WP6.4, "WP6.4 notes"); no unit in the shipped data has a
   `requires` (balance, phase 15); the sandbox keys act on the first selected factory only; the real game could not
   be driven to a queue from outside the window, so the shots come from the test harness that draws with the same
   functions the HUD calls (`production_screenshot.rs`), and a plain `sf_game --sandbox --harvest` run was only checked
@@ -2414,13 +2414,43 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   needs a standing construction centre ("Needs a construction centre"); the last look numbers of `sidebar_view.rs` are
   in `sidebar.ron` and the whole file is pinned; the old "build paused" strip is documented as gone from the column.
 - **Cost** (the sidebar adds nothing to the sim): release build, this container, **load average about 10 (busy, other agents running)**, 4000 frames per round, three rounds: `Situation::read` + `sidebar::model` mean 1.2 us with 8 entities and 17 to 30 us with 5,008 (p99 42 to 56 us); building the UI for the full structures tab (159 quads: panel, credits, power bar, four tabs, nine items) on a reused `Ui` mean 19 to 30 us (p99 39 to 74 us), the same with 8 and with 5,008 entities. About 0.05 ms of a 16.7 ms frame. Not measured on the laptop (relative numbers only; the container cannot measure the fps requirement, PLAN section 13). The first run of this test built a new `Ui` per iteration and read 190 us: that was the font setup, not the sidebar. Command: `cargo test --release -p sf_game --test sidebar_cost -- --ignored --nocapture`. The sim thread is untouched, so there is no before/after of the tick.
-- **Gaps.** The power bar is a neutral frame until WP6.4 (`sidebar::power_reading` is the hook, `power_fill` is tested but no
-  world gives a reading). Hidden items cannot be discovered before they unlock (decision; greyed items would show the whole tree).
+- **Gaps.** The power bar is a neutral frame until WP6.4 (done there: `sidebar::power_reading` returns the simulation's totals; "WP6.4 notes"). Hidden items cannot be discovered before they unlock (decision; greyed items would show the whole tree).
   The tile is a coloured box with a short name (art is WP11.6); there is no tooltip. The factory a click goes to is the selected
   one or the lowest slot; the sidebar shows only that factory's queue. A click was not driven in the real window (there is no
   `xdotool` here): clicks are tested with `UiInput` through `sidebar_view::frame`, the commands by running them in a world, and the
   runner's three handlers read `pointer_over_ui` as they did before. The edge-band width is read from `input.ron` when the HUD
   starts. A `QueueUnit` the simulation refuses (queue full) is silent: the count on the item shows 5. The sidebar is built for the faction of `LOCAL_PLAYER` (Meridian) only; there are no seats yet.
+
+### WP6.4 notes: power (stacked on WP7.6, orchestrator decision 02-11-2026)
+
+- Done: `sf_sim::power` (made and used per player over the standing structures, damage lowering a producer's output by
+  `power * hp / max_hp`, the shortage speed `made * 1000 / used` with a floor, the hook `defences_powered` for WP6.7,
+  checksum section `I` only with power rules, last); the slower construction (`advances_on`, stateless) and the speed
+  that production already took (`production_speed_permille`); `power.ron` (`sf_data::power`, `sf_bridge::power_rules`);
+  the sidebar's power bar filled from the snapshot (`sidebar::power_reading`) and the "low power" sign with its own bar
+  colour; power on in the match, the pinned scenario `power` and the sandbox with `--harvest`. Rules: `docs/rules/power.md`.
+  Screenshots: `docs/screenshots/wp6.4`.
+- **Decisions** (written in `power.md`): a structure under construction makes and uses nothing; one speed for production
+  and construction (progress per tick for a factory, `speed` ticks of every thousand for a structure, so the price stays
+  exact at any speed); the totals are recounted at the start of each step (what happens in a tick counts from the next);
+  the shortage floor is 250 in the file (the simulation accepts 0 = stopped); matches have power rules on.
+- **Pins.** No pin of an earlier phase moved (`golden.rs`, every `.expected` of an earlier phase, bench PLAIN and FIGHT:
+  worlds without power rules write no section `I`). **One moved, on purpose: `match.expected`** `0x54a140fc12273e31` to
+  `0x49f207148bde095c`. Measured cause: with the `power` line taken out of `match.ron` the old value comes back, and with it
+  in, every checked tick has the same entities, hit points and credits (`power_in_the_match_moves_the_pin_by_its_section_only`),
+  so the section alone moved it. New: `power.expected` `0x8b6d789e18499593`, in the CI list.
+- **Cost:** `refresh_power` 4 to 6 us per tick with 40 structures among 5,040 entities (release); alternating release runs of
+  the headless binary, 10,000 ticks with those entities, six rounds: base 899, this branch without power rules 878 and with
+  them 891 ticks per second (medians; single runs 857 to 965; load average about 2 of 4 cores, other agents running). Inside the
+  noise; relative numbers only (the container cannot measure the fps requirement, PLAN section 13).
+- **Found while testing:** the pinned final checksum of a scenario does not see *when* things happen (a rifleman made faster
+  stands in the same place at the end). The scenario `power` is therefore pinned along the way (eight ticks) as well.
+  Other scenarios may have the same blind spot.
+- **Gaps.** Nothing reads `defences_powered` (WP6.7; it must also key on a structure's own `power < 0`, see the WP6.1
+  follow-up); the sandbox's demo base is in a permanent shortage (one of every structure: 270 used of 100 made); a power
+  plant built in a shortage is slowed like any structure (no exemption: the floor is the way out); the damage stage of the
+  models is not tied to the output (the output follows the hit points, the model follows the damage thresholds of
+  `damage.ron`); no sound or announcement for "low power" (audio is another work package); not played by a person.
 
 ## Open follow-ups
 

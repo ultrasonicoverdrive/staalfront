@@ -1,7 +1,7 @@
 # The sidebar
 
 Work package WP11.1 (PLAN.md phase 11), built before M1 by the orchestrator's decision of 01-11-2026: the
-debug keys of WP6.5 (U, I, O, G) are not a way to play. Presentation only: no simulation code changed, no new
+debug keys of WP6.5 (U, I, O, G) are not a way to play. Presentation only (WP6.4 later filled the power bar and added the low-power sign, below): no simulation code changed, no new
 command and no checksum moved. Code: `crates/sf_game/src/sidebar.rs` (what the tabs show and what a click does),
 `sidebar_layout.rs` (the geometry, the hit test, scrolling), `sidebar_view.rs` (drawing, reading the presses),
 `hud.rs` (the few lines that call it) and `runner.rs` (turning an action into a command). Data:
@@ -22,10 +22,11 @@ A column on the right edge of the window, 200 logical pixels wide, scaled with t
    turns the warning colour while any build of the player waits for credits (`SidebarModel::waiting_for_credits`, also
    when the tab of the waiting item is closed), and the waiting item itself says "no credits" with the bar in the
    waiting colour. A structure going up on the map keeps its pause strokes (`economy.md`, "Paused bar").
-2. **The power bar.** Power does not exist yet (WP6.4). `sidebar::power_reading` is the hook: it returns `None`, and
-   the bar then draws a neutral frame saying "Power: no power rules". WP6.4 returns a `PowerReading { made, used }` and
-   the bar fills with what is used against the larger of made and used, in the low colour when more is used than made
-   (`power_fill`, tested; the drawing of both states is `the_credits_the_power_bar_and_the_tabs_are_drawn`).
+2. **The power bar.** `sidebar::power_reading` returns the local player's `PowerReading { made, used }` from the snapshot
+   (WP6.4: the totals the simulation counted, `power.md`; `the_power_bar_reads_what_the_simulation_counted`), and `None`
+   in a world without power rules, where the bar draws a neutral frame saying "Power: no power rules". The bar fills with
+   what is used against the larger of made and used, in the low colour when more is used than made (`power_fill`, tested;
+   the drawing of both states is `the_credits_the_power_bar_and_the_tabs_are_drawn`; shots in `docs/screenshots/wp6.4/`).
 3. **Four tabs**: Structures, Infantry, Vehicles, Vessels, two by two. The tab shown is lit; a tab with nothing to
    build has dimmed text but can still be opened.
 4. **A grid of items**, two per row, as many rows as fit. The wheel over the column scrolls it a row at a time
@@ -104,11 +105,17 @@ Everything is read from the snapshot of the simulation; nothing is counted in th
   shows).
 * **Waiting:** the bar turns to the waiting colour and the right of the price line says why, in the words of
   `production_view` (WP6.5): "no credits" (`WaitingForMoney`, or a structure under construction that is stalled),
-  "exit blocked" (`WaitingForExit`), "stopped" (the factory's speed is 0, the hook of WP6.4), "needs <structure>"
+  "exit blocked" (`WaitingForExit`), "stopped" (the factory's speed is 0: no power at all and a shortage floor of 0, WP6.4), "needs <structure>"
   (`MissingPrerequisite`). It is shown on the item being built, the front of the queue, and not on the ones behind it
   (`a_unit_that_waits_for_credits_says_so_on_the_item_at_the_front_only`,
   `a_finished_unit_with_no_free_exit_says_the_exit_is_blocked`,
   `a_structure_that_waits_for_credits_says_so`).
+* **Low power (WP6.4):** an item that is being built, does not wait and goes on at less than full speed because its
+  player is short of power says "low power" in the warning colour in the place of the percentage, and its bar is the amber
+  `bar_low` colour (`Item::low_power`, from `Situation::slowed`, which is the snapshot's `power_speed` below 1000): the same
+  place and manner as "no credits", with a bar colour of its own because the item is advancing, only slowly
+  (`an_item_that_is_being_built_in_a_shortage_says_low_power`, `a_structure_going_up_in_a_shortage_says_low_power_and_one_with_enough_does_not`,
+  `an_item_in_a_power_shortage_has_its_own_bar_colour_and_says_so`). A structure item says it too while it goes up.
 * **The chosen structure** (the build mode is on for it) has a ring round its tile
   (`the_chosen_structure_gets_a_ring_and_the_others_do_not`).
 
@@ -177,7 +184,7 @@ the same quad count with 0 and with 5,000 extra entities) and has an `--ignored`
 
 ## Not done, on purpose
 
-Power (WP6.4: the hook is there, nothing fills it); the repair and sell buttons (WP6.6); menus and settings
+The repair and sell buttons (WP6.6); menus and settings
 (WP11.5); click sounds (audio is another work package); an icon picture instead of the coloured tile (art, WP11.6);
 a tooltip with the full name and the build time (the tile shows the short name and the price); hotkeys for the tabs;
 a rally-point button; showing the other factories' queues (an item shows its primary factory's queue only); a

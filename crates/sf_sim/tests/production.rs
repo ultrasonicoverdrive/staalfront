@@ -1404,10 +1404,10 @@ fn a_free_harvester_waits_inside_when_the_exit_is_blocked() {
     assert_eq!(units_of(&w, HARVESTER, P0).len(), 1);
 }
 
-// ---- the speed hook --------------------------------------------------------------------------
+// ---- the speed (power, WP6.4: tests/power.rs) --------------------------------------------------------------------------
 
 #[test]
-fn the_speed_factor_is_a_hook_fixed_at_full_speed() {
+fn without_power_rules_the_speed_is_full_and_the_price_adds_up_at_any_speed() {
     let w = free_world(5, 4);
     assert_eq!(FULL_SPEED_PERMILLE, 1000);
     assert_eq!(w.production_speed_permille(P0), 1000);

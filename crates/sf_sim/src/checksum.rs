@@ -37,7 +37,8 @@
 //! | storage (`V`), only in a world given storage rules (and so harvest rules) | the capacity table (kind and units, ascending), then per player the ore stored and the capacity of its standing buildings at the last sync (WP7.3). |
 //! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
 //! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
-//! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6). It is the last section |
+//! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6) |
+//! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -212,6 +213,7 @@ const SECTION_STORAGE: u8 = b'V';
 const SECTION_MONEY: u8 = b'M';
 const SECTION_PRODUCTION: u8 = b'Y';
 const SECTION_OUTCOME: u8 = b'Z';
+const SECTION_POWER: u8 = b'I';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -654,6 +656,14 @@ impl World {
         if let Some(outcome) = &self.outcome {
             h.write_u8(SECTION_OUTCOME);
             outcome.write_hash(&mut h);
+        }
+
+        // Power (`I`, WP6.4): the rules and the totals of each player at the last recount. After `Z`, so it
+        // is the last section, and only in a world that was given power rules: every world without
+        // them hashes as before.
+        if let Some(power) = &self.power {
+            h.write_u8(SECTION_POWER);
+            power.write_hash(&mut h);
         }
 
         h.finish()

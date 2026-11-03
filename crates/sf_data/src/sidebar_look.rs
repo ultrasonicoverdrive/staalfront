@@ -35,6 +35,8 @@ pub struct Words {
     pub exit_blocked: String,
     /// On an item whose factory is stopped.
     pub stopped: String,
+    /// On an item that advances more slowly because its player is short of power (WP6.4).
+    pub low_power: String,
     /// Before the name of the structure an item waits for.
     pub needs: String,
     /// What an empty tab says when nothing is missing, there is just nothing to build.
@@ -71,6 +73,8 @@ pub struct Colors {
     pub bar_back: Rgba,
     /// The fill while the item waits.
     pub bar_waiting: Rgba,
+    /// The fill while the item advances at less than full speed (low power, WP6.4).
+    pub bar_low: Rgba,
     /// The back of the queue count.
     pub badge_back: Rgba,
     /// The back of the power bar.
@@ -267,6 +271,7 @@ mod tests {
                 waiting_credits: "no credits".into(),
                 exit_blocked: "exit blocked".into(),
                 stopped: "stopped".into(),
+                low_power: "low power".into(),
                 needs: "needs".into(),
                 nothing: "Nothing to build".into(),
             }
@@ -296,6 +301,7 @@ mod tests {
                 bar_fill: (90, 200, 255, 235),
                 bar_back: (10, 14, 20, 190),
                 bar_waiting: (255, 110, 80, 245),
+                bar_low: (255, 180, 70, 245),
                 badge_back: (10, 14, 20, 220),
                 power_back: (16, 20, 28, 255),
                 power_neutral: (70, 76, 88, 255),

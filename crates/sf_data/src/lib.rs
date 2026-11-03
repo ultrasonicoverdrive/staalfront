@@ -24,6 +24,7 @@ pub mod money;
 pub mod money_look;
 pub mod movement;
 pub mod ore;
+pub mod power;
 pub mod production;
 pub mod production_look;
 pub mod sidebar_look;

@@ -174,6 +174,12 @@ pub struct SimSnapshot {
     credits: Vec<(PlayerId, u64)>,
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
     stalled: Vec<EntityId>,
+    /// Whether the world has power rules (WP6.4).
+    has_power: bool,
+    /// Per player that owns an entity, ascending: what it makes, what it uses and the speed that
+    /// follows (WP6.4), as the world counted them at the start of the last step. Empty without power
+    /// rules.
+    power: Vec<(PlayerId, u64, u64, u32)>,
     /// The queue of every structure that has one or a rally point (WP6.5), ascending by slot.
     factories: Vec<(EntityId, FactoryView)>,
     /// What the factories can build (WP6.5); shared.
@@ -219,6 +225,8 @@ impl SimSnapshot {
             has_money: false,
             credits: Vec::new(),
             stalled: Vec::new(),
+            has_power: false,
+            power: Vec::new(),
             factories: Vec::new(),
             menu: Arc::new(ProductionMenu::default()),
             wrecks: Vec::new(),
@@ -392,6 +400,21 @@ impl SimSnapshot {
         }
         self.stalled.clear();
         self.stalled.extend_from_slice(world.stalled());
+        // Power (WP6.4): what each player makes and uses, and the speed that follows. The numbers are
+        // the world's; nothing is counted here.
+        self.has_power = world.power_rules().is_some();
+        self.power.clear();
+        if self.has_power {
+            let mut players: Vec<PlayerId> = self.views.iter().map(|v| v.owner).collect();
+            players.sort_unstable();
+            players.dedup();
+            for p in players {
+                if let Some(t) = world.power_of(p) {
+                    self.power
+                        .push((p, t.made, t.used, world.power_speed_permille(p)));
+                }
+            }
+        }
         // The match (WP7.6): the result once it is decided.
         self.result = world.match_result();
         // The queues (WP6.5): the simulation's state of this tick, a handful of records.
@@ -510,6 +533,24 @@ impl SimSnapshot {
                 .binary_search_by_key(&player, |&(p, _)| p)
                 .map_or(0, |k| self.credits[k].1)
         })
+    }
+
+    /// What `player` makes and uses (WP6.4), straight from [`World::power_of`]; `None` in a world
+    /// without power rules. A player that owns nothing makes and uses nothing.
+    pub fn power_of(&self, player: PlayerId) -> Option<(u64, u64)> {
+        self.has_power.then(|| {
+            self.power
+                .binary_search_by_key(&player, |&(p, ..)| p)
+                .map_or((0, 0), |k| (self.power[k].1, self.power[k].2))
+        })
+    }
+
+    /// The speed power gives the structures and factories of `player`, in thousandths (WP6.4):
+    /// 1000 in a world without power rules and for a player without a shortage.
+    pub fn power_speed(&self, player: PlayerId) -> u32 {
+        self.power
+            .binary_search_by_key(&player, |&(p, ..)| p)
+            .map_or(1000, |k| self.power[k].3)
     }
 
     /// The result of the match, once decided (WP7.6); straight from [`World::match_result`].

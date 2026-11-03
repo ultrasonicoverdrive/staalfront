@@ -63,10 +63,11 @@ points left** (or cannot be damaged, `hp` 0 in the table). It is what these ask:
 | prerequisites (`requires`, WP6.1) | the structure must stand (`a_structure_under_construction_is_no_prerequisite_until_it_completes`, and on the shipped tree `meridian_builds_the_whole_shipped_tree_with_build_commands`) |
 | the base anchor of the build radius (WP6.2) | the anchor must stand (`a_base_under_construction_gives_no_reach`) |
 | production (WP6.5) | the front unit's prerequisites and the factory itself must stand (`production.md`) |
-| power (WP6.4), repair and sell (WP6.6) | **to use `World::stands`**; nothing reads it yet |
+| power (WP6.4) | counts only structures that stand, made and used alike (`power.md`: `a_structure_under_construction_makes_and_uses_nothing_until_it_stands`) |
+| repair and sell (WP6.6) | **to use `World::stands`**; nothing reads it yet |
 
-A structure under construction must give no power and produce nothing; those work packages have to call
-`stands` and not look at hit points alone.
+A structure under construction gives no power and produces nothing; the work packages that read it call
+`stands` and do not look at hit points alone.
 
 ## Hurt and destroyed while it goes up (WP5.5, WP5.4)
 
@@ -142,7 +143,10 @@ Screenshots with the tick in the name: `docs/screenshots/wp6.3/` (`build_screens
 * **Money (WP7.4).** In a world with money rules a build is paid tick by tick and waits when the owner has no
   credits (`economy.md`, "Money"); nothing is refunded. In a world without them `BuildStructure` is free. A build cannot be
   cancelled or paused by the player, and there is no builder unit or queue: the player places it and it goes up by itself.
-  Rate of build is the table's `build_ticks` alone: no power shortage slows it (WP6.4).
+  Rate of build is the table's `build_ticks` at full speed; **since WP6.4 a power shortage slows it** (`power.md`): the structure
+  advances on `speed` ticks of every thousand (`tick * speed / 1000` steps up), pays the same `C * (k + 1) / T - C * k / T` on a tick it
+  advances and nothing on the others, so the price is still paid exactly. Without power rules (every world of the earlier phases) it
+  is the table's `build_ticks` alone.
 * A structure under construction is not repaired, sold or cancelled (WP6.6).
 * Hit points do not rise with progress (above).
 * No sound or voice for "construction complete" (a hook: `World::completions()`).

@@ -94,6 +94,8 @@ pub fn configure(world: World, def: &MatchDef, defs: &UnitDefs) -> Result<World,
     let world = playfield::with_storage(world, defs);
     let world = playfield::with_money_for(world, &sf_bridge::match_credits(def));
     let world = playfield::with_production(world, defs);
+    // WP6.4: the structures make and use power; a shortage slows building and production.
+    let world = playfield::with_power(world);
     let world = playfield::with_movement(world, defs);
     let world = playfield::with_combat(world, defs);
     playfield::with_match(world, def)

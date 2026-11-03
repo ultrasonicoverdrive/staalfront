@@ -25,8 +25,19 @@ fn rig(credits: u64, exit_radius: u8) -> Rig {
     rig
 }
 
+/// [`rig`] with the shipped power rules (`power.ron`).
+fn power_rig(credits: u64) -> Rig {
+    let mut rig = bare_rig_with(credits, 4, true);
+    rig.place("construction_center", (20, 20));
+    rig
+}
+
 /// [`rig`] without the construction centre.
 fn bare_rig(credits: u64, exit_radius: u8) -> Rig {
+    bare_rig_with(credits, exit_radius, false)
+}
+
+fn bare_rig_with(credits: u64, exit_radius: u8, power: bool) -> Rig {
     let defs = UnitDefs::embedded();
     let look = SidebarLook::embedded();
     let world = World::new(WorldConfig::new(7).with_map_size(64, 64))
@@ -50,6 +61,11 @@ fn bare_rig(credits: u64, exit_radius: u8) -> Rig {
             sf_bridge::production_table(&defs).unwrap(),
         )
         .unwrap();
+    let world = if power {
+        crate::playfield::with_power(world)
+    } else {
+        world
+    };
     let catalog = Catalog::build(&defs, Faction::Meridian, &look);
     Rig {
         world,
@@ -792,9 +808,132 @@ fn only_the_local_players_structures_count() {
 // ---- power ---------------------------------------------------------------------------------------
 
 #[test]
-fn the_power_hook_reads_nothing_until_the_power_rules_exist() {
-    let r = rig(1000, 4);
+fn the_power_hook_reads_nothing_in_a_world_without_power_rules() {
+    let mut r = rig(1000, 4);
+    r.place("power_plant", (30, 20));
+    r.run(2);
     assert_eq!(power_reading(&r.snap(), ME), None);
+    assert_eq!(r.snap().power_speed(ME), 1000);
+}
+
+#[test]
+fn the_power_bar_reads_what_the_simulation_counted() {
+    let mut r = power_rig(5000);
+    // Nothing made or used yet: a reading of zeros, not the neutral frame.
+    r.run(2);
+    assert_eq!(
+        power_reading(&r.snap(), ME),
+        Some(PowerReading { made: 0, used: 0 })
+    );
+    // A plant (+100), a refinery (-30) and a barracks (-20): 100 made, 50 used (the shipped table).
+    r.place("power_plant", (30, 20));
+    r.place("refinery", (30, 26));
+    r.place("barracks", (36, 20));
+    r.run(2);
+    let reading = power_reading(&r.snap(), ME).unwrap();
+    assert_eq!(
+        reading,
+        PowerReading {
+            made: 100,
+            used: 50
+        }
+    );
+    assert_eq!(power_fill(reading), (500, false));
+    // The other player makes and uses nothing of ours.
+    assert_eq!(
+        power_reading(&r.snap(), THEM),
+        Some(PowerReading { made: 0, used: 0 })
+    );
+    // A vehicle factory (-40) and a radar (-50) tip it over: 140 used of 100, full bar in the low colour.
+    r.place("vehicle_factory", (36, 26));
+    r.place("radar", (44, 20));
+    r.run(2);
+    let reading = power_reading(&r.snap(), ME).unwrap();
+    assert_eq!(
+        reading,
+        PowerReading {
+            made: 100,
+            used: 140
+        }
+    );
+    assert_eq!(power_fill(reading), (1000, true));
+    assert_eq!(r.snap().power_speed(ME), 714);
+    // The model carries it to the bar.
+    let m = model(
+        &r.catalog,
+        &r.sit(&[]),
+        Tab::Structures,
+        None,
+        Some(reading),
+        &r.look,
+    );
+    assert_eq!(m.power, Some(reading));
+}
+
+#[test]
+fn an_item_that_is_being_built_in_a_shortage_says_low_power() {
+    let mut r = power_rig(5000);
+    r.place("power_plant", (30, 20));
+    r.place("refinery", (30, 26));
+    r.place("barracks", (36, 20));
+    // Enough power: a rifleman advances at the full pace and carries no sign.
+    let rifleman = |r: &Rig| r.item(Tab::Infantry, "rifleman");
+    let barracks = r.id_of("barracks");
+    r.send(Command::QueueUnit {
+        factory: barracks,
+        kind: kind(&r.defs, "rifleman"),
+    });
+    r.run(10);
+    let it = rifleman(&r);
+    assert_eq!(
+        (it.progress, it.low_power, it.waiting),
+        (Some(100), false, None)
+    );
+    let m = model(&r.catalog, &r.sit(&[]), Tab::Infantry, None, None, &r.look);
+    assert_eq!(m.waiting_words[0], None);
+    // A vehicle factory and a radar: 140 used of 100 made, speed 714. The rifleman goes on, slower.
+    r.place("vehicle_factory", (36, 26));
+    r.place("radar", (44, 20));
+    r.run(2);
+    let before = rifleman(&r).progress.unwrap();
+    r.run(10);
+    let it = rifleman(&r);
+    let gained = it.progress.unwrap() - before;
+    // Ten ticks at 714 thousandths of a tick each: 71 thousandths of 100 ticks; at full speed it is 100.
+    assert_eq!(gained, 71);
+    assert!(it.low_power);
+    assert_eq!(it.waiting, None);
+    let m = model(&r.catalog, &r.sit(&[]), Tab::Infantry, None, None, &r.look);
+    assert_eq!(m.waiting_words[0].as_deref(), Some("low power"));
+    // An item that is not being built carries no sign, whatever the shortage.
+    let sit = r.sit(&[]);
+    let idle = items_for(&r.catalog, &sit, Tab::Structures);
+    assert!(idle.iter().all(|i| !i.low_power));
+}
+
+#[test]
+fn a_structure_going_up_in_a_shortage_says_low_power_and_one_with_enough_does_not() {
+    let mut r = power_rig(5000);
+    r.place("power_plant", (30, 20));
+    r.place("refinery", (30, 26));
+    r.place("barracks", (36, 20));
+    r.place("vehicle_factory", (36, 26));
+    r.place("radar", (44, 20));
+    r.run(2);
+    // 140 used of 100 made.
+    r.build("power_plant", (26, 20));
+    r.run(6);
+    let it = r.item(Tab::Structures, "power_plant");
+    assert!(it.progress.is_some());
+    assert!(it.low_power);
+    // Built: 200 made, and the next plant goes at the normal pace without the sign.
+    r.run(1200);
+    assert_eq!(r.snap().power_speed(ME), 1000);
+    r.build("power_plant", (26, 26));
+    r.run(6);
+    let it = r.item(Tab::Structures, "power_plant");
+    assert!(it.progress.is_some());
+    assert!(!it.low_power);
 }
 
 #[test]

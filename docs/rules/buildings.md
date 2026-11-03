@@ -41,7 +41,7 @@ conscious choice. Adding a structure is a new record and no Rust change (a test 
 | `building.exit_side` | block | `PosX`, `NegX`, `PosY` or `NegY`: the side of the footprint where units **come out** (a factory) or **go in** (the harvester dock). The art faces +x (`docs/conventions.md`), so every shipped structure uses `PosX`. Required for a factory or the dock, refused for any other function. The exit cell is the cell next to the middle of that side and must be usable when a factory is placed (WP6.2, "Placement"); where on that side units appear, and the free spot beyond it, are set by production since WP6.5 (`production.md`, "Exit and the free spot"). The structure is never rotated. |
 | `build_seconds` | record | Game seconds, a whole number of 20 Hz ticks, required with a `cost`, **not negative** (refused with its own message). Becomes `build_ticks`. |
 | `cost` | record | Credits; absent = cannot be built (the base anchor, mission structures). With money rules (WP7.4) it is paid over the build time, `economy.md` "Money". |
-| `power` | record | Produced (+) or used (-). WP6.4 sums it. |
+| `power` | record | Produced (+) or used (-). WP6.4 sums it per player over the standing structures (`power.md`). |
 | `factions` | record | Who may **build** it: `[Meridian]`, `[Veyran]`, `[Meridian, Veyran]` or `[Neutral]`. This is the per-faction availability. Checked by `BuildStructure` only (WP6.2): a mission may place any role for any owner with `PlaceStructure`. |
 | `building.requires` | block | Ids of structures the owner must have **standing** before this one can be built (the tech tree). Besides these, everything buildable has to be within the build radius of the owner's `construction_center` (WP6.2), which is not repeated in every list. |
 | `building.function` | block | What it is for, below. |
@@ -104,7 +104,7 @@ factory without a side, a side without a use, a cost without a time (or the reve
 something that cannot be built, an unknown prerequisite and a cycle. Nothing is a float.
 
 The table answers `World::building_table()`. Since WP6.2 placement reads it ("Placement" below); production reads it
-since WP6.5 (`production.md`) and power (WP6.4) will too. `BuildingStats` has one field that is not in the data table's digest, the
+since WP6.5 (`production.md`) and power since WP6.4 (`power.md`). `BuildingStats` has one field that is not in the data table's digest, the
 `build_radius` of the anchor in whole cells (from the `build_radius` flag of the record, the fraction of a
 decimal dropped); it has a digest of its own (`BuildingTable::placement_digest`) so the WP6.1 digest below stays
 as it was pinned.
