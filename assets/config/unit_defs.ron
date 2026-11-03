@@ -12,8 +12,8 @@
 //
 // Units of measure: distances, sizes and sight in cells (1 cell = 4 m, B12);
 // speed in cells per game second (20 ticks); build_seconds in game seconds;
-// turn_rate in facing steps (256 per full turn) per tick; turret_rate (optional, vehicles with a
-// glTF `turret` part) the same for the turret, which turns apart from the hull (WP4.5); cost in credits;
+// turn_rate in facing steps (256 per full turn) per tick; turret_rate (optional, vehicles and armed defence structures with a
+// glTF `turret` part) the same for the turret, which turns apart from the hull (WP4.5, WP6.7); cost in credits;
 // power in power units (+ produces, - uses); hp abstract.
 //
 // What content/units.md states is used as is: roles, cost, power, hp, speed,
@@ -146,7 +146,7 @@
             kind: 6, id: "defence_tower", factions: [Meridian, Veyran], category: Structure,
             building: (function: Defence, requires: ["barracks"]),
             cost: 500, build_seconds: 20, hp: 600, armor: "structure", power: -20,
-            footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"],
+            footprint: (width: 1, height: 1), sight: 7, weapons: ["tower_gun"], turret_rate: 12,
             model: Glb("testpack_v1/models/verdedigingstoren.glb"), strategic_icon: Square,
             models: {
                 Meridian: Glb("set_v4/meridian_defence_tower.glb"),
@@ -160,7 +160,7 @@
             kind: 7, id: "advanced_defences", factions: [Meridian, Veyran], category: Structure,
             building: (function: Defence, requires: ["defence_tower", "radar"]),
             cost: 900, build_seconds: 35, hp: 800, armor: "structure", power: -40,
-            footprint: (width: 2, height: 2), sight: 8, weapons: ["emplacement_gun"],
+            footprint: (width: 2, height: 2), sight: 8, weapons: ["emplacement_gun"], turret_rate: 8,
             model: Shape(Cube), strategic_icon: Square,
             models: {
                 Meridian: Glb("set_v4/meridian_advanced_defences.glb"),
@@ -516,7 +516,7 @@
             kind: 39, id: "automated_gun", factions: [Neutral], category: Structure,
             building: (function: Defence),
             hp: 700, armor: "structure", footprint: (width: 1, height: 1), sight: 8,
-            weapons: ["automated_gun"],
+            weapons: ["automated_gun"], turret_rate: 16,
             flags: (fires_at_all: true),
             model: Glb("set_v4/network_automated_gun.glb"), strategic_icon: Square,
             icon: "automated_gun",
@@ -534,7 +534,7 @@
             kind: 41, id: "unmanned_artillery", factions: [Neutral], category: Structure,
             building: (function: Defence),
             hp: 300, armor: "structure", footprint: (width: 2, height: 2), sight: 6,
-            weapons: ["battery_shell"],
+            weapons: ["battery_shell"], turret_rate: 6,
             model: Glb("set_v4/network_unmanned_artillery.glb"), strategic_icon: Square,
             icon: "unmanned_artillery",
             // placeholder: footprint, sight, model, weapon. "Fires when uplink alive" is

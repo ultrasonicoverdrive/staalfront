@@ -572,6 +572,8 @@ impl World {
             if let Some(config) = &self.targeting.config {
                 h.write_u8(SECTION_TARGETING);
                 targeting::write_hash(&mut h, config, e);
+                // Defences (WP6.7): the targets of the armed structures; nothing without one.
+                targeting::write_defence_hash(&mut h, e, &self.units, &self.arsenal);
             }
         }
         // Destruction (WP5.5): the settings, the wrecks, the scores and the kills of each unit. Only in

@@ -85,9 +85,10 @@ use sf_math::hash::Fnv1a64;
 use sf_math::{Fx, Vec2};
 
 use crate::behavior::Behavior;
+use crate::buildings::BuildingTable;
 use crate::crowd::Index;
 use crate::entities::{Entities, NO_DEF};
-use crate::ids::{EntityId, Tick};
+use crate::ids::{EntityId, PlayerId, Tick};
 use crate::orders::{self, GuardTarget, Order, live_slot, radius_of};
 use crate::units::{UnitClass, UnitTable};
 use crate::weapons::Arsenal;
@@ -270,6 +271,10 @@ pub(crate) struct Context<'a> {
     /// The smallest and largest valid position (for beginning an order).
     pub bounds: (Vec2, Vec2),
     pub map: (u32, u32),
+    /// The building table (a structure that uses power needs it to be on).
+    pub buildings: &'a BuildingTable,
+    /// The players whose defences have no power this tick (`World::defences_powered`); ascending.
+    pub unpowered: &'a [PlayerId],
 }
 
 /// What the stance of a unit lets it do, from its current order.
@@ -378,6 +383,16 @@ impl Targeting {
                 continue;
             }
             let stats = cx.units.at(e.def[i] as usize);
+            if stats.class() == UnitClass::Structure {
+                // Defences (WP6.7): a weaponless structure (a bunker) does nothing at all.
+                if cx.arsenal.is_armed(e.def[i]) {
+                    if defence_check(e, i, cx) && e.turret_target[i].is_none() && e.eng[i].cool == 0
+                    {
+                        scanners.push(i);
+                    }
+                }
+                continue;
+            }
             if stats.class() != UnitClass::Mobile {
                 continue;
             }
@@ -430,9 +445,8 @@ impl Targeting {
         });
     }
 
-    /// Unit `i` looks for the best target in reach.
-    fn scan(&mut self, e: &mut Entities, i: usize, cx: &Context<'_>) {
-        e.eng[i].cool = cx.config.scan_cooldown;
+    /// The best target in reach of entity `i`, with the reach of the weapon that picked it.
+    fn best_target(&mut self, e: &Entities, i: usize, cx: &Context<'_>) -> Option<(usize, Fx)> {
         let def = e.def[i];
         let farthest = cx
             .arsenal
@@ -465,8 +479,21 @@ impl Targeting {
                 }
             }
         }
-        if let Some((_, j, reach)) = best {
-            engage(e, i, j, false, reach, cx);
+        best.map(|(_, j, reach)| (j, reach))
+    }
+
+    /// Unit `i` looks for the best target in reach.
+    fn scan(&mut self, e: &mut Entities, i: usize, cx: &Context<'_>) {
+        e.eng[i].cool = cx.config.scan_cooldown;
+        if let Some((j, reach)) = self.best_target(e, i, cx) {
+            if e.order[i] == Order::Idle && e.cell[i] != crate::terrain::NO_CELL {
+                // A structure (WP6.7): no order; the turret target is the target.
+                e.turret_target[i] = Some(EntityId::new(j as u32, e.generation[j]));
+                e.eng[i].aim = e.pos[j];
+                e.eng[i].reach = reach;
+            } else {
+                engage(e, i, j, false, reach, cx);
+            }
         }
     }
 
@@ -585,6 +612,73 @@ fn check(e: &mut Entities, i: usize, victim: EntityId, cx: &Context<'_>) {
         e.eng[i].aim = e.pos[j];
     } else {
         end_engagement(e, i, cx.tick, cx.bounds);
+    }
+}
+
+/// Whether the structure in slot `i` may fire now: it stands (complete, hit points left) and, if
+/// its kind uses power, its owner's defences have power. Clears its target when it may not, or when
+/// the target is gone, at zero, no longer an enemy or out of reach of every weapon that hurts it.
+/// Counts the scan cooldown down. Returns whether the structure may look for a new target.
+fn defence_check(e: &mut Entities, i: usize, cx: &Context<'_>) -> bool {
+    e.eng[i].cool = e.eng[i].cool.saturating_sub(1);
+    let stats = cx.units.at(e.def[i] as usize);
+    let standing = e.build_left[i] == 0 && (e.hp[i] > 0 || stats.hp == 0);
+    let dark = cx.buildings.get(e.kind[i]).is_some_and(|b| b.power < 0)
+        && cx.unpowered.binary_search(&e.owner[i]).is_ok();
+    if !standing || dark {
+        e.turret_target[i] = None;
+        return false;
+    }
+    if let Some(victim) = e.turret_target[i] {
+        let keep = live_slot(e, victim)
+            .filter(|&j| targetable(e, j) && e.owner[j] != e.owner[i])
+            .is_some_and(|j| {
+                let d2 = (e.pos[j] - e.pos[i]).length_squared();
+                cx.arsenal
+                    .best_against(e.def[i], e.def[j], d2, radius_of(e, j, cx.units), true)
+                    .is_some()
+            });
+        if keep {
+            return false;
+        }
+        e.turret_target[i] = None;
+    }
+    true
+}
+
+/// Written first into the defences section.
+const DEFENCE_TAG: u8 = b'd';
+
+/// Writes the defences section of the checksum: the target of every live armed structure, in slot
+/// order. Nothing at all when the world has no armed structure (WP6.7).
+pub(crate) fn write_defence_hash(
+    h: &mut Fnv1a64,
+    e: &Entities,
+    units: &UnitTable,
+    arsenal: &Arsenal,
+) {
+    let armed = |i: usize| {
+        e.alive[i]
+            && e.def[i] != NO_DEF
+            && units.at(e.def[i] as usize).class() == UnitClass::Structure
+            && arsenal.is_armed(e.def[i])
+    };
+    let n = (0..e.len()).filter(|&i| armed(i)).count();
+    if n == 0 {
+        return;
+    }
+    h.write_u8(DEFENCE_TAG);
+    h.write_u64(n as u64);
+    for i in (0..e.len()).filter(|&i| armed(i)) {
+        h.write_u32(i as u32);
+        match e.turret_target[i] {
+            Some(id) => {
+                h.write_u8(1);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
+            None => h.write_u8(0),
+        }
     }
 }
 

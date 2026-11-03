@@ -723,14 +723,14 @@ impl Ctx<'_> {
                 if u.category.mobile() {
                     return Err(self.here("an Infantry, Vehicle or Vessel needs a movement class"));
                 }
-                if !u.speed.is_zero()
-                    || u.water_speed.is_some()
-                    || u.turn_rate != 0
-                    || u.turret_rate != 0
+                if !u.speed.is_zero() || u.water_speed.is_some() || u.turn_rate != 0 {
+                    return Err(self.here("speed, water_speed and turn_rate need a movement class"));
+                }
+                // An armed structure may have a turret (WP6.7); nothing else without a class.
+                if u.turret_rate != 0 && (u.category != Category::Structure || u.weapons.is_empty())
                 {
-                    return Err(self.here(
-                        "speed, water_speed, turn_rate and turret_rate need a movement class",
-                    ));
+                    return Err(self
+                        .here("turret_rate needs a movement class, or a Structure with a weapon"));
                 }
             }
         }
