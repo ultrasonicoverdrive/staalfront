@@ -121,6 +121,18 @@ pub struct Options {
     pub match_file: Option<Option<PathBuf>>,
     pub screen: ScreenMode,
     pub present: Present,
+    /// `--windowed`, `--fullscreen` or `--resolution` was given: the window mode of the command line
+    /// wins over the player's settings (WP11.5a).
+    pub screen_given: bool,
+    /// `--present` was given: it wins over the vsync setting.
+    pub present_given: bool,
+    /// The game starts with the start menu (WP11.5a): `sf_game` with no flag that chooses or tunes a scene
+    /// and no `--bench`, `--shots` or `--exit-after`, so scripts and benchmarks that name what they run
+    /// do not meet a menu. `--menu start` asks for it.
+    pub menu: bool,
+    /// `--menu NAME` (WP11.5a): open this menu at the start, or for `pause` and the settings pages once
+    /// `--shots-tick` is reached (screenshots). The pause menu and the settings lie over the scene.
+    pub open_menu: Option<crate::menu::Preset>,
     /// Allocate the unit instance buffers at their largest size at load
     /// (the fix of follow-up 14); `--no-reserve` turns it off to reproduce
     /// the hitches.
@@ -169,6 +181,10 @@ impl Options {
             match_file: None,
             screen: ScreenMode::Windowed,
             present: Present::Vsync,
+            screen_given: false,
+            present_given: false,
+            menu: false,
+            open_menu: None,
             reserve: true,
             sim_delay: Duration::ZERO,
             warnings: Vec::new(),
@@ -180,6 +196,8 @@ impl Options {
         let mut bench_out = PathBuf::from("bench.json");
         let mut screen_given = false;
         let mut present_given = false;
+        // A flag that chooses or tunes the scene: the player who gave it does not want the menu.
+        let mut scene_flag = false;
 
         let mut args = args.into_iter().peekable();
         while let Some(arg) = args.next() {
@@ -193,6 +211,7 @@ impl Options {
             };
             match arg.as_str() {
                 "--units" => {
+                    scene_flag = true;
                     if let Some(v) = value(&mut o.warnings) {
                         match v.parse() {
                             Ok(n) => {
@@ -209,11 +228,29 @@ impl Options {
                         o.models = (v != "none").then_some(v);
                     }
                 }
-                "--crowd" => o.scene = Scene::Crowd,
-                "--sandbox" => o.scene = Scene::Sandbox,
+                "--crowd" => {
+                    o.scene = Scene::Crowd;
+                    scene_flag = true;
+                }
+                "--sandbox" => {
+                    o.scene = Scene::Sandbox;
+                    scene_flag = true;
+                }
+                "--menu" => {
+                    let name = value(&mut o.warnings);
+                    match name.as_deref().map(crate::menu::Preset::parse) {
+                        Some(Some(preset)) => o.open_menu = Some(preset),
+                        Some(None) => o.warnings.push(format!(
+                            "--menu {}: expected start, pause, keys, graphics, accessibility or sound",
+                            name.unwrap_or_default()
+                        )),
+                        None => {}
+                    }
+                }
                 "--match" => {
                     // A file name follows, or the next flag does (or nothing): the default match.
                     o.scene = Scene::Match;
+                    scene_flag = true;
                     o.match_file = Some(
                         args.next_if(|next| !next.starts_with("--"))
                             .map(PathBuf::from),
@@ -250,8 +287,12 @@ impl Options {
                         Some((x.parse().ok()?, y.parse().ok()?))
                     });
                 }
-                "--build" => o.build = value(&mut o.warnings),
+                "--build" => {
+                    scene_flag = true;
+                    o.build = value(&mut o.warnings);
+                }
                 "--build-at" => {
+                    scene_flag = true;
                     o.build_at = value(&mut o.warnings).and_then(|v| {
                         let (x, y) = v.split_once(',')?;
                         Some((x.parse().ok()?, y.parse().ok()?))
@@ -313,8 +354,14 @@ impl Options {
                         }
                     }
                 }
-                "--fight" => o.fight = true,
-                "--harvest" => o.harvest = true,
+                "--fight" => {
+                    o.fight = true;
+                    scene_flag = true;
+                }
+                "--harvest" => {
+                    o.harvest = true;
+                    scene_flag = true;
+                }
                 "--windowed" => {
                     o.screen = ScreenMode::Windowed;
                     screen_given = true;
@@ -371,6 +418,15 @@ impl Options {
         if !demo && o.scene == Scene::Crowd && !units_given {
             o.units = GAME_UNITS;
         }
+        o.screen_given = screen_given;
+        o.present_given = present_given;
+        // The start menu (WP11.5a): the plain `sf_game`, or `--menu start`. Anything that names what to
+        // run, or measures, or screenshots, or ends by itself skips it.
+        let plain = !demo && !scene_flag && !bench && o.shots.is_none() && o.exit_after.is_none();
+        o.menu = match o.open_menu {
+            Some(preset) => !demo && preset == crate::menu::Preset::Start,
+            None => plain,
+        };
         if bench {
             o.bench = Some(BenchOptions {
                 seconds: bench_seconds,

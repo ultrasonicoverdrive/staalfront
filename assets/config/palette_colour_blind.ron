@@ -1,0 +1,24 @@
+// The colour-blind safe set of player colours (WP11.5a, docs/rules/menus.md). The player colours in
+// units.ron stay the standard set; this one takes their place when the player chooses it in the
+// settings. Read by sf_game::palette, compiled into the game.
+//
+// The four colours are four of the seven of the Okabe-Ito palette, chosen by trying every set of four
+// against the simulated colour vision of protanopia, deuteranopia and tritanopia (the check is the test
+// `the_colour_blind_set_stays_apart_for_every_common_colour_vision` in tests/palette_cvd.rs). Same
+// order as units.ron: player 0 is the warm colour (red there, vermilion here), 1 blue, 2 yellow, 3
+// the fourth (magenta there, reddish purple here).
+(
+    players: [
+        (name: "vermilion", srgb: (213, 94, 0)),
+        (name: "blue", srgb: (0, 114, 178)),
+        (name: "yellow", srgb: (240, 228, 66)),
+        (name: "reddish purple", srgb: (204, 121, 167)),
+    ],
+    // The dots of the minimap, same order: the same colours.
+    minimap: [
+        (213, 94, 0),
+        (0, 114, 178),
+        (240, 228, 66),
+        (204, 121, 167),
+    ],
+)

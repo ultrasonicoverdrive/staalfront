@@ -623,6 +623,17 @@ impl Instancer {
         &self.style
     }
 
+    /// Put another set of player colours over the first colours of the style (WP11.5a). The colour of
+    /// a unit is read from the style each frame, so this changes the next
+    /// [`Instancer::build_frame`] and nothing is re-bucketed. Refused as [`Style::with_palette`] is.
+    pub fn set_palette(
+        &mut self,
+        colours: &[(String, [u8; 3])],
+    ) -> Result<(), crate::style::StyleError> {
+        self.style = self.style.with_palette(colours)?;
+        Ok(())
+    }
+
     /// The models: their chains, and the meshes the renderer needs.
     pub fn models(&self) -> &ModelSet {
         &self.models
@@ -1545,6 +1556,30 @@ mod tests {
                 "player {p} missing"
             );
         }
+    }
+
+    /// WP11.5a: `set_palette` changes the colour of the very next frame, for the players it names only.
+    #[test]
+    fn a_new_palette_colours_the_next_frame_without_a_new_tick() {
+        let mut inst = instancer(1_200, 128.0);
+        let cam = camera(1.0, (64.0, 64.0), 128.0);
+        let frustum = Frustum::from_view_proj(cam.view_proj());
+        let has = |inst: &Instancer, lin: [f32; 3]| {
+            inst.instances(MeshKind::Cube)
+                .iter()
+                .any(|i| i.color[..3] == lin)
+        };
+        inst.build(&frustum, 0.0, |_, _| 0.0);
+        let style = Style::embedded();
+        assert!(has(&inst, style.linear(0)) && has(&inst, style.linear(1)));
+        let mine = [255u8, 128, 0];
+        inst.set_palette(&[("orange".to_owned(), mine)]).unwrap();
+        inst.build(&frustum, 0.0, |_, _| 0.0);
+        let orange = mine.map(crate::style::srgb_to_linear);
+        assert!(has(&inst, orange), "player 0 is orange now");
+        assert!(!has(&inst, style.linear(0)), "and no longer red");
+        assert!(has(&inst, style.linear(1)), "player 1 is as it was");
+        assert!(inst.set_palette(&[]).is_err());
     }
 
     #[test]

@@ -48,11 +48,13 @@ use crate::fx::{DrawnAnchors, FxFrame, FxPlayer};
 use crate::fx_sound::{FxSound, start_audio};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
+use crate::menu::{Change, Event, Live, Menu, Outcome, Preset};
 use crate::placement_view::{self, GhostFrame};
 use crate::population::Population;
 use crate::roster::{self, Roster};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
 use crate::selection_view::{self, FrameGeometry, SelectionView};
+use crate::settings::{Settings, Store};
 use crate::sidebar::Catalog;
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
@@ -298,6 +300,20 @@ pub struct Runner {
     /// The operating system's cursor is hidden right now (only ever while
     /// the software cursor is drawn).
     os_cursor_hidden: bool,
+    /// The menus (WP11.5a, [`crate::menu`]) and the player's settings they change. While one is open the
+    /// game behind it gets no input and the sim is held.
+    menu: Menu,
+    /// Where the settings are written when they change.
+    store: Store,
+    /// How the sim thread is made, kept so that a restart makes the very same one.
+    sim_config: SimConfig,
+    /// The sim thread was made and never started: the start menu stands over a scene nobody played.
+    pristine: bool,
+    /// The menus work in this scene: the sandbox and the match, not the crowd or a benchmark, where
+    /// Esc still ends the program.
+    menus: bool,
+    /// `--menu NAME`: open it once the sim has reached `--shots-tick` (for screenshots).
+    pending_menu: Option<Preset>,
     /// Set when the renderer could not start or a frame failed; `main` then
     /// exits with a non-zero code.
     failed: Arc<AtomicBool>,
@@ -340,6 +356,24 @@ impl Runner {
         lod: LodConfig,
         pack: Option<LoadedPack>,
         failed: Arc<AtomicBool>,
+    ) -> Result<Self, String> {
+        // The clock is held until the window and the renderer exist (`on_start`).
+        let sim = SimConfig {
+            start_paused: true,
+            extra_tick_time: options.sim_delay,
+            ..SimConfig::realtime()
+        };
+        Self::with_sim(options, map, lod, pack, failed, sim)
+    }
+
+    /// Like [`Runner::new`] with the sim thread made as `sim` says (the tests step it by hand).
+    pub fn with_sim(
+        options: Options,
+        map: Map,
+        lod: LodConfig,
+        pack: Option<LoadedPack>,
+        failed: Arc<AtomicBool>,
+        sim_config: SimConfig,
     ) -> Result<Self, String> {
         let now = Instant::now();
         // B12: the sim counts cells, the map and everything drawn metres.
@@ -384,15 +418,8 @@ impl Runner {
         // From here on the world belongs to the sim thread. Its clock stays
         // held until the window and the renderer exist (`on_start`), so the
         // units do not wander off while the GPU starts.
-        let sim = SimHandle::spawn(
-            world,
-            SimConfig {
-                start_paused: true,
-                extra_tick_time: options.sim_delay,
-                ..SimConfig::realtime()
-            },
-        )
-        .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
+        let sim = SimHandle::spawn(world, sim_config.clone())
+            .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
         let snap = sim.latest();
 
         let map_metres = (map.width() as f32, map.height() as f32);
@@ -451,6 +478,18 @@ impl Runner {
                 .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
                 .ok()
         });
+        // The menus (WP11.5a) belong to the scenes a player plays. The start menu stands over the
+        // scene it was started with, which is held until a choice is made.
+        let menus = matches!(options.scene, Scene::Sandbox | Scene::Match) && options.bench.is_none();
+        let shipped = sf_engine::Bindings::load(&assets_root.join("config/input.ron"))
+            .unwrap_or_else(|_| sf_engine::Bindings::builtin());
+        let mut menu = Menu::new(Settings::default(), shipped);
+        if menus && options.menu {
+            menu.open_start();
+        }
+        let pending_menu = options
+            .open_menu
+            .filter(|p| menus && *p != Preset::Start);
         Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -518,8 +557,330 @@ impl Runner {
             rejected_seen: 0,
             produce_pick: 0,
             refusal: None,
+            menu,
+            store: Store::new(None),
+            sim_config,
+            pristine: true,
+            menus,
+            pending_menu,
             failed,
         })
+    }
+
+    /// The player's settings and where they are kept (WP11.5a). `Runner::new` starts with the
+    /// defaults and keeps nothing; `sf_game::run` reads the file first, because the window and the
+    /// present mode depend on it.
+    pub fn set_settings(&mut self, settings: Settings, store: Store) {
+        self.menu.set_settings(settings);
+        self.store = store;
+    }
+}
+
+/// The menus and the scene swap (WP11.5a, [`crate::menu`], `docs/rules/menus.md`).
+impl Runner {
+    /// The menu `--menu` asked for, once the sim has reached `--shots-tick`.
+    fn open_pending_menu(&mut self, ctx: &mut Context) {
+        if let Some(preset) = self.pending_menu
+            && self.snap.tick().0 >= self.options.shots_tick
+        {
+            self.pending_menu = None;
+            let out = self.menu.open_preset(preset);
+            self.apply_outcomes(ctx, out);
+        }
+    }
+
+    /// This frame's menu input: what the menu's buttons were clicked for, Esc, and the key a
+    /// rebinding waits for. In a scene without menus (the crowd, the benchmark) there is none.
+    fn handle_menu(&mut self, ctx: &mut Context) {
+        let mut events: Vec<Event> = self
+            .hud
+            .take_menu_actions()
+            .into_iter()
+            .map(Event::Click)
+            .collect();
+        if self.menus {
+            if self.menu.capturing().is_some() {
+                // Every key goes to the menu, Esc (which ends the wait) included.
+                events.extend(ctx.input().keys_pressed_now().into_iter().map(Event::Key));
+            } else if ctx.actions().pressed(Action::Quit) {
+                if self.menu.is_open() {
+                    events.push(Event::Escape);
+                } else {
+                    let out = self.menu.open_pause();
+                    self.apply_outcomes(ctx, out);
+                }
+            }
+        }
+        for event in events {
+            let out = self.menu.handle(event);
+            self.apply_outcomes(ctx, out);
+        }
+    }
+
+    /// Does what the menu asked for.
+    fn apply_outcomes(&mut self, ctx: &mut Context, outcomes: Vec<Outcome>) {
+        for outcome in outcomes {
+            match outcome {
+                Outcome::Paused | Outcome::MainMenu => {
+                    // Not a command: the sim thread simply steps no tick until it is released.
+                    self.sim.set_paused(true);
+                    self.pointer.cancel();
+                }
+                Outcome::Resumed => self.sim.set_paused(false),
+                Outcome::Restart => self.begin(None),
+                Outcome::StartMatch => self.begin(Some(Scene::Match)),
+                Outcome::StartSandbox => self.begin(Some(Scene::Sandbox)),
+                Outcome::Quit => {
+                    println!("quit requested");
+                    ctx.request_exit();
+                }
+                Outcome::Changed(change) => self.apply_change(ctx, change),
+            }
+        }
+    }
+
+    /// Plays `scene` from its start, or the same scene again (`None`): a new world from the same
+    /// match file or sandbox setup, so the same seed and the same starting objects. The sim of the
+    /// scene that was left is stopped and joined.
+    fn begin(&mut self, scene: Option<Scene>) {
+        // The scene under the start menu has not run a tick: playing it needs no new world.
+        if self.pristine && scene == Some(self.options.scene) {
+            self.sim.start();
+            self.pristine = false;
+            return;
+        }
+        let mut options = self.options.clone();
+        if let Some(scene) = scene {
+            options.scene = scene;
+            options.match_file = (scene == Scene::Match).then_some(None);
+        }
+        options.menu = false;
+        options.open_menu = None;
+        let made = make_map(&options).and_then(|map| {
+            // The pack goes into the new runner; if that fails it is gone (only `--models` gives
+            // one, and only a scene that cannot be built fails).
+            Runner::with_sim(
+                options.clone(),
+                map,
+                self.lod,
+                self.pack.take(),
+                self.failed.clone(),
+                self.sim_config.clone(),
+            )
+        });
+        match made {
+            Ok(fresh) => {
+                self.replace_scene(fresh, options);
+                self.attach_scene();
+                self.apply_look_settings();
+                self.sim.start();
+                self.pristine = false;
+            }
+            Err(e) => {
+                eprintln!("sf_game: cannot start: {e}");
+                self.menu.open_start();
+                self.sim.set_paused(true);
+            }
+        }
+    }
+
+    /// Takes everything that belongs to a scene from `fresh` (a runner built for it) and leaves the
+    /// window, the renderer, the audio, the HUD, the settings and the menu as they are. Every field of
+    /// the runner is named, so a field that WP adds later has to be put on one side or the other
+    /// before this compiles.
+    fn replace_scene(&mut self, fresh: Runner, options: Options) {
+        let Runner {
+            // The scene.
+            map,
+            ground,
+            cell_layer,
+            cells_tick,
+            ore_view,
+            behind_seen,
+            instancer,
+            fx,
+            pack,
+            looks,
+            buildings,
+            cells,
+            units,
+            skirmish_units,
+            sim,
+            snap,
+            hovered,
+            selection,
+            pointer,
+            selection_view,
+            hits,
+            hover,
+            cursor_kind,
+            build,
+            catalog,
+            produce_pick,
+            rejected_seen,
+            refusal,
+            camera,
+            // The shell.
+            started: _,
+            report_at: _,
+            ticks: _,
+            frames: _,
+            exit_after: _,
+            renderer: _,
+            icons: _,
+            audio: _,
+            ra_play_error: _,
+            hud: _,
+            fps_shown: _,
+            lod: _,
+            fx_sound: _,
+            music_load_logged: _,
+            stats: _,
+            terrain: _,
+            draw_calls: _,
+            frame_ms: _,
+            build_ms: _,
+            pick_ms: _,
+            upload_ms: _,
+            render_ms: _,
+            tick_ms: _,
+            last_frame: _,
+            auto_zoom: _,
+            unit_view: _,
+            hover_at: _,
+            debug: _,
+            viewport: _,
+            options: _,
+            bench: _,
+            shots: _,
+            sim_micros_seen: _,
+            cursor_art: _,
+            os_cursor_hidden: _,
+            menu: _,
+            store: _,
+            sim_config: _,
+            pristine: _,
+            menus: _,
+            pending_menu: _,
+            failed: _,
+        } = fresh;
+        self.map = map;
+        self.ground = ground;
+        self.cell_layer = cell_layer;
+        self.cells_tick = cells_tick;
+        self.ore_view = ore_view;
+        self.behind_seen = behind_seen;
+        self.instancer = instancer;
+        self.fx = fx;
+        self.pack = pack;
+        self.looks = looks;
+        self.buildings = buildings;
+        self.cells = cells;
+        self.units = units;
+        self.skirmish_units = skirmish_units;
+        // The old sim thread is stopped and joined as its handle is dropped.
+        self.sim = sim;
+        self.snap = snap;
+        self.hovered = hovered;
+        self.selection = selection;
+        self.pointer = pointer;
+        self.selection_view = selection_view;
+        self.hits = hits;
+        self.hover = hover;
+        self.cursor_kind = cursor_kind;
+        self.build = build;
+        self.catalog = catalog;
+        self.produce_pick = produce_pick;
+        self.rejected_seen = rejected_seen;
+        self.refusal = refusal;
+        self.camera = camera;
+        self.camera.set_viewport(self.viewport.0, self.viewport.1);
+        self.options = options;
+        // A new game: nothing has been counted, played or heard yet.
+        self.sim_micros_seen = 0;
+        self.ticks = 0;
+        self.fx_sound.reset();
+    }
+
+    /// Gives the renderer and the minimap the scene that was just swapped in (the same steps as
+    /// `on_start` takes for the first one).
+    fn attach_scene(&mut self) {
+        let Some(mut renderer) = self.renderer.take() else {
+            return;
+        };
+        renderer.set_terrain(&self.map);
+        renderer.set_terrain_lod(self.lod);
+        if let Some(layer) = self.cell_layer.take() {
+            renderer.set_cell_layer(layer);
+        }
+        let (ground, map) = (&self.ground, &self.map);
+        renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
+            ground.height(f64::from(x), f64::from(z)) as f32
+        }));
+        if self.options.reserve {
+            renderer.reserve_units(&self.instancer);
+        }
+        self.hud.rebake_minimap(&renderer, &self.map);
+        self.renderer = Some(renderer);
+        self.ore_view.forget();
+        self.show_ore();
+    }
+
+    /// The UI scale and the player colours of the settings, for a scene that was just made and at the start.
+    fn apply_look_settings(&mut self) {
+        let settings = self.menu.settings();
+        let (scale, choice) = (settings.ui_scale, settings.palette);
+        self.hud.set_user_scale(scale);
+        self.apply_palette(choice, false);
+    }
+
+    /// Puts the player colours of `choice` on the units, the icons and the minimap. The standard set
+    /// is what the style has: it is put back only when `restore` (the player came back from the
+    /// other set), not at the start, so an edited `units.ron` keeps its colours.
+    fn apply_palette(&mut self, choice: crate::settings::PaletteChoice, restore: bool) {
+        let colours = match crate::palette::player_colours(choice) {
+            Some(colours) => Some(colours),
+            None if restore => Some(crate::palette::standard_colours()),
+            None => None,
+        };
+        if let Some(colours) = colours
+            && let Err(e) = self.instancer.set_palette(&colours)
+        {
+            eprintln!("sf_game: player colours: {e}");
+        }
+        self.hud.set_owner_dots(crate::palette::minimap_dots(choice));
+    }
+
+    /// A setting changed in the menu: apply it to the window, the engine or the picture, and write the
+    /// settings.
+    fn apply_change(&mut self, ctx: &mut Context, change: Change) {
+        use crate::settings::WindowMode;
+        let settings = self.menu.settings().clone();
+        match change {
+            Change::Window => ctx.set_fullscreen(settings.window == WindowMode::Borderless),
+            Change::FrameCap => ctx.set_frame_cap(settings.frame_cap),
+            Change::Vsync => {
+                if let Some(renderer) = &mut self.renderer {
+                    let present = if settings.vsync {
+                        sf_render::Present::Vsync
+                    } else {
+                        sf_render::Present::Uncapped
+                    };
+                    let info = renderer.set_present(present);
+                    println!(
+                        "present: {}{}",
+                        info.mode,
+                        info.note
+                            .as_ref()
+                            .map_or(String::new(), |n| format!(", NOTE: {n}"))
+                    );
+                }
+            }
+            Change::UiScale => self.hud.set_user_scale(settings.ui_scale),
+            Change::Palette => self.apply_palette(settings.palette, true),
+            Change::Keys => ctx.set_bindings(settings.effective_bindings(self.menu.shipped())),
+        }
+        self.store.save(&settings);
     }
 }
 
@@ -1551,6 +1912,9 @@ impl Runner {
             Ok(style) => {
                 // Keep the models; take the new palette and settings.
                 apply_looks(&mut self.instancer, &self.looks, self.pack.as_ref(), style);
+                // The player's own set of colours goes back over the new palette (WP11.5a).
+                let choice = self.menu.settings().palette;
+                self.apply_palette(choice, false);
                 println!("reloaded {}", units.display());
             }
             Err(e) => eprintln!(
@@ -1911,6 +2275,12 @@ impl App for Runner {
             }
         );
         self.audio = Some(audio);
+        // The player's keys over input.ron, the UI scale and the colours (WP11.5a). The window mode,
+        // the frame cap and the present mode were decided before the window was made
+        // (`settings::startup`).
+        self.menu.set_shipped(ctx.bindings().clone());
+        ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
+        self.apply_look_settings();
         let gpu_options = GpuOptions {
             present: self.options.present,
             // Screenshots copy the window frame out; nothing else needs it.
@@ -1992,8 +2362,12 @@ impl App for Runner {
                 ctx.request_exit();
             }
         }
-        // The window and the renderer exist: the sim's clock may run.
-        self.sim.start();
+        // The window and the renderer exist: the sim's clock may run, unless the start menu is
+        // open: then it runs when a game is chosen.
+        if !self.menu.is_open() {
+            self.sim.start();
+            self.pristine = false;
+        }
     }
 
     /// Nothing: the simulation steps on its own thread, with its own 20 Hz
@@ -2024,6 +2398,12 @@ impl App for Runner {
             self.frame_ms.push(d);
         }
         let dt = frame_dt.map_or(0.0, |d| d.as_secs_f64()).min(MAX_CAMERA_DT);
+        // The menus (WP11.5a): what the window is doing, and a menu that `--menu` asked for.
+        self.menu.set_live(Live {
+            fullscreen: ctx.is_fullscreen(),
+        });
+        self.open_pending_menu(ctx);
+        let menu_was_open = self.menu.is_open();
         self.update_debug_ui(ctx);
         self.shots_before_render();
         // Build the UI first (it may move the camera on a minimap click), then
@@ -2041,8 +2421,14 @@ impl App for Runner {
             result: self.snap.match_result(),
             sidebar: self.sidebar_model(),
         };
+        let menu = menu_was_open.then_some(&self.menu);
         self.hud
-            .frame(ctx, &mut self.camera, self.snap.views(), stats);
+            .frame(ctx, &mut self.camera, self.snap.views(), stats, menu);
+        // Clicks on the menu, Esc and the key a rebinding waits for (WP11.5a). A choice may swap the
+        // scene (a restart): from here on the frame is the new one's.
+        self.handle_menu(ctx);
+        // Whatever the menu did, nothing below is for the game while it was open or is now.
+        let menu_open = menu_was_open || self.menu.is_open();
         let scripted = self.scripted_pose(now);
         if let Some((zoom, focus, _)) = scripted {
             // The benchmark and the screenshots fly their own path; input is
@@ -2051,7 +2437,12 @@ impl App for Runner {
             self.camera.set_zoom(zoom);
             self.camera.set_focus(DVec2::new(focus.0, focus.1));
         } else {
-            let input = self.camera_input(ctx, dt);
+            // A menu takes the keys, the wheel and the screen edges too: the camera stands still.
+            let input = if menu_open {
+                CameraInput::default()
+            } else {
+                self.camera_input(ctx, dt)
+            };
             self.camera.update(dt, &input);
         }
         if self.renderer.is_some() {
@@ -2059,7 +2450,7 @@ impl App for Runner {
             if let Some(renderer) = &mut self.renderer {
                 renderer.set_view_proj(view_proj);
             }
-            // The cursor, unless the UI or an F1 panel has it.
+            // The cursor, unless the UI, an F1 panel or a menu has it.
             let blocked = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
             let cursor = self.hover_at.or_else(|| {
                 ctx.input()
@@ -2067,6 +2458,7 @@ impl App for Runner {
                     .filter(|_| !blocked)
                     .map(|(x, y)| (x as f32, y as f32))
             });
+            let cursor = cursor.filter(|_| !menu_open);
             self.build_units(alpha, cursor);
             self.build_effects(alpha, dt as f32);
             self.mark_selection();
@@ -2075,7 +2467,9 @@ impl App for Runner {
             self.draw_construction_bars();
             self.draw_storage_bars();
             self.draw_production();
-            let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
+            // Under a menu the game cursor is gone and the system's is back.
+            let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor)
+                .filter(|_| !menu_open);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
             if let Some(renderer) = &mut self.renderer {
@@ -2137,11 +2531,17 @@ impl App for Runner {
         // Decided once, before the handlers: the click that puts the structure
         // away must not also order the selection (handle_build ends build mode).
         let right_click = RightClick::for_frame(self.build.is_active());
-        self.handle_sidebar();
-        self.handle_build(ctx, now);
-        self.handle_production(ctx);
-        self.handle_selection(ctx);
-        self.handle_orders(ctx, right_click);
+        if menu_open {
+            // No click, key or drag reaches the sidebar, the map or the orders while a menu is open
+            // (WP11.5a); a drag the player had begun is dropped, not finished by the next click.
+            self.pointer.cancel();
+        } else {
+            self.handle_sidebar();
+            self.handle_build(ctx, now);
+            self.handle_production(ctx);
+            self.handle_selection(ctx);
+            self.handle_orders(ctx, right_click);
+        }
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {
             ctx.toggle_fullscreen();
@@ -2152,7 +2552,8 @@ impl App for Runner {
         // test-sound key and on a click that the UI did not take.
         let clicked = ctx.input().button_pressed(MouseButton::Left)
             && !self.hud.pointer_over_ui()
-            && !self.debug.pointer_over_panel();
+            && !self.debug.pointer_over_panel()
+            && !menu_open;
         if (actions.pressed(Action::PlayTestSound) || clicked)
             && let Some(audio) = &mut self.audio
         {
@@ -2167,7 +2568,9 @@ impl App for Runner {
                 ));
             audio.play_at("test_click", [at.x as f32, at.y as f32, at.z as f32]);
         }
-        if actions.pressed(Action::Quit) {
+        // Esc ends the program where there are no menus (the crowd, the benchmark); with menus it
+        // is the menu key, handled in `handle_menu`.
+        if actions.pressed(Action::Quit) && !self.menus {
             println!("quit requested");
             ctx.request_exit();
         }
@@ -2242,6 +2645,11 @@ impl App for Runner {
         self.reload_style(ctx, path);
         if path.file_name().is_some_and(|n| n == "ui.ron") {
             self.hud.reload_config(ctx.assets().root());
+        }
+        // The engine has read input.ron again; the player's own keys go back over it (WP11.5a).
+        if path.file_name().is_some_and(|n| n == "input.ron") {
+            self.menu.set_shipped(ctx.bindings().clone());
+            ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
         }
         println!("asset changed: {}", path.display());
     }
