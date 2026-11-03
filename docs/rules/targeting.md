@@ -54,8 +54,11 @@ decision to go somewhere; attack-move is the order for fighting on the way.
 | `AttackMove` | yes: it stops to fight and marches on after | no: it fires back only from where it is |
 | `Move`, `Attack`, or already engaged | no | no |
 
-Only mobile units choose. Structures take part when they can hold a target without an order, in the defence
-work package (WP6.7): a structure takes no order, and an `Order::Pursue` on one would make it walk.
+Only mobile units choose **by taking an order**. Since WP6.7 a standing structure with a weapon also chooses, but not
+through an order: a structure takes no order (every command that gives one is ignored for it, and `Order::Pursue` is
+never given to it, so nothing can make it walk), it holds its target as the `turret_target` of its turret, scans on the
+same cooldown with the same candidates, score and key, and keeps a target on the same terms
+([`defences.md`](defences.md)). It does not turn on an attacker (no return fire).
 
 ## A tick of choosing
 
@@ -289,8 +292,9 @@ WP5.6.
 
 ## Not here (and where it goes)
 
-* **Structures choosing targets** (defence towers, emplacements): WP6.7. A structure takes no order, so it
-  needs a target without one; the scan and the key are written so that it can use them.
+* **Structures choosing targets** (defence towers, emplacements): WP6.7, done, see [`defences.md`](defences.md): the scan
+  and the key are shared, the target is the structure's `turret_target` and not an order. Still not done for structures:
+  return fire, following, and garrisoning.
 * **Firing at the ground**, and backing away from a target inside the minimum range.
 * **Threat-based priorities** (shoot what is shooting at you first, focus fire, retreat): the AI of WP9.3 gives
   commands for those; here a unit prefers what its weapon does most to, and the nearest.

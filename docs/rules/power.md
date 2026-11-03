@@ -71,12 +71,15 @@ everything, `at_speed_zero_everything_stops_and_nothing_is_paid_then_it_goes_on`
   A power plant under construction in a shortage is slowed like any other structure: the way out of a shortage is the
   floor, not an exemption.
 
-## Defences (the hook; WP6.7 uses it)
+## Defences (the hook; read since WP6.7)
 
 `World::defences_powered(player)` is true while the speed is at least `defence_cutoff_permille` (shipped 1000: any shortage
 switches defences off; 0 never does; 733 would keep them on down to a quarter missing,
-`the_defence_cutoff_is_a_number_of_the_rules`), and always in a world without power rules. **Nothing reads it yet**:
-the defences are WP6.7. It is in the snapshot's reach (`SimSnapshot::power_speed`) for the picture to use.
+`the_defence_cutoff_is_a_number_of_the_rules`), and always in a world without power rules. **Since WP6.7 the defences read it**
+([`defences.md`](defences.md)): a standing armed structure whose own `power` is below zero drops its target and fires
+nothing while its owner's `defences_powered` is false, and fires again after the next look once it is true (the totals are those
+of the start of the step, so a plant that falls in tick N silences the defences from tick N + 1). It is in the snapshot's
+reach (`SimSnapshot::power_speed`) for the picture to use.
 
 ## The checksum (section `I`)
 
@@ -122,9 +125,11 @@ Screenshots from the real renderer: `docs/screenshots/wp6.4/` (`power_screenshot
 
 ## Defences and structures that use no power
 
-The hook is per player. WP6.7 must also key on the structure's own number: the fortified bunker is a Defence with `power` 0 and
+The hook is per player, and WP6.7 also keys on the structure's own number: the fortified bunker is a Defence with `power` 0 and
 the decoy a Decoy with 0 (the follow-up noted in `docs/progress.md` since WP6.1), so a shortage switches off a defence only
-when `power < 0`.
+when `power < 0` (`the_bunker_does_nothing` and `a_defence_that_uses_power_is_silent_in_a_shortage_and_one_that_does_not_is_not`
+show a defence with power 0 firing in a shortage). The shipped cutoff stays 1000. For the M1 match: the opponent's tower goes
+dark when its plant has less than 420 of 600 hit points (measured, `defences.md`).
 
 ## Pinned scenario `power`
 
@@ -162,7 +167,7 @@ scenario (every unit stands still at the end, however fast it was made), which i
 
 ## Not done, on purpose
 
-Defences that read the hook (WP6.7); repair and sell (WP6.6); the AI's response to a shortage (phase 9); a power-plant-first
+Repair and sell (WP6.6); the AI's response to a shortage (phase 9); a power-plant-first
 build order or a "low power" announcement in sound (audio is another work package); a power cost for a structure while it
 goes up; a separate rule for the structures of the harvester dock or the radar (a radar that switches off in a shortage is a
 presentation of phase 11); damage stages by state rather than by hit points; counting power in the same tick the structure

@@ -658,19 +658,20 @@ pub(crate) fn write_defence_hash(
     units: &UnitTable,
     arsenal: &Arsenal,
 ) {
-    let armed = |i: usize| {
-        e.alive[i]
-            && e.def[i] != NO_DEF
-            && units.at(e.def[i] as usize).class() == UnitClass::Structure
-            && arsenal.is_armed(e.def[i])
-    };
-    let n = (0..e.len()).filter(|&i| armed(i)).count();
-    if n == 0 {
+    let armed: Vec<usize> = (0..e.len())
+        .filter(|&i| {
+            e.alive[i]
+                && e.def[i] != NO_DEF
+                && units.at(e.def[i] as usize).class() == UnitClass::Structure
+                && arsenal.is_armed(e.def[i])
+        })
+        .collect();
+    if armed.is_empty() {
         return;
     }
     h.write_u8(DEFENCE_TAG);
-    h.write_u64(n as u64);
-    for i in (0..e.len()).filter(|&i| armed(i)) {
+    h.write_u64(armed.len() as u64);
+    for i in armed {
         h.write_u32(i as u32);
         match e.turret_target[i] {
             Some(id) => {

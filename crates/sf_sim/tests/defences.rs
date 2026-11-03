@@ -520,7 +520,8 @@ fn a_world_without_power_rules_always_fires() {
     place(&mut w, TOWER, (30, 30));
     dummy(&mut w, at(30, 34));
     w.step();
-    assert_eq!(shots_by(&run(&mut w, 100), id_at(&w, (30, 30))) > 0, true);
+    let tower = id_at(&w, (30, 30));
+    assert!(shots_by(&run(&mut w, 100), tower) > 0);
 }
 
 #[test]

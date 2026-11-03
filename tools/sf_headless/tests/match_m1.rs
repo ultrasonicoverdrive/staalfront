@@ -509,6 +509,7 @@ fn the_opponents_tower_goes_dark_when_its_plant_is_below_420_of_600() {
         }
     }
     let (dark, lit) = (dark_hp.expect("it went dark"), last_powered_hp.unwrap());
+    println!("last powered with the plant at {lit} hit points, dark with it at {dark}");
     assert!(dark < 420, "dark at {dark} hit points");
     assert!(lit >= 420, "last lit at {lit} hit points");
 }

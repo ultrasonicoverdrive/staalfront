@@ -83,8 +83,8 @@ zero hit points stays where it fell. Construction does not advance on it and no 
 "complete" (`a_structure_at_zero_hit_points_does_not_finish_building_and_fires_no_event`). If hit points come back
 (repair, WP6.6) it carries on from where it stopped.
 
-Targeting (WP5.4): structures do not choose or take targets by themselves yet (WP6.7 for defences), so only an
-explicit attack order hurts one. **Gap:** a structure has its full hit points while it goes up. Whether it should be
+Targeting (WP5.4): a structure under construction does not choose targets (it does not stand; since WP6.7 a standing
+armed structure does, `defences.md`), and it can be hurt like any other. **Gap:** a structure has its full hit points while it goes up. Whether it should be
 fragile at first (hit points rising with progress) is balance for phase 15; it would be one more column, not a
 change of the rule.
 

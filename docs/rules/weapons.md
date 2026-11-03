@@ -110,8 +110,10 @@ tanks and the siege artillery carry theirs on the turret. A unit with a turret d
 toward its victim (`Order::Attack` leaves that to the turret), so a **hull** weapon on a unit with a
 turret would never be aimed; no shipped unit has one, and WP5.4 decided that the world **refuses** such a
 table (`WeaponsError::HullWeaponOnTurret`; the turret aims and the hull does not follow it for a weapon, see
-[`targeting.md`](targeting.md#range-check-and-the-duplicated-range)). The structures' weapons are `fire_arc: 128` (all round) because a structure
-has a fixed hull until the defensive buildings get turrets (WP6.7).
+[`targeting.md`](targeting.md#range-check-and-the-duplicated-range)). Since WP6.7 the four weapons of structures (`tower_gun`, `emplacement_gun`, `automated_gun`, `battery_shell`) are on a turret
+(`mount: Turret`, and their structures have a `turret_rate`) and have the default arc like every turret weapon; they were
+`fire_arc: 128` (all round) while a structure had a fixed hull. A structure without a turret (the frozen copies of
+the scenarios) still fires a hull weapon all round. See [`defences.md`](defences.md#the-turret).
 
 The data check: a weapon with `mount: Turret` on a unit without a `turret_rate` is refused when the
 units are loaded, with the line of the weapon in the unit's record. The world checks the same when it
