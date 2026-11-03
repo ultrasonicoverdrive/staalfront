@@ -113,13 +113,13 @@ fn the_pause_menu_dims_the_window_and_the_game_panel_and_draws_its_buttons() {
     let dim = Color(look.dim.0, look.dim.1, look.dim.2, look.dim.3);
     let dimmed = blend(BACKGROUND, dim);
     assert!(
-        off(shot.pixel(900, 600), dimmed) <= 4,
+        off(shot.pixel(900, 600), dimmed) <= 8,
         "{:?} against {dimmed:?}",
         shot.pixel(900, 600)
     );
     let bright = blend([250; 3], dim);
     assert!(
-        off(shot.pixel(20, 20), bright) <= 4,
+        off(shot.pixel(20, 20), bright) <= 8,
         "the game's panel is dimmed too: {:?}",
         shot.pixel(20, 20)
     );

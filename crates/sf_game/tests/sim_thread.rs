@@ -625,7 +625,7 @@ fn a_paused_run_has_the_checksums_of_an_uninterrupted_one() {
     let mut sim = orders_run(Duration::from_millis(20));
     sim.wait_for_tick(Tick(30), WAIT).unwrap();
     sim.set_paused(true);
-    thread::sleep(Duration::from_millis(100));
+    thread::sleep(Duration::from_millis(250));
     let held_at = sim.counters().ticks;
     let held_snap = sim.latest().tick();
     assert!(held_at >= 30);
