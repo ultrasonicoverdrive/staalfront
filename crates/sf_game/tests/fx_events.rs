@@ -349,3 +349,43 @@ fn a_shot_points_along_its_mount_turret_or_hull() {
     );
     assert!(on_hull > 0, "no hull or infantry shot");
 }
+
+/// A defence structure's flash points along its turret (WP6.7): in the `defences` scenario the tower and the
+/// emplacement shoot with their turrets turned away from the (fixed) hull of the structure, and the `Fire`
+/// event carries the turret's facing, with the body length of the footprint (1 and 2 cells of 4 m). The event
+/// is found by the structure's slot; a bunker never fires.
+#[test]
+fn a_defence_structures_flash_points_along_its_turret() {
+    let path: PathBuf =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/scenarios/defences.ron");
+    let s = Scenario::load(&path).expect("the defences scenario loads");
+    let mut world = s.build_world().unwrap();
+    let (mut turned, mut sizes) = (0, [0u32; 2]);
+    for _ in 0..1000 {
+        world.step();
+        let mut events = Vec::new();
+        record(&world, &mut events);
+        for ev in events
+            .iter()
+            .filter(|e| matches!(e.kind, FxKind::Fire { .. }))
+        {
+            assert_ne!(ev.shooter, 2, "the bunker fired");
+            if ev.shooter > 2 {
+                continue; // a tank or a rifleman
+            }
+            let v = world
+                .get(sf_sim::EntityId::new(ev.shooter, 0))
+                .expect("the structure stands");
+            let t = v.turret.expect("a defence has a turret");
+            assert_eq!(ev.facing, t.facing.raw(), "the flash uses the turret");
+            if t.facing != v.facing {
+                turned += 1;
+            }
+            // 4 m a cell: the tower is one cell, the emplacement two.
+            sizes[ev.shooter as usize] += 1;
+            assert_eq!(ev.size, if ev.shooter == 0 { 4.0 } else { 8.0 });
+        }
+    }
+    assert!(turned > 0, "no shot with the turret off the hull");
+    assert!(sizes[0] > 0 && sizes[1] > 0, "{sizes:?}");
+}
