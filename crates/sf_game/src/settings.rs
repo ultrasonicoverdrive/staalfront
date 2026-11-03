@@ -117,7 +117,9 @@ impl Settings {
         };
         let nearest = nearest.unwrap_or(look.defaults.ui_scale);
         if nearest != wanted {
-            said.push(format!("ui_scale {wanted} is not a choice; using {nearest}"));
+            said.push(format!(
+                "ui_scale {wanted} is not a choice; using {nearest}"
+            ));
             self.ui_scale = nearest;
         }
         match self.frame_cap {
@@ -237,8 +239,9 @@ pub fn settings_path(os: Os, env: &dyn Fn(&str) -> Option<String>) -> Option<Pat
             .map(|d| PathBuf::from(d).join("staalfront"))
             .or_else(|| get("HOME").map(|h| PathBuf::from(h).join(".config/staalfront"))),
         Os::Windows => get("APPDATA").map(|d| PathBuf::from(d).join("Staalfront")),
-        Os::MacOs => get("HOME")
-            .map(|h| PathBuf::from(h).join("Library/Application Support/Staalfront")),
+        Os::MacOs => {
+            get("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/Staalfront"))
+        }
     }
     .map(|dir| dir.join(FILE_NAME))
 }

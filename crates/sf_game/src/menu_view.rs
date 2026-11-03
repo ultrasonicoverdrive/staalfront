@@ -4,9 +4,9 @@
 //! menu is dimmed and takes the pointer ([`sf_ui::Ui::block_rect`]), so no click beside the panel
 //! is the game's.
 
-use sf_ui::{Anchor, Color, Rect, Ui};
+use sf_ui::{Anchor, Color, Rect, Ui, UiInput};
 
-use crate::menu::{Fit, Item, Kind, Model, Row};
+use crate::menu::{Fit, Item, Kind, Menu, Model, Row};
 use crate::menu_look::MenuLook;
 
 fn color(c: (u8, u8, u8, u8)) -> Color {
@@ -340,10 +340,18 @@ fn control(
         let y = rect.y + ((rect.h - size) * 0.5).floor();
         for rgb in &c.swatches {
             ui.fill(
-                Rect::new(x - outline, y - outline, size + 2.0 * outline, size + 2.0 * outline),
+                Rect::new(
+                    x - outline,
+                    y - outline,
+                    size + 2.0 * outline,
+                    size + 2.0 * outline,
+                ),
                 color(look.swatch.outline),
             );
-            ui.fill(Rect::new(x, y, size, size), Color::rgb(rgb[0], rgb[1], rgb[2]));
+            ui.fill(
+                Rect::new(x, y, size, size),
+                Color::rgb(rgb[0], rgb[1], rgb[2]),
+            );
             x += size + gap;
         }
         let text_px = ui.text_px();
@@ -379,7 +387,12 @@ pub fn frame(ui: &mut Ui, model: &Model, look: &MenuLook) -> Option<Item> {
     let border = px(look.panel.border_px, scale).max(1.0);
     let p = lay.panel;
     ui.fill(
-        Rect::new(p.x - border, p.y - border, p.w + 2.0 * border, p.h + 2.0 * border),
+        Rect::new(
+            p.x - border,
+            p.y - border,
+            p.w + 2.0 * border,
+            p.h + 2.0 * border,
+        ),
         color(look.panel.border),
     );
     ui.panel_rect(p);
@@ -466,6 +479,38 @@ pub fn frame(ui: &mut Ui, model: &Model, look: &MenuLook) -> Option<Item> {
     clicked
 }
 
+/// Starts the frame of a UI that may have a menu over the game (WP11.5a). Returns the input the game's
+/// widgets are built with: `real`, or, while a menu is open, an input that sees nothing (no cursor, no
+/// button), so nothing under the menu can be hovered, pressed or clicked.
+pub fn begin_frame(
+    ui: &mut Ui,
+    real: UiInput,
+    screen: (u32, u32),
+    dpi: f64,
+    menu_open: bool,
+) -> UiInput {
+    let game = if menu_open { UiInput::default() } else { real };
+    ui.begin_frame(game, screen, dpi);
+    game
+}
+
+/// Ends the frame begun by [`begin_frame`]: draws `menu` (if one is open) over the game's panels
+/// with the real input, and decides what the UI consumed. Returns the button of the menu that was
+/// clicked, if one was.
+pub fn finish_frame(ui: &mut Ui, real: UiInput, menu: Option<&Menu>) -> Option<Item> {
+    let mut clicked = None;
+    if let Some(menu) = menu {
+        ui.set_input(real);
+        let look = menu.look();
+        let fit = fit(ui.screen(), ui.scale(), look);
+        if let Some(model) = menu.model(fit) {
+            clicked = frame(ui, &model, look);
+        }
+    }
+    ui.end_frame();
+    clicked
+}
+
 /// The two buttons under the banner of a decided match (Restart, Main menu): drawn when no menu is
 /// open, and the button that was clicked is returned. `banner_bottom_px` is where the banner ends in
 /// logical pixels (its top and height, `match_look.ron`).
@@ -477,8 +522,18 @@ pub fn result_buttons(ui: &mut Ui, look: &MenuLook, banner_bottom_px: u16) -> Op
     let scale = ui.scale();
     let screen = ui.screen();
     // The pair is centred: the first button left of the middle, the second right of it.
-    let left = ui.place(screen, Anchor::Top, (-(size.0 + gap) * 0.5, f32::from(top)), size);
-    let right = ui.place(screen, Anchor::Top, ((size.0 + gap) * 0.5, f32::from(top)), size);
+    let left = ui.place(
+        screen,
+        Anchor::Top,
+        (-(size.0 + gap) * 0.5, f32::from(top)),
+        size,
+    );
+    let right = ui.place(
+        screen,
+        Anchor::Top,
+        ((size.0 + gap) * 0.5, f32::from(top)),
+        size,
+    );
     let _ = scale;
     let mut clicked = None;
     let w = &look.words;

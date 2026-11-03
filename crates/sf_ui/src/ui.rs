@@ -575,7 +575,7 @@ mod tests {
         let mut ui = Ui::new(UiConfig::default());
         let menu_btn = Rect::new(300.0, 300.0, 100.0, 30.0);
         let click = release(at(150.0, 110.0), MouseButton::Left);
-        let mut frame = |ui: &mut Ui, input: UiInput| {
+        let frame = |ui: &mut Ui, input: UiInput| {
             ui.begin_frame(input, SCREEN, 1.0);
             ui.set_input(UiInput::default());
             let game = ui.button("game", BTN, "Game", true);

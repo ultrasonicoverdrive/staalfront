@@ -47,7 +47,10 @@ fn the_settings_file_is_where_each_system_keeps_its_configuration() {
         Some(PathBuf::from("/h/.config/staalfront/settings.ron"))
     );
     assert_eq!(
-        p(Os::Windows, &[("APPDATA", "C:\\Users\\a\\AppData\\Roaming")]),
+        p(
+            Os::Windows,
+            &[("APPDATA", "C:\\Users\\a\\AppData\\Roaming")]
+        ),
         Some(PathBuf::from("C:\\Users\\a\\AppData\\Roaming").join("Staalfront/settings.ron"))
     );
     assert_eq!(
@@ -63,7 +66,11 @@ fn the_settings_file_is_where_each_system_keeps_its_configuration() {
 #[test]
 fn the_environment_variable_names_the_file_on_every_system() {
     for os in [Os::Linux, Os::Windows, Os::MacOs] {
-        let pairs = [(ENV_PATH, "/tmp/mine.ron"), ("HOME", "/h"), ("APPDATA", "/a")];
+        let pairs = [
+            (ENV_PATH, "/tmp/mine.ron"),
+            ("HOME", "/h"),
+            ("APPDATA", "/a"),
+        ];
         assert_eq!(
             settings_path(os, &env(&pairs)),
             Some(PathBuf::from("/tmp/mine.ron")),
@@ -172,7 +179,10 @@ fn values_the_game_cannot_use_are_changed_and_said() {
     let s = loaded.settings;
     assert_eq!(s.ui_scale, 1.25, "the nearest choice");
     assert_eq!(s.frame_cap, Some(1000));
-    assert!(s.keys.is_empty(), "the menu key and an empty list are dropped");
+    assert!(
+        s.keys.is_empty(),
+        "the menu key and an empty list are dropped"
+    );
     assert_eq!(loaded.warnings.len(), 3, "{:?}", loaded.warnings);
     // 0 is no cap, and NaN is the default.
     let mut s = Settings {
@@ -206,7 +216,8 @@ fn rebinding_replaces_the_first_key_and_keeps_the_rest_of_the_action() {
     let base = shipped();
     let mut s = Settings::default();
     // Pan left is A, Left arrow and the left screen edge.
-    s.rebind(&base, Action::CameraPanLeft, KeyCode::KeyJ).unwrap();
+    s.rebind(&base, Action::CameraPanLeft, KeyCode::KeyJ)
+        .unwrap();
     let now = s.effective_bindings(&base);
     assert_eq!(
         now.for_action(Action::CameraPanLeft),
@@ -217,7 +228,10 @@ fn rebinding_replaces_the_first_key_and_keeps_the_rest_of_the_action() {
         ]
     );
     // Nothing else changed, and the shipped bindings are what they were.
-    for a in Action::ALL.into_iter().filter(|a| *a != Action::CameraPanLeft) {
+    for a in Action::ALL
+        .into_iter()
+        .filter(|a| *a != Action::CameraPanLeft)
+    {
         assert_eq!(now.for_action(a), base.for_action(a), "{a:?}");
     }
     assert_eq!(base, Bindings::builtin());
@@ -225,7 +239,8 @@ fn rebinding_replaces_the_first_key_and_keeps_the_rest_of_the_action() {
     assert_eq!(s.keys.len(), 1);
     // With a modifier on the first key, the whole binding is replaced by the plain key; the Alt+Enter
     // of the fullscreen key is the second binding and stays.
-    s.rebind(&base, Action::ToggleFullscreen, KeyCode::F9).unwrap();
+    s.rebind(&base, Action::ToggleFullscreen, KeyCode::F9)
+        .unwrap();
     let fs = s.effective_bindings(&base);
     assert_eq!(fs.for_action(Action::ToggleFullscreen)[0], key(KeyCode::F9));
     assert_eq!(
@@ -259,8 +274,10 @@ fn a_key_another_action_has_is_refused_and_nothing_changes() {
     );
     assert_eq!(s, Settings::default());
     // A key another action had before the player moved it is free again, and taken by the mover.
-    s.rebind(&base, Action::CameraPanRight, KeyCode::KeyL).unwrap();
-    s.rebind(&base, Action::CameraPanLeft, KeyCode::KeyD).unwrap();
+    s.rebind(&base, Action::CameraPanRight, KeyCode::KeyL)
+        .unwrap();
+    s.rebind(&base, Action::CameraPanLeft, KeyCode::KeyD)
+        .unwrap();
     assert_eq!(
         s.rebind(&base, Action::OrderStop, KeyCode::KeyL),
         Err(RebindError::Conflict(Action::CameraPanRight))
@@ -301,7 +318,8 @@ fn giving_an_action_its_shipped_key_back_leaves_nothing_in_the_file() {
     s.rebind(&base, Action::OrderStop, KeyCode::KeyC).unwrap();
     assert!(s.keys.is_empty());
     s.rebind(&base, Action::OrderStop, KeyCode::KeyV).unwrap();
-    s.rebind(&base, Action::OrderHold, KeyCode::KeyB).unwrap_err();
+    s.rebind(&base, Action::OrderHold, KeyCode::KeyB)
+        .unwrap_err();
     s.reset_key(Action::OrderStop);
     assert!(s.keys.is_empty());
     s.rebind(&base, Action::OrderStop, KeyCode::KeyV).unwrap();
@@ -331,6 +349,105 @@ fn the_player_s_key_fires_the_action_and_the_old_key_does_not() {
     // And the shipped bindings still do what they did.
     assert!(fired(KeyCode::KeyC, &base));
     assert!(!fired(KeyCode::KeyV, &base));
+}
+
+fn opts(preset: crate::args::Preset, line: &str) -> crate::args::Options {
+    crate::args::Options::parse(preset, line.split_whitespace().map(str::to_owned))
+}
+
+#[test]
+fn the_settings_start_the_window_and_a_flag_of_the_command_line_wins() {
+    use crate::args::Preset;
+    use sf_engine::ScreenMode;
+    use sf_render::Present;
+    let own = Settings {
+        window: WindowMode::Borderless,
+        vsync: false,
+        frame_cap: Some(60),
+        ..Settings::default()
+    };
+    // Nothing on the command line: the settings decide.
+    let s = startup(&opts(Preset::Game, ""), &own);
+    assert_eq!(
+        s,
+        Startup {
+            screen: ScreenMode::Borderless,
+            present: Present::Uncapped,
+            frame_cap: Some(60)
+        }
+    );
+    // The defaults change nothing.
+    let s = startup(&opts(Preset::Game, ""), &Settings::default());
+    assert_eq!(
+        s,
+        Startup {
+            screen: ScreenMode::Windowed,
+            present: Present::Vsync,
+            frame_cap: None
+        }
+    );
+    // A flag wins, each over its own setting.
+    let s = startup(
+        &opts(Preset::Game, "--windowed --present vsync --frame-cap 30"),
+        &own,
+    );
+    assert_eq!(
+        s,
+        Startup {
+            screen: ScreenMode::Windowed,
+            present: Present::Vsync,
+            frame_cap: Some(30)
+        }
+    );
+    let s = startup(&opts(Preset::Game, "--resolution 800x600"), &own);
+    assert_eq!(
+        s.screen,
+        ScreenMode::Fixed {
+            width: 800,
+            height: 600
+        }
+    );
+}
+
+/// Measurements do not depend on whoever runs them: the demo and the benchmark ignore the settings.
+#[test]
+fn the_demo_and_the_benchmark_ignore_the_settings() {
+    use crate::args::Preset;
+    let own = Settings {
+        window: WindowMode::Borderless,
+        vsync: false,
+        frame_cap: Some(60),
+        ..Settings::default()
+    };
+    for o in [opts(Preset::Demo, ""), opts(Preset::Game, "--bench")] {
+        let s = startup(&o, &own);
+        assert_eq!(
+            (s.screen, s.present, s.frame_cap),
+            (o.screen, o.present, o.frame_cap)
+        );
+    }
+}
+
+#[test]
+fn which_runs_read_the_users_settings_file() {
+    use crate::args::Preset;
+    let home = [("HOME", "/h")];
+    let with_env = [("HOME", "/h"), (ENV_PATH, "/tmp/s.ron")];
+    let user = Some(PathBuf::from("/h/.config/staalfront/settings.ron"));
+    let named = Some(PathBuf::from("/tmp/s.ron"));
+    let path = |line: &str, preset, pairs: &[(&str, &str)]| {
+        path_for(&opts(preset, line), Os::Linux, &env(pairs))
+    };
+    assert_eq!(path("", Preset::Game, &home), user);
+    assert_eq!(path("--match", Preset::Game, &home), user);
+    assert_eq!(path("--exit-after 3", Preset::Game, &home), user);
+    // The engine demo and the benchmark never touch it, the variable or not.
+    assert_eq!(path("", Preset::Demo, &home), None);
+    assert_eq!(path("--bench", Preset::Game, &with_env), None);
+    // Screenshots only through the variable: not through the home directory.
+    assert_eq!(path("--shots out", Preset::Game, &home), None);
+    assert_eq!(path("--shots out", Preset::Game, &with_env), named);
+    assert_eq!(path("", Preset::Game, &with_env), named);
 }
 
 #[test]
@@ -365,6 +482,9 @@ fn keys_and_bindings_are_named_the_way_the_player_reads_them() {
     );
     assert_eq!(binding_name(&Binding::new(Trigger::WheelUp)), "Wheel up");
     let b = shipped();
-    assert_eq!(primary_key_name(&b, Action::CameraPanUp).as_deref(), Some("W"));
+    assert_eq!(
+        primary_key_name(&b, Action::CameraPanUp).as_deref(),
+        Some("W")
+    );
     assert_eq!(primary_key_name(&b, Action::CameraZoomIn), None);
 }

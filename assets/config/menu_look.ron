@@ -8,7 +8,7 @@
     // The window behind a menu is dimmed with this.
     dim: (0, 0, 0, 150),
     panel: (
-        width_px: 720,
+        width_px: 760,
         // The least room between the panel and the window edge; the panel shrinks to keep it.
         margin_px: 12,
         pad_px: 18,
@@ -34,7 +34,7 @@
     // One line of the settings: its label, then its controls.
     row: (
         height_px: 28,
-        label_px: 190,
+        label_px: 170,
         gap_px: 6,
         heading: (150, 190, 240, 255),
     ),
@@ -143,7 +143,6 @@
         keys_capture: "Press a key...",
         keys_capture_notice: "Press the new key for {action}. Esc cancels.",
         keys_conflict: "{key} is already used for {action}.",
-        keys_reserved: "{key} cannot be used: it opens the menu.",
         keys_menu_row: "Menu / back",
         keys_reset: "Reset",
         keys_reset_all: "Reset all keys",

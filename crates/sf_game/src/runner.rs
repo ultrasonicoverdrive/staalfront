@@ -480,16 +480,15 @@ impl Runner {
         });
         // The menus (WP11.5a) belong to the scenes a player plays. The start menu stands over the
         // scene it was started with, which is held until a choice is made.
-        let menus = matches!(options.scene, Scene::Sandbox | Scene::Match) && options.bench.is_none();
+        let menus =
+            matches!(options.scene, Scene::Sandbox | Scene::Match) && options.bench.is_none();
         let shipped = sf_engine::Bindings::load(&assets_root.join("config/input.ron"))
             .unwrap_or_else(|_| sf_engine::Bindings::builtin());
         let mut menu = Menu::new(Settings::default(), shipped);
         if menus && options.menu {
             menu.open_start();
         }
-        let pending_menu = options
-            .open_menu
-            .filter(|p| menus && *p != Preset::Start);
+        let pending_menu = options.open_menu.filter(|p| menus && *p != Preset::Start);
         Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -619,6 +618,23 @@ impl Runner {
 
     /// Does what the menu asked for.
     fn apply_outcomes(&mut self, ctx: &mut Context, outcomes: Vec<Outcome>) {
+        for outcome in self.apply_to_game(outcomes) {
+            match outcome {
+                Outcome::Quit => {
+                    println!("quit requested");
+                    ctx.request_exit();
+                }
+                Outcome::Changed(change) => self.apply_change(ctx, change),
+                _ => {}
+            }
+        }
+    }
+
+    /// The part of what the menu asked for that needs no window: holding and releasing the sim, and
+    /// playing a scene from its start. Returns what is left for the window and the engine (leaving the
+    /// program, changed settings).
+    fn apply_to_game(&mut self, outcomes: Vec<Outcome>) -> Vec<Outcome> {
+        let mut left = Vec::new();
         for outcome in outcomes {
             match outcome {
                 Outcome::Paused | Outcome::MainMenu => {
@@ -630,13 +646,10 @@ impl Runner {
                 Outcome::Restart => self.begin(None),
                 Outcome::StartMatch => self.begin(Some(Scene::Match)),
                 Outcome::StartSandbox => self.begin(Some(Scene::Sandbox)),
-                Outcome::Quit => {
-                    println!("quit requested");
-                    ctx.request_exit();
-                }
-                Outcome::Changed(change) => self.apply_change(ctx, change),
+                Outcome::Quit | Outcome::Changed(_) => left.push(outcome),
             }
         }
+        left
     }
 
     /// Plays `scene` from its start, or the same scene again (`None`): a new world from the same
@@ -848,7 +861,8 @@ impl Runner {
         {
             eprintln!("sf_game: player colours: {e}");
         }
-        self.hud.set_owner_dots(crate::palette::minimap_dots(choice));
+        self.hud
+            .set_owner_dots(crate::palette::minimap_dots(choice));
     }
 
     /// A setting changed in the menu: apply it to the window, the engine or the picture, and write the
@@ -2468,8 +2482,8 @@ impl App for Runner {
             self.draw_storage_bars();
             self.draw_production();
             // Under a menu the game cursor is gone and the system's is back.
-            let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor)
-                .filter(|_| !menu_open);
+            let game_cursor =
+                game_cursor_at(self.shots.is_some(), self.hover_at, cursor).filter(|_| !menu_open);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
             if let Some(renderer) = &mut self.renderer {
@@ -3313,5 +3327,173 @@ mod tests {
         let report = start.world.step();
         assert_eq!(report.commands_executed, 1);
         assert_eq!(start.world.len(), before + 1);
+    }
+
+    // ---- WP11.5a: pause, restart, the start menu ----
+
+    const WAIT: Duration = Duration::from_secs(120);
+
+    /// A runner as `sf_game` builds one, without a window, its sim stepped by hand.
+    fn runner(line: &str) -> Runner {
+        let o = options(Preset::Game, line);
+        let map = make_map(&o).expect("the map loads");
+        Runner::with_sim(
+            o,
+            map,
+            sf_render::TerrainConfig::embedded().lod,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            SimConfig::manual(),
+        )
+        .expect("the runner starts")
+    }
+
+    /// Steps the runner's sim `ticks` ticks and returns the checksum of the world after them.
+    fn run_ticks(runner: &Runner, ticks: u64) -> (u64, Tick) {
+        let target = Tick(runner.sim.latest().tick().0 + ticks);
+        runner.sim.advance(ticks as u32);
+        let snap = runner.sim.wait_for_tick(target, WAIT).expect("ticks run");
+        (snap.checksum().expect("a checksum"), snap.tick())
+    }
+
+    /// A move order for every unit of the local player, sent the way a right-click sends it.
+    fn order_everyone(runner: &Runner) {
+        let ids: Vec<_> = runner
+            .sim
+            .latest()
+            .views()
+            .iter()
+            .filter(|v| v.has_stats && v.owner == commands::LOCAL_PLAYER)
+            .map(|v| v.id)
+            .collect();
+        assert!(!ids.is_empty(), "the local player has units to order");
+        commands::issue(
+            &runner.sim,
+            Command::Order {
+                ids,
+                order: sf_sim::Order::Move(sf_math::Vec2::from_ints(60, 60)),
+                queued: false,
+            },
+        );
+    }
+
+    /// Restart builds the world again from the same setup: after a game that had its own commands and
+    /// ticks, the checksum at tick N is the one of a fresh start, for the sandbox and for the match.
+    #[test]
+    fn a_restart_equals_a_fresh_start() {
+        for line in ["--sandbox", "--match"] {
+            let reference = runner(line);
+            let start = reference.sim.latest().tick();
+            let (fresh, at) = run_ticks(&reference, 40);
+            let mut played = runner(line);
+            // The match gives the local player no unit to order (a construction centre only); its
+            // opponent's harvester works on its own, so the game goes its own way all the same.
+            if line == "--sandbox" {
+                order_everyone(&played);
+            }
+            let (changed, _) = run_ticks(&played, 25);
+            if line == "--sandbox" {
+                assert_ne!(
+                    changed,
+                    run_ticks(&runner(line), 25).0,
+                    "{line}: the order changed the game"
+                );
+            }
+            assert!(played.sim.latest().tick().0 >= 25);
+            // The menu's Restart, through the runner's own path.
+            let left = played.apply_to_game(vec![Outcome::Restart]);
+            assert!(left.is_empty());
+            assert_eq!(
+                played.sim.latest().tick(),
+                start,
+                "{line}: the new world is at the tick a fresh one starts at"
+            );
+            let (again, tick) = run_ticks(&played, 40);
+            assert_eq!(tick, at, "{line}");
+            assert_eq!(again, fresh, "{line}: the restarted game is the fresh one");
+        }
+    }
+
+    /// Restart keeps the match file or the sandbox it was started with: the match is still the match.
+    #[test]
+    fn a_restart_keeps_the_scene_and_the_match_file() {
+        let mut r = runner("--match");
+        let credits = r.sim.latest().credits_of(commands::LOCAL_PLAYER);
+        assert!(credits.is_some(), "the match has money rules");
+        let cells = r.cells;
+        r.apply_to_game(vec![Outcome::Restart]);
+        assert_eq!(r.options.scene, Scene::Match);
+        assert_eq!(r.options.match_file, Some(None));
+        assert_eq!(r.cells, cells);
+        assert_eq!(r.sim.latest().credits_of(commands::LOCAL_PLAYER), credits);
+        assert!(r.catalog.is_some());
+        let mut s = runner("--sandbox");
+        s.apply_to_game(vec![Outcome::Restart]);
+        assert_eq!(s.options.scene, Scene::Sandbox);
+        assert!(
+            s.sim.latest().credits_of(commands::LOCAL_PLAYER).is_none(),
+            "the sandbox has no money rules"
+        );
+    }
+
+    /// The start menu: the scene under it is the sandbox, held; "Match" builds the match, "Sandbox"
+    /// on a scene nobody has played takes it as it is.
+    #[test]
+    fn the_start_menu_chooses_the_scene() {
+        let mut r = runner("");
+        assert!(r.options.menu && r.menus && r.menu.is_open());
+        assert_eq!(r.options.scene, Scene::Sandbox);
+        assert!(r.pristine);
+        let before = r.sim.latest();
+        let left = r.apply_to_game(vec![Outcome::StartSandbox]);
+        assert!(left.is_empty() && !r.pristine);
+        assert!(
+            Arc::ptr_eq(&before, &r.sim.latest()),
+            "the sandbox nobody played is not built again"
+        );
+        let mut m = runner("");
+        m.apply_to_game(vec![Outcome::StartMatch]);
+        assert_eq!(m.options.scene, Scene::Match);
+        assert!(!m.options.menu);
+        assert!(m.sim.latest().credits_of(commands::LOCAL_PLAYER).is_some());
+        assert!(m.catalog.is_some() && !m.pristine);
+        // From a played game, "Sandbox" is a new sandbox.
+        m.apply_to_game(vec![Outcome::StartSandbox]);
+        assert_eq!(m.options.scene, Scene::Sandbox);
+        assert!(m.sim.latest().credits_of(commands::LOCAL_PLAYER).is_none());
+    }
+
+    /// Pausing is not a command: a held sim steps no tick, and after the release the world is the one
+    /// of a run that was never held.
+    #[test]
+    fn pausing_holds_the_sim_and_resuming_goes_on_where_it_was() {
+        let (straight, straight_tick) = run_ticks(&runner("--sandbox"), 30);
+        let mut r = runner("--sandbox");
+        run_ticks(&r, 10);
+        let held_at = r.sim.latest().tick();
+        assert!(r.apply_to_game(vec![Outcome::Paused]).is_empty());
+        // Asking for ticks of a held sim runs none.
+        r.sim.advance(50);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(r.sim.latest().tick(), held_at, "held: no tick ran");
+        assert!(r.apply_to_game(vec![Outcome::Resumed]).is_empty());
+        let (resumed, tick) = run_ticks(&r, 20);
+        assert_eq!(
+            (resumed, tick),
+            (straight, straight_tick),
+            "after the pause the world is the one of a run that never stopped"
+        );
+    }
+
+    /// The outcomes that need the window are not the runner's to do on its own: they are handed back.
+    #[test]
+    fn the_outcomes_for_the_window_are_handed_back_not_swallowed() {
+        let mut r = runner("--sandbox");
+        let left = r.apply_to_game(vec![
+            Outcome::Quit,
+            Outcome::Changed(Change::Palette),
+            Outcome::Resumed,
+        ]);
+        assert_eq!(left, [Outcome::Quit, Outcome::Changed(Change::Palette)]);
     }
 }

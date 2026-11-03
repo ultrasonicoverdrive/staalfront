@@ -98,3 +98,39 @@ pub fn minimap_dots(choice: PaletteChoice) -> Option<Vec<Color>> {
         PaletteChoice::ColourBlind => Some(Palette::embedded().minimap_dots()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_standard_choice_leaves_the_style_alone_and_the_other_brings_its_four() {
+        assert_eq!(player_colours(PaletteChoice::Standard), None);
+        assert_eq!(minimap_dots(PaletteChoice::Standard), None);
+        let own = player_colours(PaletteChoice::ColourBlind).unwrap();
+        assert_eq!(own.len(), 4);
+        assert_eq!(own[0], ("vermilion".to_owned(), [213, 94, 0]));
+        let dots = minimap_dots(PaletteChoice::ColourBlind).unwrap();
+        assert_eq!(dots[2], Color::rgb(240, 228, 66));
+        // Going back brings the colours of units.ron.
+        let back = standard_colours();
+        assert_eq!(back.len(), 4);
+        assert_eq!(back[0], ("red".to_owned(), [214, 40, 40]));
+        assert_eq!(back[3], ("magenta".to_owned(), [200, 60, 210]));
+    }
+
+    #[test]
+    fn a_palette_that_cannot_be_used_is_refused() {
+        let good = "(players: [(name: \"a\", srgb: (1, 2, 3))], minimap: [(1, 2, 3)])";
+        assert!(Palette::from_ron(good).is_ok());
+        for bad in [
+            "(players: [], minimap: [])",
+            "(players: [(name: \"a\", srgb: (1, 2, 3))], minimap: [])",
+            "(players: [(name: \"\", srgb: (1, 2, 3))], minimap: [(1, 2, 3)])",
+            "(players: [(name: \"a\", srgb: (1, 2, 3))], minimap: [(1, 2, 3)], extra: 1)",
+            "nonsense",
+        ] {
+            assert!(Palette::from_ron(bad).is_err(), "{bad}");
+        }
+    }
+}

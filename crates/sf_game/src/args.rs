@@ -620,6 +620,75 @@ mod tests {
         assert!(o.warnings.is_empty());
     }
 
+    /// The start menu (WP11.5a) is for the plain `sf_game`. A flag that names what to run, a benchmark,
+    /// a screenshot run or one that ends by itself keeps the old behaviour: no menu in its way.
+    #[test]
+    fn the_start_menu_is_for_the_plain_game_and_every_flag_that_names_a_run_skips_it() {
+        assert!(parse(Preset::Game, "").menu);
+        // Flags that are about how the window looks or sounds are not about what to run.
+        assert!(
+            parse(
+                Preset::Game,
+                "--windowed --present vsync --debug-ui --ra-audio x"
+            )
+            .menu
+        );
+        for line in [
+            "--sandbox",
+            "--match",
+            "--match assets/matches/m1.ron",
+            "--crowd",
+            "--fight",
+            "--harvest",
+            "--build power_plant",
+            "--build-at 3,4",
+            "--units 100",
+            "--bench",
+            "--shots out",
+            "--exit-after 3",
+        ] {
+            let o = parse(Preset::Game, line);
+            assert!(!o.menu, "{line}");
+        }
+        // The engine demo has no menu, whatever it is given.
+        assert!(!parse(Preset::Demo, "").menu);
+        assert!(!parse(Preset::Demo, "--menu start").menu);
+    }
+
+    #[test]
+    fn menu_opens_a_menu_for_screenshots_and_start_asks_for_the_start_menu() {
+        use crate::menu::Preset as Menu;
+        let o = parse(Preset::Game, "--menu start --exit-after 2");
+        assert!(o.menu && o.open_menu == Some(Menu::Start));
+        for (name, preset) in [
+            ("pause", Menu::Pause),
+            ("keys", Menu::Keys),
+            ("graphics", Menu::Graphics),
+            ("accessibility", Menu::Accessibility),
+            ("sound", Menu::Sound),
+        ] {
+            let o = parse(Preset::Game, &format!("--match --menu {name} --shots out"));
+            assert_eq!((o.open_menu, o.menu), (Some(preset), false), "{name}");
+            assert_eq!(o.scene, Scene::Match);
+        }
+        let o = parse(Preset::Game, "--menu lobby");
+        assert_eq!(o.open_menu, None);
+        assert_eq!(o.warnings.len(), 1, "{:?}", o.warnings);
+        assert_eq!(parse(Preset::Game, "--menu").warnings.len(), 1);
+    }
+
+    /// A window flag is remembered as given, so that it can win over the player's settings.
+    #[test]
+    fn the_window_flags_are_remembered_for_the_settings() {
+        let o = parse(Preset::Game, "");
+        assert!(!o.screen_given && !o.present_given);
+        for line in ["--windowed", "--fullscreen", "--resolution 800x600"] {
+            assert!(parse(Preset::Game, line).screen_given, "{line}");
+        }
+        let o = parse(Preset::Game, "--present uncapped");
+        assert!(o.present_given && !o.screen_given);
+    }
+
     #[test]
     fn sim_delay_is_off_by_default_and_takes_milliseconds() {
         assert_eq!(parse(Preset::Game, "").sim_delay, Duration::ZERO);

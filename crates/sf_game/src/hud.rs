@@ -241,13 +241,15 @@ impl Hud {
     ) {
         let size = ctx.size();
         let real = ui_input(ctx);
-        let input = if menu.is_some() {
-            UiInput::default()
-        } else {
-            real
-        };
         let ui = &mut self.ui;
-        ui.begin_frame(input, (size.width, size.height), ctx.scale_factor());
+        // With a menu open the game's panels are built blind (the input they get sees nothing).
+        let input = crate::menu_view::begin_frame(
+            ui,
+            real,
+            (size.width, size.height),
+            ctx.scale_factor(),
+            menu.is_some(),
+        );
 
         // Top bar: a label and a button.
         let bar = ui.panel(Anchor::Top, (0.0, EDGE), (520.0, 32.0));
@@ -332,15 +334,7 @@ impl Hud {
             }
         }
         // The menu over everything (WP11.5a), with the real pointer.
-        if let Some(menu) = menu {
-            ui.set_input(real);
-            let look = menu.look();
-            let fit = crate::menu_view::fit(ui.screen(), ui.scale(), look);
-            if let Some(model) = menu.model(fit) {
-                menu_actions.extend(crate::menu_view::frame(ui, &model, look));
-            }
-        }
-        ui.end_frame();
+        menu_actions.extend(crate::menu_view::finish_frame(ui, real, menu));
         self.menu_actions = menu_actions;
     }
 

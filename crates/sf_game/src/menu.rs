@@ -426,8 +426,11 @@ impl Menu {
                 ));
                 Vec::new()
             }
+            // Escape never gets here (it ends the wait above) and the menu key is not in the list:
+            // nothing to say, the wait is over.
             Err(RebindError::Reserved | RebindError::NotRebindable) => {
-                self.notice = Some(fill(&words.keys_reserved, &[("key", &key_name(key))]));
+                self.capture = None;
+                self.notice = None;
                 Vec::new()
             }
         }
