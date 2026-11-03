@@ -2474,9 +2474,13 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   numbers only.
 - **Found while testing:** the match script never needs the tower to be dark: its army takes the tower out first. The opponent's
   tower goes dark below 420 of its plant's 600 hit points (measured); an army that shoots the plant first meets no tower.
-  `damage_screenshot.rs::a_structure_shot_up_shows_its_damaged_models_smoke_and_fire` fails in this container (fire at the start
-  zoom, 0 to 1 pixels of light against more than 200), also with the base's shipped definitions put back under this branch's
-  code (a clean build of the base was not run); main's CI passes it. Not investigated here; CI on this head is the check.
+  `damage_screenshot.rs::a_structure_shot_up_shows_its_damaged_models_smoke_and_fire` failed on this branch (and passes on a
+  clean copy of the base): the sandbox's neutral `automated_gun` (slot 49) now shoots at the tanks, the flame particles of the
+  heavily damaged plant wandered over the cream half of its roof, and the test's measure of fire (brightness gained) found 0 to 1
+  pixels in a picture that shows flames (the timeline, the plant's hit points and the ticks were equal to the base's; only the
+  particles differed). **The test was changed, not the rules:** `glow_pixels` also counts the warm orange of flames; the thresholds
+  are unchanged (meridian 482 pixels at the start zoom, veyran 1107, damaged 0). Worth knowing: that test is sensitive to where
+  particles drift.
 - **Gaps.** Garrisoning the bunker (owner: phase 9 or a WP6.7b); the decoy has no behaviour; no mission logic for the neutral
   structures (`fires_at_all`, "fires when the uplink is alive"); no fog (the sight of a defence is unused); a structure does not
   answer fire from out of its reach; the structures' numbers are placeholders; not played by a person.

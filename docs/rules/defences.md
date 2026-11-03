@@ -180,6 +180,7 @@ defences at turret facings 8, 40, 80 steps). The checks look at pixels in the tu
 | `crates/sf_data/tests/units.rs` (2 new, 1 changed), `weapons.rs` (1 changed) | the shipped rates and mounts, a turret on a structure needs a weapon |
 | `tools/sf_headless/tests/defences.rs` (5), `match_m1.rs` (+2) | the scenario above; the tower fires in the match; the 420 of 600 threshold |
 | `crates/sf_game/tests/fx_events.rs` (+1), `defences_screenshot.rs` (3) | flash along the turret; the pictures |
+| `crates/sf_game/tests/damage_screenshot.rs` (changed) | the measure of fire light also counts orange (see `progress.md`, WP6.7 notes): the sandbox's neutral gun now shoots in that scene |
 
 Mutations, each applied to a scratch edit of the file and reverted (`git status` clean afterwards):
 
