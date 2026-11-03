@@ -6,9 +6,11 @@
 // input.ron that a key can be given to; a test checks that none is missing.
 (
     // The window behind a menu is dimmed with this.
-    dim: (0, 0, 0, 150),
+    dim: (0, 0, 0, 170),
     panel: (
         width_px: 760,
+        // The narrower panel of the start menu and the pause menu.
+        compact_width_px: 360,
         // The least room between the panel and the window edge; the panel shrinks to keep it.
         margin_px: 12,
         pad_px: 18,

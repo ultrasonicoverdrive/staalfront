@@ -447,6 +447,41 @@ fn the_key_list_shows_the_keys_of_input_ron_and_pages_through_all_of_them() {
     assert!(model.footer.iter().all(|c| c.item != Item::KeysPage(1)));
 }
 
+/// No heading stands alone at the foot of a column, whatever the room, and nothing is lost or
+/// reordered by the cutting into pages.
+#[test]
+fn a_heading_never_ends_a_column_and_the_pages_keep_every_row_in_order() {
+    let m = keys_menu();
+    let all = m.key_rows();
+    let real = |rows: &[Row]| -> Vec<Row> {
+        rows.iter()
+            .filter(|r| !matches!(r, Row::Spacer))
+            .cloned()
+            .collect()
+    };
+    for columns in 1..=3 {
+        for per_column in 2..=40 {
+            let pages = paginate(&all, per_column, columns);
+            let flat: Vec<Row> = pages.iter().flat_map(|p| real(p)).collect();
+            assert_eq!(flat, all, "{columns} columns of {per_column}");
+            for page in &pages {
+                assert!(page.len() <= per_column * columns);
+                for column in page.chunks(per_column) {
+                    assert!(
+                        !matches!(column.last(), Some(Row::Heading(_))),
+                        "{columns} columns of {per_column}: a column ends in a heading"
+                    );
+                }
+            }
+        }
+    }
+    // One column of one row cannot avoid it, and must not loop or lose rows.
+    let tiny = paginate(&all, 1, 1);
+    assert_eq!(tiny.iter().map(|p| real(p).len()).sum::<usize>(), all.len());
+    // The list that fits takes one page.
+    assert_eq!(paginate(&all, all.len(), 1).len(), 1);
+}
+
 #[test]
 fn rebinding_waits_for_a_key_takes_it_and_shows_it() {
     let mut m = keys_menu();

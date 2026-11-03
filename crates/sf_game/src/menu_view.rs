@@ -48,7 +48,8 @@ pub struct Layout {
 /// wide enough for, and the rows that fit in the height left by everything else.
 pub fn fit(screen: Rect, scale: f32, look: &MenuLook) -> Fit {
     let p = &look.panel;
-    let panel_w = panel_width(screen, scale, look);
+    // The key list is on the settings screen: the wide panel.
+    let panel_w = panel_width(screen, scale, look, false);
     let inner_w = panel_w - 2.0 * px(p.pad_px, scale);
     let gap = px(p.gap_px, scale);
     let min_col = px(look.keys.column_min_px, scale);
@@ -75,9 +76,16 @@ pub fn fit(screen: Rect, scale: f32, look: &MenuLook) -> Fit {
     }
 }
 
-fn panel_width(screen: Rect, scale: f32, look: &MenuLook) -> f32 {
+/// The width of the panel: the settings' own, or the narrow one of a list of buttons, and never more
+/// than the window less its margins.
+fn panel_width(screen: Rect, scale: f32, look: &MenuLook, compact: bool) -> f32 {
     let p = &look.panel;
-    px(p.width_px, scale).min((screen.w - 2.0 * px(p.margin_px, scale)).max(0.0))
+    let want = if compact {
+        p.compact_width_px
+    } else {
+        p.width_px
+    };
+    px(want, scale).min((screen.w - 2.0 * px(p.margin_px, scale)).max(0.0))
 }
 
 fn title_height(look: &MenuLook, scale: f32) -> f32 {
@@ -125,7 +133,7 @@ pub fn layout(
 ) -> Layout {
     let p = &look.panel;
     let (pad, gap) = (px(p.pad_px, scale), px(p.gap_px, scale));
-    let panel_w = panel_width(screen, scale, look);
+    let panel_w = panel_width(screen, scale, look, model.kind == Kind::Buttons);
     let inner_w = (panel_w - 2.0 * pad).max(0.0);
     let title_h = title_height(look, scale);
     let row_h = px(look.row.height_px, scale);
@@ -143,6 +151,8 @@ pub fn layout(
     let mut rows = Vec::new();
     let mut notice = None;
     let mut footer = Vec::new();
+    // The height this screen has less than the tallest settings page.
+    let mut slack = 0.0f32;
 
     match model.kind {
         Kind::Buttons => {
@@ -177,7 +187,7 @@ pub fn layout(
                 let top = y + used[col];
                 let left = x0 + col as f32 * (col_w + gap);
                 let placed = match row {
-                    Row::Heading(_) => {
+                    Row::Heading(_) | Row::Spacer => {
                         let rect = Rect::new(left, top, col_w, row_h);
                         used[col] += pitch;
                         RowLayout {
@@ -223,17 +233,24 @@ pub fn layout(
                 };
                 rows.push(placed);
             }
-            let reserved = if model.rows_per_column > 0 {
+            let drawn = used.iter().copied().fold(0.0, f32::max);
+            let content = if model.rows_per_column > 0 {
                 model.rows_per_column as f32 * pitch
             } else {
-                used.iter().copied().fold(0.0, f32::max)
-            };
-            y += reserved.max(used.iter().copied().fold(0.0, f32::max)) + gap;
+                drawn
+            }
+            .max(drawn);
+            y += content + gap;
+            // What this page has less than the tallest one (rows, the notice line): the panel stands
+            // where the tallest would, so the tabs stay in place from page to page.
+            slack = (model.rows_reserved as f32 * pitch - content).max(0.0);
 
             if model.notice.is_some() {
                 let h = px(p.notice_height_px, scale);
                 notice = Some(Rect::new(x0, y, inner_w, h));
                 y += h + gap;
+            } else if model.rows_reserved > 0 {
+                slack += px(p.notice_height_px, scale) + gap;
             }
 
             let h = px(look.footer.height_px, scale);
@@ -253,7 +270,8 @@ pub fn layout(
     let panel_h = (y - gap + pad).max(title_h + 2.0 * pad);
     let panel = Rect::new(
         screen.x + ((screen.w - panel_w) * 0.5).floor(),
-        screen.y + ((screen.h - panel_h) * 0.5).floor().max(0.0),
+        // Centred as the tallest page of the settings would be, so a shorter page stands at its top.
+        screen.y + ((screen.h - (panel_h + slack)) * 0.5).floor().max(0.0),
         panel_w,
         panel_h,
     );
@@ -421,6 +439,7 @@ pub fn frame(ui: &mut Ui, model: &Model, look: &MenuLook) -> Option<Item> {
     let text_px = ui.text_px();
     for (placed, row) in lay.rows.iter().zip(&model.rows) {
         match row {
+            Row::Spacer => {}
             Row::Heading(text) => {
                 let (_, th) = ui.measure(text);
                 ui.text_px_at(

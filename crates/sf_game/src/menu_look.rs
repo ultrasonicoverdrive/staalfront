@@ -20,6 +20,8 @@ pub type Rgba = (u8, u8, u8, u8);
 #[serde(deny_unknown_fields)]
 pub struct PanelLook {
     pub width_px: u16,
+    /// The narrower panel of the start and pause menus.
+    pub compact_width_px: u16,
     pub margin_px: u16,
     pub pad_px: u16,
     pub gap_px: u16,
@@ -208,8 +210,12 @@ impl MenuLook {
 
     fn check(&self) -> Result<(), String> {
         let p = &self.panel;
-        if p.width_px == 0 || p.title_px == 0 || p.notice_height_px == 0 {
-            return Err("panel.width_px, title_px and notice_height_px must be above 0".into());
+        if p.width_px == 0 || p.compact_width_px == 0 || p.title_px == 0 || p.notice_height_px == 0
+        {
+            return Err(
+                "panel.width_px, compact_width_px, title_px and notice_height_px must be above 0"
+                    .into(),
+            );
         }
         if self.button.width_px == 0 || self.button.height_px == 0 {
             return Err("button.width_px and height_px must be above 0".into());
@@ -305,12 +311,13 @@ mod tests {
     #[test]
     fn the_shipped_look_is_pinned() {
         let l = MenuLook::embedded();
-        assert_eq!(l.dim, (0, 0, 0, 150));
+        assert_eq!(l.dim, (0, 0, 0, 170));
         let p = &l.panel;
         assert_eq!(
             (p.width_px, p.margin_px, p.pad_px, p.gap_px, p.border_px),
             (760, 12, 18, 8, 2)
         );
+        assert_eq!(p.compact_width_px, 360);
         assert_eq!((p.title_px, p.notice_height_px), (28, 22));
         assert_eq!(
             (p.title, p.notice, p.hint),
@@ -438,7 +445,7 @@ mod tests {
         assert!(broken("label: \"Pan up\"", "label: \"\"").is_err());
         // A word that is missing, a field that is unknown, text that is not RON.
         assert!(broken("quit: \"Quit\",", "").is_err());
-        assert!(broken("dim: (0, 0, 0, 150),", "dim: (0, 0, 0, 150), colour: 1,").is_err());
+        assert!(broken("dim: (0, 0, 0, 170),", "dim: (0, 0, 0, 170), colour: 1,").is_err());
         assert!(MenuLook::from_ron("not ron").is_err());
         // The unchanged file is fine.
         assert!(broken("width_px: 760", "width_px: 760").is_ok());

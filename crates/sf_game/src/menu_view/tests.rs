@@ -383,6 +383,33 @@ fn the_sidebar_keeps_out_of_the_edge_band_at_every_ui_scale_of_the_settings() {
     }
 }
 
+/// The tabs stand where they stood when another page is chosen: a click on a tab does not move the
+/// next one away from the cursor.
+#[test]
+fn the_tabs_and_the_title_stay_in_place_from_page_to_page() {
+    let l = look();
+    for (w, h, scale) in [
+        (1280, 720, 1.0),
+        (1280, 720, 1.5),
+        (1920, 1080, 1.0),
+        (1920, 1080, 2.0),
+    ] {
+        let win = screen(w, h);
+        let f = fit(win, scale, l);
+        let mut places = Vec::new();
+        for page in [Page::Keys, Page::Graphics, Page::Accessibility, Page::Sound] {
+            let mut m = menu();
+            m.open_settings(page);
+            let model = m.model(f).unwrap();
+            let lay = layout(&model, l, win, scale, &measure(scale));
+            places.push((lay.tabs.clone(), lay.title, lay.panel.x, lay.panel.y));
+        }
+        for p in &places[1..] {
+            assert_eq!(*p, places[0], "{w}x{h} at {scale}");
+        }
+    }
+}
+
 /// The settings screen's layout does not move the pager around: the key list takes the same height on
 /// every page of it.
 #[test]

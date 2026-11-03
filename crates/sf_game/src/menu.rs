@@ -199,6 +199,34 @@ pub enum Row {
     },
     /// A line of plain text.
     Note(String),
+    /// An empty line: what keeps a heading from standing alone at the foot of a column.
+    Spacer,
+}
+
+/// Cuts the rows of the key list into pages of `columns` columns of `rows_per_column` rows, filling a
+/// column before the next. A heading that would be the last line of a column goes to the top of the
+/// next one (an empty line fills its place), so no heading stands without the rows it is over.
+pub fn paginate(rows: &[Row], rows_per_column: usize, columns: usize) -> Vec<Vec<Row>> {
+    let per_column = rows_per_column.max(1);
+    let per_page = per_column * columns.max(1);
+    let mut pages: Vec<Vec<Row>> = Vec::new();
+    let mut page: Vec<Row> = Vec::new();
+    for row in rows {
+        if matches!(row, Row::Heading(_))
+            && per_column > 1
+            && page.len() % per_column == per_column - 1
+        {
+            page.push(Row::Spacer);
+        }
+        if page.len() == per_page {
+            pages.push(std::mem::take(&mut page));
+        }
+        page.push(row.clone());
+    }
+    if !page.is_empty() || pages.is_empty() {
+        pages.push(page);
+    }
+    pages
 }
 
 /// What kind of screen it is.
@@ -233,6 +261,9 @@ pub struct Model {
     /// The page has room for this many rows in a column whatever they are (so the panel does not
     /// change height as the pages of a long list are turned).
     pub rows_per_column: usize,
+    /// The rows in a column of the tallest page of the settings (the key list): every page of the
+    /// settings stands at the top that page would have, so the tabs do not move as they are clicked.
+    pub rows_reserved: usize,
     pub notice: Option<Notice>,
     pub footer: Vec<Control>,
 }
@@ -596,6 +627,7 @@ impl Menu {
             rows: Vec::new(),
             columns: 1,
             rows_per_column: 0,
+            rows_reserved: self.keys_rows_per_column(fit),
             notice: None,
             footer: vec![back],
         };
@@ -744,20 +776,25 @@ impl Menu {
         rows
     }
 
+    /// The rows in a column of a page of the key list: a list that fits in one page takes only the
+    /// room it needs; else the whole room there is.
+    fn keys_rows_per_column(&self, fit: Fit) -> usize {
+        let all = self.key_rows();
+        let columns = fit.columns.max(1);
+        (all.len().div_ceil(columns).max(1)..=fit.rows)
+            .find(|&r| paginate(&all, r, columns).len() == 1)
+            .unwrap_or(fit.rows.max(1))
+    }
+
     fn keys_page_model(&self, model: &mut Model, fit: Fit) {
         let w = &self.look.words;
         let all = self.key_rows();
         let columns = fit.columns.max(1);
-        // A list that fits in one page takes only the room it needs.
-        let rows_per_column = fit.rows.min(all.len().div_ceil(columns)).max(1);
-        let per_page = rows_per_column * columns;
-        let pages = all.len().div_ceil(per_page).max(1);
+        let rows_per_column = self.keys_rows_per_column(fit);
+        let mut cut = paginate(&all, rows_per_column, columns);
+        let pages = cut.len();
         let page = self.keys_page.min(pages - 1);
-        model.rows = all
-            .into_iter()
-            .skip(page * per_page)
-            .take(per_page)
-            .collect();
+        model.rows = cut.swap_remove(page);
         model.columns = columns;
         model.rows_per_column = rows_per_column;
         model.notice = Some(match (&self.notice, self.capture) {
@@ -823,6 +860,7 @@ impl Model {
             rows: Vec::new(),
             columns: 1,
             rows_per_column: 0,
+            rows_reserved: 0,
             notice: None,
             footer: Vec::new(),
         }

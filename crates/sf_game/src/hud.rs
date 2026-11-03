@@ -30,6 +30,23 @@ const MINIMAP_BAKE_SIDE: u32 = 256;
 /// Margin to the window edges and the minimap size, logical pixels.
 const EDGE: f32 = 6.0;
 const MINIMAP_SIZE: f32 = 200.0;
+/// The width of the top bar and of the line under it, logical pixels, and the least it is narrowed to.
+const TOP_BAR_WIDTH: f32 = 520.0;
+const TOP_BAR_LEAST: f32 = 300.0;
+
+/// The width of the top bar in logical pixels for a window `screen_px` wide at UI `scale`. The bar is
+/// centred; with the sidebar on the right edge (WP11.1) it is narrowed so that it does not reach over
+/// the column at a larger UI scale (WP11.5a: at 150 % in a 1280-pixel window the "Dots" button lay on
+/// the credits). Unchanged where it fitted before.
+fn top_bar_width(screen_px: f32, scale: f32, sidebar: bool) -> f32 {
+    if !sidebar {
+        return TOP_BAR_WIDTH;
+    }
+    let look = crate::sidebar_view::shipped_look();
+    let reserved = f32::from(look.width_px) + 2.0 * f32::from(look.margin_px);
+    let room = screen_px / scale - 2.0 * reserved;
+    TOP_BAR_WIDTH.min(room.max(TOP_BAR_LEAST))
+}
 
 /// Colors of the four players' unit dots (same order as the unit styles).
 const OWNER_DOTS: [Color; 4] = [
@@ -252,7 +269,8 @@ impl Hud {
         );
 
         // Top bar: a label and a button.
-        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (520.0, 32.0));
+        let bar_width = top_bar_width(size.width as f32, ui.scale(), stats.sidebar.is_some());
+        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (bar_width, 32.0));
         let text = ui.config().text;
         ui.text_in(
             bar,
@@ -272,7 +290,7 @@ impl Hud {
             text,
         );
         if let Some(line) = &stats.build_line {
-            let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (520.0, 26.0));
+            let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (bar_width, 26.0));
             ui.text_in(strip, Anchor::Left, (12.0, 0.0), line, text);
         }
         self.sidebar_actions = draw_panels(
@@ -459,6 +477,36 @@ mod tests {
             draw_panels(&mut ui, &input, stats, &mut state, 4.0, false);
         }
         ui.draw_list().quad_count()
+    }
+
+    /// At every UI scale of the settings the centred top bar stays left of the sidebar in a 1280-wide
+    /// window (up to 150 %), is what it always was at 100 %, and without a sidebar is unchanged.
+    #[test]
+    fn the_top_bar_does_not_reach_over_the_sidebar() {
+        let side = crate::sidebar_view::shipped_look();
+        let (w, band) = (1280.0_f32, 4.0_f32);
+        for scale in [0.75_f32, 1.0, 1.25, 1.5] {
+            let bar = top_bar_width(w, scale, true) * scale;
+            let column = crate::sidebar_layout::layout(
+                sf_ui::Rect::new(0.0, 0.0, w, 720.0),
+                scale,
+                side,
+                band,
+                true,
+            )
+            .column;
+            assert!(
+                w * 0.5 + bar * 0.5 <= column.x,
+                "scale {scale}: the bar reaches {} and the column starts at {}",
+                w * 0.5 + bar * 0.5,
+                column.x
+            );
+        }
+        assert_eq!(top_bar_width(1280.0, 1.0, true), 520.0);
+        assert_eq!(top_bar_width(1920.0, 1.5, true), 520.0);
+        assert_eq!(top_bar_width(1280.0, 1.5, false), 520.0);
+        // A window too narrow for it does not make it vanish.
+        assert_eq!(top_bar_width(1280.0, 2.0, true), 300.0);
     }
 
     /// The merge of 7460c3b drew the production readout twice (a darker panel, text drawn over
