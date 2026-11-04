@@ -38,6 +38,7 @@
 //! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
 //! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
 //! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6) |
+//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6). It is the last section |
 //! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
@@ -214,6 +215,7 @@ const SECTION_MONEY: u8 = b'M';
 const SECTION_PRODUCTION: u8 = b'Y';
 const SECTION_OUTCOME: u8 = b'Z';
 const SECTION_POWER: u8 = b'I';
+const SECTION_REPAIR: u8 = b'r';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -309,6 +311,17 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
                 }
                 None => h.write_u8(0),
             }
+        }
+        Command::Repair { structure, on } => {
+            h.write_u8(16);
+            h.write_u32(structure.index());
+            h.write_u32(structure.generation());
+            h.write_u8(u8::from(*on));
+        }
+        Command::Sell { structure } => {
+            h.write_u8(17);
+            h.write_u32(structure.index());
+            h.write_u32(structure.generation());
         }
         Command::Order { ids, order, queued } => {
             h.write_u8(8);
@@ -666,6 +679,14 @@ impl World {
         if let Some(power) = &self.power {
             h.write_u8(SECTION_POWER);
             power.write_hash(&mut h);
+        }
+
+        // Repair and sale (`r`, WP6.6): the rules and each structure that repairs or is being sold,
+        // in slot order. After `I`, so it is the last section, and only while some structure repairs
+        // or is being sold: every world where nobody does hashes as before.
+        if self.repair.is_some() && self.repair_active() {
+            h.write_u8(SECTION_REPAIR);
+            self.write_repair_hash(&mut h);
         }
 
         h.finish()
