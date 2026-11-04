@@ -163,6 +163,10 @@ foot of a column, `a_heading_never_ends_a_column_and_the_pages_keep_every_row_in
   (queue orders and add to selection): rebinding either of them to Shift is refused, and **Reset** puts the shipped pair back.
   Why refuse and not swap: a swap changes a second action the player did not touch, and a mistaken key press is then not
   visible in the row that was clicked.
+* **A hand-edited settings file follows the same rules** (`Settings::sanitize`): an override that gives an action Esc, or a key
+  (not one of the action's own shipped keys) that another action has, is dropped as a whole, so the action keeps its shipped
+  keys, and the load says so in one warning naming the actions. Overrides are taken in action order; one kept earlier counts as
+  the other action's key for a later one (`a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has`).
 * **Esc** ends the wait and never becomes a binding; the menu key is not in the list.
 * **Reset** (per row, enabled only when the row differs from `input.ron`) and **Reset all keys**. Giving an action its
   shipped key back leaves nothing in the file (`giving_an_action_its_shipped_key_back_leaves_nothing_in_the_file`).
