@@ -137,7 +137,51 @@ impl Settings {
         if self.keys.len() != before {
             said.push("ignored key overrides for the menu key or with no key".to_owned());
         }
+        let refused = self.drop_refused_keys(&Bindings::builtin());
+        if !refused.is_empty() {
+            said.push(format!(
+                "ignored key overrides that use Esc or a key another action has (the shipped keys stay): {}",
+                refused
+                    .iter()
+                    .map(|a| format!("{a:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
         said
+    }
+
+    /// The rule of [`Settings::rebind`] for a file edited by hand: an override that gives an action
+    /// Escape, or a key that another action has (whatever its modifiers), is dropped, so the action
+    /// keeps the shipped keys. Only keys the shipped list of the action does not have are checked (a
+    /// key the shipped file lets two actions share stays with both). The actions are taken in order;
+    /// an override kept earlier counts as the other action's key for a later one. Returns the
+    /// actions dropped.
+    fn drop_refused_keys(&mut self, shipped: &Bindings) -> Vec<Action> {
+        let mut refused = Vec::new();
+        // The overrides are put back one by one: `self.keys` holds the ones kept so far.
+        for (action, list) in std::mem::take(&mut self.keys) {
+            let own = shipped.for_action(action);
+            let now = self.effective_bindings(shipped);
+            let bad = list.iter().any(|b| {
+                let Trigger::Key(key) = b.trigger else {
+                    return false;
+                };
+                if own.iter().any(|o| o.trigger == Trigger::Key(key)) {
+                    return false;
+                }
+                key == KeyCode::Escape
+                    || now.bindings.iter().any(|(other, others)| {
+                        *other != action && others.iter().any(|o| o.trigger == Trigger::Key(key))
+                    })
+            });
+            if bad {
+                refused.push(action);
+            } else {
+                self.keys.insert(action, list);
+            }
+        }
+        refused
     }
 
     /// The bindings the game runs with: `shipped` with the player's lists in place of the shipped

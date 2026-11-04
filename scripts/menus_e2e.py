@@ -101,6 +101,31 @@ class Game:
         found = re.findall(r"\(total (\d+)\)", self.text())
         return int(found[-1]) if found else -1
 
+    def totals(self):
+        return [int(n) for n in re.findall(r"\(total (\d+)\)", self.text())]
+
+    def wait_settled(self, timeout=30):
+        """Waits until the sim has stopped: two reports that came after this call show the same
+        total. Returns that total (the last one seen on a timeout, so the check after it fails
+        instead of this call)."""
+        seen = len(self.totals())
+        end = time.time() + timeout
+        while time.time() < end:
+            t = self.totals()
+            if len(t) >= seen + 2 and t[-1] == t[-2]:
+                return t[-1]
+            time.sleep(0.25)
+        return self.total_ticks()
+
+    def wait_ticks_above(self, ticks, timeout=30):
+        """Waits until the sim has gone past `ticks`; says whether it did."""
+        end = time.time() + timeout
+        while time.time() < end:
+            if self.total_ticks() > ticks:
+                return True
+            time.sleep(0.25)
+        return False
+
     def wait_for(self, pattern, timeout):
         end = time.time() + timeout
         while time.time() < end:
@@ -187,8 +212,7 @@ def playthrough(display, binary, settings):
 
         # Esc opens the pause menu and holds the sim.
         game.key("Escape")
-        time.sleep(1.5)
-        t1 = game.total_ticks()
+        t1 = game.wait_settled()
         time.sleep(3.0)
         t2 = game.total_ticks()
         check("Esc holds the sim: no tick for 3 s", t1 == t2, f"total {t1} -> {t2}")
@@ -210,8 +234,7 @@ def playthrough(display, binary, settings):
 
         # Resume is the first button of the pause menu.
         game.click(640, 290, 1)
-        time.sleep(2.5)
-        check("Resume lets the sim go on", game.total_ticks() > t2)
+        check("Resume lets the sim go on", game.wait_ticks_above(t2))
         m = game.mark()
         game.key("b")
         check("B reaches the game again after Resume", game.count(r"build: ", m) == 1)
@@ -220,31 +243,32 @@ def playthrough(display, binary, settings):
 
         # Esc twice: open, close.
         game.key("Escape")
-        time.sleep(1.0)
-        held = game.total_ticks()
+        held = game.wait_settled()
         time.sleep(2.0)
         check("held again", game.total_ticks() == held)
         game.key("Escape")
-        time.sleep(2.5)
-        check("Esc in the pause menu resumes", game.total_ticks() > held)
+        check("Esc in the pause menu resumes", game.wait_ticks_above(held))
 
         # Restart is the second button.
         matches = game.count(r"match m1: ")
         before = game.total_ticks()
         game.key("Escape")
-        time.sleep(1.0)
+        game.wait_settled()  # the menu is open when the sim is held
         game.click(640, 336, 1)
-        time.sleep(4.0)
+        game.wait_for(r"(?s)(match m1: .*){%d}" % (matches + 1), 30)
+        # The first report of the new game: its total is below the old one.
+        end = time.time() + 30
+        while time.time() < end and not 0 <= game.total_ticks() < before:
+            time.sleep(0.25)
         after = game.total_ticks()
         check("Restart builds the match again", game.count(r"match m1: ") == matches + 1)
         check("and the new game's clock is young", 0 <= after < before, f"{before} -> {after}")
 
         # Main menu is the fourth button; the start menu's Quit the fourth.
         game.key("Escape")
-        time.sleep(1.0)
+        game.wait_settled()
         game.click(640, 428, 1)
-        time.sleep(1.5)
-        held = game.total_ticks()
+        held = game.wait_settled()
         time.sleep(2.5)
         check("the main menu holds the sim", game.total_ticks() == held)
         game.click(640, 451, 1)
