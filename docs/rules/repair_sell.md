@@ -188,6 +188,48 @@ on 600 hit points after costing 34 credits (20 and 14 of the refund); at tick 70
 defeated that tick. Checksum `0x963b3db14951cfa5` in `repair_sell.expected` (CI runs it on Linux and Windows); amounts and ticks in
 `tools/sf_headless/tests/repair_sell.rs`, worked out by hand.
 
+## What moved (re-pins)
+
+Nothing. No `.expected` file and no constant of `golden.rs` differs from main (a diff against `origin/main` over
+`assets/scenarios/*.expected` and `golden.rs` shows only the new `repair_sell.expected`); the 29 scenarios of the CI list pass
+`sf_headless --expect` in release; the benchmark pins `PLAIN` and `FIGHT` (`crates/sf_game/tests/bench_scene.rs`) pass. Cause, by
+construction: the new state is two columns that are zero for every existing world and the section `r` is written only while something
+repairs or is sold (`the_checksum_is_untouched_until_somebody_repairs_or_sells`). The frozen copy `repair_sell_defs` is new; no existing
+copy was touched.
+
+## Cost
+
+Measured 04-11-2026 in the container, a release build, on a machine that was busy with other agents' builds (load average 2.4 to 6.3), so
+the numbers are relative and say nothing about the laptop (PLAN section 13). `cost_of_the_repair` (`--ignored`, five rounds each): the pass
+`advance_repair_sell` over 5,040 entities (40 structures) takes 7 to 16 microseconds per call whether the 40 structures are idle or
+repairing (the ranges overlap: the scan of the slots is the cost, not the repair); a whole step with 5,040 entities is 1.24 to 1.40 ms
+without the rules, 1.25 to 1.38 ms with the rules and nobody repairing and 1.28 to 1.47 ms with 40 repairing (the three ranges overlap).
+Base (`origin/main`, built in a copy) against this branch on `wander_5000` in release, six alternating pairs: base 783 to 851 ticks per
+second, branch 816 to 844, the same final checksum `0x38d5e3c43358a889`. A world without the rules pays one `Option` test per tick.
+
+## Mutations (each reverted, each caught)
+
+Run on the committed code with one change at a time; the failing tests are named. Unit tests are
+`crates/sf_sim/src/repair/tests.rs`, scenario tests `tools/sf_headless/tests/repair_sell.rs`.
+
+| Mutation | Fails |
+|---|---|
+| the owner check removed | `only_the_owner_may_repair_or_sell_and_every_refusal_is_listed`, scenario (refused-opponent, repair, sale and pin tests) |
+| a repair pays nothing | `a_repair_gains_hit_points_and_pays_by_the_cumulative_rule_every_tick`, `a_repair_waits_without_money_...`, `a_shortage_slows_a_repair_...`, scenario |
+| a repair goes past the maximum | `a_repair_never_goes_past_full_hit_points_...`, `a_repair_gains_hit_points_...`, scenario |
+| the refund ignores the hit points | `a_sale_takes_its_ticks_pays_the_refund_by_hit_points_...`, `the_refund_is_a_part_of_the_price_scaled_by_the_hit_points`, scenario |
+| a structure being sold still stands | `a_structure_being_sold_gives_no_power_...`, `selling_a_refinery_lowers_the_capacity_...`, scenario (defeat test) |
+| the checksum section written always | `the_checksum_is_untouched_until_somebody_repairs_or_sells`, the pin |
+| power does not slow a repair | `a_shortage_slows_a_repair_and_the_price_is_still_exact` |
+| a repair stops when it cannot pay | `a_repair_waits_without_money_and_goes_on_when_there_is_some`, scenario |
+| a sale does not wake the match | scenario `the_opponent_sells_its_last_structure_and_is_defeated_in_the_tick_it_starts` |
+| a tower being sold still fires | `a_tower_being_sold_fires_nothing_and_drops_its_target` (`tests/defences.rs`) |
+| a sale one tick too long | `a_sale_takes_its_ticks_...`, the tower test, scenario |
+| `sell_ticks` and `refund_permille` swapped in the bridge | `each_repair_number_arrives_as_itself` |
+| a right click in a mode orders the selection | `the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing` |
+| the sidebar counts a structure being sold as standing | `a_structure_being_sold_stands_no_more_and_unlocks_nothing` |
+| the repair cursor over a whole structure | `a_hurt_own_structure_is_offered_a_repair_and_a_whole_one_is_not` |
+
 ## Not done, on purpose (gaps)
 
 * **No cancelling a sale**, no pausing a repair other than by the stop command, no "repair all" or "sell all".
