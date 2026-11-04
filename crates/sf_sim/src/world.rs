@@ -1518,8 +1518,18 @@ impl World {
         // The units that choose their own targets look round, from where the bodies ended (WP5.4).
         let bounds = (motion.pos_min, motion.pos_max);
         let aim = self.targeting.config.filter(|_| !self.arsenal.is_empty());
+        // Whose defences have no power this tick (WP6.7); empty without power rules.
+        let unpowered: Vec<PlayerId> = self.power.as_ref().map_or_else(Vec::new, |p| {
+            p.totals
+                .iter()
+                .map(|&(player, _)| player)
+                .filter(|&player| !self.defences_powered(player))
+                .collect()
+        });
         if let Some(config) = aim {
             let cx = targeting::Context {
+                buildings: &self.buildings,
+                unpowered: &unpowered,
                 units: &self.units,
                 arsenal: &self.arsenal,
                 config,
@@ -1549,6 +1559,8 @@ impl World {
         if let Some(config) = aim {
             let mut attacks = std::mem::take(&mut self.arsenal.attacks);
             let cx = targeting::Context {
+                buildings: &self.buildings,
+                unpowered: &unpowered,
                 units: &self.units,
                 arsenal: &self.arsenal,
                 config,
@@ -2055,8 +2067,10 @@ impl World {
             Command::AimTurret { ids, target } => {
                 let mut changed = false;
                 for id in ids {
+                    // A structure's turret target is the target it chose (WP6.7): not a command.
                     if let Some(i) = self.live_index(id)
                         && turret::has_turret(&self.entities, i, &self.units)
+                        && !self.is_immobile(i)
                     {
                         self.entities.turret_target[i] =
                             target.filter(|&t| t != id && self.live_index(t).is_some());

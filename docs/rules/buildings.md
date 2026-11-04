@@ -64,7 +64,7 @@ number, an old one is never renumbered. `the_numbers_of_functions_and_sides_are_
 | 5 | `VehicleFactory` | produces vehicles (WP6.5) | `exit_side` |
 | 6 | `VesselFactory` | produces vessels (WP6.5) | `exit_side` and the `needs_water` flag |
 | 7 | `Radar` | enables the minimap | the `minimap` flag |
-| 8 | `Defence` | fights or shelters (WP6.7) | |
+| 8 | `Defence` | fights or shelters (WP6.7): since WP6.7 a standing armed one chooses targets, turns its turret and fires (and is silent without power if its own `power` is below zero); the unarmed bunker does nothing, garrisoning is a gap ([`defences.md`](defences.md)) | |
 | 9 | `Decoy` | looks like another building to the enemy AI | a `disguise_as` flag |
 
 ## What loading refuses

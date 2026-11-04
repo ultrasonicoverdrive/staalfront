@@ -125,7 +125,7 @@ game draws that seat as, a missing local player, a refused object) stops the sta
 
 **The result banner** (`match_view.rs`, `match_look.ron`): at the top middle, "Victory" when the local
 player won, "Defeat" when someone else did, "Draw" when nobody, and under it the game time and the
-tick ("decided after 4:44 (tick 5687)"). **The game keeps running behind it**: the result never changes,
+tick ("decided after 4:44 (tick 5687; since WP6.7 the scripted match is decided at tick 5967, see below)"). **The game keeps running behind it**: the result never changes,
 and a player may carry on, for example to destroy the rest. Since WP11.5a two buttons, **Restart** and **Main menu**, stand under
 the banner, and Esc opens the pause menu (`menus.md`); neither changes the result. Every word, number and colour of the banner is
 in `match_look.ron`, those of the buttons in `menu_look.ron`.
@@ -137,7 +137,7 @@ in `match_look.ron`, those of the buttons in `menu_look.ron`.
 a power plant (done at tick 301), a barracks (705) and a refinery (1105; it brings a free harvester),
 four riflemen and five rocket troopers (the credits and then the ore pay for them), an attack-move at tick
 2400 that arrives at the opponent's base, and two attack-moves deeper into it. **The first fight is at
-tick 3689; the opponent's last structure falls at tick 5687, and that is the defeat tick of player 1 and
+tick 3689; the opponent's last structure falls at tick 5967 (5687 until WP6.7), and that is the defeat tick of player 1 and
 the win tick of player 0.** The scenario runs to tick 7000. `tools/sf_headless/tests/match_m1.rs` pins the
 checksum and asserts all of the above (see "Tests").
 
@@ -150,6 +150,18 @@ it in, the entities, their hit points and the credits equal those of the world w
 (`power_in_the_match_moves_the_pin_by_its_section_only`). The one visible effect is the opponent's: once the army shoots at
 its plant, its output falls with the hit points and its (idle) factories slow down; it never builds, so nothing changes.
 
+**The tower fires (WP6.7).** The opponent's defence tower (`power` -20, on its plant with the refinery and barracks: 70 used of
+100 made) now shoots, since defences choose targets ([`defences.md`](defences.md)). `match.expected` moved from
+`0x49f207148bde095c` to `0x164403a92986654f`: the script is unchanged and the rules moved it. The tower fires its first shot at
+tick 3830 (140 ticks after the first death, the army must come within its reach of 6 cells), 40 shots in all, and is destroyed at
+tick 4509; the human still wins, at **tick 5967 instead of 5687**, with 3 of its 9 units left and 6 lost (before WP6.7: none lost). The frozen
+copy of the definitions has the tower without a turret and with the weapon all round, as when it was made, so the match is
+not a test of the turret. Because the opponent's power use is 70, the tower goes dark when its plant has **less than 420 of its
+600 hit points**; the script never takes the plant before the tower falls, so it never happens in the script
+(`the_opponents_tower_goes_dark_when_its_plant_is_below_420_of_600` makes it happen with a tank sent at the plant: lit at 432 hit
+points, dark at 411). The ticks above in "The headless scenario" and the banner text "decided after 4:44 (tick 5687)" describe the
+first version; the game's banner shows whatever tick the game decides.
+
 A scenario can name a `match_file` (a file in its `unit_defs` directory): it then gets the match rules,
 the factions, the credits and the starting objects from the file, and `factions` and `money.starting`
 must be left out.
@@ -159,7 +171,7 @@ must be left out.
 | Test | What it shows |
 |---|---|
 | `crates/sf_sim/tests/outcome.rs` (14) | the rules are refused when wrong; a structure or an armed unit keeps a player in, a harvester and an object do not; the last player standing wins in the tick of the last defeat; a simultaneous end is a draw; three players; nobody is defeated before everyone has something; a world with a player who never has anything has no result; once decided never changes; a structure shot down defeats its owner in the tick it died; independent of spawn order; the defeats and result are in the checksum; a world without match rules has no section. |
-| `tools/sf_headless/tests/match_m1.rs` (10) | the pinned checksum; the starting objects in the order of the file; the win tick 5687 and nothing decided before it; nothing changes in the 1,313 ticks after; the same game without the rules differs only by the section; the opponent stays put, fires back and never gains an entity; the harvest pays; the committed map is what the generator draws, and its places and counts. |
+| `tools/sf_headless/tests/match_m1.rs` (12) | the pinned checksum; the starting objects in the order of the file; the win tick 5967 and nothing decided before it, the tower that fires and the 420-hit-point threshold (WP6.7); nothing changes in the 1,313 ticks after; the same game without the rules differs only by the section; the opponent stays put, fires back and never gains an entity; the harvest pays; the committed map is what the generator draws, and its places and counts. |
 | `crates/sf_data` (`match_def`, `match_look`), `crates/sf_bridge/tests/match_def.rs` | the file's shape and checks; the shipped file pinned as literals; each number arrives in the world as itself (distinct values). |
 | `crates/sf_game` (`match_view`, `args`, `tests/match_screenshot.rs`) | the standing from the winner, the clock, the words from the look; the flag; the real renderer. |
 

@@ -74,7 +74,7 @@ use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, Kind, PlayerId, Tick};
 use crate::orders::{Order, live_slot, radius_of, radius_of_stats};
 use crate::projectiles::{self, ImpactCause, Projectile, Projectiles};
-use crate::units::UnitTable;
+use crate::units::{UnitClass, UnitTable};
 
 /// Most weapons one unit kind carries.
 pub const MAX_WEAPON_SLOTS: usize = 4;
@@ -1025,6 +1025,14 @@ pub(crate) fn update_all(
         let (victim, chosen) = match e.order[i] {
             Order::Attack(id) => (live_slot(e, id).filter(|&j| j != i), false),
             Order::Pursue(id) => (live_slot(e, id).filter(|&j| j != i), true),
+            // A standing defence takes no order: the target it chose is its turret target (WP6.7,
+            // `Targeting::update` clears it when the structure may not fire).
+            _ if units.at(e.def[i] as usize).class() == UnitClass::Structure => (
+                e.turret_target[i]
+                    .and_then(|id| live_slot(e, id))
+                    .filter(|&j| j != i),
+                true,
+            ),
             _ => (None, false),
         };
         for (s, &at) in slots.iter().enumerate() {

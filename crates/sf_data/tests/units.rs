@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use sf_data::units::{
     Category, Decimal, DefFile, DefSources, EMBEDDED_CLASSES, EMBEDDED_UNITS, EMBEDDED_WEAPONS,
-    Faction, Projectile, UnitDefs,
+    Faction, Projectile, UnitDefs, WeaponMount,
 };
 use sf_math::Fx;
 
@@ -1478,6 +1478,58 @@ fn tanks_and_artillery_have_a_turret_that_turns_apart_from_the_hull() {
 }
 
 #[test]
+fn the_armed_structures_have_a_turret_each_with_its_own_rate_and_the_others_have_none() {
+    // WP6.7: distinct numbers, so that a swap between two structures shows.
+    let defs = shipped();
+    let rate = |id: &str| {
+        defs.sim_unit(defs.kind_of(id).unwrap())
+            .unwrap()
+            .turret_per_tick
+    };
+    assert_eq!(rate("defence_tower"), 12);
+    assert_eq!(rate("advanced_defences"), 8);
+    assert_eq!(rate("automated_gun"), 16);
+    assert_eq!(rate("unmanned_artillery"), 6);
+    // The bunker has no weapon and no turret; neither has a structure that only stands.
+    for role in [
+        "fortified_bunker",
+        "decoy_emplacement",
+        "power_plant",
+        "radar",
+    ] {
+        assert_eq!(rate(role), 0, "{role}");
+    }
+    // Their guns are on the turret and have the default arc, no longer all round.
+    for gun in [
+        "tower_gun",
+        "emplacement_gun",
+        "automated_gun",
+        "battery_shell",
+    ] {
+        let w = defs.sim_weapon(defs.weapon(gun).unwrap().kind).unwrap();
+        assert_eq!(w.mount, WeaponMount::Turret, "{gun}");
+        assert_eq!(w.fire_arc, 8, "{gun}");
+    }
+}
+
+#[test]
+fn a_turret_on_a_structure_needs_a_weapon() {
+    let e = replace_units(
+        "hp: 600, armor: \"structure\", power: 100,",
+        "hp: 600, armor: \"structure\", power: 100, turret_rate: 4,",
+    )
+    .unwrap_err();
+    assert!(e.message.contains("with a weapon"), "{e}");
+    // A weapon that is mounted on a turret needs the rate, on a structure too.
+    let e = replace_units(
+        "footprint: (width: 1, height: 1), sight: 7, weapons: [\"tower_gun\"], turret_rate: 12,",
+        "footprint: (width: 1, height: 1), sight: 7, weapons: [\"tower_gun\"],",
+    )
+    .unwrap_err();
+    assert!(e.message.contains("mounted on a turret"), "{e}");
+}
+
+#[test]
 fn a_turret_needs_a_movement_class() {
     // On a unit that moves, the field is just data.
     let defs = replace_units(
@@ -1487,14 +1539,14 @@ fn a_turret_needs_a_movement_class() {
     .unwrap();
     let kind = defs.kind_of("siege_artillery").unwrap();
     assert_eq!(defs.sim_unit(kind).unwrap().turret_per_tick, 7);
-    // On a structure, which never moves, it is refused with the line.
+    // On a structure without a weapon it is refused with the line (an armed one may have it, WP6.7).
     let e = replace_units(
         "hp: 600, armor: \"structure\", power: 100,",
         "hp: 600, armor: \"structure\", power: 100, turret_rate: 4,",
     )
     .unwrap_err();
     assert!(
-        e.message.contains("turret_rate need a movement class"),
+        e.message.contains("turret_rate needs a movement class"),
         "{e}"
     );
     assert!(e.line.is_some(), "{e}");

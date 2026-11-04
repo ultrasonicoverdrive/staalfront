@@ -1519,7 +1519,7 @@ spawned in, and a unit that has to turn before it drives sets off at a different
 heading in a tick. That is older than this work package (it is why no earlier permutation test moves units).
 
 **Deferred, and why.**
-1. **Structures choosing targets** (towers, emplacements): WP6.7. A structure takes no order, and a `Pursue` on one
+1. **Structures choosing targets** (towers, emplacements): done in WP6.7 (`docs/rules/defences.md`). A structure takes no order, and a `Pursue` on one
    would make it walk; it needs a target without an order.
 2. **Firing at the ground, backing off inside the minimum range** (a follower that finds its target inside the
    minimum range lets go and goes back to its order; it does not step back), **threat-based priorities** (shoot what shoots you
@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4 (power) is built and in review, main merged in (see "WP6.4 notes"); WP6.6 and WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4 (power) is merged (PR #99); WP6.7 (defensive buildings) is built and in review, stacked on WP6.4 and merged with main (see "WP6.7 notes"); WP6.6 is not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -2451,6 +2451,39 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   plant built in a shortage is slowed like any structure (no exemption: the floor is the way out); the damage stage of the
   models is not tied to the output (the output follows the hit points, the model follows the damage thresholds of
   `damage.ron`); no sound or announcement for "low power" (audio is another work package); not played by a person.
+
+### WP6.7 notes: defensive buildings (stacked on WP6.4, orchestrator decision 03-11-2026)
+
+- Done: a standing structure with a weapon chooses its own targets (the unit rules, the same cooldown), holds the target as its
+  `turret_target`, turns its turret at a rate from data and fires through the ordinary weapon path only within the arc; it takes
+  no order and no `AimTurret`; without power (own `power` below zero, `defences_powered` false) it is silent; under construction
+  or at zero hit points it does nothing; the weaponless bunker does nothing. Data: `turret_rate` 12 / 8 / 16 / 6 on the tower,
+  the advanced defences, the automated gun and the unmanned artillery, their weapons on the turret with the default arc 8 (the
+  loader allows `turret_rate` on an armed Structure). Section `d` of the checksum (only with armed structures). New pinned
+  scenario `defences` (`0xb31bf0125145ac15`, in the CI list). Rules: `docs/rules/defences.md`. Screenshots:
+  `docs/screenshots/wp6.7`.
+- **Decisions** (written in `defences.md`): the arc of the shipped structure weapons is the default 8 like every turret weapon
+  (not all round); the target of a structure is its `turret_target` (not an order); "needs power" keys on the structure's own
+  `power < 0`; the frozen copies keep structures without a turret and with an all-round hull weapon.
+- **Pins that moved (measured causes in `defences.md` and `docs/bench/README.md`):** `match.expected`
+  `0x49f207148bde095c` to `0x164403a92986654f` (the opponent's tower fires: first shot tick 3830, 40 shots, destroyed tick
+  4509; the human still wins, at tick 5967 instead of 5687, with 3 of 9 units left; the script is unchanged); bench `FIGHT` (the
+  weapon table and the unit table's turret-rate digests changed; every shot, hit, death and position equal to the old run, `PLAIN` unchanged). No other pin moved.
+- **Cost** (release, alternating runs, load average about 2 to 3): 40 armed structures with 200 units in reach about 10 us per
+  tick more (48.6 to 59.1 us, medians); a world with no structure and 5,000 units no difference (773 against 779 us). Relative
+  numbers only.
+- **Found while testing:** the match script never needs the tower to be dark: its army takes the tower out first. The opponent's
+  tower goes dark below 420 of its plant's 600 hit points (measured); an army that shoots the plant first meets no tower.
+  `damage_screenshot.rs::a_structure_shot_up_shows_its_damaged_models_smoke_and_fire` failed on this branch (and passes on a
+  clean copy of the base): the sandbox's neutral `automated_gun` (slot 49) now shoots at the tanks, the flame particles of the
+  heavily damaged plant wandered over the cream half of its roof, and the test's measure of fire (brightness gained) found 0 to 1
+  pixels in a picture that shows flames (the timeline, the plant's hit points and the ticks were equal to the base's; only the
+  particles differed). **The test was changed, not the rules:** `glow_pixels` also counts the warm orange of flames; the thresholds
+  are unchanged (meridian 482 pixels at the start zoom, veyran 1107, damaged 0). Worth knowing: that test is sensitive to where
+  particles drift.
+- **Gaps.** Garrisoning the bunker (owner: phase 9 or a WP6.7b); the decoy has no behaviour; no mission logic for the neutral
+  structures (`fires_at_all`, "fires when the uplink is alive"); no fog (the sight of a defence is unused); a structure does not
+  answer fire from out of its reach; the structures' numbers are placeholders; not played by a person.
 
 ### WP11.5a notes: menus and settings without sound (stacked on WP6.4, orchestrator decision 03-11-2026)
 
