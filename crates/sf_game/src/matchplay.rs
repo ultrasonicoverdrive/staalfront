@@ -96,6 +96,8 @@ pub fn configure(world: World, def: &MatchDef, defs: &UnitDefs) -> Result<World,
     let world = playfield::with_production(world, defs);
     // WP6.4: the structures make and use power; a shortage slows building and production.
     let world = playfield::with_power(world);
+    // WP6.6: a player can repair and sell its structures.
+    let world = playfield::with_repair(world);
     let world = playfield::with_movement(world, defs);
     let world = playfield::with_combat(world, defs);
     playfield::with_match(world, def)

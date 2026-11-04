@@ -599,3 +599,97 @@ fn the_sidebar_survives_every_size_and_scale() {
         }
     }
 }
+
+// ---- The Repair and Sell buttons (WP6.6) --------------------------------------------------------
+
+use crate::repair_mode::ToolMode;
+
+#[test]
+fn a_left_click_on_a_tool_button_switches_its_mode_and_a_right_click_leaves_it() {
+    let f = fixture();
+    let model = f
+        .model(&f.situation(Some(1000)), Tab::Structures)
+        .with_tools(None);
+    let l = lay(&f, SIZE);
+    let mut state = SidebarState::default();
+    for (mode, rect) in [(ToolMode::Repair, l.tools[0]), (ToolMode::Sell, l.tools[1])] {
+        let (x, y) = rect.center();
+        let out = run(
+            &f,
+            &mut state,
+            &model,
+            press(at(x, y), MouseButton::Left),
+            SIZE,
+        );
+        assert_eq!(out.actions, [Action::ToggleMode(mode)]);
+        let out = run(
+            &f,
+            &mut state,
+            &model,
+            press(at(x, y), MouseButton::Right),
+            SIZE,
+        );
+        assert_eq!(out.actions, [Action::LeaveMode]);
+    }
+    // A press on a button is the UI's: it changes no tab.
+    assert_eq!(state.tab, Tab::Structures);
+}
+
+#[test]
+fn the_buttons_do_nothing_in_a_world_without_repair_rules() {
+    let f = fixture();
+    // `model.tools` is `None` there: the buttons are drawn dim and are silent.
+    let model = f.model(&f.situation(Some(1000)), Tab::Structures);
+    assert!(model.tools.is_none());
+    let l = lay(&f, SIZE);
+    let mut state = SidebarState::default();
+    for rect in l.tools {
+        let (x, y) = rect.center();
+        for button in [MouseButton::Left, MouseButton::Right] {
+            let out = run(&f, &mut state, &model, press(at(x, y), button), SIZE);
+            assert!(out.actions.is_empty());
+        }
+    }
+}
+
+#[test]
+fn the_button_of_the_mode_that_is_on_is_lit_and_the_others_are_not() {
+    let f = fixture();
+    let base = f.model(&f.situation(Some(1000)), Tab::Structures);
+    let l = lay(&f, SIZE);
+    let mut state = SidebarState::default();
+    let c = &f.look.colors;
+    let lit = |ui: &Ui| quads_in(ui, color_array(c.tool_active));
+    // No mode: both at rest.
+    let out = run(
+        &f,
+        &mut state,
+        &base.clone().with_tools(None),
+        at(10.0, 10.0),
+        SIZE,
+    );
+    assert!(lit(&out.ui).is_empty());
+    assert_eq!(
+        quads_in(&out.ui, color_array(c.tool)),
+        [l.tools[0], l.tools[1]]
+    );
+    // Sell on: the second button is lit, the first at rest.
+    let out = run(
+        &f,
+        &mut state,
+        &base.clone().with_tools(Some(ToolMode::Sell)),
+        at(10.0, 10.0),
+        SIZE,
+    );
+    assert_eq!(lit(&out.ui), [l.tools[1]]);
+    assert_eq!(quads_in(&out.ui, color_array(c.tool)), [l.tools[0]]);
+    // Repair on: the first.
+    let out = run(
+        &f,
+        &mut state,
+        &base.with_tools(Some(ToolMode::Repair)),
+        at(10.0, 10.0),
+        SIZE,
+    );
+    assert_eq!(lit(&out.ui), [l.tools[0]]);
+}

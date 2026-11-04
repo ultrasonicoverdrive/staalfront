@@ -289,6 +289,8 @@ pub struct Runner {
     cursor_art: Option<CursorArt>,
     /// The structure chosen to build, if one is (WP6.2, [`crate::build_mode`]).
     build: BuildMode,
+    /// The Repair or Sell mode of the sidebar, if one is on (WP6.6, [`crate::repair_mode`]).
+    tool: Option<crate::repair_mode::ToolMode>,
     /// What the sidebar offers (WP11.1); `None` in the scenes without a sidebar.
     catalog: Option<Catalog>,
     /// Which of the units the selected factory offers the queue key adds (WP6.5); wraps.
@@ -552,6 +554,7 @@ impl Runner {
             cursor_art,
             os_cursor_hidden: false,
             build,
+            tool: None,
             catalog,
             rejected_seen: 0,
             produce_pick: 0,
@@ -604,6 +607,9 @@ impl Runner {
             } else if ctx.actions().pressed(Action::Quit) {
                 if self.menu.is_open() {
                     events.push(Event::Escape);
+                } else if self.tool.take().is_some() {
+                    // A Repair or Sell mode that is on ends first; the next Esc opens the menu (WP6.6).
+                    println!("sidebar: mode off");
                 } else {
                     let out = self.menu.open_pause();
                     self.apply_outcomes(ctx, out);
@@ -728,6 +734,7 @@ impl Runner {
             hover,
             cursor_kind,
             build,
+            tool,
             catalog,
             produce_pick,
             rejected_seen,
@@ -802,6 +809,7 @@ impl Runner {
         self.hover = hover;
         self.cursor_kind = cursor_kind;
         self.build = build;
+        self.tool = tool;
         self.catalog = catalog;
         self.produce_pick = produce_pick;
         self.rejected_seen = rejected_seen;
@@ -1068,6 +1076,7 @@ impl Runner {
         if actions.pressed(Action::SelectClick)
             && !ui_busy
             && !self.build.is_active()
+            && self.tool.is_none()
             && let Some(at) = cursor
         {
             self.pointer.press(at);
@@ -1158,6 +1167,19 @@ impl Runner {
             &self.hover,
             Modifiers::from_actions(ctx.actions()),
         );
+        // A mode of the sidebar shows what a click will do (WP6.6): the spanner or the coin over a
+        // structure it can act on, the forbidden sign elsewhere; the scroll arrows of the screen
+        // edge still win, as in every row of `cursor.md`.
+        if let Some(mode) = self.tool
+            && cursor::scroll_cursor(self.hover.edges).is_none()
+        {
+            self.cursor_kind = crate::repair_mode::cursor(
+                &self.snap,
+                mode,
+                self.hover.entity,
+                commands::LOCAL_PLAYER,
+            );
+        }
         let drawn = match (&self.cursor_art, at) {
             (Some(art), Some(pos)) => {
                 self.hud
@@ -1231,6 +1253,32 @@ impl Runner {
         (cx < self.cells.0 && cy < self.cells.1).then(|| sf_sim::Cell::new(cx, cy))
     }
 
+    /// The Repair and Sell modes (WP6.6, [`crate::repair_mode`]): with a mode on, the select button
+    /// sends the command for the structure under the cursor (the simulation checks it again at its
+    /// tick) and the order button leaves the mode. The mode stays on after a click, so several
+    /// structures can be done one after the other; Esc leaves it too (`handle_menu`).
+    fn handle_tool(&mut self, ctx: &Context) {
+        let Some(mode) = self.tool else { return };
+        if self.hud.pointer_over_ui() || self.debug.pointer_over_panel() {
+            return;
+        }
+        let actions = ctx.actions();
+        if actions.pressed(Action::OrderMove) {
+            self.tool = None;
+            println!("sidebar: mode off");
+        } else if actions.pressed(Action::SelectClick)
+            && let Some(command) = crate::repair_mode::click(
+                &self.snap,
+                mode,
+                self.hover.entity,
+                commands::LOCAL_PLAYER,
+            )
+        {
+            println!("sidebar: {command:?}");
+            commands::issue(&self.sim, command);
+        }
+    }
+
     /// Building (WP6.2, [`crate::build_mode`]): B chooses the next structure, the select
     /// button places the chosen one on the ghost's cell, the order button puts it away; and
     /// the sim thread is told which place the ghost is on, so that its answer comes back in the
@@ -1295,14 +1343,20 @@ impl Runner {
         let player = commands::LOCAL_PLAYER;
         let sit =
             crate::sidebar::Situation::read(&self.snap, player, catalog, self.selection.ids());
-        Some(crate::sidebar::model(
+        let model = crate::sidebar::model(
             catalog,
             &sit,
             self.hud.sidebar_tab(),
             self.build.chosen().map(|c| c.kind),
             crate::sidebar::power_reading(&self.snap, player),
             crate::sidebar_view::shipped_look(),
-        ))
+        );
+        // The Repair and Sell buttons are live only in a world with repair and sale rules (WP6.6).
+        Some(if self.snap.has_repair() {
+            model.with_tools(self.tool)
+        } else {
+            model
+        })
     }
 
     /// What the clicks on the sidebar asked for (WP11.1): choosing a structure starts the build mode
@@ -1313,7 +1367,26 @@ impl Runner {
         use crate::sidebar::Action;
         for action in self.hud.take_sidebar_actions() {
             match action {
+                Action::ToggleMode(mode) => {
+                    // One mode at a time, and not together with a structure chosen to build.
+                    self.tool = if self.tool == Some(mode) {
+                        None
+                    } else {
+                        Some(mode)
+                    };
+                    if self.tool.is_some() {
+                        self.build.cancel();
+                    }
+                    match self.tool {
+                        Some(m) => println!(
+                            "sidebar: {m:?} mode (left click on a structure, right click leaves)"
+                        ),
+                        None => println!("sidebar: mode off"),
+                    }
+                }
+                Action::LeaveMode => self.tool = None,
                 Action::ChooseStructure(kind) => {
+                    self.tool = None;
                     if self.build.choose_kind(kind) {
                         println!(
                             "sidebar: build {} (left click places it)",
@@ -1350,6 +1423,13 @@ impl Runner {
     /// The second line of the top bar: the chosen structure and the verdict of the ghost, or the
     /// last refusal for a few seconds.
     fn build_line(&self, now: Instant) -> Option<String> {
+        if let Some(mode) = self.tool {
+            let look = crate::repair_view::shipped_look();
+            return Some(match mode {
+                crate::repair_mode::ToolMode::Repair => look.hint_repair.clone(),
+                crate::repair_mode::ToolMode::Sell => look.hint_sell.clone(),
+            });
+        }
         let chosen = self.build.chosen()?;
         let name = self.build.name_of(chosen.kind);
         if let Some((words, at)) = &self.refusal
@@ -1403,6 +1483,30 @@ impl Runner {
         let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
         let mut layer = self.hud.world_layer();
         construction_view::draw_for(&mut layer, &frame, &terrain, &snap, &self.looks);
+    }
+
+    /// The repair signs and the sale bars (WP6.6), from the snapshot's state.
+    fn draw_repair_marks(&mut self) {
+        if self.snap.repairs().is_empty() && self.snap.sales().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        crate::repair_view::draw(
+            &mut layer,
+            &frame,
+            &terrain,
+            &snap,
+            crate::repair_view::shipped_look(),
+        );
     }
 
     /// The fill bars of the structures that store ore (WP7.3), from the snapshot's state.
@@ -2480,6 +2584,7 @@ impl App for Runner {
             self.draw_ghost();
             self.draw_construction_bars();
             self.draw_storage_bars();
+            self.draw_repair_marks();
             self.draw_production();
             // Under a menu the game cursor is gone and the system's is back.
             let game_cursor =
@@ -2544,13 +2649,14 @@ impl App for Runner {
         }
         // Decided once, before the handlers: the click that puts the structure
         // away must not also order the selection (handle_build ends build mode).
-        let right_click = RightClick::for_frame(self.build.is_active());
+        let right_click = RightClick::for_frame(self.build.is_active(), self.tool.is_some());
         if menu_open {
             // No click, key or drag reaches the sidebar, the map or the orders while a menu is open
             // (WP11.5a); a drag the player had begun is dropped, not finished by the next click.
             self.pointer.cancel();
         } else {
             self.handle_sidebar();
+            self.handle_tool(ctx);
             self.handle_build(ctx, now);
             self.handle_production(ctx);
             self.handle_selection(ctx);
@@ -2956,6 +3062,7 @@ fn sandbox_scene(
                 world = crate::playfield::with_production(world, &defs);
                 // WP6.4: and what the structures make and use is power; a shortage slows both.
                 world = crate::playfield::with_power(world);
+                world = crate::playfield::with_repair(world);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
@@ -3131,8 +3238,9 @@ enum RightClick {
 }
 
 impl RightClick {
-    fn for_frame(build_active: bool) -> Self {
-        if build_active {
+    fn for_frame(build_active: bool, tool_active: bool) -> Self {
+        // A Repair or Sell mode (WP6.6) takes the order button too: it leaves the mode.
+        if build_active || tool_active {
             RightClick::PutAway
         } else {
             RightClick::Order
@@ -3147,6 +3255,14 @@ mod tests {
     use sf_data::map::generate::generate_cells;
     use sf_sim::{Command, Kind, PlayerId, Tick};
 
+    /// WP6.6: with a Repair or Sell mode on, the right click leaves the mode and orders nothing.
+    #[test]
+    fn the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing() {
+        assert_eq!(RightClick::for_frame(false, true), RightClick::PutAway);
+        assert_eq!(RightClick::for_frame(true, true), RightClick::PutAway);
+        assert_eq!(RightClick::for_frame(false, false), RightClick::Order);
+    }
+
     /// Finding 1 of the WP6.2 review: the right click that puts the structure
     /// away ends build mode inside `handle_build`, so a check made after that
     /// handler would order the selection with the same click.
@@ -3157,12 +3273,15 @@ mod tests {
         build.cycle();
         assert!(build.is_active());
         // The frame: decide first, then the build handler cancels.
-        let right_click = RightClick::for_frame(build.is_active());
+        let right_click = RightClick::for_frame(build.is_active(), false);
         build.cancel();
         assert!(!build.is_active());
         assert_eq!(right_click, RightClick::PutAway);
         // Without build mode the same click is an order.
-        assert_eq!(RightClick::for_frame(build.is_active()), RightClick::Order);
+        assert_eq!(
+            RightClick::for_frame(build.is_active(), false),
+            RightClick::Order
+        );
     }
 
     #[test]

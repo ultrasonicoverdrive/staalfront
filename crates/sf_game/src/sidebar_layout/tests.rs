@@ -169,3 +169,30 @@ fn the_wheel_scrolls_a_row_at_a_time_and_stays_inside_the_list() {
     assert_eq!(scrolled(0, 1.0, 14, 2, 5), 0);
     assert_eq!(scrolled(1, 0.0, 14, 2, 5), 1);
 }
+
+#[test]
+fn the_two_tool_buttons_stand_side_by_side_between_the_power_bar_and_the_tabs() {
+    let l = layout(screen(1280.0, 720.0), 1.0, &look(), 4.0, true);
+    let [repair, sell] = l.tools;
+    assert_eq!(repair.y, sell.y);
+    assert!(repair.x < sell.x && repair.right() < sell.x);
+    assert!(l.power.bottom() < repair.y && repair.bottom() < l.tabs[0].y);
+    assert_eq!((repair.h, sell.h), (24.0, 24.0));
+    for r in [repair, sell] {
+        assert!(r.x >= l.column.x && r.right() <= l.column.right());
+    }
+    // A hit on each is that button, whatever the scroll.
+    let (x, y) = repair.center();
+    assert_eq!(l.hit(x, y, 3, 20), Some(Hit::Tool(ToolMode::Repair)));
+    let (x, y) = sell.center();
+    assert_eq!(l.hit(x, y, 0, 0), Some(Hit::Tool(ToolMode::Sell)));
+}
+
+#[test]
+fn the_tool_buttons_follow_the_ui_scale() {
+    for scale in [0.5, 1.0, 2.0] {
+        let l = layout(screen(1920.0, 1080.0), scale, &look(), 4.0, true);
+        assert_eq!(l.tools[0].h, (24.0 * scale).round(), "scale {scale}");
+        assert!(l.tools[1].right() <= l.column.right(), "scale {scale}");
+    }
+}
