@@ -82,9 +82,12 @@ pub fn player_colours(choice: PaletteChoice) -> Option<Vec<(String, [u8; 3])>> {
     }
 }
 
+/// Player colours as `(name, sRGB)`.
+type Colours = Vec<(String, [u8; 3])>;
+
 /// The standard colours the style had when the game last read `units.ron` (`remember_standard`); none
 /// until then.
-static STANDARD: Mutex<Option<Vec<(String, [u8; 3])>>> = Mutex::new(None);
+static STANDARD: Mutex<Option<Colours>> = Mutex::new(None);
 
 /// The first colours of `style` as `(name, sRGB)`, as many as the second set has.
 fn first_colours(style: &sf_render::Style) -> Vec<(String, [u8; 3])> {
