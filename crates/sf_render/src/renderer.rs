@@ -570,6 +570,24 @@ impl Renderer {
         &self.present
     }
 
+    /// Change how the window presents (WP11.5a: vsync on or off in the settings) without making the
+    /// renderer again: the mode is chosen from what the surface supports as at the start
+    /// ([`Present::choose`]) and the surface is configured again. Returns the info of the mode now
+    /// in use. An offscreen renderer has no presenting; it is left alone.
+    pub fn set_present(&mut self, present: crate::gpu::Present) -> &PresentInfo {
+        if let Target::Window { surface, config } = &mut self.target {
+            let caps = surface.get_capabilities(&self.gpu.adapter);
+            let (mode, note) = present.choose(&caps.present_modes);
+            config.present_mode = mode;
+            surface.configure(&self.gpu.device, config);
+            self.present = PresentInfo {
+                mode: format!("{mode:?}"),
+                note,
+            };
+        }
+        &self.present
+    }
+
     /// Start timing the GPU side of every frame. Returns `false` when the
     /// device has no timestamp queries (the results then stay empty).
     pub fn enable_gpu_timing(&mut self) -> bool {

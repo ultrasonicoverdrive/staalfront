@@ -371,7 +371,9 @@ fn a_structure_still_going_up_does_not_keep_its_owner_in_the_match() {
 /// Power (WP6.4) is on in the match. It moved the pin once, from `0x54a140fc12273e31` (the scenario with
 /// the `power` line taken out) to the value of that day, by its section alone; the proof is below, as
 /// a comparison of the two worlds tick by tick. (Since WP6.7 the tower fires, so the world without the
-/// power line no longer ends at the WP7.6 value.)
+/// power line no longer ends at the WP7.6 value. The WP6.4 value `0x49f207148bde095c` is still the
+/// measured cause of the move: with the structure branch of targeting and section `d` switched off, the
+/// match gives exactly that value again, as measured in the review of WP6.7.)
 #[test]
 fn power_in_the_match_moves_the_pin_by_its_section_only() {
     let with = scenario();

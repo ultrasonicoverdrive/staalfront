@@ -23,11 +23,30 @@ use sf_render::{Camera, RenderError, Renderer};
 use sf_sim::EntityView;
 use sf_ui::{Anchor, Color, Minimap, MouseButton, Ui, UiConfig, UiInput, UiRenderer, fov_polygon};
 
+use crate::menu::{Item, Menu};
+
 /// Longest side of the baked minimap image in pixels.
 const MINIMAP_BAKE_SIDE: u32 = 256;
 /// Margin to the window edges and the minimap size, logical pixels.
 const EDGE: f32 = 6.0;
 const MINIMAP_SIZE: f32 = 200.0;
+/// The width of the top bar and of the line under it, logical pixels, and the least it is narrowed to.
+const TOP_BAR_WIDTH: f32 = 520.0;
+const TOP_BAR_LEAST: f32 = 300.0;
+
+/// The width of the top bar in logical pixels for a window `screen_px` wide at UI `scale`. The bar is
+/// centred; with the sidebar on the right edge (WP11.1) it is narrowed so that it does not reach over
+/// the column at a larger UI scale (WP11.5a: at 150 % in a 1280-pixel window the "Dots" button lay on
+/// the credits). Unchanged where it fitted before.
+fn top_bar_width(screen_px: f32, scale: f32, sidebar: bool) -> f32 {
+    if !sidebar {
+        return TOP_BAR_WIDTH;
+    }
+    let look = crate::sidebar_view::shipped_look();
+    let reserved = f32::from(look.width_px) + 2.0 * f32::from(look.margin_px);
+    let room = screen_px / scale - 2.0 * reserved;
+    TOP_BAR_WIDTH.min(room.max(TOP_BAR_LEAST))
+}
 
 /// Colors of the four players' unit dots (same order as the unit styles).
 const OWNER_DOTS: [Color; 4] = [
@@ -75,6 +94,13 @@ pub struct Hud {
     sidebar_actions: Vec<crate::sidebar::Action>,
     /// The edge-scroll band of `input.ron`, in physical pixels: the sidebar keeps out of it.
     edge_band: f32,
+    /// `ui.ron` as it is on disk; the UI runs with its scale times [`Hud::set_user_scale`] (WP11.5a).
+    base_config: UiConfig,
+    user_scale: f32,
+    /// The dots of the minimap in the player's own set of colours (WP11.5a); `None` = [`OWNER_DOTS`].
+    dots: Option<Vec<Color>>,
+    /// What the menu's clicks asked for in the last frame; the runner takes them.
+    menu_actions: Vec<Item>,
 }
 
 /// `assets/config/ui.ron`, or the defaults when it is missing or broken.
@@ -124,20 +150,77 @@ fn ui_input(ctx: &Context) -> UiInput {
 
 impl Hud {
     pub fn new(assets: &Path) -> Self {
+        let base_config = load_config(assets);
         Self {
-            ui: Ui::new(load_config(assets)),
+            ui: Ui::new(base_config.clone()),
             gpu: None,
             minimap: None,
             show_dots: true,
             sidebar: crate::sidebar_view::SidebarState::default(),
             sidebar_actions: Vec::new(),
             edge_band: load_edge_band(assets),
+            base_config,
+            user_scale: 1.0,
+            dots: None,
+            menu_actions: Vec::new(),
         }
     }
 
     /// Re-read `ui.ron` (hot reload).
     pub fn reload_config(&mut self, assets: &Path) {
-        self.ui.set_config(load_config(assets));
+        self.base_config = load_config(assets);
+        self.apply_config();
+    }
+
+    /// The UI scale of the player's settings (WP11.5a): everything the HUD draws, the sidebar and the
+    /// menus included, is scaled by `ui.ron`'s scale times this (and the window's DPI factor). The
+    /// sidebar keeps out of the edge-scroll band at any scale ([`crate::sidebar_layout::layout`]).
+    pub fn set_user_scale(&mut self, scale: f32) {
+        self.user_scale = scale;
+        self.apply_config();
+    }
+
+    fn apply_config(&mut self) {
+        let mut config = self.base_config.clone();
+        config.scale *= self.user_scale;
+        self.ui.set_config(config);
+    }
+
+    /// The dots of the minimap in these colours (one per player), or `None` for the standard ones.
+    pub fn set_owner_dots(&mut self, dots: Option<Vec<Color>>) {
+        self.dots = dots.filter(|d| !d.is_empty());
+    }
+
+    /// The colour of a player's dot on the minimap: the player's own set, else the standard one.
+    fn dot_color(dots: &Option<Vec<Color>>, owner: u8) -> Color {
+        match dots {
+            Some(dots) => dots[usize::from(owner) % dots.len()],
+            None => OWNER_DOTS[usize::from(owner) % OWNER_DOTS.len()],
+        }
+    }
+
+    /// The colour of a player's dot now (tests read it).
+    pub fn owner_dot(&self, owner: u8) -> Color {
+        Self::dot_color(&self.dots, owner)
+    }
+
+    /// Bake the minimap again, for another map (a new scene, WP11.5a).
+    pub fn rebake_minimap(&mut self, renderer: &Renderer, map: &Map) {
+        if self.gpu.is_some() {
+            let gpu = renderer.gpu();
+            let minimap = Minimap::bake(map, MINIMAP_BAKE_SIDE);
+            if let Some(ui_gpu) = &mut self.gpu {
+                ui_gpu.set_minimap(&gpu.device, &gpu.queue, minimap.image());
+            }
+            self.minimap = Some(minimap);
+        } else {
+            self.attach(renderer, map);
+        }
+    }
+
+    /// What the menu's clicks of the last frame asked for; taken once.
+    pub fn take_menu_actions(&mut self) -> Vec<Item> {
+        std::mem::take(&mut self.menu_actions)
     }
 
     /// Create the GPU side and bake the minimap of `map`.
@@ -161,21 +244,33 @@ impl Hud {
         }
     }
 
-    /// Build this frame's UI. A click or drag on the minimap moves `camera`.
+    /// Build this frame's UI. A click or drag on the minimap moves `camera`. With a `menu` open (WP11.5a)
+    /// the game's panels are built with an input that sees nothing, so nothing under the menu can be
+    /// hovered or clicked, and the menu is drawn over them with the real input; what it was clicked
+    /// for is [`Hud::take_menu_actions`].
     pub fn frame(
         &mut self,
         ctx: &Context,
         camera: &mut Camera,
         views: &[EntityView],
         stats: HudStats,
+        menu: Option<&Menu>,
     ) {
         let size = ctx.size();
+        let real = ui_input(ctx);
         let ui = &mut self.ui;
-        let input = ui_input(ctx);
-        ui.begin_frame(input, (size.width, size.height), ctx.scale_factor());
+        // With a menu open the game's panels are built blind (the input they get sees nothing).
+        let input = crate::menu_view::begin_frame(
+            ui,
+            real,
+            (size.width, size.height),
+            ctx.scale_factor(),
+            menu.is_some(),
+        );
 
         // Top bar: a label and a button.
-        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (520.0, 32.0));
+        let bar_width = top_bar_width(size.width as f32, ui.scale(), stats.sidebar.is_some());
+        let bar = ui.panel(Anchor::Top, (0.0, EDGE), (bar_width, 32.0));
         let text = ui.config().text;
         ui.text_in(
             bar,
@@ -195,7 +290,7 @@ impl Hud {
             text,
         );
         if let Some(line) = &stats.build_line {
-            let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (520.0, 26.0));
+            let strip = ui.panel(Anchor::Top, (0.0, EDGE + 32.0 + 4.0), (bar_width, 26.0));
             ui.text_in(strip, Anchor::Left, (12.0, 0.0), line, text);
         }
         self.sidebar_actions = draw_panels(
@@ -206,7 +301,19 @@ impl Hud {
             self.edge_band,
             self.minimap.is_some(),
         );
-        crate::match_view::draw_result(ui, stats.result, crate::commands::LOCAL_PLAYER);
+        let mut menu_actions = Vec::new();
+        if crate::match_view::draw_result(ui, stats.result, crate::commands::LOCAL_PLAYER)
+            && menu.is_none()
+        {
+            // The match is decided: Restart and Main menu stand under the banner (WP11.5a).
+            let bottom = crate::match_view::shipped_look().banner;
+            let bottom = bottom.top_px.saturating_add(bottom.height_px);
+            menu_actions.extend(crate::menu_view::result_buttons(
+                ui,
+                crate::menu_look::MenuLook::embedded(),
+                bottom,
+            ));
+        }
         let button = ui.place(bar, Anchor::Right, (6.0, 0.0), (110.0, 22.0));
         let label = if self.show_dots {
             "Dots: on"
@@ -227,13 +334,11 @@ impl Hud {
             );
             let map = minimap.map_size();
             let fov = fov_polygon(camera, (size.width as f32, size.height as f32), map);
+            let palette = &self.dots;
             let dots = self.show_dots.then(|| {
-                views.iter().map(|v| {
+                views.iter().map(move |v| {
                     let [x, z] = vec2_cells_to_metres(v.pos);
-                    (
-                        (x, z),
-                        OWNER_DOTS[usize::from(v.owner.0) % OWNER_DOTS.len()],
-                    )
+                    ((x, z), Self::dot_color(palette, v.owner.0))
                 })
             });
             if let Some((x, z)) = ui.minimap(
@@ -246,7 +351,9 @@ impl Hud {
                 camera.set_focus(DVec2::new(f64::from(x), f64::from(z)));
             }
         }
-        ui.end_frame();
+        // The menu over everything (WP11.5a), with the real pointer.
+        menu_actions.extend(crate::menu_view::finish_frame(ui, real, menu));
+        self.menu_actions = menu_actions;
     }
 
     /// The tab the sidebar shows (WP11.1): the model of the next frame is built for it.
@@ -370,6 +477,36 @@ mod tests {
             draw_panels(&mut ui, &input, stats, &mut state, 4.0, false);
         }
         ui.draw_list().quad_count()
+    }
+
+    /// At every UI scale of the settings the centred top bar stays left of the sidebar in a 1280-wide
+    /// window (up to 150 %), is what it always was at 100 %, and without a sidebar is unchanged.
+    #[test]
+    fn the_top_bar_does_not_reach_over_the_sidebar() {
+        let side = crate::sidebar_view::shipped_look();
+        let (w, band) = (1280.0_f32, 4.0_f32);
+        for scale in [0.75_f32, 1.0, 1.25, 1.5] {
+            let bar = top_bar_width(w, scale, true) * scale;
+            let column = crate::sidebar_layout::layout(
+                sf_ui::Rect::new(0.0, 0.0, w, 720.0),
+                scale,
+                side,
+                band,
+                true,
+            )
+            .column;
+            assert!(
+                w * 0.5 + bar * 0.5 <= column.x,
+                "scale {scale}: the bar reaches {} and the column starts at {}",
+                w * 0.5 + bar * 0.5,
+                column.x
+            );
+        }
+        assert_eq!(top_bar_width(1280.0, 1.0, true), 520.0);
+        assert_eq!(top_bar_width(1920.0, 1.5, true), 520.0);
+        assert_eq!(top_bar_width(1280.0, 1.5, false), 520.0);
+        // A window too narrow for it does not make it vanish.
+        assert_eq!(top_bar_width(1280.0, 2.0, true), 300.0);
     }
 
     /// The merge of 7460c3b drew the production readout twice (a darker panel, text drawn over
