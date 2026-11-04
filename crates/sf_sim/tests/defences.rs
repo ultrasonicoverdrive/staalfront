@@ -13,8 +13,8 @@
 use sf_math::{Facing, Fx, Vec2};
 use sf_sim::{
     ArmorTable, BuildingFunction, BuildingStats, BuildingTable, Cell, Command, EntityId, Footprint,
-    Kind, Loadout, Mount, Order, PlayerId, PowerRules, ProjectileKind, RepairRules, Shot,
-    TargetingConfig, UnitStats, UnitTable, WeaponStats, WeaponTable, World, WorldConfig, per_tick,
+    Kind, Loadout, Mount, Order, PlayerId, PowerRules, ProjectileKind, Shot, TargetingConfig,
+    UnitStats, UnitTable, WeaponStats, WeaponTable, World, WorldConfig, per_tick,
 };
 
 const P0: PlayerId = PlayerId(0);
@@ -598,7 +598,7 @@ fn a_tower_being_sold_fires_nothing_and_drops_its_target() {
     // WP6.6: a structure being sold counts as gone from the first tick of the sale, also for the
     // targeting of defences (`docs/rules/repair_sell.md`).
     let mut w = world(false)
-        .with_repair(RepairRules {
+        .with_repair(sf_sim::RepairRules {
             hp_per_tick: 3,
             full_cost_permille: 100,
             sell_ticks: 50,
@@ -617,7 +617,6 @@ fn a_tower_being_sold_fires_nothing_and_drops_its_target() {
     assert!(w.sale_of(tower).is_some(), "the sale is still going");
     assert_eq!(shots_by(&during, tower), 0, "no shot while it is sold");
     assert_eq!(w.turret_target_of(tower), None);
-    // And it is gone when the time is up.
     run(&mut w, 2);
     assert!(w.get(tower).is_none());
 }
