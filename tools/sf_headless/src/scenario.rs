@@ -210,6 +210,12 @@ pub struct Scenario {
     /// Needs `buildings`.
     #[serde(default)]
     pub power: Option<PowerSpec>,
+    /// Repair and sale (WP6.6, `docs/rules/repair_sell.md`): the four numbers, written out in the
+    /// scenario so that editing the shipped `repair.ron` never moves its checksum. Left out: no
+    /// repair or sale, which is every scenario of the earlier phases (a section `r` in the checksum
+    /// only while something repairs or is sold). Needs `buildings`.
+    #[serde(default)]
+    pub repair: Option<RepairSpec>,
     /// The production table read from `unit_defs` by [`Scenario::load`] when `production` is on,
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
@@ -303,6 +309,32 @@ impl PowerSpec {
         sf_sim::PowerRules {
             shortage_floor_permille: self.shortage_floor_permille,
             defence_cutoff_permille: self.defence_cutoff_permille,
+        }
+    }
+}
+
+/// The repair and sale rules of a scenario (`sf_sim::RepairRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepairSpec {
+    /// Hit points gained per tick (1 to 1000).
+    pub hp_per_tick: u16,
+    /// Cost of a repair from nothing to full hit points, thousandths of the price (0 to 1000).
+    pub full_cost_permille: u32,
+    /// Ticks a sale takes (1 to 6000).
+    pub sell_ticks: u32,
+    /// The part of the price paid back at full hit points, thousandths (0 to 1000).
+    pub refund_permille: u32,
+}
+
+impl RepairSpec {
+    /// The simulation's rules for these numbers.
+    pub fn rules(self) -> sf_sim::RepairRules {
+        sf_sim::RepairRules {
+            hp_per_tick: self.hp_per_tick,
+            full_cost_permille: self.full_cost_permille,
+            sell_ticks: self.sell_ticks,
+            refund_permille: self.refund_permille,
         }
     }
 }
@@ -693,6 +725,20 @@ pub enum Action {
         /// The rally cell `(x, y)`, inside the map.
         #[serde(default)]
         cell: Option<(u32, u32)>,
+    },
+    /// `Command::Repair` (WP6.6): the player who sends the command starts (`on`) or stops
+    /// repairing `structure`, an entity as `(index, generation)`. Needs `repair`.
+    Repair {
+        /// The structure.
+        structure: (u32, u32),
+        /// True to start repairing, false to stop.
+        on: bool,
+    },
+    /// `Command::Sell` (WP6.6): the player who sends the command sells `structure`, an entity as
+    /// `(index, generation)`. Needs `repair`.
+    Sell {
+        /// The structure.
+        structure: (u32, u32),
     },
     /// `Command::Place`: a standing structure on a cell. Refused by the
     /// simulation (the command counts as ignored) on terrain that is not
@@ -1152,6 +1198,21 @@ impl Scenario {
             }
         }
 
+        if let Some(rp) = &self.repair {
+            if !self.buildings {
+                p.push(
+                    "repair needs `buildings` (repair and sale are about structures)".to_string(),
+                );
+            }
+            if !rp.rules().is_valid() {
+                p.push(
+                    "repair: hp_per_tick must be 1 to 1000, full_cost_permille and refund_permille \
+                     0 to 1000 and sell_ticks 1 to 6000"
+                        .to_string(),
+                );
+            }
+        }
+
         if let Some(pw) = &self.power {
             if !self.buildings {
                 p.push(
@@ -1364,6 +1425,18 @@ impl Scenario {
                         ));
                     }
                 }
+                Action::Repair { structure, .. } | Action::Sell { structure } => {
+                    if self.repair.is_none() {
+                        p.push(format!("{at}: repair and sell commands need `repair`"));
+                    }
+                    if structure.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: structure ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            structure.0
+                        ));
+                    }
+                }
                 Action::SetRally { factory, cell } => {
                     if self.production.is_none() {
                         p.push(format!("{at}: production commands need `production`"));
@@ -1571,6 +1644,12 @@ impl Scenario {
             };
             world = world
                 .with_production(pr.rules(), table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        // Repair and sale (WP6.6): after the tables.
+        if let Some(rp) = self.repair {
+            world = world
+                .with_repair(rp.rules())
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         // Power (WP6.4): after the tables, before the match rules.
@@ -1782,6 +1861,19 @@ impl Scenario {
                     let command = Command::SetRally {
                         factory: EntityId::new(factory.0, factory.1),
                         cell: cell.map(|c| Cell::new(c.0, c.1)),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::Repair { structure, on } => {
+                    let command = Command::Repair {
+                        structure: EntityId::new(structure.0, structure.1),
+                        on: *on,
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::Sell { structure } => {
+                    let command = Command::Sell {
+                        structure: EntityId::new(structure.0, structure.1),
                     };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }
