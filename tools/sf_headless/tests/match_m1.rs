@@ -147,8 +147,9 @@ fn nothing_changes_after_the_outcome() {
     let defeats = vec![(P1, Tick(DECIDED))];
     assert_eq!(rows.len() as u64, 7000, "the scenario runs 7,000 ticks");
     let after: Vec<&Row> = rows.iter().filter(|r| r.tick >= DECIDED).collect();
-    // Every tick from the decision to the end: 1,034 of them (ticks 5967 to 7000).
-    assert_eq!(after.len() as u64, 7000 - DECIDED + 1);
+    // Every tick from the decision to the end: 1,033 of them (the steps that ran
+    // ticks 5967 to 6999; the world is at tick 7000 after the last).
+    assert_eq!(after.len() as u64, 7000 - DECIDED);
     for r in &after {
         assert_eq!(r.result, Some(outcome), "tick {}", r.tick);
         assert_eq!(r.defeats, defeats, "tick {}", r.tick);
