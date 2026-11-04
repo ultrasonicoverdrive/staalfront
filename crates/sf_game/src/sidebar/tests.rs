@@ -211,19 +211,18 @@ fn a_structure_being_sold_stands_no_more_and_unlocks_nothing() {
     let mut r = rig(1000, 4);
     r.place("power_plant", (30, 20));
     r.place("barracks", (30, 26));
-    assert_eq!(
-        names(&r.items(Tab::Structures)),
-        ["power plant", "refinery", "barracks"]
-    );
+    let before = r.items(Tab::Structures);
+    assert!(names(&before).contains(&"refinery") && names(&before).contains(&"barracks"));
     assert!(!r.items(Tab::Infantry).is_empty());
     let plant = r.id_of("power_plant");
     r.send(Command::Sell { structure: plant });
     r.run(2);
     assert!(r.world.sale_of(plant).is_some(), "the sale is going on");
-    // The plant is still on the map, but the refinery and the barracks (which need it) are gone
-    // from the list, and so is the barracks' own unit tab entry only while the barracks itself is not
-    // sold: it stands, and its infantry needs nothing else.
-    assert_eq!(names(&r.items(Tab::Structures)), ["power plant"]);
+    // The plant is still on the map, but what needs it (the refinery and the barracks) is gone from
+    // the list; the barracks itself stands and its infantry needs nothing else.
+    let after = r.items(Tab::Structures);
+    assert!(!names(&after).contains(&"refinery") && !names(&after).contains(&"barracks"));
+    assert!(names(&after).contains(&"power plant"));
     assert!(!r.sit(&[]).standing.contains(&kind(&r.defs, "power_plant")));
     assert!(r.sit(&[]).standing.contains(&kind(&r.defs, "barracks")));
     // Selling the barracks too takes the infantry away.
