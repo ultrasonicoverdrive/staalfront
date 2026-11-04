@@ -66,6 +66,8 @@ fn bare_rig_with(credits: u64, exit_radius: u8, power: bool) -> Rig {
     } else {
         world
     };
+    // WP6.6: a structure can be sold (the sale is what the sidebar must not count as standing).
+    let world = crate::playfield::with_repair(world);
     let catalog = Catalog::build(&defs, Faction::Meridian, &look);
     Rig {
         world,
@@ -200,6 +202,37 @@ fn a_structure_that_is_still_going_up_does_not_count_as_standing() {
         names(&r.items(Tab::Structures)),
         ["power plant", "refinery", "barracks"]
     );
+}
+
+#[test]
+fn a_structure_being_sold_stands_no_more_and_unlocks_nothing() {
+    // WP6.6: the sale takes the structure out of what stands from its first tick, as it does in
+    // the simulation (`World::is_standing`), so what it unlocked is hidden at once.
+    let mut r = rig(1000, 4);
+    r.place("power_plant", (30, 20));
+    r.place("barracks", (30, 26));
+    assert_eq!(
+        names(&r.items(Tab::Structures)),
+        ["power plant", "refinery", "barracks"]
+    );
+    assert!(!r.items(Tab::Infantry).is_empty());
+    let plant = r.id_of("power_plant");
+    r.send(Command::Sell { structure: plant });
+    r.run(2);
+    assert!(r.world.sale_of(plant).is_some(), "the sale is going on");
+    // The plant is still on the map, but the refinery and the barracks (which need it) are gone
+    // from the list, and so is the barracks' own unit tab entry only while the barracks itself is not
+    // sold: it stands, and its infantry needs nothing else.
+    assert_eq!(names(&r.items(Tab::Structures)), ["power plant"]);
+    assert!(!r.sit(&[]).standing.contains(&kind(&r.defs, "power_plant")));
+    assert!(r.sit(&[]).standing.contains(&kind(&r.defs, "barracks")));
+    // Selling the barracks too takes the infantry away.
+    let barracks = r.id_of("barracks");
+    r.send(Command::Sell {
+        structure: barracks,
+    });
+    r.run(2);
+    assert!(r.items(Tab::Infantry).is_empty());
 }
 
 #[test]

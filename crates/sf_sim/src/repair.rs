@@ -48,13 +48,13 @@ pub struct RepairRules {
     /// Hit points a repairing structure gains in a tick at full speed: 1 to
     /// [`MAX_REPAIR_HP_PER_TICK`].
     pub hp_per_tick: u16,
-    /// What a repair from 0 to full hit points costs, in thousandths of the structure's price: 0
-    /// to 1000.
+    /// What a repair from 0 to full hit points costs, in thousandths of the structure's price (from
+    /// zero up to one thousand).
     pub full_cost_permille: u32,
     /// Ticks a sale takes: 1 to [`MAX_SELL_TICKS`].
     pub sell_ticks: u32,
-    /// The part of the price paid back for a structure at full hit points, in thousandths: 0 to
-    /// 1000.
+    /// The part of the price paid back for a structure at full hit points, in thousandths (from
+    /// zero up to one thousand).
     pub refund_permille: u32,
 }
 
@@ -129,14 +129,14 @@ pub enum RepairStatus {
 /// How far a sale is.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SaleProgress {
-    /// Ticks still to go; at least 1.
+    /// Ticks still to go (at least one).
     pub left: u32,
     /// Ticks in all (the rules' `sell_ticks`).
     pub total: u32,
 }
 
 impl SaleProgress {
-    /// Progress in thousandths, rounded down; 0 in the tick the sale started, never 1000.
+    /// Progress in thousandths, rounded down; zero in the tick the sale started, never a full thousand.
     pub fn permille(self) -> u16 {
         if self.total == 0 {
             return 0;
@@ -481,10 +481,10 @@ impl World {
         // Into the store whatever its capacity, after the removal: a sold refinery has already
         // lowered the capacity (`economy.md`), and the store may hold more than it.
         let paid = if self.money.is_some() { refund } else { 0 };
-        if paid > 0 {
-            if let Some(h) = self.harvest.as_deref_mut() {
-                h.refund(owner, paid);
-            }
+        if paid > 0
+            && let Some(h) = self.harvest.as_deref_mut()
+        {
+            h.refund(owner, paid);
         }
         let tick = self.tick;
         if let Some(r) = self.repair.as_deref_mut() {

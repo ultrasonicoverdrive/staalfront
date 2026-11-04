@@ -23,6 +23,7 @@ const REFINERY: Kind = Kind(23); // dock, 900 hit points, 1200 credits, stores 2
 const HUT: Kind = Kind(24); // -30, 250 hit points, 97 credits
 const IRON: Kind = Kind(25); // +10, cannot be damaged, 40 credits
 const BARRACKS: Kind = Kind(26); // infantry factory, 700 hit points, 400 credits
+const BIG: Kind = Kind(27); // only for the timing: 1,000,000 hit points, 100,000 credits
 const RIFLE: Kind = Kind(30);
 const HARVESTER: Kind = Kind(33);
 const P0: PlayerId = PlayerId(0);
@@ -135,6 +136,7 @@ fn world_with(rules: Option<RepairRules>, credits: u64) -> World {
         structure(HUT, 250, (2, 2)),
         structure(IRON, 0, (2, 2)),
         structure(BARRACKS, 700, (2, 3)),
+        structure(BIG, 1_000_000, (2, 2)),
         mobile(RIFLE),
         mobile(HARVESTER),
     ])
@@ -168,6 +170,7 @@ fn world_with(rules: Option<RepairRules>, credits: u64) -> World {
             Some(400),
             0,
         ),
+        entry(BIG, (2, 2), BuildingFunction::None, 20, Some(100_000), 0),
     ])
     .unwrap();
     let table = ProductionTable::new(
@@ -289,7 +292,7 @@ fn a_repair_gains_hit_points_and_pays_by_the_cumulative_rule_every_tick() {
             "step {steps}"
         );
     }
-    // 500 hit points at 7 per tick: 71 full ticks and a last one of 3.
+    // 500 hit points at 7 per tick: 71 full ticks and a last one of 3 hit points.
     assert_eq!(steps, 72);
     assert_eq!(hp(&w, plant), 600);
     assert_eq!(
@@ -387,7 +390,7 @@ fn a_repair_waits_without_money_and_goes_on_when_there_is_some() {
         assert_eq!(w.credits(P0), credits, "nothing is paid while it waits");
         assert!(w.is_repairing(plant), "the flag stays");
     }
-    // Money comes: it carries on and the whole run still costs exactly 75.
+    // Money comes: it carries on and the whole run still costs exactly 75 credits.
     w.harvest.as_deref_mut().unwrap().refund(P0, 100);
     let before = w.credits(P0);
     let mut n = 0;
@@ -508,7 +511,7 @@ fn a_world_without_the_rules_ignores_both_commands() {
 #[test]
 fn a_shortage_slows_a_repair_and_the_price_is_still_exact() {
     let mut w = world();
-    // 100 made, 3 x 45 used: speed 740.
+    // 100 made, three consumers of 45 used: speed of 740 thousandths
     let lab = place(&mut w, P0, LAB, (10, 10));
     place(&mut w, P0, LAB, (14, 10));
     place(&mut w, P0, LAB, (18, 10));
@@ -537,7 +540,7 @@ fn a_shortage_slows_a_repair_and_the_price_is_still_exact() {
     // 400 hit points at 7: 57 full ticks and one of 1; 58 gains in all, spread over more ticks.
     assert_eq!(gains, 58);
     assert!(ticks > 58 && ticks <= 80, "{ticks} ticks at 740 of 1000");
-    // The cumulative cost at 500 is 430 * 300 * 500 / 500000 = 129, at 100 it is 25 (25.8): the
+    // The cumulative cost at 500 is 430 * 300 * 500 / 500000 = 129, at 100 it is 25 (rounded down): the
     // price of the gap is 104, exactly, however slowly it was paid.
     assert_eq!(credits - w.credits(P0), 104);
 }
@@ -557,7 +560,7 @@ fn a_repaired_producer_makes_more_power_from_the_next_tick() {
     assert_eq!(h, 300 + 7 * 20);
     // The totals are counted at the start of a step, from the state the last one left.
     w.step();
-    assert_eq!(w.power_of(P0).unwrap().made, 100 * u64::from(h + 0) / 600);
+    assert_eq!(w.power_of(P0).unwrap().made, 100 * u64::from(h) / 600);
     while w.is_repairing(plant) {
         w.step();
     }
@@ -594,7 +597,7 @@ fn a_sale_takes_its_ticks_pays_the_refund_by_hit_points_and_removes_the_structur
     let sale = w.sales()[0];
     assert_eq!(sale.tick.0, start.0 + 40);
     assert_eq!((sale.kind, sale.owner), (PLANT, P0));
-    // 300 * 600 * 333 / (600 * 1000) = 99.9, rounded down; the full refund would be 180.
+    // 300 * 600 * 333 / (600 * 1000) rounded down to 99 (the full refund would be 180).
     assert_eq!(sale.refund, 99);
     assert_eq!(w.credits(P0), credits + 99);
     assert!(
@@ -608,7 +611,8 @@ fn a_sale_takes_its_ticks_pays_the_refund_by_hit_points_and_removes_the_structur
 
 #[test]
 fn the_refund_is_a_part_of_the_price_scaled_by_the_hit_points() {
-    let rows: [(Kind, (u32, u32), Option<u32>, u64); 5] = [
+    type Row = (Kind, (u32, u32), Option<u32>, u64);
+    let rows: [Row; 5] = [
         (PLANT, (10, 10), None, 180),         // 300 * 600 / 1000
         (PLANT, (14, 10), Some(150), 45),     // 300 * 600 * 150 / (600 * 1000)
         (REFINERY, (20, 10), Some(450), 360), // 1200 * 600 * 450 / (900 * 1000)
@@ -924,5 +928,104 @@ fn the_rules_are_checked_and_given_once_before_the_start() {
             })
             .err(),
         Some(ConfigError::Repair)
+    );
+}
+
+// ---- the cost ----------------------------------------------------------------------------------
+
+/// Builds the timing world: 40 structures of the big kind among 5,000 wanderers, with or without the
+/// rules, the structures hurt (1 hit point) and, with `active`, all repairing.
+fn timing_world(rules: Option<RepairRules>, active: bool) -> (World, Vec<EntityId>) {
+    let mut w = world_with(rules, 1_000_000_000);
+    let mut ids = Vec::new();
+    for k in 0..40u32 {
+        ids.push(place(&mut w, P0, BIG, (2 + 3 * (k % 20), 2 + 3 * (k / 20))));
+    }
+    for n in 0..5000u32 {
+        w.spawn(
+            Kind(9),
+            sf_math::Vec2::from_ints(1 + (n % 60) as i32, 20 + (n / 60) as i32 % 40),
+            PlayerId((n % 4) as u8),
+        )
+        .unwrap();
+    }
+    if active {
+        for &id in &ids {
+            set_hp(&mut w, id, 1);
+            let tick = w.tick();
+            w.schedule(
+                tick,
+                P0,
+                Command::Repair {
+                    structure: id,
+                    on: true,
+                },
+            )
+            .unwrap();
+        }
+        w.step();
+    }
+    (w, ids)
+}
+
+/// The cost of the repair pass and of a whole step with 40 structures repairing among 5,040
+/// entities. Run with `cargo test --release -p sf_sim --lib repair::tests::cost_of_the_repair -- --ignored --nocapture`.
+/// (Not a test of a rule: it prints nanoseconds and asserts only that it is far below a tick.)
+#[test]
+#[ignore = "timing; run by hand in release"]
+fn cost_of_the_repair() {
+    let rules = RepairRules {
+        hp_per_tick: 1000,
+        full_cost_permille: 1000,
+        sell_ticks: 40,
+        refund_permille: 600,
+    };
+    // The pass itself, 500 calls a round (a repair of 1000 hit points a tick lasts 1000 calls).
+    let calls = 500u32;
+    let mut idle = Vec::new();
+    let mut busy = Vec::new();
+    for _ in 0..5 {
+        let (mut w, _) = timing_world(Some(rules), false);
+        let start = std::time::Instant::now();
+        for _ in 0..calls {
+            w.advance_repair_sell();
+        }
+        idle.push(start.elapsed().as_nanos() / u128::from(calls));
+        let (mut w, ids) = timing_world(Some(rules), true);
+        assert!(ids.iter().all(|&id| w.is_repairing(id)));
+        let start = std::time::Instant::now();
+        for _ in 0..calls {
+            w.advance_repair_sell();
+        }
+        busy.push(start.elapsed().as_nanos() / u128::from(calls));
+        assert!(ids.iter().all(|&id| w.is_repairing(id)), "still repairing");
+    }
+    println!("advance_repair_sell, ns per call, 40 idle structures among 5,040 entities: {idle:?}");
+    println!(
+        "advance_repair_sell, ns per call, 40 repairing structures among 5,040 entities: {busy:?}"
+    );
+    // Whole steps, alternating: no rules, rules and nobody repairing, rules and 40 repairing.
+    let steps = 300u32;
+    let mut rows: [Vec<u128>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+    for _ in 0..5 {
+        for (k, (r, active)) in [(None, false), (Some(rules), false), (Some(rules), true)]
+            .into_iter()
+            .enumerate()
+        {
+            let (mut w, _) = timing_world(r, active);
+            let start = std::time::Instant::now();
+            for _ in 0..steps {
+                w.step();
+            }
+            rows[k].push(start.elapsed().as_nanos() / u128::from(steps));
+        }
+    }
+    println!("step, ns per tick, no rules: {:?}", rows[0]);
+    println!("step, ns per tick, rules, nobody repairing: {:?}", rows[1]);
+    println!("step, ns per tick, rules, 40 repairing: {:?}", rows[2]);
+    let best = busy.iter().copied().min().unwrap();
+    assert!(
+        best < 500_000,
+        "a tick is 50,000,000 ns; the pass took {best} ns"
     );
 }
