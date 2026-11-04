@@ -1,0 +1,170 @@
+// The menus and the settings screen (WP11.5a, docs/rules/menus.md). Read by sf_game::menu_look,
+// compiled into the game, checked when it is parsed. Presentation only: no checksum depends on it.
+//
+// Sizes are logical pixels (the UI scale of the settings is applied on top); colours are sRGB with
+// alpha last; every word the player reads is here. The rows of the key list are the actions of
+// input.ron that a key can be given to; a test checks that none is missing.
+(
+    // The window behind a menu is dimmed with this.
+    dim: (0, 0, 0, 170),
+    panel: (
+        width_px: 760,
+        // The narrower panel of the start menu and the pause menu.
+        compact_width_px: 360,
+        // The least room between the panel and the window edge; the panel shrinks to keep it.
+        margin_px: 12,
+        pad_px: 18,
+        gap_px: 8,
+        border_px: 2,
+        border: (96, 140, 200, 255),
+        title_px: 28,
+        title: (236, 240, 246, 255),
+        // The line under the key list (a refused key, or what to press) and under the sound page.
+        notice_height_px: 22,
+        notice: (255, 200, 110, 255),
+        hint: (170, 178, 190, 255),
+    ),
+    // The buttons of the start menu and the pause menu.
+    button: (
+        width_px: 300,
+        height_px: 38,
+    ),
+    // The tabs of the settings screen.
+    tab: (
+        height_px: 30,
+    ),
+    // One line of the settings: its label, then its controls.
+    row: (
+        height_px: 28,
+        label_px: 170,
+        gap_px: 6,
+        heading: (150, 190, 240, 255),
+    ),
+    // The line of buttons under the settings.
+    footer: (
+        height_px: 32,
+        button_width_px: 120,
+    ),
+    // The key list: this many columns of rows when the panel is wide enough for them, else one.
+    keys: (
+        columns: 2,
+        column_min_px: 300,
+        // Of the width of a row: the key button, then the reset button.
+        key_weight: 3,
+        reset_weight: 2,
+        // The row of the menu key, which cannot be changed.
+        fixed_key: "Esc",
+    ),
+    // The button that is the current choice has a ring in this colour.
+    selected: (
+        ring_px: 2,
+        ring: (240, 200, 90, 255),
+    ),
+    // A small square of a player colour in the palette choice.
+    swatch: (
+        size_px: 14,
+        outline: (20, 24, 30, 255),
+    ),
+    // After the match is decided: Restart and Main menu under the banner.
+    result_buttons: (
+        gap_px: 8,
+        below_banner_px: 8,
+        width_px: 150,
+        height_px: 32,
+    ),
+    // The choices of the accessibility page, and what the settings are before anything is chosen.
+    ui_scales: [0.75, 1.0, 1.25, 1.5, 2.0],
+    frame_caps: [None, Some(30), Some(60), Some(120), Some(144)],
+    defaults: (
+        window: Windowed,
+        frame_cap: None,
+        vsync: true,
+        ui_scale: 1.0,
+        palette: Standard,
+    ),
+    // The rows of the key list, grouped. `label` is what the player reads.
+    key_groups: [
+        (title: "Camera", rows: [
+            (action: CameraPanUp, label: "Pan up"),
+            (action: CameraPanDown, label: "Pan down"),
+            (action: CameraPanLeft, label: "Pan left"),
+            (action: CameraPanRight, label: "Pan right"),
+            (action: CameraRotateLeft, label: "Rotate left"),
+            (action: CameraRotateRight, label: "Rotate right"),
+        ]),
+        (title: "Orders", rows: [
+            (action: OrderStop, label: "Stop"),
+            (action: OrderScatter, label: "Scatter"),
+            (action: OrderHold, label: "Hold position"),
+            (action: OrderAttackMove, label: "Attack-move (hold)"),
+            (action: OrderQueue, label: "Queue orders (hold)"),
+        ]),
+        (title: "Building and production", rows: [
+            (action: BuildCycle, label: "Choose structure"),
+            (action: ProduceQueue, label: "Queue unit"),
+            (action: ProduceCycle, label: "Next unit"),
+            (action: ProduceCancel, label: "Take unit out"),
+            (action: RallySet, label: "Set rally point"),
+        ]),
+        (title: "Selection", rows: [
+            (action: SelectAdd, label: "Add to selection (hold)"),
+            (action: GroupAssign, label: "Assign group (hold)"),
+            (action: Group1, label: "Group 1"),
+            (action: Group2, label: "Group 2"),
+            (action: Group3, label: "Group 3"),
+            (action: Group4, label: "Group 4"),
+            (action: Group5, label: "Group 5"),
+            (action: Group6, label: "Group 6"),
+            (action: Group7, label: "Group 7"),
+            (action: Group8, label: "Group 8"),
+            (action: Group9, label: "Group 9"),
+        ]),
+        (title: "Window and tools", rows: [
+            (action: ToggleFullscreen, label: "Fullscreen"),
+            (action: ToggleDebug, label: "Debug panels"),
+            (action: PlayTestSound, label: "Test sound"),
+        ]),
+    ],
+    words: (
+        game_title: "Staalfront",
+        paused_title: "Paused",
+        settings_title: "Settings",
+        start_match: "Match",
+        start_sandbox: "Sandbox",
+        settings: "Settings",
+        quit: "Quit",
+        resume: "Resume",
+        restart: "Restart",
+        main_menu: "Main menu",
+        back: "Back",
+        tab_keys: "Keys",
+        tab_graphics: "Graphics",
+        tab_accessibility: "Accessibility",
+        tab_sound: "Sound (WP11.5b)",
+        keys_hint: "Click a key, then press the new one. Esc cancels.",
+        keys_capture: "Press a key...",
+        keys_capture_notice: "Press the new key for {action}. Esc cancels.",
+        keys_conflict: "{key} is already used for {action}.",
+        keys_menu_row: "Menu / back",
+        keys_reset: "Reset",
+        keys_reset_all: "Reset all keys",
+        keys_page: "Page {page} of {pages}",
+        keys_prev: "Previous",
+        keys_next: "Next",
+        window: "Window",
+        windowed: "Windowed",
+        borderless: "Borderless fullscreen",
+        frame_cap: "Frame cap",
+        frame_cap_off: "Off",
+        frame_cap_hz: "{hz} fps",
+        vsync: "Vertical sync",
+        on: "On",
+        off: "Off",
+        ui_scale: "UI scale",
+        ui_scale_percent: "{percent}%",
+        player_colours: "Player colours",
+        palette_standard: "Standard",
+        palette_colour_blind: "Colour-blind safe",
+        sound_empty: "The sound settings (volume sliders and the original Red Alert audio switch) come with WP11.5b.",
+    ),
+)

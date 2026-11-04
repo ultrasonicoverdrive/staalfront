@@ -126,12 +126,14 @@ and the sight in the data is unused.
   * **`match`**: `0x49f207148bde095c` to `0x164403a92986654f`. Its opponent has a defence tower on the frozen copy
     (no turret, hull weapon, all round). Tower first shot at tick 3830, 40 shots, destroyed at 4509; the human still
     wins, at **5967 instead of 5687**, with 3 of its 9 units left (before: 9 of 9) and 6 losses where there were none.
-    Not the script (it is unchanged), the rules. The section `d` alone also moves the value, so the WP6.4 value is not
-    reachable by switching the tower's weapon off; the comparison that is: the world without the power line equals the
+    Not the script (it is unchanged), the rules. Measured cause (review of WP6.7): with the structure branch of targeting
+    and section `d` both switched off, `match` gives exactly the WP6.4 value `0x49f207148bde095c` again; switching only
+    the tower's weapon off does not, since section `d` alone also moves the value. Besides: the world without the power line equals the
     world with it tick by tick (`power_in_the_match_moves_the_pin_by_its_section_only`, now without the WP7.6 literal that
     is no longer reachable). `match_m1.rs` is updated (`DECIDED`, six kills, `the_opponents_tower_fires_in_the_match`).
-  * **The fight benchmark `FIGHT`** (`bench_scene.rs`): moved by the weapon table digest alone: the same run on the
-    base's shipped definitions with this code gives the old list; on the new ones every shot, hit and death per hundred
+  * **The fight benchmark `FIGHT`** (`bench_scene.rs`): moved by two digests, the weapon table's (section `W`) and the unit table's turret rates
+    (section `R`), both changed by the new data: the same run on the
+    base's shipped `unit_defs.ron` and `weapon_defs.ron` with this code gives the old list; on the new ones every shot, hit and death per hundred
     ticks and the position and hit points of all entities at tick 1500 are equal and only the checksum differs. Details
     in `docs/bench/README.md`. `PLAIN` did not move.
   * No other pin moved: `golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn`, the whole list of

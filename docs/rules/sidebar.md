@@ -184,8 +184,9 @@ the same quad count with 0 and with 5,000 extra entities) and has an `--ignored`
 
 ## Not done, on purpose
 
-The repair and sell buttons (WP6.6); menus and settings
-(WP11.5); click sounds (audio is another work package); an icon picture instead of the coloured tile (art, WP11.6);
+The repair and sell buttons (WP6.6); click sounds (audio is another work package) (menus and settings exist since
+WP11.5a: `menus.md`; the UI scale of the settings multiplies everything here, the sidebar keeps out of the edge band at every
+scale it offers, and while a menu is open the sidebar is built blind: no hover, no click); an icon picture instead of the coloured tile (art, WP11.6);
 a tooltip with the full name and the build time (the tile shows the short name and the price); hotkeys for the tabs;
 a rally-point button; showing the other factories' queues (an item shows its primary factory's queue only); a
 second queue for structures (a structure is placed at once and goes up where it stands, WP6.2/WP6.3); a faction

@@ -343,6 +343,13 @@ impl InputState {
     pub fn key_released(&self, key: KeyCode) -> bool {
         self.keys_released.contains(&key)
     }
+    /// The keys that went down this frame, in a fixed order (by name), for a screen that waits for
+    /// "press a key" (WP11.5a); the set itself has no order.
+    pub fn keys_pressed_now(&self) -> Vec<KeyCode> {
+        let mut keys: Vec<KeyCode> = self.keys_pressed.iter().copied().collect();
+        keys.sort_by_key(|k| format!("{k:?}"));
+        keys
+    }
     pub fn button_down(&self, b: MouseButton) -> bool {
         self.buttons_down.contains(&b)
     }
@@ -893,5 +900,21 @@ mod tests {
         let mut i = sized();
         i.key_event(KeyCode::Escape, ElementState::Pressed, false);
         assert!(!eval(&i, &b).pressed(Action::Quit));
+    }
+
+    /// The keys that went down this frame, in a fixed order, and none once the frame is over or for
+    /// a key that is merely held (WP11.5a: the "press a key" screen of the key settings).
+    #[test]
+    fn the_keys_pressed_now_are_the_new_ones_in_a_fixed_order() {
+        let mut i = sized();
+        assert!(i.keys_pressed_now().is_empty());
+        i.key_event(KeyCode::KeyZ, ElementState::Pressed, false);
+        i.key_event(KeyCode::KeyA, ElementState::Pressed, false);
+        assert_eq!(i.keys_pressed_now(), [KeyCode::KeyA, KeyCode::KeyZ]);
+        i.end_frame();
+        // Held, and the OS repeat, are not new presses.
+        i.key_event(KeyCode::KeyZ, ElementState::Pressed, true);
+        assert!(i.keys_pressed_now().is_empty());
+        assert!(i.key_down(KeyCode::KeyZ));
     }
 }

@@ -110,9 +110,10 @@ ticks, as above.
 M0b and M0c are compared with M0 on `frame_ms`, `gpu_ms` and `sim.tick_ms`; the checksums only show that the run played
 the pinned world.
 
-**`FIGHT` re-pinned at WP6.7** (`0x568d257d092daa7b` to `0x2b829617a5151fdf` at tick 1500). Measured cause: the weapon table's
-digest, which the weapons section hashes every tick, changed because the four structure weapons became turret weapons
-with the default arc (`defences.md`). Run with the shipped `unit_defs.ron` and `weapon_defs.ron` of the base and the
+**`FIGHT` re-pinned at WP6.7** (`0x568d257d092daa7b` to `0x2b829617a5151fdf` at tick 1500). Measured cause: two digests that are
+hashed every tick changed with the data: the weapon table's (section `W`), because the four structure weapons became turret
+weapons with the default arc, and the turret rates of the unit table (section `R`), because the defences got a `turret_rate`
+(`defences.md`). Run with the shipped `unit_defs.ron` and `weapon_defs.ron` of the base and the
 WP6.7 code the list is the old one at all 15 checkpoints; run with the new files the shots, hits and deaths of every
 hundred ticks (15 triples) and a hash of the position and hit points of every entity in the snapshot at tick 1500 are equal to the
 old run's (`4aaa05dc08dd05ab` in both), only the checksum differs. The crowd's 24 buildings are legacy structures with no

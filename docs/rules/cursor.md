@@ -153,7 +153,9 @@ in the game).
 * **The system cursor is hidden over the game view only.** The runner hides it while the
   software cursor is drawn: the mouse is in the window and not over the HUD, the minimap or an
   F1 panel. Over those, and outside the window, the system cursor is back, and it is restored on
-  exit. If the pictures cannot be loaded the system cursor simply stays.
+  exit. **While a menu is open (WP11.5a, `menus.md`) the game cursor is not drawn at all and the
+  system cursor is back over the whole window**: the menu takes the pointer, nothing is hovered
+  and no order is given. If the pictures cannot be loaded the system cursor simply stays.
 * **Screen edges.** `Edges` (`sf_engine`) says which edge bands the mouse is in: only edge
   *triggers* of bindings count (a pan key does not), so a rebound or unbound edge shows no scroll
   cursor, and the cursor never says "scrolling" when the camera is not.

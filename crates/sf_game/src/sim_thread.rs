@@ -282,6 +282,8 @@ enum Msg {
     Advance(u32),
     /// Realtime with `start_paused`: begin the clock.
     Start,
+    /// Hold (`true`) or release (`false`) the sim: while held no tick runs (WP11.5a, the pause menu).
+    Pause(bool),
     /// The placement question to answer in every snapshot from now on (WP6.2), or none.
     Ghost(Option<GhostQuery>),
     Shutdown,
@@ -363,6 +365,7 @@ impl SimHandle {
         let sim = Sim {
             world,
             started: !config.start_paused,
+            paused: false,
             config,
             rx,
             shared: Arc::clone(&shared),
@@ -437,6 +440,17 @@ impl SimHandle {
     /// Starts the clock of a thread made with [`SimConfig::start_paused`].
     pub fn start(&self) {
         let _ = self.tx.send(Msg::Start);
+    }
+
+    /// Holds the sim (`true`) or lets it go on (`false`), the pause menu's switch (WP11.5a). While held
+    /// the thread steps no tick at all, with its own clock or for [`SimHandle::advance`]; commands
+    /// that are sent still reach the world's queue for their tick. The message is in order with the
+    /// commands, so ticks that were already running finish first. On release the clock starts again
+    /// from that moment: the time that passed is not owed as ticks (that would be a burst of
+    /// catch-up), and no tick is skipped or repeated, so the run is the one without the pause with a
+    /// gap in wall time. Pausing is not a command and the world never hears of it.
+    pub fn set_paused(&self, paused: bool) {
+        let _ = self.tx.send(Msg::Pause(paused));
     }
 
     /// [`Pacing::Manual`]: runs `ticks` ticks, after the commands sent so
@@ -571,6 +585,8 @@ struct Sim {
     config: SimConfig,
     /// The clock runs (false only while held by `start_paused`).
     started: bool,
+    /// Held by [`SimHandle::set_paused`]: no tick runs.
+    paused: bool,
     rx: Receiver<Msg>,
     shared: Arc<Shared>,
     statics: Statics,
@@ -625,11 +641,21 @@ impl Sim {
             if !self.wait_until(due) {
                 return;
             }
+            if self.paused {
+                // Held (the pause menu): no tick runs until it is released, and the clock then starts
+                // again from that moment, so the time spent held is not owed as ticks.
+                if !self.wait_while_paused() {
+                    return;
+                }
+                due = Instant::now();
+                continue;
+            }
             let pass_start = Instant::now();
             let behind = pass_start.saturating_duration_since(due);
             let owed = 1 + (behind.as_nanos() / period.as_nanos().max(1)) as u64;
             let steps = owed.min(1 + u64::from(self.config.max_catch_up));
             let mut last_due = due;
+            let mut ran = 0u64;
             for k in 0..steps {
                 // Commands that came while the last tick ran go in before
                 // this one.
@@ -638,9 +664,18 @@ impl Sim {
                         return;
                     }
                 }
+                // A hold that came with them stops the pass here, before the tick it would start.
+                if self.paused {
+                    break;
+                }
                 last_due = due + period * k as u32;
                 self.step_once();
+                ran += 1;
             }
+            if ran == 0 {
+                continue;
+            }
+            let steps = ran;
             due += period * steps as u32;
             self.shared
                 .max_pass_ticks
@@ -664,6 +699,22 @@ impl Sim {
                 return;
             }
         }
+    }
+
+    /// Handles messages (commands still go to the world's queue) until the hold is released; false
+    /// when the thread should end.
+    fn wait_while_paused(&mut self) -> bool {
+        while self.paused {
+            match self.rx.recv() {
+                Ok(msg) => {
+                    if matches!(self.handle(msg), Flow::Stop) {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+        true
     }
 
     /// Handles messages until `deadline`; false when the thread should end.
@@ -693,7 +744,8 @@ impl Sim {
                 command,
             } => self.schedule(tick, player, command),
             Msg::Advance(n) => {
-                if self.config.pacing == Pacing::Manual {
+                // Held: no tick, not even one that was asked for by hand.
+                if self.config.pacing == Pacing::Manual && !self.paused {
                     for _ in 0..n {
                         self.step_once();
                         self.publish(Instant::now(), Duration::ZERO);
@@ -701,6 +753,7 @@ impl Sim {
                 }
             }
             Msg::Start => self.started = true,
+            Msg::Pause(paused) => self.paused = paused,
             Msg::Ghost(query) => {
                 self.ghost = query;
                 // Stepped by hand there is no clock to carry the answer to the next snapshot.

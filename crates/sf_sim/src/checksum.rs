@@ -29,6 +29,7 @@
 //! | weapons (`W`), only with a weapon table | the weapon table's digest, then each live entity with a weapon that is reloading or in a burst, in slot order: for each weapon slot the ticks it waits to fire and the shots left in its burst (WP5.1) |
 //! | projectiles (`J`), only with a weapon table | the projectile store: its slot count, free list (stack order) and each projectile in flight in slot order, with its slot, generation, weapon, owner, target, aim point, place, height, heading, span and fuse (WP5.2) |
 //! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
+//! | structure targets (`d`), only while the world has at least one live armed structure (inside the condition of `A`) | each live armed structure in slot order with its target, id and generation (WP6.7); after `A` |
 //! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
 //! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
 //! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
