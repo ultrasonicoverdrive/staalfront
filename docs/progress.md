@@ -2452,6 +2452,40 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   models is not tied to the output (the output follows the hit points, the model follows the damage thresholds of
   `damage.ron`); no sound or announcement for "low power" (audio is another work package); not played by a person.
 
+### WP11.5a notes: menus and settings without sound (stacked on WP6.4, orchestrator decision 03-11-2026)
+
+- Done: the start menu, the pause menu with restart, the settings screen (keys, graphics, accessibility) and a marked empty
+  "Sound (WP11.5b)" section; Restart and Main menu under the result banner; `--menu NAME` for screenshots. Rules, decisions,
+  numbers and the list of mutations: `docs/rules/menus.md`. Pictures: `docs/screenshots/wp11.5a/`. The WP is split by the
+  orchestrator: the sound settings are **WP11.5b**, built later with the audio work (PLAN.md phase 11 has the dated note).
+- **No `sf_sim` change and no pin moved** (`golden.rs`, every `.expected`, bench PLAIN and FIGHT): pausing is a hold of the sim
+  thread, not a command; a restart builds a world through the code the program starts with.
+- **Decisions** (in `menus.md`): Esc is the existing `Quit` action and is the fixed menu key; a taken key is refused, not
+  swapped; a rebind replaces the first key binding of the action; the shipped `input.ron` is never edited (the player's lists
+  are kept in a settings file and put over it); flag over setting over default; the demo and the benchmark ignore the settings;
+  a `--shots` run reads a settings file only through `STAALFRONT_SETTINGS`.
+- **Measured** (all in `menus.md`): the checksum after every one of 150 ticks of a run with a 0.9 s hold equals the
+  uninterrupted run's (`a_paused_run_has_the_checksums_of_an_uninterrupted_one`); the checksum at tick 41 after a restart equals a
+  fresh start's, sandbox and match; the closed menu costs 10.4 ns a frame without the two calls and 14.7 ns with them (release,
+  alternating runs, load average 2.6 to 3.8 on 4 cores); the colour-blind safe set is at least 22.7 delta E apart for every pair
+  under protanopia, deuteranopia and tritanopia (the standard set is 11.0 under protanopia).
+- **Real window** (`scripts/menus_e2e.py`, Xvfb + lavapipe, real X events): 26 of 26 checks, among them that keys, clicks and the
+  sidebar under an open menu reach nothing and that a rebound key survives a restart of the program. The check fails (13 of 14)
+  when the gating in `Runner::render` is taken out.
+- **Found while taking the screenshots:** at 150 % UI scale in a 1280-pixel window the centred top bar lay over the sidebar's
+  credits; it is narrowed to the room it has (`hud::top_bar_width`). At 200 % a 1280-pixel window is too narrow for the top
+  bar and the menus are taller than a 720-pixel window.
+- **Gaps** (`menus.md`, "Not done"): the sound settings (WP11.5b); the menus are mouse-driven (no keyboard or gamepad
+  navigation); no tooltips or confirmations; Esc does not cancel a chosen structure; no resolution choice or exclusive
+  fullscreen; the window mode switch was not seen on a system with a window manager and the banner buttons were not clicked in a
+  finished game (both only by pixels and state machine); `Runner::replace_scene` names every field of the runner, so WP6.7 (which
+  parallel work may touch `runner.rs`) will get a compile error for a field it adds until the field is put on one side; a
+  `--models` pack is lost if a new scene fails to build; not played by a person.
+- **Engine additions** (small, tested): `Context::{bindings, set_bindings, frame_cap, set_frame_cap, set_fullscreen}`,
+  `InputState::keys_pressed_now`, `Ui::{set_input, block_rect}`, `Style::with_palette`, `Instancer::set_palette`,
+  `Renderer::set_present` (the last one only on a real window: the offscreen renderer ignores it, and the real-window check
+  saw `present: Immediate`).
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -2552,3 +2586,8 @@ fixed, delete the entry in the same PR.
     adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
     original-audio side is done (PR #87, 28-10-2026): `ra_mapping.ron` maps every fight event by role except
     `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`, which have no Red Alert sound.
+32. **WP11.5b: the sound settings** (volume sliders, the Red Alert audio switch), to be built with the audio work in agreement
+    with it. The settings screen has the marked empty "Sound (WP11.5b)" page and the settings file ignores unknown fields, so
+    a later `sound:` section can be added without breaking files written now (`docs/rules/menus.md`).
+33. **Menus are mouse-driven** (WP11.5a): no keyboard or gamepad navigation, no tooltips, no confirmation for Quit or Restart,
+    Esc does not first cancel a chosen structure. Owner: Tijmen; each is a small follow-up on `menu.rs` and `menu_view.rs`.

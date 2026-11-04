@@ -126,8 +126,9 @@ game draws that seat as, a missing local player, a refused object) stops the sta
 **The result banner** (`match_view.rs`, `match_look.ron`): at the top middle, "Victory" when the local
 player won, "Defeat" when someone else did, "Draw" when nobody, and under it the game time and the
 tick ("decided after 4:44 (tick 5687)"). **The game keeps running behind it**: the result never changes,
-there is no menu to go to before the sidebar and menus of phase 11, and a player may carry on, for
-example to destroy the rest. Every word, number and colour is in `match_look.ron`.
+and a player may carry on, for example to destroy the rest. Since WP11.5a two buttons, **Restart** and **Main menu**, stand under
+the banner, and Esc opens the pause menu (`menus.md`); neither changes the result. Every word, number and colour of the banner is
+in `match_look.ron`, those of the buttons in `menu_look.ron`.
 
 ## The headless scenario `match`
 
@@ -205,8 +206,8 @@ Release, same machine (4 cores, shared with other jobs: load average 1 to 4 duri
 
 * No AI (phase 9) and no triggers or scenario format (phase 10): the match file and the fixed rule are
   absorbed by WP10.1 to WP10.3.
-* No fog (WP8.1), no sidebar (WP11.1), no menu: the banner is all the game shows, and there is no restart,
-  no pause and no way back to a menu; close the window.
+* No fog (WP8.1). *(The sidebar came with WP11.1; the start menu, the pause menu, restart and the way back to the main menu
+  with WP11.5a, `menus.md`: "Match" on the start menu plays this file, Restart builds the same match again.)*
 * No surrender and no timeout: a match that nobody can win (the human has no way to hurt the opponent) goes
   on.
 * One human; the local player is fixed at player 0 (`commands::LOCAL_PLAYER`), as in the sandbox.

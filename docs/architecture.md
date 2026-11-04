@@ -998,6 +998,11 @@ that comes later stalls the picture for the difference and counts as a
 picture does not extrapolate. The engine's own alpha and `fixed_update` are no
 longer used by the game.
 
+**Pause (WP11.5a).** `SimHandle::set_paused(true)` sends `Pause(true)` in order with the commands; while held the thread
+steps no tick (its own clock and `advance` alike), still accepts commands for their tick, and on release restarts its clock
+from that moment instead of owing the held time as a burst. It is not a sim command: the world never hears of it. The pause
+menu uses it, and a restart or a new scene drops the handle and makes another (`docs/rules/menus.md`).
+
 **Shutdown.** Dropping the `SimHandle` (the runner, on window close) sends
 `Shutdown` and joins the thread; the longest wait is the tick that is running.
 `stop()` returns what the thread leaves (`SimExit`: ticks, the full checksum

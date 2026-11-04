@@ -566,6 +566,95 @@ fn a_command_for_a_past_tick_runs_next_and_is_counted() {
     assert_eq!(exit.commands[0].effective, Tick(5));
 }
 
+/// The pause menu (WP11.5a): a sim that is held steps no tick, whoever asks for one.
+#[test]
+fn a_held_sim_steps_nothing_not_even_by_hand_and_goes_on_where_it_was() {
+    let _serial = one_at_a_time();
+    let mut sim = SimHandle::spawn(light_world(), SimConfig::manual()).unwrap();
+    sim.advance(5);
+    sim.wait_for_tick(Tick(5), WAIT).unwrap();
+    sim.set_paused(true);
+    // A held sim ignores the request; a command sent meanwhile still reaches the world's queue.
+    sim.advance(10);
+    sim.send(PlayerId(0), Command::Stop { ids: Vec::new() });
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(sim.counters().ticks, 5, "held: no tick ran");
+    assert_eq!(sim.latest().tick(), Tick(5));
+    sim.set_paused(false);
+    sim.advance(10);
+    let snap = sim.wait_for_tick(Tick(15), WAIT).unwrap();
+    assert_eq!(snap.tick(), Tick(15), "released: the ticks are not owed");
+    assert_eq!(sim.stop().ticks, 15);
+}
+
+/// Spawns the `orders` scenario with all its commands in before the clock starts (so that *when* a
+/// command arrives cannot differ between two runs), on a clock of `period`, and starts it.
+fn orders_run(period: Duration) -> SimHandle {
+    let s = scenario("orders");
+    let sim = SimHandle::spawn(
+        bare_world(&s),
+        SimConfig {
+            period,
+            start_paused: true,
+            ..SimConfig::realtime()
+        },
+    )
+    .unwrap();
+    for (tick, player, command) in scenario_commands(&s) {
+        sim.send_at(tick, player, command);
+    }
+    sim.start();
+    sim
+}
+
+/// The pause menu must not change the game: the world run with a stop in the middle, in real time,
+/// has the checksum after every tick of the world run straight through; while it is held not a
+/// single tick runs; and the time spent held is not owed as a burst of ticks afterwards.
+#[test]
+fn a_paused_run_has_the_checksums_of_an_uninterrupted_one() {
+    let _serial = one_at_a_time();
+    const TICKS: u64 = 150;
+    let straight = {
+        let mut sim = orders_run(Duration::from_millis(2));
+        sim.wait_for_tick(Tick(TICKS), WAIT).unwrap();
+        sim.stop().clone()
+    };
+    assert!(straight.ticks >= TICKS && !straight.panicked);
+
+    // A longer period for the interrupted run: the clock is easy to tell from a burst.
+    let mut sim = orders_run(Duration::from_millis(20));
+    sim.wait_for_tick(Tick(30), WAIT).unwrap();
+    sim.set_paused(true);
+    thread::sleep(Duration::from_millis(250));
+    let held_at = sim.counters().ticks;
+    let held_snap = sim.latest().tick();
+    assert!(held_at >= 30);
+    // 800 ms is 40 periods: more than the sim would forgive as lag if the held time were owed.
+    thread::sleep(Duration::from_millis(800));
+    assert_eq!(sim.counters().ticks, held_at, "held: no tick ran");
+    assert_eq!(sim.latest().tick(), held_snap, "and no new snapshot");
+    sim.set_paused(false);
+    sim.wait_for_tick(Tick(TICKS), WAIT).unwrap();
+    let counters = sim.counters();
+    let paused = sim.stop().clone();
+    assert!(!paused.panicked);
+    assert_eq!(
+        counters.clock_resets, 0,
+        "the time spent held is not owed: the clock starts again on release"
+    );
+    assert!(
+        counters.max_pass_ticks <= 1 + u64::from(MAX_CATCH_UP_TICKS),
+        "no burst after the release"
+    );
+    // The same world: every tick's checksum, from the first to the last both have.
+    let n = TICKS as usize;
+    assert_eq!(
+        &paused.checksums[..n],
+        &straight.checksums[..n],
+        "a run with a pause in it is the run without"
+    );
+}
+
 /// The game runs with the full command log off. A command that is moved to a
 /// later tick is logged anyway, with the tick asked for and the tick it ran at.
 #[test]

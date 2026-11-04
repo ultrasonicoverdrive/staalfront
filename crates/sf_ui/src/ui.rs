@@ -316,6 +316,20 @@ impl Ui {
         self.blockers.push(rect);
     }
 
+    /// Replace the pointer input for the widgets declared from here on in this frame (WP11.5a). A
+    /// menu that covers the game builds the game's panels with an input that sees nothing, then calls
+    /// this with the real one, so only the menu's widgets can be hovered or clicked. What
+    /// [`Ui::end_frame`] decides to consume uses the input set last.
+    pub fn set_input(&mut self, input: UiInput) {
+        self.input = input;
+    }
+
+    /// An invisible rectangle that takes the pointer like a panel does, without drawing anything (the
+    /// whole window behind a menu: a click beside the menu is not the game's).
+    pub fn block_rect(&mut self, rect: Rect) {
+        self.block(rect);
+    }
+
     /// A panel (nine-slice, tinted with the config color) that blocks input.
     pub fn panel_rect(&mut self, rect: Rect) {
         self.block(rect);
@@ -551,6 +565,41 @@ mod tests {
         );
         let r = frame(&mut ui, release(at(150.0, 110.0), MouseButton::Left));
         assert!(!r.clicked);
+    }
+
+    /// A menu over the game (WP11.5a): the game's button is declared with an input that sees nothing,
+    /// the menu's with the real one; a click on the spot where both lie goes to the menu's widget
+    /// only, and a click on empty window is blocked by `block_rect` without drawing anything.
+    #[test]
+    fn a_blind_input_then_the_real_one_lets_only_the_later_widgets_react() {
+        let mut ui = Ui::new(UiConfig::default());
+        let menu_btn = Rect::new(300.0, 300.0, 100.0, 30.0);
+        let click = release(at(150.0, 110.0), MouseButton::Left);
+        let frame = |ui: &mut Ui, input: UiInput| {
+            ui.begin_frame(input, SCREEN, 1.0);
+            ui.set_input(UiInput::default());
+            let game = ui.button("game", BTN, "Game", true);
+            ui.set_input(input);
+            ui.block_rect(Rect::new(0.0, 0.0, 800.0, 600.0));
+            let menu = ui.button("menu", menu_btn, "Menu", true);
+            ui.end_frame();
+            (game, menu)
+        };
+        frame(&mut ui, press(at(150.0, 110.0), MouseButton::Left));
+        let (game, menu) = frame(&mut ui, click);
+        assert!(!game.clicked && !game.hovered && !menu.clicked);
+        assert!(
+            ui.pointer_over_ui(),
+            "the whole window is blocked, the game gets no click"
+        );
+        // The menu's own button works.
+        frame(&mut ui, press(at(350.0, 310.0), MouseButton::Left));
+        let (_, menu) = frame(&mut ui, release(at(350.0, 310.0), MouseButton::Left));
+        assert!(menu.clicked);
+        // Without the blocker a click on empty window is not the UI's.
+        ui.begin_frame(at(700.0, 500.0), SCREEN, 1.0);
+        ui.end_frame();
+        assert!(!ui.pointer_over_ui());
     }
 
     #[test]

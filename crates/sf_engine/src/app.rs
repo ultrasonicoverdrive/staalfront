@@ -145,11 +145,36 @@ pub struct Resized {
     pub scale_factor: f64,
 }
 
+/// Changes the application asked for during a callback (WP11.5a). The loop applies them when the
+/// callback returns, so they take effect from the next frame on.
+#[derive(Debug, Default)]
+pub struct Requests {
+    /// Use these bindings from now on (the player's own keys over the shipped ones).
+    bindings: Option<Bindings>,
+    /// Use this frame cap from now on (`Some(None)` = no cap).
+    frame_cap: Option<Option<u32>>,
+}
+
+impl Requests {
+    /// Applies what was asked for to the loop's `bindings` and `frame_cap`, and forgets it.
+    pub fn apply(&mut self, bindings: &mut Bindings, frame_cap: &mut Option<u32>) {
+        if let Some(b) = self.bindings.take() {
+            *bindings = b;
+        }
+        if let Some(cap) = self.frame_cap.take() {
+            *frame_cap = cap;
+        }
+    }
+}
+
 /// What the application can see and do during a callback.
 pub struct Context<'a> {
     window: &'a Arc<Window>,
     input: &'a InputState,
     actions: &'a ActionState,
+    bindings: &'a Bindings,
+    frame_cap: Option<u32>,
+    requests: &'a mut Requests,
     stats: &'a FrameStats,
     assets: &'a AssetRoot,
     screen: &'a ScreenReport,
@@ -165,6 +190,23 @@ impl Context<'_> {
     }
     pub fn actions(&self) -> &ActionState {
         self.actions
+    }
+    /// The bindings in use now: `input.ron`, or what [`Context::set_bindings`] put over it.
+    pub fn bindings(&self) -> &Bindings {
+        self.bindings
+    }
+    /// Use `bindings` from the next frame on. In debug builds the engine reloads `input.ron` itself
+    /// and then replaces whatever was set here; [`App::on_asset_changed`] is the place to set it again.
+    pub fn set_bindings(&mut self, bindings: Bindings) {
+        self.requests.bindings = Some(bindings);
+    }
+    /// The frame cap in use now (`None` = no cap).
+    pub fn frame_cap(&self) -> Option<u32> {
+        self.frame_cap
+    }
+    /// Use this frame cap from the next frame on (`None` = no cap).
+    pub fn set_frame_cap(&mut self, cap: Option<u32>) {
+        self.requests.frame_cap = Some(cap);
     }
     pub fn frame_stats(&self) -> &FrameStats {
         self.stats
@@ -189,12 +231,12 @@ impl Context<'_> {
     }
     /// Switch between windowed and borderless fullscreen.
     pub fn toggle_fullscreen(&self) {
-        let next = if self.is_fullscreen() {
-            None
-        } else {
-            Some(Fullscreen::Borderless(None))
-        };
-        self.window.set_fullscreen(next);
+        self.set_fullscreen(!self.is_fullscreen());
+    }
+    /// Borderless fullscreen on, or off (windowed).
+    pub fn set_fullscreen(&self, on: bool) {
+        self.window
+            .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
     }
     /// Leave the loop after the current frame.
     pub fn request_exit(&mut self) {
@@ -256,6 +298,8 @@ struct Handler<A: App> {
     window: Option<Arc<Window>>,
     input: InputState,
     actions: ActionState,
+    /// What the app asked for in its last callback (WP11.5a).
+    requests: Requests,
     stats: FrameStats,
     fixed: FixedStep,
     screen: ScreenReport,
@@ -286,6 +330,7 @@ impl<A: App> Handler<A> {
             window: None,
             input: InputState::new(),
             actions: ActionState::default(),
+            requests: Requests::default(),
             stats: FrameStats::default(),
             fixed: FixedStep::sim_default(),
             screen: ScreenReport {
@@ -310,12 +355,18 @@ impl<A: App> Handler<A> {
             window,
             input: &self.input,
             actions: &self.actions,
+            bindings: &self.bindings,
+            frame_cap: self.config.frame_cap_hz,
+            requests: &mut self.requests,
             stats: &self.stats,
             assets: &self.assets,
             screen: &self.screen,
             exit: &mut self.exit,
         };
-        Some(f(&mut self.app, &mut ctx))
+        let result = f(&mut self.app, &mut ctx);
+        self.requests
+            .apply(&mut self.bindings, &mut self.config.frame_cap_hz);
+        Some(result)
     }
 
     fn resized(&mut self) {
@@ -497,6 +548,35 @@ impl<A: App> ApplicationHandler for Handler<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the app asks for through the `Context` is applied to the loop's own copies, once, and
+    /// asking for nothing leaves them alone (WP11.5a).
+    #[test]
+    fn requests_replace_the_bindings_and_the_frame_cap_once() {
+        use crate::input::{Action, Binding, Trigger};
+        let shipped = Bindings::builtin();
+        let mut own = shipped.clone();
+        own.bindings.insert(
+            Action::OrderStop,
+            vec![Binding::new(Trigger::Key(winit::keyboard::KeyCode::KeyV))],
+        );
+        let (mut bindings, mut cap) = (shipped.clone(), Some(60));
+
+        let mut nothing = Requests::default();
+        nothing.apply(&mut bindings, &mut cap);
+        assert_eq!((&bindings, cap), (&shipped, Some(60)));
+
+        let mut asked = Requests {
+            bindings: Some(own.clone()),
+            frame_cap: Some(None),
+        };
+        asked.apply(&mut bindings, &mut cap);
+        assert_eq!((&bindings, cap), (&own, None));
+        // Applied once: a second pass changes nothing.
+        let mut again = (own.clone(), None);
+        asked.apply(&mut again.0, &mut again.1);
+        assert_eq!(again, (own, None));
+    }
 
     #[test]
     fn consumed_presses_are_withheld_but_releases_pass() {
