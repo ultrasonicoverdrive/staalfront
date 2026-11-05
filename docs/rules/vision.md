@@ -103,8 +103,8 @@ rules (legacy sight, then each kind with its sight), then for each player that h
 | visible cells, visible mix | the number of visible cells and a running sum of a fixed mixing of their indices, changed at each crossing of zero |
 | explored cells, explored mix | the same for explored |
 
-It does not walk the arrays (a 256 by 256 map with 8 players would be a megabyte of hashing per tick). The cost of a tick
-with vision is the pass and 56 bytes of hashing per player. A missed unstamp, the bug this design invites, changes `sum` and
+It does not walk the arrays (a 256 by 256 map with 8 players would be a megabyte of hashing per tick). The hashing of a tick
+with vision is the rules (6 bytes per kind) and 37 bytes per player, whatever the map size. A missed unstamp, the bug this design invites, changes `sum` and
 the visible mix; the full recompute that proves it cannot happen is `World::vision_audit` (the stamps against the arrays) and
 `World::vision_audit_current` (the entities as they are now against the arrays, on a clone after `vision_resync`), run
 **every tick** on `vision`, on the busy world of `the_incremental_counts_equal_a_recompute_every_tick` (deaths, spawns, a slot
