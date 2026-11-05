@@ -280,13 +280,6 @@ impl SimSnapshot {
         v.hp = hp;
     }
 
-    /// Overwrites the copied fog bitsets with all-clear (tests of what refills them).
-    #[cfg(test)]
-    pub(crate) fn poison_fog_for_test(&mut self) {
-        self.fog_visible.iter_mut().for_each(|w| *w = 0);
-        self.fog_explored.iter_mut().for_each(|w| *w = 0);
-    }
-
     /// Marks `id` as being repaired in this snapshot (tests of what reads it).
     #[cfg(test)]
     pub(crate) fn set_repair_for_test(&mut self, id: EntityId, status: RepairStatus) {
@@ -532,6 +525,13 @@ impl SimSnapshot {
     /// Changes exactly when the visible or explored cells do.
     pub fn fog_version(&self) -> Option<u64> {
         self.fog_version
+    }
+
+    /// Overwrites the copied fog bitsets with all-clear (tests of what refills them).
+    #[cfg(test)]
+    pub(crate) fn poison_fog_for_test(&mut self) {
+        self.fog_visible.iter_mut().for_each(|w| *w = 0);
+        self.fog_explored.iter_mut().for_each(|w| *w = 0);
     }
 
     /// What the local player knows about `cell` (WP8.1), from the bitsets copied with this snapshot.
