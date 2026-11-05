@@ -134,24 +134,38 @@ class Game:
             time.sleep(0.5)
         return False
 
+    def barrier(self, timeout=20):
+        """Waits until the main thread has handled every key pressed before this call. Ctrl+9
+        (assign group 9) logs `group 9: ` from the frame that handles it; the first press can share
+        a frame with earlier keys, so a second one is pressed only once the first line is there: its
+        frame is then strictly later than theirs. Says whether both lines came."""
+        for _ in range(2):
+            m = self.mark()
+            self.chord("Control_L", "9")
+            end = time.time() + timeout
+            while not re.search(r"group 9: ", self.text()[m:]):
+                if time.time() > end:
+                    return False
+                time.sleep(0.1)
+        return True
+
     def old_and_new_key(self, timeout=20):
-        """Presses b (the old key of Choose structure), then n (the new one). Returns the number of
-        `build: ` lines between the two presses and after n, counted only once n's line is there (or
-        on a timeout, so the check fails). b is given until n's line comes: the sim handles keys in
-        order, so a line from b would come first."""
+        """Presses b (the old key of Choose structure), waits for a barrier that comes after b's
+        frame, then presses n (the new one). Returns the number of `build: ` lines from b and from n,
+        or (-1, -1) when the barrier did not come (so the check fails). n is given until its line
+        comes and one second more, so a second line would be counted too."""
         m = self.mark()
         self.key("b")
+        if not self.barrier():
+            return -1, -1
         m2 = self.mark()
         self.key("n")
         end = time.time() + timeout
         while time.time() < end and not re.search(r"build: ", self.text()[m2:]):
             time.sleep(0.25)
+        time.sleep(1.0)
         text = self.text()
-        before_n = text[m:m2]
-        after_n = re.findall(r"build: ", text[m2:])
-        # A line from b that the log wrote after the second mark comes before n's.
-        late_b = 1 if len(after_n) > 1 else 0
-        return len(re.findall(r"build: ", before_n)) + late_b, len(after_n) - late_b
+        return len(re.findall(r"build: ", text[m:m2])), len(re.findall(r"build: ", text[m2:]))
 
     def hands(self):
         self.d = x11.XOpenDisplay(self.display.encode())
