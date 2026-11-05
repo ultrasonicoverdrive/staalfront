@@ -548,3 +548,22 @@ fn a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has() {
     assert_eq!(twice.keys.keys().copied().collect::<Vec<_>>(), vec![first]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn esc_is_refused_even_when_the_shipped_file_binds_it_to_nothing() {
+    // An `input.ron` where no action has Escape: only the explicit Esc rule refuses it.
+    let mut base = shipped();
+    for list in base.bindings.values_mut() {
+        list.retain(|b| b.trigger != Trigger::Key(KeyCode::Escape));
+    }
+    assert!(
+        base.bindings
+            .values()
+            .flatten()
+            .all(|b| b.trigger != Trigger::Key(KeyCode::Escape))
+    );
+    let mut s = Settings::default();
+    s.keys.insert(Action::OrderStop, vec![key(KeyCode::Escape)]);
+    assert_eq!(s.drop_refused_keys(&base), vec![Action::OrderStop]);
+    assert!(s.keys.is_empty());
+}

@@ -134,6 +134,25 @@ class Game:
             time.sleep(0.5)
         return False
 
+    def old_and_new_key(self, timeout=20):
+        """Presses b (the old key of Choose structure), then n (the new one). Returns the number of
+        `build: ` lines between the two presses and after n, counted only once n's line is there (or
+        on a timeout, so the check fails). b is given until n's line comes: the sim handles keys in
+        order, so a line from b would come first."""
+        m = self.mark()
+        self.key("b")
+        m2 = self.mark()
+        self.key("n")
+        end = time.time() + timeout
+        while time.time() < end and not re.search(r"build: ", self.text()[m2:]):
+            time.sleep(0.25)
+        text = self.text()
+        before_n = text[m:m2]
+        after_n = re.findall(r"build: ", text[m2:])
+        # A line from b that the log wrote after the second mark comes before n's.
+        late_b = 1 if len(after_n) > 1 else 0
+        return len(re.findall(r"build: ", before_n)) + late_b, len(after_n) - late_b
+
     def hands(self):
         self.d = x11.XOpenDisplay(self.display.encode())
         assert self.d, "cannot open the display"
@@ -322,14 +341,11 @@ def settings_scenario(display, binary, settings):
         check("vertical sync off is applied to the surface", game.count(r"present: ") >= 1, str(re.findall(r"present: .*", game.text())[-1:]))
 
         # Back to the game; the new key works, the old one does not.
+        before = game.total_ticks()
         game.key("Escape")
         game.key("Escape")
-        time.sleep(1.0)
-        m = game.mark()
-        game.key("b")
-        old = game.count(r"build: ", m)
-        game.key("n")
-        new = game.count(r"build: ", m) - old
+        check("the sim runs again after the menu", game.wait_ticks_above(before + 1))
+        old, new = game.old_and_new_key()
         check("the new key works and the old one does not", old == 0 and new == 1, f"b: {old}, n: {new}")
     finally:
         game.stop()
@@ -343,12 +359,8 @@ def settings_scenario(display, binary, settings):
         check("and reads the file without a warning", "settings.ron" not in head and "settings" not in head, head[-200:])
         game.hands()
         game.move(300, 300)
-        time.sleep(3)
-        m = game.mark()
-        game.key("b")
-        old = game.count(r"build: ", m)
-        game.key("n")
-        new = game.count(r"build: ", m) - old
+        check("the sim runs at the second start", game.wait_ticks_above(game.total_ticks() + 1))
+        old, new = game.old_and_new_key()
         check("the rebound key is still there after a restart of the program", old == 0 and new == 1, f"b: {old}, n: {new}")
         check("the file is unchanged by a start", settings.read_text() == saved)
     finally:
