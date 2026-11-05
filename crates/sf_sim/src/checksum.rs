@@ -685,7 +685,7 @@ impl World {
         }
 
         // Repair and sale (`r`, WP6.6): the rules and each structure that repairs or is being sold,
-        // in slot order. After `I`, so it is the last section, and only while some structure repairs
+        // in slot order. After `I`, and only while some structure repairs
         // or is being sold: every world where nobody does hashes as before.
         if self.repair.is_some() && self.repair_active() {
             h.write_u8(SECTION_REPAIR);
