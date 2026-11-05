@@ -39,8 +39,9 @@
 //! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
 //! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
 //! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6) |
-//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6). It is the last section |
-//! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4). It is the last section |
+//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6) |
+//! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4) |
+//! | vision (`v`), only in a world given vision rules | the legacy sight and the sight of every kind, then for each player that has had an object, ascending: its disc count, a running sum of `(index + 1) * count` over the cells, the number of visible cells and a mixed sum of their indices, the number of explored cells and a mixed sum of theirs (WP8.1). Kept up to date per change, so it costs the same whatever the map size. It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -217,6 +218,7 @@ const SECTION_PRODUCTION: u8 = b'Y';
 const SECTION_OUTCOME: u8 = b'Z';
 const SECTION_POWER: u8 = b'I';
 const SECTION_REPAIR: u8 = b'r';
+const SECTION_VISION: u8 = b'v';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -688,6 +690,14 @@ impl World {
         if self.repair.is_some() && self.repair_active() {
             h.write_u8(SECTION_REPAIR);
             self.write_repair_hash(&mut h);
+        }
+
+        // Vision (`v`, WP8.1): the rules and, per player, the running sums of what it sees and has
+        // seen. After `r`, so it is the last section, and only in a world given vision rules: every
+        // world without them hashes as before. The byte is outside A-Z (all taken).
+        if let Some(vision) = &self.vision {
+            h.write_u8(SECTION_VISION);
+            vision.write_hash(&mut h);
         }
 
         h.finish()
