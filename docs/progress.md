@@ -2536,6 +2536,31 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   `Renderer::set_present` (the last one only on a real window: the offscreen renderer ignores it, and the real-window check
   saw `present: Immediate`).
 
+## Phase 8 — Vision
+
+Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour) is built and in review, stacked on WP6.6 (#102); WP8.2a
+(targeting gate, structure sight rules, allied vision), WP8.2b (height bonus, waits for elevation in the sim), WP8.3 (presentation) and
+WP8.4 (minimap and icons) are not started. The split of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026).
+
+### WP8.1 notes: shroud and fog of war (stacked on WP6.6, orchestrator decision 05-11-2026)
+
+- Done: `sf_sim::vision` (per player a `u16` count per cell, a `visible` and an `explored` bitset, per slot the stamp it made; discs from
+  integer row-span masks per distinct sight; delta stamping in one pass after the crowd pass and before targeting), `World::with_vision`,
+  `World::visibility(player, cell)` (the hook for WP8.2a; nothing reads it), `fog_version`, `fog_words`, checksum section `v` (running sums,
+  gated, after `r`), `sf_data::vision` + `vision.ron`, `sf_bridge::vision_rules`, scenario field `vision` and the new pinned scenario
+  `vision` (`0x84facee4249aa869`, in the CI list), the local player's bitsets and a `seen` flag per view in `SimSnapshot` (copied when the
+  version changes), a debug view (F1 checkbox or `--debug-fog`, `vision_look.ron`). Rules: `docs/rules/vision.md`. Screenshots:
+  `docs/screenshots/wp8.1`.
+- **Decisions** (written in `vision.md`): a structure stamps its disc grown by its footprint; it sees only while it stands (not under
+  construction, not while sold); every object marks its own cells explored; a sight of 0 reveals nothing; a unit stamps from its position
+  (units have no `cell`, only structures do: the memo assumed otherwise); the sight is a table in `VisionRules`, not a field of `UnitStats`
+  (65 literals, other branches add fields); matches turn vision on in the game, the headless `match` scenario does not; a player's 65,536th
+  disc is refused (so `u16` cannot wrap).
+- **Pins:** none moved. Section `v` exists only in a world given vision rules; golden.rs, every `.expected` and the bench PLAIN and FIGHT
+  checksums are as before (see the PR for the runs). New: `vision.expected`.
+- **Gaps:** nothing reads the sight (WP8.2a); no allied vision; no height (WP8.2b); the debug view hides nothing (units show through it) and
+  is sheared on slopes; no ghosts, soft edges, minimap or icon filtering (WP8.3, WP8.4); the AI has no memory of what it has seen.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

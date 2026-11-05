@@ -83,7 +83,7 @@ pub struct VisionRules {
     /// structures), at most [`MAX_SIGHT_MILLI`].
     pub legacy_sight_milli: u32,
     /// `(kind, sight)`, strictly ascending by kind, each kind in the unit table. A kind of the table
-    /// that is not listed has sight 0.
+    /// that is not listed has a sight of nothing.
     pub sights: Vec<(Kind, u32)>,
 }
 
@@ -126,7 +126,7 @@ impl Mask {
     }
 
     /// Rows on one side of the centre row, the centre row not counted: the disc reaches this many
-    /// cells up and down. Zero for a sight of 0.
+    /// cells up and down; nothing for a sight of nothing.
     pub fn radius(&self) -> u32 {
         self.half.len().saturating_sub(1) as u32
     }

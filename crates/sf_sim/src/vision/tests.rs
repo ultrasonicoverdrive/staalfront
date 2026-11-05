@@ -20,7 +20,7 @@ const RUNNER: Kind = Kind(2); // mobile, sight 5, fast
 const BLIND: Kind = Kind(3); // mobile, sight 0
 const HALL: Kind = Kind(4); // structure 2 x 2, sight 3
 const TOWER: Kind = Kind(5); // structure 1 x 1, sight 10
-const BIG: Kind = Kind(6); // structure 4 x 4, sight 4.5
+const BIG: Kind = Kind(6); // structure 4 x 4, sight 4500 thousandths
 
 const SIGHTS: [(Kind, u32); 6] = [
     (SCOUT, 3000),
@@ -37,7 +37,7 @@ fn stats(kind: Kind, structure: Option<(u8, u8)>, fast: bool) -> UnitStats {
         hp: 100,
         movement_class: structure.is_none().then_some(1),
         speed_per_tick: if structure.is_none() {
-            Fx::from_ratio(if fast { 1 } else { 1 }, if fast { 2 } else { 4 })
+            Fx::from_ratio(1, if fast { 2 } else { 4 })
         } else {
             Fx::ZERO
         },
@@ -184,7 +184,7 @@ fn the_cell_counts_of_the_discs_are_pinned() {
 
 #[test]
 fn the_edge_of_the_disc_is_inside() {
-    // (3, 4) is exactly 5 cells away: 9 + 16 = 25.
+    // (3, 4) is exactly 5 cells away: 9 + 16 is 25, and so is 5 times 5
     assert!(Mask::new(5000).contains(3, 4));
     assert!(Mask::new(5000).contains(-4, -3));
     assert!(!Mask::new(4999).contains(3, 4));
@@ -244,7 +244,7 @@ fn each_kind_has_the_sight_of_its_own_entry() {
     }
     let mut w = world(60);
     structure(&mut w, P1, TOWER, 30, 30);
-    // A tower of one cell: the full disc of 10.
+    // A tower of one cell: the full disc of 10 cells
     assert_eq!(count(&w, P1, Visibility::Visible), 317);
 }
 
@@ -262,7 +262,7 @@ fn a_unit_that_sees_nothing_still_knows_its_own_cell() {
 fn a_structure_sees_from_its_whole_footprint() {
     let mut w = world(40);
     structure(&mut w, P0, HALL, 10, 10); // cells 10..=11 by 10..=11, sight 3
-    // Along the middle rows the reach is 3 beyond the footprint: columns 7 to 14.
+    // Along the middle rows the reach is 3 beyond the footprint: columns 7 to 14 in all
     assert_eq!(seen(&w, P0, 7, 10), Visibility::Visible);
     assert_eq!(seen(&w, P0, 14, 11), Visibility::Visible);
     assert_eq!(seen(&w, P0, 6, 10), Visibility::Shroud);
@@ -276,14 +276,14 @@ fn a_structure_sees_from_its_whole_footprint() {
     assert_eq!(seen(&w, P0, 8, 8), Visibility::Visible);
     assert_eq!(seen(&w, P0, 7, 7), Visibility::Shroud);
     // Counted: the two footprint rows are 2 + 2 * 3 = 8 wide; the three rows beyond, above and below,
-    // have half-widths 2, 2 and 0 round the footprint of two: 6, 6 and 2.
+    // have half-widths 2, 2 and 0 round the footprint of two: 6, 6 and 2 wide
     assert_eq!(count(&w, P0, Visibility::Visible), 2 * 8 + 2 * (6 + 6 + 2));
 }
 
 #[test]
 fn a_big_structure_is_not_a_disc_round_its_anchor() {
     let mut w = world(40);
-    structure(&mut w, P0, BIG, 10, 10); // 4 x 4, sight 4.5
+    structure(&mut w, P0, BIG, 10, 10); // 4 x 4, sight 4500 thousandths
     // Four cells beyond the far edge are in; from the anchor that would be 7 away.
     assert_eq!(seen(&w, P0, 17, 12), Visibility::Visible);
     assert_eq!(seen(&w, P0, 18, 12), Visibility::Shroud);
@@ -368,7 +368,7 @@ fn a_disc_is_clipped_at_the_edges_and_corners() {
         );
         w.vision_audit().unwrap();
     }
-    // A quarter of the disc of 3 with its axes: 4 + 3 + 3 + 1.
+    // A quarter of the disc of 3 with its axes: 4 + 3 + 3 + 1 cells
     let mut w = world(40);
     unit(&mut w, P0, SCOUT, 0, 0);
     assert_eq!(count(&w, P0, Visibility::Visible), 11);

@@ -255,3 +255,67 @@ fn a_quad_off_the_screen_or_smeared_by_the_near_plane_is_not_drawn() {
     smear[2] = (9000.0, 100.0);
     assert!(!worth_drawing(&smear, vp));
 }
+
+#[test]
+fn own_objects_are_always_seen_even_when_their_own_cell_is_not_in_sight() {
+    let (mut w, _defs) = world();
+    // A legacy structure never stands, so it sees nothing and its cell is only explored (fog); it is
+    // the local player's own, and an own object is always seen.
+    let t = w.tick();
+    w.schedule(
+        t,
+        LOCAL_PLAYER,
+        Command::Place {
+            kind: Kind(900),
+            cell: Cell::new(5, 5),
+            owner: LOCAL_PLAYER,
+        },
+    )
+    .unwrap();
+    w.schedule(
+        t,
+        OTHER,
+        Command::Place {
+            kind: Kind(901),
+            cell: Cell::new(20, 20),
+            owner: OTHER,
+        },
+    )
+    .unwrap();
+    w.step();
+    let snap = SimSnapshot::capture(&w);
+    let own = w.occupant_at(Cell::new(5, 5)).unwrap();
+    let theirs = w.occupant_at(Cell::new(20, 20)).unwrap();
+    assert_eq!(snap.visibility(Cell::new(5, 5)), Fog);
+    assert!(snap.seen(own));
+    assert!(!snap.seen(theirs));
+}
+
+#[test]
+fn a_structure_is_seen_through_a_cell_that_is_not_its_anchor() {
+    let (mut w, defs) = world();
+    // The anchor is the north-west cell. The scout (sight 8) stands south of a refinery (3 by 4)
+    // anchored at (8, 10): the anchor is 10 rows away, the last row of the footprint (y = 13) is 7.
+    spawn(&mut w, LOCAL_PLAYER, kind(&defs, "scout"), 10, 20);
+    let t = w.tick();
+    w.schedule(
+        t,
+        OTHER,
+        Command::PlaceStructure {
+            kind: kind(&defs, "refinery"),
+            cell: Cell::new(8, 10),
+            owner: OTHER,
+        },
+    )
+    .unwrap();
+    w.step();
+    let snap = SimSnapshot::capture(&w);
+    let id = w.occupant_at(Cell::new(8, 10)).unwrap();
+    assert_eq!(
+        snap.visibility(Cell::new(8, 10)),
+        Shroud,
+        "the anchor is out of sight"
+    );
+    assert_eq!(snap.visibility(Cell::new(9, 13)), Visible);
+    assert!(snap.seen(id));
+}

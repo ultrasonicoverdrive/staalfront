@@ -71,10 +71,13 @@ fn picture(w: &World) -> Vec<(u32, u32, i64, i64, u32)> {
         .collect()
 }
 
+/// `(tick, player 0's state, player 1's state)` of a probe cell when either changed.
+type Change = (u64, Visibility, Visibility);
+
 /// What a run showed.
 struct Story {
     /// `(tick, p0, p1)` of each probe cell whenever it changed, per cell.
-    changes: Vec<(Cell, Vec<(u64, Visibility, Visibility)>)>,
+    changes: Vec<(Cell, Vec<Change>)>,
     gone: Vec<(u64, EntityId)>,
     /// Explored cells and visible cells of both players after each tick.
     explored: Vec<[u32; 2]>,
@@ -116,7 +119,7 @@ fn play() -> (World, Story) {
     (w, story)
 }
 
-fn changes_of(story: &Story, c: Cell) -> &[(u64, Visibility, Visibility)] {
+fn changes_of(story: &Story, c: Cell) -> &[Change] {
     &story.changes.iter().find(|(x, _)| *x == c).unwrap().1
 }
 
