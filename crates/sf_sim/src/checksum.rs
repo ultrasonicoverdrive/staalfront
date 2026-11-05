@@ -39,8 +39,8 @@
 //! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
 //! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
 //! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6) |
-//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6). It is the last section |
 //! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4) |
+//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6). It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
