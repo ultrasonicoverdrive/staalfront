@@ -50,7 +50,7 @@ fixed row "Menu / back: Esc", and Esc can never be given to another action). Wit
 | a settings page | goes back to the menu it was opened from |
 | the pause menu | closes it and lets the game go on |
 | the start menu | nothing (there is nothing under it) |
-| no menu open, but a Repair or Sell mode of the sidebar is on (WP6.6) | ends the mode; the next Esc opens the pause menu |
+| no menu open, but a Repair or Sell mode of the sidebar is on (WP6.6) | ends the mode; the next Esc opens the pause menu (`esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu`) |
 
 (`esc_closes_the_pause_menu_and_lets_the_game_go_on`, `esc_goes_back_one_screen_at_a_time_and_the_start_menu_stays`,
 `esc_while_a_key_is_awaited_ends_the_wait_and_nothing_else`.) The menus pile up as a stack (`Menu::stack`): the settings lie on

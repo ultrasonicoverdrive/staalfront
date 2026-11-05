@@ -1,6 +1,6 @@
 # Repair and sell: two processes of a structure
 
-Work package WP6.6 (PLAN.md phase 6), stacked on WP6.7. A player can **repair** a damaged structure of its own, which
+Work package WP6.6 (PLAN.md phase 6). A player can **repair** a damaged structure of its own, which
 costs money tick by tick and gives hit points back, and **sell** a structure, which takes it down over a number of ticks
 and pays part of its price back. Both are processes with state and progress in the simulation, not buttons: the buttons of
 the sidebar only send two commands. Rules in our own words (clean-room, B5; `docs/red-alert-analysis.md`, "Repair and
@@ -74,7 +74,9 @@ shows the same for a sale), and when the sale starts (`a_sale_cancels_a_repair_i
 nothing and gains nothing; the flag stays (`RepairStatus::WaitingForMoney`) and the next tick that can be paid goes on
 (`a_repair_waits_without_money_and_goes_on_when_there_is_some`: no hit points, no credits and the flag kept for 25 ticks, and the
 whole run still costs 75). Why: a stop would need a click again after every income, and the owner cannot lose
-anything by waiting. In a world without money rules a repair is free, like construction.
+anything by waiting. Known flicker (not fixed in WP6.6, it needs a sim change): in a power shortage a tick that power
+skips returns before the pay check, so `repair_status` reads `Repairing` on that tick and `WaitingForMoney` on the next
+one; the sign of a broke owner then switches between its two colours. In a world without money rules a repair is free, like construction.
 
 **Power slows it like it slows construction** (decision: one rule with construction): in a shortage the repair advances only
 on the ticks `advances_on(tick, speed)` names (`power.md`) and costs nothing on the others, so the price is still exact
@@ -160,7 +162,7 @@ the slot order. Re-pins: see "What moved" below.
   The layout keeps the row between the power bar and the tabs, side by side (`the_two_tool_buttons_stand_side_by_side_between_the_power_bar_and_the_tabs`).
 * **The mode.** In a mode a **left click on the player's own structure** sends the command (`repair_mode::click`); a **right
   click or Esc leaves the mode** (a right click orders nothing, `the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing`;
-  Esc leaves the mode first and the next Esc opens the pause menu, `menus.md`). The mode stays on after a click so that several
+  Esc leaves the mode first and the next Esc opens the pause menu, `esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu`, `menus.md`; a left click in a mode never starts a selection, `a_left_click_in_a_repair_or_sell_mode_starts_no_selection`). The mode stays on after a click so that several
   structures can be done one after the other. A chosen structure to build and a mode do not go together: choosing one ends the other.
   A click in repair mode on a hurt structure starts the repair, on a repairing one stops it, on a whole one does nothing; in sell mode on
   any own structure that is not going up or being sold it sells (`repair_mode::target`; tests in `repair_mode/tests.rs`). The

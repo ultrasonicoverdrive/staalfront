@@ -48,7 +48,7 @@ geometry (centring, both sides of a padding), not looks; the picture of an item 
 A row of two buttons under the power bar, **Repair** and **Sell** (`sidebar.ron`: `tool_height_px`, `tool_labels` and the colours `tool`,
 `tool_hover`, `tool_active`). They are mode buttons: a left click switches the mode on (the button is lit; the other one goes out; a chosen
 structure to build is put away), or off when it is the mode that is on; a right click on a button leaves the mode. With a mode on, a left click on
-the player's own structure on the map sends `Repair` or `Sell` and a right click or Esc leaves the mode (`repair_sell.md`, "The picture";
+the player's own structure on the map sends `Repair` or `Sell` and never starts a selection (`a_left_click_in_a_repair_or_sell_mode_starts_no_selection`), and a right click or Esc leaves the mode (`the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing`, `esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu`; `repair_sell.md`, "The picture";
 `cursor.md`, "Modes"). Rows: the row sits between the power bar and the tabs, so the item grid is 24 and a gap shorter than in WP11.1 (five rows
 still fit in the default window, `the_parts_stand_top_to_bottom_money_power_tabs_items`). A structure being sold does not stand, so the
 tabs and items it unlocked disappear from the first tick (`Situation::read`). In a world without repair rules the buttons are drawn dim and do
