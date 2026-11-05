@@ -605,14 +605,17 @@ impl Runner {
                 // Every key goes to the menu, Esc (which ends the wait) included.
                 events.extend(ctx.input().keys_pressed_now().into_iter().map(Event::Key));
             } else if ctx.actions().pressed(Action::Quit) {
-                if self.menu.is_open() {
-                    events.push(Event::Escape);
-                } else if self.tool.take().is_some() {
-                    // A Repair or Sell mode that is on ends first; the next Esc opens the menu (WP6.6).
-                    println!("sidebar: mode off");
-                } else {
-                    let out = self.menu.open_pause();
-                    self.apply_outcomes(ctx, out);
+                match EscKey::for_frame(self.menu.is_open(), self.tool.is_some()) {
+                    EscKey::ToMenu => events.push(Event::Escape),
+                    EscKey::EndMode => {
+                        // A Repair or Sell mode that is on ends first; the next Esc opens the menu (WP6.6).
+                        self.tool = None;
+                        println!("sidebar: mode off");
+                    }
+                    EscKey::OpenPause => {
+                        let out = self.menu.open_pause();
+                        self.apply_outcomes(ctx, out);
+                    }
                 }
             }
         }
@@ -1074,9 +1077,7 @@ impl Runner {
         let now = self.now_ms();
         let scale = self.hud.scale();
         if actions.pressed(Action::SelectClick)
-            && !ui_busy
-            && !self.build.is_active()
-            && self.tool.is_none()
+            && select_press_starts_selection(ui_busy, self.build.is_active(), self.tool.is_some())
             && let Some(at) = cursor
         {
             self.pointer.press(at);
@@ -3248,6 +3249,36 @@ impl RightClick {
     }
 }
 
+/// What Esc does in one frame with menus (WP6.6, `docs/rules/menus.md` "Esc"), when no key is awaited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EscKey {
+    /// A menu is open: Esc goes to the menu (back one screen or resume).
+    ToMenu,
+    /// No menu, but a Repair or Sell mode is on: Esc only ends the mode.
+    EndMode,
+    /// No menu and no mode: Esc opens the pause menu.
+    OpenPause,
+}
+
+impl EscKey {
+    fn for_frame(menu_open: bool, tool_active: bool) -> Self {
+        if menu_open {
+            EscKey::ToMenu
+        } else if tool_active {
+            EscKey::EndMode
+        } else {
+            EscKey::OpenPause
+        }
+    }
+}
+
+/// Whether a left (select) press on the map starts a selection pointer (click or box). Not over
+/// the UI, not in build mode, and not in a Repair or Sell mode (WP6.6): there the click is the
+/// mode's command and never a selection.
+fn select_press_starts_selection(ui_busy: bool, build_active: bool, tool_active: bool) -> bool {
+    !ui_busy && !build_active && !tool_active
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3261,6 +3292,25 @@ mod tests {
         assert_eq!(RightClick::for_frame(false, true), RightClick::PutAway);
         assert_eq!(RightClick::for_frame(true, true), RightClick::PutAway);
         assert_eq!(RightClick::for_frame(false, false), RightClick::Order);
+    }
+
+    /// WP6.6: Esc with a Repair or Sell mode on only ends the mode; without a mode it opens the
+    /// pause menu; with a menu open it goes to the menu, mode or not.
+    #[test]
+    fn esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu() {
+        assert_eq!(EscKey::for_frame(false, true), EscKey::EndMode);
+        assert_eq!(EscKey::for_frame(false, false), EscKey::OpenPause);
+        assert_eq!(EscKey::for_frame(true, true), EscKey::ToMenu);
+        assert_eq!(EscKey::for_frame(true, false), EscKey::ToMenu);
+    }
+
+    /// WP6.6: a left click in a Repair or Sell mode never starts a selection.
+    #[test]
+    fn a_left_click_in_a_repair_or_sell_mode_starts_no_selection() {
+        assert!(!select_press_starts_selection(false, false, true));
+        assert!(select_press_starts_selection(false, false, false));
+        assert!(!select_press_starts_selection(true, false, false));
+        assert!(!select_press_starts_selection(false, true, false));
     }
 
     /// Finding 1 of the WP6.2 review: the right click that puts the structure

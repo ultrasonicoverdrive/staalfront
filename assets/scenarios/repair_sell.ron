@@ -10,10 +10,10 @@
 //
 // Kinds: 0 construction_center, 1 power_plant (2 x 3, 600 hp, 300 credits), 2 refinery (3 x 4, 900 hp, 1200 credits),
 // 3 barracks (2 x 3, 700 hp, 400 credits), 19 light_tank. Slots: 0 the human's construction centre, 1 its power
-// plant, 2 its barracks, 3 its refinery, 4 the opponent's construction centre, 5 the light tank.
+// plant, 2 its barracks, 3 its refinery, 4 the opponent's construction centre, 5 and 6 the two light tanks.
 //
-//   tick 1     a Veyran light tank (slot 5) is spawned next to the plant and ordered to shoot it
-//   tick TANK_GONE   the tank is removed; the plant has lost some of its hit points
+//   tick 1     two Veyran light tanks (slots 5 and 6) are spawned and ordered to shoot
+//   tick 300   both tanks are removed; the structures they shot have lost some of their hit points
 //   ...        (see tools/sf_headless/tests/repair_sell.rs for every tick and amount)
 Scenario(
     name: "repair_sell",
