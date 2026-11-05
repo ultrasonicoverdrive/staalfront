@@ -39,8 +39,8 @@
 //! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
 //! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
 //! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6) |
-//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6) |
 //! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4) |
+//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6). |
 //! | vision (`v`), only in a world given vision rules | the legacy sight and the sight of every kind, then for each player that has had an object, ascending: its disc count, a running sum of `(index + 1) * count` over the cells, the number of visible cells and a mixed sum of their indices, the number of explored cells and a mixed sum of theirs (WP8.1). Kept up to date per change, so it costs the same whatever the map size. It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
