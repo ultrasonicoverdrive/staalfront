@@ -48,6 +48,7 @@ use sf_data::units::{
     BuildingFunction as DataFunction, Projectile, Side as DataSide, SimBuildingDef, SimUnitDef,
     SimWeaponDef, TerrainCost, TurnMode, TurningDef, UnitDefs, WeaponMount,
 };
+use sf_data::vision::VisionSettings;
 use sf_sim::{
     ArmorTable, BuildingFunction, BuildingStats, BuildingTable, ClassCosts, Cost, Footprint, Kind,
     Loadout, Mount, MovementTable, ProjectileKind, TerrainDef, TerrainFlags, TerrainId,
@@ -385,6 +386,29 @@ pub fn power_rules(settings: &PowerSettings) -> sf_sim::PowerRules {
     sf_sim::PowerRules {
         shortage_floor_permille: settings.shortage_floor_permille,
         defence_cutoff_permille: settings.defence_cutoff_permille,
+    }
+}
+
+/// A sight in cells as the simulation keeps it, in thousandths of a cell (rounded; the decimal of
+/// the definitions has three places, so this is exact for every shipped value).
+pub fn sight_milli(sight: sf_math::Fx) -> u32 {
+    let milli =
+        (sight.raw() * 1000 + (1 << (sf_math::fx::FRAC_BITS - 1))) >> sf_math::fx::FRAC_BITS;
+    milli.clamp(0, i64::from(sf_sim::MAX_SIGHT_MILLI)) as u32
+}
+
+/// The vision rules of the world (WP8.1): the `sight` of every role of `defs` and the sight of an
+/// entity without a table entry from `vision.ron`. To hand to
+/// [`World::with_vision`](sf_sim::World::with_vision), after the unit table. The sight lives here
+/// and not in [`UnitStats`], so that the stats (written out by hand in many tests) stay as they are.
+pub fn vision_rules(settings: &VisionSettings, defs: &UnitDefs) -> sf_sim::VisionRules {
+    sf_sim::VisionRules {
+        legacy_sight_milli: settings.legacy_sight_cells * 1000,
+        sights: defs
+            .sim_units()
+            .iter()
+            .map(|role| (Kind(role.kind), sight_milli(role.sight)))
+            .collect(),
     }
 }
 

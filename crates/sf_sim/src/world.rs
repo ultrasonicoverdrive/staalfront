@@ -186,8 +186,8 @@ pub enum ConfigError {
     /// The repair and sale rules were given twice, after the start, before the unit or building
     /// table, or with numbers out of bounds (WP6.6).
     Repair,
-    /// The vision rules were given twice, after the start, before the unit table, with a sight
-    /// above 64 cells or a kind the unit table does not have (WP8.1).
+    /// The vision rules were given twice, after the start, with a sight above 64 cells, kinds out of
+    /// order or a kind the unit table does not have; or a unit table was given after them (WP8.1).
     Vision,
     /// The match rules were given twice, after the start, before the unit table, the weapon table
     /// or the destruction settings; or one of those was given after them (WP7.6).
@@ -485,6 +485,10 @@ impl World {
         // The match rules read who is armed from the unit and weapon tables: they come last.
         if self.outcome.is_some() {
             return Err(ConfigError::Match);
+        }
+        // The vision rules froze the sight of each table position (WP8.1).
+        if self.vision.is_some() {
+            return Err(ConfigError::Vision);
         }
         self.units = units;
         self.crowd

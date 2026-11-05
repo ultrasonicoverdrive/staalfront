@@ -216,6 +216,17 @@ pub struct Scenario {
     /// only while something repairs or is sold). Needs `buildings`.
     #[serde(default)]
     pub repair: Option<RepairSpec>,
+    /// Vision (WP8.1, `docs/rules/vision.md`): the sight of an entity without a unit table entry,
+    /// written out in the scenario so that editing the shipped `vision.ron` never moves its
+    /// checksum. The sight of each unit kind is `sight` in the `unit_defs` directory (a frozen copy
+    /// freezes it). Left out: no vision rules, which is every scenario of the earlier phases (no pass
+    /// and no section `v` in the checksum). Nothing in the simulation behaves differently with it.
+    #[serde(default)]
+    pub vision: Option<VisionSpec>,
+    /// The sight of each kind of the `unit_defs` directory, read by [`Scenario::load`] when `vision`
+    /// is on, handed to the world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub vision_sights: Vec<(Kind, u32)>,
     /// The production table read from `unit_defs` by [`Scenario::load`] when `production` is on,
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
@@ -291,6 +302,15 @@ impl ProductionSpec {
             exit_radius: self.exit_radius,
         }
     }
+}
+
+/// The vision rules of a scenario (`sf_sim::VisionRules`, without the sights of the kinds, which come
+/// from the definitions).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VisionSpec {
+    /// The sight, in thousandths of a cell, of an entity without a unit table entry (0 to 64000).
+    pub legacy_sight_milli: u32,
 }
 
 /// The power rules of a scenario (`sf_sim::PowerRules`).
@@ -825,7 +845,16 @@ fn load_unit_defs(
     } else {
         None
     };
+    // Only the sights of the kinds: the scenario writes out its own legacy sight.
+    let sights = sf_bridge::vision_rules(
+        &sf_data::vision::VisionSettings {
+            legacy_sight_cells: 0,
+        },
+        &defs,
+    )
+    .sights;
     Ok(LoadedDefs {
+        sights,
         units,
         weapons,
         movement,
@@ -845,6 +874,8 @@ struct LoadedDefs {
     costs: MovementCosts,
     buildings: Option<BuildingTable>,
     production: Option<ProductionTable>,
+    /// The sight of each role, in thousandths of a cell, ascending by kind (WP8.1).
+    sights: Vec<(Kind, u32)>,
 }
 
 /// The middle of a cell, in cells: where an order sends a unit.
@@ -980,6 +1011,7 @@ impl Scenario {
             scenario.unit_table = Some(loaded.units);
             scenario.building_table = loaded.buildings;
             scenario.production_table = loaded.production;
+            scenario.vision_sights = loaded.sights;
             scenario.weapon_table = scenario.combat.then_some(loaded.weapons);
             scenario.movement_table = Some(loaded.movement);
             own_costs = Some(loaded.costs);
@@ -1211,6 +1243,15 @@ impl Scenario {
                         .to_string(),
                 );
             }
+        }
+
+        if let Some(v) = &self.vision
+            && v.legacy_sight_milli > sf_sim::MAX_SIGHT_MILLI
+        {
+            p.push(format!(
+                "vision: legacy_sight_milli must be 0 to {}",
+                sf_sim::MAX_SIGHT_MILLI
+            ));
         }
 
         if let Some(pw) = &self.power {
@@ -1650,6 +1691,15 @@ impl Scenario {
         if let Some(rp) = self.repair {
             world = world
                 .with_repair(rp.rules())
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        // Vision (WP8.1): after the unit table, which it reads the kinds of.
+        if let Some(v) = self.vision {
+            world = world
+                .with_vision(sf_sim::VisionRules {
+                    legacy_sight_milli: v.legacy_sight_milli,
+                    sights: self.vision_sights.clone(),
+                })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         // Power (WP6.4): after the tables, before the match rules.

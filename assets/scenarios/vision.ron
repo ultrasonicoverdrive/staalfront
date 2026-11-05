@@ -1,0 +1,48 @@
+// Shroud and fog of war (WP8.1, docs/rules/vision.md) on a 64 by 64 cell open map (no terrain layer): two
+// players, units that walk, a structure that is shot down, a unit that dies, and one corner nobody looks
+// into. Nothing behaves differently with vision on; this scenario pins what each player SEES (section `v`
+// of the checksum) and tools/sf_headless/tests/vision.rs asserts the transitions shroud -> visible -> fog
+// at the key ticks and that the explored cells never shrink. CI runs it on Linux and Windows and requires
+// the checksum in vision.expected.
+//
+// `unit_defs` names a FROZEN copy of the shipped definitions (tanks_vs_infantry_defs/, the set of WP5.4), so
+// a rebalance of assets/config/ does not move this checksum: the sight of each kind is `sight` in that copy
+// (scout 8, light_tank 6, defence_tower 7, relay_transmitter 5, rifleman 5). `vision` writes out the one
+// number that is not in the definitions, the sight of an entity without a table entry (none is made here).
+// No automatic targeting: what is shot is what an attack order says.
+//
+// Entity ids, all at generation 0. Commands run in (player, written order) order, so player 0's objects
+// are made first:
+//    0  defence_tower (6, 600 hp, 1 by 1, sight 7)  owner 0  cell (8, 8)     never moves, never dies
+//    1  scout (15, sight 8)                         owner 0  cell (6, 32)    walks east to (36, 32) from tick 1,
+//                                                                            back west to (10, 32) from tick 700
+//    2  light_tank (19, 400 hp, sight 6)            owner 0  cell (10, 40)   attacks 3 from tick 1, then 4 from tick 1200
+//    3  relay_transmitter (32, 400 hp, 2 by 2, 5)   owner 1  cell (40, 34)   shot down by the tank
+//    4  rifleman (12, 50 hp, sight 5)               owner 1  cell (44, 26)   shot after the relay
+//    5  rifleman                                    owner 1  cell (56, 52)   stays; nobody of player 0 gets near
+Scenario(
+    name: "vision",
+    seed: 0x0F06_0081,
+    map: (width: 64, height: 64),
+    unit_defs: Some("tanks_vs_infantry_defs"),
+    combat: true,
+    destruction: true,
+    vision: Some((legacy_sight_milli: 5000)),
+    ticks: 2000,
+    commands: [
+        // --- player 0 ---
+        (tick: 0, command: PlaceStructure(kind: 6, owner: 0, cell: (8, 8))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 0, cell: (6, 32))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (10, 40))),
+        // --- player 1 ---
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 1, cell: (40, 34))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (44, 26))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (56, 52))),
+
+        // --- the orders ---
+        (tick: 1, command: OrderMove(ids: [Id(1, 0)], target: (36, 32))),
+        (tick: 1, command: OrderAttack(ids: [Id(2, 0)], target: (3, 0))),
+        (tick: 700, command: OrderMove(ids: [Id(1, 0)], target: (10, 32))),
+        (tick: 1200, command: OrderAttack(ids: [Id(2, 0)], target: (4, 0))),
+    ],
+)

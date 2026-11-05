@@ -565,8 +565,17 @@ fn the_rules_are_refused_when_they_do_not_fit() {
         "legacy too far"
     );
     assert!(bad(world(8), rules()), "given twice");
-    let no_table = World::new(WorldConfig::new(1).with_map_size(8, 8)).unwrap();
-    assert!(bad(no_table, mk(vec![], 0)), "without a unit table");
+    // Without a unit table the rules may list no kinds (everything is legacy); one kind is unknown.
+    let no_table = || World::new(WorldConfig::new(1).with_map_size(8, 8)).unwrap();
+    assert!(no_table().with_vision(mk(vec![], 3000)).is_ok());
+    assert!(
+        bad(no_table(), mk(vec![(SCOUT, 1000)], 0)),
+        "no table, a kind"
+    );
+    assert!(
+        matches!(world(8).with_units(table()), Err(ConfigError::Vision)),
+        "a table after the rules"
+    );
     let mut started = plain(8);
     started.step();
     let started = started.with_vision(mk(vec![], 0));

@@ -585,8 +585,10 @@ impl Vision {
 impl World {
     /// The same world with vision (WP8.1, `docs/rules/vision.md`): each player works out which cells
     /// it sees and has seen. Call it after the unit table and before the world starts. Refused with
-    /// [`ConfigError::Vision`] after the start, twice, without the unit table, with a kind the table
-    /// does not have, with kinds out of order or a sight above 64 cells. A world without it has no
+    /// [`ConfigError::Vision`] after the start, twice, with a kind the unit table does not have, with
+    /// kinds out of order or a sight above 64 cells; a unit table given after it is refused too (the
+    /// sight of each table position was frozen). A world without a unit table may be given rules
+    /// with no kinds: every entity then has the legacy sight. A world without it has no
     /// pass and no section and hashes as before; [`World::visibility`] then says everything is
     /// visible.
     pub fn with_vision(mut self, rules: VisionRules) -> Result<World, ConfigError> {
@@ -594,7 +596,6 @@ impl World {
             || self.entities.len() != 0
             || !self.queue.is_empty()
             || self.vision.is_some()
-            || self.units.is_empty()
             || !rules.is_valid()
             || rules
                 .sights

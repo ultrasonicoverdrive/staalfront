@@ -1,0 +1,15 @@
+// How the debug view of shroud and fog is drawn (WP8.1, docs/rules/vision.md). Read by
+// sf_data::vision_look, compiled into the game, checked when it is parsed. Debug only: the real
+// look (soft edges, ghosts of seen structures, a filtered minimap) is WP8.3 and WP8.4. It draws
+// from the local player's own bitsets over the whole picture, units of the other side included, so
+// it is not a fair view: do not play with it on. Switch it on with the "Fog of war (debug)"
+// checkbox of the F1 panel or `--debug-fog`. Colours sRGB, alpha last. No checksum depends on this
+// file.
+(
+    // Cells never seen.
+    shroud: (0, 0, 0, 215),
+    // Cells seen before but not now.
+    fog: (10, 14, 24, 120),
+    // The most cells of one row drawn as one quad (so that a quad follows a slope).
+    run_cells: 8,
+)
