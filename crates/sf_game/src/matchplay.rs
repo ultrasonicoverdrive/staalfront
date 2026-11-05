@@ -98,6 +98,8 @@ pub fn configure(world: World, def: &MatchDef, defs: &UnitDefs) -> Result<World,
     let world = playfield::with_power(world);
     // WP6.6: a player can repair and sell its structures.
     let world = playfield::with_repair(world);
+    // WP8.1: each player's sight is worked out (nothing reads it yet; the debug view shows it).
+    let world = playfield::with_vision(world, defs);
     let world = playfield::with_movement(world, defs);
     let world = playfield::with_combat(world, defs);
     playfield::with_match(world, def)

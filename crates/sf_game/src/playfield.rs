@@ -222,6 +222,20 @@ pub fn with_repair(world: World) -> World {
         .expect("a world with unit and building tables that has not started takes repair")
 }
 
+/// `world` with vision (WP8.1): every player works out which cells it sees and has seen, from the
+/// `sight` of the unit definitions and `vision.ron` (`docs/rules/vision.md`). Nothing in the world
+/// behaves differently; the snapshot and the debug view read it. Call it after the unit table.
+///
+/// # Panics
+///
+/// If the world has no unit table or has started; the callers have neither problem.
+pub fn with_vision(world: World, defs: &UnitDefs) -> World {
+    let settings = sf_data::vision::VisionSettings::embedded();
+    world
+        .with_vision(sf_bridge::vision_rules(&settings, defs))
+        .expect("a world with a unit table that has not started takes vision")
+}
+
 /// `world` with production (WP6.5): the factories build the units of `defs` from queues
 /// (`production.ron`, `docs/rules/production.md`). Call it after [`with_money`], so that the
 /// units are paid for; the unit and building tables must be in already.

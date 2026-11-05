@@ -83,6 +83,9 @@ pub struct Options {
     pub auto_zoom: bool,
     pub panels: bool,
     pub grid: bool,
+    /// `--debug-fog` (WP8.1): the world gets vision rules and the debug view of shroud and fog is on
+    /// (the checkbox of the F1 panel does the same later). Debug only: it is not a fair view.
+    pub fog: bool,
     pub lod_tint: bool,
     pub hover: Option<(f32, f32)>,
     /// `--build <role>`: start with this structure chosen to build, as if B had been pressed
@@ -162,6 +165,7 @@ impl Options {
             auto_zoom: false,
             panels: false,
             grid: false,
+            fog: false,
             lod_tint: false,
             hover: None,
             build: None,
@@ -280,6 +284,7 @@ impl Options {
                 "--auto-zoom" => o.auto_zoom = true,
                 "--debug-ui" => o.panels = true,
                 "--debug-grid" => o.grid = true,
+                "--debug-fog" => o.fog = true,
                 "--debug-lod" => o.lod_tint = true,
                 "--hover" => {
                     o.hover = value(&mut o.warnings).and_then(|v| {
