@@ -96,7 +96,8 @@ pub fn fogged_color(rgb: [u8; 3], state: u8, look: &MinimapFog) -> [u8; 3] {
         VISIBLE => rgb,
         FOG => {
             let t = look.fog_dim.clamp(0.0, 1.0);
-            let mix = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
+            let mix =
+                |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
             [
                 mix(rgb[0], look.shroud[0]),
                 mix(rgb[1], look.shroud[1]),
@@ -205,7 +206,11 @@ impl Minimap {
                     let cx =
                         ((u64::from(px) * 2 + 1) * u64::from(cw) / (u64::from(w) * 2)) as usize;
                     let at = ((py * w + px) * 4) as usize;
-                    let state = f.states.get(cz * cw as usize + cx).copied().unwrap_or(SHROUD);
+                    let state = f
+                        .states
+                        .get(cz * cw as usize + cx)
+                        .copied()
+                        .unwrap_or(SHROUD);
                     let c = fogged_color([next[at], next[at + 1], next[at + 2]], state, &f.look);
                     next[at..at + 3].copy_from_slice(&c);
                 }

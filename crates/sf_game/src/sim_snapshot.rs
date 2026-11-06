@@ -634,8 +634,7 @@ impl SimSnapshot {
         }
         match (w.footprint, w.anchor) {
             (Some(fp), Some(at)) => (0..u32::from(fp.height)).any(|dy| {
-                (0..u32::from(fp.width))
-                    .any(|dx| self.is_visible(Cell::new(at.x + dx, at.y + dy)))
+                (0..u32::from(fp.width)).any(|dx| self.is_visible(Cell::new(at.x + dx, at.y + dy)))
             }),
             _ => self.cell_at(w.pos).is_some_and(|c| self.is_visible(c)),
         }

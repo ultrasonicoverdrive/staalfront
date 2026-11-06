@@ -14,13 +14,13 @@
 
 use std::path::Path;
 
+use crate::sim_snapshot::SimSnapshot;
 use sf_data::map::Map;
 use sf_engine::Context;
 use sf_engine::winit::event::MouseButton as WinitButton;
 use sf_math::render_bridge::vec2_cells_to_metres;
 use sf_render::camera::DVec2;
 use sf_render::{Camera, RenderError, Renderer};
-use crate::sim_snapshot::SimSnapshot;
 use sf_ui::{Anchor, Color, Minimap, MouseButton, Ui, UiConfig, UiInput, UiRenderer, fov_polygon};
 
 use crate::menu::{Item, Menu};

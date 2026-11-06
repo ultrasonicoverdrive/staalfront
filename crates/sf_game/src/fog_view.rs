@@ -51,7 +51,11 @@ pub fn shading_of(look: &FogLook) -> sf_render::FogShading {
 /// The minimap's settings for `look`.
 pub fn minimap_fog_of(look: &FogLook) -> sf_ui::MinimapFog {
     sf_ui::MinimapFog {
-        shroud: [look.minimap_shroud.0, look.minimap_shroud.1, look.minimap_shroud.2],
+        shroud: [
+            look.minimap_shroud.0,
+            look.minimap_shroud.1,
+            look.minimap_shroud.2,
+        ],
         fog_dim: look.minimap_fog_dim,
     }
 }
@@ -264,6 +268,41 @@ pub fn fog_step(applied: Option<u64>, current: Option<u64>) -> FogStep {
         (Some(_), None) => FogStep::Clear,
         (None, None) => FogStep::Keep,
     }
+}
+
+/// Gives the terrain the fog of `snap`, or takes it off, when `applied` (the version it shows) is not
+/// the snapshot's: the one place the terrain's fog is set (the runner and the screenshot tests call it).
+/// Returns what it did. A terrain of another size than the world's gets no fog (and the version is
+/// marked as applied so that the texels are not rebuilt every frame).
+pub fn sync_terrain(
+    renderer: &mut sf_render::Renderer,
+    snap: &SimSnapshot,
+    applied: &mut Option<u64>,
+) -> FogStep {
+    let step = fog_step(*applied, snap.fog_version());
+    match step {
+        FogStep::Keep => {}
+        FogStep::Upload(v) => {
+            let look = shipped_look();
+            let (w, h) = snap.map_size();
+            if renderer.fog_size() == Some((w, h)) {
+                let (visible, explored) = snap.fog_words();
+                let texels = sf_render::fog::texels(w, h, visible, explored, look.softness);
+                renderer.set_fog((w, h), &texels, shading_of(look));
+            } else {
+                eprintln!(
+                    "sf_game: the fog of the world is {w}x{h} cells, the terrain's is {:?}; no fog drawn",
+                    renderer.fog_size()
+                );
+            }
+            *applied = Some(v);
+        }
+        FogStep::Clear => {
+            renderer.clear_fog();
+            *applied = None;
+        }
+    }
+    step
 }
 
 impl FogApplied {

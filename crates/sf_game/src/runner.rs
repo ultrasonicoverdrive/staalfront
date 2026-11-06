@@ -1779,25 +1779,7 @@ impl Runner {
         let current = self.snap.fog_version();
         let (w, h) = self.snap.map_size();
         let (visible, explored) = self.snap.fog_words();
-        match crate::fog_view::fog_step(self.fog_applied.terrain, current) {
-            crate::fog_view::FogStep::Keep => {}
-            crate::fog_view::FogStep::Upload(v) => {
-                if renderer.fog_size() == Some((w, h)) {
-                    let texels = sf_render::fog::texels(w, h, visible, explored, look.softness);
-                    renderer.set_fog((w, h), &texels, crate::fog_view::shading_of(look));
-                } else {
-                    eprintln!(
-                        "sf_game: the fog of the world is {w}x{h} cells, the terrain's is {:?}; no fog drawn",
-                        renderer.fog_size()
-                    );
-                }
-                self.fog_applied.terrain = Some(v);
-            }
-            crate::fog_view::FogStep::Clear => {
-                renderer.clear_fog();
-                self.fog_applied.terrain = None;
-            }
-        }
+        crate::fog_view::sync_terrain(renderer, &self.snap, &mut self.fog_applied.terrain);
         match crate::fog_view::fog_step(self.fog_applied.minimap, current) {
             crate::fog_view::FogStep::Keep => {}
             crate::fog_view::FogStep::Upload(v) => {
