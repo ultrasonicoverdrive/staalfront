@@ -290,6 +290,8 @@ win. First moment to really play and adjust the design.
 - WP8.3 Presentation: soft edges, last-seen buildings as a "ghost".
 - WP8.4 Minimap and strategic icons respect vision. Icons are drawn last and without depth, so a fog layer cannot hide them: unseen units must be removed from the icon list on the CPU (see `sf_render::icons`).
 
+*05-11-2026 (orchestrator, with WP8.1): WP8.2 is split. **WP8.2a** is the targeting gate (auto-acquisition only of cells the owner sees, retaliation always allowed), the sight rules of structures and the allied-vision hook, on top of `World::visibility` that WP8.1 builds; **WP8.2b** is the height bonus and waits until the sim has integer height levels and a map with relief exists (both maps are flat and the sim has no elevation today). WP8.1 computes what each player sees and changes no behaviour (`docs/rules/vision.md`).*
+
 ### Phase 9 — Computer opponent
 Layered (analysis §12, §22G):
 - WP9.1 **[xhigh]** Strategic: build order, economy, tech choice, attack timing.

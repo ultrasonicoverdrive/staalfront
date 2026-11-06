@@ -221,7 +221,8 @@ Release, same machine (4 cores, shared with other jobs: load average 1 to 4 duri
 
 * No AI (phase 9) and no triggers or scenario format (phase 10): the match file and the fixed rule are
   absorbed by WP10.1 to WP10.3.
-* No fog (WP8.1). *(The sidebar came with WP11.1; the start menu, the pause menu, restart and the way back to the main menu
+* No fog in the rules: WP8.1 added what each player sees ([`vision.md`](vision.md); the game's match turns the rules on, the headless
+  `match` scenario does not and keeps its pin) but nothing reads it; the gate on targeting is WP8.2a. *(The sidebar came with WP11.1; the start menu, the pause menu, restart and the way back to the main menu
   with WP11.5a, `menus.md`: "Match" on the start menu plays this file, Restart builds the same match again.)*
 * No surrender and no timeout: a match that nobody can win (the human has no way to hurt the opponent) goes
   on.

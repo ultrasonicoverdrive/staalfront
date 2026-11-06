@@ -30,6 +30,7 @@ use crate::targeting::{self, Engagement, Targeting, TargetingConfig};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::turret;
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
+use crate::vision::Vision;
 use crate::weapons::{self, Arsenal, Impact, Shot, WeaponTable, WeaponsError};
 
 /// The most slots a world will ever allocate. A `Spawn` beyond it is ignored.
@@ -185,6 +186,9 @@ pub enum ConfigError {
     /// The repair and sale rules were given twice, after the start, before the unit or building
     /// table, or with numbers out of bounds (WP6.6).
     Repair,
+    /// The vision rules were given twice, after the start, with a sight above 64 cells, kinds out of
+    /// order or a kind the unit table does not have; or a unit table was given after them (WP8.1).
+    Vision,
     /// The match rules were given twice, after the start, before the unit table, the weapon table
     /// or the destruction settings; or one of those was given after them (WP7.6).
     Match,
@@ -267,6 +271,10 @@ impl fmt::Display for ConfigError {
                 "the repair and sale rules must be given once, before the world starts, after the unit and \
                  building tables, with 1 to 1000 hit points per tick, a full-repair cost of 0 to 1000 \
                  thousandths of the price, 1 to 6000 sale ticks and a refund of 0 to 1000 thousandths"
+            }
+            ConfigError::Vision => {
+                "the vision rules must be given once, before the world starts, after the unit table, with \
+                 kinds the table has (ascending, each once) and a sight of at most 64 cells"
             }
             ConfigError::Match => {
                 "the match rules must be given once, last, before the world starts, after the unit table, the \
@@ -388,6 +396,9 @@ pub struct World {
     /// The repair and sale rules and what the last step did with them (WP6.6). `None` for a world
     /// that was given none: nothing is repaired or sold.
     pub(crate) repair: Option<Box<RepairSell>>,
+    /// What each player sees and has seen (WP8.1). `None` for a world that was given no vision
+    /// rules: no pass, no section, everything counts as visible.
+    pub(crate) vision: Option<Box<Vision>>,
     /// Who takes part in the match, who is defeated and who won (WP7.6). `None` for a world that was
     /// given no match rules.
     pub(crate) outcome: Option<Box<Outcome>>,
@@ -474,6 +485,10 @@ impl World {
         // The match rules read who is armed from the unit and weapon tables: they come last.
         if self.outcome.is_some() {
             return Err(ConfigError::Match);
+        }
+        // The vision rules froze the sight of each table position (WP8.1).
+        if self.vision.is_some() {
+            return Err(ConfigError::Vision);
         }
         self.units = units;
         self.crowd
@@ -822,6 +837,7 @@ impl World {
             production: None,
             power: None,
             repair: None,
+            vision: None,
             outcome: None,
             placement: PlacementState::default(),
             completions: Vec::new(),
@@ -1533,6 +1549,8 @@ impl World {
             (motion.pos_min, motion.pos_max),
             &mut self.pathing,
         );
+        // What each player sees from where the bodies ended (WP8.1); nothing reads it yet.
+        self.update_vision();
         // The units that choose their own targets look round, from where the bodies ended (WP5.4).
         let bounds = (motion.pos_min, motion.pos_max);
         let aim = self.targeting.config.filter(|_| !self.arsenal.is_empty());
