@@ -755,10 +755,17 @@ impl World {
 
     /// Checks that the vision is what the entities in the world **now** make of it: a vision built
     /// from scratch from the present entities has the same counts, visible set and sums, and the
-    /// explored set only lacks cells that no longer matter. Valid right after a pass (call
-    /// [`World::vision_resync`] on a clone first). For tests.
+    /// explored set only lacks cells that no longer matter. It runs the pass on **a clone** first
+    /// (the deaths of the weapon stage are only picked up by the next pass), so it never changes
+    /// this world: there is no public way to run the pass outside a step. For tests.
     #[doc(hidden)]
     pub fn vision_audit_current(&self) -> Result<(), String> {
+        let mut c = self.clone();
+        c.update_vision();
+        c.audit_current_after_pass()
+    }
+
+    fn audit_current_after_pass(&self) -> Result<(), String> {
         let Some(v) = self.vision.as_deref() else {
             return Ok(());
         };
@@ -777,12 +784,6 @@ impl World {
             }
         }
         Ok(())
-    }
-
-    /// Runs the vision pass now, outside a step. For tests (on a clone).
-    #[doc(hidden)]
-    pub fn vision_resync(&mut self) {
-        self.update_vision();
     }
 
     /// What the entity in slot `i` stamps now; `None` if it stamps nothing.
