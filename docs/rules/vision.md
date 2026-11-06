@@ -85,10 +85,9 @@ places, most of them tests, and other branches add fields to it; the sight lives
 `sf_bridge::vision_rules` from the `sight` of each role) and is hashed only inside the vision section. The units section
 (`U`) never sees it, so it cannot move a pin.
 
-Matches turn vision **on**: `matchplay::configure` gives the world the rules (nothing reads them; the debug view and the
-snapshot do). The headless `match` scenario is **unchanged** and keeps its checksum: it writes its rules out in the scenario
-file, and `match.expected` stays as pinned. What vision does to a match is checked by
-`the_first_match_plays_the_same_with_vision_on` (see "Pins"). The sandbox gets vision only with `--debug-fog`.
+Matches turn vision **on**: `matchplay::configure` gives the world the rules, and since WP8.2a the headless `match` scenario
+writes the same rules out (`vision: Some((legacy_sight_milli: 5000))`), so the pinned scenario is the game's world and not a
+sibling of it. In both the targeting gate (WP8.2a, below) is off. The sandbox gets vision only with `--debug-fog`.
 
 ## The checksum (section `v`)
 
@@ -207,12 +206,12 @@ CI list (`git diff` of `assets/scenarios` against the WP6.6 head shows only the 
 benchmark's PLAIN and FIGHT checksums (`crates/sf_game/tests/bench_scene.rs`) and the 30 scenarios of the CI list run in release
 with `--expect` all pass. The new pin is `vision.expected` (`0x84facee4249aa869`).
 
-The first match: `match.expected` is `0x164403a92986654f` and did not move, because the headless `match` scenario does not turn
-vision on. With the same scenario given vision rules (a copy with `vision: Some((legacy_sight_milli: 5000))`, measured with the
-release binary) the final checksum is `0x771de0f816275bbc`; with the line taken out it is `0x164403a92986654f` again, the pin. The
-two worlds are the same match in every position and hit point (`the_first_match_plays_the_same_with_vision_on`), so the section is
-the whole difference. `wander_5000`: `0x38d5e3c43358a889` without the rules (the pin), `0x6231220a5eaa67d9` with sight 5 and
-`0x65da61b8f36c30dc` with sight 10.
+The first match: `match.expected` moved in WP8.2a from `0x164403a92986654f` to `0x771de0f816275bbc` because the scenario now has
+the vision rules like the game (review finding 1 of #104). Measured cause (release binary): the file with the `vision` line
+gives `0x771de0f816275bbc`, with the line taken out `0x164403a92986654f` again (`vision_in_the_match_moves_the_pin_by_its_section_only`
+in `match_m1.rs`). The two worlds are the same match in every position and hit point
+(`the_first_match_plays_the_same_with_vision_on`), so the section is the whole difference. `wander_5000`: `0x38d5e3c43358a889`
+without the rules (the pin), `0x6231220a5eaa67d9` with sight 5 and `0x65da61b8f36c30dc` with sight 10.
 
 ## Cost
 

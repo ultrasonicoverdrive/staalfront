@@ -421,6 +421,26 @@ fn power_in_the_match_moves_the_pin_by_its_section_only() {
     assert_eq!((t.made, t.used), (100, 50));
 }
 
+/// Vision (WP8.1) is on in the match, like `sf_game --match` (since WP8.2a the file has the section;
+/// before that the pin was the world without it). The pin moved from `0x164403a92986654f` to the value
+/// of today by the section `v` alone: with the `vision` line taken out the old value comes back, and
+/// the game is the same game (`vision.rs`: `the_first_match_plays_the_same_with_vision_on`).
+/// Targeting does not read it (the gate of WP8.2a is off in this file).
+#[test]
+fn vision_in_the_match_moves_the_pin_by_its_section_only() {
+    let with = scenario();
+    assert!(with.vision.is_some());
+    let mut without = with.clone();
+    without.vision = None;
+    let run_to_end = |s: &Scenario| run(s, &RunOptions::for_scenario(s)).unwrap().final_checksum;
+    assert_eq!(run_to_end(&with), parse_checksum(EXPECTED).unwrap());
+    assert_eq!(
+        run_to_end(&without),
+        parse_checksum("0x164403a92986654f").unwrap(),
+        "without the vision section the match is the pin it had before WP8.2a"
+    );
+}
+
 /// The opponent's tower (slot 4) fires in the match (WP6.7): the first shot is at tick 3830, 140 ticks
 /// after the first fight began (the human's infantry has to come within its reach of 6 cells), it fires
 /// 40 shots, and it falls at tick 4509 to the human's rocket troopers. Those 40 shots (8 damage each) and the

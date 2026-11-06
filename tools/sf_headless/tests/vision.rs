@@ -305,15 +305,15 @@ fn two_runs_agree() {
 
 /// The first match (`match.ron`, 96 by 96 cells, two players, an economy, a fight) played with vision on
 /// is the same match: the same entities in the same places at every tick we look at, the same
-/// verdict. Only the hash differs (the section `v`); `match.expected` itself is checked in
-/// `match_m1.rs` and did not move.
+/// verdict. Only the hash differs (the section `v`). Since WP8.2a the file has the rules itself (as
+/// `sf_game --match` does); the "off" world is the same file with the section taken out, which is
+/// the value `match.expected` had before WP8.2a (`match_m1.rs`).
 #[test]
 fn the_first_match_plays_the_same_with_vision_on() {
-    let off = Scenario::load(&scenario_path("match.ron")).unwrap();
-    let mut on = Scenario::load(&scenario_path("match.ron")).unwrap();
-    on.vision = Some(VisionSpec {
-        legacy_sight_milli: 5000,
-    });
+    let mut off = Scenario::load(&scenario_path("match.ron")).unwrap();
+    let on = Scenario::load(&scenario_path("match.ron")).unwrap();
+    assert!(on.vision.is_some(), "match.ron has the vision rules");
+    off.vision = None;
     let (mut a, mut b) = (off.build_world().unwrap(), on.build_world().unwrap());
     assert!(a.vision_rules().is_none() && b.vision_rules().is_some());
     for _ in 0..off.ticks {
