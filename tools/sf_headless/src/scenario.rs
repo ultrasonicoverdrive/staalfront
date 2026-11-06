@@ -306,11 +306,18 @@ impl ProductionSpec {
 
 /// The vision rules of a scenario (`sf_sim::VisionRules`, without the sights of the kinds, which come
 /// from the definitions).
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VisionSpec {
     /// The sight, in thousandths of a cell, of an entity without a unit table entry (0 to 64000).
     pub legacy_sight_milli: u32,
+    /// WP8.2a: automatic acquisition only picks what its owner can see (`vision.md`). Left out: off.
+    #[serde(default)]
+    pub acquire_needs_sight: bool,
+    /// WP8.2a: `(sharer, viewer)` pairs, strictly ascending: the viewer also sees what the sharer
+    /// sees. Left out: nothing is shared.
+    #[serde(default)]
+    pub shared: Vec<(u8, u8)>,
 }
 
 /// The power rules of a scenario (`sf_sim::PowerRules`).
@@ -849,6 +856,7 @@ fn load_unit_defs(
     let sights = sf_bridge::vision_rules(
         &sf_data::vision::VisionSettings {
             legacy_sight_cells: 0,
+            acquire_needs_sight: false,
         },
         &defs,
     )
@@ -1245,13 +1253,20 @@ impl Scenario {
             }
         }
 
-        if let Some(v) = &self.vision
-            && v.legacy_sight_milli > sf_sim::MAX_SIGHT_MILLI
-        {
-            p.push(format!(
-                "vision: legacy_sight_milli must be 0 to {}",
-                sf_sim::MAX_SIGHT_MILLI
-            ));
+        if let Some(v) = &self.vision {
+            if v.legacy_sight_milli > sf_sim::MAX_SIGHT_MILLI {
+                p.push(format!(
+                    "vision: legacy_sight_milli must be 0 to {}",
+                    sf_sim::MAX_SIGHT_MILLI
+                ));
+            }
+            if v.shared.iter().any(|&(a, b)| a == b) || !v.shared.windows(2).all(|w| w[0] < w[1]) {
+                p.push(
+                    "vision: shared must be strictly ascending (sharer, viewer) pairs, no player \
+                     with itself"
+                        .to_string(),
+                );
+            }
         }
 
         if let Some(pw) = &self.power {
@@ -1694,12 +1709,18 @@ impl Scenario {
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         // Vision (WP8.1): after the unit table, which it reads the kinds of.
-        if let Some(v) = self.vision {
+        if let Some(v) = &self.vision {
             world = world
-                .with_vision(sf_sim::VisionRules {
-                    legacy_sight_milli: v.legacy_sight_milli,
-                    sights: self.vision_sights.clone(),
-                })
+                .with_vision(
+                    sf_sim::VisionRules::new(v.legacy_sight_milli, self.vision_sights.clone())
+                        .with_acquire_needs_sight(v.acquire_needs_sight)
+                        .with_shared(
+                            v.shared
+                                .iter()
+                                .map(|&(a, b)| (PlayerId(a), PlayerId(b)))
+                                .collect(),
+                        ),
+                )
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         // Power (WP6.4): after the tables, before the match rules.

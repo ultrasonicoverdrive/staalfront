@@ -66,10 +66,7 @@ fn table() -> UnitTable {
 }
 
 fn rules() -> VisionRules {
-    VisionRules {
-        legacy_sight_milli: 2000,
-        sights: SIGHTS.to_vec(),
-    }
+    VisionRules::new(2000, SIGHTS.to_vec())
 }
 
 fn plain(side: u32) -> World {
@@ -542,10 +539,7 @@ fn a_world_without_vision_rules_sees_everything_and_hashes_as_a_plain_world() {
 
 #[test]
 fn the_rules_are_refused_when_they_do_not_fit() {
-    let mk = |sights: Vec<(Kind, u32)>, legacy| VisionRules {
-        legacy_sight_milli: legacy,
-        sights,
-    };
+    let mk = |sights: Vec<(Kind, u32)>, legacy| VisionRules::new(legacy, sights);
     let bad = |w: World, r: VisionRules| matches!(w.with_vision(r), Err(ConfigError::Vision));
     assert!(bad(plain(8), mk(vec![(Kind(99), 1000)], 0)), "unknown kind");
     assert!(

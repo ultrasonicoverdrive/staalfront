@@ -65,9 +65,9 @@ pub const MAX_SIGHT_MILLI: u32 = 64_000;
 pub const MAX_DISCS_PER_PLAYER: u32 = u16::MAX as u32;
 
 /// What a player knows about a cell.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Visibility {
-    /// Never seen.
+    /// Never seen. (Ordered: shroud < fog < visible.)
     Shroud,
     /// Seen before, not now.
     Fog,
@@ -77,7 +77,7 @@ pub enum Visibility {
 
 /// The sight of every kind, in thousandths of a cell (`sight` of `unit_defs.ron`, handed over by
 /// `sf_bridge::vision_rules`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VisionRules {
     /// The sight of an entity that has no unit table entry (placeholder wanderers, legacy
     /// structures), at most [`MAX_SIGHT_MILLI`].
@@ -85,14 +85,47 @@ pub struct VisionRules {
     /// `(kind, sight)`, strictly ascending by kind, each kind in the unit table. A kind of the table
     /// that is not listed has a sight of nothing.
     pub sights: Vec<(Kind, u32)>,
+    /// WP8.2a, the targeting gate: when set, automatic acquisition (a unit's scan, a defence
+    /// structure's look round) only picks candidates that are [`Visibility::Visible`] to the
+    /// scanner's owner. Off by default; retaliation and explicit orders are never gated.
+    pub acquire_needs_sight: bool,
+    /// WP8.2a, shared vision: `(sharer, viewer)` pairs; the viewer also sees (and has explored)
+    /// everything the sharer does. One way: the viewer's objects are not seen by the sharer unless
+    /// the reverse pair is listed too. Strictly ascending, no pair with itself. Empty by default.
+    pub shared: Vec<(PlayerId, PlayerId)>,
 }
 
 impl VisionRules {
-    /// Whether the numbers are inside their bounds and the kinds ascend without repeats.
+    /// Rules with the sights only: the gate off and nothing shared (what WP8.1 had).
+    pub fn new(legacy_sight_milli: u32, sights: Vec<(Kind, u32)>) -> VisionRules {
+        VisionRules {
+            legacy_sight_milli,
+            sights,
+            acquire_needs_sight: false,
+            shared: Vec::new(),
+        }
+    }
+
+    /// The same rules with the targeting gate set.
+    pub fn with_acquire_needs_sight(mut self, on: bool) -> VisionRules {
+        self.acquire_needs_sight = on;
+        self
+    }
+
+    /// The same rules with these `(sharer, viewer)` pairs (must be strictly ascending).
+    pub fn with_shared(mut self, shared: Vec<(PlayerId, PlayerId)>) -> VisionRules {
+        self.shared = shared;
+        self
+    }
+
+    /// Whether the numbers are inside their bounds, the kinds ascend without repeats and the
+    /// shared pairs ascend without repeats or a player sharing with itself.
     pub fn is_valid(&self) -> bool {
         self.legacy_sight_milli <= MAX_SIGHT_MILLI
             && self.sights.iter().all(|&(_, s)| s <= MAX_SIGHT_MILLI)
             && self.sights.windows(2).all(|w| w[0].0 < w[1].0)
+            && self.shared.iter().all(|&(a, b)| a != b)
+            && self.shared.windows(2).all(|w| w[0] < w[1])
     }
 }
 
@@ -467,6 +500,17 @@ impl Vision {
             h.write_bytes(&kind.0.to_le_bytes());
             h.write_u32(s);
         }
+        // WP8.2a: only when something is set, so rules without the gate and without sharing hash
+        // exactly as they did in WP8.1.
+        if self.rules.acquire_needs_sight || !self.rules.shared.is_empty() {
+            h.write_u8(b'g');
+            h.write_u8(u8::from(self.rules.acquire_needs_sight));
+            h.write_u64(self.rules.shared.len() as u64);
+            for &(a, b) in &self.rules.shared {
+                h.write_u8(a.0);
+                h.write_u8(b.0);
+            }
+        }
         let n = self.players.iter().flatten().count();
         h.write_u64(n as u64);
         for (id, pv) in self.players.iter().enumerate() {
@@ -481,7 +525,20 @@ impl Vision {
         }
     }
 
+    /// What `player` knows about the cell at `index`: its own picture united with that of every
+    /// player that shares vision with it (`rules.shared`).
     pub(crate) fn visibility(&self, player: PlayerId, index: u32) -> Visibility {
+        let mut best = self.own_visibility(player, index);
+        for &(sharer, viewer) in &self.rules.shared {
+            if viewer == player && best != Visibility::Visible {
+                best = best.max(self.own_visibility(sharer, index));
+            }
+        }
+        best
+    }
+
+    /// What `player` itself knows about the cell, shared vision not counted.
+    fn own_visibility(&self, player: PlayerId, index: u32) -> Visibility {
         let Some(pv) = self.player(player) else {
             return Visibility::Shroud;
         };
@@ -492,6 +549,24 @@ impl Vision {
         } else {
             Visibility::Shroud
         }
+    }
+
+    /// Whether the targeting gate is on (`rules.acquire_needs_sight`).
+    pub(crate) fn gate_on(&self) -> bool {
+        self.rules.acquire_needs_sight
+    }
+
+    /// Whether any cell of the `w` by `h` rectangle at `(x, y)` is visible to `player` (cells
+    /// outside the map do not count).
+    pub(crate) fn sees_rect(&self, player: PlayerId, x: u32, y: u32, w: u32, h: u32) -> bool {
+        for cy in y..(y + h).min(self.height) {
+            for cx in x..(x + w).min(self.width) {
+                if self.visibility(player, cy * self.width + cx) == Visibility::Visible {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// The number of discs `player` has stamped.

@@ -268,6 +268,7 @@ fn a_different_legacy_sight_changes_the_hash_and_a_different_scout_sight_changes
     let mut other = scenario();
     other.vision = Some(VisionSpec {
         legacy_sight_milli: 1000,
+        ..VisionSpec::default()
     });
     let mut b = other.build_world().unwrap();
     for _ in 0..50 {
@@ -343,6 +344,7 @@ fn a_crowd_of_wanderers_keeps_its_counts_exact() {
     let mut on = Scenario::load(&scenario_path("wander_5000.ron")).unwrap();
     on.vision = Some(VisionSpec {
         legacy_sight_milli: 5000,
+        ..VisionSpec::default()
     });
     let (mut a, mut b) = (base.build_world().unwrap(), on.build_world().unwrap());
     for _ in 0..300 {

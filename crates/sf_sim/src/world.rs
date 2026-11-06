@@ -1572,6 +1572,7 @@ impl World {
                 tick,
                 bounds,
                 map: (self.config.width, self.config.height),
+                gate: targeting::Gate::of(self.vision.as_deref(), &self.occupancy),
             };
             self.targeting.update(&mut self.entities, &cx);
         }
@@ -1603,6 +1604,8 @@ impl World {
                 tick,
                 bounds,
                 map: (self.config.width, self.config.height),
+                // Retaliation is always allowed: never gated (WP8.2a).
+                gate: None,
             };
             self.targeting
                 .return_fire(&mut self.entities, &cx, &mut attacks);
