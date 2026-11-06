@@ -138,17 +138,32 @@ fn the_human_wins_in_the_tick_the_last_of_the_opponent_falls() {
 fn nothing_changes_after_the_outcome() {
     let s = scenario();
     let (w, rows) = play(&s);
-    let decided = rows[DECIDED as usize].result;
-    assert!(decided.is_some());
-    for r in &rows[DECIDED as usize..] {
-        assert_eq!(r.result, decided, "tick {}", r.tick);
-        assert_eq!(r.defeats.len(), 1, "tick {}", r.tick);
+    // The expectation is written down here, not read from the run: it does not depend on the run
+    // having decided at the tick the other test pins.
+    let outcome = MatchResult {
+        tick: Tick(DECIDED),
+        verdict: Verdict::Won(P0),
+    };
+    let defeats = vec![(P1, Tick(DECIDED))];
+    assert_eq!(rows.len() as u64, 7000, "the scenario runs 7,000 ticks");
+    let after: Vec<&Row> = rows.iter().filter(|r| r.tick >= DECIDED).collect();
+    // Every tick from the decision to the end: 1,033 of them (the steps that ran
+    // ticks 5967 to 6999; the world is at tick 7000 after the last).
+    assert_eq!(after.len() as u64, 7000 - DECIDED);
+    for r in &after {
+        assert_eq!(r.result, Some(outcome), "tick {}", r.tick);
+        assert_eq!(r.defeats, defeats, "tick {}", r.tick);
     }
-    // 1,300 ticks of game went by after the decision; the world kept running (the human's harvester
-    // still works), the result stayed.
+    // The world kept running after the decision (the human's harvester still works), and the
+    // state the match keeps is what it was: the result, the defeat of the opponent and none of the
+    // human, the players.
     assert_eq!(w.tick().0, 7000);
-    assert_eq!(rows.len() as u64 - DECIDED, 7000 - DECIDED);
-    assert_eq!(w.match_result(), decided);
+    assert_eq!(w.match_result(), Some(outcome));
+    assert_eq!(w.defeats(), defeats.as_slice());
+    assert_eq!(w.defeat_tick(P1), Some(Tick(DECIDED)));
+    assert_eq!(w.defeat_tick(P0), None);
+    assert_eq!(w.match_players(), &[P0, P1]);
+    assert!(w.match_begun());
 }
 
 #[test]

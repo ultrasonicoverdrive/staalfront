@@ -425,6 +425,7 @@ impl Runner {
         let snap = sim.latest();
 
         let map_metres = (map.width() as f32, map.height() as f32);
+        crate::palette::remember_standard(&style);
         let mut instancer = Instancer::new(style.clone(), map_metres);
         apply_looks(&mut instancer, &looks, pack.as_ref(), style);
         if pack.is_some() || looks.roster().is_some_and(|r| r.pack().is_some()) {
@@ -2056,6 +2057,7 @@ impl Runner {
             .map(placeholder_style);
         match result {
             Ok(style) => {
+                crate::palette::remember_standard(&style);
                 // Keep the models; take the new palette and settings.
                 apply_looks(&mut self.instancer, &self.looks, self.pack.as_ref(), style);
                 // The player's own set of colours goes back over the new palette (WP11.5a).
