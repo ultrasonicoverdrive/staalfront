@@ -6,4 +6,7 @@
     // the placeholder wanderers of `--units` and the legacy `Place` structures. Real units and
     // structures use their own `sight`.
     legacy_sight_cells: 5,
+    // WP8.2a: true = units and defences only pick targets their owner can see now (retaliation and
+    // explicit orders are never gated). Off until the first match has been played and decided.
+    acquire_needs_sight: false,
 )

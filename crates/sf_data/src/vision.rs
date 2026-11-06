@@ -26,6 +26,11 @@ pub struct VisionSettings {
     /// The sight, in whole cells (0 to [`MAX_SIGHT_CELLS`]), of an entity made without a unit table
     /// entry.
     pub legacy_sight_cells: u32,
+    /// WP8.2a: whether automatic target acquisition (a unit's scan, a defence's look round) only
+    /// picks what its owner can see. Off in the shipped file until the first match has been
+    /// played (`docs/rules/vision.md`). A file without the line means off.
+    #[serde(default)]
+    pub acquire_needs_sight: bool,
 }
 
 /// Why a vision file was refused.
@@ -77,6 +82,16 @@ mod tests {
     #[test]
     fn the_shipped_number_is_pinned() {
         assert_eq!(VisionSettings::embedded().legacy_sight_cells, 5);
+        assert!(!VisionSettings::embedded().acquire_needs_sight);
+    }
+
+    #[test]
+    fn the_gate_line_is_optional_and_read() {
+        let on =
+            VisionSettings::from_ron("(legacy_sight_cells: 5, acquire_needs_sight: true)").unwrap();
+        assert!(on.acquire_needs_sight);
+        let default = VisionSettings::from_ron("(legacy_sight_cells: 5)").unwrap();
+        assert!(!default.acquire_needs_sight);
     }
 
     #[test]

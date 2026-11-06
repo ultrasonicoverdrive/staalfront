@@ -398,18 +398,19 @@ pub fn sight_milli(sight: sf_math::Fx) -> u32 {
 }
 
 /// The vision rules of the world (WP8.1): the `sight` of every role of `defs` and the sight of an
-/// entity without a table entry from `vision.ron`. To hand to
+/// entity without a table entry and the targeting gate from `vision.ron` (sharing is not in the file:
+/// no team exists yet). To hand to
 /// [`World::with_vision`](sf_sim::World::with_vision), after the unit table. The sight lives here
 /// and not in [`UnitStats`], so that the stats (written out by hand in many tests) stay as they are.
 pub fn vision_rules(settings: &VisionSettings, defs: &UnitDefs) -> sf_sim::VisionRules {
-    sf_sim::VisionRules {
-        legacy_sight_milli: settings.legacy_sight_cells * 1000,
-        sights: defs
-            .sim_units()
+    sf_sim::VisionRules::new(
+        settings.legacy_sight_cells * 1000,
+        defs.sim_units()
             .iter()
             .map(|role| (Kind(role.kind), sight_milli(role.sight)))
             .collect(),
-    }
+    )
+    .with_acquire_needs_sight(settings.acquire_needs_sight)
 }
 
 /// The repair and sale rules of the world (WP6.6) from the settings of `repair.ron`. To hand to

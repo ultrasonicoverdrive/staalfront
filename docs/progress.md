@@ -2538,11 +2538,11 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
 
 ## Phase 8 — Vision
 
-Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour) is built and in review, stacked on WP6.6 (#102); WP8.2a
-(targeting gate, structure sight rules, allied vision), WP8.2b (height bonus, waits for elevation in the sim), WP8.3 (presentation) and
-WP8.4 (minimap and icons) are not started. The split of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026).
+Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour; #104) is merged. WP8.2a (the targeting gate behind a flag that is
+**off**, structure sight, the shared-vision hook; this PR) is built and in review; WP8.2b (height bonus, waits for elevation in the sim),
+WP8.3 (presentation) and WP8.4 (minimap and icons) are not started. The split of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026).
 
-### WP8.1 notes: shroud and fog of war (stacked on WP6.6, orchestrator decision 05-11-2026)
+### WP8.1 notes: shroud and fog of war (merged in #104 on top of WP6.6, orchestrator decision 05-11-2026)
 
 - Done: `sf_sim::vision` (per player a `u16` count per cell, a `visible` and an `explored` bitset, per slot the stamp it made; discs from
   integer row-span masks per distinct sight; delta stamping in one pass after the crowd pass and before targeting), `World::with_vision`,
@@ -2554,12 +2554,42 @@ WP8.4 (minimap and icons) are not started. The split of WP8.2 is in PLAN.md Phas
 - **Decisions** (written in `vision.md`): a structure stamps its disc grown by its footprint; it sees only while it stands (not under
   construction, not while sold); every object marks its own cells explored; a sight of 0 reveals nothing; a unit stamps from its position
   (units have no `cell`, only structures do: the memo assumed otherwise); the sight is a table in `VisionRules`, not a field of `UnitStats`
-  (65 literals, other branches add fields); matches turn vision on in the game, the headless `match` scenario does not; a player's 65,536th
+  (65 literals, other branches add fields); matches turn vision on in the game (the headless `match` scenario did not until WP8.2a); a player's 65,536th
   disc is refused (so `u16` cannot wrap).
 - **Pins:** none moved. Section `v` exists only in a world given vision rules; golden.rs, every `.expected` and the bench PLAIN and FIGHT
   checksums are as before (see the PR for the runs). New: `vision.expected`.
 - **Gaps:** nothing reads the sight (WP8.2a); no allied vision; no height (WP8.2b); the debug view hides nothing (units show through it) and
   is sheared on slopes; no ghosts, soft edges, minimap or icon filtering (WP8.3, WP8.4); the AI has no memory of what it has seen.
+
+### WP8.2a notes: the targeting gate, structure sight, shared vision (orchestrator decisions 06-11-2026)
+
+- **Step 0, its own commit:** the headless `match` scenario now has the vision rules `sf_game --match` gives the game (review finding 1 of
+  #104). `match.expected` moved `0x164403a92986654f` to `0x771de0f816275bbc`. Measured cause: with the `vision` line taken out of `match.ron`
+  the old value comes back (`vision_in_the_match_moves_the_pin_by_its_section_only`, and by hand with the release binary); the world is the
+  same tick by tick (`the_first_match_plays_the_same_with_vision_on`). No other pin moved.
+- **Done:** `VisionRules` has `acquire_needs_sight` (the gate, **off** in the shipped `vision.ron` and in the match) and `shared`
+  (`(sharer, viewer)` pairs, empty by default). With the gate on, `Targeting::best_target` (the one function every automatic pick goes
+  through: a unit's scan and a defence's look round) skips candidates the scanner's owner does not see now (a unit: its cell; a structure:
+  any cell of its footprint). Retaliation, the checks of an engagement and every explicit order are untouched. `World::visibility`
+  answers with the union of the player's own picture and that of every sharer. Structures already stamped their disc grown by their
+  footprint, only while standing (WP8.1); nothing needed completing, the data has `sight` for every structure. The section `v` writes
+  the gate and the pairs only when one is set. New pinned scenario `vision_targeting` (`0x8ee88b023c9719cb`, CI list), `vision.ron` of the
+  scenarios takes `acquire_needs_sight` and `shared`. Rules: `docs/rules/vision.md`, `targeting.md`, `defences.md`, `match.md`.
+- **Decisions:** (1) the gate is on **acquisition** only: a target already chosen is kept while it is valid, also when it walks into fog;
+  (2) an explicit attack order is never dropped for fog (the player's order wins, as before; WP8.3 hides what the player cannot see, so
+  the player cannot normally order it); (3) shared vision is one way and not transitive, and the viewer's explored set is the union too;
+  (4) the snapshot and the debug view of `sf_game` still show the local player's **own** cells (no team exists in the game; documented gap).
+- **Measured, not shipped (the gate on in the match):** the scripted match is still won, at tick **8067 instead of 5967**, with **8 units
+  lost instead of 6**. The first difference is tick 4282: a rocket trooper does not pick the opponent's defence tower, which is in its reach
+  (5, to the edge of the tower) but outside its disc of sight 5 (the disc is cell against cell: the tower's cell is at squared distance 26).
+  Units whose sight equals their reach lose targets at the limit of their reach; Tijmen decides after playing M1 (sight a cell above reach
+  in the data, or the gate measured to the edge). `what_the_gate_would_do_to_the_first_match`.
+- **Review nits of #104 carried:** the two "stacked on WP6.6" lines above are fixed; the crowd cost of vision is in the open follow-ups (34);
+  the public `vision_resync` is gone (`vision_audit_current` runs the pass on a clone itself, so nothing public changes the world outside a
+  step); the "explored never shrinks" tests compare the sets, not the counts.
+- **Gaps:** the gate does not drop a chosen target that walks into fog; the snapshot and debug view do not use the shared pairs; no
+  team or alliance exists, so nothing but scenarios sets `shared`; no height (WP8.2b); no ghosts or hiding (WP8.3, WP8.4); the AI has no
+  memory. The cost of the gate was not measurable (see `vision.md`, "Cost").
 
 ## Open follow-ups
 
@@ -2666,3 +2696,8 @@ fixed, delete the entry in the same PR.
     a later `sound:` section can be added without breaking files written now (`docs/rules/menus.md`).
 33. **Menus are mouse-driven** (WP11.5a): no keyboard or gamepad navigation, no tooltips, no confirmation for Quit or Restart,
     Esc does not first cancel a chosen structure. Owner: Tijmen; each is a small follow-up on `menu.rs` and `menu_view.rs`.
+34. **The crowd cost of vision** (WP8.1, measured in the review of #104): with vision on, the pass costs +0.66 ms a tick at sight 5 and
+    +1.19 ms at sight 10 in `wander_5000` (5,000 wanderers that never stop; the tick is 1.2 ms without). It dominates the cost of
+    vision and scales with the units that change cell and the area of their disc. The next step if a crowd with a large sight ever
+    shows in a profile is to stamp only the difference of two discs one cell apart (about 2 x (2r + 1) cells instead of
+    2 x (2r + 1)^2). Nothing in a match shows it (`vision.md`, "Cost").
