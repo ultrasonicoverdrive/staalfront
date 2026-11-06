@@ -239,9 +239,9 @@ def playthrough(display, binary, settings):
         for _ in range(4):
             game.key("b")  # round the list of structures to none
         m = game.mark()
-        game.click(1125, 135, 1)
+        game.click(1125, 163, 1)  # the first tile, under the Repair and Sell buttons of WP6.6 (24 px + 4 px gap)
         check("a click on the sidebar reaches it with no menu open", game.count(r"sidebar: build", m) >= 1)
-        game.click(1125, 140, 3)  # the right button puts the structure away
+        game.click(1125, 168, 3)  # the right button puts the structure away
 
         # Esc opens the pause menu and holds the sim.
         game.key("Escape")
@@ -258,8 +258,8 @@ def playthrough(display, binary, settings):
         game.chord("Control_L", "1")
         game.click(200, 200, 1)
         game.click(250, 250, 3)
-        game.click(1125, 135, 1)  # the first tile of the sidebar
-        game.click(1125, 140, 3)
+        game.click(1125, 163, 1)  # the first tile of the sidebar
+        game.click(1125, 168, 3)
         time.sleep(1.0)
         bad = re.findall(r"^(?:build:|group \d|order for tick|sidebar:).*$", game.text()[m:], re.M)
         check("keys, clicks and the sidebar under the menu do nothing", not bad, str(bad[:3]))
