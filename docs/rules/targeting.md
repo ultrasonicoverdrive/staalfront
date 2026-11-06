@@ -298,6 +298,10 @@ WP5.6.
 * **Firing at the ground**, and backing away from a target inside the minimum range.
 * **Threat-based priorities** (shoot what is shooting at you first, focus fire, retreat): the AI of WP9.3 gives
   commands for those; here a unit prefers what its weapon does most to, and the nearest.
+* **Seeing before shooting** (WP8.2a): the hook exists since WP8.1, `World::visibility(player, cell)`, and **nothing reads it**: a unit still picks any
+  other owner's entity in weapon reach whether or not its owner has seen the cell ([`vision.md`](vision.md)). The planned rule: auto-acquisition
+  (the unit scan and the structure's `defence_check`) only takes candidates on a `Visible` cell, behind a switch that is off by default; being hit
+  (return fire) is always allowed.
 * **Alliances and neutrals**: every other player is an enemy; `friendly_fire` and the choice of targets both
   mean "the same player".
 * **Switching to a better target**, and **returning to where an idle unit stood** after a chase.

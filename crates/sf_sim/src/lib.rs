@@ -369,6 +369,7 @@ pub mod terrain;
 pub mod turning;
 mod turret;
 pub mod units;
+pub mod vision;
 pub mod weapons;
 pub mod world;
 
@@ -431,6 +432,7 @@ pub use turning::{
     DEFAULT_DRIVE_TOLERANCE, MAX_DRIVE_TOLERANCE, MIN_ARC_RADIUS, TurnMode, Turning, TurningError,
 };
 pub use units::{Footprint, UnitClass, UnitStats, UnitTable, UnitTableError};
+pub use vision::{MAX_DISCS_PER_PLAYER, MAX_SIGHT_MILLI, Mask, Visibility, VisionRules};
 pub use weapons::{
     ALL_ROUND, Impact, Loadout, MAX_WEAPON_SLOTS, Mount, ProjectileKind, Shot, WeaponStats,
     WeaponTable, WeaponsError,

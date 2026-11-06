@@ -460,6 +460,7 @@ impl Runner {
         let mut debug = DebugUi::new(camera_config);
         debug.set_visible(options.panels);
         debug.state.grid = options.grid;
+        debug.state.fog = options.fog;
         debug.state.lod_tint = options.lod_tint;
         debug.state.unit_display = options.unit_display;
         if let Some(zoom) = options.zoom {
@@ -1508,6 +1509,32 @@ impl Runner {
             &terrain,
             &snap,
             crate::repair_view::shipped_look(),
+        );
+    }
+
+    /// The debug view of shroud and fog (WP8.1), from the snapshot's bitsets of the local player.
+    /// Off unless the checkbox of the F1 panel or `--debug-fog` asks for it, and drawing nothing in a
+    /// world without vision rules.
+    fn draw_fog_debug(&mut self) {
+        if !self.debug.state.fog || self.snap.fog_version().is_none() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        crate::vision_view::draw_debug(
+            &mut layer,
+            &frame,
+            &terrain,
+            &snap,
+            crate::vision_view::shipped_look(),
         );
     }
 
@@ -2588,6 +2615,7 @@ impl App for Runner {
             self.draw_construction_bars();
             self.draw_storage_bars();
             self.draw_repair_marks();
+            self.draw_fog_debug();
             self.draw_production();
             // Under a menu the game cursor is gone and the system's is back.
             let game_cursor =
@@ -3066,6 +3094,10 @@ fn sandbox_scene(
                 // WP6.4: and what the structures make and use is power; a shortage slows both.
                 world = crate::playfield::with_power(world);
                 world = crate::playfield::with_repair(world);
+            }
+            // WP8.1 (`--debug-fog`): the world works out what each player sees, for the debug view.
+            if options.fog {
+                world = crate::playfield::with_vision(world, &defs);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),

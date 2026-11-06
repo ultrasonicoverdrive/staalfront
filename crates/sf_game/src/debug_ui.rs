@@ -150,6 +150,10 @@ pub struct PanelState {
     pub lod_tint: bool,
     /// Cell grid (one line per 4 m cell) on the terrain, fading with the zoom.
     pub grid: bool,
+    /// Debug view of shroud and fog of war (WP8.1): dark cells for what the local player has never
+    /// seen, dim ones for what it has seen but does not see now. Draws nothing in a world without
+    /// vision rules. Not a fair view: the units under it are not hidden.
+    pub fog: bool,
     /// Sound browser: (archive, entry) whose play button was clicked.
     pub ra_play: Option<(usize, usize)>,
     /// Models, icons or by the zoom.
@@ -163,6 +167,7 @@ impl PanelState {
             camera_default: camera,
             lod_tint: false,
             grid: false,
+            fog: false,
             ra_play: None,
             unit_display: UnitDisplay::Auto,
         }
@@ -471,6 +476,8 @@ fn view_toggles(ui: &mut egui::Ui, state: &mut PanelState) {
         .on_hover_text("Tints terrain chunks by level of detail: red = full detail, then orange, yellow, green, blue, purple (coarsest).");
     ui.checkbox(&mut state.grid, "Cell grid (4 m)")
         .on_hover_text("Fades out when zoomed far out; chunk borders (32 m) are yellow.");
+    ui.checkbox(&mut state.fog, "Fog of war (debug)")
+        .on_hover_text("Darkens the cells the local player has never seen and dims those it saw before. Needs a world with vision rules (a match, or --debug-fog in the sandbox). Not a fair view: units under it are not hidden.");
     ui.horizontal(|ui| {
         ui.label("Units:");
         ui.radio_value(&mut state.unit_display, UnitDisplay::Auto, "by zoom")

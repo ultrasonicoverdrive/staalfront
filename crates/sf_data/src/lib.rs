@@ -35,6 +35,8 @@ pub mod skirmish;
 pub mod storage_look;
 pub mod terrain;
 pub mod units;
+pub mod vision;
+pub mod vision_look;
 
 /// Name of this crate, a placeholder until the real API lands.
 pub const CRATE: &str = "sf_data";

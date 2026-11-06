@@ -205,6 +205,11 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   (headless goldens, `wander_5000.expected`) do not change when it does.
 - Height is **visual only**, plus a few gameplay effects (vision from a hill,
   slower uphill). No true 3D ballistics in v1.
+- **What a player sees is simulation state** (WP8.1, `docs/rules/vision.md`): per player and cell a count of
+  sight discs and an explored flag, updated by one pass per tick (only the stamps that changed), hashed in a gated
+  section `v`, and asked through `World::visibility(player, cell)`. The presentation never works it out: the snapshot
+  carries the local player's bitsets and a `seen` flag per entity. The first slice only computes it; the targeting gate
+  is WP8.2a, the height bonus (no elevation exists in the sim yet) WP8.2b, the picture WP8.3 and WP8.4.
 
 ## 6. Camera and zoom (summary of §2)
 
