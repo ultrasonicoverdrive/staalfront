@@ -19,6 +19,9 @@ once) asks one question of every player at the end of every tick in which someth
 
 > Does this player own **a standing structure** or **an armed unit**?
 
+*Since WP6.6 a structure that is being sold does not stand, so a player who sells its last structure and has no armed unit is
+defeated in the tick the sale starts, not when the structure is removed (`repair_sell.md`).*
+
 A player for whom the answer is no is **defeated**, in that tick, for good. When all players but one are
 defeated, the last one **wins**, in that tick, for good. If the last players are defeated in the *same*
 tick nobody wins: the result is a **draw**. Once the result is decided nothing in the outcome changes any
@@ -224,4 +227,5 @@ Release, same machine (4 cores, shared with other jobs: load average 1 to 4 duri
   on.
 * One human; the local player is fixed at player 0 (`commands::LOCAL_PLAYER`), as in the sandbox.
 * The opponent's harvester gathers credits it never spends.
+* A sale cannot be cancelled, so a player that sells its last structure is defeated at once and for good (WP6.6; `repair_sell.md`).
 * The Windows and the framerate check of M1 on the reference laptop (PLAN §13) are not made here.

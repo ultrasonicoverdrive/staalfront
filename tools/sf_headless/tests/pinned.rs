@@ -19,7 +19,7 @@
 //!
 //! and copy the `final:` value into the `.expected` file (one line, the hex
 //! value only). Do the same for `command_mix`, `terrain_256`, `units_spawn`, `orders`,
-//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction`, `placement` and `construction` (and `ore_256`, `harvest`, `storage`, `money`, `production`, `match`, `power` and `defences`, pinned in `tests/ore.rs`, `tests/harvest.rs`, `tests/storage.rs`, `tests/money.rs`, `tests/production.rs`, `tests/match_m1.rs`, `tests/power.rs` and `tests/defences.rs`). A change in `sf_sim` also moves
+//! `terrain_costs`, `pathing`, `pathing_256`, `bridge_200`, `crowd_jam`, `turning`, `replan`, `formation_move`, `weapons_reload`, `projectiles`, `armour_splash`, `tanks_vs_infantry`, `destruction`, `placement` and `construction` (and `ore_256`, `harvest`, `storage`, `money`, `production`, `match`, `power`, `defences` and `repair_sell`, pinned in `tests/ore.rs`, `tests/harvest.rs`, `tests/storage.rs`, `tests/money.rs`, `tests/production.rs`, `tests/match_m1.rs`, `tests/power.rs`, `tests/defences.rs` and `tests/repair_sell.rs`). A change in `sf_sim` also moves
 //! the golden values in `crates/sf_sim/tests/golden.rs`.
 
 mod common;

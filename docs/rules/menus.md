@@ -50,6 +50,7 @@ fixed row "Menu / back: Esc", and Esc can never be given to another action). Wit
 | a settings page | goes back to the menu it was opened from |
 | the pause menu | closes it and lets the game go on |
 | the start menu | nothing (there is nothing under it) |
+| no menu open, but a Repair or Sell mode of the sidebar is on (WP6.6) | ends the mode; the next Esc opens the pause menu (`esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu`) |
 
 (`esc_closes_the_pause_menu_and_lets_the_game_go_on`, `esc_goes_back_one_screen_at_a_time_and_the_start_menu_stays`,
 `esc_while_a_key_is_awaited_ends_the_wait_and_nothing_else`.) The menus pile up as a stack (`Menu::stack`): the settings lie on
@@ -275,7 +276,7 @@ generator is the cost; the match map is loaded, not generated).
 * **Keyboard and gamepad navigation of the menus**: they are mouse-driven (Esc and the key capture are the only keys). No
   tooltips, no confirmation for Quit or Restart (they act at once), no "are you sure".
 * **Save and load** of a game (phase 13): the pause menu has no such entry.
-* **Esc does not cancel a chosen structure**: it opens the pause menu (the right button still puts the structure away).
+* **Esc does not cancel a chosen structure**: it opens the pause menu (the right button still puts the structure away). A Repair or Sell mode of the sidebar (WP6.6) is different: Esc ends it first.
 * **No menu sounds**, no animation, no music change in the menus.
 * **Resolution choice and exclusive fullscreen**: only windowed and borderless fullscreen (`--resolution` stays a flag). A
   frame cap above 144 or an odd one can be written by hand in the file; the menu offers the five.

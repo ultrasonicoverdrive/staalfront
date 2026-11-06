@@ -35,8 +35,8 @@ use std::time::{Duration, Instant};
 use sf_math::Vec2;
 use sf_sim::{
     BuildingFunction, Cell, Construction, Death, EntityId, EntityView, FactoryView, Kind, Order,
-    PlacementPreview, PlayerId, ProjectileView, Tick, UnitBuild, UnitStats, UnitTable, World,
-    WreckView,
+    PlacementPreview, PlayerId, ProjectileView, RepairStatus, SaleProgress, Tick, UnitBuild,
+    UnitStats, UnitTable, World, WreckView,
 };
 
 /// What the factories can build and which structure is which factory (WP6.5): read from the world
@@ -201,6 +201,13 @@ pub struct SimSnapshot {
     builds: Vec<(EntityId, Construction)>,
     /// The decided result of the match (WP7.6); `None` before, and in a world without match rules.
     result: Option<sf_sim::MatchResult>,
+    /// Whether the world has repair and sale rules (WP6.6).
+    has_repair: bool,
+    /// The structures that are being repaired and what the repair is doing (WP6.6), ascending by
+    /// slot. Usually empty.
+    repairs: Vec<(EntityId, RepairStatus)>,
+    /// The structures that are being sold and how far the sale is (WP6.6), ascending by slot.
+    sales: Vec<(EntityId, SaleProgress)>,
 }
 
 impl SimSnapshot {
@@ -238,6 +245,9 @@ impl SimSnapshot {
             ghost: None,
             builds: Vec::new(),
             result: None,
+            has_repair: false,
+            repairs: Vec::new(),
+            sales: Vec::new(),
         }
     }
 
@@ -264,6 +274,12 @@ impl SimSnapshot {
             .find(|v| v.id == id)
             .expect("a live id");
         v.hp = hp;
+    }
+
+    /// Marks `id` as being repaired in this snapshot (tests of what reads it).
+    #[cfg(test)]
+    pub(crate) fn set_repair_for_test(&mut self, id: EntityId, status: RepairStatus) {
+        self.repairs.push((id, status));
     }
 
     /// The views of live objects `(role id, owner, cell x, cell y, hit points)` in ascending slots, the
@@ -415,6 +431,16 @@ impl SimSnapshot {
                 }
             }
         }
+        // Repair and sale (WP6.6): the simulation's state of this tick; usually nothing.
+        self.has_repair = world.repair_rules().is_some();
+        self.repairs.clear();
+        self.repairs.extend(
+            world
+                .repairing()
+                .filter_map(|id| world.repair_status(id).map(|s| (id, s))),
+        );
+        self.sales.clear();
+        self.sales.extend(world.sales_in_progress());
         // The match (WP7.6): the result once it is decided.
         self.result = world.match_result();
         // The queues (WP6.5): the simulation's state of this tick, a handful of records.
@@ -453,6 +479,31 @@ impl SimSnapshot {
     pub fn construction_of(&self, id: EntityId) -> Option<Construction> {
         // Nearly always empty, and a handful of entries when not: a scan is the cheap way.
         self.builds.iter().find(|(b, _)| *b == id).map(|(_, c)| *c)
+    }
+
+    /// Whether the world has repair and sale rules (WP6.6): the sidebar shows its buttons only then.
+    pub fn has_repair(&self) -> bool {
+        self.has_repair
+    }
+
+    /// What the repair of `id` is doing, or `None` when it is not being repaired (WP6.6).
+    pub fn repair_of(&self, id: EntityId) -> Option<RepairStatus> {
+        self.repairs.iter().find(|(r, _)| *r == id).map(|(_, s)| *s)
+    }
+
+    /// Every structure that is being repaired, ascending by slot.
+    pub fn repairs(&self) -> &[(EntityId, RepairStatus)] {
+        &self.repairs
+    }
+
+    /// How far the sale of `id` is, or `None` when it is not being sold (WP6.6).
+    pub fn sale_of(&self, id: EntityId) -> Option<SaleProgress> {
+        self.sales.iter().find(|(s, _)| *s == id).map(|(_, p)| *p)
+    }
+
+    /// Every structure that is being sold with its progress, ascending by slot.
+    pub fn sales(&self) -> &[(EntityId, SaleProgress)] {
+        &self.sales
     }
 
     /// Every structure under construction, ascending by slot.

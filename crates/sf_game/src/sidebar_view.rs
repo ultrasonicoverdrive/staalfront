@@ -13,6 +13,7 @@ use sf_data::sidebar_look::{Rgba, SidebarLook};
 use sf_ui::{Color, Rect, Ui, UiInput};
 
 use crate::money_view;
+use crate::repair_mode::ToolMode;
 use crate::sidebar::{Action, Button, Item, SidebarModel, Tab, power_fill};
 use crate::sidebar_layout::{self, Hit, Layout};
 
@@ -126,6 +127,7 @@ pub fn frame(
     ui.panel_rect(lay.column);
     draw_money(ui, &lay, model, look, money);
     draw_power(ui, &lay, model, look);
+    draw_tools(ui, &lay, model, look, cursor);
     draw_tabs(ui, &lay, model, state.tab, look, cursor);
     draw_items(ui, &lay, model, state.scroll, look, cursor);
     if let Some(hint) = &model.empty_hint {
@@ -145,6 +147,12 @@ pub fn frame(
                     state.scroll = 0;
                 }
                 Some(Hit::Item(i)) => actions.extend(model.items[i].click(button)),
+                // The Repair and Sell buttons (WP6.6): left switches the mode, right leaves it.
+                // Dim and silent while the world has no repair and sale rules.
+                Some(Hit::Tool(mode)) if model.tools.is_some() => actions.push(match button {
+                    Button::Left => Action::ToggleMode(mode),
+                    Button::Right => Action::LeaveMode,
+                }),
                 _ => {}
             }
         }
@@ -198,6 +206,42 @@ fn draw_power(ui: &mut Ui, lay: &Layout, model: &SidebarModel, look: &SidebarLoo
             let text = format!("{}: {}/{}", look.words.power, reading.used, reading.made);
             centered(ui, lay.power, &text, px, color(c.text));
         }
+    }
+}
+
+/// The Repair and Sell buttons under the power bar (WP6.6): the one of the mode that is on is lit.
+fn draw_tools(
+    ui: &mut Ui,
+    lay: &Layout,
+    model: &SidebarModel,
+    look: &SidebarLook,
+    cursor: Option<(f32, f32)>,
+) {
+    let c = &look.colors;
+    let px = f32::from(look.text_px) * ui.scale();
+    let labels = [&look.tool_labels.0, &look.tool_labels.1];
+    for mode in ToolMode::ALL {
+        let rect = lay.tools[mode.index()];
+        let live = model.tools.is_some();
+        let on = model.tools.is_some_and(|t| t.mode == Some(mode));
+        let hovered = live && cursor.is_some_and(|(x, y)| rect.contains(x, y));
+        let back = if on {
+            c.tool_active
+        } else if hovered {
+            c.tool_hover
+        } else {
+            c.tool
+        };
+        ui.fill(rect, color(back));
+        // The lit button is bright, so its text is dark; a dead button has the dim text of an empty tab.
+        let text = if !live {
+            c.tab_empty_text
+        } else if on {
+            c.tile_back
+        } else {
+            c.text
+        };
+        centered(ui, rect, labels[mode.index()], px, color(text));
     }
 }
 

@@ -115,8 +115,28 @@ source of truth, so the picture, the click and the walk cannot disagree
 * **placeholders** `capture` (flag), `repair` (spanner), `enter` (door), `deploy` (box with
   arrows out), `harvest` (drop), `infiltrate` (eye), `sell` (coin), `place` (corner marks):
   their enum variants and pictures exist so that phases 6 to 10 only have to teach
-  `cursor_context` when to answer them. **Nothing returns them today and `order_for` gives no
-  order for them** (`placeholders_never_come_out_of_the_context_and_never_order`).
+  `cursor_context` when to answer them. **`cursor_context` returns none of them and `order_for` gives no
+  order for them** (`placeholders_never_come_out_of_the_context_and_never_order`); since WP6.6 `repair` and
+  `sell` are shown by the sidebar's modes (below), a path of their own that never goes through the decision
+  table, and `place` and the others are still waiting.
+
+## Modes (WP6.6)
+
+With the **Repair** or **Sell** mode of the sidebar on (`sidebar.md`, `repair_sell.md`) the cursor is decided by
+`repair_mode::cursor(snapshot, mode, hover entity, player)`, one source of truth for the picture and the click
+(`repair_mode::click`, which gives the command from the same `repair_mode::target`):
+
+| Over | Repair mode | Sell mode | A left click |
+|---|---|---|---|
+| an own structure that is hurt (repair) / any own standing structure (sell) | **repair** (spanner) | **sell** (coin) | `Repair { on: true }` / `Sell` |
+| an own structure that is repairing (repair mode) | **repair** | | `Repair { on: false }` |
+| an own structure at full hit points (repair mode), going up, being sold, or at 0 hit points | **no_go** | **no_go** | nothing |
+| an enemy or neutral structure, a unit, the ground, nothing | **no_go** | **no_go** | nothing |
+
+The scroll arrows of the screen edge still come first (row 1 of the table above). A right click or Esc leaves the mode, and the
+right click gives no order (`the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing`). The tests are in `repair_mode/tests.rs`
+(`nothing_else_is_offered_anything`, `a_hurt_own_structure_is_offered_a_repair_and_a_whole_one_is_not`, ...) and the pictures in
+`crates/sf_game/tests/repair_screenshot.rs`.
 
 The pictures are drawn by `tools/sf_icon_gen` (`cargo run -p sf_icon_gen -- --cursors`, the
 approach of the strategic icons: signed distance shapes, integer-exact arithmetic, the same

@@ -208,6 +208,20 @@ pub fn with_power(world: World) -> World {
         .expect("a world with unit and building tables that has not started takes power")
 }
 
+/// `world` with repair and sale (WP6.6): a player can repair a damaged structure of its own, which
+/// costs money over time, and sell a structure for a part of its price (`repair.ron`,
+/// `docs/rules/repair_sell.md`). Call it after the unit and building tables.
+///
+/// # Panics
+///
+/// If the world has no unit or building table or has started; the callers have neither problem.
+pub fn with_repair(world: World) -> World {
+    let settings = sf_data::repair::RepairSettings::embedded();
+    world
+        .with_repair(sf_bridge::repair_rules(&settings))
+        .expect("a world with unit and building tables that has not started takes repair")
+}
+
 /// `world` with production (WP6.5): the factories build the units of `defs` from queues
 /// (`production.ron`, `docs/rules/production.md`). Call it after [`with_money`], so that the
 /// units are paid for; the unit and building tables must be in already.

@@ -730,7 +730,7 @@ tick is, per structure under construction, one table lookup and one store update
 
 ### Not done
 
-* Unit costs, the refund on cancel and the lost factory (no refund) are WP6.5's, see `production.md`. No refund for structures, sell or repair (WP6.6), no silo (WP7.3b), no sidebar (WP11.1). (The refinery choice is WP7.5.)
+* Unit costs, the refund on cancel and the lost factory (no refund) are WP6.5's, see `production.md`. No refund for a structure destroyed or removed half built (a sale pays for a complete one, WP6.6: `repair_sell.md`, and repair is paid per tick through the same store), no silo (WP7.3b), no sidebar (WP11.1). (The refinery choice is WP7.5.)
 * `BuildStructure` is not refused for lack of funds; it waits.
 * Money exists only with `--harvest` in the sandbox, and the HUD shows a player's credits also when it owns
   no entity (they are read from `World::credits`, not from the views).

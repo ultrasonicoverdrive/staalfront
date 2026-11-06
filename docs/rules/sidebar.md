@@ -43,6 +43,17 @@ geometry (centring, both sides of a padding), not looks; the picture of an item 
 (`the_column_lies_on_the_right_edge_above_the_minimap`, `the_parts_stand_top_to_bottom_money_power_tabs_items`,
 `the_column_is_laid_out_in_physical_pixels_at_any_scale`, `a_tiny_window_gets_no_item_rows_and_does_not_panic`).
 
+## The Repair and Sell buttons (WP6.6)
+
+A row of two buttons under the power bar, **Repair** and **Sell** (`sidebar.ron`: `tool_height_px`, `tool_labels` and the colours `tool`,
+`tool_hover`, `tool_active`). They are mode buttons: a left click switches the mode on (the button is lit; the other one goes out; a chosen
+structure to build is put away), or off when it is the mode that is on; a right click on a button leaves the mode. With a mode on, a left click on
+the player's own structure on the map sends `Repair` or `Sell` and never starts a selection (`a_left_click_in_a_repair_or_sell_mode_starts_no_selection`), and a right click or Esc leaves the mode (`the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing`, `esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu`; `repair_sell.md`, "The picture";
+`cursor.md`, "Modes"). Rows: the row sits between the power bar and the tabs, so the item grid is 24 and a gap shorter than in WP11.1 (five rows
+still fit in the default window, `the_parts_stand_top_to_bottom_money_power_tabs_items`). A structure being sold does not stand, so the
+tabs and items it unlocked disappear from the first tick (`Situation::read`). In a world without repair rules the buttons are drawn dim and do
+nothing. Tests: `sidebar_view/tests.rs` (clicks, lit button, dim buttons), `sidebar_layout/tests.rs` (the row and the hit test).
+
 ## The edge band (progress item 22, decided)
 
 The window edge scrolls the camera in a band of `edge_margin` physical pixels (`input.ron`, 4), and the cursor shows
@@ -184,7 +195,7 @@ the same quad count with 0 and with 5,000 extra entities) and has an `--ignored`
 
 ## Not done, on purpose
 
-The repair and sell buttons (WP6.6); click sounds (audio is another work package) (menus and settings exist since
+Click sounds (audio is another work package) (menus and settings exist since
 WP11.5a: `menus.md`; the UI scale of the settings multiplies everything here, the sidebar keeps out of the edge band at every
 scale it offers, and while a menu is open the sidebar is built blind: no hover, no click); an icon picture instead of the coloured tile (art, WP11.6);
 a tooltip with the full name and the build time (the tile shows the short name and the price); hotkeys for the tabs;

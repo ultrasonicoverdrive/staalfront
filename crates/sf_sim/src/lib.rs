@@ -362,6 +362,7 @@ pub mod placement;
 pub mod power;
 pub mod production;
 pub mod projectiles;
+pub mod repair;
 pub mod snapshot;
 pub mod targeting;
 pub mod terrain;
@@ -414,6 +415,10 @@ pub use production::{
     QueueItem, UnitBuild, paid_at,
 };
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
+pub use repair::{
+    MAX_REPAIR_HP_PER_TICK, MAX_SELL_TICKS, RepairError, RepairRejection, RepairRules,
+    RepairStatus, Sale, SaleProgress, repair_cost, sale_refund,
+};
 pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView, WreckView};
 pub use targeting::{
     DEFAULT_PURSUIT_CELLS, DEFAULT_PURSUIT_RESET_TICKS, DEFAULT_SCAN_COOLDOWN, Engagement,

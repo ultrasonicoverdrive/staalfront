@@ -1,0 +1,32 @@
+// The small match of the scenario `repair_sell` (WP6.6, docs/rules/repair_sell.md): two players on the
+// hand-drawn map m1 (assets/maps/m1). Player 0 is Meridian in the south-west with a construction centre,
+// a power plant, a barracks and a refinery and very little money (20 credits), so that a repair runs out
+// of it; player 1 is Veyran in the north-east with one construction centre and nothing else, so that
+// selling it takes away its last structure. Objects enter the world on tick 0 in the order written here:
+// slots 0 .. 3 are player 0's, slot 4 is player 1's.
+(
+    name: "repair_sell",
+    map: "m1",
+    seed: 393222,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 20,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+                (role: "power_plant", cell: (8, 62)),
+                (role: "barracks", cell: (18, 74)),
+                (role: "refinery", cell: (18, 62)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (76, 20)),
+            ],
+        ),
+    ],
+)
