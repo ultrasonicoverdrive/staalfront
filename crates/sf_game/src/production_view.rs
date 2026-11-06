@@ -123,6 +123,10 @@ pub fn draw_rally_flags(
     let mut drawn = 0;
     for (id, view) in snap.factories() {
         let Some(cell) = view.rally else { continue };
+        // The rally flag of a factory the local player does not see would give it away (WP8.3).
+        if !snap.seen(*id) {
+            continue;
+        }
         let x = (cell.x as f32 + 0.5) * METRES_PER_CELL;
         let z = (cell.y as f32 + 0.5) * METRES_PER_CELL;
         let Some((foot, _)) = project_px(

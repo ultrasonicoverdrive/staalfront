@@ -47,6 +47,7 @@ Every asset in this directory needs a line here (PLAN.md section 12.4).
 | `config/power.ron` | Written for this project (WP6.4: the shortage floor and the defence cutoff; placeholders) | Project license (see workspace `Cargo.toml`) |
 | `config/vision.ron` | Written for this project (WP8.1: the sight of an entity without a unit table entry; placeholder) | Project license (see workspace `Cargo.toml`) |
 | `config/vision_look.ron` | Written for this project (WP8.1: the colours of the debug view of shroud and fog) | Project license (see workspace `Cargo.toml`) |
+| `config/fog_look.ron` | Written for this project (WP8.3, WP8.4: the look of shroud, fog, ghosts and the fogged minimap) | Project license (see workspace `Cargo.toml`) |
 | `config/repair.ron` | Written for this project (WP6.6: repair speed and cost, sale time and refund; placeholders) | Project license (see workspace `Cargo.toml`) |
 | `config/repair_look.ron` | Written for this project (WP6.6: the repair sign, the sale progress bar and the words of the mode line) | Project license (see workspace `Cargo.toml`) |
 | `config/production.ron` | Written for this project (WP6.5: the queue limit and the exit search radius of the factories; placeholders) | Project license (see workspace `Cargo.toml`) |

@@ -134,6 +134,9 @@ pub struct FxCounters {
     pub damage_puffs_at_anchor: u64,
     /// Puffs that started by the rule of `damage.ron` (no anchor: another model, or no model drawn).
     pub damage_puffs_by_rule: u64,
+    /// Events not drawn because the cell they happened on is out of the local player's sight (WP8.3).
+    /// The audio still gets them (`FxPlayer::shown`): sounds of hidden events are an open question.
+    pub hidden: u64,
 }
 
 /// `effects.ron` resolved against the definitions: names are numbers, links are lists of numbers.
@@ -435,8 +438,14 @@ impl FxPlayer {
                 self.counters.expired += 1;
                 continue;
             }
-            self.counters.shown += 1;
             self.shown_now.push(*ev);
+            // A flash, a hit or a death on a cell the local player does not see is not drawn (WP8.3);
+            // its own events always are. The audio takes `shown_now` as before.
+            if !snap.shown_at_metres(ev.pos, sf_sim::PlayerId(ev.player)) {
+                self.counters.hidden += 1;
+                continue;
+            }
+            self.counters.shown += 1;
             self.spawn(ev, ground, anchors, alpha, band);
         }
         self.ready = batch;
@@ -561,7 +570,7 @@ impl FxPlayer {
             1.0
         };
         for wreck in snap.wrecks() {
-            if wreck.ticks_left == 0 || wreck.lifetime == 0 {
+            if wreck.ticks_left == 0 || wreck.lifetime == 0 || !snap.wreck_shown(wreck) {
                 continue;
             }
             // Full until the last `fade_fraction` of its life, then down to nothing.
@@ -618,7 +627,11 @@ impl FxPlayer {
         };
         let margin = d.limits.cull_margin;
         let (w, h) = (f.viewport[0], f.viewport[1]);
-        for v in snap.views() {
+        for (i, v) in snap.views().iter().enumerate() {
+            // Smoke over a thing the local player does not see would give it away (WP8.3).
+            if !snap.view_shown(i) {
+                continue;
+            }
             let Some(rates) = d.rates(snap.damage_stage(d, v)) else {
                 continue;
             };
@@ -741,6 +754,9 @@ impl FxPlayer {
         };
         let mut budget = view.limits.max_tracer_dots as usize;
         for p in snap.projectiles() {
+            if !snap.projectile_shown(p) {
+                continue;
+            }
             let (slot, tracer) = match p.kind {
                 ProjectileKind::Straight => (0, &self.tables.effects.tracers.straight),
                 ProjectileKind::Arc => (1, &self.tables.effects.tracers.arc),

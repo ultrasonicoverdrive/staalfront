@@ -116,6 +116,7 @@ pub mod commands;
 pub mod construction_view;
 pub mod cursor;
 pub mod debug_ui;
+pub mod fog_view;
 pub mod fx;
 pub mod fx_events;
 pub mod fx_sound;

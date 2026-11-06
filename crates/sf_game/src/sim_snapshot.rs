@@ -218,6 +218,12 @@ pub struct SimSnapshot {
     /// the others when the cell they stand on (a structure: any cell of its footprint) is visible.
     /// Empty in a world without vision rules.
     seen: Vec<bool>,
+    /// The player whose sight this is (WP8.3): `seen` is for this player, and nothing of its own is
+    /// ever hidden from it.
+    local: PlayerId,
+    /// The footprint of each structure view, `(anchor cell, width, height)`, parallel to `views`
+    /// (`None` for a unit). Filled only in a world with vision rules: the ghosts (WP8.3) remember it.
+    foot: Vec<Option<(Cell, u8, u8)>>,
 }
 
 impl SimSnapshot {
@@ -262,6 +268,8 @@ impl SimSnapshot {
             fog_visible: Vec::new(),
             fog_explored: Vec::new(),
             seen: Vec::new(),
+            local: crate::commands::LOCAL_PLAYER,
+            foot: Vec::new(),
         }
     }
 
@@ -486,6 +494,8 @@ impl SimSnapshot {
     /// The vision part of [`SimSnapshot::fill`] for the player `local`.
     fn fill_fog(&mut self, world: &World, local: PlayerId) {
         self.seen.clear();
+        self.foot.clear();
+        self.local = local;
         match world.fog_version(local) {
             None => {
                 self.fog_version = None;
@@ -503,6 +513,12 @@ impl SimSnapshot {
                     }
                 }
                 for v in &self.views {
+                    self.foot.push(
+                        world
+                            .cell_of(v.id)
+                            .zip(world.footprint_of(v.id))
+                            .map(|(at, fp)| (at, fp.width, fp.height)),
+                    );
                     let seen = v.owner == local
                         || match (world.cell_of(v.id), world.footprint_of(v.id)) {
                             (Some(at), Some(fp)) => (0..u32::from(fp.height)).any(|dy| {
@@ -556,13 +572,82 @@ impl SimSnapshot {
 
     /// Whether the local player sees the entity `id` now (WP8.1): its own objects always, the
     /// others when their cell is visible. True in a world without vision rules; false for a stale id.
-    /// **Nothing filters by it yet**: hiding what is not seen (picking, hover, the icon list, the
-    /// minimap, ghosts) is WP8.3 and WP8.4.
+    /// The picture hides what is not seen with it (WP8.3, WP8.4: [`SimSnapshot::view_shown`]).
     pub fn seen(&self, id: EntityId) -> bool {
         let Some(at) = self.find(id) else {
             return false;
         };
         self.seen.get(at).copied().unwrap_or(true)
+    }
+
+    /// The player whose sight this snapshot carries (WP8.3).
+    pub fn local_player(&self) -> PlayerId {
+        self.local
+    }
+
+    /// Whether the view at `index` of [`SimSnapshot::views`] is drawn, iconised, picked and counted on
+    /// the minimap (WP8.3, WP8.4): always in a world without vision rules, always for the local
+    /// player's own, else when it is seen. An index beyond the views is shown (nothing to hide).
+    pub fn view_shown(&self, index: usize) -> bool {
+        self.seen.get(index).copied().unwrap_or(true)
+    }
+
+    /// The two fog bitsets `(visible, explored)` of the local player (bit `y * width + x`); empty
+    /// slices in a world without vision rules.
+    pub fn fog_words(&self) -> (&[u64], &[u64]) {
+        (&self.fog_visible, &self.fog_explored)
+    }
+
+    /// The footprint `(anchor cell, width, height)` of the structure view at `index`, if it is one and
+    /// the world has vision rules (the ghosts remember it).
+    pub fn footprint_at(&self, index: usize) -> Option<(Cell, u8, u8)> {
+        self.foot.get(index).copied().flatten()
+    }
+
+    /// Whether the cell `cell` is visible to the local player now; true in a world without vision rules.
+    pub fn is_visible(&self, cell: Cell) -> bool {
+        self.visibility(cell) == Visibility::Visible
+    }
+
+    /// Whether a thing at `pos` (metres, `[x, z]`) is shown (WP8.3): in a world without vision rules
+    /// always, the local player's own things always (`player`), else when the cell it is in is visible.
+    /// The test of effects: a flash, a hit, a death, a tracer. A position off the map is hidden.
+    pub fn shown_at_metres(&self, pos: [f32; 2], player: PlayerId) -> bool {
+        if self.fog_version.is_none() || player == self.local {
+            return true;
+        }
+        let cell = sf_math::render_bridge::METRES_PER_CELL;
+        if pos[0] < 0.0 || pos[1] < 0.0 {
+            return false;
+        }
+        self.is_visible(Cell::new(
+            (pos[0] / cell).floor() as u32,
+            (pos[1] / cell).floor() as u32,
+        ))
+    }
+
+    /// Whether a wreck or a pile of rubble is shown: its owner's own always, else when the cell it lies
+    /// on (rubble: any cell of its footprint) is visible. A wreck in fog is hidden until it is seen again.
+    pub fn wreck_shown(&self, w: &WreckView) -> bool {
+        if self.fog_version.is_none() || w.owner == self.local {
+            return true;
+        }
+        match (w.footprint, w.anchor) {
+            (Some(fp), Some(at)) => (0..u32::from(fp.height)).any(|dy| {
+                (0..u32::from(fp.width))
+                    .any(|dx| self.is_visible(Cell::new(at.x + dx, at.y + dy)))
+            }),
+            _ => self.cell_at(w.pos).is_some_and(|c| self.is_visible(c)),
+        }
+    }
+
+    /// Whether a projectile in flight is shown: the local player's own always, else when the ground
+    /// under it is in a visible cell.
+    pub fn projectile_shown(&self, p: &ProjectileView) -> bool {
+        if self.fog_version.is_none() || p.player == self.local {
+            return true;
+        }
+        self.cell_at(p.pos).is_some_and(|c| self.is_visible(c))
     }
 
     /// Asks `world` the placement question `query` and keeps the answer in this snapshot (WP6.2).

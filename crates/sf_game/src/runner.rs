@@ -212,6 +212,10 @@ pub struct Runner {
     cells_tick: Option<sf_sim::Tick>,
     /// The fill levels of the ore the picture shows (WP7.1).
     ore_view: crate::ore_view::OreView,
+    /// The structures of the other side last seen, drawn while their cells are fog (WP8.3).
+    ghosts: crate::fog_view::GhostBook,
+    /// The fog version the terrain and the minimap show (WP8.3, WP8.4): uploaded only when it changes.
+    fog_applied: crate::fog_view::FogApplied,
     /// When the last snapshot that showed the sim behind its clock arrived:
     /// the F1 panel keeps saying "sim behind" for a second after.
     behind_seen: Option<Instant>,
@@ -516,6 +520,8 @@ impl Runner {
             ore_view: crate::ore_view::OreView::new(
                 &sf_render::terrain_look::TerrainLooks::embedded(),
             ),
+            ghosts: crate::fog_view::GhostBook::new(),
+            fog_applied: crate::fog_view::FogApplied::default(),
             behind_seen: None,
             instancer,
             fx: FxPlayer::embedded(),
@@ -720,6 +726,8 @@ impl Runner {
             cell_layer,
             cells_tick,
             ore_view,
+            ghosts,
+            fog_applied,
             behind_seen,
             instancer,
             fx,
@@ -794,6 +802,9 @@ impl Runner {
         self.cell_layer = cell_layer;
         self.cells_tick = cells_tick;
         self.ore_view = ore_view;
+        // A new game remembers no ghosts and has shown no fog yet (WP8.3).
+        self.ghosts = ghosts;
+        self.fog_applied = fog_applied;
         self.behind_seen = behind_seen;
         self.instancer = instancer;
         self.fx = fx;
@@ -849,6 +860,8 @@ impl Runner {
         self.hud.rebake_minimap(&renderer, &self.map);
         self.renderer = Some(renderer);
         self.ore_view.forget();
+        self.fog_applied.forget();
+        self.sync_fog();
         self.show_ore();
     }
 
@@ -978,7 +991,9 @@ pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
 }
 
 /// Everything the instancer draws for a snapshot: the entities, then the wrecks and the rubble (WP5.5),
-/// which are numbered from the first slot no entity has.
+/// which are numbered from the first slot no entity has. In a world with vision rules (WP8.3, WP8.4) an
+/// entity the local player does not see is left out, and so is a wreck on a cell it does not see: the
+/// instancer then neither draws, iconises nor picks it. In a world without them nothing is left out.
 pub fn motions_of<'a>(
     looks: &'a Looks,
     snap: &'a SimSnapshot,
@@ -986,13 +1001,26 @@ pub fn motions_of<'a>(
     let first = crate::looks::first_wreck_slot(snap);
     snap.views()
         .iter()
-        .map(move |v| motion_of(looks, snap, v))
+        .enumerate()
+        .filter(move |&(i, _)| snap.view_shown(i))
+        .map(move |(_, v)| motion_of(looks, snap, v))
         .chain(
             snap.wrecks()
                 .iter()
                 .enumerate()
+                .filter(move |&(_, w)| snap.wreck_shown(w))
                 .filter_map(move |(n, w)| looks.wreck_motion(w, first + n as u32)),
         )
+}
+
+/// [`motions_of`] and then the ghosts of structures last seen (WP8.3), numbered after the wrecks.
+pub fn scene_motions<'a>(
+    looks: &'a Looks,
+    snap: &'a SimSnapshot,
+    ghosts: &'a crate::fog_view::GhostBook,
+) -> impl Iterator<Item = Motion> + 'a {
+    let first = crate::looks::first_wreck_slot(snap) + snap.wrecks().len() as u32;
+    motions_of(looks, snap).chain(ghosts.motions(snap, first))
 }
 
 impl Runner {
@@ -1731,10 +1759,61 @@ impl Runner {
         // Once per tick the fixed-point positions (cells) are converted to f32
         // metres and bucketed by map tile.
         let started = Instant::now();
+        self.ghosts.update(&self.snap, &self.looks);
         let looks = &self.looks;
-        self.instancer.update_tick(motions_of(looks, &self.snap));
+        self.instancer
+            .update_tick(scene_motions(looks, &self.snap, &self.ghosts));
         self.tick_ms.push(started.elapsed());
+        self.sync_fog();
         self.show_ore();
+    }
+
+    /// Gives the terrain and the minimap the fog of the newest snapshot when its version is not the one
+    /// they show (WP8.3, WP8.4), and takes it off when the world has no vision rules. Nothing happens
+    /// before the renderer exists, and a snapshot of the version already shown costs one comparison.
+    fn sync_fog(&mut self) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+        let look = crate::fog_view::shipped_look();
+        let current = self.snap.fog_version();
+        let (w, h) = self.snap.map_size();
+        let (visible, explored) = self.snap.fog_words();
+        match crate::fog_view::fog_step(self.fog_applied.terrain, current) {
+            crate::fog_view::FogStep::Keep => {}
+            crate::fog_view::FogStep::Upload(v) => {
+                if renderer.fog_size() == Some((w, h)) {
+                    let texels = sf_render::fog::texels(w, h, visible, explored, look.softness);
+                    renderer.set_fog((w, h), &texels, crate::fog_view::shading_of(look));
+                } else {
+                    eprintln!(
+                        "sf_game: the fog of the world is {w}x{h} cells, the terrain's is {:?}; no fog drawn",
+                        renderer.fog_size()
+                    );
+                }
+                self.fog_applied.terrain = Some(v);
+            }
+            crate::fog_view::FogStep::Clear => {
+                renderer.clear_fog();
+                self.fog_applied.terrain = None;
+            }
+        }
+        match crate::fog_view::fog_step(self.fog_applied.minimap, current) {
+            crate::fog_view::FogStep::Keep => {}
+            crate::fog_view::FogStep::Upload(v) => {
+                let states = sf_ui::fog_states(w, h, visible, explored);
+                self.hud.set_minimap_fog(
+                    renderer,
+                    &self.map,
+                    Some((&states, crate::fog_view::minimap_fog_of(look))),
+                );
+                self.fog_applied.minimap = Some(v);
+            }
+            crate::fog_view::FogStep::Clear => {
+                self.hud.set_minimap_fog(renderer, &self.map, None);
+                self.fog_applied.minimap = None;
+            }
+        }
     }
 
     /// Draw the ore cells whose fill level changed, on the terrain and on the minimap (WP7.1).
@@ -2502,6 +2581,8 @@ impl App for Runner {
                 self.viewport = (s.width, s.height);
                 self.renderer = Some(renderer);
                 self.ore_view.forget();
+                self.fog_applied.forget();
+                self.sync_fog();
                 self.show_ore();
             }
             Err(e) => {
@@ -2571,7 +2652,7 @@ impl App for Runner {
         };
         let menu = menu_was_open.then_some(&self.menu);
         self.hud
-            .frame(ctx, &mut self.camera, self.snap.views(), stats, menu);
+            .frame(ctx, &mut self.camera, &self.snap, &self.ghosts, stats, menu);
         // Clicks on the menu, Esc and the key a rebinding waits for (WP11.5a). A choice may swap the
         // scene (a restart): from here on the frame is the new one's.
         self.handle_menu(ctx);

@@ -20,7 +20,7 @@ use sf_engine::winit::event::MouseButton as WinitButton;
 use sf_math::render_bridge::vec2_cells_to_metres;
 use sf_render::camera::DVec2;
 use sf_render::{Camera, RenderError, Renderer};
-use sf_sim::EntityView;
+use crate::sim_snapshot::SimSnapshot;
 use sf_ui::{Anchor, Color, Minimap, MouseButton, Ui, UiConfig, UiInput, UiRenderer, fov_polygon};
 
 use crate::menu::{Item, Menu};
@@ -244,6 +244,22 @@ impl Hud {
         }
     }
 
+    /// Lays the fog of war over the minimap, or takes it off (`None`), and uploads the image when it
+    /// changed (WP8.4). Call when the snapshot's fog version changed, not every frame.
+    pub fn set_minimap_fog(
+        &mut self,
+        renderer: &Renderer,
+        map: &Map,
+        fog: Option<(&[u8], sf_ui::MinimapFog)>,
+    ) {
+        if let (Some(minimap), Some(ui_gpu)) = (&mut self.minimap, &mut self.gpu)
+            && minimap.set_fog(map, fog)
+        {
+            let gpu = renderer.gpu();
+            ui_gpu.set_minimap(&gpu.device, &gpu.queue, minimap.image());
+        }
+    }
+
     /// Build this frame's UI. A click or drag on the minimap moves `camera`. With a `menu` open (WP11.5a)
     /// the game's panels are built with an input that sees nothing, so nothing under the menu can be
     /// hovered or clicked, and the menu is drawn over them with the real input; what it was clicked
@@ -252,7 +268,8 @@ impl Hud {
         &mut self,
         ctx: &Context,
         camera: &mut Camera,
-        views: &[EntityView],
+        snap: &SimSnapshot,
+        ghosts: &crate::fog_view::GhostBook,
         stats: HudStats,
         menu: Option<&Menu>,
     ) {
@@ -335,10 +352,17 @@ impl Hud {
             let map = minimap.map_size();
             let fov = fov_polygon(camera, (size.width as f32, size.height as f32), map);
             let palette = &self.dots;
+            let ghost_dot = crate::fog_view::shipped_look().ghost_dot;
+            let ghost_dot = Color(ghost_dot.0, ghost_dot.1, ghost_dot.2, 255);
+            // Only what the local player sees, and the ghosts of structures it saw (WP8.4).
             let dots = self.show_dots.then(|| {
-                views.iter().map(move |v| {
-                    let [x, z] = vec2_cells_to_metres(v.pos);
-                    ((x, z), Self::dot_color(palette, v.owner.0))
+                crate::fog_view::minimap_dots(snap, ghosts).map(move |(pos, dot)| {
+                    let [x, z] = vec2_cells_to_metres(pos);
+                    let color = match dot {
+                        crate::fog_view::Dot::Owner(o) => Self::dot_color(palette, o),
+                        crate::fog_view::Dot::Ghost => ghost_dot,
+                    };
+                    ((x, z), color)
                 })
             });
             if let Some((x, z)) = ui.minimap(

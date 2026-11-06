@@ -109,6 +109,11 @@ pub(crate) fn front_edge(
     id: sf_sim::EntityId,
 ) -> Option<([f32; 2], [f32; 2])> {
     let view = snap.get(id)?;
+    // A structure the local player does not see has no bar, sign or flag over it (WP8.3): they would
+    // show where it is and what it is doing.
+    if !snap.seen(id) {
+        return None;
+    }
     let footprint = snap.stats_of(id).and_then(|s| s.footprint)?;
     // The front edge: the footprint is centred on the entity.
     let (half_w, half_h) = (
