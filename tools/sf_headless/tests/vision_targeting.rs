@@ -17,7 +17,7 @@ use common::scenario_path;
 use sf_headless::cli::parse_checksum;
 use sf_headless::run::{RunOptions, run};
 use sf_headless::scenario::Scenario;
-use sf_sim::{Cell, EntityId, PlayerId, Visibility, World};
+use sf_sim::{Cell, EntityId, PlayerId, Verdict, Visibility, World};
 
 const EXPECTED: &str = include_str!("../../../assets/scenarios/vision_targeting.expected");
 
@@ -257,4 +257,68 @@ fn the_gate_changes_only_what_it_gates() {
     );
     let again = play(&scenario());
     assert_eq!(on.shots, again.shots);
+}
+
+/// What the gate WOULD do to the first match (measured, not shipped: `match.ron` has it off and the
+/// pin of `match.expected` is the match without it). The scripted match still ends in a win, but
+/// the two worlds part at tick 4282, when a rocket trooper (slot 21) would pick the opponent's
+/// defence tower (slot 4): the tower is in the trooper's reach (rocket reach 5, measured to the
+/// edge of the tower) but its cell is 26 (squared) from the trooper's cell, outside the disc of
+/// sight 5 (25). In the end the human wins at tick 8067 instead of 5967, with 8 units lost
+/// instead of 6.
+#[test]
+fn what_the_gate_would_do_to_the_first_match() {
+    let load = |gate: bool| {
+        let mut s = Scenario::load(&scenario_path("match.ron")).unwrap();
+        assert!(
+            !s.vision.as_ref().unwrap().acquire_needs_sight,
+            "shipped off"
+        );
+        s.vision.as_mut().unwrap().acquire_needs_sight = gate;
+        s.ticks = 9000;
+        s
+    };
+    let tower = id(4);
+    let trooper = id(21);
+    let picture = |w: &World| -> Vec<(u32, i64, i64, u32)> {
+        w.snapshot()
+            .iter()
+            .map(|v| (v.id.index(), v.pos.x.raw(), v.pos.y.raw(), v.hp))
+            .collect()
+    };
+    let (off, on) = (load(false), load(true));
+    let (mut a, mut b) = (off.build_world().unwrap(), on.build_world().unwrap());
+    let mut parted = None;
+    while parted.is_none() {
+        a.step();
+        b.step();
+        if picture(&a) != picture(&b) {
+            parted = Some(a.tick().0);
+        }
+        assert!(a.tick().0 < 5000, "they never parted");
+    }
+    assert_eq!(parted, Some(4282));
+    assert_eq!(a.engagement_of(trooper).map(|e| e.target), Some(tower));
+    assert_eq!(b.engagement_of(trooper), None);
+    // The tower's cell is not visible to the human at that tick, in the gated world.
+    let at = b.snapshot().iter().find(|v| v.id == tower).unwrap().pos;
+    let cell = b.cell_at(at).unwrap();
+    assert_ne!(b.visibility(P0, cell), Visibility::Visible);
+
+    // To the end of each match.
+    let decided = |gate: bool| {
+        let s = load(gate);
+        let mut w = s.build_world().unwrap();
+        let mut lost = 0;
+        for _ in 0..s.ticks {
+            w.step();
+            lost += w.deaths().iter().filter(|d| d.owner == P0).count();
+            if let Some(r) = w.match_result() {
+                return (w.tick().0 - 1, r.verdict, lost); // the tick that ran
+            }
+        }
+        panic!("not decided");
+    };
+    assert_eq!(decided(false), (5967, Verdict::Won(P0), 6));
+    assert_eq!(decided(true), (8067, Verdict::Won(P0), 8));
 }
