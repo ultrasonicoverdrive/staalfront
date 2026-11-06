@@ -20,6 +20,10 @@
 
     money_height_px: 26,
     power_height_px: 16,
+    // The row of two mode buttons under the power bar (WP6.6): Repair and Sell. Click one and a left
+    // click on one of your structures repairs or sells it; right click, Esc or the button again leaves.
+    tool_height_px: 24,
+    tool_labels: ("Repair", "Sell"),
 
     // The tabs, in a grid.
     tab_height_px: 24,
@@ -74,6 +78,10 @@
         tab_active: (92, 126, 184, 255),
         // A tab with nothing to build.
         tab_empty_text: (130, 136, 146, 255),
+        // The mode buttons: at rest, under the cursor and with the mode on.
+        tool: (62, 52, 40, 255),
+        tool_hover: (92, 76, 54, 255),
+        tool_active: (214, 164, 60, 255),
         tile_back: (20, 24, 32, 255),
         tile_hover: (255, 255, 255, 40),
         // The ring round the structure that is chosen to be placed.

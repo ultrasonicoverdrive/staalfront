@@ -129,7 +129,7 @@ destroyed with its queue. `tools/sf_headless/tests/production.rs` asserts each o
 
 ## Not done, on purpose
 
-Repair and sell (WP6.6); defences (WP6.7); the AI's
+Defences (WP6.7, done); repair and sell (WP6.6, done: a factory being sold accepts nothing and its queue is lost with it, nothing refunded, `repair_sell.md`); the AI's
 use of production (phase 9); the hotkeys of the finished game (the sidebar itself is WP11.1);
 unit `requires` in the shipped data (balance, phase 15); a queue that survives a lost factory;
 choosing which factory of several gets a unit; production of structures through a factory queue.

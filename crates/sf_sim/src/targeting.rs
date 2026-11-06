@@ -623,7 +623,7 @@ fn check(e: &mut Entities, i: usize, victim: EntityId, cx: &Context<'_>) {
 fn defence_check(e: &mut Entities, i: usize, cx: &Context<'_>) -> bool {
     e.eng[i].cool = e.eng[i].cool.saturating_sub(1);
     let stats = cx.units.at(e.def[i] as usize);
-    let standing = e.build_left[i] == 0 && (e.hp[i] > 0 || stats.hp == 0);
+    let standing = e.build_left[i] == 0 && e.sell_left[i] == 0 && (e.hp[i] > 0 || stats.hp == 0);
     let dark = cx.buildings.get(e.kind[i]).is_some_and(|b| b.power < 0)
         && cx.unpowered.binary_search(&e.owner[i]).is_ok();
     if !standing || dark {

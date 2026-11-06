@@ -217,6 +217,6 @@ measure the frame rate (PLAN section 13).
 ## Not here (and where it goes)
 
 * Garrisoning the bunker, the decoy's disguise, mission logic of the neutral structures, fog and sight: see above.
-* Repair and sell of structures (WP6.6), the AI that builds defences (phase 9), balance of ranges, damage and costs (phase 15).
+* Repair and sell of structures: WP6.6, done (`repair_sell.md`; a tower being sold fires nothing, `a_tower_being_sold_fires_nothing_and_drops_its_target`). The AI that builds defences (phase 9), balance of ranges, damage and costs (phase 15).
 * A structure answering fire from out of its reach, switching to a better target, preferring threats: as for units, not here.
 * Structures that rotate their hull; the barrel's pitch (still a hook of the renderer).

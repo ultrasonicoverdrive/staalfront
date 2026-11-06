@@ -10,6 +10,7 @@
 use sf_data::sidebar_look::SidebarLook;
 use sf_ui::Rect;
 
+use crate::repair_mode::ToolMode;
 use crate::sidebar::Tab;
 
 /// The rectangles of the sidebar, in physical pixels.
@@ -21,6 +22,8 @@ pub struct Layout {
     pub money: Rect,
     /// The power bar.
     pub power: Rect,
+    /// The Repair and Sell buttons (WP6.6), in [`ToolMode::ALL`] order, side by side under the power bar.
+    pub tools: [Rect; 2],
     /// The four tabs, in [`Tab::ALL`] order.
     pub tabs: [Rect; 4],
     /// The grid of items.
@@ -38,6 +41,8 @@ pub struct Layout {
 /// What a point on the sidebar is on.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Hit {
+    /// A Repair or Sell button.
+    Tool(ToolMode),
     /// A tab.
     Tab(Tab),
     /// The item with this index in the tab's list (scrolling already taken into account).
@@ -85,6 +90,14 @@ pub fn layout(
     let power = Rect::new(inner_x, y, inner_w, px(look.power_height_px, scale));
     y += power.h + gap;
 
+    let tool_h = px(look.tool_height_px, scale);
+    let tool_w = ((inner_w - gap) / 2.0).floor();
+    let mut tools = [Rect::default(); 2];
+    for (i, tool) in tools.iter_mut().enumerate() {
+        *tool = Rect::new(inner_x + i as f32 * (tool_w + gap), y, tool_w, tool_h);
+    }
+    y += tool_h + gap;
+
     let tab_columns = usize::from(look.tab_columns);
     let tab_w = ((inner_w - gap * (tab_columns as f32 - 1.0)) / tab_columns as f32).floor();
     let tab_h = px(look.tab_height_px, scale);
@@ -114,6 +127,7 @@ pub fn layout(
         column,
         money,
         power,
+        tools,
         tabs,
         area: Rect::new(inner_x, y, inner_w, area_h),
         tile: (tile_w, tile_h),
@@ -145,6 +159,9 @@ impl Layout {
     pub fn hit(&self, x: f32, y: f32, scroll: usize, items: usize) -> Option<Hit> {
         if !self.column.contains(x, y) {
             return None;
+        }
+        if let Some(i) = self.tools.iter().position(|t| t.contains(x, y)) {
+            return Some(Hit::Tool(ToolMode::ALL[i]));
         }
         if let Some(i) = self.tabs.iter().position(|t| t.contains(x, y)) {
             return Some(Hit::Tab(Tab::ALL[i]));

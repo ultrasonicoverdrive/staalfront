@@ -133,6 +133,8 @@ pub mod placement_view;
 pub mod playfield;
 pub mod population;
 pub mod production_view;
+pub mod repair_mode;
+pub mod repair_view;
 pub mod roster;
 pub mod runner;
 pub mod sandbox;

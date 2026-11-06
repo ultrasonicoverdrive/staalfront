@@ -147,6 +147,24 @@ pub enum Command {
         /// The rally cell.
         cell: Option<Cell>,
     },
+    /// Start (`on`) or stop repairing the structure (WP6.6, `docs/rules/repair_sell.md`). The owner
+    /// is the player who sent the command, who must own the structure. A refusal is reported
+    /// ([`World::repair_rejections`](crate::World::repair_rejections)) and counts as ignored: not
+    /// a structure of the sender's, under construction, being sold, not standing, at full hit
+    /// points, already repairing (start) or not repairing (stop).
+    Repair {
+        /// The structure.
+        structure: EntityId,
+        /// True to start repairing, false to stop.
+        on: bool,
+    },
+    /// Sell the structure (WP6.6): it takes the sale time and is then removed, and the owner is
+    /// paid a part of the price scaled by the hit points it has at that moment. The sender must
+    /// own it; refused when it is under construction, already being sold or not standing.
+    Sell {
+        /// The structure.
+        structure: EntityId,
+    },
     /// Give the units an order (WP3.4, `docs/rules/orders.md`): replace their
     /// current order and queue with `order`, or, with `queued`, add it behind
     /// the orders they have (a unit with none starts on it at once). A unit

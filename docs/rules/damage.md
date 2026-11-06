@@ -76,6 +76,6 @@ difference), effect instances per frame 39 off, 44 to 45 on; the first four chec
 
 ## Not done
 
-No sound (audio is another WP), no repair or sell (WP6.6), no damage models for units (the art has none), no
+No sound (audio is another WP), a repair (WP6.6) raises the hit points and the stage follows at once, with no hysteresis; no damage models for units (the art has none), no
 smoke from a structure under construction, no damage stage in the minimap or the icons, no fire on a damaged (not
 heavily damaged) object by design. Hit-point bars are WP3.3's.

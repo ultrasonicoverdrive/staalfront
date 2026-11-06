@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4 (power) is merged (PR #99); WP6.7 (defensive buildings) is built and in review, stacked on WP6.4 and merged with main (see "WP6.7 notes"); WP6.6 is not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4 (power) is merged (PR #99); WP6.7 (defensive buildings) is merged (PR #100, see "WP6.7 notes"); WP6.6 (repair and sell) is built and in review, based on main (see "WP6.6 notes"); every WP of the phase is then built. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -2451,6 +2451,23 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   plant built in a shortage is slowed like any structure (no exemption: the floor is the way out); the damage stage of the
   models is not tied to the output (the output follows the hit points, the model follows the damage thresholds of
   `damage.ron`); no sound or announcement for "low power" (audio is another work package); not played by a person.
+
+### WP6.6 notes: repair and sell (based on main after #100, decision 04-11-2026)
+
+- Done: `Command::Repair { structure, on }` (tag 16) and `Command::Sell { structure }` (tag 17), owner only, every refusal listed
+  (`World::repair_rejections`); repair gains `hp_per_tick` and pays the construction rule on the absolute hit points (the ticks add
+  up to exactly the cost of the gap), waits without money, is slowed by a power shortage; a sale is a countdown after which the
+  structure is removed by the ordinary path and pays `price * refund * hp / max_hp`; a structure being sold counts as gone from the
+  first tick (power, prerequisites, production, storage, defences, match). Data `assets/config/repair.ron` (3 hp a tick, 250
+  thousandths, 100 ticks, 500 thousandths) and `repair_look.ron`. Sidebar: Repair and Sell mode buttons, the cursor of the mode, a
+  repair sign and a sale bar on the structure. New pinned scenario `repair_sell` (`0x963b3db14951cfa5`, in the CI list). Rules:
+  `docs/rules/repair_sell.md`. Screenshots: `docs/screenshots/wp6.6`.
+- **Decisions** (written in `repair_sell.md`): no money means a repair waits (flag stays) and does not stop; power slows repair like
+  construction and does not slow a sale; the defeat of a player that sells its last structure is in the tick the sale starts; the
+  refund goes into the store above the capacity and is not taken off `credits_spent`; Esc ends a mode before it opens the pause menu.
+- **Pins:** none moved. New section `r` of the checksum exists only while something repairs or is sold.
+- **Gaps:** no cancelling a sale, no sound, no hotkeys for the modes, a sold factory loses its queue without refund, no units come
+  out of a sold structure, no repair of units, no AI use.
 
 ### WP6.7 notes: defensive buildings (stacked on WP6.4, orchestrator decision 03-11-2026)
 

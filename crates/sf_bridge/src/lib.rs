@@ -41,6 +41,7 @@ use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
 use sf_data::power::PowerSettings;
 use sf_data::production::ProductionSettings;
+use sf_data::repair::RepairSettings;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{
@@ -384,6 +385,17 @@ pub fn power_rules(settings: &PowerSettings) -> sf_sim::PowerRules {
     sf_sim::PowerRules {
         shortage_floor_permille: settings.shortage_floor_permille,
         defence_cutoff_permille: settings.defence_cutoff_permille,
+    }
+}
+
+/// The repair and sale rules of the world (WP6.6) from the settings of `repair.ron`. To hand to
+/// [`World::with_repair`](sf_sim::World::with_repair), after the unit and building tables.
+pub fn repair_rules(settings: &RepairSettings) -> sf_sim::RepairRules {
+    sf_sim::RepairRules {
+        hp_per_tick: settings.hp_per_tick,
+        full_cost_permille: settings.full_cost_permille,
+        sell_ticks: settings.sell_ticks,
+        refund_permille: settings.refund_permille,
     }
 }
 

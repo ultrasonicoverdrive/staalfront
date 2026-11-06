@@ -71,6 +71,13 @@ everything, `at_speed_zero_everything_stops_and_nothing_is_paid_then_it_goes_on`
   A power plant under construction in a shortage is slowed like any other structure: the way out of a shortage is the
   floor, not an exemption.
 
+## Repair and sale (WP6.6)
+
+A repair is slowed by the same speed as construction: it advances only on the ticks `advances_on(tick, speed)` names and costs nothing on
+the others, so the price stays exact (`a_shortage_slows_a_repair_and_the_price_is_still_exact`). A repaired producer makes
+`power * hp / max_hp` again from the next count (`a_repaired_producer_makes_more_power_from_the_next_tick`). A structure being sold makes
+and uses nothing from the next count (it does not stand); a sale itself is not slowed by a shortage (`repair_sell.md`).
+
 ## Defences (the hook; read since WP6.7)
 
 `World::defences_powered(player)` is true while the speed is at least `defence_cutoff_permille` (shipped 1000: any shortage
@@ -167,7 +174,7 @@ scenario (every unit stands still at the end, however fast it was made), which i
 
 ## Not done, on purpose
 
-Repair and sell (WP6.6); the AI's response to a shortage (phase 9); a power-plant-first
+The AI's response to a shortage (phase 9); a power-plant-first
 build order or a "low power" announcement in sound (audio is another work package); a power cost for a structure while it
 goes up; a separate rule for the structures of the harvester dock or the radar (a radar that switches off in a shortage is a
 presentation of phase 11); damage stages by state rather than by hit points; counting power in the same tick the structure

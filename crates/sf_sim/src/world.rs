@@ -24,6 +24,7 @@ use crate::placement::PlacementState;
 use crate::power::Power;
 use crate::production::Production;
 use crate::projectiles::ProjectileId;
+use crate::repair::RepairSell;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 use crate::targeting::{self, Engagement, Targeting, TargetingConfig};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
@@ -181,6 +182,9 @@ pub enum ConfigError {
     /// The power rules were given twice, after the start, before the unit or building table, after
     /// the match rules, or with numbers out of bounds (WP6.4).
     Power,
+    /// The repair and sale rules were given twice, after the start, before the unit or building
+    /// table, or with numbers out of bounds (WP6.6).
+    Repair,
     /// The match rules were given twice, after the start, before the unit table, the weapon table
     /// or the destruction settings; or one of those was given after them (WP7.6).
     Match,
@@ -258,6 +262,11 @@ impl fmt::Display for ConfigError {
             ConfigError::Power => {
                 "the power rules must be given once, before the world starts, after the unit and building \
                  tables and before the match rules, with the floor and the defence cutoff from 0 to 1000"
+            }
+            ConfigError::Repair => {
+                "the repair and sale rules must be given once, before the world starts, after the unit and \
+                 building tables, with 1 to 1000 hit points per tick, a full-repair cost of 0 to 1000 \
+                 thousandths of the price, 1 to 6000 sale ticks and a refund of 0 to 1000 thousandths"
             }
             ConfigError::Match => {
                 "the match rules must be given once, last, before the world starts, after the unit table, the \
@@ -376,6 +385,9 @@ pub struct World {
     /// The power rules and the totals of the last recount (WP6.4). `None` for a world that was given
     /// none: nothing makes or uses power and the speed is always full.
     pub(crate) power: Option<Power>,
+    /// The repair and sale rules and what the last step did with them (WP6.6). `None` for a world
+    /// that was given none: nothing is repaired or sold.
+    pub(crate) repair: Option<Box<RepairSell>>,
     /// Who takes part in the match, who is defeated and who won (WP7.6). `None` for a world that was
     /// given no match rules.
     pub(crate) outcome: Option<Box<Outcome>>,
@@ -809,6 +821,7 @@ impl World {
             stalled: Vec::new(),
             production: None,
             power: None,
+            repair: None,
             outcome: None,
             placement: PlacementState::default(),
             completions: Vec::new(),
@@ -1454,11 +1467,16 @@ impl World {
         if let Some(p) = self.production.as_deref_mut() {
             p.rejections.clear();
         }
+        if let Some(r) = self.repair.as_deref_mut() {
+            r.rejections.clear();
+        }
         // The state first (WP6.3): structures under construction advance and the ones that
         // finish are recorded, so the commands of this tick already see them standing.
         // Power (WP6.4): recounted from the state the last step left, before anything uses it.
         self.refresh_power();
         self.advance_construction();
+        // Repair and sale (WP6.6): after construction, in slot order, before the commands.
+        self.advance_repair_sell();
         while let Some((player, command)) = self.queue.pop_due(tick) {
             if self.apply_from(player, command) {
                 executed = executed.saturating_add(1);
@@ -1974,7 +1992,9 @@ impl World {
             Command::BuildStructure { .. }
             | Command::QueueUnit { .. }
             | Command::CancelUnit { .. }
-            | Command::SetRally { .. } => false,
+            | Command::SetRally { .. }
+            | Command::Repair { .. }
+            | Command::Sell { .. } => false,
             Command::Despawn { id } => self.despawn(id),
             Command::Order { ids, order, queued } => {
                 let (pos_min, pos_max) = self.pos_range();

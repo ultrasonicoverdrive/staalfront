@@ -592,3 +592,31 @@ fn the_same_world_replays_to_the_same_checksums() {
     assert_eq!(a, b);
     assert!(a.windows(2).any(|p| p[0] != p[1]));
 }
+
+#[test]
+fn a_tower_being_sold_fires_nothing_and_drops_its_target() {
+    // WP6.6: a structure being sold counts as gone from the first tick of the sale, also for the
+    // targeting of defences (`docs/rules/repair_sell.md`).
+    let mut w = world(false)
+        .with_repair(sf_sim::RepairRules {
+            hp_per_tick: 3,
+            full_cost_permille: 100,
+            sell_ticks: 50,
+            refund_permille: 500,
+        })
+        .unwrap();
+    place(&mut w, TOWER, (30, 30));
+    dummy(&mut w, at(30, 35));
+    w.step();
+    let tower = id_at(&w, (30, 30));
+    let before = run(&mut w, 60);
+    assert!(shots_by(&before, tower) > 0, "it fires before the sale");
+    assert!(w.turret_target_of(tower).is_some());
+    send(&mut w, P0, Command::Sell { structure: tower });
+    let during = run(&mut w, 49);
+    assert!(w.sale_of(tower).is_some(), "the sale is still going");
+    assert_eq!(shots_by(&during, tower), 0, "no shot while it is sold");
+    assert_eq!(w.turret_target_of(tower), None);
+    run(&mut w, 2);
+    assert!(w.get(tower).is_none());
+}

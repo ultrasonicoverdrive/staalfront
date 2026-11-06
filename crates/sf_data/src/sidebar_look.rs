@@ -55,6 +55,12 @@ pub struct Colors {
     pub tab_active: Rgba,
     /// The text of a tab with nothing to build.
     pub tab_empty_text: Rgba,
+    /// A Repair or Sell button (WP6.6).
+    pub tool: Rgba,
+    /// A button under the cursor.
+    pub tool_hover: Rgba,
+    /// The button of the mode that is on.
+    pub tool_active: Rgba,
     /// The back of an item.
     pub tile_back: Rgba,
     /// Laid over the item under the cursor.
@@ -105,6 +111,10 @@ pub struct SidebarLook {
     pub money_height_px: u16,
     /// Height of the power bar.
     pub power_height_px: u16,
+    /// Height of the row with the Repair and Sell buttons (WP6.6).
+    pub tool_height_px: u16,
+    /// The names of the two buttons, Repair then Sell.
+    pub tool_labels: (String, String),
     /// Height of a tab.
     pub tab_height_px: u16,
     /// Tabs per row.
@@ -155,6 +165,7 @@ impl SidebarLook {
             ("width_px", look.width_px),
             ("money_height_px", look.money_height_px),
             ("power_height_px", look.power_height_px),
+            ("tool_height_px", look.tool_height_px),
             ("tab_height_px", look.tab_height_px),
             ("tile_height_px", look.tile_height_px),
             ("bar_height_px", look.bar_height_px),
@@ -225,12 +236,14 @@ mod tests {
             (
                 look.money_height_px,
                 look.power_height_px,
+                look.tool_height_px,
                 look.tab_height_px,
                 look.tile_height_px,
                 look.bar_height_px
             ),
-            (26, 16, 24, 62, 5)
+            (26, 16, 24, 24, 62, 5)
         );
+        assert_eq!(look.tool_labels, ("Repair".to_owned(), "Sell".to_owned()));
         assert_eq!((look.tab_columns, look.tile_columns), (2, 2));
         assert_eq!(
             look.tab_labels,
@@ -292,6 +305,9 @@ mod tests {
                 tab_hover: (64, 82, 116, 255),
                 tab_active: (92, 126, 184, 255),
                 tab_empty_text: (130, 136, 146, 255),
+                tool: (62, 52, 40, 255),
+                tool_hover: (92, 76, 54, 255),
+                tool_active: (214, 164, 60, 255),
                 tile_back: (20, 24, 32, 255),
                 tile_hover: (255, 255, 255, 40),
                 tile_chosen: (255, 220, 90, 255),

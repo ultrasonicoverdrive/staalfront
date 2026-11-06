@@ -12,6 +12,7 @@ use sf_data::sidebar_look::SidebarLook;
 use sf_data::units::{Category, Faction, UnitDefs};
 use sf_sim::{BuildingFunction, Command, EntityId, FactoryStatus, FactoryView, Kind, PlayerId};
 
+use crate::repair_mode::ToolMode;
 use crate::sim_snapshot::SimSnapshot;
 
 /// The four build tabs, in the order they are shown.
@@ -296,6 +297,8 @@ impl Situation {
                     permille: c.permille(),
                     stalled: snap.stalled().contains(&v.id),
                 }),
+                // A structure being sold stands no more (WP6.6, `World::is_standing`).
+                None if snap.sale_of(v.id).is_some() => {}
                 // The simulation's `World::is_standing`: complete, and hit points left or a kind
                 // that cannot be damaged (0 in the unit table). A wreck-to-be at 0 HP stands not.
                 None if v.hp == 0 && !snap.stats_for(v).is_some_and(|t| t.hp == 0) => {}
@@ -395,6 +398,11 @@ pub enum Action {
     ChooseStructure(Kind),
     /// Put the structure that is chosen away.
     PutAway,
+    /// A left click on a Repair or Sell button (WP6.6): switch that mode on, or off when it is
+    /// the mode that is on.
+    ToggleMode(ToolMode),
+    /// A right click on a Repair or Sell button: leave the mode.
+    LeaveMode,
     /// Send this command (`QueueUnit` or `CancelUnit`).
     Send(Command),
 }
@@ -580,6 +588,24 @@ pub struct SidebarModel {
     pub power: Option<PowerReading>,
     /// What an empty tab says; `None` while the tab has items.
     pub empty_hint: Option<String>,
+    /// The Repair and Sell buttons (WP6.6): `None` while the world has no repair and sale rules (the
+    /// buttons are drawn dim and do nothing), else the mode that is on.
+    pub tools: Option<Tools>,
+}
+
+/// The state of the Repair and Sell buttons.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Tools {
+    /// The mode that is on, if one is.
+    pub mode: Option<ToolMode>,
+}
+
+impl SidebarModel {
+    /// The same model with the Repair and Sell buttons live and `mode` on (WP6.6).
+    pub fn with_tools(mut self, mode: Option<ToolMode>) -> SidebarModel {
+        self.tools = Some(Tools { mode });
+        self
+    }
 }
 
 /// Builds the model of `tab` for this frame.
@@ -626,6 +652,7 @@ pub fn model(
         waiting_for_credits,
         chosen,
         power,
+        tools: None,
     }
 }
 
