@@ -1,10 +1,12 @@
 //! Shroud and fog of war (WP8.1, `docs/rules/vision.md`): what each player can see, per cell.
 //!
-//! **Nothing in the simulation reads this yet.** The pass only works out, for every player, which
-//! cells are *visible* (inside the sight of one of its objects now), *explored* (visible at some
-//! time; never shrinks) and which are neither (*shroud*). A cell that is explored but not visible is
-//! *fog*. [`World::visibility`] is the hook WP8.2a will read; targeting, defences, orders and
-//! production behave exactly as before.
+//! The pass works out, for every player, which cells are *visible* (inside the sight of one of its
+//! objects now), *explored* (visible at some time; never shrinks) and which are neither (*shroud*).
+//! A cell that is explored but not visible is *fog*. [`World::visibility`] is what the rest of the
+//! simulation asks. **Only one thing reads it** (WP8.2a): the targeting gate, when the rules say
+//! `acquire_needs_sight` (off in everything that ships); targeting, defences, orders and production
+//! otherwise behave exactly as before. The rules may also list `shared` pairs (a viewer sees what a
+//! sharer sees); `visibility` is the union.
 //!
 //! **Sight.** Sight is kept in thousandths of a cell. A cell at offset `(dx, dy)` from the cell of an
 //! object is inside its disc when `(1000 dx)^2 + (1000 dy)^2 <= sight^2`: the centre of the cell
@@ -47,8 +49,8 @@
 //! would cost a megabyte of hashing per tick); the full recompute lives in
 //! [`World::vision_audit_current`], which the tests run every tick.
 //!
-//! **Where in the tick.** One pass right after the crowd pass and before targeting, so the gate WP8.2a
-//! adds reads this tick's positions. Deaths of a tick are picked up by the next pass. A world without
+//! **Where in the tick.** One pass right after the crowd pass and before targeting, so the gate
+//! reads this tick's positions. Deaths of a tick are picked up by the next pass. A world without
 //! vision rules has no pass and no section and hashes exactly as before.
 
 use sf_math::hash::Fnv1a64;
@@ -699,8 +701,8 @@ impl World {
         self.vision.as_deref().map(Vision::rules)
     }
 
-    /// What `player` knows about `cell` as of the last pass: the hook of WP8.2a (nothing reads it
-    /// yet). In a world without vision rules everything is [`Visibility::Visible`]; in one with
+    /// What `player` knows about `cell` as of the last pass, united with what every player that
+    /// shares vision with it knows (WP8.2a). The targeting gate reads it when the rules ask. In a world without vision rules everything is [`Visibility::Visible`]; in one with
     /// them a cell outside the map, and any cell of a player that has no object yet, is
     /// [`Visibility::Shroud`].
     pub fn visibility(&self, player: PlayerId, cell: Cell) -> Visibility {
