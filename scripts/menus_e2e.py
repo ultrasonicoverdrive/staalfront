@@ -101,6 +101,31 @@ class Game:
         found = re.findall(r"\(total (\d+)\)", self.text())
         return int(found[-1]) if found else -1
 
+    def totals(self):
+        return [int(n) for n in re.findall(r"\(total (\d+)\)", self.text())]
+
+    def wait_settled(self, timeout=30):
+        """Waits until the sim has stopped: two reports that came after this call show the same
+        total. Returns that total (the last one seen on a timeout, so the check after it fails
+        instead of this call)."""
+        seen = len(self.totals())
+        end = time.time() + timeout
+        while time.time() < end:
+            t = self.totals()
+            if len(t) >= seen + 2 and t[-1] == t[-2]:
+                return t[-1]
+            time.sleep(0.25)
+        return self.total_ticks()
+
+    def wait_ticks_above(self, ticks, timeout=30):
+        """Waits until the sim has gone past `ticks`; says whether it did."""
+        end = time.time() + timeout
+        while time.time() < end:
+            if self.total_ticks() > ticks:
+                return True
+            time.sleep(0.25)
+        return False
+
     def wait_for(self, pattern, timeout):
         end = time.time() + timeout
         while time.time() < end:
@@ -108,6 +133,39 @@ class Game:
                 return True
             time.sleep(0.5)
         return False
+
+    def barrier(self, timeout=20):
+        """Waits until the main thread has handled every key pressed before this call. Ctrl+9
+        (assign group 9) logs `group 9: ` from the frame that handles it; the first press can share
+        a frame with earlier keys, so a second one is pressed only once the first line is there: its
+        frame is then strictly later than theirs. Says whether both lines came."""
+        for _ in range(2):
+            m = self.mark()
+            self.chord("Control_L", "9")
+            end = time.time() + timeout
+            while not re.search(r"group 9: ", self.text()[m:]):
+                if time.time() > end:
+                    return False
+                time.sleep(0.1)
+        return True
+
+    def old_and_new_key(self, timeout=20):
+        """Presses b (the old key of Choose structure), waits for a barrier that comes after b's
+        frame, then presses n (the new one). Returns the number of `build: ` lines from b and from n,
+        or (-1, -1) when the barrier did not come (so the check fails). n is given until its line
+        comes and one second more, so a second line would be counted too."""
+        m = self.mark()
+        self.key("b")
+        if not self.barrier():
+            return -1, -1
+        m2 = self.mark()
+        self.key("n")
+        end = time.time() + timeout
+        while time.time() < end and not re.search(r"build: ", self.text()[m2:]):
+            time.sleep(0.25)
+        time.sleep(1.0)
+        text = self.text()
+        return len(re.findall(r"build: ", text[m:m2])), len(re.findall(r"build: ", text[m2:]))
 
     def hands(self):
         self.d = x11.XOpenDisplay(self.display.encode())
@@ -181,14 +239,13 @@ def playthrough(display, binary, settings):
         for _ in range(4):
             game.key("b")  # round the list of structures to none
         m = game.mark()
-        game.click(1125, 135, 1)
+        game.click(1125, 163, 1)  # the first tile, under the Repair and Sell buttons of WP6.6 (24 px + 4 px gap)
         check("a click on the sidebar reaches it with no menu open", game.count(r"sidebar: build", m) >= 1)
-        game.click(1125, 140, 3)  # the right button puts the structure away
+        game.click(1125, 168, 3)  # the right button puts the structure away
 
         # Esc opens the pause menu and holds the sim.
         game.key("Escape")
-        time.sleep(1.5)
-        t1 = game.total_ticks()
+        t1 = game.wait_settled()
         time.sleep(3.0)
         t2 = game.total_ticks()
         check("Esc holds the sim: no tick for 3 s", t1 == t2, f"total {t1} -> {t2}")
@@ -201,8 +258,8 @@ def playthrough(display, binary, settings):
         game.chord("Control_L", "1")
         game.click(200, 200, 1)
         game.click(250, 250, 3)
-        game.click(1125, 135, 1)  # the first tile of the sidebar
-        game.click(1125, 140, 3)
+        game.click(1125, 163, 1)  # the first tile of the sidebar
+        game.click(1125, 168, 3)
         time.sleep(1.0)
         bad = re.findall(r"^(?:build:|group \d|order for tick|sidebar:).*$", game.text()[m:], re.M)
         check("keys, clicks and the sidebar under the menu do nothing", not bad, str(bad[:3]))
@@ -210,8 +267,7 @@ def playthrough(display, binary, settings):
 
         # Resume is the first button of the pause menu.
         game.click(640, 290, 1)
-        time.sleep(2.5)
-        check("Resume lets the sim go on", game.total_ticks() > t2)
+        check("Resume lets the sim go on", game.wait_ticks_above(t2))
         m = game.mark()
         game.key("b")
         check("B reaches the game again after Resume", game.count(r"build: ", m) == 1)
@@ -220,31 +276,32 @@ def playthrough(display, binary, settings):
 
         # Esc twice: open, close.
         game.key("Escape")
-        time.sleep(1.0)
-        held = game.total_ticks()
+        held = game.wait_settled()
         time.sleep(2.0)
         check("held again", game.total_ticks() == held)
         game.key("Escape")
-        time.sleep(2.5)
-        check("Esc in the pause menu resumes", game.total_ticks() > held)
+        check("Esc in the pause menu resumes", game.wait_ticks_above(held))
 
         # Restart is the second button.
         matches = game.count(r"match m1: ")
         before = game.total_ticks()
         game.key("Escape")
-        time.sleep(1.0)
+        game.wait_settled()  # the menu is open when the sim is held
         game.click(640, 336, 1)
-        time.sleep(4.0)
+        game.wait_for(r"(?s)(match m1: .*){%d}" % (matches + 1), 30)
+        # The first report of the new game: its total is below the old one.
+        end = time.time() + 30
+        while time.time() < end and not 0 <= game.total_ticks() < before:
+            time.sleep(0.25)
         after = game.total_ticks()
         check("Restart builds the match again", game.count(r"match m1: ") == matches + 1)
         check("and the new game's clock is young", 0 <= after < before, f"{before} -> {after}")
 
         # Main menu is the fourth button; the start menu's Quit the fourth.
         game.key("Escape")
-        time.sleep(1.0)
+        game.wait_settled()
         game.click(640, 428, 1)
-        time.sleep(1.5)
-        held = game.total_ticks()
+        held = game.wait_settled()
         time.sleep(2.5)
         check("the main menu holds the sim", game.total_ticks() == held)
         game.click(640, 451, 1)
@@ -298,14 +355,11 @@ def settings_scenario(display, binary, settings):
         check("vertical sync off is applied to the surface", game.count(r"present: ") >= 1, str(re.findall(r"present: .*", game.text())[-1:]))
 
         # Back to the game; the new key works, the old one does not.
+        before = game.total_ticks()
         game.key("Escape")
         game.key("Escape")
-        time.sleep(1.0)
-        m = game.mark()
-        game.key("b")
-        old = game.count(r"build: ", m)
-        game.key("n")
-        new = game.count(r"build: ", m) - old
+        check("the sim runs again after the menu", game.wait_ticks_above(before + 1))
+        old, new = game.old_and_new_key()
         check("the new key works and the old one does not", old == 0 and new == 1, f"b: {old}, n: {new}")
     finally:
         game.stop()
@@ -319,12 +373,8 @@ def settings_scenario(display, binary, settings):
         check("and reads the file without a warning", "settings.ron" not in head and "settings" not in head, head[-200:])
         game.hands()
         game.move(300, 300)
-        time.sleep(3)
-        m = game.mark()
-        game.key("b")
-        old = game.count(r"build: ", m)
-        game.key("n")
-        new = game.count(r"build: ", m) - old
+        check("the sim runs at the second start", game.wait_ticks_above(game.total_ticks() + 1))
+        old, new = game.old_and_new_key()
         check("the rebound key is still there after a restart of the program", old == 0 and new == 1, f"b: {old}, n: {new}")
         check("the file is unchanged by a start", settings.read_text() == saved)
     finally:

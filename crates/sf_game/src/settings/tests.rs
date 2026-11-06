@@ -488,3 +488,82 @@ fn keys_and_bindings_are_named_the_way_the_player_reads_them() {
     );
     assert_eq!(primary_key_name(&b, Action::CameraZoomIn), None);
 }
+
+#[test]
+fn a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has() {
+    let dir = scratch("hand_edited_keys");
+    let path = dir.join("settings.ron");
+    let base = shipped();
+    // Escape for the stop order; the key of pan right (D) for pan left; a free key (J) for the
+    // fullscreen toggle.
+    std::fs::write(
+        &path,
+        "(keys: {OrderStop: [(trigger: Key(Escape))], CameraPanLeft: [(trigger: Key(KeyD))], \
+         ToggleFullscreen: [(trigger: Key(KeyJ))]})",
+    )
+    .unwrap();
+    let loaded = load_from(&path);
+    let s = &loaded.settings;
+    assert!(!s.keys.contains_key(&Action::OrderStop), "Esc is refused");
+    assert!(
+        !s.keys.contains_key(&Action::CameraPanLeft),
+        "D is pan right's"
+    );
+    assert!(
+        s.keys.contains_key(&Action::ToggleFullscreen),
+        "a free key stays"
+    );
+    // The refused actions keep the shipped keys.
+    let effective = s.effective_bindings(&base);
+    for action in [Action::OrderStop, Action::CameraPanLeft] {
+        assert_eq!(effective.for_action(action), base.for_action(action));
+    }
+    // One warning, naming both and not the third.
+    assert_eq!(loaded.warnings.len(), 1, "{:?}", loaded.warnings);
+    let w = &loaded.warnings[0];
+    assert!(
+        w.contains("OrderStop") && w.contains("CameraPanLeft"),
+        "{w}"
+    );
+    assert!(!w.contains("ToggleFullscreen"), "{w}");
+    // What the in-game rebind accepts, a file may hold: no warning, nothing dropped.
+    let mut by_hand = Settings::default();
+    by_hand
+        .rebind(&base, Action::CameraPanLeft, KeyCode::KeyJ)
+        .unwrap();
+    let mut again = by_hand.clone();
+    assert!(again.sanitize().is_empty());
+    assert_eq!(again, by_hand);
+    // Two actions given the same free key: the first in action order keeps it.
+    let mut twice = Settings::default();
+    twice
+        .keys
+        .insert(Action::OrderStop, vec![key(KeyCode::KeyJ)]);
+    twice
+        .keys
+        .insert(Action::CameraPanLeft, vec![key(KeyCode::KeyJ)]);
+    let first = *twice.keys.keys().next().unwrap();
+    let said = twice.sanitize();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(twice.keys.keys().copied().collect::<Vec<_>>(), vec![first]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn esc_is_refused_even_when_the_shipped_file_binds_it_to_nothing() {
+    // An `input.ron` where no action has Escape: only the explicit Esc rule refuses it.
+    let mut base = shipped();
+    for list in base.bindings.values_mut() {
+        list.retain(|b| b.trigger != Trigger::Key(KeyCode::Escape));
+    }
+    assert!(
+        base.bindings
+            .values()
+            .flatten()
+            .all(|b| b.trigger != Trigger::Key(KeyCode::Escape))
+    );
+    let mut s = Settings::default();
+    s.keys.insert(Action::OrderStop, vec![key(KeyCode::Escape)]);
+    assert_eq!(s.drop_refused_keys(&base), vec![Action::OrderStop]);
+    assert!(s.keys.is_empty());
+}

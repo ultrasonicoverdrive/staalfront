@@ -252,15 +252,34 @@ fn the_fight_benchmark_has_the_crowd_of_the_plain_one_and_the_skirmish_at_its_si
     assert_eq!(armed.iter().filter(|v| v.owner.0 == 0).count(), 24);
 }
 
-/// `docs/bench/README.md` quotes the tick-1500 values of `PLAIN`, `FIGHT` and `M0`; they must be these constants.
+/// `docs/bench/README.md` quotes the tick-1500 value of `PLAIN`, `FIGHT` and `M0` once each, in a sentence that
+/// names the scenario. The value in that sentence must be exactly the constant: a stale value, a second value in
+/// the same sentence or a missing one fails. (Other places in the README may quote old values on purpose, as history.)
 #[test]
 fn the_readme_quotes_the_pinned_end_values() {
     let readme = include_str!("../../../docs/bench/README.md");
-    for (name, list) in [("PLAIN", &PLAIN), ("FIGHT", &FIGHT), ("M0", &M0)] {
-        let end = format!("`{:#018x}`", list[14]);
-        assert!(
-            readme.contains(&end),
-            "the README does not quote {name}'s end {end}"
+    // Line breaks and runs of spaces in the Markdown source do not matter.
+    let text = readme.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (name, lead, list) in [
+        ("FIGHT", "the list `FIGHT` of that test, ending", &FIGHT),
+        ("PLAIN", "the list `PLAIN`, ending", &PLAIN),
+        ("M0", "M0 ended at", &M0),
+    ] {
+        assert_eq!(
+            text.matches(lead).count(),
+            1,
+            "the README must have exactly one sentence starting `{lead}`"
+        );
+        let rest = text.split(lead).nth(1).unwrap();
+        let sentence = rest
+            .split(" at tick 1500")
+            .next()
+            .filter(|s| s.len() < rest.len())
+            .unwrap_or_else(|| panic!("the README sentence for {name} has no `at tick 1500`"));
+        assert_eq!(
+            sentence.trim(),
+            format!("`{:#018x}`", list[14]),
+            "the README's end value for {name} is not the pinned one"
         );
     }
 }
