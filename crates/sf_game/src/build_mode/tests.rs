@@ -59,7 +59,7 @@ fn b_cycles_through_the_choices_and_back_to_none() {
     let mut distinct = seen.clone();
     distinct.sort();
     distinct.dedup();
-    assert_eq!(distinct.len(), 9);
+    assert_eq!(distinct.len(), 10);
     mode.cycle();
     assert!(!mode.is_active());
     mode.cycle();

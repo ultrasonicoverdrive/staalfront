@@ -466,7 +466,6 @@ fn the_copy_that_builds_keeps_the_blocks_it_was_made_with() {
     assert!(copy.units().iter().filter(|u| u.building.is_some()).count() >= 10);
 }
 
-#[test]
 /// The proposed silo (WP7.3b) as literals, every number distinct from its neighbours so that two
 /// swapped fields fail. A move of the place in the tree is a data edit plus this row and
 /// `docs/rules/buildings.md`.
@@ -476,10 +475,10 @@ fn the_proposed_ore_silo_is_the_documented_one() {
     let silo = defs.unit("ore_silo").unwrap();
     assert_eq!(silo.kind, 43);
     assert_eq!(silo.cost, Some(250));
-    assert_eq!(silo.build_seconds, 12);
+    assert_eq!(silo.build_seconds.to_ticks().unwrap(), 240);
     assert_eq!(silo.power, -10);
     assert_eq!(silo.hp, 450);
-    assert_eq!(silo.sight, 4);
+    assert_eq!(silo.sight.milli(), 4000);
     assert_eq!(
         (
             silo.footprint.unwrap().width,
