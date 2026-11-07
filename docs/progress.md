@@ -2087,7 +2087,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before 
 
 ## Phase 7 — Economy
 
-Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in review; see "WP7.6 notes"). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) waits for its place in the tech tree. The report is below the notes. Milestone M1 is not reached yet (see the report).
+Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in review; see "WP7.6 notes"). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) is built with a proposed place in the tree and waits for Tijmen to confirm it (see "WP7.3b notes"). The report is below the notes. Milestone M1 is not reached yet (see the report).
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2296,7 +2296,7 @@ the design"). There is no menu, no restart and no pause behind the banner (phase
 For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).
 
 **Open from phase 7:**
-- WP7.3b, the silo, waits for its place in the approved tech tree.
+- WP7.3b, the silo: built with a proposed place (requires a refinery); Tijmen confirms or moves it in the WP7.3b PR.
 - Field totals per mission (WP7.1).
 - Refinery choice by route length instead of a straight line (WP7.5).
 - Queue spots not checked for passability (WP7.5).
@@ -2590,6 +2590,30 @@ WP8.3 (presentation) and WP8.4 (minimap and icons) are not started. The split of
 - **Gaps:** the gate does not drop a chosen target that walks into fog; the snapshot and debug view do not use the shared pairs; no
   team or alliance exists, so nothing but scenarios sets `shared`; no height (WP8.2b); no ghosts or hiding (WP8.3, WP8.4); the AI has no
   memory. The cost of the gate was not measurable (see `vision.md`, "Cost").
+
+### WP7.3b notes: the ore silo (orchestrator brief 07-11-2026)
+
+- **Done:** the structure `ore_silo` (kind 43) in `unit_defs.ron`: function `None`, `storage: 1500`, `requires: ["refinery"]`, 250 credits,
+  12 seconds, power -10, footprint 2x2, 450 hit points, sight 4, a cube for a model, the build picture "SILO" (order 110, the last tile of
+  the Structures tab). **No Rust rule changed:** `storage_capacities` and the capacity sum already read the `storage` field of every
+  structure, the sidebar and build mode list every buildable structure whose `requires` stand. Its **place in the tree is a proposal that
+  waits for Tijmen** (`buildings.md`, "The ore silo": the table row says "proposed"; the approved rows are untouched; alternatives are in the
+  PR body). New pinned scenario `silo` (`silo_defs`, a new frozen copy; `0x937182f6b4e6c09e`; CI list): refinery 600 plus a silo of 400, the
+  store fills to 600 by tick 2157, the silo is built at tick 2600 and stands at tick 2841 (capacity 1000), the store reaches 1000, the silo is
+  sold at tick 4400 and the capacity is 600 again at tick 4401 with the 1000 kept.
+- **Pins that moved, with the measured cause:** the shipped building-table digest `0x53aeb53ab44157d1` became `0x5dd54a0da8cb4303`
+  (`sf_bridge/tests/buildings.rs` and `placement.rs`) because the table has one more entry; measured: with the silo record taken out of `unit_defs.ron` the digest is `0x53aeb53ab44157d1` again. **`FIGHT` of `bench_scene.rs` re-pinned** (`0x2b829617a5151fdf` to `0x0f215774d484c93a` at tick 1500, all 15 checkpoints; `docs/bench/README.md`): same measurement, with the silo record out the old list passes unchanged; `PLAIN` did not move. The structure count
+  19 to 20, the priced roles 28 to 29, the storage table `[(2, 2000), (43, 1500)]`, the Structures tab and build mode (9 to 10 choices) are
+  the same cause. `units.md` has a row for the silo (a test holds the ids of the defs against it); the tests that add a role as data now use
+  kind 44. No scenario pin and no `golden.rs` constant moved; the `FIGHT` list moved as said.
+- **Decisions:** (1) the sandbox (`sf_game::sandbox::LEFT_OUT`) does not place the silo: with it, one heavy unit stays 33 cells from its goal
+  in `formation_base` (open item 14 of this file: the layout of the sandbox decides who gets stuck), and I did not want a proposal to
+  change the pinned formation measurements; it joins the sandbox when Tijmen confirms the place. (2) The silo has no art: the roster test
+  `every_buildable_structure_has_stage_models_from_the_art_set` lists it in `NO_ART_YET` and checks the box fallback instead. (3) The scenario
+  needs `repair` rules only because `Sell` does.
+- **Gaps:** no model, icon or stage models for the silo (a cube, base shape); the place, cost, time, power and size are placeholders; the
+  silo is not in the sandbox; nothing spends the store in this scenario (no money rules).
+- **Screenshots:** `docs/screenshots/wp7.3b/` (`silo_screenshot.rs`): the refinery full, a silo beside it (400 of 600, a bar of its own), both full.
 
 ## Open follow-ups
 

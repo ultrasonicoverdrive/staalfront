@@ -576,10 +576,18 @@ capacity drops to 60, after 1500 ticks still 120).
 The silo is a structure whose only job is storage: its `storage` is summed into the owner's capacity exactly as
 the refinery's is (standing = complete and with hit points), so a silo under construction, destroyed or sold
 adds nothing and the cap rule above applies unchanged: the ore stays, nothing more goes in until there is room.
-Nothing in `sf_sim`, `sf_bridge` or `sf_game` changed; the silo is picked up by `storage_capacities` and shows
-the same fill bar as the refinery. Tests: `sf_bridge/tests/harvest.rs` (`the_shipped_storage_reaches_the_world`
-pins `[(Kind(2), 2000), (Kind(43), 1500)]`, `the_silo_counts_only_while_it_stands`), and the scenario `silo`
-(below). Its cost and place in the tree are proposals (`buildings.md`).
+No rule in `sf_sim` or `sf_bridge` changed; the silo is picked up by `storage_capacities` and shows the same fill
+bar as the refinery (`silo_screenshot.rs`). The sandbox of `sf_game` leaves it out (`sandbox::LEFT_OUT`) until its place is
+confirmed. Tests: `sf_bridge/tests/harvest.rs` (`the_shipped_storage_reaches_the_world` pins `[(Kind(2), 2000), (Kind(43), 1500)]`),
+`sf_bridge/tests/silo.rs` (`the_silo_needs_a_standing_refinery`, `the_silo_adds_its_storage_only_while_it_stands`), and the scenario `silo`.
+Its cost and place in the tree are proposals (`buildings.md`).
+
+The scenario `silo` (6000 ticks, `silo_defs` = a copy of `harvest_defs` with the silo, capacities `[(2, 600), (43, 400)]` written
+in the scenario; `assets/scenarios/silo.expected` = `0x937182f6b4e6c09e`, `tools/sf_headless/tests/silo.rs`, CI job `headless`):
+the store is full at 600 by tick 2157; `BuildStructure` of the silo at tick 2600, which stands at tick 2841 (capacity 1000 from then,
+600 before: `the_silo_adds_room_once_built_and_takes_it_away_when_sold_without_losing_ore`); the store reaches 1000 before the sale
+at tick 4400; the capacity is 600 again at tick 4401 and the 1000 stay stored. `Sell` needs `repair` rules, which the scenario gives
+and does not otherwise use. Picture: `docs/screenshots/wp7.3b/`.
 
 ### Checksum
 
