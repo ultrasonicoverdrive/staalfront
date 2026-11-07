@@ -54,12 +54,13 @@ fn the_silo_adds_room_once_built_and_takes_it_away_when_sold_without_losing_ore(
     }
     // (2) While the silo is under construction (12 seconds = 240 ticks) it holds nothing.
     let complete = rows.iter().find(|r| r.2 == 1000).unwrap().0;
-    assert!(
-        (2840..=2845).contains(&complete),
-        "silo complete at {complete}"
-    );
+    assert!(complete == 2841, "silo complete at {complete}");
     for t in 2601..complete {
-        assert_eq!((at(t).1, at(t).2), (600, 600), "under construction, tick {t}");
+        assert_eq!(
+            (at(t).1, at(t).2),
+            (600, 600),
+            "under construction, tick {t}"
+        );
     }
     // (3) Standing: the capacity is 1000 and the store fills to it before the sale.
     assert_eq!(at(4399).1, 1000);
@@ -70,7 +71,10 @@ fn the_silo_adds_room_once_built_and_takes_it_away_when_sold_without_losing_ore(
         .find(|r| r.2 == 600)
         .expect("the sale lowers the capacity")
         .0;
-    assert!(sold <= 4400 + 120, "capacity back at 600 at {sold}");
+    assert_eq!(
+        sold, 4401,
+        "the sale lowers the capacity from the next sync"
+    );
     for t in sold..=6000 {
         assert_eq!((at(t).1, at(t).2), (1000, 600), "after the sale, tick {t}");
     }

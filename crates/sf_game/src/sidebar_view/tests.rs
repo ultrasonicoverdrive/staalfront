@@ -255,7 +255,7 @@ fn a_press_on_the_column_between_the_parts_is_consumed_and_does_nothing() {
         l.power.center(),
         // Between two tiles, and below the last one.
         (l.slot(0).right() + l.gap * 0.5, l.slot(0).center().1),
-        l.slot(9).center(),
+        l.slot(10).center(),
     ] {
         let out = run(
             &f,

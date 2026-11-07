@@ -370,11 +370,11 @@ fn f1_m05_the_player_builds_the_decoy_and_the_enemys_preplaced_decoys_stand() {
 // --- the checksum sees the shipped numbers ---
 
 #[test]
-fn the_shipped_building_digest_did_not_move_and_placement_has_its_own() {
+fn the_shipped_building_digest_is_pinned_and_placement_has_its_own() {
     let defs = defs();
     let table = building_table(&defs).unwrap();
-    // WP6.1's pin (see tests/buildings.rs): the build radius is not in it.
-    assert_eq!(table.digest(), 0x53ae_b53a_b441_57d1);
+    // The pin of tests/buildings.rs (moved by the proposed ore silo, WP7.3b): the build radius is not in it.
+    assert_eq!(table.digest(), 0x5dd5_4a0d_a8cb_4303);
     assert_ne!(table.placement_digest(), 0);
     assert_ne!(table.placement_digest(), table.digest());
 }

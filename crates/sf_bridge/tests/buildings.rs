@@ -290,7 +290,7 @@ fn sim_numbers_equal_the_data_numbers_for_every_variant() {
 /// The digest of the shipped building table (sf_data -> building_table -> World::with_buildings).
 /// It moves with any change of the shipped structures or of a hashed number; a move needs a
 /// deliberate data change and a note in `docs/rules/buildings.md`.
-const SHIPPED_BUILDINGS_DIGEST: u64 = 0x53ae_b53a_b441_57d1;
+const SHIPPED_BUILDINGS_DIGEST: u64 = 0x5dd5_4a0d_a8cb_4303;
 
 #[test]
 fn the_shipped_building_table_digest_is_pinned() {

@@ -39,8 +39,8 @@ fn each_faction_is_offered_the_shipped_structures_it_may_build() {
         assert!(!ids(&meridian).contains(&id), "{id}");
         assert!(!ids(&veyran).contains(&id), "{id}");
     }
-    // Nine each, in kind order.
-    assert_eq!((meridian.choices().len(), veyran.choices().len()), (9, 9));
+    // Ten each (the proposed ore silo among them), in kind order.
+    assert_eq!((meridian.choices().len(), veyran.choices().len()), (10, 10));
     let kinds: Vec<u16> = meridian.choices().iter().map(|c| c.kind.0).collect();
     assert!(kinds.windows(2).all(|w| w[0] < w[1]));
 }
@@ -55,7 +55,7 @@ fn b_cycles_through_the_choices_and_back_to_none() {
         assert!(mode.is_active());
         seen.push(mode.chosen().unwrap().id.clone());
     }
-    assert_eq!(seen.len(), 9);
+    assert_eq!(seen.len(), 10);
     let mut distinct = seen.clone();
     distinct.sort();
     distinct.dedup();

@@ -13,6 +13,8 @@
 //           capacity stays 600), then standing: capacity 1000; sold at tick 4400: capacity 600 again,
 //           below what is stored
 //
+// `repair` is only there because `Sell` needs it (no repair command is given; the sale takes 60 ticks).
+//
 // What happens: the store fills to 600 and a harvester waits in the bay holding its load; the silo
 // stands and the store fills to 1000; the sale lowers the capacity, the 1000 stored are kept and
 // nothing more is taken. tools/sf_headless/tests/silo.rs asserts those stages and the pinned
@@ -56,6 +58,7 @@ Scenario(
         queue_rows: 8,
     )),
     storage: Some([(2, 600), (43, 400)]),
+    repair: Some((hp_per_tick: 5, full_cost_permille: 400, sell_ticks: 60, refund_permille: 700)),
     ticks: 6000,
     commands: [
         (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (84, 74))),

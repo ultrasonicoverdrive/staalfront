@@ -177,7 +177,8 @@ fn the_structures_tab_lists_what_the_standing_structures_allow() {
             "barracks",
             "vehicle factory",
             "defence tower",
-            "decoy emplacement"
+            "decoy emplacement",
+            "ore silo"
         ]
     );
     // The radar, the shipyard and the advanced defences need the vehicle factory or each other.
@@ -434,9 +435,10 @@ fn every_entry_has_the_price_and_time_the_simulation_will_charge() {
         assert_eq!(Some(e.tab), Tab::of_category(def.category), "{}", e.id);
         checked += 1;
     }
-    // The ten structures of Meridian less the bunker of Veyran, plus its infantry, vehicles.
-    assert_eq!(checked, 9 + 5 + 7);
-    // The data tells the entries apart, so that a mixed-up mapping cannot hide: of the 21 entries at
+    // The eleven structures of Meridian (the ore silo of WP7.3b among them) less the bunker of
+    // Veyran, plus its infantry, vehicles.
+    assert_eq!(checked, 10 + 5 + 7);
+    // The data tells the entries apart, so that a mixed-up mapping cannot hide: of the 22 entries at
     // least 20 have a price and a time of their own (the radar and the advanced defences share
     // theirs, and are told apart by their pictures above).
     let mut pairs: Vec<(u32, u32)> = r

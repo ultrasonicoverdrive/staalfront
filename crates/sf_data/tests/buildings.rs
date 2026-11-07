@@ -481,7 +481,10 @@ fn the_proposed_ore_silo_is_the_documented_one() {
     assert_eq!(silo.hp, 450);
     assert_eq!(silo.sight, 4);
     assert_eq!(
-        (silo.footprint.unwrap().width, silo.footprint.unwrap().height),
+        (
+            silo.footprint.unwrap().width,
+            silo.footprint.unwrap().height
+        ),
         (2, 2)
     );
     let block = silo.building.as_ref().unwrap();

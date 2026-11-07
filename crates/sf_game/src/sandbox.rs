@@ -92,10 +92,18 @@ pub fn faction_of_owner(owner: u8) -> Option<Faction> {
         .map(|side| side.faction)
 }
 
-/// Whether `side` gets this role: its faction is among the role's, and it is
-/// not a vessel.
+/// Roles the sandbox leaves out: the ore silo is a proposal that waits for Tijmen (WP7.3b,
+/// `docs/rules/buildings.md`), and a sandbox base with one more structure moves where the units
+/// are put (the pinned formation tests of `formation_base.rs` and the bench would move with it).
+/// It joins the sandbox when its place in the tree is confirmed.
+const LEFT_OUT: [&str; 1] = ["ore_silo"];
+
+/// Whether `side` gets this role: its faction is among the role's, it is
+/// not a vessel and it is not left out ([`LEFT_OUT`]).
 fn belongs_to(def: &UnitDef, side: &Side) -> bool {
-    def.category != Category::Vessel && def.factions.contains(&side.faction)
+    def.category != Category::Vessel
+        && !LEFT_OUT.contains(&def.id.as_str())
+        && def.factions.contains(&side.faction)
 }
 
 /// How many structures and units (and objects) the definitions give the
