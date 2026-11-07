@@ -207,6 +207,19 @@
             build_picture: (color: (120, 100, 80), label: "BNKR", order: 100),
             // placeholder: build_seconds, sight, model.
         ),
+        (
+            // Proposed (WP7.3b), waiting for Tijmen: not part of the approved tech tree, see
+            // docs/rules/buildings.md "The ore silo". It stores ore and does nothing else, so
+            // its function is `None`; the `storage` number is all the rules read.
+            kind: 43, id: "ore_silo", factions: [Meridian, Veyran], category: Structure,
+            building: (requires: ["refinery"], storage: 1500),
+            cost: 250, build_seconds: 12, hp: 450, armor: "structure", power: -10,
+            footprint: (width: 2, height: 2), sight: 4,
+            model: Shape(Cube), strategic_icon: Square,
+            build_picture: (color: (170, 120, 70), label: "SILO", order: 110),
+            // placeholder: all of it (cost, build_seconds, power, footprint, hp, sight, storage,
+            // model, the place in the tree: proposed, not approved).
+        ),
 
         // ---- Shared units ------------------------------------------------
         (
