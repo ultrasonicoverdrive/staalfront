@@ -66,10 +66,7 @@ fn table() -> UnitTable {
 }
 
 fn rules() -> VisionRules {
-    VisionRules {
-        legacy_sight_milli: 2000,
-        sights: SIGHTS.to_vec(),
-    }
+    VisionRules::new(2000, SIGHTS.to_vec())
 }
 
 fn plain(side: u32) -> World {
@@ -401,17 +398,22 @@ fn a_unit_that_walks_away_leaves_fog_and_explored_never_shrinks() {
             target: at(45, 10),
         },
     );
-    let mut last_explored = 0u32;
+    // The sets, not the counts: a cell lost and another gained would keep a count.
+    let mut last_explored: Vec<u64> = Vec::new();
     let mut was_fog = false;
-    for _ in 0..400 {
+    for t in 0..400 {
         w.step();
         let (_, explored) = w.fog_words(P0).unwrap();
-        let n: u32 = explored.iter().map(|x| x.count_ones()).sum();
-        assert!(
-            n >= last_explored,
-            "explored shrank from {last_explored} to {n}"
-        );
-        last_explored = n;
+        if !last_explored.is_empty() {
+            for (k, (before, now)) in last_explored.iter().zip(explored).enumerate() {
+                assert_eq!(
+                    before & !now,
+                    0,
+                    "tick {t}: explored cells lost in word {k}"
+                );
+            }
+        }
+        last_explored = explored.to_vec();
         was_fog |= seen(&w, P0, 10, 10) == Visibility::Fog;
         w.vision_audit().unwrap();
     }
@@ -542,10 +544,7 @@ fn a_world_without_vision_rules_sees_everything_and_hashes_as_a_plain_world() {
 
 #[test]
 fn the_rules_are_refused_when_they_do_not_fit() {
-    let mk = |sights: Vec<(Kind, u32)>, legacy| VisionRules {
-        legacy_sight_milli: legacy,
-        sights,
-    };
+    let mk = |sights: Vec<(Kind, u32)>, legacy| VisionRules::new(legacy, sights);
     let bad = |w: World, r: VisionRules| matches!(w.with_vision(r), Err(ConfigError::Vision));
     assert!(bad(plain(8), mk(vec![(Kind(99), 1000)], 0)), "unknown kind");
     assert!(
@@ -684,9 +683,7 @@ fn the_incremental_counts_equal_a_recompute_every_tick() {
         w.step();
         w.vision_audit()
             .unwrap_or_else(|e| panic!("tick {tick}: {e}"));
-        let mut c = w.clone();
-        c.vision_resync();
-        c.vision_audit_current()
+        w.vision_audit_current()
             .unwrap_or_else(|e| panic!("tick {tick}, from the entities: {e}"));
     }
 }
@@ -812,4 +809,132 @@ fn a_player_cannot_have_more_discs_than_a_count_can_hold() {
     assert!(v.player(P0).unwrap().count.iter().all(|&c| c == 0));
     assert_eq!(v.player(P0).unwrap().visible_cells, 0);
     v.audit().unwrap();
+}
+
+// ---- shared vision and the gate flag (WP8.2a) -----------------------------------------------------
+
+const P2: PlayerId = PlayerId(2);
+
+fn shared_world(shared: Vec<(PlayerId, PlayerId)>) -> World {
+    plain(40).with_vision(rules().with_shared(shared)).unwrap()
+}
+
+#[test]
+fn a_viewer_sees_what_its_sharer_sees_and_not_the_other_way_round() {
+    // (P0, P1): P1 also sees what P0 sees. P0 sees a disc of 3 round (10, 10), P1 one round (30, 30).
+    let mut w = shared_world(vec![(P0, P1)]);
+    unit(&mut w, P0, SCOUT, 10, 10);
+    unit(&mut w, P1, SCOUT, 30, 30);
+    assert_eq!(
+        seen(&w, P1, 10, 10),
+        Visibility::Visible,
+        "the viewer gets the sharer's cell"
+    );
+    assert_eq!(seen(&w, P1, 12, 11), Visibility::Visible);
+    assert_eq!(
+        seen(&w, P1, 30, 30),
+        Visibility::Visible,
+        "and keeps its own"
+    );
+    assert_eq!(
+        seen(&w, P0, 30, 30),
+        Visibility::Shroud,
+        "the sharer gets nothing back"
+    );
+    assert_eq!(seen(&w, P0, 10, 10), Visibility::Visible);
+    // A third player is not part of it.
+    unit(&mut w, P2, SCOUT, 20, 20);
+    assert_eq!(seen(&w, P2, 10, 10), Visibility::Shroud);
+    assert_eq!(seen(&w, P0, 20, 20), Visibility::Shroud);
+    assert_eq!(seen(&w, P1, 20, 20), Visibility::Shroud);
+    // The viewer's own bitsets are its own: nothing shared is stored in them.
+    let (vis, _) = w.fog_words(P1).unwrap();
+    let i = 10 * 40 + 10;
+    assert_eq!((vis[i / 64] >> (i % 64)) & 1, 0);
+    w.vision_audit().unwrap();
+}
+
+#[test]
+fn shared_fog_is_fog_for_the_viewer_and_a_viewer_without_objects_sees_too() {
+    let mut w = shared_world(vec![(P0, P2)]);
+    let a = unit(&mut w, P0, RUNNER, 10, 10);
+    // P2 has no object at all: it still sees through P0.
+    assert_eq!(seen(&w, P2, 10, 10), Visibility::Visible);
+    assert_eq!(seen(&w, P2, 30, 30), Visibility::Shroud);
+    schedule(&mut w, P0, Command::Despawn { id: a });
+    w.step();
+    // The sharer lost its sight and keeps the explored cells; the viewer knows them as fog.
+    assert_eq!(seen(&w, P0, 10, 10), Visibility::Fog);
+    assert_eq!(seen(&w, P2, 10, 10), Visibility::Fog);
+}
+
+#[test]
+fn sharing_both_ways_and_in_a_chain_is_not_transitive() {
+    // 0 -> 1 and 1 -> 2: player 2 gets player 1's cells, not player 0's.
+    let mut w = shared_world(vec![(P0, P1), (P1, P2)]);
+    unit(&mut w, P0, SCOUT, 5, 5);
+    unit(&mut w, P1, SCOUT, 15, 15);
+    assert_eq!(seen(&w, P1, 5, 5), Visibility::Visible);
+    assert_eq!(seen(&w, P2, 15, 15), Visibility::Visible);
+    assert_eq!(seen(&w, P2, 5, 5), Visibility::Shroud, "not transitive");
+    let mut both = shared_world(vec![(P0, P1), (P1, P0)]);
+    unit(&mut both, P0, SCOUT, 5, 5);
+    unit(&mut both, P1, SCOUT, 15, 15);
+    assert_eq!(seen(&both, P0, 15, 15), Visibility::Visible);
+    assert_eq!(seen(&both, P1, 5, 5), Visibility::Visible);
+}
+
+#[test]
+fn the_shared_pairs_must_ascend_and_not_name_a_player_twice_in_one_pair() {
+    let bad = |shared: Vec<(PlayerId, PlayerId)>| {
+        matches!(
+            plain(8).with_vision(rules().with_shared(shared)),
+            Err(ConfigError::Vision)
+        )
+    };
+    assert!(bad(vec![(P0, P0)]), "a player with itself");
+    assert!(bad(vec![(P1, P0), (P0, P1)]), "out of order");
+    assert!(bad(vec![(P0, P1), (P0, P1)]), "twice");
+    assert!(!bad(vec![(P0, P1), (P1, P0)]));
+    assert!(!bad(vec![]));
+}
+
+#[test]
+fn the_gate_and_the_pairs_are_in_the_hash_only_when_set() {
+    let digest = |r: VisionRules| plain(8).with_vision(r).unwrap().vision_digest().unwrap();
+    let base = digest(rules());
+    // Off and empty is what it was before the fields existed: the same digest as the plain rules.
+    assert_eq!(
+        base,
+        digest(rules().with_acquire_needs_sight(false).with_shared(vec![]))
+    );
+    let gate = digest(rules().with_acquire_needs_sight(true));
+    let ab = digest(rules().with_shared(vec![(P0, P1)]));
+    let ba = digest(rules().with_shared(vec![(P1, P0)]));
+    let both = digest(
+        rules()
+            .with_acquire_needs_sight(true)
+            .with_shared(vec![(P0, P1)]),
+    );
+    let all = [base, gate, ab, ba, both];
+    for i in 0..all.len() {
+        for j in i + 1..all.len() {
+            assert_ne!(all[i], all[j], "{i} and {j}");
+        }
+    }
+}
+
+#[test]
+fn the_rules_are_handed_back_with_the_gate_and_the_pairs() {
+    let w = plain(8)
+        .with_vision(
+            rules()
+                .with_acquire_needs_sight(true)
+                .with_shared(vec![(P0, P1)]),
+        )
+        .unwrap();
+    let r = w.vision_rules().unwrap();
+    assert!(r.acquire_needs_sight);
+    assert_eq!(r.shared, vec![(P0, P1)]);
+    assert!(!world(8).vision_rules().unwrap().acquire_needs_sight);
 }

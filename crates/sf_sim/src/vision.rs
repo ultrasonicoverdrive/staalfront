@@ -1,10 +1,12 @@
 //! Shroud and fog of war (WP8.1, `docs/rules/vision.md`): what each player can see, per cell.
 //!
-//! **Nothing in the simulation reads this yet.** The pass only works out, for every player, which
-//! cells are *visible* (inside the sight of one of its objects now), *explored* (visible at some
-//! time; never shrinks) and which are neither (*shroud*). A cell that is explored but not visible is
-//! *fog*. [`World::visibility`] is the hook WP8.2a will read; targeting, defences, orders and
-//! production behave exactly as before.
+//! The pass works out, for every player, which cells are *visible* (inside the sight of one of its
+//! objects now), *explored* (visible at some time; never shrinks) and which are neither (*shroud*).
+//! A cell that is explored but not visible is *fog*. [`World::visibility`] is what the rest of the
+//! simulation asks. **Only one thing reads it** (WP8.2a): the targeting gate, when the rules say
+//! `acquire_needs_sight` (off in everything that ships); targeting, defences, orders and production
+//! otherwise behave exactly as before. The rules may also list `shared` pairs (a viewer sees what a
+//! sharer sees); `visibility` is the union.
 //!
 //! **Sight.** Sight is kept in thousandths of a cell. A cell at offset `(dx, dy)` from the cell of an
 //! object is inside its disc when `(1000 dx)^2 + (1000 dy)^2 <= sight^2`: the centre of the cell
@@ -47,8 +49,8 @@
 //! would cost a megabyte of hashing per tick); the full recompute lives in
 //! [`World::vision_audit_current`], which the tests run every tick.
 //!
-//! **Where in the tick.** One pass right after the crowd pass and before targeting, so the gate WP8.2a
-//! adds reads this tick's positions. Deaths of a tick are picked up by the next pass. A world without
+//! **Where in the tick.** One pass right after the crowd pass and before targeting, so the gate
+//! reads this tick's positions. Deaths of a tick are picked up by the next pass. A world without
 //! vision rules has no pass and no section and hashes exactly as before.
 
 use sf_math::hash::Fnv1a64;
@@ -65,9 +67,9 @@ pub const MAX_SIGHT_MILLI: u32 = 64_000;
 pub const MAX_DISCS_PER_PLAYER: u32 = u16::MAX as u32;
 
 /// What a player knows about a cell.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Visibility {
-    /// Never seen.
+    /// Never seen. (Ordered: shroud < fog < visible.)
     Shroud,
     /// Seen before, not now.
     Fog,
@@ -77,7 +79,7 @@ pub enum Visibility {
 
 /// The sight of every kind, in thousandths of a cell (`sight` of `unit_defs.ron`, handed over by
 /// `sf_bridge::vision_rules`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VisionRules {
     /// The sight of an entity that has no unit table entry (placeholder wanderers, legacy
     /// structures), at most [`MAX_SIGHT_MILLI`].
@@ -85,14 +87,47 @@ pub struct VisionRules {
     /// `(kind, sight)`, strictly ascending by kind, each kind in the unit table. A kind of the table
     /// that is not listed has a sight of nothing.
     pub sights: Vec<(Kind, u32)>,
+    /// WP8.2a, the targeting gate: when set, automatic acquisition (a unit's scan, a defence
+    /// structure's look round) only picks candidates that are [`Visibility::Visible`] to the
+    /// scanner's owner. Off by default; retaliation and explicit orders are never gated.
+    pub acquire_needs_sight: bool,
+    /// WP8.2a, shared vision: `(sharer, viewer)` pairs; the viewer also sees (and has explored)
+    /// everything the sharer does. One way: the viewer's objects are not seen by the sharer unless
+    /// the reverse pair is listed too. Strictly ascending, no pair with itself. Empty by default.
+    pub shared: Vec<(PlayerId, PlayerId)>,
 }
 
 impl VisionRules {
-    /// Whether the numbers are inside their bounds and the kinds ascend without repeats.
+    /// Rules with the sights only: the gate off and nothing shared (what WP8.1 had).
+    pub fn new(legacy_sight_milli: u32, sights: Vec<(Kind, u32)>) -> VisionRules {
+        VisionRules {
+            legacy_sight_milli,
+            sights,
+            acquire_needs_sight: false,
+            shared: Vec::new(),
+        }
+    }
+
+    /// The same rules with the targeting gate set.
+    pub fn with_acquire_needs_sight(mut self, on: bool) -> VisionRules {
+        self.acquire_needs_sight = on;
+        self
+    }
+
+    /// The same rules with these `(sharer, viewer)` pairs (must be strictly ascending).
+    pub fn with_shared(mut self, shared: Vec<(PlayerId, PlayerId)>) -> VisionRules {
+        self.shared = shared;
+        self
+    }
+
+    /// Whether the numbers are inside their bounds, the kinds ascend without repeats and the
+    /// shared pairs ascend without repeats or a player sharing with itself.
     pub fn is_valid(&self) -> bool {
         self.legacy_sight_milli <= MAX_SIGHT_MILLI
             && self.sights.iter().all(|&(_, s)| s <= MAX_SIGHT_MILLI)
             && self.sights.windows(2).all(|w| w[0].0 < w[1].0)
+            && self.shared.iter().all(|&(a, b)| a != b)
+            && self.shared.windows(2).all(|w| w[0] < w[1])
     }
 }
 
@@ -467,6 +502,17 @@ impl Vision {
             h.write_bytes(&kind.0.to_le_bytes());
             h.write_u32(s);
         }
+        // WP8.2a: only when something is set, so rules without the gate and without sharing hash
+        // exactly as they did in WP8.1.
+        if self.rules.acquire_needs_sight || !self.rules.shared.is_empty() {
+            h.write_u8(b'g');
+            h.write_u8(u8::from(self.rules.acquire_needs_sight));
+            h.write_u64(self.rules.shared.len() as u64);
+            for &(a, b) in &self.rules.shared {
+                h.write_u8(a.0);
+                h.write_u8(b.0);
+            }
+        }
         let n = self.players.iter().flatten().count();
         h.write_u64(n as u64);
         for (id, pv) in self.players.iter().enumerate() {
@@ -481,7 +527,20 @@ impl Vision {
         }
     }
 
+    /// What `player` knows about the cell at `index`: its own picture united with that of every
+    /// player that shares vision with it (`rules.shared`).
     pub(crate) fn visibility(&self, player: PlayerId, index: u32) -> Visibility {
+        let mut best = self.own_visibility(player, index);
+        for &(sharer, viewer) in &self.rules.shared {
+            if viewer == player && best != Visibility::Visible {
+                best = best.max(self.own_visibility(sharer, index));
+            }
+        }
+        best
+    }
+
+    /// What `player` itself knows about the cell, shared vision not counted.
+    fn own_visibility(&self, player: PlayerId, index: u32) -> Visibility {
         let Some(pv) = self.player(player) else {
             return Visibility::Shroud;
         };
@@ -492,6 +551,24 @@ impl Vision {
         } else {
             Visibility::Shroud
         }
+    }
+
+    /// Whether the targeting gate is on (`rules.acquire_needs_sight`).
+    pub(crate) fn gate_on(&self) -> bool {
+        self.rules.acquire_needs_sight
+    }
+
+    /// Whether any cell of the `w` by `h` rectangle at `(x, y)` is visible to `player` (cells
+    /// outside the map do not count).
+    pub(crate) fn sees_rect(&self, player: PlayerId, x: u32, y: u32, w: u32, h: u32) -> bool {
+        for cy in y..(y + h).min(self.height) {
+            for cx in x..(x + w).min(self.width) {
+                if self.visibility(player, cy * self.width + cx) == Visibility::Visible {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// The number of discs `player` has stamped.
@@ -624,8 +701,8 @@ impl World {
         self.vision.as_deref().map(Vision::rules)
     }
 
-    /// What `player` knows about `cell` as of the last pass: the hook of WP8.2a (nothing reads it
-    /// yet). In a world without vision rules everything is [`Visibility::Visible`]; in one with
+    /// What `player` knows about `cell` as of the last pass, united with what every player that
+    /// shares vision with it knows (WP8.2a). The targeting gate reads it when the rules ask. In a world without vision rules everything is [`Visibility::Visible`]; in one with
     /// them a cell outside the map, and any cell of a player that has no object yet, is
     /// [`Visibility::Shroud`].
     pub fn visibility(&self, player: PlayerId, cell: Cell) -> Visibility {
@@ -680,10 +757,17 @@ impl World {
 
     /// Checks that the vision is what the entities in the world **now** make of it: a vision built
     /// from scratch from the present entities has the same counts, visible set and sums, and the
-    /// explored set only lacks cells that no longer matter. Valid right after a pass (call
-    /// [`World::vision_resync`] on a clone first). For tests.
+    /// explored set only lacks cells that no longer matter. It runs the pass on **a clone** first
+    /// (the deaths of the weapon stage are only picked up by the next pass), so it never changes
+    /// this world: there is no public way to run the pass outside a step. For tests.
     #[doc(hidden)]
     pub fn vision_audit_current(&self) -> Result<(), String> {
+        let mut c = self.clone();
+        c.update_vision();
+        c.audit_current_after_pass()
+    }
+
+    fn audit_current_after_pass(&self) -> Result<(), String> {
         let Some(v) = self.vision.as_deref() else {
             return Ok(());
         };
@@ -702,12 +786,6 @@ impl World {
             }
         }
         Ok(())
-    }
-
-    /// Runs the vision pass now, outside a step. For tests (on a clone).
-    #[doc(hidden)]
-    pub fn vision_resync(&mut self) {
-        self.update_vision();
     }
 
     /// What the entity in slot `i` stamps now; `None` if it stamps nothing.

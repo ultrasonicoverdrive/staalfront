@@ -1,0 +1,56 @@
+// The targeting gate and shared vision (WP8.2a, docs/rules/vision.md) on a 64 by 64 open map. With
+// `acquire_needs_sight: true` a unit or a defence only picks targets that its owner SEES now; here the
+// shooters have more reach than sight (the siege artillery reaches 10 cells and sees 6, the unmanned
+// artillery reaches 12 and sees 6), so there is something in reach that is not in sight.
+// `shared: [(2, 0)]`: player 2 shares what it sees with player 0 (one way). Player 2's scouts are
+// the "friend" that reveals things; they stay out of everybody's reach. CI runs it on Linux and Windows and
+// requires the checksum in vision_targeting.expected; tools/sf_headless/tests/vision_targeting.rs asserts the
+// key ticks and runs the same file with the gate off.
+//
+// `unit_defs` names the FROZEN copy of the definitions of WP5.4 (tanks_vs_infantry_defs/): the sights
+// and the weapons are that copy's (siege_artillery sight 6 and howitzer range 10, min 3; rifleman sight 5
+// and rifle range 4; scout sight 8; unmanned_artillery 2 by 2, sight 6, battery shell range 12, min 3).
+//
+// Slots (written order = slot, all generation 0):
+//    0  siege_artillery (21)    owner 0  cell (8, 8)     idle; the unit gate
+//    1  unmanned_artillery (41) owner 0  cell (20, 40)   2 by 2 defence; the defence gate
+//    2  siege_artillery         owner 0  cell (50, 47)   the footprint test: sees the relay's lower row only
+//    3  rifleman (12)           owner 1  cell (8, 16)    8 from slot 0: in its reach (10), outside its sight (6)
+//    4  rifleman                owner 1  cell (20, 50)   9 from slot 1's lower row: in reach (12), outside sight
+//    5  relay_transmitter (32)  owner 1  cell (50, 40)   2 by 2, rows 40 and 41: row 41 is 6 from slot 2
+//    6  siege_artillery         owner 1  cell (40, 8)    explicit attack order on slot 7 (not gated)
+//    7  light_tank (19)         owner 0  cell (40, 17)   9 from slot 6: out of its own sight, retaliates
+//    8  scout (15)              owner 2  cell (8, 40)    walks to (8, 24) from tick 300: reveals slot 3
+//    9  scout                   owner 2  cell (20, 62)   walks to (20, 56) from tick 600: reveals slot 4
+Scenario(
+    name: "vision_targeting",
+    seed: 0x0F06_0082,
+    map: (width: 64, height: 64),
+    unit_defs: Some("tanks_vs_infantry_defs"),
+    combat: true,
+    targeting: true,
+    destruction: true,
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true, shared: [(2, 0)])),
+    ticks: 1500,
+    commands: [
+        // --- player 0 ---
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (8, 8))),
+        (tick: 0, command: PlaceStructure(kind: 41, owner: 0, cell: (20, 40))),
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 0, cell: (50, 47))),
+        // --- player 1 ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (8, 16))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (20, 50))),
+        (tick: 0, command: PlaceStructure(kind: 32, owner: 1, cell: (50, 40))),
+        (tick: 0, command: SpawnUnit(kind: 21, owner: 1, cell: (40, 8))),
+        // --- player 0 again: the rifleman that is shot at from the fog ---
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 0, cell: (40, 17))),
+        // --- player 2: the friend that shares its sight ---
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 2, cell: (8, 40))),
+        (tick: 0, command: SpawnUnit(kind: 15, owner: 2, cell: (20, 62))),
+
+        // --- the orders ---
+        (tick: 1, command: OrderAttack(ids: [Id(6, 0)], target: (7, 0))),
+        (tick: 300, command: OrderMove(ids: [Id(8, 0)], target: (8, 24))),
+        (tick: 600, command: OrderMove(ids: [Id(9, 0)], target: (20, 56))),
+    ],
+)

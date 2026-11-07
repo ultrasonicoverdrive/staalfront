@@ -144,6 +144,21 @@ and the old order begun again, when:
 
 When an engagement ends and the cooldown has already run out, the unit looks round on that same tick.
 
+## The sight gate (WP8.2a, off by default)
+
+A world given vision rules (`vision.md`) with `acquire_needs_sight` set restricts what a scan may **pick**: a candidate counts only if its
+cell (a structure: any cell of its footprint) is `Visible` to the scanner's **owner** at the time of the scan, shared sight included. The
+check sits in `best_target`, after the weapon check, so it is the same for a unit's scan and a structure's ([`defences.md`](defences.md)).
+Everything else in this file stands:
+
+* **Return fire is not gated.** A unit that is hurt takes its attacker whether or not its owner sees it, and follows it within the
+  pursuit distance (`being_hit_from_the_fog_is_answered_and_an_attack_order_is_not_gated`: a tank hit by an artillery 9 cells away in the
+  shroud takes it at the tick the shell lands, tick 32).
+* **An explicit attack order is not gated, and stays until the target is gone** (the player's order wins; the interface will not offer
+  an unseen target, WP8.3 and WP8.4): in the same test the artillery of player 1 fires on its order at a tank it cannot see.
+* **A target already chosen is kept** by the checks above while it is valid, also when it steps into fog (the gate is on the pick).
+* With the flag off, or without vision rules, nothing differs from before; the shipped `vision.ron` and the match have it off.
+
 ## Return fire
 
 A unit that is **hurt by an enemy** in a tick (a shot or a splash; damage of zero does not count, since an
@@ -298,10 +313,8 @@ WP5.6.
 * **Firing at the ground**, and backing away from a target inside the minimum range.
 * **Threat-based priorities** (shoot what is shooting at you first, focus fire, retreat): the AI of WP9.3 gives
   commands for those; here a unit prefers what its weapon does most to, and the nearest.
-* **Seeing before shooting** (WP8.2a): the hook exists since WP8.1, `World::visibility(player, cell)`, and **nothing reads it**: a unit still picks any
-  other owner's entity in weapon reach whether or not its owner has seen the cell ([`vision.md`](vision.md)). The planned rule: auto-acquisition
-  (the unit scan and the structure's `defence_check`) only takes candidates on a `Visible` cell, behind a switch that is off by default; being hit
-  (return fire) is always allowed.
+* **Seeing before shooting** (WP8.2a): done, behind a switch that is **off** everywhere it ships: see "The sight gate" above and
+  [`vision.md`](vision.md). Not done: dropping a target that has been chosen when it steps into fog.
 * **Alliances and neutrals**: every other player is an enemy; `friendly_fire` and the choice of targets both
   mean "the same player".
 * **Switching to a better target**, and **returning to where an idle unit stood** after a chase.

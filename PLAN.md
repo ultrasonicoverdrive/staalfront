@@ -292,6 +292,8 @@ win. First moment to really play and adjust the design.
 
 *05-11-2026 (orchestrator, with WP8.1): WP8.2 is split. **WP8.2a** is the targeting gate (auto-acquisition only of cells the owner sees, retaliation always allowed), the sight rules of structures and the allied-vision hook, on top of `World::visibility` that WP8.1 builds; **WP8.2b** is the height bonus and waits until the sim has integer height levels and a map with relief exists (both maps are flat and the sim has no elevation today). WP8.1 computes what each player sees and changes no behaviour (`docs/rules/vision.md`).*
 
+*06-11-2026 (orchestrator, WP8.2a): the targeting gate is **behind a flag in the vision rules (`acquire_needs_sight`), off by default and off in the M1 match** until Tijmen has played M1 and decides; WP8.2a measures what turning it on would change in `match` (won at tick 8067 instead of 5967, 8 units lost instead of 6) and does not ship it on. The headless `match` scenario has the same vision rules as `sf_game --match` (review finding 1 of #104), `match.expected` re-pinned for that. Shared (allied) vision is a per-player list in the rules, empty by default; no diplomacy system.*
+
 ### Phase 9 — Computer opponent
 Layered (analysis §12, §22G):
 - WP9.1 **[xhigh]** Strategic: build order, economy, tech choice, attack timing.
