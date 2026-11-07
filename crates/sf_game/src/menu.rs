@@ -321,9 +321,12 @@ impl Menu {
         &self.shipped
     }
 
-    /// `input.ron` was read again (hot reload).
-    pub fn set_shipped(&mut self, shipped: Bindings) {
+    /// `input.ron` was read again (hot reload). The player's key overrides are checked against the
+    /// new file; the ones it no longer allows are dropped, and the warning says which.
+    pub fn set_shipped(&mut self, shipped: Bindings) -> Vec<String> {
+        let said = self.settings.sanitize_keys(&shipped);
         self.shipped = shipped;
+        said
     }
 
     pub fn set_live(&mut self, live: Live) {

@@ -102,8 +102,9 @@ fn first_key(list: &[Binding]) -> Option<usize> {
 impl Settings {
     /// Brings every value into what the game can use, and says what it changed: the UI scale to the
     /// nearest choice of the menu, a frame cap into [`FRAME_CAP_RANGE`] (0 is no cap), and no override
-    /// for the menu key or with an empty list.
-    pub fn sanitize(&mut self) -> Vec<String> {
+    /// for the menu key or with an empty list. The key overrides are checked against `shipped`, the
+    /// bindings the game runs with (the `input.ron` read from disk), see [`Settings::sanitize_keys`].
+    pub fn sanitize(&mut self, shipped: &Bindings) -> Vec<String> {
         let mut said = Vec::new();
         let look = MenuLook::embedded();
         let wanted = self.ui_scale;
@@ -131,13 +132,22 @@ impl Settings {
             }
             _ => {}
         }
+        said.extend(self.sanitize_keys(shipped));
+        said
+    }
+
+    /// The key part of [`Settings::sanitize`], also run again when `input.ron` is hot-reloaded (the
+    /// overrides are checked against the new file): no override for the menu key or with an empty
+    /// list, none that uses Esc or a key another action has in `shipped`. Says what it dropped.
+    pub fn sanitize_keys(&mut self, shipped: &Bindings) -> Vec<String> {
+        let mut said = Vec::new();
         let before = self.keys.len();
         self.keys
             .retain(|action, list| is_rebindable(*action) && !list.is_empty());
         if self.keys.len() != before {
             said.push("ignored key overrides for the menu key or with no key".to_owned());
         }
-        let refused = self.drop_refused_keys(&Bindings::builtin());
+        let refused = self.drop_refused_keys(shipped);
         if !refused.is_empty() {
             said.push(format!(
                 "ignored key overrides that use Esc or a key another action has (the shipped keys stay): {}",
@@ -359,8 +369,9 @@ pub struct Loaded {
 
 /// Reads `path`. A file that is not there gives the defaults and no warning (it is the first run);
 /// one that cannot be read or parsed gives the defaults and one warning that says it will be replaced
-/// on the next change; one with unusable values keeps the rest and warns about those.
-pub fn load_from(path: &Path) -> Loaded {
+/// on the next change; one with unusable values keeps the rest and warns about those. `shipped` is
+/// the `input.ron` the game runs with; the key overrides are checked against it.
+pub fn load_from(path: &Path, shipped: &Bindings) -> Loaded {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -374,7 +385,7 @@ pub fn load_from(path: &Path) -> Loaded {
     match ron::from_str::<Settings>(&text) {
         Ok(mut settings) => {
             let warnings = settings
-                .sanitize()
+                .sanitize(shipped)
                 .into_iter()
                 .map(|w| format!("{}: {w}", path.display()))
                 .collect();
