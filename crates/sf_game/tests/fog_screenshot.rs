@@ -185,10 +185,13 @@ impl Scene {
         let defs = UnitDefs::embedded();
         let map = Map::load(&assets().join("maps/m1")).unwrap();
         let cells = map.size_in_cells();
-        let world = sf_game::playfield::make_world(WorldConfig::new(7).with_map_size(cells.0, cells.1), &map)
-            .unwrap()
-            .with_units(sf_bridge::unit_table(&defs).unwrap())
-            .unwrap();
+        let world = sf_game::playfield::make_world(
+            WorldConfig::new(7).with_map_size(cells.0, cells.1),
+            &map,
+        )
+        .unwrap()
+        .with_units(sf_bridge::unit_table(&defs).unwrap())
+        .unwrap();
         let world = sf_game::playfield::with_buildings(world, &defs);
         let world = if vision {
             sf_game::playfield::with_vision(world, &defs)
@@ -443,8 +446,16 @@ fn the_edge_between_seen_and_unseen_is_a_ramp_and_not_a_step() {
     assert!(hi - lo > 100, "the edge is there: {hi} down to {lo}");
     // A ramp: no single step between neighbours takes more than a third of the whole drop, and at
     // least five samples sit strictly between the two ends.
-    let biggest = samples.windows(2).map(|p| (p[0] - p[1]).abs()).max().unwrap();
-    assert!(biggest * 3 < hi - lo, "a step of {biggest} in a drop of {}", hi - lo);
+    let biggest = samples
+        .windows(2)
+        .map(|p| (p[0] - p[1]).abs())
+        .max()
+        .unwrap();
+    assert!(
+        biggest * 3 < hi - lo,
+        "a step of {biggest} in a drop of {}",
+        hi - lo
+    );
     let between = samples
         .iter()
         .filter(|&&s| s > lo + (hi - lo) / 10 && s < hi - (hi - lo) / 10)
@@ -455,7 +466,8 @@ fn the_edge_between_seen_and_unseen_is_a_ramp_and_not_a_step() {
 // ---- ghosts and the minimap ---------------------------------------------------------------------------
 
 #[test]
-fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_place_is_seen_empty() {
+fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_place_is_seen_empty()
+{
     let mut scene = Scene::scouting(true);
     let mut r = renderer(&scene.map);
     let cam = scene.camera(0.22, (68.0, 25.0));
@@ -466,7 +478,10 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
     let (seen, snap) = scene.shoot_with(&mut r, &cam, true);
     assert!(snap.seen(refinery));
     assert_eq!(scene.ghosts.drawn(&snap).count(), 0);
-    save(&format!("m1_t{:05}_scout_sees_the_refinery.png", snap.tick().0), &seen);
+    save(
+        &format!("m1_t{:05}_scout_sees_the_refinery.png", snap.tick().0),
+        &seen,
+    );
 
     // The scout walks home: the cells go to fog and the refinery is hidden; its ghost is drawn.
     scene.send_scout(30, 60);
@@ -476,7 +491,10 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
     assert_eq!(snap.visibility(Cell::new(70, 26)), Visibility::Fog);
     let ghosts: Vec<_> = scene.ghosts.drawn(&snap).map(|g| g.id).collect();
     assert!(ghosts.contains(&refinery), "{ghosts:?}");
-    save(&format!("m1_t{:05}_ghost_of_the_refinery.png", snap.tick().0), &left);
+    save(
+        &format!("m1_t{:05}_ghost_of_the_refinery.png", snap.tick().0),
+        &left,
+    );
     // The ghost is a model in the ghost colour at the structure's place; the picture has changed
     // from "seen" by the fog and the ghost colour (not an empty field).
     let motions: Vec<_> = scene_motions(&scene.looks, &snap, &scene.ghosts).collect();
@@ -489,7 +507,10 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
         empty.run_to(3);
         let id = empty.world.occupant_at(Cell::new(70, 26)).unwrap();
         let t = empty.world.tick();
-        empty.world.schedule(t, THEM, Command::Despawn { id }).unwrap();
+        empty
+            .world
+            .schedule(t, THEM, Command::Despawn { id })
+            .unwrap();
         empty.run_to(10);
         empty.send_scout(30, 60);
         empty.run_to(900);
@@ -497,7 +518,8 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
     };
     // Without the ghost the fogged field is plain terrain; with it a model stands there.
     assert!(
-        brightness(rgb(&left, ghost_px.0, ghost_px.1)) != brightness(rgb(&bare, ghost_px.0, ghost_px.1)),
+        brightness(rgb(&left, ghost_px.0, ghost_px.1))
+            != brightness(rgb(&bare, ghost_px.0, ghost_px.1)),
         "the ghost model changes the pixels over the refinery"
     );
     r.set_view_proj(cam.view_proj());
@@ -514,9 +536,13 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
     ));
     assert_ne!(minimap.image().rgba, clean, "the fog changed the image");
     let dots: Vec<_> = minimap_dots(&snap, &scene.ghosts).collect();
-    assert_eq!(dots.iter().filter(|d| d.1 == Dot::Ghost).count(), ghosts.len());
+    assert_eq!(
+        dots.iter().filter(|d| d.1 == Dot::Ghost).count(),
+        ghosts.len()
+    );
     assert!(
-        dots.iter().all(|d| matches!(d.1, Dot::Ghost | Dot::Owner(0))),
+        dots.iter()
+            .all(|d| matches!(d.1, Dot::Ghost | Dot::Owner(0))),
         "no dot of the other side except ghosts: {dots:?}"
     );
     let mut ui = Ui::new(UiConfig::default());
@@ -542,7 +568,10 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
         .render_to_image_with(|t| ur.render(t, &mut ui))
         .expect("render");
     assert!(geom_map.0 > 0.0);
-    save(&format!("m1_t{:05}_minimap_with_fog.png", snap.tick().0), &with_map);
+    save(
+        &format!("m1_t{:05}_minimap_with_fog.png", snap.tick().0),
+        &with_map,
+    );
 
     // The scout comes back and sees the empty place after the refinery is gone: the ghost is removed.
     let t = scene.world.tick();
@@ -552,7 +581,11 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
         .unwrap();
     scene.run_to(scene.world.tick().0 + 3);
     let (still, snap) = scene.shoot_with(&mut r, &cam, true);
-    assert_eq!(scene.ghosts.drawn(&snap).count(), ghosts.len(), "nobody looked");
+    assert_eq!(
+        scene.ghosts.drawn(&snap).count(),
+        ghosts.len(),
+        "nobody looked"
+    );
     let _ = still;
     scene.send_scout(66, 27);
     scene.run_to(scene.world.tick().0 + 700);

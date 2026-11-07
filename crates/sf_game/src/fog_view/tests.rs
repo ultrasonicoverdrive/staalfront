@@ -641,3 +641,61 @@ fn projectiles_in_the_shroud_are_hidden_and_the_local_players_are_not() {
     // A world without vision rules shows every shell.
     assert!(SimSnapshot::capture(&world(false)).projectiles().is_empty());
 }
+
+// ---- wrecks ---------------------------------------------------------------------------------------
+
+/// Two tanks of the other sides fight far from the local player's scout until one leaves a wreck; the
+/// world as it is then.
+fn world_with_a_wreck() -> World {
+    use sf_sim::Order;
+    let d = defs();
+    let mut w = crate::playfield::with_combat(world(true), &d);
+    spawn(&mut w, LOCAL_PLAYER, "scout", 5, 5);
+    spawn(&mut w, ENEMY, "light_tank", 40, 30);
+    spawn(&mut w, PlayerId(2), "light_tank", 44, 30);
+    w.step();
+    for owner in [ENEMY, PlayerId(2)] {
+        let ids: Vec<_> = w
+            .snapshot()
+            .iter()
+            .filter(|v| v.owner == owner)
+            .map(|v| v.id)
+            .collect();
+        let t = w.tick();
+        w.schedule(
+            t,
+            owner,
+            Command::Order {
+                ids,
+                order: Order::AttackMove(at(42, 30)),
+                queued: false,
+            },
+        )
+        .unwrap();
+    }
+    for _ in 0..3000 {
+        w.step();
+        if w.snapshot().wrecks().next().is_some() {
+            return w;
+        }
+    }
+    panic!("no wreck within 3000 ticks");
+}
+
+#[test]
+fn a_wreck_on_a_cell_out_of_sight_is_hidden_until_it_is_seen() {
+    let mut w = world_with_a_wreck();
+    let snap = SimSnapshot::capture(&w);
+    let wreck = snap.wrecks().first().copied().expect("a wreck");
+    assert_ne!(wreck.owner, LOCAL_PLAYER);
+    assert!(!snap.wreck_shown(&wreck), "a wreck of the others far away");
+    // The scout comes to look: the same wreck is shown.
+    let (cx, cy) = wreck.pos.cell();
+    spawn(&mut w, LOCAL_PLAYER, "scout", cx + 2, cy);
+    w.step();
+    w.step();
+    let near = SimSnapshot::capture(&w);
+    let same = near.wrecks().first().copied().expect("the wreck lies on");
+    assert_eq!(same.pos, wreck.pos);
+    assert!(near.wreck_shown(&same), "in the scout's sight");
+}

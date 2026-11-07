@@ -1008,6 +1008,75 @@ mod tests {
         assert_eq!(p.counters().shown, 1);
     }
 
+    /// A world with vision rules and the local player's scout at `(x, y)` (sight 8), one step in: the
+    /// effects of the fog tests happen at (12, 12) m, cell (3, 3).
+    fn vision_snapshot(scout: (i32, i32)) -> SimSnapshot {
+        use sf_math::{Fx, Vec2};
+        use sf_sim::{Command, PlayerId};
+        let defs = UnitDefs::embedded();
+        let world = World::new(WorldConfig::new(1).with_map_size(64, 64))
+            .unwrap()
+            .with_units(sf_bridge::unit_table(&defs).unwrap())
+            .unwrap();
+        let mut world = crate::playfield::with_vision(world, &defs);
+        world
+            .schedule(
+                world.tick(),
+                PlayerId(0),
+                Command::SpawnUnit {
+                    kind: sf_sim::Kind(defs.kind_of("scout").unwrap()),
+                    pos: Vec2::new(
+                        Fx::from_int(scout.0) + Fx::HALF,
+                        Fx::from_int(scout.1) + Fx::HALF,
+                    ),
+                    owner: PlayerId(0),
+                },
+            )
+            .unwrap();
+        world.step();
+        world.step();
+        SimSnapshot::capture(&world)
+    }
+
+    /// WP8.3: a flash, a hit or a death of the other side on a cell the local player does not see is not
+    /// drawn; on a visible cell it is; the local player's own always is. The audio's list still has
+    /// all of them (the sounds of hidden events are an open question for the audio work).
+    #[test]
+    fn effects_on_cells_out_of_sight_are_not_drawn_but_still_reach_the_audio_list() {
+        let ground = FlatGround::default();
+        let f = frame(1.0, 200.0);
+        let enemy = |e: FxEvent| FxEvent { player: 1, ..e };
+        let events = [
+            enemy(fire(weapon("cannon"))),
+            enemy(hit(weapon("cannon"), true, false)),
+            enemy(death(3.0, false)),
+        ];
+        // The scout sees cell (3, 3): all three are drawn.
+        let mut seen = player();
+        seen.push_events(&events);
+        seen.frame(&vision_snapshot((3, 4)), &ground, &f);
+        assert!(spawned(&seen) > 0);
+        assert_eq!((seen.counters().shown, seen.counters().hidden), (3, 0));
+        // The scout is far away: none is drawn, all three are counted as hidden, the audio still has them.
+        let mut hidden = player();
+        hidden.push_events(&events);
+        hidden.frame(&vision_snapshot((50, 50)), &ground, &f);
+        assert_eq!(spawned(&hidden), 0, "nothing of it is drawn");
+        assert_eq!((hidden.counters().shown, hidden.counters().hidden), (0, 3));
+        assert_eq!(hidden.shown().len(), 3, "the audio list is unchanged");
+        // The local player's own event on the same cell is drawn.
+        let mut own = player();
+        own.push_events(&[fire(weapon("cannon"))]);
+        own.frame(&vision_snapshot((50, 50)), &ground, &f);
+        assert!(spawned(&own) > 0);
+        assert_eq!((own.counters().shown, own.counters().hidden), (1, 0));
+        // A world without vision rules hides nothing.
+        let mut open = player();
+        open.push_events(&events);
+        open.frame(&snapshot_at(2), &ground, &f);
+        assert_eq!((open.counters().shown, open.counters().hidden), (3, 0));
+    }
+
     #[test]
     fn an_event_that_is_too_old_is_dropped_and_counted() {
         let mut p = player();
