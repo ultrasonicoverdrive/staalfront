@@ -26,9 +26,11 @@ fn each_role_gets_the_sight_of_its_own_entry() {
     let defs = UnitDefs::embedded();
     let settings = VisionSettings {
         legacy_sight_cells: 7,
+        acquire_needs_sight: false,
     };
     let rules = vision_rules(&settings, &defs);
     assert_eq!(rules.legacy_sight_milli, 7000);
+    assert!(!rules.acquire_needs_sight && rules.shared.is_empty());
     assert_eq!(rules.sights.len(), defs.sim_units().len());
     for role in defs.sim_units() {
         let got = rules
@@ -57,4 +59,27 @@ fn a_world_takes_the_shipped_vision_rules() {
         .with_vision(vision_rules(&VisionSettings::embedded(), &defs))
         .unwrap();
     assert!(world.vision_rules().is_some());
+}
+
+/// The gate of WP8.2a travels from `vision.ron` to the rules, and is off in the shipped file.
+#[test]
+fn the_gate_flag_reaches_the_rules_and_is_off_in_the_shipped_file() {
+    let defs = UnitDefs::embedded();
+    let shipped = VisionSettings::embedded();
+    assert!(
+        !shipped.acquire_needs_sight,
+        "off until Tijmen has played M1"
+    );
+    assert!(!vision_rules(&shipped, &defs).acquire_needs_sight);
+    let on = VisionSettings {
+        acquire_needs_sight: true,
+        ..shipped
+    };
+    let rules = vision_rules(&on, &defs);
+    assert!(rules.acquire_needs_sight);
+    assert!(
+        rules.shared.is_empty(),
+        "no team exists yet: nothing is shared"
+    );
+    assert!(rules.is_valid());
 }

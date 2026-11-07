@@ -32,6 +32,14 @@ own side's unit and nothing fires). The weapons pass reads `turret_target` as th
 (`weapons::update_all`) and fires through the ordinary weapon and projectile path: reload, burst, projectile,
 damage, return fire of the victim, kill credit.
 
+**The sight gate (WP8.2a, off by default).** With `acquire_needs_sight` in the vision rules a defence picks only a candidate that its
+owner sees now (any cell of the candidate's footprint, the owner's own sight and what its allies share), because the look round is the
+same function as a unit's (`Targeting::best_target`). The sight of a defence is its `sight` in the data (a tower 7, an emplacement 8,
+an unmanned artillery 6) from its whole footprint, only while it stands: a tower sees farther than it reaches (7 against 6) and
+loses nothing, the unmanned artillery reaches 12 and sees 6, so it needs a spotter beyond the sixth cell. A target it holds is kept
+while the rules above keep it. In the scenario `vision_targeting` the unmanned artillery has a rifleman 9 cells away in reach and
+does not fire until a friendly scout reveals it (tick 654 seen, 661 first shot). The match has the gate off.
+
 **It does not answer fire.** A structure that is hit by something out of its reach does nothing about it (return
 fire is for mobile units). Alliances do not exist: every other owner is an enemy, a neutral structure of the shipped
 data (`automated_gun`, `unmanned_artillery`) with a different owner shoots every player.
@@ -109,8 +117,8 @@ structure, taking it out of the world's bodies and putting its weapon in the str
 (owner: phase 9 with the AI that would use it, or a work package WP6.7b if the playtest of M1 wants the bunker to do
 something). Until then the bunker is a tough 1200-hit-point wall. Also not done: the decoy (`decoy_emplacement`,
 `disguise_as`) has no behaviour, the neutral structures have no mission logic (`fires_at_all`, "fires when the uplink is
-alive": mission logic of phase 10 reads them), and there is no fog: a defence sees as far as its weapon reaches
-and the sight in the data is unused.
+alive": mission logic of phase 10 reads them), and a defence sees as far as its weapon reaches unless the sight gate (WP8.2a, below the first section) is on, which it is
+not in anything that ships.
 
 ## The checksum
 
@@ -216,7 +224,7 @@ measure the frame rate (PLAN section 13).
 
 ## Not here (and where it goes)
 
-* Garrisoning the bunker, the decoy's disguise, mission logic of the neutral structures, fog and sight: see above.
+* Garrisoning the bunker, the decoy's disguise, mission logic of the neutral structures, fog and sight: the gate is in `vision.md`, off by default.
 * Repair and sell of structures: WP6.6, done (`repair_sell.md`; a tower being sold fires nothing, `a_tower_being_sold_fires_nothing_and_drops_its_target`). The AI that builds defences (phase 9), balance of ranges, damage and costs (phase 15).
 * A structure answering fire from out of its reach, switching to a better target, preferring threats: as for units, not here.
 * Structures that rotate their hull; the barrel's pitch (still a hook of the renderer).

@@ -321,6 +321,7 @@ fn check_defence(
         map: (64, 64),
         buildings: &buildings,
         unpowered: dark,
+        gate: None,
     };
     let may_look = defence_check(&mut e, 0, &cx);
     (may_look, e.turret_target[0])
@@ -405,6 +406,7 @@ fn a_weaponless_structure_is_left_alone_by_the_update() {
         map: (64, 64),
         buildings: &buildings,
         unpowered: &[],
+        gate: None,
     };
     let mut t = Targeting::default();
     for _ in 0..30 {

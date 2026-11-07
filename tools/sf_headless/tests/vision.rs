@@ -82,6 +82,9 @@ struct Story {
     /// Explored cells and visible cells of both players after each tick.
     explored: Vec<[u32; 2]>,
     visible: Vec<[u32; 2]>,
+    /// `(tick, player)` whenever a cell that was explored the tick before no longer is: the sets are
+    /// compared, not only their sizes.
+    lost: Vec<(u64, usize)>,
 }
 
 fn play() -> (World, Story) {
@@ -93,7 +96,9 @@ fn play() -> (World, Story) {
         gone: Vec::new(),
         explored: Vec::new(),
         visible: Vec::new(),
+        lost: Vec::new(),
     };
+    let mut before: [Vec<u64>; 2] = [Vec::new(), Vec::new()];
     let mut last = vec![(Visibility::Shroud, Visibility::Shroud); probes.len()];
     let mut dead = [false; 6];
     for _ in 0..s.ticks {
@@ -112,6 +117,15 @@ fn play() -> (World, Story) {
                 dead[i as usize] = true;
                 story.gone.push((t, id));
             }
+        }
+        for (p, prev) in before.iter_mut().enumerate() {
+            let now = w
+                .fog_words(PlayerId(p as u8))
+                .map_or(Vec::new(), |(_, e)| e.to_vec());
+            if prev.iter().zip(&now).any(|(a, b)| a & !b != 0) {
+                story.lost.push((t, p));
+            }
+            *prev = now;
         }
         story.explored.push([explored(&w, P0), explored(&w, P1)]);
         story.visible.push([visible(&w, P0), visible(&w, P1)]);
@@ -204,6 +218,11 @@ fn a_corner_nobody_looks_into_stays_shroud_for_the_other_player() {
 #[test]
 fn explored_never_shrinks_and_visible_cells_come_and_go() {
     let (_, story) = play();
+    assert!(
+        story.lost.is_empty(),
+        "explored cells were lost: {:?}",
+        story.lost
+    );
     for p in 0..2 {
         let mut last = 0;
         for (i, e) in story.explored.iter().enumerate() {
@@ -235,9 +254,7 @@ fn the_incremental_state_equals_a_recompute_every_tick() {
         w.step();
         let t = w.tick().0;
         w.vision_audit().unwrap_or_else(|e| panic!("tick {t}: {e}"));
-        let mut c = w.clone();
-        c.vision_resync();
-        c.vision_audit_current()
+        w.vision_audit_current()
             .unwrap_or_else(|e| panic!("tick {t}, from the entities: {e}"));
     }
 }
@@ -268,6 +285,7 @@ fn a_different_legacy_sight_changes_the_hash_and_a_different_scout_sight_changes
     let mut other = scenario();
     other.vision = Some(VisionSpec {
         legacy_sight_milli: 1000,
+        ..VisionSpec::default()
     });
     let mut b = other.build_world().unwrap();
     for _ in 0..50 {
@@ -305,15 +323,15 @@ fn two_runs_agree() {
 
 /// The first match (`match.ron`, 96 by 96 cells, two players, an economy, a fight) played with vision on
 /// is the same match: the same entities in the same places at every tick we look at, the same
-/// verdict. Only the hash differs (the section `v`); `match.expected` itself is checked in
-/// `match_m1.rs` and did not move.
+/// verdict. Only the hash differs (the section `v`). Since WP8.2a the file has the rules itself (as
+/// `sf_game --match` does); the "off" world is the same file with the section taken out, which is
+/// the value `match.expected` had before WP8.2a (`match_m1.rs`).
 #[test]
 fn the_first_match_plays_the_same_with_vision_on() {
-    let off = Scenario::load(&scenario_path("match.ron")).unwrap();
-    let mut on = Scenario::load(&scenario_path("match.ron")).unwrap();
-    on.vision = Some(VisionSpec {
-        legacy_sight_milli: 5000,
-    });
+    let mut off = Scenario::load(&scenario_path("match.ron")).unwrap();
+    let on = Scenario::load(&scenario_path("match.ron")).unwrap();
+    assert!(on.vision.is_some(), "match.ron has the vision rules");
+    off.vision = None;
     let (mut a, mut b) = (off.build_world().unwrap(), on.build_world().unwrap());
     assert!(a.vision_rules().is_none() && b.vision_rules().is_some());
     for _ in 0..off.ticks {
@@ -343,6 +361,7 @@ fn a_crowd_of_wanderers_keeps_its_counts_exact() {
     let mut on = Scenario::load(&scenario_path("wander_5000.ron")).unwrap();
     on.vision = Some(VisionSpec {
         legacy_sight_milli: 5000,
+        ..VisionSpec::default()
     });
     let (mut a, mut b) = (base.build_world().unwrap(), on.build_world().unwrap());
     for _ in 0..300 {
@@ -352,9 +371,7 @@ fn a_crowd_of_wanderers_keeps_its_counts_exact() {
         if t % 50 == 0 {
             assert_eq!(picture(&a), picture(&b), "tick {t}");
             b.vision_audit().unwrap_or_else(|e| panic!("tick {t}: {e}"));
-            let mut c = b.clone();
-            c.vision_resync();
-            c.vision_audit_current()
+            b.vision_audit_current()
                 .unwrap_or_else(|e| panic!("tick {t}, from the entities: {e}"));
         }
     }

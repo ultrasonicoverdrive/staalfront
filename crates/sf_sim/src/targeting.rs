@@ -90,7 +90,9 @@ use crate::crowd::Index;
 use crate::entities::{Entities, NO_DEF};
 use crate::ids::{EntityId, PlayerId, Tick};
 use crate::orders::{self, GuardTarget, Order, live_slot, radius_of};
-use crate::units::{UnitClass, UnitTable};
+use crate::terrain::{NO_CELL, Occupancy};
+use crate::units::{Footprint, UnitClass, UnitTable};
+use crate::vision::Vision;
 use crate::weapons::Arsenal;
 
 /// Ticks between two scans of a unit unless the settings say otherwise: half a second.
@@ -275,6 +277,50 @@ pub(crate) struct Context<'a> {
     pub buildings: &'a BuildingTable,
     /// The players whose defences have no power this tick (`World::defences_powered`); ascending.
     pub unpowered: &'a [PlayerId],
+    /// The sight gate of automatic acquisition (WP8.2a): `None` unless the world has vision rules
+    /// with `acquire_needs_sight`. Only `Targeting::update` (scans) reads it; retaliation
+    /// (`return_fire`) and the checks of an engagement never do.
+    pub gate: Option<Gate<'a>>,
+}
+
+/// What the gate reads: the picture of every player and where the structures stand.
+#[derive(Copy, Clone)]
+pub(crate) struct Gate<'a> {
+    pub vision: &'a Vision,
+    pub occupancy: &'a Occupancy,
+}
+
+impl<'a> Gate<'a> {
+    /// The gate of a world: on only when its vision rules ask for it.
+    pub(crate) fn of(vision: Option<&'a Vision>, occupancy: &'a Occupancy) -> Option<Gate<'a>> {
+        vision
+            .filter(|v| v.gate_on())
+            .map(|vision| Gate { vision, occupancy })
+    }
+
+    /// Whether `viewer` sees entity `j` now: the cell its position is in (a unit), or any cell of
+    /// its footprint (a structure).
+    fn sees(&self, e: &Entities, units: &UnitTable, viewer: PlayerId, j: usize) -> bool {
+        if e.cell[j] != NO_CELL {
+            let anchor = self.occupancy.cell(e.cell[j]);
+            let fp = units
+                .at(e.def[j] as usize)
+                .footprint
+                .unwrap_or(Footprint::ONE);
+            return self.vision.sees_rect(
+                viewer,
+                anchor.x,
+                anchor.y,
+                u32::from(fp.width),
+                u32::from(fp.height),
+            );
+        }
+        let (x, y) = e.pos[j].cell();
+        match (u32::try_from(x), u32::try_from(y)) {
+            (Ok(x), Ok(y)) => self.vision.sees_rect(viewer, x, y, 1, 1),
+            _ => false,
+        }
+    }
 }
 
 /// What the stance of a unit lets it do, from its current order.
@@ -474,6 +520,12 @@ impl Targeting {
                 else {
                     continue;
                 };
+                // WP8.2a: with the gate on, only what the scanner's owner can see is picked.
+                if let Some(g) = &cx.gate
+                    && !g.sees(e, cx.units, e.owner[i], j)
+                {
+                    continue;
+                }
                 let key = key_of(e, j, 0, pick.score, d2);
                 if best.is_none_or(|(b, _, _)| key < b) {
                     best = Some((key, j, pick.reach));

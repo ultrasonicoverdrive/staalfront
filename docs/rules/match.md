@@ -165,6 +165,15 @@ not a test of the turret. Because the opponent's power use is 70, the tower goes
 points, dark at 411). The ticks above in "The headless scenario" and the banner text "decided after 4:44 (tick 5687)" describe the
 first version; the game's banner shows whatever tick the game decides.
 
+**Vision (WP8.1, WP8.2a).** The game turns vision on in a match (`matchplay::configure`); since WP8.2a the scenario has the same
+rules (`vision: Some((legacy_sight_milli: 5000))`), so there is no longer a difference between the pinned match and the played one.
+`match.expected` moved from `0x164403a92986654f` to `0x771de0f816275bbc` for the section `v` alone (measured: with the line taken
+out the old value comes back, `vision_in_the_match_moves_the_pin_by_its_section_only`; the game is the same game tick by tick,
+`the_first_match_plays_the_same_with_vision_on`). The targeting gate of WP8.2a is off in the match until the match has been played
+and decided (`vision.md`). Measured, not shipped: with the gate on the match is still won, at tick 8067 instead of 5967, with 8 units
+lost instead of 6 (a rocket trooper whose sight equals its reach does not pick the opponent's tower at the limit of its reach; the
+worlds part at tick 4282, `what_the_gate_would_do_to_the_first_match`).
+
 A scenario can name a `match_file` (a file in its `unit_defs` directory): it then gets the match rules,
 the factions, the credits and the starting objects from the file, and `factions` and `money.starting`
 must be left out.

@@ -1,14 +1,15 @@
 # Vision: shroud and fog of war
 
-WP8.1. What each player can see, per cell, worked out by the simulation. **Nothing in the simulation behaves differently
-yet**: targeting, defences, orders and production are as they were. The pass only keeps three facts per player and cell
-(visible now, explored at some time, neither) and gives the next WPs one function to ask:
+WP8.1, WP8.2a. What each player can see, per cell, worked out by the simulation, and (WP8.2a, behind a flag that is **off**
+everywhere it ships) a gate on automatic target acquisition. With the flag off **nothing in the simulation behaves differently**:
+targeting, defences, orders and production are as they were. The pass keeps three facts per player and cell (visible now, explored
+at some time, neither) and gives the rest of the simulation one function to ask:
 
 ```rust
 World::visibility(player, cell) -> Visibility   // Visible, Fog or Shroud
 ```
 
-Code: `crates/sf_sim/src/vision.rs` (tests `vision/tests.rs`). Data: `assets/config/vision.ron` (one number),
+Code: `crates/sf_sim/src/vision.rs` (tests `vision/tests.rs`). Data: `assets/config/vision.ron` (two numbers: the legacy sight and the gate flag),
 `vision_look.ron` (the debug view only), `sight` of every role in `unit_defs.ron`. Bridge: `sf_bridge::vision_rules`.
 Scenario: `assets/scenarios/vision.ron`, tests `tools/sf_headless/tests/vision.rs`.
 
@@ -73,10 +74,63 @@ this (a player with 5,000 wanderers has 5,000); the cap is there so that the ari
 `a_player_cannot_have_more_discs_than_a_count_can_hold` pins it. This is the one place slot order could show, and only
 beyond 65,535 discs of one player.
 
+## The targeting gate and shared vision (WP8.2a)
+
+Two fields of `VisionRules` (both in the section `v` of the checksum, and only when one is set):
+
+| Field | Default | Meaning |
+|---|---|---|
+| `acquire_needs_sight: bool` | `false` (`vision.ron`, the match, every scenario but `vision_targeting`) | the gate, below |
+| `shared: Vec<(PlayerId, PlayerId)>` | empty (the game has no teams) | `(sharer, viewer)`: the viewer also sees what the sharer sees |
+
+**The gate.** With the flag on, **automatic acquisition** only picks a candidate that is `Visible` to the scanner's **owner** at the
+time of the scan: the single function every automatic pick goes through (`Targeting::best_target`: a unit's scan, which covers idle,
+hold, guard and attack-move units, and a defence structure's look round, `defences.md`) skips the others, after it has found that a
+weapon could fire at them. A unit candidate counts by the cell its position is in; a structure candidate by **any cell of its
+footprint** (a relay whose anchor is in the fog and whose lower row is in sight is seen). What the scanner's owner sees includes what
+its allies share.
+
+What the gate does **not** touch, on purpose:
+
+* **Retaliation** (a unit that is hurt turns on its attacker, `targeting.md`) is always allowed: the attacker is picked from the fog,
+  and then followed within the pursuit distance like any attacker. `return_fire` is given no gate.
+* **An explicit attack order** (`Order::Attack`, `AimTurret`) is never gated and never dropped because the target is in fog. Chosen:
+  the player's order wins over any rule of the units (`targeting.md`), the interface will not offer an unseen target (WP8.3, WP8.4),
+  and a "grace in fog" state would be one more thing to hash and to get wrong for no case that exists yet.
+* **A target already chosen** (a `Pursue` order or a defence's turret target) is kept while the existing rules keep it, also when it
+  steps into fog: the gate is on the pick, not on the engagement. A unit that fired at something it saw keeps its shot.
+  Gap, on purpose (see "Not done").
+
+**Shared vision.** `World::visibility(player, cell)` is the union of the player's own picture and that of every player that shares
+with it (`Visible` beats `Fog` beats `Shroud`, so also explored cells are united). It is one way (`(0, 2)` lets player 2 see what
+player 0 sees, not the reverse), not transitive (`(0, 1), (1, 2)` does not give player 2 the cells of player 0), and it needs no
+object of the viewer. The pairs must be strictly ascending and never a player with itself (`ConfigError::Vision` otherwise). The
+per-player bitsets (`fog_words`, `fog_version`, the snapshot's bitsets and the debug view) are the player's **own** cells and do not
+contain the shared ones; the snapshot's `seen` does (see "Own picture and shared vision" below): nothing in the game sets a pair yet. Sharing is stored as a list and read at query time, so it adds no state, no cost to
+the pass, and a scenario can set it.
+
+**Structure sight** needed nothing more: the data has a `sight` for every structure (`unit_defs.ron`, 3 to 12 cells), a structure
+stamps its disc grown by its footprint and only while it stands (table above, WP8.1), and a structure under construction sees nothing
+but knows its footprint. The gate reads that.
+
+**One thing to know before the gate is switched on: sight against reach.** The disc is cell against cell (a cell is in when its
+centre is inside), a weapon's reach is measured from the unit's position to the **edge** of the target. A unit whose sight equals its
+reach therefore loses a target at the very limit of its reach: a rocket trooper (sight 5, reach 5) does not pick the defence tower
+whose cell is at squared distance 26 from its own cell, though the tower is within reach. In the first match that is the whole
+difference (below, "What the gate would do to the first match"). Units that outreach their sight (siege artillery: reach 10, sight 6;
+the unmanned artillery: reach 12, sight 6) need a spotter by design; that is the point of the gate.
+
+**What the gate would do to the first match** (measured, `what_the_gate_would_do_to_the_first_match`; **not shipped**: the flag is off in
+`match.ron`, and `match.expected` is the match without it). The match is still won, at tick **8067** instead of 5967, with **8 units
+lost** instead of 6. The two worlds part at tick 4282, when a rocket trooper would have picked the opponent's defence tower (the case
+above). Whether to switch the gate on, and whether to give the units a cell more sight or to measure the disc to the edge of the
+target, is for Tijmen after playing M1.
+
 ## The rules and where they come from
 
-`World::with_vision(VisionRules { legacy_sight_milli, sights: Vec<(Kind, u32)> })` (after the unit table; refused with
-`ConfigError::Vision` when given twice, after the start, with a kind the table does not have, out of order, or above 64 000;
+`World::with_vision(VisionRules::new(legacy_sight_milli, sights))` plus `.with_acquire_needs_sight(bool)` and `.with_shared(pairs)`
+(after the unit table; refused with
+`ConfigError::Vision` when given twice, after the start, with a kind the table does not have, out of order, or above 64 000, or with shared pairs that do not ascend or name a player with itself;
 a unit table given after the rules is refused too). A world that is never given the rules has `vision: None`: no pass, no
 section, every pin as before.
 
@@ -85,14 +139,14 @@ places, most of them tests, and other branches add fields to it; the sight lives
 `sf_bridge::vision_rules` from the `sight` of each role) and is hashed only inside the vision section. The units section
 (`U`) never sees it, so it cannot move a pin.
 
-Matches turn vision **on**: `matchplay::configure` gives the world the rules (nothing in the simulation reads them; the snapshot, the debug view and, since
-WP8.3 and WP8.4, the picture do). The headless `match` scenario is **unchanged** and keeps its checksum: it writes its rules out in the scenario
-file, and `match.expected` stays as pinned. What vision does to a match is checked by
-`the_first_match_plays_the_same_with_vision_on` (see "Pins"). The sandbox gets vision only with `--debug-fog`.
+Matches turn vision **on**: `matchplay::configure` gives the world the rules, and since WP8.2a the headless `match` scenario
+writes the same rules out (`vision: Some((legacy_sight_milli: 5000))`), so the pinned scenario is the game's world and not a
+sibling of it. In both the targeting gate (WP8.2a, below) is off. Since WP8.3 and WP8.4 the picture reads the rules too. The sandbox
+gets vision only with `--debug-fog`.
 
 ## The checksum (section `v`)
 
-After the last section (`r`, repair) and only in a world with vision rules. The byte is `v` (the upper-case letters are all
+After the last section (`r`, repair) and only in a world with vision rules. The gate and the shared pairs are written after the sights, as a block tagged `g`, **only when the gate is on or a pair is set**; rules with both off hash exactly as in WP8.1 (`match` and `vision` keep their pins; `the_gate_and_the_pairs_are_in_the_hash_only_when_set`). The byte is `v` (the upper-case letters are all
 taken, and `M` is used twice, by money and by movement; that is left alone, "fixing" it would move every pin). It hashes the
 rules (legacy sight, then each kind with its sight), then for each player that has had an object, ascending:
 
@@ -106,7 +160,7 @@ rules (legacy sight, then each kind with its sight), then for each player that h
 It does not walk the arrays (a 256 by 256 map with 8 players would be a megabyte of hashing per tick). The hashing of a tick
 with vision is the rules (6 bytes per kind) and 37 bytes per player, whatever the map size. A missed unstamp, the bug this design invites, changes `sum` and
 the visible mix; the full recompute that proves it cannot happen is `World::vision_audit` (the stamps against the arrays) and
-`World::vision_audit_current` (the entities as they are now against the arrays, on a clone after `vision_resync`), run
+`World::vision_audit_current` (the entities as they are now against the arrays; it runs the pass on a clone itself, so no public function runs the pass outside a step), run
 **every tick** on `vision`, on the busy world of `the_incremental_counts_equal_a_recompute_every_tick` (deaths, spawns, a slot
 reused, a structure going up and down) and at sample ticks on 5,000 wanderers.
 
@@ -119,6 +173,12 @@ others when their cell (a structure: any cell of its footprint) is visible. **Si
 what is drawn, iconised, picked, put on the minimap or shown as an effect, the soft fog on the terrain and the ghosts of structures
 last seen are all in [`fog_look.md`](fog_look.md). Worlds without vision rules are drawn as before.
 
+Own picture and shared vision, exactly: the two bitsets, `fog_version` and `visibility(cell)` of the snapshot are the local
+player's **own** cells, but `seen` is computed with `World::visibility`, which answers with the union of the own picture and that of every sharer
+(`sf_game/src/sim_snapshot.rs`). The two agree as long as no `(sharer, viewer)` pair is set, and nothing in the game sets one
+(only scenarios do). Follow-up for when teams exist: take the bitsets and the version from the shared union too, or `seen` from the
+own picture, so the fog drawn and the objects shown come from the same set.
+
 The debug view (WP8.1) draws a dark film over shroud and a dim one over fog, in runs of at most 8 cells along a row, projected like
 the placement ghost. Switch: the "Fog of war (debug)" checkbox of the F1 panel, or `--debug-fog` (which also gives the
 sandbox vision rules). Colours: `vision_look.ron`. **It stays a debug view**: a quad over a steep slope is sheared, and it is a film over the
@@ -127,11 +187,8 @@ now). Screenshots: `docs/screenshots/wp8.1/` (the debug view; tick in the name) 
 
 ## Planned, not built
 
-* **WP8.2a** (targeting gate, structure sight rules, allied vision): auto-acquisition (unit scan, `defence_check`) only picks
-  candidates whose cell is `Visible` to the scanner's owner, behind a switch in the rules that is off by default; an explicit
-  attack order on a target in fog stays valid or is dropped (to decide); retaliation (being hit) is always allowed. Allied
-  vision (a team sees what its members see) is one more reader of the same arrays. This must be measured, not assumed: run
-  the match with the gate on and off and compare the tick it is decided in.
+(WP8.2a is built, above.)
+
 * **WP8.2b** (height bonus): only after the sim has integer height levels and a map with relief exists. Both shipped maps are
   flat (`height_scale: 0`) and `sf_sim::terrain` has only type ids today.
 * **WP8.3 / WP8.4**: built, see [`fog_look.md`](fog_look.md).
@@ -152,6 +209,21 @@ rifleman in the far corner that player 0 never sees. The transitions are asserte
 | (41, 35), the relay | shroud, visible from 425, fog from 737, visible from 1202 | visible from tick 1, fog from 1022 |
 | (44, 26), the rifleman's cell | shroud, visible from 1272 | visible from tick 1, fog from 1408 |
 | (56, 52), the far corner | shroud for the whole run | visible from tick 1 |
+
+## The scenario `vision_targeting` (WP8.2a)
+
+`assets/scenarios/vision_targeting.ron`, checksum `0x8ee88b023c9719cb` in `vision_targeting.expected` (CI runs it on Linux and
+Windows), on the same frozen definitions (`tanks_vs_infantry_defs`), with `acquire_needs_sight: true` and `shared: [(2, 0)]`
+(player 2 shares with player 0). Slots are listed in the file. Asserted in `tools/sf_headless/tests/vision_targeting.rs`:
+
+| What | Slots | Ticks |
+|---|---|---|
+| A siege artillery (reach 10, sight 6) has an enemy rifleman 8 cells away in reach and does not pick it; a scout of player 2 walks up, player 0 sees the cell at tick **539** (not in its own bits: the sight is shared), the artillery engages at **541** and fires at **546** | 0, 3, 8 | 539 / 541 / 546 |
+| The same file with the gate off: engaged and firing within the first ten ticks | 0, 1 | 1 / <= 10 |
+| A defence (unmanned artillery, reach 12, sight 6) has a rifleman 9 cells away and ignores it; the second scout reveals it at **654**, the first shot is at **661** | 1, 4, 9 | 654 / 661 |
+| A relay (2 by 2) whose anchor is outside the sight of an artillery and whose lower row is inside is picked at once | 2, 5 | 1 / first shot 18 |
+| An artillery of player 1 with an explicit attack order fires at a tank it cannot see (tick **19**); the shell lands at **32** and the tank takes its attacker at once, though the attacker's cell is shroud to player 0; the attacker comes into the tank's sight at 65 | 6, 7 | 19 / 32 / 65 |
+| Sharing reversed `[(0, 2)]`, or none: the artilleries never fire in 1,500 ticks, and the unrelated shots (slots 2 and 6) stay as they are | 0, 1 | never |
 
 ## Tests and mutations
 
@@ -181,6 +253,16 @@ Tests (all call production code; `crates/sf_sim/src/vision/tests.rs`, `crates/sf
   near and far units, a structure seen only through a cell that is not its anchor, a stale id; the bitsets are copied only when the
   version changes (poisoned in between) and again when it does.
 
+* **Gate and sharing (WP8.2a)**: `vision_targeting.rs` (table above, each with the gate-off counterpart and the reversed pair);
+  `a_viewer_sees_what_its_sharer_sees_and_not_the_other_way_round`, `shared_fog_is_fog_for_the_viewer_and_a_viewer_without_objects_sees_too`,
+  `sharing_both_ways_and_in_a_chain_is_not_transitive`, `the_shared_pairs_must_ascend_and_not_name_a_player_twice_in_one_pair`,
+  `the_gate_and_the_pairs_are_in_the_hash_only_when_set` (five different rules, five different digests; off and empty equals plain),
+  `the_rules_are_handed_back_with_the_gate_and_the_pairs`; `sf_bridge`: `the_gate_flag_reaches_the_rules_and_is_off_in_the_shipped_file`;
+  `sf_data`: the line is optional and read; `match_m1.rs`: `vision_in_the_match_moves_the_pin_by_its_section_only`;
+  `what_the_gate_would_do_to_the_first_match`.
+* **Sets, not counts**: the tests that said "explored never shrinks" compare the sets (`prev & !now == 0`, per word) and no longer the
+  number of cells (`a_unit_that_walks_away_leaves_fog_and_explored_never_shrinks`, `explored_never_shrinks_and_visible_cells_come_and_go`).
+
 Mutations (each applied to the source, the tests run, then reverted with `git checkout`; none left in):
 
 | Mutation | Fails |
@@ -200,6 +282,15 @@ Mutations (each applied to the source, the tests run, then reverted with `git ch
 | own objects are not always seen | `own_objects_are_always_seen_even_when_their_own_cell_is_not_in_sight` |
 | a structure is seen only by its anchor cell | `a_structure_is_seen_through_a_cell_that_is_not_its_anchor` (the first version of the tests did **not** catch this one: the seen structure's anchor was in sight; the test was added after the mutation survived) |
 
+| WP8.2a: the gate ignores the flag (always on in a world with vision rules) | 9: `with_the_gate_off_the_same_units_fire_at_once`, `the_final_checksum_is_the_pinned_value` (match), `vision_in_the_match_moves_the_pin_by_its_section_only`, `the_human_wins_in_the_tick_the_last_of_the_opponent_falls`, `the_opponents_tower_fires_in_the_match`, ... |
+| WP8.2a: the gate asks about the target's owner instead of the scanner's | 6: `a_unit_does_not_pick_what_it_cannot_see_until_a_friend_reveals_it`, `a_defence_ignores_an_unseen_target_until_it_is_revealed`, `being_hit_from_the_fog_is_answered_and_an_attack_order_is_not_gated`, ... |
+| WP8.2a: retaliation goes through the gate (the attacker must be visible; the context given the gate) | `being_hit_from_the_fog_is_answered_and_an_attack_order_is_not_gated`, `the_final_checksum_is_the_pinned_value` (**the first version of this mutation changed only one of the two places and survived**: with no gate in the context the check in `return_fire` does nothing; both places are mutated together) |
+| WP8.2a: a structure is seen by its anchor cell only | 5: `a_structure_target_is_seen_through_any_cell_of_its_footprint`, `the_gate_changes_only_what_it_gates`, `what_the_gate_would_do_to_the_first_match`, ... |
+| WP8.2a: a unit target is "seen" whatever its cell | 5: `a_unit_does_not_pick_what_it_cannot_see_until_a_friend_reveals_it`, `a_defence_ignores_an_unseen_target_until_it_is_revealed`, ... |
+| WP8.2a: shared vision not applied | 7: `a_viewer_sees_what_its_sharer_sees_and_not_the_other_way_round`, `the_viewer_sees_the_sharers_cells_in_fog_and_in_sight`, `a_unit_does_not_pick_what_it_cannot_see_until_a_friend_reveals_it`, ... |
+| WP8.2a: shared vision applied the wrong way (the sharer gets the viewer's cells) | 8: the same, and `sharing_goes_from_the_sharer_to_the_viewer_only` |
+| WP8.2a: the `g` block is written whatever the rules (gate off, no pairs) | `vision_in_the_match_moves_the_pin_by_its_section_only`, `the_final_checksum_is_the_pinned_value` (`match`: the pin of step 0 moves) |
+| WP8.2a: the hash does not tell `(a, b)` from `(b, a)` | `the_gate_and_the_pairs_are_in_the_hash_only_when_set`, `the_final_checksum_is_the_pinned_value` |
 
 ## Pins
 
@@ -208,12 +299,16 @@ CI list (`git diff` of `assets/scenarios` against the WP6.6 head shows only the 
 benchmark's PLAIN and FIGHT checksums (`crates/sf_game/tests/bench_scene.rs`) and the 30 scenarios of the CI list run in release
 with `--expect` all pass. The new pin is `vision.expected` (`0x84facee4249aa869`).
 
-The first match: `match.expected` is `0x164403a92986654f` and did not move, because the headless `match` scenario does not turn
-vision on. With the same scenario given vision rules (a copy with `vision: Some((legacy_sight_milli: 5000))`, measured with the
-release binary) the final checksum is `0x771de0f816275bbc`; with the line taken out it is `0x164403a92986654f` again, the pin. The
-two worlds are the same match in every position and hit point (`the_first_match_plays_the_same_with_vision_on`), so the section is
-the whole difference. `wander_5000`: `0x38d5e3c43358a889` without the rules (the pin), `0x6231220a5eaa67d9` with sight 5 and
-`0x65da61b8f36c30dc` with sight 10.
+The first match: `match.expected` moved in WP8.2a from `0x164403a92986654f` to `0x771de0f816275bbc` because the scenario now has
+the vision rules like the game (review finding 1 of #104). Measured cause (release binary): the file with the `vision` line
+gives `0x771de0f816275bbc`, with the line taken out `0x164403a92986654f` again (`vision_in_the_match_moves_the_pin_by_its_section_only`
+in `match_m1.rs`). The two worlds are the same match in every position and hit point
+(`the_first_match_plays_the_same_with_vision_on`), so the section is the whole difference. `wander_5000`: `0x38d5e3c43358a889`
+without the rules (the pin), `0x6231220a5eaa67d9` with sight 5 and `0x65da61b8f36c30dc` with sight 10.
+
+Other pins in WP8.2a: none moved (`golden.rs`, every other `.expected`, the bench PLAIN and FIGHT checksums); new: `vision_targeting.expected`
+(`0x8ee88b023c9719cb`). A world with vision rules and the gate off and nothing shared hashes as before (the `g` block is absent), which is
+why `vision.expected` (`0x84facee4249aa869`) stands and why the step-0 `match.expected` is the only pin that moved.
 
 ## Cost
 
@@ -237,11 +332,37 @@ Ticks per second of the whole step (the pass, the hashing and everything else):
   (2r + 1)^2) would cut the crowd cost several times over. It is the next step if a crowd of units with a large sight ever shows
   in a profile; nothing in a match does. The container and CI cannot measure the frame rate requirement (PLAN section 13).
 
+### The gate (WP8.2a)
+
+Release `sf_headless`, same container (4 cores; load average 1.4 to 1.5 at the start and end of the runs, a few other agents idle),
+six rounds, the five variants alternating inside each round; ticks per second of the whole step, minimum to maximum (median). The
+variants of the two fights are copies of the shipped scenarios in the scratch directory with `vision: Some((legacy_sight_milli: 5000,
+acquire_needs_sight: false / true))`; `tanks_vs_infantry` has 30 objects and 1,500 ticks of fighting, `match` is the first match for 7,000
+ticks.
+
+| Scenario | no vision rules | gate off | gate on |
+|---|---|---|---|
+| `tanks_vs_infantry` | 108,600 to 118,700 (117,000) | 81,600 to 106,100 (96,300) | 65,900 to 103,500 (98,800) |
+| `match` (7,000 ticks) | 38,300 (one run, before step 0) | 27,700 to 36,500 (35,800) | 34,900 to 37,300 (36,800) |
+
+* **The gate's own cost is below what this container can resolve.** The "on" runs are not slower than the "off" runs; the spread of
+  one variant between rounds (10 to 20 %, with one slow outlier in each of three variants) is larger than any difference between the
+  two columns. In `match` the gate-on world plays a different, longer fight (it is decided at 8067, not 5967), so the two columns
+  are not the same work there.
+* Per tick the gate adds one `Option` test in the context (`Gate::of`) and, per candidate that a weapon could fire at, one visibility
+  lookup (one cell, or the cells of a footprint); the candidates are the few in reach, not the whole map. A scan runs once every
+  ten ticks per unit.
+* The difference between "no vision rules" and "gate off" in the table is the vision pass of WP8.1 (about 15 % of a tick in this small
+  fight), not the gate.
+* Not measured: a crowd of scanners with many candidates in reach and a footprint-heavy target list. The container and CI cannot
+  measure the frame-rate requirement (PLAN section 13).
+
 ## Not done, on purpose (gaps)
 
-* No behaviour: nothing reads `visibility` (WP8.2a).
-* No allied vision, no shared vision, no reveal-the-map effect, no radar or special reveal, no height or occlusion (a disc
-  looks through everything).
+* The gate is off in everything that ships; nothing but the scenario `vision_targeting` and the measurement test turns it on.
+* A chosen target that steps into fog is kept (the gate is on the pick only). No team or alliance exists in the game: `shared` is set by
+  scenarios only; the debug view and the snapshot's bitsets do not use it, while `seen` does (see "Own picture and shared vision").
+  No reveal-the-map effect, no radar or special reveal, no height or occlusion (a disc looks through everything).
 * The debug view is sheared on slopes and is a film over the whole picture (the real look, ghosts, hiding, the minimap are in
   `fog_look.md`).
 * The snapshot carries the local player only (a constant, `LOCAL_PLAYER`); a replay or observer view would pass another.
