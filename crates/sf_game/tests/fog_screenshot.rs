@@ -628,3 +628,81 @@ fn a_world_without_vision_rules_draws_the_same_pixels_as_a_renderer_that_never_h
     assert!(!r.fog_on());
     assert_eq!(changed(&plain, &back), 0, "back to the old picture");
 }
+
+// ---- cost ---------------------------------------------------------------------------------------------
+
+/// Median of `n` timings of `f`, microseconds.
+fn median_us(n: usize, mut f: impl FnMut()) -> f64 {
+    let mut t: Vec<f64> = (0..n)
+        .map(|_| {
+            let s = std::time::Instant::now();
+            f();
+            s.elapsed().as_secs_f64() * 1e6
+        })
+        .collect();
+    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    t[n / 2]
+}
+
+/// What the fog costs a frame (run with `--ignored --nocapture`; numbers in `docs/rules/fog_look.md`):
+/// the CPU side of an update (`fog::texels` for 96 and 256 cells a side at every softness), the upload
+/// (`Renderer::set_fog`), and the frame on the software adapter with the fog off and on, alternating.
+#[test]
+#[ignore = "a measurement: run with --ignored --nocapture"]
+fn measure_the_cost_of_the_fog() {
+    // Texels: a quarter of the map visible, half explored.
+    for side in [96_u32, 256] {
+        let n = (side * side) as usize;
+        let mut visible = vec![0u64; n.div_ceil(64)];
+        let mut explored = vec![0u64; n.div_ceil(64)];
+        for i in 0..n {
+            let (x, y) = (i as u32 % side, i as u32 / side);
+            if x < side / 2 && y < side / 2 {
+                visible[i / 64] |= 1 << (i % 64);
+            }
+            if x < side * 3 / 4 {
+                explored[i / 64] |= 1 << (i % 64);
+            }
+        }
+        for softness in [0_u8, 2, 4] {
+            let us = median_us(21, || {
+                std::hint::black_box(sf_render::fog::texels(
+                    side, side, &visible, &explored, softness,
+                ));
+            });
+            println!("fog::texels {side}x{side} softness {softness}: {us:8.1} us");
+        }
+    }
+    // The upload and the frame on the first match's map (96 by 96 cells).
+    let mut scene = Scene::first_match();
+    let mut r = renderer(&scene.map);
+    let cam = scene.camera(0.45, (16.0, 66.0));
+    let (_, snap) = scene.shoot_with(&mut r, &cam, true);
+    let (w, h) = snap.map_size();
+    let (visible, explored) = snap.fog_words();
+    let look = shipped_look();
+    let texels = sf_render::fog::texels(w, h, visible, explored, look.softness);
+    let up = median_us(21, || {
+        r.set_fog((w, h), &texels, fog_view::shading_of(look));
+    });
+    println!(
+        "Renderer::set_fog upload 96x96: {up:8.1} us (queue write, the copy is done on the next submit)"
+    );
+    for round in 0..3 {
+        let mut frame = |on: bool| {
+            if on {
+                r.set_fog((w, h), &texels, fog_view::shading_of(look));
+            } else {
+                r.clear_fog();
+            }
+            r.render_to_image().unwrap();
+            median_us(15, || {
+                r.render_to_image().unwrap();
+            })
+        };
+        let (off, on) = (frame(false), frame(true));
+        println!(
+            "  round {round}: frame on the software adapter, fog off {off:9.0} us   on {on:9.0} us"
+        );
+    }
+}

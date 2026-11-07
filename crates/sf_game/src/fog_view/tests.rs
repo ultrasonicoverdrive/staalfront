@@ -277,6 +277,30 @@ fn selection_facts_and_the_inspected_unit_ignore_what_is_not_seen() {
     assert_eq!(sel.inspected(), Some(near_enemy));
 }
 
+#[test]
+fn bars_and_signs_hang_only_over_structures_the_local_player_sees() {
+    // The one place the construction, storage, repair and production marks find a structure's front
+    // edge: a structure out of sight has none.
+    let mut w = world(true);
+    spawn(&mut w, LOCAL_PLAYER, "scout", 10, 10);
+    place(&mut w, ENEMY, "refinery", 14, 8);
+    place(&mut w, ENEMY, "refinery", 40, 30);
+    w.step();
+    let snap = SimSnapshot::capture(&w);
+    let (vp, _) = overhead();
+    let frame = crate::placement_view::GhostFrame {
+        view_proj: vp,
+        viewport: [960.0, 720.0],
+        ui_scale: 1.0,
+    };
+    let height = |_: f32, _: f32| 0.0;
+    let near = w.occupant_at(Cell::new(14, 8)).unwrap();
+    let far = w.occupant_at(Cell::new(40, 30)).unwrap();
+    assert!(snap.seen(near) && !snap.seen(far));
+    assert!(crate::construction_view::front_edge(&frame, &height, &snap, near).is_some());
+    assert!(crate::construction_view::front_edge(&frame, &height, &snap, far).is_none());
+}
+
 // ---- ghosts ---------------------------------------------------------------------------------------
 
 /// Who sees what: the scout of the local player at (10, 10) sees the enemy refinery anchored at (14, 8)
@@ -698,4 +722,107 @@ fn a_wreck_on_a_cell_out_of_sight_is_hidden_until_it_is_seen() {
     let same = near.wrecks().first().copied().expect("the wreck lies on");
     assert_eq!(same.pos, wreck.pos);
     assert!(near.wreck_shown(&same), "in the scout's sight");
+}
+
+// ---- cost (run with `--ignored --nocapture`; numbers in docs/rules/fog_look.md) ----------------------
+
+/// `n` placeholder wanderers (the crowd of `wander_5000`) of the other side and `own` scouts of the
+/// local player in a 256 by 256 world, with or without vision rules.
+fn crowd_world(n: u32, own: u32, vision: bool) -> World {
+    let d = defs();
+    let w = World::new(WorldConfig::new(5).with_map_size(256, 256))
+        .unwrap()
+        .with_units(sf_bridge::unit_table(&d).unwrap())
+        .unwrap();
+    let mut w = if vision {
+        crate::playfield::with_vision(w, &d)
+    } else {
+        w
+    };
+    let t = w.tick();
+    for i in 0..n {
+        w.schedule(
+            t,
+            ENEMY,
+            Command::Spawn {
+                kind: Kind(7),
+                pos: Vec2::new(
+                    Fx::from_int((i % 100) as i32 * 2 + 20) + Fx::HALF,
+                    Fx::from_int((i / 100) as i32 * 2 + 20) + Fx::HALF,
+                ),
+                owner: ENEMY,
+            },
+        )
+        .unwrap();
+    }
+    for i in 0..own {
+        spawn(
+            &mut w,
+            LOCAL_PLAYER,
+            "scout",
+            20 + (i % 20) as i32 * 3,
+            20 + (i / 20) as i32 * 3,
+        );
+    }
+    w.step();
+    w
+}
+
+fn median_us(mut f: impl FnMut()) -> f64 {
+    let mut t: Vec<f64> = (0..21)
+        .map(|_| {
+            let s = std::time::Instant::now();
+            f();
+            s.elapsed().as_secs_f64() * 1e6
+        })
+        .collect();
+    t.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    t[10]
+}
+
+#[test]
+#[ignore = "a measurement: run with --ignored --nocapture"]
+fn measure_the_cost_of_hiding() {
+    use crate::sim_snapshot::{Pace, Statics};
+    for (label, n, own) in [
+        ("200 units", 0, 200),
+        ("wander_5000-sized, 5,000 views", 4900, 100),
+    ] {
+        let off = crowd_world(n, own, false);
+        let on = crowd_world(n, own, true);
+        let (so, sn) = (Statics::new(&off), Statics::new(&on));
+        let mut snap_off = SimSnapshot::capture(&off);
+        let mut snap_on = SimSnapshot::capture(&on);
+        println!("{label}: {} views", snap_on.views().len());
+        for round in 0..3 {
+            let a = median_us(|| snap_off.fill(&off, &so, Pace::now()));
+            let b = median_us(|| snap_on.fill(&on, &sn, Pace::now()));
+            println!("  round {round}: snapshot fill  vision off {a:8.1} us   on {b:8.1} us");
+        }
+        let l = looks();
+        for round in 0..3 {
+            let mut out: Vec<sf_render::Motion> = Vec::with_capacity(6000);
+            let a = median_us(|| {
+                out.clear();
+                out.extend(motions_of(&l, &snap_off));
+                std::hint::black_box(&out);
+            });
+            let b = median_us(|| {
+                out.clear();
+                out.extend(motions_of(&l, &snap_on));
+                std::hint::black_box(&out);
+            });
+            println!(
+                "  round {round}: motions_of     vision off {a:8.1} us   on {b:8.1} us ({} of {} drawn)",
+                motions_of(&l, &snap_on).count(),
+                snap_on.views().len()
+            );
+        }
+        let mut book = GhostBook::new();
+        let c = median_us(|| book.update(&snap_on, &l));
+        let d = median_us(|| {
+            std::hint::black_box(minimap_dots(&snap_on, &book).count());
+        });
+        println!("  ghost book update {c:8.1} us, minimap dots {d:8.1} us");
+    }
 }

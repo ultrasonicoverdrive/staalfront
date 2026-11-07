@@ -839,6 +839,18 @@ impl Runner {
         self.fx_sound.reset();
     }
 
+    /// The landmarks the scene shows on the ground (a grid of pillars and a few blocks, development
+    /// scenery). A world with vision rules has none (WP8.3): they would stand out of the shroud.
+    fn scene_markers(&self) -> Vec<sf_render::scene::SceneObject> {
+        if self.snap.fog_version().is_some() {
+            return Vec::new();
+        }
+        let (ground, map) = (&self.ground, &self.map);
+        world_markers(map.width().min(map.height()), |x, z| {
+            ground.height(f64::from(x), f64::from(z)) as f32
+        })
+    }
+
     /// Gives the renderer and the minimap the scene that was just swapped in (the same steps as
     /// `on_start` takes for the first one).
     fn attach_scene(&mut self) {
@@ -850,10 +862,7 @@ impl Runner {
         if let Some(layer) = self.cell_layer.take() {
             renderer.set_cell_layer(layer);
         }
-        let (ground, map) = (&self.ground, &self.map);
-        renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
-            ground.height(f64::from(x), f64::from(z)) as f32
-        }));
+        renderer.set_scene(&self.scene_markers());
         if self.options.reserve {
             renderer.reserve_units(&self.instancer);
         }
@@ -2520,11 +2529,7 @@ impl App for Runner {
                 if let Some(layer) = self.cell_layer.take() {
                     renderer.set_cell_layer(layer);
                 }
-                let ground = &self.ground;
-                let map = &self.map;
-                renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
-                    ground.height(f64::from(x), f64::from(z)) as f32
-                }));
+                renderer.set_scene(&self.scene_markers());
                 renderer.watch_shader_file(
                     ctx.assets().root().join("shaders/scene.wgsl"),
                     Duration::from_millis(250),
