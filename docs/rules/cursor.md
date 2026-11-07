@@ -69,6 +69,12 @@ Notes on the rows:
   never shows Attack: the enemy is only a place on the ground and rows 6 to 10 apply (a Move
   onto it). Structures never count as the armed unit: a selected defence tower does not turn a
   right-click into an attack, because structures take no orders.
+* **Hidden things (WP8.3).** In a world with vision rules a unit or structure of someone else that the local player does not see
+  (`selection::facts` answers `None` for it, `fog_look.md`) is not there for the cursor: rows 2 and 4 do not match over it (no Inspect,
+  no Attack), the cursor over it is the one of the ground under it, and a right-click is a move order to that ground. A move order onto
+  a shroud or fog cell is fine (the cell is not secret); a cell the picture cannot show an enemy on is just ground. A ghost (the last view
+  of a structure) is not an entity: the cursor over it is the ground's too. Tested in `fog_view/tests.rs`
+  (`selection_facts_and_the_inspected_unit_ignore_what_is_not_seen`).
 * **Row 4, neutral.** A neutral unit (the civilians, `owner` 2) is not attacked by a right-click;
   it is ground for the orders. It can be inspected by a left-click.
 * **Row 5, guard needs no modifier.** Right-click on a friendly unit means "stay with it", the

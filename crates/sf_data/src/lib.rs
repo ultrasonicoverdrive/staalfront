@@ -16,6 +16,7 @@
 pub mod build_stages;
 pub mod damage;
 pub mod effects;
+pub mod fog_look;
 pub mod harvest;
 pub mod map;
 pub mod match_def;
