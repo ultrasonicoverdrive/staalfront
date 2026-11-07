@@ -131,9 +131,10 @@ Mutations: see the table in the PR and in `docs/progress.md`.
 
 ## Cost
 
-Release build, the container's software adapter, load average about 1.3 (the machine was nearly idle; `cargo` of other agents was not
-running), alternating or three rounds each. The container and CI cannot measure the frame-rate requirement (PLAN section 13); the
-laptop benchmarks M0b and M0c do.
+Release build, the container's software adapter (llvmpipe), load average 1.1 to 1.3 before and after the runs (the machine was lightly
+busy), the medians of 21 timings (15 for frames), three rounds each where a line says so, off and on alternating. The container and CI
+cannot measure the frame-rate requirement (PLAN section 13); the laptop benchmarks M0b and M0c do. Measured by the ignored tests
+`fog_view::tests::measure_the_cost_of_hiding` and `fog_screenshot::measure_the_cost_of_the_fog` (`--ignored --nocapture`).
 
 | What | Cost |
 |---|---|
