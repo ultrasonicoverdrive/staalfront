@@ -363,8 +363,8 @@ pub fn build(
     );
     let cell_view = cell_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-    // The fog texture (WP8.3): one Rg8 texel per gameplay cell, all visible until `set_fog` writes
-    // something else; the shader does not read it while `fog_on` is 0.
+    // The fog texture (WP8.3): one Rg8 texel per gameplay cell; wgpu zero-fills it, so it starts all
+    // shroud until `set_fog` writes; the shader does not read it while `fog_on` is 0.
     let fog_size = map.size_in_cells();
     let fog_extent = wgpu::Extent3d {
         width: fog_size.0.max(1),

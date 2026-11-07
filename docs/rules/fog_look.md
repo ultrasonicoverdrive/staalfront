@@ -9,8 +9,9 @@ below. Data: `assets/config/fog_look.ron` (read by `sf_data::fog_look`, pinned i
 **Only with vision rules.** Matches turn vision on (`matchplay::configure`, `docs/rules/match.md`), and so does `--debug-fog` for the
 sandbox. Every function below does nothing when the snapshot has no `fog_version` (the sandbox, the crowd, the benchmark, the demo):
 nothing is hidden, there are no ghosts, no fog is uploaded, the terrain shader skips its fog branch (`fog_on = 0`). The test
-`a_world_without_vision_rules_draws_the_same_pixels_as_a_renderer_that_never_heard_of_fog` renders a sandbox-like world through the
-production path and compares it with a path that never touched the fog: 0 pixels differ.
+`without_vision_rules_the_fog_upload_is_a_no_op_for_the_pixels` renders a sandbox-like world twice with the same renderer, once through the fog upload step of
+the runner and once without it, and finds 0 pixels differ: it shows that the fog upload does nothing without vision rules, not that
+the picture equals the one before WP8.3 (there is no second, fog-free renderer to compare with).
 
 ## The look: shroud and fog on the terrain
 
@@ -107,6 +108,8 @@ not an information rule: the simulation still knows everything.
 * **No allied vision**, no radar or "reveal map" (WP8.2a and later).
 * The F1 cell grid overlay (`cell_overlay::unit_cells`) still marks every unit's cell (debug view, off by default).
 * The old debug film (`--debug-fog`) is still a film over the whole picture.
+* **The building placement preview** can show hidden enemy structures as red (blocked) cells where the placement range reaches past
+  the player's sight: the preview checks occupancy in the world, not in what the player sees.
 * The softness is a blur of the cell maps, so a one-cell-wide visible stripe (a scout in a corridor) is dimmer than a wide one.
 
 ## Tests and mutations
@@ -125,9 +128,9 @@ Tests (all call production code):
   `fx::tests::effects_on_cells_out_of_sight_are_not_drawn_but_still_reach_the_audio_list`.
 * `crates/sf_game/tests/fog_screenshot.rs` (real renderer on a software adapter): shroud is the look's colour, fog is the clean terrain
   pulled by `fog_dim` (worked out from the picture without fog), visible is untouched, the edge is a ramp, the refinery's ghost appears
-  and goes, the minimap with fog, and the no-rules world is pixel-identical.
+  and goes, the minimap with fog, and without vision rules the fog upload changes no pixel.
 
-Mutations: see the table in the PR and in `docs/progress.md`.
+Mutations: see the table "Mutations (each applied, tests run, reverted)" in the body of PR #106.
 
 ## Cost
 

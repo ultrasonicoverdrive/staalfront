@@ -464,14 +464,17 @@ fn a_new_game_or_an_earlier_tick_clears_the_book() {
     run(&mut w, 5);
     book.update(&SimSnapshot::capture(&w), &l);
     assert_eq!(book.len(), 1);
-    // A snapshot of an earlier tick (a restart): forgotten before the new one is read.
-    let fresh = ghost_world();
-    let earlier = SimSnapshot::capture(&fresh);
+    // A snapshot of an earlier tick (a restart) of a world where nothing is in view: the old record
+    // is not visible there, so only the clear on an earlier tick can remove it.
+    let earlier = SimSnapshot::capture(&world(true));
+    assert!(earlier.fog_version().is_some());
     assert!(earlier.tick() < w.tick());
+    book.update(&earlier, &l);
+    assert!(book.is_empty(), "an earlier tick clears the ghost book");
+    // The new game's own refinery, seen: one record, written after the clear.
     let mut other = ghost_world();
     run(&mut other, 0);
-    book.update(&earlier, &l);
-    // The record is the new world's own refinery, seen: one record, written after the clear.
+    book.update(&SimSnapshot::capture(&other), &l);
     assert_eq!(book.len(), 1);
     book.clear();
     assert!(book.is_empty());

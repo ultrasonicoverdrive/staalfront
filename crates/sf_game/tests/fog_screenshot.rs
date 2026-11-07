@@ -631,7 +631,7 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
 // ---- no vision rules ----------------------------------------------------------------------------------
 
 #[test]
-fn a_world_without_vision_rules_draws_the_same_pixels_as_a_renderer_that_never_heard_of_fog() {
+fn without_vision_rules_the_fog_upload_is_a_no_op_for_the_pixels() {
     let mut scene = Scene::scouting(false);
     let mut r = renderer(&scene.map);
     let cam = scene.camera(0.3, (66.0, 24.0));
