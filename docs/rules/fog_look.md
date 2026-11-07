@@ -97,6 +97,19 @@ An effect is decided by the cell it happens on, so an enemy's shot *at* the play
 not the muzzle flash far away; the player's own shot into the shroud shows both (its `player` is local). That is a presentation rule,
 not an information rule: the simulation still knows everything.
 
+## The placement preview (follow-up to #106)
+
+The ghost of a structure being placed (`placement_view`, `docs/rules/buildings.md`) asks the sim for its verdict per cell. A cell the sim
+calls a **structure** or a **unit** is drawn red only when the player sees that cell now (`SimSnapshot::is_visible`); otherwise it is
+drawn in the neutral grey `placement_unknown` of `vision_look.ron` (`placement_view::tints`, `tint_seen`). The top-bar words for
+"another structure is in the way" / "a unit is in the way" are only said when a cell of exactly that kind is in sight, else the line says
+"cannot build here" (`refusal_words`). Terrain and map-edge cells are not hidden. **The verdict is the sim's and is untouched**:
+a refused placement is still refused and the outline and the amber cells say so; only the "where" and the "what" are not told.
+Without vision rules every cell is seen, so nothing changes. Tests: `placement_view::tests::a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell`,
+`the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green`, `sf_data::vision_look::tests::the_shipped_look_is_pinned`.
+Left: that the placement is refused at all (outline, amber cells) is still shown, as is the sim's own answer when the player clicks; an
+own structure whose cell is outside its own sight would also read grey.
+
 ## Gaps (known and left)
 
 * **Sound.** The audio plays `FxPlayer::shown()` as before, so a shot or an explosion in the shroud is still heard. That is an audio
@@ -108,8 +121,6 @@ not an information rule: the simulation still knows everything.
 * **No allied vision**, no radar or "reveal map" (WP8.2a and later).
 * The F1 cell grid overlay (`cell_overlay::unit_cells`) still marks every unit's cell (debug view, off by default).
 * The old debug film (`--debug-fog`) is still a film over the whole picture.
-* **The building placement preview** can show hidden enemy structures as red (blocked) cells where the placement range reaches past
-  the player's sight: the preview checks occupancy in the world, not in what the player sees.
 * The softness is a blur of the cell maps, so a one-cell-wide visible stripe (a scout in a corridor) is dimmer than a wide one.
 
 ## Tests and mutations

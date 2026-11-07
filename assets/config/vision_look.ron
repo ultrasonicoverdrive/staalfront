@@ -10,6 +10,10 @@
     shroud: (0, 0, 0, 215),
     // Cells seen before but not now.
     fog: (10, 14, 24, 120),
+    // A cell of the building placement preview that holds something the player cannot see (the
+    // sim says structure or unit; the cell is not in sight now): drawn in this neutral colour, not
+    // as the red of a blocked cell, so the preview does not show what is hidden (docs/rules/fog_look.md).
+    placement_unknown: (150, 150, 160, 110),
     // The most cells of one row drawn as one quad (so that a quad follows a slope).
     run_cells: 8,
 )

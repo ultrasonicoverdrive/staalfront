@@ -1489,10 +1489,11 @@ impl Runner {
             return Some(format!("Build {name}: refused, {words}"));
         }
         let verdict = match self.snap.ghost() {
-            Some(g) if g.query.kind == chosen.kind => match g.preview.verdict {
-                Ok(()) => "place here".to_owned(),
-                Err(e) => placement_view::describe(e, &|k| self.build.name_of(k)),
-            },
+            Some(g) if g.query.kind == chosen.kind => {
+                placement_view::refusal_words(&g.preview, &|c| self.snap.is_visible(c), &|k| {
+                    self.build.name_of(k)
+                })
+            }
             _ => "move the cursor over the ground".to_owned(),
         };
         Some(format!("Build {name}: {verdict}"))
@@ -1515,7 +1516,9 @@ impl Runner {
         let ground = &self.ground;
         let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
         let mut layer = self.hud.world_layer();
-        placement_view::draw_ghost(&mut layer, &frame, &terrain, answer);
+        placement_view::draw_ghost(&mut layer, &frame, &terrain, answer, &|c| {
+            snap.is_visible(c)
+        });
     }
 
     /// The progress bars of the structures under construction (WP6.3), from the snapshot's state.

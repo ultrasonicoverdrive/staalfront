@@ -17,6 +17,11 @@
 //! | red | this cell is the problem: off the map, terrain that cannot be built on, a structure or a unit in it |
 //! | amber | this cell is fine, but the placement is refused for another reason: too far from your base, a prerequisite missing, not your faction's structure, the exit blocked |
 //!
+//! A cell that the sim calls a structure or a unit, but that the player cannot see now, is drawn in
+//! a neutral colour (`placement_unknown` of `vision_look.ron`) and not red: the preview must not show
+//! what is hidden (`docs/rules/fog_look.md`). The verdict itself is the sim's and is not changed; a
+//! placement it refuses is still drawn as refused (outline, amber cells).
+//!
 //! The outline round the footprint is green or red by the verdict. A factory's exit cell is drawn
 //! blue when units can come out of it and red when not.
 //!
@@ -26,7 +31,7 @@
 use sf_math::render_bridge::METRES_PER_CELL;
 use sf_render::glam::{Mat4, Vec3};
 use sf_render::pick::project_px;
-use sf_sim::{Cell, CellVerdict, Kind, PlacementError};
+use sf_sim::{Cell, CellVerdict, Kind, PlacementError, PlacementPreview};
 use sf_ui::{Color, Layer};
 
 use crate::sim_snapshot::GhostAnswer;
@@ -78,6 +83,8 @@ pub enum Tint {
     Blocked,
     /// Amber.
     Elsewhere,
+    /// Grey: the cell holds something the player cannot see.
+    Unknown,
 }
 
 /// The tint of a cell with `verdict` in a placement that is (`placement_ok`) or is not allowed.
@@ -89,12 +96,64 @@ pub fn tint_of(verdict: CellVerdict, placement_ok: bool) -> Tint {
     }
 }
 
+/// [`tint_of`] for what the player can see: a cell the sim calls a structure or a unit is `Unknown`
+/// while `seen` says the player cannot see the cell now. Terrain and the map edge are not hidden.
+pub fn tint_seen(verdict: CellVerdict, placement_ok: bool, seen: bool) -> Tint {
+    match verdict {
+        CellVerdict::Structure | CellVerdict::Unit if !seen => Tint::Unknown,
+        _ => tint_of(verdict, placement_ok),
+    }
+}
+
+/// The tint of every cell of `preview` that is on the map, as [`draw_ghost`] paints them.
+pub fn tints(preview: &PlacementPreview, seen: &dyn Fn(Cell) -> bool) -> Vec<(Cell, Tint)> {
+    let ok = preview.verdict.is_ok();
+    preview
+        .cells
+        .iter()
+        // A cell off the map has no ground to lie on.
+        .filter(|&&(_, verdict)| verdict != CellVerdict::OffMap)
+        .map(|&(cell, verdict)| (cell, tint_seen(verdict, ok, seen(cell))))
+        .collect()
+}
+
 fn color_of(tint: Tint) -> Color {
     match tint {
         Tint::Valid => VALID,
         Tint::Blocked => BLOCKED,
         Tint::Elsewhere => ELSEWHERE,
+        Tint::Unknown => {
+            let c = crate::vision_view::shipped_look().placement_unknown;
+            Color(c.0, c.1, c.2, c.3)
+        }
     }
+}
+
+/// The words for the refusal of `preview`: [`describe`], except that "another structure" or "a unit
+/// is in the way" is only said when `seen` shows a cell with that very thing; otherwise the player
+/// is not told what is hidden and gets a plain "cannot build here".
+pub fn refusal_words(
+    preview: &PlacementPreview,
+    seen: &dyn Fn(Cell) -> bool,
+    name_of: &dyn Fn(Kind) -> String,
+) -> String {
+    let Err(error) = preview.verdict else {
+        return "place here".into();
+    };
+    let culprit = match error {
+        PlacementError::Occupied => Some(CellVerdict::Structure),
+        PlacementError::UnitInTheWay => Some(CellVerdict::Unit),
+        _ => None,
+    };
+    if let Some(culprit) = culprit
+        && !preview
+            .cells
+            .iter()
+            .any(|&(cell, v)| v == culprit && seen(cell))
+    {
+        return "cannot build here".into();
+    }
+    describe(error, name_of)
 }
 
 /// The words for a refusal. `name_of` names a structure kind (for "needs a power plant first").
@@ -161,23 +220,21 @@ fn cell_quad(
 
 /// Draws the ghost of `answer` on `layer`: a tinted quad for each cell, the outline of the
 /// footprint and the exit cell. `height(x, z)` is the terrain height in metres. Returns the
-/// number of cells drawn (a cell behind the camera is skipped).
+/// number of cells drawn (a cell behind the camera is skipped). `seen(cell)` says whether the player
+/// sees the cell now (always true in a world without vision rules).
 pub fn draw_ghost(
     layer: &mut Layer<'_>,
     frame: &GhostFrame,
     height: &dyn Fn(f32, f32) -> f32,
     answer: &GhostAnswer,
+    seen: &dyn Fn(Cell) -> bool,
 ) -> usize {
     let preview = &answer.preview;
     let ok = preview.verdict.is_ok();
     let mut drawn = 0;
-    for &(cell, verdict) in &preview.cells {
-        // A cell off the map has no ground to lie on.
-        if verdict == CellVerdict::OffMap {
-            continue;
-        }
+    for (cell, tint) in tints(preview, seen) {
         if let Some(quad) = cell_quad(frame, height, cell, CELL_INSET) {
-            layer.fill_quad(quad, color_of(tint_of(verdict, ok)));
+            layer.fill_quad(quad, color_of(tint));
             drawn += 1;
         }
     }

@@ -70,6 +70,12 @@ the scroll arrow there (`cursor.md`, row 1: the band wins over everything). Two 
   one source of truth). Letting the band yield to a unit under the cursor would change `cursor_context` for every
   screen edge and break that rule. It is a band of four pixels, and the sidebar no longer sits in it.
 
+## A new scene
+
+The tab and the scroll belong to the HUD, which a Restart keeps. `Runner::replace_scene` puts them back on the default tab
+(Structures) at scroll 0 (`Hud::reset_sidebar`), for Restart, Main menu and a new scene alike
+(`a_restart_puts_the_sidebar_on_its_default_tab_at_the_top`).
+
 ## Which items a tab shows
 
 An item is a role with a price (`cost`) that the local faction may have (`factions`), on the tab of its category

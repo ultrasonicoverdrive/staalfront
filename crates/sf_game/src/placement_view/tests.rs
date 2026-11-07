@@ -81,7 +81,7 @@ fn quads_in(answer: &GhostAnswer, frame: &GhostFrame) -> (usize, usize) {
     ui.begin_frame(UiInput::default(), (W as u32, H as u32), 1.0);
     ui.end_frame();
     let mut layer = ui.world_layer();
-    let cells = draw_ghost(&mut layer, frame, &flat, answer);
+    let cells = draw_ghost(&mut layer, frame, &flat, answer, &|_| true);
     (cells, layer.quad_count())
 }
 
@@ -223,4 +223,73 @@ fn cells_off_the_map_are_not_drawn_and_a_refused_ghost_still_shows_its_cells() {
     assert_eq!(on_map, 3);
     let (cells, _) = quads_in(&answer, &frame_at((248.0, 24.0)));
     assert_eq!(cells, 3, "the three cells on the map");
+}
+
+#[test]
+fn a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell() {
+    let (world, defs) = world();
+    let name = |k: Kind| format!("kind{}", k.0);
+    // A power plant on the anchor of the construction centre: structure cells, refused by the sim.
+    let answer = answer_for(&world, &defs, "power_plant", 48, 48);
+    let preview = &answer.preview;
+    assert_eq!(preview.verdict, Err(PlacementError::Occupied));
+    let blocking: Vec<Cell> = preview
+        .cells
+        .iter()
+        .filter(|c| c.1 == CellVerdict::Structure)
+        .map(|c| c.0)
+        .collect();
+    assert!(!blocking.is_empty());
+    // In sight (or in a world without vision rules): red, with the words of the refusal.
+    let in_sight = tints(preview, &|_| true);
+    for &c in &blocking {
+        assert!(in_sight.contains(&(c, Tint::Blocked)), "{c:?}");
+    }
+    assert_eq!(
+        refusal_words(preview, &|_| true, &name),
+        describe(PlacementError::Occupied, &name)
+    );
+    // Out of sight: the same cells are grey, nothing is red, and the words do not name a structure.
+    let hidden = tints(preview, &|_| false);
+    assert_eq!(hidden.len(), in_sight.len());
+    for &c in &blocking {
+        assert!(hidden.contains(&(c, Tint::Unknown)), "{c:?}");
+    }
+    assert!(hidden.iter().all(|t| t.1 != Tint::Blocked));
+    assert_eq!(
+        refusal_words(preview, &|_| false, &name),
+        "cannot build here"
+    );
+    // The sim's verdict is the same either way: the placement is still refused.
+    assert_eq!(preview.verdict, Err(PlacementError::Occupied));
+    // One of the structure's cells in sight: that one is red and the words come back.
+    let one = blocking[0];
+    let part = tints(preview, &|c| c == one);
+    assert!(part.contains(&(one, Tint::Blocked)));
+    assert!(
+        part.iter()
+            .filter(|t| t.0 != one && blocking.contains(&t.0))
+            .all(|t| t.1 == Tint::Unknown)
+    );
+    assert_eq!(
+        refusal_words(preview, &|c| c == one, &name),
+        describe(PlacementError::Occupied, &name)
+    );
+    // Terrain and the edge of the map are not hidden: they say nothing about the other side.
+    assert_eq!(
+        tint_seen(CellVerdict::BadTerrain, false, false),
+        Tint::Blocked
+    );
+    assert_eq!(tint_seen(CellVerdict::Unit, true, false), Tint::Unknown);
+    assert_eq!(tint_seen(CellVerdict::Free, true, false), Tint::Valid);
+}
+
+#[test]
+fn the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green() {
+    let c = crate::vision_view::shipped_look().placement_unknown;
+    let unknown = Color(c.0, c.1, c.2, c.3);
+    assert_ne!(unknown, BLOCKED);
+    assert_ne!(unknown, VALID);
+    assert_ne!(unknown, ELSEWHERE);
+    assert_eq!(color_of(Tint::Unknown), unknown);
 }
