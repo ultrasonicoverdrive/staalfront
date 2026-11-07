@@ -1,0 +1,25 @@
+// How shroud and fog of war look in the game (WP8.3, WP8.4, docs/rules/fog_look.md). Read by
+// sf_data::fog_look, compiled into the game, checked when it is parsed. Presentation only: no
+// checksum depends on this file. Colours are sRGB bytes. The debug view of WP8.1 keeps its own file
+// (vision_look.ron) and its own switch.
+(
+    // The terrain fades to this where a cell was never seen (shroud).
+    shroud: (3, 4, 8),
+    // Where a cell was seen before but is not seen now (fog) the terrain is pulled towards this tint
+    // by `fog_dim` (0 = not at all, 1 = all the way).
+    fog_tint: (16, 22, 38),
+    fog_dim: 0.55,
+    // How soft the edges are: passes of a 3 by 3 box blur over the two cell maps before they are
+    // uploaded (0 = the edge is only as soft as the bilinear filter, one cell; each pass adds about
+    // one cell). 0 to 4.
+    softness: 2,
+    // A ghost (a structure of the other side or a neutral one, drawn as it was last seen while its
+    // cells are fog) takes the model's team parts in this colour, and shows as a dot of
+    // `ghost_dot` on the minimap.
+    ghost_colour: (88, 96, 112),
+    ghost_dot: (150, 156, 170),
+    // The minimap: shroud cells go to this colour, fog cells are pulled towards it by
+    // `minimap_fog_dim`.
+    minimap_shroud: (0, 0, 0),
+    minimap_fog_dim: 0.5,
+)

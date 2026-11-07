@@ -105,8 +105,8 @@ What the gate does **not** touch, on purpose:
 with it (`Visible` beats `Fog` beats `Shroud`, so also explored cells are united). It is one way (`(0, 2)` lets player 2 see what
 player 0 sees, not the reverse), not transitive (`(0, 1), (1, 2)` does not give player 2 the cells of player 0), and it needs no
 object of the viewer. The pairs must be strictly ascending and never a player with itself (`ConfigError::Vision` otherwise). The
-per-player bitsets (`fog_words`, `fog_version`, the snapshot and the debug view) are the player's **own** cells and do not contain the
-shared ones: nothing in the game sets a pair yet. Sharing is stored as a list and read at query time, so it adds no state, no cost to
+per-player bitsets (`fog_words`, `fog_version`, the snapshot's bitsets and the debug view) are the player's **own** cells and do not
+contain the shared ones; the snapshot's `seen` does (see "Own picture and shared vision" below): nothing in the game sets a pair yet. Sharing is stored as a list and read at query time, so it adds no state, no cost to
 the pass, and a scenario can set it.
 
 **Structure sight** needed nothing more: the data has a `sight` for every structure (`unit_defs.ron`, 3 to 12 cells), a structure
@@ -141,11 +141,12 @@ places, most of them tests, and other branches add fields to it; the sight lives
 
 Matches turn vision **on**: `matchplay::configure` gives the world the rules, and since WP8.2a the headless `match` scenario
 writes the same rules out (`vision: Some((legacy_sight_milli: 5000))`), so the pinned scenario is the game's world and not a
-sibling of it. In both the targeting gate (WP8.2a, below) is off. The sandbox gets vision only with `--debug-fog`.
+sibling of it. In both the targeting gate (WP8.2a, below) is off. Since WP8.3 and WP8.4 the picture reads the rules too. The sandbox
+gets vision only with `--debug-fog`.
 
 ## The checksum (section `v`)
 
-After the last section (`r`, repair) and only in a world with vision rules. The gate and the shared pairs are written after the sights, as a block tagged `g`, **only when the gate is on or a pair is set**; rules with both off hash exactly as in WP8.1 (`match` and `vision` keep their pins; `hash_always_writes_gate_block` below). The byte is `v` (the upper-case letters are all
+After the last section (`r`, repair) and only in a world with vision rules. The gate and the shared pairs are written after the sights, as a block tagged `g`, **only when the gate is on or a pair is set**; rules with both off hash exactly as in WP8.1 (`match` and `vision` keep their pins; `the_gate_and_the_pairs_are_in_the_hash_only_when_set`). The byte is `v` (the upper-case letters are all
 taken, and `M` is used twice, by money and by movement; that is left alone, "fixing" it would move every pin). It hashes the
 rules (legacy sight, then each kind with its sight), then for each player that has had an object, ascending:
 
@@ -163,19 +164,26 @@ the visible mix; the full recompute that proves it cannot happen is `World::visi
 **every tick** on `vision`, on the busy world of `the_incremental_counts_equal_a_recompute_every_tick` (deaths, spawns, a slot
 reused, a structure going up and down) and at sample ticks on 5,000 wanderers.
 
-## For the player's side: the snapshot and the debug view
+## For the player's side: the snapshot, the real look and the debug view
 
 `SimSnapshot` (sf_game) carries what the **local player** (`commands::LOCAL_PLAYER`) sees: `fog_version()` (`None` without
 vision rules), the two bitsets, copied only when the version changed (the ore pattern; the version is bumped by every pass
 that changed the visible or explored cells of that player), `visibility(cell)`, and `seen(id)` per view: own objects always,
-others when their cell (a structure: any cell of its footprint) is visible. **Nothing filters by `seen` yet.** It is the local player's own picture: shared vision (WP8.2a) is not in it.
+others when their cell (a structure: any cell of its footprint) is visible. **Since WP8.3 and WP8.4 the picture filters by it**:
+what is drawn, iconised, picked, put on the minimap or shown as an effect, the soft fog on the terrain and the ghosts of structures
+last seen are all in [`fog_look.md`](fog_look.md). Worlds without vision rules are drawn as before.
 
-The debug view draws a dark film over shroud and a dim one over fog, in runs of at most 8 cells along a row, projected like
+Own picture and shared vision, exactly: the two bitsets, `fog_version` and `visibility(cell)` of the snapshot are the local
+player's **own** cells, but `seen` is computed with `World::visibility`, which answers with the union of the own picture and that of every sharer
+(`sf_game/src/sim_snapshot.rs`). The two agree as long as no `(sharer, viewer)` pair is set, and nothing in the game sets one
+(only scenarios do). Follow-up for when teams exist: take the bitsets and the version from the shared union too, or `seen` from the
+own picture, so the fog drawn and the objects shown come from the same set.
+
+The debug view (WP8.1) draws a dark film over shroud and a dim one over fog, in runs of at most 8 cells along a row, projected like
 the placement ghost. Switch: the "Fog of war (debug)" checkbox of the F1 panel, or `--debug-fog` (which also gives the
-sandbox vision rules). Colours: `vision_look.ron`. **It is a debug view and not a fair one**: units and icons of the other
-side in the shroud show through the film (the screenshots show it), and a quad over a steep slope is sheared. The real look
-(soft edges, ghosts of seen structures, hiding units that are not seen, the filtered minimap and icon list) is WP8.3 and
-WP8.4. Screenshots: `docs/screenshots/wp8.1/` (tick in the name).
+sandbox vision rules). Colours: `vision_look.ron`. **It stays a debug view**: a quad over a steep slope is sheared, and it is a film over the
+whole picture. It is no longer the way to see fog (units of the other side in the shroud no longer show through; they are hidden
+now). Screenshots: `docs/screenshots/wp8.1/` (the debug view; tick in the name) and `docs/screenshots/wp8.3/` (the real look).
 
 ## Planned, not built
 
@@ -183,7 +191,7 @@ WP8.4. Screenshots: `docs/screenshots/wp8.1/` (tick in the name).
 
 * **WP8.2b** (height bonus): only after the sim has integer height levels and a map with relief exists. Both shipped maps are
   flat (`height_scale: 0`) and `sf_sim::terrain` has only type ids today.
-* **WP8.3 / WP8.4**: see above.
+* **WP8.3 / WP8.4**: built, see [`fog_look.md`](fog_look.md).
 * **AI**: an opponent that must not cheat needs a last-seen memory on the sim side; not in this WP.
 
 ## The scenario `vision`
@@ -353,9 +361,10 @@ ticks.
 
 * The gate is off in everything that ships; nothing but the scenario `vision_targeting` and the measurement test turns it on.
 * A chosen target that steps into fog is kept (the gate is on the pick only). No team or alliance exists in the game: `shared` is set by
-  scenarios only, and the snapshot and the debug view do not use it. No reveal-the-map effect, no radar or special reveal, no height or
-  occlusion (a disc looks through everything).
-* The debug view hides nothing and is sheared on slopes; no ghosts, no soft edges, no icon or minimap filter (WP8.3, WP8.4).
+  scenarios only; the debug view and the snapshot's bitsets do not use it, while `seen` does (see "Own picture and shared vision").
+  No reveal-the-map effect, no radar or special reveal, no height or occlusion (a disc looks through everything).
+* The debug view is sheared on slopes and is a film over the whole picture (the real look, ghosts, hiding, the minimap are in
+  `fog_look.md`).
 * The snapshot carries the local player only (a constant, `LOCAL_PLAYER`); a replay or observer view would pass another.
 * The AI has no memory of what it has seen.
 * A sold or under-construction structure sees nothing (decided, written above), which also means that a base whose only

@@ -2538,9 +2538,10 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
 
 ## Phase 8 — Vision
 
-Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour; #104) is merged. WP8.2a (the targeting gate behind a flag that is
-**off**, structure sight, the shared-vision hook; this PR) is built and in review; WP8.2b (height bonus, waits for elevation in the sim),
-WP8.3 (presentation) and WP8.4 (minimap and icons) are not started. The split of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026).
+Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour; #104) and WP8.2a (the targeting gate behind a flag that is
+**off**, structure sight, the shared-vision hook; #105) are merged; WP8.3 and WP8.4 (the look of shroud and fog, ghosts, hiding what is
+not seen, the minimap) are built together and in review; WP8.2b (height bonus, waits for elevation in the sim) is not started. The split
+of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 and WP8.4 in the note of 07-11-2026.
 
 ### WP8.1 notes: shroud and fog of war (merged in #104 on top of WP6.6, orchestrator decision 05-11-2026)
 
@@ -2590,6 +2591,25 @@ WP8.3 (presentation) and WP8.4 (minimap and icons) are not started. The split of
 - **Gaps:** the gate does not drop a chosen target that walks into fog; the snapshot and debug view do not use the shared pairs; no
   team or alliance exists, so nothing but scenarios sets `shared`; no height (WP8.2b); no ghosts or hiding (WP8.3, WP8.4); the AI has no
   memory. The cost of the gate was not measurable (see `vision.md`, "Cost").
+
+### WP8.3 and WP8.4 notes: the look of fog, ghosts, hiding, the minimap (orchestrator decision 07-11-2026)
+
+- Done: `assets/config/fog_look.ron` + `sf_data::fog_look` (pinned); `sf_render::fog::texels` (the two bitsets as an `Rg8` texture,
+  a 3 by 3 box blur `softness` times) and the terrain shader's fog branch (`fog_on`, bilinear, `smoothstep`; `Renderer::set_fog`,
+  `clear_fog`); `sf_game::fog_view` (`GhostBook`, `minimap_dots`, `fog_step`/`sync_terrain`, the shipped look); hiding by
+  `SimSnapshot::{view_shown, wreck_shown, projectile_shown, shown_at_metres}` in `runner::motions_of` (models, icons, hover, picking),
+  `selection::facts` (clicks, cursor, inspected panel), `construction_view::front_edge` and the rally flags (bars and signs), `FxPlayer`
+  (flashes, hits, deaths, tracers, wreck smoke, damage smoke); `Minimap::set_fog` (shroud and fog on the minimap, ore under shroud kept);
+  no scenery markers in a world with vision rules. Rules: `docs/rules/fog_look.md` (+ `vision.md`, `cursor.md`, `selection.md`).
+  Screenshots: `docs/screenshots/wp8.3/`.
+- **Decisions:** the fog is a texture sampled by the terrain shader (no per-vertex values, no film): one fetch per fragment, only when
+  `fog_on`; the blur is on the CPU over the two maps, so the edge softness is data (`softness`); an effect is judged by the cell it
+  happens on and shown if that cell is visible or the effect is the local player's own; a ghost is the structure's last shape in a
+  ghost team colour (palette entry 5), not a desaturated model; a click on a hidden unit finds the ground; the sound of hidden events is
+  left alone (audio is another chat's).
+- **Pins:** none moved, nothing in `crates/sf_sim/` changed (the diff of that directory against origin/main is empty).
+- **Gaps:** sound of hidden events; ghosts only for structures and they do not age; the ghost is a team colour; no allied vision; the F1 cell
+  grid overlay still marks every unit's cell; the shader's cost on a real GPU is not measured (only the software adapter).
 
 ## Open follow-ups
 

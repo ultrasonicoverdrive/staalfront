@@ -70,11 +70,15 @@ pub struct Facts {
 }
 
 /// The [`Facts`] of a live entity; `None` for a stale id (dead, or its slot
-/// holds another entity: the generation check) and for an entity without a
-/// unit-table entry.
+/// holds another entity: the generation check), for an entity without a
+/// unit-table entry and, in a world with vision rules (WP8.3), for one the local player does not see:
+/// a click or a hover there finds nothing of the enemy, so nothing is selected, inspected or attacked.
 pub fn facts(world: &SimSnapshot, id: EntityId) -> Option<Facts> {
     let stats = world.stats_of(id)?;
     let view = world.get(id)?;
+    if !world.seen(id) {
+        return None;
+    }
     Some(Facts {
         owner: view.owner,
         kind: stats.kind,
@@ -323,7 +327,12 @@ impl Selection {
     /// groups. Call it once a frame.
     pub fn forget_the_dead(&mut self, world: &SimSnapshot) {
         self.own.retain(|&id| world.is_alive(id));
-        if self.inspected.is_some_and(|id| !world.is_alive(id)) {
+        // An inspected enemy that went out of sight is let go too (WP8.3): its panel would tell where
+        // it is.
+        if self
+            .inspected
+            .is_some_and(|id| !world.is_alive(id) || !world.seen(id))
+        {
             self.inspected = None;
         }
         for group in &mut self.groups {

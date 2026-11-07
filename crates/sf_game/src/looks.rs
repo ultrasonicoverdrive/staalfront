@@ -25,13 +25,20 @@ use crate::roster::{Roster, faction_of_owner};
 /// parts and the primitives take it).
 pub const WRECK_COLOUR: u8 = 4;
 
-/// `style` with the wreck colour added at index [`WRECK_COLOUR`]. Every style the game draws units with goes
+/// The player colour the ghost of a structure last seen is drawn in (WP8.3): the entry after the wreck
+/// colour, its sRGB the `ghost_colour` of `assets/config/fog_look.ron`, added by [`with_wreck_colour`].
+pub const GHOST_COLOUR: u8 = 5;
+
+/// `style` with the wreck colour added at index [`WRECK_COLOUR`] and the ghost colour (WP8.3) after it at [`GHOST_COLOUR`]. Every style the game draws units with goes
 /// through it (the runner's placeholder style, the screenshot tests'). A palette that already has more than the
 /// four player colours is left alone: the colour would not be at the index the wrecks use.
 pub fn with_wreck_colour(style: Style) -> Style {
     if style.color_count() == usize::from(WRECK_COLOUR) {
         let (r, g, b) = crate::wreck_looks::WreckLooks::shipped().colour;
-        style.with_colour("wreck", [r, g, b])
+        let ghost = sf_data::fog_look::FogLook::embedded().ghost_colour;
+        style
+            .with_colour("wreck", [r, g, b])
+            .with_colour("ghost", [ghost.0, ghost.1, ghost.2])
     } else {
         style
     }
