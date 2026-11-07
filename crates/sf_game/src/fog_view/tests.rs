@@ -120,6 +120,11 @@ fn field() -> (World, SimSnapshot) {
 fn an_enemy_unit_out_of_sight_is_not_given_to_the_instancer_and_the_others_are() {
     let (_w, snap) = field();
     assert_eq!(snap.views().len(), 4);
+    assert_eq!(
+        snap.shown_count(),
+        3,
+        "the counter on the screen does not count the hidden unit"
+    );
     let ids = motion_ids(&snap);
     let scout = slot_at_column(&snap, LOCAL_PLAYER, 10);
     let near = slot_at_column(&snap, ENEMY, 13);
@@ -179,6 +184,7 @@ fn a_world_without_vision_rules_hides_nothing() {
     let snap = SimSnapshot::capture(&w);
     assert_eq!(snap.fog_version(), None);
     assert_eq!(motion_ids(&snap).len(), 3, "every view is drawn");
+    assert_eq!(snap.shown_count(), 3);
     assert!((0..3).all(|i| snap.view_shown(i)));
     assert!(snap.shown_at_metres([200.0, 100.0], ENEMY));
     let mut book = GhostBook::new();

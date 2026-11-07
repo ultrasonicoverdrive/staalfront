@@ -323,11 +323,76 @@ fn changed(a: &Rgba8, b: &Rgba8) -> usize {
         .count()
 }
 
+/// Checks the pixels over cells that are far from every edge of their state and from every model: shroud is
+/// the look's colour, visible is the terrain untouched (as in `clean`, the same view without fog), fog is
+/// the clean terrain pulled towards the tint by `fog_dim` (worked out here, in linear light). Returns how
+/// many cells of each state were checked: `[shroud, visible, fog]`.
+fn check_pixels(
+    scene: &Scene,
+    cam: &Camera,
+    snap: &SimSnapshot,
+    with_fog: &Rgba8,
+    clean: &Rgba8,
+) -> [usize; 3] {
+    let look = shipped_look();
+    let (mut shroud_hits, mut visible_hits, mut fog_hits) = (0, 0, 0);
+    for y in (0..96).step_by(2) {
+        for x in (0..96).step_by(2) {
+            let Some((px, py)) = scene.screen_of(cam, x as f32, y as f32) else {
+                continue;
+            };
+            let state = snap.visibility(Cell::new(x, y));
+            // Only cells whose whole 7 by 7 neighbourhood has the same state: away from every edge.
+            let same = (-3..=3).all(|dy: i32| {
+                (-3..=3).all(|dx: i32| {
+                    let c = Cell::new((x as i32 + dx).max(0) as u32, (y as i32 + dy).max(0) as u32);
+                    snap.visibility(c) == state
+                })
+            });
+            if !same {
+                continue;
+            }
+            // A model standing there changes the pixel: compare only on bare terrain.
+            let near_object = snap.views().iter().enumerate().any(|(i, v)| {
+                let (cx, cy) = v.pos.cell();
+                snap.view_shown(i) && (cx - x as i32).abs() <= 6 && (cy - y as i32).abs() <= 6
+            });
+            if near_object {
+                continue;
+            }
+            let got = rgb(with_fog, px, py);
+            match state {
+                Visibility::Shroud => {
+                    let want = [look.shroud.0, look.shroud.1, look.shroud.2];
+                    assert!(
+                        close(got, want, 3),
+                        "shroud at {x},{y}: {got:?} wanted about {want:?}"
+                    );
+                    shroud_hits += 1;
+                }
+                Visibility::Visible => {
+                    assert_eq!(got, rgb(clean, px, py), "visible at {x},{y} is untouched");
+                    visible_hits += 1;
+                }
+                Visibility::Fog => {
+                    let want = mix_srgb(rgb(clean, px, py), look.fog_tint, look.fog_dim);
+                    assert!(
+                        close(got, want, 4),
+                        "fog at {x},{y}: {got:?} wanted about {want:?} from {:?}",
+                        rgb(clean, px, py)
+                    );
+                    fog_hits += 1;
+                }
+            }
+        }
+    }
+    [shroud_hits, visible_hits, fog_hits]
+}
+
 // ---- the start of the first match --------------------------------------------------------------------
 
 #[test]
 fn the_start_of_the_first_match_has_shroud_round_the_base_and_a_dimmed_explored_ring() {
-    let look = shipped_look();
     let mut scene = Scene::first_match();
     let mut r = renderer(&scene.map);
     // The base at (12, 68) sees ten cells beyond its 4 by 4 footprint; the camera looks at it.
@@ -347,59 +412,7 @@ fn the_start_of_the_first_match_has_shroud_round_the_base_and_a_dimmed_explored_
     assert!(!r.fog_on());
     scene.applied = None;
 
-    // A cell deep in the shroud (far from anything of the local player) is the shroud colour.
-    let mut shroud_hits = 0;
-    let mut visible_hits = 0;
-    for y in (0..96).step_by(2) {
-        for x in (0..96).step_by(2) {
-            let Some((px, py)) = scene.screen_of(&cam, x as f32, y as f32) else {
-                continue;
-            };
-            let state = snap.visibility(Cell::new(x, y));
-            // Only cells whose whole 5 by 5 neighbourhood has the same state: away from every edge.
-            let same = (-3..=3).all(|dy: i32| {
-                (-3..=3).all(|dx: i32| {
-                    let c = Cell::new((x as i32 + dx).max(0) as u32, (y as i32 + dy).max(0) as u32);
-                    snap.visibility(c) == state
-                })
-            });
-            if !same {
-                continue;
-            }
-            // A model standing there changes the pixel: compare only where the clean picture and the
-            // fogged one are on bare terrain (no unit of the local player within 3 cells).
-            let near_object = snap.views().iter().enumerate().any(|(i, v)| {
-                let (cx, cy) = v.pos.cell();
-                snap.view_shown(i) && (cx - x as i32).abs() <= 6 && (cy - y as i32).abs() <= 6
-            });
-            if near_object {
-                continue;
-            }
-            let got = rgb(&with_fog, px, py);
-            match state {
-                Visibility::Shroud => {
-                    let want = [look.shroud.0, look.shroud.1, look.shroud.2];
-                    assert!(
-                        close(got, want, 3),
-                        "shroud at {x},{y}: {got:?} wanted about {want:?}"
-                    );
-                    shroud_hits += 1;
-                }
-                Visibility::Visible => {
-                    assert_eq!(got, rgb(&clean, px, py), "visible at {x},{y} is untouched");
-                    visible_hits += 1;
-                }
-                Visibility::Fog => {
-                    let want = mix_srgb(rgb(&clean, px, py), look.fog_tint, look.fog_dim);
-                    assert!(
-                        close(got, want, 4),
-                        "fog at {x},{y}: {got:?} wanted about {want:?} from {:?}",
-                        rgb(&clean, px, py)
-                    );
-                }
-            }
-        }
-    }
+    let [shroud_hits, visible_hits, _] = check_pixels(&scene, &cam, &snap, &with_fog, &clean);
     assert!(shroud_hits > 15, "shroud cells checked: {shroud_hits}");
     assert!(visible_hits > 3, "visible cells checked: {visible_hits}");
     // The picture changed a lot: most of the screen is shroud.
@@ -495,6 +508,23 @@ fn the_ghost_of_the_refinery_the_scout_left_behind_is_drawn_and_goes_when_the_pl
         &format!("m1_t{:05}_ghost_of_the_refinery.png", snap.tick().0),
         &left,
     );
+    // The fog is the clean terrain pulled towards the tint: the same view without fog is the reference. The
+    // wide view has fog cells (the scout's trail and the explored ground round the structures) that sit
+    // away from every edge.
+    let wide = scene.camera(0.9, (48.0, 48.0));
+    let (fogged_wide, snap_wide) = scene.shoot_with(&mut r, &wide, true);
+    r.clear_fog();
+    scene.applied = None;
+    let (clean_wide, _) = scene.shoot_with(&mut r, &wide, false);
+    let [shroud_hits, visible_hits, fog_hits] =
+        check_pixels(&scene, &wide, &snap_wide, &fogged_wide, &clean_wide);
+    assert!(
+        shroud_hits > 10 && visible_hits > 0,
+        "{shroud_hits} {visible_hits}"
+    );
+    assert!(fog_hits > 0, "fog cells checked: {fog_hits}");
+    // Back to the picture the rest of the test looks at.
+    scene.applied = None;
     // The ghost is a model in the ghost colour at the structure's place; the picture has changed
     // from "seen" by the fog and the ghost colour (not an empty field).
     let motions: Vec<_> = scene_motions(&scene.looks, &snap, &scene.ghosts).collect();

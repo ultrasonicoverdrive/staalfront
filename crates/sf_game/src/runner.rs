@@ -2627,7 +2627,7 @@ impl App for Runner {
         self.selection.forget_the_dead(&self.snap);
         let stats = HudStats {
             fps: self.fps_shown,
-            units: self.snap.len() as u32,
+            units: self.snap.shown_count() as u32,
             selected: self.selection.len() as u32,
             inspecting: self.selection.inspected().is_some(),
             tick: self.snap.tick().0,

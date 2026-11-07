@@ -723,6 +723,15 @@ impl SimSnapshot {
         &self.pace
     }
 
+    /// The number of live entities the local player is shown (WP8.3): all of them without vision rules,
+    /// else its own and the others it sees. What a counter on the screen may say.
+    pub fn shown_count(&self) -> usize {
+        if self.fog_version.is_none() {
+            return self.views.len();
+        }
+        self.seen.iter().filter(|&&s| s).count()
+    }
+
     /// The number of live entities.
     pub fn len(&self) -> usize {
         self.views.len()

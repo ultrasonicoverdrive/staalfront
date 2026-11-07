@@ -189,16 +189,10 @@ impl GhostBook {
     /// The ghosts to draw now: the records whose structure is not shown. A structure that is seen is
     /// drawn as itself, and its record only waits.
     pub fn drawn<'a>(&'a self, snap: &'a SimSnapshot) -> impl Iterator<Item = &'a Ghost> + 'a {
-        let shown: BTreeSet<EntityId> = snap
-            .views()
-            .iter()
-            .enumerate()
-            .filter(|&(i, _)| snap.view_shown(i))
-            .map(|(_, v)| v.id)
-            .collect();
+        // `seen` is false for a structure that is hidden and for one that is gone (a stale id).
         self.ghosts
             .values()
-            .filter(move |g| snap.fog_version().is_some() && !shown.contains(&g.id))
+            .filter(move |g| snap.fog_version().is_some() && !snap.seen(g.id))
     }
 
     /// The ghosts as models for the instancer: in the ghost colour, numbered from `first_slot` on (a

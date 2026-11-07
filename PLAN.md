@@ -292,6 +292,8 @@ win. First moment to really play and adjust the design.
 
 *05-11-2026 (orchestrator, with WP8.1): WP8.2 is split. **WP8.2a** is the targeting gate (auto-acquisition only of cells the owner sees, retaliation always allowed), the sight rules of structures and the allied-vision hook, on top of `World::visibility` that WP8.1 builds; **WP8.2b** is the height bonus and waits until the sim has integer height levels and a map with relief exists (both maps are flat and the sim has no elevation today). WP8.1 computes what each player sees and changes no behaviour (`docs/rules/vision.md`).*
 
+*07-11-2026 (orchestrator, with WP8.3): **WP8.3 and WP8.4 are built together in one PR.** Both read the same snapshot fields from WP8.1 (`fog_version`, the two bitsets, `seen` per view) and neither touches the sim, so they share one presentation layer: the soft shroud and fog on the terrain, ghosts of structures last seen, and everything an unseen object of the other side is removed from on the CPU (models, the icon list, picking, the cursor, bars, effects, wrecks, tracers, the minimap). WP8.2a (vision-gated targeting, in the sim) is built in parallel on its own branch; this PR stays out of `crates/sf_sim/` and moves no pin (`docs/rules/fog_look.md`).*
+
 ### Phase 9 — Computer opponent
 Layered (analysis §12, §22G):
 - WP9.1 **[xhigh]** Strategic: build order, economy, tech choice, attack timing.
