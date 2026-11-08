@@ -17,13 +17,13 @@
 //! | red | this cell is the problem: off the map, terrain that cannot be built on, a structure or a unit in it |
 //! | amber | this cell is fine, but the placement is refused for another reason: too far from your base, a prerequisite missing, not your faction's structure, the exit blocked |
 //!
-//! A cell that the sim calls a structure or a unit, but that the player cannot see now, is drawn in
-//! a neutral colour (`placement_unknown` of `vision_look.ron`) and not red: the preview must not show
-//! what is hidden (`docs/rules/fog_look.md`). The verdict itself is the sim's and is not changed; a
+//! Every on-map cell that is not in sight now (free, a structure or a unit alike) is drawn in a
+//! neutral colour (`placement_unknown` of `vision_look.ron`), and so is a factory's exit cell that is
+//! not in sight: the preview must not show what is hidden (`docs/rules/fog_look.md`). The verdict itself is the sim's and is not changed; a
 //! placement it refuses is still drawn as refused (outline, amber cells).
 //!
 //! The outline round the footprint is green or red by the verdict. A factory's exit cell is drawn
-//! blue when units can come out of it and red when not.
+//! blue when units can come out of it and red when not, grey when it is not in sight ([`exit_look`]).
 //!
 //! The quads are projected onto the terrain through the camera like the selection rings
 //! ([`crate::selection_view`]) and go on the UI's world layer, under the panels.
@@ -83,7 +83,7 @@ pub enum Tint {
     Blocked,
     /// Amber.
     Elsewhere,
-    /// Grey: the cell holds something the player cannot see.
+    /// Grey: the cell is not in sight now (whatever is or is not on it).
     Unknown,
 }
 
@@ -147,6 +147,9 @@ pub fn refusal_words(
         PlacementError::UnitInTheWay => Some(CellVerdict::Unit),
         _ => None,
     };
+    if error == PlacementError::ExitBlocked && !preview.exit.is_some_and(|e| seen(e.cell)) {
+        return "cannot build here".into();
+    }
     if let Some(culprit) = culprit
         && !preview
             .cells
@@ -160,7 +163,8 @@ pub fn refusal_words(
 
 /// The words for a refusal the sim gave on a click, for a structure of `size` (cells along x, y)
 /// anchored at `anchor`: "another structure / a unit is in the way" only when every footprint cell
-/// is in sight, else the same generic "cannot build here" as [`refusal_words`].
+/// is in sight, and "the exit is blocked" only when every cell of the ring round the footprint (where
+/// any exit cell lies) is in sight; else the same generic "cannot build here" as [`refusal_words`].
 pub fn click_refusal_words(
     error: PlacementError,
     anchor: Cell,
@@ -178,7 +182,42 @@ pub fn click_refusal_words(
     if hides && !all_seen {
         return "cannot build here".into();
     }
+    if error == PlacementError::ExitBlocked {
+        // The ring one cell round the footprint; cells off the map (negative) are skipped.
+        let (x0, y0) = (i64::from(anchor.x) - 1, i64::from(anchor.y) - 1);
+        let (x1, y1) = (
+            i64::from(anchor.x) + i64::from(w),
+            i64::from(anchor.y) + i64::from(h),
+        );
+        let ring_seen = (y0..=y1).all(|y| {
+            (x0..=x1).all(|x| {
+                let inside = x > x0 && x < x1 && y > y0 && y < y1;
+                match (u32::try_from(x), u32::try_from(y)) {
+                    (Ok(x), Ok(y)) if !inside => seen(Cell::new(x, y)),
+                    _ => true,
+                }
+            })
+        });
+        if !ring_seen {
+            return "cannot build here".into();
+        }
+    }
     describe(error, name_of)
+}
+
+/// The fill and line colour of a factory's exit cell: blue when `usable`, red when not, and the
+/// neutral `placement_unknown` grey (fill and line) when the cell is not `seen`, whatever `usable`
+/// says, because the sim calls it unusable when a structure stands on it.
+pub fn exit_look(usable: bool, seen: bool) -> (Color, Color) {
+    if !seen {
+        let c = color_of(Tint::Unknown);
+        return (c, Color(c.0, c.1, c.2, 255));
+    }
+    if usable {
+        (EXIT_OPEN, EXIT_OPEN_LINE)
+    } else {
+        (EXIT_BLOCKED, EXIT_BLOCKED_LINE)
+    }
 }
 
 /// The words for a refusal. `name_of` names a structure kind (for "needs a power plant first").
@@ -284,11 +323,7 @@ pub fn draw_ghost(
     if let Some(exit) = preview.exit
         && let Some(quad) = cell_quad(frame, height, exit.cell, 0.0)
     {
-        let (fill, line) = if exit.usable {
-            (EXIT_OPEN, EXIT_OPEN_LINE)
-        } else {
-            (EXIT_BLOCKED, EXIT_BLOCKED_LINE)
-        };
+        let (fill, line) = exit_look(exit.usable, seen(exit.cell));
         layer.fill_quad(quad, fill);
         let points = quad.map(|(x, y)| [x, y]);
         layer.polyline(&points, true, OUTLINE_PX * frame.ui_scale, line);

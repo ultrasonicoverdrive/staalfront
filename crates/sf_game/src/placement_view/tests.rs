@@ -327,3 +327,61 @@ fn the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green() {
     assert_ne!(unknown, ELSEWHERE);
     assert_eq!(color_of(Tint::Unknown), unknown);
 }
+
+#[test]
+fn an_exit_cell_out_of_sight_looks_the_same_free_or_blocked() {
+    // Out of sight: the same grey whatever the sim says, so a hidden structure on it is not shown.
+    assert_eq!(exit_look(true, false), exit_look(false, false));
+    let grey = color_of(Tint::Unknown);
+    assert_eq!(exit_look(false, false).0, grey);
+    // In sight: blue when free, red when blocked.
+    assert_eq!(exit_look(true, true), (EXIT_OPEN, EXIT_OPEN_LINE));
+    assert_eq!(exit_look(false, true), (EXIT_BLOCKED, EXIT_BLOCKED_LINE));
+}
+
+#[test]
+fn a_blocked_exit_out_of_sight_is_not_named() {
+    let name = |k: Kind| format!("kind {}", k.0);
+    let exit = Cell::new(6, 5);
+    let preview = PlacementPreview {
+        footprint: None,
+        cells: vec![(Cell::new(4, 4), CellVerdict::Free)],
+        exit: Some(sf_sim::ExitCell {
+            cell: exit,
+            usable: false,
+        }),
+        verdict: Err(PlacementError::ExitBlocked),
+    };
+    let blocked = describe(PlacementError::ExitBlocked, &name);
+    assert_eq!(refusal_words(&preview, &|_| true, &name), blocked);
+    assert_eq!(
+        refusal_words(&preview, &|c| c != exit, &name),
+        "cannot build here"
+    );
+    // The click: every cell of the ring round a 2x2 footprint at (4, 4) must be in sight.
+    let anchor = Cell::new(4, 4);
+    let e = PlacementError::ExitBlocked;
+    assert_eq!(
+        click_refusal_words(e, anchor, (2, 2), &|_| true, &name),
+        blocked
+    );
+    for hidden in [Cell::new(6, 5), Cell::new(3, 3), Cell::new(4, 6)] {
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &|c| c != hidden, &name),
+            "cannot build here",
+            "{hidden:?}"
+        );
+    }
+    // A cell inside the footprint or beyond the ring does not matter for the exit.
+    for other in [Cell::new(5, 5), Cell::new(8, 8)] {
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &|c| c != other, &name),
+            blocked
+        );
+    }
+    // At the map edge the ring cells off the map are skipped.
+    assert_eq!(
+        click_refusal_words(e, Cell::new(0, 0), (2, 2), &|_| true, &name),
+        blocked
+    );
+}

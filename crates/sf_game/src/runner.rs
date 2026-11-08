@@ -1372,7 +1372,11 @@ impl Runner {
             let new = usize::try_from(total - self.rejected_seen)
                 .unwrap_or(usize::MAX)
                 .min(last.len());
-            for r in &last[last.len() - new..] {
+            // Only the local player's own refusals go to its top bar.
+            for r in last[last.len() - new..]
+                .iter()
+                .filter(|r| r.player == commands::LOCAL_PLAYER)
+            {
                 let words = placement_view::click_refusal_words(
                     r.reason,
                     r.cell,

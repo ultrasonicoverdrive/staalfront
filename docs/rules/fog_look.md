@@ -106,11 +106,16 @@ cell the player cannot see now, free, structure or unit alike (also an own struc
 "cannot build here" (`refusal_words`). Terrain and map-edge cells are not hidden. **The verdict is the sim's and is untouched**:
 a refused placement is still refused and the outline and the amber cells say so, but no cell says where the hidden blocker is: grey
 means "not in sight", never "something hidden stands here". The 4-second top-bar line after a refused click uses the same rule
-(`click_refusal_words`): "another structure / a unit is in the way" only when every footprint cell is in sight, else "cannot build here".
+(`click_refusal_words`): "another structure / a unit is in the way" only when every footprint cell is in sight, else "cannot build here", and "the exit is blocked" only when every cell of the ring round the footprint (where any exit cell lies) is in sight.
+A factory's **exit cell** follows the same rule (`exit_look`): out of sight it is drawn in the same `placement_unknown` grey, fill and
+line, whether the sim calls it usable or not (the sim calls it unusable when a structure stands on it); in sight it is blue or red. The
+hover words for `ExitBlocked` say "the exit is blocked" only when the exit cell is in sight, else "cannot build here". Only refusals of
+the local player reach its top bar.
 Without vision rules every cell is seen, so nothing changes. Tests: `placement_view::tests::a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell`, `a_click_refused_by_a_hidden_blocker_does_not_name_it`,
 `the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green`, `sf_data::vision_look::tests::the_shipped_look_is_pinned`.
-Left: that the placement is refused at all (outline, amber cells) is still shown; the console log line of a refused click names the
-sim's reason.
+Tests also: `an_exit_cell_out_of_sight_looks_the_same_free_or_blocked`, `a_blocked_exit_out_of_sight_is_not_named`.
+Left: that the placement is refused at all (outline, amber cells) is still shown; the console log line of a refused click prints the
+same generic words as the top bar.
 
 ## Gaps (known and left)
 
