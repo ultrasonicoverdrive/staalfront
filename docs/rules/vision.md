@@ -80,15 +80,38 @@ Two fields of `VisionRules` (both in the section `v` of the checksum, and only w
 
 | Field | Default | Meaning |
 |---|---|---|
-| `acquire_needs_sight: bool` | `false` (`vision.ron`, the match, every scenario but `vision_targeting`) | the gate, below |
+| `acquire_needs_sight: bool` | **`true` since WP7.7** in `vision.ron` (and when the line is left out there) and in the `match` scenario; `false` in `VisionRules::new` and in a scenario that leaves the line out (so that the pins of the earlier scenarios stay), `true` in `vision_targeting` | the gate, below |
 | `shared: Vec<(PlayerId, PlayerId)>` | empty (the game has no teams) | `(sharer, viewer)`: the viewer also sees what the sharer sees |
 
 **The gate.** With the flag on, **automatic acquisition** only picks a candidate that is `Visible` to the scanner's **owner** at the
 time of the scan: the single function every automatic pick goes through (`Targeting::best_target`: a unit's scan, which covers idle,
 hold, guard and attack-move units, and a defence structure's look round, `defences.md`) skips the others, after it has found that a
-weapon could fire at them. A unit candidate counts by the cell its position is in; a structure candidate by **any cell of its
-footprint** (a relay whose anchor is in the fog and whose lower row is in sight is seen). What the scanner's owner sees includes what
+weapon could fire at them. A unit candidate counts by its own cell or a neighbour cell its body reaches; a structure candidate by **any cell of its
+footprint** or a cell beside it (a relay whose anchor is in the fog and whose lower row is in sight is seen). What the scanner's owner sees includes what
 its allies share.
+
+**Measured to the edge (WP7.7).** A candidate counts by where its **body** touches the picture, the way a weapon's reach is
+measured to the edge of the target (`in_reach`: `d^2 <= (range + edge)^2`, `<=`). `Vision::sees_footprint_edge` and
+`Vision::sees_body` (integer only):
+
+* a **structure** is seen when any cell of its footprint is visible, or a visible cell **shares a side** with the footprint (the
+  ring of cells round it, without its four corners: a weapon measures to the inscribed circle, not to the corner). A visible cell
+  is half a cell wide on each side of its centre, so a visible cell that touches the footprint has the structure's edge inside the
+  sight;
+* a **unit** is seen when the cell its position is in is visible, or a neighbour cell (diagonals too) is visible **and the body of
+  the unit reaches it**: the distance from its position to the square of that cell is at most its radius (half its `size`,
+  squared on both sides, `<=`). A unit well inside its cell is seen through that cell only; it is the unit's own body, not a
+  rounder number, that decides. This leaves a gap on purpose: a rifleman standing in the middle of a cell that is 26 (squared) from a
+  rocket trooper of sight 5 is in the trooper's reach (`5.2` squared is 27.04) and is **not** picked, while the 1 by 1 tower at the
+  same offset is (`sight_gate.rs`). The edge of a tower is half a cell from its middle, the edge of a rifleman 0.2.
+
+Why this and not "a cell more sight": before WP7.7 a unit whose sight equalled its reach lost targets at the limit of its reach
+(the rocket trooper of sight 5 and reach 5 did not pick the opponent's tower at 26 squared; the first match then took 8067 ticks
+instead of 5967 and cost 8 units instead of 6, WP8.2a). A cell more sight for every kind would change what the player sees, the fog
+look and the vision pin of every scenario; the edge test changes only what the gate asks. It never makes a target reachable: the
+weapon check comes first. It is **not** a proof that a target in reach is always seen when the range equals the sight: a cell is a square and a position is not a cell centre, so a geometry can still lose a target (the unit case above is one; a structure whose near side is two cells off the disc is another). It fixes the case the first match met;
+`sight_gate.rs` pins the cases that matter, `vision/tests.rs` the sight alone.
+
 
 What the gate does **not** touch, on purpose:
 
@@ -113,20 +136,22 @@ the pass, and a scenario can set it.
 stamps its disc grown by its footprint and only while it stands (table above, WP8.1), and a structure under construction sees nothing
 but knows its footprint. The gate reads that.
 
-**One thing to know before the gate is switched on: sight against reach.** The disc is cell against cell (a cell is in when its
+**Sight against reach (solved for structures in WP7.7, see "Measured to the edge" above).** The disc is cell against cell (a cell is in when its
 centre is inside), a weapon's reach is measured from the unit's position to the **edge** of the target. A unit whose sight equals its
 reach therefore loses a target at the very limit of its reach: a rocket trooper (sight 5, reach 5) does not pick the defence tower
 whose cell is at squared distance 26 from its own cell, though the tower is within reach. In the first match that is the whole
 difference (below, "What the gate would do to the first match"). Units that outreach their sight (siege artillery: reach 10, sight 6;
 the unmanned artillery: reach 12, sight 6) need a spotter by design; that is the point of the gate.
 
-**What the gate would do to the first match** (measured, `what_the_gate_would_do_to_the_first_match`; **not shipped**: the flag is off in
-`match.ron`, and `match.expected` is the match without it). The match is still won, at tick **8067** instead of 5967, with **8 units
+**What the gate would do to the first match** (measured, `what_the_gate_would_do_to_the_first_match`; **not shipped**: the flag was off in
+`match.ron` then; since WP7.7 it is on and the edge test replaces the cell test, see "Measured to the edge" above). The match is still won, at tick **8067** instead of 5967, with **8 units
 lost** instead of 6. The two worlds part at tick 4282, when a rocket trooper would have picked the opponent's defence tower (the case
 above). Whether to switch the gate on, and whether to give the units a cell more sight or to measure the disc to the edge of the
 target, is for Tijmen after playing M1.
 
 ## The rules and where they come from
+
+*(Since WP7.7 the gate is on in the shipped `vision.ron`, in `sf_game` and in the pinned `match`; `VisionRules::new` and a scenario that leaves the line out keep it off, a scenario says what it means. `sf_data::vision::VisionSettings` defaults to on when the line is left out.)*
 
 `World::with_vision(VisionRules::new(legacy_sight_milli, sights))` plus `.with_acquire_needs_sight(bool)` and `.with_shared(pairs)`
 (after the unit table; refused with
@@ -169,7 +194,7 @@ reused, a structure going up and down) and at sample ticks on 5,000 wanderers.
 `SimSnapshot` (sf_game) carries what the **local player** (`commands::LOCAL_PLAYER`) sees: `fog_version()` (`None` without
 vision rules), the two bitsets, copied only when the version changed (the ore pattern; the version is bumped by every pass
 that changed the visible or explored cells of that player), `visibility(cell)`, and `seen(id)` per view: own objects always,
-others when their cell (a structure: any cell of its footprint) is visible. **Since WP8.3 and WP8.4 the picture filters by it**:
+others when their cell (a structure: any cell of its footprint) is visible (the snapshot's `seen` is the **cell** test, what is drawn; the gate asks the edge test above, which can pick a target one cell inside the fog: that is the price of the weapon reaching as far as the sight). **Since WP8.3 and WP8.4 the picture filters by it**:
 what is drawn, iconised, picked, put on the minimap or shown as an effect, the soft fog on the terrain and the ghosts of structures
 last seen are all in [`fog_look.md`](fog_look.md). Worlds without vision rules are drawn as before.
 

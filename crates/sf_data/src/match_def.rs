@@ -280,6 +280,7 @@ mod tests {
                 ("rifleman".to_string(), 66, 28),
                 ("rifleman".to_string(), 68, 20),
                 ("light_tank".to_string(), 62, 22),
+                ("construction_center".to_string(), 72, 14),
             ]
         );
     }

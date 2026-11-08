@@ -32,7 +32,7 @@ own side's unit and nothing fires). The weapons pass reads `turret_target` as th
 (`weapons::update_all`) and fires through the ordinary weapon and projectile path: reload, burst, projectile,
 damage, return fire of the victim, kill credit.
 
-**The sight gate (WP8.2a, off by default).** With `acquire_needs_sight` in the vision rules a defence picks only a candidate that its
+**The sight gate (WP8.2a; on by default since WP7.7, measured to the edge of the candidate, `vision.md`).** With `acquire_needs_sight` in the vision rules a defence picks only a candidate that its
 owner sees now (any cell of the candidate's footprint, the owner's own sight and what its allies share), because the look round is the
 same function as a unit's (`Targeting::best_target`). The sight of a defence is its `sight` in the data (a tower 7, an emplacement 8,
 an unmanned artillery 6) from its whole footprint, only while it stands: a tower sees farther than it reaches (7 against 6) and
