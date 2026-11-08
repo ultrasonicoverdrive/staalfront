@@ -74,7 +74,7 @@ fn replace_units(from: &str, to: &str) -> Result<UnitDefs, sf_data::units::DefEr
 #[test]
 fn shipped_definitions_load_and_every_reference_resolves() {
     let defs = shipped();
-    assert!(defs.units().len() >= 43);
+    assert!(defs.units().len() >= 44);
     assert_eq!(defs.sim_units().len(), defs.units().len());
     assert_eq!(defs.sim_weapons().len(), defs.weapons().len());
     // Loading from disk checked that every model and icon file exists; the
@@ -536,7 +536,7 @@ fn factions_follow_the_tech_tree_of_units_md() {
 
 const EXTRA_UNIT: &str = r#"
         (
-            kind: 43, id: "hover_scout", factions: [Meridian], category: Vehicle,
+            kind: 44, id: "hover_scout", factions: [Meridian], category: Vehicle,
             cost: 450, build_seconds: 12, hp: 120, armor: "light",
             movement: "hover", speed: 3.5, water_speed: 3, turn_rate: 12, size: 0.9, sight: 9,
             weapons: ["rifle"],
@@ -559,7 +559,7 @@ fn a_role_added_to_the_file_needs_no_rust_change() {
     .expect("the file with one more unit loads");
     assert_eq!(defs.units().len(), base.units().len() + 1);
     let kind = defs.kind_of("hover_scout").unwrap();
-    assert_eq!(kind, 43);
+    assert_eq!(kind, 44);
     // Every earlier kind kept its number and its numbers.
     assert_eq!(&defs.sim_units()[..base.units().len()], base.sim_units());
     let sim = defs.sim_unit(kind).unwrap();
@@ -580,7 +580,7 @@ fn a_new_weapon_damage_type_and_movement_class_are_data_too() {
     let base = shipped();
     let extra = r#"
         (
-            kind: 43, id: "plasma_walker", factions: [Veyran], category: Vehicle,
+            kind: 44, id: "plasma_walker", factions: [Veyran], category: Vehicle,
             cost: 2000, build_seconds: 60, hp: 700, armor: "heavy",
             movement: "strider", speed: 0.9, turn_rate: 5, size: 1.6, sight: 8,
             weapons: ["plasma_lance"],
@@ -1286,7 +1286,7 @@ fn shuffle_unit_records(text: &str) -> String {
             }
         }
     }
-    assert_eq!(records.len(), 43);
+    assert_eq!(records.len(), 44);
     records.reverse();
     records.rotate_left(7);
     let mut out: Vec<&str> = lines[..first.unwrap()].to_vec();

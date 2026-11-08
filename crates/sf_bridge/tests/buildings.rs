@@ -36,7 +36,7 @@ fn with_buildings(defs: &UnitDefs) -> World {
 fn the_shipped_structures_reach_the_sim_in_ticks_and_cells() {
     let defs = defs();
     let table = building_table(&defs).unwrap();
-    assert_eq!(table.len(), 19);
+    assert_eq!(table.len(), 20);
     let yard = table.get(kind(&defs, "vehicle_factory")).unwrap();
     assert_eq!(yard.function, BuildingFunction::VehicleFactory);
     assert_eq!(yard.exit_side, Some(Side::PosX));
@@ -65,7 +65,7 @@ fn the_world_takes_the_table_after_the_units_and_before_it_starts() {
     let defs = defs();
     let table = building_table(&defs).unwrap();
     let w = with_buildings(&defs);
-    assert_eq!(w.building_table().len(), 19);
+    assert_eq!(w.building_table().len(), 20);
     assert_eq!(w.building_table().digest(), table.digest());
     assert!(world(&defs).building_table().is_empty());
 
@@ -290,7 +290,7 @@ fn sim_numbers_equal_the_data_numbers_for_every_variant() {
 /// The digest of the shipped building table (sf_data -> building_table -> World::with_buildings).
 /// It moves with any change of the shipped structures or of a hashed number; a move needs a
 /// deliberate data change and a note in `docs/rules/buildings.md`.
-const SHIPPED_BUILDINGS_DIGEST: u64 = 0x53ae_b53a_b441_57d1;
+const SHIPPED_BUILDINGS_DIGEST: u64 = 0x5dd5_4a0d_a8cb_4303;
 
 #[test]
 fn the_shipped_building_table_digest_is_pinned() {

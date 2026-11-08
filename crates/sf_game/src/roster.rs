@@ -1182,7 +1182,7 @@ mod tests {
         }
         // The generic look of the structures of both factions is still a
         // primitive (what an owner without a faction model gets): five of them.
-        assert_eq!(seen, 5, "structures with a primitive");
+        assert_eq!(seen, 6, "structures with a primitive");
     }
 
     #[test]
@@ -1288,7 +1288,13 @@ mod tests {
             .collect();
         assert_eq!(
             without,
-            ["evidence_crate", "bridge_segment", "rail_spur", "ore_field"]
+            [
+                "evidence_crate",
+                "bridge_segment",
+                "rail_spur",
+                "ore_field",
+                "ore_silo"
+            ]
         );
         assert_eq!(defs.units().len() - without.len(), 39);
         for d in defs.units() {
@@ -1538,11 +1544,23 @@ mod tests {
     /// different shapes (WP6.3).
     #[test]
     fn every_buildable_structure_has_stage_models_from_the_art_set() {
+        /// Buildable structures that have no art yet and are drawn as boxes.
+        const NO_ART_YET: [&str; 1] = ["ore_silo"];
         let (defs, roster) = built(true);
         let mut checked = 0;
         for def in defs.units() {
             let buildable = def.category == Category::Structure && def.cost.is_some();
             let kind = Kind(def.kind);
+            if buildable && NO_ART_YET.contains(&def.id.as_str()) {
+                // The proposed ore silo (WP7.3b) has no model yet: a box, with stage boxes (the
+                // fallback of `build_stages.ron`), until its art comes.
+                assert!(!roster.look_for(kind, None).unwrap().model, "{}", def.id);
+                for stage in 0..2 {
+                    let look = roster.stage_look(kind, None, stage).unwrap();
+                    assert!(!look.model, "{} stage {stage}", def.id);
+                }
+                continue;
+            }
             if !buildable {
                 assert!(
                     roster.shape_under_construction(kind, None, 0).is_none(),

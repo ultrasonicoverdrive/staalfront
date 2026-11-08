@@ -129,7 +129,7 @@ fn the_number_of_quads_is_bounded_and_does_not_grow_with_the_world() {
     assert_eq!(big.snap.len(), small.snap.len() + 5000);
     let (a, b) = (small.model(), big.model());
     assert_eq!(a, b, "the crowd changes nothing the sidebar shows");
-    assert_eq!(a.items.len(), 9, "all nine structures can be built");
+    assert_eq!(a.items.len(), 10, "all ten structures can be built");
     let (qa, qb) = (
         small.frame(&mut Ui::new(UiConfig::default()), &a),
         big.frame(&mut Ui::new(UiConfig::default()), &b),

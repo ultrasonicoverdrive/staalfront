@@ -120,7 +120,7 @@ The simulation's checksum after every 100th tick is in `sim.checksums`. The head
 (`crates/sf_game/tests/bench_scene.rs`, no window, no GPU) pins them, so a run on any machine must show the same list for
 the ticks it reached:
 
-* **`sf_demo --bench --fight`** (M0c): the list `FIGHT` of that test, ending `0x2b829617a5151fdf` at tick 1500;
+* **`sf_demo --bench --fight`** (M0c): the list `FIGHT` of that test, ending `0x0f215774d484c93a` at tick 1500;
 * **`sf_demo --bench`** (the plain benchmark, as the game builds it today): the list `PLAIN`, ending
   `0x8e57352fc4bdec7b` at tick 1500.
 
@@ -147,6 +147,8 @@ WP6.7 code the list is the old one at all 15 checkpoints; run with the new files
 hundred ticks (15 triples) and a hash of the position and hit points of every entity in the snapshot at tick 1500 are equal to the
 old run's (`4aaa05dc08dd05ab` in both), only the checksum differs. The crowd's 24 buildings are legacy structures with no
 weapons, so nothing in this scene is a defence. `PLAIN` did not move.
+
+**`FIGHT` re-pinned at WP7.3b** (`0x2b829617a5151fdf` to `0x0f215774d484c93a` at tick 1500). Measured cause: the shipped unit table and building table gained the `ore_silo` record (kind 43), and both digests are hashed every tick in this scene. With the silo record taken out of `unit_defs.ron` the old list is back (the test passes unchanged), and the building-table digest is the old `0x53aeb53ab44157d1` again. The crowd, the skirmish and the simulation did not change; `PLAIN` did not move (it has no unit table).
 
 **Re-pinning.** Any WP that moves the world's checksum (for example WP7.2, #78) re-pins `PLAIN` and `FIGHT` in
 `crates/sf_game/tests/bench_scene.rs` in its own PR, with a measured cause, and updates the end values quoted above in the

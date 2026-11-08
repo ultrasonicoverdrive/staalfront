@@ -77,7 +77,7 @@ fn every_shipped_structure_has_an_explicit_building_block() {
         assert!(u.building.is_some(), "{} has no building block", u.id);
         n += 1;
     }
-    assert_eq!(n, 19);
+    assert_eq!(n, 20);
     assert_eq!(defs.sim_buildings().len(), n);
     for u in defs
         .units()
@@ -142,6 +142,8 @@ const TREE: &[(&str, BuildingFunction, Option<Side>, &[&str])] = &[
         None,
         &["barracks"],
     ),
+    // Proposed (WP7.3b), waiting for Tijmen: not part of the approved tree above.
+    ("ore_silo", BuildingFunction::None, None, &["refinery"]),
     ("relay_transmitter", BuildingFunction::None, None, &[]),
     ("fuel_depot", BuildingFunction::None, None, &[]),
     ("archive_building", BuildingFunction::None, None, &[]),
@@ -164,6 +166,10 @@ fn the_shipped_tech_tree_is_the_documented_one() {
         assert_eq!(b.requires, want, "{id} requires");
     }
 }
+
+/// Buildable structures that are not in the approved tree or in the campaign's unlock order
+/// (`content/units.md` has no silo): the proposal of WP7.3b.
+const PROPOSED: &[&str] = &["ore_silo"];
 
 /// The campaign mission after which `content/units.md` ("Tech tree per campaign") unlocks each
 /// buildable structure; M01 for the roles of the first row, both factions.
@@ -195,6 +201,7 @@ fn no_structure_is_unlocked_by_the_campaign_before_its_prerequisites() {
         .iter()
         .filter(|u| u.category == Category::Structure && u.cost.is_some())
         .map(|u| u.id.as_str())
+        .filter(|id| !PROPOSED.contains(id))
         .collect();
     assert_eq!(buildable.len(), UNLOCKED_AFTER.len());
     for id in buildable {
@@ -407,12 +414,13 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 /// and the base radius, and the harvest scenario (WP7.2) needs the refinery's `HarvesterDock`
 /// function and exit side, and the match scenario (WP7.6) builds the whole base (power plant, refinery,
 /// barracks) and has the opponent's structures. Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 5] = [
+const COPIES_WITH_BLOCKS: [&str; 6] = [
     "placement_defs",
     "harvest_defs",
     "match_defs",
     "defences_defs",
     "repair_sell_defs",
+    "silo_defs",
 ];
 
 #[test]
@@ -456,6 +464,37 @@ fn the_copy_that_builds_keeps_the_blocks_it_was_made_with() {
     assert_eq!(anchor.function, BuildingFunction::Anchor);
     assert_eq!(anchor.build_radius.floor_int(), 8);
     assert!(copy.units().iter().filter(|u| u.building.is_some()).count() >= 10);
+}
+
+/// The proposed silo (WP7.3b) as literals, every number distinct from its neighbours so that two
+/// swapped fields fail. A move of the place in the tree is a data edit plus this row and
+/// `docs/rules/buildings.md`.
+#[test]
+fn the_proposed_ore_silo_is_the_documented_one() {
+    let defs = shipped();
+    let silo = defs.unit("ore_silo").unwrap();
+    assert_eq!(silo.kind, 43);
+    assert_eq!(silo.cost, Some(250));
+    assert_eq!(silo.build_seconds.to_ticks().unwrap(), 240);
+    assert_eq!(silo.power, -10);
+    assert_eq!(silo.hp, 450);
+    assert_eq!(silo.sight.milli(), 4000);
+    assert_eq!(
+        (
+            silo.footprint.unwrap().width,
+            silo.footprint.unwrap().height
+        ),
+        (2, 2)
+    );
+    let block = silo.building.as_ref().unwrap();
+    assert_eq!(block.function, BuildingFunction::None);
+    assert_eq!(block.exit_side, None);
+    assert_eq!(block.requires, vec!["refinery".to_string()]);
+    assert_eq!(block.storage, 1500);
+    // Both factions; a picture of its own in the Structures tab, after the approved ones.
+    assert_eq!(silo.factions.len(), 2);
+    let pic = silo.build_picture.as_ref().unwrap();
+    assert_eq!((pic.label.as_str(), pic.order), ("SILO", 110));
 }
 
 #[test]
@@ -878,11 +917,13 @@ fn only_the_refinery_stores_ore_and_it_stores_the_shipped_amount() {
             (s > 0).then_some((u.id.as_str(), s))
         })
         .collect();
-    assert_eq!(storing, vec![("refinery", 2000)]);
+    assert_eq!(storing, vec![("refinery", 2000), ("ore_silo", 1500)]);
     // The conversion keeps it, and every other structure stores nothing.
     for b in defs.sim_buildings() {
         let want = if Some(b.kind) == defs.kind_of("refinery") {
             2000
+        } else if Some(b.kind) == defs.kind_of("ore_silo") {
+            1500
         } else {
             0
         };

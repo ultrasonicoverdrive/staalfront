@@ -3507,7 +3507,7 @@ mod tests {
         assert_eq!(o.scene, Scene::Sandbox);
         let style = placeholder_style(Style::embedded());
         let start = sandbox_scene(world(128), &o, &style, &load_icons(), (128, 128));
-        assert_eq!(start.world.unit_table().len(), 43);
+        assert_eq!(start.world.unit_table().len(), 44);
         let (structures, units) = crate::sandbox::wanted(&UnitDefs::embedded());
         let all = (structures + units) as usize;
         assert_eq!(views_of(&start.world).len(), all);

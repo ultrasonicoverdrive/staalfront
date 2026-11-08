@@ -70,21 +70,21 @@ const PLAIN: [u64; 15] = [
 
 /// The fight benchmark's world.
 const FIGHT: [u64; 15] = [
-    0x5c4a5f16a4587ffc,
-    0xabe18c0ace598482,
-    0xf5cb25e5d7c6efcd,
-    0x764ba212cfc20bfc,
-    0xf4e5f5ba979be83c,
-    0xe203cf1bb62fc0cb,
-    0x3f82d4b5f27b95c0,
-    0x644b5a215069965b,
-    0x157ef3f60f8e8fa1,
-    0x1df8fb0fc3e7a218,
-    0x2239cc07b76b6a28,
-    0x1bd0526b6b2d96cf,
-    0xdf2ac11248ef824b,
-    0xe50f82cb74ad950c,
-    0x2b829617a5151fdf,
+    0x29d8c41de00ce519,
+    0x82b72a6ea3a80409,
+    0x49d11bfcefa58aca,
+    0x1fd8a31cf59e055f,
+    0x885ba224ed6fa207,
+    0xb2f40671c5612f46,
+    0x2676b85458dbe415,
+    0xf726cbb678d795a6,
+    0x694be5cd88480762,
+    0xc6b2280909887431,
+    0x3f651be633c3198d,
+    0x6a3a7cdedea68a08,
+    0xf85b79cd3084b232,
+    0xc7e88b4f7bcb8da5,
+    0x0f215774d484c93a,
 ];
 
 /// What the demo's scene is made of, as `Runner::new` makes it: 256 x 256 cells, the test pack, 5,000 units.
