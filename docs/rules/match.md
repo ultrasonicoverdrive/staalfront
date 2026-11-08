@@ -226,12 +226,13 @@ must be left out.
 
 | Test | What it shows |
 |---|---|
-| `crates/sf_sim/tests/outcome.rs` (14) | the rules are refused when wrong; a structure or an armed unit keeps a player in, a harvester and an object do not; the last player standing wins in the tick of the last defeat; a simultaneous end is a draw; three players; nobody is defeated before everyone has something; a world with a player who never has anything has no result; once decided never changes; a structure shot down defeats its owner in the tick it died; independent of spawn order; the defeats and result are in the checksum; a world without match rules has no section. |
-| `tools/sf_headless/tests/match_m1.rs` (12) | the pinned checksum; the starting objects in the order of the file; the win tick 5967 and nothing decided before it, the tower that fires and the 420-hit-point threshold (WP6.7); nothing changes in the 1,313 ticks after; the same game without the rules differs only by the section; the opponent stays put, fires back and never gains an entity; the harvest pays; the committed map is what the generator draws, and its places and counts. |
+| `crates/sf_sim/tests/outcome.rs` (18) | the rules are refused when wrong, and without a construction centre kind in the building table; only a standing construction centre keeps a player in (a barn, armed units, a harvester and an object do not); the last player standing wins in the tick of the last defeat; a simultaneous end is a draw; three players; nobody is defeated before everyone has a construction centre; a world with a player who never has one has no result; once decided never changes; a construction centre shot down defeats its owner in the tick it died; **selling it defeats the player at once, selling another structure does not**; **a construction centre under construction does not count until it is complete**; independent of spawn order; the defeats and result are in the checksum; a world without match rules has no section (literal pinned, as before WP7.7). |
+| `crates/sf_sim/tests/sight_gate.rs` (6), `vision/tests.rs` (3 new) | the edge test of the gate: a tower at squared distance 26 (sight 5, reach 5) is picked, a two-cell structure too, what is out of reach is not; a unit is seen through a neighbour cell its body reaches and not otherwise; the sight alone (side yes, corner no, clipped at the map border). |
+| `tools/sf_headless/tests/match_m1.rs` (13) | the pinned checksum and the pins of the gate off and without vision; the starting objects in the order of the file (12, the construction centre last); the win tick 6238, nothing decided before it; the deciding blow is the construction centre while the opponent still has its barracks; nothing changes in the 762 ticks after; the gate parts the worlds at 4692; the same game without the rules differs only by the section; the opponent stays put, fires back and never gains an entity; the tower fires (WP6.7); the harvest pays; the committed map is what the generator draws. |
 | `crates/sf_data` (`match_def`, `match_look`), `crates/sf_bridge/tests/match_def.rs` | the file's shape and checks; the shipped file pinned as literals; each number arrives in the world as itself (distinct values). |
 | `crates/sf_game` (`match_view`, `args`, `tests/match_screenshot.rs`) | the standing from the winner, the clock, the words from the look; the flag; the real renderer. |
 
-Twelve mutations, each applied in a scratch copy of the tree and reverted:
+Twelve mutations of WP7.6 (rows 1, 4, 5 and 7 are about the old rule and are superseded by the table after this one), each applied in a scratch copy of the tree and reverted:
 
 | # | Mutation (scratch copy, reverted) | Tests that fail |
 |---|---|---|
@@ -247,6 +248,18 @@ Twelve mutations, each applied in a scratch copy of the tree and reverted:
 | 10 | winner and loser swapped on the banner | `the_standing_is_the_local_players`, `there_is_no_banner_before_the_result` |
 | 11 | the snapshot does not carry the result | `the_match_is_won_in_the_world_the_game_makes` |
 | 12 | the clock counts ticks as tenths of a second | `the_clock_counts_game_seconds_at_twenty_ticks_to_the_second`, `the_words_come_from_the_look` |
+
+**Mutations of WP7.7**, each applied in a scratch copy and reverted (the file restored from the commit):
+
+| # | Mutation | Tests that fail |
+|---|---|---|
+| A | the outcome keeps the old idea: any standing structure keeps a player in | 11 of 18 in `outcome.rs`, among them `only_a_standing_construction_centre_keeps_a_player_in_the_match` |
+| B | a construction centre under construction counts (`has_hit_points` for `is_standing`) | `a_construction_centre_under_construction_does_not_count_until_it_is_complete`, `selling_the_construction_centre_defeats_the_player_at_once` |
+| C | a match file without a construction centre is accepted | `a_player_without_a_construction_center_is_a_load_error` |
+| D | `acquire_needs_sight: false` in `vision.ron` (gate default off) | `the_shipped_number_is_pinned` (sf_data), `the_gate_flag_reaches_the_rules_and_is_on_in_the_shipped_file` (sf_bridge) |
+| E | the edge test replaced by the old cell test | 4 of 6 in `sight_gate.rs`; in `match_m1.rs` 8 tests (pin, win tick 6238, tower fires at 3830, ...) |
+| F | the start of a sale does not flag the match | `selling_the_construction_centre_defeats_the_player_at_once` |
+| G | `with_match` accepts a building table without a construction centre | `match_rules_need_a_construction_centre_kind_in_the_building_table` |
 
 Not covered by a test: the one line in `Hud::frame` that calls `match_view::draw_result` and the line in the
 runner that copies the snapshot's result into `HudStats` (both need the window's `Context`); the screenshot
@@ -267,7 +280,8 @@ Release, same machine (4 cores, shared with other jobs: load average 1 to 4 duri
   runs, median microseconds per tick: 27.18 with, 27.20 without (`cost_of_the_outcome`, `--ignored`).
 * **The worst case of the scan**: 40,000 unarmed units, the only thing each player owns that counts at the highest slots,
   one unit removed in every tick, so every tick walks all slots (`worst_case_cost`, `--ignored`): median 7073 microseconds
-  per tick with the rules, 7008 without, a tick being 7 ms of work for 40,000 units: the full scan adds under one percent.
+  per tick with the rules, 7008 without (WP7.6). Re-measured in WP7.7 (the scan now looks up the building table per candidate): 5079 with, 4983 without, about 2 percent, within the spread of the runs (4817 to 5096 without, 5050 to 5359 with), load average 7 on a shared container.
+* **WP7.7, the whole match:** `cost_of_the_outcome` 19.93 with, 20.11 microseconds per tick without (median of 7). The edge test of the gate, release, alternating, 7 rounds, ticks per second, `tanks_vs_infantry` and a copy of it with the gate on: main (cell test) 135,000 and 121,700 (medians), this branch 134,000 and 121,400; the spread (50,000 to 138,000, load average 8 on a shared container) is much larger than any difference. No cost is shown and none is claimed.
 
 
 ## What is not done

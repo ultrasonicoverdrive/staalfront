@@ -2283,6 +2283,25 @@ with combat; the economy itself costs a few microseconds a tick (see the WP note
 original Red Alert audio on and won. His decisions (loss rule by construction center, `acquire_needs_sight` on, WP3.3
 confirmed, WP11.2 next) and the queue are in PLAN.md under Milestone M1. The text below is the state before that play.
 
+### WP7.7 notes: the loss rule by construction centre and the sight-gated targeting (08-11-2026)
+
+- **Done:** (a) a player is defeated when it owns no standing construction centre (the structure of the function `Anchor`);
+  selling it defeats at once, one under construction does not count; the old rule is gone with no flag. (b) A match file whose
+  player starts without a construction centre is refused by `MatchDef::check`; the opponent of `m1.ron` got one on (72, 14), last
+  in its list. (c) `acquire_needs_sight` is on in `vision.ron` (and when the line is left out of `VisionSettings`) and in the `match`
+  scenario; `VisionRules::new` and a scenario without the line keep it off (documented, so the earlier pins stay). (d) The
+  visibility test for target acquisition is measured to the edge of the target (`Vision::sees_footprint_edge`, `sees_body`).
+  (e) `match.expected` re-pinned `0x771de0f816275bbc` to `0xb709cd3110af3c0f`; the frozen `match_defs/match.ron` got the same
+  construction centre, the script's slots moved up by one. Rules: `match.md`, `vision.md`, `targeting.md`, `defences.md`,
+  `repair_sell.md`.
+- **Measured (M1, three ways, new rule and base):** gate off won at 6228 with 6 lost; gate on with the old cell test 9189, 8 lost;
+  gate on with the edge test (shipped) **6238, 6 lost**. On main (old rule) the numbers were 5967/6 and 8067/8.
+  Pins that moved: `match.expected` only (cause in `match.md`). Not moved: every other `.expected`, `golden.rs`, the bench pins.
+- **Known gaps, written down:** the edge test is not a proof that a target in reach is always seen when range equals sight; a
+  unit in the middle of a cell that is outside the disc is not picked (the body rule), while the structure beside it is. The
+  win tick of the scripted match is later (6238 against 5967) because the construction centre stands at the back of the base.
+  The opponent's construction centre sees 10 cells, which lets its units pick targets earlier (the worlds part at tick 4692).
+
 **Milestone M1 was not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
 opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
 sandbox (`sf_game --sandbox --harvest`). Still missing:

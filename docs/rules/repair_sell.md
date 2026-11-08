@@ -123,12 +123,12 @@ again. The refund goes into the store after the removal, whatever the capacity, 
 credits stored and one refinery (capacity 2000) the store is 5000 during the sale and 5720 after the refund of 720
 (`selling_a_refinery_lowers_the_capacity_and_the_store_keeps_what_it_holds`). In a world without money rules a sale pays nothing.
 
-**Match.** Selling the last structure of a player can defeat it. A sale marks the outcome rule to look again at the end of the
+**Match.** Selling the construction centre of a player defeats it (WP7.7; before, selling the last structure did when no armed unit was left; in this scenario the opponent's only structure is its construction centre, so nothing here moved). A sale marks the outcome rule to look again at the end of the
 tick, and a structure being sold does not stand, so **the defeat is in the tick the sale starts**, not when the structure
 is removed: in the scenario the opponent sells its only structure at tick 700, is defeated in tick 700 and the other player
 wins in tick 700; the structure is gone at tick 760 (`the_opponent_sells_its_last_structure_and_is_defeated_in_the_tick_it_starts`).
-A defeated player's sale still runs and still pays. A player with an armed unit left is not defeated by it
-(`match.md`).
+A defeated player's sale still runs and still pays. Selling any other structure never defeats a player
+(`match.md`, `selling_another_structure_does_not_defeat_the_player`).
 
 ## When it happens in a tick
 

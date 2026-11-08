@@ -995,7 +995,7 @@ fn the_edge_test_clips_at_the_borders_of_the_map() {
 fn a_unit_is_seen_through_its_own_cell_or_a_neighbour_its_body_reaches() {
     let w = runner_world();
     let v = w.vision.as_deref().unwrap();
-    let r = Fx::from_ratio(1, 5); // the body of a unit of size 0.4
+    let r = Fx::from_ratio(1, 5); // the body of a unit of size 2/5
     let p = |x: i32, y: i32, dx: i64, dy: i64| {
         Vec2::new(
             Fx::from_int(x) + Fx::from_ratio(dx, 1000),
@@ -1004,18 +1004,18 @@ fn a_unit_is_seen_through_its_own_cell_or_a_neighbour_its_body_reaches() {
     };
     // Its own cell: (14, 11) is inside the disc (17 squared), wherever in the cell.
     assert!(v.sees_body(P0, p(14, 11, 500, 500), r));
-    // (15, 11) is outside (26): in its middle the body (0.2) reaches no neighbour (0.5 away).
+    // (15, 11) is outside (26): in its middle the body (1/5) reaches no neighbour (1/2 away).
     assert!(!v.sees_body(P0, p(15, 11, 500, 500), r));
     // A tenth from the west border: the body reaches (14, 11).
     assert!(v.sees_body(P0, p(15, 11, 100, 500), r));
-    // 0.25 from it: it does not. 0.2 from it: it does (the edge is inside, like a reach).
+    // a quarter from it: it does not. A fifth from it: it does (the edge is inside, like a reach).
     assert!(!v.sees_body(P0, p(15, 11, 250, 500), r));
     assert!(v.sees_body(P0, p(15, 11, 200, 500), r));
     // A radius of nothing sees through the own cell only.
     assert!(!v.sees_body(P0, p(15, 11, 0, 500), Fx::ZERO));
     // Diagonal: in cell (16, 11) the neighbour (15, 10) is offset (5, 0), inside (25), and the sides
     // (15, 11) and (16, 10) are outside (26 and 36): close to the corner the body reaches it, not far
-    // from it (0.15 squared twice is 0.045, more than 0.2 squared).
+    // from it (3/20 squared twice is more than 1/5 squared).
     assert!(v.sees_body(P0, p(16, 11, 100, 100), r));
     assert!(!v.sees_body(P0, p(16, 11, 150, 150), r));
     // Not for another player.
