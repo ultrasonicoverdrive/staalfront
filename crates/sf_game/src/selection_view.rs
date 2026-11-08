@@ -198,10 +198,12 @@ impl SelectionView {
             OWN
         };
 
-        // The ring, while the model is drawn, and its width for the bar.
+        // The ring, while the model is the larger picture (the models stay drawn at every zoom, but
+        // in the far band where the icon is mostly opaque the icon's own outline shows the selection),
+        // and its width for the bar.
         let centre = Vec3::from(unit.centre);
         let mut width = None;
-        if frame.blend.models_drawn()
+        if frame.blend.dominant() == Dominant::Model
             && ground_loop(
                 &frame.view_proj,
                 frame.viewport,

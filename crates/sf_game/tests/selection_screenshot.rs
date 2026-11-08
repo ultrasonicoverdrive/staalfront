@@ -485,8 +485,24 @@ fn selected_icons_are_highlighted_and_the_others_are_not() {
     for id in far {
         assert_eq!(changed(&base, &img, icon(*id)), 0, "{id}");
     }
-    // The other side is untouched.
-    for id in &scene.enemy {
+    // The other side is untouched (the icons of the far zoom sit close together on the screen since the
+    // farthest zoom shows a margin: only those not within reach of a selected unit's outline or bar count).
+    let far_enemies: Vec<_> = scene
+        .enemy
+        .iter()
+        .filter(|id| {
+            let p = scene.screen(&cam, **id);
+            mobile.iter().all(|m| {
+                let q = scene.screen(&cam, *m);
+                (p[0] - q[0]).abs() > 30.0 || (p[1] - q[1]).abs() > 40.0
+            })
+        })
+        .collect();
+    assert!(
+        !far_enemies.is_empty(),
+        "some of the other side is clear of the selection"
+    );
+    for id in far_enemies {
         assert_eq!(changed(&base, &img, icon(*id)), 0, "{id}");
     }
 }

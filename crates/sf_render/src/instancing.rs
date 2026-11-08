@@ -27,8 +27,9 @@
 //!   and appends it to the list of that level's mesh: **one list, one
 //!   buffer and one draw call per (mesh kind, level)**, see [`crate::model`];
 //! * appends a model instance whose alpha is the model weight of the blend
-//!   (the dissolve threshold of the cross-fade) unless the weight is 0, and
-//!   an [`IconInstance`] unless it is 1, see [`crate::icons`];
+//!   (1 in play; the dither threshold below 1) unless the weight is 0, drawn
+//!   `FrameView::model_scale` times larger, and an [`IconInstance`] carrying
+//!   the icon opacity unless that is 0, see [`crate::icons`];
 //! * records what it drew (id, the interpolated position it stands at, the
 //!   facing, where its instances went) so that [`Instancer::pick`] answers
 //!   from exactly the frame on the screen and [`Instancer::highlight`] can

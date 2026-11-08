@@ -400,3 +400,26 @@ fn the_world_layer_is_cleared_every_frame_and_is_under_the_panels() {
     ui.begin_frame(UiInput::default(), (W as u32, H as u32), 1.0);
     assert_eq!(ui.underlay().quad_count(), 0);
 }
+
+/// With the icons over the models (the far zoom band) the ring stays while the model is the larger
+/// picture (icon at most half opaque) and goes once the icon is; the bar follows the same switch.
+#[test]
+fn in_the_icon_overlay_the_ring_goes_when_the_icon_is_more_than_half_opaque() {
+    for (alpha, ring) in [
+        (0.0, true),
+        (0.4, true),
+        (0.5, true),
+        (0.6, false),
+        (1.0, false),
+    ] {
+        let mut f = frame(0.95, Blend::overlay(alpha));
+        let mut selection = local();
+        selection.drag(&f.snap(), &f.ids, false);
+        let quads = quads_for(&mut f, &selection);
+        assert_eq!(
+            quads,
+            if ring { RING_SEGMENTS + 3 } else { 3 },
+            "icon alpha {alpha}"
+        );
+    }
+}

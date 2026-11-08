@@ -18,8 +18,8 @@
 //!
 //! * Size: a particle is `size` metres across, drawn between `limits.min_px` and `limits.max_px` pixels
 //!   ([`size_px`]), the same maths as the icons' reference size.
-//! * Fade: the alpha of everything is multiplied by the model weight of the model/icon cross-fade
-//!   ([`crate::Blend::model`]), so effects are gone where the units have become icons.
+//! * Fade: the alpha of everything is multiplied by the effects weight (`1 - ` [`crate::Blend::icon`]), so
+//!   effects fade out as the strategic icons fade in over the models and are gone where they are opaque.
 //! * Density: a burst makes `limits.middle_factor` of its particles at middle zoom ([`ZoomBand`]).
 //! * The exception: a death makes one *flash* at strategic zoom, which keeps `limits.strategic_flash_alpha`
 //!   and is no bigger than an icon, so a battle stays visible from the overview.

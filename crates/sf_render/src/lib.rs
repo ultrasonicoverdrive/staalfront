@@ -23,8 +23,8 @@
 //! seams between chunks of different levels, and ray picking against the
 //! terrain ([`ground`]) for the camera.
 //!
-//! WP1.9 adds model levels of detail ([`model`]), strategic icons with a
-//! dithered cross-fade ([`icons`]) and picking per zoom ([`pick`]): a chain of
+//! WP1.9 adds model levels of detail ([`model`]), strategic icons ([`icons`], an overlay
+//! over the models in the farthest zoom band since the zoom work package, [`zoom`]) and picking per zoom ([`pick`]): a chain of
 //! meshes per model chosen by projected size with hysteresis, screen-fixed
 //! icons in player colour past a zoom threshold, and a click volume that is the
 //! model's box when zoomed in and the icon's quad when zoomed out.

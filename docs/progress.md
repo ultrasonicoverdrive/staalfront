@@ -2748,3 +2748,14 @@ fixed, delete the entry in the same PR.
     vision and scales with the units that change cell and the area of their disc. The next step if a crowd with a large sight ever
     shows in a profile is to stamp only the difference of two discs one cell apart (about 2 x (2r + 1) cells instead of
     2 x (2r + 1)^2). Nothing in a match shows it (`vision.md`, "Cost").
+
+35. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
+    to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side
+    (`far_margin` 0.25, `assets/config/camera.ron`, which now holds every camera number); the models are drawn at every zoom and the
+    strategic icons are an overlay fading in over the last 15 % of the zoom range (`icons_from` 0.85); the models are drawn up to 1.6 times
+    larger toward the far end (the click volumes keep their size). Effects fade with the icons. Measured in the container (llvmpipe, release,
+    1,000 units, farthest zoom, six alternating runs, the machine shared and loaded at about 8): the models cost +3.0 ms on a 29.1 ms frame
+    (medians 32.0 against 29.1 ms for icons only); no cliff, so no simpler distance level was needed. The GTX 1650 number has to come from
+    Tijmen's laptop or the M0 benchmarks. Images that use the default camera above zoom 0 were re-pinned (cause measured: all match again with
+    `far_margin: 0`); no `sf_sim` pin moved. Gap: at the very farthest zoom the opaque icon hides the model under it; a soldier is 1 to 2 px as
+    a model at 1280 x 720.

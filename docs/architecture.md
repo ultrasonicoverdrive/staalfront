@@ -222,8 +222,8 @@ units in view on the reference hardware (Windows laptop, GTX 1650, 1920x1080, B1
 first measurement at the engine demo (5,000 units), final measurement in phase 16.
 
 Implemented in `sf_render::camera` (WP1.5): zoom is a log-scale parameter in `0..=1`
-mapped to the eye-to-focus distance 12 m .. just enough for the whole map (about
-340 m for 256x256 m in a square window, computed from the map size and the
+mapped to the eye-to-focus distance 12 m .. the whole map plus a quarter map on every side
+(`far_margin`, since the zoom work package, `rules/camera.md`; computed from the map size and the
 viewport aspect ratio, so a portrait window gets more distance); pitch is `smoothstep(zoom)`
 between 45 and 80 degrees. The camera takes the frame time and a plain
 `CameraInput` (pan direction, wheel notches, cursor, drag), so it is tested
@@ -600,16 +600,12 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
   icons). Three shapes with 1 + 3 + 3 levels make at most 7 model draws.
   glTF models (WP1.10, section 15) add a part list per level: one draw per
   (part, level).
-- **When icons take over** (`icons.rs`, `icons:` in `units.ron`). The trigger is the
-  apparent size, at the camera focus, of a reference unit (`reference_size` 2 m):
-  `reference_size * focal_px / camera distance`. Models only at or above
-  `model_above_px` (28), icons only at or below `icon_below_px` (14), a cross-fade
-  in between that is linear in the *logarithm* of that size (so a wheel notch moves
-  it equally everywhere in the band). It is one number per frame, not per unit, so
-  all units cross over together, and it is in pixels, not in camera zoom (zoom 1.0
-  is 340 m on a 256 m map and 1360 m on a 1024 m map), so it means the same on every
-  map and resolution. The thresholds are logical pixels times the UI scale, like the
-  icon. The F1 panel shows the band as camera distances.
+- **When icons are drawn** (zoom work package, `rules/camera.md`; `zoom.rs`, `camera.ron`). Models are drawn at
+  every zoom. The icons are an overlay: alpha 0 up to the camera zoom `zoom.icons_from` (0.85), 1 from `icons_full`
+  (1.0), a smoothstep between, so they fade in over the last 15 % of the wheel travel, on top of the models. The
+  blend of a frame is `Blend { model, icon }` (model weight 1 in play, icon alpha from `ZoomBands::icon_alpha`).
+  (Before that the icons replaced the models by a dithered cross-fade driven by the apparent size of a reference unit.)
+  The models also grow with `ZoomBands::model_scale` (capped, 1 to 1.6) toward the far end.
 - **Icons.** One instanced quad per unit, one draw call (`IconInstance`, 32 bytes:
   world anchor, shape + flags, colour). The vertex shader projects the anchor and
   lays a quad of `size_px * ui_scale` **pixels** around it (centre snapped to the
@@ -617,17 +613,10 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
   (square, circle, triangle: `icon:` per shape) is a signed distance function in the
   fragment shader, so it is crisp at every scale; fill = player colour (unlit, so it
   is exactly the palette colour), dark outline, white when highlighted.
-- **The cross-fade is a dissolve, not alpha.** The blend is one number, the model
-  weight `m`; the icon weight is `1 - m` (the sum is exact by construction). Both
-  representations compare the pixel's 8x8 Bayer threshold with the same `m` (the
-  alpha of the instance colour): the model keeps the pixels with threshold `< m`
-  (`scene.wgsl`), the icon draws the others (`icon.wgsl`). Every pixel belongs to
-  exactly one of them: **no double-bright overlap, no dark dip from two
-  half-transparent layers, nothing to sort** (the models stay opaque and
-  depth-correct), nothing pops (at `m = 1` the test passes everywhere, at `m = 0` the
-  models are not even built). The price is a visible screen-door pattern for the
-  second or so of a zoom through the band. The icon's own antialiased edge is plain
-  alpha blending on top. Weight 1 skips the test in the shader.
+- **The icon overlay is plain alpha.** `icon.wgsl` multiplies its coverage by the icon opacity (the alpha of the
+  instance colour); the models stay opaque and depth-correct and are drawn in full, so there is no pattern. The
+  model shader keeps its 8x8 Bayer dither for a model weight below 1 (the debug `--unit-display icons` is weight 0).
+  The old dissolve (WP1.9: the two representations complementary pixel by pixel) went with the replacement of models by icons.
 - **Icons are not depth tested** (documented choice). They are a map symbol drawn
   after the scene, over terrain and models. A depth-tested billboard would be half
   eaten by the ground below it on a tilted camera (the ground lower on the screen is
@@ -648,7 +637,7 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
     (`icon_hit`). Terrain does not hide icons (they are not depth tested). The icon
     whose centre is nearest the cursor wins, then the nearer to the camera, then the
     lower id.
-  * Cross-fade band: the representation with the larger weight, the model on a tie.
+  * Icon fade band: the icon once it is more than half opaque, the model otherwise (and on a tie).
   * Tile pruning: a tile is searched only if the cursor ray passes its box grown by
     what a click volume can grow; 0.01 ms for 10,000 icons.
 - **Hover** (`sf_game`): `build_frame`, `pick`, `Instancer::highlight` (model tinted

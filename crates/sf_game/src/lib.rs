@@ -89,7 +89,7 @@
 //! **Model LOD, strategic icons and hover (WP1.9).** Each model has a chain of
 //! meshes chosen per unit by projected size (`assets/config/units.ron`); past
 //! a zoom threshold the units become screen-fixed icons in player colour,
-//! with a dithered cross-fade between the two. The unit under the cursor is
+//! with the icons over the models in the farthest zoom band (`assets/config/camera.ron`). The unit under the cursor is
 //! picked, highlighted and named in the F1 panel. `--hover x,y` fixes the
 //! cursor for screenshots, `--unit-display auto|models|icons` forces the
 //! display.

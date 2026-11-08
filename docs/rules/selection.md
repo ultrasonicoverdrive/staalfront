@@ -61,7 +61,7 @@ other shared binding. The debug select-all on F2 of WP3.4 is gone.
   under the cursor is the one `Instancer::pick` found in the frame that was drawn, so a
   click uses the same volume as the hover highlight: the model's oriented box through
   the cursor ray close up, the icon quad when zoomed out, the more visible of the two in
-  the cross-fade band (see `pick.rs`). An own unit or structure replaces the selection.
+  the icon fade band, where the icon quad takes over once it is more than half opaque (see `pick.rs`, `camera.md`). An own unit or structure replaces the selection.
   An enemy or neutral entity is inspected (the selection is emptied; the inspected
   entity gets a ring and a bar, and the top bar says "inspecting"). Bare ground empties
   the selection and the inspection.
@@ -106,7 +106,7 @@ is unchanged.
 |---|---|---|
 | models (close, middle) | green ring on the ground around the unit, sized from its model's box (longer side times `RING_GROW`); a box outline around a structure; health bar above the model | the same in red (enemy) or amber (neutral) |
 | icons (strategic) | the icon gets `ICON_SELECTED` (a white outline drawn **outside** the icon, clearly thicker than the thin white hover outline; hovering a selected icon turns it yellow; all set by the icon shader, which grows the quad for it, so the owner's colour keeps the same area in every state and the plain icon is unchanged) and a health bar above it | same, ring colours do not apply |
-| cross-fade band | the ring is drawn as long as the model is; the bar follows the more visible representation | |
+| icon fade band (far zoom) | the ring is drawn while the model is the larger picture (icon at most half opaque); the bar follows the more visible representation (the icon once it is more than half opaque) | |
 
 The ring is the projection of a circle (28 segments) or a rectangle on the ground at the
 unit's footprint centre, so it has the perspective of the terrain it lies on. It is not

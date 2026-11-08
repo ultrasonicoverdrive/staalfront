@@ -206,15 +206,16 @@ instancer's answer for that muzzle (0.10 m and 0.09 m in the run printed).
 
 ## 6. Zoom
 
-All of it is decided by two numbers a frame already has: the **model weight** of the model/icon cross-fade
-(`Blend::model()`, `1` models only, `0` icons only) and the apparent size of the 2 m reference unit
-(`ViewBand::reference_px`).
+All of it is decided by two numbers a frame already has: the **effects weight** (`1 - Blend::icon()`: `1` while no icon
+is drawn over the models, `0` at the farthest zoom where the icons are opaque; since the zoom work package the models
+are drawn at every zoom, only the icons come and go, `camera.md`) and the apparent size of the 2 m reference unit
+(`IconConfig::reference_px`).
 
 | Band | When | Particles | Alpha |
 |---|---|---|---|
-| close | models only and the reference unit at least 60 px | all of a burst | times the model weight (1) |
-| middle | the cross-fade, or the reference unit under 60 px | `middle_factor` (0.5) of a burst, rounded up, at least one | times the model weight |
-| strategic | icons only | none; **a death makes one flash** | zero, except the flash |
+| close | no icon and the reference unit at least 60 px | all of a burst | times the model weight (1) |
+| middle | the icons fading in, or the reference unit under 60 px | `middle_factor` (0.5) of a burst, rounded up, at least one | times the model weight |
+| strategic | the icons fully opaque (the farthest zoom) | none; **a death makes one flash** | zero, except the flash |
 
 * **Pixel clamp.** A particle is `size` metres across; on the screen it is `size * focal / depth` pixels clamped to
   `min_px` (2) and `max_px` (64) (`size_px`; the same maths as `IconConfig::reference_px`). It is computed on the CPU, so

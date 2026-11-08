@@ -130,9 +130,18 @@ map in view**, without jolts and without the controls breaking.
 | Close-up | full models, animations, particles, shadows | full detail, decoration | health bars on selection |
 | Middle (default play height) | full models, fewer particles | medium LOD | bars on damage |
 | Far | simplified models (LOD) | coarse chunks | group bars |
-| Strategic | **icons in player color** (triangle = vehicle, square = building, etc.), constant size on screen | map-like display | area overlays, route arrows |
+| Strategic (the last ~15 % of the zoom range, up to the whole map plus a quarter-map margin) | **the same models, with strategic icons on top** (player color; triangle = vehicle, square = building, etc.), constant size on screen, fading in over the band | map-like display | area overlays, route arrows |
 
-Transition between model and icon with a short crossfade, not a hard swap.
+Models are drawn at every zoom; the icons are an overlay that fades in over the farthest band, not a replacement
+for the models (see the note below).
+
+*Note 08-11-2026 (decision Tijmen, after playing M1; `docs/rules/camera.md`): "I must be able to zoom out further,
+and I keep seeing the buildings and the little soldiers." The farthest zoom now shows the whole map plus a quarter
+map of margin on every side (`camera.far_margin`, `assets/config/camera.ron`). The model-to-icon swap of the first
+version of this table is gone: models stay at every zoom (a modest, capped scale-up toward the far end keeps them
+readable), and the strategic icons are drawn on top of them in the last ~15 % of the zoom range, fading in
+(`zoom.icons_from`/`icons_full`). The click volume is the icon quad where the icon is mostly opaque, the model
+elsewhere (section 2.3 is unchanged in that). All numbers are in RON.*
 
 ### 2.3 Controls work at every zoom
 - Selecting via ray → terrain + a click volume per entity; at
