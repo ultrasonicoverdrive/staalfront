@@ -71,6 +71,7 @@ mod shader_watch;
 pub mod style;
 pub mod terrain;
 mod terrain_gpu;
+pub mod zoom;
 pub use terrain_gpu::FogShading;
 pub mod terrain_look;
 
@@ -82,7 +83,7 @@ pub use glam;
 pub use gpu::{Gpu, GpuOptions, Present, RenderError};
 pub use ground::{FlatGround, Ground, TerrainGround};
 pub use icon_atlas::IconAtlas;
-pub use icons::{Blend, IconConfig, IconId, IconShape, ViewBand};
+pub use icons::{Blend, IconConfig, IconId, IconShape};
 pub use image::{Rgba8, Tolerance};
 pub use instancing::{DrawnUnit, FrameView, InstanceStats, Instancer, Motion};
 pub use lod::{LodConfig, TerrainConfig, TerrainStats};
@@ -95,3 +96,4 @@ pub use renderer::{
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
 pub use wgpu;
+pub use zoom::{CameraSettings, ZoomBands};

@@ -193,6 +193,9 @@ pub struct Runner {
     /// Why the last sound-browser play failed (shown in the browser).
     ra_play_error: Option<String>,
     camera: Camera,
+    /// What the picture does with the zoom: the icon overlay band and the far-zoom
+    /// model scale (`assets/config/camera.ron`).
+    zoom_bands: sf_render::ZoomBands,
     hud: Hud,
     /// Frames counted in the last full second, for the top bar.
     fps_shown: u32,
@@ -436,12 +439,11 @@ impl Runner {
             instancer.set_aim(Some([0.5 * map_metres.0, 0.5 * map_metres.1]));
         }
         instancer.update_tick(motions_of(&looks, &snap));
+        let camera_settings = sf_render::CameraSettings::embedded();
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
-        let camera_config = CameraConfig {
-            map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
-            ..CameraConfig::default()
-        };
+        let camera_config = camera_settings
+            .camera_config(DVec2::new(f64::from(map.width()), f64::from(map.height())));
         let mut camera = Camera::new(camera_config, 1280, 720);
         camera.set_ground(ground.clone());
         let bench = options.bench.clone().map(|opts| BenchRun {
@@ -508,6 +510,7 @@ impl Runner {
             audio: None,
             ra_play_error: None,
             camera,
+            zoom_bands: camera_settings.zoom,
             hud,
             fps_shown: 0,
             map,
@@ -753,6 +756,7 @@ impl Runner {
             rejected_seen,
             refusal,
             camera,
+            zoom_bands: _,
             // The shell.
             started: _,
             report_at: _,
@@ -1944,15 +1948,16 @@ impl Runner {
         let scale = self.hud.scale();
         let icons = *self.instancer.icon_config();
         let distance = self.camera.distance() as f32;
-        let blend = match self.debug.state.unit_display {
-            UnitDisplay::Auto => icons.blend_for_view(
-                eye.focal_px,
-                distance,
-                self.camera.max_distance() as f32,
-                scale,
+        let zoom = self.camera.zoom() as f32;
+        // Models at every zoom; the icons over them in the far band; the models
+        // a little larger toward the far end (camera.ron, `zoom`).
+        let (blend, model_scale) = match self.debug.state.unit_display {
+            UnitDisplay::Auto => (
+                self.zoom_bands.blend(zoom),
+                self.zoom_bands.model_scale(zoom),
             ),
-            UnitDisplay::Models => Blend::MODELS,
-            UnitDisplay::Icons => Blend::ICONS,
+            UnitDisplay::Models => (Blend::MODELS, self.zoom_bands.model_scale(zoom)),
+            UnitDisplay::Icons => (Blend::ICONS, 1.0),
         };
 
         // Cull by tile, interpolate, put the units on the ground, choose the
@@ -1960,7 +1965,7 @@ impl Runner {
         let started = Instant::now();
         let ground = &self.ground;
         self.stats = self.instancer.build_frame(
-            &FrameView::new(&frustum, alpha, eye, blend, scale),
+            &FrameView::new(&frustum, alpha, eye, blend, scale).with_model_scale(model_scale),
             |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
         );
         self.build_ms.push(started.elapsed());
@@ -2005,24 +2010,13 @@ impl Runner {
                     .map_or_else(String::new, |o| order_text(o, &self.snap)),
             }
         });
-        let (above, below) = (icons.model_above_px * scale, icons.icon_below_px * scale);
-        // The band as `blend_for_view` applies it (with its shrink on a map
-        // whose whole-map view would still show models).
-        let band = icons.view_band(
-            eye.focal_px,
-            distance,
-            self.camera.max_distance() as f32,
-            scale,
-        );
         self.unit_view = UnitView {
-            model_weight: blend.model(),
-            zoom: self.camera.zoom() as f32,
+            icon_alpha: blend.icon(),
+            model_scale,
+            icons_from_zoom: self.zoom_bands.icons_from,
+            zoom,
             distance,
-            reference_px: band.reference_px,
-            model_above_px: above,
-            icon_below_px: below,
-            models_until: band.models_until,
-            icons_from: band.icons_from,
+            reference_px: icons.reference_px(eye.focal_px, distance),
             ui_scale: scale,
             hovered,
         };
@@ -2040,7 +2034,8 @@ impl Runner {
             view_proj,
             focal_px: eye.focal_px,
             viewport: [width as f32, height as f32],
-            model_weight: self.unit_view.model_weight,
+            // The effects fade out as the icons fade in over the models.
+            model_weight: 1.0 - self.unit_view.icon_alpha,
             reference_px: self.unit_view.reference_px,
             icon_px: self.instancer.icon_params().size_px,
             dt,
@@ -2954,14 +2949,15 @@ impl App for Runner {
         );
         println!(
             "summary: last frame {} models (levels {:?}, {} triangles, {} draw calls), \
-             {} icons ({} draw call), model weight {:.2}, hovered {}",
+             {} icons ({} draw call), icon alpha {:.2}, model scale {:.2}, hovered {}",
             self.stats.models,
             self.stats.per_lod,
             self.stats.model_triangles,
             self.stats.model_draw_calls,
             self.stats.icons,
             self.stats.icon_draw_calls,
-            self.unit_view.model_weight,
+            self.unit_view.icon_alpha,
+            self.unit_view.model_scale,
             self.unit_view
                 .hovered
                 .as_ref()

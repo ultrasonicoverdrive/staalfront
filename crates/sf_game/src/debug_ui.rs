@@ -18,7 +18,7 @@ use sf_render::{CameraConfig, DrawStats, InstanceStats, OverlayFrame};
 /// What the units are drawn as (WP1.9): by the zoom, or forced for a look.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UnitDisplay {
-    /// Models up close, icons far away, a dithered cross-fade between.
+    /// Models at every zoom, the icons over them in the far band.
     #[default]
     Auto,
     /// Always models (the level of detail still applies).
@@ -52,21 +52,17 @@ pub struct HoveredUnit {
 /// The model/icon state of the frame, for the panel.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnitView {
-    /// Share of the picture that is models; the icons have `1 - model_weight`.
-    pub model_weight: f32,
+    /// Opacity of the strategic icons drawn over the models (0 = none).
+    pub icon_alpha: f32,
+    /// The factor the models are drawn larger by (1 = true size).
+    pub model_scale: f32,
+    /// The camera zoom (`0..=1`) where the icons start to fade in.
+    pub icons_from_zoom: f32,
     /// Camera zoom `0..=1` and the eye-to-focus distance in metres.
     pub zoom: f32,
     pub distance: f32,
-    /// Apparent size of the reference unit at the focus, in pixels, and the
-    /// thresholds of the cross-fade (already times the UI scale). The size is
-    /// the one the blend compares, after `IconConfig::view_shrink`.
+    /// Apparent size of the reference unit at the focus, in pixels.
     pub reference_px: f32,
-    pub model_above_px: f32,
-    pub icon_below_px: f32,
-    /// The camera distances (metres) where the models end and the icons
-    /// begin, as `blend_for_view` switches (shrink included).
-    pub models_until: f32,
-    pub icons_from: f32,
     pub ui_scale: f32,
     pub hovered: Option<HoveredUnit>,
 }
@@ -330,7 +326,7 @@ fn draw_calls(ui: &mut egui::Ui, data: &PanelData) {
         });
 }
 
-/// Levels of detail, the cross-fade to icons and the hovered unit (WP1.9).
+/// Levels of detail, the icon overlay and the hovered unit (WP1.9).
 fn unit_levels(ui: &mut egui::Ui, data: &PanelData) {
     let (i, u, d) = (&data.instances, &data.units, &data.draw);
     ui.label(format!(
@@ -342,18 +338,15 @@ fn unit_levels(ui: &mut egui::Ui, data: &PanelData) {
         d.dynamic_draw_calls, d.icon_draw_calls, d.dynamic_triangles
     ));
     ui.label(format!(
-        "cross-fade: models {:.0} %, icons {:.0} %",
-        u.model_weight * 100.0,
-        (1.0 - u.model_weight) * 100.0
+        "models always; icons over them {:.0} % (from zoom {:.2}), models drawn {:.2}x",
+        u.icon_alpha * 100.0,
+        u.icons_from_zoom,
+        u.model_scale
     ));
-    ui.add(egui::ProgressBar::new(1.0 - u.model_weight).desired_width(220.0));
+    ui.add(egui::ProgressBar::new(u.icon_alpha).desired_width(220.0));
     ui.label(format!(
-        "zoom {:.2}, camera {:.0} m, reference unit {:.1} px",
-        u.zoom, u.distance, u.reference_px
-    ));
-    ui.label(format!(
-        "models above {:.0} px (to {:.0} m), icons below {:.0} px (from {:.0} m), UI scale {:.2}",
-        u.model_above_px, u.models_until, u.icon_below_px, u.icons_from, u.ui_scale
+        "zoom {:.2}, camera {:.0} m, reference unit {:.1} px, UI scale {:.2}",
+        u.zoom, u.distance, u.reference_px, u.ui_scale
     ));
     match &u.hovered {
         Some(h) => {
@@ -481,7 +474,7 @@ fn view_toggles(ui: &mut egui::Ui, state: &mut PanelState) {
     ui.horizontal(|ui| {
         ui.label("Units:");
         ui.radio_value(&mut state.unit_display, UnitDisplay::Auto, "by zoom")
-            .on_hover_text("Models up close, icons far away, a dithered cross-fade between.");
+            .on_hover_text("Models at every zoom; the strategic icons fade in over them in the farthest band of the zoom.");
         ui.radio_value(&mut state.unit_display, UnitDisplay::Models, "models");
         ui.radio_value(&mut state.unit_display, UnitDisplay::Icons, "icons");
     });
@@ -677,14 +670,12 @@ mod tests {
                 ..InstanceStats::default()
             },
             units: UnitView {
-                model_weight: 0.75,
+                icon_alpha: 0.25,
+                model_scale: 1.25,
+                icons_from_zoom: 0.85,
                 zoom: 0.62,
                 distance: 96.0,
                 reference_px: 21.5,
-                model_above_px: 28.0,
-                icon_below_px: 14.0,
-                models_until: 80.0,
-                icons_from: 160.0,
                 ui_scale: 1.0,
                 hovered: Some(HoveredUnit {
                     id: "12v3".into(),
@@ -767,9 +758,8 @@ mod tests {
             "Units: LOD, icons, hover",
             "models 40 (level 0..3: 20 / 12 / 8 / 0), icons 30",
             "unit draw calls 2 models + 1 icons, 1280 triangles",
-            "cross-fade: models 75 %, icons 25 %",
-            "zoom 0.62, camera 96 m, reference unit 21.5 px",
-            "models above 28 px (to 80 m), icons below 14 px (from 160 m)",
+            "models always; icons over them 25 % (from zoom 0.85), models drawn 1.25x",
+            "zoom 0.62, camera 96 m, reference unit 21.5 px, UI scale 1.00",
             "hovering: light_tank 12v3 (blue) by model, 41.2 m, HP 320/400",
             "by zoom",
             "zoom step per notch",

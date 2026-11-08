@@ -87,8 +87,12 @@ pub struct CameraConfig {
     pub margin: f64,
     /// Closest eye-to-focus distance.
     pub min_distance: f64,
-    /// Farthest distance; `None` = just enough to show the whole map.
+    /// Farthest distance; `None` = enough to show the whole map plus `far_margin`.
     pub max_distance: Option<f64>,
+    /// How much more than the map the farthest zoom shows, as a share of the map size on
+    /// every side (0.25 = a quarter map of margin all round). Used when `max_distance` is
+    /// `None`.
+    pub far_margin: f64,
     /// Pitch (angle below the horizon) fully zoomed in, radians.
     pub pitch_near: f64,
     /// Pitch fully zoomed out, radians.
@@ -113,23 +117,9 @@ pub struct CameraConfig {
 }
 
 impl Default for CameraConfig {
+    /// The shipped feel: `assets/config/camera.ron` on the 256 m map.
     fn default() -> Self {
-        Self {
-            map_size: DVec2::new(256.0, 256.0),
-            margin: 16.0,
-            min_distance: 12.0,
-            max_distance: None,
-            pitch_near: 45_f64.to_radians(),
-            pitch_far: 80_f64.to_radians(),
-            fov_y: 45_f64.to_radians(),
-            distance_per_notch: 0.85,
-            zoom_smooth_secs: 0.10,
-            pan_smooth_secs: 0.12,
-            pan_speed: 0.7,
-            start_zoom: 0.35,
-            clearance: 2.0,
-            height_smooth_secs: 0.25,
-        }
+        crate::zoom::CameraSettings::embedded().camera_config(DVec2::new(256.0, 256.0))
     }
 }
 
@@ -571,8 +561,8 @@ fn max_distance_for(cfg: &CameraConfig, width: u32, height: u32) -> f64 {
         .max(cfg.min_distance * 1.001)
 }
 
-/// Smallest distance at which the whole map (centred, fully zoomed-out pitch)
-/// is inside a `width` x `height` viewport, plus 3 % slack.
+/// Smallest distance at which the whole map plus `far_margin` of its size on every
+/// side (centred, fully zoomed-out pitch) is inside a `width` x `height` viewport, plus 3 % slack.
 fn fit_distance(cfg: &CameraConfig, width: u32, height: u32) -> f64 {
     let probe = |d: f64| -> bool {
         let mut cam = Camera::new(
@@ -586,11 +576,12 @@ fn fit_distance(cfg: &CameraConfig, width: u32, height: u32) -> f64 {
         cam.set_zoom(1.0);
         let vp = cam.view_proj_f64();
         let c = cfg.map_size;
+        let m = cfg.far_margin.max(0.0);
         [
-            DVec2::new(0.0, 0.0),
-            DVec2::new(c.x, 0.0),
-            DVec2::new(0.0, c.y),
-            DVec2::new(c.x, c.y),
+            DVec2::new(-m * c.x, -m * c.y),
+            DVec2::new((1.0 + m) * c.x, -m * c.y),
+            DVec2::new(-m * c.x, (1.0 + m) * c.y),
+            DVec2::new((1.0 + m) * c.x, (1.0 + m) * c.y),
         ]
         .iter()
         .all(|p| {

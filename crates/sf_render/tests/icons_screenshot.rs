@@ -92,14 +92,10 @@ fn still(shape: u8, player: u8, id: u32, at: (f32, f32)) -> Motion {
 }
 
 /// The blend the game would use at this camera.
-fn blend_at(inst: &Instancer, cam: &Camera, ui_scale: f32) -> Blend {
-    let eye = EyeView::from_view_proj(cam.view_proj(), H as f32);
-    inst.icon_config().blend_for_view(
-        eye.focal_px,
-        cam.distance() as f32,
-        cam.max_distance() as f32,
-        ui_scale,
-    )
+fn blend_at(cam: &Camera) -> Blend {
+    sf_render::CameraSettings::embedded()
+        .zoom
+        .blend(cam.zoom() as f32)
 }
 
 /// Build the frame as sf_game does and upload it. `models` / `icons` can
@@ -268,18 +264,22 @@ fn strategic_zoom_shows_icons_in_all_colors_and_shapes_at_a_constant_pixel_size(
     let mut sizes = Vec::new();
     for zoom in [0.85, 1.0] {
         let cam = camera(&map, zoom, (32.0, 32.0));
-        let blend = blend_at(&inst, &cam, 1.0);
-        assert_eq!(blend, Blend::ICONS, "zoom {zoom} is past the threshold");
-        let img = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (true, true));
+        // The icons at full opacity (the game has that from `icons_full` on); the
+        // models are drawn too, the icons are looked at alone.
+        let blend = Blend::overlay(1.0);
+        if zoom == 1.0 {
+            assert_eq!(blend_at(&cam), blend, "the farthest zoom has opaque icons");
+        }
+        let img = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (false, true));
         dump(&img, &format!("icons_zoom_{zoom}"));
         let stats = inst.stats();
         assert_eq!(
             (stats.models, stats.icons, stats.icon_draw_calls),
-            (0, 12, 1)
+            (12, 12, 1),
+            "models stay at every zoom, the icons come on top"
         );
         assert_eq!(r.draw_stats().icon_instances, 12);
         assert_eq!(r.draw_stats().icon_draw_calls, 1);
-        assert_eq!(r.draw_stats().dynamic_draw_calls, 0, "no model is drawn");
 
         let found = icon_blobs(&img, &style);
         println!("zoom {zoom}: {} icon blobs", found.len());
@@ -391,14 +391,13 @@ fn changed(img: &Rgba8, base: &Rgba8, x: u32, y: u32) -> bool {
     (0..3).any(|i| a[i].abs_diff(b[i]) > 12)
 }
 
-/// One big model with its icon in front of it, at a given cross-fade weight.
-/// In the middle of the icon (where the model fills the whole screen
-/// area under it) a pixel is drawn by the model if the dither threshold is
-/// below the weight, and by the icon otherwise: exactly one of them, for
-/// every pixel and every weight. Rendered model-only and icon-only and
-/// together, on the real renderer and shaders.
+/// One big model with its icon over it, at several icon opacities. The overlay
+/// never takes a model pixel: with the model alone the pixels are the same at
+/// every opacity, and with both the pixel inside the icon is the icon's colour
+/// mixed over the model's by the opacity. (The model dither of a model weight
+/// below 1, a debug aid, is checked against the CPU function as well.)
 #[test]
-fn the_cross_fade_is_exactly_complementary_in_every_pixel() {
+fn the_icon_overlay_blends_over_the_model_and_never_takes_a_model_pixel() {
     let map = test_map();
     let style = Style::from_ron(
         "(palette: [(name: \"red\", srgb: (214, 40, 40))],
@@ -437,59 +436,73 @@ fn the_cross_fade_is_exactly_complementary_in_every_pixel() {
     let (x0, y0) = (c.0 as u32 - 5, c.1 as u32 - 5);
     let inside = || (y0..y0 + 10).flat_map(move |y| (x0..x0 + 10).map(move |x| (x, y)));
 
-    let mut model_share = Vec::new();
-    // Besides round weights, weights exactly on a dither threshold
-    // `(rank + 0.5) / 64` (exact in f32): there the pixel of that rank belongs
-    // to the icon, so a `<=` in scene.wgsl (or a `>` in icon.wgsl) fails here.
-    for weight in [
-        0.0,
-        0.5 / 64.0,
-        0.125,
-        0.25,
-        33.0 / 128.0,
-        0.5,
-        65.0 / 128.0,
-        0.75,
-        0.875,
-        127.0 / 128.0,
+    let model_only = draw(
+        &mut r,
+        &mut inst,
+        &map,
+        &cam,
+        Blend::overlay(0.0),
         1.0,
-    ] {
-        let blend = Blend::from_model_weight(weight);
-        let model_only = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (true, false));
-        let icon_only = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (false, true));
+        (true, false),
+    );
+    let icon_full = draw(
+        &mut r,
+        &mut inst,
+        &map,
+        &cam,
+        Blend::overlay(1.0),
+        1.0,
+        (false, true),
+    );
+    assert!(
+        inside().all(|(x, y)| changed(&model_only, &base, x, y)),
+        "the model fills the area under the icon"
+    );
+    assert!(
+        inside().all(|(x, y)| changed(&icon_full, &base, x, y)),
+        "the opaque icon covers its inside"
+    );
+    for alpha in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
+        let blend = Blend::overlay(alpha);
         let both = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (true, true));
-        let (mut models, mut icons) = (0, 0);
+        let again = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (true, false));
         for (x, y) in inside() {
-            let (m, i) = (
-                changed(&model_only, &base, x, y),
-                changed(&icon_only, &base, x, y),
+            assert_eq!(
+                again.pixel(x, y),
+                model_only.pixel(x, y),
+                "alpha {alpha}: the model pixel {x},{y} is the same at every icon opacity"
             );
-            // The shaders draw exactly the pixels the CPU function says.
-            assert_eq!(m, blend.model_at(x, y), "weight {weight}: model at {x},{y}");
-            assert_eq!(i, blend.icon_at(x, y), "weight {weight}: icon at {x},{y}");
-            assert!(m != i, "weight {weight}: pixel {x},{y} drawn {m}/{i}");
-            // Together: the pixel is whichever one drew it, never a mix.
-            let expected = if m { &model_only } else { &icon_only };
-            let (got, want) = (both.pixel(x, y), expected.pixel(x, y));
-            assert!(
-                (0..3).all(|k| got[k].abs_diff(want[k]) <= 1),
-                "weight {weight}: {x},{y} is {got:?}, one layer alone gives {want:?}"
+            let (m, i, got) = (
+                model_only.pixel(x, y),
+                icon_full.pixel(x, y),
+                both.pixel(x, y),
             );
-            models += u32::from(m);
-            icons += u32::from(i);
+            for k in 0..3 {
+                let want = f32::from(m[k]) * (1.0 - alpha) + f32::from(i[k]) * alpha;
+                assert!(
+                    (f32::from(got[k]) - want).abs() <= 3.0,
+                    "alpha {alpha}: {x},{y} channel {k} is {}, want about {want}",
+                    got[k]
+                );
+            }
         }
-        assert_eq!(models + icons, 100);
-        println!("weight {weight}: {models} model pixels, {icons} icon pixels of 100");
-        model_share.push(f64::from(models) / 100.0);
+    }
+
+    // A model weight below 1 (the debug dither) keeps exactly the pixels the CPU says.
+    for weight in [0.125, 0.25, 0.5, 0.75, 0.875] {
+        let blend = Blend::from_model_weight(weight);
+        let img = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (true, false));
+        let mut models = 0;
+        for (x, y) in inside() {
+            let m = changed(&img, &base, x, y);
+            assert_eq!(m, blend.model_at(x, y), "weight {weight}: model at {x},{y}");
+            models += u32::from(m);
+        }
         assert!(
             (f64::from(models) / 100.0 - f64::from(weight)).abs() < 0.07,
             "the model keeps a share of the pixels equal to its weight"
         );
     }
-    assert!(
-        model_share.windows(2).all(|w| w[0] <= w[1]),
-        "{model_share:?}"
-    );
 }
 
 /// The hovered unit's icon gets a white outline, and the pick that selected
@@ -607,12 +620,9 @@ fn ten_thousand_units_at_close_mid_and_strategic_zoom() {
         r.set_view_proj(vp);
         let frustum = Frustum::from_view_proj(vp);
         let eye = EyeView::from_view_proj(vp, 1080.0);
-        let blend = inst.icon_config().blend_for_view(
-            eye.focal_px,
-            cam.distance() as f32,
-            cam.max_distance() as f32,
-            1.0,
-        );
+        let blend = sf_render::CameraSettings::embedded()
+            .zoom
+            .blend(cam.zoom() as f32);
         // The picture before WP1.9 for comparison: every unit a level-0
         // model, whatever the zoom.
         let mut base_ms = f64::MAX;

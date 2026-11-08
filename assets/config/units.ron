@@ -46,16 +46,11 @@
         // unit at a switch distance does not flicker between two levels.
         hysteresis: 0.15,
     ),
-    // Units are models up close and icons far away, with a dithered cross-fade
-    // between (see sf_render::icons). The trigger is how big a reference unit
-    // (`reference_size` metres across) looks at the camera focus, in logical
-    // pixels (they scale with the UI scale, like the icon itself).
+    // Strategic icons are drawn over the models in the farthest band of the zoom (the band is
+    // in camera.ron, `zoom`). `reference_size` metres across is the reference unit whose
+    // apparent size at the camera focus the effects use for their zoom bands.
     icons: (
         reference_size: 2.0,
-        // At or above this apparent size: models only.
-        model_above_px: 28.0,
-        // At or below: icons only. In between the two cross-fade.
-        icon_below_px: 14.0,
         // Side of the icon quad; the same at every zoom.
         size_px: 14.0,
         // Dark outline inside the icon's edge.

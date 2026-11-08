@@ -204,6 +204,11 @@ pub fn model_matrix(x: f32, y: f32, z: f32, steps: f32, size: [f32; 3]) -> [[f32
     ]
 }
 
+/// `size` times the presentation scale `factor`.
+fn scaled(size: [f32; 3], factor: f32) -> [f32; 3] {
+    [size[0] * factor, size[1] * factor, size[2] * factor]
+}
+
 /// What one [`Instancer::build`] did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InstanceStats {
@@ -260,6 +265,10 @@ pub struct FrameView<'a> {
     /// UI scale (window DPI factor times `ui.ron` scale): icons, their
     /// zoom thresholds and the minimum click size scale with it.
     pub ui_scale: f32,
+    /// The factor the models are drawn larger by (1 = true size): the far-zoom
+    /// readability scale of `camera.ron`. Presentation only: the click volumes and
+    /// the level selection keep the true size.
+    pub model_scale: f32,
 }
 
 impl<'a> FrameView<'a> {
@@ -271,6 +280,7 @@ impl<'a> FrameView<'a> {
             eye: None,
             blend: Blend::MODELS,
             ui_scale: 1.0,
+            model_scale: 1.0,
         }
     }
 
@@ -288,7 +298,19 @@ impl<'a> FrameView<'a> {
             eye: Some(eye),
             blend,
             ui_scale,
+            model_scale: 1.0,
         }
+    }
+
+    /// The same view with the models drawn `scale` times larger (clamped to be
+    /// finite and at least a tenth).
+    pub fn with_model_scale(mut self, scale: f32) -> Self {
+        self.model_scale = if scale.is_finite() {
+            scale.max(0.1)
+        } else {
+            1.0
+        };
+        self
     }
 }
 
@@ -854,7 +876,7 @@ impl Instancer {
                     // The alpha is the model's weight in the cross-fade: the
                     // fragment shader keeps that share of the pixels.
                     let color = [r, g, b, weight];
-                    let unit = model_matrix(x, y, z, steps, geom.scale);
+                    let unit = model_matrix(x, y, z, steps, scaled(geom.scale, view.model_scale));
                     let parts = chain.parts(level);
                     if parts.is_empty() {
                         let mesh = chain.level(level).mesh;

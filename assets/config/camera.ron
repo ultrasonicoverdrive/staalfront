@@ -1,0 +1,44 @@
+// The game camera and what the picture does with the zoom (WP2.x zoom work package).
+// Read by sf_render::zoom::CameraSettings. Angles are in degrees, lengths in metres.
+(
+    camera: (
+        // How far the focus may leave the map, in metres.
+        margin: 16.0,
+        // Closest eye-to-focus distance.
+        min_distance: 12.0,
+        // The farthest zoom shows the whole map plus this share of the map size on every
+        // side (0.25 = a quarter of the map as a margin all round). 0 = just the map.
+        far_margin: 0.25,
+        // Pitch (angle below the horizon) fully zoomed in and fully zoomed out.
+        pitch_near_deg: 45.0,
+        pitch_far_deg: 80.0,
+        fov_y_deg: 45.0,
+        // One wheel notch multiplies the distance by this (or its inverse).
+        distance_per_notch: 0.85,
+        // Time constants of the zoom and pan easing, seconds.
+        zoom_smooth_secs: 0.10,
+        pan_smooth_secs: 0.12,
+        // Pan speed in distances per second (so it scales with the zoom).
+        pan_speed: 0.7,
+        // Zoom (0 = closest, 1 = farthest) a new camera starts at.
+        start_zoom: 0.35,
+        // Least height of the eye above the ground under it, and the time constant with
+        // which the pivot follows the terrain height while panning.
+        clearance: 2.0,
+        height_smooth_secs: 0.25,
+    ),
+    // What the zoom does to the units and buildings. Zoom is the camera zoom, 0 to 1,
+    // logarithmic in the distance. Models are drawn at every zoom; nothing here hides one.
+    zoom: (
+        // The strategic icons are drawn on top of the models in the farthest band of the
+        // zoom range: alpha 0 up to `icons_from`, fully opaque from `icons_full` on, a
+        // smooth ramp in between.
+        icons_from: 0.85,
+        icons_full: 1.0,
+        // Models grow a little toward the far end so they stay readable: scale 1 up to
+        // `model_scale_from`, `model_scale_max` at the farthest zoom, a smooth ramp in
+        // between. Presentation only: the click volumes keep their size.
+        model_scale_from: 0.55,
+        model_scale_max: 1.6,
+    ),
+)

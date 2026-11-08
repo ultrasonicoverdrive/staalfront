@@ -545,7 +545,7 @@ mod tests {
         assert!(base("lod: (hysteresis: -0.1)").is_err());
         assert!(base("icons: (size_px: 20.0)").is_ok());
         assert!(base("icons: (size_px: 1.0)").is_err());
-        assert!(base("icons: (icon_below_px: 50.0)").is_err());
+        assert!(base("icons: (size_px: 2.0)").is_err());
         assert!(base("icons: (nonsense: 1.0)").is_err());
     }
 
