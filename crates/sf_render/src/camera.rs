@@ -940,7 +940,8 @@ mod tests {
         let mut close = cam(1280, 720);
         close.set_zoom(0.0);
         let mut far = cam(1280, 720);
-        far.set_zoom(0.9);
+        // Not the farthest zoom: there a second of panning would hit the map margin.
+        far.set_zoom(0.5);
         far.set_focus(DVec2::new(128.0, 128.0));
         close.set_focus(DVec2::new(128.0, 128.0));
         let east = CameraInput {
@@ -1026,7 +1027,9 @@ mod tests {
                 },
             );
             for i in 0..30 {
-                cursor += DVec2::new(-9.0, 4.0);
+                // Small steps at the far end, where a pixel is metres of ground and a long drag would reach
+                // the map margin (the one case the bounds win over the cursor).
+                cursor += DVec2::new(-9.0, 4.0) * if zoom > 0.9 { 0.1 } else { 1.0 };
                 let input = CameraInput {
                     cursor: Some(cursor),
                     drag: true,
@@ -1145,6 +1148,120 @@ mod tests {
         // Back to landscape: same distance again.
         c.set_viewport(1920, 1080);
         assert!((c.distance() - landscape).abs() < 1e-9);
+    }
+
+    /// The four corners of the map grown by `margin` of its size on every side.
+    fn margin_corners(map: f64, margin: f64) -> [DVec2; 4] {
+        let (lo, hi) = (-margin * map, (1.0 + margin) * map);
+        [
+            DVec2::new(lo, lo),
+            DVec2::new(hi, lo),
+            DVec2::new(lo, hi),
+            DVec2::new(hi, hi),
+        ]
+    }
+
+    fn corner_ndc(c: &Camera, p: DVec2) -> DVec2 {
+        let clip = c.view_proj_f64() * DVec4::new(p.x, 0.0, p.y, 1.0);
+        assert!(clip.w > 0.0);
+        DVec2::new(clip.x / clip.w, clip.y / clip.w)
+    }
+
+    /// The farthest zoom shows the whole map plus a quarter map on every side,
+    /// for every map size and several window shapes (camera.ron's `far_margin`).
+    #[test]
+    fn the_farthest_zoom_shows_the_map_plus_a_quarter_map_margin() {
+        assert_eq!(CameraConfig::default().far_margin, 0.25);
+        for map in [64.0, 256.0, 1024.0] {
+            for (w, h) in [(1920, 1080), (1280, 720), (3440, 1440), (800, 1000)] {
+                let cfg = CameraConfig {
+                    map_size: DVec2::new(map, map),
+                    ..CameraConfig::default()
+                };
+                let mut c = Camera::new(cfg, w, h);
+                c.set_zoom(1.0);
+                let mut worst = 0.0_f64;
+                for p in margin_corners(map, 0.25) {
+                    let n = corner_ndc(&c, p);
+                    assert!(
+                        n.x.abs() <= 1.0 && n.y.abs() <= 1.0,
+                        "{map} m map at {w}x{h}: margin corner {p:?} off screen at {n:?}"
+                    );
+                    worst = worst.max(n.x.abs()).max(n.y.abs());
+                }
+                // Snug: the margin corners fill the window to within the 3 % slack.
+                assert!(worst > 0.9, "{map} m map at {w}x{h}: too far out ({worst})");
+                // And the camera is farther than the no-margin fit by about the margin.
+                let snug = Camera::new(
+                    CameraConfig {
+                        far_margin: 0.0,
+                        ..cfg
+                    },
+                    w,
+                    h,
+                );
+                let ratio = c.max_distance() / snug.max_distance();
+                assert!(
+                    (1.35..1.65).contains(&ratio),
+                    "{map} m map at {w}x{h}: distance ratio {ratio}"
+                );
+            }
+        }
+    }
+
+    /// Zero margin is the old behaviour: just the map.
+    #[test]
+    fn a_zero_margin_fits_just_the_map() {
+        let cfg = CameraConfig {
+            far_margin: 0.0,
+            ..CameraConfig::default()
+        };
+        let mut c = Camera::new(cfg, 1920, 1080);
+        c.set_zoom(1.0);
+        assert!(whole_map_visible(&c));
+        let off = margin_corners(256.0, 0.25)
+            .iter()
+            .map(|&p| corner_ndc(&c, p))
+            .any(|n| n.x.abs() > 1.0 || n.y.abs() > 1.0);
+        assert!(off, "with no margin the quarter-map corners are off screen");
+    }
+
+    /// An explicit `max_distance` still wins over the margin.
+    #[test]
+    fn an_explicit_max_distance_wins_over_the_margin() {
+        let cfg = CameraConfig {
+            max_distance: Some(500.0),
+            ..CameraConfig::default()
+        };
+        assert_eq!(Camera::new(cfg, 1920, 1080).max_distance(), 500.0);
+    }
+
+    /// The planes still hold the whole margin view: no hole at the map edge or the
+    /// margin corners (they are all between near and far).
+    #[test]
+    fn near_far_cover_the_margin_view_at_the_farthest_zoom() {
+        for map in [64.0, 256.0, 1024.0] {
+            for (w, h) in [(1920, 1080), (800, 1000)] {
+                let cfg = CameraConfig {
+                    map_size: DVec2::new(map, map),
+                    ..CameraConfig::default()
+                };
+                let mut c = Camera::new(cfg, w, h);
+                c.set_zoom(1.0);
+                let (near, far) = c.near_far();
+                let eye = c.eye();
+                for p in margin_corners(map, 0.25)
+                    .into_iter()
+                    .chain(margin_corners(map, 0.0))
+                {
+                    let d = (DVec3::new(p.x, 0.0, p.y) - eye).length();
+                    assert!(
+                        d > near && d < far,
+                        "{map} {w}x{h}: {d} not in {near}..{far}"
+                    );
+                }
+            }
+        }
     }
 
     use crate::ground::TerrainGround;

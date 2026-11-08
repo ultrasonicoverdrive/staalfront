@@ -329,7 +329,22 @@ fn the_blend_decides_what_is_built() {
         (0..inst.models().mesh_count()).flat_map(|id| inst.mesh_instances(MeshId(id as u16)));
     assert!(all_models.clone().count() == 30);
     assert!(all_models.into_iter().all(|i| i.color[3] == 0.4));
-    assert!(inst.icon_instances().iter().all(|i| i.color[3] == 0.4));
+    assert!(
+        inst.icon_instances()
+            .iter()
+            .all(|i| (i.color[3] - 0.6).abs() < 1e-6),
+        "the icons carry their own opacity, the complement here"
+    );
+    // The overlay of the game: every model at full weight, the icons over them.
+    let s = build(&mut inst, &cam, 0.0, Blend::overlay(0.3), 1.0, flat);
+    assert_eq!((s.models, s.icons), (30, 30), "models are never dropped");
+    let all_models =
+        (0..inst.models().mesh_count()).flat_map(|id| inst.mesh_instances(MeshId(id as u16)));
+    assert!(all_models.into_iter().all(|i| i.color[3] == 1.0));
+    assert!(inst.icon_instances().iter().all(|i| i.color[3] == 0.3));
+    // No icon opacity: no icon is built (nothing to draw), the models stay.
+    let s = build(&mut inst, &cam, 0.0, Blend::overlay(0.0), 1.0, flat);
+    assert_eq!((s.models, s.icons, s.icon_draw_calls), (30, 0, 0));
     // Full models: the weight is exactly 1, the value that skips the dissolve.
     build(&mut inst, &cam, 0.0, Blend::MODELS, 1.0, flat);
     assert!(
@@ -1239,4 +1254,105 @@ fn the_rectangle_test_of_a_tiny_model_follows_the_ui_scale() {
         "scale 2: the box is {} px",
         2.0 * min
     );
+}
+
+// ---------------------------------------------------------------------------
+// The far-zoom model scale and the overlay (zoom work package)
+// ---------------------------------------------------------------------------
+
+/// The scale draws the model larger about its feet and changes nothing else: the
+/// click volume and the icon keep their size and place.
+#[test]
+fn the_model_scale_grows_the_drawn_model_only() {
+    let mut inst = one_cube_at((100.0, 100.0));
+    let cam = camera(0.9, (100.0, 100.0));
+    let vp = cam.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H);
+    let blend = Blend::overlay(0.2);
+    let run = |inst: &mut Instancer, scale: f32| {
+        inst.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, blend, 1.0).with_model_scale(scale),
+            flat,
+        );
+        let m = inst.instances(MeshKind::Cube)[0].model;
+        (m, inst.icon_instances()[0].position)
+    };
+    let (m1, icon1) = run(&mut inst, 1.0);
+    let (m2, icon2) = run(&mut inst, 1.5);
+    for i in 0..3 {
+        for k in 0..3 {
+            assert!((m2[i][k] - 1.5 * m1[i][k]).abs() < 1e-5, "axis {i}");
+        }
+    }
+    assert_eq!(
+        m1[3], m2[3],
+        "it grows about its feet, the place is the same"
+    );
+    assert_eq!(icon1, icon2, "the icon does not move");
+    // The same ray hits the same unit at 1 and at 1.5, and a ray just outside the
+    // true box misses at both: the hit volume is not the scaled model.
+    let middle = Vec3::new(100.0, 0.5, 100.0);
+    for scale in [1.0, 1.5] {
+        run(&mut inst, scale);
+        assert!(inst.pick(&query_over(&cam, middle, 0.0, 0.0)).is_some());
+        assert_eq!(inst.pick(&query_over(&cam, middle, 60.0, 0.0)), None);
+    }
+    // Nonsense falls back to true size.
+    assert_eq!(FrameView::models_only(&frustum, 0.0).model_scale, 1.0);
+    assert_eq!(
+        FrameView::models_only(&frustum, 0.0)
+            .with_model_scale(f32::NAN)
+            .model_scale,
+        1.0
+    );
+}
+
+/// With the overlay the icon quad is the click volume once it is more than half
+/// opaque, and the model's volume before that; the model is drawn in both.
+#[test]
+fn the_overlay_decides_the_click_volume_by_its_opacity() {
+    let style = || style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let cam = camera(0.3, (100.0, 100.0));
+    let pick_with = |alpha: f32, dx: f32| {
+        let mut inst = instancer_with(style(), &[still(0, 0, 8, (100.0, 100.0))]);
+        let s = build(&mut inst, &cam, 0.0, Blend::overlay(alpha), 1.0, flat);
+        assert_eq!(s.models, 1, "the model is drawn at alpha {alpha}");
+        inst.pick(&query_over(&cam, Vec3::new(100.0, 0.5, 100.0), dx, 0.0))
+            .map(|p| p.via)
+    };
+    // The big box reaches 60 px beside the centre, the icon quad 7 px.
+    assert_eq!(pick_with(0.0, 60.0), Some(PickVia::Model));
+    assert_eq!(pick_with(0.5, 60.0), Some(PickVia::Model));
+    assert_eq!(
+        pick_with(0.51, 60.0),
+        None,
+        "icon quad only: 60 px is outside it"
+    );
+    assert_eq!(pick_with(1.0, 2.0), Some(PickVia::Icon));
+    assert_eq!(pick_with(0.4, 2.0), Some(PickVia::Model));
+}
+
+/// Through the real camera and the shipped bands: at every zoom every visible unit
+/// is built as a model; the icons are there only in the far band.
+#[test]
+fn every_unit_is_a_model_at_every_zoom_and_the_icons_come_only_in_the_far_band() {
+    let motions: Vec<_> = (0..30)
+        .map(|i| still((i % 3) as u8, (i % 4) as u8, i, (120.0 + i as f32, 128.0)))
+        .collect();
+    let mut inst = instancer(&motions);
+    let bands = crate::CameraSettings::embedded().zoom;
+    for step in 0..=100 {
+        let zoom = f64::from(step) / 100.0;
+        let cam = camera(zoom, (128.0, 128.0));
+        let blend = bands.blend(cam.zoom() as f32);
+        let s = build(&mut inst, &cam, 0.0, blend, 1.0, flat);
+        assert_eq!(s.visible, 30, "zoom {zoom}: all in view");
+        assert_eq!(s.models, 30, "zoom {zoom}: every unit is a model");
+        if zoom <= f64::from(bands.icons_from) {
+            assert_eq!(s.icons, 0, "zoom {zoom}: no icon before the far band");
+        } else {
+            assert_eq!(s.icons, 30, "zoom {zoom}: icons over the models");
+        }
+    }
 }

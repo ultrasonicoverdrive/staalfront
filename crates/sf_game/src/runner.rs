@@ -172,7 +172,9 @@ struct BenchRun {
 /// State of the `--shots` run.
 struct ShotRun {
     dir: PathBuf,
-    /// Index into [`SHOTS`].
+    /// Name, zoom and panels of every shot: [`SHOTS`], or the zooms of `--shots-zooms`.
+    steps: Vec<(String, f64, bool)>,
+    /// Index into `steps`.
     step: usize,
     settled: u32,
     requested: bool,
@@ -459,6 +461,16 @@ impl Runner {
         });
         let shots = options.shots.clone().map(|dir| ShotRun {
             dir,
+            steps: match &options.shots_zooms {
+                Some(zooms) => zooms
+                    .iter()
+                    .map(|z| (format!("zoom_{z}"), *z, false))
+                    .collect(),
+                None => SHOTS
+                    .iter()
+                    .map(|&(n, z, p)| (n.to_string(), z, p))
+                    .collect(),
+            },
             step: 0,
             settled: 0,
             requested: false,
@@ -2158,7 +2170,7 @@ impl Runner {
             return Some((pose.zoom, pose.focus, pose.segment));
         }
         if let Some(shot) = &self.shots {
-            let zoom = SHOTS[shot.step.min(SHOTS.len() - 1)].1;
+            let zoom = shot.steps[shot.step.min(shot.steps.len() - 1)].1;
             // `--focus x,z` (metres) decides where the shots look; the middle of the map without it.
             let focus = self.options.focus.unwrap_or((map.0 * 0.5, map.1 * 0.5));
             return Some((zoom, focus, 0));
@@ -2183,7 +2195,7 @@ impl Runner {
             }
             return true;
         }
-        let name = SHOTS[shot.step].0;
+        let name = shot.steps[shot.step].0.clone();
         let Some(image) = renderer.take_capture() else {
             eprintln!("sf_game: --shots: the window could not be captured ({name})");
             self.failed.store(true, Ordering::Relaxed);
@@ -2210,13 +2222,13 @@ impl Runner {
         shot.step += 1;
         shot.settled = 0;
         shot.requested = false;
-        shot.step < SHOTS.len()
+        shot.step < shot.steps.len()
     }
 
     /// Ask for the capture once the camera has settled on the step's pose.
     fn shots_before_render(&mut self) {
         let Some(shot) = &mut self.shots else { return };
-        let panels = SHOTS[shot.step.min(SHOTS.len() - 1)].2;
+        let panels = shot.steps[shot.step.min(shot.steps.len() - 1)].2;
         if self.debug.visible() != panels {
             self.debug.set_visible(panels);
             if !panels && let Some(renderer) = &mut self.renderer {

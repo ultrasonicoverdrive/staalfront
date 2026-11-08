@@ -216,3 +216,137 @@ impl CameraSettings {
         self.camera.config(map_size)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bands() -> ZoomBands {
+        CameraSettings::embedded().zoom
+    }
+
+    /// The shipped numbers, pinned: a change here is a decision, not an accident.
+    #[test]
+    fn the_shipped_camera_file_is_pinned() {
+        let s = CameraSettings::embedded();
+        let c = s.camera;
+        assert_eq!((c.margin, c.min_distance, c.far_margin), (16.0, 12.0, 0.25));
+        assert_eq!(
+            (c.pitch_near_deg, c.pitch_far_deg, c.fov_y_deg),
+            (45.0, 80.0, 45.0)
+        );
+        assert_eq!(
+            (c.distance_per_notch, c.zoom_smooth_secs, c.pan_smooth_secs),
+            (0.85, 0.10, 0.12)
+        );
+        assert_eq!(
+            (c.pan_speed, c.start_zoom, c.clearance, c.height_smooth_secs),
+            (0.7, 0.35, 2.0, 0.25)
+        );
+        assert_eq!(
+            s.zoom,
+            ZoomBands {
+                icons_from: 0.85,
+                icons_full: 1.0,
+                model_scale_from: 0.55,
+                model_scale_max: 1.6
+            }
+        );
+        // The old Rust defaults are the same numbers, now from the file.
+        let cfg = CameraConfig::default();
+        assert_eq!(cfg.map_size, DVec2::new(256.0, 256.0));
+        assert_eq!(cfg.pitch_far, 80_f64.to_radians());
+        assert_eq!(cfg.max_distance, None);
+    }
+
+    /// The icons are transparent up to `icons_from`, opaque from `icons_full`, and
+    /// rise smoothly and monotonically in between.
+    #[test]
+    fn the_icon_overlay_fades_in_over_the_farthest_band() {
+        let b = bands();
+        assert_eq!(b.icon_alpha(0.0), 0.0);
+        assert_eq!(b.icon_alpha(0.5), 0.0);
+        assert_eq!(b.icon_alpha(b.icons_from), 0.0);
+        assert_eq!(b.icon_alpha(1.0), 1.0);
+        assert_eq!(b.icon_alpha(b.icons_full), 1.0);
+        let mid = 0.5 * (b.icons_from + b.icons_full);
+        assert!((b.icon_alpha(mid) - 0.5).abs() < 1e-6);
+        // Just inside the band: a little, not nothing and not all.
+        let early = b.icon_alpha(b.icons_from + 0.01);
+        assert!(early > 0.0 && early < 0.05, "{early}");
+        let mut previous = 0.0;
+        for i in 0..=1000 {
+            let a = b.icon_alpha(i as f32 / 1000.0);
+            assert!((0.0..=1.0).contains(&a));
+            assert!(a >= previous, "not monotone at {i}");
+            assert!(a - previous < 0.02, "a jump at {i}");
+            previous = a;
+        }
+        // The far band is the last ~15 % of the zoom range.
+        assert!((1.0 - b.icons_from - 0.15).abs() < 1e-6);
+        assert_eq!(b.icon_alpha(f32::NAN), 0.0);
+    }
+
+    /// Models are never hidden by the zoom alone: at every zoom the model weight is
+    /// 1, whatever the icons do.
+    #[test]
+    fn the_zoom_alone_never_hides_a_model() {
+        let b = bands();
+        for i in 0..=1000 {
+            let zoom = i as f32 / 1000.0;
+            let blend = b.blend(zoom);
+            assert_eq!(blend.model(), 1.0, "zoom {zoom}");
+            assert!(blend.models_drawn());
+            assert!((0..64).all(|k| blend.model_at(k % 8, k / 8)), "zoom {zoom}");
+            assert_eq!(blend.icon(), b.icon_alpha(zoom));
+        }
+        // And what the click volume is: the model until the icon is half there.
+        assert_eq!(b.blend(0.0).dominant(), crate::icons::Dominant::Model);
+        assert_eq!(b.blend(1.0).dominant(), crate::icons::Dominant::Icon);
+    }
+
+    /// The model scale is 1 up to its start, the cap at the farthest zoom, never
+    /// above the cap, and smooth.
+    #[test]
+    fn the_model_scale_is_capped_and_smooth() {
+        let b = bands();
+        assert_eq!(b.model_scale(0.0), 1.0);
+        assert_eq!(b.model_scale(b.model_scale_from), 1.0);
+        assert_eq!(b.model_scale(1.0), b.model_scale_max);
+        assert_eq!(
+            b.model_scale(5.0),
+            b.model_scale_max,
+            "past the end stays at the cap"
+        );
+        let mut previous = 1.0;
+        for i in 0..=1000 {
+            let s = b.model_scale(i as f32 / 1000.0);
+            assert!((1.0..=b.model_scale_max).contains(&s), "{s}");
+            assert!(s >= previous && s - previous < 0.02, "at {i}");
+            previous = s;
+        }
+        assert!(b.model_scale(0.8) > 1.0 && b.model_scale(0.8) < b.model_scale_max);
+    }
+
+    #[test]
+    fn bad_camera_files_are_refused() {
+        let base = EMBEDDED_CAMERA_CONFIG;
+        assert!(CameraSettings::from_ron(base).is_ok());
+        for (from, to) in [
+            ("far_margin: 0.25", "far_margin: -1.0"),
+            ("far_margin: 0.25", "far_margin: 9.0"),
+            ("icons_from: 0.85", "icons_from: 1.0"),
+            ("icons_from: 0.85", "icons_from: 1.5"),
+            ("model_scale_max: 1.6", "model_scale_max: 9.0"),
+            ("model_scale_max: 1.6", "model_scale_max: 0.5"),
+            ("model_scale_from: 0.55", "model_scale_from: 1.0"),
+            ("pitch_near_deg: 45.0", "pitch_near_deg: 85.0"),
+            ("min_distance: 12.0", "min_distance: 0.0"),
+            ("far_margin: 0.25", "far_margin_typo: 0.25"),
+        ] {
+            let text = base.replacen(from, to, 1);
+            assert_ne!(text, base, "{from}");
+            assert!(CameraSettings::from_ron(&text).is_err(), "{to}");
+        }
+    }
+}

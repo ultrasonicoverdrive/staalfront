@@ -331,7 +331,8 @@ fn flattened(map: &Map) -> Map {
 #[test]
 fn sun_facing_slopes_are_brighter_than_shaded_ones() {
     let map = test_map();
-    let c = camera(&map, 0.55, (32.0, 32.0));
+    // 0.5, not 0.55: the farthest zoom grew by the margin (WP2.x), this is the same eye distance.
+    let c = camera(&map, 0.5, (32.0, 32.0));
     let img = shot(&mut renderer(&map, false), &c);
     let (lit, shaded, spread) = slope_contrast(&map, &img, &c);
     println!("relief: lit {lit:.1}, shaded {shaded:.1}, facing spread {spread:.2}");

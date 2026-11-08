@@ -478,7 +478,9 @@ fn the_icon_overlay_blends_over_the_model_and_never_takes_a_model_pixel() {
                 both.pixel(x, y),
             );
             for k in 0..3 {
-                let want = f32::from(m[k]) * (1.0 - alpha) + f32::from(i[k]) * alpha;
+                // The target is sRGB: the blend happens in linear light.
+                let lin = |v: u8| (f32::from(v) / 255.0).powf(2.2);
+                let want = (lin(m[k]) * (1.0 - alpha) + lin(i[k]) * alpha).powf(1.0 / 2.2) * 255.0;
                 assert!(
                     (f32::from(got[k]) - want).abs() <= 3.0,
                     "alpha {alpha}: {x},{y} channel {k} is {}, want about {want}",
@@ -684,12 +686,19 @@ fn ten_thousand_units_at_close_mid_and_strategic_zoom() {
     assert_eq!(close.2.icons, 0);
     assert!(close.3.dynamic_draw_calls <= 7);
     assert!(close.2.per_lod[0] > 0);
-    // Strategic: icons only, one draw call, not a single model triangle.
-    assert_eq!(strategic.1, Blend::ICONS);
-    assert_eq!(strategic.3.dynamic_draw_calls, 0);
-    assert_eq!(strategic.3.dynamic_triangles, 0);
+    // Farthest zoom: every unit is still a model (at its coarsest level), and the icons
+    // are one more draw call on top.
+    assert_eq!(strategic.1, Blend::overlay(1.0));
+    assert_eq!(strategic.2.models, 10_000, "models at every zoom");
+    assert!(strategic.3.dynamic_draw_calls <= 7);
+    assert!(strategic.3.dynamic_triangles > 0);
     assert_eq!(strategic.3.icon_draw_calls, 1);
     assert_eq!(strategic.2.icons, 10_000);
+    assert!(
+        strategic.2.per_lod[2] > strategic.2.per_lod[0],
+        "the coarse levels carry the far view: {:?}",
+        strategic.2.per_lod
+    );
     // Mid zoom: still models, and the coarser levels are in use.
     assert!(mid.2.models > 0);
     assert!(
