@@ -1962,10 +1962,11 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before 
   the frame the hit points rise above the threshold or the object dies; screenshots of both factions in
   `docs/screenshots/wp6.8/`; `docs/rules/damage.md`: done
   Gaps: no damaged models for units (smoke and fire only; the art has none); no sound; the thresholds and rates are
-  placeholders for Tijmen to tune; the cost was measured on software only (`damage.md`), not on the laptop (M0c).
-  **Open before Phase 6 closes:** re-run M0c on the GTX 1650 laptop with damage on (`sf_demo --bench --fight`) and
-  compare with the 28-10 M0c run (p99 4.42 / 4.35 ms), against the 16.7 ms budget; the risk is overdraw from the
-  2.8–3.2 m smoke and fire discs at close zoom.
+  placeholders for Tijmen to tune. Tijmen judged the Meridian fire at the start zoom good (31-10-2026); the second review of
+  #88 had named it the weaker of the two factions.
+  **Laptop re-run done (31-10-2026), met:** M0c on the GTX 1650 with damage on (`sf_demo --bench --fight`, main
+  `002ff40`) gave frame p99 4.337 and 4.342 ms against 4.42 / 4.35 ms on 28-10, gpu p99 unchanged at 0.60 ms, 0 hitches,
+  nothing dropped; the overdraw of the smoke and fire discs is not measurable (`docs/bench/README.md`, "M0c with damage").
   Shapes: the 42 damaged structure models bring the roster to 189 of the 255 u8 shape ids; damaged unit models later
   share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
   on 660/330 per mille can flip stage.
@@ -2087,7 +2088,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before 
 
 ## Phase 7 — Economy
 
-Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in review; see "WP7.6 notes"). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) waits for its place in the tech tree. The report is below the notes. Milestone M1 is not reached yet (see the report).
+Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in review; see "WP7.6 notes"). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) is built with a proposed place in the tree and waits for Tijmen to confirm it (see "WP7.3b notes"). The report is below the notes. Milestone M1 is not reached yet (see the report).
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2278,7 +2279,11 @@ recurred: rules without a test, so that a mutation survived (#78, #89); stale do
 (M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.2 ms,
 with combat; the economy itself costs a few microseconds a tick (see the WP notes).
 
-**Milestone M1 is not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
+**Update 08-11-2026: Milestone M1 is reached.** Tijmen played the M1 match on the reference laptop (GTX 1650) with the
+original Red Alert audio on and won. His decisions (loss rule by construction center, `acquire_needs_sight` on, WP3.3
+confirmed, WP11.2 next) and the queue are in PLAN.md under Milestone M1. The text below is the state before that play.
+
+**Milestone M1 was not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
 opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
 sandbox (`sf_game --sandbox --harvest`). Still missing:
 
@@ -2296,7 +2301,7 @@ the design"). There is no menu, no restart and no pause behind the banner (phase
 For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).
 
 **Open from phase 7:**
-- WP7.3b, the silo, waits for its place in the approved tech tree.
+- WP7.3b, the silo: built with a proposed place (requires a refinery); Tijmen confirms or moves it in the WP7.3b PR.
 - Field totals per mission (WP7.1).
 - Refinery choice by route length instead of a straight line (WP7.5).
 - Queue spots not checked for passability (WP7.5).
@@ -2592,6 +2597,30 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
   team or alliance exists, so nothing but scenarios sets `shared`; no height (WP8.2b); no ghosts or hiding (WP8.3, WP8.4); the AI has no
   memory. The cost of the gate was not measurable (see `vision.md`, "Cost").
 
+### WP7.3b notes: the ore silo (orchestrator brief 07-11-2026)
+
+- **Done:** the structure `ore_silo` (kind 43) in `unit_defs.ron`: function `None`, `storage: 1500`, `requires: ["refinery"]`, 250 credits,
+  12 seconds, power -10, footprint 2x2, 450 hit points, sight 4, a cube for a model, the build picture "SILO" (order 110, the last tile of
+  the Structures tab). **No Rust rule changed:** `storage_capacities` and the capacity sum already read the `storage` field of every
+  structure, the sidebar and build mode list every buildable structure whose `requires` stand. Its **place in the tree is a proposal that
+  waits for Tijmen** (`buildings.md`, "The ore silo": the table row says "proposed"; the approved rows are untouched; alternatives are in the
+  PR body). New pinned scenario `silo` (`silo_defs`, a new frozen copy; `0x937182f6b4e6c09e`; CI list): refinery 600 plus a silo of 400, the
+  store fills to 600 by tick 2157, the silo is built at tick 2600 and stands at tick 2841 (capacity 1000), the store reaches 1000, the silo is
+  sold at tick 4400 and the capacity is 600 again at tick 4401 with the 1000 kept.
+- **Pins that moved, with the measured cause:** the shipped building-table digest `0x53aeb53ab44157d1` became `0x5dd54a0da8cb4303`
+  (`sf_bridge/tests/buildings.rs` and `placement.rs`) because the table has one more entry; measured: with the silo record taken out of `unit_defs.ron` the digest is `0x53aeb53ab44157d1` again. **`FIGHT` of `bench_scene.rs` re-pinned** (`0x2b829617a5151fdf` to `0x0f215774d484c93a` at tick 1500, all 15 checkpoints; `docs/bench/README.md`): same measurement, with the silo record out the old list passes unchanged; `PLAIN` did not move. The structure count
+  19 to 20, the priced roles 28 to 29, the storage table `[(2, 2000), (43, 1500)]`, the Structures tab and build mode (9 to 10 choices) are
+  the same cause. `units.md` has a row for the silo (a test holds the ids of the defs against it); the tests that add a role as data now use
+  kind 44. No scenario pin and no `golden.rs` constant moved; the `FIGHT` list moved as said.
+- **Decisions:** (1) the sandbox (`sf_game::sandbox::LEFT_OUT`) does not place the silo: with it, one heavy unit stays 33 cells from its goal
+  in `formation_base` (open item 14 of this file: the layout of the sandbox decides who gets stuck), and I did not want a proposal to
+  change the pinned formation measurements; it joins the sandbox when Tijmen confirms the place. (2) The silo has no art: the roster test
+  `every_buildable_structure_has_stage_models_from_the_art_set` lists it in `NO_ART_YET` and checks the box fallback instead. (3) The scenario
+  needs `repair` rules only because `Sell` does.
+- **Gaps:** no model, icon or stage models for the silo (a cube, base shape); the place, cost, time, power and size are placeholders; the
+  silo is not in the sandbox; nothing spends the store in this scenario (no money rules).
+- **Screenshots:** `docs/screenshots/wp7.3b/` (`silo_screenshot.rs`): the refinery full, a silo beside it (400 of 600, a bar of its own), both full.
+
 ### WP8.3 and WP8.4 notes: the look of fog, ghosts, hiding, the minimap (orchestrator decision 07-11-2026)
 
 - Done: `assets/config/fog_look.ron` + `sf_data::fog_look` (pinned); `sf_render::fog::texels` (the two bitsets as an `Rg8` texture,
@@ -2685,9 +2714,7 @@ fixed, delete the entry in the same PR.
     construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
     names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay, but
     fail the checker as well: LOD2 lacks `debris` and `scorch`).
-26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
-    click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
-    group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
+26. *(Closed 08-11-2026: Tijmen confirmed the WP3.3 decisions as built after playing M1. The number stays so the later items keep theirs.)*
 27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen; parked with phase 14 on 22-10-2026).**
     `sf_sim::checksum` hashes the commands that wait for their tick, so two peers that receive the
     same command for the same tick at different times get different checksums in between: a false

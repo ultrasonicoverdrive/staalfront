@@ -526,9 +526,9 @@ store ore. The store has a **capacity**; a refinery takes off a harvester only w
 * **The data:** the building block of a structure in `unit_defs.ron` has `storage`, the units of
   ore one such standing building holds for its owner (a whole number, default 0, at most
   `MAX_STORAGE` = 1 000 000; `sf_data::units::building`, refused at the line otherwise). As
-  shipped only the **refinery** stores, **2000** (ten harvester loads; a placeholder for phase 15).
-  A silo (WP7.3b, after the tech tree is approved) will be a record with a `storage` number and no
-  Rust change. Pinned: `sf_data/tests/buildings.rs`
+  shipped the **refinery** stores **2000** and the **ore silo** 1500 (placeholders for phase 15; the refinery's is ten harvester loads).
+  The **ore silo** (WP7.3b, `ore_silo`, **1500**, a proposal that waits for Tijmen, `buildings.md`) is such a
+  record: a `storage` number and no Rust change. Pinned: `sf_data/tests/buildings.rs`
   (`only_the_refinery_stores_ore_and_it_stores_the_shipped_amount`,
   `storage_is_a_whole_number_up_to_the_maximum`); the frozen copies have no `storage` and store
   nothing (`the_frozen_copies_store_nothing`).
@@ -570,6 +570,24 @@ capacity, and nothing more goes in until it is below the capacity again (money, 
 it is the simplest deterministic rule (no choice of what to throw away, no rounding), and no ore
 vanishes. Test: `a_lost_refinery_lowers_the_capacity_and_the_store_keeps_its_ore` (120 stored, the
 capacity drops to 60, after 1500 ticks still 120).
+
+### The ore silo (WP7.3b)
+
+The silo is a structure whose only job is storage: its `storage` is summed into the owner's capacity exactly as
+the refinery's is (standing = complete and with hit points), so a silo under construction, destroyed or sold
+adds nothing and the cap rule above applies unchanged: the ore stays, nothing more goes in until there is room.
+No rule in `sf_sim` or `sf_bridge` changed; the silo is picked up by `storage_capacities` and shows the same fill
+bar as the refinery (`silo_screenshot.rs`). The sandbox of `sf_game` leaves it out (`sandbox::LEFT_OUT`) until its place is
+confirmed. Tests: `sf_bridge/tests/harvest.rs` (`the_shipped_storage_reaches_the_world` pins `[(Kind(2), 2000), (Kind(43), 1500)]`),
+`sf_bridge/tests/silo.rs` (`the_silo_needs_a_standing_refinery`, `the_silo_adds_its_storage_only_while_it_stands`), and the scenario `silo`.
+Its cost and place in the tree are proposals (`buildings.md`).
+
+The scenario `silo` (6000 ticks, `silo_defs` = a copy of `harvest_defs` with the silo, capacities `[(2, 600), (43, 400)]` written
+in the scenario; `assets/scenarios/silo.expected` = `0x937182f6b4e6c09e`, `tools/sf_headless/tests/silo.rs`, CI job `headless`):
+the store is full at 600 by tick 2157; `BuildStructure` of the silo at tick 2600, which stands at tick 2841 (capacity 1000 from then,
+600 before: `the_silo_adds_room_once_built_and_takes_it_away_when_sold_without_losing_ore`); the store reaches 1000 before the sale
+at tick 4400; the capacity is 600 again at tick 4401 and the 1000 stay stored. `Sell` needs `repair` rules, which the scenario gives
+and does not otherwise use. Picture: `docs/screenshots/wp7.3b/`.
 
 ### Checksum
 
@@ -614,7 +632,7 @@ rise ever ends above the capacity and the store never falls. Pinned in
 * Nothing spends the store in a world without money rules. With the shipped 2000 and no spending, such a
   world's store fills after ten loads and the harvesters then wait at the refinery for good; with money
   rules (WP7.4) spending frees room, see "Money".
-* No silo (WP7.3b). The construction centre stores nothing.
+* The silo is WP7.3b (above). The construction centre stores nothing.
 * The storage readout is in the F1 debug panel; the player HUD (WP7.4) shows the credits, not the capacity.
 * A harvester waiting in a full refinery's bay keeps that bay; it never leaves for another
   refinery by itself (WP7.5 chooses a refinery on the way, not from the bay). The store is one per
@@ -730,7 +748,7 @@ tick is, per structure under construction, one table lookup and one store update
 
 ### Not done
 
-* Unit costs, the refund on cancel and the lost factory (no refund) are WP6.5's, see `production.md`. No refund for a structure destroyed or removed half built (a sale pays for a complete one, WP6.6: `repair_sell.md`, and repair is paid per tick through the same store), no silo (WP7.3b), no sidebar (WP11.1). (The refinery choice is WP7.5.)
+* Unit costs, the refund on cancel and the lost factory (no refund) are WP6.5's, see `production.md`. No refund for a structure destroyed or removed half built (a sale pays for a complete one, WP6.6: `repair_sell.md`, and repair is paid per tick through the same store), the silo is WP7.3b, no sidebar (WP11.1). (The refinery choice is WP7.5.)
 * `BuildStructure` is not refused for lack of funds; it waits.
 * Money exists only with `--harvest` in the sandbox, and the HUD shows a player's credits also when it owns
   no entity (they are read from `World::credits`, not from the views).

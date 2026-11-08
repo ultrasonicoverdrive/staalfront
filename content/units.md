@@ -34,6 +34,7 @@ Canonical role names. Mission documents, team tables and triggers must only use 
 | shipyard | 1000 | −40 | 900 | Only on coastal maps (F1-M06, F2-M06). |
 | decoy_emplacement | 150 | 0 | 150 | Meridian only as a buildable structure. Looks like defence_tower to enemy AI; draws fire. Unlocked F1-M05. Exception: F1-M05 places 8 for the enemy as mission objects (network-supplied props, not a Veyran unlock); to the player they look like defence_tower until within 3 cells. |
 | fortified_bunker | 600 | 0 | 1200 | Veyran only. Garrison 5 infantry. Unlocked F2-M04. |
+| ore_silo | 250 | −10 | 450 | Proposed (WP7.3b), waiting for Tijmen: stores 1500 ore, needs a refinery. Not used by the campaign. |
 
 ## Shared units
 

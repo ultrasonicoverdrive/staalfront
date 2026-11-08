@@ -78,8 +78,8 @@ fn every_shipped_role_with_a_price_has_a_picture_of_its_own() {
             (None, None) => {}
         }
     }
-    // 10 structures, 9 infantry, 8 vehicles and 1 vessel can be built.
-    assert_eq!(priced, 28);
+    // 11 structures (the ore silo of WP7.3b among them), 9 infantry, 8 vehicles and 1 vessel can be built.
+    assert_eq!(priced, 29);
 }
 
 #[test]
