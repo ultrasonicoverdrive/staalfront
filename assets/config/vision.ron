@@ -7,6 +7,8 @@
     // structures use their own `sight`.
     legacy_sight_cells: 5,
     // WP8.2a: true = units and defences only pick targets their owner can see now (retaliation and
-    // explicit orders are never gated). Off until the first match has been played and decided.
-    acquire_needs_sight: false,
+    // explicit orders are never gated). On since WP7.7 (Tijmen, 08-11-2026, after playing the first
+    // match); a file without the line means on too. The test is measured to the edge of the target
+    // (docs/rules/vision.md).
+    acquire_needs_sight: true,
 )

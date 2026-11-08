@@ -2,41 +2,44 @@
 //!
 //! A world given match rules ([`World::with_match`]) knows which players take part. At the end of a
 //! tick, after the dead have been removed ([`World::reap`]), it asks of each of them one question:
-//! does this player still own **a standing structure** or **an armed unit**? A player for whom the
-//! answer is no is **defeated**, at that tick, for good. When all but one of the players are defeated
-//! the last one **wins**, at that tick, for good. When the last players fall in the same tick nobody
-//! wins: the match is a **draw**. Once the result is decided nothing in this module changes any more,
-//! whatever happens in the world afterwards (a defeated player's harvester may still be driving).
+//! does this player still own **a standing construction centre** (a structure whose building function
+//! is [`BuildingFunction::Anchor`])? A player for whom the answer is no is **defeated**, at that tick,
+//! for good. When all but one of the players are defeated the last one **wins**, at that tick, for
+//! good. When the last players fall in the same tick nobody wins: the match is a **draw**. Once the
+//! result is decided nothing in this module changes any more, whatever happens in the world
+//! afterwards (a defeated player's harvester may still be driving).
 //!
-//! **What counts.** A structure counts when it stands ([`World::stands`]: complete, with hit points
-//! left): a building under construction is not yet something to lose. A mobile unit counts when its
-//! kind carries a weapon in the weapon table and it has hit points left. A harvester does not count:
-//! it cannot fight, and it cannot build, so a player with only harvesters can do nothing that changes
-//! the match. (Building needs a standing structure of one's own, `docs/rules/construction.md`.) A
-//! crate, an ore field and a neutral object count for nobody: only the players taking part are
-//! looked at.
+//! **What counts.** Only a construction centre that stands ([`World::stands`]: complete, not being
+//! sold, with hit points left). One under construction is not yet something to lose, and one being
+//! sold is gone from the first tick of the sale (`docs/rules/repair_sell.md`), so selling the
+//! construction centre defeats the player at once. Every other structure, every unit (armed or not),
+//! a crate, an ore field and a neutral object count for nobody. (The rule before WP7.7 was "a standing
+//! structure or an armed unit"; it is not kept anywhere, there is no flag. Tijmen, 08-11-2026: hunting
+//! the last unit was tedious.) The match file refuses a player that never has a construction centre
+//! (`sf_data::match_def`), and [`World::with_match`] refuses a building table without a kind of that
+//! function.
 //!
-//! **The match begins** at the first check at which every player owns something that counts. Until
-//! then nobody can be defeated: the starting objects of a match enter the world through commands, and
-//! a world whose second player appears a few ticks later must not end in its first tick. A world in which some player
-//! never owns anything has no result.
+//! **The match begins** at the first check at which every player owns a standing construction centre.
+//! Until then nobody can be defeated: the starting objects of a match enter the world through
+//! commands, and a world whose second player appears a few ticks later must not end in its first
+//! tick. A world in which some player never owns one has no result.
 //!
-//! **Cost.** The question is asked only after something was removed from the world (the `dirty` flag,
-//! set by [`World::despawn`], the one place an entity leaves) and, before the match began, at every
-//! tick. The scan walks the slots in ascending order and stops as soon as every player still in the
-//! match has been found once, so a tick without a removal costs one flag test. Only removal can change
-//! the answer once the match began: a structure that stops standing and a unit that stops having hit
-//! points are removed by the same tick (destruction is required of a world with match rules), and a
-//! weapon table never changes.
+//! **Cost.** The question is asked only after something changed the answer (the `dirty` flag, set by
+//! [`World::despawn`], the one place an entity leaves, and by the start of a sale) and, before the
+//! match began, at every tick. The scan walks the slots in ascending order and stops as soon as every
+//! player still in the match has been found once, so a tick without a removal costs one flag test.
+//! Only those two events can change the answer once the match began: a construction centre that stops
+//! standing is removed by the same tick (destruction is required of a world with match rules) or starts
+//! its sale, and a building table never changes.
 //!
 //! **Order and determinism.** Players are kept ascending. The scan reads the columns in slot order and
 //! writes one flag per player; nothing depends on the order the entities were made in. Integers only.
 
 use sf_math::hash::Fnv1a64;
 
+use crate::buildings::BuildingFunction;
 use crate::entities::NO_DEF;
 use crate::ids::{PlayerId, Tick};
-use crate::units::UnitClass;
 use crate::world::World;
 
 /// The most players a match can have.
@@ -161,7 +164,8 @@ impl World {
     /// decides who is defeated and who wins ([`crate::outcome`]). Give it last, after the unit table,
     /// the weapon table and the destruction settings (a world in which nothing is destroyed or
     /// nothing is armed has no match to decide): [`ConfigError::Match`] after the world has started,
-    /// twice, without those, or for a player list [`MatchRules::new`] refuses.
+    /// twice, without those, without a building table that has a construction centre (the kind of
+    /// function [`BuildingFunction::Anchor`]: without one nobody could stay in the match), or for a player list [`MatchRules::new`] refuses.
     pub fn with_match(mut self, rules: MatchRules) -> Result<World, crate::world::ConfigError> {
         if self.tick != Tick::ZERO
             || self.entities.len() != 0
@@ -170,6 +174,10 @@ impl World {
             || self.units.is_empty()
             || self.arsenal.is_empty()
             || self.destruction.config.is_none()
+            || !self
+                .buildings
+                .iter()
+                .any(|b| b.function == BuildingFunction::Anchor)
         {
             return Err(crate::world::ConfigError::Match);
         }
@@ -207,19 +215,13 @@ impl World {
         self.outcome.as_ref()?.result
     }
 
-    /// Whether the entity in slot `i` is something that keeps its owner in the match: a standing
-    /// structure, or an armed mobile unit with hit points left.
+    /// Whether the entity in slot `i` keeps its owner in the match: a construction centre (a structure
+    /// of the building function [`BuildingFunction::Anchor`]) that stands.
     fn keeps_in_match(&self, i: usize) -> bool {
-        let Some(stats) = self.stats_at(i) else {
-            return false;
-        };
-        match stats.class() {
-            UnitClass::Structure => self.is_standing(i),
-            UnitClass::Mobile => {
-                self.arsenal.is_armed(self.entities.def[i]) && self.has_hit_points(i)
-            }
-            UnitClass::Object => false,
-        }
+        self.buildings
+            .get(self.entities.kind[i])
+            .is_some_and(|b| b.function == BuildingFunction::Anchor)
+            && self.is_standing(i)
     }
 
     /// The end of a tick (WP7.6): decides defeats and the win. A world without match rules pays one test

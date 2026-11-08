@@ -25,7 +25,7 @@ use std::fmt;
 
 use serde::Deserialize;
 
-use crate::units::{Category, Faction, UnitDefs};
+use crate::units::{BuildingFunction, Category, Faction, UnitDefs};
 
 /// The shipped first match, compiled in.
 pub const EMBEDDED_M1: &str = include_str!("../../../assets/matches/m1.ron");
@@ -142,10 +142,15 @@ impl MatchDef {
     /// Checks the file against the unit definitions and the size of its map (in cells): every role
     /// exists, is a structure or a mobile unit (not a vessel: there is no water to stand on in the
     /// first match, and an object or a neutral role belongs to nobody), is open to the player's
-    /// faction, and lies on the map; no two structures overlap.
+    /// faction, and lies on the map; no two structures overlap; and every player starts with a
+    /// construction centre (a structure of the building function `Anchor`): a player is defeated when
+    /// it owns no standing one (WP7.7, `docs/rules/match.md`), so a player without one would be
+    /// defeated before it began. A player that is to get its first construction centre later is not
+    /// something this file can express.
     pub fn check(&self, defs: &UnitDefs, map_cells: (u32, u32)) -> Result<(), MatchError> {
         let mut taken = BTreeSet::new();
         for p in &self.players {
+            let mut construction_centres = 0;
             for (i, o) in p.objects.iter().enumerate() {
                 let at = format!("player {} object {i} ({})", p.id, o.role);
                 let Some(def) = defs.unit(&o.role) else {
@@ -171,6 +176,14 @@ impl MatchDef {
                         ));
                     }
                 };
+                if def.category == Category::Structure
+                    && def
+                        .building
+                        .as_ref()
+                        .is_some_and(|b| b.function == BuildingFunction::Anchor)
+                {
+                    construction_centres += 1;
+                }
                 let (x1, y1) = (o.cell.0 + u32::from(w), o.cell.1 + u32::from(h));
                 if x1 > map_cells.0 || y1 > map_cells.1 {
                     return err(format!(
@@ -190,6 +203,13 @@ impl MatchDef {
                     }
                 }
             }
+            if construction_centres == 0 {
+                return err(format!(
+                    "player {} starts without a construction center: a player with none standing is \
+                     defeated, so every player needs one",
+                    p.id
+                ));
+            }
         }
         Ok(())
     }
@@ -203,7 +223,20 @@ mod tests {
         format!("(role: \"{role}\", cell: ({x}, {y}))")
     }
 
+    /// A file whose second player starts with a construction center far from everything, and then with
+    /// `second_objects` (which may be empty).
     fn file(second_objects: &str) -> String {
+        let cc = object("construction_center", 60, 60);
+        let objects = if second_objects.is_empty() {
+            cc
+        } else {
+            format!("{cc}, {second_objects}")
+        };
+        file_with_second(&objects)
+    }
+
+    /// A file whose second player starts with exactly `second_objects`.
+    fn file_with_second(second_objects: &str) -> String {
         format!(
             "(name: \"t\", map: \"m1\", seed: 1, players: [\
              (id: 0, faction: Meridian, credits: 10, objects: [{}]),\
@@ -284,10 +317,7 @@ mod tests {
             file(&ok).replace("credits: 0", "credits: 1000000001"),
             "above the limit",
         );
-        bad(
-            file("").replace("construction_center", "x"),
-            "starts with nothing",
-        );
+        bad(file_with_second(""), "starts with nothing");
         bad(file(&ok).replace("m1", "../x"), "map");
         bad(
             file(&ok).replace("map: \"m1\"", "map: \"a/b\""),
@@ -303,6 +333,36 @@ mod tests {
             ),
             "2 to 8",
         );
+    }
+
+    #[test]
+    fn a_player_without_a_construction_center_is_a_load_error() {
+        // WP7.7: a player is defeated when it owns no standing construction center, so a player that
+        // starts without one could only ever lose.
+        let defs = UnitDefs::embedded();
+        let check = |text: String| MatchDef::from_ron(&text).unwrap().check(&defs, (96, 96));
+        // The second player has a power plant and an army, but no construction center.
+        let e = check(file_with_second(&format!(
+            "{}, {}",
+            object("power_plant", 60, 60),
+            object("rifleman", 50, 50)
+        )))
+        .unwrap_err();
+        assert!(
+            e.0.contains("player 1") && e.0.contains("construction center"),
+            "{e}"
+        );
+        // And the first.
+        let text = file("").replace("(role: \"construction_center\", cell: (4, 4))", "(role: \"rifleman\", cell: (4, 4))");
+        let e = check(text).unwrap_err();
+        assert!(e.0.contains("player 0"), "{e}");
+        // With one each it is fine, wherever in the list it stands.
+        let ok = format!(
+            "{}, {}",
+            object("rifleman", 50, 50),
+            object("construction_center", 60, 60)
+        );
+        assert!(check(file_with_second(&ok)).is_ok());
     }
 
     #[test]

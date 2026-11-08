@@ -61,22 +61,19 @@ fn a_world_takes_the_shipped_vision_rules() {
     assert!(world.vision_rules().is_some());
 }
 
-/// The gate of WP8.2a travels from `vision.ron` to the rules, and is off in the shipped file.
+/// The gate of WP8.2a travels from `vision.ron` to the rules, and is on in the shipped file (WP7.7).
 #[test]
-fn the_gate_flag_reaches_the_rules_and_is_off_in_the_shipped_file() {
+fn the_gate_flag_reaches_the_rules_and_is_on_in_the_shipped_file() {
     let defs = UnitDefs::embedded();
     let shipped = VisionSettings::embedded();
-    assert!(
-        !shipped.acquire_needs_sight,
-        "off until Tijmen has played M1"
-    );
-    assert!(!vision_rules(&shipped, &defs).acquire_needs_sight);
-    let on = VisionSettings {
-        acquire_needs_sight: true,
+    assert!(shipped.acquire_needs_sight, "on since Tijmen played M1");
+    assert!(vision_rules(&shipped, &defs).acquire_needs_sight);
+    let off = VisionSettings {
+        acquire_needs_sight: false,
         ..shipped
     };
-    let rules = vision_rules(&on, &defs);
-    assert!(rules.acquire_needs_sight);
+    assert!(!vision_rules(&off, &defs).acquire_needs_sight);
+    let rules = vision_rules(&shipped, &defs);
     assert!(
         rules.shared.is_empty(),
         "no team exists yet: nothing is shared"
