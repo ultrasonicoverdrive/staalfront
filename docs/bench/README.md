@@ -51,8 +51,9 @@ The re-run that `docs/progress.md` (WP6.8) asked for before Phase 6 closes: the 
 before WP6.8 (#88), so they had no damage smoke or fire. Same laptop and settings, release build of main `002ff40`
 (`cargo build --release -p sf_demo`, finished 16:40), started at 16:46 after a 5-minute pause with nothing running; the two
 `--bench --fight` runs one after the other. Mains power and the Windows GPU setting were not recorded (the adapter in
-the JSON is the NVIDIA card). Both runs reached tick 1500 at `FIGHT`'s end value `0x568d257d092daa7b`: the damage display
-is presentation only.
+the JSON is the NVIDIA card). Both runs reached tick 1500 at the end value `FIGHT` had at `002ff40`,
+`0x568d257d092daa7b`, the same as on 28-10: the damage display is presentation only. (`FIGHT` was re-pinned later, at
+WP6.7; see "The checksums" below. A run of today's main ends at the new value.)
 
 | | M0c run 1 (28-10) | M0c run 2 (28-10) | damage run 1 | damage run 2 |
 |---|---|---|---|---|
