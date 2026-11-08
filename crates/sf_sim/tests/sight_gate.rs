@@ -11,7 +11,7 @@
 use sf_math::{Fx, Vec2};
 use sf_sim::{
     Cell, Command, DestructionConfig, EntityId, Footprint, Kind, Loadout, Mount, PlayerId,
-    ProjectileKind, Tick, TargetingConfig, UnitStats, UnitTable, VisionRules, WeaponStats,
+    ProjectileKind, TargetingConfig, Tick, UnitStats, UnitTable, VisionRules, WeaponStats,
     WeaponTable, World, WorldConfig, per_tick,
 };
 
@@ -102,11 +102,8 @@ fn world(gate: bool) -> World {
         .with_targeting(TargetingConfig::DEFAULT)
         .unwrap()
         .with_vision(
-            VisionRules::new(
-                0,
-                vec![(SHOOTER, 5000), (DUMMY, 0), (TOWER, 0), (WALL, 0)],
-            )
-            .with_acquire_needs_sight(gate),
+            VisionRules::new(0, vec![(SHOOTER, 5000), (DUMMY, 0), (TOWER, 0), (WALL, 0)])
+                .with_acquire_needs_sight(gate),
         )
         .unwrap()
 }

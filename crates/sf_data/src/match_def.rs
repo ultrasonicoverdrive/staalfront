@@ -353,7 +353,10 @@ mod tests {
             "{e}"
         );
         // And the first.
-        let text = file("").replace("(role: \"construction_center\", cell: (4, 4))", "(role: \"rifleman\", cell: (4, 4))");
+        let text = file("").replace(
+            "(role: \"construction_center\", cell: (4, 4))",
+            "(role: \"rifleman\", cell: (4, 4))",
+        );
         let e = check(text).unwrap_err();
         assert!(e.0.contains("player 0"), "{e}");
         // With one each it is fine, wherever in the list it stands.

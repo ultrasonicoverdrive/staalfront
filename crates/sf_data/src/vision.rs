@@ -94,9 +94,8 @@ mod tests {
         let on =
             VisionSettings::from_ron("(legacy_sight_cells: 5, acquire_needs_sight: true)").unwrap();
         assert!(on.acquire_needs_sight);
-        let off =
-            VisionSettings::from_ron("(legacy_sight_cells: 5, acquire_needs_sight: false)")
-                .unwrap();
+        let off = VisionSettings::from_ron("(legacy_sight_cells: 5, acquire_needs_sight: false)")
+            .unwrap();
         assert!(!off.acquire_needs_sight);
         // WP7.7: a file without the line means on.
         let default = VisionSettings::from_ron("(legacy_sight_cells: 5)").unwrap();

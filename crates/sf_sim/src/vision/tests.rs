@@ -987,16 +987,8 @@ fn the_edge_test_clips_at_the_borders_of_the_map() {
     );
     assert!(!v.sees_footprint_edge(P0, 7, 7, 1, 1));
     // A unit outside the map, or with a negative position, is not seen.
-    assert!(!v.sees_body(
-        P0,
-        Vec2::new(Fx::from_int(-1), Fx::from_int(2)),
-        Fx::HALF
-    ));
-    assert!(!v.sees_body(
-        P0,
-        Vec2::new(Fx::from_int(2), Fx::from_int(9)),
-        Fx::HALF
-    ));
+    assert!(!v.sees_body(P0, Vec2::new(Fx::from_int(-1), Fx::from_int(2)), Fx::HALF));
+    assert!(!v.sees_body(P0, Vec2::new(Fx::from_int(2), Fx::from_int(9)), Fx::HALF));
 }
 
 #[test]
