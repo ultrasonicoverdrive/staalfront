@@ -284,6 +284,20 @@ _Note 01-11-2026: WP7.6 added by the orchestrator. PLAN.md put M1 at the end of 
 a static opponent: build a base, harvest, make units, attack,
 win. First moment to really play and adjust the design.
 
+*08-11-2026 (Tijmen): **M1 reached.** Tijmen played the M1 match on the reference laptop (GTX 1650) with the original
+Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play:*
+- *Loss rule: a player is defeated when it has **lost its construction center** (no standing `construction_center`),
+  instead of "no standing structure and no armed unit" (hunting the last unit was tedious). Built in **WP7.7**.*
+- *`acquire_needs_sight` (WP8.2a) goes **on** in the M1 match and as the default of the vision rules. Built in **WP7.7**
+  together with the loss rule, because both move the pinned `match` scenario.*
+- *The WP3.3 selection decisions (PR #44) are **confirmed** as built.*
+- *Unit voices on select, move and attack were missed: **WP11.2 is next**, before phase 9.*
+
+**Queue for the orchestrator (set 08-11-2026), in this order:**
+1. **WP7.7** The loss rule and sight-gated targeting from the M1 play, in `sf_sim`: (a) a player is defeated when it owns no standing `construction_center`; the last player left wins; a player that never had one in its match file is a match-file error, checked when the file loads (`sf_data::match_def`); (b) add a `construction_center` to the opponent in `assets/matches/m1.ron` (it has none today), placed so the base still makes sense; (c) `acquire_needs_sight` on by default and in `m1`; (d) re-pin `match.expected` and update `tools/sf_headless/tests/match_m1.rs`, with the change of the winning tick explained in the PR; (e) `docs/rules/match.md` and `docs/rules/vision.md` follow. The old rule stays nowhere (no flag). Checksum section unchanged in layout.
+2. **WP11.2** Voice responses (see Phase 11), built now: `sf_game` raises `unit.select`, `unit.move` and `unit.attack` (the bank events, mapped to Red Alert voices in `assets/audio/ra_mapping.ron`) on the player's own selection and orders, from the UI side (no sim event needed: these are the player's own actions), with a brake against spam (one voice at a time, a minimum gap, not on every box-select frame). Without the Red Alert files the events stay silent unless the bank has a CC0 sound. Test: the brake and which event each action raises, headless where the runner allows.
+3. Then phase 9 (computer opponent) as planned.
+
 ### Phase 8 — Vision
 - WP8.1 Shroud (never seen) and fog of war (seen, not current) per player, cell-based in the sim.
 - WP8.2 Vision range per unit, height bonus.
@@ -314,7 +328,7 @@ Layered (analysis §12, §22G):
 
 ### Phase 11 — Presentation and UI
 - WP11.1 Sidebar à la classic RTS: build tabs, queue, money, power bar. The build menu needs its own picture field in `unit_defs.ron`, separate from `icon` (since WP3.6 `icon` is the name of the strategic map icon). *Brought forward before M1 by decision of the orchestrator, 01-11-2026: M1 is "the first moment to really play", and the WP6.5 debug keys (U, I, O, G) are not a way to play. It needs production (WP6.5) and is stacked on it; power (WP6.4) is not built yet, so the power bar is a hook that shows a neutral bar until WP6.4 fills it.*
-- WP11.2 Voice responses on selecting, moving, attacking (analysis §15), with a brake against spam.
+- WP11.2 Voice responses on selecting, moving, attacking (analysis §15), with a brake against spam. *Brought forward after the M1 play (Tijmen, 08-11-2026): next after WP7.7, see the queue under M1.*
 - WP11.3 Sound: positional, volume by zoom (farther away = quieter and less).
 - WP11.4 Music: dynamic (calm/combat). Optionally plays original Red Alert music (B11) through the WP11.7 loader. The existing `ra_audio` setting (`assets/config/audio.ron`, `--ra-audio`) turns it on too; there is no separate music switch. A `music: (calm: [...], combat: [...])` section in `assets/audio/ra_mapping.ron` assigns tracks (names or `#id`s) to the moods. The shipped section is empty: Staalfront ships no list of Red Alert track names (B5; at most a single name checked by `onderzoeker`), and the player fills it in with the F1 sound browser. A mood with an empty list plays all tracks of the Red Alert music archive (`SCORES.MIX`). Several tracks per mood play shuffled (presentation side, not in `sf_sim`). A missing or unreadable track is skipped with one warning, and a mood with no playable track uses the default music (CC0, or silence if there is none), without error; the same holds without Red Alert files. Music is streamed or decoded when needed, never decoded up front with the sound effects. Tests use only generated fixtures, never real Red Alert files. The WP updates the README section on original Red Alert audio and docs/architecture.md §16.
 - WP11.5 Menus, settings (keys, sound, graphics), accessibility (colorblind colors, UI scale). *Split by decision of the orchestrator, 03-11-2026: **WP11.5a** (menus: start menu, pause menu with restart, settings for keys, graphics and accessibility, `docs/rules/menus.md`) and **WP11.5b** (the sound settings: volume sliders and the Red Alert audio switch). The sound belongs to the audio work Tijmen does in another chat, so 11.5b is built later in agreement with it; 11.5a leaves a marked empty "Sound (WP11.5b)" section in the settings screen with no controls. M1 needed a way to start a match, pause and restart it, which 11.5a gives.*

@@ -2279,7 +2279,11 @@ recurred: rules without a test, so that a mutation survived (#78, #89); stale do
 (M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.2 ms,
 with combat; the economy itself costs a few microseconds a tick (see the WP notes).
 
-**Milestone M1 is not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
+**Update 08-11-2026: Milestone M1 is reached.** Tijmen played the M1 match on the reference laptop (GTX 1650) with the
+original Red Alert audio on and won. His decisions (loss rule by construction center, `acquire_needs_sight` on, WP3.3
+confirmed, WP11.2 next) and the queue are in PLAN.md under Milestone M1. The text below is the state before that play.
+
+**Milestone M1 was not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
 opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
 sandbox (`sf_game --sandbox --harvest`). Still missing:
 
@@ -2686,9 +2690,7 @@ fixed, delete the entry in the same PR.
     construction states of the structures (`_damaged`, `_foundation`, ... are in the pack, no role
     names them: the building WPs) and the four v4 wrecks that fail the checker (the v3 wrecks stay, but
     fail the checker as well: LOD2 lacks `debris` and `scorch`).
-26. **Decisions of WP3.3 to confirm** (PR #44): a double-click on a structure acts as a single
-    click; a shift-click on an enemy is ignored; ctrl+number with nothing selected clears the
-    group. Owner: Tijmen; change in `selection.rs` and `selection.md` together.
+26. *(Closed 08-11-2026: Tijmen confirmed the WP3.3 decisions as built after playing M1. The number stays so the later items keep theirs.)*
 27. **Pending commands are in the world checksum (open decision for phase 14, owner Tijmen; parked with phase 14 on 22-10-2026).**
     `sf_sim::checksum` hashes the commands that wait for their tick, so two peers that receive the
     same command for the same tick at different times get different checksums in between: a false
