@@ -13,7 +13,7 @@ cylinders, cones in four colours), `--sandbox` is the sandbox with 59 units of t
 | `before_main_m1_zoom0.53.jpg` | M1 base on main at zoom 0.53: the building is half dissolved into its icon, dithered and see-through (the picture Tijmen's complaint was about) |
 | `after_m1_zoom0.53.jpg` | The same view on this branch: the solid model, no icon yet (the icons start at zoom 0.85) |
 | `m1_zoom0.10_close.jpg`, `m1_zoom0.35_start.jpg`, `m1_zoom0.70.jpg` | M1 base at close, the starting zoom and 0.70: models, the building is drawn 1.0 to 1.16 times its size |
-| `m1_zoom0.93_icon_fading_in.jpg` | Zoom 0.93: the whole map is in view and the icon is a translucent overlay on the model (about 55 % opaque; the model shows through) |
+| `m1_zoom0.93_icon_fading_in.jpg` | Zoom 0.93: most of the map is in view and the icon is a translucent overlay on the model (about 55 % opaque; the model shows through) |
 | `m1_zoom1.00_farthest.jpg` | The farthest zoom: the whole 384 m map plus a quarter map of margin all round (the map is 420 px of the 1280), the icon is opaque and 14 px, the model under it is drawn 1.6 times larger |
 | `before_main_m1_zoom1.00.jpg` | Main's farthest zoom: just the map, icons only |
 | `crowd1000_zoom1.00_farthest.jpg`, `before_main_crowd1000_zoom1.00.jpg` | 1,000 units at the farthest zoom, this branch (1,000 models at the coarse levels plus 1,000 icons) against main (icons only) |
