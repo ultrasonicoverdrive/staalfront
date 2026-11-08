@@ -72,10 +72,74 @@ pub struct MinimapImage {
     pub rgba: Vec<u8>,
 }
 
+/// What the local player knows of a cell, for the minimap's colouring (WP8.4).
+pub const SHROUD: u8 = 0;
+/// Seen before, not now.
+pub const FOG: u8 = 1;
+/// Seen now.
+pub const VISIBLE: u8 = 2;
+
+/// How the minimap shows shroud and fog (WP8.4): `assets/config/fog_look.ron`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MinimapFog {
+    /// Shroud cells go to this colour.
+    pub shroud: [u8; 3],
+    /// Fog cells are pulled this far (`0..=1`) towards [`MinimapFog::shroud`].
+    pub fog_dim: f32,
+}
+
+/// The colour a minimap cell of terrain colour `rgb` shows in `state` ([`SHROUD`], [`FOG`], [`VISIBLE`]):
+/// shroud is `look.shroud` whatever the terrain is, fog is the terrain pulled towards `look.shroud` by
+/// `look.fog_dim`, visible is the terrain. Any other state counts as shroud (the safe side: it hides).
+pub fn fogged_color(rgb: [u8; 3], state: u8, look: &MinimapFog) -> [u8; 3] {
+    match state {
+        VISIBLE => rgb,
+        FOG => {
+            let t = look.fog_dim.clamp(0.0, 1.0);
+            let mix =
+                |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
+            [
+                mix(rgb[0], look.shroud[0]),
+                mix(rgb[1], look.shroud[1]),
+                mix(rgb[2], look.shroud[2]),
+            ]
+        }
+        _ => look.shroud,
+    }
+}
+
+/// The state of each of the `width` by `height` cells from the two bitsets of the snapshot (bit
+/// `y * width + x`): visible wins over explored, neither is shroud.
+pub fn fog_states(width: u32, height: u32, visible: &[u64], explored: &[u64]) -> Vec<u8> {
+    let bit = |words: &[u64], i: usize| words.get(i / 64).is_some_and(|w| w >> (i % 64) & 1 == 1);
+    (0..(width as usize * height as usize))
+        .map(|i| {
+            if bit(visible, i) {
+                VISIBLE
+            } else if bit(explored, i) {
+                FOG
+            } else {
+                SHROUD
+            }
+        })
+        .collect()
+}
+
+/// The fog laid over a minimap: the state of each cell and the look.
+#[derive(Clone, Debug)]
+struct FogLayer {
+    states: Vec<u8>,
+    look: MinimapFog,
+}
+
 /// A baked minimap of one map.
 #[derive(Clone, Debug)]
 pub struct Minimap {
+    /// What is shown: `clean` with the fog laid over it, when there is fog.
     image: MinimapImage,
+    /// The terrain and ore as baked and painted, without fog (RGBA).
+    clean: Vec<u8>,
+    fog: Option<FogLayer>,
     map_size: (f32, f32),
     uv: [f32; 4],
 }
@@ -106,10 +170,61 @@ impl Minimap {
             image.height as f32 * map.height() as f32 / (ch.max(1) as f32 * cell),
         ];
         Self {
+            clean: image.rgba.clone(),
             image,
+            fog: None,
             map_size: (map.width() as f32, map.height() as f32),
             uv,
         }
+    }
+
+    /// Lays the fog of war over the image (WP8.4): `states` is one of [`SHROUD`], [`FOG`], [`VISIBLE`]
+    /// per gameplay cell, row-major (`map.size_in_cells()`); `None` takes the fog off. The image has to
+    /// be uploaded again afterwards. Returns whether the image changed; a `states` of the wrong length
+    /// is refused (false, nothing changed).
+    pub fn set_fog(&mut self, map: &Map, states: Option<(&[u8], MinimapFog)>) -> bool {
+        let (cw, ch) = map.size_in_cells();
+        let (cw, ch) = (cw.max(1), ch.max(1));
+        let fog = match states {
+            Some((s, look)) => {
+                if s.len() != cw as usize * ch as usize {
+                    return false;
+                }
+                Some(FogLayer {
+                    states: s.to_vec(),
+                    look,
+                })
+            }
+            None => None,
+        };
+        let (w, h) = (self.image.width, self.image.height);
+        let mut next = self.clean.clone();
+        if let Some(f) = &fog {
+            for py in 0..h {
+                let cz = ((u64::from(py) * 2 + 1) * u64::from(ch) / (u64::from(h) * 2)) as usize;
+                for px in 0..w {
+                    let cx =
+                        ((u64::from(px) * 2 + 1) * u64::from(cw) / (u64::from(w) * 2)) as usize;
+                    let at = ((py * w + px) * 4) as usize;
+                    let state = f
+                        .states
+                        .get(cz * cw as usize + cx)
+                        .copied()
+                        .unwrap_or(SHROUD);
+                    let c = fogged_color([next[at], next[at + 1], next[at + 2]], state, &f.look);
+                    next[at..at + 3].copy_from_slice(&c);
+                }
+            }
+        }
+        self.fog = fog;
+        let changed = next != self.image.rgba;
+        self.image.rgba = next;
+        changed
+    }
+
+    /// The image without fog (for tests and the screenshots).
+    pub fn clean_rgba(&self) -> &[u8] {
+        &self.clean
     }
 
     pub fn image(&self) -> &MinimapImage {
@@ -142,11 +257,24 @@ impl Minimap {
             let shade = relief_shade(map, i64::from(x), i64::from(y));
             let c = color.map(|c| (f32::from(c) * shade).clamp(0.0, 255.0).round() as u8);
             let mut touched = false;
+            // What the cell shows: the colour, under the fog when there is one.
+            let shown = match &self.fog {
+                Some(f) => fogged_color(
+                    c,
+                    f.states
+                        .get(y as usize * cw as usize + x as usize)
+                        .copied()
+                        .unwrap_or(SHROUD),
+                    &f.look,
+                ),
+                None => c,
+            };
             for py in span(y, ch, h) {
                 for px in span(x, cw, w) {
                     let at = ((py * w + px) * 4) as usize;
-                    if self.image.rgba[at..at + 3] != c {
-                        self.image.rgba[at..at + 3].copy_from_slice(&c);
+                    self.clean[at..at + 3].copy_from_slice(&c);
+                    if self.image.rgba[at..at + 3] != shown {
+                        self.image.rgba[at..at + 3].copy_from_slice(&shown);
                         touched = true;
                     }
                 }

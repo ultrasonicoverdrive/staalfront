@@ -168,6 +168,12 @@ pub struct SimUnitDef {
     pub weapons: Vec<u16>,
     /// Abilities.
     pub flags: SimFlags,
+    /// The function of the factory that builds it (WP6.5), derived from the category; `None`
+    /// for a structure and an object.
+    pub produced_by: Option<BuildingFunction>,
+    /// Kind numbers of the structures its owner must have standing (WP6.5), in the order of the
+    /// record.
+    pub requires: Vec<u16>,
 }
 
 impl SimUnitDef {
@@ -345,6 +351,12 @@ pub(crate) fn convert_units(
                 sight: u.sight.to_fx(),
                 weapons: weapon_ids,
                 flags: convert_flags(&u.flags, &kind_of)?,
+                produced_by: super::building::produced_by(u.category),
+                requires: u
+                    .requires
+                    .iter()
+                    .map(|r| kind_of(r))
+                    .collect::<Result<_, _>>()?,
             })
         })
         .collect()

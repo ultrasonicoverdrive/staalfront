@@ -30,6 +30,12 @@ Three things are kept:
 | enemy or neutral thing | **inspect** | no | as a single click | no | **never** |
 | entity without a unit-table entry (the crowd's placeholder wanderers) | no | no | no | no | no |
 
+**Hidden things (WP8.3, WP8.4).** In a world with vision rules an enemy or neutral thing the local player does not see cannot be
+clicked, inspected, hovered or caught by a rectangle or a double-click: the instancer is not given it (`runner::motions_of`), and
+`selection::facts` answers `None` for it as a second line. An inspected enemy that goes out of sight is let go with the dead
+(`forget_the_dead`). Own things are never hidden. A ghost of a structure last seen is not an entity and cannot be selected or
+inspected either (`fog_look.md`).
+
 "Own" is `owner == LOCAL_PLAYER` (Meridian, seat 0). Orders are made from
 `Selection::orderable`, which keeps only the own *mobile* entities, so an inspected enemy
 and a selected structure are never in a command. The rule is stated once, in that

@@ -21,7 +21,7 @@
 //                                     a Falling weapon without one)
 //   guide_turn                        facing steps (of 256) per tick a Guided projectile steers
 //   burst, burst_delay                shots per trigger pull (default 1) and game seconds between them
-//   mount                             Hull (default) or Turret (only for a unit with a turret_rate)
+//   mount                             Hull (default) or Turret (only for a unit, or an armed structure, with a turret_rate)
 //   fire_arc                          half the firing arc in facing steps of 256 (default 8, all
 //                                     round is 128): how far from the target the hull, or the
 //                                     turret, may point and still fire
@@ -62,14 +62,14 @@
         // gunboat: fixed to the hull.
         (kind: 10, id: "naval_cannon", range: 6, reload: 2, damage: 45, damage_type: "cannon", projectile: Straight, projectile_speed: 30), // placeholder: reload, damage, speed
         // defence_tower: anti-infantry and light vehicles.
-        (kind: 11, id: "tower_gun", range: 6, reload: 0.8, damage: 8, damage_type: "bullet", projectile: Instant, fire_arc: 128), // placeholder: reload, damage
+        (kind: 11, id: "tower_gun", range: 6, reload: 0.8, damage: 8, damage_type: "bullet", projectile: Instant, mount: Turret), // placeholder: reload, damage
         // advanced_defences: anti-armour gun emplacement.
-        (kind: 12, id: "emplacement_gun", range: 7, reload: 2.5, damage: 80, damage_type: "cannon", projectile: Straight, projectile_speed: 36, fire_arc: 128), // placeholder: reload, damage, speed
+        (kind: 12, id: "emplacement_gun", range: 7, reload: 2.5, damage: 80, damage_type: "cannon", projectile: Straight, projectile_speed: 36, mount: Turret), // placeholder: reload, damage, speed
         // automated_gun (F2-M10 hub prototype defence): a machine gun, four shots a burst a tenth of
         // a second apart (the 20 hit points of the old single shot, split in four).
-        (kind: 13, id: "automated_gun", range: 8, reload: 1, damage: 5, damage_type: "bullet", projectile: Instant, burst: 4, burst_delay: 0.1, fire_arc: 128), // placeholder: reload, damage, burst
+        (kind: 13, id: "automated_gun", range: 8, reload: 1, damage: 5, damage_type: "bullet", projectile: Instant, burst: 4, burst_delay: 0.1, mount: Turret), // placeholder: reload, damage, burst
         // unmanned_artillery (F2-M09): units.md gives no numbers.
-        (kind: 14, id: "battery_shell", range: 12, min_range: 3, reload: 6, damage: 80, damage_type: "shell", projectile: Arc, projectile_speed: 14, flight_height: 3, splash_radius: 1.5, splash_inner: 0.5, fire_arc: 128), // placeholder: all numbers
+        (kind: 14, id: "battery_shell", range: 12, min_range: 3, reload: 6, damage: 80, damage_type: "shell", projectile: Arc, projectile_speed: 14, flight_height: 3, splash_radius: 1.5, splash_inner: 0.5, mount: Turret), // placeholder: all numbers
     ],
     // Tombstones of removed weapons, as (kind: <number>, name: "<old id>").
     retired_weapons: [],

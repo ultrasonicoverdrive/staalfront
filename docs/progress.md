@@ -1519,7 +1519,7 @@ spawned in, and a unit that has to turn before it drives sets off at a different
 heading in a tick. That is older than this work package (it is why no earlier permutation test moves units).
 
 **Deferred, and why.**
-1. **Structures choosing targets** (towers, emplacements): WP6.7. A structure takes no order, and a `Pursue` on one
+1. **Structures choosing targets** (towers, emplacements): done in WP6.7 (`docs/rules/defences.md`). A structure takes no order, and a `Pursue` on one
    would make it walk; it needs a target without an order.
 2. **Firing at the ground, backing off inside the minimum range** (a follower that finds its target inside the
    minimum range lets go and goes back to its order; it does not step back), **threat-based priorities** (shoot what shoots you
@@ -1929,7 +1929,7 @@ and does not read `--models`).
 
 ## Phase 6 — Buildings, building and power
 
-Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
+Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before WP6.4 by the orchestrator's decision of 31-10-2026); WP6.4 (power) is merged (PR #99); WP6.7 (defensive buildings) is merged (PR #100, see "WP6.7 notes"); WP6.6 (repair and sell) is built and in review, based on main (see "WP6.6 notes"); every WP of the phase is then built. The tech tree in `docs/rules/buildings.md` was approved by Tijmen on 30-10-2026 (costs, times and power stay placeholders).
 
 - WP6.1 Building definitions (the optional `building: (function, exit_side, requires)` block of a Structure
   record in `unit_defs.ron`, next to the footprint, price, build time, power and factions that were already
@@ -2088,7 +2088,7 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.4 to WP6.7 are not started. Th
 
 ## Phase 7 — Economy
 
-Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch `wp/7.4-money` (PR #90); WP7.3b is not started.
+Status: done (2026-10-31), with WP7.6 added on 01-11-2026 (the M1 match, in review; see "WP7.6 notes"). WP7.1 to WP7.5 are merged (#75, #78, #89, #90, #92); WP7.3b (the silo) waits for its place in the tech tree. The report is below the notes. Milestone M1 is not reached yet (see the report).
 
 - WP7.1 Ore on the map (`sf_sim::Ore`: an amount per field cell, `Ore::take`, `Command::TakeOre` for scenarios,
   staggered regrowth that touches `cells / period` cells per tick, `World::ore_at`, `nearest_ore` and
@@ -2142,7 +2142,7 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch 
   by straight-line distance, not route length or queue length; the harvester's own re-issue of a walk the crowd
   gave up (three tries) has no test of its own (the traffic test goes through the crowd's replan); no alliances;
   the sandbox without `--harvest` has no harvest rules.
-- **Gap: throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
+- **Gap (closed by WP7.5, see its notes): throughput collapses with many harvesters.** The refinery is chosen by straight-line distance, so every
   harvester goes to the same bay and the queue stands in its approach. The reviewer of #78 measured (three
   refineries, 4000 ticks): 3 harvesters deliver 2400, 6 deliver 3200, 12 deliver 3200, 24 deliver 2271, 48 deliver
   618. The 48/50-harvester measurements in `economy.md` (cost, minimap uploads) are therefore of a jammed system.
@@ -2188,6 +2188,119 @@ Status: WP7.1 and WP7.2 are in; WP7.3 is merged (#89); WP7.4 is built on branch 
   the sandbox; no refund, sell or repair; the screenshot harness shows no stage models.
 - **Fix round 1:** the HUD reads the credits from `World::credits` for every player id, so a player that owns no
   entity shows its money (it showed 0 before); construction payment is documented as greedy by lowest slot, not fair.
+
+- WP7.5 Refinery choice and queues (PR #92, a2b9719): a full harvester goes to the refinery with the
+  lowest expected wait, `round(cells x travel_cost) + committed x queue_cost` ticks (ties: cost, distance, lower
+  slot), looks again every `recheck_period` ticks while driving and switches only past `switch_margin` ticks;
+  a queued harvester walks to a spot beside the approach (its own side, rows `queue_step` apart) so the holder
+  reaches the bay. Eight new numbers in `assets/config/harvest.ron` (validated, hashed, mapped through
+  `sf_data`, `sf_bridge` and the scenario spec), `docs/rules/economy.md` ("Refinery choice and queues").
+  Review measurement (3 refineries, 4000 ticks, 3, 6, 12, 24, 48 harvesters, shipped ore): 2310, 3642, 3807, 2805, 2321
+  against 2400, 3200, 3200, 2271, 618; with harvesters that fill in 10 ticks (the bays are the limit): 5180, 7510,
+  9050, 9990, 7310 against 3800, 3600, 3000, 2600, 1400. Pinned scenarios `harvest`, `storage`, `money` moved
+  (cause measured: the queue spots; `economy.md`, "Checksum and pins"); no earlier-phase pin moved.
+  Screenshots in `docs/screenshots/wp7.5`.
+
+### WP7.5 notes
+
+- **What is not fixed:** with the shipped mining, 24 and 48 harvesters on the one 28-cell field still deliver less
+  than 12 (the field is the limit and 22 to 28 harvesters crowd in it; the bays are busy at most 15 percent of the
+  time); the drive in the cost is a straight line, not a route; parked harvesters still stand partly in the
+  approach; `recheck_period` has no test of its own.
+- **Decision:** a harvester in the queue never leaves for another refinery (it would give up its place); choice
+  happens on leaving the field and while driving. The side of the queue spot is the side the harvester came from.
+- **Cost:** `harvest_cost` +8 microseconds a tick on 150 (inside the run-to-run spread); `wander_5000`, which has no
+  harvest rules, ran 3.5 percent slower in eight alternating pairs (same checksum); cause: `turning::steer` was no longer
+  inlined into `behavior::walk` (+3.1 percent instructions, cachegrind); fixed with `#[inline]` on `steer`.
+- **Flaky under load:** `sim_thread::a_slow_sim_does_not_delay_the_frames` (wall clock) failed once in a full
+  workspace run while the machine was busy and passed alone; see item 28 above for the same kind.
+
+### WP6.5 notes: production (built before WP6.4, orchestrator decision 31-10-2026)
+
+- Done: `sf_sim::production` (one queue per factory, `QueueUnit`/`CancelUnit`/`SetRally`, pay per tick with the
+  structure rule through `World::pay`, exit cell and free-spot search, the queue holding behind a blocked exit,
+  the refinery's free harvester, the rally point, checksum section `Y` only with production rules); data in
+  `production.ron`, `produced_by` derived from the unit's category and unit `requires` in `sf_data`; the bridge
+  `production_table`; the pinned scenario `production` (`0x4d2f161c74d16308`, Linux and Windows in CI); the sandbox
+  readout, progress bars, rally flags and keys U / I / O / G (`sf_game::production_view`, `production_look.ron`) with
+  `--harvest`. Rules: `docs/rules/production.md`. Screenshots: `docs/screenshots/wp6.5`.
+- **Pins:** no earlier pin moved: all 24 earlier scenarios pass against their committed `.expected` after the merge
+  of main (`git diff origin/main -- assets/scenarios/*.expected` adds only `production.expected`); a world without
+  production rules writes no `Y` section.
+- **Gaps:** power does not slow production yet (the hook is fixed at 1000; done in WP6.4, "WP6.4 notes"); no unit in the shipped data has a
+  `requires` (balance, phase 15); the sandbox keys act on the first selected factory only; the real game could not
+  be driven to a queue from outside the window, so the shots come from the test harness that draws with the same
+  functions the HUD calls (`production_screenshot.rs`), and a plain `sf_game --sandbox --harvest` run was only checked
+  to start and exit cleanly.
+- **Cost:** see the PR body (alternating runs against `origin/main`).
+
+
+### WP7.6 notes: the M1 match (stacked on WP6.5, orchestrator decision 01-11-2026)
+
+- Done: the **rule** (`sf_sim::outcome`: a player is defeated when it owns no standing structure and no armed
+  unit; the last one left wins in the tick of the last defeat; the last players falling together is a draw; once
+  decided it never changes; the match begins when every player owns something; harvesters, structures under
+  construction and objects do not count; checksum section `Z`, last, only in a world given match rules via
+  `World::with_match`); the **match file** (`assets/matches/m1.ron`, `sf_data::match_def`, checked against the
+  definitions and the map; `sf_bridge::match_rules`, `match_commands`, `match_factions`, `match_credits`); the
+  **map** `m1` (96 by 96 cells, `tools/sf_headless/examples/gen_match_map.rs`); the **static opponent** (no
+  command is ever given to it; its units fire back by WP5.4, its harvester mines by WP7.2); the game mode
+  `sf_game --match [FILE]` and the **result banner** (`match_view`, `match_look.ron`; the game keeps running behind
+  it); the pinned scenario `match` (`0x54a140fc12273e31`, Linux and Windows in CI) whose script wins at tick 5687;
+  `docs/rules/match.md`. Screenshots: `docs/screenshots/wp7.6`.
+- **Pins:** no earlier pin moved. All 25 earlier scenarios pass against their committed `.expected`
+  (`git diff origin/main -- assets/scenarios/*.expected` adds only `match.expected`); `golden.rs` and the
+  benchmark's PLAIN and FIGHT checksums are unchanged; a world without match rules writes no `Z` section.
+- **Gaps:** no AI, triggers or scenario format (WP10.1 absorbs the match file); no fog, sidebar or menu; no restart,
+  no pause and no surrender; the local player is fixed at player 0; the opponent's harvester collects credits it
+  never spends; M1 has not been played by a person on the laptop (see the Phase 7 report).
+- **Cost:** see the PR body and `docs/rules/match.md` ("Measured").
+
+
+### Phase 7 report
+
+Phase 7 gives the sim a whole economy loop, every step gated and hashed in its own checksum section (`E` ore,
+`H` harvest, `V` storage, `M` money), so worlds without these rules hash as before:
+
+- **Ore** lies on the map in fields and grows back slowly (WP7.1, #75).
+- **Harvesters** search, mine, drive back and check in at a refinery by messages, with one bay, a first-come
+  queue and a grant timeout (WP7.2, #78).
+- **Storage**: a player's store is capped by the storage of its standing buildings; a full store stops the
+  unloading (WP7.3, #89).
+- **Money**: the store is the money pool; a structure is paid tick by tick while it is built and pauses
+  without money; the HUD shows `Credits N` (WP7.4, #90).
+- **Refinery choice**: a harvester picks the refinery with the lowest expected wait and queues beside the
+  approach. With 48 harvesters on three refineries delivery went from 618 to 2321 ore in 4000 ticks
+  (WP7.5, #92).
+
+**What it took.** Five WPs. WP7.2 and WP7.3 came back from review twice, WP7.4 and WP7.5 once. What
+recurred: rules without a test, so that a mutation survived (#78, #89); stale docs, status lines and comments
+(#89, #92); and the PR body or checklist not reporting what was asked (#89, #90, #92). Measured on the laptop
+(M0c, 28-10-2026, GTX 1650): frame p99 4.4 ms, sim tick p99 3.2 ms,
+with combat; the economy itself costs a few microseconds a tick (see the WP notes).
+
+**Milestone M1 is not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
+opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
+sandbox (`sf_game --sandbox --harvest`). Still missing:
+
+- making units (WP6.5, production, in PR #96): built;
+- a skirmish map with both bases and a win condition: built in WP7.6 (the map `m1`, the match file, the fixed rule
+  of `sf_sim::outcome`, the banner), see "WP7.6 notes" below;
+- a static opponent: built in WP7.6 (it does not build, produce or attack; its units fire back).
+
+What is still missing for M1 after WP7.6: it has not been played by a person on the reference laptop (the
+scripted run in `tools/sf_headless/tests/match_m1.rs` wins at tick 5687; the screenshots come from the test
+harness, plus two shots of the real game window from `sf_game --match --shots` that look at the map at ticks 19 and
+137 without input, and a human playing the match is the point of the milestone: "the first moment to really play and adjust
+the design"). There is no menu, no restart and no pause behind the banner (phase 11).
+
+For this reason WP6.5 is built before WP6.4 (power) (orchestrator, 31-10-2026; recorded in PLAN.md by the WP6.5 PR).
+
+**Open from phase 7:**
+- WP7.3b, the silo, waits for its place in the approved tech tree.
+- Field totals per mission (WP7.1).
+- Refinery choice by route length instead of a straight line (WP7.5).
+- Queue spots not checked for passability (WP7.5).
 
 ## WP11.3 notes: positional sound
 
@@ -2255,6 +2368,250 @@ player's own Red Alert music (B11, scope change of 28-10-2026). Rules: `docs/rul
   real Red Alert disc here, so real `SCORES.MIX` contents (and that AUD music is what that archive holds) are unverified.
   (6) Mood radius, weights and times in `audio.ron` are first guesses.
 
+### WP11.1 notes: the sidebar (brought forward before M1, orchestrator decision 01-11-2026)
+
+Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-production`): the sidebar needs production. When #96 merges, `origin/main` is merged into this branch (a merge commit, no rebase). Rules: `docs/rules/sidebar.md`; screenshots: `docs/screenshots/wp11.1`.
+
+- **Done.** A column on the right edge of the sandbox window: the credits (moved from the corner), the power-bar hook, four
+  build tabs and a grid of items with a picture, price, progress, queue count and the waiting words; a click on a structure
+  starts the build mode of WP6.2, a click on a unit sends `QueueUnit` to the primary factory (the selected one of that
+  function, else the lowest slot), a right-click puts the structure away or sends `CancelUnit` for the last item of that
+  kind. Items that cannot be built yet are hidden. The picture is the new `build_picture` field of `unit_defs.ron`
+  (`color`, `label`, `order`), validated on load, optional (the frozen copies load unchanged), separate from `icon`. All sizes,
+  words and colours are in `assets/config/sidebar.ron`. New code: `sf_game::{sidebar, sidebar_layout, sidebar_view}` and
+  `sf_data::sidebar_look`; `hud.rs` and `runner.rs` got a few self-contained lines (WP7.6 touches the same files).
+- **No sim change, no pin moved.** `sf_sim` is untouched; `git diff origin/wp/6.5-production -- crates/sf_sim assets/scenarios`
+  is empty, and the release `sf_headless --expect` run passes all scenarios (numbers in the PR body).
+- **Progress item 22 decided: kept.** A right-click on a unit in the 4 px band gives no order (the scroll arrow is on the
+  cursor and a click does what it shows). The sidebar no longer shares the band: its margin is never less than `edge_margin`.
+- **Mutations** (each applied to a scratch change of the source, the failing tests read, then reverted):
+  - M1 swap infantry and vehicle tabs: `a_click_on_a_unit_queues_it_and_a_right_click_cancels_the_last_one_of_its_kind, a_click_on_a_unit_without_a_factory_does_nothing, a_finished_unit_with_no_free_exit_says_the_exit_is_blocked (+12 more)`
+  - M2 prerequisites ignored: `a_structure_that_is_still_going_up_does_not_count_as_standing, a_unit_with_prerequisites_waits_for_them, only_the_local_players_structures_count (+3 more)`
+  - M3 a structure under construction counts as standing: `a_structure_going_up_shows_its_own_progress_and_count, a_structure_that_is_still_going_up_does_not_count_as_standing, a_structure_that_waits_for_credits_says_so (+1 more)`
+  - M4 selection ignored for the primary factory: `the_primary_factory_is_the_selected_one_else_the_lowest_slot`
+  - M5 right click cancels the first of its kind: `a_click_on_a_unit_queues_it_and_a_right_click_cancels_the_last_one_of_its_kind, a_queued_unit_shows_its_own_progress_and_count`
+  - M6 left and right buttons swapped: `a_click_on_a_structure_chooses_it_and_a_right_click_puts_it_away, a_click_on_a_unit_queues_it_and_a_right_click_cancels_the_last_one_of_its_kind, the_primary_factory_is_the_selected_one_else_the_lowest_slot (+1 more)`
+  - M7 waiting shown on every queued item of the kind: `a_queued_unit_shows_its_own_progress_and_count, a_unit_that_waits_for_credits_says_so_on_the_item_at_the_front_only`
+  - M8 order by kind number instead of the picture order: `a_role_without_a_picture_gets_the_default_of_its_tab_and_comes_last, the_order_follows_the_order_of_the_pictures_not_the_kind_numbers`
+  - M9 margin may be smaller than the edge band: `layout:the_sidebar_never_covers_the_edge_scroll_band`
+  - M10 the column does not block the pointer: `view:a_press_on_a_structure_chooses_it_and_the_ui_keeps_the_click, view:a_press_on_a_tab_shows_it_and_a_right_press_does_not, view:a_press_on_a_unit_queues_it_and_a_right_press_cancels_one (+4 more)`
+  - M11 progress bar always full: `view:the_progress_bar_is_as_long_as_the_progress_and_turns_to_the_waiting_colour`
+  - M12 price and time swapped in the catalog: `a_price_the_player_cannot_pay_is_marked_but_the_item_stays, every_entry_has_the_price_and_time_the_simulation_will_charge`
+  - M13 picture orders may repeat: `an_order_above_the_limit_or_repeated_in_a_category_is_refused`
+  - M14 wheel scrolls the wrong way: `layout:the_wheel_scrolls_a_row_at_a_time_and_stays_inside_the_list, view:the_wheel_scrolls_the_items_over_the_column_only`
+  - M15 scrolling ignored by the hit test: `layout:scrolling_moves_the_items_under_the_slots, view:the_wheel_scrolls_the_items_over_the_column_only`
+  - M16 a label of any length is accepted: `a_bad_label_is_refused`
+  - M17 a build picture on an unbuildable role is accepted: `a_picture_on_a_role_that_cannot_be_built_is_refused`
+  - M18 sidebar chooses the wrong structure (by position, not kind): `build_mode:the_sidebar_chooses_a_structure_by_kind_and_the_click_places_that_kind`
+  - M19 right-click on a structure item does nothing but chooses: `a_click_on_a_structure_chooses_it_and_a_right_click_puts_it_away, view:a_right_press_on_a_structure_puts_the_chosen_one_away_and_orders_nothing`
+  - M20 empty tab always says nothing to build: `an_empty_tab_names_the_factory_it_misses_or_says_there_is_nothing, view:an_empty_tab_says_what_it_needs`
+  - M21 (fix round 1) a structure at 0 HP stands: `a_factory_at_zero_hit_points_unlocks_nothing_and_is_never_the_primary, without_a_standing_construction_centre_no_structure_is_offered`
+  - M22 (fix round 1) the anchor ignored for the structures tab: `without_a_standing_construction_centre_no_structure_is_offered`
+  - M23 (fix round 1) the structures tab never names the missing anchor: `without_a_standing_construction_centre_no_structure_is_offered`
+  - M24 (fix round 1) the production readout drawn twice (the bad merge of 7460c3b): `hud::the_production_readout_is_drawn_once_per_frame`
+  - M25 (fix round 1) any look value of `sidebar.ron` changed (e.g. `chosen_ring_px` 3): `sidebar_look::the_shipped_look_is_pinned`
+- **Fix round 1** (review of PR #97): the duplicated production readout of the merge removed (`Hud::frame` now draws its
+  panels through `draw_panels`, tested once per frame); *standing* is the sim's rule with hit points; the structures tab
+  needs a standing construction centre ("Needs a construction centre"); the last look numbers of `sidebar_view.rs` are
+  in `sidebar.ron` and the whole file is pinned; the old "build paused" strip is documented as gone from the column.
+- **Cost** (the sidebar adds nothing to the sim): release build, this container, **load average about 10 (busy, other agents running)**, 4000 frames per round, three rounds: `Situation::read` + `sidebar::model` mean 1.2 us with 8 entities and 17 to 30 us with 5,008 (p99 42 to 56 us); building the UI for the full structures tab (159 quads: panel, credits, power bar, four tabs, nine items) on a reused `Ui` mean 19 to 30 us (p99 39 to 74 us), the same with 8 and with 5,008 entities. About 0.05 ms of a 16.7 ms frame. Not measured on the laptop (relative numbers only; the container cannot measure the fps requirement, PLAN section 13). The first run of this test built a new `Ui` per iteration and read 190 us: that was the font setup, not the sidebar. Command: `cargo test --release -p sf_game --test sidebar_cost -- --ignored --nocapture`. The sim thread is untouched, so there is no before/after of the tick.
+- **Gaps.** The power bar is a neutral frame until WP6.4 (done there: `sidebar::power_reading` returns the simulation's totals; "WP6.4 notes"). Hidden items cannot be discovered before they unlock (decision; greyed items would show the whole tree).
+  The tile is a coloured box with a short name (art is WP11.6); there is no tooltip. The factory a click goes to is the selected
+  one or the lowest slot; the sidebar shows only that factory's queue. A click was not driven in the real window (there is no
+  `xdotool` here): clicks are tested with `UiInput` through `sidebar_view::frame`, the commands by running them in a world, and the
+  runner's three handlers read `pointer_over_ui` as they did before. The edge-band width is read from `input.ron` when the HUD
+  starts. A `QueueUnit` the simulation refuses (queue full) is silent: the count on the item shows 5. The sidebar is built for the faction of `LOCAL_PLAYER` (Meridian) only; there are no seats yet.
+
+### WP6.4 notes: power (stacked on WP7.6, orchestrator decision 02-11-2026)
+
+- Done: `sf_sim::power` (made and used per player over the standing structures, damage lowering a producer's output by
+  `power * hp / max_hp`, the shortage speed `made * 1000 / used` with a floor, the hook `defences_powered` for WP6.7,
+  checksum section `I` only with power rules, last); the slower construction (`advances_on`, stateless) and the speed
+  that production already took (`production_speed_permille`); `power.ron` (`sf_data::power`, `sf_bridge::power_rules`);
+  the sidebar's power bar filled from the snapshot (`sidebar::power_reading`) and the "low power" sign with its own bar
+  colour; power on in the match, the pinned scenario `power` and the sandbox with `--harvest`. Rules: `docs/rules/power.md`.
+  Screenshots: `docs/screenshots/wp6.4`.
+- **Decisions** (written in `power.md`): a structure under construction makes and uses nothing; one speed for production
+  and construction (progress per tick for a factory, `speed` ticks of every thousand for a structure, so the price stays
+  exact at any speed); the totals are recounted at the start of each step (what happens in a tick counts from the next);
+  the shortage floor is 250 in the file (the simulation accepts 0 = stopped); matches have power rules on.
+- **Pins.** No pin of an earlier phase moved (`golden.rs`, every `.expected` of an earlier phase, bench PLAIN and FIGHT:
+  worlds without power rules write no section `I`). **One moved, on purpose: `match.expected`** `0x54a140fc12273e31` to
+  `0x49f207148bde095c`. Measured cause: with the `power` line taken out of `match.ron` the old value comes back, and with it
+  in, every checked tick has the same entities, hit points and credits (`power_in_the_match_moves_the_pin_by_its_section_only`),
+  so the section alone moved it. New: `power.expected` `0x8b6d789e18499593`, in the CI list.
+- **Cost:** `refresh_power` 4 to 6 us per tick with 40 structures among 5,040 entities (release); alternating release runs of
+  the headless binary, 10,000 ticks with those entities, six rounds: base 899, this branch without power rules 878 and with
+  them 891 ticks per second (medians; single runs 857 to 965; load average about 2 of 4 cores, other agents running). Inside the
+  noise; relative numbers only (the container cannot measure the fps requirement, PLAN section 13).
+- **Found while testing:** the pinned final checksum of a scenario does not see *when* things happen (a rifleman made faster
+  stands in the same place at the end). The scenario `power` is therefore pinned along the way (eight ticks) as well.
+  Other scenarios may have the same blind spot.
+- **Gaps.** Nothing reads `defences_powered` (WP6.7; it must also key on a structure's own `power < 0`, see the WP6.1
+  follow-up); the sandbox's demo base is in a permanent shortage (one of every structure: 270 used of 100 made); a power
+  plant built in a shortage is slowed like any structure (no exemption: the floor is the way out); the damage stage of the
+  models is not tied to the output (the output follows the hit points, the model follows the damage thresholds of
+  `damage.ron`); no sound or announcement for "low power" (audio is another work package); not played by a person.
+
+### WP6.6 notes: repair and sell (based on main after #100, decision 04-11-2026)
+
+- Done: `Command::Repair { structure, on }` (tag 16) and `Command::Sell { structure }` (tag 17), owner only, every refusal listed
+  (`World::repair_rejections`); repair gains `hp_per_tick` and pays the construction rule on the absolute hit points (the ticks add
+  up to exactly the cost of the gap), waits without money, is slowed by a power shortage; a sale is a countdown after which the
+  structure is removed by the ordinary path and pays `price * refund * hp / max_hp`; a structure being sold counts as gone from the
+  first tick (power, prerequisites, production, storage, defences, match). Data `assets/config/repair.ron` (3 hp a tick, 250
+  thousandths, 100 ticks, 500 thousandths) and `repair_look.ron`. Sidebar: Repair and Sell mode buttons, the cursor of the mode, a
+  repair sign and a sale bar on the structure. New pinned scenario `repair_sell` (`0x963b3db14951cfa5`, in the CI list). Rules:
+  `docs/rules/repair_sell.md`. Screenshots: `docs/screenshots/wp6.6`.
+- **Decisions** (written in `repair_sell.md`): no money means a repair waits (flag stays) and does not stop; power slows repair like
+  construction and does not slow a sale; the defeat of a player that sells its last structure is in the tick the sale starts; the
+  refund goes into the store above the capacity and is not taken off `credits_spent`; Esc ends a mode before it opens the pause menu.
+- **Pins:** none moved. New section `r` of the checksum exists only while something repairs or is sold.
+- **Gaps:** no cancelling a sale, no sound, no hotkeys for the modes, a sold factory loses its queue without refund, no units come
+  out of a sold structure, no repair of units, no AI use.
+
+### WP6.7 notes: defensive buildings (stacked on WP6.4, orchestrator decision 03-11-2026)
+
+- Done: a standing structure with a weapon chooses its own targets (the unit rules, the same cooldown), holds the target as its
+  `turret_target`, turns its turret at a rate from data and fires through the ordinary weapon path only within the arc; it takes
+  no order and no `AimTurret`; without power (own `power` below zero, `defences_powered` false) it is silent; under construction
+  or at zero hit points it does nothing; the weaponless bunker does nothing. Data: `turret_rate` 12 / 8 / 16 / 6 on the tower,
+  the advanced defences, the automated gun and the unmanned artillery, their weapons on the turret with the default arc 8 (the
+  loader allows `turret_rate` on an armed Structure). Section `d` of the checksum (only with armed structures). New pinned
+  scenario `defences` (`0xb31bf0125145ac15`, in the CI list). Rules: `docs/rules/defences.md`. Screenshots:
+  `docs/screenshots/wp6.7`.
+- **Decisions** (written in `defences.md`): the arc of the shipped structure weapons is the default 8 like every turret weapon
+  (not all round); the target of a structure is its `turret_target` (not an order); "needs power" keys on the structure's own
+  `power < 0`; the frozen copies keep structures without a turret and with an all-round hull weapon.
+- **Pins that moved (measured causes in `defences.md` and `docs/bench/README.md`):** `match.expected`
+  `0x49f207148bde095c` to `0x164403a92986654f` (the opponent's tower fires: first shot tick 3830, 40 shots, destroyed tick
+  4509; the human still wins, at tick 5967 instead of 5687, with 3 of 9 units left; the script is unchanged); bench `FIGHT` (the
+  weapon table and the unit table's turret-rate digests changed; every shot, hit, death and position equal to the old run, `PLAIN` unchanged). No other pin moved.
+- **Cost** (release, alternating runs, load average about 2 to 3): 40 armed structures with 200 units in reach about 10 us per
+  tick more (48.6 to 59.1 us, medians); a world with no structure and 5,000 units no difference (773 against 779 us). Relative
+  numbers only.
+- **Found while testing:** the match script never needs the tower to be dark: its army takes the tower out first. The opponent's
+  tower goes dark below 420 of its plant's 600 hit points (measured); an army that shoots the plant first meets no tower.
+  `damage_screenshot.rs::a_structure_shot_up_shows_its_damaged_models_smoke_and_fire` failed on this branch (and passes on a
+  clean copy of the base): the sandbox's neutral `automated_gun` (slot 49) now shoots at the tanks, the flame particles of the
+  heavily damaged plant wandered over the cream half of its roof, and the test's measure of fire (brightness gained) found 0 to 1
+  pixels in a picture that shows flames (the timeline, the plant's hit points and the ticks were equal to the base's; only the
+  particles differed). **The test was changed, not the rules:** `glow_pixels` also counts the warm orange of flames; the thresholds
+  are unchanged (meridian 482 pixels at the start zoom, veyran 1107, damaged 0). Worth knowing: that test is sensitive to where
+  particles drift.
+- **Gaps.** Garrisoning the bunker (owner: phase 9 or a WP6.7b); the decoy has no behaviour; no mission logic for the neutral
+  structures (`fires_at_all`, "fires when the uplink is alive"); no fog (the sight of a defence is unused); a structure does not
+  answer fire from out of its reach; the structures' numbers are placeholders; not played by a person.
+
+### WP11.5a notes: menus and settings without sound (stacked on WP6.4, orchestrator decision 03-11-2026)
+
+- Done: the start menu, the pause menu with restart, the settings screen (keys, graphics, accessibility) and a marked empty
+  "Sound (WP11.5b)" section; Restart and Main menu under the result banner; `--menu NAME` for screenshots. Rules, decisions,
+  numbers and the list of mutations: `docs/rules/menus.md`. Pictures: `docs/screenshots/wp11.5a/`. The WP is split by the
+  orchestrator: the sound settings are **WP11.5b**, built later with the audio work (PLAN.md phase 11 has the dated note).
+- **No `sf_sim` change and no pin moved** (`golden.rs`, every `.expected`, bench PLAIN and FIGHT): pausing is a hold of the sim
+  thread, not a command; a restart builds a world through the code the program starts with.
+- **Decisions** (in `menus.md`): Esc is the existing `Quit` action and is the fixed menu key; a taken key is refused, not
+  swapped; a rebind replaces the first key binding of the action; the shipped `input.ron` is never edited (the player's lists
+  are kept in a settings file and put over it); flag over setting over default; the demo and the benchmark ignore the settings;
+  a `--shots` run reads a settings file only through `STAALFRONT_SETTINGS`.
+- **Measured** (all in `menus.md`): the checksum after every one of 150 ticks of a run with a 0.9 s hold equals the
+  uninterrupted run's (`a_paused_run_has_the_checksums_of_an_uninterrupted_one`); the checksum at tick 41 after a restart equals a
+  fresh start's, sandbox and match; the closed menu costs 10.4 ns a frame without the two calls and 14.7 ns with them (release,
+  alternating runs, load average 2.6 to 3.8 on 4 cores); the colour-blind safe set is at least 22.7 delta E apart for every pair
+  under protanopia, deuteranopia and tritanopia (the standard set is 11.0 under protanopia).
+- **Real window** (`scripts/menus_e2e.py`, Xvfb + lavapipe, real X events): 26 of 26 checks, among them that keys, clicks and the
+  sidebar under an open menu reach nothing and that a rebound key survives a restart of the program. The check fails (13 of 14)
+  when the gating in `Runner::render` is taken out.
+- **Found while taking the screenshots:** at 150 % UI scale in a 1280-pixel window the centred top bar lay over the sidebar's
+  credits; it is narrowed to the room it has (`hud::top_bar_width`). At 200 % a 1280-pixel window is too narrow for the top
+  bar and the menus are taller than a 720-pixel window.
+- **Gaps** (`menus.md`, "Not done"): the sound settings (WP11.5b); the menus are mouse-driven (no keyboard or gamepad
+  navigation); no tooltips or confirmations; Esc does not cancel a chosen structure; no resolution choice or exclusive
+  fullscreen; the window mode switch was not seen on a system with a window manager and the banner buttons were not clicked in a
+  finished game (both only by pixels and state machine); `Runner::replace_scene` names every field of the runner, so WP6.7 (which
+  parallel work may touch `runner.rs`) will get a compile error for a field it adds until the field is put on one side; a
+  `--models` pack is lost if a new scene fails to build; not played by a person.
+- **Engine additions** (small, tested): `Context::{bindings, set_bindings, frame_cap, set_frame_cap, set_fullscreen}`,
+  `InputState::keys_pressed_now`, `Ui::{set_input, block_rect}`, `Style::with_palette`, `Instancer::set_palette`,
+  `Renderer::set_present` (the last one only on a real window: the offscreen renderer ignores it, and the real-window check
+  saw `present: Immediate`).
+
+## Phase 8 — Vision
+
+Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour; #104) and WP8.2a (the targeting gate behind a flag that is
+**off**, structure sight, the shared-vision hook; #105) are merged; WP8.3 and WP8.4 (the look of shroud and fog, ghosts, hiding what is
+not seen, the minimap) are built together and in review; WP8.2b (height bonus, waits for elevation in the sim) is not started. The split
+of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 and WP8.4 in the note of 07-11-2026.
+
+### WP8.1 notes: shroud and fog of war (merged in #104 on top of WP6.6, orchestrator decision 05-11-2026)
+
+- Done: `sf_sim::vision` (per player a `u16` count per cell, a `visible` and an `explored` bitset, per slot the stamp it made; discs from
+  integer row-span masks per distinct sight; delta stamping in one pass after the crowd pass and before targeting), `World::with_vision`,
+  `World::visibility(player, cell)` (the hook for WP8.2a; nothing reads it), `fog_version`, `fog_words`, checksum section `v` (running sums,
+  gated, after `r`), `sf_data::vision` + `vision.ron`, `sf_bridge::vision_rules`, scenario field `vision` and the new pinned scenario
+  `vision` (`0x84facee4249aa869`, in the CI list), the local player's bitsets and a `seen` flag per view in `SimSnapshot` (copied when the
+  version changes), a debug view (F1 checkbox or `--debug-fog`, `vision_look.ron`). Rules: `docs/rules/vision.md`. Screenshots:
+  `docs/screenshots/wp8.1`.
+- **Decisions** (written in `vision.md`): a structure stamps its disc grown by its footprint; it sees only while it stands (not under
+  construction, not while sold); every object marks its own cells explored; a sight of 0 reveals nothing; a unit stamps from its position
+  (units have no `cell`, only structures do: the memo assumed otherwise); the sight is a table in `VisionRules`, not a field of `UnitStats`
+  (65 literals, other branches add fields); matches turn vision on in the game (the headless `match` scenario did not until WP8.2a); a player's 65,536th
+  disc is refused (so `u16` cannot wrap).
+- **Pins:** none moved. Section `v` exists only in a world given vision rules; golden.rs, every `.expected` and the bench PLAIN and FIGHT
+  checksums are as before (see the PR for the runs). New: `vision.expected`.
+- **Gaps:** nothing reads the sight (WP8.2a); no allied vision; no height (WP8.2b); the debug view hides nothing (units show through it) and
+  is sheared on slopes; no ghosts, soft edges, minimap or icon filtering (WP8.3, WP8.4); the AI has no memory of what it has seen.
+
+### WP8.2a notes: the targeting gate, structure sight, shared vision (orchestrator decisions 06-11-2026)
+
+- **Step 0, its own commit:** the headless `match` scenario now has the vision rules `sf_game --match` gives the game (review finding 1 of
+  #104). `match.expected` moved `0x164403a92986654f` to `0x771de0f816275bbc`. Measured cause: with the `vision` line taken out of `match.ron`
+  the old value comes back (`vision_in_the_match_moves_the_pin_by_its_section_only`, and by hand with the release binary); the world is the
+  same tick by tick (`the_first_match_plays_the_same_with_vision_on`). No other pin moved.
+- **Done:** `VisionRules` has `acquire_needs_sight` (the gate, **off** in the shipped `vision.ron` and in the match) and `shared`
+  (`(sharer, viewer)` pairs, empty by default). With the gate on, `Targeting::best_target` (the one function every automatic pick goes
+  through: a unit's scan and a defence's look round) skips candidates the scanner's owner does not see now (a unit: its cell; a structure:
+  any cell of its footprint). Retaliation, the checks of an engagement and every explicit order are untouched. `World::visibility`
+  answers with the union of the player's own picture and that of every sharer. Structures already stamped their disc grown by their
+  footprint, only while standing (WP8.1); nothing needed completing, the data has `sight` for every structure. The section `v` writes
+  the gate and the pairs only when one is set. New pinned scenario `vision_targeting` (`0x8ee88b023c9719cb`, CI list), `vision.ron` of the
+  scenarios takes `acquire_needs_sight` and `shared`. Rules: `docs/rules/vision.md`, `targeting.md`, `defences.md`, `match.md`.
+- **Decisions:** (1) the gate is on **acquisition** only: a target already chosen is kept while it is valid, also when it walks into fog;
+  (2) an explicit attack order is never dropped for fog (the player's order wins, as before; WP8.3 hides what the player cannot see, so
+  the player cannot normally order it); (3) shared vision is one way and not transitive, and the viewer's explored set is the union too;
+  (4) the snapshot and the debug view of `sf_game` still show the local player's **own** cells (no team exists in the game; documented gap).
+- **Measured, not shipped (the gate on in the match):** the scripted match is still won, at tick **8067 instead of 5967**, with **8 units
+  lost instead of 6**. The first difference is tick 4282: a rocket trooper does not pick the opponent's defence tower, which is in its reach
+  (5, to the edge of the tower) but outside its disc of sight 5 (the disc is cell against cell: the tower's cell is at squared distance 26).
+  Units whose sight equals their reach lose targets at the limit of their reach; Tijmen decides after playing M1 (sight a cell above reach
+  in the data, or the gate measured to the edge). `what_the_gate_would_do_to_the_first_match`.
+- **Review nits of #104 carried:** the two "stacked on WP6.6" lines above are fixed; the crowd cost of vision is in the open follow-ups (34);
+  the public `vision_resync` is gone (`vision_audit_current` runs the pass on a clone itself, so nothing public changes the world outside a
+  step); the "explored never shrinks" tests compare the sets, not the counts.
+- **Gaps:** the gate does not drop a chosen target that walks into fog; the snapshot and debug view do not use the shared pairs; no
+  team or alliance exists, so nothing but scenarios sets `shared`; no height (WP8.2b); no ghosts or hiding (WP8.3, WP8.4); the AI has no
+  memory. The cost of the gate was not measurable (see `vision.md`, "Cost").
+
+### WP8.3 and WP8.4 notes: the look of fog, ghosts, hiding, the minimap (orchestrator decision 07-11-2026)
+
+- Done: `assets/config/fog_look.ron` + `sf_data::fog_look` (pinned); `sf_render::fog::texels` (the two bitsets as an `Rg8` texture,
+  a 3 by 3 box blur `softness` times) and the terrain shader's fog branch (`fog_on`, bilinear, `smoothstep`; `Renderer::set_fog`,
+  `clear_fog`); `sf_game::fog_view` (`GhostBook`, `minimap_dots`, `fog_step`/`sync_terrain`, the shipped look); hiding by
+  `SimSnapshot::{view_shown, wreck_shown, projectile_shown, shown_at_metres}` in `runner::motions_of` (models, icons, hover, picking),
+  `selection::facts` (clicks, cursor, inspected panel), `construction_view::front_edge` and the rally flags (bars and signs), `FxPlayer`
+  (flashes, hits, deaths, tracers, wreck smoke, damage smoke); `Minimap::set_fog` (shroud and fog on the minimap, ore under shroud kept);
+  no scenery markers in a world with vision rules. Rules: `docs/rules/fog_look.md` (+ `vision.md`, `cursor.md`, `selection.md`).
+  Screenshots: `docs/screenshots/wp8.3/`.
+- **Decisions:** the fog is a texture sampled by the terrain shader (no per-vertex values, no film): one fetch per fragment, only when
+  `fog_on`; the blur is on the CPU over the two maps, so the edge softness is data (`softness`); an effect is judged by the cell it
+  happens on and shown if that cell is visible or the effect is the local player's own; a ghost is the structure's last shape in a
+  ghost team colour (palette entry 5), not a desaturated model; a click on a hidden unit finds the ground; the sound of hidden events is
+  left alone (audio is another chat's).
+- **Pins:** none moved, nothing in `crates/sf_sim/` changed (the diff of that directory against origin/main is empty).
+- **Gaps:** sound of hidden events; ghosts only for structures and they do not age; the ghost is a team colour; no allied vision; the F1 cell
+  grid overlay still marks every unit's cell; the shader's cost on a real GPU is not measured (only the software adapter).
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -2310,9 +2667,8 @@ fixed, delete the entry in the same PR.
     unit differs. Pass no cursor to `build_units` while `--shots` has no `--hover` (it also
     changes the `sf_demo` shots, which share the runner). Owner: WP4.5, the next WP that
     changes how `sf_game` looks.
-22. **A right-click on a unit inside the 4 px edge band gives no order** (PR #46; the band
-    wins over everything and the cursor shows the scroll arrow, documented in `cursor.md`).
-    Owner: WP11.1, when the HUD and the edge scrolling are revisited.
+22. *(Closed in WP11.1: the edge band keeps winning; the decision is in the WP11.1 notes and in
+    `docs/rules/sidebar.md`, "The edge band". The number stays so the later items keep theirs.)*
 23. **Icon set.** The cost of the SDF icon quad on the GTX 1650: the M0 laptop run
     (22-10-2026) has gpu p99 0.496 ms in the overview phases (all 5,000 units in view, at the zoom where
     they are icons), so it is negligible there. The weakest pairs of the placeholders
@@ -2356,3 +2712,13 @@ fixed, delete the entry in the same PR.
     adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
     original-audio side is done (PR #87, 28-10-2026): `ra_mapping.ron` maps every fight event by role except
     `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`, which have no Red Alert sound.
+32. **WP11.5b: the sound settings** (volume sliders, the Red Alert audio switch), to be built with the audio work in agreement
+    with it. The settings screen has the marked empty "Sound (WP11.5b)" page and the settings file ignores unknown fields, so
+    a later `sound:` section can be added without breaking files written now (`docs/rules/menus.md`).
+33. **Menus are mouse-driven** (WP11.5a): no keyboard or gamepad navigation, no tooltips, no confirmation for Quit or Restart,
+    Esc does not first cancel a chosen structure. Owner: Tijmen; each is a small follow-up on `menu.rs` and `menu_view.rs`.
+34. **The crowd cost of vision** (WP8.1, measured in the review of #104): with vision on, the pass costs +0.66 ms a tick at sight 5 and
+    +1.19 ms at sight 10 in `wander_5000` (5,000 wanderers that never stop; the tick is 1.2 ms without). It dominates the cost of
+    vision and scales with the units that change cell and the area of their disc. The next step if a crowd with a large sight ever
+    shows in a profile is to stamp only the difference of two discs one cell apart (about 2 x (2r + 1) cells instead of
+    2 x (2r + 1)^2). Nothing in a match shows it (`vision.md`, "Cost").

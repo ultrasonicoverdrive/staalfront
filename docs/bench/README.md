@@ -119,7 +119,7 @@ The simulation's checksum after every 100th tick is in `sim.checksums`. The head
 (`crates/sf_game/tests/bench_scene.rs`, no window, no GPU) pins them, so a run on any machine must show the same list for
 the ticks it reached:
 
-* **`sf_demo --bench --fight`** (M0c): the list `FIGHT` of that test, ending `0x568d257d092daa7b` at tick 1500;
+* **`sf_demo --bench --fight`** (M0c): the list `FIGHT` of that test, ending `0x2b829617a5151fdf` at tick 1500;
 * **`sf_demo --bench`** (the plain benchmark, as the game builds it today): the list `PLAIN`, ending
   `0x8e57352fc4bdec7b` at tick 1500.
 
@@ -137,6 +137,15 @@ ticks, as above.
 `PLAIN`'s value (`0x8e57352fc4bdec7b` at the time of writing), **not** at M0's `0x9e196a6ced2ef024`; that is expected.
 M0b and M0c are compared with M0 on `frame_ms`, `gpu_ms` and `sim.tick_ms`; the checksums only show that the run played
 the pinned world.
+
+**`FIGHT` re-pinned at WP6.7** (`0x568d257d092daa7b` to `0x2b829617a5151fdf` at tick 1500). Measured cause: two digests that are
+hashed every tick changed with the data: the weapon table's (section `W`), because the four structure weapons became turret
+weapons with the default arc, and the turret rates of the unit table (section `R`), because the defences got a `turret_rate`
+(`defences.md`). Run with the shipped `unit_defs.ron` and `weapon_defs.ron` of the base and the
+WP6.7 code the list is the old one at all 15 checkpoints; run with the new files the shots, hits and deaths of every
+hundred ticks (15 triples) and a hash of the position and hit points of every entity in the snapshot at tick 1500 are equal to the
+old run's (`4aaa05dc08dd05ab` in both), only the checksum differs. The crowd's 24 buildings are legacy structures with no
+weapons, so nothing in this scene is a defence. `PLAIN` did not move.
 
 **Re-pinning.** Any WP that moves the world's checksum (for example WP7.2, #78) re-pins `PLAIN` and `FIGHT` in
 `crates/sf_game/tests/bench_scene.rs` in its own PR, with a measured cause, and updates the end values quoted above in the

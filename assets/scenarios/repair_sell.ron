@@ -1,0 +1,77 @@
+// Repair and sale (WP6.6, docs/rules/repair_sell.md): a structure is damaged and repaired to full hit points with
+// exact money, a repair runs out of money in the middle and goes on when a sale pays, structures are sold for a
+// refund scaled by their hit points, and a player sells its last structure and is defeated.
+//
+// `unit_defs` names the FROZEN copy repair_sell_defs (the shipped definitions of the day, plus a small match file
+// of its own); the ore, harvest, storage, money, production, power and repair numbers are written out below, so
+// editing the shipped definitions or repair.ron never moves this checksum. The repair numbers are not the shipped
+// ones, so that a mixed-up field shows: 5 hit points per tick, a full repair costs 400 thousandths of the price,
+// a sale takes 60 ticks and pays back 700 thousandths at full hit points.
+//
+// Kinds: 0 construction_center, 1 power_plant (2 x 3, 600 hp, 300 credits), 2 refinery (3 x 4, 900 hp, 1200 credits),
+// 3 barracks (2 x 3, 700 hp, 400 credits), 19 light_tank. Slots: 0 the human's construction centre, 1 its power
+// plant, 2 its barracks, 3 its refinery, 4 the opponent's construction centre, 5 and 6 the two light tanks.
+//
+//   tick 1     two Veyran light tanks (slots 5 and 6) are spawned and ordered to shoot
+//   tick 300   both tanks are removed; the structures they shot have lost some of their hit points
+//   ...        (see tools/sf_headless/tests/repair_sell.rs for every tick and amount)
+Scenario(
+    name: "repair_sell",
+    seed: 393222,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("repair_sell_defs"),
+    match_file: Some("match.ron"),
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 600)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4)),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    repair: Some((hp_per_tick: 5, full_cost_permille: 400, sell_ticks: 60, refund_permille: 700)),
+    ticks: 800,
+    commands: [
+        (tick: 1, player: 1, command: SpawnUnit(kind: 19, owner: 1, cell: (12, 59))),
+        (tick: 2, player: 1, command: OrderAttack(ids: [Id(5, 0)], target: (1, 0))),
+        (tick: 3, player: 1, command: SpawnUnit(kind: 19, owner: 1, cell: (22, 71))),
+        (tick: 4, player: 1, command: OrderAttack(ids: [Id(6, 0)], target: (2, 0))),
+        (tick: 300, player: 1, command: Despawn(ids: [Id(5, 0), Id(6, 0)])),
+        (tick: 400, player: 1, command: Repair(structure: (1, 0), on: true)),
+        (tick: 400, player: 1, command: Sell(structure: (1, 0))),
+        (tick: 410, player: 0, command: Repair(structure: (1, 0), on: true)),
+        (tick: 480, player: 0, command: Sell(structure: (2, 0))),
+        (tick: 700, player: 1, command: Sell(structure: (4, 0))),
+    ],
+)

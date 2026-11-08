@@ -265,6 +265,11 @@ pub(crate) struct Mover {
 
 /// One tick of steering for `unit` walking toward `target`, which lies in the
 /// direction `wanted`.
+///
+/// `#[inline]`: without it the compiler stopped inlining this into
+/// `behavior::walk` once `harvest.rs` grew (WP7.5), about 3 percent more instructions on
+/// `wander_5000`.
+#[inline]
 pub(crate) fn steer(turning: &Turning, unit: &Mover, wanted: Facing, target: Vec2) -> Heading {
     let Mover {
         pos,

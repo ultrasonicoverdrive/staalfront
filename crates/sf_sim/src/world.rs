@@ -18,14 +18,19 @@ use crate::money::Money;
 use crate::movement::{Cost, Ground, MovementTable};
 use crate::orders::{self, GuardTarget, Order};
 use crate::ore::{Ore, OreRules};
+use crate::outcome::Outcome;
 use crate::path::{MIN_NODE_BUDGET, PathStats, Pathing, PlannedRoute, ReplanConfig, RouteView};
 use crate::placement::PlacementState;
+use crate::power::Power;
+use crate::production::Production;
 use crate::projectiles::ProjectileId;
+use crate::repair::RepairSell;
 use crate::snapshot::{EntityView, ProjectileView, Snapshot, TurretView};
 use crate::targeting::{self, Engagement, Targeting, TargetingConfig};
 use crate::terrain::{Cell, NO_CELL, Occupancy, Terrain, TerrainId};
 use crate::turret;
 use crate::units::{Footprint, UnitClass, UnitStats, UnitTable};
+use crate::vision::Vision;
 use crate::weapons::{self, Arsenal, Impact, Shot, WeaponTable, WeaponsError};
 
 /// The most slots a world will ever allocate. A `Spawn` beyond it is ignored.
@@ -171,6 +176,22 @@ pub enum ConfigError {
     /// The money rules were given without storage rules, twice, after the start, with a price per
     /// unit of ore outside 1 to 1000, a starting sum above a billion, or a player twice (WP7.4).
     Money,
+    /// The production rules were given twice, after the start, before the unit or building
+    /// table, with numbers out of bounds or a table that does not fit the unit and building
+    /// tables; or a unit or building table was given after them (WP6.5).
+    Production,
+    /// The power rules were given twice, after the start, before the unit or building table, after
+    /// the match rules, or with numbers out of bounds (WP6.4).
+    Power,
+    /// The repair and sale rules were given twice, after the start, before the unit or building
+    /// table, or with numbers out of bounds (WP6.6).
+    Repair,
+    /// The vision rules were given twice, after the start, with a sight above 64 cells, kinds out of
+    /// order or a kind the unit table does not have; or a unit table was given after them (WP8.1).
+    Vision,
+    /// The match rules were given twice, after the start, before the unit table, the weapon table
+    /// or the destruction settings; or one of those was given after them (WP7.6).
+    Match,
     /// The player factions were given to a world that has already started.
     PlayersAfterStart,
     /// A player faction is not exactly one faction bit, or a player is listed twice.
@@ -237,6 +258,28 @@ impl fmt::Display for ConfigError {
                 "the money rules must be given once, after the storage rules and before the world starts, \
                  with a price per unit of ore from 1 to 1000, at most a billion starting credits and each player once"
             }
+            ConfigError::Production => {
+                "the production rules must be given once, before the world starts, after the unit and building \
+                 tables, with a queue limit of 1 to 20, an exit radius of 1 to 8 and units, factories, \
+                 prerequisites and free units that the tables know"
+            }
+            ConfigError::Power => {
+                "the power rules must be given once, before the world starts, after the unit and building \
+                 tables and before the match rules, with the floor and the defence cutoff from 0 to 1000"
+            }
+            ConfigError::Repair => {
+                "the repair and sale rules must be given once, before the world starts, after the unit and \
+                 building tables, with 1 to 1000 hit points per tick, a full-repair cost of 0 to 1000 \
+                 thousandths of the price, 1 to 6000 sale ticks and a refund of 0 to 1000 thousandths"
+            }
+            ConfigError::Vision => {
+                "the vision rules must be given once, before the world starts, after the unit table, with \
+                 kinds the table has (ascending, each once) and a sight of at most 64 cells"
+            }
+            ConfigError::Match => {
+                "the match rules must be given once, last, before the world starts, after the unit table, the \
+                 weapon table and the destruction settings, with two to eight players, each once"
+            }
             ConfigError::Harvest => {
                 "the harvest rules must be given before the world starts, after the unit and building tables, \
                  with valid numbers and mobile harvester kinds"
@@ -285,6 +328,11 @@ pub struct StepReport {
     /// Structures that became complete in that tick (WP6.3); they are listed by
     /// [`World::completions`] until the next step.
     pub structures_completed: u32,
+    /// Production commands refused in that tick (WP6.5); listed by
+    /// [`World::production_rejections`] until the next step. Also counted in `commands_ignored`.
+    pub production_rejected: u32,
+    /// Units that left a factory in that tick (WP6.5); listed by [`World::produced`].
+    pub units_produced: u32,
 }
 
 /// The complete simulation state. See the crate documentation for the design.
@@ -339,6 +387,21 @@ pub struct World {
     /// The structures under construction that did not advance in the last tick for lack of money
     /// (WP7.4); replaced by every step, not hashed (it follows from the hashed state).
     pub(crate) stalled: Vec<EntityId>,
+    /// The queues of the factories, the rally points and the rules of production (WP6.5). `None`
+    /// for a world that was given no production rules.
+    pub(crate) production: Option<Box<Production>>,
+    /// The power rules and the totals of the last recount (WP6.4). `None` for a world that was given
+    /// none: nothing makes or uses power and the speed is always full.
+    pub(crate) power: Option<Power>,
+    /// The repair and sale rules and what the last step did with them (WP6.6). `None` for a world
+    /// that was given none: nothing is repaired or sold.
+    pub(crate) repair: Option<Box<RepairSell>>,
+    /// What each player sees and has seen (WP8.1). `None` for a world that was given no vision
+    /// rules: no pass, no section, everything counts as visible.
+    pub(crate) vision: Option<Box<Vision>>,
+    /// Who takes part in the match, who is defeated and who won (WP7.6). `None` for a world that was
+    /// given no match rules.
+    pub(crate) outcome: Option<Box<Outcome>>,
     /// Who is which faction, and the builds refused in the last tick (WP6.2).
     pub(crate) placement: PlacementState,
     /// The structures that became complete in the last tick (WP6.3); replaced by every step.
@@ -416,6 +479,17 @@ impl World {
         if self.harvest.is_some() {
             return Err(ConfigError::Harvest);
         }
+        if self.production.is_some() {
+            return Err(ConfigError::Production);
+        }
+        // The match rules read who is armed from the unit and weapon tables: they come last.
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
+        }
+        // The vision rules froze the sight of each table position (WP8.1).
+        if self.vision.is_some() {
+            return Err(ConfigError::Vision);
+        }
         self.units = units;
         self.crowd
             .set_tables(&self.units, &self.movement, self.map_size());
@@ -433,6 +507,9 @@ impl World {
     pub fn with_weapons(mut self, table: WeaponTable) -> Result<World, ConfigError> {
         if self.tick != Tick::ZERO || self.entities.len() != 0 || !self.queue.is_empty() {
             return Err(ConfigError::WeaponsAfterStart);
+        }
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
         }
         self.arsenal = Arsenal::new(table, &self.units).map_err(ConfigError::Weapons)?;
         Ok(self)
@@ -452,6 +529,9 @@ impl World {
         }
         if self.harvest.is_some() {
             return Err(ConfigError::Harvest);
+        }
+        if self.production.is_some() {
+            return Err(ConfigError::Production);
         }
         for b in table.iter() {
             let Some(unit) = self.units.get(b.kind) else {
@@ -682,6 +762,9 @@ impl World {
         {
             return Err(ConfigError::Destruction);
         }
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
+        }
         self.destruction.config = Some(config);
         Ok(self)
     }
@@ -751,6 +834,11 @@ impl World {
             harvest: None,
             money: None,
             stalled: Vec::new(),
+            production: None,
+            power: None,
+            repair: None,
+            vision: None,
+            outcome: None,
             placement: PlacementState::default(),
             completions: Vec::new(),
             targeting: Targeting::default(),
@@ -1392,9 +1480,19 @@ impl World {
         let mut executed: u32 = 0;
         let mut ignored: u32 = 0;
         self.placement.rejections.clear();
+        if let Some(p) = self.production.as_deref_mut() {
+            p.rejections.clear();
+        }
+        if let Some(r) = self.repair.as_deref_mut() {
+            r.rejections.clear();
+        }
         // The state first (WP6.3): structures under construction advance and the ones that
         // finish are recorded, so the commands of this tick already see them standing.
+        // Power (WP6.4): recounted from the state the last step left, before anything uses it.
+        self.refresh_power();
         self.advance_construction();
+        // Repair and sale (WP6.6): after construction, in slot order, before the commands.
+        self.advance_repair_sell();
         while let Some((player, command)) = self.queue.pop_due(tick) {
             if self.apply_from(player, command) {
                 executed = executed.saturating_add(1);
@@ -1402,6 +1500,11 @@ impl World {
                 ignored = ignored.saturating_add(1);
             }
         }
+
+        // Production (WP6.5): the queues pay and advance, finished units go out. After the
+        // commands (a unit queued this tick already gains its first progress) and before the
+        // harvesters and the movement, so a unit that came out walks to its rally point in this tick.
+        self.advance_production();
 
         // The ore grows back (WP7.1): after the commands of this tick, so a take and the
         // growth of the same cell in one tick are seen in that order.
@@ -1446,17 +1549,30 @@ impl World {
             (motion.pos_min, motion.pos_max),
             &mut self.pathing,
         );
+        // What each player sees from where the bodies ended (WP8.1); nothing reads it yet.
+        self.update_vision();
         // The units that choose their own targets look round, from where the bodies ended (WP5.4).
         let bounds = (motion.pos_min, motion.pos_max);
         let aim = self.targeting.config.filter(|_| !self.arsenal.is_empty());
+        // Whose defences have no power this tick (WP6.7); empty without power rules.
+        let unpowered: Vec<PlayerId> = self.power.as_ref().map_or_else(Vec::new, |p| {
+            p.totals
+                .iter()
+                .map(|&(player, _)| player)
+                .filter(|&player| !self.defences_powered(player))
+                .collect()
+        });
         if let Some(config) = aim {
             let cx = targeting::Context {
+                buildings: &self.buildings,
+                unpowered: &unpowered,
                 units: &self.units,
                 arsenal: &self.arsenal,
                 config,
                 tick,
                 bounds,
                 map: (self.config.width, self.config.height),
+                gate: targeting::Gate::of(self.vision.as_deref(), &self.occupancy),
             };
             self.targeting.update(&mut self.entities, &cx);
         }
@@ -1474,16 +1590,22 @@ impl World {
         );
         // What the weapons took to zero is destroyed now, after all the damage of the tick is in (WP5.5).
         self.reap(tick);
+        // Who is defeated and who has won, after the dead have gone (WP7.6).
+        self.evaluate_match(tick);
         // The units that were hurt turn on their attackers (WP5.4).
         if let Some(config) = aim {
             let mut attacks = std::mem::take(&mut self.arsenal.attacks);
             let cx = targeting::Context {
+                buildings: &self.buildings,
+                unpowered: &unpowered,
                 units: &self.units,
                 arsenal: &self.arsenal,
                 config,
                 tick,
                 bounds,
                 map: (self.config.width, self.config.height),
+                // Retaliation is always allowed: never gated (WP8.2a).
+                gate: None,
             };
             self.targeting
                 .return_fire(&mut self.entities, &cx, &mut attacks);
@@ -1514,6 +1636,8 @@ impl World {
             impacts: self.arsenal.impacts.len() as u32,
             placements_rejected: self.placement.rejections.len() as u32,
             structures_completed: self.completions.len() as u32,
+            production_rejected: self.production_rejections().len() as u32,
+            units_produced: self.produced().len() as u32,
         }
     }
 
@@ -1686,6 +1810,10 @@ impl World {
             );
         }
         self.entities.clear(i);
+        // Something left the world: the match, if there is one, looks again at the end of the tick.
+        if let Some(outcome) = self.outcome.as_deref_mut() {
+            outcome.dirty = true;
+        }
         if let Some(next) = self.entities.generation[i].checked_add(1) {
             self.entities.generation[i] = next;
             self.free.push(id.index());
@@ -1785,7 +1913,12 @@ impl World {
     /// its movement class cannot enter (WP4.1), and at the entity limit.
     /// The unit occupies no cell and starts idle, a mobile one with a random
     /// facing, an object with facing zero.
-    fn spawn_unit(&mut self, kind: Kind, pos: Vec2, owner: PlayerId) -> Option<EntityId> {
+    pub(crate) fn spawn_unit(
+        &mut self,
+        kind: Kind,
+        pos: Vec2,
+        owner: PlayerId,
+    ) -> Option<EntityId> {
         let def = self.units.index_of(kind)?;
         let stats = *self.units.at(def);
         if stats.class() == UnitClass::Structure {
@@ -1877,7 +2010,12 @@ impl World {
                 self.place_structure(kind, cell, owner).is_some()
             }
             // Needs to know who sent it: `World::apply_from` runs it (placement.rs).
-            Command::BuildStructure { .. } => false,
+            Command::BuildStructure { .. }
+            | Command::QueueUnit { .. }
+            | Command::CancelUnit { .. }
+            | Command::SetRally { .. }
+            | Command::Repair { .. }
+            | Command::Sell { .. } => false,
             Command::Despawn { id } => self.despawn(id),
             Command::Order { ids, order, queued } => {
                 let (pos_min, pos_max) = self.pos_range();
@@ -1970,8 +2108,10 @@ impl World {
             Command::AimTurret { ids, target } => {
                 let mut changed = false;
                 for id in ids {
+                    // A structure's turret target is the target it chose (WP6.7): not a command.
                     if let Some(i) = self.live_index(id)
                         && turret::has_turret(&self.entities, i, &self.units)
+                        && !self.is_immobile(i)
                     {
                         self.entities.turret_target[i] =
                             target.filter(|&t| t != id && self.live_index(t).is_some());

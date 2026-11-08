@@ -1,0 +1,66 @@
+// Defensive buildings (WP6.7, docs/rules/defences.md): standing, powered structures with weapons choose their
+// own targets, turn their turrets and fire; without power they are silent; a weaponless bunker does nothing.
+// Meridian (player 0) holds a base on a flat 64 by 64 map; Veyran (player 1) sends units in four waves.
+//
+// `unit_defs` names the FROZEN copy defences_defs (the shipped definitions of the day, with the turrets of
+// the four armed structures: defence_tower turret_rate 12, advanced_defences 8, automated_gun 16,
+// unmanned_artillery 6); the power numbers are written out below, so editing the shipped power.ron never moves
+// this checksum. Kinds: 1 power_plant (2 x 3, 600 hp, +100), 6 defence_tower (1 x 1, 600 hp, -20, range 6),
+// 7 advanced_defences (2 x 2, 800 hp, -40, range 7), 10 fortified_bunker (2 x 2, 1200 hp, no weapon, power 0),
+// 12 rifleman, 19 light_tank.
+//
+//   slot 0  defence_tower          player 0  cell (30, 30)
+//   slot 1  advanced_defences      player 0  cell (36, 30)    the tower and the emplacement use 60 of 100
+//   slot 2  fortified_bunker       player 0  cell (30, 36)
+//   slot 3  power_plant            player 0  cell (8, 50)     +100
+//   slot 4, 5  riflemen            player 1  cells (28, 33), (27, 32)   the first wave: in reach of the tower only
+//   slot 6  light_tank             player 1  cell (43, 33)              in reach of the emplacement only
+//   slot 7, 8, 9  light tanks      player 1  cells (7, 57), (9, 57), (11, 57)   ordered at tick 1 to shoot the plant
+//
+//   tick 0     everything stands; the defences are at full power (60 used of 100 made)
+//   (ticks)    the tower shoots the riflemen, the emplacement the tank; the three tanks shoot the plant; its output
+//              falls with its hit points and below 360 of 600 the defences have no power; it is destroyed
+//   tick 700   the second wave: three riflemen in reach of the tower (cells (28, 33), (27, 32), (29, 34)) and one in
+//              reach of the bunker only (cell (28, 38)); the defences are dark, so the tower is silent
+//   tick 900   Meridian places a new power plant on (20, 44), out of reach of the three tanks; the speed is full again from the next tick and the
+//              tower shoots the second wave
+Scenario(
+    name: "defences",
+    seed: 0x0006_0007,
+    map: (width: 64, height: 64),
+    unit_defs: Some("defences_defs"),
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    ticks: 1500,
+    commands: [
+        // --- the base ---
+        (tick: 0, command: PlaceStructure(kind: 6, owner: 0, cell: (30, 30))),
+        (tick: 0, command: PlaceStructure(kind: 7, owner: 0, cell: (36, 30))),
+        (tick: 0, command: PlaceStructure(kind: 10, owner: 0, cell: (30, 36))),
+        (tick: 0, command: PlaceStructure(kind: 1, owner: 0, cell: (8, 50))),
+
+        // --- the first wave ---
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (28, 33))),
+        (tick: 0, command: SpawnUnit(kind: 12, owner: 1, cell: (27, 32))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (43, 33))),
+
+        // --- the tanks that take the power away ---
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (7, 57))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (9, 57))),
+        (tick: 0, command: SpawnUnit(kind: 19, owner: 1, cell: (11, 57))),
+        (tick: 1, command: OrderAttack(ids: [Id(7, 0), Id(8, 0), Id(9, 0)], target: (3, 0))),
+
+        // --- the second wave, while the defences are dark ---
+        (tick: 700, command: SpawnUnit(kind: 12, owner: 1, cell: (28, 33))),
+        (tick: 700, command: SpawnUnit(kind: 12, owner: 1, cell: (27, 32))),
+        (tick: 700, command: SpawnUnit(kind: 12, owner: 1, cell: (29, 34))),
+        (tick: 700, command: SpawnUnit(kind: 12, owner: 1, cell: (28, 38))),
+
+        // --- a new plant ---
+        (tick: 900, command: PlaceStructure(kind: 1, owner: 0, cell: (20, 44))),
+    ],
+)

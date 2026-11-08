@@ -35,15 +35,20 @@
 //! ```
 
 use sf_data::harvest::HarvestSettings;
+use sf_data::match_def::MatchDef;
 use sf_data::money::MoneySettings;
 use sf_data::movement::MovementCosts;
 use sf_data::ore::OreSettings;
+use sf_data::power::PowerSettings;
+use sf_data::production::ProductionSettings;
+use sf_data::repair::RepairSettings;
 use sf_data::sim_settings::SimSettings;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{
     BuildingFunction as DataFunction, Projectile, Side as DataSide, SimBuildingDef, SimUnitDef,
     SimWeaponDef, TerrainCost, TurnMode, TurningDef, UnitDefs, WeaponMount,
 };
+use sf_data::vision::VisionSettings;
 use sf_sim::{
     ArmorTable, BuildingFunction, BuildingStats, BuildingTable, ClassCosts, Cost, Footprint, Kind,
     Loadout, Mount, MovementTable, ProjectileKind, TerrainDef, TerrainFlags, TerrainId,
@@ -322,6 +327,14 @@ pub fn harvest_rules(settings: &HarvestSettings) -> sf_sim::HarvestRules {
         mine_reach_tenths: settings.mine_reach_tenths,
         mine_lose_tenths: settings.mine_lose_tenths,
         dock_reach_tenths: settings.dock_reach_tenths,
+        travel_cost: settings.travel_cost,
+        queue_cost: settings.queue_cost,
+        switch_margin: settings.switch_margin,
+        recheck_period: settings.recheck_period,
+        queue_gap: settings.queue_gap,
+        queue_start: settings.queue_start,
+        queue_step: settings.queue_step,
+        queue_rows: settings.queue_rows,
     }
 }
 
@@ -364,6 +377,91 @@ pub fn harvester_kinds(defs: &UnitDefs) -> Vec<Kind> {
         .filter(|role| role.flags.harvests)
         .map(|role| Kind(role.kind))
         .collect()
+}
+
+/// The power rules of the world (WP6.4) from the settings of `power.ron`. To hand to
+/// [`World::with_power`](sf_sim::World::with_power), after the unit and building tables and
+/// before the match rules.
+pub fn power_rules(settings: &PowerSettings) -> sf_sim::PowerRules {
+    sf_sim::PowerRules {
+        shortage_floor_permille: settings.shortage_floor_permille,
+        defence_cutoff_permille: settings.defence_cutoff_permille,
+    }
+}
+
+/// A sight in cells as the simulation keeps it, in thousandths of a cell (rounded; the decimal of
+/// the definitions has three places, so this is exact for every shipped value).
+pub fn sight_milli(sight: sf_math::Fx) -> u32 {
+    let milli =
+        (sight.raw() * 1000 + (1 << (sf_math::fx::FRAC_BITS - 1))) >> sf_math::fx::FRAC_BITS;
+    milli.clamp(0, i64::from(sf_sim::MAX_SIGHT_MILLI)) as u32
+}
+
+/// The vision rules of the world (WP8.1): the `sight` of every role of `defs` and the sight of an
+/// entity without a table entry and the targeting gate from `vision.ron` (sharing is not in the file:
+/// no team exists yet). To hand to
+/// [`World::with_vision`](sf_sim::World::with_vision), after the unit table. The sight lives here
+/// and not in [`UnitStats`], so that the stats (written out by hand in many tests) stay as they are.
+pub fn vision_rules(settings: &VisionSettings, defs: &UnitDefs) -> sf_sim::VisionRules {
+    sf_sim::VisionRules::new(
+        settings.legacy_sight_cells * 1000,
+        defs.sim_units()
+            .iter()
+            .map(|role| (Kind(role.kind), sight_milli(role.sight)))
+            .collect(),
+    )
+    .with_acquire_needs_sight(settings.acquire_needs_sight)
+}
+
+/// The repair and sale rules of the world (WP6.6) from the settings of `repair.ron`. To hand to
+/// [`World::with_repair`](sf_sim::World::with_repair), after the unit and building tables.
+pub fn repair_rules(settings: &RepairSettings) -> sf_sim::RepairRules {
+    sf_sim::RepairRules {
+        hp_per_tick: settings.hp_per_tick,
+        full_cost_permille: settings.full_cost_permille,
+        sell_ticks: settings.sell_ticks,
+        refund_permille: settings.refund_permille,
+    }
+}
+
+/// The production rules of the world (WP6.5) from the settings of `production.ron`. To hand to
+/// [`World::with_production`](sf_sim::World::with_production) with [`production_table`].
+pub fn production_rules(settings: &ProductionSettings) -> sf_sim::ProductionRules {
+    sf_sim::ProductionRules {
+        queue_limit: settings.queue_limit,
+        exit_radius: settings.exit_radius,
+    }
+}
+
+/// What the factories can build (WP6.5): every role of `defs` with a price and a factory
+/// function (`produced_by`, derived from its category), with its cost, build ticks, factions and
+/// the structures it needs; and which structure comes with a free unit (the `comes_with` flag),
+/// ascending. To hand to [`World::with_production`](sf_sim::World::with_production) after the
+/// unit and building tables. Fails with the simulation's reason if the table is refused (the
+/// definitions' own checks rule that out for any definitions that loaded).
+pub fn production_table(defs: &UnitDefs) -> Result<sf_sim::ProductionTable, String> {
+    let builds = defs
+        .sim_units()
+        .iter()
+        .filter_map(|role| {
+            let factory = role.produced_by?;
+            let cost = role.cost?;
+            Some(sf_sim::UnitBuild {
+                kind: Kind(role.kind),
+                factory: building_function(factory),
+                cost,
+                build_ticks: role.build_ticks,
+                factions: role.factions,
+                requires: role.requires.iter().map(|&k| Kind(k)).collect(),
+            })
+        })
+        .collect();
+    let comes_with = defs
+        .sim_units()
+        .iter()
+        .filter_map(|role| Some((Kind(role.kind), Kind(role.flags.comes_with?))))
+        .collect();
+    sf_sim::ProductionTable::new(builds, comes_with).map_err(|e| e.to_string())
 }
 
 /// The collision settings from the settings of `sim.ron`, to hand to
@@ -442,6 +540,73 @@ pub fn terrain_defs(types: &TerrainTypes, costs: &MovementCosts) -> Vec<TerrainD
             },
         })
         .collect()
+}
+
+// ---- the match (WP7.6) ------------------------------------------------------------------------
+
+/// The players of a match file as the simulation's match rules (`sf_sim::outcome`): every player
+/// listed takes part. The error is the simulation's refusal in words.
+pub fn match_rules(def: &MatchDef) -> Result<sf_sim::MatchRules, String> {
+    let players: Vec<sf_sim::PlayerId> =
+        def.players.iter().map(|p| sf_sim::PlayerId(p.id)).collect();
+    sf_sim::MatchRules::new(&players).map_err(|e| format!("match rules refused: {e:?}"))
+}
+
+/// The faction bit of every player of a match file (`World::with_player_factions`), in the order of
+/// the file.
+pub fn match_factions(def: &MatchDef) -> Vec<(sf_sim::PlayerId, u8)> {
+    def.players
+        .iter()
+        .map(|p| (sf_sim::PlayerId(p.id), p.faction.bit()))
+        .collect()
+}
+
+/// The credits every player of a match file starts with (`World::with_money`), in the order of the
+/// file. A player who starts with nothing is listed with zero.
+pub fn match_credits(def: &MatchDef) -> Vec<(sf_sim::PlayerId, u64)> {
+    def.players
+        .iter()
+        .map(|p| (sf_sim::PlayerId(p.id), p.credits))
+        .collect()
+}
+
+/// The commands that put the starting objects of a match file in the world, for tick 0: a
+/// `PlaceStructure` for every structure (its footprint anchored on the cell) and a `SpawnUnit` for every
+/// unit (in the middle of the cell), player after player, object after object, in the order of the file.
+/// Each is sent by the player who owns the object. The roles are looked up in `defs`; the file is
+/// checked against them first ([`MatchDef::check`]), so an error here is a role that is not there.
+pub fn match_commands(
+    def: &MatchDef,
+    defs: &UnitDefs,
+) -> Result<Vec<(sf_sim::PlayerId, sf_sim::Command)>, String> {
+    let mut out = Vec::new();
+    for p in &def.players {
+        let owner = sf_sim::PlayerId(p.id);
+        for o in &p.objects {
+            let role = defs
+                .unit(&o.role)
+                .ok_or_else(|| format!("player {}: no role \"{}\"", p.id, o.role))?;
+            let kind = Kind(role.kind);
+            let command = if role.category == sf_data::units::Category::Structure {
+                sf_sim::Command::PlaceStructure {
+                    kind,
+                    cell: sf_sim::Cell::new(o.cell.0, o.cell.1),
+                    owner,
+                }
+            } else {
+                sf_sim::Command::SpawnUnit {
+                    kind,
+                    pos: sf_math::Vec2::new(
+                        sf_math::Fx::from_int(o.cell.0 as i32) + sf_math::Fx::HALF,
+                        sf_math::Fx::from_int(o.cell.1 as i32) + sf_math::Fx::HALF,
+                    ),
+                    owner,
+                }
+            };
+            out.push((owner, command));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

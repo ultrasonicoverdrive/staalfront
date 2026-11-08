@@ -1,0 +1,16 @@
+// Production (WP6.5, docs/rules/production.md): the two tuning numbers of the factory queues.
+// Read by sf_data::production; sf_bridge::production_rules hands them to the world
+// (World::with_production). What each unit costs and how long it takes is in unit_defs.ron
+// (`cost`, `build_seconds`); which factory builds it follows from its category (infantry from the
+// infantry factory, vehicles from the vehicle factory, vessels from the vessel factory); a unit may
+// list structures that must stand first in `requires`. Placeholders for the balance rounds of
+// phase 15 and the playtest of M1.
+(
+    // Most items in one factory's queue, the one being built included (1 to 20).
+    queue_limit: 5,
+    // How far, in cells (chessboard distance), from the cell next to the middle of the exit side a
+    // finished unit looks for a free spot: ring 0 is the exit cell itself, then rings of growing
+    // distance, each row by row from the north-west (1 to 8). If every cell in reach is blocked the
+    // unit waits inside and the queue holds. 4 cells is a square of 9 by 9 round the exit.
+    exit_radius: 4,
+)

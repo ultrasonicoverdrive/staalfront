@@ -1,0 +1,46 @@
+// How production is shown (WP6.5, docs/rules/production.md). Read by sf_data::production_look,
+// compiled into the game, checked when it is parsed. Presentation only: no checksum depends on it.
+//
+// Three things: the queue readout of the selected factory (a panel on the left edge of the window,
+// below the top bar), the progress bar under every factory that is building (the same place and
+// sizes as the construction bar), and the rally flag on the cell a factory sends its units to.
+// The sidebar of the finished game is WP11.1; this is the sandbox's readout. Colours sRGB, alpha
+// last. Sizes in logical pixels (the UI scale is applied on top).
+(
+    // The progress bar under a factory's front edge: `fill` while it builds.
+    bar: (
+        fill: (90, 200, 255, 235),
+        back: (10, 14, 20, 190),
+        height_px: 6,
+        min_width_px: 18,
+        max_width_px: 220,
+        gap_px: 4,
+    ),
+    // The fill of the bar while the factory waits (for money, or for a free spot at the exit).
+    waiting: (255, 110, 80, 245),
+    panel: (
+        // Size of a line of the panel, and its distance from the left edge and from the top.
+        width_px: 360,
+        line_px: 22,
+        margin_px: 6,
+        top_px: 100,
+        // Left padding of the text inside a line, and the size of the text.
+        pad_px: 10,
+        text_px: 15,
+    ),
+    // The colour of the text, of the item being built and of a factory that waits.
+    text: (225, 230, 240, 255),
+    accent: (120, 220, 255, 255),
+    warn: (255, 110, 80, 255),
+    // The rally flag: a pole and a flag standing on the middle of the cell. The flag of the
+    // selected factory has its own colour.
+    rally: (
+        pole: (235, 235, 240, 255),
+        flag: (90, 200, 255, 235),
+        flag_selected: (255, 220, 90, 245),
+        pole_height_px: 30,
+        pole_width_px: 2,
+        flag_width_px: 18,
+        flag_height_px: 11,
+    ),
+)

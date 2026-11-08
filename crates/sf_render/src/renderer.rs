@@ -570,6 +570,24 @@ impl Renderer {
         &self.present
     }
 
+    /// Change how the window presents (WP11.5a: vsync on or off in the settings) without making the
+    /// renderer again: the mode is chosen from what the surface supports as at the start
+    /// ([`Present::choose`]) and the surface is configured again. Returns the info of the mode now
+    /// in use. An offscreen renderer has no presenting; it is left alone.
+    pub fn set_present(&mut self, present: crate::gpu::Present) -> &PresentInfo {
+        if let Target::Window { surface, config } = &mut self.target {
+            let caps = surface.get_capabilities(&self.gpu.adapter);
+            let (mode, note) = present.choose(&caps.present_modes);
+            config.present_mode = mode;
+            surface.configure(&self.gpu.device, config);
+            self.present = PresentInfo {
+                mode: format!("{mode:?}"),
+                note,
+            };
+        }
+        &self.present
+    }
+
     /// Start timing the GPU side of every frame. Returns `false` when the
     /// device has no timestamp queries (the results then stay empty).
     pub fn enable_gpu_timing(&mut self) -> bool {
@@ -1041,9 +1059,43 @@ impl Renderer {
             return;
         }
         self.debug_view = view;
-        if let Some(t) = &self.terrain {
+        if let Some(t) = &mut self.terrain {
             t.write_debug_view(&self.gpu.queue, view);
         }
+    }
+
+    /// Shows the fog of war on the terrain (WP8.3): `texels` is the `Rg8` image of
+    /// [`crate::fog::texels`] (one texel per gameplay cell of the terrain, `size` cells), `shading` the
+    /// look as linear light. Call when what the player sees changed, not every frame. Returns false
+    /// (nothing changed) without terrain or when `size` is not the terrain's.
+    pub fn set_fog(
+        &mut self,
+        size: (u32, u32),
+        texels: &[u8],
+        shading: crate::terrain_gpu::FogShading,
+    ) -> bool {
+        match &mut self.terrain {
+            Some(t) => t.set_fog(&self.gpu.queue, size, texels, shading),
+            None => false,
+        }
+    }
+
+    /// Takes the fog of war off the terrain: it is drawn as it was before WP8.3 (a world without
+    /// vision rules, a new scene).
+    pub fn clear_fog(&mut self) {
+        if let Some(t) = &mut self.terrain {
+            t.clear_fog(&self.gpu.queue);
+        }
+    }
+
+    /// Whether the terrain shows the fog of war now.
+    pub fn fog_on(&self) -> bool {
+        self.terrain.as_ref().is_some_and(|t| t.fog_on())
+    }
+
+    /// The terrain's fog texture size in cells (what [`Renderer::set_fog`] takes); `None` without terrain.
+    pub fn fog_size(&self) -> Option<(u32, u32)> {
+        self.terrain.as_ref().map(|t| t.fog_size())
     }
 
     /// Give the cell grid overlay its map (WP2.4): terrain type and
@@ -1150,7 +1202,7 @@ impl Renderer {
             },
             config,
         ));
-        if let Some(t) = &self.terrain {
+        if let Some(t) = &mut self.terrain {
             t.write_debug_view(&self.gpu.queue, self.debug_view);
         }
     }

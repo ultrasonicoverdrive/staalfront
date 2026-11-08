@@ -1,0 +1,44 @@
+// How the end of a match is shown (WP7.6, docs/rules/match.md). Read by sf_data::match_look, compiled
+// into the game, checked when it is parsed. Presentation only: no checksum depends on it.
+//
+// When the match is decided a banner stands at the top middle of the window: the word for the local
+// player's result and, under it, when the match was decided. The game keeps running behind it (the
+// result never changes). Colours sRGB, alpha last. Sizes in logical pixels (the UI scale is applied on
+// top).
+(
+    banner: (
+        // Size of the banner, and its distance from the top edge of the window.
+        width_px: 460,
+        height_px: 118,
+        top_px: 96,
+        // Size of the big word and of the line under it, and the gap between the two.
+        title_px: 52,
+        detail_px: 18,
+        gap_px: 6,
+        // Width of the frame round the banner.
+        border_px: 3,
+    ),
+    // The local player won: the opponent is defeated.
+    victory: (
+        title: "Victory",
+        text: (150, 235, 140, 255),
+        back: (14, 44, 20, 232),
+        border: (110, 200, 100, 255),
+    ),
+    // The local player is defeated.
+    defeat: (
+        title: "Defeat",
+        text: (255, 130, 110, 255),
+        back: (52, 16, 14, 232),
+        border: (220, 90, 70, 255),
+    ),
+    // The last players fell in the same tick: nobody won.
+    draw: (
+        title: "Draw",
+        text: (235, 215, 140, 255),
+        back: (44, 38, 14, 232),
+        border: (210, 190, 100, 255),
+    ),
+    // The line under the word. `{time}` is the game time as minutes:seconds, `{tick}` the tick.
+    detail: "decided after {time} (tick {tick})",
+)

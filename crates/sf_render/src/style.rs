@@ -204,6 +204,25 @@ impl Style {
         style
     }
 
+    /// The same style with the first colours of the palette replaced (WP11.5a: the colour-blind safe
+    /// set of players). `colours` are `(name, sRGB)` for players `0..colours.len()`; the colours after
+    /// them (the wrecks' colour that [`Style::with_colour`] added) and everything else stay. Refused
+    /// when there are none, or more than the palette has.
+    pub fn with_palette(&self, colours: &[(String, [u8; 3])]) -> Result<Style, StyleError> {
+        if colours.is_empty() || colours.len() > self.linear.len() {
+            return Err(StyleError::Invalid(
+                "a replacement palette needs 1 colour up to the size of the palette",
+            ));
+        }
+        let mut style = self.clone();
+        for (i, (name, srgb)) in colours.iter().enumerate() {
+            style.names[i] = name.clone();
+            style.srgb[i] = *srgb;
+            style.linear[i] = srgb.map(srgb_to_linear);
+        }
+        Ok(style)
+    }
+
     /// The same palette, icon and level settings with other shapes (one per
     /// glTF model of a pack, WP1.10). The shapes get no placeholder level
     /// chains: their models bring their own.
@@ -349,6 +368,29 @@ pub fn srgb_to_linear(byte: u8) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// WP11.5a: another set of player colours goes over the first ones; the colour added after the
+    /// players (the wrecks') and the shapes stay, and a set that does not fit is refused.
+    #[test]
+    fn a_replacement_palette_replaces_the_players_and_keeps_the_rest() {
+        let base = Style::embedded().with_colour("wreck", [60, 60, 60]);
+        assert_eq!(base.color_count(), 5);
+        let two = [("a".to_owned(), [1, 2, 3]), ("b".to_owned(), [255, 0, 128])];
+        let s = base.with_palette(&two).unwrap();
+        assert_eq!((s.color_name(0), s.srgb(0)), ("a", [1, 2, 3]));
+        assert_eq!((s.color_name(1), s.srgb(1)), ("b", [255, 0, 128]));
+        assert_eq!(s.linear(1), [255u8, 0, 128].map(srgb_to_linear));
+        // The players after the replaced ones, the wreck colour and the shapes are untouched.
+        for p in 2..5 {
+            assert_eq!(s.srgb(p), base.srgb(p), "colour {p}");
+            assert_eq!(s.color_name(p), base.color_name(p));
+        }
+        assert_eq!(s.shapes(), base.shapes());
+        assert!(base.with_palette(&[]).is_err());
+        let six: Vec<_> = (0..6).map(|i| (format!("c{i}"), [i as u8; 3])).collect();
+        assert!(base.with_palette(&six).is_err());
+        assert!(base.with_palette(&six[..5]).is_ok());
+    }
 
     #[test]
     fn variants_follow_the_style_and_keep_the_chain_they_come_from() {

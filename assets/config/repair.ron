@@ -1,0 +1,20 @@
+// Repair and sale (WP6.6, docs/rules/repair_sell.md). Read by sf_data::repair; sf_bridge::repair_rules
+// hands the numbers to the world (World::with_repair). All four are placeholders for the balance
+// rounds of phase 15 and the playtest of M1; whole numbers only, no float and no tolerance anywhere.
+(
+    // Hit points a repairing structure gains per tick (1 to 1000). 3 per tick at 20 ticks a second
+    // is 60 hit points a second: a power plant of 600 hit points is whole again in ten seconds.
+    hp_per_tick: 3,
+    // What a repair from nothing to full hit points costs, in thousandths of the structure's
+    // price (0 to 1000). 250 means a quarter of the price for the whole of it; a repair of part of
+    // the damage costs that part, rounded down on the running total, so the ticks add up to
+    // exactly the cost of the gap. 0 makes repair free.
+    full_cost_permille: 250,
+    // Ticks a sale takes (1 to 6000). 100 is five seconds. The structure counts as gone from the
+    // first tick and is removed when the time is up.
+    sell_ticks: 100,
+    // The part of the price paid back for a structure at full hit points, in thousandths (0 to
+    // 1000). The refund is scaled by the hit points the structure has when the sale ends, rounded
+    // down: price * refund_permille * hp / (max_hp * 1000).
+    refund_permille: 500,
+)

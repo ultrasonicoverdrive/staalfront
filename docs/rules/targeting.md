@@ -54,8 +54,11 @@ decision to go somewhere; attack-move is the order for fighting on the way.
 | `AttackMove` | yes: it stops to fight and marches on after | no: it fires back only from where it is |
 | `Move`, `Attack`, or already engaged | no | no |
 
-Only mobile units choose. Structures take part when they can hold a target without an order, in the defence
-work package (WP6.7): a structure takes no order, and an `Order::Pursue` on one would make it walk.
+Only mobile units choose **by taking an order**. Since WP6.7 a standing structure with a weapon also chooses, but not
+through an order: a structure takes no order (every command that gives one is ignored for it, and `Order::Pursue` is
+never given to it, so nothing can make it walk), it holds its target as the `turret_target` of its turret, scans on the
+same cooldown with the same candidates, score and key, and keeps a target on the same terms
+([`defences.md`](defences.md)). It does not turn on an attacker (no return fire).
 
 ## A tick of choosing
 
@@ -140,6 +143,21 @@ and the old order begun again, when:
   minimum range of every weapon that hurts it (walking closer will not help; the unit goes back to its order).
 
 When an engagement ends and the cooldown has already run out, the unit looks round on that same tick.
+
+## The sight gate (WP8.2a, off by default)
+
+A world given vision rules (`vision.md`) with `acquire_needs_sight` set restricts what a scan may **pick**: a candidate counts only if its
+cell (a structure: any cell of its footprint) is `Visible` to the scanner's **owner** at the time of the scan, shared sight included. The
+check sits in `best_target`, after the weapon check, so it is the same for a unit's scan and a structure's ([`defences.md`](defences.md)).
+Everything else in this file stands:
+
+* **Return fire is not gated.** A unit that is hurt takes its attacker whether or not its owner sees it, and follows it within the
+  pursuit distance (`being_hit_from_the_fog_is_answered_and_an_attack_order_is_not_gated`: a tank hit by an artillery 9 cells away in the
+  shroud takes it at the tick the shell lands, tick 32).
+* **An explicit attack order is not gated, and stays until the target is gone** (the player's order wins; the interface will not offer
+  an unseen target, WP8.3 and WP8.4): in the same test the artillery of player 1 fires on its order at a tank it cannot see.
+* **A target already chosen is kept** by the checks above while it is valid, also when it steps into fog (the gate is on the pick).
+* With the flag off, or without vision rules, nothing differs from before; the shipped `vision.ron` and the match have it off.
 
 ## Return fire
 
@@ -289,11 +307,14 @@ WP5.6.
 
 ## Not here (and where it goes)
 
-* **Structures choosing targets** (defence towers, emplacements): WP6.7. A structure takes no order, so it
-  needs a target without one; the scan and the key are written so that it can use them.
+* **Structures choosing targets** (defence towers, emplacements): WP6.7, done, see [`defences.md`](defences.md): the scan
+  and the key are shared, the target is the structure's `turret_target` and not an order. Still not done for structures:
+  return fire, following, and garrisoning.
 * **Firing at the ground**, and backing away from a target inside the minimum range.
 * **Threat-based priorities** (shoot what is shooting at you first, focus fire, retreat): the AI of WP9.3 gives
   commands for those; here a unit prefers what its weapon does most to, and the nearest.
+* **Seeing before shooting** (WP8.2a): done, behind a switch that is **off** everywhere it ships: see "The sight gate" above and
+  [`vision.md`](vision.md). Not done: dropping a target that has been chosen when it steps into fog.
 * **Alliances and neutrals**: every other player is an enemy; `friendly_fire` and the choice of targets both
   mean "the same player".
 * **Switching to a better target**, and **returning to where an idle unit stood** after a chase.

@@ -49,6 +49,7 @@
 pub mod camera;
 pub mod cell_overlay;
 pub mod effects;
+pub mod fog;
 pub mod frustum;
 pub mod glb;
 pub mod gpu;
@@ -70,6 +71,7 @@ mod shader_watch;
 pub mod style;
 pub mod terrain;
 mod terrain_gpu;
+pub use terrain_gpu::FogShading;
 pub mod terrain_look;
 
 pub use camera::{Camera, CameraConfig, CameraInput};

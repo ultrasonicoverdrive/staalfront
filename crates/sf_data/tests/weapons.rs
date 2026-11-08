@@ -156,13 +156,15 @@ fn the_shipped_weapons_in_the_sims_units() {
     );
     assert_eq!(twin.damage, 30);
 
-    // The machine gun: four shots a tenth of a second apart, all round.
+    // The machine gun: four shots a tenth of a second apart, on the turret of its structure (WP6.7:
+    // it turns, so it has the default arc of every turret weapon, no longer all round).
     let gun = sim("automated_gun");
     assert_eq!(
         (gun.burst, gun.burst_delay_ticks, gun.reload_ticks),
         (4, 2, 20)
     );
-    assert_eq!(gun.fire_arc, 128);
+    assert_eq!(gun.mount, WeaponMount::Turret);
+    assert_eq!(gun.fire_arc, 8);
 
     // The howitzer: an arc, a minimum range, a splash and a height.
     let howitzer = sim("howitzer");

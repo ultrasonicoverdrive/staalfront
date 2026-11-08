@@ -41,6 +41,9 @@ Inputs:
 
 ## The decision table
 
+*Since WP11.1 (`sidebar.md`) the sidebar keeps out of the edge-scroll band, so row 1 and the sidebar never meet on a
+pixel. Row 1 still wins over a unit under the cursor inside the band (progress item 22): decided and kept, see there.*
+
 The first row that matches wins.
 
 | # | Situation | Cursor | A right-click gives |
@@ -66,6 +69,12 @@ Notes on the rows:
   never shows Attack: the enemy is only a place on the ground and rows 6 to 10 apply (a Move
   onto it). Structures never count as the armed unit: a selected defence tower does not turn a
   right-click into an attack, because structures take no orders.
+* **Hidden things (WP8.3).** In a world with vision rules a unit or structure of someone else that the local player does not see
+  (`selection::facts` answers `None` for it, `fog_look.md`) is not there for the cursor: rows 2 and 4 do not match over it (no Inspect,
+  no Attack), the cursor over it is the one of the ground under it, and a right-click is a move order to that ground. A move order onto
+  a shroud or fog cell is fine (the cell is not secret); a cell the picture cannot show an enemy on is just ground. A ghost (the last view
+  of a structure) is not an entity: the cursor over it is the ground's too. Tested in `fog_view/tests.rs`
+  (`selection_facts_and_the_inspected_unit_ignore_what_is_not_seen`).
 * **Row 4, neutral.** A neutral unit (the civilians, `owner` 2) is not attacked by a right-click;
   it is ground for the orders. It can be inspected by a left-click.
 * **Row 5, guard needs no modifier.** Right-click on a friendly unit means "stay with it", the
@@ -112,8 +121,28 @@ source of truth, so the picture, the click and the walk cannot disagree
 * **placeholders** `capture` (flag), `repair` (spanner), `enter` (door), `deploy` (box with
   arrows out), `harvest` (drop), `infiltrate` (eye), `sell` (coin), `place` (corner marks):
   their enum variants and pictures exist so that phases 6 to 10 only have to teach
-  `cursor_context` when to answer them. **Nothing returns them today and `order_for` gives no
-  order for them** (`placeholders_never_come_out_of_the_context_and_never_order`).
+  `cursor_context` when to answer them. **`cursor_context` returns none of them and `order_for` gives no
+  order for them** (`placeholders_never_come_out_of_the_context_and_never_order`); since WP6.6 `repair` and
+  `sell` are shown by the sidebar's modes (below), a path of their own that never goes through the decision
+  table, and `place` and the others are still waiting.
+
+## Modes (WP6.6)
+
+With the **Repair** or **Sell** mode of the sidebar on (`sidebar.md`, `repair_sell.md`) the cursor is decided by
+`repair_mode::cursor(snapshot, mode, hover entity, player)`, one source of truth for the picture and the click
+(`repair_mode::click`, which gives the command from the same `repair_mode::target`):
+
+| Over | Repair mode | Sell mode | A left click |
+|---|---|---|---|
+| an own structure that is hurt (repair) / any own standing structure (sell) | **repair** (spanner) | **sell** (coin) | `Repair { on: true }` / `Sell` |
+| an own structure that is repairing (repair mode) | **repair** | | `Repair { on: false }` |
+| an own structure at full hit points (repair mode), going up, being sold, or at 0 hit points | **no_go** | **no_go** | nothing |
+| an enemy or neutral structure, a unit, the ground, nothing | **no_go** | **no_go** | nothing |
+
+The scroll arrows of the screen edge still come first (row 1 of the table above). A right click or Esc leaves the mode, and the
+right click gives no order (`the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing`). The tests are in `repair_mode/tests.rs`
+(`nothing_else_is_offered_anything`, `a_hurt_own_structure_is_offered_a_repair_and_a_whole_one_is_not`, ...) and the pictures in
+`crates/sf_game/tests/repair_screenshot.rs`.
 
 The pictures are drawn by `tools/sf_icon_gen` (`cargo run -p sf_icon_gen -- --cursors`, the
 approach of the strategic icons: signed distance shapes, integer-exact arithmetic, the same
@@ -150,7 +179,9 @@ in the game).
 * **The system cursor is hidden over the game view only.** The runner hides it while the
   software cursor is drawn: the mouse is in the window and not over the HUD, the minimap or an
   F1 panel. Over those, and outside the window, the system cursor is back, and it is restored on
-  exit. If the pictures cannot be loaded the system cursor simply stays.
+  exit. **While a menu is open (WP11.5a, `menus.md`) the game cursor is not drawn at all and the
+  system cursor is back over the whole window**: the menu takes the pointer, nothing is hovered
+  and no order is given. If the pictures cannot be loaded the system cursor simply stays.
 * **Screen edges.** `Edges` (`sf_engine`) says which edge bands the mouse is in: only edge
   *triggers* of bindings count (a pan key does not), so a rebound or unbound edge shows no scroll
   cursor, and the cursor never says "scrolling" when the camera is not.

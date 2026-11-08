@@ -48,11 +48,14 @@ use crate::fx::{DrawnAnchors, FxFrame, FxPlayer};
 use crate::fx_sound::{FxSound, start_audio};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
+use crate::menu::{Change, Event, Live, Menu, Outcome, Preset};
 use crate::placement_view::{self, GhostFrame};
 use crate::population::Population;
 use crate::roster::{self, Roster};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
 use crate::selection_view::{self, FrameGeometry, SelectionView};
+use crate::settings::{Settings, Store};
+use crate::sidebar::Catalog;
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
 
@@ -209,6 +212,10 @@ pub struct Runner {
     cells_tick: Option<sf_sim::Tick>,
     /// The fill levels of the ore the picture shows (WP7.1).
     ore_view: crate::ore_view::OreView,
+    /// The structures of the other side last seen, drawn while their cells are fog (WP8.3).
+    ghosts: crate::fog_view::GhostBook,
+    /// The fog version the terrain and the minimap show (WP8.3, WP8.4): uploaded only when it changes.
+    fog_applied: crate::fog_view::FogApplied,
     /// When the last snapshot that showed the sim behind its clock arrived:
     /// the F1 panel keeps saying "sim behind" for a second after.
     behind_seen: Option<Instant>,
@@ -286,6 +293,12 @@ pub struct Runner {
     cursor_art: Option<CursorArt>,
     /// The structure chosen to build, if one is (WP6.2, [`crate::build_mode`]).
     build: BuildMode,
+    /// The Repair or Sell mode of the sidebar, if one is on (WP6.6, [`crate::repair_mode`]).
+    tool: Option<crate::repair_mode::ToolMode>,
+    /// What the sidebar offers (WP11.1); `None` in the scenes without a sidebar.
+    catalog: Option<Catalog>,
+    /// Which of the units the selected factory offers the queue key adds (WP6.5); wraps.
+    produce_pick: usize,
     /// How many refused builds the console has been told about.
     rejected_seen: u64,
     /// The last refused build in words, and when, for the line under the top bar.
@@ -293,6 +306,20 @@ pub struct Runner {
     /// The operating system's cursor is hidden right now (only ever while
     /// the software cursor is drawn).
     os_cursor_hidden: bool,
+    /// The menus (WP11.5a, [`crate::menu`]) and the player's settings they change. While one is open the
+    /// game behind it gets no input and the sim is held.
+    menu: Menu,
+    /// Where the settings are written when they change.
+    store: Store,
+    /// How the sim thread is made, kept so that a restart makes the very same one.
+    sim_config: SimConfig,
+    /// The sim thread was made and never started: the start menu stands over a scene nobody played.
+    pristine: bool,
+    /// The menus work in this scene: the sandbox and the match, not the crowd or a benchmark, where
+    /// Esc still ends the program.
+    menus: bool,
+    /// `--menu NAME`: open it once the sim has reached `--shots-tick` (for screenshots).
+    pending_menu: Option<Preset>,
     /// Set when the renderer could not start or a frame failed; `main` then
     /// exits with a non-zero code.
     failed: Arc<AtomicBool>,
@@ -300,6 +327,16 @@ pub struct Runner {
 
 /// The map of the options: a directory, or a generated square of cells.
 pub fn make_map(options: &Options) -> Result<Map, String> {
+    // A match brings its own map (WP7.6): the file names it.
+    if let Some(named) = &options.match_file {
+        if options.map_dir.is_some() {
+            eprintln!("sf_game: --map is ignored with --match: the match file names its map");
+        }
+        let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+        let def = crate::matchplay::load(&crate::matchplay::file_path(named.as_deref(), &assets))?;
+        let dir = crate::matchplay::map_dir(&def, &assets);
+        return Map::load(&dir).map_err(|e| format!("cannot load map {}: {e}", dir.display()));
+    }
     match &options.map_dir {
         Some(dir) => {
             Map::load(std::path::Path::new(dir)).map_err(|e| format!("cannot load map {dir}: {e}"))
@@ -326,6 +363,24 @@ impl Runner {
         pack: Option<LoadedPack>,
         failed: Arc<AtomicBool>,
     ) -> Result<Self, String> {
+        // The clock is held until the window and the renderer exist (`on_start`).
+        let sim = SimConfig {
+            start_paused: true,
+            extra_tick_time: options.sim_delay,
+            ..SimConfig::realtime()
+        };
+        Self::with_sim(options, map, lod, pack, failed, sim)
+    }
+
+    /// Like [`Runner::new`] with the sim thread made as `sim` says (the tests step it by hand).
+    pub fn with_sim(
+        options: Options,
+        map: Map,
+        lod: LodConfig,
+        pack: Option<LoadedPack>,
+        failed: Arc<AtomicBool>,
+        sim_config: SimConfig,
+    ) -> Result<Self, String> {
         let now = Instant::now();
         // B12: the sim counts cells, the map and everything drawn metres.
         let cells = map.size_in_cells();
@@ -343,6 +398,7 @@ impl Runner {
             }
             Scene::Crowd => crowd_scene(world, &options, pack.as_ref(), cells),
             Scene::Sandbox => sandbox_scene(world, &options, &style, &icons, cells),
+            Scene::Match => match_scene(world, &options, &style, &icons, cells)?,
         };
         let SceneStart {
             world,
@@ -351,6 +407,8 @@ impl Runner {
             buildings,
             skirmish_units,
             mut build,
+            focus,
+            catalog,
         } = start;
         if let Some(role) = &options.build
             && !build.choose(role)
@@ -366,18 +424,12 @@ impl Runner {
         // From here on the world belongs to the sim thread. Its clock stays
         // held until the window and the renderer exist (`on_start`), so the
         // units do not wander off while the GPU starts.
-        let sim = SimHandle::spawn(
-            world,
-            SimConfig {
-                start_paused: true,
-                extra_tick_time: options.sim_delay,
-                ..SimConfig::realtime()
-            },
-        )
-        .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
+        let sim = SimHandle::spawn(world, sim_config.clone())
+            .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
         let snap = sim.latest();
 
         let map_metres = (map.width() as f32, map.height() as f32);
+        crate::palette::remember_standard(&style);
         let mut instancer = Instancer::new(style.clone(), map_metres);
         apply_looks(&mut instancer, &looks, pack.as_ref(), style);
         if pack.is_some() || looks.roster().is_some_and(|r| r.pack().is_some()) {
@@ -412,25 +464,39 @@ impl Runner {
         let mut debug = DebugUi::new(camera_config);
         debug.set_visible(options.panels);
         debug.state.grid = options.grid;
+        debug.state.fog = options.fog;
         debug.state.lod_tint = options.lod_tint;
         debug.state.unit_display = options.unit_display;
         if let Some(zoom) = options.zoom {
             camera.set_zoom(zoom);
         }
-        if let Some((x, z)) = options.focus {
+        // A match opens on the local player's base unless told where to look (WP7.6).
+        if let Some((x, z)) = options.focus.or(focus) {
             camera.set_focus(DVec2::new(x, z));
         }
         let assets_root = sf_engine::AssetRoot::resolve().root().to_path_buf();
         let mut hud = Hud::new(&assets_root);
         // The game cursor belongs to the sandbox, the scene with selection and
         // orders; the benchmark and the engine demo's crowd show none.
-        let cursor_art = (options.scene == Scene::Sandbox && options.bench.is_none())
-            .then(|| CursorArt::load(&mut hud, &assets_root.join("ui/cursors")))
-            .and_then(|loaded| {
-                loaded
-                    .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
-                    .ok()
-            });
+        let cursor_art = (matches!(options.scene, Scene::Sandbox | Scene::Match)
+            && options.bench.is_none())
+        .then(|| CursorArt::load(&mut hud, &assets_root.join("ui/cursors")))
+        .and_then(|loaded| {
+            loaded
+                .map_err(|e| eprintln!("sf_game: cursors: {e}; keeping the system cursor"))
+                .ok()
+        });
+        // The menus (WP11.5a) belong to the scenes a player plays. The start menu stands over the
+        // scene it was started with, which is held until a choice is made.
+        let menus =
+            matches!(options.scene, Scene::Sandbox | Scene::Match) && options.bench.is_none();
+        let shipped = sf_engine::Bindings::load(&assets_root.join("config/input.ron"))
+            .unwrap_or_else(|_| sf_engine::Bindings::builtin());
+        let mut menu = Menu::new(Settings::default(), shipped);
+        if menus && options.menu {
+            menu.open_start();
+        }
+        let pending_menu = options.open_menu.filter(|p| menus && *p != Preset::Start);
         Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -454,6 +520,8 @@ impl Runner {
             ore_view: crate::ore_view::OreView::new(
                 &sf_render::terrain_look::TerrainLooks::embedded(),
             ),
+            ghosts: crate::fog_view::GhostBook::new(),
+            fog_applied: crate::fog_view::FogApplied::default(),
             behind_seen: None,
             instancer,
             fx: FxPlayer::embedded(),
@@ -494,10 +562,374 @@ impl Runner {
             cursor_art,
             os_cursor_hidden: false,
             build,
+            tool: None,
+            catalog,
             rejected_seen: 0,
+            produce_pick: 0,
             refusal: None,
+            menu,
+            store: Store::new(None),
+            sim_config,
+            pristine: true,
+            menus,
+            pending_menu,
             failed,
         })
+    }
+
+    /// The player's settings and where they are kept (WP11.5a). `Runner::new` starts with the
+    /// defaults and keeps nothing; `sf_game::run` reads the file first, because the window and the
+    /// present mode depend on it.
+    pub fn set_settings(&mut self, settings: Settings, store: Store) {
+        self.menu.set_settings(settings);
+        self.store = store;
+    }
+}
+
+/// The menus and the scene swap (WP11.5a, [`crate::menu`], `docs/rules/menus.md`).
+impl Runner {
+    /// The menu `--menu` asked for, once the sim has reached `--shots-tick`.
+    fn open_pending_menu(&mut self, ctx: &mut Context) {
+        if let Some(preset) = self.pending_menu
+            && self.snap.tick().0 >= self.options.shots_tick
+        {
+            self.pending_menu = None;
+            let out = self.menu.open_preset(preset);
+            self.apply_outcomes(ctx, out);
+        }
+    }
+
+    /// This frame's menu input: what the menu's buttons were clicked for, Esc, and the key a
+    /// rebinding waits for. In a scene without menus (the crowd, the benchmark) there is none.
+    fn handle_menu(&mut self, ctx: &mut Context) {
+        let mut events: Vec<Event> = self
+            .hud
+            .take_menu_actions()
+            .into_iter()
+            .map(Event::Click)
+            .collect();
+        if self.menus {
+            if self.menu.capturing().is_some() {
+                // Every key goes to the menu, Esc (which ends the wait) included.
+                events.extend(ctx.input().keys_pressed_now().into_iter().map(Event::Key));
+            } else if ctx.actions().pressed(Action::Quit) {
+                match EscKey::for_frame(self.menu.is_open(), self.tool.is_some()) {
+                    EscKey::ToMenu => events.push(Event::Escape),
+                    EscKey::EndMode => {
+                        // A Repair or Sell mode that is on ends first; the next Esc opens the menu (WP6.6).
+                        self.tool = None;
+                        println!("sidebar: mode off");
+                    }
+                    EscKey::OpenPause => {
+                        let out = self.menu.open_pause();
+                        self.apply_outcomes(ctx, out);
+                    }
+                }
+            }
+        }
+        for event in events {
+            let out = self.menu.handle(event);
+            self.apply_outcomes(ctx, out);
+        }
+    }
+
+    /// Does what the menu asked for.
+    fn apply_outcomes(&mut self, ctx: &mut Context, outcomes: Vec<Outcome>) {
+        for outcome in self.apply_to_game(outcomes) {
+            match outcome {
+                Outcome::Quit => {
+                    println!("quit requested");
+                    ctx.request_exit();
+                }
+                Outcome::Changed(change) => self.apply_change(ctx, change),
+                _ => {}
+            }
+        }
+    }
+
+    /// The part of what the menu asked for that needs no window: holding and releasing the sim, and
+    /// playing a scene from its start. Returns what is left for the window and the engine (leaving the
+    /// program, changed settings).
+    fn apply_to_game(&mut self, outcomes: Vec<Outcome>) -> Vec<Outcome> {
+        let mut left = Vec::new();
+        for outcome in outcomes {
+            match outcome {
+                Outcome::Paused | Outcome::MainMenu => {
+                    // Not a command: the sim thread simply steps no tick until it is released.
+                    self.sim.set_paused(true);
+                    self.pointer.cancel();
+                }
+                Outcome::Resumed => self.sim.set_paused(false),
+                Outcome::Restart => self.begin(None),
+                Outcome::StartMatch => self.begin(Some(Scene::Match)),
+                Outcome::StartSandbox => self.begin(Some(Scene::Sandbox)),
+                Outcome::Quit | Outcome::Changed(_) => left.push(outcome),
+            }
+        }
+        left
+    }
+
+    /// Plays `scene` from its start, or the same scene again (`None`): a new world from the same
+    /// match file or sandbox setup, so the same seed and the same starting objects. The sim of the
+    /// scene that was left is stopped and joined.
+    fn begin(&mut self, scene: Option<Scene>) {
+        // The scene under the start menu has not run a tick: playing it needs no new world.
+        if self.pristine && scene == Some(self.options.scene) {
+            self.sim.start();
+            self.pristine = false;
+            return;
+        }
+        let mut options = self.options.clone();
+        if let Some(scene) = scene {
+            options.scene = scene;
+            options.match_file = (scene == Scene::Match).then_some(None);
+        }
+        options.menu = false;
+        options.open_menu = None;
+        let made = make_map(&options).and_then(|map| {
+            // The pack goes into the new runner; if that fails it is gone (only `--models` gives
+            // one, and only a scene that cannot be built fails).
+            Runner::with_sim(
+                options.clone(),
+                map,
+                self.lod,
+                self.pack.take(),
+                self.failed.clone(),
+                self.sim_config.clone(),
+            )
+        });
+        match made {
+            Ok(fresh) => {
+                self.replace_scene(fresh, options);
+                self.attach_scene();
+                self.apply_look_settings();
+                self.sim.start();
+                self.pristine = false;
+            }
+            Err(e) => {
+                eprintln!("sf_game: cannot start: {e}");
+                self.menu.open_start();
+                self.sim.set_paused(true);
+            }
+        }
+    }
+
+    /// Takes everything that belongs to a scene from `fresh` (a runner built for it) and leaves the
+    /// window, the renderer, the audio, the HUD, the settings and the menu as they are. Every field of
+    /// the runner is named, so a field that WP adds later has to be put on one side or the other
+    /// before this compiles.
+    fn replace_scene(&mut self, fresh: Runner, options: Options) {
+        let Runner {
+            // The scene.
+            map,
+            ground,
+            cell_layer,
+            cells_tick,
+            ore_view,
+            ghosts,
+            fog_applied,
+            behind_seen,
+            instancer,
+            fx,
+            pack,
+            looks,
+            buildings,
+            cells,
+            units,
+            skirmish_units,
+            sim,
+            snap,
+            hovered,
+            selection,
+            pointer,
+            selection_view,
+            hits,
+            hover,
+            cursor_kind,
+            build,
+            tool,
+            catalog,
+            produce_pick,
+            rejected_seen,
+            refusal,
+            camera,
+            // The shell.
+            started: _,
+            report_at: _,
+            ticks: _,
+            frames: _,
+            exit_after: _,
+            renderer: _,
+            icons: _,
+            audio: _,
+            ra_play_error: _,
+            hud: _,
+            fps_shown: _,
+            lod: _,
+            fx_sound: _,
+            music_load_logged: _,
+            stats: _,
+            terrain: _,
+            draw_calls: _,
+            frame_ms: _,
+            build_ms: _,
+            pick_ms: _,
+            upload_ms: _,
+            render_ms: _,
+            tick_ms: _,
+            last_frame: _,
+            auto_zoom: _,
+            unit_view: _,
+            hover_at: _,
+            debug: _,
+            viewport: _,
+            options: _,
+            bench: _,
+            shots: _,
+            sim_micros_seen: _,
+            cursor_art: _,
+            os_cursor_hidden: _,
+            menu: _,
+            store: _,
+            sim_config: _,
+            pristine: _,
+            menus: _,
+            pending_menu: _,
+            failed: _,
+        } = fresh;
+        self.map = map;
+        self.ground = ground;
+        self.cell_layer = cell_layer;
+        self.cells_tick = cells_tick;
+        self.ore_view = ore_view;
+        // A new game remembers no ghosts and has shown no fog yet (WP8.3).
+        self.ghosts = ghosts;
+        self.fog_applied = fog_applied;
+        self.behind_seen = behind_seen;
+        self.instancer = instancer;
+        self.fx = fx;
+        self.pack = pack;
+        self.looks = looks;
+        self.buildings = buildings;
+        self.cells = cells;
+        self.units = units;
+        self.skirmish_units = skirmish_units;
+        // The old sim thread is stopped and joined as its handle is dropped.
+        self.sim = sim;
+        self.snap = snap;
+        self.hovered = hovered;
+        self.selection = selection;
+        self.pointer = pointer;
+        self.selection_view = selection_view;
+        self.hits = hits;
+        self.hover = hover;
+        self.cursor_kind = cursor_kind;
+        self.build = build;
+        self.tool = tool;
+        self.catalog = catalog;
+        self.produce_pick = produce_pick;
+        self.rejected_seen = rejected_seen;
+        self.refusal = refusal;
+        self.camera = camera;
+        self.camera.set_viewport(self.viewport.0, self.viewport.1);
+        self.options = options;
+        // A new game: nothing has been counted, played or heard yet.
+        self.sim_micros_seen = 0;
+        self.ticks = 0;
+        self.fx_sound.reset();
+    }
+
+    /// The landmarks the scene shows on the ground (a grid of pillars and a few blocks, development
+    /// scenery). A world with vision rules has none (WP8.3): they would stand out of the shroud.
+    fn scene_markers(&self) -> Vec<sf_render::scene::SceneObject> {
+        if self.snap.fog_version().is_some() {
+            return Vec::new();
+        }
+        let (ground, map) = (&self.ground, &self.map);
+        world_markers(map.width().min(map.height()), |x, z| {
+            ground.height(f64::from(x), f64::from(z)) as f32
+        })
+    }
+
+    /// Gives the renderer and the minimap the scene that was just swapped in (the same steps as
+    /// `on_start` takes for the first one).
+    fn attach_scene(&mut self) {
+        let Some(mut renderer) = self.renderer.take() else {
+            return;
+        };
+        renderer.set_terrain(&self.map);
+        renderer.set_terrain_lod(self.lod);
+        if let Some(layer) = self.cell_layer.take() {
+            renderer.set_cell_layer(layer);
+        }
+        renderer.set_scene(&self.scene_markers());
+        if self.options.reserve {
+            renderer.reserve_units(&self.instancer);
+        }
+        self.hud.rebake_minimap(&renderer, &self.map);
+        self.renderer = Some(renderer);
+        self.ore_view.forget();
+        self.fog_applied.forget();
+        self.sync_fog();
+        self.show_ore();
+    }
+
+    /// The UI scale and the player colours of the settings, for a scene that was just made and at the start.
+    fn apply_look_settings(&mut self) {
+        let settings = self.menu.settings();
+        let (scale, choice) = (settings.ui_scale, settings.palette);
+        self.hud.set_user_scale(scale);
+        self.apply_palette(choice, false);
+    }
+
+    /// Puts the player colours of `choice` on the units, the icons and the minimap. The standard set
+    /// is what the style has: it is put back only when `restore` (the player came back from the
+    /// other set), not at the start, so an edited `units.ron` keeps its colours.
+    fn apply_palette(&mut self, choice: crate::settings::PaletteChoice, restore: bool) {
+        let colours = match crate::palette::player_colours(choice) {
+            Some(colours) => Some(colours),
+            None if restore => Some(crate::palette::standard_colours()),
+            None => None,
+        };
+        if let Some(colours) = colours
+            && let Err(e) = self.instancer.set_palette(&colours)
+        {
+            eprintln!("sf_game: player colours: {e}");
+        }
+        self.hud
+            .set_owner_dots(crate::palette::minimap_dots(choice));
+    }
+
+    /// A setting changed in the menu: apply it to the window, the engine or the picture, and write the
+    /// settings.
+    fn apply_change(&mut self, ctx: &mut Context, change: Change) {
+        use crate::settings::WindowMode;
+        let settings = self.menu.settings().clone();
+        match change {
+            Change::Window => ctx.set_fullscreen(settings.window == WindowMode::Borderless),
+            Change::FrameCap => ctx.set_frame_cap(settings.frame_cap),
+            Change::Vsync => {
+                if let Some(renderer) = &mut self.renderer {
+                    let present = if settings.vsync {
+                        sf_render::Present::Vsync
+                    } else {
+                        sf_render::Present::Uncapped
+                    };
+                    let info = renderer.set_present(present);
+                    println!(
+                        "present: {}{}",
+                        info.mode,
+                        info.note
+                            .as_ref()
+                            .map_or(String::new(), |n| format!(", NOTE: {n}"))
+                    );
+                }
+            }
+            Change::UiScale => self.hud.set_user_scale(settings.ui_scale),
+            Change::Palette => self.apply_palette(settings.palette, true),
+            Change::Keys => ctx.set_bindings(settings.effective_bindings(self.menu.shipped())),
+        }
+        self.store.save(&settings);
     }
 }
 
@@ -568,7 +1000,9 @@ pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
 }
 
 /// Everything the instancer draws for a snapshot: the entities, then the wrecks and the rubble (WP5.5),
-/// which are numbered from the first slot no entity has.
+/// which are numbered from the first slot no entity has. In a world with vision rules (WP8.3, WP8.4) an
+/// entity the local player does not see is left out, and so is a wreck on a cell it does not see: the
+/// instancer then neither draws, iconises nor picks it. In a world without them nothing is left out.
 pub fn motions_of<'a>(
     looks: &'a Looks,
     snap: &'a SimSnapshot,
@@ -576,13 +1010,26 @@ pub fn motions_of<'a>(
     let first = crate::looks::first_wreck_slot(snap);
     snap.views()
         .iter()
-        .map(move |v| motion_of(looks, snap, v))
+        .enumerate()
+        .filter(move |&(i, _)| snap.view_shown(i))
+        .map(move |(_, v)| motion_of(looks, snap, v))
         .chain(
             snap.wrecks()
                 .iter()
                 .enumerate()
+                .filter(move |&(_, w)| snap.wreck_shown(w))
                 .filter_map(move |(n, w)| looks.wreck_motion(w, first + n as u32)),
         )
+}
+
+/// [`motions_of`] and then the ghosts of structures last seen (WP8.3), numbered after the wrecks.
+pub fn scene_motions<'a>(
+    looks: &'a Looks,
+    snap: &'a SimSnapshot,
+    ghosts: &'a crate::fog_view::GhostBook,
+) -> impl Iterator<Item = Motion> + 'a {
+    let first = crate::looks::first_wreck_slot(snap) + snap.wrecks().len() as u32;
+    motions_of(looks, snap).chain(ghosts.motions(snap, first))
 }
 
 impl Runner {
@@ -669,8 +1116,7 @@ impl Runner {
         let now = self.now_ms();
         let scale = self.hud.scale();
         if actions.pressed(Action::SelectClick)
-            && !ui_busy
-            && !self.build.is_active()
+            && select_press_starts_selection(ui_busy, self.build.is_active(), self.tool.is_some())
             && let Some(at) = cursor
         {
             self.pointer.press(at);
@@ -761,6 +1207,19 @@ impl Runner {
             &self.hover,
             Modifiers::from_actions(ctx.actions()),
         );
+        // A mode of the sidebar shows what a click will do (WP6.6): the spanner or the coin over a
+        // structure it can act on, the forbidden sign elsewhere; the scroll arrows of the screen
+        // edge still win, as in every row of `cursor.md`.
+        if let Some(mode) = self.tool
+            && cursor::scroll_cursor(self.hover.edges).is_none()
+        {
+            self.cursor_kind = crate::repair_mode::cursor(
+                &self.snap,
+                mode,
+                self.hover.entity,
+                commands::LOCAL_PLAYER,
+            );
+        }
         let drawn = match (&self.cursor_art, at) {
             (Some(art), Some(pos)) => {
                 self.hud
@@ -834,6 +1293,32 @@ impl Runner {
         (cx < self.cells.0 && cy < self.cells.1).then(|| sf_sim::Cell::new(cx, cy))
     }
 
+    /// The Repair and Sell modes (WP6.6, [`crate::repair_mode`]): with a mode on, the select button
+    /// sends the command for the structure under the cursor (the simulation checks it again at its
+    /// tick) and the order button leaves the mode. The mode stays on after a click, so several
+    /// structures can be done one after the other; Esc leaves it too (`handle_menu`).
+    fn handle_tool(&mut self, ctx: &Context) {
+        let Some(mode) = self.tool else { return };
+        if self.hud.pointer_over_ui() || self.debug.pointer_over_panel() {
+            return;
+        }
+        let actions = ctx.actions();
+        if actions.pressed(Action::OrderMove) {
+            self.tool = None;
+            println!("sidebar: mode off");
+        } else if actions.pressed(Action::SelectClick)
+            && let Some(command) = crate::repair_mode::click(
+                &self.snap,
+                mode,
+                self.hover.entity,
+                commands::LOCAL_PLAYER,
+            )
+        {
+            println!("sidebar: {command:?}");
+            commands::issue(&self.sim, command);
+        }
+    }
+
     /// Building (WP6.2, [`crate::build_mode`]): B chooses the next structure, the select
     /// button places the chosen one on the ghost's cell, the order button puts it away; and
     /// the sim thread is told which place the ghost is on, so that its answer comes back in the
@@ -891,6 +1376,81 @@ impl Runner {
         }
     }
 
+    /// The sidebar of this frame (WP11.1, [`crate::sidebar`]): what the shown tab offers the local
+    /// player, read from the snapshot. `None` in the scenes without one.
+    fn sidebar_model(&self) -> Option<crate::sidebar::SidebarModel> {
+        let catalog = self.catalog.as_ref()?;
+        let player = commands::LOCAL_PLAYER;
+        let sit =
+            crate::sidebar::Situation::read(&self.snap, player, catalog, self.selection.ids());
+        let model = crate::sidebar::model(
+            catalog,
+            &sit,
+            self.hud.sidebar_tab(),
+            self.build.chosen().map(|c| c.kind),
+            crate::sidebar::power_reading(&self.snap, player),
+            crate::sidebar_view::shipped_look(),
+        );
+        // The Repair and Sell buttons are live only in a world with repair and sale rules (WP6.6).
+        Some(if self.snap.has_repair() {
+            model.with_tools(self.tool)
+        } else {
+            model
+        })
+    }
+
+    /// What the clicks on the sidebar asked for (WP11.1): choosing a structure starts the build mode
+    /// of WP6.2 (its own left click then sends `BuildStructure`), the other buttons put it away,
+    /// queue a unit or take one out. They send the commands of WP6.5; the simulation checks each
+    /// again at its tick.
+    fn handle_sidebar(&mut self) {
+        use crate::sidebar::Action;
+        for action in self.hud.take_sidebar_actions() {
+            match action {
+                Action::ToggleMode(mode) => {
+                    // One mode at a time, and not together with a structure chosen to build.
+                    self.tool = if self.tool == Some(mode) {
+                        None
+                    } else {
+                        Some(mode)
+                    };
+                    if self.tool.is_some() {
+                        self.build.cancel();
+                    }
+                    match self.tool {
+                        Some(m) => println!(
+                            "sidebar: {m:?} mode (left click on a structure, right click leaves)"
+                        ),
+                        None => println!("sidebar: mode off"),
+                    }
+                }
+                Action::LeaveMode => self.tool = None,
+                Action::ChooseStructure(kind) => {
+                    self.tool = None;
+                    if self.build.choose_kind(kind) {
+                        println!(
+                            "sidebar: build {} (left click places it)",
+                            self.build.name_of(kind)
+                        );
+                    }
+                }
+                Action::PutAway => self.build.cancel(),
+                Action::Send(command) => {
+                    match &command {
+                        sf_sim::Command::QueueUnit { kind, .. } => {
+                            println!("sidebar: queue {}", self.build.name_of(*kind));
+                        }
+                        sf_sim::Command::CancelUnit { index, .. } => {
+                            println!("sidebar: cancel the unit in place {index}");
+                        }
+                        _ => {}
+                    }
+                    commands::issue(&self.sim, command);
+                }
+            }
+        }
+    }
+
     /// The credits of the local player and whether one of its builds waits for them (WP7.4).
     fn money_hud(&self) -> Option<crate::money_view::MoneyHud> {
         let player = commands::LOCAL_PLAYER;
@@ -903,6 +1463,13 @@ impl Runner {
     /// The second line of the top bar: the chosen structure and the verdict of the ghost, or the
     /// last refusal for a few seconds.
     fn build_line(&self, now: Instant) -> Option<String> {
+        if let Some(mode) = self.tool {
+            let look = crate::repair_view::shipped_look();
+            return Some(match mode {
+                crate::repair_mode::ToolMode::Repair => look.hint_repair.clone(),
+                crate::repair_mode::ToolMode::Sell => look.hint_sell.clone(),
+            });
+        }
         let chosen = self.build.chosen()?;
         let name = self.build.name_of(chosen.kind);
         if let Some((words, at)) = &self.refusal
@@ -958,6 +1525,56 @@ impl Runner {
         construction_view::draw_for(&mut layer, &frame, &terrain, &snap, &self.looks);
     }
 
+    /// The repair signs and the sale bars (WP6.6), from the snapshot's state.
+    fn draw_repair_marks(&mut self) {
+        if self.snap.repairs().is_empty() && self.snap.sales().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        crate::repair_view::draw(
+            &mut layer,
+            &frame,
+            &terrain,
+            &snap,
+            crate::repair_view::shipped_look(),
+        );
+    }
+
+    /// The debug view of shroud and fog (WP8.1), from the snapshot's bitsets of the local player.
+    /// Off unless the checkbox of the F1 panel or `--debug-fog` asks for it, and drawing nothing in a
+    /// world without vision rules.
+    fn draw_fog_debug(&mut self) {
+        if !self.debug.state.fog || self.snap.fog_version().is_none() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        crate::vision_view::draw_debug(
+            &mut layer,
+            &frame,
+            &terrain,
+            &snap,
+            crate::vision_view::shipped_look(),
+        );
+    }
+
     /// The fill bars of the structures that store ore (WP7.3), from the snapshot's state.
     fn draw_storage_bars(&mut self) {
         if self.snap.stores().is_empty() {
@@ -979,6 +1596,111 @@ impl Runner {
             &terrain,
             &snap,
             crate::storage_view::shipped_look(),
+        );
+    }
+
+    /// The units the selected factory offers the local player, ascending by kind.
+    fn production_menu(&self, function: sf_sim::BuildingFunction) -> Vec<sf_sim::Kind> {
+        self.snap
+            .menu()
+            .units_for(function, sf_data::units::Faction::Meridian.bit())
+    }
+
+    /// Production by key (WP6.5, [`crate::production_view`]): with a factory selected, U adds
+    /// the unit on offer to its queue, I picks the next unit on offer, O takes the last one out
+    /// and G sets the rally point to the cell under the cursor. The simulation checks every one
+    /// again and says a refusal on the console.
+    fn handle_production(&mut self, ctx: &Context) {
+        let Some((factory, function)) =
+            crate::production_view::selected_factory(&self.snap, &self.selection)
+        else {
+            return;
+        };
+        let actions = ctx.actions();
+        let menu = self.production_menu(function);
+        if actions.pressed(Action::ProduceCycle) && !menu.is_empty() {
+            self.produce_pick = (self.produce_pick + 1) % menu.len();
+        }
+        let pick = crate::production_view::menu_pick(&menu, self.produce_pick);
+        if actions.pressed(Action::ProduceQueue)
+            && let Some(kind) = pick
+        {
+            println!("production: queue {}", self.build.name_of(kind));
+            commands::issue(&self.sim, sf_sim::Command::QueueUnit { factory, kind });
+        }
+        if actions.pressed(Action::ProduceCancel)
+            && let Some(view) = self.snap.factory_of(factory)
+            && let Some(last) = view.queue.len().checked_sub(1)
+        {
+            commands::issue(
+                &self.sim,
+                sf_sim::Command::CancelUnit {
+                    factory,
+                    index: u8::try_from(last).unwrap_or(u8::MAX),
+                },
+            );
+        }
+        if actions.pressed(Action::RallySet) {
+            let cursor = self
+                .hover_at
+                .or_else(|| ctx.input().cursor().map(|(x, y)| (x as f32, y as f32)));
+            if let Some(cell) = self.cell_under(cursor) {
+                commands::issue(
+                    &self.sim,
+                    sf_sim::Command::SetRally {
+                        factory,
+                        cell: Some(cell),
+                    },
+                );
+            }
+        }
+    }
+
+    /// The lines of the queue readout of the selected factory (WP6.5).
+    fn production_lines(&self) -> Vec<(String, crate::production_view::Tone)> {
+        let Some((id, function)) =
+            crate::production_view::selected_factory(&self.snap, &self.selection)
+        else {
+            return Vec::new();
+        };
+        let menu = self.production_menu(function);
+        let next = crate::production_view::menu_pick(&menu, self.produce_pick).and_then(|k| {
+            let (cost, ticks) = self.snap.menu().price_of(k)?;
+            Some((self.build.name_of(k), cost, ticks))
+        });
+        let title = self
+            .snap
+            .get(id)
+            .map_or_else(String::new, |v| self.build.name_of(v.kind));
+        crate::production_view::panel_lines(
+            &title,
+            self.snap.factory_of(id),
+            next.as_ref().map(|(n, c, t)| (n.as_str(), *c, *t)),
+            &|k| self.build.name_of(k),
+        )
+    }
+
+    /// The progress bars under the factories and the rally flags (WP6.5).
+    fn draw_production(&mut self) {
+        if self.snap.factories().is_empty() {
+            return;
+        }
+        let snap = Arc::clone(&self.snap);
+        let (width, height) = self.viewport;
+        let frame = GhostFrame {
+            view_proj: self.camera.view_proj(),
+            viewport: [width as f32, height as f32],
+            ui_scale: self.hud.scale(),
+        };
+        let selected =
+            crate::production_view::selected_factory(&snap, &self.selection).map(|(id, _)| id);
+        let ground = &self.ground;
+        let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+        let mut layer = self.hud.world_layer();
+        let look = crate::production_view::shipped_look();
+        crate::production_view::draw_bars(&mut layer, &frame, &terrain, &snap, look);
+        crate::production_view::draw_rally_flags(
+            &mut layer, &frame, &terrain, &snap, selected, look,
         );
     }
 
@@ -1046,10 +1768,43 @@ impl Runner {
         // Once per tick the fixed-point positions (cells) are converted to f32
         // metres and bucketed by map tile.
         let started = Instant::now();
+        self.ghosts.update(&self.snap, &self.looks);
         let looks = &self.looks;
-        self.instancer.update_tick(motions_of(looks, &self.snap));
+        self.instancer
+            .update_tick(scene_motions(looks, &self.snap, &self.ghosts));
         self.tick_ms.push(started.elapsed());
+        self.sync_fog();
         self.show_ore();
+    }
+
+    /// Gives the terrain and the minimap the fog of the newest snapshot when its version is not the one
+    /// they show (WP8.3, WP8.4), and takes it off when the world has no vision rules. Nothing happens
+    /// before the renderer exists, and a snapshot of the version already shown costs one comparison.
+    fn sync_fog(&mut self) {
+        let Some(renderer) = &mut self.renderer else {
+            return;
+        };
+        let look = crate::fog_view::shipped_look();
+        let current = self.snap.fog_version();
+        let (w, h) = self.snap.map_size();
+        let (visible, explored) = self.snap.fog_words();
+        crate::fog_view::sync_terrain(renderer, &self.snap, &mut self.fog_applied.terrain);
+        match crate::fog_view::fog_step(self.fog_applied.minimap, current) {
+            crate::fog_view::FogStep::Keep => {}
+            crate::fog_view::FogStep::Upload(v) => {
+                let states = sf_ui::fog_states(w, h, visible, explored);
+                self.hud.set_minimap_fog(
+                    renderer,
+                    &self.map,
+                    Some((&states, crate::fog_view::minimap_fog_of(look))),
+                );
+                self.fog_applied.minimap = Some(v);
+            }
+            crate::fog_view::FogStep::Clear => {
+                self.hud.set_minimap_fog(renderer, &self.map, None);
+                self.fog_applied.minimap = None;
+            }
+        }
     }
 
     /// Draw the ore cells whose fill level changed, on the terrain and on the minimap (WP7.1).
@@ -1372,8 +2127,12 @@ impl Runner {
             .map(placeholder_style);
         match result {
             Ok(style) => {
+                crate::palette::remember_standard(&style);
                 // Keep the models; take the new palette and settings.
                 apply_looks(&mut self.instancer, &self.looks, self.pack.as_ref(), style);
+                // The player's own set of colours goes back over the new palette (WP11.5a).
+                let choice = self.menu.settings().palette;
+                self.apply_palette(choice, false);
                 println!("reloaded {}", units.display());
             }
             Err(e) => eprintln!(
@@ -1734,6 +2493,12 @@ impl App for Runner {
             }
         );
         self.audio = Some(audio);
+        // The player's keys over input.ron, the UI scale and the colours (WP11.5a). The window mode,
+        // the frame cap and the present mode were decided before the window was made
+        // (`settings::startup`).
+        self.menu.set_shipped(ctx.bindings().clone());
+        ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
+        self.apply_look_settings();
         let gpu_options = GpuOptions {
             present: self.options.present,
             // Screenshots copy the window frame out; nothing else needs it.
@@ -1764,11 +2529,7 @@ impl App for Runner {
                 if let Some(layer) = self.cell_layer.take() {
                     renderer.set_cell_layer(layer);
                 }
-                let ground = &self.ground;
-                let map = &self.map;
-                renderer.set_scene(&world_markers(map.width().min(map.height()), |x, z| {
-                    ground.height(f64::from(x), f64::from(z)) as f32
-                }));
+                renderer.set_scene(&self.scene_markers());
                 renderer.watch_shader_file(
                     ctx.assets().root().join("shaders/scene.wgsl"),
                     Duration::from_millis(250),
@@ -1807,6 +2568,8 @@ impl App for Runner {
                 self.viewport = (s.width, s.height);
                 self.renderer = Some(renderer);
                 self.ore_view.forget();
+                self.fog_applied.forget();
+                self.sync_fog();
                 self.show_ore();
             }
             Err(e) => {
@@ -1815,8 +2578,12 @@ impl App for Runner {
                 ctx.request_exit();
             }
         }
-        // The window and the renderer exist: the sim's clock may run.
-        self.sim.start();
+        // The window and the renderer exist: the sim's clock may run, unless the start menu is
+        // open: then it runs when a game is chosen.
+        if !self.menu.is_open() {
+            self.sim.start();
+            self.pristine = false;
+        }
     }
 
     /// Nothing: the simulation steps on its own thread, with its own 20 Hz
@@ -1847,6 +2614,12 @@ impl App for Runner {
             self.frame_ms.push(d);
         }
         let dt = frame_dt.map_or(0.0, |d| d.as_secs_f64()).min(MAX_CAMERA_DT);
+        // The menus (WP11.5a): what the window is doing, and a menu that `--menu` asked for.
+        self.menu.set_live(Live {
+            fullscreen: ctx.is_fullscreen(),
+        });
+        self.open_pending_menu(ctx);
+        let menu_was_open = self.menu.is_open();
         self.update_debug_ui(ctx);
         self.shots_before_render();
         // Build the UI first (it may move the camera on a minimap click), then
@@ -1854,15 +2627,24 @@ impl App for Runner {
         self.selection.forget_the_dead(&self.snap);
         let stats = HudStats {
             fps: self.fps_shown,
-            units: self.snap.len() as u32,
+            units: self.snap.shown_count() as u32,
             selected: self.selection.len() as u32,
             inspecting: self.selection.inspected().is_some(),
             tick: self.snap.tick().0,
             build_line: self.build_line(now),
             money: self.money_hud(),
+            production: self.production_lines(),
+            result: self.snap.match_result(),
+            sidebar: self.sidebar_model(),
         };
+        let menu = menu_was_open.then_some(&self.menu);
         self.hud
-            .frame(ctx, &mut self.camera, self.snap.views(), stats);
+            .frame(ctx, &mut self.camera, &self.snap, &self.ghosts, stats, menu);
+        // Clicks on the menu, Esc and the key a rebinding waits for (WP11.5a). A choice may swap the
+        // scene (a restart): from here on the frame is the new one's.
+        self.handle_menu(ctx);
+        // Whatever the menu did, nothing below is for the game while it was open or is now.
+        let menu_open = menu_was_open || self.menu.is_open();
         let scripted = self.scripted_pose(now);
         if let Some((zoom, focus, _)) = scripted {
             // The benchmark and the screenshots fly their own path; input is
@@ -1871,7 +2653,12 @@ impl App for Runner {
             self.camera.set_zoom(zoom);
             self.camera.set_focus(DVec2::new(focus.0, focus.1));
         } else {
-            let input = self.camera_input(ctx, dt);
+            // A menu takes the keys, the wheel and the screen edges too: the camera stands still.
+            let input = if menu_open {
+                CameraInput::default()
+            } else {
+                self.camera_input(ctx, dt)
+            };
             self.camera.update(dt, &input);
         }
         if self.renderer.is_some() {
@@ -1879,7 +2666,7 @@ impl App for Runner {
             if let Some(renderer) = &mut self.renderer {
                 renderer.set_view_proj(view_proj);
             }
-            // The cursor, unless the UI or an F1 panel has it.
+            // The cursor, unless the UI, an F1 panel or a menu has it.
             let blocked = self.hud.pointer_over_ui() || self.debug.pointer_over_panel();
             let cursor = self.hover_at.or_else(|| {
                 ctx.input()
@@ -1887,6 +2674,7 @@ impl App for Runner {
                     .filter(|_| !blocked)
                     .map(|(x, y)| (x as f32, y as f32))
             });
+            let cursor = cursor.filter(|_| !menu_open);
             self.build_units(alpha, cursor);
             self.build_effects(alpha, dt as f32);
             self.mark_selection();
@@ -1894,7 +2682,12 @@ impl App for Runner {
             self.draw_ghost();
             self.draw_construction_bars();
             self.draw_storage_bars();
-            let game_cursor = game_cursor_at(self.shots.is_some(), self.hover_at, cursor);
+            self.draw_repair_marks();
+            self.draw_fog_debug();
+            self.draw_production();
+            // Under a menu the game cursor is gone and the system's is back.
+            let game_cursor =
+                game_cursor_at(self.shots.is_some(), self.hover_at, cursor).filter(|_| !menu_open);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
             if let Some(renderer) = &mut self.renderer {
@@ -1955,10 +2748,19 @@ impl App for Runner {
         }
         // Decided once, before the handlers: the click that puts the structure
         // away must not also order the selection (handle_build ends build mode).
-        let right_click = RightClick::for_frame(self.build.is_active());
-        self.handle_build(ctx, now);
-        self.handle_selection(ctx);
-        self.handle_orders(ctx, right_click);
+        let right_click = RightClick::for_frame(self.build.is_active(), self.tool.is_some());
+        if menu_open {
+            // No click, key or drag reaches the sidebar, the map or the orders while a menu is open
+            // (WP11.5a); a drag the player had begun is dropped, not finished by the next click.
+            self.pointer.cancel();
+        } else {
+            self.handle_sidebar();
+            self.handle_tool(ctx);
+            self.handle_build(ctx, now);
+            self.handle_production(ctx);
+            self.handle_selection(ctx);
+            self.handle_orders(ctx, right_click);
+        }
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) {
             ctx.toggle_fullscreen();
@@ -1969,7 +2771,8 @@ impl App for Runner {
         // test-sound key and on a click that the UI did not take.
         let clicked = ctx.input().button_pressed(MouseButton::Left)
             && !self.hud.pointer_over_ui()
-            && !self.debug.pointer_over_panel();
+            && !self.debug.pointer_over_panel()
+            && !menu_open;
         if (actions.pressed(Action::PlayTestSound) || clicked)
             && let Some(audio) = &mut self.audio
         {
@@ -1984,7 +2787,9 @@ impl App for Runner {
                 ));
             audio.play_at("test_click", [at.x as f32, at.y as f32, at.z as f32]);
         }
-        if actions.pressed(Action::Quit) {
+        // Esc ends the program where there are no menus (the crowd, the benchmark); with menus it
+        // is the menu key, handled in `handle_menu`.
+        if actions.pressed(Action::Quit) && !self.menus {
             println!("quit requested");
             ctx.request_exit();
         }
@@ -2059,6 +2864,11 @@ impl App for Runner {
         self.reload_style(ctx, path);
         if path.file_name().is_some_and(|n| n == "ui.ron") {
             self.hud.reload_config(ctx.assets().root());
+        }
+        // The engine has read input.ron again; the player's own keys go back over it (WP11.5a).
+        if path.file_name().is_some_and(|n| n == "input.ron") {
+            self.menu.set_shipped(ctx.bindings().clone());
+            ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
         }
         println!("asset changed: {}", path.display());
     }
@@ -2209,6 +3019,10 @@ struct SceneStart {
     skirmish_units: u32,
     /// The structures the local player may build (WP6.2); none in the crowd scene.
     build: BuildMode,
+    /// Where the camera looks at the start, in metres on the ground; `None`: the middle of the map.
+    focus: Option<(f64, f64)>,
+    /// What the sidebar offers (WP11.1); none in the crowd scenes, which have no sidebar.
+    catalog: Option<Catalog>,
 }
 
 /// The engine demo's scene: a crowd of placeholder wanderers and, with a model
@@ -2231,6 +3045,8 @@ fn crowd_scene(
         buildings,
         skirmish_units: 0,
         build: BuildMode::empty(),
+        focus: None,
+        catalog: None,
     }
 }
 
@@ -2309,6 +3125,8 @@ fn fight_scene(
         buildings,
         skirmish_units: armed,
         build: BuildMode::empty(),
+        focus: None,
+        catalog: None,
     }
 }
 
@@ -2339,6 +3157,15 @@ fn sandbox_scene(
                 world = crate::playfield::with_storage(world, &defs);
                 // WP7.4: and the store is the player's money; structures are paid while they go up.
                 world = crate::playfield::with_money(world);
+                // WP6.5: and the factories build units from queues, paid while they go up.
+                world = crate::playfield::with_production(world, &defs);
+                // WP6.4: and what the structures make and use is power; a shortage slows both.
+                world = crate::playfield::with_power(world);
+                world = crate::playfield::with_repair(world);
+            }
+            // WP8.1 (`--debug-fog`): the world works out what each player sees, for the debug view.
+            if options.fog {
+                world = crate::playfield::with_vision(world, &defs);
             }
         }
         Err(e) => eprintln!("sf_game: unit table: {e}; the sandbox stays empty"),
@@ -2380,12 +3207,83 @@ fn sandbox_scene(
         units,
         buildings: plan.structures,
         skirmish_units: 0,
-        build: BuildMode::for_faction(
+        build: BuildMode::for_faction(&defs, local_faction()),
+        catalog: Some(Catalog::build(
             &defs,
-            crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
-                .unwrap_or(sf_data::units::Faction::Meridian),
-        ),
+            local_faction(),
+            crate::sidebar_view::shipped_look(),
+        )),
+        focus: None,
     }
+}
+
+/// The match (WP7.6, `sf_game --match`): the map, the players, the credits and the starting objects of a
+/// match file, the sandbox's controls, a static opponent and a victory or a defeat. The world has the
+/// rules of the economy and of production the sandbox has with `--harvest`, and the match rules last.
+/// A match file the game cannot play (a role that is not there, a player missing) stops the start.
+fn match_scene(
+    mut world: World,
+    options: &Options,
+    style: &Style,
+    icons: &IconAtlas,
+    cells: (u32, u32),
+) -> Result<SceneStart, String> {
+    let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+    let defs = load_defs(&assets);
+    let named = options.match_file.as_ref().and_then(Option::as_deref);
+    let def = crate::matchplay::load(&crate::matchplay::file_path(named, &assets))?;
+    crate::matchplay::check(&def, &defs, cells, commands::LOCAL_PLAYER)?;
+    world = crate::matchplay::configure(world, &def, &defs)?;
+    let roster = load_roster(options, &defs, style, icons, &assets);
+    let start = crate::matchplay::schedule(&mut world, &def, &defs)?;
+    let mut views = Vec::new();
+    let report = world.step();
+    if report.commands_ignored > 0 {
+        return Err(format!(
+            "match {}: the world refused {} of the {} starting objects (is the ground under them buildable?)",
+            def.name, report.commands_ignored, start.objects
+        ));
+    }
+    world.snapshot().collect_into(&mut views);
+    println!(
+        "match {}: {} players, {} starting objects, map {}",
+        def.name,
+        def.players.len(),
+        start.objects,
+        def.map
+    );
+    let units = views.len() as u32;
+    Ok(SceneStart {
+        world,
+        looks: Looks::Roster {
+            roster: Box::new(roster),
+            crowd: Population::new(None),
+        },
+        units,
+        buildings: def
+            .players
+            .iter()
+            .flat_map(|p| &p.objects)
+            .filter(|o| {
+                defs.unit(&o.role)
+                    .is_some_and(|d| d.category == sf_data::units::Category::Structure)
+            })
+            .count() as u32,
+        skirmish_units: 0,
+        build: BuildMode::for_faction(&defs, local_faction()),
+        catalog: Some(Catalog::build(
+            &defs,
+            local_faction(),
+            crate::sidebar_view::shipped_look(),
+        )),
+        focus: crate::matchplay::focus_metres(&def, commands::LOCAL_PLAYER),
+    })
+}
+
+/// The faction of the player at this keyboard.
+fn local_faction() -> sf_data::units::Faction {
+    crate::sandbox::faction_of_owner(commands::LOCAL_PLAYER.0)
+        .unwrap_or(sf_data::units::Faction::Meridian)
 }
 
 /// Read the icon set from `assets/icons`. What cannot be read is reported and
@@ -2443,13 +3341,44 @@ enum RightClick {
 }
 
 impl RightClick {
-    fn for_frame(build_active: bool) -> Self {
-        if build_active {
+    fn for_frame(build_active: bool, tool_active: bool) -> Self {
+        // A Repair or Sell mode (WP6.6) takes the order button too: it leaves the mode.
+        if build_active || tool_active {
             RightClick::PutAway
         } else {
             RightClick::Order
         }
     }
+}
+
+/// What Esc does in one frame with menus (WP6.6, `docs/rules/menus.md` "Esc"), when no key is awaited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EscKey {
+    /// A menu is open: Esc goes to the menu (back one screen or resume).
+    ToMenu,
+    /// No menu, but a Repair or Sell mode is on: Esc only ends the mode.
+    EndMode,
+    /// No menu and no mode: Esc opens the pause menu.
+    OpenPause,
+}
+
+impl EscKey {
+    fn for_frame(menu_open: bool, tool_active: bool) -> Self {
+        if menu_open {
+            EscKey::ToMenu
+        } else if tool_active {
+            EscKey::EndMode
+        } else {
+            EscKey::OpenPause
+        }
+    }
+}
+
+/// Whether a left (select) press on the map starts a selection pointer (click or box). Not over
+/// the UI, not in build mode, and not in a Repair or Sell mode (WP6.6): there the click is the
+/// mode's command and never a selection.
+fn select_press_starts_selection(ui_busy: bool, build_active: bool, tool_active: bool) -> bool {
+    !ui_busy && !build_active && !tool_active
 }
 
 #[cfg(test)]
@@ -2458,6 +3387,33 @@ mod tests {
     use crate::args::Preset;
     use sf_data::map::generate::generate_cells;
     use sf_sim::{Command, Kind, PlayerId, Tick};
+
+    /// WP6.6: with a Repair or Sell mode on, the right click leaves the mode and orders nothing.
+    #[test]
+    fn the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing() {
+        assert_eq!(RightClick::for_frame(false, true), RightClick::PutAway);
+        assert_eq!(RightClick::for_frame(true, true), RightClick::PutAway);
+        assert_eq!(RightClick::for_frame(false, false), RightClick::Order);
+    }
+
+    /// WP6.6: Esc with a Repair or Sell mode on only ends the mode; without a mode it opens the
+    /// pause menu; with a menu open it goes to the menu, mode or not.
+    #[test]
+    fn esc_ends_a_repair_or_sell_mode_before_it_opens_the_pause_menu() {
+        assert_eq!(EscKey::for_frame(false, true), EscKey::EndMode);
+        assert_eq!(EscKey::for_frame(false, false), EscKey::OpenPause);
+        assert_eq!(EscKey::for_frame(true, true), EscKey::ToMenu);
+        assert_eq!(EscKey::for_frame(true, false), EscKey::ToMenu);
+    }
+
+    /// WP6.6: a left click in a Repair or Sell mode never starts a selection.
+    #[test]
+    fn a_left_click_in_a_repair_or_sell_mode_starts_no_selection() {
+        assert!(!select_press_starts_selection(false, false, true));
+        assert!(select_press_starts_selection(false, false, false));
+        assert!(!select_press_starts_selection(true, false, false));
+        assert!(!select_press_starts_selection(false, true, false));
+    }
 
     /// Finding 1 of the WP6.2 review: the right click that puts the structure
     /// away ends build mode inside `handle_build`, so a check made after that
@@ -2469,12 +3425,15 @@ mod tests {
         build.cycle();
         assert!(build.is_active());
         // The frame: decide first, then the build handler cancels.
-        let right_click = RightClick::for_frame(build.is_active());
+        let right_click = RightClick::for_frame(build.is_active(), false);
         build.cancel();
         assert!(!build.is_active());
         assert_eq!(right_click, RightClick::PutAway);
         // Without build mode the same click is an order.
-        assert_eq!(RightClick::for_frame(build.is_active()), RightClick::Order);
+        assert_eq!(
+            RightClick::for_frame(build.is_active(), false),
+            RightClick::Order
+        );
     }
 
     #[test]
@@ -2639,5 +3598,173 @@ mod tests {
         let report = start.world.step();
         assert_eq!(report.commands_executed, 1);
         assert_eq!(start.world.len(), before + 1);
+    }
+
+    // ---- WP11.5a: pause, restart, the start menu ----
+
+    const WAIT: Duration = Duration::from_secs(120);
+
+    /// A runner as `sf_game` builds one, without a window, its sim stepped by hand.
+    fn runner(line: &str) -> Runner {
+        let o = options(Preset::Game, line);
+        let map = make_map(&o).expect("the map loads");
+        Runner::with_sim(
+            o,
+            map,
+            sf_render::TerrainConfig::embedded().lod,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            SimConfig::manual(),
+        )
+        .expect("the runner starts")
+    }
+
+    /// Steps the runner's sim `ticks` ticks and returns the checksum of the world after them.
+    fn run_ticks(runner: &Runner, ticks: u64) -> (u64, Tick) {
+        let target = Tick(runner.sim.latest().tick().0 + ticks);
+        runner.sim.advance(ticks as u32);
+        let snap = runner.sim.wait_for_tick(target, WAIT).expect("ticks run");
+        (snap.checksum().expect("a checksum"), snap.tick())
+    }
+
+    /// A move order for every unit of the local player, sent the way a right-click sends it.
+    fn order_everyone(runner: &Runner) {
+        let ids: Vec<_> = runner
+            .sim
+            .latest()
+            .views()
+            .iter()
+            .filter(|v| v.has_stats && v.owner == commands::LOCAL_PLAYER)
+            .map(|v| v.id)
+            .collect();
+        assert!(!ids.is_empty(), "the local player has units to order");
+        commands::issue(
+            &runner.sim,
+            Command::Order {
+                ids,
+                order: sf_sim::Order::Move(sf_math::Vec2::from_ints(60, 60)),
+                queued: false,
+            },
+        );
+    }
+
+    /// Restart builds the world again from the same setup: after a game that had its own commands and
+    /// ticks, the checksum at tick N is the one of a fresh start, for the sandbox and for the match.
+    #[test]
+    fn a_restart_equals_a_fresh_start() {
+        for line in ["--sandbox", "--match"] {
+            let reference = runner(line);
+            let start = reference.sim.latest().tick();
+            let (fresh, at) = run_ticks(&reference, 40);
+            let mut played = runner(line);
+            // The match gives the local player no unit to order (a construction centre only); its
+            // opponent's harvester works on its own, so the game goes its own way all the same.
+            if line == "--sandbox" {
+                order_everyone(&played);
+            }
+            let (changed, _) = run_ticks(&played, 25);
+            if line == "--sandbox" {
+                assert_ne!(
+                    changed,
+                    run_ticks(&runner(line), 25).0,
+                    "{line}: the order changed the game"
+                );
+            }
+            assert!(played.sim.latest().tick().0 >= 25);
+            // The menu's Restart, through the runner's own path.
+            let left = played.apply_to_game(vec![Outcome::Restart]);
+            assert!(left.is_empty());
+            assert_eq!(
+                played.sim.latest().tick(),
+                start,
+                "{line}: the new world is at the tick a fresh one starts at"
+            );
+            let (again, tick) = run_ticks(&played, 40);
+            assert_eq!(tick, at, "{line}");
+            assert_eq!(again, fresh, "{line}: the restarted game is the fresh one");
+        }
+    }
+
+    /// Restart keeps the match file or the sandbox it was started with: the match is still the match.
+    #[test]
+    fn a_restart_keeps_the_scene_and_the_match_file() {
+        let mut r = runner("--match");
+        let credits = r.sim.latest().credits_of(commands::LOCAL_PLAYER);
+        assert!(credits.is_some(), "the match has money rules");
+        let cells = r.cells;
+        r.apply_to_game(vec![Outcome::Restart]);
+        assert_eq!(r.options.scene, Scene::Match);
+        assert_eq!(r.options.match_file, Some(None));
+        assert_eq!(r.cells, cells);
+        assert_eq!(r.sim.latest().credits_of(commands::LOCAL_PLAYER), credits);
+        assert!(r.catalog.is_some());
+        let mut s = runner("--sandbox");
+        s.apply_to_game(vec![Outcome::Restart]);
+        assert_eq!(s.options.scene, Scene::Sandbox);
+        assert!(
+            s.sim.latest().credits_of(commands::LOCAL_PLAYER).is_none(),
+            "the sandbox has no money rules"
+        );
+    }
+
+    /// The start menu: the scene under it is the sandbox, held; "Match" builds the match, "Sandbox"
+    /// on a scene nobody has played takes it as it is.
+    #[test]
+    fn the_start_menu_chooses_the_scene() {
+        let mut r = runner("");
+        assert!(r.options.menu && r.menus && r.menu.is_open());
+        assert_eq!(r.options.scene, Scene::Sandbox);
+        assert!(r.pristine);
+        let before = r.sim.latest();
+        let left = r.apply_to_game(vec![Outcome::StartSandbox]);
+        assert!(left.is_empty() && !r.pristine);
+        assert!(
+            Arc::ptr_eq(&before, &r.sim.latest()),
+            "the sandbox nobody played is not built again"
+        );
+        let mut m = runner("");
+        m.apply_to_game(vec![Outcome::StartMatch]);
+        assert_eq!(m.options.scene, Scene::Match);
+        assert!(!m.options.menu);
+        assert!(m.sim.latest().credits_of(commands::LOCAL_PLAYER).is_some());
+        assert!(m.catalog.is_some() && !m.pristine);
+        // From a played game, "Sandbox" is a new sandbox.
+        m.apply_to_game(vec![Outcome::StartSandbox]);
+        assert_eq!(m.options.scene, Scene::Sandbox);
+        assert!(m.sim.latest().credits_of(commands::LOCAL_PLAYER).is_none());
+    }
+
+    /// Pausing is not a command: a held sim steps no tick, and after the release the world is the one
+    /// of a run that was never held.
+    #[test]
+    fn pausing_holds_the_sim_and_resuming_goes_on_where_it_was() {
+        let (straight, straight_tick) = run_ticks(&runner("--sandbox"), 30);
+        let mut r = runner("--sandbox");
+        run_ticks(&r, 10);
+        let held_at = r.sim.latest().tick();
+        assert!(r.apply_to_game(vec![Outcome::Paused]).is_empty());
+        // Asking for ticks of a held sim runs none.
+        r.sim.advance(50);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(r.sim.latest().tick(), held_at, "held: no tick ran");
+        assert!(r.apply_to_game(vec![Outcome::Resumed]).is_empty());
+        let (resumed, tick) = run_ticks(&r, 20);
+        assert_eq!(
+            (resumed, tick),
+            (straight, straight_tick),
+            "after the pause the world is the one of a run that never stopped"
+        );
+    }
+
+    /// The outcomes that need the window are not the runner's to do on its own: they are handed back.
+    #[test]
+    fn the_outcomes_for_the_window_are_handed_back_not_swallowed() {
+        let mut r = runner("--sandbox");
+        let left = r.apply_to_game(vec![
+            Outcome::Quit,
+            Outcome::Changed(Change::Palette),
+            Outcome::Resumed,
+        ]);
+        assert_eq!(left, [Outcome::Quit, Outcome::Changed(Change::Palette)]);
     }
 }
