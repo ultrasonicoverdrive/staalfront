@@ -43,7 +43,9 @@ the game at a tick) and hold it there. In a scene without menus (`--crowd`, a be
 F11 (`ToggleFullscreen`) switches the window **only with no menu open** (`fullscreen_key_works(menu_open)`, which the runner calls).
 With a menu open, the wait for a key to rebind included (a menu is open then), F11 does nothing: while a key is awaited the press
 belongs to the menu, which can take F11 as the new key. The window mode is changed in the settings with the mouse then.
-Test: `f11_does_not_switch_the_window_while_a_menu_is_open`.
+Test: `f11_does_not_switch_the_window_while_a_menu_is_open` (the pure function). Checked by reading only, not by a test: the call
+of `fullscreen_key_works` at the F11 line in `runner.rs`, and the load of the shipped `config/input.ron` in `lib.rs::run` (both need
+a live window/event loop to reach).
 
 ## Esc
 

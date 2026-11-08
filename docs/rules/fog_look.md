@@ -100,15 +100,17 @@ not an information rule: the simulation still knows everything.
 ## The placement preview (follow-up to #106)
 
 The ghost of a structure being placed (`placement_view`, `docs/rules/buildings.md`) asks the sim for its verdict per cell. A cell the sim
-calls a **structure** or a **unit** is drawn red only when the player sees that cell now (`SimSnapshot::is_visible`); otherwise it is
-drawn in the neutral grey `placement_unknown` of `vision_look.ron` (`placement_view::tints`, `tint_seen`). The top-bar words for
+calls a **structure** or a **unit** is drawn red only when the player sees that cell now (`SimSnapshot::is_visible`). **Every** on-map
+cell the player cannot see now, free, structure or unit alike (also an own structure outside own sight), is drawn in the neutral grey `placement_unknown` of `vision_look.ron` (`placement_view::tints`, `tint_seen`). The top-bar words for
 "another structure is in the way" / "a unit is in the way" are only said when a cell of exactly that kind is in sight, else the line says
 "cannot build here" (`refusal_words`). Terrain and map-edge cells are not hidden. **The verdict is the sim's and is untouched**:
-a refused placement is still refused and the outline and the amber cells say so; only the "where" and the "what" are not told.
-Without vision rules every cell is seen, so nothing changes. Tests: `placement_view::tests::a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell`,
+a refused placement is still refused and the outline and the amber cells say so, but no cell says where the hidden blocker is: grey
+means "not in sight", never "something hidden stands here". The 4-second top-bar line after a refused click uses the same rule
+(`click_refusal_words`): "another structure / a unit is in the way" only when every footprint cell is in sight, else "cannot build here".
+Without vision rules every cell is seen, so nothing changes. Tests: `placement_view::tests::a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell`, `a_click_refused_by_a_hidden_blocker_does_not_name_it`,
 `the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green`, `sf_data::vision_look::tests::the_shipped_look_is_pinned`.
-Left: that the placement is refused at all (outline, amber cells) is still shown, as is the sim's own answer when the player clicks; an
-own structure whose cell is outside its own sight would also read grey.
+Left: that the placement is refused at all (outline, amber cells) is still shown; the console log line of a refused click names the
+sim's reason.
 
 ## Gaps (known and left)
 

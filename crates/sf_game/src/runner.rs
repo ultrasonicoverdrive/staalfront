@@ -1373,7 +1373,13 @@ impl Runner {
                 .unwrap_or(usize::MAX)
                 .min(last.len());
             for r in &last[last.len() - new..] {
-                let words = placement_view::describe(r.reason, &|k| self.build.name_of(k));
+                let words = placement_view::click_refusal_words(
+                    r.reason,
+                    r.cell,
+                    self.build.size_of(r.kind),
+                    &|c| self.snap.is_visible(c),
+                    &|k| self.build.name_of(k),
+                );
                 println!(
                     "build refused in tick {}: {} on ({}, {}): {words}",
                     r.tick.0,

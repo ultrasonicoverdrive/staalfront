@@ -96,11 +96,13 @@ pub fn tint_of(verdict: CellVerdict, placement_ok: bool) -> Tint {
     }
 }
 
-/// [`tint_of`] for what the player can see: a cell the sim calls a structure or a unit is `Unknown`
-/// while `seen` says the player cannot see the cell now. Terrain and the map edge are not hidden.
+/// [`tint_of`] for what the player can see: every cell the player cannot see now is `Unknown`,
+/// whether the sim calls it free, a structure or a unit, so grey means "not in sight" and never
+/// "something hidden stands here". That also covers an own structure outside own sight.
+/// Terrain and the map edge are not hidden.
 pub fn tint_seen(verdict: CellVerdict, placement_ok: bool, seen: bool) -> Tint {
     match verdict {
-        CellVerdict::Structure | CellVerdict::Unit if !seen => Tint::Unknown,
+        CellVerdict::Free | CellVerdict::Structure | CellVerdict::Unit if !seen => Tint::Unknown,
         _ => tint_of(verdict, placement_ok),
     }
 }
@@ -151,6 +153,29 @@ pub fn refusal_words(
             .iter()
             .any(|&(cell, v)| v == culprit && seen(cell))
     {
+        return "cannot build here".into();
+    }
+    describe(error, name_of)
+}
+
+/// The words for a refusal the sim gave on a click, for a structure of `size` (cells along x, y)
+/// anchored at `anchor`: "another structure / a unit is in the way" only when every footprint cell
+/// is in sight, else the same generic "cannot build here" as [`refusal_words`].
+pub fn click_refusal_words(
+    error: PlacementError,
+    anchor: Cell,
+    size: (u8, u8),
+    seen: &dyn Fn(Cell) -> bool,
+    name_of: &dyn Fn(Kind) -> String,
+) -> String {
+    let hides = matches!(
+        error,
+        PlacementError::Occupied | PlacementError::UnitInTheWay
+    );
+    let (w, h) = (u32::from(size.0), u32::from(size.1));
+    let all_seen = (anchor.y..anchor.y.saturating_add(h))
+        .all(|y| (anchor.x..anchor.x.saturating_add(w)).all(|x| seen(Cell::new(x, y))));
+    if hides && !all_seen {
         return "cannot build here".into();
     }
     describe(error, name_of)

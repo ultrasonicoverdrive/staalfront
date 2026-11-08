@@ -281,7 +281,41 @@ fn a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell() {
         Tint::Blocked
     );
     assert_eq!(tint_seen(CellVerdict::Unit, true, false), Tint::Unknown);
-    assert_eq!(tint_seen(CellVerdict::Free, true, false), Tint::Valid);
+    // Grey means "not in sight": an unseen free cell looks exactly like an unseen structure cell.
+    assert_eq!(
+        tint_seen(CellVerdict::Free, true, false),
+        tint_seen(CellVerdict::Structure, true, false)
+    );
+    assert_eq!(
+        tint_seen(CellVerdict::Free, false, false),
+        tint_seen(CellVerdict::Structure, false, false)
+    );
+    assert_eq!(tint_seen(CellVerdict::Free, true, false), Tint::Unknown);
+    assert_eq!(tint_seen(CellVerdict::Free, true, true), Tint::Valid);
+}
+
+#[test]
+fn a_click_refused_by_a_hidden_blocker_does_not_name_it() {
+    let name = |k: Kind| format!("kind {}", k.0);
+    let anchor = Cell::new(4, 4);
+    let all = |_: Cell| true;
+    let one_hidden = |c: Cell| c != Cell::new(5, 5);
+    for e in [PlacementError::Occupied, PlacementError::UnitInTheWay] {
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &all, &name),
+            describe(e, &name)
+        );
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &one_hidden, &name),
+            "cannot build here"
+        );
+    }
+    // A cell outside the footprint does not matter.
+    let far = |c: Cell| c != Cell::new(9, 9);
+    assert_eq!(
+        click_refusal_words(PlacementError::Occupied, anchor, (2, 2), &far, &name),
+        describe(PlacementError::Occupied, &name)
+    );
 }
 
 #[test]
