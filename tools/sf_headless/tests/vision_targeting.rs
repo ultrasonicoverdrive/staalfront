@@ -259,51 +259,48 @@ fn the_gate_changes_only_what_it_gates() {
     assert_eq!(on.shots, again.shots);
 }
 
-/// What the gate WOULD do to the first match (measured, not shipped: `match.ron` has it off and the
-/// pin of `match.expected` is the match without it). The scripted match still ends in a win, but
-/// the two worlds part at tick 4282, when a rocket trooper (slot 21) would pick the opponent's
-/// defence tower (slot 4): the tower is in the trooper's reach (rocket reach 5, measured to the
-/// edge of the tower) but its cell is 26 (squared) from the trooper's cell, outside the disc of
-/// sight 5 (25). In the end the human wins at tick 8067 instead of 5967, with 8 units lost
-/// instead of 6.
+/// What the gate does to the first match (WP7.7: shipped on, with the sight of a target measured to its
+/// edge). Measured with the new match file (the opponent has a construction centre, the match is
+/// decided when it falls), three ways:
+///
+/// | | decided | units lost |
+/// |---|---|---|
+/// | gate off (this test, `acquire_needs_sight = false`) | 6228 | 6 |
+/// | gate on, edge test (shipped) | 6238 | 6 |
+/// | gate on, the old cell test (WP8.2a, measured while building WP7.7, no longer in the code) | 9189 | 8 |
+///
+/// The rocket trooper (slot 22, sight 5, reach 5) picks the opponent's defence tower (slot 4) at the
+/// limit of its reach as soon as it would without the gate: the tower's cell is 26 (squared) from the
+/// trooper's cell, outside the disc of 25, and the cell beside it is inside. With the cell test it did
+/// not, and the worlds parted at 4282 (WP8.2a).
 #[test]
-fn what_the_gate_would_do_to_the_first_match() {
+fn the_gate_in_the_first_match_costs_ten_ticks_and_no_unit() {
     let load = |gate: bool| {
         let mut s = Scenario::load(&scenario_path("match.ron")).unwrap();
         assert!(
-            !s.vision.as_ref().unwrap().acquire_needs_sight,
-            "shipped off"
+            s.vision.as_ref().unwrap().acquire_needs_sight,
+            "shipped on (WP7.7)"
         );
         s.vision.as_mut().unwrap().acquire_needs_sight = gate;
         s.ticks = 9000;
         s
     };
     let tower = id(4);
-    let trooper = id(21);
-    let picture = |w: &World| -> Vec<(u32, i64, i64, u32)> {
-        w.snapshot()
-            .iter()
-            .map(|v| (v.id.index(), v.pos.x.raw(), v.pos.y.raw(), v.hp))
-            .collect()
-    };
-    let (off, on) = (load(false), load(true));
-    let (mut a, mut b) = (off.build_world().unwrap(), on.build_world().unwrap());
-    let mut parted = None;
-    while parted.is_none() {
-        a.step();
-        b.step();
-        if picture(&a) != picture(&b) {
-            parted = Some(a.tick().0);
+    let trooper = id(22);
+    // The tick the trooper first has the tower as its target, with and without the gate.
+    let first_pick = |gate: bool| {
+        let mut w = load(gate).build_world().unwrap();
+        for _ in 0..5000 {
+            w.step();
+            if w.engagement_of(trooper).map(|e| e.target) == Some(tower) {
+                return Some(w.tick().0);
+            }
         }
-        assert!(a.tick().0 < 5000, "they never parted");
-    }
-    assert_eq!(parted, Some(4282));
-    assert_eq!(a.engagement_of(trooper).map(|e| e.target), Some(tower));
-    assert_eq!(b.engagement_of(trooper), None);
-    // The tower's cell is not visible to the human at that tick, in the gated world.
-    let at = b.snapshot().iter().find(|v| v.id == tower).unwrap().pos;
-    let cell = b.cell_at(at).unwrap();
-    assert_ne!(b.visibility(P0, cell), Visibility::Visible);
+        None
+    };
+    let (off, on) = (first_pick(false), first_pick(true));
+    assert!(off.is_some());
+    assert_eq!(on, off, "the gate does not hold the trooper back any more");
 
     // To the end of each match.
     let decided = |gate: bool| {
@@ -319,6 +316,6 @@ fn what_the_gate_would_do_to_the_first_match() {
         }
         panic!("not decided");
     };
-    assert_eq!(decided(false), (5967, Verdict::Won(P0), 6));
-    assert_eq!(decided(true), (8067, Verdict::Won(P0), 8));
+    assert_eq!(decided(false), (6228, Verdict::Won(P0), 6));
+    assert_eq!(decided(true), (6238, Verdict::Won(P0), 6));
 }

@@ -938,3 +938,94 @@ fn the_rules_are_handed_back_with_the_gate_and_the_pairs() {
     assert_eq!(r.shared, vec![(P0, P1)]);
     assert!(!world(8).vision_rules().unwrap().acquire_needs_sight);
 }
+
+// ---- the edge test of the targeting gate (WP7.7) ---------------------------------------------------
+
+/// A world in which player 0 has a runner (sight 5) in cell (10, 10): it sees every cell whose centre
+/// is within 5 of (10, 10), `dx^2 + dy^2 <= 25`.
+fn runner_world() -> World {
+    let mut w = world(24);
+    unit(&mut w, P0, RUNNER, 10, 10);
+    w
+}
+
+#[test]
+fn a_structure_is_seen_to_its_edge_over_a_side_and_not_over_a_corner() {
+    let w = runner_world();
+    let v = w.vision.as_deref().unwrap();
+    // Offset (5, 1) is 26 squared: not in the disc. The cell beside it, (4, 1), is (17).
+    assert_ne!(seen(&w, P0, 15, 11), Visibility::Visible);
+    assert!(!v.sees_rect(P0, 15, 11, 1, 1), "the cell test");
+    assert!(v.sees_footprint_edge(P0, 15, 11, 1, 1), "the edge test");
+    // Offset (6, 0) has (5, 0) on its west side: 25, inside the disc, so it is seen.
+    assert!(v.sees_footprint_edge(P0, 16, 10, 1, 1));
+    // Offset (6, 1): (5, 1) is 26, (6, 0) is 36, (6, 2) and (7, 1) are farther: none of its sides is
+    // visible. (5, 0) is visible and touches it only at a corner: that does not count.
+    assert!(v.sees_rect(P0, 15, 10, 1, 1), "the corner cell is visible");
+    assert!(!v.sees_footprint_edge(P0, 16, 11, 1, 1));
+    // The same on every side: (-6, 0), (0, 6), (0, -6) are seen through the cell between.
+    assert!(v.sees_footprint_edge(P0, 4, 10, 1, 1));
+    assert!(v.sees_footprint_edge(P0, 10, 16, 1, 1));
+    assert!(v.sees_footprint_edge(P0, 10, 4, 1, 1));
+    // A bigger footprint: a 2 by 2 at (15, 11) has a visible cell beside its west side.
+    assert!(v.sees_footprint_edge(P0, 15, 11, 2, 2));
+    // Nothing for another player, and nothing far away.
+    assert!(!v.sees_footprint_edge(P1, 15, 11, 1, 1));
+    assert!(!v.sees_footprint_edge(P0, 20, 20, 1, 1));
+}
+
+#[test]
+fn the_edge_test_clips_at_the_borders_of_the_map() {
+    let mut w = world(8);
+    unit(&mut w, P0, RUNNER, 0, 0);
+    let v = w.vision.as_deref().unwrap();
+    // A structure in the corner: no cell before x = 0 or y = 0 to look at, none after the last.
+    assert!(v.sees_footprint_edge(P0, 0, 0, 1, 1));
+    assert!(
+        v.sees_footprint_edge(P0, 6, 0, 2, 1),
+        "the cell beside it, (5, 0), is in the disc"
+    );
+    assert!(!v.sees_footprint_edge(P0, 7, 7, 1, 1));
+    // A unit outside the map, or with a negative position, is not seen.
+    assert!(!v.sees_body(
+        P0,
+        Vec2::new(Fx::from_int(-1), Fx::from_int(2)),
+        Fx::HALF
+    ));
+    assert!(!v.sees_body(
+        P0,
+        Vec2::new(Fx::from_int(2), Fx::from_int(9)),
+        Fx::HALF
+    ));
+}
+
+#[test]
+fn a_unit_is_seen_through_its_own_cell_or_a_neighbour_its_body_reaches() {
+    let w = runner_world();
+    let v = w.vision.as_deref().unwrap();
+    let r = Fx::from_ratio(1, 5); // the body of a unit of size 0.4
+    let p = |x: i32, y: i32, dx: i64, dy: i64| {
+        Vec2::new(
+            Fx::from_int(x) + Fx::from_ratio(dx, 1000),
+            Fx::from_int(y) + Fx::from_ratio(dy, 1000),
+        )
+    };
+    // Its own cell: (14, 11) is inside the disc (17 squared), wherever in the cell.
+    assert!(v.sees_body(P0, p(14, 11, 500, 500), r));
+    // (15, 11) is outside (26): in its middle the body (0.2) reaches no neighbour (0.5 away).
+    assert!(!v.sees_body(P0, p(15, 11, 500, 500), r));
+    // A tenth from the west border: the body reaches (14, 11).
+    assert!(v.sees_body(P0, p(15, 11, 100, 500), r));
+    // 0.25 from it: it does not. 0.2 from it: it does (the edge is inside, like a reach).
+    assert!(!v.sees_body(P0, p(15, 11, 250, 500), r));
+    assert!(v.sees_body(P0, p(15, 11, 200, 500), r));
+    // A radius of nothing sees through the own cell only.
+    assert!(!v.sees_body(P0, p(15, 11, 0, 500), Fx::ZERO));
+    // Diagonal: in cell (16, 11) the neighbour (15, 10) is offset (5, 0), inside (25), and the sides
+    // (15, 11) and (16, 10) are outside (26 and 36): close to the corner the body reaches it, not far
+    // from it (0.15 squared twice is 0.045, more than 0.2 squared).
+    assert!(v.sees_body(P0, p(16, 11, 100, 100), r));
+    assert!(!v.sees_body(P0, p(16, 11, 150, 150), r));
+    // Not for another player.
+    assert!(!v.sees_body(P1, p(15, 11, 100, 500), r));
+}
