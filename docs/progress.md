@@ -2300,7 +2300,7 @@ confirmed, WP11.2 next) and the queue are in PLAN.md under Milestone M1. The tex
 - **Known gaps, written down:** the edge test is not a proof that a target in reach is always seen when range equals sight; a
   unit in the middle of a cell that is outside the disc is not picked (the body rule), while the structure beside it is. The
   win tick of the scripted match is later (6238 against 5967) because the construction centre stands at the back of the base.
-  The opponent's construction centre sees 10 cells, which lets its units pick targets earlier (the worlds part at tick 4692).
+  The gated and ungated worlds part at tick 4692; what differs there was not investigated.
 
 **Milestone M1 was not reached yet.** PLAN.md puts M1 at the end of phase 7: one skirmish map against a static
 opponent, build a base, harvest, make units, attack, win. Building, harvesting, storage and money work in the
