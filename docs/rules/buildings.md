@@ -303,6 +303,7 @@ flowchart TD
 | shipyard | yes | yes | VesselFactory | +x | vehicle_factory | 1000 | 40 | -40 |
 | decoy_emplacement | **yes** | no | Decoy | | barracks | 150 | 8 | 0 |
 | fortified_bunker | no | **yes** | Defence | | barracks | 600 | 25 | 0 |
+| ore_silo _(proposed, waiting for Tijmen)_ | yes | yes | None (stores ore) | | refinery | 250 | 12 | -10 |
 
 The two factions share one tree and differ only in the last two rows: the Meridian decoy and the Veyran bunker
 hang on the shared barracks. The decoy needs only the barracks (decision orchestrator, review of PR #69) so
@@ -311,6 +312,24 @@ from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Foot
 `fuel_depot`, `archive_building`, `bridge_segment`, `rail_spur`, `automated_gun`, `generator`,
 `unmanned_artillery`) are Neutral, cannot be built and have no prerequisites; `automated_gun` and
 `unmanned_artillery` are `Defence`, `generator` is a `PowerPlant`, the rest `None`.
+
+### The ore silo (WP7.3b), proposed, waiting for Tijmen
+
+The `ore_silo` is **not** in the approved tree above (its arrows and rows are unchanged); the last table row and
+this section are a proposal that Tijmen confirms or changes in the WP7.3b PR. It is built with the proposal so it
+can be played; moving it is a data edit (`requires`, `cost`, `build_seconds`, `power`, `footprint`, `storage` in
+`unit_defs.ron`) plus the literal row in `crates/sf_data/tests/buildings.rs` (`the_proposed_ore_silo_is_the_documented_one`).
+
+* **Place:** `requires: ["refinery"]`. The silo adds room to a store that only exists once ore comes in, so it
+  makes no sense before a refinery stands. Both factions, no other prerequisite; nothing in the approved tree
+  needs it, so the tree's other nodes do not change.
+* **Numbers (all placeholders):** 250 credits, 12 seconds, power -10, footprint 2x2, 450 hit points, sight 4,
+  **storage 1500** (the refinery stores 2000).
+* **Function:** `None`: nothing but its `storage` number is read by the rules (the function list says "a storage
+  tank" for this case). No new function, no Rust change. It has no exit side and no model of its own yet (a cube).
+* **Alternatives for Tijmen:** `requires: ["power_plant"]` (a silo before the first refinery: useless, the store is
+  empty, but harmless), or `requires: ["vehicle_factory"]` (a silo only in the mid game, when the harvesters
+  outgrow one refinery). Either is a one-word edit.
 
 ### What this tree is not
 

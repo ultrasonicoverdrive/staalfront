@@ -166,8 +166,8 @@ fn each_field_maps_to_its_own_field() {
 fn the_shipped_storage_reaches_the_world() {
     let defs = UnitDefs::embedded();
     let table = sf_bridge::storage_capacities(&defs);
-    // Literal pin: only the refinery (kind 2) stores, 2000 units.
-    assert_eq!(table, vec![(Kind(2), 2000)]);
+    // Literal pin: the refinery (kind 2) stores 2000 units, the proposed ore silo (kind 43) 1500.
+    assert_eq!(table, vec![(Kind(2), 2000), (Kind(43), 1500)]);
     let world = World::new(WorldConfig::new(1))
         .unwrap()
         .with_units(sf_bridge::unit_table(&defs).unwrap())
