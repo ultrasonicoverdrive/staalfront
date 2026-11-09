@@ -298,8 +298,10 @@ impl<'a> Gate<'a> {
             .map(|vision| Gate { vision, occupancy })
     }
 
-    /// Whether `viewer` sees entity `j` now: the cell its position is in (a unit), or any cell of
-    /// its footprint (a structure).
+    /// Whether `viewer` sees entity `j` now, **measured to its edge** (WP7.7), the way a weapon's
+    /// reach is: a structure through any cell of its footprint or a visible cell that shares a side
+    /// with it, a unit through its own cell or a neighbour cell that its body reaches
+    /// ([`Vision::sees_footprint_edge`], [`Vision::sees_body`]; `docs/rules/vision.md`).
     fn sees(&self, e: &Entities, units: &UnitTable, viewer: PlayerId, j: usize) -> bool {
         if e.cell[j] != NO_CELL {
             let anchor = self.occupancy.cell(e.cell[j]);
@@ -307,7 +309,7 @@ impl<'a> Gate<'a> {
                 .at(e.def[j] as usize)
                 .footprint
                 .unwrap_or(Footprint::ONE);
-            return self.vision.sees_rect(
+            return self.vision.sees_footprint_edge(
                 viewer,
                 anchor.x,
                 anchor.y,
@@ -315,11 +317,8 @@ impl<'a> Gate<'a> {
                 u32::from(fp.height),
             );
         }
-        let (x, y) = e.pos[j].cell();
-        match (u32::try_from(x), u32::try_from(y)) {
-            (Ok(x), Ok(y)) => self.vision.sees_rect(viewer, x, y, 1, 1),
-            _ => false,
-        }
+        self.vision
+            .sees_body(viewer, e.pos[j], radius_of(e, j, units))
     }
 }
 

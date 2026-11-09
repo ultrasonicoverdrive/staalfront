@@ -144,10 +144,10 @@ and the old order begun again, when:
 
 When an engagement ends and the cooldown has already run out, the unit looks round on that same tick.
 
-## The sight gate (WP8.2a, off by default)
+## The sight gate (WP8.2a; on by default since WP7.7)
 
 A world given vision rules (`vision.md`) with `acquire_needs_sight` set restricts what a scan may **pick**: a candidate counts only if its
-cell (a structure: any cell of its footprint) is `Visible` to the scanner's **owner** at the time of the scan, shared sight included. The
+cell is `Visible` to the scanner's **owner** at the time of the scan, shared sight included; since WP7.7 the test is **measured to the edge of the target** like the reach above (a structure: any cell of its footprint or a visible cell beside it; a unit: its own cell or a neighbour cell its body reaches, `vision.md`). The
 check sits in `best_target`, after the weapon check, so it is the same for a unit's scan and a structure's ([`defences.md`](defences.md)).
 Everything else in this file stands:
 

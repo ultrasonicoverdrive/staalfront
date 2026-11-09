@@ -27,10 +27,14 @@ pub struct VisionSettings {
     /// entry.
     pub legacy_sight_cells: u32,
     /// WP8.2a: whether automatic target acquisition (a unit's scan, a defence's look round) only
-    /// picks what its owner can see. Off in the shipped file until the first match has been
-    /// played (`docs/rules/vision.md`). A file without the line means off.
-    #[serde(default)]
+    /// picks what its owner can see. **On** since WP7.7 (the first match was played, Tijmen
+    /// 08-11-2026), in the shipped file and when the line is left out (`docs/rules/vision.md`).
+    #[serde(default = "gate_on_by_default")]
     pub acquire_needs_sight: bool,
+}
+
+fn gate_on_by_default() -> bool {
+    true
 }
 
 /// Why a vision file was refused.
@@ -82,16 +86,20 @@ mod tests {
     #[test]
     fn the_shipped_number_is_pinned() {
         assert_eq!(VisionSettings::embedded().legacy_sight_cells, 5);
-        assert!(!VisionSettings::embedded().acquire_needs_sight);
+        assert!(VisionSettings::embedded().acquire_needs_sight);
     }
 
     #[test]
-    fn the_gate_line_is_optional_and_read() {
+    fn the_gate_line_is_optional_read_and_on_by_default() {
         let on =
             VisionSettings::from_ron("(legacy_sight_cells: 5, acquire_needs_sight: true)").unwrap();
         assert!(on.acquire_needs_sight);
+        let off = VisionSettings::from_ron("(legacy_sight_cells: 5, acquire_needs_sight: false)")
+            .unwrap();
+        assert!(!off.acquire_needs_sight);
+        // WP7.7: a file without the line means on.
         let default = VisionSettings::from_ron("(legacy_sight_cells: 5)").unwrap();
-        assert!(!default.acquire_needs_sight);
+        assert!(default.acquire_needs_sight);
     }
 
     #[test]

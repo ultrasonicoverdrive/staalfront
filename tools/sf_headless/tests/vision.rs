@@ -322,15 +322,17 @@ fn two_runs_agree() {
 }
 
 /// The first match (`match.ron`, 96 by 96 cells, two players, an economy, a fight) played with vision on
-/// is the same match: the same entities in the same places at every tick we look at, the same
-/// verdict. Only the hash differs (the section `v`). Since WP8.2a the file has the rules itself (as
-/// `sf_game --match` does); the "off" world is the same file with the section taken out, which is
-/// the value `match.expected` had before WP8.2a (`match_m1.rs`).
+/// (the targeting gate off) is the same match: the same entities in the same places at every tick we
+/// look at, the same verdict. Only the hash differs (the section `v`). Since WP8.2a the file has the
+/// rules itself (as `sf_game --match` does); the "off" world is the same file with the section taken
+/// out. Since WP7.7 the file has the gate on, which does change the game (`match_m1.rs`), so the gate
+/// is switched off here: this test is about the picture alone.
 #[test]
 fn the_first_match_plays_the_same_with_vision_on() {
     let mut off = Scenario::load(&scenario_path("match.ron")).unwrap();
-    let on = Scenario::load(&scenario_path("match.ron")).unwrap();
+    let mut on = Scenario::load(&scenario_path("match.ron")).unwrap();
     assert!(on.vision.is_some(), "match.ron has the vision rules");
+    on.vision.as_mut().unwrap().acquire_needs_sight = false;
     off.vision = None;
     let (mut a, mut b) = (off.build_world().unwrap(), on.build_world().unwrap());
     assert!(a.vision_rules().is_none() && b.vision_rules().is_some());

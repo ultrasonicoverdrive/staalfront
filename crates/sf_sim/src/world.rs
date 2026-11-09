@@ -278,7 +278,8 @@ impl fmt::Display for ConfigError {
             }
             ConfigError::Match => {
                 "the match rules must be given once, last, before the world starts, after the unit table, the \
-                 weapon table and the destruction settings, with two to eight players, each once"
+                 building table (with a construction centre), the weapon table and the destruction \
+                 settings, with two to eight players, each once"
             }
             ConfigError::Harvest => {
                 "the harvest rules must be given before the world starts, after the unit and building tables, \
@@ -532,6 +533,10 @@ impl World {
         }
         if self.production.is_some() {
             return Err(ConfigError::Production);
+        }
+        // The match rules read which kind is the construction centre from this table: it comes first.
+        if self.outcome.is_some() {
+            return Err(ConfigError::Match);
         }
         for b in table.iter() {
             let Some(unit) = self.units.get(b.kind) else {

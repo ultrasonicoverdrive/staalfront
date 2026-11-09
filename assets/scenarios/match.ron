@@ -2,7 +2,7 @@
 // `assets/maps/m1` and the starting objects come from the match file (the frozen copy
 // `match_defs/match.ron`), the players' commands are written below: the human builds a power plant, a
 // refinery and a barracks, harvests, makes riflemen and sends them across the map, where the static
-// opponent's defenders fire back; the last of its structures and armed units falls and the human wins.
+// opponent's defenders fire back; its construction centre falls and the human wins.
 //
 // `unit_defs` names a FROZEN copy of the shipped definitions (match_defs, made for WP7.6); the ore,
 // harvest, storage, money and production numbers are written out below, so editing the shipped
@@ -11,12 +11,20 @@
 // capacity 600), 3 barracks (2 x 3, exit side +x), 6 defence_tower, 11 harvester, 12 rifleman
 // (100 credits over 100 ticks), 19 light_tank.
 //
-// Slots: 0 the human's construction centre, 1 .. 10 the opponent's objects in the order of the match
+// Slots: 0 the human's construction centre, 1 .. 11 the opponent's objects in the order of the match
 // file (1 power plant, 2 refinery, 3 barracks, 4 defence tower, 5 harvester, 6 .. 9 riflemen,
-// 10 light tank), then what the human builds and makes, in the order it appears.
+// 10 light tank, 11 its construction centre, added by WP7.7), then what the human builds and makes, in
+// the order it appears (12 power plant, 13 refinery, 14 barracks, ...).
 //
-// Vision (WP8.1) is on, as in `sf_game --match` (`matchplay::configure`); since WP8.2a the pinned scenario
-// has the same rules (section `v` of the checksum). Nothing reads it here: the targeting gate is off.
+// The match is decided when the opponent's construction centre (slot 11) falls (WP7.7; before that
+// the opponent had to lose every structure and armed unit, tick 5967). The match file next to it,
+// `match_defs/match.ron`, got the construction centre for that reason, and the script's slot numbers
+// moved up by one with it (the factory 13 -> 14, the army 14 .. 23 -> 15 .. 24).
+//
+// Vision (WP8.1) is on, as in `sf_game --match` (`matchplay::configure`), and since WP7.7 the
+// targeting gate is on too (`acquire_needs_sight: true`, the default of `vision.ron`), the sight of a
+// target measured to its edge (docs/rules/vision.md). The scenario writes the flag out, so that a
+// change of the default does not move this pin.
 Scenario(
     name: "match",
     seed: 458758,
@@ -62,24 +70,24 @@ Scenario(
     money: Some((credits_per_ore: 1)),
     production: Some((queue_limit: 5, exit_radius: 4)),
     power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
-    vision: Some((legacy_sight_milli: 5000)),
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
     ticks: 7000,
     commands: [
         (tick: 1, player: 0, command: BuildStructure(kind: 1, cell: (8, 62))),
         (tick: 305, player: 0, command: BuildStructure(kind: 2, cell: (18, 62))),
         (tick: 305, player: 0, command: BuildStructure(kind: 3, cell: (18, 74))),
-        (tick: 710, player: 0, command: SetRally(factory: (13, 0), cell: Some((34, 60)))),
-        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
-        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
-        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
-        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 12)),
-        (tick: 710, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
-        (tick: 1010, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
-        (tick: 1010, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
-        (tick: 1010, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
-        (tick: 1120, player: 0, command: QueueUnit(factory: (13, 0), kind: 13)),
-        (tick: 2400, player: 0, command: OrderAttackMove(ids: [Id(14, 0), Id(15, 0), Id(16, 0), Id(18, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0)], target: (67, 24))),
-        (tick: 4700, player: 0, command: OrderAttackMove(ids: [Id(14, 0), Id(15, 0), Id(16, 0), Id(18, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0)], target: (75, 22))),
-        (tick: 5400, player: 0, command: OrderAttackMove(ids: [Id(14, 0), Id(15, 0), Id(16, 0), Id(18, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0)], target: (79, 17))),
+        (tick: 710, player: 0, command: SetRally(factory: (14, 0), cell: Some((34, 60)))),
+        (tick: 710, player: 0, command: QueueUnit(factory: (14, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (14, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (14, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (14, 0), kind: 12)),
+        (tick: 710, player: 0, command: QueueUnit(factory: (14, 0), kind: 13)),
+        (tick: 1010, player: 0, command: QueueUnit(factory: (14, 0), kind: 13)),
+        (tick: 1010, player: 0, command: QueueUnit(factory: (14, 0), kind: 13)),
+        (tick: 1010, player: 0, command: QueueUnit(factory: (14, 0), kind: 13)),
+        (tick: 1120, player: 0, command: QueueUnit(factory: (14, 0), kind: 13)),
+        (tick: 2400, player: 0, command: OrderAttackMove(ids: [Id(15, 0), Id(16, 0), Id(17, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0), Id(24, 0)], target: (67, 24))),
+        (tick: 4700, player: 0, command: OrderAttackMove(ids: [Id(15, 0), Id(16, 0), Id(17, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0), Id(24, 0)], target: (75, 22))),
+        (tick: 5400, player: 0, command: OrderAttackMove(ids: [Id(15, 0), Id(16, 0), Id(17, 0), Id(19, 0), Id(20, 0), Id(21, 0), Id(22, 0), Id(23, 0), Id(24, 0)], target: (79, 17))),
     ],
 )
