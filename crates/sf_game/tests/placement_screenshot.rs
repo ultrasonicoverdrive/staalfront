@@ -247,7 +247,7 @@ impl Scene {
             };
             let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
             let mut layer = ui.world_layer();
-            placement_view::draw_ghost(&mut layer, &frame, &height, answer);
+            placement_view::draw_ghost(&mut layer, &frame, &height, answer, &|_| true);
             quads = layer.quad_count();
         }
         r.upload_units(&self.instancer);

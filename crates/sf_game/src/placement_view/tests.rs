@@ -81,7 +81,7 @@ fn quads_in(answer: &GhostAnswer, frame: &GhostFrame) -> (usize, usize) {
     ui.begin_frame(UiInput::default(), (W as u32, H as u32), 1.0);
     ui.end_frame();
     let mut layer = ui.world_layer();
-    let cells = draw_ghost(&mut layer, frame, &flat, answer);
+    let cells = draw_ghost(&mut layer, frame, &flat, answer, &|_| true);
     (cells, layer.quad_count())
 }
 
@@ -223,4 +223,165 @@ fn cells_off_the_map_are_not_drawn_and_a_refused_ghost_still_shows_its_cells() {
     assert_eq!(on_map, 3);
     let (cells, _) = quads_in(&answer, &frame_at((248.0, 24.0)));
     assert_eq!(cells, 3, "the three cells on the map");
+}
+
+#[test]
+fn a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell() {
+    let (world, defs) = world();
+    let name = |k: Kind| format!("kind{}", k.0);
+    // A power plant on the anchor of the construction centre: structure cells, refused by the sim.
+    let answer = answer_for(&world, &defs, "power_plant", 48, 48);
+    let preview = &answer.preview;
+    assert_eq!(preview.verdict, Err(PlacementError::Occupied));
+    let blocking: Vec<Cell> = preview
+        .cells
+        .iter()
+        .filter(|c| c.1 == CellVerdict::Structure)
+        .map(|c| c.0)
+        .collect();
+    assert!(!blocking.is_empty());
+    // In sight (or in a world without vision rules): red, with the words of the refusal.
+    let in_sight = tints(preview, &|_| true);
+    for &c in &blocking {
+        assert!(in_sight.contains(&(c, Tint::Blocked)), "{c:?}");
+    }
+    assert_eq!(
+        refusal_words(preview, &|_| true, &name),
+        describe(PlacementError::Occupied, &name)
+    );
+    // Out of sight: the same cells are grey, nothing is red, and the words do not name a structure.
+    let hidden = tints(preview, &|_| false);
+    assert_eq!(hidden.len(), in_sight.len());
+    for &c in &blocking {
+        assert!(hidden.contains(&(c, Tint::Unknown)), "{c:?}");
+    }
+    assert!(hidden.iter().all(|t| t.1 != Tint::Blocked));
+    assert_eq!(
+        refusal_words(preview, &|_| false, &name),
+        "cannot build here"
+    );
+    // The sim's verdict is the same either way: the placement is still refused.
+    assert_eq!(preview.verdict, Err(PlacementError::Occupied));
+    // One of the structure's cells in sight: that one is red and the words come back.
+    let one = blocking[0];
+    let part = tints(preview, &|c| c == one);
+    assert!(part.contains(&(one, Tint::Blocked)));
+    assert!(
+        part.iter()
+            .filter(|t| t.0 != one && blocking.contains(&t.0))
+            .all(|t| t.1 == Tint::Unknown)
+    );
+    assert_eq!(
+        refusal_words(preview, &|c| c == one, &name),
+        describe(PlacementError::Occupied, &name)
+    );
+    // Terrain and the edge of the map are not hidden: they say nothing about the other side.
+    assert_eq!(
+        tint_seen(CellVerdict::BadTerrain, false, false),
+        Tint::Blocked
+    );
+    assert_eq!(tint_seen(CellVerdict::Unit, true, false), Tint::Unknown);
+    // Grey means "not in sight": an unseen free cell looks exactly like an unseen structure cell.
+    assert_eq!(
+        tint_seen(CellVerdict::Free, true, false),
+        tint_seen(CellVerdict::Structure, true, false)
+    );
+    assert_eq!(
+        tint_seen(CellVerdict::Free, false, false),
+        tint_seen(CellVerdict::Structure, false, false)
+    );
+    assert_eq!(tint_seen(CellVerdict::Free, true, false), Tint::Unknown);
+    assert_eq!(tint_seen(CellVerdict::Free, true, true), Tint::Valid);
+}
+
+#[test]
+fn a_click_refused_by_a_hidden_blocker_does_not_name_it() {
+    let name = |k: Kind| format!("kind {}", k.0);
+    let anchor = Cell::new(4, 4);
+    let all = |_: Cell| true;
+    let one_hidden = |c: Cell| c != Cell::new(5, 5);
+    for e in [PlacementError::Occupied, PlacementError::UnitInTheWay] {
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &all, &name),
+            describe(e, &name)
+        );
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &one_hidden, &name),
+            "cannot build here"
+        );
+    }
+    // A cell outside the footprint does not matter.
+    let far = |c: Cell| c != Cell::new(9, 9);
+    assert_eq!(
+        click_refusal_words(PlacementError::Occupied, anchor, (2, 2), &far, &name),
+        describe(PlacementError::Occupied, &name)
+    );
+}
+
+#[test]
+fn the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green() {
+    let c = crate::vision_view::shipped_look().placement_unknown;
+    let unknown = Color(c.0, c.1, c.2, c.3);
+    assert_ne!(unknown, BLOCKED);
+    assert_ne!(unknown, VALID);
+    assert_ne!(unknown, ELSEWHERE);
+    assert_eq!(color_of(Tint::Unknown), unknown);
+}
+
+#[test]
+fn an_exit_cell_out_of_sight_looks_the_same_free_or_blocked() {
+    // Out of sight: the same grey whatever the sim says, so a hidden structure on it is not shown.
+    assert_eq!(exit_look(true, false), exit_look(false, false));
+    let grey = color_of(Tint::Unknown);
+    assert_eq!(exit_look(false, false).0, grey);
+    // In sight: blue when free, red when blocked.
+    assert_eq!(exit_look(true, true), (EXIT_OPEN, EXIT_OPEN_LINE));
+    assert_eq!(exit_look(false, true), (EXIT_BLOCKED, EXIT_BLOCKED_LINE));
+}
+
+#[test]
+fn a_blocked_exit_out_of_sight_is_not_named() {
+    let name = |k: Kind| format!("kind {}", k.0);
+    let exit = Cell::new(6, 5);
+    let preview = PlacementPreview {
+        footprint: None,
+        cells: vec![(Cell::new(4, 4), CellVerdict::Free)],
+        exit: Some(sf_sim::ExitCell {
+            cell: exit,
+            usable: false,
+        }),
+        verdict: Err(PlacementError::ExitBlocked),
+    };
+    let blocked = describe(PlacementError::ExitBlocked, &name);
+    assert_eq!(refusal_words(&preview, &|_| true, &name), blocked);
+    assert_eq!(
+        refusal_words(&preview, &|c| c != exit, &name),
+        "cannot build here"
+    );
+    // The click: every cell of the ring round a 2x2 footprint at (4, 4) must be in sight.
+    let anchor = Cell::new(4, 4);
+    let e = PlacementError::ExitBlocked;
+    assert_eq!(
+        click_refusal_words(e, anchor, (2, 2), &|_| true, &name),
+        blocked
+    );
+    for hidden in [Cell::new(6, 5), Cell::new(3, 3), Cell::new(4, 6)] {
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &|c| c != hidden, &name),
+            "cannot build here",
+            "{hidden:?}"
+        );
+    }
+    // A cell inside the footprint or beyond the ring does not matter for the exit.
+    for other in [Cell::new(5, 5), Cell::new(8, 8)] {
+        assert_eq!(
+            click_refusal_words(e, anchor, (2, 2), &|c| c != other, &name),
+            blocked
+        );
+    }
+    // At the map edge the ring cells off the map are skipped.
+    assert_eq!(
+        click_refusal_words(e, Cell::new(0, 0), (2, 2), &|_| true, &name),
+        blocked
+    );
 }

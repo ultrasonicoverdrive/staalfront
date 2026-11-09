@@ -385,6 +385,22 @@ impl Hud {
         self.sidebar.tab
     }
 
+    /// The sidebar's tab and scroll. A new scene starts from the default ([`Hud::reset_sidebar`]).
+    pub fn sidebar_state(&self) -> crate::sidebar_view::SidebarState {
+        self.sidebar
+    }
+
+    /// Puts the sidebar back on its default tab at scroll 0 (a Restart or a new scene).
+    pub fn reset_sidebar(&mut self) {
+        self.sidebar = crate::sidebar_view::SidebarState::default();
+    }
+
+    /// Sets the sidebar's tab and scroll (the tests put it somewhere before a restart).
+    #[cfg(test)]
+    pub(crate) fn set_sidebar_state(&mut self, state: crate::sidebar_view::SidebarState) {
+        self.sidebar = state;
+    }
+
     /// What the sidebar's clicks of the last frame asked for; taken once.
     pub fn take_sidebar_actions(&mut self) -> Vec<crate::sidebar::Action> {
         std::mem::take(&mut self.sidebar_actions)
