@@ -159,8 +159,9 @@ fn the_delivered_total_is_asserted_and_nothing_is_lost_or_made() {
     // The total that was unloaded is the sum of the unloading bites seen.
     let bites: u64 = log.unload_bites.iter().map(|&(_, _, n)| u64::from(n)).sum();
     assert_eq!(delivered, bites);
-    // Eight whole loads and 80 units of the ninth (the bay is mid-unload at the last tick).
-    assert_eq!(delivered, 1680);
+    // Nine whole loads. (Before WP7.5 it was eight and 80 units of the ninth: the queued harvesters
+    // stood in the approach; see `without_queue_spots_the_scenario_delivers_the_old_total`.)
+    assert_eq!(delivered, 1800);
     // Conservation: the ore left in the cells plus the loads carried plus the ore delivered only
     // ever rises by the regrowth, and never falls. The tick's growth is the number of field
     // cells whose turn it is, one unit each: at most `215 / 200 + 1` cells per tick here.
@@ -176,6 +177,36 @@ fn the_delivered_total_is_asserted_and_nothing_is_lost_or_made() {
             "ore appeared: {} to {}",
             pair[0],
             pair[1]
+        );
+    }
+}
+
+/// The same scenario with `queue_gap: 0` (queued harvesters stand where they were told to wait, as
+/// before WP7.5) delivers the total of WP7.2: that is the whole difference to the pinned run (the
+/// scenario has one refinery, so the choice of refinery cannot matter).
+#[test]
+fn without_queue_spots_the_scenario_delivers_the_old_total() {
+    let mut s = scenario();
+    s.harvest.as_mut().unwrap().queue_gap = 0;
+    let mut world = s.build_world().unwrap();
+    for _ in 0..s.ticks {
+        world.step();
+    }
+    assert_eq!(world.ore_delivered(P0), 1680);
+    // And the choice weights alone change nothing with one refinery (the checksum differs, since the
+    // weights are part of it; the harvesters do not).
+    let mut s = scenario();
+    s.harvest.as_mut().unwrap().queue_gap = 0;
+    s.harvest.as_mut().unwrap().queue_cost = 0;
+    let mut other = s.build_world().unwrap();
+    for _ in 0..s.ticks {
+        other.step();
+    }
+    for slot in 1..=4 {
+        assert_eq!(other.harvester_of(id(slot)), world.harvester_of(id(slot)));
+        assert_eq!(
+            other.get(id(slot)).unwrap().pos,
+            world.get(id(slot)).unwrap().pos
         );
     }
 }
@@ -430,6 +461,95 @@ fn crowd_scenario(harvest: bool, ticks: u64) -> Scenario {
     s
 }
 
+/// The crowd scenario with only the first `n` of its harvesters (the WP7.2 review's measurement).
+fn crowd_of(n: usize, ticks: u64) -> Scenario {
+    crowd_with_ore(n, ticks, 120)
+}
+
+/// [`crowd_of`] with `ore` units in every ore cell at the start (and as the most a cell holds):
+/// 120 is the shipped amount, which the near field runs out of in 4000 ticks with 12 harvesters;
+/// a richer field shows what the bays can unload.
+fn crowd_with_ore(n: usize, ticks: u64, ore: u16) -> Scenario {
+    let mut s = crowd_scenario(true, ticks);
+    if let Some(o) = &mut s.ore {
+        o.start = ore;
+        o.max = o.max.max(ore);
+    }
+    let mut seen = 0;
+    s.commands.retain(|c| match c.command {
+        Action::SpawnUnit { .. } => {
+            seen += 1;
+            seen <= n
+        }
+        _ => true,
+    });
+    s
+}
+
+/// The crowd with `n` harvesters that fill a load in 10 ticks (40 ore every 2 ticks) from a field
+/// of 2000 a cell, so that the refineries, not the mining, limit the delivery.
+fn bay_limited(n: usize) -> Scenario {
+    let mut s = crowd_with_ore(n, 4000, 2000);
+    let h = s.harvest.as_mut().unwrap();
+    h.mine_amount = 40;
+    h.mine_period = 2;
+    s
+}
+
+/// Ore delivered to player 0 by the end of `scenario`.
+fn delivered_by(scenario: &Scenario) -> u64 {
+    let mut world = scenario.build_world().unwrap();
+    for _ in 0..scenario.ticks {
+        world.step();
+    }
+    world.ore_delivered(P0)
+}
+
+/// Prints the delivery of 3, 6, 12, 24 and 48 harvesters on three refineries in 4000 ticks.
+/// `cargo test --release -p sf_headless --test harvest -- --ignored --nocapture throughput_table`.
+#[test]
+#[ignore]
+fn throughput_table() {
+    type Make = fn(usize) -> Scenario;
+    let regimes: [(&str, Make); 3] = [
+        ("shipped ore (120 a cell)", |n| crowd_of(n, 4000)),
+        ("2000 ore a cell", |n| crowd_with_ore(n, 4000, 2000)),
+        ("bay-limited", bay_limited),
+    ];
+    for ((ore, make), n) in regimes
+        .into_iter()
+        .flat_map(|r| [3, 6, 12, 24, 48].map(|n| (r, n)))
+    {
+        let scenario = make(n);
+        let mut world = scenario.build_world().unwrap();
+        let mut busy = [0u64; 3];
+        for _ in 0..scenario.ticks {
+            world.step();
+            for (slot, b) in busy.iter_mut().enumerate() {
+                *b += u64::from(world.dock_of(id(slot as u32)).is_some_and(|d| d.unloading));
+            }
+        }
+        let mut stages = std::collections::BTreeMap::new();
+        let mut carried = 0u64;
+        for slot in 3..(3 + n as u32) {
+            let v = world.harvester_of(id(slot)).unwrap();
+            *stages.entry(format!("{:?}", v.stage)).or_insert(0u32) += 1;
+            carried += u64::from(v.load);
+        }
+        let mut left = 0u64;
+        for y in 70..95 {
+            for x in 105..130 {
+                left += u64::from(world.ore_at(Cell::new(x, y)));
+            }
+        }
+        println!(
+            "{n:2} harvesters, {ore}: {} ore delivered, {carried} carried, {left} in the field; bays unloading {busy:?} of {} ticks; {stages:?}",
+            world.ore_delivered(P0),
+            scenario.ticks
+        );
+    }
+}
+
 /// Milliseconds a run of `scenario` takes, and the harvesters alive at the end.
 fn timed(scenario: &Scenario) -> (f64, usize, u64) {
     let mut world = scenario.build_world().unwrap();
@@ -597,4 +717,25 @@ fn money_cost() {
             (with - without) * 1e3 / ticks as f64
         );
     }
+}
+
+/// WP7.5: more harvesters do not collapse the delivery (the WP7.2 review measured 3, 6, 12, 24 and
+/// 48 harvesters on three refineries delivering 2400, 3200, 3200, 2271 and 618 in 4000 ticks).
+///
+/// Two regimes. With the shipped mining the near field (28 cells of 120) is the limit and runs
+/// out, and with 48 harvesters the field itself is crowded; the numbers there are floors a
+/// regression must not fall below, 10 to 20 percent under the measured ones. With harvesters that
+/// fill a load in 10 ticks the bays are the limit: the delivery rises with the number of
+/// harvesters up to 24 (measured 5180, 7510, 9050, 9990; with the old rule 3800, 3600, 3000,
+/// 2600), and 48 are not far under the best.
+#[test]
+fn many_harvesters_keep_delivering() {
+    let shipped = |n| delivered_by(&crowd_of(n, 4000));
+    assert!(shipped(24) >= 2500, "24 harvesters");
+    assert!(shipped(48) >= 2000, "48 harvesters");
+    let bays = |n| delivered_by(&bay_limited(n));
+    let (d6, d24, d48) = (bays(6), bays(24), bays(48));
+    assert!(d24 > d6, "24 harvesters {d24} against 6 {d6}");
+    assert!(d24 >= 8500, "24 harvesters {d24}");
+    assert!(d48 >= 5500, "48 harvesters {d48}");
 }

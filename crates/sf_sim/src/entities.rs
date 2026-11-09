@@ -126,6 +126,12 @@ pub(crate) struct Entities {
     /// everything that is complete, which is every unit and every structure placed with
     /// `PlaceStructure`. Hashed in the construction section while some entity is not zero.
     pub build_left: Vec<u32>,
+    /// Whether the structure is being repaired (WP6.6); false for everything else. Hashed in the
+    /// repair section while some entity is repairing or being sold.
+    pub repairing: Vec<bool>,
+    /// Ticks until a structure that is being sold is gone (WP6.6); zero for everything that is
+    /// not being sold. Hashed with `repairing`.
+    pub sell_left: Vec<u32>,
     /// How many kills the unit has been credited with (WP5.5); zero for everything that has none.
     /// Hashed in the destruction section while it is not zero.
     pub kills: Vec<u16>,
@@ -168,6 +174,8 @@ impl Entities {
         self.weapon.push(REST);
         self.eng.push(Engage::REST);
         self.build_left.push(0);
+        self.repairing.push(false);
+        self.sell_left.push(0);
         self.kills.push(0);
         index
     }
@@ -206,6 +214,8 @@ impl Entities {
         self.weapon[i] = REST;
         self.eng[i] = Engage::REST;
         self.build_left[i] = 0;
+        self.repairing[i] = false;
+        self.sell_left[i] = 0;
         self.kills[i] = 0;
         self.route.reset(i);
     }
@@ -240,6 +250,8 @@ impl Entities {
         self.weapon[i] = REST;
         self.eng[i] = Engage::REST;
         self.build_left[i] = 0;
+        self.repairing[i] = false;
+        self.sell_left[i] = 0;
         self.kills[i] = 0;
         self.route.reset(i);
     }

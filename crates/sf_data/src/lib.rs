@@ -16,17 +16,28 @@
 pub mod build_stages;
 pub mod damage;
 pub mod effects;
+pub mod fog_look;
 pub mod harvest;
 pub mod map;
+pub mod match_def;
+pub mod match_look;
 pub mod money;
 pub mod money_look;
 pub mod movement;
 pub mod ore;
+pub mod power;
+pub mod production;
+pub mod production_look;
+pub mod repair;
+pub mod repair_look;
+pub mod sidebar_look;
 pub mod sim_settings;
 pub mod skirmish;
 pub mod storage_look;
 pub mod terrain;
 pub mod units;
+pub mod vision;
+pub mod vision_look;
 
 /// Name of this crate, a placeholder until the real API lands.
 pub const CRATE: &str = "sf_data";

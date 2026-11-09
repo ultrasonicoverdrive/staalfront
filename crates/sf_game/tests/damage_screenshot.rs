@@ -456,15 +456,21 @@ fn changed(a: &Rgba8, b: &Rgba8, rect: [u32; 4]) -> usize {
     n
 }
 
-/// Pixels inside `rect` that `with` makes clearly brighter than `without`: light from fire (additive glow;
-/// over a blue roof it is pink, over a red one orange, so the hue is not tested).
+/// Pixels inside `rect` that show light from fire: `with` is clearly brighter than `without` (additive glow; over
+/// a blue roof it is pink, over a red one orange, so the hue is not tested there), or `with` shows the warm
+/// orange of flames where `without` does not. The second way was added in WP6.7: a flame drawn over the cream
+/// half of a roof is darker than the roof and gains nothing, and where the particles wander to depends on the
+/// effects of everything shot before (the sandbox's neutral gun shoots at the tanks since WP6.7), so the gain
+/// alone found no fire in a picture that had some. Smoke is dark and grey (red below 200) and the roofs are red
+/// (green below 80) or cream (green above 200): neither is orange.
 fn glow_pixels(with: &Rgba8, without: &Rgba8, rect: [u32; 4]) -> usize {
+    let orange = |p: [u8; 4]| p[0] > 200 && (80..200).contains(&p[1]) && p[2] < 130;
     let mut n = 0;
     for y in rect[1]..=rect[3] {
         for x in rect[0]..=rect[2] {
             let (p, q) = (with.pixel(x, y), without.pixel(x, y));
             let gain: i32 = (0..3).map(|i| i32::from(p[i]) - i32::from(q[i])).sum();
-            n += usize::from(gain > 120);
+            n += usize::from(gain > 120 || (orange(p) && !orange(q)));
         }
     }
     n

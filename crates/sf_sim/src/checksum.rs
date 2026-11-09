@@ -29,13 +29,19 @@
 //! | weapons (`W`), only with a weapon table | the weapon table's digest, then each live entity with a weapon that is reloading or in a burst, in slot order: for each weapon slot the ticks it waits to fire and the shots left in its burst (WP5.1) |
 //! | projectiles (`J`), only with a weapon table | the projectile store: its slot count, free list (stack order) and each projectile in flight in slot order, with its slot, generation, weapon, owner, target, aim point, place, height, heading, span and fuse (WP5.2) |
 //! | targeting (`A`), only with a weapon table **and** targeting settings | the settings, then each live unit whose memory of the targets it chose is not at rest (WP5.4) |
+//! | structure targets (`d`), only while the world has at least one live armed structure (inside the condition of `A`) | each live armed structure in slot order with its target, id and generation (WP6.7); after `A` |
 //! | destruction (`X`), only with destruction settings | the settings, the wrecks, the tally of each player and the kills of each live unit (WP5.5) |
 //! | buildings (`B`), only with a building table | the table's digest: every structure kind with its footprint, function, exit side, build time, price, power, factions and prerequisites (WP6.1), since WP6.2 the build radii and the faction of each player |
 //! | construction (`N`), only while some structure is under construction | the number of such structures, then for each in slot order: the slot and the ticks still to go (WP6.3); before `E` |
 //! | ore (`E`), only in a world given ore rules | the rules (start, maximum, regrowth amount and period), the number of field cells and a running sum of one mixed term per field cell and its amount (WP7.1). The sum is kept up to date in constant time per change, so the section costs 24 bytes of hashing per tick whatever the map size |
 //! | harvest (`H`), only in a world given harvest rules | the rules and the harvester kinds, the ore delivered per player, then every harvester in slot order (load, phase, timer, claimed cell, search focus, skipped cell, refinery, the order it expects, tries, unread messages) and every dock (bay, queue, inbox) (WP7.2) |
 //! | storage (`V`), only in a world given storage rules (and so harvest rules) | the capacity table (kind and units, ascending), then per player the ore stored and the capacity of its standing buildings at the last sync (WP7.3). |
-//! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V`. It is the last section |
+//! | money (`M`), only in a world given money rules (and so storage rules) | the price of a unit of ore in credits, then the credits each player has spent, ascending (WP7.4). The credits a player holds are the stored amount of `V` |
+//! | production (`Y`), only in a world given production rules | the rules and the table, then every queue, rally point and progress in slot order (WP6.5) |
+//! | outcome (`Z`), only in a world given match rules | the players of the match, whether it began, the defeats (player and tick) and the result (WP7.6) |
+//! | power (`I`), only in a world given power rules | the two tuning numbers, then for each player that makes or uses power, ascending: made and used as counted at the start of the last step (WP6.4) |
+//! | repair (`r`), only while some structure repairs or is being sold | the four numbers of the rules, then each such structure in slot order: the slot, whether it repairs and the ticks of its sale still to go (WP6.6). |
+//! | vision (`v`), only in a world given vision rules | the legacy sight and the sight of every kind, then for each player that has had an object, ascending: its disc count, a running sum of `(index + 1) * count` over the cells, the number of visible cells and a mixed sum of their indices, the number of explored cells and a mixed sum of theirs (WP8.1). Kept up to date per change, so it costs the same whatever the map size. It is the last section |
 //!
 //! Every variable-length part is preceded by its length and every section by a
 //! tag byte, so two different states cannot produce the same byte stream.
@@ -208,6 +214,11 @@ const SECTION_ORE: u8 = b'E';
 const SECTION_HARVEST: u8 = b'H';
 const SECTION_STORAGE: u8 = b'V';
 const SECTION_MONEY: u8 = b'M';
+const SECTION_PRODUCTION: u8 = b'Y';
+const SECTION_OUTCOME: u8 = b'Z';
+const SECTION_POWER: u8 = b'I';
+const SECTION_REPAIR: u8 = b'r';
+const SECTION_VISION: u8 = b'v';
 
 fn len64(n: usize) -> u64 {
     u64::try_from(n).unwrap_or(u64::MAX)
@@ -278,6 +289,42 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
             h.write_bytes(&kind.0.to_le_bytes());
             h.write_u32(cell.x);
             h.write_u32(cell.y);
+        }
+        Command::QueueUnit { factory, kind } => {
+            h.write_u8(13);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            h.write_bytes(&kind.0.to_le_bytes());
+        }
+        Command::CancelUnit { factory, index } => {
+            h.write_u8(14);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            h.write_u8(*index);
+        }
+        Command::SetRally { factory, cell } => {
+            h.write_u8(15);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            match cell {
+                Some(c) => {
+                    h.write_u8(1);
+                    h.write_u32(c.x);
+                    h.write_u32(c.y);
+                }
+                None => h.write_u8(0),
+            }
+        }
+        Command::Repair { structure, on } => {
+            h.write_u8(16);
+            h.write_u32(structure.index());
+            h.write_u32(structure.generation());
+            h.write_u8(u8::from(*on));
+        }
+        Command::Sell { structure } => {
+            h.write_u8(17);
+            h.write_u32(structure.index());
+            h.write_u32(structure.generation());
         }
         Command::Order { ids, order, queued } => {
             h.write_u8(8);
@@ -541,6 +588,8 @@ impl World {
             if let Some(config) = &self.targeting.config {
                 h.write_u8(SECTION_TARGETING);
                 targeting::write_hash(&mut h, config, e);
+                // Defences (WP6.7): the targets of the armed structures; nothing without one.
+                targeting::write_defence_hash(&mut h, e, &self.units, &self.arsenal);
             }
         }
         // Destruction (WP5.5): the settings, the wrecks, the scores and the kills of each unit. Only in
@@ -609,6 +658,46 @@ impl World {
                     self.write_money_hash(&mut h);
                 }
             }
+        }
+
+        // Production (`Y`, WP6.5): the rules and the table, then every queue, rally point and
+        // progress in slot order. Last, and only in a world that was given production rules, so
+        // every world without them hashes as before.
+        if let Some(production) = &self.production {
+            h.write_u8(SECTION_PRODUCTION);
+            production.write_hash(&mut h);
+        }
+
+        // Outcome (`Z`, WP7.6): the players of the match, whether it began, the defeats and the result.
+        // After `Y`, and only in a world that was given match rules, so every world without them
+        // hashes as before.
+        if let Some(outcome) = &self.outcome {
+            h.write_u8(SECTION_OUTCOME);
+            outcome.write_hash(&mut h);
+        }
+
+        // Power (`I`, WP6.4): the rules and the totals of each player at the last recount. After `Z`, so it
+        // is the last section, and only in a world that was given power rules: every world without
+        // them hashes as before.
+        if let Some(power) = &self.power {
+            h.write_u8(SECTION_POWER);
+            power.write_hash(&mut h);
+        }
+
+        // Repair and sale (`r`, WP6.6): the rules and each structure that repairs or is being sold,
+        // in slot order. After `I`, and only while some structure repairs
+        // or is being sold: every world where nobody does hashes as before.
+        if self.repair.is_some() && self.repair_active() {
+            h.write_u8(SECTION_REPAIR);
+            self.write_repair_hash(&mut h);
+        }
+
+        // Vision (`v`, WP8.1): the rules and, per player, the running sums of what it sees and has
+        // seen. After `r`, so it is the last section, and only in a world given vision rules: every
+        // world without them hashes as before. The byte is outside A-Z (all taken).
+        if let Some(vision) = &self.vision {
+            h.write_u8(SECTION_VISION);
+            vision.write_hash(&mut h);
         }
 
         h.finish()

@@ -62,10 +62,12 @@ points left** (or cannot be damaged, `hp` 0 in the table). It is what these ask:
 |---|---|
 | prerequisites (`requires`, WP6.1) | the structure must stand (`a_structure_under_construction_is_no_prerequisite_until_it_completes`, and on the shipped tree `meridian_builds_the_whole_shipped_tree_with_build_commands`) |
 | the base anchor of the build radius (WP6.2) | the anchor must stand (`a_base_under_construction_gives_no_reach`) |
-| power (WP6.4), production (WP6.5), repair and sell (WP6.6) | **to use `World::stands`**; nothing reads it yet |
+| production (WP6.5) | the front unit's prerequisites and the factory itself must stand (`production.md`) |
+| power (WP6.4) | counts only structures that stand, made and used alike (`power.md`: `a_structure_under_construction_makes_and_uses_nothing_until_it_stands`) |
+| repair and sell (WP6.6) | a repair and a sale need a structure that stands (not one going up, not one at zero hit points), and a structure being sold stops standing from the first tick (`repair_sell.md`) |
 
-A structure under construction must give no power and produce nothing; those work packages have to call
-`stands` and not look at hit points alone.
+A structure under construction gives no power and produces nothing; the work packages that read it call
+`stands` and do not look at hit points alone.
 
 ## Hurt and destroyed while it goes up (WP5.5, WP5.4)
 
@@ -79,10 +81,10 @@ plant down in two shots, 200 ticks run on, no `Completion`, no state left, the c
 In a world **without** destruction settings (the pinned earlier scenarios, the unit tests of placement) a structure at
 zero hit points stays where it fell. Construction does not advance on it and no completion fires: a wreck must not
 "complete" (`a_structure_at_zero_hit_points_does_not_finish_building_and_fires_no_event`). If hit points come back
-(repair, WP6.6) it carries on from where it stopped.
+(a repair, WP6.6, cannot bring them back: a structure under construction cannot be repaired, and one at zero hit points is not repaired either, `repair_sell.md`) it would carry on from where it stopped.
 
-Targeting (WP5.4): structures do not choose or take targets by themselves yet (WP6.7 for defences), so only an
-explicit attack order hurts one. **Gap:** a structure has its full hit points while it goes up. Whether it should be
+Targeting (WP5.4): a structure under construction does not choose targets (it does not stand; since WP6.7 a standing
+armed structure does, `defences.md`), and it can be hurt like any other. **Gap:** a structure has its full hit points while it goes up. Whether it should be
 fragile at first (hit points rising with progress) is balance for phase 15; it would be one more column, not a
 change of the rule.
 
@@ -141,8 +143,11 @@ Screenshots with the tick in the name: `docs/screenshots/wp6.3/` (`build_screens
 * **Money (WP7.4).** In a world with money rules a build is paid tick by tick and waits when the owner has no
   credits (`economy.md`, "Money"); nothing is refunded. In a world without them `BuildStructure` is free. A build cannot be
   cancelled or paused by the player, and there is no builder unit or queue: the player places it and it goes up by itself.
-  Rate of build is the table's `build_ticks` alone: no power shortage slows it (WP6.4).
-* A structure under construction is not repaired, sold or cancelled (WP6.6).
+  Rate of build is the table's `build_ticks` at full speed; **since WP6.4 a power shortage slows it** (`power.md`): the structure
+  advances on `speed` ticks of every thousand (`tick * speed / 1000` steps up), pays the same `C * (k + 1) / T - C * k / T` on a tick it
+  advances and nothing on the others, so the price is still paid exactly. Without power rules (every world of the earlier phases) it
+  is the table's `build_ticks` alone.
+* A structure under construction is not repaired or sold (WP6.6: both are refused, `UnderConstruction`; `repair_sell.md`), and it cannot be cancelled.
 * Hit points do not rise with progress (above).
 * No sound or voice for "construction complete" (a hook: `World::completions()`).
 * The decoy (`F1-M05`): `decoy_emplacement` builds in 8 s (160 ticks), the fastest of the tree; its prerequisite

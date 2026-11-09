@@ -34,9 +34,63 @@ use std::time::{Duration, Instant};
 
 use sf_math::Vec2;
 use sf_sim::{
-    Cell, Construction, Death, EntityId, EntityView, Kind, Order, PlacementPreview, PlayerId,
-    ProjectileView, Tick, UnitStats, UnitTable, World, WreckView,
+    BuildingFunction, Cell, Construction, Death, EntityId, EntityView, FactoryView, Kind, Order,
+    PlacementPreview, PlayerId, ProjectileView, RepairStatus, SaleProgress, Tick, UnitBuild,
+    UnitStats, UnitTable, Visibility, World, WreckView,
 };
+
+/// What the factories can build and which structure is which factory (WP6.5): read from the world
+/// once, shared by every snapshot. The queue readout and the keys that queue a unit ask it; the
+/// rules (who may build what) stay in the simulation, which refuses what is not allowed.
+#[derive(Clone, Debug, Default)]
+pub struct ProductionMenu {
+    builds: Vec<UnitBuild>,
+    factories: Vec<(Kind, BuildingFunction)>,
+}
+
+impl ProductionMenu {
+    /// Reads the menu of `world`; empty for a world without production rules.
+    pub fn of(world: &World) -> ProductionMenu {
+        let Some(table) = world.production_table() else {
+            return ProductionMenu::default();
+        };
+        ProductionMenu {
+            builds: table.iter().cloned().collect(),
+            factories: world
+                .building_table()
+                .iter()
+                .filter(|b| b.function.is_factory())
+                .map(|b| (b.kind, b.function))
+                .collect(),
+        }
+    }
+
+    /// The function of the structure kind `kind` if it is a factory.
+    pub fn factory_function(&self, kind: Kind) -> Option<BuildingFunction> {
+        self.factories
+            .iter()
+            .find(|&&(k, _)| k == kind)
+            .map(|&(_, f)| f)
+    }
+
+    /// The unit kinds a factory of `function` builds for a player of the faction `faction_bit`, ascending
+    /// by kind.
+    pub fn units_for(&self, function: BuildingFunction, faction_bit: u8) -> Vec<Kind> {
+        self.builds
+            .iter()
+            .filter(|b| b.factory == function && b.factions & faction_bit != 0)
+            .map(|b| b.kind)
+            .collect()
+    }
+
+    /// The price and build time of a unit: `(credits, ticks)`.
+    pub fn price_of(&self, kind: Kind) -> Option<(u32, u32)> {
+        self.builds
+            .iter()
+            .find(|b| b.kind == kind)
+            .map(|b| (b.cost, b.build_ticks))
+    }
+}
 
 /// A placement question for the ghost under the cursor (WP6.2): may `player` build `kind` with
 /// its footprint anchored on `cell`? The sim thread answers it against the world as it is, with
@@ -120,6 +174,16 @@ pub struct SimSnapshot {
     credits: Vec<(PlayerId, u64)>,
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
     stalled: Vec<EntityId>,
+    /// Whether the world has power rules (WP6.4).
+    has_power: bool,
+    /// Per player that owns an entity, ascending: what it makes, what it uses and the speed that
+    /// follows (WP6.4), as the world counted them at the start of the last step. Empty without power
+    /// rules.
+    power: Vec<(PlayerId, u64, u64, u32)>,
+    /// The queue of every structure that has one or a rally point (WP6.5), ascending by slot.
+    factories: Vec<(EntityId, FactoryView)>,
+    /// What the factories can build (WP6.5); shared.
+    menu: Arc<ProductionMenu>,
     /// The wrecks and the rubble that lie in the world (WP5.5), by where they lie.
     wrecks: Vec<WreckView>,
     /// What was destroyed in the last step (WP5.5); lossy, see [`SimSnapshot::deaths`].
@@ -135,6 +199,31 @@ pub struct SimSnapshot {
     /// Usually empty. The picture picks the stage model and the progress bar from this and nothing
     /// else: the state is the simulation's.
     builds: Vec<(EntityId, Construction)>,
+    /// The decided result of the match (WP7.6); `None` before, and in a world without match rules.
+    result: Option<sf_sim::MatchResult>,
+    /// Whether the world has repair and sale rules (WP6.6).
+    has_repair: bool,
+    /// The structures that are being repaired and what the repair is doing (WP6.6), ascending by
+    /// slot. Usually empty.
+    repairs: Vec<(EntityId, RepairStatus)>,
+    /// The structures that are being sold and how far the sale is (WP6.6), ascending by slot.
+    sales: Vec<(EntityId, SaleProgress)>,
+    /// What the local player sees and has seen (WP8.1): the version of the world's picture of it
+    /// (`None` in a world without vision rules) and the two bitsets, bit `y * width + x`. The bitsets
+    /// are copied only when the version changed, like the ore. Empty bitsets mean nothing seen yet.
+    fog_version: Option<u64>,
+    fog_visible: Vec<u64>,
+    fog_explored: Vec<u64>,
+    /// Whether the local player sees each view (WP8.1), parallel to `views`: its own objects always,
+    /// the others when the cell they stand on (a structure: any cell of its footprint) is visible.
+    /// Empty in a world without vision rules.
+    seen: Vec<bool>,
+    /// The player whose sight this is (WP8.3): `seen` is for this player, and nothing of its own is
+    /// ever hidden from it.
+    local: PlayerId,
+    /// The footprint of each structure view, `(anchor cell, width, height)`, parallel to `views`
+    /// (`None` for a unit). Filled only in a world with vision rules: the ghosts (WP8.3) remember it.
+    foot: Vec<Option<(Cell, u8, u8)>>,
 }
 
 impl SimSnapshot {
@@ -159,6 +248,10 @@ impl SimSnapshot {
             has_money: false,
             credits: Vec::new(),
             stalled: Vec::new(),
+            has_power: false,
+            power: Vec::new(),
+            factories: Vec::new(),
+            menu: Arc::new(ProductionMenu::default()),
             wrecks: Vec::new(),
             deaths: Vec::new(),
             projectiles: Vec::new(),
@@ -167,6 +260,16 @@ impl SimSnapshot {
             pace: Pace::now(),
             ghost: None,
             builds: Vec::new(),
+            result: None,
+            has_repair: false,
+            repairs: Vec::new(),
+            sales: Vec::new(),
+            fog_version: None,
+            fog_visible: Vec::new(),
+            fog_explored: Vec::new(),
+            seen: Vec::new(),
+            local: crate::commands::LOCAL_PLAYER,
+            foot: Vec::new(),
         }
     }
 
@@ -181,6 +284,24 @@ impl SimSnapshot {
         snap.views = views;
         snap.units = units;
         snap
+    }
+
+    /// Sets the hit points of the view of `id` (tests of what reads them; a sim of the tests may
+    /// have no rules that take hit points away).
+    #[cfg(test)]
+    pub(crate) fn set_hp_for_test(&mut self, id: EntityId, hp: u32) {
+        let v = self
+            .views
+            .iter_mut()
+            .find(|v| v.id == id)
+            .expect("a live id");
+        v.hp = hp;
+    }
+
+    /// Marks `id` as being repaired in this snapshot (tests of what reads it).
+    #[cfg(test)]
+    pub(crate) fn set_repair_for_test(&mut self, id: EntityId, status: RepairStatus) {
+        self.repairs.push((id, status));
     }
 
     /// The views of live objects `(role id, owner, cell x, cell y, hit points)` in ascending slots, the
@@ -317,6 +438,44 @@ impl SimSnapshot {
         }
         self.stalled.clear();
         self.stalled.extend_from_slice(world.stalled());
+        // Power (WP6.4): what each player makes and uses, and the speed that follows. The numbers are
+        // the world's; nothing is counted here.
+        self.has_power = world.power_rules().is_some();
+        self.power.clear();
+        if self.has_power {
+            let mut players: Vec<PlayerId> = self.views.iter().map(|v| v.owner).collect();
+            players.sort_unstable();
+            players.dedup();
+            for p in players {
+                if let Some(t) = world.power_of(p) {
+                    self.power
+                        .push((p, t.made, t.used, world.power_speed_permille(p)));
+                }
+            }
+        }
+        // Repair and sale (WP6.6): the simulation's state of this tick; usually nothing.
+        self.has_repair = world.repair_rules().is_some();
+        self.repairs.clear();
+        self.repairs.extend(
+            world
+                .repairing()
+                .filter_map(|id| world.repair_status(id).map(|s| (id, s))),
+        );
+        self.sales.clear();
+        self.sales.extend(world.sales_in_progress());
+        // Vision (WP8.1): what the local player sees. The bitsets are copied only when the world's
+        // version of them changed; `seen` is worked out for every view from the world's own answer.
+        self.fill_fog(world, statics.local);
+        // The match (WP7.6): the result once it is decided.
+        self.result = world.match_result();
+        // The queues (WP6.5): the simulation's state of this tick, a handful of records.
+        self.factories.clear();
+        self.factories.extend(
+            world
+                .factories()
+                .filter_map(|id| world.production_of(id).map(|v| (id, v))),
+        );
+        self.menu = Arc::clone(&statics.menu);
         self.wrecks.clear();
         self.wrecks.extend(world.snapshot().wrecks());
         self.deaths.clear();
@@ -332,6 +491,164 @@ impl SimSnapshot {
         self.ghost = None;
     }
 
+    /// The vision part of [`SimSnapshot::fill`] for the player `local`.
+    fn fill_fog(&mut self, world: &World, local: PlayerId) {
+        self.seen.clear();
+        self.foot.clear();
+        self.local = local;
+        match world.fog_version(local) {
+            None => {
+                self.fog_version = None;
+                self.fog_visible.clear();
+                self.fog_explored.clear();
+            }
+            Some(version) => {
+                if self.fog_version != Some(version) {
+                    self.fog_version = Some(version);
+                    self.fog_visible.clear();
+                    self.fog_explored.clear();
+                    if let Some((visible, explored)) = world.fog_words(local) {
+                        self.fog_visible.extend_from_slice(visible);
+                        self.fog_explored.extend_from_slice(explored);
+                    }
+                }
+                for v in &self.views {
+                    self.foot.push(
+                        world
+                            .cell_of(v.id)
+                            .zip(world.footprint_of(v.id))
+                            .map(|(at, fp)| (at, fp.width, fp.height)),
+                    );
+                    let seen = v.owner == local
+                        || match (world.cell_of(v.id), world.footprint_of(v.id)) {
+                            (Some(at), Some(fp)) => (0..u32::from(fp.height)).any(|dy| {
+                                (0..u32::from(fp.width)).any(|dx| {
+                                    world.visibility(local, Cell::new(at.x + dx, at.y + dy))
+                                        == Visibility::Visible
+                                })
+                            }),
+                            _ => self
+                                .cell_at(v.pos)
+                                .is_some_and(|c| world.visibility(local, c) == Visibility::Visible),
+                        };
+                    self.seen.push(seen);
+                }
+            }
+        }
+    }
+
+    /// The version of what the local player sees (WP8.1); `None` in a world without vision rules.
+    /// Changes exactly when the visible or explored cells do.
+    pub fn fog_version(&self) -> Option<u64> {
+        self.fog_version
+    }
+
+    /// Overwrites the copied fog bitsets with all-clear (tests of what refills them).
+    #[cfg(test)]
+    pub(crate) fn poison_fog_for_test(&mut self) {
+        self.fog_visible.iter_mut().for_each(|w| *w = 0);
+        self.fog_explored.iter_mut().for_each(|w| *w = 0);
+    }
+
+    /// What the local player knows about `cell` (WP8.1), from the bitsets copied with this snapshot.
+    /// [`Visibility::Visible`] in a world without vision rules; shroud outside the map.
+    pub fn visibility(&self, cell: Cell) -> Visibility {
+        if self.fog_version.is_none() {
+            return Visibility::Visible;
+        }
+        if cell.x >= self.map_size.0 || cell.y >= self.map_size.1 {
+            return Visibility::Shroud;
+        }
+        let i = cell.y as usize * self.map_size.0 as usize + cell.x as usize;
+        let bit = |words: &[u64]| words.get(i / 64).is_some_and(|w| w >> (i % 64) & 1 == 1);
+        if bit(&self.fog_visible) {
+            Visibility::Visible
+        } else if bit(&self.fog_explored) {
+            Visibility::Fog
+        } else {
+            Visibility::Shroud
+        }
+    }
+
+    /// Whether the local player sees the entity `id` now (WP8.1): its own objects always, the
+    /// others when their cell is visible. True in a world without vision rules; false for a stale id.
+    /// The picture hides what is not seen with it (WP8.3, WP8.4: [`SimSnapshot::view_shown`]).
+    pub fn seen(&self, id: EntityId) -> bool {
+        let Some(at) = self.find(id) else {
+            return false;
+        };
+        self.seen.get(at).copied().unwrap_or(true)
+    }
+
+    /// The player whose sight this snapshot carries (WP8.3).
+    pub fn local_player(&self) -> PlayerId {
+        self.local
+    }
+
+    /// Whether the view at `index` of [`SimSnapshot::views`] is drawn, iconised, picked and counted on
+    /// the minimap (WP8.3, WP8.4): always in a world without vision rules, always for the local
+    /// player's own, else when it is seen. An index beyond the views is shown (nothing to hide).
+    pub fn view_shown(&self, index: usize) -> bool {
+        self.seen.get(index).copied().unwrap_or(true)
+    }
+
+    /// The two fog bitsets `(visible, explored)` of the local player (bit `y * width + x`); empty
+    /// slices in a world without vision rules.
+    pub fn fog_words(&self) -> (&[u64], &[u64]) {
+        (&self.fog_visible, &self.fog_explored)
+    }
+
+    /// The footprint `(anchor cell, width, height)` of the structure view at `index`, if it is one and
+    /// the world has vision rules (the ghosts remember it).
+    pub fn footprint_at(&self, index: usize) -> Option<(Cell, u8, u8)> {
+        self.foot.get(index).copied().flatten()
+    }
+
+    /// Whether the cell `cell` is visible to the local player now; true in a world without vision rules.
+    pub fn is_visible(&self, cell: Cell) -> bool {
+        self.visibility(cell) == Visibility::Visible
+    }
+
+    /// Whether a thing at `pos` (metres, `[x, z]`) is shown (WP8.3): in a world without vision rules
+    /// always, the local player's own things always (`player`), else when the cell it is in is visible.
+    /// The test of effects: a flash, a hit, a death, a tracer. A position off the map is hidden.
+    pub fn shown_at_metres(&self, pos: [f32; 2], player: PlayerId) -> bool {
+        if self.fog_version.is_none() || player == self.local {
+            return true;
+        }
+        let cell = sf_math::render_bridge::METRES_PER_CELL;
+        if pos[0] < 0.0 || pos[1] < 0.0 {
+            return false;
+        }
+        self.is_visible(Cell::new(
+            (pos[0] / cell).floor() as u32,
+            (pos[1] / cell).floor() as u32,
+        ))
+    }
+
+    /// Whether a wreck or a pile of rubble is shown: its owner's own always, else when the cell it lies
+    /// on (rubble: any cell of its footprint) is visible. A wreck in fog is hidden until it is seen again.
+    pub fn wreck_shown(&self, w: &WreckView) -> bool {
+        if self.fog_version.is_none() || w.owner == self.local {
+            return true;
+        }
+        match (w.footprint, w.anchor) {
+            (Some(fp), Some(at)) => (0..u32::from(fp.height)).any(|dy| {
+                (0..u32::from(fp.width)).any(|dx| self.is_visible(Cell::new(at.x + dx, at.y + dy)))
+            }),
+            _ => self.cell_at(w.pos).is_some_and(|c| self.is_visible(c)),
+        }
+    }
+
+    /// Whether a projectile in flight is shown: the local player's own always, else when the ground
+    /// under it is in a visible cell.
+    pub fn projectile_shown(&self, p: &ProjectileView) -> bool {
+        if self.fog_version.is_none() || p.player == self.local {
+            return true;
+        }
+        self.cell_at(p.pos).is_some_and(|c| self.is_visible(c))
+    }
+
     /// Asks `world` the placement question `query` and keeps the answer in this snapshot (WP6.2).
     /// The one place the presentation's ghost gets its verdict: `World::preview_placement`, the
     /// function the `BuildStructure` command runs.
@@ -345,6 +662,31 @@ impl SimSnapshot {
     pub fn construction_of(&self, id: EntityId) -> Option<Construction> {
         // Nearly always empty, and a handful of entries when not: a scan is the cheap way.
         self.builds.iter().find(|(b, _)| *b == id).map(|(_, c)| *c)
+    }
+
+    /// Whether the world has repair and sale rules (WP6.6): the sidebar shows its buttons only then.
+    pub fn has_repair(&self) -> bool {
+        self.has_repair
+    }
+
+    /// What the repair of `id` is doing, or `None` when it is not being repaired (WP6.6).
+    pub fn repair_of(&self, id: EntityId) -> Option<RepairStatus> {
+        self.repairs.iter().find(|(r, _)| *r == id).map(|(_, s)| *s)
+    }
+
+    /// Every structure that is being repaired, ascending by slot.
+    pub fn repairs(&self) -> &[(EntityId, RepairStatus)] {
+        &self.repairs
+    }
+
+    /// How far the sale of `id` is, or `None` when it is not being sold (WP6.6).
+    pub fn sale_of(&self, id: EntityId) -> Option<SaleProgress> {
+        self.sales.iter().find(|(s, _)| *s == id).map(|(_, p)| *p)
+    }
+
+    /// Every structure that is being sold with its progress, ascending by slot.
+    pub fn sales(&self) -> &[(EntityId, SaleProgress)] {
+        &self.sales
     }
 
     /// Every structure under construction, ascending by slot.
@@ -379,6 +721,15 @@ impl SimSnapshot {
     /// How the last tick went.
     pub fn pace(&self) -> &Pace {
         &self.pace
+    }
+
+    /// The number of live entities the local player is shown (WP8.3): all of them without vision rules,
+    /// else its own and the others it sees. What a counter on the screen may say.
+    pub fn shown_count(&self) -> usize {
+        if self.fog_version.is_none() {
+            return self.views.len();
+        }
+        self.seen.iter().filter(|&&s| s).count()
     }
 
     /// The number of live entities.
@@ -427,9 +778,52 @@ impl SimSnapshot {
         })
     }
 
+    /// What `player` makes and uses (WP6.4), straight from [`World::power_of`]; `None` in a world
+    /// without power rules. A player that owns nothing makes and uses nothing.
+    pub fn power_of(&self, player: PlayerId) -> Option<(u64, u64)> {
+        self.has_power.then(|| {
+            self.power
+                .binary_search_by_key(&player, |&(p, ..)| p)
+                .map_or((0, 0), |k| (self.power[k].1, self.power[k].2))
+        })
+    }
+
+    /// The speed power gives the structures and factories of `player`, in thousandths (WP6.4):
+    /// 1000 in a world without power rules and for a player without a shortage.
+    pub fn power_speed(&self, player: PlayerId) -> u32 {
+        self.power
+            .binary_search_by_key(&player, |&(p, ..)| p)
+            .map_or(1000, |k| self.power[k].3)
+    }
+
+    /// The result of the match, once decided (WP7.6); straight from [`World::match_result`].
+    pub fn match_result(&self) -> Option<sf_sim::MatchResult> {
+        self.result
+    }
+
     /// The structures under construction that wait for money (WP7.4), ascending by slot.
     pub fn stalled(&self) -> &[EntityId] {
         &self.stalled
+    }
+
+    /// The queue of the factory `id`, if it has one or a rally point (WP6.5).
+    pub fn factory_of(&self, id: EntityId) -> Option<&FactoryView> {
+        self.factories
+            .binary_search_by_key(&id.index(), |(f, _)| f.index())
+            .ok()
+            .map(|k| &self.factories[k])
+            .filter(|(f, _)| *f == id)
+            .map(|(_, v)| v)
+    }
+
+    /// Every factory with a queue or a rally point, ascending by slot (WP6.5).
+    pub fn factories(&self) -> &[(EntityId, FactoryView)] {
+        &self.factories
+    }
+
+    /// What the factories can build (WP6.5).
+    pub fn menu(&self) -> &ProductionMenu {
+        &self.menu
     }
 
     /// Whether any structure of `player` under construction waits for money (WP7.4).
@@ -641,6 +1035,9 @@ impl GroundMap {
 pub(crate) struct Statics {
     units: Arc<UnitTable>,
     ground: Arc<GroundMap>,
+    menu: Arc<ProductionMenu>,
+    /// The player whose sight the snapshots carry (WP8.1).
+    local: PlayerId,
 }
 
 impl Statics {
@@ -672,6 +1069,8 @@ impl Statics {
         Statics {
             units: Arc::new(world.unit_table().clone()),
             ground: Arc::new(map),
+            menu: Arc::new(ProductionMenu::of(world)),
+            local: crate::commands::LOCAL_PLAYER,
         }
     }
 }

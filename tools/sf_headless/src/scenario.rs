@@ -41,14 +41,15 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use sf_data::map::Map;
+use sf_data::match_def::MatchDef;
 use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::{Faction, UnitDefs};
 use sf_math::{Fx, Rng, Vec2};
 use sf_sim::{
     Area, BuildingTable, Cell, Command, DEFAULT_MAP_SIDE, EntityId, GuardTarget, Kind,
-    MAX_ENTITIES, MAX_MAP_SIDE, MovementTable, Order, PlayerId, Terrain, Tick, UnitTable,
-    WeaponTable, World, WorldConfig,
+    MAX_ENTITIES, MAX_MAP_SIDE, MovementTable, Order, PlayerId, ProductionTable, Terrain, Tick,
+    UnitTable, WeaponTable, World, WorldConfig,
 };
 
 /// The stream number of the placement generator: spawn positions come from
@@ -195,6 +196,41 @@ pub struct Scenario {
     /// scenario of the earlier phases. Needs `storage` (the store is the pool).
     #[serde(default)]
     pub money: Option<MoneySpec>,
+    /// Production (WP6.5, `docs/rules/production.md`): the queue limit and the exit search radius,
+    /// written out in the scenario so that editing the shipped `production.ron` never moves its
+    /// checksum. What each unit costs and which factory builds it come from the `unit_defs`
+    /// directory (a frozen copy freezes them). Left out: the factories build nothing, which is
+    /// every scenario of the earlier phases. Needs `buildings`; without `money` units are free.
+    #[serde(default)]
+    pub production: Option<ProductionSpec>,
+    /// Power (WP6.4, `docs/rules/power.md`): the shortage floor and the defence cutoff, written out in
+    /// the scenario so that editing the shipped `power.ron` never moves its checksum. What each
+    /// structure makes or uses is `power` in the `unit_defs` directory. Left out: no power rules, which
+    /// is every scenario of the earlier phases (a section `I` in the checksum only when it is on).
+    /// Needs `buildings`.
+    #[serde(default)]
+    pub power: Option<PowerSpec>,
+    /// Repair and sale (WP6.6, `docs/rules/repair_sell.md`): the four numbers, written out in the
+    /// scenario so that editing the shipped `repair.ron` never moves its checksum. Left out: no
+    /// repair or sale, which is every scenario of the earlier phases (a section `r` in the checksum
+    /// only while something repairs or is sold). Needs `buildings`.
+    #[serde(default)]
+    pub repair: Option<RepairSpec>,
+    /// Vision (WP8.1, `docs/rules/vision.md`): the sight of an entity without a unit table entry,
+    /// written out in the scenario so that editing the shipped `vision.ron` never moves its
+    /// checksum. The sight of each unit kind is `sight` in the `unit_defs` directory (a frozen copy
+    /// freezes it). Left out: no vision rules, which is every scenario of the earlier phases (no pass
+    /// and no section `v` in the checksum). Nothing in the simulation behaves differently with it.
+    #[serde(default)]
+    pub vision: Option<VisionSpec>,
+    /// The sight of each kind of the `unit_defs` directory, read by [`Scenario::load`] when `vision`
+    /// is on, handed to the world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub vision_sights: Vec<(Kind, u32)>,
+    /// The production table read from `unit_defs` by [`Scenario::load`] when `production` is on,
+    /// handed to the world by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub production_table: Option<ProductionTable>,
     /// Whether what the weapons take to zero is destroyed (WP5.5, `docs/rules/destruction.md`): removed
     /// from the world with its cells freed, a vehicle leaving a wreck and a structure rubble, the kill
     /// credited. The world is given the simulation's own settings (the numbers of `sim.ron`). Off when
@@ -206,6 +242,23 @@ pub struct Scenario {
     /// handed to the world by [`Scenario::build_world`]. Not part of the file.
     #[serde(skip)]
     pub weapon_table: Option<WeaponTable>,
+    /// A match file (WP7.6, `docs/rules/match.md`): the name of a file in the `unit_defs` directory
+    /// (a frozen copy of `assets/matches/m1.ron` next to the frozen definitions, so that editing the
+    /// shipped match never moves the checksum). It gives the world its match rules (who takes part,
+    /// hence the outcome section `Z`), the faction and the starting credits of each player and the
+    /// objects each starts with, which enter the world on tick 0 before everything else of the
+    /// scenario, in the order of the file. The map is the scenario's own `map_name`. Left out: no
+    /// match, which is every scenario of the earlier phases. Needs `unit_defs`, `buildings`, `combat`
+    /// and `destruction`; `factions` and the `starting` list of `money` stay empty (the file has them).
+    #[serde(default)]
+    pub match_file: Option<String>,
+    /// The match file read from `match_file` by [`Scenario::load`]. Not part of the file.
+    #[serde(skip)]
+    pub match_def: Option<MatchDef>,
+    /// The commands that make the starting objects of `match_def` (`sf_bridge::match_commands`), read
+    /// by [`Scenario::load`], scheduled for tick 0 by [`Scenario::build_world`]. Not part of the file.
+    #[serde(skip)]
+    pub match_commands: Vec<(PlayerId, Command)>,
 
     /// How many ticks to run; at least 1.
     pub ticks: u64,
@@ -229,6 +282,88 @@ pub struct OreSpec {
     pub regrow_amount: u16,
     /// Ticks between two turns of a cell.
     pub regrow_period: u32,
+}
+
+/// The production rules of a scenario (`sf_sim::ProductionRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProductionSpec {
+    /// Most items in one factory's queue, the one being built included.
+    pub queue_limit: u8,
+    /// Cells round the exit cell in which a finished unit looks for a free spot.
+    pub exit_radius: u8,
+}
+
+impl ProductionSpec {
+    /// The simulation's rules for these numbers.
+    pub fn rules(self) -> sf_sim::ProductionRules {
+        sf_sim::ProductionRules {
+            queue_limit: self.queue_limit,
+            exit_radius: self.exit_radius,
+        }
+    }
+}
+
+/// The vision rules of a scenario (`sf_sim::VisionRules`, without the sights of the kinds, which come
+/// from the definitions).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VisionSpec {
+    /// The sight, in thousandths of a cell, of an entity without a unit table entry (0 to 64000).
+    pub legacy_sight_milli: u32,
+    /// WP8.2a: automatic acquisition only picks what its owner can see (`vision.md`). Left out: off (the opposite of `vision.ron`, which sets it).
+    #[serde(default)]
+    pub acquire_needs_sight: bool,
+    /// WP8.2a: `(sharer, viewer)` pairs, strictly ascending: the viewer also sees what the sharer
+    /// sees. Left out: nothing is shared.
+    #[serde(default)]
+    pub shared: Vec<(u8, u8)>,
+}
+
+/// The power rules of a scenario (`sf_sim::PowerRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PowerSpec {
+    /// The lowest speed a shortage brings things down to, in thousandths (0 to 1000).
+    pub shortage_floor_permille: u32,
+    /// Defences work while the speed is at least this (0 to 1000).
+    pub defence_cutoff_permille: u32,
+}
+
+impl PowerSpec {
+    /// The simulation's rules for these numbers.
+    pub fn rules(self) -> sf_sim::PowerRules {
+        sf_sim::PowerRules {
+            shortage_floor_permille: self.shortage_floor_permille,
+            defence_cutoff_permille: self.defence_cutoff_permille,
+        }
+    }
+}
+
+/// The repair and sale rules of a scenario (`sf_sim::RepairRules`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepairSpec {
+    /// Hit points gained per tick (1 to 1000).
+    pub hp_per_tick: u16,
+    /// Cost of a repair from nothing to full hit points, thousandths of the price (0 to 1000).
+    pub full_cost_permille: u32,
+    /// Ticks a sale takes (1 to 6000).
+    pub sell_ticks: u32,
+    /// The part of the price paid back at full hit points, thousandths (0 to 1000).
+    pub refund_permille: u32,
+}
+
+impl RepairSpec {
+    /// The simulation's rules for these numbers.
+    pub fn rules(self) -> sf_sim::RepairRules {
+        sf_sim::RepairRules {
+            hp_per_tick: self.hp_per_tick,
+            full_cost_permille: self.full_cost_permille,
+            sell_ticks: self.sell_ticks,
+            refund_permille: self.refund_permille,
+        }
+    }
 }
 
 /// The money rules of a scenario (`sf_sim::MoneyRules`) and the credits each player starts with.
@@ -289,6 +424,22 @@ pub struct HarvestSpec {
     pub mine_lose_tenths: u16,
     /// Tenths of a cell from the dock point that count as docked when a walk is over.
     pub dock_reach_tenths: u16,
+    /// Choice of refinery: ticks one cell of straight-line distance to the dock point is worth.
+    pub travel_cost: u16,
+    /// Ticks every harvester already committed to a refinery adds to the expected wait there.
+    pub queue_cost: u16,
+    /// Ticks a refinery has to be cheaper than the one a driving harvester is bound for before it switches.
+    pub switch_margin: u16,
+    /// Ticks between two looks of a driving harvester at the other refineries.
+    pub recheck_period: u16,
+    /// Cells beside the approach where queued harvesters wait; 0 leaves them where they stand.
+    pub queue_gap: u16,
+    /// Cells out from the dock point of the first row of queue spots.
+    pub queue_start: u16,
+    /// Cells between two rows of queue spots.
+    pub queue_step: u16,
+    /// Rows of queue spots (two a row); a longer queue shares the last row.
+    pub queue_rows: u16,
 }
 
 impl HarvestSpec {
@@ -312,6 +463,14 @@ impl HarvestSpec {
             mine_reach_tenths: self.mine_reach_tenths,
             mine_lose_tenths: self.mine_lose_tenths,
             dock_reach_tenths: self.dock_reach_tenths,
+            travel_cost: self.travel_cost,
+            queue_cost: self.queue_cost,
+            switch_margin: self.switch_margin,
+            recheck_period: self.recheck_period,
+            queue_gap: self.queue_gap,
+            queue_start: self.queue_start,
+            queue_step: self.queue_step,
+            queue_rows: self.queue_rows,
         }
     }
 }
@@ -569,6 +728,45 @@ pub enum Action {
         /// The anchor cell `(x, y)`, inside the map.
         cell: (u32, u32),
     },
+    /// `Command::QueueUnit` (WP6.5): the player who sends the command queues a unit of `kind`
+    /// at the factory `factory`, an entity as `(index, generation)`. Needs `production`.
+    QueueUnit {
+        /// The factory.
+        factory: (u32, u32),
+        /// The permanent kind number of the unit.
+        kind: u16,
+    },
+    /// `Command::CancelUnit` (WP6.5): take the item at place `index` (0 is the one being built)
+    /// out of the queue of `factory` and give back what was paid. Needs `production`.
+    CancelUnit {
+        /// The factory.
+        factory: (u32, u32),
+        /// The place in the queue.
+        index: u8,
+    },
+    /// `Command::SetRally` (WP6.5): where the units of `factory` walk to; none clears it.
+    /// Needs `production`.
+    SetRally {
+        /// The factory.
+        factory: (u32, u32),
+        /// The rally cell `(x, y)`, inside the map.
+        #[serde(default)]
+        cell: Option<(u32, u32)>,
+    },
+    /// `Command::Repair` (WP6.6): the player who sends the command starts (`on`) or stops
+    /// repairing `structure`, an entity as `(index, generation)`. Needs `repair`.
+    Repair {
+        /// The structure.
+        structure: (u32, u32),
+        /// True to start repairing, false to stop.
+        on: bool,
+    },
+    /// `Command::Sell` (WP6.6): the player who sends the command sells `structure`, an entity as
+    /// `(index, generation)`. Needs `repair`.
+    Sell {
+        /// The structure.
+        structure: (u32, u32),
+    },
     /// `Command::Place`: a standing structure on a cell. Refused by the
     /// simulation (the command counts as ignored) on terrain that is not
     /// buildable and on an occupied cell. The entity takes the next free id,
@@ -623,6 +821,7 @@ fn load_unit_defs(
     scenario_file: &Path,
     combat: bool,
     buildings: bool,
+    production: bool,
 ) -> Result<LoadedDefs, ScenarioError> {
     let invalid = |problem: String| ScenarioError::Invalid {
         path: Some(scenario_file.to_path_buf()),
@@ -647,18 +846,45 @@ fn load_unit_defs(
     } else {
         None
     };
-    Ok((units, weapons, movement, costs, building_table))
+    // Built only for a scenario with `production`, for the same reason.
+    let production_table = if production {
+        Some(sf_bridge::production_table(&defs).map_err(invalid)?)
+    } else {
+        None
+    };
+    // Only the sights of the kinds: the scenario writes out its own legacy sight.
+    let sights = sf_bridge::vision_rules(
+        &sf_data::vision::VisionSettings {
+            legacy_sight_cells: 0,
+            acquire_needs_sight: false,
+        },
+        &defs,
+    )
+    .sights;
+    Ok(LoadedDefs {
+        sights,
+        units,
+        weapons,
+        movement,
+        costs,
+        buildings: building_table,
+        production: production_table,
+    })
 }
 
 /// What [`load_unit_defs`] reads: the unit, weapon and movement tables, the movement costs they
-/// came from, and the building table of a scenario with `buildings`.
-type LoadedDefs = (
-    UnitTable,
-    WeaponTable,
-    MovementTable,
-    MovementCosts,
-    Option<BuildingTable>,
-);
+/// came from, the building table of a scenario with `buildings` and the production table of one
+/// with `production`.
+struct LoadedDefs {
+    units: UnitTable,
+    weapons: WeaponTable,
+    movement: MovementTable,
+    costs: MovementCosts,
+    buildings: Option<BuildingTable>,
+    production: Option<ProductionTable>,
+    /// The sight of each role, in thousandths of a cell, ascending by kind (WP8.1).
+    sights: Vec<(Kind, u32)>,
+}
 
 /// The middle of a cell, in cells: where an order sends a unit.
 fn cell_middle(cell: (i32, i32)) -> Vec2 {
@@ -783,13 +1009,23 @@ impl Scenario {
         // The unit definitions first: their costs decide the terrain's summary.
         let mut own_costs = None;
         if let Some(name) = scenario.unit_defs.clone() {
-            let (units, weapons, movement, costs, buildings) =
-                load_unit_defs(&name, path, scenario.combat, scenario.buildings)?;
-            scenario.unit_table = Some(units);
-            scenario.building_table = buildings;
-            scenario.weapon_table = scenario.combat.then_some(weapons);
-            scenario.movement_table = Some(movement);
-            own_costs = Some(costs);
+            let loaded = load_unit_defs(
+                &name,
+                path,
+                scenario.combat,
+                scenario.buildings,
+                scenario.production.is_some(),
+            )?;
+            scenario.unit_table = Some(loaded.units);
+            scenario.building_table = loaded.buildings;
+            scenario.production_table = loaded.production;
+            scenario.vision_sights = loaded.sights;
+            scenario.weapon_table = scenario.combat.then_some(loaded.weapons);
+            scenario.movement_table = Some(loaded.movement);
+            own_costs = Some(loaded.costs);
+        }
+        if let (Some(dir), Some(file)) = (scenario.unit_defs.clone(), scenario.match_file.clone()) {
+            scenario.load_match(&dir, &file, path)?;
         }
         if let Some(name) = scenario.map_name.clone() {
             let costs = match (own_costs, shipped) {
@@ -800,6 +1036,32 @@ impl Scenario {
             scenario.terrain = Some(scenario.load_terrain(&name, path, &costs)?);
         }
         Ok(scenario)
+    }
+
+    /// Reads the match file `file` of the `unit_defs` directory `dir`, checks it against that
+    /// directory's definitions and the scenario's map size, and makes the commands of its starting
+    /// objects.
+    fn load_match(
+        &mut self,
+        dir: &str,
+        file: &str,
+        scenario_file: &Path,
+    ) -> Result<(), ScenarioError> {
+        let invalid = |problem: String| ScenarioError::Invalid {
+            path: Some(scenario_file.to_path_buf()),
+            problems: vec![format!("match_file \"{file}\": {problem}")],
+        };
+        let scenarios = scenario_file.parent().unwrap_or(Path::new(""));
+        let text = std::fs::read_to_string(scenarios.join(dir).join(file))
+            .map_err(|e| invalid(e.to_string()))?;
+        let def = MatchDef::from_ron(&text).map_err(|e| invalid(e.to_string()))?;
+        let defs = UnitDefs::load(&scenarios.join(dir), &scenarios.join(".."))
+            .map_err(|e| invalid(e.to_string()))?;
+        def.check(&defs, (self.map.width, self.map.height))
+            .map_err(|e| invalid(e.to_string()))?;
+        self.match_commands = sf_bridge::match_commands(&def, &defs).map_err(invalid)?;
+        self.match_def = Some(def);
+        Ok(())
     }
 
     /// Reads the terrain layer of map `name`, which lives in
@@ -965,6 +1227,62 @@ impl Scenario {
             }
         }
 
+        if let Some(pr) = &self.production {
+            if !self.buildings {
+                p.push("production needs `buildings` (the factories are structures)".to_string());
+            }
+            if !pr.rules().is_valid() {
+                p.push(
+                    "production: queue_limit must be 1 to 20 and exit_radius 1 to 8".to_string(),
+                );
+            }
+        }
+
+        if let Some(rp) = &self.repair {
+            if !self.buildings {
+                p.push(
+                    "repair needs `buildings` (repair and sale are about structures)".to_string(),
+                );
+            }
+            if !rp.rules().is_valid() {
+                p.push(
+                    "repair: hp_per_tick must be 1 to 1000, full_cost_permille and refund_permille \
+                     0 to 1000 and sell_ticks 1 to 6000"
+                        .to_string(),
+                );
+            }
+        }
+
+        if let Some(v) = &self.vision {
+            if v.legacy_sight_milli > sf_sim::MAX_SIGHT_MILLI {
+                p.push(format!(
+                    "vision: legacy_sight_milli must be 0 to {}",
+                    sf_sim::MAX_SIGHT_MILLI
+                ));
+            }
+            if v.shared.iter().any(|&(a, b)| a == b) || !v.shared.windows(2).all(|w| w[0] < w[1]) {
+                p.push(
+                    "vision: shared must be strictly ascending (sharer, viewer) pairs, no player \
+                     with itself"
+                        .to_string(),
+                );
+            }
+        }
+
+        if let Some(pw) = &self.power {
+            if !self.buildings {
+                p.push(
+                    "power needs `buildings` (power is made and used by structures)".to_string(),
+                );
+            }
+            if !pw.rules().is_valid() {
+                p.push(
+                    "power: shortage_floor_permille and defence_cutoff_permille must be 0 to 1000"
+                        .to_string(),
+                );
+            }
+        }
+
         if !self.factions.is_empty() && !self.buildings {
             p.push(
                 "factions needs `buildings` (they are checked when a player builds)".to_string(),
@@ -981,6 +1299,32 @@ impl Scenario {
                 p.push(format!(
                     "factions: player {player} cannot be Neutral (nobody plays it)"
                 ));
+            }
+        }
+
+        if let Some(file) = &self.match_file {
+            if let Err(e) = sf_data::map::check_file_name("match_file", file) {
+                p.push(e.to_string());
+            } else if file.contains('/') {
+                p.push(format!(
+                    "match_file \"{file}\" must be the name of one file in the unit_defs directory, without '/'"
+                ));
+            }
+            if self.unit_defs.is_none() || !self.buildings || !self.combat || !self.destruction {
+                p.push(
+                    "match_file needs `unit_defs`, `buildings`, `combat` and `destruction` (a match is \
+                     decided by what is destroyed)"
+                        .to_string(),
+                );
+            }
+            if !self.factions.is_empty() {
+                p.push("match_file gives the factions: `factions` must be left out".to_string());
+            }
+            if self.money.as_ref().is_some_and(|m| !m.starting.is_empty()) {
+                p.push(
+                    "match_file gives the starting credits: `money.starting` must be left empty"
+                        .to_string(),
+                );
             }
         }
 
@@ -1125,6 +1469,51 @@ impl Scenario {
                     id_problems(&at, ids, &mut p);
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
+                Action::QueueUnit { factory, .. } | Action::CancelUnit { factory, .. } => {
+                    if self.production.is_none() {
+                        p.push(format!("{at}: production commands need `production`"));
+                    }
+                    if factory.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: factory ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            factory.0
+                        ));
+                    }
+                }
+                Action::Repair { structure, .. } | Action::Sell { structure } => {
+                    if self.repair.is_none() {
+                        p.push(format!("{at}: repair and sell commands need `repair`"));
+                    }
+                    if structure.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: structure ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            structure.0
+                        ));
+                    }
+                }
+                Action::SetRally { factory, cell } => {
+                    if self.production.is_none() {
+                        p.push(format!("{at}: production commands need `production`"));
+                    }
+                    if factory.0 >= MAX_ENTITIES {
+                        p.push(format!(
+                            "{at}: factory ({}, ..) is not a valid slot (the limit is \
+                             {MAX_ENTITIES} slots)",
+                            factory.0
+                        ));
+                    }
+                    if let Some(cell) = cell
+                        && map_ok
+                        && (cell.0 >= width || cell.1 >= height)
+                    {
+                        p.push(format!(
+                            "{at}: cell ({}, {}) lies outside the {width}x{height} map",
+                            cell.0, cell.1
+                        ));
+                    }
+                }
                 Action::TakeOre { cell, .. } => {
                     if map_ok && (cell.0 >= width || cell.1 >= height) {
                         p.push(format!(
@@ -1253,11 +1642,14 @@ impl Scenario {
                 world = world
                     .with_buildings(table)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
-                let players: Vec<(PlayerId, u8)> = self
-                    .factions
-                    .iter()
-                    .map(|&(player, faction)| (PlayerId(player), faction.bit()))
-                    .collect();
+                let players: Vec<(PlayerId, u8)> = match &self.match_def {
+                    Some(def) => sf_bridge::match_factions(def),
+                    None => self
+                        .factions
+                        .iter()
+                        .map(|&(player, faction)| (PlayerId(player), faction.bit()))
+                        .collect(),
+                };
                 world = world
                     .with_player_factions(&players)
                     .map_err(|e| ScenarioError::Sim(e.to_string()))?;
@@ -1281,8 +1673,11 @@ impl Scenario {
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(m) = &self.money {
-            let starting: Vec<(PlayerId, u64)> =
+            let mut starting: Vec<(PlayerId, u64)> =
                 m.starting.iter().map(|&(p, n)| (PlayerId(p), n)).collect();
+            if let Some(def) = &self.match_def {
+                starting.extend(sf_bridge::match_credits(def));
+            }
             world = world
                 .with_money(
                     sf_sim::MoneyRules {
@@ -1290,6 +1685,48 @@ impl Scenario {
                     },
                     &starting,
                 )
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        if let Some(pr) = self.production {
+            let Some(table) = self.production_table.clone() else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "production: the table is read from the files next to the scenario, \
+                         so the scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
+            world = world
+                .with_production(pr.rules(), table)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        // Repair and sale (WP6.6): after the tables.
+        if let Some(rp) = self.repair {
+            world = world
+                .with_repair(rp.rules())
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        // Vision (WP8.1): after the unit table, which it reads the kinds of.
+        if let Some(v) = &self.vision {
+            world = world
+                .with_vision(
+                    sf_sim::VisionRules::new(v.legacy_sight_milli, self.vision_sights.clone())
+                        .with_acquire_needs_sight(v.acquire_needs_sight)
+                        .with_shared(
+                            v.shared
+                                .iter()
+                                .map(|&(a, b)| (PlayerId(a), PlayerId(b)))
+                                .collect(),
+                        ),
+                )
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
+        // Power (WP6.4): after the tables, before the match rules.
+        if let Some(pw) = self.power {
+            world = world
+                .with_power(pw.rules())
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
         if let Some(budget) = self.path_budget {
@@ -1320,7 +1757,29 @@ impl Scenario {
                 })
                 .map_err(|e| ScenarioError::Sim(e.to_string()))?;
         }
+        // The match (WP7.6): its rules last, after everything they need; its starting objects first.
+        if self.match_file.is_some() {
+            let Some(def) = &self.match_def else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "match_file: the match is read from the file next to the definitions, so the \
+                         scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
+            let rules = sf_bridge::match_rules(def).map_err(ScenarioError::Sim)?;
+            world = world
+                .with_match(rules)
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+        }
         let sim = |e: sf_sim::ScheduleError| ScenarioError::Sim(e.to_string());
+        for (player, command) in &self.match_commands {
+            world
+                .schedule(Tick(0), *player, command.clone())
+                .map_err(sim)?;
+        }
 
         let mut placement = Rng::with_stream(self.seed, PLACEMENT_STREAM);
         for g in &self.spawns {
@@ -1452,6 +1911,40 @@ impl Scenario {
                     let command = Command::BuildStructure {
                         kind: Kind(*kind),
                         cell: Cell::new(cell.0, cell.1),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::QueueUnit { factory, kind } => {
+                    let command = Command::QueueUnit {
+                        factory: EntityId::new(factory.0, factory.1),
+                        kind: Kind(*kind),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::CancelUnit { factory, index } => {
+                    let command = Command::CancelUnit {
+                        factory: EntityId::new(factory.0, factory.1),
+                        index: *index,
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::SetRally { factory, cell } => {
+                    let command = Command::SetRally {
+                        factory: EntityId::new(factory.0, factory.1),
+                        cell: cell.map(|c| Cell::new(c.0, c.1)),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::Repair { structure, on } => {
+                    let command = Command::Repair {
+                        structure: EntityId::new(structure.0, structure.1),
+                        on: *on,
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::Sell { structure } => {
+                    let command = Command::Sell {
+                        structure: EntityId::new(structure.0, structure.1),
                     };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }

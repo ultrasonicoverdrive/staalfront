@@ -205,6 +205,12 @@ As built in WP1.2 (`crates/sf_sim`; its crate documentation is the reference):
   (headless goldens, `wander_5000.expected`) do not change when it does.
 - Height is **visual only**, plus a few gameplay effects (vision from a hill,
   slower uphill). No true 3D ballistics in v1.
+- **What a player sees is simulation state** (WP8.1, `docs/rules/vision.md`): per player and cell a count of
+  sight discs and an explored flag, updated by one pass per tick (only the stamps that changed), hashed in a gated
+  section `v`, and asked through `World::visibility(player, cell)`. The presentation never works it out: the snapshot
+  carries the local player's bitsets and a `seen` flag per entity. WP8.2a adds a gate on automatic target acquisition and a one-way shared-vision list, both in
+  the vision rules and both off when left out; since WP7.7 the game (`vision.ron`) and the match run with the gate on; the height bonus (no elevation exists in the
+  sim yet) is WP8.2b, the picture WP8.3 and WP8.4.
 
 ## 6. Camera and zoom (summary of §2)
 
@@ -997,6 +1003,11 @@ that comes later stalls the picture for the difference and counts as a
 `late_publish` (F1, `bench.json`). When the sim is behind, alpha holds at 1: the
 picture does not extrapolate. The engine's own alpha and `fixed_update` are no
 longer used by the game.
+
+**Pause (WP11.5a).** `SimHandle::set_paused(true)` sends `Pause(true)` in order with the commands; while held the thread
+steps no tick (its own clock and `advance` alike), still accepts commands for their tick, and on release restarts its clock
+from that moment instead of owing the held time as a burst. It is not a sim command: the world never hears of it. The pause
+menu uses it, and a restart or a new scene drops the handle and makes another (`docs/rules/menus.md`).
 
 **Shutdown.** Dropping the `SimHandle` (the runner, on window close) sends
 `Shutdown` and joins the thread; the longest wait is the tick that is running.

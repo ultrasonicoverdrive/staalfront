@@ -263,6 +263,8 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 - WP6.7 Defensive buildings with turrets.
 - WP6.8 Damage display: damaged and heavily damaged model, smoke, fire.
 
+_Note 31-10-2026: WP6.5 (production) is built before WP6.4 (power), decided by the orchestrator. Milestone M1 ("build a base, harvest, make units, attack, win") needs units to be made and does not need power. WP6.4 later hooks into production through a speed factor that WP6.5 leaves as a documented hook, fixed at 1 (`docs/rules/production.md`)._
+
 ### Phase 7 — Economy
 - WP7.1 Ore on the map: fields, amount, slow regrowth.
 - WP7.2 Harvester: search, harvest, drive back, check in at refinery via **messages** (analysis §11, §13), unload, repeat.
@@ -270,20 +272,44 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 - WP7.3b The silo as a building (a structure whose job is storage), after the tech tree in `docs/rules/buildings.md` is approved.
 - WP7.4 Money in the UI, deducting costs during production.
 - WP7.5 Refinery choice and queues: a harvester picks the refinery by expected wait (queue length plus travel), not by straight-line distance alone; queued harvesters wait clear of the approach, so many harvesters keep delivering.
+- WP7.6 The M1 match: one small map with two bases, a static opponent and a fixed win and loss rule in the sim, so that M1 can be played: a match file (`assets/matches/m1.ron`: map, players, credits, starting objects), a defeat and win rule in `sf_sim` (a player is defeated when it owns no standing structure and no armed unit; the last one left wins; its own checksum section, only in a world with match rules), a result banner ("Victory" / "Defeat") and `sf_game --match`; the pinned headless scenario `match`.
 
 _Note 27-10-2026: WP7.5 added by the orchestrator after the WP7.2 review measured that throughput collapses with many harvesters (6 harvesters deliver 3200 ore in 4000 ticks, 48 deliver 618): the straight-line choice sends every harvester to the same bay and the queue blocks its approach. WP7.2 records it as a gap; WP7.5 touches `sf_sim` and comes after WP7.3 and WP7.4._
 
 _Note 28-10-2026: WP7.3 ("storage capacity and silos, fill level visible") is split into WP7.3 and WP7.3b. Decided by the orchestrator (Tijmen delegated WP splits to the orchestrator on 27-10-2026). The silo is a new structure role: the campaign uses none (`content/production.md`) and the tech tree in `docs/rules/buildings.md` still waits on Tijmen's approval. WP7.3 builds the storage mechanism and a storage capacity per building in the data, so a silo later is a record in `unit_defs.ron` with a `storage` number; WP7.3b adds that silo once the tech tree is approved._
 
+_Note 01-11-2026: WP7.6 added by the orchestrator. PLAN.md put M1 at the end of phase 7, but no work package built the map, the opponent or the win condition. The full scenario format with triggers is phase 10 (WP10.1 to WP10.3) and M1 does not need triggers, so WP7.6 builds only the minimum: a match map file, a fixed win and loss rule in the sim and a static opponent (no AI before phase 9). WP10.1 later absorbs the match file into the scenario format. WP7.6 is built after WP6.5 and stacked on it (sf_sim work packages are built one after another, section 12.3); see `docs/rules/match.md`._
+
 **Milestone M1 — vertical slice (end of phase 7):** one skirmish map, you against
 a static opponent: build a base, harvest, make units, attack,
 win. First moment to really play and adjust the design.
+
+*08-11-2026 (Tijmen): **M1 reached.** Tijmen played the M1 match on the reference laptop (GTX 1650) with the original
+Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play:*
+- *Loss rule: a player is defeated when it has **lost its construction center** (no standing `construction_center`),
+  instead of "no standing structure and no armed unit" (hunting the last unit was tedious). Built in **WP7.7**.*
+- *`acquire_needs_sight` (WP8.2a) goes **on** in the M1 match and as the default of the vision rules. Built in **WP7.7**
+  together with the loss rule, because both move the pinned `match` scenario.*
+- *The WP3.3 selection decisions (PR #44) are **confirmed** as built.*
+- *Unit voices on select, move and attack were missed: **WP11.2 is next**, before phase 9.*
+
+**Queue for the orchestrator (set 08-11-2026), in this order:**
+1. **WP7.7** The loss rule and sight-gated targeting from the M1 play, in `sf_sim`: (a) a player is defeated when it owns no standing `construction_center`; the last player left wins; a player that never had one in its match file is a match-file error, checked when the file loads (`sf_data::match_def`); (b) add a `construction_center` to the opponent in `assets/matches/m1.ron` (it has none today), placed so the base still makes sense; (c) `acquire_needs_sight` on by default and in `m1`; (d) re-pin `match.expected` and update `tools/sf_headless/tests/match_m1.rs`, with the change of the winning tick explained in the PR; (e) `docs/rules/match.md` and `docs/rules/vision.md` follow. The old rule stays nowhere (no flag). Checksum section unchanged in layout.
+*08-11-2026 (orchestrator, with Tijmen: "follow your own proposals"; built in WP7.7): the #105 measurement showed that with the gate on a unit whose sight equals its weapon reach loses targets at the limit of its reach (the rocket trooper, sight 5 and reach 5, did not pick a tower at squared distance 26). Decision: **the visibility test for target acquisition is measured to the target's edge, like the reach** (a structure: any footprint cell or a visible cell beside it; a unit: its own cell or a neighbour cell its body reaches), in integers, before the gate goes on, so M1 does not get that regression. Rules: `docs/rules/vision.md`, "Measured to the edge".*
+
+2. **WP11.2** Voice responses (see Phase 11), built now: `sf_game` raises `unit.select`, `unit.move` and `unit.attack` (the bank events, mapped to Red Alert voices in `assets/audio/ra_mapping.ron`) on the player's own selection and orders, from the UI side (no sim event needed: these are the player's own actions), with a brake against spam (one voice at a time, a minimum gap, not on every box-select frame). Without the Red Alert files the events stay silent unless the bank has a CC0 sound. Test: the brake and which event each action raises, headless where the runner allows.
+3. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision
 - WP8.1 Shroud (never seen) and fog of war (seen, not current) per player, cell-based in the sim.
 - WP8.2 Vision range per unit, height bonus.
 - WP8.3 Presentation: soft edges, last-seen buildings as a "ghost".
 - WP8.4 Minimap and strategic icons respect vision. Icons are drawn last and without depth, so a fog layer cannot hide them: unseen units must be removed from the icon list on the CPU (see `sf_render::icons`).
+
+*05-11-2026 (orchestrator, with WP8.1): WP8.2 is split. **WP8.2a** is the targeting gate (auto-acquisition only of cells the owner sees, retaliation always allowed), the sight rules of structures and the allied-vision hook, on top of `World::visibility` that WP8.1 builds; **WP8.2b** is the height bonus and waits until the sim has integer height levels and a map with relief exists (both maps are flat and the sim has no elevation today). WP8.1 computes what each player sees and changes no behaviour (`docs/rules/vision.md`).*
+
+*06-11-2026 (orchestrator, WP8.2a): the targeting gate is **behind a flag in the vision rules (`acquire_needs_sight`), off by default and off in the M1 match** until Tijmen has played M1 and decides; WP8.2a measures what turning it on would change in `match` (won at tick 8067 instead of 5967, 8 units lost instead of 6) and does not ship it on. The headless `match` scenario has the same vision rules as `sf_game --match` (review finding 1 of #104), `match.expected` re-pinned for that. Shared (allied) vision is a per-player list in the rules, empty by default; no diplomacy system.*
+*07-11-2026 (orchestrator, with WP8.3): **WP8.3 and WP8.4 are built together in one PR.** Both read the same snapshot fields from WP8.1 (`fog_version`, the two bitsets, `seen` per view) and neither touches the sim, so they share one presentation layer: the soft shroud and fog on the terrain, ghosts of structures last seen, and everything an unseen object of the other side is removed from on the CPU (models, the icon list, picking, the cursor, bars, effects, wrecks, tracers, the minimap). WP8.2a (vision-gated targeting, in the sim) is built in parallel on its own branch; this PR stays out of `crates/sf_sim/` and moves no pin (`docs/rules/fog_look.md`).*
 
 ### Phase 9 — Computer opponent
 Layered (analysis §12, §22G):
@@ -296,18 +322,18 @@ Layered (analysis §12, §22G):
 **Done when:** the normal AI beats a passive player and loses to a good one; headless tournament runs without hangs.
 
 ### Phase 10 — Missions and editor
-- WP10.1 (groundwork: `docs/mission-inspiration.md`) Scenario format: starting objects, players, goals, triggers (event → condition → action), teams.
+- WP10.1 (groundwork: `docs/mission-inspiration.md`) Scenario format: starting objects, players, goals, triggers (event → condition → action), teams. It absorbs the match file of WP7.6 (`assets/matches/m1.ron`: map, players, credits, starting objects) and turns the fixed win and loss rule of `sf_sim::outcome` into one goal among others.
 - WP10.2 Trigger system in the sim (deterministic): time, entering an area, object destroyed, money, etc.
 - WP10.3 Actions: messages, reinforcements, start cutscene, camera, victory/defeat.
 - WP10.4 `sf_editor`: painting terrain, placing objects, editing triggers, testing from the editor.
 - WP10.5 Campaign structure: mission sequence, briefing (cartoon), choices.
 
 ### Phase 11 — Presentation and UI
-- WP11.1 Sidebar à la classic RTS: build tabs, queue, money, power bar. The build menu needs its own picture field in `unit_defs.ron`, separate from `icon` (since WP3.6 `icon` is the name of the strategic map icon).
-- WP11.2 Voice responses on selecting, moving, attacking (analysis §15), with a brake against spam.
+- WP11.1 Sidebar à la classic RTS: build tabs, queue, money, power bar. The build menu needs its own picture field in `unit_defs.ron`, separate from `icon` (since WP3.6 `icon` is the name of the strategic map icon). *Brought forward before M1 by decision of the orchestrator, 01-11-2026: M1 is "the first moment to really play", and the WP6.5 debug keys (U, I, O, G) are not a way to play. It needs production (WP6.5) and is stacked on it; power (WP6.4) is not built yet, so the power bar is a hook that shows a neutral bar until WP6.4 fills it.*
+- WP11.2 Voice responses on selecting, moving, attacking (analysis §15), with a brake against spam. *Brought forward after the M1 play (Tijmen, 08-11-2026): next after WP7.7, see the queue under M1.*
 - WP11.3 Sound: positional, volume by zoom (farther away = quieter and less).
 - WP11.4 Music: dynamic (calm/combat). Optionally plays original Red Alert music (B11) through the WP11.7 loader. The existing `ra_audio` setting (`assets/config/audio.ron`, `--ra-audio`) turns it on too; there is no separate music switch. A `music: (calm: [...], combat: [...])` section in `assets/audio/ra_mapping.ron` assigns tracks (names or `#id`s) to the moods. The shipped section is empty: Staalfront ships no list of Red Alert track names (B5; at most a single name checked by `onderzoeker`), and the player fills it in with the F1 sound browser. A mood with an empty list plays all tracks of the Red Alert music archive (`SCORES.MIX`). Several tracks per mood play shuffled (presentation side, not in `sf_sim`). A missing or unreadable track is skipped with one warning, and a mood with no playable track uses the default music (CC0, or silence if there is none), without error; the same holds without Red Alert files. Music is streamed or decoded when needed, never decoded up front with the sound effects. Tests use only generated fixtures, never real Red Alert files. The WP updates the README section on original Red Alert audio and docs/architecture.md §16.
-- WP11.5 Menus, settings (keys, sound, graphics), accessibility (colorblind colors, UI scale).
+- WP11.5 Menus, settings (keys, sound, graphics), accessibility (colorblind colors, UI scale). *Split by decision of the orchestrator, 03-11-2026: **WP11.5a** (menus: start menu, pause menu with restart, settings for keys, graphics and accessibility, `docs/rules/menus.md`) and **WP11.5b** (the sound settings: volume sliders and the Red Alert audio switch). The sound belongs to the audio work Tijmen does in another chat, so 11.5b is built later in agreement with it; 11.5a leaves a marked empty "Sound (WP11.5b)" section in the settings screen with no controls. M1 needed a way to start a match, pause and restart it, which 11.5a gives.*
 - WP11.6 Real models and textures replace the placeholders (see §10 assets).
 - WP11.7 Original Red Alert audio (B11), optional, in `sf_audio`: reader for `.mix` archives (including Red Alert's encrypted headers: RSA-wrapped Blowfish key) and decoder for `.aud` (Westwood ADPCM and IMA ADPCM) to PCM; a mapping file in RON from Red Alert sound names to Staalfront sound-bank events; setting "Use original Red Alert audio" with the path to the player's install or freeware download. Missing or unknown files fall back to the CC0 sounds without error. Tests use only fixtures generated in the test itself (own encoder), never real Red Alert files; CI never needs them.
 

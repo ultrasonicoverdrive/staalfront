@@ -441,15 +441,29 @@ impl World {
     }
 
     /// Whether the structure in slot `i` stands: it is complete (WP6.3) and has hit points left,
-    /// or cannot be damaged at all. A structure under construction does not stand.
+    /// or cannot be damaged at all. A structure under construction does not stand, and neither does
+    /// one that is being sold (WP6.6: it counts as gone from the first tick of the sale).
     pub(crate) fn is_standing(&self, i: usize) -> bool {
-        self.entities.build_left[i] == 0 && self.has_hit_points(i)
+        self.entities.build_left[i] == 0
+            && self.entities.sell_left[i] == 0
+            && self.has_hit_points(i)
     }
 
     /// Runs one command of `player`. `BuildStructure` is the only command whose
     /// rules need to know who sent it; everything else is [`World::apply`].
     pub(crate) fn apply_from(&mut self, player: PlayerId, command: Command) -> bool {
         let Command::BuildStructure { kind, cell } = command else {
+            // The production commands (WP6.5) need to know who sent them too.
+            if matches!(
+                command,
+                Command::QueueUnit { .. } | Command::CancelUnit { .. } | Command::SetRally { .. }
+            ) {
+                return self.apply_production(player, command);
+            }
+            // Repair and sale (WP6.6) need to know who sent them too.
+            if matches!(command, Command::Repair { .. } | Command::Sell { .. }) {
+                return self.apply_repair(player, command);
+            }
             return self.apply(command);
         };
         let verdict = self.check_placement(kind, cell, player);

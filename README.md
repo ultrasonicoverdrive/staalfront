@@ -24,9 +24,12 @@ scripts/check-sim-determinism.sh   # rejects f32/f64/HashMap/HashSet in sf_sim
 
 ## Controls (`sf_game`)
 
-`cargo run -p sf_game` starts the sandbox: units and structures of three sides on a
-generated map. Every key and button is an action in `assets/config/input.ron` and can be
-rebound there (the file reloads while the game runs in debug builds). They work at every
+`cargo run -p sf_game` opens the start menu (Match, Sandbox, Settings, Quit; WP11.5a,
+`docs/rules/menus.md`); any flag that names a run (`--sandbox`, `--match`, `--shots`, ...)
+skips it. The sandbox is units and structures of three sides on a generated map. Every key
+and button is an action in `assets/config/input.ron`; the player rebinds keys in
+**Settings > Keys** (kept in the user's settings file, never in `input.ron`, which also
+reloads while the game runs in debug builds). They work at every
 zoom, on models and on strategic icons alike. Rules: `docs/rules/selection.md`,
 `docs/rules/orders.md` and `docs/rules/cursor.md`. **The cursor shows what a click will do**
 (and a right-click does exactly that).
@@ -49,7 +52,8 @@ zoom, on models and on strategic icons alike. Rules: `docs/rules/selection.md`,
 | F + right-click (hold F) | attack-move: go there and fight on the way (needs a unit with a weapon; A is camera pan left) |
 | C, X, H | stop, scatter, hold position |
 | mouse at a screen edge | scrolls; the cursor shows the direction (8 arrows) |
-| F1, F11, Esc | debug panels, fullscreen, quit |
+| F1, F11 | debug panels, fullscreen |
+| Esc | the pause menu (Resume, Restart, Settings, Main menu, Quit); in a scene without menus (`--crowd`, the demo) it quits |
 
 ## Engine demo and benchmark (M0)
 

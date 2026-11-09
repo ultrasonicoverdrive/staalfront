@@ -340,7 +340,7 @@ lavapipe: the plain benchmark's checkpoints 100 to 400 and the fight's 100 to 30
   (`the_plain_benchmark_without_ore_is_the_world_m0_recorded`). Nothing of WP5.6b moved it (`git diff origin/main -- crates/sf_sim`
   is empty; the plain scene is built by the same calls in the same order as before). The brief of this WP said the old value
   still held; it had moved before this WP, and the test now says why.
-* The fight's list ends at `0x568d257d092daa7b`. In the twin the fight makes 143 to 536 shots, 66 to 267 hits and 6 to 44 deaths
+* The fight's list ends at `0x0f215774d484c93a` since WP7.3b (the ore silo, `docs/bench/README.md`; it ended at `0x2b829617a5151fdf` after WP6.7 and `0x568d257d092daa7b` before; `docs/bench/README.md` has the cause). In the twin the fight makes 143 to 536 shots, 66 to 267 hits and 6 to 44 deaths
   per hundred ticks and at most 32 events in one tick: a light load next to the design's 100 to 500 events a tick for 5,000 units
   all fighting, which this does not try to be (the cap and the pool have headroom: 45 s flight on lavapipe, 7,075 events, pool
   peak 1,513 of 4,096, nothing dropped).

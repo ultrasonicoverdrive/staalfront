@@ -39,8 +39,8 @@ fn each_faction_is_offered_the_shipped_structures_it_may_build() {
         assert!(!ids(&meridian).contains(&id), "{id}");
         assert!(!ids(&veyran).contains(&id), "{id}");
     }
-    // Nine each, in kind order.
-    assert_eq!((meridian.choices().len(), veyran.choices().len()), (9, 9));
+    // Ten each (the proposed ore silo among them), in kind order.
+    assert_eq!((meridian.choices().len(), veyran.choices().len()), (10, 10));
     let kinds: Vec<u16> = meridian.choices().iter().map(|c| c.kind.0).collect();
     assert!(kinds.windows(2).all(|w| w[0] < w[1]));
 }
@@ -55,11 +55,11 @@ fn b_cycles_through_the_choices_and_back_to_none() {
         assert!(mode.is_active());
         seen.push(mode.chosen().unwrap().id.clone());
     }
-    assert_eq!(seen.len(), 9);
+    assert_eq!(seen.len(), 10);
     let mut distinct = seen.clone();
     distinct.sort();
     distinct.dedup();
-    assert_eq!(distinct.len(), 9);
+    assert_eq!(distinct.len(), 10);
     mode.cycle();
     assert!(!mode.is_active());
     mode.cycle();
@@ -161,4 +161,37 @@ fn the_sim_thread_is_asked_only_when_the_question_changes() {
         "putting the structure away is a change"
     );
     assert!(!mode.ask(&sim, None));
+}
+
+#[test]
+fn the_sidebar_chooses_a_structure_by_kind_and_the_click_places_that_kind() {
+    // WP11.1: a click on a sidebar item calls `choose_kind`; the left click on the map then sends
+    // `BuildStructure` for that kind, exactly as after B (the sidebar adds no way to place).
+    let defs = defs();
+    let mut mode = BuildMode::for_faction(&defs, Faction::Meridian);
+    let refinery = Kind(defs.kind_of("refinery").unwrap());
+    let barracks = Kind(defs.kind_of("barracks").unwrap());
+    assert!(mode.choose_kind(refinery));
+    assert_eq!(mode.chosen().map(|c| c.kind), Some(refinery));
+    assert_eq!(
+        mode.click(Some(Cell::new(30, 30))),
+        Some(Command::BuildStructure {
+            kind: refinery,
+            // The footprint (3 x 4) is centred on the cursor cell.
+            cell: Cell::new(29, 28),
+        })
+    );
+    // Another item replaces the choice.
+    assert!(mode.choose_kind(barracks));
+    assert_eq!(mode.chosen().map(|c| c.kind), Some(barracks));
+    // A kind the faction does not build (the Veyran bunker, a unit) changes nothing.
+    let bunker = Kind(defs.kind_of("fortified_bunker").unwrap());
+    let rifleman = Kind(defs.kind_of("rifleman").unwrap());
+    assert!(!mode.choose_kind(bunker));
+    assert!(!mode.choose_kind(rifleman));
+    assert_eq!(mode.chosen().map(|c| c.kind), Some(barracks));
+    // The sidebar's PutAway is `cancel`: nothing is placed afterwards.
+    mode.cancel();
+    assert!(!mode.is_active());
+    assert_eq!(mode.click(Some(Cell::new(30, 30))), None);
 }

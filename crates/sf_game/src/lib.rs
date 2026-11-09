@@ -51,6 +51,12 @@
 //! N` adds N of them to the sandbox, `--models none` draws the roles as shapes.
 //! `sf_demo` is always the crowd (it is what the M0 benchmark was measured on).
 //!
+//! **The sidebar (WP11.1).** The sandbox has a column on the right edge with the credits, the
+//! power-bar hook, four build tabs and a grid of items: a click on a structure starts the build
+//! mode, a click on a unit queues it at the primary factory, a right-click cancels
+//! ([`sidebar`] decides what a tab shows and what a click does, [`sidebar_layout`] where
+//! things are, [`sidebar_view`] draws it; `docs/rules/sidebar.md`).
+//!
 //! **Units (WP1.6).** An `sf_sim` world with `--units N` wanderers is stepped
 //! at 20 Hz and drawn instanced on top of the terrain, positions interpolated
 //! between the last two ticks, tile-culled against the camera frustum.
@@ -110,26 +116,41 @@ pub mod commands;
 pub mod construction_view;
 pub mod cursor;
 pub mod debug_ui;
+pub mod fog_view;
 pub mod fx;
 pub mod fx_events;
 pub mod fx_sound;
 pub mod hud;
 pub mod looks;
+pub mod match_view;
+pub mod matchplay;
+pub mod menu;
+pub mod menu_look;
+pub mod menu_view;
 pub mod money_view;
 pub mod ore_view;
+pub mod palette;
 pub mod placement_view;
 pub mod playfield;
 pub mod population;
+pub mod production_view;
+pub mod repair_mode;
+pub mod repair_view;
 pub mod roster;
 pub mod runner;
 pub mod sandbox;
 pub mod selection;
 pub mod selection_view;
+pub mod settings;
+pub mod sidebar;
+pub mod sidebar_layout;
+pub mod sidebar_view;
 pub mod sim_snapshot;
 pub mod sim_thread;
 pub mod skirmish;
 mod sound_browser;
 pub mod storage_view;
+pub mod vision_view;
 pub mod wreck_looks;
 
 use std::sync::Arc;
@@ -149,10 +170,30 @@ pub fn run(preset: Preset) -> i32 {
         Preset::Game => "sf_game",
         Preset::Demo => "sf_demo",
     };
-    let options = Options::from_env(preset);
+    let mut options = Options::from_env(preset);
     for warning in &options.warnings {
         eprintln!("{name}: {warning}");
     }
+    // The player's settings (WP11.5a): read before the window is made, because the window mode, the
+    // frame cap and the present mode depend on them. A bad file is said once and replaced by the
+    // defaults.
+    let settings_path = settings::path_for(&options, settings::Os::current(), &|n| {
+        std::env::var(n).ok()
+    });
+    let loaded = settings_path
+        .as_deref()
+        .map(settings::load_from)
+        .unwrap_or_else(|| settings::Loaded {
+            settings: settings::Settings::default(),
+            warnings: Vec::new(),
+        });
+    for warning in &loaded.warnings {
+        eprintln!("{name}: {warning}");
+    }
+    let start = settings::startup(&options, &loaded.settings);
+    options.screen = start.screen;
+    options.present = start.present;
+    options.frame_cap = start.frame_cap;
     let pack = match &options.models {
         Some(pack) => match runner::load_pack(pack) {
             Ok(pack) => Some(pack),
@@ -183,13 +224,14 @@ pub fn run(preset: Preset) -> i32 {
         ..EngineConfig::default()
     };
     let failed = Arc::new(AtomicBool::new(false));
-    let app = match runner::Runner::new(options, map, lod, pack, failed.clone()) {
+    let mut app = match runner::Runner::new(options, map, lod, pack, failed.clone()) {
         Ok(app) => app,
         Err(e) => {
             eprintln!("{name}: {e}");
             return 1;
         }
     };
+    app.set_settings(loaded.settings, settings::Store::new(settings_path));
     if let Err(e) = sf_engine::run(config, app) {
         eprintln!("{name}: {e}");
         return 1;

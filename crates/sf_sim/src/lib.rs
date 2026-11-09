@@ -67,6 +67,8 @@
 //! * count the weapons down and fire them, move the projectiles in flight and detonate them, when the
 //!   world has a weapon table (WP5.1, WP5.2): every decision first, then all the damage at once, each
 //!   hit through the armor table and with its splash (WP5.3);
+//! * remove what the weapons took to zero (WP5.5) and, in a world with match rules, decide who is
+//!   defeated and who has won (WP7.6, [`outcome`]);
 //! * advance the tick counter;
 //! * compute the checksum of the new state and append it to the history.
 //!
@@ -354,15 +356,20 @@ pub mod money;
 pub mod movement;
 pub mod orders;
 pub mod ore;
+pub mod outcome;
 pub mod path;
 pub mod placement;
+pub mod power;
+pub mod production;
 pub mod projectiles;
+pub mod repair;
 pub mod snapshot;
 pub mod targeting;
 pub mod terrain;
 pub mod turning;
 mod turret;
 pub mod units;
+pub mod vision;
 pub mod weapons;
 pub mod world;
 
@@ -392,6 +399,7 @@ pub use orders::{
     SCATTER_MIN, scatter_offset,
 };
 pub use ore::{Ore, OreRules};
+pub use outcome::{MAX_MATCH_PLAYERS, MatchError, MatchResult, MatchRules, Verdict};
 pub use path::{
     ABS_CAP, DEFAULT_FLOWFIELD_THRESHOLD, DEFAULT_NODE_BUDGET, DEFAULT_REPLAN_COOLDOWN,
     DEFAULT_REPLAN_MAX, DEFAULT_RETARGET_COOLDOWN, FIELD_IDLE_TICKS, FIELD_POOL, FIELD_SECTORS,
@@ -401,7 +409,17 @@ pub use path::{
 pub use placement::{
     CellVerdict, ExitCell, PlacementError, PlacementPreview, PlacementRejection, exit_cell, gap,
 };
+pub use power::{PowerRules, PowerTotals, advances_on, speed_for};
+pub use production::{
+    FULL_SPEED_PERMILLE, FactoryStatus, FactoryView, MAX_EXIT_RADIUS, MAX_QUEUE_LIMIT, Produced,
+    ProductionError, ProductionRejection, ProductionRules, ProductionTable, ProductionTableError,
+    QueueItem, UnitBuild, paid_at,
+};
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
+pub use repair::{
+    MAX_REPAIR_HP_PER_TICK, MAX_SELL_TICKS, RepairError, RepairRejection, RepairRules,
+    RepairStatus, Sale, SaleProgress, repair_cost, sale_refund,
+};
 pub use snapshot::{EntityView, ProjectileView, Snapshot, TurretView, WreckView};
 pub use targeting::{
     DEFAULT_PURSUIT_CELLS, DEFAULT_PURSUIT_RESET_TICKS, DEFAULT_SCAN_COOLDOWN, Engagement,
@@ -414,6 +432,7 @@ pub use turning::{
     DEFAULT_DRIVE_TOLERANCE, MAX_DRIVE_TOLERANCE, MIN_ARC_RADIUS, TurnMode, Turning, TurningError,
 };
 pub use units::{Footprint, UnitClass, UnitStats, UnitTable, UnitTableError};
+pub use vision::{MAX_DISCS_PER_PLAYER, MAX_SIGHT_MILLI, Mask, Visibility, VisionRules};
 pub use weapons::{
     ALL_ROUND, Impact, Loadout, MAX_WEAPON_SLOTS, Mount, ProjectileKind, Shot, WeaponStats,
     WeaponTable, WeaponsError,

@@ -16,7 +16,7 @@ pub const EMBEDDED_TERRAIN_SHADER: &str = include_str!("../../../assets/shaders/
 pub(crate) const VERTEX_ATTRS: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Uint32];
 
-/// Mirrors `TerrainParams` in `terrain.wgsl` (56 bytes, no vector members, so
+/// Mirrors `TerrainParams` in `terrain.wgsl` (96 bytes, no vector members, so
 /// the WGSL layout is plain 4-byte packing plus the 8-byte `index_size`).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -39,6 +39,28 @@ struct TerrainParams {
     shore_amount: f32,
     shore_color: [f32; 3],
     _pad: f32,
+    /// Fog of war (WP8.3): 0 = off (a world without vision rules; the shader then does exactly what it
+    /// did before), 1 = the fog texture is read.
+    fog_on: u32,
+    /// How far fog pulls the terrain towards `fog_tint`.
+    fog_dim: f32,
+    /// The size of the fog texture in cells.
+    fog_size: [f32; 2],
+    /// Linear colours of the fog tint and of shroud.
+    fog_tint: [f32; 3],
+    shroud: [f32; 3],
+}
+
+/// What the terrain shader needs besides the fog texture (WP8.3): the look of `fog_look.ron` as linear
+/// light.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FogShading {
+    /// How far fog pulls the terrain towards the tint, `0..=1`.
+    pub dim: f32,
+    /// The fog tint, linear.
+    pub tint: [f32; 3],
+    /// The shroud colour, linear.
+    pub shroud: [f32; 3],
 }
 
 /// `flags` bit: tint chunks by their level of detail.
@@ -65,9 +87,82 @@ pub struct TerrainGpu {
     index: Vec<u8>,
     index_width: u32,
     resource: Option<crate::terrain_look::ResourceLayers>,
+    /// The fog texture (WP8.3), one `Rg8` texel per gameplay cell, and whether the shader reads it.
+    fog_texture: wgpu::Texture,
+    fog_size: (u32, u32),
+    fog: Option<FogShading>,
+    /// The debug view last written, so a fog change rewrites the uniform with it.
+    current_flags: crate::renderer::DebugView,
 }
 
 impl TerrainGpu {
+    /// Shows `texels` (`2 * width * height` bytes, red explored, green visible; see [`crate::fog`]) as
+    /// the fog of war with `shading`. Cheap enough to call when the picture of what is seen changed. A
+    /// size other than the terrain's is refused (returns false) and leaves the fog as it was.
+    pub fn set_fog(
+        &mut self,
+        queue: &wgpu::Queue,
+        size: (u32, u32),
+        texels: &[u8],
+        shading: FogShading,
+    ) -> bool {
+        if size != self.fog_size || texels.len() != (size.0 * size.1 * 2) as usize {
+            return false;
+        }
+        queue.write_texture(
+            self.fog_texture.as_image_copy(),
+            texels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(size.0 * 2),
+                rows_per_image: Some(size.1),
+            },
+            wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+        if self.fog != Some(shading) {
+            self.fog = Some(shading);
+            self.write_params(queue, self.current_flags);
+        }
+        true
+    }
+
+    /// Turns the fog off: the terrain is drawn as it was before WP8.3.
+    pub fn clear_fog(&mut self, queue: &wgpu::Queue) {
+        if self.fog.take().is_some() {
+            self.write_params(queue, self.current_flags);
+        }
+    }
+
+    /// The fog texture's size in cells.
+    pub fn fog_size(&self) -> (u32, u32) {
+        self.fog_size
+    }
+
+    /// Whether the shader reads the fog texture.
+    pub fn fog_on(&self) -> bool {
+        self.fog.is_some()
+    }
+
+    fn write_params(&self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
+        let mut params = TerrainParams {
+            flags: if view.lod_tint { FLAG_LOD_TINT } else { 0 },
+            grid_alpha: view.grid_alpha.clamp(0.0, 1.0),
+            ..self.base_params
+        };
+        if let Some(f) = self.fog {
+            params.fog_on = 1;
+            params.fog_dim = f.dim;
+            params.fog_tint = f.tint;
+            params.shroud = f.shroud;
+        }
+        params.fog_size = [self.fog_size.0 as f32, self.fog_size.1 as f32];
+        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
+    }
+
     /// Show the fill of resource cells (WP7.1): each `(x, y, level)` makes cell `(x, y)` use the
     /// texture of fill level `level` of the resource type. Only the rows that changed are
     /// uploaded, in one write. A change that leaves the cell as it was uploads nothing.
@@ -132,13 +227,9 @@ impl TerrainGpu {
     }
 
     /// Update the debug visualisation flags in the terrain uniform.
-    pub fn write_debug_view(&self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
-        let params = TerrainParams {
-            flags: if view.lod_tint { FLAG_LOD_TINT } else { 0 },
-            grid_alpha: view.grid_alpha.clamp(0.0, 1.0),
-            ..self.base_params
-        };
-        queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
+    pub fn write_debug_view(&mut self, queue: &wgpu::Queue, view: crate::renderer::DebugView) {
+        self.current_flags = view;
+        self.write_params(queue, view);
     }
 }
 
@@ -272,6 +363,34 @@ pub fn build(
     );
     let cell_view = cell_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+    // The fog texture (WP8.3): one Rg8 texel per gameplay cell; wgpu zero-fills it, so it starts all
+    // shroud until `set_fog` writes; the shader does not read it while `fog_on` is 0.
+    let fog_size = map.size_in_cells();
+    let fog_extent = wgpu::Extent3d {
+        width: fog_size.0.max(1),
+        height: fog_size.1.max(1),
+        depth_or_array_layers: 1,
+    };
+    let fog_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("terrain fog"),
+        size: fog_extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rg8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let fog_view = fog_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let fog_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("terrain fog sampler"),
+        address_mode_u: wgpu::AddressMode::ClampToEdge,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        ..Default::default()
+    });
+
     let base_params = TerrainParams {
         index_size: [surface.size.0 as i32, surface.size.1 as i32],
         tile_meters: TILE_METERS,
@@ -284,6 +403,11 @@ pub fn build(
         shore_amount: surface.shore_amount,
         shore_color: surface.shore,
         _pad: 0.0,
+        fog_on: 0,
+        fog_dim: 0.0,
+        fog_size: [0.0, 0.0],
+        fog_tint: [0.0; 3],
+        shroud: [0.0; 3],
     };
     let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("terrain params"),
@@ -328,6 +452,18 @@ pub fn build(
                     min_binding_size: None,
                 },
             ),
+            entry(
+                4,
+                wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+            ),
+            entry(
+                5,
+                wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            ),
         ],
     });
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -349,6 +485,14 @@ pub fn build(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: params.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&fog_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::Sampler(&fog_sampler),
             },
         ],
     });
@@ -420,5 +564,9 @@ pub fn build(
         index: surface.index.clone(),
         index_width: surface.size.0,
         resource: surface.resource,
+        fog_texture,
+        fog_size: (fog_extent.width, fog_extent.height),
+        fog: None,
+        current_flags: crate::renderer::DebugView::default(),
     }
 }

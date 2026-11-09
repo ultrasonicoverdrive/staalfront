@@ -61,5 +61,8 @@ pub use cursor::{CursorError, CursorSet, CursorSprite};
 pub use draw::{DrawList, Layer, Texture};
 pub use gpu::UiRenderer;
 pub use layout::{Anchor, Rect};
-pub use minimap::{Minimap, MinimapGeometry, MinimapImage, clip_to_rect, fov_polygon, fov_quad};
+pub use minimap::{
+    FOG, Minimap, MinimapFog, MinimapGeometry, MinimapImage, SHROUD, VISIBLE, clip_to_rect,
+    fog_states, fogged_color, fov_polygon, fov_quad,
+};
 pub use ui::{AreaResponse, MouseButton, Response, Ui, UiInput};

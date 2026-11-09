@@ -42,6 +42,20 @@ struct TerrainParams {
     shore_g: f32,
     shore_b: f32,
     pad: f32,
+    // Fog of war (WP8.3). fog_on = 0 leaves the picture exactly as it was without fog.
+    fog_on: u32,
+    // How far fog pulls the terrain towards the tint, 0..1.
+    fog_dim: f32,
+    // The fog texture's size in cells.
+    fog_w: f32,
+    fog_h: f32,
+    // Linear colours: the fog tint and shroud.
+    tint_r: f32,
+    tint_g: f32,
+    tint_b: f32,
+    shroud_r: f32,
+    shroud_g: f32,
+    shroud_b: f32,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -49,6 +63,9 @@ struct TerrainParams {
 @group(1) @binding(1) var material_sampler: sampler;
 @group(1) @binding(2) var cell_index: texture_2d<u32>;
 @group(1) @binding(3) var<uniform> params: TerrainParams;
+// Fog of war (WP8.3): red = explored, green = visible, one texel per gameplay cell, filtered.
+@group(1) @binding(4) var fog_map: texture_2d<f32>;
+@group(1) @binding(5) var fog_sampler: sampler;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -214,5 +231,18 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), flat_weight));
     let diffuse = max(dot(n, globals.light_dir.xyz), 0.0);
     let lit = globals.ambient.rgb + globals.light_color.rgb * diffuse;
-    return vec4<f32>(albedo * lit, 1.0);
+    var color = albedo * lit;
+    if (params.fog_on != 0u) {
+        // Texel centres are the cell centres, so the bilinear filter ramps across the cell borders;
+        // the smoothstep rounds the ends of the ramp. Shroud is where nothing was explored, fog where
+        // it was explored but is not visible.
+        let fog_uv = in.world_xz / (params.cell_meters * vec2<f32>(params.fog_w, params.fog_h));
+        let seen = textureSampleLevel(fog_map, fog_sampler, fog_uv, 0.0).rg;
+        let explored = smoothstep(0.0, 1.0, seen.r);
+        let visible = smoothstep(0.0, 1.0, seen.g);
+        let fogged = mix(color, vec3<f32>(params.tint_r, params.tint_g, params.tint_b), params.fog_dim);
+        let shown = mix(fogged, color, visible);
+        color = mix(vec3<f32>(params.shroud_r, params.shroud_g, params.shroud_b), shown, explored);
+    }
+    return vec4<f32>(color, 1.0);
 }

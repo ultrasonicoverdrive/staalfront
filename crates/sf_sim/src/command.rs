@@ -118,6 +118,53 @@ pub enum Command {
         /// The anchor cell.
         cell: Cell,
     },
+    /// Put a unit of `kind` at the back of the queue of the factory (WP6.5,
+    /// `docs/rules/production.md`). The owner is the player who sent the command, who must own
+    /// the factory. A refusal is reported ([`World::production_rejections`](crate::World::production_rejections))
+    /// and counts as ignored: the factory is not standing, the unit is not built there, not open to
+    /// the faction, lacks a prerequisite, or the queue is full. Without money the item is
+    /// accepted and waits.
+    QueueUnit {
+        /// The factory.
+        factory: EntityId,
+        /// The unit to build.
+        kind: Kind,
+    },
+    /// Take the item at place `index` out of the queue of the factory (0 is the one being built)
+    /// and give back what was paid for it (WP6.5). Refused for an empty place and for a unit that
+    /// came free with a structure.
+    CancelUnit {
+        /// The factory.
+        factory: EntityId,
+        /// The place in the queue, counted from zero.
+        index: u8,
+    },
+    /// Set where the units of the factory walk to once they are out, or with `None` let them stay on
+    /// their spot (WP6.5). Refused for a cell outside the map.
+    SetRally {
+        /// The factory.
+        factory: EntityId,
+        /// The rally cell.
+        cell: Option<Cell>,
+    },
+    /// Start (`on`) or stop repairing the structure (WP6.6, `docs/rules/repair_sell.md`). The owner
+    /// is the player who sent the command, who must own the structure. A refusal is reported
+    /// ([`World::repair_rejections`](crate::World::repair_rejections)) and counts as ignored: not
+    /// a structure of the sender's, under construction, being sold, not standing, at full hit
+    /// points, already repairing (start) or not repairing (stop).
+    Repair {
+        /// The structure.
+        structure: EntityId,
+        /// True to start repairing, false to stop.
+        on: bool,
+    },
+    /// Sell the structure (WP6.6): it takes the sale time and is then removed, and the owner is
+    /// paid a part of the price scaled by the hit points it has at that moment. The sender must
+    /// own it; refused when it is under construction, already being sold or not standing.
+    Sell {
+        /// The structure.
+        structure: EntityId,
+    },
     /// Give the units an order (WP3.4, `docs/rules/orders.md`): replace their
     /// current order and queue with `order`, or, with `queued`, add it behind
     /// the orders they have (a unit with none starts on it at once). A unit

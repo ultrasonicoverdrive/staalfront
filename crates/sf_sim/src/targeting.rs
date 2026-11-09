@@ -85,11 +85,14 @@ use sf_math::hash::Fnv1a64;
 use sf_math::{Fx, Vec2};
 
 use crate::behavior::Behavior;
+use crate::buildings::BuildingTable;
 use crate::crowd::Index;
 use crate::entities::{Entities, NO_DEF};
-use crate::ids::{EntityId, Tick};
+use crate::ids::{EntityId, PlayerId, Tick};
 use crate::orders::{self, GuardTarget, Order, live_slot, radius_of};
-use crate::units::{UnitClass, UnitTable};
+use crate::terrain::{NO_CELL, Occupancy};
+use crate::units::{Footprint, UnitClass, UnitTable};
+use crate::vision::Vision;
 use crate::weapons::Arsenal;
 
 /// Ticks between two scans of a unit unless the settings say otherwise: half a second.
@@ -270,6 +273,53 @@ pub(crate) struct Context<'a> {
     /// The smallest and largest valid position (for beginning an order).
     pub bounds: (Vec2, Vec2),
     pub map: (u32, u32),
+    /// The building table (a structure that uses power needs it to be on).
+    pub buildings: &'a BuildingTable,
+    /// The players whose defences have no power this tick (`World::defences_powered`); ascending.
+    pub unpowered: &'a [PlayerId],
+    /// The sight gate of automatic acquisition (WP8.2a): `None` unless the world has vision rules
+    /// with `acquire_needs_sight`. Only `Targeting::update` (scans) reads it; retaliation
+    /// (`return_fire`) and the checks of an engagement never do.
+    pub gate: Option<Gate<'a>>,
+}
+
+/// What the gate reads: the picture of every player and where the structures stand.
+#[derive(Copy, Clone)]
+pub(crate) struct Gate<'a> {
+    pub vision: &'a Vision,
+    pub occupancy: &'a Occupancy,
+}
+
+impl<'a> Gate<'a> {
+    /// The gate of a world: on only when its vision rules ask for it.
+    pub(crate) fn of(vision: Option<&'a Vision>, occupancy: &'a Occupancy) -> Option<Gate<'a>> {
+        vision
+            .filter(|v| v.gate_on())
+            .map(|vision| Gate { vision, occupancy })
+    }
+
+    /// Whether `viewer` sees entity `j` now, **measured to its edge** (WP7.7), the way a weapon's
+    /// reach is: a structure through any cell of its footprint or a visible cell that shares a side
+    /// with it, a unit through its own cell or a neighbour cell that its body reaches
+    /// ([`Vision::sees_footprint_edge`], [`Vision::sees_body`]; `docs/rules/vision.md`).
+    fn sees(&self, e: &Entities, units: &UnitTable, viewer: PlayerId, j: usize) -> bool {
+        if e.cell[j] != NO_CELL {
+            let anchor = self.occupancy.cell(e.cell[j]);
+            let fp = units
+                .at(e.def[j] as usize)
+                .footprint
+                .unwrap_or(Footprint::ONE);
+            return self.vision.sees_footprint_edge(
+                viewer,
+                anchor.x,
+                anchor.y,
+                u32::from(fp.width),
+                u32::from(fp.height),
+            );
+        }
+        self.vision
+            .sees_body(viewer, e.pos[j], radius_of(e, j, units))
+    }
 }
 
 /// What the stance of a unit lets it do, from its current order.
@@ -378,6 +428,17 @@ impl Targeting {
                 continue;
             }
             let stats = cx.units.at(e.def[i] as usize);
+            if stats.class() == UnitClass::Structure {
+                // Defences (WP6.7): a weaponless structure (a bunker) does nothing at all.
+                if cx.arsenal.is_armed(e.def[i])
+                    && defence_check(e, i, cx)
+                    && e.turret_target[i].is_none()
+                    && e.eng[i].cool == 0
+                {
+                    scanners.push(i);
+                }
+                continue;
+            }
             if stats.class() != UnitClass::Mobile {
                 continue;
             }
@@ -430,9 +491,8 @@ impl Targeting {
         });
     }
 
-    /// Unit `i` looks for the best target in reach.
-    fn scan(&mut self, e: &mut Entities, i: usize, cx: &Context<'_>) {
-        e.eng[i].cool = cx.config.scan_cooldown;
+    /// The best target in reach of entity `i`, with the reach of the weapon that picked it.
+    fn best_target(&mut self, e: &Entities, i: usize, cx: &Context<'_>) -> Option<(usize, Fx)> {
         let def = e.def[i];
         let farthest = cx
             .arsenal
@@ -459,14 +519,33 @@ impl Targeting {
                 else {
                     continue;
                 };
+                // WP8.2a: with the gate on, only what the scanner's owner can see is picked.
+                if let Some(g) = &cx.gate
+                    && !g.sees(e, cx.units, e.owner[i], j)
+                {
+                    continue;
+                }
                 let key = key_of(e, j, 0, pick.score, d2);
                 if best.is_none_or(|(b, _, _)| key < b) {
                     best = Some((key, j, pick.reach));
                 }
             }
         }
-        if let Some((_, j, reach)) = best {
-            engage(e, i, j, false, reach, cx);
+        best.map(|(_, j, reach)| (j, reach))
+    }
+
+    /// Unit `i` looks for the best target in reach.
+    fn scan(&mut self, e: &mut Entities, i: usize, cx: &Context<'_>) {
+        e.eng[i].cool = cx.config.scan_cooldown;
+        if let Some((j, reach)) = self.best_target(e, i, cx) {
+            if cx.units.at(e.def[i] as usize).class() == UnitClass::Structure {
+                // A structure (WP6.7): no order; the turret target is the target.
+                e.turret_target[i] = Some(EntityId::new(j as u32, e.generation[j]));
+                e.eng[i].aim = e.pos[j];
+                e.eng[i].reach = reach;
+            } else {
+                engage(e, i, j, false, reach, cx);
+            }
         }
     }
 
@@ -585,6 +664,74 @@ fn check(e: &mut Entities, i: usize, victim: EntityId, cx: &Context<'_>) {
         e.eng[i].aim = e.pos[j];
     } else {
         end_engagement(e, i, cx.tick, cx.bounds);
+    }
+}
+
+/// Whether the structure in slot `i` may fire now: it stands (complete, hit points left) and, if
+/// its kind uses power, its owner's defences have power. Clears its target when it may not, or when
+/// the target is gone, at zero, no longer an enemy or out of reach of every weapon that hurts it.
+/// Counts the scan cooldown down. Returns whether the structure may look for a new target.
+fn defence_check(e: &mut Entities, i: usize, cx: &Context<'_>) -> bool {
+    e.eng[i].cool = e.eng[i].cool.saturating_sub(1);
+    let stats = cx.units.at(e.def[i] as usize);
+    let standing = e.build_left[i] == 0 && e.sell_left[i] == 0 && (e.hp[i] > 0 || stats.hp == 0);
+    let dark = cx.buildings.get(e.kind[i]).is_some_and(|b| b.power < 0)
+        && cx.unpowered.binary_search(&e.owner[i]).is_ok();
+    if !standing || dark {
+        e.turret_target[i] = None;
+        return false;
+    }
+    if let Some(victim) = e.turret_target[i] {
+        let keep = live_slot(e, victim)
+            .filter(|&j| targetable(e, j) && e.owner[j] != e.owner[i])
+            .is_some_and(|j| {
+                let d2 = (e.pos[j] - e.pos[i]).length_squared();
+                cx.arsenal
+                    .best_against(e.def[i], e.def[j], d2, radius_of(e, j, cx.units), true)
+                    .is_some()
+            });
+        if keep {
+            return false;
+        }
+        e.turret_target[i] = None;
+    }
+    true
+}
+
+/// Written first into the defences section.
+const DEFENCE_TAG: u8 = b'd';
+
+/// Writes the defences section of the checksum: the target of every live armed structure, in slot
+/// order. Nothing at all when the world has no armed structure (WP6.7).
+pub(crate) fn write_defence_hash(
+    h: &mut Fnv1a64,
+    e: &Entities,
+    units: &UnitTable,
+    arsenal: &Arsenal,
+) {
+    let armed: Vec<usize> = (0..e.len())
+        .filter(|&i| {
+            e.alive[i]
+                && e.def[i] != NO_DEF
+                && units.at(e.def[i] as usize).class() == UnitClass::Structure
+                && arsenal.is_armed(e.def[i])
+        })
+        .collect();
+    if armed.is_empty() {
+        return;
+    }
+    h.write_u8(DEFENCE_TAG);
+    h.write_u64(armed.len() as u64);
+    for i in armed {
+        h.write_u32(i as u32);
+        match e.turret_target[i] {
+            Some(id) => {
+                h.write_u8(1);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
+            None => h.write_u8(0),
+        }
     }
 }
 

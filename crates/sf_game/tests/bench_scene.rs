@@ -70,21 +70,21 @@ const PLAIN: [u64; 15] = [
 
 /// The fight benchmark's world.
 const FIGHT: [u64; 15] = [
-    0x1a05bef657f1e420,
-    0x7ca7774f19e37632,
-    0x25080df8e24caf75,
-    0xb8efc3612e4f1fd6,
-    0xd598f13f51556a32,
-    0x7a2531f7bb74348f,
-    0x8095ce5d07399cf8,
-    0xe2d72750daf289e9,
-    0x25cdece94206d875,
-    0x507f72474aee9a32,
-    0x32c3736dad00d1d6,
-    0x634346427aeae431,
-    0x6ce70653cce7c377,
-    0xf8b808e3672a785a,
-    0x568d257d092daa7b,
+    0x29d8c41de00ce519,
+    0x82b72a6ea3a80409,
+    0x49d11bfcefa58aca,
+    0x1fd8a31cf59e055f,
+    0x885ba224ed6fa207,
+    0xb2f40671c5612f46,
+    0x2676b85458dbe415,
+    0xf726cbb678d795a6,
+    0x694be5cd88480762,
+    0xc6b2280909887431,
+    0x3f651be633c3198d,
+    0x6a3a7cdedea68a08,
+    0xf85b79cd3084b232,
+    0xc7e88b4f7bcb8da5,
+    0x0f215774d484c93a,
 ];
 
 /// What the demo's scene is made of, as `Runner::new` makes it: 256 x 256 cells, the test pack, 5,000 units.
@@ -252,15 +252,34 @@ fn the_fight_benchmark_has_the_crowd_of_the_plain_one_and_the_skirmish_at_its_si
     assert_eq!(armed.iter().filter(|v| v.owner.0 == 0).count(), 24);
 }
 
-/// `docs/bench/README.md` quotes the tick-1500 values of `PLAIN`, `FIGHT` and `M0`; they must be these constants.
+/// `docs/bench/README.md` quotes the tick-1500 value of `PLAIN`, `FIGHT` and `M0` once each, in a sentence that
+/// names the scenario. The value in that sentence must be exactly the constant: a stale value, a second value in
+/// the same sentence or a missing one fails. (Other places in the README may quote old values on purpose, as history.)
 #[test]
 fn the_readme_quotes_the_pinned_end_values() {
     let readme = include_str!("../../../docs/bench/README.md");
-    for (name, list) in [("PLAIN", &PLAIN), ("FIGHT", &FIGHT), ("M0", &M0)] {
-        let end = format!("`{:#018x}`", list[14]);
-        assert!(
-            readme.contains(&end),
-            "the README does not quote {name}'s end {end}"
+    // Line breaks and runs of spaces in the Markdown source do not matter.
+    let text = readme.split_whitespace().collect::<Vec<_>>().join(" ");
+    for (name, lead, list) in [
+        ("FIGHT", "the list `FIGHT` of that test, ending", &FIGHT),
+        ("PLAIN", "the list `PLAIN`, ending", &PLAIN),
+        ("M0", "M0 ended at", &M0),
+    ] {
+        assert_eq!(
+            text.matches(lead).count(),
+            1,
+            "the README must have exactly one sentence starting `{lead}`"
+        );
+        let rest = text.split(lead).nth(1).unwrap();
+        let sentence = rest
+            .split(" at tick 1500")
+            .next()
+            .filter(|s| s.len() < rest.len())
+            .unwrap_or_else(|| panic!("the README sentence for {name} has no `at tick 1500`"));
+        assert_eq!(
+            sentence.trim(),
+            format!("`{:#018x}`", list[14]),
+            "the README's end value for {name} is not the pinned one"
         );
     }
 }

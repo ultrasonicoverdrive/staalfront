@@ -25,6 +25,14 @@ fn the_shipped_harvest_numbers_are_pinned() {
     assert_eq!(s.mine_reach_tenths, 15);
     assert_eq!(s.mine_lose_tenths, 25);
     assert_eq!(s.dock_reach_tenths, 20);
+    assert_eq!(s.travel_cost, 16);
+    assert_eq!(s.queue_cost, 100);
+    assert_eq!(s.switch_margin, 100);
+    assert_eq!(s.recheck_period, 20);
+    assert_eq!(s.queue_gap, 3);
+    assert_eq!(s.queue_start, 1);
+    assert_eq!(s.queue_step, 2);
+    assert_eq!(s.queue_rows, 8);
 }
 
 /// The timings the comments of the file state, worked out from the numbers.
@@ -67,7 +75,8 @@ fn the_grant_lasts_longer_than_the_drive_from_the_call_range() {
 /// The tuning numbers of the loop, as the shipped file has them.
 const TUNING: &str = "call_timeout: 10, max_tries: 3, park_distance: 4, park_spread: 5, \
      park_near_tenths: 20, mine_start_tenths: 10, mine_reach_tenths: 15, mine_lose_tenths: 25, \
-     dock_reach_tenths: 20";
+     dock_reach_tenths: 20, travel_cost: 16, queue_cost: 100, switch_margin: 100, \
+     recheck_period: 20, queue_gap: 3, queue_start: 1, queue_step: 2, queue_rows: 8";
 
 /// The tuning numbers are checked on load: each within its bounds, and the three mining radii in
 /// order.
@@ -97,6 +106,10 @@ fn bad_tuning_numbers_are_refused() {
         ("park_spread", 32),
         ("park_near_tenths", 320),
         ("dock_reach_tenths", 320),
+        ("travel_cost", 1000),
+        ("recheck_period", 1000),
+        ("queue_step", 8),
+        ("queue_rows", 32),
     ] {
         assert!(with(name, 1).is_ok(), "{name} 1");
         assert!(with(name, most).is_ok(), "{name} {most}");
@@ -104,6 +117,21 @@ fn bad_tuning_numbers_are_refused() {
             matches!(with(name, 0), Err(HarvestError::Invalid(_))),
             "{name} 0"
         );
+        assert!(
+            matches!(with(name, most + 1), Err(HarvestError::Invalid(_))),
+            "{name} {}",
+            most + 1
+        );
+    }
+    // These may be 0 (off) and are bounded above.
+    for (name, most) in [
+        ("queue_cost", 10_000),
+        ("switch_margin", 10_000),
+        ("queue_gap", 32),
+        ("queue_start", 32),
+    ] {
+        assert!(with(name, 0).is_ok(), "{name} 0");
+        assert!(with(name, most).is_ok(), "{name} {most}");
         assert!(
             matches!(with(name, most + 1), Err(HarvestError::Invalid(_))),
             "{name} {}",

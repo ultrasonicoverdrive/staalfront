@@ -52,6 +52,15 @@ pub enum Action {
     /// chosen the ghost follows the cursor, the select button places it and the order button
     /// puts it away.
     BuildCycle,
+    /// Add the unit on offer to the queue of the selected factory (WP6.5).
+    ProduceQueue,
+    /// Choose the next unit the selected factory offers (WP6.5).
+    ProduceCycle,
+    /// Take the last unit out of the queue of the selected factory, and give back what was paid
+    /// for it (WP6.5).
+    ProduceCancel,
+    /// Set the rally point of the selected factory to the cell under the cursor (WP6.5).
+    RallySet,
     /// Left button: click selects, drag draws the selection rectangle,
     /// double-click selects the units of the same kind in view (WP3.3).
     SelectClick,
@@ -88,7 +97,7 @@ impl Action {
         Action::Group9,
     ];
 
-    pub const ALL: [Action; 32] = [
+    pub const ALL: [Action; 36] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -109,6 +118,10 @@ impl Action {
         Action::OrderHold,
         Action::OrderAttackMove,
         Action::BuildCycle,
+        Action::ProduceQueue,
+        Action::ProduceCycle,
+        Action::ProduceCancel,
+        Action::RallySet,
         Action::SelectClick,
         Action::SelectAdd,
         Action::GroupAssign,
@@ -330,6 +343,13 @@ impl InputState {
     pub fn key_released(&self, key: KeyCode) -> bool {
         self.keys_released.contains(&key)
     }
+    /// The keys that went down this frame, in a fixed order (by name), for a screen that waits for
+    /// "press a key" (WP11.5a); the set itself has no order.
+    pub fn keys_pressed_now(&self) -> Vec<KeyCode> {
+        let mut keys: Vec<KeyCode> = self.keys_pressed.iter().copied().collect();
+        keys.sort_by_key(|k| format!("{k:?}"));
+        keys
+    }
     pub fn button_down(&self, b: MouseButton) -> bool {
         self.buttons_down.contains(&b)
     }
@@ -537,6 +557,19 @@ mod tests {
             b.for_action(Action::BuildCycle),
             [Binding::new(Trigger::Key(KeyCode::KeyB))]
         );
+    }
+
+    #[test]
+    fn the_production_keys_are_u_i_o_g_and_leave_the_camera_keys_alone() {
+        let b = Bindings::builtin();
+        for (action, key) in [
+            (Action::ProduceQueue, KeyCode::KeyU),
+            (Action::ProduceCycle, KeyCode::KeyI),
+            (Action::ProduceCancel, KeyCode::KeyO),
+            (Action::RallySet, KeyCode::KeyG),
+        ] {
+            assert_eq!(b.for_action(action), [Binding::new(Trigger::Key(key))]);
+        }
     }
 
     #[test]
@@ -867,5 +900,21 @@ mod tests {
         let mut i = sized();
         i.key_event(KeyCode::Escape, ElementState::Pressed, false);
         assert!(!eval(&i, &b).pressed(Action::Quit));
+    }
+
+    /// The keys that went down this frame, in a fixed order, and none once the frame is over or for
+    /// a key that is merely held (WP11.5a: the "press a key" screen of the key settings).
+    #[test]
+    fn the_keys_pressed_now_are_the_new_ones_in_a_fixed_order() {
+        let mut i = sized();
+        assert!(i.keys_pressed_now().is_empty());
+        i.key_event(KeyCode::KeyZ, ElementState::Pressed, false);
+        i.key_event(KeyCode::KeyA, ElementState::Pressed, false);
+        assert_eq!(i.keys_pressed_now(), [KeyCode::KeyA, KeyCode::KeyZ]);
+        i.end_frame();
+        // Held, and the OS repeat, are not new presses.
+        i.key_event(KeyCode::KeyZ, ElementState::Pressed, true);
+        assert!(i.keys_pressed_now().is_empty());
+        assert!(i.key_down(KeyCode::KeyZ));
     }
 }

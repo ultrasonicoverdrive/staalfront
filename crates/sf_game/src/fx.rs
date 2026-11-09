@@ -134,6 +134,9 @@ pub struct FxCounters {
     pub damage_puffs_at_anchor: u64,
     /// Puffs that started by the rule of `damage.ron` (no anchor: another model, or no model drawn).
     pub damage_puffs_by_rule: u64,
+    /// Events not drawn because the cell they happened on is out of the local player's sight (WP8.3).
+    /// The audio still gets them (`FxPlayer::shown`): sounds of hidden events are an open question.
+    pub hidden: u64,
 }
 
 /// `effects.ron` resolved against the definitions: names are numbers, links are lists of numbers.
@@ -437,8 +440,14 @@ impl FxPlayer {
                 self.counters.expired += 1;
                 continue;
             }
-            self.counters.shown += 1;
             self.shown_now.push(*ev);
+            // A flash, a hit or a death on a cell the local player does not see is not drawn (WP8.3);
+            // its own events always are. The audio takes `shown_now` as before.
+            if !snap.shown_at_metres(ev.pos, sf_sim::PlayerId(ev.player)) {
+                self.counters.hidden += 1;
+                continue;
+            }
+            self.counters.shown += 1;
             self.spawn(ev, ground, anchors, alpha, band);
         }
         self.ready = batch;
@@ -563,7 +572,7 @@ impl FxPlayer {
             1.0
         };
         for wreck in snap.wrecks() {
-            if wreck.ticks_left == 0 || wreck.lifetime == 0 {
+            if wreck.ticks_left == 0 || wreck.lifetime == 0 || !snap.wreck_shown(wreck) {
                 continue;
             }
             // Full until the last `fade_fraction` of its life, then down to nothing.
@@ -620,7 +629,11 @@ impl FxPlayer {
         };
         let margin = d.limits.cull_margin;
         let (w, h) = (f.viewport[0], f.viewport[1]);
-        for v in snap.views() {
+        for (i, v) in snap.views().iter().enumerate() {
+            // Smoke over a thing the local player does not see would give it away (WP8.3).
+            if !snap.view_shown(i) {
+                continue;
+            }
             let stage = snap.damage_stage(d, v);
             if stage == Stage::Intact {
                 continue;
@@ -741,6 +754,9 @@ impl FxPlayer {
         };
         let mut budget = view.limits.max_tracer_dots as usize;
         for p in snap.projectiles() {
+            if !snap.projectile_shown(p) {
+                continue;
+            }
             let (slot, tracer) = match p.kind {
                 ProjectileKind::Straight => (0, &self.tables.effects.tracers.straight),
                 ProjectileKind::Arc => (1, &self.tables.effects.tracers.arc),
@@ -990,6 +1006,75 @@ mod tests {
         p.frame(&snapshot_at(1), &ground, &f);
         assert_eq!(spawned(&p), first);
         assert_eq!(p.counters().shown, 1);
+    }
+
+    /// A world with vision rules and the local player's scout at `(x, y)` (sight 8), one step in: the
+    /// effects of the fog tests happen at (12, 12) m, cell (3, 3).
+    fn vision_snapshot(scout: (i32, i32)) -> SimSnapshot {
+        use sf_math::{Fx, Vec2};
+        use sf_sim::{Command, PlayerId};
+        let defs = UnitDefs::embedded();
+        let world = World::new(WorldConfig::new(1).with_map_size(64, 64))
+            .unwrap()
+            .with_units(sf_bridge::unit_table(&defs).unwrap())
+            .unwrap();
+        let mut world = crate::playfield::with_vision(world, &defs);
+        world
+            .schedule(
+                world.tick(),
+                PlayerId(0),
+                Command::SpawnUnit {
+                    kind: sf_sim::Kind(defs.kind_of("scout").unwrap()),
+                    pos: Vec2::new(
+                        Fx::from_int(scout.0) + Fx::HALF,
+                        Fx::from_int(scout.1) + Fx::HALF,
+                    ),
+                    owner: PlayerId(0),
+                },
+            )
+            .unwrap();
+        world.step();
+        world.step();
+        SimSnapshot::capture(&world)
+    }
+
+    /// WP8.3: a flash, a hit or a death of the other side on a cell the local player does not see is not
+    /// drawn; on a visible cell it is; the local player's own always is. The audio's list still has
+    /// all of them (the sounds of hidden events are an open question for the audio work).
+    #[test]
+    fn effects_on_cells_out_of_sight_are_not_drawn_but_still_reach_the_audio_list() {
+        let ground = FlatGround::default();
+        let f = frame(1.0, 200.0);
+        let enemy = |e: FxEvent| FxEvent { player: 1, ..e };
+        let events = [
+            enemy(fire(weapon("cannon"))),
+            enemy(hit(weapon("cannon"), true, false)),
+            enemy(death(3.0, false)),
+        ];
+        // The scout sees cell (3, 3): all three are drawn.
+        let mut seen = player();
+        seen.push_events(&events);
+        seen.frame(&vision_snapshot((3, 4)), &ground, &f);
+        assert!(spawned(&seen) > 0);
+        assert_eq!((seen.counters().shown, seen.counters().hidden), (3, 0));
+        // The scout is far away: none is drawn, all three are counted as hidden, the audio still has them.
+        let mut hidden = player();
+        hidden.push_events(&events);
+        hidden.frame(&vision_snapshot((50, 50)), &ground, &f);
+        assert_eq!(spawned(&hidden), 0, "nothing of it is drawn");
+        assert_eq!((hidden.counters().shown, hidden.counters().hidden), (0, 3));
+        assert_eq!(hidden.shown().len(), 3, "the audio list is unchanged");
+        // The local player's own event on the same cell is drawn.
+        let mut own = player();
+        own.push_events(&[fire(weapon("cannon"))]);
+        own.frame(&vision_snapshot((50, 50)), &ground, &f);
+        assert!(spawned(&own) > 0);
+        assert_eq!((own.counters().shown, own.counters().hidden), (1, 0));
+        // A world without vision rules hides nothing.
+        let mut open = player();
+        open.push_events(&events);
+        open.frame(&snapshot_at(2), &ground, &f);
+        assert_eq!((open.counters().shown, open.counters().hidden), (3, 0));
     }
 
     #[test]

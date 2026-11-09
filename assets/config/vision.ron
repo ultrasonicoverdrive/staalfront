@@ -1,0 +1,14 @@
+// Vision (WP8.1, docs/rules/vision.md): the one number the simulation takes from here. How far each
+// kind sees is `sight` in unit_defs.ron (cells); sf_bridge::vision_rules hands both to the world
+// (World::with_vision). Placeholder for the balance rounds of phase 15.
+(
+    // The sight, in whole cells (0 to 64), of an entity that was not made from a unit table entry:
+    // the placeholder wanderers of `--units` and the legacy `Place` structures. Real units and
+    // structures use their own `sight`.
+    legacy_sight_cells: 5,
+    // WP8.2a: true = units and defences only pick targets their owner can see now (retaliation and
+    // explicit orders are never gated). On since WP7.7 (Tijmen, 08-11-2026, after playing the first
+    // match); a file without the line means on too. The test is measured to the edge of the target
+    // (docs/rules/vision.md).
+    acquire_needs_sight: true,
+)
