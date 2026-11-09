@@ -168,19 +168,51 @@ impl Scene {
         FxPlayer::with_damage(Effects::embedded(), &self.defs, table).expect("the baseline player")
     }
 
-    /// The picture of the same scene with the baseline player (structures burn like vehicles): the
-    /// stage holds for `ticks` ticks first so that every puff is the baseline's. The real player is put
-    /// back afterwards. Returns the picture with the effects.
-    fn baseline_shot(&mut self, r: &mut Renderer, cam: &Camera, ticks: u32) -> Rgba8 {
+    /// The flame light in each of `windows`, summed over `frames` pictures `every` ticks apart (each
+    /// against a plain picture of the same tick): one frame is a single phase of the flicker, so a
+    /// comparison of two fires reads several.
+    fn glow_over(
+        &mut self,
+        r: &mut Renderer,
+        cam: &Camera,
+        frames: u32,
+        every: u32,
+        windows: &[[u32; 4]],
+    ) -> Vec<usize> {
+        let mut sums = vec![0; windows.len()];
+        for _ in 0..frames {
+            let mut last = Vec::new();
+            for _ in 0..every {
+                last = self.tick(cam).1;
+            }
+            let plain = self.shoot(r, cam, &[]);
+            let shot = self.shoot(r, cam, &last);
+            for (sum, w) in sums.iter_mut().zip(windows) {
+                *sum += glow_pixels(&shot, &plain, *w);
+            }
+        }
+        sums
+    }
+
+    /// [`Self::glow_over`] with the baseline player, after `ticks` ticks so that every puff is the
+    /// baseline's; the real player is put back afterwards.
+    fn baseline_glow_over(
+        &mut self,
+        r: &mut Renderer,
+        cam: &Camera,
+        ticks: u32,
+        frames: u32,
+        every: u32,
+        windows: &[[u32; 4]],
+    ) -> Vec<usize> {
         let baseline = self.vehicle_fire_player();
         let real = std::mem::replace(&mut self.fx, baseline);
-        let mut last = Vec::new();
         for _ in 0..ticks {
-            last = self.tick(cam).1;
+            self.tick(cam);
         }
-        let shot = self.shoot(r, cam, &last);
+        let sums = self.glow_over(r, cam, frames, every, windows);
         self.fx = real;
-        shot
+        sums
     }
 
     fn kind(&self, role: &str) -> Kind {
@@ -535,9 +567,10 @@ fn at_start_zoom(
     let fire_at = scene
         .anchor_px(&cam, plant, "fx_fire")
         .expect("the model has fx_fire_0");
-    let glow = glow_pixels(&shot, &plain, around(fire_at, 40.0));
-    let old_shot = scene.baseline_shot(r, &cam, 80);
-    let old_glow = glow_pixels(&old_shot, &plain, around(fire_at, 40.0));
+    // Summed over six frames: one frame is a single phase of the flicker (WP6.8b, 09-11-2026).
+    let near = around(fire_at, 40.0);
+    let glow = scene.glow_over(r, &cam, 6, 7, &[near])[0];
+    let old_glow = scene.baseline_glow_over(r, &cam, 80, 6, 7, &[near])[0];
     println!(
         "{name} at start zoom: effects {effects} px, light near the fire anchor {glow} px (vehicle fire: {old_glow} px)"
     );
@@ -689,16 +722,17 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
         assert!(smoke > 150, "{faction}: smoke and fire are drawn ({smoke})");
         assert!(glow > 100, "{faction}: fire at the fire anchor ({glow})");
         // Bigger than the vehicle fire the structure had before WP6.8b (same scene, same camera).
-        let old_shot = scene.baseline_shot(&mut r, &cam, 80);
         // A wide window: the new flame is taller and broader than the 90 px square of the check above.
+        // Summed over six frames: a single frame is one phase of the flicker (WP6.8b, 09-11-2026).
         let wide = around(fire_at, 200.0);
-        let old_glow = glow_pixels(&old_shot, &heavy_plain, wide);
-        let glow = glow_pixels(&heavy, &heavy_plain, wide);
+        let glow = scene.glow_over(&mut r, &cam, 6, 7, &[wide])[0];
+        let old_glow = scene.baseline_glow_over(&mut r, &cam, 80, 6, 7, &[wide])[0];
         println!(
             "{faction} heavy, close: flame light {glow} px, with the vehicle fire {old_glow} px"
         );
         // At least 1.2 times the light: the Veyran roof is bright and the additive glow saturates on it, and a
-        // vehicle flame already fills much of the close picture (measured: 2.4 times Meridian, 1.3 Veyran).
+        // vehicle flame already fills much of the close picture (measured over six frames: 1.9 times Meridian,
+        // 1.4 Veyran).
         assert!(
             glow * 10 > old_glow * 12,
             "{faction}: the structure fire is clearly bigger at the close camera ({glow} against {old_glow})"
@@ -845,7 +879,6 @@ fn a_burning_tank_burns_smaller_than_the_burning_building_beside_it() {
         last = fx;
     }
     let tick = scene.world.tick().0;
-    let plain = scene.shoot(&mut r, &cam, &[]);
     let shot = scene.shoot(&mut r, &cam, &last);
     save(
         &format!("meridian_tank_beside_power_plant_both_burning_start_zoom_tick{tick}.png"),
@@ -860,8 +893,16 @@ fn a_burning_tank_burns_smaller_than_the_burning_building_beside_it() {
     let tank_at = project_px(&cam.view_proj(), [tx, ty, tz].into(), [W as f32, H as f32])
         .expect("in front of the camera")
         .0;
-    let building = glow_pixels(&shot, &plain, around(fire_at, 40.0));
-    let vehicle = glow_pixels(&shot, &plain, around(tank_at, 40.0));
+    // Summed over six frames: one frame is a single phase of the flicker, and a small flame can be
+    // between puffs in it (WP6.8b, 09-11-2026).
+    let sums = scene.glow_over(
+        &mut r,
+        &cam,
+        6,
+        7,
+        &[around(fire_at, 40.0), around(tank_at, 40.0)],
+    );
+    let (building, vehicle) = (sums[0], sums[1]);
     println!(
         "start zoom: flame light at the building {building} px, at the tank {vehicle} px; fire anchor {fire_at:?}, tank {tank_at:?}"
     );

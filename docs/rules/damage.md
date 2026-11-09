@@ -83,12 +83,14 @@ structure entries at the mobile ones) and requires the structure fire to give at
 
 Pictures: `docs/screenshots/wp6.8b/` (same names as `wp6.8/`, plus `meridian_tank_beside_power_plant_both_burning_start_zoom_*`:
 a burning tank and a burning power plant side by side at the start zoom; the tick is in the file name only).
-Measured in `damage_screenshot.rs` (WARP, release; light = pixels that the effects make 120 or more brighter in
-sum of the colour channels, near `fx_fire`; "before" is the same scene with the structure entries pointed at the
-vehicle ones): start zoom, Meridian 1,654 px against 1,043, Veyran 1,587 against 982 (1.6 times); close camera,
-Meridian 2,631 against 1,092 (2.4 times), Veyran 3,691 against 2,857 (1.3 times; the Veyran roof is bright and the
-additive glow saturates on it, so the close-camera test asks for 1.2 times, the start zoom for 1.4); tank and
-building side by side at the start zoom, 581 px at the tank and 1,467 at the building (2.5 times).
+Measured in `damage_screenshot.rs` (lavapipe under xvfb, debug, 09-11-2026 after the merge of main; light =
+pixels that the effects make 120 or more brighter in sum of the colour channels, near `fx_fire`, summed over six
+frames 7 ticks apart because one frame is a single phase of the flicker; "before" is the same scene with the structure
+entries pointed at the vehicle ones): start zoom, Meridian 9,569 px against 6,691 (1.43 times), Veyran 10,546 against
+3,529 (3.0 times); close camera, Meridian 25,550 against 13,682 (1.9 times), Veyran 26,928 against 19,462 (1.4 times;
+the Veyran roof is bright and the additive glow saturates on it, so the close-camera test asks for 1.2 times, the
+start zoom for 1.4); tank and building side by side at the start zoom, 2,113 px at the tank and 8,980 at the building
+(4.2 times). The Meridian start-zoom margin is small (1.43 against the 1.4 asked).
 
 Cost of WP6.8b (release, Windows laptop, nothing else running on purpose, no load average to read, relative numbers
 only): `FxPlayer::frame_with` for 5,000 objects, medians of 5 alternating rounds: 200 burning buildings 184.4 us now
