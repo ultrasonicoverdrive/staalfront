@@ -4,7 +4,7 @@
 //! objects now), *explored* (visible at some time; never shrinks) and which are neither (*shroud*).
 //! A cell that is explored but not visible is *fog*. [`World::visibility`] is what the rest of the
 //! simulation asks. **Only one thing reads it** (WP8.2a): the targeting gate, when the rules say
-//! `acquire_needs_sight` (off in everything that ships); targeting, defences, orders and production
+//! `acquire_needs_sight` (on in `vision.ron`, so in the game and the match); targeting, defences, orders and production
 //! otherwise behave exactly as before. The rules may also list `shared` pairs (a viewer sees what a
 //! sharer sees); `visibility` is the union.
 //!

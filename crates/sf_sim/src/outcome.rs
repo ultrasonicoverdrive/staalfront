@@ -165,7 +165,8 @@ impl World {
     /// the weapon table and the destruction settings (a world in which nothing is destroyed or
     /// nothing is armed has no match to decide): [`ConfigError::Match`] after the world has started,
     /// twice, without those, without a building table that has a construction centre (the kind of
-    /// function [`BuildingFunction::Anchor`]: without one nobody could stay in the match), or for a player list [`MatchRules::new`] refuses.
+    /// function [`BuildingFunction::Anchor`]: without one nobody could stay in the match), or for a
+    /// player list [`MatchRules::new`] refuses.
     pub fn with_match(mut self, rules: MatchRules) -> Result<World, crate::world::ConfigError> {
         if self.tick != Tick::ZERO
             || self.entities.len() != 0

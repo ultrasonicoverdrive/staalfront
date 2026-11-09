@@ -311,7 +311,7 @@ impl ProductionSpec {
 pub struct VisionSpec {
     /// The sight, in thousandths of a cell, of an entity without a unit table entry (0 to 64000).
     pub legacy_sight_milli: u32,
-    /// WP8.2a: automatic acquisition only picks what its owner can see (`vision.md`). Left out: off.
+    /// WP8.2a: automatic acquisition only picks what its owner can see (`vision.md`). Left out: off (the opposite of `vision.ron`, which sets it).
     #[serde(default)]
     pub acquire_needs_sight: bool,
     /// WP8.2a: `(sharer, viewer)` pairs, strictly ascending: the viewer also sees what the sharer

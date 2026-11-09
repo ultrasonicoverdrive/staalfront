@@ -384,7 +384,9 @@ ticks.
 
 ## Not done, on purpose (gaps)
 
-* The gate is off in everything that ships; nothing but the scenario `vision_targeting` and the measurement test turns it on.
+* Since WP7.7 the gate is on in everything that ships: `assets/config/vision.ron` sets it, so `sf_game` runs with it, and the `match`
+  scenario sets it as well. A scenario that leaves the line out of its vision rules stays off (the field defaults to off), so the
+  older scenarios and their pinned checksums keep the behaviour they were measured with.
 * A chosen target that steps into fog is kept (the gate is on the pick only). No team or alliance exists in the game: `shared` is set by
   scenarios only; the debug view and the snapshot's bitsets do not use it, while `seen` does (see "Own picture and shared vision").
   No reveal-the-map effect, no radar or special reveal, no height or occlusion (a disc looks through everything).

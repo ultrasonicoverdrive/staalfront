@@ -33,7 +33,7 @@ own side's unit and nothing fires). The weapons pass reads `turret_target` as th
 damage, return fire of the victim, kill credit.
 
 **The sight gate (WP8.2a; on by default since WP7.7, measured to the edge of the candidate, `vision.md`).** With `acquire_needs_sight` in the vision rules a defence picks only a candidate that its
-owner sees now (any cell of the candidate's footprint, the owner's own sight and what its allies share), because the look round is the
+owner sees now (any cell of the candidate's footprint or a visible cell beside it, the owner's own sight and what its allies share), because the look round is the
 same function as a unit's (`Targeting::best_target`). The sight of a defence is its `sight` in the data (a tower 7, an emplacement 8,
 an unmanned artillery 6) from its whole footprint, only while it stands: a tower sees farther than it reaches (7 against 6) and
 loses nothing, the unmanned artillery reaches 12 and sees 6, so it needs a spotter beyond the sixth cell. A target it holds is kept
@@ -224,7 +224,7 @@ measure the frame rate (PLAN section 13).
 
 ## Not here (and where it goes)
 
-* Garrisoning the bunker, the decoy's disguise, mission logic of the neutral structures, fog and sight: the gate is in `vision.md`, off by default.
+* Garrisoning the bunker, the decoy's disguise, mission logic of the neutral structures, fog and sight: the gate is in `vision.md`.
 * Repair and sell of structures: WP6.6, done (`repair_sell.md`; a tower being sold fires nothing, `a_tower_being_sold_fires_nothing_and_drops_its_target`). The AI that builds defences (phase 9), balance of ranges, damage and costs (phase 15).
 * A structure answering fire from out of its reach, switching to a better target, preferring threats: as for units, not here.
 * Structures that rotate their hull; the barrel's pitch (still a hook of the renderer).
