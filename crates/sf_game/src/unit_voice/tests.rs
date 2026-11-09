@@ -11,6 +11,7 @@ use crate::cursor::{Hover, Modifiers};
 use crate::sandbox::{MERIDIAN, NEUTRAL, VEYRAN};
 use crate::selection::{Gesture, Pointer, Recall, Selection};
 use crate::sim_snapshot::SimSnapshot;
+use sf_audio::AudioConfig;
 use sf_data::units::UnitDefs;
 use sf_math::Vec2;
 use sf_sim::{Cell, GuardTarget, Kind, PlayerId, World, WorldConfig};
@@ -408,7 +409,7 @@ impl VoiceOut for Out {
 }
 
 fn voices() -> UnitVoices {
-    UnitVoices::new(&AudioConfig::embedded())
+    UnitVoices::new(AudioConfig::embedded().voices)
 }
 
 fn all_sounds() -> Out {

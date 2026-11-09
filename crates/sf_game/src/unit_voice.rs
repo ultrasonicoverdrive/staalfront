@@ -15,7 +15,7 @@
 //! [`Selection::orderable`](crate::selection::Selection::orderable) leaves out structures, so the
 //! callers hand in that list and nothing else can speak.
 
-use sf_audio::{AudioConfig, AudioSystem, VoiceBrake};
+use sf_audio::{AudioSystem, VoiceBrake, VoiceConfig};
 use sf_sim::{Command, EntityId, Order};
 
 /// What a unit says.
@@ -109,9 +109,10 @@ pub struct UnitVoices {
 }
 
 impl UnitVoices {
-    pub fn new(config: &AudioConfig) -> Self {
+    /// The brake with the numbers of `voices` in `audio.ron`.
+    pub fn new(config: VoiceConfig) -> Self {
         Self {
-            brake: VoiceBrake::new(config.voices),
+            brake: VoiceBrake::new(config),
         }
     }
 
