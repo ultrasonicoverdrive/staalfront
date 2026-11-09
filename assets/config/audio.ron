@@ -64,6 +64,18 @@
         fallback: (calm: None, combat: None),
     ),
 
+    // Unit voices (WP11.2): the replies of the player's own units to selecting, moving and attacking
+    // (the events unit.select, unit.move, unit.attack). Presentation only; rules in docs/rules/voices.md.
+    // One voice at a time: a voice that is still sounding is never cut off and nothing new starts over it.
+    //   min_gap_ms     after a voice has started, no other voice starts within this many milliseconds
+    //   repeat_gap_ms  after a voice has started, the same event does not start again within this many
+    //                  milliseconds (at least min_gap_ms): ten clicks on one unit are not ten replies
+    // An event with no sound (no Red Alert file mapped, nothing in bank.ron) is silent and uses up no gap.
+    voices: (
+        min_gap_ms: 400,
+        repeat_gap_ms: 1200,
+    ),
+
     // The sounds of the game's events (shots, hits, deaths): which of them play in a frame. The event names
     // are the `sound` fields of effects.ron. An event whose name is not in the sound bank is silent without a
     // message. Per frame the events go through, in this order:

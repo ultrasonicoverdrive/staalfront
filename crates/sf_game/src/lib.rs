@@ -150,6 +150,7 @@ pub mod sim_thread;
 pub mod skirmish;
 mod sound_browser;
 pub mod storage_view;
+pub mod unit_voice;
 pub mod vision_view;
 pub mod wreck_looks;
 
