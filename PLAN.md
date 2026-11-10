@@ -154,6 +154,8 @@ farthest zoom shows the map plus a full map size of margin on every side (`camer
 only in the last 5 % of the zoom range (`zoom.icons_from` 0.95) and at most 40 % opaque (`icons_max_alpha` 0.4);
 the models grow up to 2.5 times toward the far end (`model_scale_max`, 2.5 is the cap); the key K (`ToggleIcons`,
 on by default) switches the icons off, models only at every zoom.*
+*Fix round 3, same day: structures have their own far-zoom scale (`zoom.structure_scale_max` 1.6; units stay at 2.5),
+because at 2.5 neighbouring structures overlapped by up to 13 m and a click could take the wrong one.*
 
 ### 2.3 Controls work at every zoom
 - Selecting via ray → terrain + a click volume per entity; at

@@ -2815,3 +2815,7 @@ fixed, delete the entry in the same PR.
     are half as big on the screen), terrain 1,024 of 1,024 chunks at the coarsest level, 9,984 triangles, one draw call, the same in both;
     icons off 13.4 to 14.9 ms. No cliff, no distance LOD added. The scaled structure boxes of the M1 base now overlap in 8 pairs, at worst
     13.0 m (a measured bound in the test).
+    **Fix round 3 (10-11-2026)**: that overlap broke picking, so structures have their own cap `structure_scale_max` 1.6 on the
+    same ramp, units stay at 2.5. The game marks a motion as a structure from the snapshot (`view_motion`), also rubble and fog
+    ghosts. M1 base again 2 pairs, 0.40 m. 1,000 crowd units at the farthest zoom, 3 alternating runs against 689ce04: 15.8 /
+    17.6 / 16.8 ms against 16.6 / 17.8 / 16.0 ms (no difference beyond the noise; the crowd has no structures).

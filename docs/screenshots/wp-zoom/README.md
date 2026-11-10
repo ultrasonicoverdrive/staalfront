@@ -46,3 +46,13 @@ grab), at tick 100 to 110. The farthest zoom now shows the map plus a full map s
 Honest reading: on M1 the farthest view is mostly margin, as accepted in the decision (bigger maps need it). A
 structure is about 18 px drawn at the cap; vehicles a few pixels; infantry is a dot either way (no separate scale,
 left for Tijmen to judge on his laptop).
+
+## Fix round 3 (10-11-2026): structures at their own scale
+
+Same commands as round 2. Structures are drawn at most 1.6 times (`structure_scale_max`), units 2.5 times.
+
+| File | What it shows |
+|---|---|
+| `r3_m1_zoom1.00_farthest_icons_on.jpg` | M1 at the farthest zoom: the construction centre at 1.6 with its 40 % icon (round 2's `r2_m1_*` show it at 2.5) |
+| `r3_m1_zoom1.00_farthest_icons_off.jpg` | The same with the icons off |
+| `r3_sandbox59_zoom1.00_farthest.jpg` | The sandbox: the units of the two sides still at 2.5 |

@@ -18,6 +18,12 @@ too soon"; orchestrator decision, his rule "your proposal holds if I do not answ
 0.45/2.5 (2.5 is the cap the file may set), and the key K (`ToggleIcons`) switches the icons off and on (on by
 default; off = models only at every zoom, picking on the models).*
 
+*Fix round 3 (10-11-2026, orchestrator decision under the same rule): at one scale of 2.5, 8 of the 9 pairs of M1
+base structures overlapped, the worst by 13.0 m, so a click on one building could select its neighbour. Structures
+now have their own cap `zoom.structure_scale_max` (1.6) on the same ramp (`model_scale_from`); units keep
+`model_scale_max` (2.5). Validated: 1 <= structure cap <= unit cap <= 2.5. Measured again: 2 pairs (one per base),
+0.40 m, as in round 1.*
+
 1. **The farthest zoom shows the whole map plus a whole map size on every side.** `camera.far_margin` (1.0) is a
    share of the map size. `Camera` fits the margin rectangle (map grown by `far_margin * size` on every side, at the
    far pitch of 80 degrees, centred) into the window and takes 3 % slack, as it always did for the bare map. That
@@ -40,16 +46,23 @@ default; off = models only at every zoom, picking on the models).*
    outline of a hovered or selected icon is drawn at full opacity (`icon.wgsl`), only the shape is dimmed.
 4. **Models grow toward the far end.** `zoom.model_scale_from` (0.45) to 1.0: a smoothstep from scale 1
    to `zoom.model_scale_max` (2.5, a cap: the function is clamped, never above it; the file may not set more than
-   2.5, `MODEL_SCALE_CAP`), about the model's feet. Applied in
+   2.5, `MODEL_SCALE_CAP`) for the units, and to `zoom.structure_scale_max` (1.6, at most the unit cap) for the
+   structures (`ZoomBands::structure_scale`, fix round 3). Which is which: `Motion::with_structure`, set by
+   `runner::view_motion` from the snapshot (`SimSnapshot::is_structure_at`: the view has a footprint), for the
+   rubble of a structure (`WreckView::footprint`) and for every fog ghost (a ghost is a structure last seen);
+   `FrameView::with_structure_scale` carries the factor. The drawn box, ring, bars and click volume of a structure
+   follow its own scale. The placement preview is not a model: it draws the true footprint cells and outline
+   (`placement_view::draw_ghost`), unscaled, so it marks the cells the structure will take, not its drawn size. about the model's feet. Applied in
    `build_frame` to the instance matrices (`FrameView::model_scale`). The level selection and the icon anchor keep the
    true size. **Changed 10-11-2026 (fix round 1, orchestrator decision):** the click volume, the selection ring, the
    health bar and the cargo bar follow the drawn size (`DrawnUnit::size` and the box of `pick`/`pick_rect` are times
    the frame's model scale), so a click on the visible rim of an enlarged structure hits it and the ring goes around
    what is drawn. Checked on the M1 base at the cap
-   (`the_scaled_structure_boxes_of_the_m1_base_overlap_within_the_measured_bound_at_the_farthest_zoom`): at the cap of
-   1.6 (round 1) one pair per base overlapped by 0.40 m; **at 2.5 (round 2) 8 pairs of the 9 structures overlap, the
-   worst by 13.0 m** (at 2.0: 5 pairs, 6.0 m). The test pins that measured bound, the scale was not lowered to hide it;
-   a click there goes to the box the ray enters first. Round 1 decided by screenshots
+   (`the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_farthest_zoom`, through the game's
+   `view_motion`): at 1.6 one pair per base overlaps by 0.40 m (round 1 and again round 3); at one scale of 2.5
+   (round 2) it was 8 pairs and 13.0 m (2.0: 5 pairs, 6.0 m), hence the structure scale. The test pins at most 2 pairs
+   and less than 0.5 m; a click there goes to the box the ray enters first. Units overlap each other at 2.5 in a crowd;
+   that is accepted (a click takes the box the ray enters first; not measured in the 1,000 crowd). Round 1 decided by screenshots
    (`docs/screenshots/wp-zoom/`): the 384 m M1 map is 420 px wide at the farthest zoom of a 1280 x 720 window
    (about 1.1 px per metre), so a structure of 3 cells (12 m) is about 19 px true and 30 px with the cap, and a soldier
    is 1 to 2 px either way. The cap makes structures and vehicles readable as models; a soldier is only a dot as a model
@@ -83,7 +96,7 @@ default; off = models only at every zoom, picking on the models).*
 Every number of `CameraConfig` is in the file now (angles in degrees), pinned by `the_shipped_camera_file_is_pinned`;
 `CameraConfig::default()` reads it (on the 256 m map; the game sets the map size). `far_margin` 1.0,
 `icons_from` 0.95, `icons_full` 1.0, `icons_max_alpha` 0.4 (above 0, at most 1), `model_scale_from` 0.45,
-`model_scale_max` 2.5 (1 to 2.5). Bad values are refused when
+`model_scale_max` 2.5 (1 to 2.5), `structure_scale_max` 1.6 (1 to `model_scale_max`). Bad values are refused when
 the file is read (`bad_camera_files_are_refused`).
 
 ## Tests
@@ -93,7 +106,10 @@ the file is read (`bad_camera_files_are_refused`).
   `a_zero_margin_fits_just_the_map`, `an_explicit_max_distance_wins_over_the_margin`,
   `near_far_cover_the_margin_view_at_the_farthest_zoom` (no corner clipped by the planes).
 * `zoom.rs`: the pinned file, the alpha band (0 below, 1 above, monotone, no jump), models never hidden by the zoom,
-  the capped scale, `the_icon_toggle_off_draws_models_only`, `the_model_scale_cap_is_two_and_a_half`.
+  the capped scale, `the_icon_toggle_off_draws_models_only`, `the_model_scale_cap_is_two_and_a_half`,
+  `structures_grow_less_than_units`; `frame_tests`:
+  `a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale` (instance matrix, drawn box and a
+  click 6.5 m beside a 6 m cube: hit as a unit at 2.5, miss as a structure at 1.6).
 * `instancing/frame_tests.rs`: `every_unit_is_a_model_at_every_zoom_and_the_icons_come_only_in_the_far_band` (the
   real camera and the shipped bands, 101 zooms), `the_model_scale_grows_the_drawn_model_only`,
   `the_overlay_decides_the_click_volume_by_its_opacity`.
