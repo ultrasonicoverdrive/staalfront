@@ -325,6 +325,10 @@ fn test_pack_models_at_close_zoom() {
     inst.set_aim(Some([45.0, 60.0]));
     let cfg = CameraConfig {
         map_size: DVec2::new(64.0, 64.0),
+        // The framing these pictures were made for: the quarter-map margin of the zoom work package's
+        // first round. The full-map margin of fix round 2 is checked by `terrain_lod_screenshot` and
+        // `camera_screenshot`; here it would only move the eye.
+        far_margin: 0.25,
         ..CameraConfig::default()
     };
     let mut cam = Camera::new(cfg, W, H);

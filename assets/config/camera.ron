@@ -21,8 +21,9 @@
         pan_smooth_secs: 0.12,
         // Pan speed in distances per second (so it scales with the zoom).
         pan_speed: 0.7,
-        // Zoom (0 = closest, 1 = farthest) a new camera starts at.
-        start_zoom: 0.35,
+        // Zoom (0 = closest, 1 = farthest) a new camera starts at. 0.30 since zoom fix round 2: with the
+        // farther farthest zoom that is the same eye distance as 0.35 was (44 m on 256 m, 51 m on M1).
+        start_zoom: 0.30,
         // Least height of the eye above the ground under it, and the time constant with
         // which the pivot follows the terrain height while panning.
         clearance: 2.0,

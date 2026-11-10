@@ -81,6 +81,10 @@ fn renderer(map: &Map, markers: bool) -> Renderer {
 fn camera(map: &Map, zoom: f64, focus: (f64, f64)) -> Camera {
     let cfg = CameraConfig {
         map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
+        // The framing these pictures were made for: the quarter-map margin of the zoom work package's
+        // first round. The full-map margin of fix round 2 is checked by `terrain_lod_screenshot` and
+        // `camera_screenshot`; here it would only move the eye.
+        far_margin: 0.25,
         ..CameraConfig::default()
     };
     let mut c = Camera::new(cfg, W, H);

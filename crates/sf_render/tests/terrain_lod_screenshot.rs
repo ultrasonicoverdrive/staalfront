@@ -601,7 +601,8 @@ fn the_farthest_zoom_with_its_margin_has_no_holes_and_the_lod_holds() {
         "{sky_delta} pixels moved"
     );
     // The margin is sky: the border rows and columns of the frame are all clear colour, and the map
-    // takes up about (1 / 1.5)^2 of the view.
+    // takes up a small part of the view (a full map size of margin all round since zoom fix round 2,
+    // measured 0.052; it was 0.2 to 0.6 with the quarter-map margin).
     for x in 0..W {
         assert!(
             is_sky(lod.pixel(x, 0)) && is_sky(lod.pixel(x, H - 1)),
@@ -617,5 +618,5 @@ fn the_farthest_zoom_with_its_margin_has_no_holes_and_the_lod_holds() {
     let terrain = (W * H) as usize - sky_pixels(&lod);
     let share = terrain as f64 / f64::from(W * H);
     println!("terrain share of the margin view: {share:.3}");
-    assert!((0.2..0.6).contains(&share), "{share}");
+    assert!((0.03..0.15).contains(&share), "{share}");
 }

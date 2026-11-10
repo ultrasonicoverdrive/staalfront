@@ -170,7 +170,8 @@ fn whole_map_zoom() {
     // both side edges, ground (green) just inside each map corner.
     assert_eq!(hue(img.pixel(1, H / 2)), 'b');
     assert_eq!(hue(img.pixel(W - 2, H / 2)), 'b');
-    for (x, z) in [(3.0, 3.0), (253.0, 3.0), (3.0, 253.0), (253.0, 253.0)] {
+    // 16 m inside: with the full-map margin (zoom fix round 2) the map is about 0.23 px per metre here.
+    for (x, z) in [(16.0, 16.0), (240.0, 16.0), (16.0, 240.0), (240.0, 240.0)] {
         let (px, py) = project(&c, x, z);
         assert!(
             px < W && py < H,

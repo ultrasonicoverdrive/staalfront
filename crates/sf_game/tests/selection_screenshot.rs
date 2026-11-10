@@ -210,8 +210,14 @@ impl Scene {
     }
 
     fn camera(&self, zoom: f64, focus: [f32; 2]) -> Camera {
+        self.camera_with_margin(zoom, focus, CameraConfig::default().far_margin)
+    }
+
+    /// [`Scene::camera`] with the farthest zoom at another `far_margin`.
+    fn camera_with_margin(&self, zoom: f64, focus: [f32; 2], far_margin: f64) -> Camera {
         let cfg = CameraConfig {
             map_size: DVec2::new(f64::from(self.map.width()), f64::from(self.map.height())),
+            far_margin,
             ..CameraConfig::default()
         };
         let mut c = Camera::new(cfg, W, H);
@@ -440,7 +446,10 @@ fn the_ring_is_green_and_surrounds_the_unit() {
 fn selected_icons_are_highlighted_and_the_others_are_not() {
     let mut scene = Scene::new();
     let mut r = renderer(&scene.map);
-    let cam = scene.camera(1.0, [128.0, 128.0]);
+    // The icon band at the farthest zoom of round 1 (a quarter-map margin): with the full-map margin
+    // of zoom fix round 2 the sandbox's units and structures are too close on the screen to tell
+    // one icon's outline from the next. What is tested is the highlight, not the framing.
+    let cam = scene.camera_with_margin(1.0, [128.0, 128.0], 0.25);
     let none = Selection::new(LOCAL_PLAYER);
     let (base, _) = scene.shoot(&mut r, &cam, &none, None);
     assert!(scene.instancer.blend().dominant() == sf_render::icons::Dominant::Icon);

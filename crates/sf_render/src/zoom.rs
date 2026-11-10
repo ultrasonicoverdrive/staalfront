@@ -266,7 +266,7 @@ mod tests {
         );
         assert_eq!(
             (c.pan_speed, c.start_zoom, c.clearance, c.height_smooth_secs),
-            (0.7, 0.35, 2.0, 0.25)
+            (0.7, 0.30, 2.0, 0.25)
         );
         assert_eq!(
             s.zoom,
