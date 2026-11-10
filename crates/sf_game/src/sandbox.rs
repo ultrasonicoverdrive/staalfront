@@ -143,10 +143,11 @@ fn extra_plants<'a>(defs: &'a UnitDefs, side: &Side) -> Option<(&'a UnitDef, u32
             used -= p;
         }
     }
-    if side.owner == MERIDIAN {
-        if let Some(kind) = defs.kind_of(HARVEST_SPARE) {
-            used -= i64::from(power_of(kind)).min(0);
-        }
+    if let Some(kind) = defs
+        .kind_of(HARVEST_SPARE)
+        .filter(|_| side.owner == MERIDIAN)
+    {
+        used -= i64::from(power_of(kind)).min(0);
     }
     let each = i64::from(power_of(plant.kind));
     let missing = used - made;

@@ -117,11 +117,8 @@ fn entry(
     }
 }
 
-/// The world: power with the given floor, production, money (`credits` each).
-fn world(floor: u32, credits: u64) -> World {
-    world_at(floor, credits, sf_sim::BuildSpeed::FULL)
-}
-
+/// The world: power with the given floor, production at the given build speed, money (`credits`
+/// each).
 fn world_at(floor: u32, credits: u64, speed: sf_sim::BuildSpeed) -> World {
     let units = UnitTable::new(vec![
         structure(ANCHOR, 2, 2),

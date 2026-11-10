@@ -97,11 +97,10 @@ impl BuildSpeed {
         while b != 0 {
             (a, b) = (b, a % b);
         }
-        if a == 0 {
-            (self.num, self.den)
-        } else {
-            (self.num / a, self.den / a)
-        }
+        // The terms of a valid factor are above zero, so `a` is too; `max(1)` keeps an invalid
+        // one from dividing by zero.
+        let g = a.max(1);
+        (self.num / g, self.den / g)
     }
 }
 
