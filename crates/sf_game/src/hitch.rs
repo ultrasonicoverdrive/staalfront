@@ -499,7 +499,7 @@ impl HitchLog {
     }
 }
 
-/// The CPU time of the calling thread.
+/// The CPU time of the main thread (`sf_thread_cpu`), with the number of calls and what they cost.
 #[derive(Debug, Default)]
 pub struct ThreadClock {
     calls: u64,
@@ -508,43 +508,19 @@ pub struct ThreadClock {
 
 impl ThreadClock {
     /// The thread's CPU time (kernel and user) since it began, on Windows; `None` elsewhere.
-    #[cfg(windows)]
     pub fn now(&mut self) -> Option<Duration> {
-        use windows_sys::Win32::Foundation::FILETIME;
-        use windows_sys::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+        if !sf_thread_cpu::MEASURED {
+            return None;
+        }
         let began = Instant::now();
-        let zero = FILETIME {
-            dwLowDateTime: 0,
-            dwHighDateTime: 0,
-        };
-        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
-        // SAFETY: `GetCurrentThread` returns the pseudo handle of the calling thread, valid for the
-        // call; the four out pointers point to live FILETIME values on this stack.
-        let ok = unsafe {
-            GetThreadTimes(
-                GetCurrentThread(),
-                &mut created,
-                &mut exited,
-                &mut kernel,
-                &mut user,
-            )
-        };
+        let cpu = sf_thread_cpu::thread_cpu_time();
         self.calls += 1;
         self.spent += began.elapsed();
-        (ok != 0).then(|| {
-            filetime_duration(kernel.dwLowDateTime, kernel.dwHighDateTime)
-                + filetime_duration(user.dwLowDateTime, user.dwHighDateTime)
-        })
-    }
-
-    /// Not measured off Windows (`std` has no thread CPU time).
-    #[cfg(not(windows))]
-    pub fn now(&mut self) -> Option<Duration> {
-        None
+        cpu
     }
 
     pub fn measured(&self) -> bool {
-        cfg!(windows)
+        sf_thread_cpu::MEASURED
     }
 
     pub fn calls(&self) -> u64 {
@@ -578,16 +554,6 @@ pub fn window_note(event: &sf_engine::winit::event::WindowEvent) -> Option<Strin
         }
         _ => None,
     }
-}
-
-/// A Windows `FILETIME` span (100 ns units, in two halves) as a duration.
-#[cfg_attr(not(windows), allow(dead_code))]
-pub fn filetime_duration(low: u32, high: u32) -> Duration {
-    let hundred_ns = (u64::from(high) << 32) | u64::from(low);
-    Duration::new(
-        hundred_ns / 10_000_000,
-        ((hundred_ns % 10_000_000) * 100) as u32,
-    )
 }
 
 #[cfg(test)]
@@ -819,18 +785,6 @@ mod tests {
             vec!["swap chain acquire: timeout after 1000 ms".to_owned()]
         );
         assert!(log.summary(&SimTotals::default()).contains("timeout 1,"));
-    }
-
-    #[test]
-    fn a_filetime_is_a_count_of_hundred_nanoseconds() {
-        assert_eq!(filetime_duration(0, 0), Duration::ZERO);
-        assert_eq!(filetime_duration(10_000_000, 0), Duration::from_secs(1));
-        assert_eq!(filetime_duration(1, 0), Duration::from_nanos(100));
-        // The high half counts 2^32 units: 429.4967296 s.
-        assert_eq!(
-            filetime_duration(0, 1),
-            Duration::from_nanos(429_496_729_600)
-        );
     }
 
     /// What a quiet frame costs: the bookkeeping of `begin_frame`, five laps and `end_frame`, with the

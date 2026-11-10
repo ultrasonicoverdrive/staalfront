@@ -50,7 +50,7 @@ the cost of the CPU clock.
 A long frame with small `cpu_ms`: the thread was not running (other program, antivirus, a modal window loop). A long frame with
 `cpu_ms` of the same size: our code was busy; the part says where. A big `gap_ms` with `resized` or `moved` events: the window system.
 
-**CPU time.** On Windows from `GetThreadTimes` through the direct `windows-sys` dependency of `sf_game` (Windows only; features
+**CPU time.** On Windows from `GetThreadTimes` through the small crate `sf_thread_cpu` (it holds the one `unsafe` call of the workspace, which forbids unsafe code everywhere else; a direct, Windows-only `windows-sys` 0.61 dependency with the features
 `Win32_Foundation` for the `FILETIME` and `HANDLE` types in the signature and `Win32_System_Threading` for the call). It is read once per
 frame; the file reports the number of calls and what they cost in all. Elsewhere `std` has no thread CPU time and the field is
 `null` (`cpu_measured: false`). The Windows code cannot be run in the container; its conversion (`filetime_duration`) is tested.

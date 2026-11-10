@@ -34,6 +34,8 @@ sf_ui = { path = "../../crates/sf_ui" }
 sf_audio = { path = "../../crates/sf_audio" }
 sf_cutscene = { path = "../../crates/sf_cutscene" }
 sf_net = { path = "../../crates/sf_net" }
+# The CPU time of the main thread for the hitch log (WP1.16a); the only crate with unsafe code.
+sf_thread_cpu = { path = "../../crates/sf_thread_cpu" }
 # The command record (WP1.16a, `--record`) is written as an sf_headless scenario, with the types and the
 # writer that sf_headless reads it back with, so the file format has one definition. The threaded sim is
 # also checked tick by tick against the headless runner (tests/sim_thread.rs). A workspace crate, not a
@@ -54,10 +56,3 @@ serde_json = "1"
 # assets/config/wrecks.ron (WP5.5, how wrecks and rubble are drawn) is parsed here. ron 0.12 is already
 # in the lockfile (sf_data and sf_render use it); no new crate is added.
 ron = "0.12"
-
-# The CPU time of the main thread, read with `GetThreadTimes` (WP1.16a, the hitch log: a long frame with
-# little CPU time means the thread was not running). Windows only. The crate is already in the lockfile
-# (winit, wgpu and kira use it); `Win32_System_Threading` has the call and `Win32_Foundation` the
-# `FILETIME` and `HANDLE` types in its signature.
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
