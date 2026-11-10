@@ -291,7 +291,7 @@ impl Scene {
             view_proj: vp,
             focal_px: eye.focal_px,
             viewport: [W as f32, H as f32],
-            model_weight: 1.0 - blend.icon(),
+            model_weight: sf_render::effects_weight(blend),
             reference_px,
             icon_px: self.instancer.icon_params().size_px,
             dt: 0.05,

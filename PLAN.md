@@ -143,6 +143,11 @@ readable), and the strategic icons are drawn on top of them in the last ~15 % of
 (`zoom.icons_from`/`icons_full`). The click volume is the icon quad where the icon is mostly opaque, the model
 elsewhere (section 2.3 is unchanged in that). All numbers are in RON.*
 
+*Note 10-11-2026 (fix round 1 of the zoom PR, orchestrator decision following Tijmen's "follow your own
+proposals"): the icons are drawn at most 60 % opaque (`zoom.icons_max_alpha`), so the model stays visible through
+them at the farthest zoom; the switch of click volume, ring and bars and the effects follow the uncapped band
+position. The click volume, the ring and the bars follow the drawn (scaled) model size instead of the true size.*
+
 ### 2.3 Controls work at every zoom
 - Selecting via ray → terrain + a click volume per entity; at
   strategic zoom the **icon quads** on the screen count.

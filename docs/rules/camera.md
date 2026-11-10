@@ -27,23 +27,34 @@ cross-fade half way: dithered, see-through buildings with red squares in them, a
    `zoom.icons_full` (1.0), a smoothstep between: the last 15 % of the wheel travel. The zoom is the camera zoom
    (0 to 1, logarithmic), so the band is the same stretch of wheel on every map and resolution (the old trigger was
    a reference unit's apparent size). The icon shader multiplies its coverage by the alpha; the icons are still one
-   draw call, not depth tested, over everything (`icons.md`). At the farthest zoom the icon (14 px) is about as big
-   as a unit's model, so it hides it; in the band before that the model shows under it.
+   draw call, not depth tested, over everything (`icons.md`). **Opacity cap (decision 10-11-2026, fix round 1):** the
+   drawn opacity is the ramp times `zoom.icons_max_alpha` (0.6), so even at the farthest zoom the model shows through
+   the icon (`Blend::overlay_capped`). The cap is only the look: what switches with the zoom (click volume, ring and
+   bars, effects) follows the uncapped ramp (`Blend::ramp`), so it switches at the same zoom whatever the cap is. The
+   outline of a hovered or selected icon is drawn at full opacity (`icon.wgsl`), only the shape is dimmed.
 4. **Models grow a little toward the far end.** `zoom.model_scale_from` (0.55) to 1.0: a smoothstep from scale 1
    to `zoom.model_scale_max` (1.6, a cap: the function is clamped, never above it), about the model's feet. Applied in
-   `build_frame` to the instance matrices only (`FrameView::model_scale`). The level selection, the click volumes and
-   the icon anchor keep the true size. Decided by screenshots
+   `build_frame` to the instance matrices (`FrameView::model_scale`). The level selection and the icon anchor keep the
+   true size. **Changed 10-11-2026 (fix round 1, orchestrator decision):** the click volume, the selection ring, the
+   health bar and the cargo bar follow the drawn size (`DrawnUnit::size` and the box of `pick`/`pick_rect` are times
+   the frame's model scale), so a click on the visible rim of an enlarged structure hits it and the ring goes around
+   what is drawn. Checked on the M1 base at the cap
+   (`the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_farthest_zoom`): in each of the
+   two bases one pair (the construction yard and a neighbour, 8 m apart at true size) overlaps by 0.40 m, all others are clear;
+   a click there goes to the box the ray enters first. Decided by screenshots
    (`docs/screenshots/wp-zoom/`): the 384 m M1 map is 420 px wide at the farthest zoom of a 1280 x 720 window
    (about 1.1 px per metre), so a structure of 3 cells (12 m) is about 19 px true and 30 px with the cap, and a soldier
    is 1 to 2 px either way. The cap makes structures and vehicles readable as models; a soldier is only a dot as a model
-   at that zoom, and the icon is what reads. A bigger cap would make neighbouring structures overlap, so 1.6 stays.
-5. **Picking at far zoom.** The click volume is the icon quad once the icon is more than half opaque
-   (`Blend::dominant`), the model's box (at least `click_min_px` wide) before that. Never both, as before. Drag
+   at that zoom, and the icon is what reads. A bigger cap would make neighbouring structures overlap more (at 1.6 one pair per M1 base touches, by 0.40 m), so 1.6 stays.
+5. **Picking at far zoom.** The click volume is the icon quad once the zoom is past the middle of the icon band
+   (ramp above one half, `Blend::dominant`; not the capped opacity), the model's drawn box (at least `click_min_px`
+   wide) before that. Never both, as before. Drag
    selection, the health bar and the cargo bar follow the same switch (`Blend::dominant`). The selection ring is drawn
-   only while the model is the larger picture (icon at most half opaque): in the far band the selected icon's own
+   only while the model is the larger picture (ramp at most one half): in the far band the selected icon's own
    white outline shows the selection, as before (the models stay drawn, but a 2 px ring under an opaque icon is noise,
    and the test `selected_icons_are_highlighted...` had the rings of selected units land on neighbouring icons).
-6. **Effects.** The effects fade with the icons: their weight is `1 - icon alpha` (`FxFrame::model_weight`). So
+6. **Effects.** The effects fade with the icons: their weight is `1 - ramp` (`effects_weight`, into
+   `FxFrame::model_weight`), the uncapped ramp, so the far end is still the strategic band with the cap. So
    particles and tracers are full up to `icons_from`, fade over the far band and are gone at the farthest zoom,
    where the death flash stays (`effects.md`, `ZoomBand::Strategic` exactly when the weight is 0). Decision: at the
    far end 1,000 units with particles cost more than they show, and the flash keeps a battle visible.
@@ -57,7 +68,8 @@ cross-fade half way: dithered, see-through buildings with red squares in them, a
 
 Every number of `CameraConfig` is in the file now (angles in degrees), pinned by `the_shipped_camera_file_is_pinned`;
 `CameraConfig::default()` reads it (on the 256 m map; the game sets the map size). `far_margin` 0.25,
-`icons_from` 0.85, `icons_full` 1.0, `model_scale_from` 0.55, `model_scale_max` 1.6. Bad values are refused when
+`icons_from` 0.85, `icons_full` 1.0, `icons_max_alpha` 0.6 (above 0, at most 1), `model_scale_from` 0.55,
+`model_scale_max` 1.6. Bad values are refused when
 the file is read (`bad_camera_files_are_refused`).
 
 ## Tests
@@ -90,7 +102,9 @@ zoom 0.5 instead of 0.55 (the same eye distance as before). No `sf_sim` golden, 
 
 ## Not done
 
-* The icon alpha cannot be below 1 at the farthest zoom (`icons_full` is at most 1): at the very end the opaque
-  icon hides the model under it. Tuning that is a number in `camera.ron`.
+* A soldier is still 1 to 2 px as a model at the farthest zoom, cap or not; whether infantry needs its own scale is
+  a question for Tijmen.
+* The frustum culling of the tiles still uses the true size: a model scaled 1.6x at the very edge of the screen can
+  be culled a little early (the tile margin covers most of it).
 * The sound still attenuates with the zoom by `audio.ron` as before (untouched, as decided).
 * No GTX 1650 measurement: see the pull request for the container numbers.

@@ -94,6 +94,8 @@ struct Scene {
     /// The cursor, in pixels, if the next frame is drawn with the mouse over
     /// the picture: the unit under it is highlighted as the game does.
     hover: Option<[f32; 2]>,
+    /// The icon opacity cap of the frames (`camera.ron`'s `icons_max_alpha` unless a test sets it).
+    icon_cap: Option<f32>,
 }
 
 impl Scene {
@@ -148,6 +150,7 @@ impl Scene {
             own,
             enemy,
             hover: None,
+            icon_cap: None,
         }
     }
 
@@ -193,9 +196,11 @@ impl Scene {
         let vp = cam.view_proj();
         let frustum = Frustum::from_view_proj(vp);
         let eye = EyeView::from_view_proj(vp, H as f32);
-        let blend = sf_render::CameraSettings::embedded()
-            .zoom
-            .blend(cam.zoom() as f32);
+        let mut bands = sf_render::CameraSettings::embedded().zoom;
+        if let Some(cap) = self.icon_cap {
+            bands.icons_max_alpha = cap;
+        }
+        let blend = bands.blend(cam.zoom() as f32);
         let ground = &self.ground;
         self.instancer
             .build_frame(&FrameView::new(&frustum, 0.0, eye, blend, 1.0), |x, z| {
@@ -757,6 +762,9 @@ fn yellow(p: [u8; 4]) -> bool {
 #[test]
 fn an_icon_looks_different_plain_hovered_selected_and_both() {
     let mut scene = Scene::new();
+    // The four looks of the icon itself, at full opacity (the shipped cap of 60 % mixes the fill with
+    // the ground; that the outline keeps full opacity under the cap is `icons_screenshot.rs`).
+    scene.icon_cap = Some(1.0);
     let mut r = renderer(&scene.map);
     let cam = scene.camera(1.0, [128.0, 128.0]);
     // A unit of ours alone in a corner of the map, so no other icon is near it.

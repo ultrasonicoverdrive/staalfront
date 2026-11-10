@@ -133,7 +133,7 @@ call**, which the benchmark and the tests check.
 * hovered: a white outline `icons.hover_out_px` wide **outside** the edge; selected: a
   white outline `icons.selected_out_px` wide; both: the selected width in yellow. The
   owner's colour keeps its area in all four states;
-* the icon's opacity (`IconInstance::color.a`, `Blend::icon()`) multiplies the coverage, so the icons fade in over the models in the far band (`camera.md`); the dither of WP1.9 is gone from the icon shader (the model shader keeps it for the debug model weight below 1).
+* the icon's opacity (`IconInstance::color.a`, `Blend::icon()`) multiplies the coverage of the shape, so the icons fade in over the models in the far band, at most `zoom.icons_max_alpha` (0.6) opaque so the model shows through (`camera.md`); the hover and selection outlines outside the edge keep full opacity; the dither of WP1.9 is gone from the icon shader (the model shader keeps it for the debug model weight below 1).
 
 **UI scale (the WP3.3 review follow-up).** Every length is in physical pixels and scales with
 the UI scale: the icon size, the rim, both outline widths and the room the quad leaves

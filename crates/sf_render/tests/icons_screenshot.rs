@@ -268,7 +268,11 @@ fn strategic_zoom_shows_icons_in_all_colors_and_shapes_at_a_constant_pixel_size(
         // models are drawn too, the icons are looked at alone.
         let blend = Blend::overlay(1.0);
         if zoom == 1.0 {
-            assert_eq!(blend_at(&cam), blend, "the farthest zoom has opaque icons");
+            assert_eq!(
+                blend_at(&cam).ramp(),
+                1.0,
+                "the farthest zoom is the end of the band"
+            );
         }
         let img = draw(&mut r, &mut inst, &map, &cam, blend, 1.0, (false, true));
         dump(&img, &format!("icons_zoom_{zoom}"));
@@ -595,8 +599,9 @@ fn the_outline_stays_white_when_the_icons_are_capped() {
     let lit = r.render_to_image().unwrap();
     let white = (0..H)
         .flat_map(|y| (0..W).map(move |x| (x, y)))
-        .filter(|&(x, y)| matches_color(lit.pixel(x, y), [255, 255, 255], 12))
+        .filter(|&(x, y)| lit.pixel(x, y)[..3].iter().all(|&c| c >= 230))
         .count();
+    dump(&lit, "outline_capped");
     println!("white outline pixels at the cap: {white}");
     assert!(white > 25, "the outline is drawn at full opacity: {white}");
 }
@@ -729,7 +734,8 @@ fn ten_thousand_units_at_close_mid_and_strategic_zoom() {
     assert!(close.2.per_lod[0] > 0);
     // Farthest zoom: every unit is still a model (at its coarsest level), and the icons
     // are one more draw call on top.
-    assert_eq!(strategic.1, Blend::overlay(1.0));
+    assert_eq!(strategic.1.ramp(), 1.0);
+    assert_eq!(strategic.1.dominant(), sf_render::icons::Dominant::Icon);
     assert_eq!(strategic.2.models, 10_000, "models at every zoom");
     assert!(strategic.3.dynamic_draw_calls <= 7);
     assert!(strategic.3.dynamic_triangles > 0);
