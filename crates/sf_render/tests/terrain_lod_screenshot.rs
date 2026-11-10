@@ -55,8 +55,21 @@ fn renderer(width: u32, height: u32) -> Renderer {
 }
 
 fn camera(map: &Map, size: (u32, u32), zoom: f64, focus: (f64, f64)) -> Camera {
+    camera_with_margin(map, size, zoom, focus, CameraConfig::default().far_margin)
+}
+
+/// The camera with the farthest zoom showing the map plus `far_margin` of its size all round (0 = just
+/// the map, the framing these tests were written for).
+fn camera_with_margin(
+    map: &Map,
+    size: (u32, u32),
+    zoom: f64,
+    focus: (f64, f64),
+    far_margin: f64,
+) -> Camera {
     let cfg = CameraConfig {
         map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
+        far_margin,
         ..CameraConfig::default()
     };
     let mut c = Camera::new(cfg, size.0, size.1);
@@ -150,7 +163,7 @@ fn project(vp: &Mat4, size: (u32, u32), p: Vec3) -> Option<(u32, u32)> {
 #[test]
 fn whole_map_with_relief_uses_far_fewer_triangles_and_looks_the_same() {
     let map = generate(256, 256, 1);
-    let cam = camera(&map, (W, H), 1.0, (128.0, 128.0));
+    let cam = camera_with_margin(&map, (W, H), 1.0, (128.0, 128.0), 0.0);
 
     let mut r = renderer(W, H);
     r.set_terrain(&map);
@@ -224,7 +237,10 @@ fn whole_map_with_relief_uses_far_fewer_triangles_and_looks_the_same() {
     drop(r);
     let mut rf = renderer(W, H);
     rf.set_terrain(&flat);
-    let flat_img = shot(&mut rf, &camera(&flat, (W, H), 1.0, (128.0, 128.0)));
+    let flat_img = shot(
+        &mut rf,
+        &camera_with_margin(&flat, (W, H), 1.0, (128.0, 128.0), 0.0),
+    );
     let relief = compare(&lod, &flat_img, 4).expect("same size");
     println!(
         "relief vs flat: {:.3} of the pixels differ by more than 4/255",
@@ -549,4 +565,58 @@ fn a_marker_at_the_picked_ground_point_shows_under_the_cursor() {
         on_plane <= 3,
         "the flat-plane control hits as well: {on_plane}/6"
     );
+}
+
+/// The farthest zoom of the game shows the map plus a quarter map of margin. The terrain chunks
+/// still all pass the frustum, the level selection still saves most triangles and looks the same
+/// as full detail, the map's edge is a clean edge against the clear colour (no hole inside it) and
+/// the margin is empty sky all round.
+#[test]
+fn the_farthest_zoom_with_its_margin_has_no_holes_and_the_lod_holds() {
+    let map = generate(256, 256, 1);
+    let cam = camera(&map, (W, H), 1.0, (128.0, 128.0));
+    let mut r = renderer(W, H);
+    r.set_terrain(&map);
+    let lod = shot(&mut r, &cam);
+    let stats = r.draw_stats();
+    let tstats = r.terrain_stats();
+    println!("margin view with LOD: {stats:?} {tstats:?}");
+    check_golden("terrain_lod_far_margin_320.png", &lod);
+    assert_eq!(
+        stats.terrain_chunks_visible, 64,
+        "every chunk is in the view"
+    );
+    r.set_terrain_lod(LodConfig::full_detail());
+    let full = shot(&mut r, &cam);
+    let full_stats = r.terrain_stats();
+    assert!(tstats.triangles * 4 < full_stats.triangles);
+    let diff = compare(&lod, &full, 24).expect("same size");
+    println!("margin view, LOD vs full: {:.4}", diff.ratio());
+    assert!(diff.ratio() < 0.05, "{:.4}", diff.ratio());
+    // The silhouette of the map: the same sky with the LOD as at full detail (no chunk missing, no
+    // crack to the sky inside the map).
+    let sky_delta = sky_pixels(&lod).abs_diff(sky_pixels(&full));
+    assert!(
+        sky_delta < (W * H / 200) as usize,
+        "{sky_delta} pixels moved"
+    );
+    // The margin is sky: the border rows and columns of the frame are all clear colour, and the map
+    // takes up a small part of the view (a full map size of margin all round since zoom fix round 2,
+    // measured 0.052; it was 0.2 to 0.6 with the quarter-map margin).
+    for x in 0..W {
+        assert!(
+            is_sky(lod.pixel(x, 0)) && is_sky(lod.pixel(x, H - 1)),
+            "column {x}"
+        );
+    }
+    for y in 0..H {
+        assert!(
+            is_sky(lod.pixel(0, y)) && is_sky(lod.pixel(W - 1, y)),
+            "row {y}"
+        );
+    }
+    let terrain = (W * H) as usize - sky_pixels(&lod);
+    let share = terrain as f64 / f64::from(W * H);
+    println!("terrain share of the margin view: {share:.3}");
+    assert!((0.03..0.15).contains(&share), "{share}");
 }

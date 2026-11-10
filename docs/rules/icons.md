@@ -8,8 +8,8 @@ placeholder set in `assets/icons/` written by `tools/sf_icon_gen`. Tests:
 `icon_atlas/tests.rs`, `crates/sf_render/tests/icon_atlas_screenshot.rs`,
 `crates/sf_game/src/roster.rs`, `crates/sf_data/tests/units.rs`.
 
-When the camera is far away every unit is an icon in its owner's colour (PLAN.md section
-2.2); the cross-fade, the click quad and the hover and selection outlines are
+When the camera is far away every unit gets an icon over its model, in its owner's colour (since the zoom work package, `camera.md`: the icon is an overlay that fades in over the farthest band of the zoom, it no longer replaces the model; PLAN.md section
+2.2); the fade, the click quad and the hover and selection outlines are
 unchanged from WP1.9 and WP3.3. This document is about what the icon *looks like* and
 how an artist replaces it.
 
@@ -133,7 +133,7 @@ call**, which the benchmark and the tests check.
 * hovered: a white outline `icons.hover_out_px` wide **outside** the edge; selected: a
   white outline `icons.selected_out_px` wide; both: the selected width in yellow. The
   owner's colour keeps its area in all four states;
-* the cross-fade with the models is unchanged (the dither of WP1.9).
+* the icon's opacity (`IconInstance::color.a`, `Blend::icon()`) multiplies the coverage of the shape, so the icons fade in over the models in the far band, at most `zoom.icons_max_alpha` (0.4 since zoom fix round 2) opaque, and not at all while the player has them off with K (`ToggleIcons`) so the model shows through (`camera.md`); the hover and selection outlines outside the edge keep full opacity; the dither of WP1.9 is gone from the icon shader (the model shader keeps it for the debug model weight below 1).
 
 **UI scale (the WP3.3 review follow-up).** Every length is in physical pixels and scales with
 the UI scale: the icon size, the rim, both outline widths and the room the quad leaves

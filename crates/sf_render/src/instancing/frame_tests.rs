@@ -329,7 +329,22 @@ fn the_blend_decides_what_is_built() {
         (0..inst.models().mesh_count()).flat_map(|id| inst.mesh_instances(MeshId(id as u16)));
     assert!(all_models.clone().count() == 30);
     assert!(all_models.into_iter().all(|i| i.color[3] == 0.4));
-    assert!(inst.icon_instances().iter().all(|i| i.color[3] == 0.4));
+    assert!(
+        inst.icon_instances()
+            .iter()
+            .all(|i| (i.color[3] - 0.6).abs() < 1e-6),
+        "the icons carry their own opacity, the complement here"
+    );
+    // The overlay of the game: every model at full weight, the icons over them.
+    let s = build(&mut inst, &cam, 0.0, Blend::overlay(0.3), 1.0, flat);
+    assert_eq!((s.models, s.icons), (30, 30), "models are never dropped");
+    let all_models =
+        (0..inst.models().mesh_count()).flat_map(|id| inst.mesh_instances(MeshId(id as u16)));
+    assert!(all_models.into_iter().all(|i| i.color[3] == 1.0));
+    assert!(inst.icon_instances().iter().all(|i| i.color[3] == 0.3));
+    // No icon opacity: no icon is built (nothing to draw), the models stay.
+    let s = build(&mut inst, &cam, 0.0, Blend::overlay(0.0), 1.0, flat);
+    assert_eq!((s.models, s.icons, s.icon_draw_calls), (30, 0, 0));
     // Full models: the weight is exactly 1, the value that skips the dissolve.
     build(&mut inst, &cam, 0.0, Blend::MODELS, 1.0, flat);
     assert!(
@@ -705,13 +720,13 @@ fn of_two_overlapping_icons_the_one_whose_centre_is_nearer_the_cursor_wins() {
     // Two units a few pixels apart on the screen at whole-map zoom.
     let motions = [
         still(0, 0, 1, (128.0, 128.0)),
-        still(0, 1, 2, (129.5, 128.0)),
+        still(0, 1, 2, (131.0, 128.0)),
     ];
     let mut inst = instancer(&motions);
     let cam = camera(1.0, (128.0, 128.0));
     build(&mut inst, &cam, 0.0, Blend::ICONS, 1.0, flat);
     let a = icon_centre(&cam, &inst, (128.0, 128.0), 1.0);
-    let b = icon_centre(&cam, &inst, (129.5, 128.0), 1.0);
+    let b = icon_centre(&cam, &inst, (131.0, 128.0), 1.0);
     let apart = b[0] - a[0];
     println!("icon centres {apart} px apart");
     assert!(apart > 2.0 && apart < 13.0, "the quads overlap: {apart}");
@@ -1067,9 +1082,9 @@ fn a_tiny_model_is_taken_by_a_rectangle_near_it() {
 #[test]
 fn a_rectangle_takes_the_icons_whose_quad_it_touches() {
     let motions = [
-        still(0, 0, 1, (120.0, 128.0)),
+        still(0, 0, 1, (112.0, 128.0)),
         still(0, 0, 2, (128.0, 128.0)),
-        still(0, 1, 3, (136.0, 128.0)),
+        still(0, 1, 3, (144.0, 128.0)),
     ];
     let mut inst = instancer(&motions);
     let cam = camera(1.0, (128.0, 128.0));
@@ -1238,5 +1253,259 @@ fn the_rectangle_test_of_a_tiny_model_follows_the_ui_scale() {
         1,
         "scale 2: the box is {} px",
         2.0 * min
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The far-zoom model scale and the overlay (zoom work package)
+// ---------------------------------------------------------------------------
+
+/// The scale draws the model larger about its feet; the click volume and the box
+/// reported for the ring and bars grow with it (decision 10-11-2026), the icon keeps
+/// its size and place.
+#[test]
+fn the_model_scale_grows_the_drawn_model_and_its_click_volume() {
+    let mut inst = one_cube_at((100.0, 100.0));
+    let cam = camera(0.9, (100.0, 100.0));
+    let vp = cam.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H);
+    let blend = Blend::overlay(0.2);
+    let run = |inst: &mut Instancer, scale: f32| {
+        inst.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, blend, 1.0).with_model_scale(scale),
+            flat,
+        );
+        let m = inst.instances(MeshKind::Cube)[0].model;
+        (m, inst.icon_instances()[0].position)
+    };
+    let (m1, icon1) = run(&mut inst, 1.0);
+    let (m2, icon2) = run(&mut inst, 1.5);
+    for i in 0..3 {
+        for k in 0..3 {
+            assert!((m2[i][k] - 1.5 * m1[i][k]).abs() < 1e-5, "axis {i}");
+        }
+    }
+    assert_eq!(
+        m1[3], m2[3],
+        "it grows about its feet, the place is the same"
+    );
+    assert_eq!(icon1, icon2, "the icon does not move");
+    // A box well above the least click size: the first pixel beside the true box
+    // misses at scale 1 and hits the drawn rim at 1.5; twice as far misses at both.
+    let mut big = instancer_with(
+        style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", ""),
+        &[still(0, 0, 8, (100.0, 100.0))],
+    );
+    let near = camera(0.3, (100.0, 100.0));
+    let pick_at = |inst: &mut Instancer, scale: f32, dx: f32| {
+        let vp = near.view_proj();
+        let frustum = Frustum::from_view_proj(vp);
+        let eye = EyeView::from_view_proj(vp, H);
+        inst.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0).with_model_scale(scale),
+            flat,
+        );
+        inst.pick(&query_over(&near, Vec3::new(100.0, 0.5, 100.0), dx, 0.0))
+    };
+    assert!(pick_at(&mut big, 1.0, 0.0).is_some());
+    let edge = (1..800)
+        .map(|i| i as f32 * 0.5)
+        .find(|&dx| pick_at(&mut big, 1.0, dx).is_none())
+        .expect("the box ends somewhere");
+    assert!(edge > 30.0, "{edge}");
+    let rim = edge + 2.0;
+    assert_eq!(pick_at(&mut big, 1.0, rim), None);
+    assert!(
+        pick_at(&mut big, 1.5, rim).is_some(),
+        "the drawn rim at {rim} px is the unit"
+    );
+    assert_eq!(pick_at(&mut big, 1.5, 2.0 * edge), None);
+    // The box handed to the ring and the bars is the drawn one.
+    let drawn = |inst: &mut Instancer| {
+        let mut out = None;
+        inst.visit_drawn(|_| true, |d| out = Some(d));
+        out.expect("the unit is drawn")
+    };
+    run(&mut inst, 1.0);
+    let d1 = drawn(&mut inst);
+    run(&mut inst, 1.5);
+    let d2 = drawn(&mut inst);
+    for i in 0..3 {
+        assert!((d2.size[i] - 1.5 * d1.size[i]).abs() < 1e-5, "axis {i}");
+    }
+    assert_eq!(d1.centre, d2.centre, "a centred box keeps its centre");
+    // Nonsense falls back to true size.
+    assert_eq!(FrameView::models_only(&frustum, 0.0).model_scale, 1.0);
+    assert_eq!(
+        FrameView::models_only(&frustum, 0.0)
+            .with_model_scale(f32::NAN)
+            .model_scale,
+        1.0
+    );
+}
+
+/// With the overlay the icon quad is the click volume once the zoom is past the middle
+/// of the icon band (the uncapped ramp above one half), and the model's volume before
+/// that; the model is drawn in both.
+#[test]
+fn the_icon_band_position_decides_the_click_volume() {
+    let style = || style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let cam = camera(0.3, (100.0, 100.0));
+    let pick_with = |alpha: f32, dx: f32| {
+        let mut inst = instancer_with(style(), &[still(0, 0, 8, (100.0, 100.0))]);
+        let s = build(&mut inst, &cam, 0.0, Blend::overlay(alpha), 1.0, flat);
+        assert_eq!(s.models, 1, "the model is drawn at alpha {alpha}");
+        inst.pick(&query_over(&cam, Vec3::new(100.0, 0.5, 100.0), dx, 0.0))
+            .map(|p| p.via)
+    };
+    // The big box reaches 60 px beside the centre, the icon quad 7 px.
+    assert_eq!(pick_with(0.0, 60.0), Some(PickVia::Model));
+    assert_eq!(pick_with(0.5, 60.0), Some(PickVia::Model));
+    assert_eq!(
+        pick_with(0.51, 60.0),
+        None,
+        "icon quad only: 60 px is outside it"
+    );
+    assert_eq!(pick_with(1.0, 2.0), Some(PickVia::Icon));
+    assert_eq!(pick_with(0.4, 2.0), Some(PickVia::Model));
+}
+
+/// Through the real camera and the shipped bands: at every zoom every visible unit
+/// is built as a model; the icons are there only in the far band.
+#[test]
+fn every_unit_is_a_model_at_every_zoom_and_the_icons_come_only_in_the_far_band() {
+    let motions: Vec<_> = (0..30)
+        .map(|i| still((i % 3) as u8, (i % 4) as u8, i, (120.0 + i as f32, 128.0)))
+        .collect();
+    let mut inst = instancer(&motions);
+    let bands = crate::CameraSettings::embedded().zoom;
+    for step in 0..=100 {
+        let zoom = f64::from(step) / 100.0;
+        let cam = camera(zoom, (128.0, 128.0));
+        let blend = bands.blend(cam.zoom() as f32);
+        let s = build(&mut inst, &cam, 0.0, blend, 1.0, flat);
+        assert_eq!(s.visible, 30, "zoom {zoom}: all in view");
+        assert_eq!(s.models, 30, "zoom {zoom}: every unit is a model");
+        if cam.zoom() as f32 <= bands.icons_from {
+            assert_eq!(s.icons, 0, "zoom {zoom}: no icon before the far band");
+        } else {
+            assert_eq!(s.icons, 30, "zoom {zoom}: icons over the models");
+        }
+    }
+}
+
+/// Zoom fix round 3: at the farthest zoom the shipped bands draw a unit at its scale (2.5) and a
+/// motion marked as a structure at the structure scale (1.6); the drawn box, the ring and bars
+/// (`visit_drawn`) and the click volume follow each one's own scale.
+#[test]
+fn a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale() {
+    let bands = crate::CameraSettings::embedded().zoom;
+    let (unit_scale, structure_scale) = (bands.model_scale(1.0), bands.structure_scale(1.0));
+    assert_eq!((unit_scale, structure_scale), (2.5, 1.6));
+    let style = style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let unit = still(0, 0, 1, (100.0, 100.0));
+    let structure = still(0, 0, 2, (100.0, 100.0)).with_structure(true);
+    assert!(structure.is_structure() && !unit.is_structure());
+    let near = camera(0.3, (100.0, 100.0));
+    let vp = near.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H);
+    let view = FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0)
+        .with_model_scale(unit_scale)
+        .with_structure_scale(structure_scale);
+    for (m, k) in [(unit, unit_scale), (structure, structure_scale)] {
+        let mut inst = instancer_with(style.clone(), &[m]);
+        // The model itself is drawn at its scale: the instance matrix against one at true size.
+        inst.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0).with_model_scale(1.0),
+            flat,
+        );
+        let true_size = inst.instances(MeshKind::Cube)[0].model[0][0];
+        inst.build_frame(&view, flat);
+        let drawn = inst.instances(MeshKind::Cube)[0].model[0][0];
+        assert!(
+            (drawn - k * true_size).abs() < 1e-4,
+            "{drawn} vs {k} x {true_size}"
+        );
+        let mut sizes = Vec::new();
+        inst.visit_drawn(|_| true, |d| sizes.push(d.size));
+        assert_eq!(sizes.len(), 1);
+        for (got, want) in sizes[0].iter().zip([6.0 * k; 3]) {
+            assert!((got - want).abs() < 1e-3, "{:?} at {k}", sizes[0]);
+        }
+        // A point 6.5 m beside the centre: inside the unit's drawn half width (7.5 m), outside
+        // the structure's (4.8 m).
+        let beside = inst.pick(&query_over(&near, Vec3::new(106.5, 0.5, 100.0), 0.0, 0.0));
+        assert_eq!(beside.is_some(), !m.is_structure(), "scale {k}");
+        assert!(
+            inst.pick(&query_over(&near, Vec3::new(103.0, 0.5, 100.0), 0.0, 0.0))
+                .is_some()
+        );
+    }
+}
+
+/// Zoom fix round 4: the drag rectangle takes the drawn box too. A small rectangle 6.5 m beside a 6 m
+/// cube, outside its true box, takes it as a unit at 2.5 and not as a structure at 1.6; and
+/// `mark_selected` reports the same drawn boxes as `visit_drawn`.
+#[test]
+fn the_rectangle_and_the_selection_marks_take_the_drawn_box_of_each_scale() {
+    let style = style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let near = camera(0.3, (100.0, 100.0));
+    let vp = near.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H);
+    let view = FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0)
+        .with_model_scale(2.5)
+        .with_structure_scale(1.6);
+    let beside = project_px(&vp, Vec3::new(106.5, 0.5, 100.0), [W, H])
+        .unwrap()
+        .0;
+    for structure in [false, true] {
+        let m = still(0, 0, 1, (100.0, 100.0)).with_structure(structure);
+        let mut inst = instancer_with(style.clone(), &[m]);
+        inst.build_frame(&view, flat);
+        let taken = found(&inst, &near, around_px(beside, 1.0));
+        assert_eq!(taken.is_empty(), structure, "structure {structure}");
+        let mut seen = Vec::new();
+        inst.visit_drawn(|_| true, |d| seen.push(d));
+        let mut marked = Vec::new();
+        inst.mark_selected(|_| true, |d| marked.push(d));
+        assert_eq!(seen, marked);
+        let k = if structure { 1.6 } else { 2.5 };
+        assert!(
+            (marked[0].size[0] - 6.0 * k).abs() < 1e-3,
+            "{:?}",
+            marked[0].size
+        );
+    }
+}
+
+/// Zoom fix round 4: the tile culling grows the tile boxes by the scale, as the picking does. A cube
+/// moved left until its true box has just left the view is still built when it is drawn 2.5 times its
+/// size (its drawn box still reaches into the view), and not at true size.
+#[test]
+fn a_unit_whose_drawn_box_reaches_into_the_view_is_not_culled_with_its_tile() {
+    let style = style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let cam = camera(0.3, (100.0, 100.0));
+    let frustum = Frustum::from_view_proj(cam.view_proj());
+    let visible = |x: f32, scale: f32| {
+        let mut inst = Instancer::with_tile_size(style.clone(), (256.0, 256.0), 4.0);
+        inst.set_height_range(0.0, 30.0);
+        inst.update_tick([still(0, 0, 1, (x, 100.0))]);
+        inst.build_frame(
+            &FrameView::models_only(&frustum, 0.0).with_model_scale(scale),
+            flat,
+        )
+        .visible
+    };
+    let gone = (0..400)
+        .map(|i| 100.0 - i as f32 * 0.25)
+        .find(|&x| visible(x, 1.0) == 0)
+        .expect("the cube leaves the view on the left");
+    assert_eq!(
+        visible(gone, 2.5),
+        1,
+        "at x {gone} the drawn box is still in view"
     );
 }

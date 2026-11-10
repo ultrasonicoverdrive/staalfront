@@ -27,6 +27,9 @@
         smoke_refuse_percent: 75,
         // The alpha a death flash keeps at strategic zoom, where everything else has faded out.
         strategic_flash_alpha: 0.6,
+        // The least size of that flash on the screen (physical pixels, at most an icon). Zoom fix
+        // round 2 (10-11-2026): the farthest zoom is twice as far, and a flash at its true size was 2 px.
+        strategic_flash_min_px: 6.0,
         // An event older than this many ticks when the picture takes it is dropped (a window that was
         // minimised does not set off a backlog of explosions).
         max_event_age_ticks: 40,

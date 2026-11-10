@@ -1,0 +1,56 @@
+// The game camera and what the picture does with the zoom (WP2.x zoom work package).
+// Read by sf_render::zoom::CameraSettings. Angles are in degrees, lengths in metres.
+(
+    camera: (
+        // How far the focus may leave the map, in metres.
+        margin: 16.0,
+        // Closest eye-to-focus distance.
+        min_distance: 12.0,
+        // The farthest zoom shows the whole map plus this share of the map size on every
+        // side (1.0 = a whole map size as a margin all round, decision 10-11-2026, so
+        // the map takes about a third of the screen width). 0 = just the map.
+        far_margin: 1.0,
+        // Pitch (angle below the horizon) fully zoomed in and fully zoomed out.
+        pitch_near_deg: 45.0,
+        pitch_far_deg: 80.0,
+        fov_y_deg: 45.0,
+        // One wheel notch multiplies the distance by this (or its inverse).
+        distance_per_notch: 0.85,
+        // Time constants of the zoom and pan easing, seconds.
+        zoom_smooth_secs: 0.10,
+        pan_smooth_secs: 0.12,
+        // Pan speed in distances per second (so it scales with the zoom).
+        pan_speed: 0.7,
+        // Zoom (0 = closest, 1 = farthest) a new camera starts at. 0.30 since zoom fix round 2: with the
+        // farther farthest zoom that is the same eye distance as 0.35 was (44 m on 256 m, 51 m on M1).
+        start_zoom: 0.30,
+        // Least height of the eye above the ground under it, and the time constant with
+        // which the pivot follows the terrain height while panning.
+        clearance: 2.0,
+        height_smooth_secs: 0.25,
+    ),
+    // What the zoom does to the units and buildings. Zoom is the camera zoom, 0 to 1,
+    // logarithmic in the distance. Models are drawn at every zoom; nothing here hides one.
+    zoom: (
+        // The strategic icons are drawn on top of the models in the farthest band of the
+        // zoom range: alpha 0 up to `icons_from`, fully opaque from `icons_full` on, a
+        // smooth ramp in between. The `K` key (`ToggleIcons`) switches the icons off and
+        // on in play; off = models only at every zoom.
+        icons_from: 0.95,
+        icons_full: 1.0,
+        // The icons are never drawn more opaque than this, so the model stays visible
+        // through them at the farthest zoom. Only the look: what switches with the zoom
+        // (click volume, ring and bars, effects) follows the ramp above, not this cap.
+        icons_max_alpha: 0.4,
+        // Models grow toward the far end so they stay readable: scale 1 up to
+        // `model_scale_from`, `model_scale_max` at the farthest zoom, a smooth ramp in
+        // between (the units; structures below). Presentation only, but the click volume,
+        // the selection ring and the bars follow the drawn size. At most 2.5.
+        model_scale_from: 0.45,
+        model_scale_max: 2.5,
+        // The structures on the same ramp, to this at the farthest zoom (at most
+        // `model_scale_max`). Lower than the units: at 2.5 the boxes of neighbouring
+        // structures overlapped by up to 13 m (zoom fix round 3, 10-11-2026).
+        structure_scale_max: 1.6,
+    ),
+)

@@ -18,8 +18,8 @@
 //!
 //! * Size: a particle is `size` metres across, drawn between `limits.min_px` and `limits.max_px` pixels
 //!   ([`size_px`]), the same maths as the icons' reference size.
-//! * Fade: the alpha of everything is multiplied by the model weight of the model/icon cross-fade
-//!   ([`crate::Blend::model`]), so effects are gone where the units have become icons.
+//! * Fade: the alpha of everything is multiplied by the effects weight (`1 - ` [`crate::Blend::icon`]), so
+//!   effects fade out as the strategic icons fade in over the models and are gone where they are opaque.
 //! * Density: a burst makes `limits.middle_factor` of its particles at middle zoom ([`ZoomBand`]).
 //! * The exception: a death makes one *flash* at strategic zoom, which keeps `limits.strategic_flash_alpha`
 //!   and is no bigger than an icon, so a battle stays visible from the overview.
@@ -50,16 +50,23 @@ pub struct EffectInstance {
 pub enum ZoomBand {
     /// Models up close: full bursts.
     Close,
-    /// A smaller picture (or the cross-fade): fewer particles.
+    /// A smaller picture (or the zoom inside the icon band): fewer particles.
     Middle,
-    /// Only icons: effects have faded out, a death keeps one flash.
+    /// The far end of the icon band: effects have faded out, a death keeps one flash.
     Strategic,
 }
 
+/// The weight the effects are drawn with for the frame's `blend`: `1 - ramp`, the
+/// position in the icon band before the icon opacity cap, so the far end of the band
+/// is still [`ZoomBand::Strategic`] when the icons are capped below full opacity.
+pub fn effects_weight(blend: crate::icons::Blend) -> f32 {
+    1.0 - blend.ramp()
+}
+
 impl ZoomBand {
-    /// The band for a model weight (`0` = icons only, `1` = models only) and the apparent size in pixels of
-    /// the 2 m reference unit. Strategic exactly when only icons are drawn; middle in the cross-fade and
-    /// below `limits.middle_below_px`.
+    /// The band for an effects weight ([`effects_weight`]: `1` before the icon band, `0` at its far
+    /// end) and the apparent size in pixels of the 2 m reference unit. Strategic at weight 0; middle
+    /// inside the icon band and below `limits.middle_below_px`.
     pub fn of(model_weight: f32, reference_px: f32, limits: &Limits) -> ZoomBand {
         if model_weight <= 0.0 {
             ZoomBand::Strategic
@@ -330,9 +337,14 @@ impl ParticlePool {
             if alpha <= 0.0 {
                 continue;
             }
-            let Some(px) = view.size_for(p.pos, p.size_m + p.growth * p.age, size_cap) else {
+            let Some(mut px) = view.size_for(p.pos, p.size_m + p.growth * p.age, size_cap) else {
                 continue;
             };
+            if flash {
+                // Seen from the farthest zoom a flash at its true size is a dot: keep it at least this
+                // big, never bigger than an icon.
+                px.0 = px.0.max(view.limits.strategic_flash_min_px.min(size_cap));
+            }
             out.push(instance(p.pos, px.0, p.colour, alpha, p.flags & GLOW != 0));
         }
         out.len()
@@ -367,7 +379,7 @@ pub struct EmitView<'a> {
     pub focal_px: f32,
     /// The viewport, physical pixels.
     pub viewport: [f32; 2],
-    /// The model weight of the cross-fade: `1` models only, `0` icons only.
+    /// The effects' weight from the zoom band (`effects_weight`): `1` full effects, `0` the strategic band.
     pub model_weight: f32,
     /// The side of an icon, physical pixels: what a strategic flash is clamped to.
     pub icon_px: f32,
@@ -634,6 +646,15 @@ mod tests {
         assert_eq!(ZoomBand::Middle.count(5, &l), 3, "rounded up");
         assert_eq!(ZoomBand::Middle.count(1, &l), 1, "never none");
         assert_eq!(ZoomBand::Strategic.count(8, &l), 0);
+        // The far end of the zoom is strategic even with the icons capped at 60 %.
+        let far = crate::CameraSettings::embedded().zoom.blend(1.0);
+        assert!(far.icon() < 1.0);
+        assert_eq!(effects_weight(far), 0.0);
+        assert_eq!(
+            ZoomBand::of(effects_weight(far), 5.0, &l),
+            ZoomBand::Strategic
+        );
+        assert_eq!(effects_weight(crate::icons::Blend::MODELS), 1.0);
     }
 
     #[test]
@@ -707,6 +728,31 @@ mod tests {
         assert!(out[0].color[0] < l.strategic_flash_alpha);
         pool.update(0.2);
         assert_eq!(pool.emit(&view(&l, 0.0), &mut out), 0);
+    }
+
+    /// Far away a flash is at least `strategic_flash_min_px` (zoom fix round 2), an ordinary particle
+    /// is not lifted.
+    #[test]
+    fn a_far_death_flash_keeps_its_least_size() {
+        let l = limits();
+        let mut pool = ParticlePool::new(&l);
+        let far = |flash: bool| Burst {
+            position: [0.0, 0.0, 900.0],
+            flash,
+            def: BurstDef {
+                size_m: 0.5,
+                ..glow()
+            },
+            ..burst(1, glow())
+        };
+        pool.spawn(&far(true));
+        let mut out = Vec::new();
+        assert_eq!(pool.emit(&view(&l, 0.0), &mut out), 1);
+        assert_eq!(out[0].size_px, l.strategic_flash_min_px);
+        let mut plain = ParticlePool::new(&l);
+        plain.spawn(&far(false));
+        assert_eq!(plain.emit(&view(&l, 1.0), &mut out), 1);
+        assert_eq!(out[0].size_px, l.min_px);
     }
 
     #[test]

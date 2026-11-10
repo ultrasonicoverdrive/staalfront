@@ -376,7 +376,7 @@ fn keys_menu() -> Menu {
 #[test]
 fn the_key_list_shows_the_keys_of_input_ron_and_pages_through_all_of_them() {
     let mut m = keys_menu();
-    // Two columns of ten rows: a page of twenty of the 36 lines.
+    // Two columns of ten rows: a page of twenty of the 37 lines.
     let ten = Fit {
         rows: 10,
         columns: 2,
@@ -439,10 +439,10 @@ fn the_key_list_shows_the_keys_of_input_ron_and_pages_through_all_of_them() {
     let model = m.model(tall).unwrap();
     assert_eq!(
         model.rows.len(),
-        36,
-        "5 headings, 30 actions and the menu key"
+        37,
+        "5 headings, 31 actions and the menu key"
     );
-    assert_eq!(model.rows_per_column, 36, "no more room than it needs");
+    assert_eq!(model.rows_per_column, 37, "no more room than it needs");
     assert_eq!(pages_of(&model), 1);
     assert!(model.footer.iter().all(|c| c.item != Item::KeysPage(1)));
 }
@@ -605,7 +605,7 @@ fn no_action_with_a_key_is_missing_from_the_list() {
         let wanted = has_key && crate::settings::is_rebindable(action);
         assert_eq!(listed.contains(&action), wanted, "{action:?}");
     }
-    assert_eq!(listed.len(), 30);
+    assert_eq!(listed.len(), 31);
 }
 
 #[test]

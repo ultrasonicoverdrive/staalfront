@@ -130,9 +130,32 @@ map in view**, without jolts and without the controls breaking.
 | Close-up | full models, animations, particles, shadows | full detail, decoration | health bars on selection |
 | Middle (default play height) | full models, fewer particles | medium LOD | bars on damage |
 | Far | simplified models (LOD) | coarse chunks | group bars |
-| Strategic | **icons in player color** (triangle = vehicle, square = building, etc.), constant size on screen | map-like display | area overlays, route arrows |
+| Strategic (the last 5 % of the zoom range, up to the whole map plus a full map size of margin) | **the same models, with strategic icons on top** (player color; triangle = vehicle, square = building, etc.), constant size on screen, fading in over the band | map-like display | area overlays, route arrows |
 
-Transition between model and icon with a short crossfade, not a hard swap.
+Models are drawn at every zoom; the icons are an overlay that fades in over the farthest band, not a replacement
+for the models (see the note below).
+
+*Note 08-11-2026 (decision Tijmen, after playing M1; `docs/rules/camera.md`): "I must be able to zoom out further,
+and I keep seeing the buildings and the little soldiers." The farthest zoom now shows the whole map plus a quarter
+map of margin on every side (`camera.far_margin`, `assets/config/camera.ron`). The model-to-icon swap of the first
+version of this table is gone: models stay at every zoom (a modest, capped scale-up toward the far end keeps them
+readable), and the strategic icons are drawn on top of them in the last ~15 % of the zoom range, fading in
+(`zoom.icons_from`/`icons_full`). The click volume is the icon quad where the icon is mostly opaque, the model
+elsewhere (section 2.3 is unchanged in that). All numbers are in RON.*
+
+*Note 10-11-2026 (fix round 1 of the zoom PR, orchestrator decision following Tijmen's "follow your own
+proposals"): the icons are drawn at most 60 % opaque (`zoom.icons_max_alpha`), so the model stays visible through
+them at the farthest zoom; the switch of click volume, ring and bars and the effects follow the uncapped band
+position. The click volume, the ring and the bars follow the drawn (scaled) model size instead of the true size.*
+
+*Note 10-11-2026 (fix round 2 of the zoom PR; Tijmen after playing: "I want to zoom out much farther; they still
+turn into icons far too soon"; orchestrator decision under his rule "your proposal holds if I do not answer"): the
+farthest zoom shows the map plus a full map size of margin on every side (`camera.far_margin` 1.0); the icons come
+only in the last 5 % of the zoom range (`zoom.icons_from` 0.95) and at most 40 % opaque (`icons_max_alpha` 0.4);
+the models grow up to 2.5 times toward the far end (`model_scale_max`, 2.5 is the cap); the key K (`ToggleIcons`,
+on by default) switches the icons off, models only at every zoom.*
+*Fix round 3, same day: structures have their own far-zoom scale (`zoom.structure_scale_max` 1.6; units stay at 2.5),
+because at 2.5 neighbouring structures overlapped by up to 13 m and a click could take the wrong one.*
 
 ### 2.3 Controls work at every zoom
 - Selecting via ray → terrain + a click volume per entity; at

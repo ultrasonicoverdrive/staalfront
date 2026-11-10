@@ -204,6 +204,10 @@ camera keys. It is a **held modifier** like shift, not a key that arms the next 
 cursor can show the AttackMove picture while it is held and the click needs no state. The binding
 test of `sf_engine` still allows only the shift of `OrderQueue` and `SelectAdd` to be shared.
 
+Later (zoom fix round 2, 10-11-2026): `ToggleIcons`, K, switches the strategic icons of the far zoom off and on
+(`camera.md` rule 8). It does not change the cursor; with the icons off the cursor rows read the model under it at
+every zoom. I was the first wish but is `ProduceCycle`.
+
 ## Decisions that were open
 
 * Guard on a friendly unit needs no modifier (row 5); see the note about strategic zoom.

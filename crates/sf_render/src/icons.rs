@@ -22,38 +22,19 @@
 //! crisp at any scale, as the procedural shapes of WP1.9 were. All icons of a
 //! frame are one instanced draw call.
 //!
-//! # When icons take over
-//! The trigger is the **apparent size of a reference unit at the camera
-//! focus**: `reference_size` metres (the bounding diameter of a typical unit)
-//! seen from the focus distance, in pixels. It is one number per frame, so
-//! every unit crosses over at the same moment (no ring of icons moving over
-//! the map) and the thresholds mean the same on every map size and on every
-//! resolution (a camera "zoom" value would not: whole-map zoom is 340 m on a
-//! 256 m map and 1360 m on a 1024 m map). The two thresholds are in logical
-//! pixels and scale with the UI scale like the icon itself.
+//! # When icons are drawn (zoom work package, 08-11-2026)
+//! **Models are drawn at every zoom.** The strategic icons are an overlay: drawn
+//! on top of the models in the farthest band of the zoom range, with an alpha
+//! that rises from 0 to 1 over that band ([`crate::zoom::ZoomBands::icon_alpha`],
+//! the numbers are in `assets/config/camera.ron`). Before this work package the
+//! icons took the place of the models (a dithered cross-fade driven by the
+//! apparent size of a reference unit); zooming out further turned the soldiers
+//! and buildings into symbols, which is what the player did not want.
 //!
-//! * apparent size at or above `model_above_px`: models only;
-//! * at or below `icon_below_px`: icons only (the models are not even built);
-//! * in between: a cross-fade, linear in the logarithm of the apparent size.
-//!   The zoom is logarithmic in the distance, so one wheel notch moves the
-//!   blend by the same amount everywhere in the band.
-//!
-//! # The cross-fade is a dissolve
-//! The blend is a single number, the **model weight** `m` in `0..=1`
-//! (`icon weight = 1 - m`). Both representations read it as a threshold
-//! against the same 8x8 ordered-dither pattern ([`dither_threshold`]): a
-//! pixel belongs to the model when its threshold is below `m`, and to the
-//! icon otherwise. So
-//!
-//! * the two weights sum to exactly 1 (one number, two complementary tests);
-//! * a pixel is never both: nothing is drawn twice, so there is no double-bright overlap
-//!   and no dark dip from half-transparent layers either;
-//! * the models stay opaque and depth-correct (no sorting, no blending of
-//!   overlapping units), only a share `m` of their pixels is kept;
-//! * there is nothing to pop: at `m = 1` the dissolve test passes everywhere
-//!   (identical to no dissolve), at `m = 0` the models are not drawn at all.
-//!
-//! The icon's own anti-aliased edge is ordinary alpha blending on top.
+//! The blend of a frame is a [`Blend`]: the model weight `m` (always 1 in play;
+//! below 1 the models keep that share of their pixels by an 8x8 ordered dither,
+//! a debug aid) and the icon alpha `a`. The icon's own anti-aliased edge and
+//! this alpha are ordinary alpha blending on top of the scene.
 //!
 //! # Depth
 //! Icons are **not depth tested**: they are drawn after the scene, over
@@ -61,30 +42,15 @@
 //! hill would be a unit the player cannot find. At the zoom where icons exist
 //! the camera looks down at 70 degrees or more, where relief hides almost nothing; what a
 //! player may know about enemy units is the business of the fog of war
-//! (WP8.4), not of the depth buffer. A depth-tested billboard would also be
-//! half-eaten by the ground in front of it on a tilted camera, since the
-//! ground below the icon on the screen is nearer to the eye than the icon's
-//! anchor point. The price: icons of units on both sides of a ridge overlap
-//! on the screen without occluding anything. Picking follows the drawing
-//! (see [`crate::pick`]).
+//! (WP8.4), not of the depth buffer. The price: icons of units on both sides of
+//! a ridge overlap on the screen without occluding anything. Picking follows the
+//! drawing (see [`crate::pick`]).
 //!
-//! # Fog of war (for WP8.4)
+//! # Fog of war
 //! Because icons are drawn last and without depth, a fog layer drawn into the
-//! scene cannot hide them. WP8.4 must remove the units the player cannot see
-//! from the icon list on the CPU (in [`crate::Instancer::build_frame`]), not
-//! rely on the fog rendering to cover them.
-//!
-//! # The whole-map view
-//! The thresholds are independent of the map size, but the camera's whole-map
-//! distance is not: it grows with the map, so on a small map at a low
-//! resolution the reference unit can still be bigger than `icon_below_px`
-//! when the camera is zoomed out all the way (with the default camera a 64 m
-//! map at 1080p sits at about 31 px, models only; a 256 m map at 4K and UI
-//! scale 1 at about 15.5 px, still in the cross-fade). [`IconConfig::blend_for_view`] therefore takes the camera's
-//! maximum distance and, when the band would end beyond it, shifts the band
-//! towards the camera (its width in log size stays the same) so that the
-//! maximum zoom is always icons only. On maps where the band ends before the
-//! maximum distance nothing changes.
+//! scene cannot hide them. The units the player cannot see are removed on the
+//! CPU before [`crate::Instancer::build_frame`], from the models and the icons
+//! alike.
 
 use bytemuck::{Pod, Zeroable};
 use serde::Deserialize;
@@ -141,20 +107,14 @@ impl From<IconShape> for IconId {
 /// the click quad) and the square (the quad itself) both fit.
 pub const ART_BOX: f32 = 1.2;
 
-/// Icon and cross-fade settings (the `icons` section of `assets/config/units.ron`).
+/// Icon settings (the `icons` section of `assets/config/units.ron`).
 /// Sizes are logical pixels unless the name says metres.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct IconConfig {
     /// Bounding diameter in metres of the reference unit whose apparent size
-    /// at the focus drives the cross-fade.
+    /// at the focus the effects use for their zoom bands.
     pub reference_size: f32,
-    /// Apparent size of the reference unit at or above which only models are
-    /// drawn.
-    pub model_above_px: f32,
-    /// Apparent size at or below which only icons are drawn. Smaller than
-    /// `model_above_px`; in between the two cross-fade.
-    pub icon_below_px: f32,
     /// Side of the icon quad, the same at every zoom.
     pub size_px: f32,
     /// Width of the dark outline inside the shape's edge.
@@ -175,8 +135,6 @@ impl Default for IconConfig {
     fn default() -> Self {
         Self {
             reference_size: 2.0,
-            model_above_px: 28.0,
-            icon_below_px: 14.0,
             size_px: 14.0,
             outline_px: 1.5,
             hover_out_px: 1.0,
@@ -197,12 +155,6 @@ impl IconConfig {
         let finite_positive = |v: f32| v.is_finite() && v > 0.0;
         if !finite_positive(self.reference_size) {
             return Err("icons.reference_size must be positive");
-        }
-        if !finite_positive(self.icon_below_px) || !finite_positive(self.model_above_px) {
-            return Err("icons.icon_below_px and icons.model_above_px must be positive");
-        }
-        if self.icon_below_px >= self.model_above_px {
-            return Err("icons.icon_below_px must be smaller than icons.model_above_px");
         }
         if !(self.size_px.is_finite() && (4.0..=128.0).contains(&self.size_px)) {
             return Err("icons.size_px must be between 4 and 128");
@@ -263,144 +215,95 @@ impl IconConfig {
             selected_px,
         }
     }
-
-    /// The model/icon weights when the reference unit appears `reference_px`
-    /// physical pixels big, at UI scale `ui_scale`.
-    pub fn blend(&self, reference_px: f32, ui_scale: f32) -> Blend {
-        let hi = self.model_above_px * ui_scale;
-        let lo = self.icon_below_px * ui_scale;
-        if reference_px >= hi {
-            return Blend::MODELS;
-        }
-        if reference_px <= lo {
-            return Blend::ICONS;
-        }
-        // 0 at `hi`, 1 at `lo`, linear in the logarithm of the size.
-        let t = (hi / reference_px).ln() / (hi / lo).ln();
-        Blend::from_model_weight(1.0 - t)
-    }
-
-    /// [`IconConfig::blend`] from the camera: focal length and the distance
-    /// from the eye to the focus.
-    pub fn blend_for_camera(&self, focal_px: f32, distance: f32, ui_scale: f32) -> Blend {
-        self.blend(self.reference_px(focal_px, distance), ui_scale)
-    }
 }
 
-impl IconConfig {
-    /// [`IconConfig::blend_for_camera`] for a camera that cannot go farther
-    /// than `max_distance` (its whole-map distance): if the reference unit
-    /// would still be above the icon threshold there, every apparent size is
-    /// scaled down by the same factor so that `max_distance` lands exactly on
-    /// the threshold. The blend stays continuous and monotone in the
-    /// distance, and the maximum zoom is always [`Blend::ICONS`] (see the
-    /// module docs, "The whole-map view").
-    pub fn blend_for_view(
-        &self,
-        focal_px: f32,
-        distance: f32,
-        max_distance: f32,
-        ui_scale: f32,
-    ) -> Blend {
-        let Some(shrink) = self.view_shrink(focal_px, max_distance, ui_scale) else {
-            // The band ends before the maximum zoom (or the input is NaN).
-            return self.blend_for_camera(focal_px, distance, ui_scale);
-        };
-        // At the maximum zoom (to rounding: the camera computes its distance
-        // through a power, which can land a hair short of the maximum).
-        if distance >= max_distance * (1.0 - 1e-4) {
-            return Blend::ICONS;
-        }
-        self.blend(self.reference_px(focal_px, distance) * shrink, ui_scale)
-    }
-
-    /// The factor [`IconConfig::blend_for_view`] scales every apparent size
-    /// by, or `None` when it does not scale (the band ends before
-    /// `max_distance`).
-    pub fn view_shrink(&self, focal_px: f32, max_distance: f32, ui_scale: f32) -> Option<f32> {
-        let lo = self.icon_below_px * ui_scale;
-        let at_max = self.reference_px(focal_px, max_distance);
-        if at_max.is_nan() || at_max <= lo {
-            return None;
-        }
-        Some(lo / at_max)
-    }
-
-    /// The band [`IconConfig::blend_for_view`] really uses, for the F1 panel:
-    /// the reference unit's apparent size after the shrink, and the camera
-    /// distances where the models start to fade (`models_until`) and where
-    /// only icons are left (`icons_from`). Without a shrink this is the plain
-    /// [`IconConfig::reference_px`] and [`IconConfig::distance_for_px`].
-    pub fn view_band(
-        &self,
-        focal_px: f32,
-        distance: f32,
-        max_distance: f32,
-        ui_scale: f32,
-    ) -> ViewBand {
-        let shrink = self
-            .view_shrink(focal_px, max_distance, ui_scale)
-            .unwrap_or(1.0);
-        let (hi, lo) = (
-            self.model_above_px * ui_scale,
-            self.icon_below_px * ui_scale,
-        );
-        ViewBand {
-            reference_px: self.reference_px(focal_px, distance) * shrink,
-            shrink,
-            models_until: self.distance_for_px(focal_px, hi / shrink),
-            icons_from: self.distance_for_px(focal_px, lo / shrink),
-        }
-    }
-}
-
-/// The model/icon band of a view as [`IconConfig::blend_for_view`] applies it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ViewBand {
-    /// Apparent size of the reference unit after the shrink, pixels.
-    pub reference_px: f32,
-    /// The shrink factor (1 = none).
-    pub shrink: f32,
-    /// Camera distance up to which only models are drawn.
-    pub models_until: f32,
-    /// Camera distance from which only icons are drawn.
-    pub icons_from: f32,
-}
-
-/// How much of the picture is models and how much is icons.
+/// What the picture is made of: the models and the icons drawn over them.
 ///
-/// One number: the model weight `m`. The icon weight is `1 - m`, so the two
-/// sum to exactly 1 by construction.
+/// Two independent numbers. The **model weight** `m`: the share of the models' pixels
+/// that is kept (an 8x8 ordered dither, see [`Blend::model_at`]); 1 in play, below 1
+/// only as a debug aid (`--unit-display icons` is 0). The **icon alpha** `a`: the
+/// opacity of the icon overlay, 0 = no icon is drawn. Besides those, the **ramp**:
+/// how far the zoom is into the icon band (`0..=1`), before the opacity cap of
+/// `camera.ron` (`zoom.icons_max_alpha`). What switches with the zoom (the click
+/// volume, the ring and bars, the effects) follows the ramp, so a cap never moves it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Blend {
     model: f32,
+    icon: f32,
+    ramp: f32,
 }
 
 impl Blend {
     /// Models only (zoomed in; also the "no icons" setting).
-    pub const MODELS: Blend = Blend { model: 1.0 };
-    /// Icons only (strategic zoom).
-    pub const ICONS: Blend = Blend { model: 0.0 };
+    pub const MODELS: Blend = Blend {
+        model: 1.0,
+        icon: 0.0,
+        ramp: 0.0,
+    };
+    /// Icons only (a debug setting: the models are not drawn).
+    pub const ICONS: Blend = Blend {
+        model: 0.0,
+        icon: 1.0,
+        ramp: 1.0,
+    };
 
-    /// A blend with this model weight, clamped to `0..=1`.
-    pub fn from_model_weight(model: f32) -> Self {
+    /// Models at full weight with the icons over them at opacity `alpha`
+    /// (clamped to `0..=1`; NaN = no icons). This is the picture in play.
+    pub fn overlay(alpha: f32) -> Self {
+        Self::overlay_capped(alpha, 1.0)
+    }
+
+    /// Models at full weight with the icons over them: `ramp` is the position in
+    /// the icon band (clamped to `0..=1`, NaN = 0), the drawn opacity is
+    /// `ramp * cap` (`cap` clamped to `0..=1`, NaN = 1). The switches follow `ramp`.
+    pub fn overlay_capped(ramp: f32, cap: f32) -> Self {
+        let ramp = if ramp.is_nan() {
+            0.0
+        } else {
+            ramp.clamp(0.0, 1.0)
+        };
+        let cap = if cap.is_nan() {
+            1.0
+        } else {
+            cap.clamp(0.0, 1.0)
+        };
         Self {
-            model: if model.is_nan() {
-                1.0
-            } else {
-                model.clamp(0.0, 1.0)
-            },
+            model: 1.0,
+            icon: ramp * cap,
+            ramp,
         }
     }
 
-    /// The share of the picture that is models.
+    /// A blend with this model weight (clamped to `0..=1`, NaN = 1) and the icon
+    /// opacity `1 - model`: the models dissolve into the picture and the icons fade in
+    /// as they go.
+    pub fn from_model_weight(model: f32) -> Self {
+        let model = if model.is_nan() {
+            1.0
+        } else {
+            model.clamp(0.0, 1.0)
+        };
+        Self {
+            model,
+            icon: 1.0 - model,
+            ramp: 1.0 - model,
+        }
+    }
+
+    /// The share of the models' pixels that is kept.
     pub fn model(self) -> f32 {
         self.model
     }
 
-    /// The share that is icons.
+    /// The opacity of the icons.
     pub fn icon(self) -> f32 {
-        1.0 - self.model
+        self.icon
+    }
+
+    /// The position in the icon band before the opacity cap (`0..=1`): what the
+    /// click volume, the ring and bars and the effects switch on.
+    pub fn ramp(self) -> f32 {
+        self.ramp
     }
 
     pub fn models_drawn(self) -> bool {
@@ -408,15 +311,17 @@ impl Blend {
     }
 
     pub fn icons_drawn(self) -> bool {
-        self.model < 1.0
+        self.icon > 0.0
     }
 
-    /// The representation that is more visible: the model on a tie.
+    /// The representation that is the click volume and carries the bars: the icon
+    /// once the zoom is past the middle of the icon band (ramp above one half; the
+    /// opacity cap does not move this), the model otherwise (also on a tie).
     pub fn dominant(self) -> Dominant {
-        if self.model >= 0.5 {
-            Dominant::Model
-        } else {
+        if self.icon > 0.0 && self.ramp > 0.5 {
             Dominant::Icon
+        } else {
+            Dominant::Model
         }
     }
 
@@ -425,15 +330,6 @@ impl Blend {
     /// `scene.wgsl`.
     pub fn model_at(self, x: u32, y: u32) -> bool {
         dither_threshold(x, y) < self.model
-    }
-
-    /// Whether the icon is drawn at the screen pixel `(x, y)`: the dither
-    /// threshold is at or above the model weight. This is the test of
-    /// `icon.wgsl` (which discards where `threshold < weight`), written out on
-    /// its own rather than as `!model_at` so that the tests can catch the two
-    /// shaders disagreeing on a pixel that sits exactly on a threshold.
-    pub fn icon_at(self, x: u32, y: u32) -> bool {
-        dither_threshold(x, y) >= self.model
     }
 }
 
@@ -519,8 +415,8 @@ pub struct IconInstance {
     /// Bit 8: [`ICON_HIGHLIGHT`]. Bit 9: [`ICON_SELECTED`]. Bits 16 to 31:
     /// the atlas layer ([`IconId`]).
     pub flags: u32,
-    /// Linear RGB fill, and the **model weight** of the frame in `a`, the
-    /// dissolve threshold (the icon is drawn where the model is not).
+    /// Linear RGB fill, and the **opacity** of the icon in `a` (the overlay
+    /// alpha of the frame).
     pub color: [f32; 4],
 }
 
@@ -529,7 +425,7 @@ impl IconInstance {
         Self {
             position,
             flags: icon.layer() << ICON_LAYER_SHIFT,
-            color: [rgb[0], rgb[1], rgb[2], blend.model()],
+            color: [rgb[0], rgb[1], rgb[2], blend.icon()],
         }
     }
 
@@ -605,36 +501,6 @@ impl IconParams {
 mod tests {
     use super::*;
 
-    /// The F1 band (WP1.9 review follow-up): the distances it shows are
-    /// where `blend_for_view` really switches, shrink included.
-    #[test]
-    fn the_view_band_matches_where_blend_for_view_switches() {
-        let c = IconConfig::default();
-        let focal = 870.0;
-        for max_distance in [100.0_f32, 400.0, 2000.0] {
-            let band = c.view_band(focal, 50.0, max_distance, 1.0);
-            let blend = |d: f32| c.blend_for_view(focal, d, max_distance, 1.0).model();
-            if band.models_until < max_distance * 0.99 {
-                assert_eq!(blend(band.models_until * 0.999), 1.0, "{max_distance}");
-                assert!(blend(band.models_until * 1.01) < 1.0, "{max_distance}");
-            }
-            if band.icons_from < max_distance * 0.99 {
-                assert!(blend(band.icons_from * 0.99) > 0.0, "{max_distance}");
-                assert_eq!(blend(band.icons_from * 1.001), 0.0, "{max_distance}");
-            }
-            assert!(band.icons_from <= max_distance * 1.0001);
-            let plain = c.reference_px(focal, 50.0);
-            assert!((band.reference_px - plain * band.shrink).abs() < 1e-3);
-        }
-        // A camera that can go far past the band: no shrink.
-        assert_eq!(c.view_band(focal, 50.0, 2000.0, 1.0).shrink, 1.0);
-        // One whose maximum is inside the band (a small map): shrunk, and
-        // the icons start exactly at the maximum.
-        let band = c.view_band(focal, 50.0, 100.0, 1.0);
-        assert!(band.shrink < 1.0);
-        assert!((band.icons_from - 100.0).abs() < 0.05, "{band:?}");
-    }
-
     #[test]
     fn default_config_is_valid() {
         IconConfig::default().validate().unwrap();
@@ -646,18 +512,6 @@ mod tests {
         for bad in [
             IconConfig {
                 reference_size: 0.0,
-                ..ok
-            },
-            IconConfig {
-                icon_below_px: 30.0,
-                ..ok
-            },
-            IconConfig {
-                icon_below_px: ok.model_above_px,
-                ..ok
-            },
-            IconConfig {
-                icon_below_px: -1.0,
                 ..ok
             },
             IconConfig { size_px: 2.0, ..ok },
@@ -676,10 +530,6 @@ mod tests {
             },
             IconConfig {
                 selected_out_px: f32::NAN,
-                ..ok
-            },
-            IconConfig {
-                model_above_px: f32::NAN,
                 ..ok
             },
         ] {
@@ -722,7 +572,7 @@ mod tests {
     /// twice: it must be the same text in both, and the formula of
     /// [`dither_rank`].
     #[test]
-    fn both_shaders_carry_the_same_dither_function() {
+    fn the_model_shader_carries_the_dither_function() {
         let function = |src: &str| {
             let start = src
                 .find("fn dither_threshold")
@@ -734,8 +584,8 @@ mod tests {
                 .join(" ")
         };
         let scene = function(include_str!("../../../assets/shaders/scene.wgsl"));
-        let icon = function(include_str!("../../../assets/shaders/icon.wgsl"));
-        assert_eq!(scene, icon);
+        // The icon shader has no dither any more: it blends by alpha.
+        assert!(!include_str!("../../../assets/shaders/icon.wgsl").contains("dither_threshold"));
         assert!(scene.contains(
             "((xy & 1u) << 5u) | ((y & 1u) << 4u) | ((xy & 2u) << 2u) | ((y & 2u) << 1u) | ((xy & 4u) >> 1u) | ((y & 4u) >> 2u)"
         ));
@@ -752,39 +602,21 @@ mod tests {
         }
     }
 
-    /// The share of an 8x8 block's pixels the model keeps is its weight (to
-    /// 1/64), and the icon keeps exactly the rest: every pixel belongs to
-    /// exactly one of them, for every weight.
+    /// The share of an 8x8 block's pixels the model keeps is its weight (to 1/64).
     #[test]
-    fn model_and_icon_pixels_partition_every_block() {
+    fn model_pixels_follow_the_weight() {
         for step in 0..=128 {
             let m = step as f32 / 128.0;
             let blend = Blend::from_model_weight(m);
-            let (mut models, mut icons) = (0, 0);
-            for y in 0..8 {
-                for x in 0..8 {
-                    let (a, b) = (blend.model_at(x, y), blend.icon_at(x, y));
-                    assert!(a != b, "pixel {x},{y} at weight {m} is drawn {a}/{b}");
-                    models += u32::from(a);
-                    icons += u32::from(b);
-                }
-            }
-            assert_eq!(models + icons, 64);
+            let models = (0..64).filter(|i| blend.model_at(i % 8, i / 8)).count();
             assert!(
                 (models as f32 / 64.0 - m).abs() <= 1.0 / 64.0 + 1e-6,
                 "weight {m} keeps {models}/64 model pixels"
             );
         }
-        // The ends: no dissolve at all, and no model at all.
         assert!((0..64).all(|i| Blend::MODELS.model_at(i % 8, i / 8)));
-        assert!((0..64).all(|i| Blend::ICONS.icon_at(i % 8, i / 8)));
-    }
-
-    /// The pixels that sit exactly on a threshold: weight `(rank + 0.5) / 64`
-    /// is exact in f32, and there `model_at` must say no and `icon_at` yes.
-    /// A `<=` in one test (or a `>` in the other) fails here.
-    #[test]
-    fn a_weight_exactly_on_a_threshold_gives_the_pixel_to_the_icon() {
+        assert!((0..64).all(|i| !Blend::ICONS.model_at(i % 8, i / 8)));
+        // A pixel exactly on its threshold is not the model's.
         for rank in 0..64 {
             let blend = Blend::from_model_weight((rank as f32 + 0.5) / 64.0);
             let (x, y) = (0..64)
@@ -792,118 +624,24 @@ mod tests {
                 .find(|&(x, y)| dither_rank(x, y) == rank)
                 .unwrap();
             assert!(!blend.model_at(x, y), "rank {rank}: model on its threshold");
-            assert!(blend.icon_at(x, y), "rank {rank}: icon on its threshold");
         }
     }
 
+    /// The overlay keeps every model pixel and only sets the icon opacity.
     #[test]
-    fn at_the_maximum_zoom_there_are_only_icons_on_every_map_size() {
-        let c = IconConfig::default();
-        // 1080p and 4K with a 45 degree field of view, UI scale 1 and 2, and
-        // whole-map distances from a 64 m map to a 1024 m map.
-        for height in [1080.0_f32, 2160.0] {
-            let focal = 0.5 * height / (22.5_f32.to_radians()).tan();
-            for scale in [1.0, 2.0] {
-                for max in [60.0_f32, 85.0, 170.0, 340.0, 1360.0] {
-                    assert_eq!(c.blend_for_view(focal, max, max, scale), Blend::ICONS);
-                    // Continuous and monotone up to it, never models again.
-                    let mut previous = 1.0_f32;
-                    for i in 0..=400 {
-                        // Even steps in log distance (as the zoom moves).
-                        let d = 2.0 * (max / 2.0).powf(i as f32 / 400.0);
-                        let m = c.blend_for_view(focal, d, max, scale).model();
-                        assert!(m <= previous + 1e-6, "{height} {scale} {max} {d}");
-                        assert!(previous - m < 0.1, "a jump at {d} on {max}");
-                        previous = m;
-                    }
-                    // Where the plain band already ends before the maximum,
-                    // nothing changes.
-                    if c.reference_px(focal, max) <= c.icon_below_px * scale {
-                        for d in [5.0, 20.0, 50.0, max] {
-                            assert_eq!(
-                                c.blend_for_view(focal, d, max, scale),
-                                c.blend_for_camera(focal, d, scale)
-                            );
-                        }
-                    }
-                }
-            }
+    fn an_overlay_never_takes_a_model_pixel() {
+        for step in 0..=100 {
+            let a = step as f32 / 100.0;
+            let b = Blend::overlay(a);
+            assert_eq!(b.model(), 1.0);
+            assert!((b.icon() - a).abs() < 1e-6);
+            assert!(b.models_drawn());
+            assert_eq!(b.icons_drawn(), a > 0.0);
+            assert!((0..64).all(|i| b.model_at(i % 8, i / 8)), "alpha {a}");
         }
-    }
-
-    /// The same with the real camera, as sf_game calls it: zoomed out all the
-    /// way on a 64 m and a 256 m map, at 1080p and 4K.
-    #[test]
-    fn the_real_camera_at_maximum_zoom_shows_icons_only() {
-        use crate::camera::{Camera, CameraConfig, DVec2};
-        use crate::model::EyeView;
-        let c = IconConfig::default();
-        for map in [64.0, 256.0, 1024.0] {
-            for (w, h) in [(1920, 1080), (3840, 2160)] {
-                let mut cam = Camera::new(
-                    CameraConfig {
-                        map_size: DVec2::new(map, map),
-                        ..CameraConfig::default()
-                    },
-                    w,
-                    h,
-                );
-                cam.set_zoom(1.0);
-                let eye = EyeView::from_view_proj(cam.view_proj(), h as f32);
-                let (d, max) = (cam.distance() as f32, cam.max_distance() as f32);
-                let plain = c.reference_px(eye.focal_px, d);
-                println!("{map} m map at {w}x{h}: {plain:.1} px at {d:.0} m");
-                if map == 64.0 && h == 1080 {
-                    // The case from the review: in the band without the clamp.
-                    assert!(c.blend_for_camera(eye.focal_px, d, 1.0).models_drawn());
-                }
-                assert_eq!(
-                    c.blend_for_view(eye.focal_px, d, max, 1.0),
-                    Blend::ICONS,
-                    "{map} m map at {w}x{h}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn weights_sum_to_one_across_the_band() {
-        let c = IconConfig::default();
-        for scale in [1.0, 1.5, 2.0] {
-            let mut previous = 1.0_f32;
-            for i in 0..=400 {
-                // Sweep the apparent size from well above the band to well below.
-                let px = c.model_above_px * scale * 1.5 * (0.2_f32 / 1.5).powf(i as f32 / 400.0);
-                let b = c.blend(px, scale);
-                assert!((b.model() + b.icon() - 1.0).abs() < 1e-6);
-                assert!((0.0..=1.0).contains(&b.model()));
-                // Zooming out (smaller apparent size) never brings models back.
-                assert!(b.model() <= previous + 1e-6, "not monotone at {px}");
-                previous = b.model();
-            }
-        }
-    }
-
-    #[test]
-    fn the_band_has_the_documented_ends_and_is_linear_in_log_size() {
-        let c = IconConfig::default();
-        assert_eq!(c.blend(c.model_above_px, 1.0), Blend::MODELS);
-        assert_eq!(c.blend(c.model_above_px * 3.0, 1.0), Blend::MODELS);
-        assert_eq!(c.blend(c.icon_below_px, 1.0), Blend::ICONS);
-        assert_eq!(c.blend(0.5, 1.0), Blend::ICONS);
-        // The geometric mean of the ends is the middle of the band.
-        let mid = (c.model_above_px * c.icon_below_px).sqrt();
-        assert!((c.blend(mid, 1.0).model() - 0.5).abs() < 1e-5);
-        // One third of the way (in log size) is one third of the weight.
-        let third = c.model_above_px * (c.icon_below_px / c.model_above_px).powf(1.0 / 3.0);
-        assert!((c.blend(third, 1.0).icon() - 1.0 / 3.0).abs() < 1e-5);
-        // The thresholds scale with the UI scale.
-        assert_eq!(
-            c.blend(c.model_above_px * 2.0, 2.0),
-            Blend::MODELS,
-            "at scale 2 the band is twice as high"
-        );
-        assert!(c.blend(c.model_above_px * 1.5, 2.0).icon() > 0.0);
+        assert_eq!(Blend::overlay(f32::NAN), Blend::MODELS);
+        assert_eq!(Blend::overlay(3.0).icon(), 1.0);
+        assert_eq!(Blend::overlay(-1.0), Blend::MODELS);
     }
 
     #[test]
@@ -913,22 +651,45 @@ mod tests {
         let near = c.reference_px(focal, 50.0);
         let far = c.reference_px(focal, 100.0);
         assert!((near - 2.0 * far).abs() < 1e-3);
-        let d = c.distance_for_px(focal, c.model_above_px);
-        assert!((c.reference_px(focal, d) - c.model_above_px).abs() < 1e-3);
-        assert_eq!(c.blend_for_camera(focal, d * 0.5, 1.0), Blend::MODELS);
-        assert_eq!(c.blend_for_camera(focal, d * 4.0, 1.0), Blend::ICONS);
+        let d = c.distance_for_px(focal, 20.0);
+        assert!((c.reference_px(focal, d) - 20.0).abs() < 1e-3);
     }
 
     #[test]
-    fn dominant_picks_the_larger_weight_and_the_model_on_a_tie() {
+    fn the_icon_is_dominant_above_half_opacity_and_the_model_on_a_tie() {
+        assert_eq!(Blend::overlay(0.49).dominant(), Dominant::Model);
+        assert_eq!(Blend::overlay(0.5).dominant(), Dominant::Model);
+        assert_eq!(Blend::overlay(0.51).dominant(), Dominant::Icon);
         assert_eq!(Blend::from_model_weight(0.51).dominant(), Dominant::Model);
-        assert_eq!(Blend::from_model_weight(0.5).dominant(), Dominant::Model);
         assert_eq!(Blend::from_model_weight(0.49).dominant(), Dominant::Icon);
         assert_eq!(Blend::MODELS.dominant(), Dominant::Model);
         assert_eq!(Blend::ICONS.dominant(), Dominant::Icon);
         assert_eq!(Blend::from_model_weight(f32::NAN), Blend::MODELS);
         assert_eq!(Blend::from_model_weight(7.0), Blend::MODELS);
         assert_eq!(Blend::from_model_weight(-1.0), Blend::ICONS);
+    }
+
+    #[test]
+    fn the_opacity_cap_dims_the_icon_but_never_moves_the_switch() {
+        for cap in [1.0, 0.6, 0.4, 0.1] {
+            for i in 0..=100 {
+                let ramp = i as f32 / 100.0;
+                let b = Blend::overlay_capped(ramp, cap);
+                assert_eq!(b.ramp(), ramp);
+                assert!((b.icon() - ramp * cap).abs() < 1e-6, "{ramp} {cap}");
+                assert_eq!(b.model(), 1.0);
+                assert_eq!(
+                    b.dominant(),
+                    Blend::overlay(ramp).dominant(),
+                    "{ramp} {cap}"
+                );
+            }
+        }
+        let b = Blend::overlay_capped(1.0, 0.6);
+        assert!((b.icon() - 0.6).abs() < 1e-6);
+        assert_eq!(b.dominant(), Dominant::Icon);
+        assert_eq!(Blend::overlay_capped(0.55, 0.4).dominant(), Dominant::Icon);
+        assert_eq!(Blend::overlay_capped(f32::NAN, 0.6), Blend::MODELS);
     }
 
     #[test]
@@ -942,7 +703,7 @@ mod tests {
         );
         assert_eq!(i.icon(), IconId(2));
         assert!(!i.highlighted());
-        assert_eq!(i.color, [0.1, 0.2, 0.3, 0.25]);
+        assert_eq!(i.color, [0.1, 0.2, 0.3, 0.75]);
         let h = IconInstance {
             flags: i.flags | ICON_HIGHLIGHT,
             ..i

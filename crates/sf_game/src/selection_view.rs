@@ -11,8 +11,8 @@
 //!   icon shader (`Instancer::mark_selected` sets the flag; a white outline
 //!   drawn outside the icon, clearly thicker than the thin white hover
 //!   outline, yellow while a selected icon is hovered; the owner's colour
-//!   inside keeps its size), and the health bar sits above the icon. In the cross-fade the ring is drawn as long as the model
-//!   is, and the bar goes with the representation that is more visible.
+//!   inside keeps its size), and the health bar sits above the icon. In the icon band the ring is drawn up to the middle of
+//!   the band (the uncapped ramp at most one half) and the bar goes with the same switch.
 //! * **The drag rectangle** is a translucent fill with an outline.
 //!
 //! All of it is drawn on the **world layer** of `sf_ui` ([`Ui::world_layer`](sf_ui::Ui::world_layer)):
@@ -198,10 +198,12 @@ impl SelectionView {
             OWN
         };
 
-        // The ring, while the model is drawn, and its width for the bar.
+        // The ring, while the model is the larger picture (the models stay drawn at every zoom, but
+        // in the far band where the icon is mostly opaque the icon's own outline shows the selection),
+        // and its width for the bar.
         let centre = Vec3::from(unit.centre);
         let mut width = None;
-        if frame.blend.models_drawn()
+        if frame.blend.dominant() == Dominant::Model
             && ground_loop(
                 &frame.view_proj,
                 frame.viewport,
