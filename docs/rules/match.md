@@ -148,7 +148,11 @@ a power plant (done at tick 301), a barracks (705) and a refinery (1105; it brin
 four riflemen and five rocket troopers (the credits and then the ore pay for them), an attack-move at tick
 2400 that arrives at the opponent's base, and two attack-moves deeper into it. **The first fight is at
 tick 3689; the opponent's construction centre falls at tick 6238 (WP7.7; its last structure and armed unit fell at 5967 until then, 5687 until WP6.7), and that is the defeat tick of player 1 and
-the win tick of player 0.** The scenario runs to tick 7000. `tools/sf_headless/tests/match_m1.rs` pins the
+the win tick of player 0.** The scenario runs to tick 7000. **At the shipped build speed (WP6.11, 3 / 2) the same scripted match is decided
+at tick 5656, not 6238** (final checksum `0xda53debc239be030`): the scenario `match` is frozen at 1 / 1, so its pin and the
+ticks of this page did not move; `match_m1.rs` (`the_match_at_the_shipped_build_speed_is_won_sooner_and_one_over_one_is_the_old_match`)
+runs it with `build_speed: (3, 2)` written into its production block and pins 5656 and that checksum, and shows that written as
+1 / 1 the old pin comes back. (The script's commands stay on their old ticks, so what changes is that everything they ask for is ready sooner.) `tools/sf_headless/tests/match_m1.rs` pins the
 checksum and asserts all of the above (see "Tests").
 
 **Power (WP6.4).** The match is played with power rules (`matchplay::configure`, and the `power` line of the scenario):

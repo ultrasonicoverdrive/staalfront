@@ -150,6 +150,11 @@ weapons, so nothing in this scene is a defence. `PLAIN` did not move.
 
 **`FIGHT` re-pinned at WP7.3b** (`0x2b829617a5151fdf` to `0x0f215774d484c93a` at tick 1500). Measured cause: the shipped unit table and building table gained the `ore_silo` record (kind 43), and both digests are hashed every tick in this scene. With the silo record taken out of `unit_defs.ron` the old list is back (the test passes unchanged), and the building-table digest is the old `0x53aeb53ab44157d1` again. The crowd, the skirmish and the simulation did not change; `PLAIN` did not move (it has no unit table).
 
+**WP6.11 (build speed 3 / 2, sandbox power, silo in the sandbox): `PLAIN` and `FIGHT` did not move.** Measured: with the shipped
+`production.ron` at 3 / 2, with the sandbox's extra power plants and with the silo in the sandbox, `bench_scene.rs` passes unchanged
+(`cargo test -p sf_game --test bench_scene`, 6 passed). The scenes do not call `World::with_production` (the build speed is applied
+there) and do not use `sandbox::schedule`, so none of the three changes reaches them.
+
 **Re-pinning.** Any WP that moves the world's checksum (for example WP7.2, #78) re-pins `PLAIN` and `FIGHT` in
 `crates/sf_game/tests/bench_scene.rs` in its own PR, with a measured cause, and updates the end values quoted above in the
 same change. The test `the_readme_quotes_the_pinned_end_values` fails if this README and the constants disagree.
