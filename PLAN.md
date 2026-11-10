@@ -306,10 +306,16 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
      The runner times some of them today (snapshot convert, build+cull, instance upload with the buffer allocations,
      `render_ms`, which includes present). **New in this WP:** the event-loop gap before the frame (the time the
      main thread was not in the frame callback), surface acquire and present measured apart from the rest of
-     `render_ms`, and the CPU time of the main thread in that frame. Plus what happened in the frame: window events
-     (resize, move, focus, occlusion), a music track start or decode result with its time, the number of sound starts,
-     and the tick number of a sim tick over 20 ms. Also `--hitch-log FILE` (JSON), so Tijmen's next play hands back a
-     file. Cost when nothing is slow: one comparison per frame.
+     `render_ms`, and the CPU time of the main thread in that frame. `std` has no thread CPU time, so on Windows it comes
+     from `GetThreadTimes`, through a direct `windows-sys` dependency of `sf_game` with the feature
+     `Win32_System_Threading`, for Windows only. That crate is already in `Cargo.lock` as a transitive dependency, and it
+     is motivated here because suspect 5 needs to tell a thread that was not running from one that was busy. On other
+     platforms the field reads "not measured". Plus what happened in the frame: window events (resize, move, focus,
+     occlusion), a music track start or decode result with its time, the number of sound starts, and the tick number of
+     a sim tick over 20 ms. The hitch log and the play's exit summary also report the **total number of frames and the
+     number over `sf_game::bench::HITCH_MS`** (25 ms), as the benchmark does, so the done-when below can be read from
+     the run. Also `--hitch-log FILE` (JSON), so Tijmen's next play hands back a file. Cost when nothing is slow: one
+     comparison per frame.
    - (b) **The sim side, without breaking `sf_sim`'s rules.** The clock stays out of `sf_sim`: the sim thread in
      `sf_game` already times each tick and logs a tick over 20 ms with its number. A split per system is made on a
      **headless replay** with a sampling profiler (no code in `sf_sim`). A timing hook inside `sf_sim` is not part of
