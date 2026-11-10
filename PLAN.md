@@ -298,7 +298,59 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 *08-11-2026 (orchestrator, with Tijmen: "follow your own proposals"; built in WP7.7): the #105 measurement showed that with the gate on a unit whose sight equals its weapon reach loses targets at the limit of its reach (the rocket trooper, sight 5 and reach 5, did not pick a tower at squared distance 26). Decision: **the visibility test for target acquisition is measured to the target's edge, like the reach** (a structure: any footprint cell or a visible cell beside it; a unit: its own cell or a neighbour cell its body reaches), in integers, before the gate goes on, so M1 does not get that regression. Rules: `docs/rules/vision.md`, "Measured to the edge".*
 
 2. **WP11.2** *(built 09-11-2026, PR in review; `docs/rules/voices.md`)* Voice responses (see Phase 11), built now: `sf_game` raises `unit.select`, `unit.move` and `unit.attack` (the bank events, mapped to Red Alert voices in `assets/audio/ra_mapping.ron`) on the player's own selection and orders, from the UI side (no sim event needed: these are the player's own actions), with a brake against spam (one voice at a time, a minimum gap, not on every box-select frame). Without the Red Alert files the events stay silent unless the bank has a CC0 sound. Test: the brake and which event each action raises, headless where the runner allows.
-3. Then phase 9 (computer opponent) as planned.
+3. **WP1.16 Stutter in play** *(10-11-2026, orchestrator, with Tijmen: "make a plan to fix it and put it on GitHub",
+   after an M1 play on the laptop that stuttered; evidence in `docs/progress.md` follow-up 35: frames of 0.6 to 1.6 s
+   with vsync on, 125 late snapshots)*. Built **before phase 9**. Measure first, then fix only what the measurement
+   shows; no fix on a guess.
+   - (a) **A hitch log in ordinary play**, not only in `--bench`: every frame over 50 ms writes one line with its parts.
+     The runner times some of them today (snapshot convert, build+cull, instance upload with the buffer allocations,
+     `render_ms`, which includes present). **New in this WP:** the event-loop gap before the frame (the time the
+     main thread was not in the frame callback), surface acquire and present measured apart from the rest of
+     `render_ms`, and the CPU time of the main thread in that frame. `std` has no thread CPU time, so on Windows it comes
+     from `GetThreadTimes`, through a direct `windows-sys` dependency of `sf_game` with the feature
+     `Win32_System_Threading`, for Windows only. That crate is already in `Cargo.lock` as a transitive dependency, and it
+     is motivated here because suspect 5 needs to tell a thread that was not running from one that was busy. On other
+     platforms the field reads "not measured". Plus what happened in the frame: window events (resize, move, focus,
+     occlusion), a music track start or decode result with its time, the number of sound starts, and the tick number of
+     a sim tick over 20 ms. The hitch log and the play's exit summary also report the **total number of frames and the
+     number over `sf_game::bench::HITCH_MS`** (25 ms), as the benchmark does, so the done-when below can be read from
+     the run. Also `--hitch-log FILE` (JSON), so Tijmen's next play hands back a file. Cost when nothing is slow: one
+     comparison per frame.
+   - (b) **The sim side, without breaking `sf_sim`'s rules.** The clock stays out of `sf_sim`: the sim thread in
+     `sf_game` already times each tick and logs a tick over 20 ms with its number. A split per system is made on a
+     **headless replay** with a sampling profiler (no code in `sf_sim`). A timing hook inside `sf_sim` is not part of
+     this WP; if one turns out to be needed, it is Tijmen's decision (section 12.4). No checksum, pin or `.expected`
+     moves. The replay comes from a **command record**, `sf_game --match --record FILE`:
+     - The file is an `sf_headless` scenario. That format already has `match_file` and commands at later ticks
+       (`tools/sf_headless/src/scenario.rs`).
+     - Each command is written on the sim-thread side with the tick it **actually ran at** and its exact fixed-point
+       values.
+     - Every command the game can send is covered, or the WP adds it to the scenario format.
+     - A test plays a recorded match to its end in the game's sim thread and in `sf_headless` and gets the **same
+       checksum at every tick**.
+   - (c) **Suspects to rule in or out, each with its own measurement:**
+     1. **Instance buffers.** They grow during play, because `reserve_units` runs only at start and on a scene swap.
+        This is likely only a few allocations (follow-up 35).
+     2. **The music.** The allocation, the decode and the 16-bit copy already run on the decode thread. The main
+        thread does the hand-over (`inject`, `play_music`) and frees the old track, about 50 MiB. Measure those against
+        the 0.12 ms main-thread figure in `docs/rules/audio.md`, with a forced track switch every 10 s in a test scene,
+        and say why one decode took 804 ms instead of about 40.
+     3. **Windows window handling.** Resizing and moving the window block the event loop.
+     4. **The sim thread** in M1 with many units (fog of war, targeting with sight): the 62 ms tick and the late
+        snapshots.
+     5. **The machine itself.** A long frame with little main-thread CPU time means the thread was not running
+        (another program, antivirus). In the 1,628 ms and 885 ms frames the sim kept its pace, so only the main thread
+        stood still; that counts against suspects 4 and 5 for those frames.
+   - (d) **Fix** what (a) to (c) show, each with a test that fails without it where the runner allows one, and a
+     measured before/after in the PR.
+   - **Done when:** in a 10-minute M1 play on the GTX 1650 laptop with vsync on and `--hitch-log`:
+     - no frame is over 50 ms, except during a window resize or move;
+     - fewer than 0.1 % of the frames are over 25 ms (the benchmark's hitch threshold, `sf_game::bench::HITCH_MS`);
+     - late snapshots are 0, or each one is explained.
+
+     And Tijmen does not feel it stutter. A p99 frame time is not the criterion with vsync on, because a quiet second
+     already sits at about 17 ms. The laptop play is Tijmen's; the PR gives him the command.
+4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision
 - WP8.1 Shroud (never seen) and fog of war (seen, not current) per player, cell-based in the sim.
