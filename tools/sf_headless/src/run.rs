@@ -99,7 +99,11 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
     let mut samples = Vec::new();
     let (mut executed, mut ignored) = (0u64, 0u64);
     let mut last = initial_checksum;
-    for done in 1..=options.ticks {
+    // A recorded game starts after its first tick (`Scenario::game`): the loop counts world ticks.
+    let first = world.tick().0 + 1;
+    let mut arrivals = scenario.arrivals();
+    for done in first..=options.ticks {
+        arrivals.schedule_due(&mut world)?;
         let report = world.step();
         executed += u64::from(report.commands_executed);
         ignored += u64::from(report.commands_ignored);
