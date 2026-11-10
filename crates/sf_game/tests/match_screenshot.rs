@@ -352,7 +352,7 @@ fn the_start_the_fight_and_the_banner() {
 
 /// The click volume follows the drawn model scale (decision 10-11-2026). At the farthest zoom, where
 /// the scale is at its cap, the scaled boxes of the structures of the M1 base may touch at most in a
-/// sliver: measured, in each of the two (mirrored) bases the construction yard and one neighbour
+/// sliver: measured, in each of the two (mirrored) bases the construction centre and one neighbour
 /// overlap by 0.40 m at 1.6 (8 m apart at true size); everything else is clear. A click in that sliver goes to
 /// the box the ray enters first, as for any two models. The pin is that it stays a sliver.
 #[test]

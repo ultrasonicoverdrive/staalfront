@@ -40,7 +40,7 @@ cross-fade half way: dithered, see-through buildings with red squares in them, a
    the frame's model scale), so a click on the visible rim of an enlarged structure hits it and the ring goes around
    what is drawn. Checked on the M1 base at the cap
    (`the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_farthest_zoom`): in each of the
-   two bases one pair (the construction yard and a neighbour, 8 m apart at true size) overlaps by 0.40 m, all others are clear;
+   two bases one pair (the construction centre and a neighbour, 8 m apart at true size) overlaps by 0.40 m, all others are clear;
    a click there goes to the box the ray enters first. Decided by screenshots
    (`docs/screenshots/wp-zoom/`): the 384 m M1 map is 420 px wide at the farthest zoom of a 1280 x 720 window
    (about 1.1 px per metre), so a structure of 3 cells (12 m) is about 19 px true and 30 px with the cap, and a soldier
