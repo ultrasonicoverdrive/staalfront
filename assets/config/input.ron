@@ -17,6 +17,9 @@
         CameraRotateLeft: [(trigger: Key(KeyQ))],
         CameraRotateRight: [(trigger: Key(KeyE))],
         CameraDrag: [(trigger: Mouse(Middle))],
+        // The strategic icons over the far zoom on or off (zoom WP, 10-11-2026). I is
+        // taken by ProduceCycle, so K. Off = models only at every zoom.
+        ToggleIcons: [(trigger: Key(KeyK))],
         ToggleFullscreen: [(trigger: Key(F11)), (trigger: Key(Enter), mods: [Alt])],
         ToggleDebug: [(trigger: Key(F1))],
         PlayTestSound: [(trigger: Key(KeyT))],

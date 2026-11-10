@@ -1167,11 +1167,11 @@ mod tests {
         DVec2::new(clip.x / clip.w, clip.y / clip.w)
     }
 
-    /// The farthest zoom shows the whole map plus a quarter map on every side,
+    /// The farthest zoom shows the whole map plus a whole map size on every side,
     /// for every map size and several window shapes (camera.ron's `far_margin`).
     #[test]
-    fn the_farthest_zoom_shows_the_map_plus_a_quarter_map_margin() {
-        assert_eq!(CameraConfig::default().far_margin, 0.25);
+    fn the_farthest_zoom_shows_the_map_plus_a_full_map_margin() {
+        assert_eq!(CameraConfig::default().far_margin, 1.0);
         for map in [64.0, 256.0, 1024.0] {
             for (w, h) in [(1920, 1080), (1280, 720), (3440, 1440), (800, 1000)] {
                 let cfg = CameraConfig {
@@ -1181,7 +1181,7 @@ mod tests {
                 let mut c = Camera::new(cfg, w, h);
                 c.set_zoom(1.0);
                 let mut worst = 0.0_f64;
-                for p in margin_corners(map, 0.25) {
+                for p in margin_corners(map, 1.0) {
                     let n = corner_ndc(&c, p);
                     assert!(
                         n.x.abs() <= 1.0 && n.y.abs() <= 1.0,
@@ -1202,7 +1202,7 @@ mod tests {
                 );
                 let ratio = c.max_distance() / snug.max_distance();
                 assert!(
-                    (1.35..1.65).contains(&ratio),
+                    (2.6..3.4).contains(&ratio),
                     "{map} m map at {w}x{h}: distance ratio {ratio}"
                 );
             }

@@ -198,6 +198,9 @@ pub struct Runner {
     /// What the picture does with the zoom: the icon overlay band and the far-zoom
     /// model scale (`assets/config/camera.ron`).
     zoom_bands: sf_render::ZoomBands,
+    /// The strategic icons over the far zoom: on by default, `ToggleIcons` (K)
+    /// switches them; off = models only at every zoom.
+    icons_on: bool,
     hud: Hud,
     /// Frames counted in the last full second, for the top bar.
     fps_shown: u32,
@@ -523,6 +526,7 @@ impl Runner {
             ra_play_error: None,
             camera,
             zoom_bands: camera_settings.zoom,
+            icons_on: true,
             hud,
             fps_shown: 0,
             map,
@@ -778,6 +782,7 @@ impl Runner {
             refusal,
             camera,
             zoom_bands: _,
+            icons_on: _,
             // The shell.
             started: _,
             report_at: _,
@@ -1917,6 +1922,13 @@ impl Runner {
     /// F1 handling, the panel pass and the terrain debug view. While the
     /// panels are hidden the egui pass does not run at all.
     fn update_debug_ui(&mut self, ctx: &Context) {
+        if ctx.actions().pressed(Action::ToggleIcons) {
+            self.icons_on = !self.icons_on;
+            println!(
+                "strategic icons: {}",
+                if self.icons_on { "on" } else { "off" }
+            );
+        }
         if ctx.actions().pressed(Action::ToggleDebug) {
             let visible = self.debug.toggle();
             println!("debug panels: {}", if visible { "on" } else { "off" });
@@ -1989,7 +2001,7 @@ impl Runner {
         // a little larger toward the far end (camera.ron, `zoom`).
         let (blend, model_scale) = match self.debug.state.unit_display {
             UnitDisplay::Auto => (
-                self.zoom_bands.blend(zoom),
+                self.zoom_bands.blend_toggled(zoom, self.icons_on),
                 self.zoom_bands.model_scale(zoom),
             ),
             UnitDisplay::Models => (Blend::MODELS, self.zoom_bands.model_scale(zoom)),

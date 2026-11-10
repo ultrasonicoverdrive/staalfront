@@ -110,6 +110,9 @@ impl CameraFile {
     }
 }
 
+/// The largest `zoom.model_scale_max` the file may set (decision 10-11-2026).
+pub const MODEL_SCALE_CAP: f32 = 2.5;
+
 /// The `zoom` section of `camera.ron`.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -141,6 +144,17 @@ impl ZoomBands {
         (1.0 + (self.model_scale_max - 1.0) * t).clamp(1.0, self.model_scale_max.max(1.0))
     }
 
+    /// The picture at `zoom` with the player's icon toggle (`ToggleIcons`, on by
+    /// default): on = [`ZoomBands::blend`], off = models only at every zoom, so the
+    /// click volume, ring and bars stay on the model.
+    pub fn blend_toggled(&self, zoom: f32, icons_on: bool) -> Blend {
+        if icons_on {
+            self.blend(zoom)
+        } else {
+            Blend::MODELS
+        }
+    }
+
     /// The picture at `zoom`: models always at full weight, the icons as an overlay
     /// on the ramp [`ZoomBands::icon_alpha`], drawn at most `icons_max_alpha` opaque.
     pub fn blend(&self, zoom: f32) -> Blend {
@@ -158,8 +172,10 @@ impl ZoomBands {
         if !unit(self.model_scale_from) || self.model_scale_from >= 1.0 {
             return bad("zoom.model_scale_from must be in 0..1");
         }
-        if !(self.model_scale_max.is_finite() && (1.0..=4.0).contains(&self.model_scale_max)) {
-            return bad("zoom.model_scale_max must be between 1 and 4");
+        if !(self.model_scale_max.is_finite()
+            && (1.0..=MODEL_SCALE_CAP).contains(&self.model_scale_max))
+        {
+            return bad("zoom.model_scale_max must be between 1 and 2.5");
         }
         if !(self.icons_max_alpha.is_finite()
             && self.icons_max_alpha > 0.0
@@ -239,7 +255,7 @@ mod tests {
     fn the_shipped_camera_file_is_pinned() {
         let s = CameraSettings::embedded();
         let c = s.camera;
-        assert_eq!((c.margin, c.min_distance, c.far_margin), (16.0, 12.0, 0.25));
+        assert_eq!((c.margin, c.min_distance, c.far_margin), (16.0, 12.0, 1.0));
         assert_eq!(
             (c.pitch_near_deg, c.pitch_far_deg, c.fov_y_deg),
             (45.0, 80.0, 45.0)
@@ -255,11 +271,11 @@ mod tests {
         assert_eq!(
             s.zoom,
             ZoomBands {
-                icons_from: 0.85,
+                icons_from: 0.95,
                 icons_full: 1.0,
-                model_scale_from: 0.55,
-                model_scale_max: 1.6,
-                icons_max_alpha: 0.6
+                model_scale_from: 0.45,
+                model_scale_max: 2.5,
+                icons_max_alpha: 0.4
             }
         );
         // The old Rust defaults are the same numbers, now from the file.
@@ -292,8 +308,13 @@ mod tests {
             assert!(a - previous < 0.02, "a jump at {i}");
             previous = a;
         }
-        // The far band is the last ~15 % of the zoom range.
-        assert!((1.0 - b.icons_from - 0.15).abs() < 1e-6);
+        // The far band is the last 5 % of the zoom range (decision 10-11-2026):
+        // nothing at all at 0.90 or 0.95.
+        assert!((1.0 - b.icons_from - 0.05).abs() < 1e-6);
+        assert_eq!(b.icon_alpha(0.90), 0.0);
+        assert_eq!(b.blend(0.90).icon(), 0.0);
+        assert_eq!(b.blend(0.95).icon(), 0.0);
+        assert_eq!(b.blend(0.90).dominant(), crate::icons::Dominant::Model);
         assert_eq!(b.icon_alpha(f32::NAN), 0.0);
     }
 
@@ -316,18 +337,18 @@ mod tests {
         assert_eq!(b.blend(1.0).dominant(), crate::icons::Dominant::Icon);
     }
 
-    /// At the farthest zoom the icon is drawn at the cap (60 %), so the model shows
+    /// At the farthest zoom the icon is drawn at the cap (40 %), so the model shows
     /// through; the switch from model to icon sits in the middle of the band whatever
     /// the cap is.
     #[test]
     fn the_icons_are_capped_and_the_switch_ignores_the_cap() {
         let b = bands();
-        assert_eq!(b.icons_max_alpha, 0.6);
+        assert_eq!(b.icons_max_alpha, 0.4);
         let far = b.blend(1.0);
-        assert!((far.icon() - 0.6).abs() < 1e-6, "{}", far.icon());
+        assert!((far.icon() - 0.4).abs() < 1e-6, "{}", far.icon());
         assert_eq!(far.ramp(), 1.0);
         let low = ZoomBands {
-            icons_max_alpha: 0.4,
+            icons_max_alpha: 0.2,
             ..b
         };
         let switch = |bands: &ZoomBands| {
@@ -368,23 +389,49 @@ mod tests {
         assert!(b.model_scale(0.8) > 1.0 && b.model_scale(0.8) < b.model_scale_max);
     }
 
+    /// The player's icon toggle: on is the band above, off is models only at every
+    /// zoom, the model staying the click volume even at the farthest zoom.
+    #[test]
+    fn the_icon_toggle_off_draws_models_only() {
+        let b = bands();
+        assert_eq!(b.blend_toggled(1.0, true), b.blend(1.0));
+        assert!(b.blend_toggled(1.0, true).icons_drawn());
+        for i in 0..=100 {
+            let zoom = i as f32 / 100.0;
+            let off = b.blend_toggled(zoom, false);
+            assert!(!off.icons_drawn(), "zoom {zoom}");
+            assert_eq!(off.model(), 1.0);
+            assert_eq!(off.dominant(), crate::icons::Dominant::Model, "zoom {zoom}");
+        }
+    }
+
+    /// The model scale never goes above 2.5 (the shipped value is the cap).
+    #[test]
+    fn the_model_scale_cap_is_two_and_a_half() {
+        let b = bands();
+        assert_eq!(MODEL_SCALE_CAP, 2.5);
+        assert_eq!(b.model_scale(1.0), 2.5);
+        assert!((0..=100).all(|i| b.model_scale(i as f32 / 100.0) <= 2.5));
+    }
+
     #[test]
     fn bad_camera_files_are_refused() {
         let base = EMBEDDED_CAMERA_CONFIG;
         assert!(CameraSettings::from_ron(base).is_ok());
         for (from, to) in [
-            ("far_margin: 0.25", "far_margin: -1.0"),
-            ("far_margin: 0.25", "far_margin: 9.0"),
-            ("icons_from: 0.85", "icons_from: 1.0"),
-            ("icons_from: 0.85", "icons_from: 1.5"),
-            ("model_scale_max: 1.6", "model_scale_max: 9.0"),
-            ("model_scale_max: 1.6", "model_scale_max: 0.5"),
-            ("model_scale_from: 0.55", "model_scale_from: 1.0"),
-            ("icons_max_alpha: 0.6", "icons_max_alpha: 0.0"),
-            ("icons_max_alpha: 0.6", "icons_max_alpha: 1.5"),
+            ("far_margin: 1.0", "far_margin: -1.0"),
+            ("far_margin: 1.0", "far_margin: 9.0"),
+            ("icons_from: 0.95", "icons_from: 1.0"),
+            ("icons_from: 0.95", "icons_from: 1.5"),
+            ("model_scale_max: 2.5", "model_scale_max: 9.0"),
+            ("model_scale_max: 2.5", "model_scale_max: 2.6"),
+            ("model_scale_max: 2.5", "model_scale_max: 0.5"),
+            ("model_scale_from: 0.45", "model_scale_from: 1.0"),
+            ("icons_max_alpha: 0.4", "icons_max_alpha: 0.0"),
+            ("icons_max_alpha: 0.4", "icons_max_alpha: 1.5"),
             ("pitch_near_deg: 45.0", "pitch_near_deg: 85.0"),
             ("min_distance: 12.0", "min_distance: 0.0"),
-            ("far_margin: 0.25", "far_margin_typo: 0.25"),
+            ("far_margin: 1.0", "far_margin_typo: 1.0"),
         ] {
             let text = base.replacen(from, to, 1);
             assert_ne!(text, base, "{from}");
