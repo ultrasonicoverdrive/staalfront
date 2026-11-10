@@ -191,6 +191,7 @@ fn world(floor: u32, credits: u64) -> World {
             ProductionRules {
                 queue_limit: 5,
                 exit_radius: 4,
+                build_speed: sf_sim::BuildSpeed::FULL,
             },
             table,
         )

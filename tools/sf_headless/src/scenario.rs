@@ -292,6 +292,15 @@ pub struct ProductionSpec {
     pub queue_limit: u8,
     /// Cells round the exit cell in which a finished unit looks for a free spot.
     pub exit_radius: u8,
+    /// WP6.11: the build speed as `(num, den)`. Left out: `(1, 1)`, the build times of the
+    /// definitions, as every scenario before WP6.11 has it.
+    #[serde(default = "full_build_speed")]
+    pub build_speed: (u32, u32),
+}
+
+/// `(1, 1)`, the default of [`ProductionSpec::build_speed`].
+fn full_build_speed() -> (u32, u32) {
+    (1, 1)
 }
 
 impl ProductionSpec {
@@ -300,6 +309,10 @@ impl ProductionSpec {
         sf_sim::ProductionRules {
             queue_limit: self.queue_limit,
             exit_radius: self.exit_radius,
+            build_speed: sf_sim::BuildSpeed {
+                num: self.build_speed.0,
+                den: self.build_speed.1,
+            },
         }
     }
 }
@@ -1233,7 +1246,7 @@ impl Scenario {
             }
             if !pr.rules().is_valid() {
                 p.push(
-                    "production: queue_limit must be 1 to 20 and exit_radius 1 to 8".to_string(),
+                    "production: queue_limit must be 1 to 20, exit_radius 1 to 8 and build_speed a fraction of terms 1 to 100 within 4 times".to_string(),
                 );
             }
         }

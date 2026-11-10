@@ -215,6 +215,7 @@ fn rules(limit: u8, radius: u8) -> ProductionRules {
     ProductionRules {
         queue_limit: limit,
         exit_radius: radius,
+        build_speed: sf_sim::BuildSpeed::FULL,
     }
 }
 

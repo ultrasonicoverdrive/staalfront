@@ -430,6 +430,10 @@ pub fn production_rules(settings: &ProductionSettings) -> sf_sim::ProductionRule
     sf_sim::ProductionRules {
         queue_limit: settings.queue_limit,
         exit_radius: settings.exit_radius,
+        build_speed: sf_sim::BuildSpeed {
+            num: settings.build_speed.num,
+            den: settings.build_speed.den,
+        },
     }
 }
 
