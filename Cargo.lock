@@ -2519,6 +2519,7 @@ dependencies = [
  "sf_render",
  "sf_sim",
  "sf_ui",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

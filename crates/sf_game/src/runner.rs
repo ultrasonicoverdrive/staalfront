@@ -46,6 +46,7 @@ use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::fx::{DrawnAnchors, FxFrame, FxPlayer};
 use crate::fx_sound::{FxSound, start_audio};
+use crate::hitch::{HitchLog, Lap, SimTotals};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::menu::{Change, Event, Live, Menu, Outcome, Preset};
@@ -252,6 +253,11 @@ pub struct Runner {
     /// snapshot (this used to be the whole tick; the sim runs elsewhere now).
     tick_ms: Samples,
     last_frame: Option<Instant>,
+    /// The hitch log (WP1.16a, `docs/rules/hitch_log.md`): every frame over 50 ms with its parts, and the
+    /// totals of the play. Belongs to the window, not to a scene.
+    hitch: HitchLog,
+    /// Games the command record (`--record`) already wrote because a restart ended them.
+    record_restarts: u32,
     auto_zoom: bool,
     /// The unit under the cursor in the last frame, highlighted in the
     /// picture and named in the F1 panel; a click selects it.
@@ -367,6 +373,8 @@ impl Runner {
         let sim = SimConfig {
             start_paused: true,
             extra_tick_time: options.sim_delay,
+            // `--record`: the sim thread keeps every command with the tick it ran at.
+            record_commands: options.record.is_some(),
             ..SimConfig::realtime()
         };
         Self::with_sim(options, map, lod, pack, failed, sim)
@@ -543,6 +551,8 @@ impl Runner {
             render_ms: Samples::default(),
             tick_ms: Samples::default(),
             last_frame: None,
+            hitch: HitchLog::new(now),
+            record_restarts: 0,
             auto_zoom: options.auto_zoom,
             hovered: None,
             unit_view: UnitView::default(),
@@ -709,6 +719,12 @@ impl Runner {
         });
         match made {
             Ok(fresh) => {
+                // The game that ends here keeps its own record (`--record`).
+                if self.options.record.is_some() {
+                    self.record_restarts += 1;
+                    let exit = self.sim.stop().clone();
+                    self.write_record(&exit, Some(self.record_restarts));
+                }
                 self.replace_scene(fresh, options);
                 self.attach_scene();
                 self.apply_look_settings();
@@ -787,6 +803,8 @@ impl Runner {
             render_ms: _,
             tick_ms: _,
             last_frame: _,
+            hitch: _,
+            record_restarts: _,
             auto_zoom: _,
             unit_view: _,
             hover_at: _,
@@ -848,6 +866,43 @@ impl Runner {
         self.sim_micros_seen = 0;
         self.ticks = 0;
         self.fx_sound.reset();
+    }
+
+    /// What the sim thread says about the play, for the hitch log (WP1.16a).
+    fn sim_totals(&self, exit: &crate::sim_thread::SimExit, tick_ms: &Samples) -> SimTotals {
+        let counters = self.sim.counters();
+        SimTotals {
+            ticks: exit.ticks,
+            late_snapshots: counters.late_publishes,
+            behind_passes: counters.behind_passes,
+            clock_resets: counters.clock_resets,
+            late_commands: counters.late_commands,
+            tick_ms_max: tick_ms.0.iter().copied().fold(0.0, f64::max),
+            slow_ticks: self.sim.all_slow_ticks(),
+        }
+    }
+
+    /// Writes the command record of the game that just ended (`--record`, WP1.16a); `restart` is
+    /// `Some(n)` for the n-th game a restart ended, which gets a file of its own.
+    fn write_record(&self, exit: &crate::sim_thread::SimExit, restart: Option<u32>) {
+        let Some(path) = &self.options.record else {
+            return;
+        };
+        if self.options.scene != Scene::Match {
+            return;
+        }
+        let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+        let named = self.options.match_file.as_ref().and_then(Option::as_deref);
+        let match_file = crate::matchplay::file_path(named, &assets);
+        let path = restart.map_or_else(|| path.clone(), |n| crate::record::restart_path(path, n));
+        match crate::record::write(&path, exit, self.cells, &assets, &match_file) {
+            Ok(n) => println!(
+                "record: wrote {} ({n} commands, {} ticks)",
+                path.display(),
+                exit.ticks
+            ),
+            Err(e) => eprintln!("sf_game: record: {e}"),
+        }
     }
 
     /// The landmarks the scene shows on the ground (a grid of pillars and a few blocks, development
@@ -2616,10 +2671,17 @@ impl App for Runner {
     fn render(&mut self, ctx: &mut Context, _engine_alpha: f32) {
         self.frames += 1;
         let now = Instant::now();
+        // The hitch log: one comparison for a frame that was not slow (`docs/rules/hitch_log.md`).
+        let sim = &self.sim;
+        self.hitch.begin_frame(now, |from| {
+            sim.slow_ticks(from, sim.latest().tick().0.max(from))
+        });
         // The sim thread's newest snapshot is this frame's world. How far
         // between its last two states the picture is comes from the sim's own
         // clock, not from the engine's accumulator.
         self.pull_snapshot(now);
+        self.hitch.set_tick(self.snap.tick().0);
+        self.hitch.lap(Lap::Snapshot, Instant::now());
         let alpha = interpolation_alpha(now, self.snap.pace(), self.sim.period());
         if !self.sim.is_running() {
             // `stop` joins the finished thread and prints its panic message,
@@ -2684,6 +2746,7 @@ impl App for Runner {
             };
             self.camera.update(dt, &input);
         }
+        self.hitch.lap(Lap::Ui, Instant::now());
         if self.renderer.is_some() {
             let view_proj = self.camera.view_proj();
             if let Some(renderer) = &mut self.renderer {
@@ -2713,11 +2776,15 @@ impl App for Runner {
                 game_cursor_at(self.shots.is_some(), self.hover_at, cursor).filter(|_| !menu_open);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
+            self.hitch.lap(Lap::Scene, started);
             if let Some(renderer) = &mut self.renderer {
                 renderer.upload_units(&self.instancer);
             }
-            self.upload_ms.push(started.elapsed());
+            let uploaded = Instant::now();
+            self.upload_ms.push(uploaded.duration_since(started));
+            self.hitch.lap(Lap::Upload, uploaded);
         }
+        let mut sounds_started = 0u32;
         // The listener follows the camera (it does not rotate, so right = +X).
         // The camera works in metres, so does the audio.
         let focus = self.camera.focus();
@@ -2736,11 +2803,25 @@ impl App for Runner {
                     .music_frame(&self.fx, [focus.x as f32, focus.y as f32], now, audio);
             for t in audio.take_music_trace() {
                 println!("music: tick {now} mood {} track {}", t.mood.name(), t.track);
+                self.hitch.note(|| {
+                    format!(
+                        "music: tick {now} mood {} track {} starts",
+                        t.mood.name(),
+                        t.track
+                    )
+                });
             }
             if let Some(l) = audio.last_music_load()
                 && self.music_load_logged != Some(l)
             {
                 self.music_load_logged = Some(l);
+                self.hitch.note(|| {
+                    format!(
+                        "music: a track was decoded on the background thread in {:.0} ms ({} frames)",
+                        l.decode.as_secs_f64() * 1000.0,
+                        l.frames
+                    )
+                });
                 println!(
                     "music: track decoded on a background thread in {:.0} ms, {} frames ({:.1} MiB in memory); mood now {}",
                     l.decode.as_secs_f64() * 1000.0,
@@ -2750,8 +2831,9 @@ impl App for Runner {
                 );
             }
             // The shots, hits and deaths the picture showed this frame, heard from where the camera is.
-            self.fx_sound.play_frame(&mut self.fx, audio);
+            sounds_started = self.fx_sound.play_frame(&mut self.fx, audio).planned;
         }
+        self.hitch.lap(Lap::Audio, Instant::now());
         if let Some(renderer) = &mut self.renderer {
             // The GPU time of this frame arrives frames later; the number
             // lets the benchmark credit it to this frame (`bench_after_render`
@@ -2759,7 +2841,11 @@ impl App for Runner {
             renderer.set_gpu_frame_tag(self.bench.as_ref().map_or(0, |b| u64::from(b.frame)));
             let drawing = Instant::now();
             let drawn = self.hud.draw(renderer);
-            self.render_ms.push(drawing.elapsed());
+            let drew = Instant::now();
+            self.render_ms.push(drew.duration_since(drawing));
+            let (submit, present) = renderer.last_submit_and_present();
+            self.hitch
+                .lap_draw(drew, renderer.last_acquire_wait(), submit, present);
             if let Err(e) = drawn {
                 eprintln!("sf_game: render failed: {e}");
                 self.failed.store(true, Ordering::Relaxed);
@@ -2861,9 +2947,17 @@ impl App for Runner {
             self.ticks = 0;
             self.report_at += Duration::from_secs(1);
         }
+        let end = Instant::now();
+        self.hitch.lap(Lap::Input, end);
+        self.hitch.end_frame(end, sounds_started);
     }
 
     fn on_window_event(&mut self, ctx: &mut Context, event: &winit::event::WindowEvent) -> bool {
+        // The hitch log keeps the events that move or hide the window: they belong on the line of the
+        // frame they fell in (cursor moves and keys do not).
+        if let Some(text) = crate::hitch::window_note(event) {
+            self.hitch.note(|| text);
+        }
         // egui sees events first while the panels are open; hidden = free.
         self.debug.on_event(ctx.window(), event)
     }
@@ -2905,6 +2999,21 @@ impl App for Runner {
         let exit = self.sim.stop().clone();
         let tick_ms = Samples(self.sim.tick_ms_since(0));
         println!("exit after {} ticks", exit.ticks);
+        // The hitch log (WP1.16a): the totals first, then the file `--hitch-log` asked for.
+        let sim_totals = self.sim_totals(&exit, &tick_ms);
+        println!("summary: {}", self.hitch.summary(&sim_totals));
+        if let Some(path) = &self.options.hitch_log {
+            match self.hitch.write(path, &sim_totals) {
+                Ok(()) => println!(
+                    "hitch log: wrote {} ({} frames over {} ms described)",
+                    path.display(),
+                    self.hitch.lines().len(),
+                    crate::hitch::LOG_MS
+                ),
+                Err(e) => eprintln!("sf_game: hitch log: {e}"),
+            }
+        }
+        self.write_record(&exit, None);
         println!("summary: fight sounds {:?}", self.fx_sound.totals());
         // Summary for the stress test (software rendering: no fps claim).
         println!(

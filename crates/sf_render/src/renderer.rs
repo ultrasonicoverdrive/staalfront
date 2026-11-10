@@ -212,6 +212,9 @@ pub struct Renderer {
     /// Time the last [`Renderer::render_with`] spent waiting for the swap
     /// chain to hand out an image (the display pacing it, not CPU work).
     acquire_wait: std::time::Duration,
+    /// How long the last frame's `queue.submit` and `queue.present` took (WP1.16a, the hitch log).
+    submit_time: std::time::Duration,
+    present_time: std::time::Duration,
     /// An offscreen renderer holds the process's one headless slot
     /// ([`HeadlessSlot`]). **Keep this the last field**: fields drop in
     /// order, so the slot is released only after the device and every
@@ -560,6 +563,8 @@ impl Renderer {
             capture_requested: false,
             captured: None,
             acquire_wait: std::time::Duration::ZERO,
+            submit_time: std::time::Duration::ZERO,
+            present_time: std::time::Duration::ZERO,
             headless_slot: None,
         }
     }
@@ -622,6 +627,13 @@ impl Renderer {
     /// from a frame's wall time it leaves the CPU work.
     pub fn last_acquire_wait(&self) -> std::time::Duration {
         self.acquire_wait
+    }
+
+    /// How long the last frame's `queue.submit` took, and its `queue.present` (zero when the frame
+    /// was not presented). With [`Renderer::last_acquire_wait`] these are the parts of a frame that
+    /// can wait for the display or the driver (the hitch log, WP1.16a).
+    pub fn last_submit_and_present(&self) -> (std::time::Duration, std::time::Duration) {
+        (self.submit_time, self.present_time)
     }
 
     /// GPU buffers created after start-up so far.
@@ -743,6 +755,9 @@ impl Renderer {
         &mut self,
         overlay: impl FnOnce(&mut FrameTarget),
     ) -> Result<(), RenderError> {
+        self.acquire_wait = std::time::Duration::ZERO;
+        self.submit_time = std::time::Duration::ZERO;
+        self.present_time = std::time::Duration::ZERO;
         let _ = self.poll_shader_reload();
         self.prepare_frame();
         let mut encoder = self
@@ -806,14 +821,19 @@ impl Renderer {
         if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
             timer.end(&mut encoder, slot);
         }
+        let submitting = std::time::Instant::now();
         self.gpu
             .queue
             .submit(extra.into_iter().chain([encoder.finish()]));
+        self.submit_time = submitting.elapsed();
         if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
             timer.submitted(slot, self.gpu_frame_tag);
         }
+        self.present_time = std::time::Duration::ZERO;
         if let Some(frame) = frame {
+            let presenting = std::time::Instant::now();
             self.gpu.queue.present(frame);
+            self.present_time = presenting.elapsed();
         }
         if let Some(readback) = readback {
             let bgra = matches!(
