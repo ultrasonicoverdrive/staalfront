@@ -20,5 +20,5 @@
     // exactly its price in all (docs/rules/production.md). It lives here, with the other numbers
     // of how things are built, and is applied to the building table and the production table
     // when the world gets its production rules. 1 / 1 gives the data's own build times.
-    build_speed: (num: 1, den: 1),
+    build_speed: (num: 3, den: 2),
 )
