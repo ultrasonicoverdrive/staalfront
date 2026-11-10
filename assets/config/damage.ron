@@ -20,7 +20,8 @@
         damaged_suffix: "_damaged",
         heavy_suffix: "_heavily_damaged",
     ),
-    // The smoke and fire. `smoke_effect` and `fire_effect` name entries of effects.ron; the rates are
+    // The smoke and fire. `smoke_effect` and `fire_effect` (a structure's: `structure_smoke_effect` and
+    // `structure_fire_effect`) name entries of effects.ron; the rates are
     // puffs per second and source. A model's own anchor (a node whose name starts with `smoke_anchor`
     // or `fire_anchor`, set v4 has `fx_smoke_0` and `fx_fire_0` on every structure) gives the place;
     // without one the rule of `fallback` does. Heavily damaged objects give off smoke and fire,
@@ -32,6 +33,13 @@
         fire_anchor: "fx_fire",
         damaged: (smoke_per_s: 4.0, fire_per_s: 0.0),
         heavy: (smoke_per_s: 8.0, fire_per_s: 7.0),
+        // A structure (an object with a footprint) burns bigger than a mobile one (WP6.8b): its own, larger
+        // puffs and a somewhat higher rate. PLACEHOLDERS for Tijmen to tune; the mobile objects above keep
+        // their effect and rates as WP6.8 shipped them.
+        structure_smoke_effect: "damage_smoke_structure",
+        structure_fire_effect: "damage_fire_structure",
+        structure_damaged: (smoke_per_s: 5.0, fire_per_s: 0.0),
+        structure_heavy: (smoke_per_s: 10.0, fire_per_s: 10.0),
         // Puffs start in a disc of this radius around an anchor, metres, this much above it (a puff
         // is a disc facing the screen and is depth-tested: on the surface of a roof half of it
         // would be cut off).
