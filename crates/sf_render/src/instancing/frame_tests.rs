@@ -1415,7 +1415,18 @@ fn a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale
         .with_structure_scale(structure_scale);
     for (m, k) in [(unit, unit_scale), (structure, structure_scale)] {
         let mut inst = instancer_with(style.clone(), &[m]);
+        // The model itself is drawn at its scale: the instance matrix against one at true size.
+        inst.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0).with_model_scale(1.0),
+            flat,
+        );
+        let true_size = inst.instances(MeshKind::Cube)[0].model[0][0];
         inst.build_frame(&view, flat);
+        let drawn = inst.instances(MeshKind::Cube)[0].model[0][0];
+        assert!(
+            (drawn - k * true_size).abs() < 1e-4,
+            "{drawn} vs {k} x {true_size}"
+        );
         let mut sizes = Vec::new();
         inst.visit_drawn(|_| true, |d| sizes.push(d.size));
         assert_eq!(sizes.len(), 1);
