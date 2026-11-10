@@ -129,7 +129,14 @@ fn write_record(exit: &SimExit, cells: (u32, u32), dir: &Path, name: &str) -> Pa
     let file = matchplay::file_path(None, &assets);
     let (text, _) = record::render(exit, cells, &assets, &file).unwrap();
     let path = dir.join(name);
-    std::fs::write(&path, text).unwrap();
+    std::fs::write(&path, &text).unwrap();
+    // `SF_RECORD_KEEP=FILE` keeps the record of the full match for a profiler or `sf_game --replay`.
+    if name == "play.ron"
+        && let Some(out) = std::env::var_os("SF_RECORD_KEEP")
+        && text.contains("ticks: 7000")
+    {
+        std::fs::write(out, &text).unwrap();
+    }
     path
 }
 

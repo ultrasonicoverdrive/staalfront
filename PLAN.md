@@ -350,6 +350,11 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 
      And Tijmen does not feel it stutter. A p99 frame time is not the criterion with vsync on, because a quiet second
      already sits at about 17 ms. The laptop play is Tijmen's; the PR gives him the command.
+   *10-11-2026 (orchestrator): **WP1.16 is split.** **WP1.16a** builds the measuring half: (a) the hitch log with `--hitch-log`, (b) the
+   command record with `--record` and its replay test, and from (c) the suspects that can be measured in the container (1, 2, 4) with the
+   fixes that a measurement proves; it also records the swap-chain acquire outcome and the `on_resize` time, and reuses the minimap texture
+   (confirmed waste). **WP1.16b** fixes what Tijmen's hitch-log file from the laptop shows (suspects 3 and 5 and anything new). Rules:
+   `docs/rules/hitch_log.md`.*
 4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision

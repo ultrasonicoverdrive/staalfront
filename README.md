@@ -133,6 +133,11 @@ the instance-buffer pre-allocation off (follow-up 14). `--shots <dir>` (three
 screenshots) is the only mode that lets the window be copied out; `--bench`
 leaves the surface as it is.
 
+**Hitch log and command record** (WP1.16a, [`docs/rules/hitch_log.md`](docs/rules/hitch_log.md)): `sf_game --match --hitch-log hitch.json
+--record play.ron` writes, when the game ends, every frame over 50 ms with its parts (and the exit summary counts the frames over
+25 ms) and the commands of the play as an `sf_headless` scenario (`sf_headless play.ron`); `--replay play.ron` feeds a record back into the running
+game.
+
 **`--fight`** (WP5.6b) adds an armed skirmish to the crowd: `--bench --fight` is the combat benchmark of M0c (the same
 camera path and the same 5,000 units, plus shots, hits, deaths, wrecks and smoke where the path looks), and `--fight --shots <dir>
 --shots-tick 330` takes the screenshots of it. How to run M0c and what to read in its JSON: [`docs/bench/README.md`](docs/bench/README.md).
