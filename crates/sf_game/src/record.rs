@@ -74,7 +74,9 @@ pub fn write(
 
 /// Where the record of a game that a restart ended goes: `FILE` with `.restartN` before the extension.
 pub fn restart_path(path: &Path, n: u32) -> PathBuf {
-    let stem = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+    let stem = path
+        .file_stem()
+        .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
     let name = match path.extension() {
         Some(ext) => format!("{stem}.restart{n}.{}", ext.to_string_lossy()),
         None => format!("{stem}.restart{n}"),
@@ -105,6 +107,9 @@ mod tests {
             restart_path(Path::new("out/play.ron"), 2),
             Path::new("out/play.restart2.ron")
         );
-        assert_eq!(restart_path(Path::new("play"), 1), Path::new("play.restart1"));
+        assert_eq!(
+            restart_path(Path::new("play"), 1),
+            Path::new("play.restart1")
+        );
     }
 }

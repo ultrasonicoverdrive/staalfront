@@ -80,8 +80,10 @@ pub fn load_game(
     let text = std::fs::read_to_string(&match_path)
         .map_err(|e| invalid(format!("{}: {e}", match_path.display())))?;
     let def = MatchDef::from_ron(&text).map_err(|e| invalid(e.to_string()))?;
-    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|_| UnitDefs::embedded());
-    def.check(&defs, cells).map_err(|e| invalid(e.to_string()))?;
+    let defs =
+        UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|_| UnitDefs::embedded());
+    def.check(&defs, cells)
+        .map_err(|e| invalid(e.to_string()))?;
     let map_dir = assets.join("maps").join(&def.map);
     let map = Map::load(&map_dir).map_err(|e| invalid(format!("{}: {e}", map_dir.display())))?;
     let layer = map
@@ -96,7 +98,8 @@ pub fn load_game(
             cells.1
         )));
     }
-    let terrain_defs = sf_bridge::terrain_defs(&TerrainTypes::embedded(), &MovementCosts::embedded());
+    let terrain_defs =
+        sf_bridge::terrain_defs(&TerrainTypes::embedded(), &MovementCosts::embedded());
     let terrain = Terrain::from_layer(cells.0, cells.1, layer.ids(), &terrain_defs)
         .map_err(|e| invalid(e.to_string()))?;
     let commands = sf_bridge::match_commands(&def, &defs).map_err(invalid)?;

@@ -294,7 +294,13 @@ impl HitchLog {
     /// Closes the draw lap: the whole draw call took the time since the last lap, of which the swap
     /// chain wait, the submit and the present are given (the renderer measures them); the rest was
     /// recording the passes.
-    pub fn lap_draw(&mut self, now: Instant, acquire: Duration, submit: Duration, present: Duration) {
+    pub fn lap_draw(
+        &mut self,
+        now: Instant,
+        acquire: Duration,
+        submit: Duration,
+        present: Duration,
+    ) {
         let total = now.duration_since(self.lap_at).as_secs_f64() * 1e3;
         self.lap_at = now;
         let ms = |d: Duration| d.as_secs_f64() * 1e3;
@@ -458,7 +464,11 @@ pub fn window_note(event: &sf_engine::winit::event::WindowEvent) -> Option<Strin
         W::Focused(on) => Some(format!("focus {}", if *on { "gained" } else { "lost" })),
         W::Occluded(on) => Some(format!(
             "window {}",
-            if *on { "occluded (hidden)" } else { "visible again" }
+            if *on {
+                "occluded (hidden)"
+            } else {
+                "visible again"
+            }
         )),
         W::ScaleFactorChanged { scale_factor, .. } => {
             Some(format!("scale factor now {scale_factor}"))
@@ -520,7 +530,11 @@ mod tests {
         let t = log.totals();
         assert_eq!(t.frames, 6);
         assert_eq!((t.over_hitch, t.over_log), (4, 2), "{t:?}");
-        let ms: Vec<u64> = log.lines().iter().map(|l| l.frame_ms.round() as u64).collect();
+        let ms: Vec<u64> = log
+            .lines()
+            .iter()
+            .map(|l| l.frame_ms.round() as u64)
+            .collect();
         assert_eq!(ms, vec![51, 200]);
         assert!((t.longest_ms - 200.0).abs() < 1e-6);
     }
@@ -578,7 +592,10 @@ mod tests {
         assert_eq!(first.last().unwrap(), "... and 76 more events");
         log.end_frame(at(begun, 101), 0);
         log.begin_frame(at(begun, 200), no_ticks);
-        assert!(log.lines()[1].events.is_empty(), "the events were handed over");
+        assert!(
+            log.lines()[1].events.is_empty(),
+            "the events were handed over"
+        );
     }
 
     #[test]
@@ -590,7 +607,11 @@ mod tests {
         for i in 0..(WARMUP_FRAMES as u64 + 40) {
             log.begin_frame(at(begun, t), no_ticks);
             log.end_frame(at(begun, t + 1), 0);
-            t += if i == 3 || i == WARMUP_FRAMES as u64 + 10 { 90 } else { 17 };
+            t += if i == 3 || i == WARMUP_FRAMES as u64 + 10 {
+                90
+            } else {
+                17
+            };
         }
         let c = log.totals();
         assert_eq!((c.over_hitch, c.over_hitch_after_warmup), (2, 1), "{c:?}");
@@ -615,7 +636,10 @@ mod tests {
         assert!(value["hitches"][0]["cpu_ms"].is_null() || cfg!(windows));
         assert_eq!(value["cpu_measured"], cfg!(windows));
         let text = log.summary(&sim);
-        assert!(text.contains("4 frames") || text.contains("3 frames"), "{text}");
+        assert!(
+            text.contains("4 frames") || text.contains("3 frames"),
+            "{text}"
+        );
         assert!(text.contains("late snapshots 3"), "{text}");
     }
 
@@ -624,8 +648,14 @@ mod tests {
         use sf_engine::winit::dpi::{PhysicalPosition, PhysicalSize};
         use sf_engine::winit::event::WindowEvent as W;
         let note = |e: W| window_note(&e);
-        assert_eq!(note(W::Resized(PhysicalSize::new(1920, 991))).unwrap(), "resized 1920x991");
-        assert_eq!(note(W::Moved(PhysicalPosition::new(-8, 12))).unwrap(), "moved to -8,12");
+        assert_eq!(
+            note(W::Resized(PhysicalSize::new(1920, 991))).unwrap(),
+            "resized 1920x991"
+        );
+        assert_eq!(
+            note(W::Moved(PhysicalPosition::new(-8, 12))).unwrap(),
+            "moved to -8,12"
+        );
         assert_eq!(note(W::Focused(false)).unwrap(), "focus lost");
         assert_eq!(note(W::Occluded(true)).unwrap(), "window occluded (hidden)");
         assert_eq!(note(W::CursorLeft { device_id: None }), None);
@@ -638,7 +668,10 @@ mod tests {
         assert_eq!(filetime_duration(10_000_000, 0), Duration::from_secs(1));
         assert_eq!(filetime_duration(1, 0), Duration::from_nanos(100));
         // The high half counts 2^32 units: 429.4967296 s.
-        assert_eq!(filetime_duration(0, 1), Duration::from_nanos(429_496_729_600));
+        assert_eq!(
+            filetime_duration(0, 1),
+            Duration::from_nanos(429_496_729_600)
+        );
     }
 
     /// What a quiet frame costs: the bookkeeping of `begin_frame`, four laps and `end_frame`, per frame,

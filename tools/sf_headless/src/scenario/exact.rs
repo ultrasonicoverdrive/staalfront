@@ -392,7 +392,10 @@ pub fn render_recording(
     out.push_str("Scenario(\n");
     out.push_str(&format!("    name: {},\n", ron::to_string(name)?));
     out.push_str(&format!("    seed: {seed},\n"));
-    out.push_str(&format!("    map: (width: {}, height: {}),\n", map.0, map.1));
+    out.push_str(&format!(
+        "    map: (width: {}, height: {}),\n",
+        map.0, map.1
+    ));
     out.push_str(&format!("    game: Some({}),\n", ron::to_string(game)?));
     out.push_str(&format!("    ticks: {ticks},\n"));
     out.push_str("    recorded: [\n");

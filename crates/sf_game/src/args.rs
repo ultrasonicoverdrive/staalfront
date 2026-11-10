@@ -723,7 +723,10 @@ mod tests {
 
     #[test]
     fn record_and_hitch_log_take_a_file_and_the_record_needs_a_match() {
-        let o = parse(Preset::Game, "--match --record play.ron --hitch-log hitch.json");
+        let o = parse(
+            Preset::Game,
+            "--match --record play.ron --hitch-log hitch.json",
+        );
         assert_eq!(o.record, Some(PathBuf::from("play.ron")));
         assert_eq!(o.hitch_log, Some(PathBuf::from("hitch.json")));
         assert!(o.warnings.is_empty(), "{:?}", o.warnings);
