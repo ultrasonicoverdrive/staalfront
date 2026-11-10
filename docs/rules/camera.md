@@ -114,11 +114,28 @@ only the distance of a given zoom changed. `terrain_lod_far` is kept at the old 
 in its test, and a new golden `terrain_lod_far_margin_320.png` pins the new framing. `sun_facing_slopes...` uses
 zoom 0.5 instead of 0.55 (the same eye distance as before). No `sf_sim` golden, `.expected` file or checksum moved.
 
+Fix round 2 (`far_margin` 1.0): measured first, with `far_margin: 0.25` and `start_zoom: 0.35` back in `camera.ron` every
+image test of `sf_render` matched the round-1 goldens. Re-pinned because they are about the framing: `camera_mid`,
+`camera_far`, `camera_cursor_zoom` (the wheel test now takes five stages of six notches to reach the closest zoom),
+`terrain_lod_far_margin` (the map share is 0.052 of the view, the bound is 0.03 to 0.15). Kept at the round-1 framing by
+`far_margin: 0.25` in their test cameras, because they test shapes, colours, crowds and terrain materials:
+`instancing_screenshot`, `terrain_screenshot`, `glb_screenshot`, and `selected_icons_are_highlighted...` in
+`selection_screenshot`. `fog_screenshot`'s whole-map view uses zoom 0.77 (the distance 0.9 had). Logic tests that
+placed units for the old pixel scale were spread (`frame_tests`: icon picking, rectangle). No `sf_sim` golden moved.
+
 ## Not done
 
 * A soldier is still 1 to 2 px as a model at the farthest zoom, cap or not; whether infantry needs its own scale is
   a question for Tijmen.
-* The frustum culling of the tiles still uses the true size: a model scaled 1.6x at the very edge of the screen can
+* The frustum culling of the tiles still uses the true size: a model scaled 2.5x at the very edge of the screen can
   be culled a little early (the tile margin covers most of it).
 * The sound still attenuates with the zoom by `audio.ron` as before (untouched, as decided).
 * No GTX 1650 measurement: see the pull request for the container numbers.
+* Fix round 2 performance (container, llvmpipe, release, 1,000 crowd units at the farthest zoom, six alternating runs against
+  8207a4f): median frame 17.4 ms against 23.2 ms; terrain 1,024 of 1,024 chunks, all at the coarsest level, 9,984 triangles in one
+  draw call, in both; with the icons off 13.4 to 14.9 ms. No cliff, so no distance LOD was added. Checked at the new distance:
+  near/far planes (`near_far_cover_the_margin_view_at_the_farthest_zoom`), no terrain holes and the LOD holds
+  (`the_farthest_zoom_with_its_margin_has_no_holes_and_the_lod_holds`, re-pinned), fog and the minimap (`fog_screenshot`,
+  screenshots), pitch still follows the zoom.
+* With the icons off the effects are not faded by the band (ramp 0): particles are drawn at the farthest zoom too.
+* The icon toggle is not saved between runs.

@@ -2778,3 +2778,11 @@ fixed, delete the entry in the same PR.
     Tijmen's laptop or the M0 benchmarks. Images that use the default camera above zoom 0 were re-pinned (cause measured: all match again with
     `far_margin: 0`); no `sf_sim` pin moved. Gap: at the very farthest zoom the opaque icon hides the model under it; a soldier is 1 to 2 px as
     a model at 1280 x 720.
+    **Fix round 2 (10-11-2026)**, after Tijmen played again ("much farther out, they turn into icons far too soon"): `far_margin` 1.0 (a full
+    map size of margin), the icons only from zoom 0.95 and at most 40 % opaque, the models up to 2.5 times (the cap the file may set),
+    `start_zoom` 0.30 (the same start distance as before), the key K (`ToggleIcons`) switches the icons off, and a death flash keeps at
+    least 6 px (`effects.ron` `strategic_flash_min_px`; at true size it was 2 px from the new distance). Measured (llvmpipe, release, 1,000
+    crowd units at the farthest zoom, six alternating runs against 8207a4f, load about 2.2): median frame 17.4 ms against 23.2 ms (the units
+    are half as big on the screen), terrain 1,024 of 1,024 chunks at the coarsest level, 9,984 triangles, one draw call, the same in both;
+    icons off 13.4 to 14.9 ms. No cliff, no distance LOD added. The scaled structure boxes of the M1 base now overlap in 8 pairs, at worst
+    13.0 m (a measured bound in the test).

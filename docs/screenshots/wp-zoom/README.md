@@ -27,3 +27,22 @@ make neighbouring structures overlap.
 
 `m1_zoom0.93_icon_fading_in.jpg`, `m1_zoom1.00_farthest.jpg` and `crowd1000_zoom1.00_farthest.jpg` were made again in fix round 1
 (10-11-2026) with the icon opacity cap of 60 % (`zoom.icons_max_alpha`), same commands and window.
+
+## Fix round 2 (10-11-2026): much farther, icons much later
+
+Same build kind, window and machine; `--shots dir --shots-zooms ...` of the real renderer (the game's own picture, no
+grab), at tick 100 to 110. The farthest zoom now shows the map plus a full map size of margin on every side
+(`far_margin` 1.0), the icons come only from zoom 0.95 and at most 40 % opaque, the models grow up to 2.5 times.
+"Icons off" is `--unit-display models`, the same picture as the K toggle off (`Blend::MODELS`).
+
+| File | What it shows |
+|---|---|
+| `r2_m1_zoom1.00_farthest_icons_on.jpg` | M1 at the new farthest zoom: the 384 m map is about 225 px of the 1280 (a third of the view left of the sidebar), shroud black, the margin clear colour; the construction centre is drawn 2.5 times its size with its icon over it at 40 % |
+| `r2_m1_zoom1.00_farthest_icons_off.jpg` | The same with the icons off: the model alone |
+| `r2_m1_zoom0.90_no_icons_yet.jpg` | Zoom 0.90: no icon at all yet (the band starts at 0.95), the model at about 2.3 times |
+| `r2_crowd1000_zoom1.00_farthest.jpg` | 1,000 crowd units at the new farthest zoom: the models with the 40 % icons over them, 55 fps in the top bar |
+| `r2_sandbox59_zoom1.00_farthest.jpg` | The sandbox's 59 units at the new farthest zoom: the two sides read as coloured clusters; single soldiers are dots |
+
+Honest reading: on M1 the farthest view is mostly margin, as accepted in the decision (bigger maps need it). A
+structure is about 18 px drawn at the cap; vehicles a few pixels; infantry is a dot either way (no separate scale,
+left for Tijmen to judge on his laptop).
