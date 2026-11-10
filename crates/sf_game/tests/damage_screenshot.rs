@@ -145,16 +145,27 @@ impl Scene {
     /// The player as WP6.8 shipped it: structures burn with the vehicle effects and rates (the table
     /// with the structure entries pointed at the mobile ones). The baseline of "bigger than before".
     fn vehicle_fire_player(&self) -> FxPlayer {
-        let table = Damage::parse(
-            &EMBEDDED_DAMAGE
-                .replace(
-                    "structure_smoke_effect: \"damage_smoke_structure\"",
-                    "structure_smoke_effect: \"damage_smoke\"",
-                )
-                .replace(
-                    "structure_fire_effect: \"damage_fire_structure\"",
-                    "structure_fire_effect: \"damage_fire\"",
-                )
+        self.baseline_player(true)
+    }
+
+    /// The structure rates with the vehicle effects: isolates the choice of effect from the higher
+    /// rates (a structure that got the vehicle effect would give exactly this light).
+    fn vehicle_effect_player(&self) -> FxPlayer {
+        self.baseline_player(false)
+    }
+
+    fn baseline_player(&self, vehicle_rates: bool) -> FxPlayer {
+        let mut text = EMBEDDED_DAMAGE
+            .replace(
+                "structure_smoke_effect: \"damage_smoke_structure\"",
+                "structure_smoke_effect: \"damage_smoke\"",
+            )
+            .replace(
+                "structure_fire_effect: \"damage_fire_structure\"",
+                "structure_fire_effect: \"damage_fire\"",
+            );
+        if vehicle_rates {
+            text = text
                 .replace(
                     "structure_damaged: (smoke_per_s: 5.0",
                     "structure_damaged: (smoke_per_s: 4.0",
@@ -162,9 +173,9 @@ impl Scene {
                 .replace(
                     "structure_heavy: (smoke_per_s: 10.0, fire_per_s: 10.0)",
                     "structure_heavy: (smoke_per_s: 8.0, fire_per_s: 7.0)",
-                ),
-        )
-        .expect("the baseline table");
+                );
+        }
+        let table = Damage::parse(&text).expect("the baseline table");
         FxPlayer::with_damage(Effects::embedded(), &self.defs, table).expect("the baseline player")
     }
 
@@ -206,7 +217,22 @@ impl Scene {
         windows: &[[u32; 4]],
     ) -> Vec<usize> {
         let baseline = self.vehicle_fire_player();
-        let real = std::mem::replace(&mut self.fx, baseline);
+        self.glow_with(baseline, r, cam, ticks, frames, every, windows)
+    }
+
+    /// [`Self::glow_over`] with `player`, after `ticks` ticks; the real player is put back afterwards.
+    #[allow(clippy::too_many_arguments)]
+    fn glow_with(
+        &mut self,
+        player: FxPlayer,
+        r: &mut Renderer,
+        cam: &Camera,
+        ticks: u32,
+        frames: u32,
+        every: u32,
+        windows: &[[u32; 4]],
+    ) -> Vec<usize> {
+        let real = std::mem::replace(&mut self.fx, player);
         for _ in 0..ticks {
             self.tick(cam);
         }
@@ -270,6 +296,8 @@ impl Scene {
             .get(tank)
             .and_then(|s| s.movement_class)
             .expect("a tank has a movement class");
+        // A structure has a cell of its footprint; a mobile target (the tank) falls back to the cell
+        // under its position.
         let at = self.world.cell_of(target).unwrap_or_else(|| {
             let (x, y) = self
                 .world
@@ -538,7 +566,7 @@ fn at_start_zoom(
     plant: EntityId,
     stage: Stage,
     name: &str,
-) -> (usize, usize, usize) {
+) -> (usize, usize, usize, usize) {
     let v = scene.world.get(plant).unwrap();
     let focus = sf_math::render_bridge::vec2_cells_to_metres(v.pos);
     let cam = scene.camera(CameraConfig::default().start_zoom, focus);
@@ -571,10 +599,12 @@ fn at_start_zoom(
     let near = around(fire_at, 40.0);
     let glow = scene.glow_over(r, &cam, 6, 7, &[near])[0];
     let old_glow = scene.baseline_glow_over(r, &cam, 80, 6, 7, &[near])[0];
+    let effect_only = scene.vehicle_effect_player();
+    let rates_glow = scene.glow_with(effect_only, r, &cam, 80, 6, 7, &[near])[0];
     println!(
-        "{name} at start zoom: effects {effects} px, light near the fire anchor {glow} px (vehicle fire: {old_glow} px)"
+        "{name} at start zoom: effects {effects} px, light near the fire anchor {glow} px (vehicle fire: {old_glow} px, structure rates with the vehicle effect: {rates_glow} px)"
     );
-    (effects, glow, old_glow)
+    (effects, glow, old_glow, rates_glow)
 }
 
 #[test]
@@ -668,7 +698,7 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             .expect("the model has fx_smoke_0");
         assert!(changed(&damaged_plain, &damaged, around(at, 120.0)) > 50);
         // Where the player looks: the start zoom of the game.
-        let (smoke, glow, _) = at_start_zoom(
+        let (smoke, glow, _, _) = at_start_zoom(
             &mut scene,
             &mut r,
             plant,
@@ -742,7 +772,7 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             "{faction}: damaged is smoke, no light ({glow_damaged})"
         );
 
-        let (smoke, glow, old_glow) = at_start_zoom(
+        let (smoke, glow, old_glow, rates_glow) = at_start_zoom(
             &mut scene,
             &mut r,
             plant,
@@ -754,6 +784,12 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
             "{faction}: smoke and fire at the start zoom ({smoke})"
         );
         assert!(glow > 200, "{faction}: fire at the start zoom ({glow})");
+        // The effect itself, not only its rates: the same rates with the vehicle effect give less light
+        // (measured: 1.5 times Meridian, 1.8 Veyran; with the effects swapped 1.18).
+        assert!(
+            glow * 10 > rates_glow * 13,
+            "{faction}: the structure effect, not only its rates, makes the fire bigger ({glow} against {rates_glow})"
+        );
         assert!(
             glow * 10 > old_glow * 14,
             "{faction}: the structure fire is clearly bigger at the start zoom ({glow} against {old_glow})"
