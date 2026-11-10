@@ -135,6 +135,38 @@ mod tests {
         let s = ProductionSettings::embedded();
         assert_eq!(s.queue_limit, 5);
         assert_eq!(s.exit_radius, 4);
+        // WP6.11: one and a half times as fast.
+        assert_eq!(s.build_speed, BuildSpeedSetting { num: 3, den: 2 });
+    }
+
+    #[test]
+    fn a_file_without_the_build_speed_means_one_over_one() {
+        let s = ProductionSettings::from_ron("(queue_limit: 5, exit_radius: 4)").unwrap();
+        assert_eq!(s.build_speed, BuildSpeedSetting { num: 1, den: 1 });
+    }
+
+    #[test]
+    fn a_build_speed_out_of_bounds_is_refused() {
+        let ok = |n: u32, d: u32| {
+            ProductionSettings::from_ron(&format!(
+                "(queue_limit: 5, exit_radius: 4, build_speed: (num: {n}, den: {d}))"
+            ))
+        };
+        assert!(ok(3, 2).is_ok() && ok(1, 1).is_ok() && ok(2, 3).is_ok());
+        assert!(ok(MAX_BUILD_SPEED_RATIO, 1).is_ok() && ok(1, MAX_BUILD_SPEED_RATIO).is_ok());
+        for (n, d) in [(0, 1), (1, 0), (101, 100), (1, 101), (9, 2), (2, 9)] {
+            assert!(
+                matches!(ok(n, d), Err(ProductionError::Invalid(_))),
+                "{n}/{d}"
+            );
+        }
+        // A negative or fractional term is not RON for a whole number.
+        assert!(matches!(
+            ProductionSettings::from_ron(
+                "(queue_limit: 5, exit_radius: 4, build_speed: (num: -3, den: 2))"
+            ),
+            Err(ProductionError::Ron(_))
+        ));
     }
 
     #[test]

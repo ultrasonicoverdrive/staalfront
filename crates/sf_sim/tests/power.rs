@@ -119,6 +119,10 @@ fn entry(
 
 /// The world: power with the given floor, production, money (`credits` each).
 fn world(floor: u32, credits: u64) -> World {
+    world_at(floor, credits, sf_sim::BuildSpeed::FULL)
+}
+
+fn world_at(floor: u32, credits: u64, speed: sf_sim::BuildSpeed) -> World {
     let units = UnitTable::new(vec![
         structure(ANCHOR, 2, 2),
         structure(BARRACKS, 2, 3),
@@ -191,7 +195,7 @@ fn world(floor: u32, credits: u64) -> World {
             ProductionRules {
                 queue_limit: 5,
                 exit_radius: 4,
-                build_speed: sf_sim::BuildSpeed::FULL,
+                build_speed: speed,
             },
             table,
         )
@@ -242,7 +246,11 @@ fn at(w: &World, cell: (u32, u32)) -> EntityId {
 /// drains (-100 each); player 1: anchor, a plant and a barracks (enough power). Two steps later the
 /// totals are counted.
 fn base(floor: u32, plants: u32, drains: u32) -> World {
-    let mut w = world(floor, 5000);
+    base_at(floor, plants, drains, sf_sim::BuildSpeed::FULL)
+}
+
+fn base_at(floor: u32, plants: u32, drains: u32, speed: sf_sim::BuildSpeed) -> World {
+    let mut w = world_at(floor, 5000, speed);
     place(&mut w, P0, ANCHOR, (4, 4));
     place(&mut w, P1, ANCHOR, (50, 50));
     place(&mut w, P0, BARRACKS, (10, 10));
@@ -310,6 +318,24 @@ fn a_shortage_slows_a_factory_and_the_price_is_still_paid_exactly() {
     // Player 1 has enough power and builds at the normal 14 ticks.
     let theirs = at(&w, (40, 40));
     assert_eq!(ticks_to_make_a_rifleman(&mut w, P1, theirs, 100), 14);
+}
+
+/// WP6.11: the shortage slows what the build speed has already sped up. The rifleman is 14 build
+/// ticks in the table, 10 at 3 / 2 (14 * 2 / 3 = 9.33, rounded up); in the shortage of 384
+/// thousandths a tick that is 10 000 thousandths at 384: 27 ticks (26 x 384 = 9 984 is not enough),
+/// and the price is still paid exactly.
+#[test]
+fn a_shortage_slows_the_build_speed_on_top_of_it() {
+    let speed = sf_sim::BuildSpeed { num: 3, den: 2 };
+    let mut w = base_at(250, 1, 2, speed);
+    assert_eq!(w.production_speed_permille(P0), 384);
+    let barracks = at(&w, (10, 10));
+    let spent = w.credits_spent(P0);
+    assert_eq!(ticks_to_make_a_rifleman(&mut w, P0, barracks, 100), 27);
+    assert_eq!(w.credits_spent(P0) - spent, 70);
+    // Player 1 has enough power: the scaled 10 ticks.
+    let theirs = at(&w, (40, 40));
+    assert_eq!(ticks_to_make_a_rifleman(&mut w, P1, theirs, 100), 10);
 }
 
 #[test]

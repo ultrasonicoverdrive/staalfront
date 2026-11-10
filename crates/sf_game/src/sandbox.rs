@@ -606,9 +606,8 @@ mod tests {
     fn the_demo_base_makes_at_least_the_power_it_uses() {
         let (mut world, defs) = powered_world();
         schedule(&mut world, &defs);
-        // Everything is built (the longest build is 667 ticks at the shipped speed), the
-        // shortage of the first ticks slowed it a little.
-        for _ in 0..3000 {
+        // The sandbox places its structures complete (`PlaceStructure`), so a few ticks count the power.
+        for _ in 0..5 {
             world.step();
         }
         let refinery = defs
@@ -644,5 +643,89 @@ mod tests {
                 .count();
             assert_eq!(n, 1, "owner {owner}");
         }
+    }
+
+    /// WP6.11: a silo shot to zero by a weapon (not sold, not set to zero by hand) stops adding room:
+    /// the capacity of its owner falls by what it stored, at the next sync after it is destroyed.
+    #[test]
+    fn a_silo_destroyed_by_damage_lowers_the_capacity() {
+        let (world, defs) = world_for(256, 1);
+        let world = crate::playfield::with_buildings(world, &defs);
+        let world = crate::playfield::with_harvest(world, &defs);
+        let world = crate::playfield::with_storage(world, &defs);
+        let mut world = crate::playfield::with_combat(world, &defs);
+        let plan = schedule(&mut world, &defs);
+        assert_eq!(plan.skipped, 0);
+        world.step();
+        let mut taken = Taken(BTreeSet::new());
+        let silo_kind = Kind(defs.kind_of("ore_silo").unwrap());
+        let silo = world
+            .snapshot()
+            .iter()
+            .find(|v| v.owner == PlayerId(MERIDIAN) && v.kind == silo_kind)
+            .map(|v| v.id)
+            .expect("Meridian's silo");
+        let before = world.storage_capacity(PlayerId(MERIDIAN));
+        let silo_stores = u64::from(
+            sf_bridge::storage_capacities(&defs)
+                .iter()
+                .find(|&&(k, _)| k == silo_kind)
+                .unwrap()
+                .1,
+        );
+        assert!(before > silo_stores, "the refinery stores too: {before}");
+        // Six Veyran heavy tanks beside the silo (the base's defences kill fewer than that), all sent
+        // at it.
+        let at = world.cell_of(silo).unwrap();
+        let tank = Kind(defs.kind_of("heavy_tank").unwrap());
+        for _ in 0..6 {
+            let spot = find_unit(&world, &taken, (at.x as i32 + 5, at.y as i32)).unwrap();
+            taken.0.insert(spot);
+            send(
+                &mut world,
+                VEYRAN,
+                Command::SpawnUnit {
+                    kind: tank,
+                    pos: Vec2::new(
+                        Fx::from_int(spot.0) + Fx::HALF,
+                        Fx::from_int(spot.1) + Fx::HALF,
+                    ),
+                    owner: PlayerId(VEYRAN),
+                },
+            );
+            world.step();
+        }
+        let tanks: Vec<_> = world
+            .snapshot()
+            .iter()
+            .filter(|v| v.owner == PlayerId(VEYRAN) && v.kind == tank)
+            .map(|v| v.id)
+            .collect();
+        assert!(tanks.len() >= 6, "the tanks stand: {}", tanks.len());
+        send(
+            &mut world,
+            VEYRAN,
+            Command::Order {
+                ids: tanks,
+                order: sf_sim::Order::Attack(silo),
+                queued: false,
+            },
+        );
+        let mut gone = None;
+        for _ in 0..4000 {
+            world.step();
+            if gone.is_none() && world.hp_of(silo).is_none() {
+                gone = Some(world.tick().0);
+            }
+            if gone.is_some() {
+                break;
+            }
+        }
+        assert!(gone.is_some(), "the silo was destroyed by the tank");
+        world.step();
+        assert_eq!(
+            world.storage_capacity(PlayerId(MERIDIAN)),
+            before - silo_stores
+        );
     }
 }
