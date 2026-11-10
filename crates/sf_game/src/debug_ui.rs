@@ -54,6 +54,8 @@ pub struct HoveredUnit {
 pub struct UnitView {
     /// Opacity of the strategic icons drawn over the models (0 = none).
     pub icon_alpha: f32,
+    /// The weight of the effects (`1 - ramp` of the icon band, before the opacity cap).
+    pub effects_weight: f32,
     /// The factor the models are drawn larger by (1 = true size).
     pub model_scale: f32,
     /// The camera zoom (`0..=1`) where the icons start to fade in.
@@ -671,6 +673,7 @@ mod tests {
             },
             units: UnitView {
                 icon_alpha: 0.25,
+                effects_weight: 0.75,
                 model_scale: 1.25,
                 icons_from_zoom: 0.85,
                 zoom: 0.62,

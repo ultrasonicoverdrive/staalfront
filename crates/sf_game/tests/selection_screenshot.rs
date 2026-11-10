@@ -499,8 +499,10 @@ fn selected_icons_are_highlighted_and_the_others_are_not() {
         })
         .collect();
     assert!(
-        !far_enemies.is_empty(),
-        "some of the other side is clear of the selection"
+        2 * far_enemies.len() >= scene.enemy.len(),
+        "at least half of the other side is clear of the selection: {} of {}",
+        far_enemies.len(),
+        scene.enemy.len()
     );
     for id in far_enemies {
         assert_eq!(changed(&base, &img, icon(*id)), 0, "{id}");

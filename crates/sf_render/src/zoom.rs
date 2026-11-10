@@ -122,6 +122,9 @@ pub struct ZoomBands {
     pub model_scale_from: f32,
     /// The scale of the models at the farthest zoom (a cap: never more).
     pub model_scale_max: f32,
+    /// The most opaque the icons are ever drawn (`0 < cap <= 1`), so the model stays
+    /// visible through them. Only the drawn opacity: the switches follow the ramp.
+    pub icons_max_alpha: f32,
 }
 
 impl ZoomBands {
@@ -139,9 +142,9 @@ impl ZoomBands {
     }
 
     /// The picture at `zoom`: models always at full weight, the icons as an overlay
-    /// of [`ZoomBands::icon_alpha`].
+    /// on the ramp [`ZoomBands::icon_alpha`], drawn at most `icons_max_alpha` opaque.
     pub fn blend(&self, zoom: f32) -> Blend {
-        Blend::overlay(self.icon_alpha(zoom))
+        Blend::overlay_capped(self.icon_alpha(zoom), self.icons_max_alpha)
     }
 
     fn validate(&self) -> Result<(), CameraSettingsError> {
@@ -157,6 +160,12 @@ impl ZoomBands {
         }
         if !(self.model_scale_max.is_finite() && (1.0..=4.0).contains(&self.model_scale_max)) {
             return bad("zoom.model_scale_max must be between 1 and 4");
+        }
+        if !(self.icons_max_alpha.is_finite()
+            && self.icons_max_alpha > 0.0
+            && self.icons_max_alpha <= 1.0)
+        {
+            return bad("zoom.icons_max_alpha must be above 0 and at most 1");
         }
         Ok(())
     }
@@ -249,7 +258,8 @@ mod tests {
                 icons_from: 0.85,
                 icons_full: 1.0,
                 model_scale_from: 0.55,
-                model_scale_max: 1.6
+                model_scale_max: 1.6,
+                icons_max_alpha: 0.6
             }
         );
         // The old Rust defaults are the same numbers, now from the file.
@@ -298,11 +308,41 @@ mod tests {
             assert_eq!(blend.model(), 1.0, "zoom {zoom}");
             assert!(blend.models_drawn());
             assert!((0..64).all(|k| blend.model_at(k % 8, k / 8)), "zoom {zoom}");
-            assert_eq!(blend.icon(), b.icon_alpha(zoom));
+            assert_eq!(blend.ramp(), b.icon_alpha(zoom));
+            assert!((blend.icon() - b.icon_alpha(zoom) * b.icons_max_alpha).abs() < 1e-6);
         }
         // And what the click volume is: the model until the icon is half there.
         assert_eq!(b.blend(0.0).dominant(), crate::icons::Dominant::Model);
         assert_eq!(b.blend(1.0).dominant(), crate::icons::Dominant::Icon);
+    }
+
+    /// At the farthest zoom the icon is drawn at the cap (60 %), so the model shows
+    /// through; the switch from model to icon sits in the middle of the band whatever
+    /// the cap is.
+    #[test]
+    fn the_icons_are_capped_and_the_switch_ignores_the_cap() {
+        let b = bands();
+        assert_eq!(b.icons_max_alpha, 0.6);
+        let far = b.blend(1.0);
+        assert!((far.icon() - 0.6).abs() < 1e-6, "{}", far.icon());
+        assert_eq!(far.ramp(), 1.0);
+        let low = ZoomBands {
+            icons_max_alpha: 0.4,
+            ..b
+        };
+        let switch = |bands: &ZoomBands| {
+            (0..=1000)
+                .map(|i| i as f32 / 1000.0)
+                .find(|&z| bands.blend(z).dominant() == crate::icons::Dominant::Icon)
+        };
+        let mid = 0.5 * (b.icons_from + b.icons_full);
+        let at = switch(&b).expect("the icon takes over");
+        assert!((at - mid).abs() < 0.002, "{at}");
+        assert_eq!(
+            switch(&low),
+            Some(at),
+            "a lower cap does not move the switch"
+        );
     }
 
     /// The model scale is 1 up to its start, the cap at the farthest zoom, never
@@ -340,6 +380,8 @@ mod tests {
             ("model_scale_max: 1.6", "model_scale_max: 9.0"),
             ("model_scale_max: 1.6", "model_scale_max: 0.5"),
             ("model_scale_from: 0.55", "model_scale_from: 1.0"),
+            ("icons_max_alpha: 0.6", "icons_max_alpha: 0.0"),
+            ("icons_max_alpha: 0.6", "icons_max_alpha: 1.5"),
             ("pitch_near_deg: 45.0", "pitch_near_deg: 85.0"),
             ("min_distance: 12.0", "min_distance: 0.0"),
             ("far_margin: 0.25", "far_margin_typo: 0.25"),

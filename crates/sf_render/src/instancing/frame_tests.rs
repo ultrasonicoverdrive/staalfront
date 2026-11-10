@@ -1260,8 +1260,9 @@ fn the_rectangle_test_of_a_tiny_model_follows_the_ui_scale() {
 // The far-zoom model scale and the overlay (zoom work package)
 // ---------------------------------------------------------------------------
 
-/// The scale draws the model larger about its feet and changes nothing else: the
-/// click volume and the icon keep their size and place.
+/// The scale draws the model larger about its feet; the click volume and the box
+/// reported for the ring and bars grow with it (decision 10-11-2026), the icon keeps
+/// its size and place.
 #[test]
 fn the_model_scale_grows_the_drawn_model_only() {
     let mut inst = one_cube_at((100.0, 100.0));
@@ -1290,14 +1291,50 @@ fn the_model_scale_grows_the_drawn_model_only() {
         "it grows about its feet, the place is the same"
     );
     assert_eq!(icon1, icon2, "the icon does not move");
-    // The same ray hits the same unit at 1 and at 1.5, and a ray just outside the
-    // true box misses at both: the hit volume is not the scaled model.
-    let middle = Vec3::new(100.0, 0.5, 100.0);
-    for scale in [1.0, 1.5] {
-        run(&mut inst, scale);
-        assert!(inst.pick(&query_over(&cam, middle, 0.0, 0.0)).is_some());
-        assert_eq!(inst.pick(&query_over(&cam, middle, 60.0, 0.0)), None);
+    // A box well above the least click size: the first pixel beside the true box
+    // misses at scale 1 and hits the drawn rim at 1.5; twice as far misses at both.
+    let mut big = instancer_with(
+        style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", ""),
+        &[still(0, 0, 8, (100.0, 100.0))],
+    );
+    let near = camera(0.3, (100.0, 100.0));
+    let pick_at = |inst: &mut Instancer, scale: f32, dx: f32| {
+        let vp = near.view_proj();
+        let frustum = Frustum::from_view_proj(vp);
+        let eye = EyeView::from_view_proj(vp, H);
+        inst.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0).with_model_scale(scale),
+            flat,
+        );
+        inst.pick(&query_over(&near, Vec3::new(100.0, 0.5, 100.0), dx, 0.0))
+    };
+    assert!(pick_at(&mut big, 1.0, 0.0).is_some());
+    let edge = (1..800)
+        .map(|i| i as f32 * 0.5)
+        .find(|&dx| pick_at(&mut big, 1.0, dx).is_none())
+        .expect("the box ends somewhere");
+    assert!(edge > 30.0, "{edge}");
+    let rim = edge + 2.0;
+    assert_eq!(pick_at(&mut big, 1.0, rim), None);
+    assert!(
+        pick_at(&mut big, 1.5, rim).is_some(),
+        "the drawn rim at {rim} px is the unit"
+    );
+    assert_eq!(pick_at(&mut big, 1.5, 2.0 * edge), None);
+    // The box handed to the ring and the bars is the drawn one.
+    let drawn = |inst: &mut Instancer| {
+        let mut out = None;
+        inst.visit_drawn(|_| true, |d| out = Some(d));
+        out.expect("the unit is drawn")
+    };
+    run(&mut inst, 1.0);
+    let d1 = drawn(&mut inst);
+    run(&mut inst, 1.5);
+    let d2 = drawn(&mut inst);
+    for i in 0..3 {
+        assert!((d2.size[i] - 1.5 * d1.size[i]).abs() < 1e-5, "axis {i}");
     }
+    assert_eq!(d1.centre, d2.centre, "a centred box keeps its centre");
     // Nonsense falls back to true size.
     assert_eq!(FrameView::models_only(&frustum, 0.0).model_scale, 1.0);
     assert_eq!(

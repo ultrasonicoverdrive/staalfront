@@ -233,6 +233,13 @@ fn the_icon_list_and_the_model_lists_leave_out_what_is_not_seen() {
     );
     assert_eq!(models.models, 3);
     assert_eq!(models.visible, 3);
+    // The overlay band of play: models and icons together, and still only what is seen.
+    let both = inst.build_frame(
+        &FrameView::new(&frustum, 0.0, eye, Blend::overlay(0.5), 1.0),
+        flat,
+    );
+    assert_eq!((both.models, both.icons), (3, 3));
+    assert_eq!(inst.icon_instances().len(), 3);
 }
 
 #[test]

@@ -320,6 +320,9 @@ impl<'a> FrameView<'a> {
 struct FrameState {
     blend: Blend,
     ui_scale: f32,
+    /// [`FrameView::model_scale`] of the frame: the models' drawn size, which the
+    /// click volume, the ring and the bars follow.
+    model_scale: f32,
 }
 
 /// Marks a record without a model or icon instance.
@@ -350,12 +353,13 @@ struct Drawn {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrawnUnit {
     pub id: UnitId,
-    /// The point on the ground under the middle of the model's box:
+    /// The point on the ground under the middle of the model's drawn box:
     /// interpolated `x`, terrain height, `z`, in metres.
     pub centre: [f32; 3],
     /// Interpolated facing in 1/256 turns.
     pub steps: f32,
-    /// The model's box: along the facing, height, across, in metres.
+    /// The model's box as drawn (times the frame's model scale): along the
+    /// facing, height, across, in metres.
     pub size: [f32; 3],
     /// World position of the unit's icon (the ground point lifted by the
     /// icon settings).
@@ -586,6 +590,18 @@ impl Instancer {
     /// The look of shape `shape` to the culling, the level selection and
     /// the picking: the model's real bounds (finest level) if it has them,
     /// else the style's shape size.
+    /// The model's box as drawn in the last frame: [`Instancer::geom`]'s size and
+    /// footprint offset times the frame's model scale (1 before any frame). The model
+    /// is scaled about the unit's origin, so the offset grows with it.
+    fn drawn_box(&self, shape: u8) -> ([f32; 3], [f32; 2]) {
+        let geom = self.geom(shape);
+        let k = self.frame.map_or(1.0, |f| f.model_scale);
+        (
+            scaled(geom.size, k),
+            [geom.offset[0] * k, geom.offset[1] * k],
+        )
+    }
+
     fn geom(&self, shape: u8) -> ShapeGeom {
         let s = self.style.shape(shape);
         match self.models.model(shape).bounds() {
@@ -874,8 +890,8 @@ impl Instancer {
                         }
                         _ => 0,
                     };
-                    // The alpha is the model's weight in the cross-fade: the
-                    // fragment shader keeps that share of the pixels.
+                    // The alpha is the model weight (1 in play, below 1 only for the
+                    // debug display): the fragment shader keeps that share of the pixels.
                     let color = [r, g, b, weight];
                     let unit = model_matrix(x, y, z, steps, scaled(geom.scale, view.model_scale));
                     let parts = chain.parts(level);
@@ -948,6 +964,7 @@ impl Instancer {
         self.frame = Some(FrameState {
             blend,
             ui_scale: view.ui_scale,
+            model_scale: view.model_scale,
         });
         self.stats = stats;
         stats
@@ -1018,30 +1035,33 @@ impl Instancer {
         ui_scale: f32,
     ) -> Option<Candidate> {
         let click_px = self.icon_config.click_min_px * ui_scale;
+        // The models' drawn scale grows their boxes beyond the tile's.
+        let grown = (self.frame.map_or(1.0, |f| f.model_scale) - 1.0).max(0.0)
+            * self.footprint.max(self.tallest);
         let mut best: Option<Candidate> = None;
         for vt in &self.visible_tiles {
             let tile = &self.tile_boxes[vt.tile as usize];
             // The tile box, grown by the most any of its units' click volumes can grow.
             let (centre, half) = ((tile.min + tile.max) * 0.5, (tile.max - tile.min) * 0.5);
             let far = (centre - eye.eye).length() + half.length();
-            let reach = Vec3::splat(click_reach(far, eye, click_px));
+            let reach = Vec3::splat(click_reach(far, eye, click_px) + grown);
             if !ray_hits_aabb(ray, tile.min - reach, tile.max + reach) {
                 continue;
             }
             for (r, rec) in
                 (vt.start..vt.end).zip(&self.records[vt.start as usize..vt.end as usize])
             {
-                let geom = self.geom(rec.shape);
-                // The box's footprint centre (a model's real bounds need not
-                // be centred on the unit's origin).
-                let pos = offset_point(Vec3::from(rec.pos), rec.steps, geom.offset);
-                let middle = pos + Vec3::new(0.0, 0.5 * geom.size[1], 0.0);
+                // The box as drawn (scaled with the model); its footprint centre
+                // (a model's real bounds need not be centred on the unit's origin).
+                let (size, offset) = self.drawn_box(rec.shape);
+                let pos = offset_point(Vec3::from(rec.pos), rec.steps, offset);
+                let middle = pos + Vec3::new(0.0, 0.5 * size[1], 0.0);
                 let distance = (middle - eye.eye).length();
                 // The smaller side of the footprint is what has to be wide
                 // enough to hit, whatever way the unit faces.
-                let footprint = geom.size[0].min(geom.size[2]);
+                let footprint = size[0].min(size[2]);
                 let margin = click_margin(footprint, distance, eye.focal_px, click_px);
-                let Some(t) = ray_obb(ray, pos, rec.steps, geom.size, margin) else {
+                let Some(t) = ray_obb(ray, pos, rec.steps, size, margin) else {
                     continue;
                 };
                 // Entered behind the terrain the ray meets first: hidden by the ground.
@@ -1068,9 +1088,9 @@ impl Instancer {
         let mut best = best?;
         // For the readout: how far the box centre is from the cursor on the screen.
         let rec = &self.records[best.record as usize];
-        let geom = self.geom(rec.shape);
-        let middle = offset_point(Vec3::from(rec.pos), rec.steps, geom.offset)
-            + Vec3::new(0.0, 0.5 * geom.size[1], 0.0);
+        let (size, offset) = self.drawn_box(rec.shape);
+        let middle = offset_point(Vec3::from(rec.pos), rec.steps, offset)
+            + Vec3::new(0.0, 0.5 * size[1], 0.0);
         best.cursor_distance = project_px(&query.view_proj, middle, query.viewport)
             .map_or(0.0, |(p, _)| {
                 (p[0] - query.cursor[0]).hypot(p[1] - query.cursor[1])
@@ -1147,15 +1167,15 @@ impl Instancer {
         let models = frame.blend.dominant() == Dominant::Model;
         for rec in &self.records {
             let hit = if models {
-                let geom = self.geom(rec.shape);
-                let pos = offset_point(Vec3::from(rec.pos), rec.steps, geom.offset);
+                let (size, offset) = self.drawn_box(rec.shape);
+                let pos = offset_point(Vec3::from(rec.pos), rec.steps, offset);
                 rect_hits_model(
                     &query.rect,
                     &query.view_proj,
                     query.viewport,
                     pos,
                     rec.steps,
-                    geom.size,
+                    size,
                     click_px,
                 )
             } else {
@@ -1193,12 +1213,12 @@ impl Instancer {
             {
                 icon.flags |= ICON_SELECTED;
             }
-            let geom = self.geom(rec.shape);
+            let (size, offset) = self.drawn_box(rec.shape);
             visit(DrawnUnit {
                 id: rec.id,
-                centre: offset_point(Vec3::from(rec.pos), rec.steps, geom.offset).to_array(),
+                centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),
                 steps: rec.steps,
-                size: geom.size,
+                size,
                 icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
             });
         }
@@ -1217,12 +1237,12 @@ impl Instancer {
             if !is_wanted(rec.id) {
                 continue;
             }
-            let geom = self.geom(rec.shape);
+            let (size, offset) = self.drawn_box(rec.shape);
             visit(DrawnUnit {
                 id: rec.id,
-                centre: offset_point(Vec3::from(rec.pos), rec.steps, geom.offset).to_array(),
+                centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),
                 steps: rec.steps,
-                size: geom.size,
+                size,
                 icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
             });
         }

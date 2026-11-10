@@ -2048,6 +2048,7 @@ impl Runner {
         });
         self.unit_view = UnitView {
             icon_alpha: blend.icon(),
+            effects_weight: sf_render::effects_weight(blend),
             model_scale,
             icons_from_zoom: self.zoom_bands.icons_from,
             zoom,
@@ -2070,8 +2071,10 @@ impl Runner {
             view_proj,
             focal_px: eye.focal_px,
             viewport: [width as f32, height as f32],
-            // The effects fade out as the icons fade in over the models.
-            model_weight: 1.0 - self.unit_view.icon_alpha,
+            // The effects fade out as the zoom goes into the icon band: on the
+            // ramp, not on the capped icon opacity, so the strategic band (only the
+            // death flash) is still reached.
+            model_weight: self.unit_view.effects_weight,
             reference_px: self.unit_view.reference_px,
             icon_px: self.instancer.icon_params().size_px,
             dt,

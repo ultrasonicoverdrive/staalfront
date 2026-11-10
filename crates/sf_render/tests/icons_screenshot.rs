@@ -560,6 +560,47 @@ fn a_highlighted_icon_has_a_white_outline_and_is_picked_where_it_is_drawn() {
     assert!(white(&lit) > 25, "the white outline of a 14 px icon");
 }
 
+/// With the icons capped below full opacity (camera.ron `icons_max_alpha`), the shape is dimmed
+/// but the white outline of a hovered icon keeps its full opacity: it is the selection and hover
+/// feedback in the far band.
+#[test]
+fn the_outline_stays_white_when_the_icons_are_capped() {
+    let map = test_map();
+    let style = Style::embedded();
+    let mut r = renderer(&map);
+    let mut inst = instancer(&map, style.clone());
+    let cam = camera(&map, 1.0, (32.0, 32.0));
+    inst.update_tick([still(0, 1, 5, (32.0, 32.0))]);
+    let vp = cam.view_proj();
+    r.set_view_proj(vp);
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H as f32);
+    let ground = |x: f32, z: f32| map.height_at(x, z);
+    let capped = sf_render::CameraSettings::embedded().zoom.blend(1.0);
+    assert!(capped.icon() < 0.7, "the shipped cap dims the icon");
+    inst.build_frame(&FrameView::new(&frustum, 0.0, eye, capped, 1.0), ground);
+    let ground_y = map.height_at(32.0, 32.0);
+    let (px, _) = project_px(
+        &vp,
+        Vec3::new(32.0, ground_y + inst.icon_config().lift, 32.0),
+        [W as f32, H as f32],
+    )
+    .unwrap();
+    let pick = inst
+        .pick(&PickQuery::new(px, vp, [W as f32, H as f32]))
+        .expect("at the cap the icon is still the click volume");
+    assert_eq!(pick.via, sf_render::PickVia::Icon);
+    inst.highlight(&pick);
+    r.upload_units(&inst);
+    let lit = r.render_to_image().unwrap();
+    let white = (0..H)
+        .flat_map(|y| (0..W).map(move |x| (x, y)))
+        .filter(|&(x, y)| matches_color(lit.pixel(x, y), [255, 255, 255], 12))
+        .count();
+    println!("white outline pixels at the cap: {white}");
+    assert!(white > 25, "the outline is drawn at full opacity: {white}");
+}
+
 /// The numbers for the PR: draw calls and triangles with 10,000 units at
 /// close, mid and strategic zoom, and the CPU time of the level selection and
 /// the icon build. Printed; the assertions pin the structure, not the time.

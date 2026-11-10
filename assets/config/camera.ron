@@ -35,6 +35,10 @@
         // smooth ramp in between.
         icons_from: 0.85,
         icons_full: 1.0,
+        // The icons are never drawn more opaque than this, so the model stays visible
+        // through them at the farthest zoom. Only the look: what switches with the zoom
+        // (click volume, ring and bars, effects) follows the ramp above, not this cap.
+        icons_max_alpha: 0.6,
         // Models grow a little toward the far end so they stay readable: scale 1 up to
         // `model_scale_from`, `model_scale_max` at the farthest zoom, a smooth ramp in
         // between. Presentation only: the click volumes keep their size.

@@ -349,3 +349,70 @@ fn the_start_the_fight_and_the_banner() {
     let later = scene.shoot(&mut r, &at_victory, P0);
     assert!(count_in(&later, banner_area(), look.victory.border, 30) > 400);
 }
+
+/// The click volume follows the drawn model scale (decision 10-11-2026). At the farthest zoom, where
+/// the scale is at its cap, the scaled boxes of the structures of the M1 base must not overlap: a
+/// click on one structure's rim must never be a click on its neighbour.
+#[test]
+fn the_scaled_structure_boxes_of_the_m1_base_do_not_overlap_at_the_farthest_zoom() {
+    let mut scene = Scene::new();
+    // The base of the player is up: power, refinery, factory and the rest of the opening.
+    scene.run_to(1200);
+    scene.sync();
+    let bands = sf_render::CameraSettings::embedded().zoom;
+    let scale = bands.model_scale(1.0);
+    assert_eq!(scale, bands.model_scale_max);
+    let cam = scene.camera(1.0, (48.0, 48.0));
+    let vp = cam.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H as f32);
+    let ground = scene.ground.clone();
+    scene.instancer.build_frame(
+        &FrameView::new(&frustum, 0.0, eye, bands.blend(1.0), 1.0).with_model_scale(scale),
+        |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
+    );
+    let world = &scene.world;
+    let structures: Vec<_> = world
+        .snapshot()
+        .iter()
+        .filter(|v| world.footprint_of(v.id).is_some())
+        .map(|v| UnitId::from_parts(v.id.index(), v.id.generation()))
+        .collect();
+    let mut boxes = Vec::new();
+    scene.instancer.visit_drawn(
+        |id| structures.contains(&id),
+        |d| {
+            let (s, c) = (d.steps * (std::f32::consts::TAU / 256.0)).sin_cos();
+            let half = [
+                0.5 * (c.abs() * d.size[0] + s.abs() * d.size[2]),
+                0.5 * (s.abs() * d.size[0] + c.abs() * d.size[2]),
+            ];
+            boxes.push((d.id, [d.centre[0], d.centre[2]], half));
+        },
+    );
+    assert!(
+        boxes.len() >= 4,
+        "the base has its structures: {}",
+        boxes.len()
+    );
+    let mut closest = f32::MAX;
+    for (i, a) in boxes.iter().enumerate() {
+        for b in &boxes[i + 1..] {
+            let gap = (0..2)
+                .map(|k| (a.1[k] - b.1[k]).abs() - a.2[k] - b.2[k])
+                .fold(f32::MIN, f32::max);
+            closest = closest.min(gap);
+            assert!(
+                gap > 0.0,
+                "{:?} and {:?} overlap by {:.2} m at scale {scale}",
+                a.0,
+                b.0,
+                -gap
+            );
+        }
+    }
+    println!(
+        "{} structures, closest scaled gap {closest:.2} m",
+        boxes.len()
+    );
+}

@@ -26,8 +26,8 @@
 //! WP1.9 adds model levels of detail ([`model`]), strategic icons ([`icons`], an overlay
 //! over the models in the farthest zoom band since the zoom work package, [`zoom`]) and picking per zoom ([`pick`]): a chain of
 //! meshes per model chosen by projected size with hysteresis, screen-fixed
-//! icons in player colour past a zoom threshold, and a click volume that is the
-//! model's box when zoomed in and the icon's quad when zoomed out.
+//! icons in player colour drawn over the models in the far band, and a click volume
+//! that is the model's box when zoomed in and the icon's quad when zoomed out.
 //!
 //! WP1.11 adds the debug overlay layer ([`overlay`]): the egui painter
 //! (`egui-wgpu`) on this crate's wgpu device, the terrain LOD tint and a 4 m cell
@@ -76,7 +76,7 @@ pub use terrain_gpu::FogShading;
 pub mod terrain_look;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
-pub use effects::{EffectInstance, EmitView, ParticlePool, ZoomBand};
+pub use effects::{EffectInstance, EmitView, ParticlePool, ZoomBand, effects_weight};
 pub use frustum::{Aabb, Frustum, Visibility};
 /// Re-exported so the game can name the `Mat4` and `Vec3` of the camera and the picking without a second dependency.
 pub use glam;

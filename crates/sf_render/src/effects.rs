@@ -50,16 +50,23 @@ pub struct EffectInstance {
 pub enum ZoomBand {
     /// Models up close: full bursts.
     Close,
-    /// A smaller picture (or the cross-fade): fewer particles.
+    /// A smaller picture (or the zoom inside the icon band): fewer particles.
     Middle,
-    /// Only icons: effects have faded out, a death keeps one flash.
+    /// The far end of the icon band: effects have faded out, a death keeps one flash.
     Strategic,
 }
 
+/// The weight the effects are drawn with for the frame's `blend`: `1 - ramp`, the
+/// position in the icon band before the icon opacity cap, so the far end of the band
+/// is still [`ZoomBand::Strategic`] when the icons are capped below full opacity.
+pub fn effects_weight(blend: crate::icons::Blend) -> f32 {
+    1.0 - blend.ramp()
+}
+
 impl ZoomBand {
-    /// The band for a model weight (`0` = icons only, `1` = models only) and the apparent size in pixels of
-    /// the 2 m reference unit. Strategic exactly when only icons are drawn; middle in the cross-fade and
-    /// below `limits.middle_below_px`.
+    /// The band for an effects weight ([`effects_weight`]: `1` before the icon band, `0` at its far
+    /// end) and the apparent size in pixels of the 2 m reference unit. Strategic at weight 0; middle
+    /// inside the icon band and below `limits.middle_below_px`.
     pub fn of(model_weight: f32, reference_px: f32, limits: &Limits) -> ZoomBand {
         if model_weight <= 0.0 {
             ZoomBand::Strategic
@@ -634,6 +641,15 @@ mod tests {
         assert_eq!(ZoomBand::Middle.count(5, &l), 3, "rounded up");
         assert_eq!(ZoomBand::Middle.count(1, &l), 1, "never none");
         assert_eq!(ZoomBand::Strategic.count(8, &l), 0);
+        // The far end of the zoom is strategic even with the icons capped at 60 %.
+        let far = crate::CameraSettings::embedded().zoom.blend(1.0);
+        assert!(far.icon() < 1.0);
+        assert_eq!(effects_weight(far), 0.0);
+        assert_eq!(
+            ZoomBand::of(effects_weight(far), 5.0, &l),
+            ZoomBand::Strategic
+        );
+        assert_eq!(effects_weight(crate::icons::Blend::MODELS), 1.0);
     }
 
     #[test]

@@ -188,6 +188,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // selected. The shape's own antialiased edge blends into it.
     var outline = vec3<f32>(1.0);
     outline = select(outline, vec3<f32>(1.0, 0.85, 0.2), highlighted && selected);
+    // The outline is the selection and hover feedback in the far band: it keeps
+    // full opacity, only the shape itself is dimmed by the icon opacity (its cap).
     let shape_cover = clamp(0.5 - d, 0.0, 1.0);
-    return vec4<f32>(mix(outline, inside, shape_cover), coverage * in.weight);
+    return vec4<f32>(mix(outline, inside, shape_cover), coverage * mix(1.0, in.weight, shape_cover));
 }

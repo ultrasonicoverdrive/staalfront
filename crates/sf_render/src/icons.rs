@@ -222,11 +222,15 @@ impl IconConfig {
 /// Two independent numbers. The **model weight** `m`: the share of the models' pixels
 /// that is kept (an 8x8 ordered dither, see [`Blend::model_at`]); 1 in play, below 1
 /// only as a debug aid (`--unit-display icons` is 0). The **icon alpha** `a`: the
-/// opacity of the icon overlay, 0 = no icon is drawn.
+/// opacity of the icon overlay, 0 = no icon is drawn. Besides those, the **ramp**:
+/// how far the zoom is into the icon band (`0..=1`), before the opacity cap of
+/// `camera.ron` (`zoom.icons_max_alpha`). What switches with the zoom (the click
+/// volume, the ring and bars, the effects) follows the ramp, so a cap never moves it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Blend {
     model: f32,
     icon: f32,
+    ramp: f32,
 }
 
 impl Blend {
@@ -234,23 +238,39 @@ impl Blend {
     pub const MODELS: Blend = Blend {
         model: 1.0,
         icon: 0.0,
+        ramp: 0.0,
     };
     /// Icons only (a debug setting: the models are not drawn).
     pub const ICONS: Blend = Blend {
         model: 0.0,
         icon: 1.0,
+        ramp: 1.0,
     };
 
     /// Models at full weight with the icons over them at opacity `alpha`
     /// (clamped to `0..=1`; NaN = no icons). This is the picture in play.
     pub fn overlay(alpha: f32) -> Self {
+        Self::overlay_capped(alpha, 1.0)
+    }
+
+    /// Models at full weight with the icons over them: `ramp` is the position in
+    /// the icon band (clamped to `0..=1`, NaN = 0), the drawn opacity is
+    /// `ramp * cap` (`cap` clamped to `0..=1`, NaN = 1). The switches follow `ramp`.
+    pub fn overlay_capped(ramp: f32, cap: f32) -> Self {
+        let ramp = if ramp.is_nan() {
+            0.0
+        } else {
+            ramp.clamp(0.0, 1.0)
+        };
+        let cap = if cap.is_nan() {
+            1.0
+        } else {
+            cap.clamp(0.0, 1.0)
+        };
         Self {
             model: 1.0,
-            icon: if alpha.is_nan() {
-                0.0
-            } else {
-                alpha.clamp(0.0, 1.0)
-            },
+            icon: ramp * cap,
+            ramp,
         }
     }
 
@@ -266,6 +286,7 @@ impl Blend {
         Self {
             model,
             icon: 1.0 - model,
+            ramp: 1.0 - model,
         }
     }
 
@@ -279,6 +300,12 @@ impl Blend {
         self.icon
     }
 
+    /// The position in the icon band before the opacity cap (`0..=1`): what the
+    /// click volume, the ring and bars and the effects switch on.
+    pub fn ramp(self) -> f32 {
+        self.ramp
+    }
+
     pub fn models_drawn(self) -> bool {
         self.model > 0.0
     }
@@ -288,9 +315,10 @@ impl Blend {
     }
 
     /// The representation that is the click volume and carries the bars: the icon
-    /// once its opacity is above one half, the model otherwise (also on a tie).
+    /// once the zoom is past the middle of the icon band (ramp above one half; the
+    /// opacity cap does not move this), the model otherwise (also on a tie).
     pub fn dominant(self) -> Dominant {
-        if self.icon > 0.5 {
+        if self.icon > 0.0 && self.ramp > 0.5 {
             Dominant::Icon
         } else {
             Dominant::Model
@@ -639,6 +667,29 @@ mod tests {
         assert_eq!(Blend::from_model_weight(f32::NAN), Blend::MODELS);
         assert_eq!(Blend::from_model_weight(7.0), Blend::MODELS);
         assert_eq!(Blend::from_model_weight(-1.0), Blend::ICONS);
+    }
+
+    #[test]
+    fn the_opacity_cap_dims_the_icon_but_never_moves_the_switch() {
+        for cap in [1.0, 0.6, 0.4, 0.1] {
+            for i in 0..=100 {
+                let ramp = i as f32 / 100.0;
+                let b = Blend::overlay_capped(ramp, cap);
+                assert_eq!(b.ramp(), ramp);
+                assert!((b.icon() - ramp * cap).abs() < 1e-6, "{ramp} {cap}");
+                assert_eq!(b.model(), 1.0);
+                assert_eq!(
+                    b.dominant(),
+                    Blend::overlay(ramp).dominant(),
+                    "{ramp} {cap}"
+                );
+            }
+        }
+        let b = Blend::overlay_capped(1.0, 0.6);
+        assert!((b.icon() - 0.6).abs() < 1e-6);
+        assert_eq!(b.dominant(), Dominant::Icon);
+        assert_eq!(Blend::overlay_capped(0.55, 0.4).dominant(), Dominant::Icon);
+        assert_eq!(Blend::overlay_capped(f32::NAN, 0.6), Blend::MODELS);
     }
 
     #[test]
