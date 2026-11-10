@@ -764,6 +764,12 @@ no separate music setting. Three parts, all presentation side (`sf_sim` is untou
   built (see the gaps in `docs/rules/audio.md`). A mood without a playable track uses `music.fallback` (a bank
   sound, shipped `None`) or fades the running music out to silence; a track that fails to decode is skipped with one warning.
 
+**Unit voices (WP11.2, 09-11-2026).** The replies of the player's own units (`unit.select`, `unit.move`, `unit.attack`)
+are raised on the UI side, not by the sim: `sf_game::unit_voice` decides which action speaks (`selection_frame`,
+`order_voice`) and `sf_audio::VoiceBrake` decides play or skip (one voice at a time, a minimum gap, a longer gap for the
+same event; `voices` in `audio.ron`). An event with no sound (no mapped Red Alert file, nothing in the bank) is silent
+and uses up no gap. `AudioSystem::is_playing` tells the brake that a voice is still sounding. `docs/rules/voices.md`.
+
 **Clean-room (B5).** Written only from public format descriptions, never from
 the EA source release or OpenRA (both GPL), and without following the code
 links some of these pages carry:

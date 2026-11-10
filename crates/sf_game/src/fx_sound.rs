@@ -75,6 +75,7 @@ pub fn start_audio(
 
 /// Turns the shown events into sounds. See the module documentation.
 pub struct FxSound {
+    voices: sf_audio::VoiceConfig,
     planner: Planner,
     totals: SoundTotals,
     mood: MoodTracker,
@@ -94,10 +95,16 @@ impl FxSound {
     /// [`AudioSystem`] (`spatial_params`), so the plan and the output use one copy.
     pub fn new(config: &AudioConfig) -> FxSound {
         FxSound {
+            voices: config.voices,
             planner: Planner::new(config.positional.clone()),
             totals: SoundTotals::default(),
             mood: MoodTracker::new(config.music.mood),
         }
+    }
+
+    /// The numbers of the unit voices' brake (`voices` of `audio.ron`, WP11.2).
+    pub fn voice_config(&self) -> sf_audio::VoiceConfig {
+        self.voices
     }
 
     pub fn totals(&self) -> SoundTotals {

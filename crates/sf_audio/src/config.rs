@@ -6,6 +6,7 @@
 //! - `positional`: which in-game sounds play, how many, how often
 //!   ([`crate::positional`]).
 //! - `music`: the calm/combat mood and the crossfade (WP11.4, [`crate::music`]).
+//! - `voices`: the brake on unit voices (WP11.2, [`crate::voice_brake`]).
 //!
 //! The shipped file is also compiled in ([`AudioConfig::embedded`]) and is
 //! the fallback when the file on disk is missing or broken, so there are no
@@ -21,6 +22,7 @@ use serde::Deserialize;
 use crate::music::MusicConfig;
 use crate::ra::{CONFIG_FILE, RaAudioConfig};
 use crate::spatial::SpatialParams;
+use crate::voice_brake::VoiceConfig;
 
 /// The shipped `assets/config/audio.ron`, compiled in.
 pub const EMBEDDED_CONFIG: &str = include_str!("../../../assets/config/audio.ron");
@@ -35,6 +37,8 @@ pub struct AudioConfig {
     pub mix: MixConfig,
     pub positional: PositionalConfig,
     pub music: MusicConfig,
+    /// The brake on unit voices (WP11.2).
+    pub voices: VoiceConfig,
 }
 
 /// The numbers of [`SpatialParams`], in metres.
@@ -241,6 +245,7 @@ impl AudioConfig {
             return Err("mix.music_volume must be in [0, 2]".into());
         }
         self.music.validate()?;
+        self.voices.validate()?;
         let p = &self.positional;
         if p.max_cues_per_frame == 0 {
             return Err("positional.max_cues_per_frame must be at least 1".into());
@@ -335,6 +340,13 @@ mod tests {
                     impact: 1,
                     death: 3
                 },
+            }
+        );
+        assert_eq!(
+            c.voices,
+            VoiceConfig {
+                min_gap_ms: 400,
+                repeat_gap_ms: 1200
             }
         );
         assert_eq!(c.music.fallback.calm, None);
