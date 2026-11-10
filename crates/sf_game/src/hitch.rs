@@ -135,6 +135,14 @@ pub struct Totals {
     pub longest_ms: f64,
     /// Frames over [`LOG_MS`] that were not described because the log was full.
     pub lines_dropped: u64,
+    /// Frames whose swap-chain acquire gave something else than a normal image (WP1.16a): the frame was
+    /// skipped or the surface wanted configuring again.
+    pub acquire_suboptimal: u64,
+    pub acquire_timeout: u64,
+    pub acquire_occluded: u64,
+    pub acquire_outdated: u64,
+    pub acquire_lost: u64,
+    pub acquire_other: u64,
 }
 
 /// A frame in which the renderer created or grew instance buffers (suspect 1 of WP1.16).
@@ -368,7 +376,9 @@ impl HitchLog {
 
     #[cold]
     fn buffers_grew(&mut self, added: u64, total: u64, bytes: u64, upload_ms: f64) {
-        self.note(|| format!("instance buffers: {added} created or grown (now {total}, {bytes} bytes)"));
+        self.note(|| {
+            format!("instance buffers: {added} created or grown (now {total}, {bytes} bytes)")
+        });
         if self.growth.len() < MAX_GROWTHS {
             self.growth.push(BufferGrowth {
                 frame: self.frame_no + 1,
@@ -379,6 +389,36 @@ impl HitchLog {
                 upload_ms,
             });
         }
+    }
+
+    /// What the swap chain gave this frame, and how long the acquire waited. An ordinary image costs a
+    /// comparison; anything else is counted and written on the frame's line (`acquire timeout after
+    /// 1000 ms` is the best-fit explanation of a frame of a second on DX12).
+    pub fn observe_acquire(&mut self, outcome: sf_render::AcquireOutcome, waited: Duration) {
+        if outcome.is_trouble() {
+            self.acquire_trouble(outcome, waited);
+        }
+    }
+
+    #[cold]
+    fn acquire_trouble(&mut self, outcome: sf_render::AcquireOutcome, waited: Duration) {
+        use sf_render::AcquireOutcome as A;
+        let t = &mut self.totals;
+        match outcome {
+            A::Suboptimal => t.acquire_suboptimal += 1,
+            A::Timeout => t.acquire_timeout += 1,
+            A::Occluded => t.acquire_occluded += 1,
+            A::Outdated => t.acquire_outdated += 1,
+            A::Lost => t.acquire_lost += 1,
+            A::Other | A::Success => t.acquire_other += 1,
+        }
+        self.note(|| {
+            format!(
+                "swap chain acquire: {} after {:.0} ms",
+                outcome.name(),
+                waited.as_secs_f64() * 1e3
+            )
+        });
     }
 
     pub fn growth(&self) -> &[BufferGrowth] {
@@ -414,7 +454,8 @@ impl HitchLog {
         format!(
             "hitches: {} frames, {} over {HITCH_MS} ms ({:.3} %), {} over {LOG_MS} ms; \
              without the first {WARMUP_FRAMES} frames: {} frames, {} over {HITCH_MS} ms ({:.3} %), {} over {LOG_MS} ms; \
-             longest {:.1} ms; late snapshots {}, sim ticks over 20 ms {}",
+             longest {:.1} ms; late snapshots {}, sim ticks over 20 ms {}; \
+             swap chain acquires that gave no normal image: timeout {}, occluded {}, outdated {}, lost {}, suboptimal {}, other {}",
             t.frames,
             t.over_hitch,
             pct(t.over_hitch, t.frames),
@@ -426,6 +467,12 @@ impl HitchLog {
             t.longest_ms,
             sim.late_snapshots,
             sim.slow_ticks.len(),
+            t.acquire_timeout,
+            t.acquire_occluded,
+            t.acquire_outdated,
+            t.acquire_lost,
+            t.acquire_suboptimal,
+            t.acquire_other,
         )
     }
 
@@ -747,6 +794,33 @@ mod tests {
         assert_eq!(log.growth().len(), 1);
     }
 
+    /// A swap chain that gives no image goes on the line of its frame and into the totals; a normal
+    /// image leaves no trace.
+    #[test]
+    fn an_acquire_that_timed_out_is_counted_and_written_on_the_line() {
+        use sf_render::AcquireOutcome as A;
+        let begun = Instant::now();
+        let mut log = HitchLog::new(begun);
+        log.begin_frame(at(begun, 0), no_ticks);
+        log.observe_acquire(A::Success, Duration::from_millis(3));
+        log.end_frame(at(begun, 1), 0);
+        log.begin_frame(at(begun, 17), no_ticks);
+        log.observe_acquire(A::Timeout, Duration::from_millis(1000));
+        log.end_frame(at(begun, 18), 0);
+        log.begin_frame(at(begun, 1100), no_ticks);
+        let t = log.totals();
+        assert_eq!(
+            (t.acquire_timeout, t.acquire_occluded, t.acquire_other),
+            (1, 0, 0)
+        );
+        let line = &log.lines()[0];
+        assert_eq!(
+            line.events,
+            vec!["swap chain acquire: timeout after 1000 ms".to_owned()]
+        );
+        assert!(log.summary(&SimTotals::default()).contains("timeout 1,"));
+    }
+
     #[test]
     fn a_filetime_is_a_count_of_hundred_nanoseconds() {
         assert_eq!(filetime_duration(0, 0), Duration::ZERO);
@@ -778,7 +852,9 @@ mod tests {
             log.end_frame(Instant::now(), 0);
         }
         let per_frame = started.elapsed().as_nanos() as f64 / f64::from(n);
-        println!("hitch bookkeeping, quiet frame, 7 clock reads: {per_frame:.0} ns (a frame is 16,700,000 ns)");
+        println!(
+            "hitch bookkeeping, quiet frame, 7 clock reads: {per_frame:.0} ns (a frame is 16,700,000 ns)"
+        );
         assert_eq!(log.totals().over_hitch, 0);
         assert!(per_frame < 20_000.0, "{per_frame} ns per frame");
     }

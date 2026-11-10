@@ -274,6 +274,8 @@ pub struct Runner {
     /// Converting and bucketing a new snapshot for the instancer, per
     /// snapshot (this used to be the whole tick; the sim runs elsewhere now).
     tick_ms: Samples,
+    /// The fog uploads to the minimap (WP1.16a): how long each took, in `sync_fog`.
+    fog_ms: Samples,
     last_frame: Option<Instant>,
     /// The hitch log (WP1.16a, `docs/rules/hitch_log.md`): every frame over 50 ms with its parts, and the
     /// totals of the play. Belongs to the window, not to a scene.
@@ -575,6 +577,7 @@ impl Runner {
             upload_ms: Samples::default(),
             render_ms: Samples::default(),
             tick_ms: Samples::default(),
+            fog_ms: Samples::default(),
             last_frame: None,
             hitch: HitchLog::new(now),
             record_restarts: 0,
@@ -828,6 +831,7 @@ impl Runner {
             upload_ms: _,
             render_ms: _,
             tick_ms: _,
+            fog_ms: _,
             last_frame: _,
             hitch: _,
             record_restarts: _,
@@ -1921,6 +1925,7 @@ impl Runner {
         match crate::fog_view::fog_step(self.fog_applied.minimap, current) {
             crate::fog_view::FogStep::Keep => {}
             crate::fog_view::FogStep::Upload(v) => {
+                let started = Instant::now();
                 let states = sf_ui::fog_states(w, h, visible, explored);
                 self.hud.set_minimap_fog(
                     renderer,
@@ -1928,6 +1933,7 @@ impl Runner {
                     Some((&states, crate::fog_view::minimap_fog_of(look))),
                 );
                 self.fog_applied.minimap = Some(v);
+                self.fog_ms.push(started.elapsed());
             }
             crate::fog_view::FogStep::Clear => {
                 self.hud.set_minimap_fog(renderer, &self.map, None);
@@ -2905,6 +2911,10 @@ impl App for Runner {
             let (submit, present) = renderer.last_submit_and_present();
             self.hitch
                 .lap_draw(drew, renderer.last_acquire_wait(), submit, present);
+            self.hitch.observe_acquire(
+                renderer.last_acquire_outcome(),
+                renderer.last_acquire_wait(),
+            );
             if let Err(e) = drawn {
                 eprintln!("sf_game: render failed: {e}");
                 self.failed.store(true, Ordering::Relaxed);
@@ -3022,11 +3032,23 @@ impl App for Runner {
     }
 
     fn on_resize(&mut self, _ctx: &mut Context, size: Resized) {
+        // Runs in the event handler, so its time lands in the gap of the frame; the hitch log names it
+        // (surface configure waits for the GPU, the depth texture is made again).
+        let started = Instant::now();
         self.viewport = (size.width, size.height);
         self.camera.set_viewport(size.width, size.height);
         if let Some(renderer) = &mut self.renderer {
             renderer.resize(size.width, size.height);
         }
+        let took = started.elapsed();
+        self.hitch.note(|| {
+            format!(
+                "on_resize {}x{}: surface configure and depth texture took {:.1} ms",
+                size.width,
+                size.height,
+                took.as_secs_f64() * 1e3
+            )
+        });
         println!(
             "resized {}x{} @ {}",
             size.width, size.height, size.scale_factor
@@ -3052,6 +3074,18 @@ impl App for Runner {
         if self.os_cursor_hidden {
             ctx.window().set_cursor_visible(true);
             self.os_cursor_hidden = false;
+        }
+        if let Some(renderer) = &self.renderer {
+            let a = renderer.alloc_stats();
+            let grew = self.hitch.growth();
+            let slowest = grew.iter().map(|g| g.upload_ms).fold(0.0, f64::max);
+            println!(
+                "summary: instance buffers {} ({} bytes) at exit; {} frames grew them, their upload lap max {:.2} ms",
+                a.instance_buffers,
+                a.instance_bytes,
+                grew.len(),
+                slowest
+            );
         }
         self.renderer = None; // release the surface before the window goes
         // Stop the sim thread first: the summary reads its final numbers.
@@ -3100,6 +3134,10 @@ impl App for Runner {
         println!(
             "summary: per-snapshot convert+bucket ms (main thread) {}",
             self.tick_ms.describe(WARMUP_FRAMES / 3)
+        );
+        println!(
+            "summary: minimap fog uploads ms (inside the snapshot lap) {}",
+            self.fog_ms.describe(0)
         );
         println!(
             "summary: sim thread tick ms {}",
