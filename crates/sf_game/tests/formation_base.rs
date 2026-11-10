@@ -527,13 +527,20 @@ fn a_loose_formation_keeps_the_pace() {
 fn the_shape_does_not_regress_in_the_base() {
     // Per goal: (members near their slots, all members near on the ticks not loose, worst
     // deviation in cells). Measured on the merge with main at cfef151: (92 %, 24 %, 4.4),
-    // (59 %, 18 %, 25.5), (75 %, 74 %, 5.8), (68 %, 34 %, 24.2). The bounds sit a few points
-    // below; they guard against regression and claim no good shape (open items 14 and 15).
+    // (59 %, 18 %, 25.5), (75 %, 74 %, 5.8), (68 %, 34 %, 24.2). **Re-measured at WP6.11**, when the
+    // sandbox base gained two extra power plants per side and the ore silo (so a different layout
+    // of the structures the march goes round; the same code otherwise): (89 %, 61 %, 4.4),
+    // (65 %, 11 %, 26.0), (57 %, 72 %, 8.4), (64 %, 7 %, 29.1). With only the extra power plants
+    // (no silo) it was (91 %, 71 %, 4.2), (56 %, 7 %, 26.7), (59 %, 60 %, 9.4), (71 %, 50 %, 26.7);
+    // with only the silo (no plants) (92 %, 56 %, 4.4), (50 %, 36 %, 24.3), (61 %, 71 %, 8.7),
+    // (70 %, 49 %, 25.7). The shape in a base moves with every layout change, in either direction
+    // (open items 14 and 15). The bounds sit a few points below the numbers of the layout of
+    // WP6.11; they guard against regression and claim no good shape.
     let bounds: [((i32, i32), f64, f64, f64); 4] = [
         ((56, 44), 0.85, 0.18, 8.0),
-        ((90, 44), 0.55, 0.14, 30.0),
-        ((90, 10), 0.70, 0.65, 9.0),
-        ((100, 40), 0.62, 0.28, 30.0),
+        ((90, 44), 0.55, 0.07, 30.0),
+        ((90, 10), 0.50, 0.65, 12.0),
+        ((100, 40), 0.58, 0.04, 33.0),
     ];
     for r in reports() {
         let &(_, member, open, worst) = bounds
