@@ -179,6 +179,17 @@ struct ShotRun {
     requested: bool,
 }
 
+/// The sim thread of the game: its own clock, held until the window exists; with `--record` it keeps
+/// every command with the tick it ran at (WP1.16a).
+fn sim_config(options: &Options) -> SimConfig {
+    SimConfig {
+        start_paused: true,
+        extra_tick_time: options.sim_delay,
+        record_commands: options.record.is_some(),
+        ..SimConfig::realtime()
+    }
+}
+
 /// The commands of a record that `--replay` feeds into the game (WP1.16a).
 struct Replay {
     commands: Vec<sf_headless::scenario::RecordedCommand>,
@@ -396,13 +407,7 @@ impl Runner {
         failed: Arc<AtomicBool>,
     ) -> Result<Self, String> {
         // The clock is held until the window and the renderer exist (`on_start`).
-        let sim = SimConfig {
-            start_paused: true,
-            extra_tick_time: options.sim_delay,
-            // `--record`: the sim thread keeps every command with the tick it ran at.
-            record_commands: options.record.is_some(),
-            ..SimConfig::realtime()
-        };
+        let sim = sim_config(&options);
         Self::with_sim(options, map, lod, pack, failed, sim)
     }
 
@@ -3618,6 +3623,17 @@ fn select_press_starts_selection(ui_busy: bool, build_active: bool, tool_active:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_sim_thread_records_commands_only_with_record() {
+        let parse =
+            |line: &str| Options::parse(Preset::Game, line.split_whitespace().map(str::to_owned));
+        assert!(sim_config(&parse("--match --record play.ron")).record_commands);
+        assert!(!sim_config(&parse("--match")).record_commands);
+        // The sandbox has nothing to record: the flag is dropped by the parser.
+        assert!(!sim_config(&parse("--record play.ron")).record_commands);
+        assert!(sim_config(&parse("--match")).start_paused);
+    }
+
     use super::*;
     use crate::args::Preset;
     use sf_data::map::generate::generate_cells;
