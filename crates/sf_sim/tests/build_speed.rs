@@ -401,7 +401,19 @@ fn the_money_adds_up_for_every_price_and_every_factor() {
 /// times hashes as before).
 #[test]
 fn the_factor_is_in_the_checksum() {
-    // Every build here is 1 tick or 0, so 3 / 2 and 2 / 1 give the same scaled tables.
+    // Every build here is 1 tick or 0 (the structures too), so 3 / 2 and 2 / 1 give the same scaled
+    // tables and digests, and only the factor itself can part the two checksums.
+    let one_tick_buildings = || {
+        let stats = buildings()
+            .iter()
+            .cloned()
+            .map(|mut b| {
+                b.build_ticks = b.build_ticks.min(1);
+                b
+            })
+            .collect();
+        BuildingTable::new(stats).unwrap()
+    };
     let one_tick_world = |speed: BuildSpeed| {
         let build = |kind| UnitBuild {
             kind,
@@ -415,7 +427,7 @@ fn the_factor_is_in_the_checksum() {
             .unwrap()
             .with_units(units())
             .unwrap()
-            .with_buildings(buildings())
+            .with_buildings(one_tick_buildings())
             .unwrap()
             .with_production(
                 rules(speed),
@@ -436,6 +448,11 @@ fn the_factor_is_in_the_checksum() {
             .get(RIFLE)
             .unwrap()
             .build_ticks,
+    );
+    assert_eq!(a.building_table().digest(), b.building_table().digest());
+    assert_eq!(
+        a.production_table().unwrap().digest(),
+        b.production_table().unwrap().digest()
     );
     assert_ne!(a.checksum(), b.checksum(), "3/2 against 2/1");
     // The same fraction written differently is the same rule.
