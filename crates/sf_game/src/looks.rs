@@ -153,7 +153,9 @@ impl Looks {
         let shape = roster.wreck_shape(w)?;
         Some(
             Motion::from_fixed(shape, WRECK_COLOUR, w.pos, w.pos, w.facing, w.facing)
-                .with_id(UnitId::from_parts(slot, WRECK_GENERATION)),
+                .with_id(UnitId::from_parts(slot, WRECK_GENERATION))
+                // The rubble of a structure is drawn at the structure scale.
+                .with_structure(w.footprint.is_some()),
         )
     }
 

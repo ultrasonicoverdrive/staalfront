@@ -47,5 +47,9 @@
         // between. Presentation only: the click volumes keep their size. At most 2.5.
         model_scale_from: 0.45,
         model_scale_max: 2.5,
+        // The structures on the same ramp, to this at the farthest zoom (at most
+        // `model_scale_max`). Lower than the units: at 2.5 the boxes of neighbouring
+        // structures overlapped by up to 13 m (zoom fix round 3, 10-11-2026).
+        structure_scale_max: 1.6,
     ),
 )

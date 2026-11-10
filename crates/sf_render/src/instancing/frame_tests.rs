@@ -1393,3 +1393,42 @@ fn every_unit_is_a_model_at_every_zoom_and_the_icons_come_only_in_the_far_band()
         }
     }
 }
+
+/// Zoom fix round 3: at the farthest zoom the shipped bands draw a unit at its scale (2.5) and a
+/// motion marked as a structure at the structure scale (1.6); the drawn box, the ring and bars
+/// (`visit_drawn`) and the click volume follow each one's own scale.
+#[test]
+fn a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale() {
+    let bands = crate::CameraSettings::embedded().zoom;
+    let (unit_scale, structure_scale) = (bands.model_scale(1.0), bands.structure_scale(1.0));
+    assert_eq!((unit_scale, structure_scale), (2.5, 1.6));
+    let style = style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let unit = still(0, 0, 1, (100.0, 100.0));
+    let structure = still(0, 0, 2, (100.0, 100.0)).with_structure(true);
+    assert!(structure.is_structure() && !unit.is_structure());
+    let near = camera(0.3, (100.0, 100.0));
+    let vp = near.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H);
+    let view = FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0)
+        .with_model_scale(unit_scale)
+        .with_structure_scale(structure_scale);
+    for (m, k) in [(unit, unit_scale), (structure, structure_scale)] {
+        let mut inst = instancer_with(style.clone(), &[m]);
+        inst.build_frame(&view, flat);
+        let mut sizes = Vec::new();
+        inst.visit_drawn(|_| true, |d| sizes.push(d.size));
+        assert_eq!(sizes.len(), 1);
+        for (got, want) in sizes[0].iter().zip([6.0 * k; 3]) {
+            assert!((got - want).abs() < 1e-3, "{:?} at {k}", sizes[0]);
+        }
+        // A point 6.5 m beside the centre: inside the unit's drawn half width (7.5 m), outside
+        // the structure's (4.8 m).
+        let beside = inst.pick(&query_over(&near, Vec3::new(106.5, 0.5, 100.0), 0.0, 0.0));
+        assert_eq!(beside.is_some(), !m.is_structure(), "scale {k}");
+        assert!(
+            inst.pick(&query_over(&near, Vec3::new(103.0, 0.5, 100.0), 0.0, 0.0))
+                .is_some()
+        );
+    }
+}

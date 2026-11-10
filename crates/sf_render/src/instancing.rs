@@ -102,6 +102,9 @@ pub struct Motion {
     /// the simulation has no say in it yet, so it is zero unless the caller sets
     /// it; this is the hook for the ballistics of phase 5.
     barrel_pitch: f32,
+    /// A structure (or its wreck or ghost): drawn at [`FrameView::structure_scale`]
+    /// instead of [`FrameView::model_scale`] (zoom fix round 3).
+    structure: bool,
 }
 
 impl Motion {
@@ -127,6 +130,7 @@ impl Motion {
             facing: facing.raw(),
             turret: None,
             barrel_pitch: 0.0,
+            structure: false,
         }
     }
 
@@ -137,6 +141,18 @@ impl Motion {
     pub fn with_turret(mut self, prev_facing: Facing, facing: Facing) -> Self {
         self.turret = Some((prev_facing.raw(), facing.raw()));
         self
+    }
+
+    /// The same motion marked as a structure (or not): structures are drawn and
+    /// picked at the frame's structure scale, units at its model scale.
+    pub fn with_structure(mut self, structure: bool) -> Self {
+        self.structure = structure;
+        self
+    }
+
+    /// Whether this motion is drawn as a structure ([`Motion::with_structure`]).
+    pub fn is_structure(&self) -> bool {
+        self.structure
     }
 
     /// The same motion with the pitch of the barrel, in radians (the hook for the
@@ -270,6 +286,9 @@ pub struct FrameView<'a> {
     /// readability scale of `camera.ron`. Presentation only: the click volumes and
     /// the level selection keep the true size.
     pub model_scale: f32,
+    /// The same for the structures (a motion [`Motion::with_structure`]); the units
+    /// use [`FrameView::model_scale`].
+    pub structure_scale: f32,
 }
 
 impl<'a> FrameView<'a> {
@@ -282,6 +301,7 @@ impl<'a> FrameView<'a> {
             blend: Blend::MODELS,
             ui_scale: 1.0,
             model_scale: 1.0,
+            structure_scale: 1.0,
         }
     }
 
@@ -300,18 +320,41 @@ impl<'a> FrameView<'a> {
             blend,
             ui_scale,
             model_scale: 1.0,
+            structure_scale: 1.0,
         }
     }
 
     /// The same view with the models drawn `scale` times larger (clamped to be
-    /// finite and at least a tenth).
+    /// finite and at least a tenth), units and structures alike; see
+    /// [`FrameView::with_structure_scale`] for a scale of the structures' own.
     pub fn with_model_scale(mut self, scale: f32) -> Self {
-        self.model_scale = if scale.is_finite() {
-            scale.max(0.1)
-        } else {
-            1.0
-        };
+        self.model_scale = clean_scale(scale);
+        self.structure_scale = self.model_scale;
         self
+    }
+
+    /// The same view with the structures drawn `scale` times larger (clamped as
+    /// [`FrameView::with_model_scale`]); call it after that.
+    pub fn with_structure_scale(mut self, scale: f32) -> Self {
+        self.structure_scale = clean_scale(scale);
+        self
+    }
+
+    /// The scale a record is drawn at.
+    fn scale_for(&self, structure: bool) -> f32 {
+        if structure {
+            self.structure_scale
+        } else {
+            self.model_scale
+        }
+    }
+}
+
+fn clean_scale(scale: f32) -> f32 {
+    if scale.is_finite() {
+        scale.max(0.1)
+    } else {
+        1.0
     }
 }
 
@@ -323,6 +366,8 @@ struct FrameState {
     /// [`FrameView::model_scale`] of the frame: the models' drawn size, which the
     /// click volume, the ring and the bars follow.
     model_scale: f32,
+    /// [`FrameView::structure_scale`] of the frame.
+    structure_scale: f32,
 }
 
 /// Marks a record without a model or icon instance.
@@ -337,6 +382,8 @@ struct Drawn {
     /// Interpolated facing in 1/256 turns.
     steps: f32,
     shape: u8,
+    /// Drawn at the structure scale ([`Motion::with_structure`]).
+    structure: bool,
     /// The mesh list and the index in it of the unit's model instance (its
     /// first part).
     model_mesh: u16,
@@ -593,9 +640,15 @@ impl Instancer {
     /// The model's box as drawn in the last frame: [`Instancer::geom`]'s size and
     /// footprint offset times the frame's model scale (1 before any frame). The model
     /// is scaled about the unit's origin, so the offset grows with it.
-    fn drawn_box(&self, shape: u8) -> ([f32; 3], [f32; 2]) {
+    fn drawn_box(&self, shape: u8, structure: bool) -> ([f32; 3], [f32; 2]) {
         let geom = self.geom(shape);
-        let k = self.frame.map_or(1.0, |f| f.model_scale);
+        let k = self.frame.map_or(1.0, |f| {
+            if structure {
+                f.structure_scale
+            } else {
+                f.model_scale
+            }
+        });
         (
             scaled(geom.size, k),
             [geom.offset[0] * k, geom.offset[1] * k],
@@ -863,6 +916,7 @@ impl Instancer {
                     pos: [x, y, z],
                     steps,
                     shape: m.shape,
+                    structure: m.structure,
                     model_mesh: 0,
                     model_index: NO_INSTANCE,
                     extra: [(0, NO_INSTANCE); MAX_PARTS - 1],
@@ -893,7 +947,13 @@ impl Instancer {
                     // The alpha is the model weight (1 in play, below 1 only for the
                     // debug display): the fragment shader keeps that share of the pixels.
                     let color = [r, g, b, weight];
-                    let unit = model_matrix(x, y, z, steps, scaled(geom.scale, view.model_scale));
+                    let unit = model_matrix(
+                        x,
+                        y,
+                        z,
+                        steps,
+                        scaled(geom.scale, view.scale_for(m.structure)),
+                    );
                     let parts = chain.parts(level);
                     if parts.is_empty() {
                         let mesh = chain.level(level).mesh;
@@ -965,6 +1025,7 @@ impl Instancer {
             blend,
             ui_scale: view.ui_scale,
             model_scale: view.model_scale,
+            structure_scale: view.structure_scale,
         });
         self.stats = stats;
         stats
@@ -1036,7 +1097,11 @@ impl Instancer {
     ) -> Option<Candidate> {
         let click_px = self.icon_config.click_min_px * ui_scale;
         // The models' drawn scale grows their boxes beyond the tile's.
-        let grown = (self.frame.map_or(1.0, |f| f.model_scale) - 1.0).max(0.0)
+        let grown = (self
+            .frame
+            .map_or(1.0, |f| f.model_scale.max(f.structure_scale))
+            - 1.0)
+            .max(0.0)
             * self.footprint.max(self.tallest);
         let mut best: Option<Candidate> = None;
         for vt in &self.visible_tiles {
@@ -1053,7 +1118,7 @@ impl Instancer {
             {
                 // The box as drawn (scaled with the model); its footprint centre
                 // (a model's real bounds need not be centred on the unit's origin).
-                let (size, offset) = self.drawn_box(rec.shape);
+                let (size, offset) = self.drawn_box(rec.shape, rec.structure);
                 let pos = offset_point(Vec3::from(rec.pos), rec.steps, offset);
                 let middle = pos + Vec3::new(0.0, 0.5 * size[1], 0.0);
                 let distance = (middle - eye.eye).length();
@@ -1088,7 +1153,7 @@ impl Instancer {
         let mut best = best?;
         // For the readout: how far the box centre is from the cursor on the screen.
         let rec = &self.records[best.record as usize];
-        let (size, offset) = self.drawn_box(rec.shape);
+        let (size, offset) = self.drawn_box(rec.shape, rec.structure);
         let middle = offset_point(Vec3::from(rec.pos), rec.steps, offset)
             + Vec3::new(0.0, 0.5 * size[1], 0.0);
         best.cursor_distance = project_px(&query.view_proj, middle, query.viewport)
@@ -1167,7 +1232,7 @@ impl Instancer {
         let models = frame.blend.dominant() == Dominant::Model;
         for rec in &self.records {
             let hit = if models {
-                let (size, offset) = self.drawn_box(rec.shape);
+                let (size, offset) = self.drawn_box(rec.shape, rec.structure);
                 let pos = offset_point(Vec3::from(rec.pos), rec.steps, offset);
                 rect_hits_model(
                     &query.rect,
@@ -1213,7 +1278,7 @@ impl Instancer {
             {
                 icon.flags |= ICON_SELECTED;
             }
-            let (size, offset) = self.drawn_box(rec.shape);
+            let (size, offset) = self.drawn_box(rec.shape, rec.structure);
             visit(DrawnUnit {
                 id: rec.id,
                 centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),
@@ -1237,7 +1302,7 @@ impl Instancer {
             if !is_wanted(rec.id) {
                 continue;
             }
-            let (size, offset) = self.drawn_box(rec.shape);
+            let (size, offset) = self.drawn_box(rec.shape, rec.structure);
             visit(DrawnUnit {
                 id: rec.id,
                 centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),

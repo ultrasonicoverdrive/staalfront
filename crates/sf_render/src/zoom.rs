@@ -123,8 +123,12 @@ pub struct ZoomBands {
     pub icons_full: f32,
     /// Zoom up to which the models keep their size.
     pub model_scale_from: f32,
-    /// The scale of the models at the farthest zoom (a cap: never more).
+    /// The scale of the unit models at the farthest zoom (a cap: never more).
     pub model_scale_max: f32,
+    /// The scale of the structures at the farthest zoom (a cap, at most
+    /// `model_scale_max`): structures are large already, and at the unit scale
+    /// neighbouring ones overlap (zoom fix round 3).
+    pub structure_scale_max: f32,
     /// The most opaque the icons are ever drawn (`0 < cap <= 1`), so the model stays
     /// visible through them. Only the drawn opacity: the switches follow the ramp.
     pub icons_max_alpha: f32,
@@ -140,8 +144,13 @@ impl ZoomBands {
     /// The factor the models are drawn larger by at `zoom`: 1 up to `model_scale_from`,
     /// `model_scale_max` at zoom 1, a smooth ramp in between. Never above the cap.
     pub fn model_scale(&self, zoom: f32) -> f32 {
-        let t = smooth_ramp(zoom, self.model_scale_from, 1.0);
-        (1.0 + (self.model_scale_max - 1.0) * t).clamp(1.0, self.model_scale_max.max(1.0))
+        scale_on_ramp(zoom, self.model_scale_from, self.model_scale_max)
+    }
+
+    /// The factor the structures are drawn larger by at `zoom`: the same ramp as
+    /// [`ZoomBands::model_scale`], to `structure_scale_max` at zoom 1.
+    pub fn structure_scale(&self, zoom: f32) -> f32 {
+        scale_on_ramp(zoom, self.model_scale_from, self.structure_scale_max)
     }
 
     /// The picture at `zoom` with the player's icon toggle (`ToggleIcons`, on by
@@ -177,6 +186,11 @@ impl ZoomBands {
         {
             return bad("zoom.model_scale_max must be between 1 and 2.5");
         }
+        if !(self.structure_scale_max.is_finite()
+            && (1.0..=self.model_scale_max).contains(&self.structure_scale_max))
+        {
+            return bad("zoom.structure_scale_max must be between 1 and zoom.model_scale_max");
+        }
         if !(self.icons_max_alpha.is_finite()
             && self.icons_max_alpha > 0.0
             && self.icons_max_alpha <= 1.0)
@@ -185,6 +199,12 @@ impl ZoomBands {
         }
         Ok(())
     }
+}
+
+/// 1 up to `from`, `max` at zoom 1, a smoothstep in between; never above `max`.
+fn scale_on_ramp(zoom: f32, from: f32, max: f32) -> f32 {
+    let t = smooth_ramp(zoom, from, 1.0);
+    (1.0 + (max - 1.0) * t).clamp(1.0, max.max(1.0))
 }
 
 /// `0` at and below `from`, `1` at and above `to`, a smoothstep in between.
@@ -275,6 +295,7 @@ mod tests {
                 icons_full: 1.0,
                 model_scale_from: 0.45,
                 model_scale_max: 2.5,
+                structure_scale_max: 1.6,
                 icons_max_alpha: 0.4
             }
         );
@@ -407,6 +428,19 @@ mod tests {
         }
     }
 
+    /// Structures have their own, smaller scale on the same ramp (zoom fix round 3).
+    #[test]
+    fn structures_grow_less_than_units() {
+        let b = bands();
+        assert_eq!(b.structure_scale(1.0), 1.6);
+        assert_eq!(b.structure_scale(b.model_scale_from), 1.0);
+        for i in 0..=100 {
+            let z = i as f32 / 100.0;
+            assert!(b.structure_scale(z) <= b.model_scale(z), "zoom {z}");
+        }
+        assert!(b.structure_scale(0.8) > 1.0 && b.structure_scale(0.8) < 1.6);
+    }
+
     /// The model scale never goes above 2.5 (the shipped value is the cap).
     #[test]
     fn the_model_scale_cap_is_two_and_a_half() {
@@ -428,6 +462,10 @@ mod tests {
             ("model_scale_max: 2.5", "model_scale_max: 9.0"),
             ("model_scale_max: 2.5", "model_scale_max: 2.6"),
             ("model_scale_max: 2.5", "model_scale_max: 0.5"),
+            ("structure_scale_max: 1.6", "structure_scale_max: 2.6"),
+            ("structure_scale_max: 1.6", "structure_scale_max: 0.9"),
+            // Structures larger than the units: the cap order.
+            ("model_scale_max: 2.5", "model_scale_max: 1.5"),
             ("model_scale_from: 0.45", "model_scale_from: 1.0"),
             ("icons_max_alpha: 0.4", "icons_max_alpha: 0.0"),
             ("icons_max_alpha: 0.4", "icons_max_alpha: 1.5"),

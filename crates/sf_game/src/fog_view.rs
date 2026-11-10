@@ -203,6 +203,8 @@ impl GhostBook {
             .map(|(n, g)| {
                 Motion::from_fixed(g.shape, GHOST_COLOUR, g.pos, g.pos, g.facing, g.facing)
                     .with_id(UnitId::from_parts(first_slot + n as u32, GHOST_GENERATION))
+                    // A ghost is a structure last seen: the structure scale, like the original.
+                    .with_structure(true)
             })
             .collect()
     }

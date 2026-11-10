@@ -1031,6 +1031,12 @@ pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
     }
 }
 
+/// The motion of the view at `index` of `snap`, as [`motions_of`] draws it: [`motion_of`], marked as
+/// a structure when it has a footprint, so it is drawn at the structure scale (zoom fix round 3).
+pub fn view_motion(looks: &Looks, snap: &SimSnapshot, index: usize) -> Motion {
+    motion_of(looks, snap, &snap.views()[index]).with_structure(snap.is_structure_at(index))
+}
+
 /// Everything the instancer draws for a snapshot: the entities, then the wrecks and the rubble (WP5.5),
 /// which are numbered from the first slot no entity has. In a world with vision rules (WP8.3, WP8.4) an
 /// entity the local player does not see is left out, and so is a wreck on a cell it does not see: the
@@ -1044,7 +1050,7 @@ pub fn motions_of<'a>(
         .iter()
         .enumerate()
         .filter(move |&(i, _)| snap.view_shown(i))
-        .map(move |(_, v)| motion_of(looks, snap, v))
+        .map(move |(i, _)| view_motion(looks, snap, i))
         .chain(
             snap.wrecks()
                 .iter()
@@ -1998,14 +2004,19 @@ impl Runner {
         let distance = self.camera.distance() as f32;
         let zoom = self.camera.zoom() as f32;
         // Models at every zoom; the icons over them in the far band; the models
-        // a little larger toward the far end (camera.ron, `zoom`).
-        let (blend, model_scale) = match self.debug.state.unit_display {
+        // larger toward the far end, the structures less than the units (camera.ron, `zoom`).
+        let (blend, model_scale, structure_scale) = match self.debug.state.unit_display {
             UnitDisplay::Auto => (
                 self.zoom_bands.blend_toggled(zoom, self.icons_on),
                 self.zoom_bands.model_scale(zoom),
+                self.zoom_bands.structure_scale(zoom),
             ),
-            UnitDisplay::Models => (Blend::MODELS, self.zoom_bands.model_scale(zoom)),
-            UnitDisplay::Icons => (Blend::ICONS, 1.0),
+            UnitDisplay::Models => (
+                Blend::MODELS,
+                self.zoom_bands.model_scale(zoom),
+                self.zoom_bands.structure_scale(zoom),
+            ),
+            UnitDisplay::Icons => (Blend::ICONS, 1.0, 1.0),
         };
 
         // Cull by tile, interpolate, put the units on the ground, choose the
@@ -2013,7 +2024,9 @@ impl Runner {
         let started = Instant::now();
         let ground = &self.ground;
         self.stats = self.instancer.build_frame(
-            &FrameView::new(&frustum, alpha, eye, blend, scale).with_model_scale(model_scale),
+            &FrameView::new(&frustum, alpha, eye, blend, scale)
+                .with_model_scale(model_scale)
+                .with_structure_scale(structure_scale),
             |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
         );
         self.build_ms.push(started.elapsed());

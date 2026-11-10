@@ -29,7 +29,7 @@ use sf_render::image::{self, Rgba8};
 use sf_render::model::EyeView;
 use sf_render::{
     Blend, Camera, CameraConfig, FrameView, Frustum, GpuOptions, Ground, Instancer, ModelSet,
-    Motion, Renderer, Style, TerrainGround, UnitId,
+    Renderer, Style, TerrainGround, UnitId,
 };
 use sf_sim::{PlayerId, Verdict, World};
 use sf_ui::{Ui, UiConfig, UiInput, UiRenderer};
@@ -141,23 +141,15 @@ impl Scene {
         panic!("not reached within {limit} ticks");
     }
 
-    /// The instancer takes the world as it is, as the game does each tick.
+    /// The instancer takes the world as it is, as the game does each tick: the game's own
+    /// snapshot and `view_motion` (so a structure is marked as one, zoom fix round 3).
     fn sync(&mut self) {
-        let roster = self.looks.roster().expect("a roster");
-        let views: Vec<_> = self.world.snapshot().iter().collect();
-        let motions = views.iter().map(|v| {
-            let shape = roster
-                .shape_for(v.kind, sf_game::roster::faction_of_owner(v.owner.0))
-                .unwrap_or(0);
-            let motion =
-                Motion::from_fixed(shape, v.owner.0, v.prev_pos, v.pos, v.prev_facing, v.facing)
-                    .with_id(UnitId::from_parts(v.id.index(), v.id.generation()));
-            match v.turret {
-                Some(t) => motion.with_turret(t.prev_facing, t.facing),
-                None => motion,
-            }
-        });
-        self.instancer.update_tick(motions.collect::<Vec<_>>());
+        let snap = sf_game::sim_snapshot::SimSnapshot::capture(&self.world);
+        // Every view, seen or not (both mirrored bases), each as the game draws it.
+        let motions: Vec<_> = (0..snap.views().len())
+            .map(|i| sf_game::runner::view_motion(&self.looks, &snap, i))
+            .collect();
+        self.instancer.update_tick(motions);
     }
 
     /// A camera over the map looking at the cell `focus`; `zoom` as the game's camera has it.
@@ -351,14 +343,14 @@ fn the_start_the_fight_and_the_banner() {
 }
 
 /// The click volume follows the drawn model scale (decision 10-11-2026). At the farthest zoom, where
-/// the scale is at its cap, the scaled boxes of the structures of the M1 base overlap. Measured bound,
-/// not a goal (zoom fix round 2, cap 2.5): 8 pairs of the 9 structures overlap, the worst by 13.0 m
-/// (the construction centre and its neighbours; at 2.0 it was 5 pairs and 6.0 m, at the old 1.6 2 pairs
-/// and 0.40 m). A click where two boxes overlap goes to the box the ray enters first, as for any two
-/// models. The pin is that it does not grow beyond this without anyone noticing.
+/// the scale is at its cap, the scaled boxes of the structures of the M1 base may touch in a sliver.
+/// Structures have their own scale since zoom fix round 3 (`structure_scale_max` 1.6, units 2.5):
+/// measured, in each of the two mirrored bases the construction centre and one neighbour overlap by
+/// 0.40 m, the other pairs are clear (at the single scale of 2.5 of round 2 it was 8 pairs and 13.0 m).
+/// The structures go through the game's own `view_motion`, so they are marked as structures as in play.
+/// A click in the sliver goes to the box the ray enters first, as for any two models.
 #[test]
-fn the_scaled_structure_boxes_of_the_m1_base_overlap_within_the_measured_bound_at_the_farthest_zoom()
- {
+fn the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_farthest_zoom() {
     let mut scene = Scene::new();
     // The base of the player is up: power, refinery, factory and the rest of the opening.
     scene.run_to(1200);
@@ -366,13 +358,17 @@ fn the_scaled_structure_boxes_of_the_m1_base_overlap_within_the_measured_bound_a
     let bands = sf_render::CameraSettings::embedded().zoom;
     let scale = bands.model_scale(1.0);
     assert_eq!(scale, bands.model_scale_max);
+    let structure_scale = bands.structure_scale(1.0);
+    assert_eq!(structure_scale, bands.structure_scale_max);
     let cam = scene.camera(1.0, (48.0, 48.0));
     let vp = cam.view_proj();
     let frustum = Frustum::from_view_proj(vp);
     let eye = EyeView::from_view_proj(vp, H as f32);
     let ground = scene.ground.clone();
     scene.instancer.build_frame(
-        &FrameView::new(&frustum, 0.0, eye, bands.blend(1.0), 1.0).with_model_scale(scale),
+        &FrameView::new(&frustum, 0.0, eye, bands.blend(1.0), 1.0)
+            .with_model_scale(scale)
+            .with_structure_scale(structure_scale),
         |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
     );
     let world = &scene.world;
@@ -410,7 +406,7 @@ fn the_scaled_structure_boxes_of_the_m1_base_overlap_within_the_measured_bound_a
                 println!("{:?} and {:?} overlap by {:.2} m", a.0, b.0, -gap);
             }
             assert!(
-                gap > -13.5,
+                gap > -0.5,
                 "{:?} and {:?} overlap by {:.2} m at scale {scale}",
                 a.0,
                 b.0,
@@ -429,7 +425,7 @@ fn the_scaled_structure_boxes_of_the_m1_base_overlap_within_the_measured_bound_a
         .filter(|(a, b)| (0..2).all(|k| (a.1[k] - b.1[k]).abs() < a.2[k] + b.2[k]))
         .count();
     assert!(
-        overlapping <= 8,
-        "{overlapping} pairs overlap, 8 measured at the cap of 2.5"
+        overlapping <= 2,
+        "{overlapping} pairs overlap, one per base at most"
     );
 }
