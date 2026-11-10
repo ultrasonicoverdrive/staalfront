@@ -1135,7 +1135,9 @@ impl Runner {
         // The unit voice (WP11.2): the own units that can speak before this frame's step, and whether
         // the player did anything that sets the selection (a click, the release of a drag, a double
         // click, a group key). A drag in progress, or a selection that just stays, says nothing.
-        let before = self.selection.orderable(&self.snap);
+        // (Only the ids are copied here; which of them can speak is worked out below, and only when the
+        // player acted, so a frame without a selection action costs one small copy.)
+        let before_ids = self.selection.ids().to_vec();
         let mut acted = false;
         let mut additive_step = false;
         if actions.pressed(Action::SelectClick)
@@ -1205,9 +1207,16 @@ impl Runner {
                 }
             }
         }
-        let after = self.selection.orderable(&self.snap);
-        if let Some(voice) = selection_frame(acted, additive_step, &before, &after) {
-            self.say(voice);
+        if acted {
+            let can_speak = |id: &sf_sim::EntityId| {
+                crate::selection::facts(&self.snap, *id)
+                    .is_some_and(|f| f.class == sf_sim::UnitClass::Mobile)
+            };
+            let before: Vec<_> = before_ids.iter().copied().filter(can_speak).collect();
+            let after = self.selection.orderable(&self.snap);
+            if let Some(voice) = selection_frame(acted, additive_step, &before, &after) {
+                self.say(voice);
+            }
         }
     }
 
