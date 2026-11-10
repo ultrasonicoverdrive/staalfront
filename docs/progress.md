@@ -2767,3 +2767,20 @@ fixed, delete the entry in the same PR.
     vision and scales with the units that change cell and the area of their disc. The next step if a crowd with a large sight ever
     shows in a profile is to stamp only the difference of two discs one cell apart (about 2 x (2r + 1) cells instead of
     2 x (2r + 1)^2). Nothing in a match shows it (`vision.md`, "Cost").
+35. **Stutter in play** (M1 on the laptop, 10-11-2026; plan: **WP1.16** in the PLAN.md queue). Tijmen played `sf_game --match
+    --ra-audio` from main `4944d5c` on the reference laptop (GTX 1650, DX12, 1600 x 900 windowed, later maximised), 8,710 ticks
+    (7 min 15 s), and felt it stutter. The run's own summary: frame ms avg 17.0, **p99 25.5, max 1,627.8** (the benchmarks
+    give p99 4.3); sim thread tick max 62.3 ms, behind 3 passes, **125 late snapshots**; instance upload max 40.1 ms;
+    build+cull max 10.9 ms; pick max 11.9 ms. The worst frames, from the once-a-second lines:
+    | Near tick | Longest frame | What the log shows at that time |
+    |---|---|---|
+    | 5183 | 595 ms | nothing |
+    | 6651 | 878 ms | nothing |
+    | 7476 | 885 ms | the window was maximised (`resized 1920x991`) |
+    | 7896 | 1,628 ms | the combat music switch: that track's decode on its background thread took **804 ms** (the other tracks in this session and in `audio.md`: 30 to 56 ms) |
+    The once-a-second lines report a new longest frame over 40 ms 44 times, 32 of them after tick 5100, when the player
+    had produced most units (their `max` is over a rolling window, so this counts changes, not slow frames). The
+    starting reservation was 4 instance buffers, 0.0 MB (`renderer: reserved`, 12 starting objects); `reserve_units` runs
+    only at start and on a scene swap, so every unit produced later grows the buffers in play (the cause of follow-up 14).
+    On the machine: 15.3 GB RAM, 9.0 GB free afterwards, page file peak 3.4 GB; a Bitdefender service runs (its
+    exclusions need administrator rights to read). Not known yet: which of these, if any, made the long frames.

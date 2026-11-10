@@ -298,7 +298,31 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 *08-11-2026 (orchestrator, with Tijmen: "follow your own proposals"; built in WP7.7): the #105 measurement showed that with the gate on a unit whose sight equals its weapon reach loses targets at the limit of its reach (the rocket trooper, sight 5 and reach 5, did not pick a tower at squared distance 26). Decision: **the visibility test for target acquisition is measured to the target's edge, like the reach** (a structure: any footprint cell or a visible cell beside it; a unit: its own cell or a neighbour cell its body reaches), in integers, before the gate goes on, so M1 does not get that regression. Rules: `docs/rules/vision.md`, "Measured to the edge".*
 
 2. **WP11.2** Voice responses (see Phase 11), built now: `sf_game` raises `unit.select`, `unit.move` and `unit.attack` (the bank events, mapped to Red Alert voices in `assets/audio/ra_mapping.ron`) on the player's own selection and orders, from the UI side (no sim event needed: these are the player's own actions), with a brake against spam (one voice at a time, a minimum gap, not on every box-select frame). Without the Red Alert files the events stay silent unless the bank has a CC0 sound. Test: the brake and which event each action raises, headless where the runner allows.
-3. Then phase 9 (computer opponent) as planned.
+3. **WP1.16 Stutter in play** (added 10-11-2026 by Tijmen, after an M1 play on the laptop that stuttered; evidence in
+   `docs/progress.md` follow-up 35: frame p99 25.5 ms, frames of 0.6 to 1.6 s, 125 late snapshots). Built **before
+   phase 9**. Measure first, then fix only what the measurement shows; no fix on a guess.
+   - (a) **A hitch log in ordinary play**, not only in `--bench`: every frame over 50 ms writes one line with the parts
+     the runner already times (event-loop gap before the frame, sim wait, snapshot convert, build+cull, instance
+     upload with the number of buffer allocations, render, surface acquire and present), plus what happened in that
+     frame: window events (resize, move, focus, occlusion), a music track start or decode result with its time, the
+     number of sound starts, a sim tick over 20 ms with the tick number. Also `--hitch-log FILE` (JSON), so Tijmen's
+     next play hands back a file. Cost when nothing is slow: one comparison per frame.
+   - (b) **Tick and per-system timing on the sim thread** for a tick over 20 ms (the 62 ms tick and the late snapshots),
+     printed with the tick number; and a **command record** of the player's orders with their ticks
+     (`--record FILE`), so the same match can be replayed headless (`sf_headless`, the sim is deterministic) to find a
+     sim-side spike without the window, the GPU or the player.
+   - (c) **Suspects to rule in or out, each with its own measurement**: (1) instance buffers that grow during play
+     (`reserve_units` runs only at start and on a scene swap); (2) the music: the 804 ms decode and whether anything on
+     the main thread waits for it (the hand-over to kira, a 30 to 64 MiB allocation, the 16-bit copy); force a track
+     switch every 10 s in a test scene and look at the frame max; (3) Windows window handling (resize and move block
+     the event loop); (4) the sim thread (fog of war, targeting with sight) in M1 with many units; (5) the machine
+     itself: if a long frame has little CPU time in it, the process was not running (another program, antivirus).
+   - (d) **Fix** what (a) to (c) show, each with a test that fails without it where the runner allows one; a
+     measured before/after in the PR.
+   - **Done when:** a 10-minute M1 play on the GTX 1650 laptop with `--hitch-log` has frame p99 under 16.7 ms and no
+     frame over 100 ms except at a window resize, and Tijmen does not feel it stutter. The laptop play is Tijmen's;
+     the PR gives him the command.
+4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision
 - WP8.1 Shroud (never seen) and fog of war (seen, not current) per player, cell-based in the sim.
