@@ -79,6 +79,10 @@ pub struct Emitters {
     pub smoke_effect: String,
     /// The effects.ron entry of a fire puff.
     pub fire_effect: String,
+    /// The effects.ron entry of a smoke puff of a structure (larger than a vehicle's).
+    pub structure_smoke_effect: String,
+    /// The effects.ron entry of a fire puff of a structure.
+    pub structure_fire_effect: String,
     /// The anchor-name prefix of the smoke node.
     pub smoke_anchor: String,
     /// The anchor-name prefix of the fire node.
@@ -87,6 +91,10 @@ pub struct Emitters {
     pub damaged: Rates,
     /// A heavily damaged object.
     pub heavy: Rates,
+    /// A damaged structure.
+    pub structure_damaged: Rates,
+    /// A heavily damaged structure.
+    pub structure_heavy: Rates,
     /// The disc around an anchor the puffs start in, metres.
     pub anchor_radius_m: f32,
     /// Puffs start this far above the anchor, metres (a puff on a roof's surface is cut in half).
@@ -194,7 +202,20 @@ impl Damage {
                 return Err(format!("emitters.{what} is empty"));
             }
         }
-        for (what, r) in [("damaged", &e.damaged), ("heavy", &e.heavy)] {
+        for (what, v) in [
+            ("structure_smoke_effect", &e.structure_smoke_effect),
+            ("structure_fire_effect", &e.structure_fire_effect),
+        ] {
+            if v.is_empty() {
+                return Err(format!("emitters.{what} is empty"));
+            }
+        }
+        for (what, r) in [
+            ("damaged", &e.damaged),
+            ("heavy", &e.heavy),
+            ("structure_damaged", &e.structure_damaged),
+            ("structure_heavy", &e.structure_heavy),
+        ] {
             in_range(&format!("{what}.smoke_per_s"), r.smoke_per_s, 0.0, 60.0)?;
             in_range(&format!("{what}.fire_per_s"), r.fire_per_s, 0.0, 60.0)?;
         }
@@ -204,6 +225,15 @@ impl Damage {
         if e.damaged.smoke_per_s <= 0.0 {
             return Err(
                 "emitters.damaged.smoke_per_s must be above 0 (damaged shows smoke)".into(),
+            );
+        }
+        if e.structure_heavy.smoke_per_s <= 0.0 && e.structure_heavy.fire_per_s <= 0.0 {
+            return Err("emitters.structure_heavy gives off nothing".into());
+        }
+        if e.structure_damaged.smoke_per_s <= 0.0 {
+            return Err(
+                "emitters.structure_damaged.smoke_per_s must be above 0 (damaged shows smoke)"
+                    .into(),
             );
         }
         in_range("emitters.anchor_radius_m", e.anchor_radius_m, 0.0, 5.0)?;
@@ -234,19 +264,28 @@ impl Damage {
                 .get(name)
                 .ok_or_else(|| format!("emitters.{what} \"{name}\" is not an effect"))
         };
-        let smoke = find("smoke_effect", &self.emitters.smoke_effect)?;
-        if smoke.glow {
-            return Err(format!(
-                "emitters.smoke_effect \"{}\" must be a smoke-class effect (glow: false)",
-                self.emitters.smoke_effect
-            ));
-        }
-        let fire = find("fire_effect", &self.emitters.fire_effect)?;
-        if !fire.glow {
-            return Err(format!(
-                "emitters.fire_effect \"{}\" must glow",
-                self.emitters.fire_effect
-            ));
+        for (smoke_what, smoke_name, fire_what, fire_name) in [
+            (
+                "smoke_effect",
+                &self.emitters.smoke_effect,
+                "fire_effect",
+                &self.emitters.fire_effect,
+            ),
+            (
+                "structure_smoke_effect",
+                &self.emitters.structure_smoke_effect,
+                "structure_fire_effect",
+                &self.emitters.structure_fire_effect,
+            ),
+        ] {
+            if find(smoke_what, smoke_name)?.glow {
+                return Err(format!(
+                    "emitters.{smoke_what} \"{smoke_name}\" must be a smoke-class effect (glow: false)"
+                ));
+            }
+            if !find(fire_what, fire_name)?.glow {
+                return Err(format!("emitters.{fire_what} \"{fire_name}\" must glow"));
+            }
         }
         Ok(())
     }
@@ -267,12 +306,31 @@ impl Damage {
         }
     }
 
-    /// What `stage` gives off; nothing for an intact object.
+    /// What `stage` gives off a mobile object; nothing for an intact object.
     pub fn rates(&self, stage: Stage) -> Option<Rates> {
-        match stage {
-            Stage::Intact => None,
-            Stage::Damaged => Some(self.emitters.damaged),
-            Stage::Heavy => Some(self.emitters.heavy),
+        self.rates_of(stage, false)
+    }
+
+    /// What `stage` gives off, puffs per second and source: a structure's own rates when `structure`,
+    /// else a mobile object's. Nothing for an intact object.
+    pub fn rates_of(&self, stage: Stage, structure: bool) -> Option<Rates> {
+        let e = &self.emitters;
+        match (stage, structure) {
+            (Stage::Intact, _) => None,
+            (Stage::Damaged, false) => Some(e.damaged),
+            (Stage::Heavy, false) => Some(e.heavy),
+            (Stage::Damaged, true) => Some(e.structure_damaged),
+            (Stage::Heavy, true) => Some(e.structure_heavy),
+        }
+    }
+
+    /// The effects.ron names `(smoke, fire)` of the puffs of a structure or of a mobile object.
+    pub fn puff_effects(&self, structure: bool) -> (&str, &str) {
+        let e = &self.emitters;
+        if structure {
+            (&e.structure_smoke_effect, &e.structure_fire_effect)
+        } else {
+            (&e.smoke_effect, &e.fire_effect)
         }
     }
 
@@ -324,6 +382,25 @@ mod tests {
         );
         assert_eq!((e.damaged.smoke_per_s, e.damaged.fire_per_s), (4.0, 0.0));
         assert_eq!((e.heavy.smoke_per_s, e.heavy.fire_per_s), (8.0, 7.0));
+        // A structure burns bigger (WP6.8b placeholders); the mobile numbers above are unchanged.
+        assert_eq!(
+            (
+                e.structure_smoke_effect.as_str(),
+                e.structure_fire_effect.as_str()
+            ),
+            ("damage_smoke_structure", "damage_fire_structure")
+        );
+        assert_eq!(
+            (
+                e.structure_damaged.smoke_per_s,
+                e.structure_damaged.fire_per_s
+            ),
+            (5.0, 0.0)
+        );
+        assert_eq!(
+            (e.structure_heavy.smoke_per_s, e.structure_heavy.fire_per_s),
+            (10.0, 10.0)
+        );
         assert_eq!(
             (e.anchor_radius_m, e.anchor_lift_m, e.min_body_cells),
             (0.4, 1.0, 1.0)
@@ -387,8 +464,32 @@ mod tests {
     fn rates_are_only_for_damaged_objects() {
         let d = shipped();
         assert_eq!(d.rates(Stage::Intact), None);
+        assert_eq!(d.rates_of(Stage::Intact, true), None);
         assert_eq!(d.rates(Stage::Damaged).unwrap().fire_per_s, 0.0);
         assert!(d.rates(Stage::Heavy).unwrap().fire_per_s > 0.0);
+    }
+
+    /// A structure has its own, bigger effects and higher rates than a mobile object.
+    #[test]
+    fn a_structure_has_its_own_effects_and_rates() {
+        let d = shipped();
+        assert_eq!(d.puff_effects(false), ("damage_smoke", "damage_fire"));
+        assert_eq!(
+            d.puff_effects(true),
+            ("damage_smoke_structure", "damage_fire_structure")
+        );
+        let (mobile, structure) = (
+            d.rates_of(Stage::Heavy, false).unwrap(),
+            d.rates_of(Stage::Heavy, true).unwrap(),
+        );
+        assert!(structure.fire_per_s > mobile.fire_per_s);
+        assert!(structure.smoke_per_s > mobile.smoke_per_s);
+        assert_eq!(d.rates(Stage::Heavy), Some(mobile));
+        // The flame is about twice the size, the smoke column larger (effects.ron).
+        let fx = Effects::embedded();
+        let size = |n: &str| fx.effects[n].size_m;
+        assert!(size("damage_fire_structure") >= 1.8 * size("damage_fire"));
+        assert!(size("damage_smoke_structure") > size("damage_smoke"));
     }
 
     fn with(from: &str, to: &str) -> Result<Damage, String> {
@@ -414,6 +515,20 @@ mod tests {
         assert!(e.contains("min_height_m"), "{e}");
         let e = with("damaged: (smoke_per_s: 4.0", "damaged: (smoke_per_s: 0.0").unwrap_err();
         assert!(e.contains("damaged.smoke_per_s"), "{e}");
+        let e = with(
+            "structure_heavy: (smoke_per_s: 10.0, fire_per_s: 10.0)",
+            "structure_heavy: (smoke_per_s: 0.0, fire_per_s: 0.0)",
+        )
+        .unwrap_err();
+        assert!(e.contains("structure_heavy"), "{e}");
+        let e = with(
+            "structure_damaged: (smoke_per_s: 5.0",
+            "structure_damaged: (smoke_per_s: 0.0",
+        )
+        .unwrap_err();
+        assert!(e.contains("structure_damaged.smoke_per_s"), "{e}");
+        let e = with("fire_per_s: 10.0)", "fire_per_s: 99.0)").unwrap_err();
+        assert!(e.contains("structure_heavy.fire_per_s"), "{e}");
         let e = with("limits: (", "limits: (surprise: 1, ").unwrap_err();
         assert!(e.contains("surprise"), "{e}");
     }
@@ -426,6 +541,33 @@ mod tests {
             .check_against(&effects)
             .unwrap_err();
         assert!(e.contains("smoke_effect"), "{e}");
+        let e = with("\"damage_fire_structure\"", "\"nope\"")
+            .unwrap()
+            .check_against(&effects)
+            .unwrap_err();
+        assert!(e.contains("structure_fire_effect"), "{e}");
+        let e = with(
+            "structure_fire_effect: \"damage_fire_structure\"",
+            "structure_fire_effect: \"smoke_wreck\"",
+        )
+        .unwrap()
+        .check_against(&effects)
+        .unwrap_err();
+        assert!(
+            e.contains("structure_fire_effect") && e.contains("must glow"),
+            "{e}"
+        );
+        let e = with(
+            "structure_smoke_effect: \"damage_smoke_structure\"",
+            "structure_smoke_effect: \"flash_bullet\"",
+        )
+        .unwrap()
+        .check_against(&effects)
+        .unwrap_err();
+        assert!(
+            e.contains("structure_smoke_effect") && e.contains("smoke-class"),
+            "{e}"
+        );
         // The fire must glow and the smoke must not.
         let e = with(
             "fire_effect: \"damage_fire\"",
