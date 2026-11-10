@@ -94,8 +94,8 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
   (follow-up 31 in `docs/progress.md`: WP11.3b adds CC0 fight sounds). With them, `ra_mapping.ron` maps every fight
   event by role (PR #87) except `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`:
   Red Alert has no sound for those, so they stay silent until WP11.3b.
-* The sim emits no event for a unit being selected or ordered, a structure placed or finished, or a harvester
-  unloading: those are WP11.2 (voices) and later; nothing was added to `sf_sim`.
+* The sim emits no event for a structure placed or finished, or a harvester unloading: those are later WPs; nothing
+  was added to `sf_sim`. The replies to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side.
 * The settings screen (WP11.5) is not part of this; `mix.sfx_volume` and `mix.music_volume` are set in the file.
 * `audio.ron` is read once at start; no hot reload.
 * A moving unit's sound stops at the place it had when the event happened (no Doppler, no following).
