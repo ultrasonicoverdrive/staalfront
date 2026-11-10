@@ -42,9 +42,10 @@
         // through them at the farthest zoom. Only the look: what switches with the zoom
         // (click volume, ring and bars, effects) follows the ramp above, not this cap.
         icons_max_alpha: 0.4,
-        // Models grow a little toward the far end so they stay readable: scale 1 up to
+        // Models grow toward the far end so they stay readable: scale 1 up to
         // `model_scale_from`, `model_scale_max` at the farthest zoom, a smooth ramp in
-        // between. Presentation only: the click volumes keep their size. At most 2.5.
+        // between (the units; structures below). Presentation only, but the click volume,
+        // the selection ring and the bars follow the drawn size. At most 2.5.
         model_scale_from: 0.45,
         model_scale_max: 2.5,
         // The structures on the same ramp, to this at the farthest zoom (at most

@@ -107,7 +107,7 @@ impl From<IconShape> for IconId {
 /// the click quad) and the square (the quad itself) both fit.
 pub const ART_BOX: f32 = 1.2;
 
-/// Icon and cross-fade settings (the `icons` section of `assets/config/units.ron`).
+/// Icon settings (the `icons` section of `assets/config/units.ron`).
 /// Sizes are logical pixels unless the name says metres.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]

@@ -1992,7 +1992,7 @@ impl Runner {
 
 impl Runner {
     /// Build this frame's models and icons (level of detail per unit, the
-    /// cross-fade by zoom), pick the unit under the cursor in what was built
+    /// icon band and the far-zoom scales by zoom), pick the unit under the cursor in what was built
     /// and highlight it. A click on it selects it ([`Runner::handle_selection`]).
     fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>) {
         let view_proj = self.camera.view_proj();

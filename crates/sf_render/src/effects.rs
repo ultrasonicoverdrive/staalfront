@@ -379,7 +379,7 @@ pub struct EmitView<'a> {
     pub focal_px: f32,
     /// The viewport, physical pixels.
     pub viewport: [f32; 2],
-    /// The model weight of the cross-fade: `1` models only, `0` icons only.
+    /// The effects' weight from the zoom band (`effects_weight`): `1` full effects, `0` the strategic band.
     pub model_weight: f32,
     /// The side of an icon, physical pixels: what a strategic flash is clamped to.
     pub icon_px: f32,

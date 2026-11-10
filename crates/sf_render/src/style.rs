@@ -310,7 +310,7 @@ impl Style {
         self.lod
     }
 
-    /// Strategic icon and cross-fade settings.
+    /// Strategic icon settings.
     pub fn icons(&self) -> &IconConfig {
         &self.icons
     }

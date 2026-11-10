@@ -19,11 +19,12 @@
 //!   not hide icons (they are not depth tested), so it does not hide them
 //!   from the cursor either. When quads overlap, the icon whose centre is
 //!   nearest to the cursor wins; on a tie the one nearer to the camera.
-//! * **In the icon fade band (the far zoom):** the icon once its opacity is
-//!   above one half ([`Blend::dominant`](crate::icons::Blend::dominant)), the
-//!   model otherwise. Never both, so a unit is not picked through a layer
-//!   that is mostly gone. The models are always drawn; the click volume of a
-//!   model is its true size (a drawn far-zoom scale-up does not grow it).
+//! * **In the icon fade band (the far zoom):** the icon once the zoom is past
+//!   the middle of the band (the uncapped ramp above one half,
+//!   [`Blend::dominant`](crate::icons::Blend::dominant); the opacity cap does
+//!   not move it), the model otherwise. Never both. The models are always
+//!   drawn; the click volume of a model is its drawn box, at the frame's scale
+//!   for it (units and structures have their own far-zoom scale).
 //!
 //! Ties between equal hits go to the lower [`UnitId`], so the answer does not
 //! depend on the order the units were stored in.

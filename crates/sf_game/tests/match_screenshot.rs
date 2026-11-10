@@ -168,6 +168,18 @@ impl Scene {
     /// One frame as `sf_game` draws it: the models, the credits readout of the local player and, once
     /// the match is decided, the banner for `local`.
     fn shoot(&mut self, r: &mut Renderer, cam: &Camera, local: PlayerId) -> Rgba8 {
+        self.shoot_with(r, cam, local, Blend::MODELS, (1.0, 1.0))
+    }
+
+    /// [`Scene::shoot`] with a blend and the (unit, structure) model scales of the frame.
+    fn shoot_with(
+        &mut self,
+        r: &mut Renderer,
+        cam: &Camera,
+        local: PlayerId,
+        blend: Blend,
+        (unit_scale, structure_scale): (f32, f32),
+    ) -> Rgba8 {
         self.sync();
         let vp = cam.view_proj();
         r.set_view_proj(vp);
@@ -175,7 +187,9 @@ impl Scene {
         let eye = EyeView::from_view_proj(vp, H as f32);
         let ground = &self.ground;
         self.instancer.build_frame(
-            &FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0),
+            &FrameView::new(&frustum, 0.0, eye, blend, 1.0)
+                .with_model_scale(unit_scale)
+                .with_structure_scale(structure_scale),
             |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
         );
         r.upload_units(&self.instancer);
@@ -371,6 +385,23 @@ fn the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_
             .with_structure_scale(structure_scale),
         |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
     );
+    // The pictures of the base at the farthest zoom, icons on and off, for docs/screenshots/wp-zoom
+    // (written only with SF_SAVE_SHOTS).
+    if std::env::var_os("SF_SAVE_SHOTS").is_some() {
+        let mut r = renderer(&scene.map);
+        let scales = (scale, structure_scale);
+        let tick = scene.world.tick().0;
+        let on = scene.shoot_with(&mut r, &cam, P0, bands.blend(1.0), scales);
+        save(&format!("m1_base_t{tick}_zoom1.00_icons_on.png"), &on);
+        let off = scene.shoot_with(&mut r, &cam, P0, bands.blend_toggled(1.0, false), scales);
+        save(&format!("m1_base_t{tick}_zoom1.00_icons_off.png"), &off);
+        scene.instancer.build_frame(
+            &FrameView::new(&frustum, 0.0, eye, bands.blend(1.0), 1.0)
+                .with_model_scale(scale)
+                .with_structure_scale(structure_scale),
+            |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
+        );
+    }
     let world = &scene.world;
     let structures: Vec<_> = world
         .snapshot()

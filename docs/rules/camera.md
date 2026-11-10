@@ -24,6 +24,11 @@ now have their own cap `zoom.structure_scale_max` (1.6) on the same ramp (`model
 `model_scale_max` (2.5). Validated: 1 <= structure cap <= unit cap <= 2.5. Measured again: 2 pairs (one per base),
 0.40 m, as in round 1.*
 
+*Fix round 4 (10-11-2026, second review and a Fable research round): every reader of a model's size was swept and
+listed in rule 4 (drawn / true / does not care); the drag rectangle, the selection marks (one helper with
+`visit_drawn`), the tile frustum culling and the muzzle and smoke anchors now follow the drawn size too, and ghosts
+and rubble are tested at the structure scale.*
+
 1. **The farthest zoom shows the whole map plus a whole map size on every side.** `camera.far_margin` (1.0) is a
    share of the map size. `Camera` fits the margin rectangle (map grown by `far_margin * size` on every side, at the
    far pitch of 80 degrees, centred) into the window and takes 3 % slack, as it always did for the bare map. That
@@ -44,29 +49,40 @@ now have their own cap `zoom.structure_scale_max` (1.6) on the same ramp (`model
    the icon (`Blend::overlay_capped`). The cap is only the look: what switches with the zoom (click volume, ring and
    bars, effects) follows the uncapped ramp (`Blend::ramp`), so it switches at the same zoom whatever the cap is. The
    outline of a hovered or selected icon is drawn at full opacity (`icon.wgsl`), only the shape is dimmed.
-4. **Models grow toward the far end.** `zoom.model_scale_from` (0.45) to 1.0: a smoothstep from scale 1
-   to `zoom.model_scale_max` (2.5, a cap: the function is clamped, never above it; the file may not set more than
-   2.5, `MODEL_SCALE_CAP`) for the units, and to `zoom.structure_scale_max` (1.6, at most the unit cap) for the
-   structures (`ZoomBands::structure_scale`, fix round 3). Which is which: `Motion::with_structure`, set by
-   `runner::view_motion` from the snapshot (`SimSnapshot::is_structure_at`: the view has a footprint), for the
-   rubble of a structure (`WreckView::footprint`) and for every fog ghost (a ghost is a structure last seen);
-   `FrameView::with_structure_scale` carries the factor. The drawn box, ring, bars and click volume of a structure
-   follow its own scale. The placement preview is not a model: it draws the true footprint cells and outline
-   (`placement_view::draw_ghost`), unscaled, so it marks the cells the structure will take, not its drawn size. about the model's feet. Applied in
-   `build_frame` to the instance matrices (`FrameView::model_scale`). The level selection and the icon anchor keep the
-   true size. **Changed 10-11-2026 (fix round 1, orchestrator decision):** the click volume, the selection ring, the
-   health bar and the cargo bar follow the drawn size (`DrawnUnit::size` and the box of `pick`/`pick_rect` are times
-   the frame's model scale), so a click on the visible rim of an enlarged structure hits it and the ring goes around
-   what is drawn. Checked on the M1 base at the cap
-   (`the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_farthest_zoom`, through the game's
-   `view_motion`): at 1.6 one pair per base overlaps by 0.40 m (round 1 and again round 3); at one scale of 2.5
-   (round 2) it was 8 pairs and 13.0 m (2.0: 5 pairs, 6.0 m), hence the structure scale. The test pins at most 2 pairs
-   and less than 0.5 m; a click there goes to the box the ray enters first. Units overlap each other at 2.5 in a crowd;
-   that is accepted (a click takes the box the ray enters first; not measured in the 1,000 crowd). Round 1 decided by screenshots
-   (`docs/screenshots/wp-zoom/`): the 384 m M1 map is 420 px wide at the farthest zoom of a 1280 x 720 window
-   (about 1.1 px per metre), so a structure of 3 cells (12 m) is about 19 px true and 30 px with the cap, and a soldier
-   is 1 to 2 px either way. The cap makes structures and vehicles readable as models; a soldier is only a dot as a model
-   at that zoom, and the icon is what reads. Round 1 kept 1.6 for that reason; round 2 raised it to 2.5 because the farthest zoom is about twice as far (the 384 m map is about 225 px wide at 1280 x 720, 0.59 px per metre), so a structure of 12 m is about 7 px true and 18 px drawn, and accepts the overlap above.
+4. **Models grow toward the far end; what follows the drawn size.** From `zoom.model_scale_from` (0.45) to zoom 1
+   a smoothstep raises the scale from 1 to `zoom.model_scale_max` (2.5) for units and to `zoom.structure_scale_max`
+   (1.6) for structures (`ZoomBands::model_scale`, `ZoomBands::structure_scale`; clamped, never above the cap; the
+   file is refused unless 1 <= structure cap <= unit cap <= 2.5, `MODEL_SCALE_CAP`). The model grows about its
+   feet. A motion is a structure when `Motion::with_structure` says so: `runner::view_motion` sets it from
+   `SimSnapshot::is_structure_at` (the view has a footprint), `Looks::wreck_motion` for rubble
+   (`WreckView::footprint`), and `GhostBook::motions` for every fog ghost (a ghost is a structure last seen). The
+   frame carries both factors (`FrameView::with_model_scale`, `with_structure_scale`), and each record uses its own.
+   **The rule: whatever the player sees or clicks follows the drawn size; what only chooses detail uses the true
+   size.**
+
+   | Consumer | Size | Pinned by |
+   |---|---|---|
+   | Instance matrix (`build_frame`) | drawn | `a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale`, `the_model_scale_grows_the_drawn_model_and_its_click_volume` |
+   | Click volume `pick` | drawn | same two tests |
+   | Pick tile pre-test (`grown`, the larger scale) | drawn | `a_structure_is_drawn_and_picked_...` (fails with `grown = 0`) |
+   | Drag rectangle `pick_rect` | drawn | `the_rectangle_and_the_selection_marks_take_the_drawn_box_of_each_scale` |
+   | `visit_drawn` / `mark_selected` (one helper, `drawn_unit`) -> ring, health bar, cargo bar | drawn | the same test, `the_ring_grows_with_the_drawn_scale_of_the_model` (sf_game) |
+   | Tile frustum culling (tile box grown by the larger scale) | drawn | `a_unit_whose_drawn_box_reaches_into_the_view_is_not_culled_with_its_tile` |
+   | Muzzle and smoke anchors `anchor_world` (muzzle flash, tracer start) | drawn, the last frame's scale | `an_anchor_is_where_the_drawn_barrel_carries_it` (also at 2x) |
+   | Ghosts and rubble | drawn, structure scale | `a_structure_seen_and_then_left_behind_becomes_a_ghost_...`, `structure_rubble_is_drawn_at_the_structure_scale_and_a_hulk_at_the_unit_scale` |
+   | M1 base structures (through `view_motion`) | drawn, structure scale | `the_scaled_structure_boxes_of_the_m1_base_overlap_at_most_in_a_sliver_at_the_farthest_zoom`: 2 pairs, 0.40 m |
+   | Level of detail (`chain.select` by the true diameter) | true | by reading: a unit at 2.5 takes a coarser level than its drawn size would get |
+   | Burst and smoke sizes of the effects (`fx.rs`, from the simulation's size) | true | by reading |
+   | Construction, production, storage, repair and sale bars and signs (`construction_view::front_edge`) | true footprint edge | by reading |
+   | Placement preview (`placement_view::draw_ghost`: footprint cells and outline) | true, by design | it marks the cells the structure will take |
+   | Icons, icon anchor, minimap, rally flag, vision view | do not care | |
+
+   Screenshots: at the farthest zoom of a 1280 x 720 window the 384 m M1 map is about 225 px wide (0.59 px per
+   metre), so a structure of 12 m is about 7 px true and about 11 px drawn at 1.6; a vehicle is a few pixels; a
+   soldier is a dot as a model and the icon is what reads. Overlap at the cap: on the M1 base, one pair per base (the
+   construction centre and a neighbour) overlaps by 0.40 m; a click there goes to the box the ray enters first.
+   Units overlap each other at 2.5 in a crowd; that is accepted (not measured in the 1,000 crowd). History of the
+   numbers: the dated notes at the top.
 5. **Picking at far zoom.** The click volume is the icon quad once the zoom is past the middle of the icon band
    (ramp above one half, `Blend::dominant`; not the capped opacity), the model's drawn box (at least `click_min_px`
    wide) before that. Never both, as before. Drag
@@ -143,8 +159,6 @@ placed units for the old pixel scale were spread (`frame_tests`: icon picking, r
 
 * A soldier is still 1 to 2 px as a model at the farthest zoom, cap or not; whether infantry needs its own scale is
   a question for Tijmen.
-* The frustum culling of the tiles still uses the true size: a model scaled 2.5x at the very edge of the screen can
-  be culled a little early (the tile margin covers most of it).
 * The sound still attenuates with the zoom by `audio.ron` as before (untouched, as decided).
 * No GTX 1650 measurement: see the pull request for the container numbers.
 * Fix round 2 performance (container, llvmpipe, release, 1,000 crowd units at the farthest zoom, six alternating runs against
@@ -155,3 +169,11 @@ placed units for the old pixel scale were spread (`frame_tests`: icon picking, r
   screenshots), pitch still follows the zoom.
 * With the icons off the effects are not faded by the band (ramp 0): particles are drawn at the farthest zoom too.
 * The icon toggle is not saved between runs.
+* Follow-ups (zoom fix round 4, Fable plan): the bars and signs of construction, production, storage, repair and
+  sale sit on the true footprint edge, not the drawn one; the level of detail is chosen by the true size, not the
+  drawn one; the effects are not faded with the icons off; the toggle is not saved; infantry has no scale of its own;
+  `runner::motion_of` is public and returns a motion without the structure flag (its callers only read `.shape`
+  today); make it private or fold the flag into it.
+* Not tested: that the runner passes the K toggle (`icons_on`) through to the picking. Checked by reading:
+  `Runner::build_units` builds the frame with `blend_toggled(zoom, self.icons_on)`, and `pick` reads that frame's
+  blend (`the_icon_toggle_off_draws_models_only` pins `blend_toggled`).

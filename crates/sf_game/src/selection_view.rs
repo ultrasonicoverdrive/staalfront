@@ -11,8 +11,8 @@
 //!   icon shader (`Instancer::mark_selected` sets the flag; a white outline
 //!   drawn outside the icon, clearly thicker than the thin white hover
 //!   outline, yellow while a selected icon is hovered; the owner's colour
-//!   inside keeps its size), and the health bar sits above the icon. In the cross-fade the ring is drawn as long as the model
-//!   is, and the bar goes with the representation that is more visible.
+//!   inside keeps its size), and the health bar sits above the icon. In the icon band the ring is drawn up to the middle of
+//!   the band (the uncapped ramp at most one half) and the bar goes with the same switch.
 //! * **The drag rectangle** is a translucent fill with an outline.
 //!
 //! All of it is drawn on the **world layer** of `sf_ui` ([`Ui::world_layer`](sf_ui::Ui::world_layer)):

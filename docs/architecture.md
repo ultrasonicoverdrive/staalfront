@@ -222,8 +222,8 @@ units in view on the reference hardware (Windows laptop, GTX 1650, 1920x1080, B1
 first measurement at the engine demo (5,000 units), final measurement in phase 16.
 
 Implemented in `sf_render::camera` (WP1.5): zoom is a log-scale parameter in `0..=1`
-mapped to the eye-to-focus distance 12 m .. the whole map plus a quarter map on every side
-(`far_margin`, since the zoom work package, `rules/camera.md`; computed from the map size and the
+mapped to the eye-to-focus distance 12 m .. the whole map plus a full map size on every side
+(`far_margin` 1.0, since the zoom work package and its fix round 2, `rules/camera.md`; computed from the map size and the
 viewport aspect ratio, so a portrait window gets more distance); pitch is `smoothstep(zoom)`
 between 45 and 80 degrees. The camera takes the frame time and a plain
 `CameraInput` (pan direction, wheel notches, cursor, drag), so it is tested
@@ -638,7 +638,9 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
     (`icon_hit`). Terrain does not hide icons (they are not depth tested). The icon
     whose centre is nearest the cursor wins, then the nearer to the camera, then the
     lower id.
-  * Icon fade band: the icon once it is more than half opaque, the model otherwise (and on a tie).
+  * Icon fade band: the icon once the zoom is past the middle of the band (the uncapped ramp above one
+    half; the opacity cap does not move it), the model otherwise (and on a tie). A model's click volume
+    is its drawn box, at the units' or the structures' far-zoom scale.
   * Tile pruning: a tile is searched only if the cursor ray passes its box grown by
     what a click volume can grow; 0.01 ms for 10,000 icons.
 - **Hover** (`sf_game`): `build_frame`, `pick`, `Instancer::highlight` (model tinted

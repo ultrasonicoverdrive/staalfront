@@ -40,8 +40,8 @@
 //! instance ([`model::pose_parts`]), one draw call per part per level.
 //!
 //! WP5.6a adds the effects ([`effects`]): a particle pool and tracer dots drawn as screen-facing soft discs
-//! in one instanced, premultiplied-alpha call, with the zoom rules (pixel clamp, fade with the icon
-//! cross-fade, fewer particles at middle zoom, a death flash kept at strategic zoom).
+//! in one instanced, premultiplied-alpha call, with the zoom rules (pixel clamp, fade over the icon
+//! band, fewer particles at middle zoom, a death flash kept at strategic zoom).
 //!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).

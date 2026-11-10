@@ -2819,3 +2819,7 @@ fixed, delete the entry in the same PR.
     same ramp, units stay at 2.5. The game marks a motion as a structure from the snapshot (`view_motion`), also rubble and fog
     ghosts. M1 base again 2 pairs, 0.40 m. 1,000 crowd units at the farthest zoom, 3 alternating runs against 689ce04: 15.8 /
     17.6 / 16.8 ms against 16.6 / 17.8 / 16.0 ms (no difference beyond the noise; the crowd has no structures).
+    **Fix round 4 (10-11-2026)**, after the second review and a Fable research round: every reader of a model's size is listed in
+    `rules/camera.md` rule 4 (drawn / true / does not care); the drag rectangle, the selection marks (one helper with `visit_drawn`),
+    the tile frustum culling and the muzzle and smoke anchors follow the drawn size; ghosts and rubble are tested at 1.6; the stale
+    "click volume keeps its size" and "cross-fade" texts are gone. Follow-ups listed under "Not done" there.
