@@ -156,6 +156,11 @@ impl Frame {
 }
 
 fn frame(zoom: f64, blend: Blend) -> Frame {
+    frame_scaled(zoom, blend, 1.0)
+}
+
+/// [`frame`] with the models drawn `scale` times their size (the far-zoom scale of `camera.ron`).
+fn frame_scaled(zoom: f64, blend: Blend, scale: f32) -> Frame {
     let defs = UnitDefs::embedded();
     let table = sf_bridge::unit_table(&defs).unwrap();
     let mut world = World::new(WorldConfig::new(2).with_map_size(64, 64))
@@ -224,7 +229,10 @@ fn frame(zoom: f64, blend: Blend) -> Frame {
     let vp = cam.view_proj();
     let frustum = Frustum::from_view_proj(vp);
     let eye = sf_render::EyeView::from_view_proj(vp, H);
-    instancer.build_frame(&FrameView::new(&frustum, 0.0, eye, blend, 1.0), |_, _| 0.0);
+    instancer.build_frame(
+        &FrameView::new(&frustum, 0.0, eye, blend, 1.0).with_model_scale(scale),
+        |_, _| 0.0,
+    );
     let geometry = FrameGeometry {
         view_proj: vp,
         viewport: [W, H],
@@ -402,9 +410,10 @@ fn the_world_layer_is_cleared_every_frame_and_is_under_the_panels() {
 }
 
 /// With the icons over the models (the far zoom band) the ring stays while the model is the larger
-/// picture (icon at most half opaque) and goes once the icon is; the bar follows the same switch.
+/// picture (the uncapped ramp of the icon band at most one half) and goes past it; the bar follows
+/// the same switch.
 #[test]
-fn in_the_icon_overlay_the_ring_goes_when_the_icon_is_more_than_half_opaque() {
+fn in_the_icon_overlay_the_ring_goes_past_the_middle_of_the_icon_band() {
     for (alpha, ring) in [
         (0.0, true),
         (0.4, true),
@@ -422,4 +431,31 @@ fn in_the_icon_overlay_the_ring_goes_when_the_icon_is_more_than_half_opaque() {
             "icon alpha {alpha}"
         );
     }
+}
+
+/// Zoom fix round 4: the selection ring goes round the drawn model, so drawn twice as large it is
+/// twice as wide on the screen (the instancer's `DrawnUnit::size` through `SelectionView::mark`).
+#[test]
+fn the_ring_grows_with_the_drawn_scale_of_the_model() {
+    let ring_width = |scale: f32| {
+        let mut f = frame_scaled(0.2, Blend::MODELS, scale);
+        let mut selection = local();
+        selection.drag(&f.snap(), &f.ids, false);
+        assert_eq!(selection.len(), 1, "the tank");
+        let mut ui = Ui::new(UiConfig::default());
+        ui.begin_frame(UiInput::default(), (W as u32, H as u32), 1.0);
+        ui.end_frame();
+        let mut layer = ui.world_layer();
+        let mut view = SelectionView::default();
+        let snap = f.snap();
+        view.mark(&mut f.instancer, &selection, &snap, &f.geometry, &mut layer);
+        let (lo, hi) = bounds(&view.points);
+        hi[0] - lo[0]
+    };
+    let (one, two) = (ring_width(1.0), ring_width(2.0));
+    assert!(one > 10.0, "{one}");
+    assert!(
+        (two / one - 2.0).abs() < 0.1,
+        "{one} px at 1, {two} px at 2"
+    );
 }

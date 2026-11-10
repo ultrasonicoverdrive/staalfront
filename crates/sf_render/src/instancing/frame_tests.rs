@@ -1264,7 +1264,7 @@ fn the_rectangle_test_of_a_tiny_model_follows_the_ui_scale() {
 /// reported for the ring and bars grow with it (decision 10-11-2026), the icon keeps
 /// its size and place.
 #[test]
-fn the_model_scale_grows_the_drawn_model_only() {
+fn the_model_scale_grows_the_drawn_model_and_its_click_volume() {
     let mut inst = one_cube_at((100.0, 100.0));
     let cam = camera(0.9, (100.0, 100.0));
     let vp = cam.view_proj();
@@ -1345,10 +1345,11 @@ fn the_model_scale_grows_the_drawn_model_only() {
     );
 }
 
-/// With the overlay the icon quad is the click volume once it is more than half
-/// opaque, and the model's volume before that; the model is drawn in both.
+/// With the overlay the icon quad is the click volume once the zoom is past the middle
+/// of the icon band (the uncapped ramp above one half), and the model's volume before
+/// that; the model is drawn in both.
 #[test]
-fn the_overlay_decides_the_click_volume_by_its_opacity() {
+fn the_icon_band_position_decides_the_click_volume() {
     let style = || style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
     let cam = camera(0.3, (100.0, 100.0));
     let pick_with = |alpha: f32, dx: f32| {
@@ -1442,4 +1443,69 @@ fn a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale
                 .is_some()
         );
     }
+}
+
+/// Zoom fix round 4: the drag rectangle takes the drawn box too. A small rectangle 6.5 m beside a 6 m
+/// cube, outside its true box, takes it as a unit at 2.5 and not as a structure at 1.6; and
+/// `mark_selected` reports the same drawn boxes as `visit_drawn`.
+#[test]
+fn the_rectangle_and_the_selection_marks_take_the_drawn_box_of_each_scale() {
+    let style = style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let near = camera(0.3, (100.0, 100.0));
+    let vp = near.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, H);
+    let view = FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0)
+        .with_model_scale(2.5)
+        .with_structure_scale(1.6);
+    let beside = project_px(&vp, Vec3::new(106.5, 0.5, 100.0), [W, H])
+        .unwrap()
+        .0;
+    for structure in [false, true] {
+        let m = still(0, 0, 1, (100.0, 100.0)).with_structure(structure);
+        let mut inst = instancer_with(style.clone(), &[m]);
+        inst.build_frame(&view, flat);
+        let taken = found(&inst, &near, around_px(beside, 1.0));
+        assert_eq!(taken.is_empty(), structure, "structure {structure}");
+        let mut seen = Vec::new();
+        inst.visit_drawn(|_| true, |d| seen.push(d));
+        let mut marked = Vec::new();
+        inst.mark_selected(|_| true, |d| marked.push(d));
+        assert_eq!(seen, marked);
+        let k = if structure { 1.6 } else { 2.5 };
+        assert!(
+            (marked[0].size[0] - 6.0 * k).abs() < 1e-3,
+            "{:?}",
+            marked[0].size
+        );
+    }
+}
+
+/// Zoom fix round 4: the tile culling grows the tile boxes by the scale, as the picking does. A cube
+/// moved left until its true box has just left the view is still built when it is drawn 2.5 times its
+/// size (its drawn box still reaches into the view), and not at true size.
+#[test]
+fn a_unit_whose_drawn_box_reaches_into_the_view_is_not_culled_with_its_tile() {
+    let style = style_ron("(mesh: Cube, size: (6.0, 6.0, 6.0))", "");
+    let cam = camera(0.3, (100.0, 100.0));
+    let frustum = Frustum::from_view_proj(cam.view_proj());
+    let visible = |x: f32, scale: f32| {
+        let mut inst = Instancer::with_tile_size(style.clone(), (256.0, 256.0), 4.0);
+        inst.set_height_range(0.0, 30.0);
+        inst.update_tick([still(0, 0, 1, (x, 100.0))]);
+        inst.build_frame(
+            &FrameView::models_only(&frustum, 0.0).with_model_scale(scale),
+            flat,
+        )
+        .visible
+    };
+    let gone = (0..400)
+        .map(|i| 100.0 - i as f32 * 0.25)
+        .find(|&x| visible(x, 1.0) == 0)
+        .expect("the cube leaves the view on the left");
+    assert_eq!(
+        visible(gone, 2.5),
+        1,
+        "at x {gone} the drawn box is still in view"
+    );
 }

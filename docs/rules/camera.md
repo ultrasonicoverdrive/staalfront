@@ -111,8 +111,8 @@ the file is read (`bad_camera_files_are_refused`).
   `a_structure_is_drawn_and_picked_at_its_own_scale_and_a_unit_at_the_unit_scale` (instance matrix, drawn box and a
   click 6.5 m beside a 6 m cube: hit as a unit at 2.5, miss as a structure at 1.6).
 * `instancing/frame_tests.rs`: `every_unit_is_a_model_at_every_zoom_and_the_icons_come_only_in_the_far_band` (the
-  real camera and the shipped bands, 101 zooms), `the_model_scale_grows_the_drawn_model_only`,
-  `the_overlay_decides_the_click_volume_by_its_opacity`.
+  real camera and the shipped bands, 101 zooms), `the_model_scale_grows_the_drawn_model_and_its_click_volume`,
+  `the_icon_band_position_decides_the_click_volume`.
 * `tests/icons_screenshot.rs` (real renderer): `the_icon_overlay_blends_over_the_model_and_never_takes_a_model_pixel`
   (the pixel under the icon is the linear-light mix of model and icon by the alpha, the model's pixels are the same
   at every alpha), the 10,000 unit test (models at the farthest zoom, coarse levels, one icon draw call).

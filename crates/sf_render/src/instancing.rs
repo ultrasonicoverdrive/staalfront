@@ -283,8 +283,8 @@ pub struct FrameView<'a> {
     /// zoom thresholds and the minimum click size scale with it.
     pub ui_scale: f32,
     /// The factor the models are drawn larger by (1 = true size): the far-zoom
-    /// readability scale of `camera.ron`. Presentation only: the click volumes and
-    /// the level selection keep the true size.
+    /// readability scale of `camera.ron` for the units. Presentation only. The click
+    /// volume, ring and bars follow the drawn size; the level selection keeps the true size.
     pub model_scale: f32,
     /// The same for the structures (a motion [`Motion::with_structure`]); the units
     /// use [`FrameView::model_scale`].
@@ -621,7 +621,22 @@ impl Instancer {
             return None;
         }
         let ([x, z], steps) = m.at(alpha);
-        let unit = model_matrix(x, ground(x, z), z, steps, self.geom(m.shape).scale);
+        // At the scale the last frame drew it at, so a muzzle flash or tracer starts at the drawn
+        // barrel end (zoom fix round 4).
+        let k = self.frame.map_or(1.0, |f| {
+            if m.structure {
+                f.structure_scale
+            } else {
+                f.model_scale
+            }
+        });
+        let unit = model_matrix(
+            x,
+            ground(x, z),
+            z,
+            steps,
+            scaled(self.geom(m.shape).scale, k),
+        );
         let angles = self.joint_angles(m, [x, z], steps, alpha);
         crate::model::anchor_position(
             Mat4::from_cols_array_2d(&unit),
@@ -893,13 +908,22 @@ impl Instancer {
             total_per_mesh: self.total_per_mesh,
             ..InstanceStats::default()
         };
+        // A unit drawn larger than its true size can reach out of its tile: grow the tile box by
+        // the most a model can grow, as the picking's tile pre-test does.
+        let grown = (view.model_scale.max(view.structure_scale) - 1.0).max(0.0)
+            * self.footprint.max(self.tallest);
+        let grow = Vec3::splat(grown);
         for t in 0..self.tiles_x * self.tiles_z {
             let (start, end) = (self.tile_start[t] as usize, self.tile_start[t + 1] as usize);
             if start == end {
                 continue;
             }
             stats.tiles_total += 1;
-            if !view.frustum.intersects(&self.tile_boxes[t]) {
+            let tile = &self.tile_boxes[t];
+            if !view
+                .frustum
+                .intersects(&Aabb::new(tile.min - grow, tile.max + grow))
+            {
                 continue;
             }
             stats.tiles_visible += 1;
@@ -1278,14 +1302,21 @@ impl Instancer {
             {
                 icon.flags |= ICON_SELECTED;
             }
-            let (size, offset) = self.drawn_box(rec.shape, rec.structure);
-            visit(DrawnUnit {
-                id: rec.id,
-                centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),
-                steps: rec.steps,
-                size,
-                icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
-            });
+            visit(self.drawn_unit(&rec, lift));
+        }
+    }
+
+    /// Where a record of the last frame is drawn: its box at the frame's scale for it
+    /// ([`Instancer::drawn_box`]). The one place [`Instancer::mark_selected`] and
+    /// [`Instancer::visit_drawn`] take it from.
+    fn drawn_unit(&self, rec: &Drawn, lift: f32) -> DrawnUnit {
+        let (size, offset) = self.drawn_box(rec.shape, rec.structure);
+        DrawnUnit {
+            id: rec.id,
+            centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),
+            steps: rec.steps,
+            size,
+            icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
         }
     }
 
@@ -1302,14 +1333,7 @@ impl Instancer {
             if !is_wanted(rec.id) {
                 continue;
             }
-            let (size, offset) = self.drawn_box(rec.shape, rec.structure);
-            visit(DrawnUnit {
-                id: rec.id,
-                centre: offset_point(Vec3::from(rec.pos), rec.steps, offset).to_array(),
-                steps: rec.steps,
-                size,
-                icon_anchor: [rec.pos[0], rec.pos[1] + lift, rec.pos[2]],
-            });
+            visit(self.drawn_unit(rec, lift));
         }
     }
 
@@ -1841,6 +1865,24 @@ mod tests {
         // The interpolation matters: another alpha is another place (the tank drives, the turret turns).
         let other = inst.anchor_world(3, "muzzle", 0, 0.9, ground).unwrap();
         assert!((Vec3::from(other) - Vec3::from(l)).length() > 0.1);
+        // Drawn at twice its size (the far-zoom scale), the muzzle is at the drawn barrel end too, twice
+        // as far from the unit's origin (zoom fix round 4).
+        inst.build_frame(&view.with_model_scale(2.0), ground);
+        let barrel_world = Mat4::from_cols_array_2d(&inst.mesh_instances(barrel.mesh)[0].model);
+        for (n, name) in ["muzzle_l", "muzzle_r"].iter().enumerate() {
+            let local = chain
+                .anchors(0)
+                .iter()
+                .find(|a| a.name == *name)
+                .unwrap()
+                .local;
+            let expected = (barrel_world * local).transform_point3(Vec3::ZERO);
+            let got = Vec3::from(inst.anchor_world(3, "muzzle", n, alpha, ground).unwrap());
+            assert!(
+                (got - expected).length() < 1e-3,
+                "{name} at 2x: {got} vs {expected}"
+            );
+        }
     }
 
     /// With the turret 64 steps off the hull, the muzzle is a quarter turn about the turret pivot from where it is
