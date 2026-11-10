@@ -2768,7 +2768,36 @@ fixed, delete the entry in the same PR.
     shows in a profile is to stamp only the difference of two discs one cell apart (about 2 x (2r + 1) cells instead of
     2 x (2r + 1)^2). Nothing in a match shows it (`vision.md`, "Cost").
 
-35. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
+35. **Stutter in play** (M1 on the laptop, 10-11-2026; plan: **WP1.16** in the PLAN.md queue). Tijmen played `sf_game --match
+    --ra-audio` from main `4944d5c` on the reference laptop (GTX 1650, DX12, 1600 x 900 windowed, later maximised), 8,710 ticks
+    (7 min 15 s), with vsync on (`present Fifo`), and felt it stutter. The run's own summary: frame ms avg 17.0, **p99
+    25.5, max 1,627.8**; sim thread tick max 62.3 ms, behind 3 passes, **125 late snapshots**; instance upload max 40.1 ms;
+    build+cull max 10.9 ms; pick max 11.9 ms. (The benchmarks run without vsync, so their p99 of 4.3 ms is not comparable;
+    with vsync a quiet second already shows a p99 of about 17.2 ms.) The worst frames, from the once-a-second lines:
+
+    | Near tick | Longest frame | What the log shows at that time |
+    |---|---|---|
+    | 5183 | 595 ms | nothing |
+    | 6651 | 878 ms | nothing |
+    | 7476 | 885 ms | the window was maximised (`resized 1920x991`) |
+    | 7896 | 1,628 ms | nothing |
+
+    The combat music did not cause the longest frame: its line (`music: tick 7942`) is printed when the decoded track
+    starts, so its decode of **804 ms** on the background thread (the other tracks in this session and in `audio.md`: 37
+    to 56 ms) ran from about tick 7926 to 7942, some 1.5 s after the 1,628 ms frame. It does line up with the lines from
+    tick 7945 to 8003, whose p99 is 122 to 163 ms. During the 1,628 ms and 885 ms frames the sim still advanced 33 ticks
+    a second, so the process kept running and only the main thread stood still.
+
+    The once-a-second lines report a new longest frame over 40 ms 44 times after start-up, 32 of them after tick 5100,
+    when the player had produced most units (their `max` covers the last 300 frames, `sf_engine::time::FrameStats`, so
+    this counts changes, not slow frames). The starting reservation was 4 instance buffers, 0.0 MB (`renderer: reserved`,
+    12 starting objects), and `reserve_units` runs only at start and on a scene swap. A new buffer holds at least 51
+    instances (4 KB of 80-byte instances), and the match ended with 33 objects, so growth in play is a few allocations
+    at most, for meshes that had no instance at the start; it is unlikely to explain frames of a second.
+    On the machine (read afterwards, not in the log): 15.3 GB RAM, 9.0 GB free, page file peak 3.4 GB; a Bitdefender
+    service runs (its exclusions need administrator rights to read). Not known yet: what made the long frames.
+
+36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
     to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side
     (`far_margin` 0.25, `assets/config/camera.ron`, which now holds every camera number); the models are drawn at every zoom and the
     strategic icons are an overlay fading in over the last 15 % of the zoom range (`icons_from` 0.85); the models are drawn up to 1.6 times
