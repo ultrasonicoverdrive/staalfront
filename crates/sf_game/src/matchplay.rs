@@ -181,10 +181,10 @@ mod tests {
         let mut w = world(&def, &defs, &map);
         assert_eq!(w.match_players(), &[PlayerId(0), PlayerId(1)]);
         let start = schedule(&mut w, &def, &defs).unwrap();
-        assert_eq!(start.objects, 11);
+        assert_eq!(start.objects, 12);
         let report = w.step();
         assert_eq!(report.commands_ignored, 0);
-        assert_eq!(report.commands_executed, 11);
+        assert_eq!(report.commands_executed, 12);
         // The credits of the file, not of money.ron (1000 each).
         assert_eq!(w.credits(PlayerId(0)), 4000);
         assert_eq!(w.credits(PlayerId(1)), 0);
@@ -195,18 +195,24 @@ mod tests {
 
     #[test]
     fn the_match_is_won_in_the_world_the_game_makes() {
-        // Remove the opponent's armed units and structures (slots 1 to 10 except the harvester, 5):
-        // the human wins, in the tick they went.
+        // WP7.7: removing everything of the opponent but its construction centre (slot 11) decides
+        // nothing; removing the centre does, in the tick it went.
         let (def, defs, map) = m1();
         let mut w = world(&def, &defs, &map);
         schedule(&mut w, &def, &defs).unwrap();
         w.step();
         let tick = w.tick();
-        for slot in [1, 2, 3, 4, 6, 7, 8, 9, 10] {
+        for slot in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] {
             let id = sf_sim::EntityId::new(slot, 0);
             w.schedule(tick, PlayerId(0), sf_sim::Command::Despawn { id })
                 .unwrap();
         }
+        w.step();
+        assert_eq!(w.match_result(), None, "the centre still stands");
+        let tick = w.tick();
+        let centre = sf_sim::EntityId::new(11, 0);
+        w.schedule(tick, PlayerId(0), sf_sim::Command::Despawn { id: centre })
+            .unwrap();
         // Before: nothing in the snapshot the HUD reads; after: the result of the world.
         assert_eq!(
             crate::sim_snapshot::SimSnapshot::capture(&w).match_result(),

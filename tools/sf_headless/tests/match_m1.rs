@@ -3,8 +3,10 @@
 //!
 //! The human (player 0) builds a power plant (done at tick 301), a barracks (705) and a refinery (1105),
 //! makes four riflemen and five rocket troopers, sends them across the map at tick 2400, and the static
-//! opponent (player 1) is defeated at tick 5967 (5687 before WP6.7: its defence tower fires now). The harvest loop pays for the units; the opponent never
-//! builds, produces or attacks.
+//! opponent (player 1) is defeated at tick 6238, the tick its construction centre falls (WP7.7: before it
+//! was "no structure and no armed unit left", tick 5967, and 5687 before WP6.7: its defence tower fires
+//! now). The harvest loop pays for the units; the opponent never builds, produces or attacks. The
+//! targeting gate (`acquire_needs_sight`) is on, as in the game (WP7.7).
 
 mod common;
 
@@ -19,8 +21,8 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/match.expected");
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 
-/// The tick the match is decided in: the last of the opponent's structures and armed units falls.
-const DECIDED: u64 = 5967;
+/// The tick the match is decided in: the opponent's construction centre (slot 11) falls (WP7.7).
+const DECIDED: u64 = 6238;
 /// The tick the first fight begins in (the army arrives at the opponent's base).
 const FIRST_DEATH: u64 = 3689;
 
@@ -66,9 +68,9 @@ fn the_starting_objects_enter_in_the_order_of_the_match_file() {
     let s = scenario();
     let mut w = s.build_world().unwrap();
     let report = w.step();
-    // Tick 0: 1 object of the human and 10 of the opponent, as the file lists them.
+    // Tick 0: 1 object of the human and 11 of the opponent, as the file lists them.
     assert_eq!(
-        report.commands_executed, 11,
+        report.commands_executed, 12,
         "the objects of the match file"
     );
     let owner_kind = |slot: u32| {
@@ -80,7 +82,7 @@ fn the_starting_objects_enter_in_the_order_of_the_match_file() {
         (v.owner.0, v.kind.0)
     };
     // Kinds: 0 construction_center, 1 power_plant, 2 refinery, 3 barracks, 6 defence_tower,
-    // 11 harvester, 12 rifleman, 19 light_tank.
+    // 11 harvester, 12 rifleman, 19 light_tank. The opponent's construction centre is the last (WP7.7).
     let expect = [
         (0, 0),
         (1, 1),
@@ -93,6 +95,7 @@ fn the_starting_objects_enter_in_the_order_of_the_match_file() {
         (1, 12),
         (1, 12),
         (1, 19),
+        (1, 0),
     ];
     for (slot, want) in expect.iter().enumerate() {
         assert_eq!(owner_kind(slot as u32), *want, "slot {slot}");
@@ -101,7 +104,7 @@ fn the_starting_objects_enter_in_the_order_of_the_match_file() {
 }
 
 #[test]
-fn the_human_wins_in_the_tick_the_last_of_the_opponent_falls() {
+fn the_human_wins_in_the_tick_the_opponents_construction_centre_falls() {
     let s = scenario();
     let (w, rows) = play(&s);
     // Nothing is decided before.
@@ -115,7 +118,7 @@ fn the_human_wins_in_the_tick_the_last_of_the_opponent_falls() {
             .take(DECIDED as usize - 1)
             .all(|r| r.defeats.is_empty())
     );
-    // In tick 5687 (the row after the step that ran it) the opponent is defeated and the human wins.
+    // In tick 6238 (the row after the step that ran it) the opponent is defeated and the human wins.
     let row = &rows[DECIDED as usize];
     assert_eq!(row.tick, DECIDED);
     assert_eq!(row.defeats, vec![(P1, Tick(DECIDED))]);
@@ -126,12 +129,39 @@ fn the_human_wins_in_the_tick_the_last_of_the_opponent_falls() {
             verdict: Verdict::Won(P0)
         })
     );
-    assert!(row.deaths > 0, "the last one fell in that tick");
+    assert!(row.deaths > 0, "the construction centre fell in that tick");
     assert_eq!(w.defeat_tick(P1), Some(Tick(DECIDED)));
     assert_eq!(w.defeat_tick(P0), None);
     // The first fight was well before.
     let first = rows.iter().find(|r| r.deaths > 0).unwrap();
     assert_eq!(first.tick, FIRST_DEATH);
+}
+
+/// WP7.7: what falls in the deciding tick is the opponent's construction centre (slot 11), and the
+/// opponent still owns other things then (the old rule needed every structure and armed unit gone).
+#[test]
+fn the_deciding_blow_is_the_construction_centre_and_the_opponent_still_has_other_things() {
+    let s = scenario();
+    let mut w = s.build_world().unwrap();
+    let cc = EntityId::new(11, 0);
+    let mut fell = None;
+    let mut others_then = Vec::new();
+    for _ in 0..s.ticks {
+        let report = w.step();
+        if fell.is_none() && !w.is_alive(cc) {
+            fell = Some(report.tick.0);
+            others_then = w
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == P1)
+                .map(|v| v.kind.0)
+                .collect();
+        }
+    }
+    assert_eq!(fell, Some(DECIDED));
+    assert_eq!(w.defeat_tick(P1), Some(Tick(DECIDED)));
+    // Kinds: 3 is the barracks. Measured, not chosen: the army had killed nearly everything else by then.
+    assert_eq!(others_then, vec![3], "the opponent still had its barracks");
 }
 
 #[test]
@@ -147,8 +177,8 @@ fn nothing_changes_after_the_outcome() {
     let defeats = vec![(P1, Tick(DECIDED))];
     assert_eq!(rows.len() as u64, 7000, "the scenario runs 7,000 ticks");
     let after: Vec<&Row> = rows.iter().filter(|r| r.tick >= DECIDED).collect();
-    // Every tick from the decision to the end: 1,033 of them (the steps that ran
-    // ticks 5967 to 6999; the world is at tick 7000 after the last).
+    // Every tick from the decision to the end: 762 of them (the steps that ran
+    // ticks 6238 to 6999; the world is at tick 7000 after the last).
     assert_eq!(after.len() as u64, 7000 - DECIDED);
     for r in &after {
         assert_eq!(r.result, Some(outcome), "tick {}", r.tick);
@@ -245,11 +275,12 @@ fn the_opponent_stays_put_fires_back_and_never_builds_or_produces() {
         farthest as f64 / 65536.0
     );
     assert!(human_hurt, "the opponent's defenders fired back");
-    // The human killed all ten things of the opponent. Before WP6.7 the opponent killed none of the
-    // human's; since its tower fires it kills six (four riflemen and two rocket troopers).
-    assert_eq!(w.tally_of(P0).kills, 10);
+    // By the end of the scenario (the match was decided long before: the world keeps running) the human
+    // killed all eleven things of the opponent. Before WP6.7 the opponent killed none of the human's;
+    // since its tower fires it kills six (four riflemen and two rocket troopers).
+    assert_eq!(w.tally_of(P0).kills, 11);
     assert_eq!(w.tally_of(P1).kills, 6);
-    assert_eq!(w.tally_of(P1).losses, 10);
+    assert_eq!(w.tally_of(P1).losses, 11);
 }
 
 #[test]
@@ -356,33 +387,6 @@ fn cost_of_the_outcome() {
     );
 }
 
-#[test]
-fn a_structure_still_going_up_does_not_keep_its_owner_in_the_match() {
-    let s = scenario();
-    let mut w = s.build_world().unwrap();
-    // Tick 1: the human's power plant (slot 11) starts to go up, and is complete at tick 301. At tick 50
-    // its construction centre (slot 0, the only other structure it has) is lost: what is left is a
-    // structure that does not stand yet, which is nothing to keep the human in the match.
-    w.schedule(
-        Tick(50),
-        P0,
-        sf_sim::Command::Despawn {
-            id: EntityId::new(0, 0),
-        },
-    )
-    .unwrap();
-    for _ in 0..60 {
-        w.step();
-    }
-    assert_eq!(w.under_construction(), 1, "the plant is still going up");
-    assert_eq!(w.defeat_tick(P0), Some(Tick(50)));
-    assert_eq!(
-        w.match_result().map(|r| r.verdict),
-        Some(Verdict::Won(P1)),
-        "the opponent wins in the tick the human is defeated"
-    );
-}
-
 /// Power (WP6.4) is on in the match. It moved the pin once, from `0x54a140fc12273e31` (the scenario with
 /// the `power` line taken out) to the value of that day, by its section alone; the proof is below, as
 /// a comparison of the two worlds tick by tick. (Since WP6.7 the tower fires, so the world without the
@@ -436,24 +440,67 @@ fn power_in_the_match_moves_the_pin_by_its_section_only() {
     assert_eq!((t.made, t.used), (100, 50));
 }
 
-/// Vision (WP8.1) is on in the match, like `sf_game --match` (since WP8.2a the file has the section;
-/// before that the pin was the world without it). The pin moved from `0x164403a92986654f` to the value
-/// of today by the section `v` alone: with the `vision` line taken out the old value comes back, and
-/// the game is the same game (`vision.rs`: `the_first_match_plays_the_same_with_vision_on`).
-/// Targeting does not read it (the gate of WP8.2a is off in this file).
+/// The three pins of the match (WP7.7), measured on the same scenario: the shipped one (vision with the
+/// targeting gate on), the same with the gate switched off, and the same without the vision line at all.
+/// Before WP7.7 the shipped pin was the world with vision and the gate off, `0x771de0f816275bbc`, and the
+/// one without the vision line `0x164403a92986654f`; both moved with the opponent's construction centre
+/// and the new rule (see `docs/rules/match.md`).
+const PIN_GATE_OFF: &str = "0x4d2b34f903b93f78";
+const PIN_NO_VISION: &str = "0xdccf390f64809d17";
+
 #[test]
-fn vision_in_the_match_moves_the_pin_by_its_section_only() {
-    let with = scenario();
-    assert!(with.vision.is_some());
-    let mut without = with.clone();
-    without.vision = None;
+fn the_pins_of_the_match_with_the_gate_on_off_and_without_vision() {
+    let on = scenario();
+    assert!(on.vision.as_ref().unwrap().acquire_needs_sight, "WP7.7");
+    let mut off = on.clone();
+    off.vision.as_mut().unwrap().acquire_needs_sight = false;
+    let mut none = on.clone();
+    none.vision = None;
     let run_to_end = |s: &Scenario| run(s, &RunOptions::for_scenario(s)).unwrap().final_checksum;
-    assert_eq!(run_to_end(&with), parse_checksum(EXPECTED).unwrap());
-    assert_eq!(
-        run_to_end(&without),
-        parse_checksum("0x164403a92986654f").unwrap(),
-        "without the vision section the match is the pin it had before WP8.2a"
-    );
+    assert_eq!(run_to_end(&on), parse_checksum(EXPECTED).unwrap());
+    assert_eq!(run_to_end(&off), parse_checksum(PIN_GATE_OFF).unwrap());
+    assert_eq!(run_to_end(&none), parse_checksum(PIN_NO_VISION).unwrap());
+}
+
+/// The gate parts the worlds at tick 4692 (WP8.2a measured 4282 with the cell test of sight; the edge
+/// test of WP7.7 lets the rocket troopers pick the tower at the limit of their reach, so the first
+/// difference is something else, later). Vision without the gate changes nothing:
+/// `vision.rs`: `the_first_match_plays_the_same_with_vision_on`.
+#[test]
+fn the_gate_parts_the_gated_and_the_ungated_match_at_tick_4692() {
+    let on = scenario();
+    let mut off = on.clone();
+    off.vision.as_mut().unwrap().acquire_needs_sight = false;
+    let state = |w: &World| -> Vec<(u32, u16, u8, i64, i64, Option<u32>)> {
+        w.snapshot()
+            .iter()
+            .map(|v| {
+                (
+                    v.id.index(),
+                    v.kind.0,
+                    v.owner.0,
+                    v.pos.x.raw(),
+                    v.pos.y.raw(),
+                    w.hp_of(v.id),
+                )
+            })
+            .collect()
+    };
+    let (mut a, mut b) = (off.build_world().unwrap(), on.build_world().unwrap());
+    let mut parted = None;
+    for _ in 0..on.ticks {
+        a.step();
+        b.step();
+        if parted.is_none() && state(&a) != state(&b) {
+            parted = Some(a.tick().0);
+        }
+    }
+    assert_eq!(parted, Some(4692));
+    assert_ne!(a.checksum(), b.checksum());
+    // Without the gate the match is decided 10 ticks earlier, with the same six units lost.
+    assert_eq!(a.defeat_tick(P1), Some(Tick(6228)));
+    assert_eq!(b.defeat_tick(P1), Some(Tick(DECIDED)));
+    assert_eq!(a.tally_of(P1).kills, b.tally_of(P1).kills);
 }
 
 /// The opponent's tower (slot 4) fires in the match (WP6.7): the first shot is at tick 3830, 140 ticks

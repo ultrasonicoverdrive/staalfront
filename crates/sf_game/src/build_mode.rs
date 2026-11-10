@@ -91,6 +91,14 @@ impl BuildMode {
         }
     }
 
+    /// The footprint (cells along x, y) of a buildable `kind`; one cell for any other kind.
+    pub fn size_of(&self, kind: Kind) -> (u8, u8) {
+        self.choices
+            .iter()
+            .find(|c| c.kind == kind)
+            .map_or((1, 1), |c| c.size)
+    }
+
     /// The role name of `kind`, or its number when the definitions do not name it.
     pub fn name_of(&self, kind: Kind) -> String {
         self.names.iter().find(|(k, _)| *k == kind).map_or_else(

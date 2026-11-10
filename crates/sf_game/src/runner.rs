@@ -648,6 +648,15 @@ impl Runner {
         }
     }
 
+    /// The engine has (re)read `input.ron`: the menu takes it as the shipped keys (dropping the
+    /// player's overrides that clash with it, and saying so) and the player's keys go back over it.
+    fn reload_shipped_keys(&mut self, ctx: &mut Context) {
+        for warning in self.menu.set_shipped(ctx.bindings().clone()) {
+            eprintln!("sf_game: settings: {warning}");
+        }
+        ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
+    }
+
     /// Does what the menu asked for.
     fn apply_outcomes(&mut self, ctx: &mut Context, outcomes: Vec<Outcome>) {
         for outcome in self.apply_to_game(outcomes) {
@@ -849,6 +858,8 @@ impl Runner {
         self.camera = camera;
         self.camera.set_viewport(self.viewport.0, self.viewport.1);
         self.options = options;
+        // The sidebar is the HUD's, which stays; a new scene starts on its default tab at the top.
+        self.hud.reset_sidebar();
         // A new game: nothing has been counted, played or heard yet.
         self.sim_micros_seen = 0;
         self.ticks = 0;
@@ -1377,8 +1388,18 @@ impl Runner {
             let new = usize::try_from(total - self.rejected_seen)
                 .unwrap_or(usize::MAX)
                 .min(last.len());
-            for r in &last[last.len() - new..] {
-                let words = placement_view::describe(r.reason, &|k| self.build.name_of(k));
+            // Only the local player's own refusals go to its top bar.
+            for r in last[last.len() - new..]
+                .iter()
+                .filter(|r| r.player == commands::LOCAL_PLAYER)
+            {
+                let words = placement_view::click_refusal_words(
+                    r.reason,
+                    r.cell,
+                    self.build.size_of(r.kind),
+                    &|c| self.snap.is_visible(c),
+                    &|k| self.build.name_of(k),
+                );
                 println!(
                     "build refused in tick {}: {} on ({}, {}): {words}",
                     r.tick.0,
@@ -1494,10 +1515,11 @@ impl Runner {
             return Some(format!("Build {name}: refused, {words}"));
         }
         let verdict = match self.snap.ghost() {
-            Some(g) if g.query.kind == chosen.kind => match g.preview.verdict {
-                Ok(()) => "place here".to_owned(),
-                Err(e) => placement_view::describe(e, &|k| self.build.name_of(k)),
-            },
+            Some(g) if g.query.kind == chosen.kind => {
+                placement_view::refusal_words(&g.preview, &|c| self.snap.is_visible(c), &|k| {
+                    self.build.name_of(k)
+                })
+            }
             _ => "move the cursor over the ground".to_owned(),
         };
         Some(format!("Build {name}: {verdict}"))
@@ -1520,7 +1542,9 @@ impl Runner {
         let ground = &self.ground;
         let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
         let mut layer = self.hud.world_layer();
-        placement_view::draw_ghost(&mut layer, &frame, &terrain, answer);
+        placement_view::draw_ghost(&mut layer, &frame, &terrain, answer, &|c| {
+            snap.is_visible(c)
+        });
     }
 
     /// The progress bars of the structures under construction (WP6.3), from the snapshot's state.
@@ -2503,8 +2527,7 @@ impl App for Runner {
         // The player's keys over input.ron, the UI scale and the colours (WP11.5a). The window mode,
         // the frame cap and the present mode were decided before the window was made
         // (`settings::startup`).
-        self.menu.set_shipped(ctx.bindings().clone());
-        ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
+        self.reload_shipped_keys(ctx);
         self.apply_look_settings();
         let gpu_options = GpuOptions {
             present: self.options.present,
@@ -2769,7 +2792,7 @@ impl App for Runner {
             self.handle_orders(ctx, right_click);
         }
         let actions = ctx.actions();
-        if actions.pressed(Action::ToggleFullscreen) {
+        if actions.pressed(Action::ToggleFullscreen) && fullscreen_key_works(menu_open) {
             ctx.toggle_fullscreen();
             println!("fullscreen: {}", ctx.is_fullscreen());
         }
@@ -2874,8 +2897,7 @@ impl App for Runner {
         }
         // The engine has read input.ron again; the player's own keys go back over it (WP11.5a).
         if path.file_name().is_some_and(|n| n == "input.ron") {
-            self.menu.set_shipped(ctx.bindings().clone());
-            ctx.set_bindings(self.menu.settings().effective_bindings(self.menu.shipped()));
+            self.reload_shipped_keys(ctx);
         }
         println!("asset changed: {}", path.display());
     }
@@ -3382,6 +3404,13 @@ impl EscKey {
     }
 }
 
+/// Whether the fullscreen key (F11, `ToggleFullscreen`) switches the window in this frame
+/// (`docs/rules/menus.md`, "Fullscreen key"): not while a menu is open, which includes the wait
+/// for a key to rebind (that key press belongs to the menu).
+fn fullscreen_key_works(menu_open: bool) -> bool {
+    !menu_open
+}
+
 /// Whether a left (select) press on the map starts a selection pointer (click or box). Not over
 /// the UI, not in build mode, and not in a Repair or Sell mode (WP6.6): there the click is the
 /// mode's command and never a selection.
@@ -3412,6 +3441,37 @@ mod tests {
         assert_eq!(EscKey::for_frame(false, false), EscKey::OpenPause);
         assert_eq!(EscKey::for_frame(true, true), EscKey::ToMenu);
         assert_eq!(EscKey::for_frame(true, false), EscKey::ToMenu);
+    }
+
+    /// F11 switches the window only with no menu open; the settings menu with a key awaited is a
+    /// menu too.
+    #[test]
+    fn f11_does_not_switch_the_window_while_a_menu_is_open() {
+        assert!(fullscreen_key_works(false));
+        assert!(!fullscreen_key_works(true));
+        let mut r = runner("--sandbox");
+        r.menu.open_pause();
+        assert!(r.menu.is_open());
+        assert!(!fullscreen_key_works(r.menu.is_open()));
+    }
+
+    /// A Restart (and a new scene from the menu) puts the sidebar back on its default tab at the top.
+    #[test]
+    fn a_restart_puts_the_sidebar_on_its_default_tab_at_the_top() {
+        use crate::sidebar::Tab;
+        use crate::sidebar_view::SidebarState;
+        for outcome in [Outcome::Restart, Outcome::StartMatch, Outcome::StartSandbox] {
+            let mut r = runner("--match");
+            r.pristine = false;
+            let moved = SidebarState {
+                tab: Tab::Vehicles,
+                scroll: 3,
+            };
+            r.hud.set_sidebar_state(moved);
+            assert_ne!(r.hud.sidebar_state(), SidebarState::default());
+            r.apply_to_game(vec![outcome]);
+            assert_eq!(r.hud.sidebar_state(), SidebarState::default());
+        }
     }
 
     /// WP6.6: a left click in a Repair or Sell mode never starts a selection.

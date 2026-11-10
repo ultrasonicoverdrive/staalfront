@@ -4,7 +4,7 @@
 //! objects now), *explored* (visible at some time; never shrinks) and which are neither (*shroud*).
 //! A cell that is explored but not visible is *fog*. [`World::visibility`] is what the rest of the
 //! simulation asks. **Only one thing reads it** (WP8.2a): the targeting gate, when the rules say
-//! `acquire_needs_sight` (off in everything that ships); targeting, defences, orders and production
+//! `acquire_needs_sight` (on in `vision.ron`, so in the game and the match); targeting, defences, orders and production
 //! otherwise behave exactly as before. The rules may also list `shared` pairs (a viewer sees what a
 //! sharer sees); `visibility` is the union.
 //!
@@ -54,6 +54,7 @@
 //! vision rules has no pass and no section and hashes exactly as before.
 
 use sf_math::hash::Fnv1a64;
+use sf_math::{Fx, Vec2};
 
 use crate::entities::NO_DEF;
 use crate::ids::{Kind, PlayerId};
@@ -564,6 +565,73 @@ impl Vision {
         for cy in y..(y + h).min(self.height) {
             for cx in x..(x + w).min(self.width) {
                 if self.visibility(player, cy * self.width + cx) == Visibility::Visible {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether `player` sees one cell now (a cell outside the map is never seen).
+    fn sees_cell(&self, player: PlayerId, x: u32, y: u32) -> bool {
+        x < self.width
+            && y < self.height
+            && self.visibility(player, y * self.width + x) == Visibility::Visible
+    }
+
+    /// Whether `player` sees a structure whose footprint is the `w` by `h` rectangle at `(x, y)`,
+    /// **measured to its edge** (WP7.7): any cell of the footprint, or a cell that shares a side with
+    /// it, is visible. The cell around a footprint reaches the edge of the structure the way a weapon
+    /// reaches the edge of its target: the visible cell is half a cell wide on each side of its
+    /// centre, so a visible cell that touches the footprint has the structure's edge inside the
+    /// sight. Cells that touch only at a corner do not count (a weapon measures to the inscribed
+    /// circle, not to the corner).
+    pub(crate) fn sees_footprint_edge(
+        &self,
+        player: PlayerId,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+    ) -> bool {
+        self.sees_rect(player, x, y, w, h)
+            || (x > 0 && self.sees_rect(player, x - 1, y, 1, h))
+            || self.sees_rect(player, x + w, y, 1, h)
+            || (y > 0 && self.sees_rect(player, x, y - 1, w, 1))
+            || self.sees_rect(player, x, y + h, w, 1)
+    }
+
+    /// Whether `player` sees a unit whose body is the disc of radius `radius` round `pos`, **measured
+    /// to its edge** (WP7.7): the cell its position lies in, or a neighbour cell (including a diagonal
+    /// one) that the disc reaches, is visible. A cell counts when the distance from `pos` to the
+    /// square of the cell is at most `radius`, squared on both sides, the test `in_reach` of the
+    /// weapons makes (`<=`, edge included). A unit that is nowhere near the border of its cell is
+    /// seen through its own cell only.
+    pub(crate) fn sees_body(&self, player: PlayerId, pos: Vec2, radius: Fx) -> bool {
+        let (cx, cy) = pos.cell();
+        let (Ok(x), Ok(y)) = (u32::try_from(cx), u32::try_from(cy)) else {
+            return false;
+        };
+        if self.sees_cell(player, x, y) {
+            return true;
+        }
+        if radius <= Fx::ZERO {
+            return false;
+        }
+        // How far `pos` is from the left and top border of its cell (from zero up to, not including,
+        // one) and from the right and bottom one.
+        let left = pos.x - Fx::from_int(cx);
+        let top = pos.y - Fx::from_int(cy);
+        let reach = radius.square();
+        for (dy, gap_y) in [(-1i32, top), (0, Fx::ZERO), (1, Fx::ONE - top)] {
+            for (dx, gap_x) in [(-1i32, left), (0, Fx::ZERO), (1, Fx::ONE - left)] {
+                if (dx, dy) == (0, 0) || gap_x.square() + gap_y.square() > reach {
+                    continue;
+                }
+                let (Ok(nx), Ok(ny)) = (u32::try_from(cx + dx), u32::try_from(cy + dy)) else {
+                    continue;
+                };
+                if self.sees_cell(player, nx, ny) {
                     return true;
                 }
             }
