@@ -58,6 +58,7 @@ use crate::settings::{Settings, Store};
 use crate::sidebar::Catalog;
 use crate::sim_snapshot::SimSnapshot;
 use crate::sim_thread::{SimConfig, SimCounters, SimHandle, interpolation_alpha};
+use crate::unit_voice::{UnitVoice, UnitVoices, order_voice, selection_frame};
 
 // The walking speed of the demo's units (`bench_scene::DEMO_SPEED`) lives next to the world's
 // configuration there, where the headless twin of the benchmark scene builds the same world.
@@ -225,6 +226,8 @@ pub struct Runner {
     fx: FxPlayer,
     /// The sounds of the fight (WP11.3), played from the events `fx` showed.
     fx_sound: FxSound,
+    /// The replies of the player's own units to selecting and ordering (WP11.2).
+    unit_voices: UnitVoices,
     /// The last music load printed (WP11.4), so it is printed once.
     music_load_logged: Option<sf_audio::MusicLoad>,
     /// The glTF models the units are drawn with, after the placeholders.
@@ -526,6 +529,7 @@ impl Runner {
             instancer,
             fx: FxPlayer::embedded(),
             fx_sound: FxSound::new(&AudioConfig::embedded()),
+            unit_voices: UnitVoices::new(AudioConfig::embedded().voices),
             music_load_logged: None,
             pack,
             looks,
@@ -776,6 +780,7 @@ impl Runner {
             fps_shown: _,
             lod: _,
             fx_sound: _,
+            unit_voices: _,
             music_load_logged: _,
             stats: _,
             terrain: _,
@@ -848,6 +853,7 @@ impl Runner {
         self.sim_micros_seen = 0;
         self.ticks = 0;
         self.fx_sound.reset();
+        self.unit_voices.reset();
     }
 
     /// The landmarks the scene shows on the ground (a grid of pillars and a few blocks, development
@@ -1126,6 +1132,14 @@ impl Runner {
         let cursor = ctx.input().cursor().map(|(x, y)| [x as f32, y as f32]);
         let now = self.now_ms();
         let scale = self.hud.scale();
+        // The unit voice (WP11.2): the own units that can speak before this frame's step, and whether
+        // the player did anything that sets the selection (a click, the release of a drag, a double
+        // click, a group key). A drag in progress, or a selection that just stays, says nothing.
+        // (Only the ids are copied here; which of them can speak is worked out below, and only when the
+        // player acted, so a frame without a selection action costs one small copy.)
+        let before_ids = self.selection.ids().to_vec();
+        let mut acted = false;
+        let mut additive_step = false;
         if actions.pressed(Action::SelectClick)
             && select_press_starts_selection(ui_busy, self.build.is_active(), self.tool.is_some())
             && let Some(at) = cursor
@@ -1142,6 +1156,7 @@ impl Runner {
             || (self.pointer.is_down() && !actions.held(Action::SelectClick))
         {
             let additive = actions.held(Action::SelectAdd);
+            additive_step = additive;
             let gesture = match cursor {
                 Some(at) => self.pointer.release(at, now, scale),
                 None => {
@@ -1153,6 +1168,7 @@ impl Runner {
                 .hovered
                 .as_ref()
                 .map(|p| selection_view::entity_of(p.id));
+            acted = gesture.is_some();
             match gesture {
                 Some(Gesture::Click { double: false }) => {
                     self.selection.click(&self.snap, hit, additive);
@@ -1179,12 +1195,37 @@ impl Runner {
             if assign {
                 self.selection.assign_group(n);
                 println!("group {}: {} units", n + 1, self.selection.group(n).len());
-            } else if let Recall::Centre([x, y]) = self.selection.recall_group(&self.snap, n, now) {
-                self.camera.set_focus(DVec2::new(
-                    f64::from(x * METRES_PER_CELL),
-                    f64::from(y * METRES_PER_CELL),
-                ));
+            } else {
+                let recall = self.selection.recall_group(&self.snap, n, now);
+                acted |= recall != Recall::Empty;
+                additive_step = false;
+                if let Recall::Centre([x, y]) = recall {
+                    self.camera.set_focus(DVec2::new(
+                        f64::from(x * METRES_PER_CELL),
+                        f64::from(y * METRES_PER_CELL),
+                    ));
+                }
             }
+        }
+        if acted {
+            let can_speak = |id: &sf_sim::EntityId| {
+                crate::selection::facts(&self.snap, *id)
+                    .is_some_and(|f| f.class == sf_sim::UnitClass::Mobile)
+            };
+            let before: Vec<_> = before_ids.iter().copied().filter(can_speak).collect();
+            let after = self.selection.orderable(&self.snap);
+            if let Some(voice) = selection_frame(acted, additive_step, &before, &after) {
+                self.say(voice);
+            }
+        }
+    }
+
+    /// A unit voice (WP11.2): `unit.select`, `unit.move` or `unit.attack` of the own units, through the
+    /// brake of [`UnitVoices`]. Silent without a sound for the event or without audio.
+    fn say(&mut self, voice: UnitVoice) {
+        let now = self.now_ms();
+        if let Some(audio) = &mut self.audio {
+            self.unit_voices.speak(voice, now, audio);
         }
     }
 
@@ -1270,7 +1311,11 @@ impl Runner {
                 Modifiers::from_actions(actions),
             )
         {
+            let voice = order_voice(&command);
             commands::issue(&self.sim, command);
+            if let Some(voice) = voice {
+                self.say(voice);
+            }
         }
         if actions.pressed(Action::OrderStop) {
             let ids = self.selection.orderable(&self.snap);
@@ -2506,6 +2551,7 @@ impl App for Runner {
         if let Some(w) = warning {
             eprintln!("sf_audio: {w}");
         }
+        self.unit_voices = UnitVoices::new(fx_sound.voice_config());
         self.fx_sound = fx_sound;
         audio.set_music_trace(true);
         println!(

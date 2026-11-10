@@ -172,6 +172,12 @@ A track is decoded when it is about to play (on a background thread, about
 files, or with the switch off, the default music plays: silence, as there is
 no music in the sound bank yet (`music.fallback` in `audio.ron` can name a bank sound).
 
+The **unit voices** are part of this: with the switch on, your selected, moving and attacking units answer
+(`unit.select`, `unit.move`, `unit.attack` in `ra_mapping.ron`), one voice at a time and not on every click (the gaps
+are in the `voices` section of `audio.ron`). Without the files they stay silent. Which variant of a voice line you like
+is a matter of ear: try them in the F1 *Sound browser* and change the name in `ra_mapping.ron`. Rules:
+[`docs/rules/voices.md`](docs/rules/voices.md).
+
 Missing, unreadable or unknown files are fine: those events keep their CC0
 sound and the game prints one warning.
 

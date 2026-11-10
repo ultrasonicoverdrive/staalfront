@@ -2560,6 +2560,32 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   `Renderer::set_present` (the last one only on a real window: the offscreen renderer ignores it, and the real-window check
   saw `present: Immediate`).
 
+## WP11.2 notes: unit voices
+
+Branch `wp/11.2-voices`. The player's own units answer when selected, told to move and told to attack (`unit.select`,
+`unit.move`, `unit.attack`), raised from the UI side with a brake against spam. Rules: `docs/rules/voices.md`.
+
+- **Built.** `sf_audio::VoiceBrake` (pure play-or-skip; `voices: (min_gap_ms: 400, repeat_gap_ms: 1200)` in `audio.ron`),
+  `AudioSystem::is_playing` (one voice at a time, from the live handles), `sf_game::unit_voice` (`selection_frame`,
+  `order_voice`, `UnitVoices::speak`) and four short additions in `runner.rs`. No change in `sf_sim`; no pin moved
+  (nothing in the simulation or its scenarios was touched).
+- **Silent without files.** The shipped bank has no sound for the three events and `ra_mapping.ron` already mapped them
+  (not changed, no name added); an event without a sound prints nothing and uses up no gap.
+- **Decisions.** One event per action whatever the number of units; a structure alone is silent; Guard answers with the
+  move voice; stop, scatter and hold are silent; a skipped voice is dropped, not queued; not positional.
+- **Mutations** (each reverted; failing tests): brake removed: 4 `voice_brake` tests; min gap ignored:
+  `another_event_waits_for_the_min_gap`; repeat gap ignored: `the_same_event_waits_for_the_longer_repeat_gap` (+1); busy
+  ignored: `a_voice_that_is_still_sounding_blocks_a_new_one`; select per frame (`acted` ignored):
+  `a_box_drag_speaks_once_at_the_release_and_not_on_its_frames` (+1); attack raises move:
+  `an_order_on_an_enemy_raises_the_attack_voice_and_never_the_move_voice`; enemy/empty selection voiced: 3 tests
+  (`clicking_bare_ground_or_an_enemy_or_a_neutral_says_nothing` among them); shift-remove voiced:
+  `shift_adding_a_unit_speaks_and_shift_removing_one_does_not`; silent event uses a gap:
+  `without_a_sound_the_event_is_silent_and_uses_up_no_gap` (+1); hold position speaks: `the_other_orders_say_nothing`.
+  (A tenth, Guard made silent, did not compile: the match is exhaustive, which is the point of it.)
+- **Gaps.** The two call sites in `runner.rs` need a window and are checked by reading; nothing was heard by a person
+  (needs the player's Red Alert files and a sound device); the three mapped names are the WP11.7 defaults, variant not
+  chosen by ear. One voice per action, not per unit type.
+
 ## Phase 8 — Vision
 
 Status: WP8.1 (shroud and fog of war per player, in the sim, no behaviour; #104) and WP8.2a (the targeting gate behind a flag that is

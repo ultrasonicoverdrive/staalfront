@@ -45,6 +45,8 @@ pub(crate) trait Player {
     fn set_music_gain(&mut self, gain: f32);
     /// Name of the running music track, if any.
     fn music_name(&self) -> Option<&str>;
+    /// Whether a voice of the sound `name` is still sounding (WP11.2: one unit voice at a time).
+    fn playing(&self, name: &str) -> bool;
     /// Housekeeping once per frame: forget finished voices.
     fn tick(&mut self);
     /// Drop decoded files (after a bank reload) so edits are picked up.
@@ -216,6 +218,11 @@ impl<B: Backend> Player for Live<B> {
         self.music.as_ref().map(|m| m.name.as_str())
     }
 
+    fn playing(&self, name: &str) -> bool {
+        self.voices
+            .any_alive(name, |h| h.state() != PlaybackState::Stopped)
+    }
+
     fn tick(&mut self) {
         self.voices.prune(|h| h.state() != PlaybackState::Stopped);
         self.fading.retain(|h| h.state() != PlaybackState::Stopped);
@@ -303,6 +310,19 @@ mod tests {
         l.tick();
         assert_eq!(l.live_voices("click"), 0, "finished voices are released");
         assert_eq!(l.play(&req("click", &path, 3)), Outcome::Played);
+    }
+
+    #[test]
+    fn playing_follows_a_voice_from_start_to_end() {
+        let path = click();
+        let mut l = live();
+        assert!(!l.playing("click"), "nothing started yet");
+        assert_eq!(l.play(&req("click", &path, 3)), Outcome::Played);
+        assert!(l.playing("click"));
+        assert!(!l.playing("other"), "only the named sound counts");
+        // No `tick` in between: a finished voice does not count even before it is pruned.
+        run(&mut l, 40);
+        assert!(!l.playing("click"));
     }
 
     #[test]

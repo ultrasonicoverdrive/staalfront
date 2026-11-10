@@ -374,6 +374,14 @@ impl AudioSystem {
             || matches!(&self.ra, Ra::Ready { events, .. } if events.contains(name))
     }
 
+    /// Whether a voice of any of the sounds `names` is still sounding. Always `false` without an output
+    /// device. The unit voices use it to speak one at a time (WP11.2).
+    pub fn is_playing(&self, names: &[&str]) -> bool {
+        self.player
+            .as_ref()
+            .is_some_and(|p| names.iter().any(|n| p.playing(n)))
+    }
+
     /// Start (`true`) or stop (`false`) recording the play requests that get
     /// past the lookup and the audibility check, with the gain and pan the
     /// output would get. Works without a device; for tests and a debug view.
@@ -1499,6 +1507,9 @@ mod tests {
             } else {
                 self.name.as_deref()
             }
+        }
+        fn playing(&self, _: &str) -> bool {
+            false
         }
         fn tick(&mut self) {}
         fn clear_cache(&mut self) {}
