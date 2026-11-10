@@ -601,11 +601,12 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
   glTF models (WP1.10, section 15) add a part list per level: one draw per
   (part, level).
 - **When icons are drawn** (zoom work package, `rules/camera.md`; `zoom.rs`, `camera.ron`). Models are drawn at
-  every zoom. The icons are an overlay: alpha 0 up to the camera zoom `zoom.icons_from` (0.85), 1 from `icons_full`
-  (1.0), a smoothstep between, so they fade in over the last 15 % of the wheel travel, on top of the models. The
+  every zoom. The icons are an overlay: alpha 0 up to the camera zoom `zoom.icons_from` (0.95), 1 from `icons_full`
+  (1.0), a smoothstep between, so they fade in over the last 5 % of the wheel travel (at most 40 % opaque; K
+  switches them off), on top of the models. The
   blend of a frame is `Blend { model, icon }` (model weight 1 in play, icon alpha from `ZoomBands::icon_alpha`).
   (Before that the icons replaced the models by a dithered cross-fade driven by the apparent size of a reference unit.)
-  The models also grow with `ZoomBands::model_scale` (capped, 1 to 1.6) toward the far end.
+  The models also grow with `ZoomBands::model_scale` (capped, 1 to 2.5) toward the far end.
 - **Icons.** One instanced quad per unit, one draw call (`IconInstance`, 32 bytes:
   world anchor, shape + flags, colour). The vertex shader projects the anchor and
   lays a quad of `size_px * ui_scale` **pixels** around it (centre snapped to the

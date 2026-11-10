@@ -298,14 +298,16 @@ mod tests {
         let mid = 0.5 * (b.icons_from + b.icons_full);
         assert!((b.icon_alpha(mid) - 0.5).abs() < 1e-6);
         // Just inside the band: a little, not nothing and not all.
-        let early = b.icon_alpha(b.icons_from + 0.01);
+        let early = b.icon_alpha(b.icons_from + 0.003);
         assert!(early > 0.0 && early < 0.05, "{early}");
         let mut previous = 0.0;
         for i in 0..=1000 {
             let a = b.icon_alpha(i as f32 / 1000.0);
             assert!((0.0..=1.0).contains(&a));
             assert!(a >= previous, "not monotone at {i}");
-            assert!(a - previous < 0.02, "a jump at {i}");
+            // A smoothstep is at most 1.5 times steeper than a line over the band.
+            let steepest = 1.5 * 0.001 / (b.icons_full - b.icons_from);
+            assert!(a - previous <= steepest + 1e-4, "a jump at {i}");
             previous = a;
         }
         // The far band is the last 5 % of the zoom range (decision 10-11-2026):

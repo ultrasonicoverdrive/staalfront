@@ -337,9 +337,14 @@ impl ParticlePool {
             if alpha <= 0.0 {
                 continue;
             }
-            let Some(px) = view.size_for(p.pos, p.size_m + p.growth * p.age, size_cap) else {
+            let Some(mut px) = view.size_for(p.pos, p.size_m + p.growth * p.age, size_cap) else {
                 continue;
             };
+            if flash {
+                // Seen from the farthest zoom a flash at its true size is a dot: keep it at least this
+                // big, never bigger than an icon.
+                px.0 = px.0.max(view.limits.strategic_flash_min_px.min(size_cap));
+            }
             out.push(instance(p.pos, px.0, p.colour, alpha, p.flags & GLOW != 0));
         }
         out.len()
@@ -723,6 +728,31 @@ mod tests {
         assert!(out[0].color[0] < l.strategic_flash_alpha);
         pool.update(0.2);
         assert_eq!(pool.emit(&view(&l, 0.0), &mut out), 0);
+    }
+
+    /// Far away a flash is at least `strategic_flash_min_px` (zoom fix round 2), an ordinary particle
+    /// is not lifted.
+    #[test]
+    fn a_far_death_flash_keeps_its_least_size() {
+        let l = limits();
+        let mut pool = ParticlePool::new(&l);
+        let far = |flash: bool| Burst {
+            position: [0.0, 0.0, 900.0],
+            flash,
+            def: BurstDef {
+                size_m: 0.5,
+                ..glow()
+            },
+            ..burst(1, glow())
+        };
+        pool.spawn(&far(true));
+        let mut out = Vec::new();
+        assert_eq!(pool.emit(&view(&l, 0.0), &mut out), 1);
+        assert_eq!(out[0].size_px, l.strategic_flash_min_px);
+        let mut plain = ParticlePool::new(&l);
+        plain.spawn(&far(false));
+        assert_eq!(plain.emit(&view(&l, 1.0), &mut out), 1);
+        assert_eq!(out[0].size_px, l.min_px);
     }
 
     #[test]

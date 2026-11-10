@@ -220,7 +220,7 @@ fn wheel_zoom_keeps_the_marker_under_the_cursor() {
     };
 
     let mut last = None;
-    for stage in 0..4 {
+    for stage in 0..5 {
         step(&mut c, Some(cursor), 6.0);
         let img = shot(&mut r, &c);
         let p = img.pixel(px, py);

@@ -720,13 +720,13 @@ fn of_two_overlapping_icons_the_one_whose_centre_is_nearer_the_cursor_wins() {
     // Two units a few pixels apart on the screen at whole-map zoom.
     let motions = [
         still(0, 0, 1, (128.0, 128.0)),
-        still(0, 1, 2, (129.5, 128.0)),
+        still(0, 1, 2, (131.0, 128.0)),
     ];
     let mut inst = instancer(&motions);
     let cam = camera(1.0, (128.0, 128.0));
     build(&mut inst, &cam, 0.0, Blend::ICONS, 1.0, flat);
     let a = icon_centre(&cam, &inst, (128.0, 128.0), 1.0);
-    let b = icon_centre(&cam, &inst, (129.5, 128.0), 1.0);
+    let b = icon_centre(&cam, &inst, (131.0, 128.0), 1.0);
     let apart = b[0] - a[0];
     println!("icon centres {apart} px apart");
     assert!(apart > 2.0 && apart < 13.0, "the quads overlap: {apart}");
@@ -1082,9 +1082,9 @@ fn a_tiny_model_is_taken_by_a_rectangle_near_it() {
 #[test]
 fn a_rectangle_takes_the_icons_whose_quad_it_touches() {
     let motions = [
-        still(0, 0, 1, (120.0, 128.0)),
+        still(0, 0, 1, (112.0, 128.0)),
         still(0, 0, 2, (128.0, 128.0)),
-        still(0, 1, 3, (136.0, 128.0)),
+        still(0, 1, 3, (144.0, 128.0)),
     ];
     let mut inst = instancer(&motions);
     let cam = camera(1.0, (128.0, 128.0));
@@ -1386,7 +1386,7 @@ fn every_unit_is_a_model_at_every_zoom_and_the_icons_come_only_in_the_far_band()
         let s = build(&mut inst, &cam, 0.0, blend, 1.0, flat);
         assert_eq!(s.visible, 30, "zoom {zoom}: all in view");
         assert_eq!(s.models, 30, "zoom {zoom}: every unit is a model");
-        if zoom <= f64::from(bands.icons_from) {
+        if cam.zoom() as f32 <= bands.icons_from {
             assert_eq!(s.icons, 0, "zoom {zoom}: no icon before the far band");
         } else {
             assert_eq!(s.icons, 30, "zoom {zoom}: icons over the models");
