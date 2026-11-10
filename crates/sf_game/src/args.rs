@@ -150,6 +150,11 @@ pub struct Options {
     /// `--hitch-log FILE` (WP1.16a): write the hitch log (every frame over 50 ms with its parts, the
     /// totals, the slow sim ticks) to `FILE` as JSON when the game ends.
     pub hitch_log: Option<PathBuf>,
+    /// `--replay FILE` (WP1.16a, only with `--match`): feed the commands of a record (`--record`) into the
+    /// running game at the ticks they ran at, so that a play can be repeated for a measurement without
+    /// anyone at the keyboard. The commands are sent as the player's are (a tick ahead of the snapshot),
+    /// so the play follows the record but is not tick-exact (`docs/rules/hitch_log.md`).
+    pub replay: Option<PathBuf>,
     /// Flags that were given but could not be used.
     pub warnings: Vec<String>,
 }
@@ -199,6 +204,7 @@ impl Options {
             sim_delay: Duration::ZERO,
             record: None,
             hitch_log: None,
+            replay: None,
             warnings: Vec::new(),
         };
         let mut units_given = false;
@@ -413,6 +419,7 @@ impl Options {
                 "--no-reserve" => o.reserve = false,
                 "--record" => o.record = value(&mut o.warnings).map(PathBuf::from),
                 "--hitch-log" => o.hitch_log = value(&mut o.warnings).map(PathBuf::from),
+                "--replay" => o.replay = value(&mut o.warnings).map(PathBuf::from),
                 "--sim-delay-ms" => {
                     if let Some(v) = value(&mut o.warnings) {
                         match v.parse::<u32>() {
@@ -434,6 +441,11 @@ impl Options {
             o.warnings
                 .push("--record needs --match: nothing is recorded".to_owned());
             o.record = None;
+        }
+        if o.replay.is_some() && o.scene != Scene::Match {
+            o.warnings
+                .push("--replay needs --match: nothing is replayed".to_owned());
+            o.replay = None;
         }
         // The viewer's crowd is the old 2,000 placeholder units.
         if !demo && o.scene == Scene::Crowd && !units_given {
@@ -742,5 +754,8 @@ mod tests {
             Some(PathBuf::from("h.json"))
         );
         assert_eq!(parse(Preset::Game, "--hitch-log").warnings.len(), 1);
+        let replay = parse(Preset::Game, "--match --replay play.ron");
+        assert_eq!(replay.replay, Some(PathBuf::from("play.ron")));
+        assert_eq!(parse(Preset::Game, "--replay play.ron").replay, None);
     }
 }

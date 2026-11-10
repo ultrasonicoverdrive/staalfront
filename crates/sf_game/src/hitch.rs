@@ -137,6 +137,24 @@ pub struct Totals {
     pub lines_dropped: u64,
 }
 
+/// A frame in which the renderer created or grew instance buffers (suspect 1 of WP1.16).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct BufferGrowth {
+    pub frame: u64,
+    pub tick: u64,
+    /// Buffers created or grown in this frame's upload.
+    pub added: u64,
+    /// All buffers created or grown since the renderer began counting (the reservation at start included).
+    pub total: u64,
+    /// Bytes of all of them.
+    pub bytes: u64,
+    /// The whole upload lap of the frame.
+    pub upload_ms: f64,
+}
+
+/// The most buffer growths kept.
+const MAX_GROWTHS: usize = 500;
+
 /// The file `--hitch-log` writes.
 #[derive(Serialize)]
 struct HitchFile<'a> {
@@ -151,6 +169,7 @@ struct HitchFile<'a> {
     thread_times_total_ms: f64,
     totals: Totals,
     sim: &'a SimTotals,
+    buffer_growth: &'a [BufferGrowth],
     hitches: &'a [HitchLine],
 }
 
@@ -173,6 +192,9 @@ pub struct HitchLog {
     lines: Vec<HitchLine>,
     /// Frame intervals completed so far.
     frame_no: u64,
+    /// The renderer's buffer count at the last frame; `None` before the first.
+    buffers_seen: Option<u64>,
+    growth: Vec<BufferGrowth>,
 }
 
 impl HitchLog {
@@ -193,6 +215,8 @@ impl HitchLog {
             totals: Totals::default(),
             lines: Vec::new(),
             frame_no: 0,
+            buffers_seen: None,
+            growth: Vec::new(),
         }
     }
 
@@ -330,6 +354,37 @@ impl HitchLog {
         }
     }
 
+    /// The renderer's instance buffer count after this frame's upload (`total` buffers of `bytes`
+    /// bytes in all, created or grown since it began counting). One comparison per frame; when the count
+    /// went up, the frame is remembered with the time its upload took.
+    pub fn observe_buffers(&mut self, total: u64, bytes: u64, upload_ms: f64) {
+        let before = self.buffers_seen.replace(total);
+        if let Some(before) = before
+            && total != before
+        {
+            self.buffers_grew(total.saturating_sub(before), total, bytes, upload_ms);
+        }
+    }
+
+    #[cold]
+    fn buffers_grew(&mut self, added: u64, total: u64, bytes: u64, upload_ms: f64) {
+        self.note(|| format!("instance buffers: {added} created or grown (now {total}, {bytes} bytes)"));
+        if self.growth.len() < MAX_GROWTHS {
+            self.growth.push(BufferGrowth {
+                frame: self.frame_no + 1,
+                tick: self.tick,
+                added,
+                total,
+                bytes,
+                upload_ms,
+            });
+        }
+    }
+
+    pub fn growth(&self) -> &[BufferGrowth] {
+        &self.growth
+    }
+
     pub fn totals(&self) -> Totals {
         Totals {
             frames_after_warmup: self.totals.frames.saturating_sub(u64::from(WARMUP_FRAMES)),
@@ -386,6 +441,7 @@ impl HitchLog {
             thread_times_total_ms: self.cpu.total_ms(),
             totals: self.totals(),
             sim,
+            buffer_growth: &self.growth,
             hitches: &self.lines,
         })
     }
@@ -658,8 +714,37 @@ mod tests {
         );
         assert_eq!(note(W::Focused(false)).unwrap(), "focus lost");
         assert_eq!(note(W::Occluded(true)).unwrap(), "window occluded (hidden)");
-        assert_eq!(note(W::CursorLeft { device_id: None }), None);
+        assert_eq!(note(W::Destroyed), None);
         assert_eq!(note(W::RedrawRequested), None);
+    }
+
+    #[test]
+    fn a_buffer_that_grew_is_remembered_with_its_upload_time() {
+        let begun = Instant::now();
+        let mut log = HitchLog::new(begun);
+        log.begin_frame(at(begun, 0), no_ticks);
+        log.set_tick(40);
+        // The first observation is the reservation: not a growth.
+        log.observe_buffers(4, 16_384, 0.2);
+        log.begin_frame(at(begun, 17), no_ticks);
+        log.observe_buffers(4, 16_384, 0.1);
+        log.begin_frame(at(begun, 34), no_ticks);
+        log.set_tick(41);
+        log.observe_buffers(6, 24_576, 0.9);
+        assert_eq!(
+            log.growth(),
+            &[BufferGrowth {
+                frame: 3,
+                tick: 41,
+                added: 2,
+                total: 6,
+                bytes: 24_576,
+                upload_ms: 0.9
+            }]
+        );
+        log.begin_frame(at(begun, 51), no_ticks);
+        log.observe_buffers(6, 24_576, 0.1);
+        assert_eq!(log.growth().len(), 1);
     }
 
     #[test]
@@ -674,28 +759,26 @@ mod tests {
         );
     }
 
-    /// What a quiet frame costs: the bookkeeping of `begin_frame`, four laps and `end_frame`, per frame,
-    /// measured here (printed with `--nocapture`). It has to be small against a 17 ms frame; the bound is
-    /// generous so that a busy machine does not fail it, the number is what the PR quotes.
+    /// What a quiet frame costs: the bookkeeping of `begin_frame`, five laps and `end_frame`, with the
+    /// clock read each of them takes in the runner, per frame, measured here (printed with
+    /// `--nocapture`). It has to be small against a 17 ms frame; the bound is generous so that a busy
+    /// machine does not fail it, the number is what the PR quotes.
     #[test]
     fn the_bookkeeping_of_a_quiet_frame_is_small() {
-        let begun = Instant::now();
-        let mut log = HitchLog::new(begun);
+        let mut log = HitchLog::new(Instant::now());
         let n = 200_000u32;
-        let frame = Duration::from_micros(16_700);
-        let mut clock = begun;
         let started = Instant::now();
-        for i in 0..n {
-            clock += frame;
-            log.begin_frame(clock, no_ticks);
-            log.lap(Lap::Snapshot, clock);
-            log.lap(Lap::Ui, clock);
-            log.lap(Lap::Scene, clock);
-            log.lap(Lap::Upload, clock);
-            log.end_frame(clock, 0);
+        for _ in 0..n {
+            log.begin_frame(Instant::now(), no_ticks);
+            log.lap(Lap::Snapshot, Instant::now());
+            log.lap(Lap::Ui, Instant::now());
+            log.lap(Lap::Scene, Instant::now());
+            log.lap(Lap::Upload, Instant::now());
+            log.lap(Lap::Audio, Instant::now());
+            log.end_frame(Instant::now(), 0);
         }
         let per_frame = started.elapsed().as_nanos() as f64 / f64::from(n);
-        println!("hitch bookkeeping, quiet frame: {per_frame:.0} ns (a frame is 16,700,000 ns)");
+        println!("hitch bookkeeping, quiet frame, 7 clock reads: {per_frame:.0} ns (a frame is 16,700,000 ns)");
         assert_eq!(log.totals().over_hitch, 0);
         assert!(per_frame < 20_000.0, "{per_frame} ns per frame");
     }

@@ -179,6 +179,28 @@ struct ShotRun {
     requested: bool,
 }
 
+/// The commands of a record that `--replay` feeds into the game (WP1.16a).
+struct Replay {
+    commands: Vec<sf_headless::scenario::RecordedCommand>,
+    next: usize,
+}
+
+impl Replay {
+    fn load(path: &std::path::Path) -> Result<Replay, String> {
+        let scenario = sf_headless::scenario::Scenario::load(path).map_err(|e| e.to_string())?;
+        println!(
+            "replay: {} commands from {} ({} ticks)",
+            scenario.recorded.len(),
+            path.display(),
+            scenario.ticks
+        );
+        Ok(Replay {
+            commands: scenario.recorded,
+            next: 0,
+        })
+    }
+}
+
 pub struct Runner {
     started: Option<Instant>,
     report_at: Instant,
@@ -258,6 +280,8 @@ pub struct Runner {
     hitch: HitchLog,
     /// Games the command record (`--record`) already wrote because a restart ended them.
     record_restarts: u32,
+    /// The commands `--replay` still has to send into the running game.
+    replay: Option<Replay>,
     auto_zoom: bool,
     /// The unit under the cursor in the last frame, highlighted in the
     /// picture and named in the F1 panel; a click selects it.
@@ -505,6 +529,7 @@ impl Runner {
             menu.open_start();
         }
         let pending_menu = options.open_menu.filter(|p| menus && *p != Preset::Start);
+        let replay = options.replay.as_deref().map(Replay::load).transpose()?;
         Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -553,6 +578,7 @@ impl Runner {
             last_frame: None,
             hitch: HitchLog::new(now),
             record_restarts: 0,
+            replay,
             auto_zoom: options.auto_zoom,
             hovered: None,
             unit_view: UnitView::default(),
@@ -805,6 +831,7 @@ impl Runner {
             last_frame: _,
             hitch: _,
             record_restarts: _,
+            replay: _,
             auto_zoom: _,
             unit_view: _,
             hover_at: _,
@@ -866,6 +893,29 @@ impl Runner {
         self.sim_micros_seen = 0;
         self.ticks = 0;
         self.fx_sound.reset();
+    }
+
+    /// `--replay`: sends the commands of the record that are due, as the player's own are sent (the tick
+    /// after the newest snapshot).
+    fn feed_replay(&mut self) {
+        let Some(replay) = &mut self.replay else {
+            return;
+        };
+        let ahead = self.snap.tick().0 + crate::sim_thread::INPUT_DELAY_TICKS;
+        while let Some(c) = replay.commands.get(replay.next)
+            && c.tick <= ahead
+        {
+            self.sim
+                .send(sf_sim::PlayerId(c.player), c.command.to_command());
+            replay.next += 1;
+            if replay.next == replay.commands.len() {
+                println!(
+                    "replay: all {} commands sent, the last at tick {}",
+                    replay.commands.len(),
+                    self.snap.tick().0
+                );
+            }
+        }
     }
 
     /// What the sim thread says about the play, for the hitch log (WP1.16a).
@@ -2680,6 +2730,7 @@ impl App for Runner {
         // between its last two states the picture is comes from the sim's own
         // clock, not from the engine's accumulator.
         self.pull_snapshot(now);
+        self.feed_replay();
         self.hitch.set_tick(self.snap.tick().0);
         self.hitch.lap(Lap::Snapshot, Instant::now());
         let alpha = interpolation_alpha(now, self.snap.pace(), self.sim.period());
@@ -2777,12 +2828,20 @@ impl App for Runner {
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
             self.hitch.lap(Lap::Scene, started);
+            let mut buffers = None;
             if let Some(renderer) = &mut self.renderer {
                 renderer.upload_units(&self.instancer);
+                let a = renderer.alloc_stats();
+                buffers = Some((a.instance_buffers, a.instance_bytes));
             }
             let uploaded = Instant::now();
-            self.upload_ms.push(uploaded.duration_since(started));
+            let upload = uploaded.duration_since(started);
+            self.upload_ms.push(upload);
             self.hitch.lap(Lap::Upload, uploaded);
+            if let Some((total, bytes)) = buffers {
+                self.hitch
+                    .observe_buffers(total, bytes, upload.as_secs_f64() * 1e3);
+            }
         }
         let mut sounds_started = 0u32;
         // The listener follows the camera (it does not rotate, so right = +X).
