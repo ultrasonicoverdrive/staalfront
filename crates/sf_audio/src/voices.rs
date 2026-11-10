@@ -58,6 +58,14 @@ impl<H> VoiceLimiter<H> {
         }
     }
 
+    /// Whether any live voice of `name` satisfies `is_alive` (a finished voice
+    /// that has not been pruned yet does not count).
+    pub fn any_alive(&self, name: &str, is_alive: impl Fn(&H) -> bool) -> bool {
+        self.voices
+            .get(name)
+            .is_some_and(|l| l.iter().any(is_alive))
+    }
+
     /// Record a started voice.
     pub fn add(&mut self, name: &str, handle: H) {
         self.voices
