@@ -97,6 +97,26 @@ An effect is decided by the cell it happens on, so an enemy's shot *at* the play
 not the muzzle flash far away; the player's own shot into the shroud shows both (its `player` is local). That is a presentation rule,
 not an information rule: the simulation still knows everything.
 
+## The placement preview (follow-up to #106)
+
+The ghost of a structure being placed (`placement_view`, `docs/rules/buildings.md`) asks the sim for its verdict per cell. A cell the sim
+calls a **structure** or a **unit** is drawn red only when the player sees that cell now (`SimSnapshot::is_visible`). **Every** on-map
+cell the player cannot see now, free, structure or unit alike (also an own structure outside own sight), is drawn in the neutral grey `placement_unknown` of `vision_look.ron` (`placement_view::tints`, `tint_seen`). The top-bar words for
+"another structure is in the way" / "a unit is in the way" are only said when a cell of exactly that kind is in sight, else the line says
+"cannot build here" (`refusal_words`). Terrain and map-edge cells are not hidden. **The verdict is the sim's and is untouched**:
+a refused placement is still refused and the outline and the amber cells say so, but no cell says where the hidden blocker is: grey
+means "not in sight", never "something hidden stands here". The 4-second top-bar line after a refused click uses the same rule
+(`click_refusal_words`): "another structure / a unit is in the way" only when every footprint cell is in sight, else "cannot build here", and "the exit is blocked" only when every cell of the ring round the footprint (where any exit cell lies) is in sight.
+A factory's **exit cell** follows the same rule (`exit_look`): out of sight it is drawn in the same `placement_unknown` grey, fill and
+line, whether the sim calls it usable or not (the sim calls it unusable when a structure stands on it); in sight it is blue or red. The
+hover words for `ExitBlocked` say "the exit is blocked" only when the exit cell is in sight, else "cannot build here". Only refusals of
+the local player reach its top bar.
+Without vision rules every cell is seen, so nothing changes. Tests: `placement_view::tests::a_structure_the_player_cannot_see_is_not_drawn_as_a_red_cell`, `a_click_refused_by_a_hidden_blocker_does_not_name_it`,
+`the_unknown_colour_comes_from_the_look_file_and_is_neither_red_nor_green`, `sf_data::vision_look::tests::the_shipped_look_is_pinned`.
+Tests also: `an_exit_cell_out_of_sight_looks_the_same_free_or_blocked`, `a_blocked_exit_out_of_sight_is_not_named`.
+Left: that the placement is refused at all (outline, amber cells) is still shown; the console log line of a refused click prints the
+same generic words as the top bar.
+
 ## Gaps (known and left)
 
 * **Sound.** The audio plays `FxPlayer::shown()` as before, so a shot or an explosion in the shroud is still heard. That is an audio
@@ -108,8 +128,6 @@ not an information rule: the simulation still knows everything.
 * **No allied vision**, no radar or "reveal map" (WP8.2a and later).
 * The F1 cell grid overlay (`cell_overlay::unit_cells`) still marks every unit's cell (debug view, off by default).
 * The old debug film (`--debug-fog`) is still a film over the whole picture.
-* **The building placement preview** can show hidden enemy structures as red (blocked) cells where the placement range reaches past
-  the player's sight: the preview checks occupancy in the world, not in what the player sees.
 * The softness is a blur of the cell maps, so a one-cell-wide visible stripe (a scout in a corridor) is dimmer than a wide one.
 
 ## Tests and mutations

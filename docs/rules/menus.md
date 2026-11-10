@@ -38,6 +38,15 @@ For screenshots and checks: `--menu start|pause|keys|graphics|accessibility|soun
 the game at a tick) and hold it there. In a scene without menus (`--crowd`, a benchmark, the demo) the flag does nothing and
 **Esc still ends the program**, as it always did.
 
+## Fullscreen key
+
+F11 (`ToggleFullscreen`) switches the window **only with no menu open** (`fullscreen_key_works(menu_open)`, which the runner calls).
+With a menu open, the wait for a key to rebind included (a menu is open then), F11 does nothing: while a key is awaited the press
+belongs to the menu, which can take F11 as the new key. The window mode is changed in the settings with the mouse then.
+Test: `f11_does_not_switch_the_window_while_a_menu_is_open` (the pure function). Checked by reading only, not by a test: the call
+of `fullscreen_key_works` at the F11 line in `runner.rs`, and the load of the shipped `config/input.ron` in `lib.rs::run` (both need
+a live window/event loop to reach).
+
 ## Esc
 
 Esc is the action `Quit` of `input.ron`, which is also **the menu key and cannot be rebound** (the key list shows it as a
@@ -168,6 +177,11 @@ foot of a column, `a_heading_never_ends_a_column_and_the_pages_keep_every_row_in
   (not one of the action's own shipped keys) that another action has, is dropped as a whole, so the action keeps its shipped
   keys, and the load says so in one warning naming the actions. Overrides are taken in action order; one kept earlier counts as
   the other action's key for a later one (`a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has`).
+  The check is against the **`input.ron` the game runs with**, read from disk (`load_from(path, shipped)`; the built-in bindings only
+  when the file cannot be read), and again when `input.ron` is hot-reloaded (`Menu::set_shipped` runs `Settings::sanitize_keys`
+  against the new file and the runner prints what it dropped). A dropped override is gone from memory; the settings file keeps it
+  until the next save (`overrides_are_checked_against_the_input_ron_that_was_loaded`,
+  `a_hot_reloaded_input_ron_is_checked_against_the_overrides_again`, `a_reloaded_input_ron_drops_the_overrides_it_now_clashes_with`).
 * **Esc** ends the wait and never becomes a binding; the menu key is not in the list.
 * **Reset** (per row, enabled only when the row differs from `input.ron`) and **Reset all keys**. Giving an action its
   shipped key back leaves nothing in the file (`giving_an_action_its_shipped_key_back_leaves_nothing_in_the_file`).

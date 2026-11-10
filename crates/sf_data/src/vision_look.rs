@@ -23,6 +23,8 @@ pub struct VisionLook {
     pub shroud: Rgba,
     /// Cells seen before but not now.
     pub fog: Rgba,
+    /// A placement preview cell that holds something the player cannot see.
+    pub placement_unknown: Rgba,
     /// The most cells of one row drawn as one quad: 1 to 64.
     pub run_cells: u32,
 }
@@ -53,6 +55,7 @@ mod tests {
         let look = VisionLook::embedded();
         assert_eq!(look.shroud, (0, 0, 0, 215));
         assert_eq!(look.fog, (10, 14, 24, 120));
+        assert_eq!(look.placement_unknown, (150, 150, 160, 110));
         assert_eq!(look.run_cells, 8);
     }
 

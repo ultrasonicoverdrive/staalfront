@@ -17,8 +17,13 @@
 //! | red | this cell is the problem: off the map, terrain that cannot be built on, a structure or a unit in it |
 //! | amber | this cell is fine, but the placement is refused for another reason: too far from your base, a prerequisite missing, not your faction's structure, the exit blocked |
 //!
+//! Every on-map cell that is not in sight now (free, a structure or a unit alike) is drawn in a
+//! neutral colour (`placement_unknown` of `vision_look.ron`), and so is a factory's exit cell that is
+//! not in sight: the preview must not show what is hidden (`docs/rules/fog_look.md`). The verdict itself is the sim's and is not changed; a
+//! placement it refuses is still drawn as refused (outline, amber cells).
+//!
 //! The outline round the footprint is green or red by the verdict. A factory's exit cell is drawn
-//! blue when units can come out of it and red when not.
+//! blue when units can come out of it and red when not, grey when it is not in sight ([`exit_look`]).
 //!
 //! The quads are projected onto the terrain through the camera like the selection rings
 //! ([`crate::selection_view`]) and go on the UI's world layer, under the panels.
@@ -26,7 +31,7 @@
 use sf_math::render_bridge::METRES_PER_CELL;
 use sf_render::glam::{Mat4, Vec3};
 use sf_render::pick::project_px;
-use sf_sim::{Cell, CellVerdict, Kind, PlacementError};
+use sf_sim::{Cell, CellVerdict, Kind, PlacementError, PlacementPreview};
 use sf_ui::{Color, Layer};
 
 use crate::sim_snapshot::GhostAnswer;
@@ -78,6 +83,8 @@ pub enum Tint {
     Blocked,
     /// Amber.
     Elsewhere,
+    /// Grey: the cell is not in sight now (whatever is or is not on it).
+    Unknown,
 }
 
 /// The tint of a cell with `verdict` in a placement that is (`placement_ok`) or is not allowed.
@@ -89,11 +96,127 @@ pub fn tint_of(verdict: CellVerdict, placement_ok: bool) -> Tint {
     }
 }
 
+/// [`tint_of`] for what the player can see: every cell the player cannot see now is `Unknown`,
+/// whether the sim calls it free, a structure or a unit, so grey means "not in sight" and never
+/// "something hidden stands here". That also covers an own structure outside own sight.
+/// Terrain and the map edge are not hidden.
+pub fn tint_seen(verdict: CellVerdict, placement_ok: bool, seen: bool) -> Tint {
+    match verdict {
+        CellVerdict::Free | CellVerdict::Structure | CellVerdict::Unit if !seen => Tint::Unknown,
+        _ => tint_of(verdict, placement_ok),
+    }
+}
+
+/// The tint of every cell of `preview` that is on the map, as [`draw_ghost`] paints them.
+pub fn tints(preview: &PlacementPreview, seen: &dyn Fn(Cell) -> bool) -> Vec<(Cell, Tint)> {
+    let ok = preview.verdict.is_ok();
+    preview
+        .cells
+        .iter()
+        // A cell off the map has no ground to lie on.
+        .filter(|&&(_, verdict)| verdict != CellVerdict::OffMap)
+        .map(|&(cell, verdict)| (cell, tint_seen(verdict, ok, seen(cell))))
+        .collect()
+}
+
 fn color_of(tint: Tint) -> Color {
     match tint {
         Tint::Valid => VALID,
         Tint::Blocked => BLOCKED,
         Tint::Elsewhere => ELSEWHERE,
+        Tint::Unknown => {
+            let c = crate::vision_view::shipped_look().placement_unknown;
+            Color(c.0, c.1, c.2, c.3)
+        }
+    }
+}
+
+/// The words for the refusal of `preview`: [`describe`], except that "another structure" or "a unit
+/// is in the way" is only said when `seen` shows a cell with that very thing; otherwise the player
+/// is not told what is hidden and gets a plain "cannot build here".
+pub fn refusal_words(
+    preview: &PlacementPreview,
+    seen: &dyn Fn(Cell) -> bool,
+    name_of: &dyn Fn(Kind) -> String,
+) -> String {
+    let Err(error) = preview.verdict else {
+        return "place here".into();
+    };
+    let culprit = match error {
+        PlacementError::Occupied => Some(CellVerdict::Structure),
+        PlacementError::UnitInTheWay => Some(CellVerdict::Unit),
+        _ => None,
+    };
+    if error == PlacementError::ExitBlocked && !preview.exit.is_some_and(|e| seen(e.cell)) {
+        return "cannot build here".into();
+    }
+    if let Some(culprit) = culprit
+        && !preview
+            .cells
+            .iter()
+            .any(|&(cell, v)| v == culprit && seen(cell))
+    {
+        return "cannot build here".into();
+    }
+    describe(error, name_of)
+}
+
+/// The words for a refusal the sim gave on a click, for a structure of `size` (cells along x, y)
+/// anchored at `anchor`: "another structure / a unit is in the way" only when every footprint cell
+/// is in sight, and "the exit is blocked" only when every cell of the ring round the footprint (where
+/// any exit cell lies) is in sight; else the same generic "cannot build here" as [`refusal_words`].
+pub fn click_refusal_words(
+    error: PlacementError,
+    anchor: Cell,
+    size: (u8, u8),
+    seen: &dyn Fn(Cell) -> bool,
+    name_of: &dyn Fn(Kind) -> String,
+) -> String {
+    let hides = matches!(
+        error,
+        PlacementError::Occupied | PlacementError::UnitInTheWay
+    );
+    let (w, h) = (u32::from(size.0), u32::from(size.1));
+    let all_seen = (anchor.y..anchor.y.saturating_add(h))
+        .all(|y| (anchor.x..anchor.x.saturating_add(w)).all(|x| seen(Cell::new(x, y))));
+    if hides && !all_seen {
+        return "cannot build here".into();
+    }
+    if error == PlacementError::ExitBlocked {
+        // The ring one cell round the footprint; cells off the map (negative) are skipped.
+        let (x0, y0) = (i64::from(anchor.x) - 1, i64::from(anchor.y) - 1);
+        let (x1, y1) = (
+            i64::from(anchor.x) + i64::from(w),
+            i64::from(anchor.y) + i64::from(h),
+        );
+        let ring_seen = (y0..=y1).all(|y| {
+            (x0..=x1).all(|x| {
+                let inside = x > x0 && x < x1 && y > y0 && y < y1;
+                match (u32::try_from(x), u32::try_from(y)) {
+                    (Ok(x), Ok(y)) if !inside => seen(Cell::new(x, y)),
+                    _ => true,
+                }
+            })
+        });
+        if !ring_seen {
+            return "cannot build here".into();
+        }
+    }
+    describe(error, name_of)
+}
+
+/// The fill and line colour of a factory's exit cell: blue when `usable`, red when not, and the
+/// neutral `placement_unknown` grey (fill and line) when the cell is not `seen`, whatever `usable`
+/// says, because the sim calls it unusable when a structure stands on it.
+pub fn exit_look(usable: bool, seen: bool) -> (Color, Color) {
+    if !seen {
+        let c = color_of(Tint::Unknown);
+        return (c, Color(c.0, c.1, c.2, 255));
+    }
+    if usable {
+        (EXIT_OPEN, EXIT_OPEN_LINE)
+    } else {
+        (EXIT_BLOCKED, EXIT_BLOCKED_LINE)
     }
 }
 
@@ -161,23 +284,21 @@ fn cell_quad(
 
 /// Draws the ghost of `answer` on `layer`: a tinted quad for each cell, the outline of the
 /// footprint and the exit cell. `height(x, z)` is the terrain height in metres. Returns the
-/// number of cells drawn (a cell behind the camera is skipped).
+/// number of cells drawn (a cell behind the camera is skipped). `seen(cell)` says whether the player
+/// sees the cell now (always true in a world without vision rules).
 pub fn draw_ghost(
     layer: &mut Layer<'_>,
     frame: &GhostFrame,
     height: &dyn Fn(f32, f32) -> f32,
     answer: &GhostAnswer,
+    seen: &dyn Fn(Cell) -> bool,
 ) -> usize {
     let preview = &answer.preview;
     let ok = preview.verdict.is_ok();
     let mut drawn = 0;
-    for &(cell, verdict) in &preview.cells {
-        // A cell off the map has no ground to lie on.
-        if verdict == CellVerdict::OffMap {
-            continue;
-        }
+    for (cell, tint) in tints(preview, seen) {
         if let Some(quad) = cell_quad(frame, height, cell, CELL_INSET) {
-            layer.fill_quad(quad, color_of(tint_of(verdict, ok)));
+            layer.fill_quad(quad, color_of(tint));
             drawn += 1;
         }
     }
@@ -202,11 +323,7 @@ pub fn draw_ghost(
     if let Some(exit) = preview.exit
         && let Some(quad) = cell_quad(frame, height, exit.cell, 0.0)
     {
-        let (fill, line) = if exit.usable {
-            (EXIT_OPEN, EXIT_OPEN_LINE)
-        } else {
-            (EXIT_BLOCKED, EXIT_BLOCKED_LINE)
-        };
+        let (fill, line) = exit_look(exit.usable, seen(exit.cell));
         layer.fill_quad(quad, fill);
         let points = quad.map(|(x, y)| [x, y]);
         layer.polyline(&points, true, OUTLINE_PX * frame.ui_scale, line);

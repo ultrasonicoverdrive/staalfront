@@ -93,7 +93,7 @@ fn the_defaults_are_the_shipped_ones_and_need_no_changes() {
     assert_eq!(d.palette, PaletteChoice::Standard);
     assert!(d.keys.is_empty());
     let mut again = d.clone();
-    assert!(again.sanitize().is_empty());
+    assert!(again.sanitize(&shipped()).is_empty());
     assert_eq!(again, d);
 }
 
@@ -112,7 +112,7 @@ fn a_saved_file_reads_back_the_same_and_the_directory_is_made() {
     s.rebind(&shipped(), Action::OrderStop, KeyCode::KeyV)
         .unwrap();
     save_to(&path, &s).unwrap();
-    let loaded = load_from(&path);
+    let loaded = load_from(&path, &shipped());
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
     assert_eq!(loaded.settings, s);
     // No half-written file is left beside it.
@@ -123,7 +123,7 @@ fn a_saved_file_reads_back_the_same_and_the_directory_is_made() {
 #[test]
 fn no_file_is_the_first_run_and_is_not_a_warning() {
     let dir = scratch("missing");
-    let loaded = load_from(&dir.join("nothing.ron"));
+    let loaded = load_from(&dir.join("nothing.ron"), &shipped());
     assert_eq!(loaded.settings, Settings::default());
     assert!(loaded.warnings.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
@@ -140,7 +140,7 @@ fn a_bad_file_gives_the_defaults_and_one_warning_and_never_a_panic() {
         "",
     ] {
         std::fs::write(&path, text).unwrap();
-        let loaded = load_from(&path);
+        let loaded = load_from(&path, &shipped());
         assert_eq!(loaded.settings, Settings::default(), "{text:?}");
         assert_eq!(loaded.warnings.len(), 1, "{text:?}: {:?}", loaded.warnings);
         assert!(loaded.warnings[0].contains("settings.ron"));
@@ -148,7 +148,7 @@ fn a_bad_file_gives_the_defaults_and_one_warning_and_never_a_panic() {
     // A directory where the file should be cannot be read either.
     let as_dir = dir.join("is_a_dir.ron");
     std::fs::create_dir_all(&as_dir).unwrap();
-    let loaded = load_from(&as_dir);
+    let loaded = load_from(&as_dir, &shipped());
     assert_eq!(loaded.settings, Settings::default());
     assert_eq!(loaded.warnings.len(), 1);
     let _ = std::fs::remove_dir_all(&dir);
@@ -159,7 +159,7 @@ fn a_partial_file_keeps_what_it_says_and_unknown_fields_are_ignored() {
     let dir = scratch("partial");
     let path = dir.join("settings.ron");
     std::fs::write(&path, "(vsync: false, sound: (volume: 7))").unwrap();
-    let loaded = load_from(&path);
+    let loaded = load_from(&path, &shipped());
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
     assert!(!loaded.settings.vsync);
     assert_eq!(loaded.settings.ui_scale, 1.0);
@@ -175,7 +175,7 @@ fn values_the_game_cannot_use_are_changed_and_said() {
         "(ui_scale: 1.3, frame_cap: Some(5000), keys: {Quit: [(trigger: Key(KeyP))], OrderStop: []})",
     )
     .unwrap();
-    let loaded = load_from(&path);
+    let loaded = load_from(&path, &shipped());
     let s = loaded.settings;
     assert_eq!(s.ui_scale, 1.25, "the nearest choice");
     assert_eq!(s.frame_cap, Some(1000));
@@ -190,7 +190,7 @@ fn values_the_game_cannot_use_are_changed_and_said() {
         ui_scale: f32::NAN,
         ..Settings::default()
     };
-    assert_eq!(s.sanitize().len(), 1);
+    assert_eq!(s.sanitize(&shipped()).len(), 1);
     assert_eq!((s.frame_cap, s.ui_scale), (None, 1.0));
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -502,7 +502,7 @@ fn a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has() {
          ToggleFullscreen: [(trigger: Key(KeyJ))]})",
     )
     .unwrap();
-    let loaded = load_from(&path);
+    let loaded = load_from(&path, &shipped());
     let s = &loaded.settings;
     assert!(!s.keys.contains_key(&Action::OrderStop), "Esc is refused");
     assert!(
@@ -532,7 +532,7 @@ fn a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has() {
         .rebind(&base, Action::CameraPanLeft, KeyCode::KeyJ)
         .unwrap();
     let mut again = by_hand.clone();
-    assert!(again.sanitize().is_empty());
+    assert!(again.sanitize(&shipped()).is_empty());
     assert_eq!(again, by_hand);
     // Two actions given the same free key: the first in action order keeps it.
     let mut twice = Settings::default();
@@ -543,7 +543,7 @@ fn a_hand_edited_file_cannot_give_esc_or_a_key_another_action_has() {
         .keys
         .insert(Action::CameraPanLeft, vec![key(KeyCode::KeyJ)]);
     let first = *twice.keys.keys().next().unwrap();
-    let said = twice.sanitize();
+    let said = twice.sanitize(&shipped());
     assert_eq!(said.len(), 1, "{said:?}");
     assert_eq!(twice.keys.keys().copied().collect::<Vec<_>>(), vec![first]);
     let _ = std::fs::remove_dir_all(&dir);
@@ -566,4 +566,65 @@ fn esc_is_refused_even_when_the_shipped_file_binds_it_to_nothing() {
     s.keys.insert(Action::OrderStop, vec![key(KeyCode::Escape)]);
     assert_eq!(s.drop_refused_keys(&base), vec![Action::OrderStop]);
     assert!(s.keys.is_empty());
+}
+
+/// The `input.ron` the game runs with, not the built-in one, decides what a hand-edited override
+/// may use (review N2 of #103): here the file on disk gives the stop order the key J.
+fn disk_with_j_for_stop() -> Bindings {
+    let mut disk = shipped();
+    disk.bindings
+        .insert(Action::OrderStop, vec![key(KeyCode::KeyJ)]);
+    disk
+}
+
+#[test]
+fn overrides_are_checked_against_the_input_ron_that_was_loaded() {
+    let dir = scratch("sanitize_loaded_input");
+    let path = dir.join("settings.ron");
+    // J is free in the built-in bindings, but the loaded file has it on the stop order.
+    std::fs::write(&path, "(keys: {CameraPanLeft: [(trigger: Key(KeyJ))]})").unwrap();
+    let against_builtin = load_from(&path, &shipped());
+    assert!(
+        against_builtin
+            .settings
+            .keys
+            .contains_key(&Action::CameraPanLeft)
+    );
+    assert!(against_builtin.warnings.is_empty());
+    let disk = disk_with_j_for_stop();
+    let loaded = load_from(&path, &disk);
+    assert!(loaded.settings.keys.is_empty(), "J is the stop order's");
+    assert_eq!(loaded.warnings.len(), 1, "{:?}", loaded.warnings);
+    assert!(loaded.warnings[0].contains("CameraPanLeft"));
+    // A key the loaded file has freed is allowed: D is not pan right's there.
+    let mut freed = shipped();
+    freed.bindings.insert(Action::CameraPanRight, Vec::new());
+    std::fs::write(&path, "(keys: {CameraPanLeft: [(trigger: Key(KeyD))]})").unwrap();
+    assert!(load_from(&path, &shipped()).settings.keys.is_empty());
+    assert!(
+        load_from(&path, &freed)
+            .settings
+            .keys
+            .contains_key(&Action::CameraPanLeft)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_hot_reloaded_input_ron_is_checked_against_the_overrides_again() {
+    let mut s = Settings::default();
+    s.rebind(&shipped(), Action::CameraPanLeft, KeyCode::KeyJ)
+        .unwrap();
+    assert!(s.sanitize_keys(&shipped()).is_empty());
+    assert!(s.keys.contains_key(&Action::CameraPanLeft));
+    // input.ron is edited: J now belongs to the stop order. The override goes, the shipped keys stay.
+    let said = s.sanitize_keys(&disk_with_j_for_stop());
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(s.keys.is_empty());
+    let disk = disk_with_j_for_stop();
+    assert_eq!(
+        s.effective_bindings(&disk)
+            .for_action(Action::CameraPanLeft),
+        disk.for_action(Action::CameraPanLeft)
+    );
 }

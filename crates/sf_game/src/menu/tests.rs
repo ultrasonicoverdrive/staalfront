@@ -631,3 +631,28 @@ fn open_preset_opens_what_the_screenshots_ask_for() {
     }
     assert_eq!(Preset::parse("lobby"), None);
 }
+
+/// The menu's `set_shipped` (the hot reload of `input.ron`) checks the player's overrides against the
+/// new file and says what it dropped.
+#[test]
+fn a_reloaded_input_ron_drops_the_overrides_it_now_clashes_with() {
+    let mut settings = Settings::default();
+    settings
+        .rebind(&Bindings::builtin(), Action::CameraPanLeft, KeyCode::KeyJ)
+        .unwrap();
+    let mut m = Menu::new(settings, Bindings::builtin());
+    assert!(m.set_shipped(Bindings::builtin()).is_empty());
+    assert!(m.settings().keys.contains_key(&Action::CameraPanLeft));
+    let mut edited = Bindings::builtin();
+    edited.bindings.insert(
+        Action::OrderStop,
+        vec![sf_engine::input::Binding::new(Trigger::Key(KeyCode::KeyJ))],
+    );
+    let said = m.set_shipped(edited.clone());
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(m.settings().keys.is_empty());
+    assert_eq!(
+        m.shipped().for_action(Action::OrderStop),
+        edited.for_action(Action::OrderStop)
+    );
+}

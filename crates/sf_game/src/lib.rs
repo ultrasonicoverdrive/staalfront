@@ -180,9 +180,16 @@ pub fn run(preset: Preset) -> i32 {
     let settings_path = settings::path_for(&options, settings::Os::current(), &|n| {
         std::env::var(n).ok()
     });
+    // The overrides are checked against the `input.ron` the game runs with, not the built-in one.
+    let shipped = sf_engine::Bindings::load(
+        &sf_engine::AssetRoot::resolve()
+            .root()
+            .join("config/input.ron"),
+    )
+    .unwrap_or_else(|_| sf_engine::Bindings::builtin());
     let loaded = settings_path
         .as_deref()
-        .map(settings::load_from)
+        .map(|p| settings::load_from(p, &shipped))
         .unwrap_or_else(|| settings::Loaded {
             settings: settings::Settings::default(),
             warnings: Vec::new(),
