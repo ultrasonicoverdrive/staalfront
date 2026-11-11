@@ -1243,7 +1243,7 @@ mod tests {
         assert!(w.production_of(f).unwrap().queue.is_empty());
     }
     /// WP6.10: the factory section as literal bytes. The tag byte after the id is 0 (no rally, no
-    /// repeat), 1 (rally), 2 (repeat) or 3 (rally and repeat); a rally cell follows only for 1 and 3.
+    /// repeat), 1 (rally), 2 (repeat) or 3 (rally and repeat); a rally cell follows only for the tags with a rally point (one and three)
     #[test]
     fn the_repeat_flag_is_the_plus_two_on_the_rally_tag_in_the_factory_section() {
         let w = world();
