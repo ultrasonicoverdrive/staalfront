@@ -3121,3 +3121,9 @@ fixed, delete the entry in the same PR.
 * **Not done / gaps.** No key. Performance was not measured: the change is one bool test per finished unit and one more byte per factory
   in the hash. The loop sign overlaps the first letters of the picture label a little at 1280 x 720 (seen in the screenshot). The AI
   (`sf_ai`) does not use `SetRepeat`.
+* **Sweep findings fixed (11-11-2026).** `repeatable()` was not reached by its test (the radar went before the item finished): the test now
+  finishes the sniper behind a walled exit first, with a control where the radar stands (mutation "call removed" fails it). The hashed
+  flag was unpinned when a rally point is set: `the_repeat_flag_is_the_plus_two_on_the_rally_tag_in_the_factory_section` pins the tag
+  bytes 0, 1, 2, 3 as literals (mutations "rally branch drops `+ repeat`" and "+2 to +4" fail it). The kind, factory and faction checks
+  and the queue-full check in `repeatable()` are documented as guards that cannot trigger. Repair and Sell are a third of the row wide
+  now (`repair_sell.md`). The scenario count is 34 (33 + new).
