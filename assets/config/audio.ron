@@ -34,10 +34,17 @@
         audible_gain: 0.003,
     ),
 
-    // Volumes, linear.
+    // Volumes, linear (0 to 2; the settings screen offers 0 to 100 % in steps of 5, WP11.5b). These are what
+    // the game uses until the player moves a slider; the player's choice is kept in the settings file.
+    //   master_volume  multiplies every category below (and the interface sounds, which have no slider)
+    //   sfx_volume     shots, hits, deaths and the other sounds of the game's events
+    //   music_volume   the music
+    //   voice_volume   the replies of the player's own units (WP11.2); write it as Some(1.0). Left out, they follow sfx_volume.
     mix: (
+        master_volume: 1.0,
         sfx_volume: 1.0,
         music_volume: 0.6,
+        voice_volume: Some(1.0),
     ),
 
     // Dynamic music (WP11.4). Calm or combat music is picked from what the game shows. Ticks are 20 per second.

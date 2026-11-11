@@ -82,8 +82,26 @@ impl SpatialConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MixConfig {
+    /// Multiplies every category (WP11.5b). Absent in a file from before the sound settings: `1.0`.
+    #[serde(default = "one")]
+    pub master_volume: f32,
     pub sfx_volume: f32,
     pub music_volume: f32,
+    /// The unit voices (WP11.2, WP11.5b). Absent in a file from before the sound settings: they follow
+    /// `sfx_volume`, as they did when they were part of the effects ([`MixConfig::voice`]).
+    #[serde(default)]
+    pub voice_volume: Option<f32>,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+impl MixConfig {
+    /// The volume of the unit voices.
+    pub fn voice(&self) -> f32 {
+        self.voice_volume.unwrap_or(self.sfx_volume)
+    }
 }
 
 /// How one sound event is thinned out (see [`crate::positional`]).
@@ -236,6 +254,14 @@ impl AudioConfig {
         if !(s.audible_gain > 0.0 && s.audible_gain < 1.0) {
             return Err("spatial.audible_gain must be in (0, 1)".into());
         }
+        let v = self.mix.master_volume;
+        if !(0.0..=2.0).contains(&v) {
+            return Err("mix.master_volume must be in [0, 2]".into());
+        }
+        let v = self.mix.voice();
+        if !(0.0..=2.0).contains(&v) {
+            return Err("mix.voice_volume must be in [0, 2]".into());
+        }
         let v = self.mix.sfx_volume;
         if !(v.is_finite() && (0.0..=2.0).contains(&v)) {
             return Err("mix.sfx_volume must be in [0, 2]".into());
@@ -321,8 +347,10 @@ mod tests {
         assert_eq!(
             c.mix,
             MixConfig {
+                master_volume: 1.0,
                 sfx_volume: 1.0,
-                music_volume: 0.6
+                music_volume: 0.6,
+                voice_volume: Some(1.0),
             }
         );
         use crate::music::{EventWeights, MoodConfig};
@@ -426,6 +454,8 @@ mod tests {
             ("nan", Box::new(|c| c.spatial.pan_growth = f32::NAN)),
             ("vol", Box::new(|c| c.mix.sfx_volume = -0.1)),
             ("mvol", Box::new(|c| c.mix.music_volume = 3.0)),
+            ("master", Box::new(|c| c.mix.master_volume = -1.0)),
+            ("voice", Box::new(|c| c.mix.voice_volume = Some(2.5))),
             ("mradius", Box::new(|c| c.music.mood.radius_m = 0.0)),
             ("mwindow", Box::new(|c| c.music.mood.window_ticks = 0)),
             ("mscore", Box::new(|c| c.music.mood.enter_score = 0)),
