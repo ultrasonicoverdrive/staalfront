@@ -1140,7 +1140,7 @@ mod tests {
         all.into_iter()
             .map(|(name, e)| {
                 let e = at(e);
-                assert_eq!(fx.sound_name(&e).as_deref(), Some(name), "{name}");
+                assert_eq!(fx.sound_name(&e), Some(name), "{name}");
                 (name, e)
             })
             .collect()
