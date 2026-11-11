@@ -7,6 +7,8 @@
 //   max_instances:   simultaneous voices of this sound, default 8
 //   category:        Sfx | Ui | Music | Voice (volume groups, WP11.5b), default Sfx
 //   looped:          repeat until stopped, default false
+//   original_as_is:  true = a mapped original Red Alert sound plays with volume 1, no pitch spread and the
+//                    default voice cap instead of this entry's values (which suit the CC0 file), default false
 //
 // Every file needs a line in assets/LICENSES.md.
 (
@@ -41,6 +43,7 @@
             pitch_variation: 0.06,
             max_instances: 6,
             category: Sfx,
+            original_as_is: true,
         ),
         "weapon.fire.precision": (
             file: "audio/sfx/weapon_fire_precision.wav",
@@ -48,6 +51,7 @@
             pitch_variation: 0.04,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "weapon.fire.cannon": (
             file: "audio/sfx/weapon_fire_cannon.wav",
@@ -55,6 +59,7 @@
             pitch_variation: 0.05,
             max_instances: 6,
             category: Sfx,
+            original_as_is: true,
         ),
         "weapon.fire.rocket": (
             file: "audio/sfx/weapon_fire_rocket.wav",
@@ -62,6 +67,7 @@
             pitch_variation: 0.04,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "weapon.fire.shell": (
             file: "audio/sfx/weapon_fire_shell.wav",
@@ -69,6 +75,7 @@
             pitch_variation: 0.05,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "weapon.fire.howitzer": (
             file: "audio/sfx/weapon_fire_howitzer.wav",
@@ -76,6 +83,7 @@
             pitch_variation: 0.03,
             max_instances: 3,
             category: Sfx,
+            original_as_is: true,
         ),
         "weapon.fire.demolition": (
             file: "audio/sfx/weapon_fire_demolition.wav",
@@ -83,6 +91,7 @@
             pitch_variation: 0.0,
             max_instances: 2,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.bullet": (
             file: "audio/sfx/impact_bullet.wav",
@@ -90,6 +99,7 @@
             pitch_variation: 0.08,
             max_instances: 6,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.precision": (
             file: "audio/sfx/impact_precision.wav",
@@ -97,6 +107,7 @@
             pitch_variation: 0.05,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.cannon": (
             file: "audio/sfx/impact_cannon.wav",
@@ -104,6 +115,7 @@
             pitch_variation: 0.05,
             max_instances: 6,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.rocket": (
             file: "audio/sfx/impact_rocket.wav",
@@ -111,6 +123,7 @@
             pitch_variation: 0.04,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.shell": (
             file: "audio/sfx/impact_shell.wav",
@@ -118,6 +131,7 @@
             pitch_variation: 0.05,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.demolition": (
             file: "audio/sfx/impact_demolition.wav",
@@ -125,6 +139,7 @@
             pitch_variation: 0.03,
             max_instances: 3,
             category: Sfx,
+            original_as_is: true,
         ),
         "impact.miss": (
             file: "audio/sfx/impact_miss.wav",
@@ -132,6 +147,7 @@
             pitch_variation: 0.08,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "unit.destroyed.infantry": (
             file: "audio/sfx/unit_destroyed_infantry.wav",
@@ -139,6 +155,7 @@
             pitch_variation: 0.06,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "explosion.small": (
             file: "audio/sfx/explosion_small.wav",
@@ -146,6 +163,7 @@
             pitch_variation: 0.05,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "explosion.medium": (
             file: "audio/sfx/explosion_medium.wav",
@@ -153,6 +171,7 @@
             pitch_variation: 0.04,
             max_instances: 4,
             category: Sfx,
+            original_as_is: true,
         ),
         "explosion.large": (
             file: "audio/sfx/explosion_large.wav",
@@ -160,6 +179,7 @@
             pitch_variation: 0.03,
             max_instances: 3,
             category: Sfx,
+            original_as_is: true,
         ),
         // The same file as a looping "music" track, to exercise the crossfade.
         "test_loop": (

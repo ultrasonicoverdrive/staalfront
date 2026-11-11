@@ -740,7 +740,8 @@ decodes AUD (Westwood ADPCM and IMA ADPCM, mono/stereo, 8/16-bit) to PCM.
 `ra::load` also decodes the sounds named in `assets/audio/ra_mapping.ron`.
 `AudioSystem::enable_original_audio` runs `load` on a background thread;
 `update()` picks the result up, after which a mapped event plays the Red Alert
-sound (with the bank entry's volume and category when it has one) and every
+sound (with the bank entry's volume and category when it has one; the 18 fight sounds are marked `original_as_is` and give the
+original the plain volume 1, no pitch spread and default voice cap) and every
 other event its CC0 sound. Nothing found, or anything broken: one warning,
 the CC0 sounds keep playing; no reader panics (a fuzz-style test feeds random
 and mutated input), and a scan visits each archive region once and stops at

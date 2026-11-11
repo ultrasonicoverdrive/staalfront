@@ -118,14 +118,14 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
   `tools/sf_sound_gen/src/lib.rs`, its bank entry, and its pinned hash in `tools/sf_sound_gen/tests/generator.rs`.
 * **Format**: mono, 16-bit, 22.05 kHz WAV, 18 files, 571,926 bytes together (budget 2 MB). Every file is normalised to the same
   peak (26000 of 32767), so **the loudness of an event is its bank `volume`** (0.125 to 0.35), not the file.
+* **A mapped original plays as it did before this WP** (sweep of PR #122): the 18 bank entries carry `original_as_is: true`, so a Red Alert sound that replaces the event plays with volume 1.0, no pitch spread and the default voice cap, **not** with the bank's volume, pitch spread and `max_instances`, which are tuned for the CC0 file. Without that flag `resolve` would give a mapped original the bank entry's 0.125 to 0.35 and its cap. Other bank entries (`ui.click`) keep handing their volume and category to a mapped original as before. Test `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` checks the resolved definition and the traced gain of all 18 (mapped: volume 1.0, pitch spread 0, cap 8; unmapped: the bank's).
 * **Precedence**: unchanged, `AudioSystem::resolve`: with the original audio on and the event mapped in `ra_mapping.ron` the Red Alert
   sound plays (with the bank's volume and category), otherwise the CC0 sound. The four events Red Alert has no sound for
   (`weapon.fire.demolition`, `impact.bullet`, `impact.precision`, `impact.miss`) play the CC0 sound also with `--ra-audio`.
 * **Volume**: the mixed peak of a 20-tank fight at the default settings is 0.466 of full scale, below the music (`music_volume`
   0.6, peak at most 0.6); see `a_20_tank_fight_is_not_louder_than_the_music`. The positional and zoom rules (section 1 and 2) and the
   Effects and master sliders apply to these sounds like to any other.
-* **Hidden events** keep the rule of `fog_look.md`: the audio plays `FxPlayer::shown()`, so a shot in the shroud is still heard at its
-  distance volume. WP11.3b did not change that.
+* **Hidden events are audible** (current rule, `fog_look.md`): the audio plays `FxPlayer::shown()`, so a shot or an explosion in the shroud is heard at its distance volume, and with these sounds that is now true in the shipped game. Tijmen may change this ("no sound from what I cannot see"); it is a design choice, not a defect.
 
 | Event | File | Length | Character |
 |---|---|---|---|
@@ -155,9 +155,10 @@ and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_audio` `the_orig
 
 ## 4. Gaps
 
+* Clipping (WP11.3b, measured by `a_heavy_moment_of_four_kinds_does_not_clip`): four kinds on one tick at one spot peak at 0.485, **eight kinds at 1.13 and all 18 at 1.37 of full scale, which would clip**; the game does not produce that (merge and the cue limits thin real fights, a 20-tank volley on one tick is 0.238, a staggered 20-tank fight 0.466). No limiter exists; if a real fight ever clips, lower the volumes or add one.
 * Fight sounds (WP11.3b): the bank has one file per event, no variants (the bank format has one file per name), so the only
   variety is `pitch_variation`. Nobody could listen in the build container: the volumes come from a measured mix, the character
-  of each sound from the table below; Tijmen to listen. The sim has no event for a structure being hit, so there is no such sound.
+  of each sound from the table in 3c above; Tijmen to listen, `weapon.fire.demolition` (two ticks and a rising beep) first, for any likeness to a Red Alert sound (B11). The sim has no event for a structure being hit, so there is no such sound.
 * The sim emits no event for a structure placed or finished, or a harvester unloading: those are later WPs; nothing
   was added to `sf_sim`. The replies to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side.
 * The volumes are set in the file (`mix`) and, since WP11.5b, on the settings screen's Sound page (see "Volumes").

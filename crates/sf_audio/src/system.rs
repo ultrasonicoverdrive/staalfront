@@ -169,6 +169,7 @@ fn default_def(key: &Path) -> SoundDef {
         max_instances: crate::bank::DEFAULT_MAX_INSTANCES,
         category: Category::Sfx,
         looped: false,
+        original_as_is: false,
     }
 }
 
@@ -824,11 +825,12 @@ impl AudioSystem {
             && events.contains(name)
         {
             let key = ra_key(name);
-            let def = self
-                .bank
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| default_def(&key));
+            // The bank's volume, pitch and cap are tuned for the CC0 file; an entry marked `original_as_is`
+            // (the fight sounds) gives the original the plain playback it had before the bank had them.
+            let def = match self.bank.get(name) {
+                Some(d) if !d.original_as_is => d.clone(),
+                _ => default_def(&key),
+            };
             return Some((def, key));
         }
         let def = self.lookup(name)?;
@@ -1086,6 +1088,7 @@ mod tests {
             max_instances: 1,
             category: Category::Sfx,
             looped: false,
+            original_as_is: false,
         };
         let rates: Vec<f64> = (0..200).map(|_| s.rate_for(&def)).collect();
         assert!(rates.iter().all(|r| (0.9..=1.1).contains(r)));
@@ -1268,18 +1271,37 @@ mod tests {
         });
         wait_for_ra(&mut s);
         assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 14 });
+        s.set_trace(true);
         for e in FIGHT_EVENTS {
             assert!(s.has_sound(e), "{e}");
             let (_, path) = s.resolve(e).unwrap();
+            let (def, _) = s.resolve(e).unwrap();
+            let bank_def = s.bank.get(e).unwrap().clone();
             if UNMAPPED.contains(&e) {
                 assert!(
                     cc0(&mut s, e),
                     "{e} must play the CC0 sound with --ra-audio"
                 );
+                // The CC0 file keeps the bank's tuning.
+                assert_eq!(def, bank_def, "{e}");
             } else {
                 assert_eq!(path, ra_key(e), "{e} must be the original");
+                // The original plays exactly as before the bank had fight sounds: volume 1, no pitch spread,
+                // the default voice cap (WP11.3b sweep).
+                assert_eq!(
+                    (def.volume, def.pitch_variation, def.max_instances),
+                    (1.0, 0.0, crate::bank::DEFAULT_MAX_INSTANCES),
+                    "{e}"
+                );
             }
             s.play(e);
+            let gain = s.take_trace().last().unwrap().gain;
+            let want = if UNMAPPED.contains(&e) {
+                bank_def.volume
+            } else {
+                1.0
+            };
+            assert_eq!(gain, want, "{e} gain");
         }
         assert_eq!(s.stats().played, 18);
         assert_eq!(s.stats().unknown, 0);

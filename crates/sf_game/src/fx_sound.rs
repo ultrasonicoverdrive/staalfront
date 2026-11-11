@@ -929,6 +929,46 @@ mod tests {
         ("explosion.large", "audio/sfx/explosion_large.wav"),
     ];
 
+    /// (event, volume, pitch_variation, max_instances) of the shipped bank, as literals: a volume set to 1.0, all
+    /// of them halved, or a changed cap or pitch spread fails here.
+    const FIGHT_TUNING: [(&str, f32, f32, u32); 18] = [
+        ("weapon.fire.bullet", 0.225, 0.06, 6),
+        ("weapon.fire.precision", 0.3, 0.04, 4),
+        ("weapon.fire.cannon", 0.3, 0.05, 6),
+        ("weapon.fire.rocket", 0.275, 0.04, 4),
+        ("weapon.fire.shell", 0.275, 0.05, 4),
+        ("weapon.fire.howitzer", 0.325, 0.03, 3),
+        ("weapon.fire.demolition", 0.25, 0.0, 2),
+        ("impact.bullet", 0.15, 0.08, 6),
+        ("impact.precision", 0.175, 0.05, 4),
+        ("impact.cannon", 0.25, 0.05, 6),
+        ("impact.rocket", 0.275, 0.04, 4),
+        ("impact.shell", 0.25, 0.05, 4),
+        ("impact.demolition", 0.3, 0.03, 3),
+        ("impact.miss", 0.125, 0.08, 4),
+        ("unit.destroyed.infantry", 0.2, 0.06, 4),
+        ("explosion.small", 0.25, 0.05, 4),
+        ("explosion.medium", 0.3, 0.04, 4),
+        ("explosion.large", 0.35, 0.03, 3),
+    ];
+
+    #[test]
+    fn the_tuning_of_every_fight_sound_is_pinned() {
+        let bank = shipped_bank();
+        for (event, volume, pitch, cap) in FIGHT_TUNING {
+            let d = bank.get(event).unwrap();
+            assert_eq!(
+                (d.volume, d.pitch_variation, d.max_instances),
+                (volume, pitch, cap),
+                "{event}"
+            );
+            assert!(
+                d.original_as_is,
+                "{event}: a mapped original must play as-is"
+            );
+        }
+    }
+
     fn shipped_bank() -> sf_audio::Bank {
         sf_audio::Bank::load(&assets().join("audio/bank.ron")).unwrap()
     }
@@ -1063,6 +1103,136 @@ mod tests {
         println!("WP11.3b: mixed peak of the 20-tank fight {peak:.3} of full scale (music 0.6)");
         assert!(peak <= 0.5, "peak {peak}");
         assert!(peak >= 0.15, "the fight is too quiet to hear: {peak}");
+    }
+
+    /// One event of every fight kind at `p`, with the event name the game gives it (checked against
+    /// `FxPlayer::sound_name`, the function the game uses).
+    fn every_fight_event(p: [f32; 2], tick: u64) -> Vec<(&'static str, FxEvent)> {
+        let w = weapon;
+        let at = |e: FxEvent| FxEvent { tick, ..e };
+        let all = vec![
+            ("weapon.fire.bullet", fire_at(w("rifle"), p, 0)),
+            ("weapon.fire.precision", fire_at(w("long_rifle"), p, 0)),
+            ("weapon.fire.cannon", fire_at(w("cannon"), p, 0)),
+            ("weapon.fire.rocket", fire_at(w("rocket"), p, 0)),
+            ("weapon.fire.shell", fire_at(w("battery_shell"), p, 0)),
+            ("weapon.fire.howitzer", fire_at(w("howitzer"), p, 0)),
+            ("weapon.fire.demolition", fire_at(w("satchel_charge"), p, 0)),
+            ("impact.bullet", hit_at(w("rifle"), true, false, p, 0)),
+            (
+                "impact.precision",
+                hit_at(w("long_rifle"), true, false, p, 0),
+            ),
+            ("impact.cannon", hit_at(w("cannon"), true, true, p, 0)),
+            ("impact.rocket", hit_at(w("rocket"), true, true, p, 0)),
+            ("impact.shell", hit_at(w("battery_shell"), true, true, p, 0)),
+            (
+                "impact.demolition",
+                hit_at(w("satchel_charge"), true, true, p, 0),
+            ),
+            ("impact.miss", hit_at(w("rifle"), false, false, p, 0)),
+            ("unit.destroyed.infantry", death_at(1.6, false, p, 0)),
+            ("explosion.small", death_at(4.8, false, p, 0)),
+            ("explosion.medium", death_at(6.0, false, p, 0)),
+            ("explosion.large", death_at(8.0, true, p, 0)),
+        ];
+        let fx = FxPlayer::embedded();
+        all.into_iter()
+            .map(|(name, e)| {
+                let e = at(e);
+                assert_eq!(fx.sound_name(&e).as_deref(), Some(name), "{name}");
+                (name, e)
+            })
+            .collect()
+    }
+
+    /// Each of the 18 events alone at the focus: audible, and none close to the 0.5 ceiling.
+    #[test]
+    fn every_fight_event_alone_is_audible_and_modest() {
+        for (name, ev) in every_fight_event([12.0, 12.0], 0) {
+            let peak = mixed_peak(&[vec![ev]]);
+            println!("WP11.3b: {name} alone peaks at {peak:.3}");
+            assert!((0.05..=0.35).contains(&peak), "{name}: {peak}");
+        }
+    }
+
+    /// 20 tanks fire on the same tick and 20 shells land four ticks later, repeated every 30 ticks for 10 s, through
+    /// the real planner (merge, `max_per_batch`, spacing).
+    #[test]
+    fn a_simultaneous_volley_of_20_tanks_is_not_louder_than_the_music() {
+        let cannon = weapon("cannon");
+        let frames: Vec<Vec<FxEvent>> = (0..200u64)
+            .map(|t| {
+                let mut v = Vec::new();
+                for i in 0..20u64 {
+                    let p = [12.0 + (i % 5) as f32, 12.0 + (i / 5) as f32];
+                    if t % 30 == 0 {
+                        v.push(fire_at(cannon, p, t));
+                    }
+                    if t % 30 == 4 {
+                        v.push(hit_at(cannon, true, false, [p[0] + 8.0, p[1]], t));
+                    }
+                }
+                v
+            })
+            .collect();
+        let peak = mixed_peak(&frames);
+        println!("WP11.3b: simultaneous 20-tank volley peaks at {peak:.3}");
+        assert!(peak <= 0.5, "peak {peak}");
+        assert!(peak >= 0.15, "{peak}");
+    }
+
+    /// Peak of `names` fired together on the same tick at the focus, repeated four times.
+    fn together_peak(names: &[&str]) -> f32 {
+        let frames: Vec<Vec<FxEvent>> = (0..40u64)
+            .map(|t| {
+                if t % 10 == 0 {
+                    every_fight_event([12.0, 12.0], t)
+                        .into_iter()
+                        .filter(|(n, _)| names.contains(n))
+                        .map(|(_, e)| e)
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+        mixed_peak(&frames)
+    }
+
+    /// A heavy moment: four kinds on one tick at one spot (a cannon shot and its hit, a rocket, a medium explosion)
+    /// must not clip. Measured and written down in `audio.md` (gaps): eight kinds on one tick at one spot sum to
+    /// about 1.13 and all 18 to about 1.37, which would clip; the game does not produce that.
+    #[test]
+    fn a_heavy_moment_of_four_kinds_does_not_clip() {
+        let four = [
+            "weapon.fire.cannon",
+            "impact.cannon",
+            "weapon.fire.rocket",
+            "explosion.medium",
+        ];
+        let peak = together_peak(&four);
+        println!("WP11.3b: four kinds at once peak at {peak:.3}");
+        assert!(peak <= 0.95, "peak {peak}");
+        let eight = [
+            "weapon.fire.cannon",
+            "impact.cannon",
+            "weapon.fire.rocket",
+            "impact.rocket",
+            "weapon.fire.howitzer",
+            "impact.shell",
+            "explosion.medium",
+            "explosion.large",
+        ];
+        println!(
+            "WP11.3b: eight kinds at once peak at {:.3}",
+            together_peak(&eight)
+        );
+        let all: Vec<&str> = FIGHT_FILES.iter().map(|(e, _)| *e).collect();
+        println!(
+            "WP11.3b: all 18 kinds at once peak at {:.3}",
+            together_peak(&all)
+        );
     }
 
     // ---- the music mood (WP11.4) -------------------------------------------------------------------------

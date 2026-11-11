@@ -10,6 +10,7 @@
 //!             max_instances: 4,                 // simultaneous voices, default 8
 //!             category: Sfx,                    // Sfx | Ui | Music, default Sfx
 //!             looped: false,                    // default false
+//!             original_as_is: false,            // default false: see the field
 //!         ),
 //!     },
 //! )
@@ -89,6 +90,10 @@ pub struct SoundDef {
     pub category: Category,
     #[serde(default)]
     pub looped: bool,
+    /// A mapped original Red Alert sound for this event plays as-is (volume 1, no pitch spread, the default
+    /// voice cap), not with this entry's volume, pitch and cap, which are tuned for the CC0 file (WP11.3b).
+    #[serde(default)]
+    pub original_as_is: bool,
 }
 
 /// All sounds, by name (sorted, so iteration and warnings are stable).
@@ -292,6 +297,7 @@ mod tests {
                     max_instances: 1,
                     category: Category::Sfx,
                     looped: false,
+                    original_as_is: false,
                 },
             )]),
         };
@@ -320,6 +326,7 @@ mod tests {
                         max_instances: 1,
                         category: Category::Sfx,
                         looped: false,
+                        original_as_is: false,
                     },
                 )]),
             };
