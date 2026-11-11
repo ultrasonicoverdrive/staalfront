@@ -15,7 +15,6 @@
 use std::path::Path;
 
 use sf_audio::music::EventWeights;
-use sf_audio::ra::RaAudioConfig;
 use sf_audio::{
     AudioConfig, AudioSystem, Category, Cue, Listener, Mood, MoodTracker, PlanStats, Planner,
     Request, SpatialParams,
@@ -23,6 +22,7 @@ use sf_audio::{
 
 use crate::fx::FxPlayer;
 use crate::fx_events::{FxEvent, FxKind};
+use crate::settings::{Mix, SoundBase, SoundSettings, Volume};
 
 /// What the sound of the fight did, summed over the run.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -57,20 +57,51 @@ pub fn start_audio(
     ra_override: Option<String>,
     audio: &mut AudioSystem,
 ) -> (FxSound, Option<String>) {
-    let (mut config, warning) = AudioConfig::load(asset_root);
-    if let Some(path) = ra_override {
-        config.ra_audio = RaAudioConfig {
-            enabled: true,
-            path,
-        };
-    }
-    audio.enable_original_audio(&config.ra_audio);
+    let (sound, warning, _) =
+        start_audio_with(asset_root, ra_override, &SoundSettings::default(), audio);
+    (sound, warning)
+}
+
+/// [`start_audio`] with the player's sound settings (WP11.5b): a volume the player chose wins over the
+/// one of `audio.ron`, the saved Red Alert switch and folder over the file's, and `ra_override`
+/// (`--ra-audio`) over both. Also returns what the sound is with nothing chosen ([`SoundBase`], the
+/// numbers of the file) for the settings page.
+pub fn start_audio_with(
+    asset_root: &Path,
+    ra_override: Option<String>,
+    saved: &SoundSettings,
+    audio: &mut AudioSystem,
+) -> (FxSound, Option<String>, SoundBase) {
+    let (config, warning) = AudioConfig::load(asset_root);
+    let base = SoundBase::from_config(&config);
+    let now = saved.resolve(&base, ra_override.as_deref());
+    audio.enable_original_audio(&now.ra);
     audio.set_spatial_params(config.spatial.params());
-    audio.set_category_volume(Category::Sfx, config.mix.sfx_volume);
-    // Dynamic music (WP11.4): crossfade, default tracks, volume.
+    // Dynamic music (WP11.4): crossfade and default tracks.
     audio.set_music_config(&config.music);
-    audio.set_category_volume(Category::Music, config.mix.music_volume);
-    (FxSound::new(&config), warning)
+    apply_mix(audio, &now.mix);
+    (FxSound::new(&config), warning, base)
+}
+
+/// Gives the audio the volumes of the settings: the master volume, and one for each category the
+/// sliders have (the effects are the `Sfx` category, the unit voices the `Voice` category).
+pub fn apply_mix(audio: &mut AudioSystem, mix: &Mix) {
+    audio.set_master_volume(mix.master);
+    audio.set_category_volume(Category::Sfx, mix.effects);
+    audio.set_category_volume(Category::Music, mix.music);
+    audio.set_category_volume(Category::Voice, mix.voices);
+}
+
+/// The sound of a slider's test button: a CC0 sound of the bank (never a Red Alert one), in the volume
+/// group of that slider, so what is heard is what the slider sets. The music has none.
+pub const TEST_SOUND: &str = "test_click";
+
+pub fn play_test_sound(audio: &mut AudioSystem, which: Volume) {
+    match which {
+        Volume::Master | Volume::Effects => audio.play(TEST_SOUND),
+        Volume::Voices => audio.play_as(TEST_SOUND, Category::Voice),
+        Volume::Music => {}
+    }
 }
 
 /// Turns the shown events into sounds. See the module documentation.
@@ -947,6 +978,188 @@ mod tests {
                 "tick 109: mood combat -> track combat_theme",
                 "tick 456: mood calm -> track calm_theme",
             ]
+        );
+    }
+
+    // ---- the sound settings (WP11.5b) ----------------------------------------------------------
+
+    use crate::settings::SoundSettings;
+    use crate::unit_voice::{UnitVoice, UnitVoices};
+    use sf_audio::{Category, RaStatus};
+
+    fn near(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    /// Four different volumes: a slider wired to the wrong category gives another gain here.
+    fn four_volumes() -> SoundSettings {
+        SoundSettings {
+            master: Some(90),
+            music: Some(70),
+            effects: Some(50),
+            voices: Some(30),
+            ..SoundSettings::default()
+        }
+    }
+
+    #[test]
+    fn each_slider_reaches_its_own_category_and_the_voices_are_not_the_effects() {
+        let root = root_with("sliders", &["weapon.fire.cannon", "unit.move"]);
+        let mut audio = tracing_audio(&root.0);
+        let (_, warning, _) = start_audio_with(&root.0, None, &four_volumes(), &mut audio);
+        assert_eq!(warning, None);
+        assert!(near(audio.master_volume(), 0.9));
+        assert!(near(audio.category_volume(Category::Music), 0.7));
+        assert!(near(audio.category_volume(Category::Sfx), 0.5));
+        assert!(near(audio.category_volume(Category::Voice), 0.3));
+        // What the output would get: a shot at the effects' volume, a voice at the voices', both under
+        // the master volume (the bank entries' own volume is 1.0).
+        audio.play("weapon.fire.cannon");
+        let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
+        assert!(voices.speak(UnitVoice::Move, 10_000, &mut audio));
+        let gains: Vec<(String, f32)> = audio
+            .take_trace()
+            .into_iter()
+            .map(|t| (t.name, t.gain))
+            .collect();
+        assert_eq!(gains.len(), 2, "{gains:?}");
+        assert_eq!(gains[0].0, "weapon.fire.cannon");
+        assert!(near(gains[0].1, 0.5 * 0.9), "effects {gains:?}");
+        assert_eq!(gains[1].0, "unit.move");
+        assert!(near(gains[1].1, 0.3 * 0.9), "voices {gains:?}");
+    }
+
+    #[test]
+    fn a_player_who_never_opened_the_page_hears_what_audio_ron_says() {
+        // The shipped numbers: master 1, effects 1, music 0.6, voices 1 - what the game did before.
+        let root = root_with("defaults", &["weapon.fire.cannon"]);
+        let mut audio = tracing_audio(&root.0);
+        let (_, _, base) = start_audio_with(&root.0, None, &SoundSettings::default(), &mut audio);
+        assert_eq!(audio.master_volume(), 1.0);
+        assert_eq!(audio.category_volume(Category::Sfx), 1.0);
+        assert_eq!(audio.category_volume(Category::Music), 0.6);
+        assert_eq!(audio.category_volume(Category::Voice), 1.0);
+        assert_eq!(base, crate::settings::SoundBase::default());
+        // An audio.ron on the disk with other numbers, and no voice volume (a file from before 11.5b):
+        // those numbers, and the voices follow the effects.
+        std::fs::create_dir_all(root.0.join("config")).unwrap();
+        let text = sf_audio::config::EMBEDDED_CONFIG
+            .replace("sfx_volume: 1.0", "sfx_volume: 0.5")
+            .replace("music_volume: 0.6", "music_volume: 0.35")
+            .replace("        voice_volume: Some(1.0),\n", "")
+            .replace("        master_volume: 1.0,\n", "");
+        assert!(!text.contains("voice_volume: Some") && !text.contains("master_volume: 1.0"));
+        std::fs::write(root.0.join("config/audio.ron"), text).unwrap();
+        let mut audio = tracing_audio(&root.0);
+        let (_, warning, base) =
+            start_audio_with(&root.0, None, &SoundSettings::default(), &mut audio);
+        assert_eq!(warning, None, "an older audio.ron still reads");
+        assert_eq!(audio.master_volume(), 1.0);
+        assert_eq!(audio.category_volume(Category::Sfx), 0.5);
+        assert_eq!(audio.category_volume(Category::Music), 0.35);
+        assert_eq!(audio.category_volume(Category::Voice), 0.5);
+        assert_eq!((base.effects, base.music, base.voices), (0.5, 0.35, 0.5));
+        // The player's choice still wins over that file.
+        let mut audio = tracing_audio(&root.0);
+        start_audio_with(&root.0, None, &four_volumes(), &mut audio);
+        assert!(near(audio.category_volume(Category::Sfx), 0.5));
+        assert!(near(audio.category_volume(Category::Music), 0.7));
+        assert!(near(audio.category_volume(Category::Voice), 0.3));
+    }
+
+    /// Lets the loader thread finish: the status after the Red Alert files were read (or not).
+    fn settled_ra_status(audio: &mut AudioSystem) -> RaStatus {
+        for _ in 0..500 {
+            audio.update();
+            if audio.original_audio_status() != RaStatus::Loading {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        audio.original_audio_status()
+    }
+
+    #[test]
+    fn the_command_line_folder_wins_over_the_saved_switch_at_the_start() {
+        let root = root_with("ra_cli", &["unit.move"]);
+        let nothing = root.0.join("no_such_folder");
+        let nothing = nothing.display().to_string();
+        let saved_off = SoundSettings {
+            ra_enabled: Some(false),
+            ra_path: Some(nothing.clone()),
+            ..SoundSettings::default()
+        };
+        // Saved off, no flag: off.
+        let mut audio = tracing_audio(&root.0);
+        start_audio_with(&root.0, None, &saved_off, &mut audio);
+        assert_eq!(audio.original_audio_status(), RaStatus::Off);
+        // Saved off, with the flag: reading that folder.
+        let mut audio = tracing_audio(&root.0);
+        start_audio_with(&root.0, Some(nothing.clone()), &saved_off, &mut audio);
+        assert_ne!(audio.original_audio_status(), RaStatus::Off);
+        // Saved on with a folder, no flag: reading it too (the saved path is used).
+        let saved_on = SoundSettings {
+            ra_enabled: Some(true),
+            ra_path: Some(nothing),
+            ..SoundSettings::default()
+        };
+        let mut audio = tracing_audio(&root.0);
+        start_audio_with(&root.0, None, &saved_on, &mut audio);
+        assert_ne!(audio.original_audio_status(), RaStatus::Off);
+        // Saved on with no folder at all: nothing to read, no error, the game's own sounds.
+        let no_folder = SoundSettings {
+            ra_enabled: Some(true),
+            ..SoundSettings::default()
+        };
+        let mut audio = tracing_audio(&root.0);
+        start_audio_with(&root.0, None, &no_folder, &mut audio);
+        assert_eq!(audio.original_audio_status(), RaStatus::Off);
+    }
+
+    #[test]
+    fn the_switch_on_without_files_reads_nothing_and_the_game_keeps_its_own_sounds() {
+        let root = root_with("ra_missing", &["unit.move"]);
+        let folder = root.0.join("no_such_folder").display().to_string();
+        let mut audio = tracing_audio(&root.0);
+        let saved = SoundSettings {
+            ra_enabled: Some(true),
+            ra_path: Some(folder),
+            ..SoundSettings::default()
+        };
+        start_audio_with(&root.0, None, &saved, &mut audio);
+        // Read, found nothing: no sound of the Red Alert files replaces any event.
+        assert_eq!(settled_ra_status(&mut audio), RaStatus::Ready { mapped: 0 });
+        assert_eq!(audio.original_audio_catalog().unwrap().sound_count(), 0);
+        // The event still has the bank's sound, and plays it: no panic, no error.
+        let mut voices = UnitVoices::new(AudioConfig::embedded().voices);
+        assert!(voices.speak(UnitVoice::Move, 10_000, &mut audio));
+        assert_eq!(audio.take_trace().len(), 1);
+    }
+
+    #[test]
+    fn the_test_sounds_are_in_the_group_of_their_slider_and_the_music_has_none() {
+        let root = root_with("test_sound", &[TEST_SOUND]);
+        let mut audio = tracing_audio(&root.0);
+        start_audio_with(&root.0, None, &four_volumes(), &mut audio);
+        // The click's own volume in the real bank is 0.8; here (a scratch bank) it is 1.0.
+        play_test_sound(&mut audio, Volume::Master);
+        play_test_sound(&mut audio, Volume::Effects);
+        play_test_sound(&mut audio, Volume::Voices);
+        play_test_sound(&mut audio, Volume::Music);
+        let gains: Vec<f32> = audio.take_trace().iter().map(|t| t.gain).collect();
+        assert_eq!(gains.len(), 3, "the music has no test sound: {gains:?}");
+        assert!(
+            near(gains[0], 0.5 * 0.9),
+            "master test plays as an effect: {gains:?}"
+        );
+        assert!(near(gains[1], 0.5 * 0.9), "{gains:?}");
+        assert!(near(gains[2], 0.3 * 0.9), "{gains:?}");
+        // The test sound is one of the shipped bank (CC0), never a mapped Red Alert one.
+        assert!(
+            sf_audio::Bank::load(&assets().join("audio/bank.ron"))
+                .unwrap()
+                .get(TEST_SOUND)
+                .is_some()
         );
     }
 }

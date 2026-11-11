@@ -99,7 +99,8 @@ impl VoiceOut for AudioSystem {
     }
 
     fn play(&mut self, event: &str) {
-        AudioSystem::play(self, event);
+        // The voice volume of the settings, not the effects' (WP11.5b).
+        AudioSystem::play_as(self, event, sf_audio::Category::Voice);
     }
 }
 
@@ -124,7 +125,7 @@ impl UnitVoices {
     /// Say `voice` at `now_ms` if it may be heard: the event has a sound (otherwise silent, no
     /// message, no gap used up), no unit voice is sounding, and the gaps of the brake have passed.
     /// Not positional: a unit voice is the player's own interface and always at full volume
-    /// (category Sfx, so `mix.sfx_volume` applies). Returns whether it was played.
+    /// (category Voice, so the voice volume and the master volume apply). Returns whether it was played.
     pub fn speak(&mut self, voice: UnitVoice, now_ms: u64, out: &mut dyn VoiceOut) -> bool {
         let event = voice.event();
         if !out.has_sound(event) {

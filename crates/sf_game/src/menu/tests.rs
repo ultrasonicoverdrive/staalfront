@@ -202,14 +202,14 @@ fn with_no_menu_open_only_restart_and_main_menu_answer() {
 }
 
 #[test]
-fn the_tabs_switch_the_page_and_the_sound_page_is_marked_and_has_no_controls() {
+fn the_tabs_switch_the_page_and_the_sound_page_has_its_controls() {
     let mut m = menu();
     m.open_start();
     click(&mut m, Item::OpenSettings);
     let model0 = model(&m);
     assert_eq!(
         texts(&model0.tabs),
-        ["Keys", "Graphics", "Accessibility", "Sound (WP11.5b)"]
+        ["Keys", "Graphics", "Accessibility", "Sound"]
     );
     assert_eq!(
         model0.tabs.iter().map(|t| t.selected).collect::<Vec<_>>(),
@@ -219,16 +219,230 @@ fn the_tabs_switch_the_page_and_the_sound_page_is_marked_and_has_no_controls() {
     assert_eq!(m.screen(), Some(Screen::Settings(Page::Sound)));
     let sound = model(&m);
     assert!(sound.tabs[3].selected);
-    // A marked, empty section: a heading and a line of text, no row with controls, only Back below.
-    assert!(matches!(&sound.rows[0], Row::Heading(h) if h == "Sound (WP11.5b)"));
-    assert!(matches!(&sound.rows[1], Row::Note(_)));
-    assert_eq!(sound.rows.len(), 2);
+    assert!(matches!(&sound.rows[0], Row::Heading(h) if h == "Volume"));
+    // Four volumes, in this order, each with the shipped audio.ron value; the test button is on all
+    // but the music.
+    let shown = |label: &str| texts(row(&sound, label)).join(" ");
+    assert_eq!(shown("Master"), "- 100% + Test");
+    assert_eq!(shown("Music"), "- 60% +");
+    assert_eq!(shown("Effects"), "- 100% + Test");
+    assert_eq!(shown("Unit voices"), "- 100% + Test");
+    assert!(
+        sound
+            .rows
+            .iter()
+            .any(|r| matches!(r, Row::Heading(h) if h == "Original Red Alert audio"))
+    );
+    assert_eq!(texts(row(&sound, "Use original audio")), ["On", "Off"]);
     assert_eq!(items(&sound.footer), [Item::Back]);
     // A click on a tab on the start menu (no settings open) does nothing to the stack.
     m.handle(Event::Escape);
     assert_eq!(m.stack(), [Screen::Start]);
     click(&mut m, Item::Page(Page::Graphics));
     assert_eq!(m.stack(), [Screen::Start]);
+}
+
+/// A menu on the sound page.
+fn sound_menu() -> Menu {
+    let mut m = menu();
+    m.open_settings(Page::Sound);
+    m
+}
+
+#[test]
+fn the_default_of_every_slider_is_the_value_of_audio_ron() {
+    let config = sf_audio::AudioConfig::embedded();
+    let now = menu().sound_now();
+    assert_eq!(now.mix.master, config.mix.master_volume);
+    assert_eq!(now.mix.music, config.mix.music_volume);
+    assert_eq!(now.mix.effects, config.mix.sfx_volume);
+    assert_eq!(now.mix.voices, config.mix.voice());
+    // A different file on disk: the page shows that file's numbers until the player chooses.
+    let mut other = config.clone();
+    other.mix.music_volume = 0.35;
+    other.mix.sfx_volume = 0.5;
+    other.mix.voice_volume = None;
+    let mut m = sound_menu();
+    m.set_sound_base(crate::settings::SoundBase::from_config(&other), None);
+    let sound = model(&m);
+    assert_eq!(texts(row(&sound, "Music"))[1], "35%");
+    assert_eq!(texts(row(&sound, "Effects"))[1], "50%");
+    assert_eq!(
+        texts(row(&sound, "Unit voices"))[1],
+        "50%",
+        "the voices follow the effects"
+    );
+}
+
+#[test]
+fn a_slider_steps_by_five_and_each_one_sets_its_own_volume() {
+    let mut m = sound_menu();
+    // Master: 100 -> 95 (the "-" button), music 60 -> 65 ("+"), effects 100 -> 80 in four clicks,
+    // voices 100 -> 30: distinct numbers, so a click that reached the wrong slider shows.
+    let step = |m: &mut Menu, label: &str, button: usize| {
+        let item = row(&model(m), label)[button].item;
+        click(m, item)
+    };
+    assert_eq!(
+        step(&mut m, "Master", 0),
+        [Outcome::Changed(Change::Volume(Volume::Master))]
+    );
+    step(&mut m, "Music", 2);
+    for _ in 0..4 {
+        step(&mut m, "Effects", 0);
+    }
+    for _ in 0..14 {
+        step(&mut m, "Unit voices", 0);
+    }
+    let s = &m.settings().sound;
+    assert_eq!(
+        (s.master, s.music, s.effects, s.voices),
+        (Some(95), Some(65), Some(80), Some(30))
+    );
+    let now = m.sound_now();
+    assert_eq!(
+        (
+            now.mix.master,
+            now.mix.music,
+            now.mix.effects,
+            now.mix.voices
+        ),
+        (0.95, 0.65, 0.8, 0.3)
+    );
+    let sound = model(&m);
+    assert_eq!(
+        [
+            &texts(row(&sound, "Master"))[1],
+            &texts(row(&sound, "Music"))[1],
+            &texts(row(&sound, "Effects"))[1],
+            &texts(row(&sound, "Unit voices"))[1],
+        ],
+        [&"95%", &"65%", &"80%", &"30%"]
+    );
+}
+
+#[test]
+fn a_slider_stops_at_nothing_and_at_full_and_a_value_off_the_grid_steps_onto_it() {
+    let mut m = sound_menu();
+    // Full: "+" is dead. Nothing: "-" is dead and a click would stay at 0.
+    let master = row(&model(&m), "Master").to_vec();
+    assert!(!master[2].enabled && master[0].enabled);
+    for _ in 0..20 {
+        let item = row(&model(&m), "Master")[0].item;
+        click(&mut m, item);
+    }
+    assert_eq!(m.settings().sound.master, Some(0));
+    let master = row(&model(&m), "Master").to_vec();
+    assert!(!master[0].enabled && master[2].enabled);
+    // A hand-made 33 % steps to 30 and to 35.
+    assert_eq!(
+        (step_down(33), step_up(33), step_down(35), step_up(35)),
+        (30, 35, 30, 40)
+    );
+    assert_eq!((step_down(0), step_up(100), step_up(98)), (0, 100, 100));
+}
+
+#[test]
+fn the_test_button_plays_without_changing_a_setting_and_the_music_has_none() {
+    let mut m = sound_menu();
+    for which in [Volume::Master, Volume::Effects, Volume::Voices] {
+        assert_eq!(
+            click(&mut m, Item::TestVolume(which)),
+            [Outcome::PlayTest(which)]
+        );
+    }
+    assert_eq!(*m.settings(), Settings::default());
+    assert_eq!(row(&model(&m), "Music").len(), 3);
+}
+
+#[test]
+fn the_red_alert_switch_keeps_the_folder_and_the_command_line_gives_way_once_it_is_touched() {
+    let mut m = sound_menu();
+    // Nothing set: off, no folder, no status line.
+    let now = m.sound_now();
+    assert!(!now.ra.enabled && now.ra.path.is_empty());
+    let notes = |m: &Menu| {
+        model(m)
+            .rows
+            .iter()
+            .filter_map(|r| match r {
+                Row::Note(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(notes(&m).len(), 2, "folder and hint only");
+    assert_eq!(notes(&m)[0], "Folder: none set");
+    // On with no folder: a clear line, not an error.
+    assert_eq!(
+        click(&mut m, Item::SetRaAudio(true)),
+        [Outcome::Changed(Change::RaAudio)]
+    );
+    assert_eq!(
+        notes(&m).last().unwrap(),
+        "Red Alert files not found: no folder is set. The game's own sounds play."
+    );
+    assert_eq!(m.settings().sound.ra_path, None, "no empty path is stored");
+    // The folder of --ra-audio: on for this run, shown, and its path is what a click on the switch keeps.
+    let mut m = sound_menu();
+    m.set_sound_base(
+        crate::settings::SoundBase::default(),
+        Some("/games/ra".into()),
+    );
+    assert!(m.sound_now().ra.enabled);
+    assert_eq!(notes(&m)[0], "Folder: /games/ra");
+    assert_eq!(
+        m.settings().sound.ra_enabled,
+        None,
+        "the flag is not written"
+    );
+    click(&mut m, Item::SetRaAudio(false));
+    assert!(
+        !m.sound_now().ra.enabled,
+        "the player's click wins over the flag from here on"
+    );
+    assert_eq!(m.settings().sound.ra_enabled, Some(false));
+    assert_eq!(m.settings().sound.ra_path.as_deref(), Some("/games/ra"));
+    click(&mut m, Item::SetRaAudio(true));
+    assert!(m.sound_now().ra.enabled);
+    assert_eq!(m.sound_now().ra.path, "/games/ra");
+}
+
+#[test]
+fn the_status_line_says_what_became_of_reading_the_red_alert_files() {
+    let mut m = sound_menu();
+    m.set_sound_base(
+        crate::settings::SoundBase::default(),
+        Some("/games/ra".into()),
+    );
+    let last = |m: &Menu| match model(m).rows.last().unwrap() {
+        Row::Note(t) => t.clone(),
+        other => panic!("{other:?}"),
+    };
+    for (ra, want) in [
+        (RaLoad::Off, "Reading the Red Alert files..."),
+        (RaLoad::Loading, "Reading the Red Alert files..."),
+        (
+            RaLoad::Ready {
+                mapped: 0,
+                found: 0,
+            },
+            "Red Alert files not found in /games/ra. The game's own sounds play.",
+        ),
+        (
+            RaLoad::Ready {
+                mapped: 7,
+                found: 40,
+            },
+            "Red Alert audio is on: 7 game sounds use it.",
+        ),
+    ] {
+        m.set_live(Live {
+            ra,
+            ..Live::default()
+        });
+        assert_eq!(last(&m), want, "{ra:?}");
+    }
 }
 
 #[test]
@@ -274,9 +488,15 @@ fn graphics_choices_change_the_settings_and_say_what_changed() {
     assert_eq!(chosen(&g, "Frame cap"), [false, false, true, false, false]);
     assert_eq!(chosen(&g, "Vertical sync"), [false, true]);
     // The window row shows the window as it is (F11 changes it without the settings).
-    m.set_live(Live { fullscreen: true });
+    m.set_live(Live {
+        fullscreen: true,
+        ..Live::default()
+    });
     assert_eq!(chosen(&model(&m), "Window"), [false, true]);
-    m.set_live(Live { fullscreen: false });
+    m.set_live(Live {
+        fullscreen: false,
+        ..Live::default()
+    });
     assert_eq!(chosen(&model(&m), "Window"), [true, false]);
 }
 
