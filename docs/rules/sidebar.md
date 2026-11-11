@@ -158,6 +158,21 @@ The commands are the ones WP6.5 already has; the simulation checks each again at
 free harvester of a refinery is in the queue but cannot be taken out, so a right-click skips it
 (`the_free_harvester_of_a_refinery_cannot_be_cancelled_from_the_sidebar`).
 
+**The tab follows the selection (WP6.9).** When the selection **changes** and holds an own factory that stands, the
+sidebar shows the tab of that factory (barracks: Infantry, vehicle factory: Vehicles, shipyard: Vessels) at the top of
+its items, as a click on the tab would. With several factories selected it is the tab of the **first one in the stable
+selection order** (ascending by id), which is also the primary factory of that tab. Code: `sidebar::TabFollow`
+(remembers the selection it last saw and answers `Some(tab)` only when the selection differs from that and has a factory
+with a unit tab), called once per frame by `Runner::follow_selection_tab` after the selection and order handlers;
+`Hud::show_sidebar_tab` sets it. It acts **only on a change of the selection**, never every frame, so a tab the player
+picks by hand stays until the selection changes again; a selection of units only, of a power plant or of nothing leaves
+the tab as it is; an inspected enemy factory is not in the selection and does not move it. The selection changing
+because one of its members died counts as a change. Tests: `rally/tests.rs`
+(`the_tab_follows_a_selection_that_changes_to_a_factory_and_only_then`: 100 further frames with the same selection answer
+nothing, a different factory switches, units/plant/empty answer nothing, a mixed selection follows its factory;
+`an_enemy_factory_inspected_does_not_move_the_tab`), the wiring by reading `Runner::follow_selection_tab` and in the
+screenshot `docs/screenshots/wp6.9/`.
+
 **The primary factory.** A unit goes to the **selected** own factory of its function (the lowest slot if several are
 selected), else to the standing factory of that function with the **lowest slot**. A selected factory of another
 function does not matter: each tab has its own (`the_primary_factory_is_the_selected_one_else_the_lowest_slot`). The
@@ -205,6 +220,6 @@ Click sounds (audio is another work package) (menus and settings exist since
 WP11.5a: `menus.md`; the UI scale of the settings multiplies everything here, the sidebar keeps out of the edge band at every
 scale it offers, and while a menu is open the sidebar is built blind: no hover, no click); an icon picture instead of the coloured tile (art, WP11.6);
 a tooltip with the full name and the build time (the tile shows the short name and the price); hotkeys for the tabs;
-a rally-point button; showing the other factories' queues (an item shows its primary factory's queue only); a
+a rally-point button (the rally point is set by right-click since WP6.9, `production.md`); showing the other factories' queues (an item shows its primary factory's queue only); a
 second queue for structures (a structure is placed at once and goes up where it stands, WP6.2/WP6.3); a faction
 other than the local seat's (the catalog is built for the faction of `LOCAL_PLAYER`).

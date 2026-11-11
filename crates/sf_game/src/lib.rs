@@ -135,6 +135,7 @@ pub mod placement_view;
 pub mod playfield;
 pub mod population;
 pub mod production_view;
+pub mod rally;
 pub mod record;
 pub mod repair_mode;
 pub mod repair_view;

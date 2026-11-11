@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use sf_math::Vec2;
 use sf_sim::{
     BuildingFunction, Cell, Construction, Death, EntityId, EntityView, FactoryView, Kind, Order,
-    PlacementPreview, PlayerId, ProjectileView, RepairStatus, SaleProgress, Tick, UnitBuild,
+    PlacementPreview, PlayerId, ProjectileView, RepairStatus, SaleProgress, Side, Tick, UnitBuild,
     UnitStats, UnitTable, Visibility, World, WreckView,
 };
 
@@ -46,6 +46,9 @@ use sf_sim::{
 pub struct ProductionMenu {
     builds: Vec<UnitBuild>,
     factories: Vec<(Kind, BuildingFunction)>,
+    /// The side of the footprint a factory's units come out on, by structure kind (WP6.9: the
+    /// rally line starts at the exit cell).
+    exit_sides: Vec<(Kind, Side)>,
 }
 
 impl ProductionMenu {
@@ -62,7 +65,21 @@ impl ProductionMenu {
                 .filter(|b| b.function.is_factory())
                 .map(|b| (b.kind, b.function))
                 .collect(),
+            exit_sides: world
+                .building_table()
+                .iter()
+                .filter(|b| b.function.is_factory())
+                .filter_map(|b| Some((b.kind, b.exit_side?)))
+                .collect(),
         }
+    }
+
+    /// The side of its footprint the factory kind `kind` sends its units out on.
+    pub fn exit_side(&self, kind: Kind) -> Option<Side> {
+        self.exit_sides
+            .iter()
+            .find(|&&(k, _)| k == kind)
+            .map(|&(_, s)| s)
     }
 
     /// The function of the structure kind `kind` if it is a factory.

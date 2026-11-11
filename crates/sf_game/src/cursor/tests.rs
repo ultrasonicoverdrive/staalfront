@@ -646,9 +646,10 @@ fn placeholders_never_come_out_of_the_context_and_never_order() {
         }
     }
     // The sweep reaches every real cursor but the scrolls (those are the
-    // edges', tested above).
+    // edges') and the two rally cursors (they need a factory in the world and the
+    // selection: `rally/tests.rs`).
     for kind in CursorKind::ALL {
-        if !kind.is_scroll() && !kind.is_placeholder() {
+        if !kind.is_scroll() && !kind.is_placeholder() && !kind.is_rally() {
             assert!(seen.contains(&kind.index()), "{kind:?} is never the answer");
         }
     }

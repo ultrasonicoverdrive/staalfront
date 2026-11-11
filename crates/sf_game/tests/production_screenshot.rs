@@ -247,7 +247,7 @@ impl Scene {
                 &frame,
                 &height,
                 &snap,
-                Some(selected),
+                &[selected],
                 look,
             );
         }
@@ -383,4 +383,187 @@ fn the_bars_the_flags_and_the_readout_follow_the_queues() {
     let walking = scene.shoot(&mut r, &cam, barracks);
     save(&format!("production_t{t2:05}_rally.png"), &walking);
     assert!(world_count(&walking, look.rally.flag_selected, 20) > 0);
+}
+
+// ---- WP6.9: the rally line, the rally cursor and the tab that follows the selection ----------
+
+use sf_data::money_look::MoneyLook;
+use sf_data::sidebar_look::SidebarLook;
+use sf_data::units::Faction;
+use sf_game::commands::LOCAL_PLAYER;
+use sf_game::cursor::{CursorArt, CursorKind};
+use sf_game::selection::Selection;
+use sf_game::sidebar::{self, Catalog, Situation, Tab, TabFollow};
+use sf_game::sidebar_view::{self, SidebarState};
+
+impl Scene {
+    /// A frame as `sf_game` draws it with the factories `selected` selected: the models, the bars,
+    /// the rally lines of the selected ones, all flags, the sidebar on the tab the selection leads
+    /// to (found by [`TabFollow`], the thing the runner asks) and the `cursor` at its position, if
+    /// given.
+    fn shoot_with_sidebar(
+        &mut self,
+        r: &mut Renderer,
+        cam: &Camera,
+        selected: &[EntityId],
+        cursor: Option<(CursorKind, (f32, f32))>,
+    ) -> (Rgba8, Tab) {
+        let snap = SimSnapshot::capture(&self.world);
+        let vp = cam.view_proj();
+        r.set_view_proj(vp);
+        let frustum = Frustum::from_view_proj(vp);
+        let eye = EyeView::from_view_proj(vp, H as f32);
+        let blend = sf_render::CameraSettings::embedded()
+            .zoom
+            .blend(cam.zoom() as f32);
+        let ground = &self.ground;
+        self.instancer
+            .build_frame(&FrameView::new(&frustum, 0.0, eye, blend, 1.0), |x, z| {
+                ground.height(f64::from(x), f64::from(z)) as f32
+            });
+        let mut ui = Ui::new(UiConfig::default());
+        ui.begin_frame(UiInput::default(), (W, H), 1.0);
+        let look = production_view::shipped_look();
+        {
+            let frame = GhostFrame {
+                view_proj: vp,
+                viewport: [W as f32, H as f32],
+                ui_scale: 1.0,
+            };
+            let mut layer = ui.world_layer();
+            let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+            production_view::draw_bars(&mut layer, &frame, &height, &snap, look);
+            production_view::draw_rally_lines(&mut layer, &frame, &height, &snap, selected, look);
+            production_view::draw_rally_flags(&mut layer, &frame, &height, &snap, selected, look);
+        }
+        // The tab the selection leads to, as the runner finds it.
+        let mut selection = Selection::new(LOCAL_PLAYER);
+        for &id in selected {
+            selection.click(&snap, Some(id), true);
+        }
+        let tab = TabFollow::default()
+            .update(&snap, &selection)
+            .unwrap_or(SidebarState::default().tab);
+        let sidebar_look = SidebarLook::embedded();
+        let catalog = Catalog::build(&UnitDefs::embedded(), Faction::Meridian, &sidebar_look);
+        let sit = Situation::read(&snap, P0, &catalog, selection.ids());
+        let model = sidebar::model(&catalog, &sit, tab, None, None, &sidebar_look);
+        let money = MoneyLook::embedded();
+        let setup = sidebar_view::Setup {
+            look: &sidebar_look,
+            money: &money,
+            edge_band_px: 4.0,
+            minimap: true,
+        };
+        let mut state = SidebarState { tab, scroll: 0 };
+        sidebar_view::frame(&mut ui, &UiInput::default(), &mut state, &model, &setup);
+        if let Some((kind, at)) = cursor {
+            let set = sf_ui::CursorSet::load(
+                &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/ui/cursors"),
+                ui.atlas_mut(),
+            )
+            .expect("the cursors load");
+            let art = CursorArt::new(set).expect("every kind has a picture");
+            ui.draw_cursor(art.set(), art.sprite_of(kind), at);
+        }
+        ui.end_frame();
+        r.upload_units(&self.instancer);
+        let mut ur = UiRenderer::new(&r.gpu().device, r.color_format());
+        let img = r
+            .render_to_image_with(|t| ur.render(t, &mut ui))
+            .expect("render");
+        (img, tab)
+    }
+}
+
+/// Pixels of colour `c` on the map part of the window: left of the sidebar column, below the top bar.
+fn map_count(img: &Rgba8, c: (u8, u8, u8, u8), tol: i32) -> usize {
+    count_in(img, (0, 40, W - 210, H), c, tol)
+}
+
+#[test]
+fn the_rally_line_runs_from_the_exit_to_the_flag_while_the_factory_is_selected() {
+    let look = *production_view::shipped_look();
+    let mut scene = Scene::new();
+    let mut r = renderer(&scene.map);
+    let cam = scene.camera(0.34, (89.0, 86.0));
+    let barracks = scene.factory("barracks");
+    let workshop = scene.factory("vehicle_factory");
+    scene.command(Command::SetRally {
+        factory: barracks,
+        cell: Some(Cell::new(92, 90)),
+    });
+    // The command runs at the start of the next tick.
+    scene.world.step();
+    let tick = scene.world.tick().0;
+
+    // Selected: the line in the colour of production_look.ron, the Infantry tab (the barracks makes
+    // infantry) and the rally cursor.
+    let (shot, tab) = scene.shoot_with_sidebar(
+        &mut r,
+        &cam,
+        &[barracks],
+        Some((CursorKind::Rally, (520.0, 410.0))),
+    );
+    save(
+        &format!("rally_t{tick:05}_selected_infantry_tab.png"),
+        &shot,
+    );
+    assert_eq!(tab, Tab::Infantry);
+    let line = map_count(&shot, look.rally.line, 12);
+    assert!(line > 60, "the line is on the screen: {line} pixels");
+    assert!(map_count(&shot, look.rally.flag_selected, 20) > 0, "flag");
+
+    // Not selected: the flag stays, the line is gone.
+    let (unselected, _) = scene.shoot_with_sidebar(&mut r, &cam, &[], None);
+    save(
+        &format!("rally_t{tick:05}_not_selected_no_line.png"),
+        &unselected,
+    );
+    assert_eq!(map_count(&unselected, look.rally.line, 12), 0, "no line");
+    assert!(map_count(&unselected, look.rally.flag, 20) > 0, "flag");
+
+    // A selected factory with no rally point has no line, and its own tab.
+    let (other, tab) = scene.shoot_with_sidebar(&mut r, &cam, &[workshop], None);
+    assert_eq!(tab, Tab::Vehicles);
+    assert_eq!(map_count(&other, look.rally.line, 12), 0);
+}
+
+#[test]
+fn the_line_is_one_quad_for_a_selected_factory_with_a_rally_point_and_none_otherwise() {
+    // No GPU: the quads the UI would draw.
+    let look = production_view::shipped_look();
+    let mut scene = Scene::new();
+    let cam = scene.camera(0.34, (89.0, 86.0));
+    let barracks = scene.factory("barracks");
+    let workshop = scene.factory("vehicle_factory");
+    scene.command(Command::SetRally {
+        factory: barracks,
+        cell: Some(Cell::new(92, 90)),
+    });
+    // The command runs at the start of the next tick.
+    scene.world.step();
+    let snap = SimSnapshot::capture(&scene.world);
+    let frame = GhostFrame {
+        view_proj: cam.view_proj(),
+        viewport: [W as f32, H as f32],
+        ui_scale: 1.0,
+    };
+    let ground = scene.ground.clone();
+    let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
+    let quads_for = |selected: &[EntityId]| {
+        let mut ui = Ui::new(UiConfig::default());
+        ui.begin_frame(UiInput::default(), (W, H), 1.0);
+        let mut layer = ui.world_layer();
+        let before = layer.quad_count();
+        let drawn =
+            production_view::draw_rally_lines(&mut layer, &frame, &height, &snap, selected, look);
+        (drawn, layer.quad_count() - before)
+    };
+    assert_eq!(quads_for(&[]), (0, 0), "nothing selected, no line");
+    assert_eq!(quads_for(&[workshop]), (0, 0), "no rally point, no line");
+    assert_eq!(quads_for(&[barracks]), (1, 1), "one line, one quad");
+    let (from, to) = production_view::rally_line_ends(&frame, &height, &snap, barracks).unwrap();
+    assert!(from != to);
+    assert!(production_view::rally_line_ends(&frame, &height, &snap, workshop).is_none());
 }

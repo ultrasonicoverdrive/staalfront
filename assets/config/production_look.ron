@@ -6,6 +6,9 @@
 // sizes as the construction bar), and the rally flag on the cell a factory sends its units to.
 // The sidebar of the finished game is WP11.1; this is the sandbox's readout. Colours sRGB, alpha
 // last. Sizes in logical pixels (the UI scale is applied on top).
+//
+// WP6.9 added the rally line: a line from the factory's exit cell to its flag, drawn only while that
+// factory is selected.
 (
     // The progress bar under a factory's front edge: `fill` while it builds.
     bar: (
@@ -33,7 +36,8 @@
     accent: (120, 220, 255, 255),
     warn: (255, 110, 80, 255),
     // The rally flag: a pole and a flag standing on the middle of the cell. The flag of the
-    // selected factory has its own colour.
+    // selected factory has its own colour. `line` and `line_width_px`: the line from the exit cell
+    // of a selected factory to its flag (WP6.9).
     rally: (
         pole: (235, 235, 240, 255),
         flag: (90, 200, 255, 235),
@@ -42,5 +46,7 @@
         pole_width_px: 2,
         flag_width_px: 18,
         flag_height_px: 11,
+        line: (255, 240, 150, 255),
+        line_width_px: 2,
     ),
 )

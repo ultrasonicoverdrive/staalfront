@@ -23,7 +23,7 @@
 //!
 //! | Action | Default | Command |
 //! |---|---|---|
-//! | `OrderMove` | right-click | the order the cursor shows ([`right_click`]): move, attack-move, attack or guard |
+//! | `OrderMove` | right-click | the order the cursor shows ([`right_click`]): move, attack-move, attack or guard; with factories selected also their rally point ([`rally_clicks`]) |
 //! | `OrderQueue` | shift (held) | the order is queued behind the unit's orders |
 //! | `OrderAttackMove` | F (held) | a right-click on the ground attack-moves |
 //! | `OrderStop` | C | `Stop` |
@@ -61,6 +61,21 @@ pub fn right_click(
     let order = cursor::order_for(kind, hover)?;
     let ids = selection.orderable(world);
     order_command(&ids, order, cursor::is_queued(kind, modifiers))
+}
+
+/// What the same right-click asks of the selected **factories** (WP6.9): `SetRally` for each of them
+/// (the cell under the mouse) or the clearing of the one under the mouse, from the same cursor kind
+/// that decided the units' order ([`crate::rally::plan`]). Empty when no factory is selected, or when
+/// the cursor promises the factories nothing (an enemy, off the map, the UI). The runner sends these
+/// next to the unit order of [`right_click`], so a mixed selection does both.
+pub fn rally_clicks(
+    world: &SimSnapshot,
+    selection: &Selection,
+    hover: &Hover,
+    modifiers: Modifiers,
+) -> Vec<Command> {
+    let kind = cursor::cursor_context(world, selection, hover, modifiers);
+    crate::rally::commands(&crate::rally::plan(kind, world, selection, hover))
 }
 
 /// What a right-click on the ground at `point` (in cells) asks for; `None`
@@ -104,6 +119,10 @@ pub fn issue(sim: &SimHandle, command: Command) {
             if *queued { " (queued)" } else { "" }
         )),
         Command::Stop { ids } => Some(format!("Stop for {} units", ids.len())),
+        Command::SetRally { factory, cell } => Some(match cell {
+            Some(cell) => format!("rally of {factory} to {cell}"),
+            None => format!("rally of {factory} cleared"),
+        }),
         _ => None,
     };
     let tick = sim.send(LOCAL_PLAYER, command);

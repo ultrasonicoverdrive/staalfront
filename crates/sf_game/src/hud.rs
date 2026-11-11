@@ -390,6 +390,13 @@ impl Hud {
         self.sidebar
     }
 
+    /// Shows `tab` at the top of its items, as a click on the tab would (the sidebar follows the
+    /// selection to a factory's tab, WP6.9).
+    pub fn show_sidebar_tab(&mut self, tab: crate::sidebar::Tab) {
+        self.sidebar.tab = tab;
+        self.sidebar.scroll = 0;
+    }
+
     /// Puts the sidebar back on its default tab at scroll 0 (a Restart or a new scene).
     pub fn reset_sidebar(&mut self) {
         self.sidebar = crate::sidebar_view::SidebarState::default();
