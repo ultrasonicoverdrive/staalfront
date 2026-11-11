@@ -25,9 +25,9 @@
 //!
 //! When nothing is slow, a frame costs one comparison against [`crate::bench::HITCH_MS`] plus the
 //! laps (one clock read each) and, on Windows, one `GetThreadTimes` call; a frame over the threshold
-//! also counts. A line is built only for a frame over [`LOG_MS`]. [`HitchLog::overhead`] measures the
-//! per-frame cost on the machine it runs on (the test `the_bookkeeping_of_a_quiet_frame_is_small`, the best
-//! of five batches against a generous bound). That a quiet frame does no slow-path work is counted, not
+//! also counts. A line is built only for a frame over [`LOG_MS`]. The test
+//! `the_bookkeeping_of_a_quiet_frame_is_small` measures the per-frame cost on the machine it runs on
+//! (the best of five batches against a generous bound). That a quiet frame does no slow-path work is counted, not
 //! timed, on synthetic frame times (the test `a_quiet_frame_does_no_slow_path_work`): no hitch counted, no
 //! line, `slow_ticks` not asked, one thread-clock read per frame where it is measured.
 
@@ -793,7 +793,9 @@ mod tests {
     /// What a quiet frame does, counted instead of timed: after 1,000 frames that all stay at or under
     /// [`HITCH_MS`] (synthetic times, so no pause of the machine can change the result) nothing was
     /// counted as a hitch, no line or event was built, `slow_ticks` was never asked, and the thread
-    /// clock was read once per frame where it is measured and never elsewhere. The cost in time is
+    /// clock was read once per frame where it is measured and never elsewhere (so a second clock read
+    /// is caught only on Windows, where `sf_thread_cpu::MEASURED` is true; on Linux the count is 0 by
+    /// construction). The cost in time is
     /// `the_bookkeeping_of_a_quiet_frame_is_small`.
     #[test]
     fn a_quiet_frame_does_no_slow_path_work() {
