@@ -97,8 +97,8 @@ Notes on the rows:
 * **R1 and R2, the units' cursor wins a mixed selection (WP6.9).** With units and factories selected the picture is the
   units' row (Move, Queue, AttackMove, Attack, Guard, NoGo); a right-click gives the units that order **and** the factories
   follow the same cursor kind (`rally::plan`, `docs/rules/production.md`, "Rally by right-click"): Move, Queue, AttackMove
-  and Guard set the rally cells to the cell under the mouse (Guard over a selected factory clears its rally point
-  instead), Attack and NoGo give the factories nothing. A rally cell is never refused for terrain (no movement class
+  and Guard set the rally cells to the cell under the mouse (Guard over a selected factory leaves its rally point
+  alone; only RallyClear, with factories alone selected, clears), Attack and NoGo give the factories nothing. A rally cell is never refused for terrain (no movement class
   applies to a factory); the sim refuses only a cell off the map, which the cursor shows as NoGo.
 * **Row 7.** A selection is blocked only when **every** orderable unit is blocked: one unit
   that can go is enough, the order goes to all and the sim sorts out who arrives (path
@@ -244,7 +244,8 @@ every zoom. I was the first wish but is `ProduceCycle`.
   `the_cursor_and_the_commands_of_a_right_click_never_disagree`, the sweep of eight selections (nothing, a tank, a power
   plant, one factory, two, a tank with factories) over twelve hovers and the four modifier combinations: a Rally
   cursor means no unit order and one `SetRally` per selected factory, RallyClear one clear, Move/Queue/AttackMove one per
-  factory, Guard one clear or one per factory, anything else nothing, and with no factory selected never a rally cursor
+  factory, Guard none over a selected factory and one per factory elsewhere, Move/Queue/AttackMove to
+  the units' order cell, anything else nothing, and with no factory selected never a rally cursor
   or command.
 * `crates/sf_game/tests/cursor_screenshot.rs`: all 26 cursors over a generated terrain through
   the real renderer (software adapter): drawn at the hotspot, the outline dark on any ground, one

@@ -2707,10 +2707,12 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
 - **Pins:** none moved; nothing in `crates/sf_sim/` changed (diff of that directory against origin/main is empty).
 - **Voices (#112, merged before this PR):** a rally right-click has no voice (`order_voice` only reads `Command::Order`); a mixed
   selection speaks the units' order voice.
-- **Gaps:** the runner wiring (`handle_orders`, `follow_selection_tab`) is checked by reading and by the pure functions it calls, not
-  by a headless runner test; Guard over a selected factory in a mixed selection clears its rally point (documented, decided by the
-  literal rule); the line is a straight screen line, not bent along the terrain; no rally on ore or a unit; the pictures are
+- **Gaps:** `handle_orders` (needs a `Context`) is checked by reading and by the pure functions it calls; `follow_selection_tab` has a
+  headless runner test; a tab picked by hand jumps back when the selection changes because a selected unit dies (`sidebar.md`); the line is a straight screen line, not bent along the terrain; no rally on ore or a unit; the pictures are
   placeholders.
+- **Fix round (review 11-11-2026):** Guard over a selected factory in a mixed selection now leaves its rally point alone (it
+  cleared it); only RallyClear (factories alone) clears. The sweep checks the rally cell against the units' order cell; the
+  re-rendered WP6.5 shots in `docs/screenshots/wp6.9/` are removed.
 - Also carried: the review nits of PR #111 (stale "cross-fade" wording in `fx.rs` and `effects_screenshot.rs`, the structure cap 1.6 in
   `architecture.md`, one test moved to its own bullet in `camera.md`) and the agent rule for a twice-rejected PR in `CLAUDE.md`.
 

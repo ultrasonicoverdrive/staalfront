@@ -94,8 +94,9 @@ pub enum RallyPlan {
 /// * **RallyClear**: the factory under the mouse loses its rally point.
 /// * A mixed selection (units and factories): the units get the order of their cursor, and the
 ///   factories follow it: **Move**, **Queue** and **AttackMove** over ground set the rally point to
-///   the same cell; **Guard** over a selected factory clears its rally point, over anything else sets
-///   it to that cell; **Attack** (an enemy), **NoGo**, Select, Inspect and the scroll cursors give the
+///   the same cell; **Guard** over a selected factory leaves its rally point alone (the units guard it;
+///   a clear is only done with factories alone selected, under the RallyClear cursor), over
+///   anything else sets it to that cell; **Attack** (an enemy), **NoGo**, Select, Inspect and the scroll cursors give the
 ///   factories nothing.
 ///
 /// A cell in shroud or fog is allowed, like a move order; a cell off the map is not (the cursor is
@@ -119,9 +120,10 @@ pub fn plan(
         }
     };
     match kind {
-        CursorKind::RallyClear | CursorKind::Guard if over_selected.is_some() => {
+        CursorKind::RallyClear => {
             over_selected.map_or(RallyPlan::Nothing, |factory| RallyPlan::Clear { factory })
         }
+        CursorKind::Guard if over_selected.is_some() => RallyPlan::Nothing,
         CursorKind::Rally
         | CursorKind::Move
         | CursorKind::Queue

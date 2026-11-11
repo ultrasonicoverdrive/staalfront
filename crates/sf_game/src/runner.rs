@@ -4036,6 +4036,74 @@ mod tests {
         );
     }
 
+    /// WP6.9: the runner's sidebar tab follows a selection that changes to hold an own factory, and
+    /// a tab picked by hand afterwards stays on later frames until the selection changes again.
+    #[test]
+    fn the_sidebar_tab_follows_a_selection_change_and_not_later_frames() {
+        // `--harvest` turns production on, so the sandbox's barracks and workshop are factories.
+        let mut r = runner("--sandbox --harvest");
+        // The sandbox base goes up over its first ticks; step until an own factory stands.
+        let factory_stands = |r: &Runner| {
+            r.snap.views().iter().any(|v| {
+                let mut sel = Selection::new(commands::LOCAL_PLAYER);
+                sel.click(&r.snap, Some(v.id), false);
+                v.owner == commands::LOCAL_PLAYER
+                    && crate::rally::selected_factories(&r.snap, &sel).count() == 1
+            })
+        };
+        r.snap = r.sim.latest();
+        for _ in 0..100 {
+            if factory_stands(&r) {
+                break;
+            }
+            run_ticks(&r, 20);
+            r.snap = r.sim.latest();
+        }
+        let own: Vec<_> = r
+            .snap
+            .views()
+            .iter()
+            .filter(|v| v.owner == commands::LOCAL_PLAYER)
+            .map(|v| v.id)
+            .collect();
+        let pick = |r: &Runner, id| {
+            let mut sel = Selection::new(commands::LOCAL_PLAYER);
+            sel.click(&r.snap, Some(id), false);
+            sel
+        };
+        let factories: Vec<_> = own
+            .iter()
+            .filter_map(|&id| {
+                let sel = pick(&r, id);
+                (crate::rally::selected_factories(&r.snap, &sel).count() == 1).then_some(sel)
+            })
+            .collect();
+        assert!(!factories.is_empty(), "the sandbox base has an own factory");
+        let first = factories[0].clone();
+        r.selection = first;
+        r.follow_selection_tab();
+        let followed = r.hud.sidebar_tab();
+        // The player picks another tab by hand; later frames with the same selection leave it.
+        let other = [
+            crate::sidebar::Tab::Structures,
+            crate::sidebar::Tab::Infantry,
+        ]
+        .into_iter()
+        .find(|&t| t != followed)
+        .unwrap();
+        r.hud.show_sidebar_tab(other);
+        for _ in 0..3 {
+            r.follow_selection_tab();
+            assert_eq!(r.hud.sidebar_tab(), other, "no follow without a change");
+        }
+        // A new selection holding the factory: the tab follows again.
+        r.selection = Selection::new(commands::LOCAL_PLAYER);
+        r.follow_selection_tab();
+        r.selection = factories[0].clone();
+        r.follow_selection_tab();
+        assert_eq!(r.hud.sidebar_tab(), followed);
+    }
+
     /// Restart builds the world again from the same setup: after a game that had its own commands and
     /// ticks, the checksum at tick N is the one of a fresh start, for the sandbox and for the match.
     #[test]

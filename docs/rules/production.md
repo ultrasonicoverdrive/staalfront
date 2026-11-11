@@ -177,9 +177,9 @@ UI only: the sim command is the `SetRally` of WP6.5 (tag 15), nothing in `sf_sim
   (`commands::right_click`), and the factories follow the same cursor kind (`rally::plan`): Move, Queue and AttackMove over
   ground set the rally point of each selected factory to the same cell (the rally point is never queued); Attack (an
   enemy) sets nothing; NoGo sets nothing, so the picture stays true over water the units cannot enter; Guard over a
-  selected factory clears **its** rally point and over anything else sets the rally cells to that cell. (Guard over a
-  selected factory is the one surprising row: the units guard the factory and its rally point goes. It follows the rule
-  "a right-click on a selected factory clears it" and is cheap to undo.)
+  selected factory leaves its rally point alone (the units guard it; the cursor says Guard, nothing about the rally)
+  and over anything else sets the rally cells to that cell. A rally point is cleared only with factories alone
+  selected, under the RallyClear cursor (fix round of PR #116, 11-11-2026).
 * **Voices.** A rally right-click raises no unit voice (`order_voice` knows only `Command::Order`); a mixed selection
   speaks the units' order voice as for a plain order.
 * **The line.** From the middle of the factory's exit cell (`rally::exit_cell_centre`: `sf_sim::exit_cell` of the anchor,

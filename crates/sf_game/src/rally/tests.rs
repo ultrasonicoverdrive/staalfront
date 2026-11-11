@@ -13,7 +13,7 @@ use crate::sidebar::{Tab, TabFollow};
 use sf_data::movement::MovementCosts;
 use sf_data::terrain::TerrainTypes;
 use sf_data::units::UnitDefs;
-use sf_sim::{Kind, PlayerId, Terrain, World, WorldConfig};
+use sf_sim::{Kind, Order, PlayerId, Terrain, World, WorldConfig};
 
 const W: u32 = 64;
 
@@ -376,7 +376,7 @@ fn a_mixed_selection_over_an_enemy_attacks_and_rallies_nothing() {
 }
 
 #[test]
-fn a_mixed_selection_over_a_selected_factory_guards_it_and_clears_its_rally_point() {
+fn a_mixed_selection_over_a_selected_factory_guards_it_and_keeps_its_rally_point() {
     let c = cast();
     let mut s = c.s;
     let sel = s.select(&[c.tank, c.barracks]);
@@ -385,10 +385,9 @@ fn a_mixed_selection_over_a_selected_factory_guards_it_and_clears_its_rally_poin
     let hover = Hover::over(c.barracks, Cell::new(5, 30));
     assert_eq!(s.cursor(&sel, &hover), CursorKind::Guard);
     assert!(commands::right_click(&s.snap(), &sel, &hover, Modifiers::default()).is_some());
-    let sent = s.rally(&sel, &hover);
-    assert_eq!(sent, vec![clear(c.barracks)]);
-    s.run(sent);
-    assert_eq!(s.rally_of(c.barracks), None);
+    // The cursor says Guard, nothing about the rally: the rally point stays.
+    assert_eq!(s.rally(&sel, &hover), vec![]);
+    assert_eq!(s.rally_of(c.barracks), Some(LAND));
     // Over an own unit that is not a selected factory, the barracks rallies to its cell.
     let hover = Hover::over(c.tank, Cell::new(12, 10));
     assert_eq!(
@@ -494,15 +493,34 @@ fn the_cursor_and_the_commands_of_a_right_click_never_disagree() {
                         }
                         CursorKind::Move | CursorKind::Queue | CursorKind::AttackMove => {
                             assert_eq!(sent.len(), factories, "{ctx}");
+                            // The factories rally to the cell the units are sent to.
+                            if factories > 0 {
+                                let Some(Command::Order {
+                                    order: Order::Move(p) | Order::AttackMove(p),
+                                    ..
+                                }) = unit
+                                else {
+                                    panic!("no move order for the units: {ctx} {unit:?}");
+                                };
+                                let target = snap.cell_at(p);
+                                assert!(target.is_some(), "{ctx}");
+                                for command in &sent {
+                                    assert!(
+                                        matches!(command, Command::SetRally { cell, .. } if *cell == target),
+                                        "{ctx} {unit:?}"
+                                    );
+                                }
+                            }
                             mixed += usize::from(factories > 0);
                         }
                         CursorKind::Guard => {
                             let over_selected = hover.entity.is_some_and(|id| {
                                 selected_factories(&snap, sel).any(|(f, _)| f == id)
                             });
+                            // Over a selected factory the units guard it and its rally stays.
                             assert_eq!(
                                 sent.len(),
-                                if over_selected { 1 } else { factories },
+                                if over_selected { 0 } else { factories },
                                 "{ctx}"
                             );
                         }

@@ -15,5 +15,8 @@ with a rally point on (92, 90) for the barracks.
 * `rally_t00003_not_selected_no_line.png`: the same tick with nothing selected: the flag stays (blue, not selected), the
   line is gone, the sidebar shows its default Structures tab.
 
+The same test run also re-renders the WP6.5 production shots under this directory; those are not kept here (the
+originals are in `docs/screenshots/wp6.5/`).
+
 Not shown: the real game window (a selection and a right-click cannot be made from outside the window); the
 wiring in `Runner` is checked by reading and by the pure functions it calls (`rally/tests.rs`).
