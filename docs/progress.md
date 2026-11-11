@@ -2798,6 +2798,14 @@ ms), the command record (`--record`, an `sf_headless` scenario with a `game` blo
 game) and the test that plays 7,000 ticks of M1 on the game's sim thread and in `sf_headless` with the same checksum at every tick.
 Nothing in `crates/sf_sim/` moved; no pin or `.expected` moved.
 
+Follow-up of the test `hitch::tests::the_bookkeeping_of_a_quiet_frame_is_small` (11-11-2026): it ran 200,000 frames on the real clock and
+asserted that none was a hitch (`over_hitch == 0`, a frame over 25 ms), so one real pause of the machine failed it. It failed once on
+`check (windows-latest)` of PR #120 (run 43033638595, attempt 1: `over_hitch` was 1); the per-frame bound held (1,441 ns against 20,000 ns)
+and the same code had passed on two earlier heads. The time test now asserts only the cost, as the best of five batches against the same
+bound (not tightened). That a quiet frame does no slow-path work is counted on synthetic frame times by
+`a_quiet_frame_does_no_slow_path_work`: no hitch, no line, `slow_ticks` not asked, one thread-clock read per frame where it is measured.
+Not changed here: follow-up 28 (`crowd_perf.rs`) is the same kind of wall-clock bound and is still open.
+
 What the container measured (debug build, software rendering on lavapipe, a busy 4-core machine; relative numbers only, the fps
 requirement is the laptop's, PLAN section 13):
 
