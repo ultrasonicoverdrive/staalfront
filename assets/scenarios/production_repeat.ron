@@ -1,0 +1,71 @@
+// Repeat (WP6.10, docs/rules/production.md): one barracks with the repeat switched on keeps building
+// riflemen from a queue of two while the money lasts, waits when it is gone and goes on when the
+// harvesters unload; at tick 1500 repeat is switched off and the queue runs out.
+//
+// `unit_defs` names the FROZEN copy of WP7.2 (harvest_defs) and the ore, harvest, storage, money and
+// production numbers are written out below, as in the `production` scenario this is made from.
+// Kinds: 0 construction_center, 2 refinery (capacity 600), 3 barracks (exit cell (86, 81)), 11
+// harvester, 12 rifleman (100 credits over 100 ticks). Player 0 starts with 150 credits.
+//
+//   slot 0 the construction centre (84, 74), slot 1 the barracks (84, 80), slot 2 the refinery
+//   (96, 86), slots 3 and 4 two harvesters
+//   tick 1     rally (80, 92); two riflemen queued; repeat on
+//   tick 1500  repeat off
+//   tick 1800  the queue has run out
+//
+// tools/sf_headless/tests/production_repeat.rs asserts it.
+Scenario(
+    name: "production_repeat",
+    seed: 0x0006_000a,
+    map: (width: 256, height: 256),
+    map_name: Some("playfield256"),
+    unit_defs: Some("harvest_defs"),
+    buildings: true,
+    factions: [(0, Meridian), (1, Veyran)],
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 600)]),
+    money: Some((credits_per_ore: 1, starting: [(0, 150)])),
+    production: Some((queue_limit: 5, exit_radius: 1)),
+    ticks: 2400,
+    commands: [
+        (tick: 0, command: PlaceStructure(kind: 0, owner: 0, cell: (84, 74))),
+        (tick: 0, command: PlaceStructure(kind: 3, owner: 0, cell: (84, 80))),
+        (tick: 0, command: PlaceStructure(kind: 2, owner: 0, cell: (96, 86))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (104, 90))),
+        (tick: 0, command: SpawnUnit(kind: 11, owner: 0, cell: (106, 92))),
+        (tick: 1, player: 0, command: SetRally(factory: (1, 0), cell: Some((80, 92)))),
+        (tick: 1, player: 0, command: QueueUnit(factory: (1, 0), kind: 12)),
+        (tick: 1, player: 0, command: QueueUnit(factory: (1, 0), kind: 12)),
+        (tick: 1, player: 0, command: SetRepeat(factory: (1, 0), on: true)),
+        (tick: 1500, player: 0, command: SetRepeat(factory: (1, 0), on: false)),
+    ],
+)

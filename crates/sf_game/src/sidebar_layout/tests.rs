@@ -196,3 +196,18 @@ fn the_tool_buttons_follow_the_ui_scale() {
         assert!(l.tools[1].right() <= l.column.right(), "scale {scale}");
     }
 }
+
+#[test]
+fn the_repeat_button_is_the_third_in_the_row_of_buttons() {
+    for scale in [0.5, 1.0, 2.0] {
+        let l = layout(screen(1920.0, 1080.0), scale, &look(), 4.0, true);
+        let [repair, sell] = l.tools;
+        assert_eq!(l.repeat.y, sell.y);
+        assert_eq!((l.repeat.w, l.repeat.h), (sell.w, sell.h));
+        assert!(sell.right() < l.repeat.x, "scale {scale}");
+        assert!(l.repeat.right() <= l.column.right(), "scale {scale}");
+        assert!(repair.x < sell.x);
+        let (x, y) = l.repeat.center();
+        assert_eq!(l.hit(x, y, 0, 0), Some(Hit::Repeat));
+    }
+}

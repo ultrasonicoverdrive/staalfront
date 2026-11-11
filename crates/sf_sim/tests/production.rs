@@ -1576,6 +1576,7 @@ fn the_commands_have_permanent_numbers_in_the_pending_queue_hash() {
                 Command::QueueUnit { kind, .. } => Command::QueueUnit { factory: f, kind },
                 Command::CancelUnit { index, .. } => Command::CancelUnit { factory: f, index },
                 Command::SetRally { cell, .. } => Command::SetRally { factory: f, cell },
+                Command::SetRepeat { on, .. } => Command::SetRepeat { factory: f, on },
                 other => other,
             };
             w.schedule(tick, P0, c).unwrap();
@@ -1612,6 +1613,14 @@ fn the_commands_have_permanent_numbers_in_the_pending_queue_hash() {
         sum(Some(Command::SetRally {
             factory: f,
             cell: None,
+        })),
+        sum(Some(Command::SetRepeat {
+            factory: f,
+            on: true,
+        })),
+        sum(Some(Command::SetRepeat {
+            factory: f,
+            on: false,
         })),
     ];
     for i in 0..all.len() {
@@ -1652,4 +1661,307 @@ fn two_runs_of_the_same_commands_agree_tick_by_tick() {
         w.checksum_history().to_vec()
     };
     assert_eq!(play(), play());
+}
+
+// ---- repeat (WP6.10) --------------------------------------------------------------------------------
+
+fn set_repeat(w: &mut World, factory: EntityId, on: bool) -> StepReport {
+    send(w, P0, Command::SetRepeat { factory, on })
+}
+
+fn queue_len(w: &World, factory: EntityId) -> usize {
+    w.production_of(factory).map_or(0, |v| v.queue.len())
+}
+
+#[test]
+fn a_repeating_factory_keeps_building_the_same_unit_and_the_queue_never_grows() {
+    let mut w = free_world(5, 4);
+    let b = barracks(&w);
+    queue(&mut w, b, RIFLE);
+    queue(&mut w, b, RIFLE);
+    assert!(!w.production_of(b).unwrap().repeat, "off by default");
+    assert_eq!(set_repeat(&mut w, b, true).commands_executed, 1);
+    assert!(w.production_of(b).unwrap().repeat);
+    // A rifle takes 14 ticks; the queue holds two the whole time.
+    for _ in 0..200 {
+        w.step();
+        assert_eq!(queue_len(&w, b), 2);
+    }
+    assert!(units_of(&w, RIFLE, P0).len() >= 12, "many rifles came out");
+    assert!(
+        w.production_of(b)
+            .unwrap()
+            .queue
+            .iter()
+            .all(|i| i.kind == RIFLE && !i.free)
+    );
+}
+
+#[test]
+fn a_full_queue_on_repeat_never_passes_the_limit_and_keeps_its_mix() {
+    let mut w = free_world(5, 4);
+    let b = barracks(&w);
+    for _ in 0..5 {
+        queue(&mut w, b, RIFLE);
+    }
+    set_repeat(&mut w, b, true);
+    for _ in 0..300 {
+        w.step();
+        assert_eq!(queue_len(&w, b), 5, "never above the limit of 5");
+    }
+    // Two kinds in an order: the mix comes round again in order.
+    let mut m = free_world(2, 4);
+    let b = barracks(&m);
+    place(&mut m, P0, RADAR, (20, 10));
+    run(&mut m, 25);
+    queue(&mut m, b, RIFLE);
+    queue(&mut m, b, SNIPER);
+    set_repeat(&mut m, b, true);
+    let mut order = Vec::new();
+    for _ in 0..80 {
+        m.step();
+        for p in m.produced() {
+            order.push(p.kind);
+        }
+    }
+    assert!(order.len() >= 6);
+    for (n, k) in order.iter().enumerate() {
+        assert_eq!(*k, if n % 2 == 0 { RIFLE } else { SNIPER }, "unit {n}");
+    }
+}
+
+#[test]
+fn a_repeating_factory_waits_for_money_and_resumes_when_it_is_back() {
+    // 200 credits: the barracks repeats rifles (70) while the workshop builds a tank (301).
+    let mut w = paid_world(200, 5, 4);
+    let (b, ws) = (barracks(&w), workshop(&w));
+    queue(&mut w, b, RIFLE);
+    queue(&mut w, ws, TANK);
+    set_repeat(&mut w, b, true);
+    run(&mut w, 150);
+    let v = w.production_of(b).unwrap();
+    assert_eq!(v.status, FactoryStatus::WaitingForMoney);
+    assert!(v.repeat, "repeat does not switch itself off without money");
+    assert!(w.credits(P0) < 5, "less than one tick of a rifle is left");
+    let before = units_of(&w, RIFLE, P0).len();
+    run(&mut w, 50);
+    assert_eq!(
+        units_of(&w, RIFLE, P0).len(),
+        before,
+        "nothing without money"
+    );
+    assert_eq!(queue_len(&w, b), 1);
+    // Cancel the tank: what it was paid comes back and the barracks goes on.
+    send(
+        &mut w,
+        P0,
+        Command::CancelUnit {
+            factory: ws,
+            index: 0,
+        },
+    );
+    run(&mut w, 100);
+    assert!(units_of(&w, RIFLE, P0).len() > before, "it resumed");
+    assert!(w.production_of(b).unwrap().repeat);
+}
+
+#[test]
+fn turning_repeat_off_lets_the_queue_run_out() {
+    let mut w = free_world(5, 4);
+    let b = barracks(&w);
+    for _ in 0..3 {
+        queue(&mut w, b, RIFLE);
+    }
+    set_repeat(&mut w, b, true);
+    run(&mut w, 100);
+    assert_eq!(queue_len(&w, b), 3);
+    set_repeat(&mut w, b, false);
+    assert!(!w.production_of(b).unwrap().repeat);
+    let at_off = units_of(&w, RIFLE, P0).len();
+    run(&mut w, 200);
+    assert_eq!(queue_len(&w, b), 0);
+    assert_eq!(w.production_of(b).unwrap().status, FactoryStatus::Idle);
+    // What was in the queue came out, and not one more.
+    assert_eq!(units_of(&w, RIFLE, P0).len(), at_off + 3);
+}
+
+#[test]
+fn a_cancelled_item_does_not_come_back() {
+    let mut w = free_world(5, 4);
+    let b = barracks(&w);
+    queue(&mut w, b, RIFLE);
+    set_repeat(&mut w, b, true);
+    send(
+        &mut w,
+        P0,
+        Command::CancelUnit {
+            factory: b,
+            index: 0,
+        },
+    );
+    run(&mut w, 100);
+    assert_eq!(queue_len(&w, b), 0);
+    assert!(units_of(&w, RIFLE, P0).is_empty());
+    assert!(w.production_of(b).unwrap().repeat, "the toggle stays on");
+    // An empty queue on repeat does nothing until something is queued.
+    queue(&mut w, b, RIFLE);
+    run(&mut w, 40);
+    assert!(units_of(&w, RIFLE, P0).len() >= 2);
+    // Of two items, the cancelled second one is gone for good.
+    let mut m = free_world(5, 4);
+    let b = barracks(&m);
+    queue(&mut m, b, RIFLE);
+    queue(&mut m, b, RIFLE);
+    set_repeat(&mut m, b, true);
+    send(
+        &mut m,
+        P0,
+        Command::CancelUnit {
+            factory: b,
+            index: 1,
+        },
+    );
+    for _ in 0..100 {
+        m.step();
+        assert_eq!(queue_len(&m, b), 1);
+    }
+}
+
+#[test]
+fn the_free_harvester_is_never_repeated() {
+    // A workshop that brings a harvester with it, its exit walled in so the free unit waits inside
+    // while repeat is switched on.
+    let table = ProductionTable::new(
+        vec![
+            build_of(RIFLE, BuildingFunction::InfantryFactory, 70, 14, 3, vec![]),
+            build_of(
+                HARVESTER,
+                BuildingFunction::VehicleFactory,
+                311,
+                13,
+                3,
+                vec![],
+            ),
+        ],
+        vec![(WORKSHOP, HARVESTER)],
+    )
+    .unwrap();
+    let mut w = start(
+        base()
+            .with_production(rules(5, 1), table)
+            .unwrap()
+            .with_player_factions(&[(P0, 1), (P1, 2)])
+            .unwrap(),
+    );
+    send(
+        &mut w,
+        P0,
+        Command::BuildStructure {
+            kind: WORKSHOP,
+            cell: Cell::new(30, 20),
+        },
+    );
+    place(&mut w, P0, WALL, (33, 20));
+    let built = w.occupant_at(Cell::new(30, 20)).unwrap();
+    run_until(&mut w, 300, |w| {
+        w.construction_of(built).is_none()
+            && w.production_of(built)
+                .is_some_and(|v| v.status == FactoryStatus::WaitingForExit)
+    });
+    assert_eq!(set_repeat(&mut w, built, true).commands_executed, 1);
+    let wall = w.occupant_at(Cell::new(33, 20)).unwrap();
+    send(&mut w, P0, Command::Despawn { id: wall });
+    run(&mut w, 100);
+    assert_eq!(units_of(&w, HARVESTER, P0).len(), 1, "it came out once");
+    assert_eq!(queue_len(&w, built), 0, "and did not go back in");
+}
+
+#[test]
+fn a_repeat_is_refused_for_what_is_not_the_senders_standing_factory() {
+    let mut w = free_world(5, 4);
+    let b = barracks(&w);
+    let anchor = w.occupant_at(Cell::new(4, 4)).unwrap();
+    let probe = |w: &mut World, player, factory| {
+        send(w, player, Command::SetRepeat { factory, on: true });
+        last_reason(w)
+    };
+    assert_eq!(probe(&mut w, P1, b), Some(ProductionError::NotYours));
+    assert_eq!(
+        probe(&mut w, P0, anchor),
+        Some(ProductionError::NotAFactory)
+    );
+    assert_eq!(
+        probe(&mut w, P0, EntityId::new(900, 0)),
+        Some(ProductionError::NoSuchFactory)
+    );
+    assert!(w.production_of(b).is_none(), "no record was made");
+    // Under construction: not standing.
+    send(
+        &mut w,
+        P0,
+        Command::BuildStructure {
+            kind: BARRACKS,
+            cell: Cell::new(20, 10),
+        },
+    );
+    let going_up = w.occupant_at(Cell::new(20, 10)).unwrap();
+    assert_eq!(
+        probe(&mut w, P0, going_up),
+        Some(ProductionError::NotStanding)
+    );
+    // A refusal counts as ignored.
+    let r = send(
+        &mut w,
+        P1,
+        Command::SetRepeat {
+            factory: b,
+            on: true,
+        },
+    );
+    assert_eq!((r.commands_executed, r.commands_ignored), (0, 1));
+    assert!(!w.factories().any(|f| w.production_of(f).unwrap().repeat));
+}
+
+#[test]
+fn a_repeat_does_not_add_a_copy_whose_requirement_no_longer_stands() {
+    let mut w = free_world(5, 4);
+    let b = barracks(&w);
+    place(&mut w, P0, RADAR, (20, 10));
+    run(&mut w, 25);
+    queue(&mut w, b, SNIPER);
+    set_repeat(&mut w, b, true);
+    let radar = w.occupant_at(Cell::new(20, 10)).unwrap();
+    run(&mut w, 3);
+    send(&mut w, P0, Command::Despawn { id: radar });
+    run(&mut w, 60);
+    // The sniper in the queue is held; nothing was added behind it.
+    assert_eq!(queue_len(&w, b), 1);
+    assert!(units_of(&w, SNIPER, P0).is_empty());
+}
+
+#[test]
+fn the_repeat_flag_is_part_of_the_checksum_and_a_world_that_never_repeats_hashes_as_before() {
+    let build = |on: Option<bool>| {
+        let mut w = free_world(5, 4);
+        let b = barracks(&w);
+        queue(&mut w, b, RIFLE);
+        if let Some(on) = on {
+            set_repeat(&mut w, b, on);
+        } else {
+            w.step();
+        }
+        w.checksum()
+    };
+    let never = build(None);
+    let on = build(Some(true));
+    let off = build(Some(false));
+    assert_ne!(never, on, "the flag is hashed");
+    assert_eq!(never, off, "switched off is as if never switched on");
+    // Switching off a factory without a record changes nothing, not even a record.
+    let mut a = free_world(5, 4);
+    let mut c = free_world(5, 4);
+    let b = barracks(&a);
+    set_repeat(&mut a, b, false);
+    c.step();
+    assert_eq!(a.checksum(), c.checksum());
 }

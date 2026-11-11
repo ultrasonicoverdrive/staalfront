@@ -450,3 +450,23 @@ fn the_format_tag_and_section_markers_are_distinct() {
     assert_eq!(unique.len(), markers.len());
     assert!(!FORMAT_TAG.is_empty());
 }
+
+#[test]
+fn set_repeat_has_the_permanent_tag_18_in_the_pending_hash() {
+    // The bytes of the command, as literals: tag, factory index, factory generation, on.
+    for (on, flag) in [(true, 1u8), (false, 0u8)] {
+        let mut a = Fnv1a64::new();
+        write_command(
+            &mut a,
+            &Command::SetRepeat {
+                factory: EntityId::new(3, 1),
+                on,
+            },
+        );
+        let mut b = Fnv1a64::new();
+        for byte in [18u8, 3, 0, 0, 0, 1, 0, 0, 0, flag] {
+            b.write_u8(byte);
+        }
+        assert_eq!(a.finish(), b.finish());
+    }
+}
