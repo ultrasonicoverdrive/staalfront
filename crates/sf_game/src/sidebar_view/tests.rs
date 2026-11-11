@@ -17,7 +17,7 @@ struct Fixture {
 fn fixture() -> Fixture {
     let defs = UnitDefs::embedded();
     let look = SidebarLook::embedded();
-    let catalog = Catalog::build(&defs, Faction::Meridian, &look);
+    let catalog = Catalog::build(&defs, Faction::Meridian, &look, sf_sim::BuildSpeed::FULL);
     Fixture {
         defs,
         catalog,

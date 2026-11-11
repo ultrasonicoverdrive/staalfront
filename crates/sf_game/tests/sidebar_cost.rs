@@ -90,7 +90,12 @@ struct Run {
 fn run(crowd: u32) -> Run {
     let defs = UnitDefs::embedded();
     let look = SidebarLook::embedded();
-    let catalog = Catalog::build(&defs, Faction::Meridian, &look);
+    let catalog = Catalog::build(
+        &defs,
+        Faction::Meridian,
+        &look,
+        sf_game::playfield::shipped_build_speed(),
+    );
     let snap = SimSnapshot::capture(&world(&defs, crowd));
     Run {
         snap,

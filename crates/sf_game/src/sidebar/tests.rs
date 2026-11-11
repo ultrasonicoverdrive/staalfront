@@ -68,7 +68,12 @@ fn bare_rig_with(credits: u64, exit_radius: u8, power: bool) -> Rig {
     };
     // WP6.6: a structure can be sold (the sale is what the sidebar must not count as standing).
     let world = crate::playfield::with_repair(world);
-    let catalog = Catalog::build(&defs, Faction::Meridian, &look);
+    let catalog = Catalog::build(
+        &defs,
+        Faction::Meridian,
+        &look,
+        sf_bridge::production_rules(&settings).build_speed,
+    );
     Rig {
         world,
         defs,
@@ -283,7 +288,7 @@ fn the_units_of_a_tab_are_those_of_the_faction_in_the_order_of_the_data() {
         ]
     );
     // Veyran's catalog of the same world is another list: a medic, no sniper, a gunboat.
-    let veyran = Catalog::build(&r.defs, Faction::Veyran, &r.look);
+    let veyran = Catalog::build(&r.defs, Faction::Veyran, &r.look, sf_sim::BuildSpeed::FULL);
     let ids = |tab| {
         veyran
             .entries()
@@ -314,7 +319,12 @@ fn the_order_follows_the_order_of_the_pictures_not_the_kind_numbers() {
             1,
         );
     let defs = defs_from(&text);
-    let catalog = Catalog::build(&defs, Faction::Meridian, &SidebarLook::embedded());
+    let catalog = Catalog::build(
+        &defs,
+        Faction::Meridian,
+        &SidebarLook::embedded(),
+        sf_sim::BuildSpeed::FULL,
+    );
     let infantry: Vec<&str> = catalog
         .entries()
         .iter()
@@ -361,7 +371,12 @@ fn a_unit_with_prerequisites_waits_for_them() {
         1,
     );
     let defs = defs_from(&text);
-    let catalog = Catalog::build(&defs, Faction::Meridian, &SidebarLook::embedded());
+    let catalog = Catalog::build(
+        &defs,
+        Faction::Meridian,
+        &SidebarLook::embedded(),
+        sf_sim::BuildSpeed::FULL,
+    );
     let rifleman = catalog.entry(kind(&defs, "rifleman")).unwrap();
     assert_eq!(rifleman.requires, [kind(&defs, "radar")]);
     let barracks = OwnFactory {
@@ -392,7 +407,7 @@ fn a_role_without_a_picture_gets_the_default_of_its_tab_and_comes_last() {
     );
     let defs = defs_from(&text);
     let look = SidebarLook::embedded();
-    let catalog = Catalog::build(&defs, Faction::Meridian, &look);
+    let catalog = Catalog::build(&defs, Faction::Meridian, &look, sf_sim::BuildSpeed::FULL);
     let infantry: Vec<&Entry> = catalog
         .entries()
         .iter()
@@ -406,6 +421,52 @@ fn a_role_without_a_picture_gets_the_default_of_its_tab_and_comes_last() {
     assert_eq!(rifleman.order, 1000 + 12);
     // The others keep their own pictures.
     assert_eq!(infantry[0].picture.label, "ROCKT");
+}
+
+/// Follow-up of WP6.11 (review of #115): the build times the sidebar holds are the scaled ticks of the
+/// world, not the unscaled times of the data.
+#[test]
+fn the_catalogue_times_are_the_scaled_ticks_the_world_counts() {
+    let defs = UnitDefs::embedded();
+    let world = World::new(WorldConfig::new(7).with_map_size(64, 64))
+        .unwrap()
+        .with_units(sf_bridge::unit_table(&defs).unwrap())
+        .unwrap();
+    let world = crate::playfield::with_buildings(world, &defs);
+    let world = crate::playfield::with_production(crate::playfield::with_money(world), &defs);
+    let speed = crate::playfield::shipped_build_speed();
+    let catalog = Catalog::build(&defs, Faction::Meridian, &SidebarLook::embedded(), speed);
+    let mut checked = 0;
+    for e in catalog.entries() {
+        let sim = match e.factory {
+            Some(_) => {
+                world
+                    .production_table()
+                    .unwrap()
+                    .get(e.kind)
+                    .unwrap()
+                    .build_ticks
+            }
+            None => world.building_table().get(e.kind).unwrap().build_ticks,
+        };
+        assert_eq!(e.ticks, sim, "{}", e.id);
+        checked += 1;
+    }
+    assert_eq!(checked, 10 + 5 + 7);
+    // Literals (production.md): 100 -> 67, 300 -> 200, 400 -> 267, never the data's own.
+    let ticks = |id: &str| catalog.entry(kind(&defs, id)).unwrap().ticks;
+    assert_eq!(
+        (ticks("rifleman"), ticks("power_plant"), ticks("barracks")),
+        (67, 200, 267)
+    );
+    // The same catalogue at 1 / 1 holds the data's times.
+    let full = Catalog::build(
+        &defs,
+        Faction::Meridian,
+        &SidebarLook::embedded(),
+        sf_sim::BuildSpeed::FULL,
+    );
+    assert_eq!(full.entry(kind(&defs, "power_plant")).unwrap().ticks, 300);
 }
 
 // ---- prices, times and pictures are the data's ---------------------------------------------------

@@ -10,7 +10,9 @@
 
 use sf_data::sidebar_look::SidebarLook;
 use sf_data::units::{Category, Faction, UnitDefs};
-use sf_sim::{BuildingFunction, Command, EntityId, FactoryStatus, FactoryView, Kind, PlayerId};
+use sf_sim::{
+    BuildSpeed, BuildingFunction, Command, EntityId, FactoryStatus, FactoryView, Kind, PlayerId,
+};
 
 use crate::repair_mode::ToolMode;
 use crate::sim_snapshot::SimSnapshot;
@@ -104,7 +106,7 @@ pub struct Entry {
     pub tab: Tab,
     /// Price in credits.
     pub cost: u32,
-    /// Ticks to build.
+    /// Ticks to build, at the build speed (what the simulation counts, not the data's own).
     pub ticks: u32,
     /// The structures that must stand, besides the factory of a unit.
     pub requires: Vec<Kind>,
@@ -130,8 +132,15 @@ pub struct Catalog {
 
 impl Catalog {
     /// The roles of `defs` that have a price and that `faction` may have, by tab, then by the
-    /// order of their `build_picture` (the roles without one after those, by kind).
-    pub fn build(defs: &UnitDefs, faction: Faction, look: &SidebarLook) -> Catalog {
+    /// order of their `build_picture` (the roles without one after those, by kind). The build times
+    /// are the data's scaled by `speed` with the rule the simulation uses
+    /// ([`BuildSpeed::ticks`]), so they are the ticks the world will count.
+    pub fn build(
+        defs: &UnitDefs,
+        faction: Faction,
+        look: &SidebarLook,
+        speed: BuildSpeed,
+    ) -> Catalog {
         let mut entries = Vec::new();
         let mut structures = Vec::new();
         let mut anchors = Vec::new();
@@ -186,7 +195,7 @@ impl Catalog {
                 name: d.id.replace('_', " "),
                 tab,
                 cost,
-                ticks: d.build_seconds.to_ticks().unwrap_or(0),
+                ticks: speed.ticks(d.build_seconds.to_ticks().unwrap_or(0)),
                 requires,
                 factory: factory_for(d.category),
                 picture,

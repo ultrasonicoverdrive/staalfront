@@ -177,6 +177,9 @@ impl Preset {
     }
 }
 
+/// How much of a sound row the test button (or, on the music row, its empty place) takes.
+const TEST_WEIGHT: u8 = 2;
+
 /// One button of the model.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Control {
@@ -189,6 +192,10 @@ pub struct Control {
     pub weight: u8,
     /// Player colours to show beside the text.
     pub swatches: Vec<[u8; 3]>,
+    /// Takes its place in the row and nothing else: nothing is drawn and nothing answers a click. It
+    /// keeps a row that has one control fewer than its neighbours (the music has no test button)
+    /// lined up with them.
+    pub blank: bool,
 }
 
 impl Control {
@@ -200,6 +207,17 @@ impl Control {
             enabled: true,
             weight: 1,
             swatches: Vec::new(),
+            blank: false,
+        }
+    }
+
+    /// The place of a control that this row does not have, `weight` wide.
+    fn gap(weight: u8) -> Control {
+        Control {
+            blank: true,
+            enabled: false,
+            weight,
+            ..Control::new("", Item::Noop)
         }
     }
 
@@ -830,10 +848,13 @@ impl Menu {
                     .disabled_if(percent >= 100),
             ];
             // The music has no test sound: there is no CC0 music to play, and the running music
-            // follows the slider at once.
-            if which != Volume::Music {
-                controls.push(Control::new(&w.sound_test, Item::TestVolume(which)).weighted(2));
-            }
+            // follows the slider at once. Its row keeps the place of the button, so that its `-`,
+            // value and `+` are as wide as, and under, those of the other rows.
+            controls.push(if which == Volume::Music {
+                Control::gap(TEST_WEIGHT)
+            } else {
+                Control::new(&w.sound_test, Item::TestVolume(which)).weighted(TEST_WEIGHT)
+            });
             rows.push(Row::Setting {
                 label: label.clone(),
                 controls,

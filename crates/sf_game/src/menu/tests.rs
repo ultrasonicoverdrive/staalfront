@@ -225,6 +225,12 @@ fn the_tabs_switch_the_page_and_the_sound_page_has_its_controls() {
     let shown = |label: &str| texts(row(&sound, label)).join(" ");
     assert_eq!(shown("Master"), "- 100% + Test");
     assert_eq!(shown("Music"), "- 60% +");
+    // The music row keeps the place of the test button, empty and dead, so it lines up.
+    let music = row(&sound, "Music");
+    assert_eq!(music.len(), 4);
+    assert!(
+        music[3].blank && !music[3].enabled && music[3].weight == row(&sound, "Master")[3].weight
+    );
     assert_eq!(shown("Effects"), "- 100% + Test");
     assert_eq!(shown("Unit voices"), "- 100% + Test");
     assert!(
@@ -352,7 +358,30 @@ fn the_test_button_plays_without_changing_a_setting_and_the_music_has_none() {
         );
     }
     assert_eq!(*m.settings(), Settings::default());
-    assert_eq!(row(&model(&m), "Music").len(), 3);
+    // The music's place is a blank that answers nothing.
+    let music = row(&model(&m), "Music").to_vec();
+    assert_eq!(music.len(), 4);
+    assert!(music[3].blank);
+    assert!(music[..3].iter().all(|c| !c.blank));
+}
+
+#[test]
+fn the_folder_hint_says_to_start_once_with_the_flag_and_click_on() {
+    let m = sound_menu();
+    let sound = model(&m);
+    let hint = sound
+        .rows
+        .iter()
+        .find_map(|r| match r {
+            Row::Note(t) if t.contains("--ra-audio") => Some(t.as_str()),
+            _ => None,
+        })
+        .expect("the hint");
+    assert_eq!(
+        hint,
+        "Your own Red Alert files: nothing from them is copied, only this folder is remembered. \
+         Start once with --ra-audio FOLDER and click On to remember it."
+    );
 }
 
 #[test]

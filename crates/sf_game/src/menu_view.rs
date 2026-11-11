@@ -313,7 +313,9 @@ pub fn hit(model: &Model, layout: &Layout, x: f32, y: f32) -> Option<Item> {
     for (placed, row) in layout.rows.iter().zip(&model.rows) {
         if let Row::Setting { controls, .. } = row {
             for (rect, c) in placed.controls.iter().zip(controls) {
-                test(rect, c.item);
+                if !c.blank {
+                    test(rect, c.item);
+                }
             }
         }
     }
@@ -471,7 +473,12 @@ pub fn frame(ui: &mut Ui, model: &Model, look: &MenuLook) -> Option<Item> {
                     text_px,
                     ui.config().text,
                 );
-                for (rect, c) in placed.controls.iter().zip(controls) {
+                for (rect, c) in placed
+                    .controls
+                    .iter()
+                    .zip(controls)
+                    .filter(|(_, c)| !c.blank)
+                {
                     control(ui, look, &next_id(), *rect, c, &mut clicked);
                 }
             }

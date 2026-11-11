@@ -592,6 +592,42 @@ mod tests {
         }
     }
 
+    /// Follow-up of WP6.11: the plain sandbox (no production rules) builds at the shipped build speed,
+    /// 3 / 2, like the world with production rules; the `--harvest` sandbox is scaled once, by
+    /// `with_production`, not twice.
+    #[test]
+    fn the_plain_sandbox_builds_at_the_shipped_speed_and_is_scaled_once() {
+        let data_ticks = |world: &World, id: &str| {
+            let (_, defs) = world_for(64, 1);
+            world
+                .building_table()
+                .get(sf_sim::Kind(defs.kind_of(id).unwrap()))
+                .unwrap()
+                .build_ticks
+        };
+        let speed = crate::playfield::shipped_build_speed();
+        assert_eq!((speed.num, speed.den), (3, 2), "production.ron");
+        // The data's own time of the power plant is 300 ticks (15 s), the barracks' 400.
+        let (world, defs) = world_for(64, 1);
+        let raw = crate::playfield::with_sandbox_buildings(world, &defs, true);
+        assert_eq!(data_ticks(&raw, "power_plant"), 300);
+        // Plain: scaled to 200 and 267, the numbers `with_production` gives (production.md).
+        let (world, defs) = world_for(64, 1);
+        let plain = crate::playfield::with_sandbox_buildings(world, &defs, false);
+        assert_eq!(data_ticks(&plain, "power_plant"), 200);
+        assert_eq!(data_ticks(&plain, "barracks"), 267);
+        // With production: the table keeps the data's until `with_production`, which scales it once,
+        // so both sandboxes end with the same table.
+        let (world, defs) = world_for(64, 1);
+        let world = crate::playfield::with_sandbox_buildings(world, &defs, true);
+        let produced = crate::playfield::with_production(world, &defs);
+        assert_eq!(data_ticks(&produced, "power_plant"), 200);
+        assert_eq!(
+            plain.building_table().digest(),
+            produced.building_table().digest()
+        );
+    }
+
     /// The sandbox as `--harvest` runs it for power: unit, building, production and power rules.
     fn powered_world() -> (World, UnitDefs) {
         let (world, defs) = world_for(256, 1);

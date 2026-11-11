@@ -146,7 +146,12 @@ impl Scene {
         );
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
         let look = SidebarLook::embedded();
-        let catalog = Catalog::build(&defs, Faction::Meridian, &look);
+        let catalog = Catalog::build(
+            &defs,
+            Faction::Meridian,
+            &look,
+            sf_game::playfield::shipped_build_speed(),
+        );
         let mut scene = Scene {
             map,
             ground,

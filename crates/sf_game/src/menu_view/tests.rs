@@ -106,6 +106,48 @@ fn the_key_list_gets_two_columns_when_the_window_is_wide_and_fewer_rows_when_it_
 }
 
 #[test]
+fn the_music_row_lines_up_with_the_other_volume_rows() {
+    let l = look();
+    let mut m = menu();
+    m.open_settings(Page::Sound);
+    let w = screen(1280, 720);
+    let model = m.model(fit(w, 1.0, l)).unwrap();
+    let lay = layout(&model, l, w, 1.0, &measure(1.0));
+    let rects = |label: &str| -> Vec<Rect> {
+        model
+            .rows
+            .iter()
+            .zip(&lay.rows)
+            .find_map(|(r, placed)| match r {
+                Row::Setting { label: n, .. } if n == label => Some(placed.controls.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no row {label:?}"))
+    };
+    let master = rects("Master");
+    let music = rects("Music");
+    assert_eq!(master.len(), 4);
+    for i in 0..3 {
+        assert_eq!(
+            (music[i].x, music[i].w),
+            (master[i].x, master[i].w),
+            "control {i} of the music row"
+        );
+    }
+    // Nothing is hit on the blank place: a click there finds no item.
+    let blank = music[3];
+    assert_eq!(
+        hit(
+            &model,
+            &lay,
+            blank.x + blank.w * 0.5,
+            blank.y + blank.h * 0.5
+        ),
+        None
+    );
+}
+
+#[test]
 fn every_screen_fits_the_window_at_every_scale_the_settings_offer() {
     let l = look();
     for (w, h) in [(1280u32, 720u32), (1920, 1080), (2560, 1440)] {
