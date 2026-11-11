@@ -2965,6 +2965,37 @@ fixed, delete the entry in the same PR.
     that was re-created for every fog version is fixed. Open until Tijmen's log: suspects 3 and 5, the swap-chain timeout (the log now
     records it), the CPU cost of `Minimap::set_fog`, and the sim thread's own CPU time (not measured; a 62 ms tick could be that thread
     not running).
+    **Laptop run with the hitch log (11-11-2026): the stutter did not come back.** Tijmen played `sf_game --match --ra-audio
+    --hitch-log --record` from main `a0acd79` (release) on the same laptop, on mains power, started from PowerShell with stdout
+    going to a file: 6,887 ticks (5 min 44 s), 115 commands, the window maximised once at tick 312. He felt no stutter. The
+    files are `docs/bench/hitch-2026-11-11-a.json` and `docs/bench/play-2026-11-11-a.ron`, as the game wrote them (the record
+    names the laptop's assets folder).
+
+    | | 10-11 (`4944d5c`) | 11-11 (`a0acd79`) |
+    |---|---|---|
+    | longest frame | 1,627.8 ms | 253.8 ms (the maximise) |
+    | frames over 50 ms | not counted | 2 of 22,876 |
+    | frames over 25 ms | not counted | 9 (0.039 %); after the first 90 frames 6 (0.026 %) |
+    | frame ms avg / p99 | 17.0 / 25.5 | 16.7 / 17.9 |
+    | late snapshots, behind passes | 125, 3 | 0, 0 |
+    | sim tick ms max | 62.3 | 8.8 |
+    | instance upload ms max | 40.1 | 1.6 |
+    | music decode | 43, 56, 804 ms | 34, 41, 42 ms |
+
+    The two frames over 50 ms: frame 1 (69.3 ms; `present_ms` 53.0, `submit_ms` 13.6: the first image), and the maximise
+    (253.8 ms; `gap_ms` 237.3 with `cpu_ms` 0.0 and the events `moved`, `resized 1920x991`, `on_resize` 33.0 ms: the window
+    system held the event loop, suspect 3, which the done-when excepts). Every swap-chain acquire gave a normal image (timeout,
+    occluded, outdated, lost, suboptimal all 0). Instance buffers grew in 41 frames to 67 buffers (274,432 bytes), upload lap
+    at most 0.51 ms: suspect 1 is ruled out on the laptop too. The minimap fog uploads cost avg 0.27, p99 0.46, max 1.53 ms
+    (787 uploads). The CPU clock cost 54.9 ms over 22,877 calls (2.4 µs a frame).
+    **What this does not show: the cause of 10-11.** Two things differ between the plays and this run cannot tell them apart:
+    (1) the minimap texture reuse of WP1.16a; (2) the load on the laptop: during the 10-11 play a reviewer agent ran the full
+    gate (`cargo test --workspace` and clippy, for #94) on the same machine, which fits that the sim thread and the music
+    decode were slow as well as the main thread. On 11-11 nothing else was building. Rule from now on: no agent builds or
+    tests on the laptop during a measured play.
+    **Against the done-when of WP1.16:** all three numbers hold and Tijmen felt no stutter, but the play was 5 min 44 s, not
+    10 minutes. Nothing in this log gives WP1.16b something to fix. Open: one 10-minute play to close the WP, and, if the
+    cause of 10-11 is to be proven, the same play once with a workspace test running beside it.
 
 36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
     to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side

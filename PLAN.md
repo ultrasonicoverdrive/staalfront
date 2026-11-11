@@ -389,6 +389,11 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
    fixes that a measurement proves; it also records the swap-chain acquire outcome and the `on_resize` time, and reuses the minimap texture
    (confirmed waste). **WP1.16b** fixes what Tijmen's hitch-log file from the laptop shows (suspects 3 and 5 and anything new). Rules:
    `docs/rules/hitch_log.md`.*
+   *11-11-2026 (Tijmen's laptop run with the hitch log, main `a0acd79`): **the stutter did not come back** (5 min 44 s, 2 frames
+   over 50 ms: start-up and the window maximise; 0.039 % over 25 ms; 0 late snapshots; Tijmen felt none). The log gives **WP1.16b
+   nothing to fix**. The cause of 10-11 is not proven: the minimap texture reuse of WP1.16a, or the reviewer agent that ran the
+   full gate on the laptop during that play. Open: one 10-minute play to close the WP. Numbers and files: `docs/progress.md`
+   follow-up 35.*
 4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision

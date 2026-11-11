@@ -1,0 +1,418 @@
+{
+  "version": 1,
+  "hitch_threshold_ms": 25.0,
+  "log_threshold_ms": 50.0,
+  "warmup_frames": 90,
+  "cpu_measured": true,
+  "thread_times_calls": 22877,
+  "thread_times_total_ms": 54.8632,
+  "totals": {
+    "frames": 22876,
+    "over_hitch": 9,
+    "over_log": 2,
+    "frames_after_warmup": 22786,
+    "over_hitch_after_warmup": 6,
+    "over_log_after_warmup": 1,
+    "longest_ms": 253.797,
+    "lines_dropped": 0,
+    "acquire_suboptimal": 0,
+    "acquire_timeout": 0,
+    "acquire_occluded": 0,
+    "acquire_outdated": 0,
+    "acquire_lost": 0,
+    "acquire_other": 0
+  },
+  "sim": {
+    "ticks": 6887,
+    "late_snapshots": 0,
+    "behind_passes": 0,
+    "clock_resets": 0,
+    "late_commands": 0,
+    "tick_ms_max": 8.756,
+    "slow_ticks": []
+  },
+  "buffer_growth": [
+    {
+      "frame": 300,
+      "tick": 103,
+      "added": 1,
+      "total": 5,
+      "bytes": 20480,
+      "upload_ms": 0.1789
+    },
+    {
+      "frame": 539,
+      "tick": 183,
+      "added": 1,
+      "total": 6,
+      "bytes": 24576,
+      "upload_ms": 0.2296
+    },
+    {
+      "frame": 899,
+      "tick": 303,
+      "added": 1,
+      "total": 7,
+      "bytes": 28672,
+      "upload_ms": 0.5138
+    },
+    {
+      "frame": 1282,
+      "tick": 435,
+      "added": 1,
+      "total": 8,
+      "bytes": 32768,
+      "upload_ms": 0.26689999999999997
+    },
+    {
+      "frame": 1749,
+      "tick": 591,
+      "added": 1,
+      "total": 9,
+      "bytes": 36864,
+      "upload_ms": 0.1219
+    },
+    {
+      "frame": 1923,
+      "tick": 649,
+      "added": 1,
+      "total": 10,
+      "bytes": 40960,
+      "upload_ms": 0.1453
+    },
+    {
+      "frame": 2070,
+      "tick": 698,
+      "added": 1,
+      "total": 11,
+      "bytes": 45056,
+      "upload_ms": 0.18430000000000002
+    },
+    {
+      "frame": 2550,
+      "tick": 858,
+      "added": 1,
+      "total": 12,
+      "bytes": 49152,
+      "upload_ms": 0.0973
+    },
+    {
+      "frame": 2883,
+      "tick": 969,
+      "added": 2,
+      "total": 14,
+      "bytes": 57344,
+      "upload_ms": 0.0798
+    },
+    {
+      "frame": 2988,
+      "tick": 1004,
+      "added": 3,
+      "total": 17,
+      "bytes": 69632,
+      "upload_ms": 0.1075
+    },
+    {
+      "frame": 3934,
+      "tick": 1319,
+      "added": 3,
+      "total": 20,
+      "bytes": 81920,
+      "upload_ms": 0.3034
+    },
+    {
+      "frame": 4473,
+      "tick": 1499,
+      "added": 3,
+      "total": 23,
+      "bytes": 94208,
+      "upload_ms": 0.2249
+    },
+    {
+      "frame": 7770,
+      "tick": 2598,
+      "added": 1,
+      "total": 24,
+      "bytes": 98304,
+      "upload_ms": 0.20570000000000002
+    },
+    {
+      "frame": 8004,
+      "tick": 2675,
+      "added": 3,
+      "total": 27,
+      "bytes": 110592,
+      "upload_ms": 0.25789999999999996
+    },
+    {
+      "frame": 8200,
+      "tick": 2741,
+      "added": 1,
+      "total": 28,
+      "bytes": 114688,
+      "upload_ms": 0.4875
+    },
+    {
+      "frame": 8204,
+      "tick": 2742,
+      "added": 2,
+      "total": 30,
+      "bytes": 122880,
+      "upload_ms": 0.22039999999999998
+    },
+    {
+      "frame": 8205,
+      "tick": 2743,
+      "added": 1,
+      "total": 31,
+      "bytes": 126976,
+      "upload_ms": 0.2141
+    },
+    {
+      "frame": 8206,
+      "tick": 2743,
+      "added": 2,
+      "total": 33,
+      "bytes": 135168,
+      "upload_ms": 0.2134
+    },
+    {
+      "frame": 8209,
+      "tick": 2744,
+      "added": 1,
+      "total": 34,
+      "bytes": 139264,
+      "upload_ms": 0.21839999999999998
+    },
+    {
+      "frame": 8210,
+      "tick": 2744,
+      "added": 1,
+      "total": 35,
+      "bytes": 143360,
+      "upload_ms": 0.2276
+    },
+    {
+      "frame": 8213,
+      "tick": 2745,
+      "added": 2,
+      "total": 37,
+      "bytes": 151552,
+      "upload_ms": 0.28459999999999996
+    },
+    {
+      "frame": 8995,
+      "tick": 3006,
+      "added": 3,
+      "total": 40,
+      "bytes": 163840,
+      "upload_ms": 0.19619999999999999
+    },
+    {
+      "frame": 8996,
+      "tick": 3006,
+      "added": 3,
+      "total": 43,
+      "bytes": 176128,
+      "upload_ms": 0.2314
+    },
+    {
+      "frame": 13769,
+      "tick": 4597,
+      "added": 1,
+      "total": 44,
+      "bytes": 180224,
+      "upload_ms": 0.3416
+    },
+    {
+      "frame": 14577,
+      "tick": 4866,
+      "added": 1,
+      "total": 45,
+      "bytes": 184320,
+      "upload_ms": 0.1561
+    },
+    {
+      "frame": 14903,
+      "tick": 4975,
+      "added": 3,
+      "total": 48,
+      "bytes": 196608,
+      "upload_ms": 0.2546
+    },
+    {
+      "frame": 15018,
+      "tick": 5013,
+      "added": 1,
+      "total": 49,
+      "bytes": 200704,
+      "upload_ms": 0.1417
+    },
+    {
+      "frame": 15234,
+      "tick": 5085,
+      "added": 1,
+      "total": 50,
+      "bytes": 204800,
+      "upload_ms": 0.2561
+    },
+    {
+      "frame": 15243,
+      "tick": 5088,
+      "added": 3,
+      "total": 53,
+      "bytes": 217088,
+      "upload_ms": 0.21660000000000001
+    },
+    {
+      "frame": 15822,
+      "tick": 5281,
+      "added": 3,
+      "total": 56,
+      "bytes": 229376,
+      "upload_ms": 0.1544
+    },
+    {
+      "frame": 16398,
+      "tick": 5473,
+      "added": 1,
+      "total": 57,
+      "bytes": 233472,
+      "upload_ms": 0.1641
+    },
+    {
+      "frame": 16785,
+      "tick": 5602,
+      "added": 1,
+      "total": 58,
+      "bytes": 237568,
+      "upload_ms": 0.1359
+    },
+    {
+      "frame": 17124,
+      "tick": 5715,
+      "added": 1,
+      "total": 59,
+      "bytes": 241664,
+      "upload_ms": 0.1242
+    },
+    {
+      "frame": 17427,
+      "tick": 5816,
+      "added": 1,
+      "total": 60,
+      "bytes": 245760,
+      "upload_ms": 0.2082
+    },
+    {
+      "frame": 17746,
+      "tick": 5922,
+      "added": 1,
+      "total": 61,
+      "bytes": 249856,
+      "upload_ms": 0.159
+    },
+    {
+      "frame": 18034,
+      "tick": 6018,
+      "added": 1,
+      "total": 62,
+      "bytes": 253952,
+      "upload_ms": 0.1227
+    },
+    {
+      "frame": 18265,
+      "tick": 6095,
+      "added": 1,
+      "total": 63,
+      "bytes": 258048,
+      "upload_ms": 0.1339
+    },
+    {
+      "frame": 18595,
+      "tick": 6205,
+      "added": 1,
+      "total": 64,
+      "bytes": 262144,
+      "upload_ms": 0.14770000000000003
+    },
+    {
+      "frame": 19289,
+      "tick": 6436,
+      "added": 1,
+      "total": 65,
+      "bytes": 266240,
+      "upload_ms": 0.1331
+    },
+    {
+      "frame": 19889,
+      "tick": 6636,
+      "added": 1,
+      "total": 66,
+      "bytes": 270336,
+      "upload_ms": 0.1005
+    },
+    {
+      "frame": 20489,
+      "tick": 6836,
+      "added": 1,
+      "total": 67,
+      "bytes": 274432,
+      "upload_ms": 0.1023
+    }
+  ],
+  "hitches": [
+    {
+      "frame": 1,
+      "at_s": 3.1901253,
+      "tick": 2,
+      "frame_ms": 69.2573,
+      "gap_ms": 0.128,
+      "callback_ms": 69.1293,
+      "parts": {
+        "snapshot_ms": 0.0288,
+        "ui_ms": 0.352,
+        "scene_ms": 0.1838,
+        "upload_ms": 0.13349999999999998,
+        "audio_ms": 0.2603,
+        "acquire_ms": 0.36860000000000004,
+        "record_ms": 0.8631999999999991,
+        "submit_ms": 13.636199999999999,
+        "present_ms": 52.975500000000004,
+        "input_ms": 0.32739999999999997
+      },
+      "cpu_ms": 46.875,
+      "sounds_started": 0,
+      "events": [],
+      "sim_slow_ticks": []
+    },
+    {
+      "frame": 928,
+      "at_s": 18.9101615,
+      "tick": 312,
+      "frame_ms": 253.797,
+      "gap_ms": 237.34890000000001,
+      "callback_ms": 16.4481,
+      "parts": {
+        "snapshot_ms": 0.0051,
+        "ui_ms": 0.1429,
+        "scene_ms": 0.030199999999999998,
+        "upload_ms": 0.2859,
+        "audio_ms": 0.0101,
+        "acquire_ms": 14.4039,
+        "record_ms": 0.40599999999999986,
+        "submit_ms": 0.7905,
+        "present_ms": 0.3653,
+        "input_ms": 0.008199999999999999
+      },
+      "cpu_ms": 0.0,
+      "sounds_started": 0,
+      "events": [
+        "moved to -9,-9",
+        "resized 1920x991",
+        "on_resize 1920x991: surface configure and depth texture took 33.0 ms"
+      ],
+      "sim_slow_ticks": []
+    }
+  ]
+}
