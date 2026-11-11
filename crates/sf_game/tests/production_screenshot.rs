@@ -445,7 +445,12 @@ impl Scene {
             .update(&snap, &selection)
             .unwrap_or(SidebarState::default().tab);
         let sidebar_look = SidebarLook::embedded();
-        let catalog = Catalog::build(&UnitDefs::embedded(), Faction::Meridian, &sidebar_look);
+        let catalog = Catalog::build(
+            &UnitDefs::embedded(),
+            Faction::Meridian,
+            &sidebar_look,
+            sf_game::playfield::shipped_build_speed(),
+        );
         let sit = Situation::read(&snap, P0, &catalog, selection.ids());
         let model = sidebar::model(&catalog, &sit, tab, None, None, &sidebar_look);
         let money = MoneyLook::embedded();
