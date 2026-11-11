@@ -1,0 +1,16 @@
+[package]
+name = "sf_sound_gen"
+description = "Generates the CC0 fight sounds (assets/audio/sfx/*.wav) deterministically, integer maths only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# Library plus binary, like sf_icon_gen: `src/lib.rs` synthesises the sounds
+# (testable), `src/main.rs` writes or checks the files. No dependencies: the
+# WAV header is written by hand.
+[dependencies]

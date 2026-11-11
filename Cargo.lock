@@ -2590,6 +2590,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sf_sound_gen"
+version = "0.1.0"
+
+[[package]]
 name = "sf_thread_cpu"
 version = "0.1.0"
 dependencies = [
