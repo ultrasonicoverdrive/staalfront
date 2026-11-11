@@ -19,7 +19,7 @@ use sf_data::ai_profile::AiProfile;
 use sf_data::units::{Faction, UnitDefs};
 use sf_headless::cli::parse_checksum;
 use sf_headless::run::{Finished, RunOptions, run, run_full};
-use sf_headless::scenario::{Action, Scenario, TimedCommand};
+use sf_headless::scenario::{Action, IdSpec, Scenario, TimedCommand};
 use sf_sim::{Cell, EntityId, Kind, PlayerId, Tick};
 
 const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected");
@@ -139,6 +139,32 @@ fn a_structure_seen_gone_is_forgotten_and_one_out_of_sight_is_kept() {
     );
     // And it really is out of sight now, so the memory is all the AI has of it.
     assert!(!visible_ids(&observe(&f)).contains(&PLANT));
+}
+
+#[test]
+fn a_structure_destroyed_out_of_sight_stays_in_memory() {
+    // The power plant is removed at tick 700, long after the scout walked home at 520. The AI must not
+    // learn it: `gone` is decided from the picture only, never from whether the entity is alive.
+    let s = scenario();
+    let mut removed = s.clone();
+    removed.commands.push(TimedCommand {
+        tick: 700,
+        player: 1,
+        command: Action::Despawn {
+            ids: vec![IdSpec::Id(PLANT.index(), 0)],
+        },
+    });
+    let with = go(&removed, 800);
+    let without = go(&s, 800);
+    // Control: the plant really is gone from the world.
+    assert!(!with.world.is_alive(PLANT) && without.world.is_alive(PLANT));
+    assert_eq!(ids(known(&with)), vec![PLANT]);
+    assert_eq!(
+        known(&with)[&PLANT].seen_tick,
+        known(&without)[&PLANT].seen_tick
+    );
+    assert!(known(&with)[&PLANT].seen_tick.0 < 600);
+    assert_eq!(with.ais[0].digest(), without.ais[0].digest());
 }
 
 #[test]

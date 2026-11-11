@@ -2827,6 +2827,9 @@ pins are those of `ai_fog`).
   `every_number_is_checked_at_both_ends_when_the_file_is_read`; an `f32` in `sf_ai` fails the determinism script and clippy (`float_arithmetic`), a `HashMap` fails both
   too; another file naming the world fails `only_the_fence_file_names_the_world`. The first version of the profile test did not check the `reserve` range at all
   (found by the mutation, then the test was made to check both ends of every number).
+- **Fix round (review 11-11-2026).** `gone` decided by `!world.is_alive(id)` passed every test; the new `ai_fog` test
+  `a_structure_destroyed_out_of_sight_stays_in_memory` (power plant removed at tick 700, after the scout left) now fails on it. `World` measured at
+  8472 bytes against 184 for `Finished` (the 16x margin of `a_finished_run_is_small_to_move`). `ai.md`: ids are opaque; `--expect` checks only the checksum.
 - **Nits of the PR #114 review carried here.** `sf_headless` warns on stderr when `assets/config` does not load for a record replay (the game's own warning is its
   model); a test pins the summary count of recorded commands (`recorded_commands_count_as_scheduled`; removing the record from `commands_scheduled` fails it); the
   comment in `crates/sf_game/tests/record_replay.rs` says riflemen; `docs/conventions.md` says `sf_thread_cpu` is the only crate allowed `unsafe`.

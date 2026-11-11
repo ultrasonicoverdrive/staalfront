@@ -62,7 +62,7 @@ staalfront/
 │  ├─ sf_data      unit/building/weapon definitions (RON), validation, loading
 │  ├─ sf_bridge    copies the sf_data definitions into the sf_sim tables (unit stats, terrain,
 │  │               movement costs) at world creation; sf_sim and sf_data may not know each other
-│  ├─ sf_ai        computer opponent, talks to sf_sim only via commands
+│  ├─ sf_ai        computer opponent: acts only via commands, reads only the fog-filtered observation
 │  ├─ sf_engine    main loop, window, input, time, assets (no game rules)
 │  ├─ sf_render    wgpu: terrain, models, camera, zoom, effects, LOD
 │  ├─ sf_ui        own UI: widgets, text, minimap; later sidebar, selection, menus

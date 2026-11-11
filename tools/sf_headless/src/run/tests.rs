@@ -118,7 +118,8 @@ fn recorded_commands_count_as_scheduled() {
 
 /// `Finished` travels by value through `run_full`, `run` and the CLI, in debug builds with a copy at every step, on
 /// the 1 MB main-thread stack of Windows (the first version of WP9.1a held the `World` inline and CI's Windows run
-/// overflowed in the `cli` tests). The world is boxed; this fails when it is put back inline.
+/// overflowed in the `cli` tests). The world is boxed; this fails when it is put back inline. Measured 11-11-2026:
+/// `Finished` 184 bytes, `World` 8472 bytes (46 times as large), so the 16x margin holds with room.
 #[test]
 fn a_finished_run_is_small_to_move() {
     let size = std::mem::size_of::<Finished>();

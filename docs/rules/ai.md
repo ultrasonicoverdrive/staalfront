@@ -24,7 +24,8 @@ lints of `crates/sf_ai/Cargo.toml` (`float_arithmetic`, `float_cmp`, `float_cmp_
 The AI state is **not** in the world checksum, so `Ai::digest()` hashes it (player, random state, profile, start sites, think count, last
 think, manager counts, every remembered structure in id order) and `sf_headless` prints it beside the checksum (`ai 0: 0x...`) and writes
 it into the log (`"ai": [{"player": 0, "digest": "0x..."}]`, only for a scenario with `ai`). CI compares the logs of Linux and Windows
-except the `host` block, so the digest is compared too. The state is plain data (integers, vectors, `BTreeMap`), ready to be saved
+except the `host` block, so the digest is compared too. `--expect` checks only the world checksum; the AI digest is pinned in
+`tests/ai_fog.rs` and compared across platforms by that log comparison. The state is plain data (integers, vectors, `BTreeMap`), ready to be saved
 (WP13.1).
 
 ## The fence: no cheating on information
@@ -40,6 +41,9 @@ that. `crates/sf_ai/tests/fence.rs` reads the files of `src/` and fails when ano
 | entities of others | **only when their cell is `Visible`** for this player (`World::visibility`, which includes shared vision): a unit by the cell its position is in, a structure by **any** cell of its footprint; the same cell test as the snapshot's `seen` (`vision.md`, "For the player's side") |
 | nothing else of an unseen entity | not its existence, hit points or order |
 | `gone` | a remembered structure with a visible cell that is not among the visible entities. Decided from the picture alone; it never asks whether the entity is alive, which would tell the AI about structures it cannot see |
+
+**Entity ids are opaque handles.** An id (in `Seen`, `Known` or the AI's own entities) is a slot index plus generation, which hints at how
+many entities the world holds; no rule may reason from its value, only compare and look it up.
 
 A world without vision rules shows everything to everyone, as it does for a human. **Not in the observation yet** (a later part asks when
 a rule needs it): the public tables (unit, building and production data, terrain), the ore on seen or explored cells, the explored bit.
@@ -97,7 +101,7 @@ come from `match_file`, so both are needed; the problems are reported when the s
 the power plant and barracks, the barracks is removed at tick 500, the scout walks home at 520. Pinned: final checksum `0xd369218db6025eff`
 (`ai_fog.expected`), AI digest `0x993afc7cd2c42cfd` (a literal in `tests/ai_fog.rs`), 800 ticks. The tests assert: the AI knows exactly the
 two structures the scout saw (kind, anchor, footprint, tick) and not the centre, refinery or army; it forgets the removed barracks and keeps
-the power plant after the scout leaves; without the scout it knows nothing; the observation at six ticks never holds a shrouded entity;
+the power plant after the scout leaves, also when it is destroyed out of sight at tick 700 (same memory and digest as without); without the scout it knows nothing; the observation at six ticks never holds a shrouded entity;
 **an invisible army changes nothing the AI sees or does** (same observation, memory and digest as a world without the army, while the world
 checksums differ) and the positive control (a unit inside the scout's sight is seen); the AI thinks 80 times in 800 ticks, manager runs
 `[20, 20, 20, 20]`; two AIs think at tick % 10 == 0 and == 7; the AI sends no command (every executed or ignored command was scheduled by the scenario).
