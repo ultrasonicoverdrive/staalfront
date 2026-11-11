@@ -310,6 +310,8 @@ pub struct Runner {
     catalog: Option<Catalog>,
     /// Which of the units the selected factory offers the queue key adds (WP6.5); wraps.
     produce_pick: usize,
+    /// The selection the sidebar last followed to a factory's tab (WP6.9).
+    tab_follow: crate::sidebar::TabFollow,
     /// How many refused builds the console has been told about.
     rejected_seen: u64,
     /// The last refused build in words, and when, for the line under the top bar.
@@ -589,6 +591,7 @@ impl Runner {
             catalog,
             rejected_seen: 0,
             produce_pick: 0,
+            tab_follow: crate::sidebar::TabFollow::default(),
             refusal: None,
             menu,
             store: Store::new(None),
@@ -782,6 +785,7 @@ impl Runner {
             tool,
             catalog,
             produce_pick,
+            tab_follow,
             rejected_seen,
             refusal,
             camera,
@@ -863,6 +867,7 @@ impl Runner {
         self.tool = tool;
         self.catalog = catalog;
         self.produce_pick = produce_pick;
+        self.tab_follow = tab_follow;
         self.rejected_seen = rejected_seen;
         self.refusal = refusal;
         self.camera = camera;
@@ -1328,20 +1333,23 @@ impl Runner {
         // A right-click gives the order the cursor shows (WP3.5): the same
         // `cursor_context` decides both. Over the UI there is no hover, so
         // nothing is ordered.
-        if actions.pressed(Action::OrderMove)
-            && !ui_busy
-            && right_click == RightClick::Order
-            && let Some(command) = commands::right_click(
-                &self.snap,
-                &self.selection,
-                &self.hover,
-                Modifiers::from_actions(actions),
-            )
-        {
-            let voice = order_voice(&command);
-            commands::issue(&self.sim, command);
-            if let Some(voice) = voice {
-                self.say(voice);
+        if actions.pressed(Action::OrderMove) && !ui_busy && right_click == RightClick::Order {
+            let modifiers = Modifiers::from_actions(actions);
+            // The units get the order of the cursor; the selected factories (WP6.9) set or clear
+            // their rally point from the same cursor kind. Only the unit order has a voice: a
+            // rally click on its own says nothing, a mixed selection speaks as for a plain order.
+            let unit_order =
+                commands::right_click(&self.snap, &self.selection, &self.hover, modifiers);
+            let rally = commands::rally_clicks(&self.snap, &self.selection, &self.hover, modifiers);
+            if let Some(command) = unit_order {
+                let voice = order_voice(&command);
+                commands::issue(&self.sim, command);
+                if let Some(voice) = voice {
+                    self.say(voice);
+                }
+            }
+            for command in rally {
+                commands::issue(&self.sim, command);
             }
         }
         if actions.pressed(Action::OrderStop) {
@@ -1361,6 +1369,15 @@ impl Runner {
             if let Some(command) = commands::hold_command(&ids, queued) {
                 commands::issue(&self.sim, command);
             }
+        }
+    }
+
+    /// The sidebar follows the selection (WP6.9): when the selection has changed and holds an own
+    /// factory, the sidebar shows the tab of that factory ([`crate::sidebar::TabFollow`]). Only on a
+    /// change, never every frame, so a tab the player picks by hand stays until the selection changes.
+    fn follow_selection_tab(&mut self) {
+        if let Some(tab) = self.tab_follow.update(&self.snap, &self.selection) {
+            self.hud.show_sidebar_tab(tab);
         }
     }
 
@@ -1788,15 +1805,21 @@ impl Runner {
             viewport: [width as f32, height as f32],
             ui_scale: self.hud.scale(),
         };
-        let selected =
-            crate::production_view::selected_factory(&snap, &self.selection).map(|(id, _)| id);
+        let selected: Vec<sf_sim::EntityId> =
+            crate::rally::selected_factories(&snap, &self.selection)
+                .map(|(id, _)| id)
+                .collect();
         let ground = &self.ground;
         let terrain = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
         let mut layer = self.hud.world_layer();
         let look = crate::production_view::shipped_look();
         crate::production_view::draw_bars(&mut layer, &frame, &terrain, &snap, look);
+        // The line first, so that the flag stands on top of its end.
+        crate::production_view::draw_rally_lines(
+            &mut layer, &frame, &terrain, &snap, &selected, look,
+        );
         crate::production_view::draw_rally_flags(
-            &mut layer, &frame, &terrain, &snap, selected, look,
+            &mut layer, &frame, &terrain, &snap, &selected, look,
         );
     }
 
@@ -2864,6 +2887,7 @@ impl App for Runner {
             self.handle_production(ctx);
             self.handle_selection(ctx);
             self.handle_orders(ctx, right_click);
+            self.follow_selection_tab();
         }
         let actions = ctx.actions();
         if actions.pressed(Action::ToggleFullscreen) && fullscreen_key_works(menu_open) {

@@ -74,6 +74,10 @@ pub struct RallyLook {
     pub flag_width_px: u16,
     /// Height of the flag.
     pub flag_height_px: u16,
+    /// The line from the exit cell of a selected factory to its flag (WP6.9).
+    pub line: (u8, u8, u8, u8),
+    /// Width of that line.
+    pub line_width_px: u16,
 }
 
 impl ProductionLook {
@@ -99,6 +103,7 @@ impl ProductionLook {
             || r.flag_width_px == 0
             || r.flag_height_px == 0
             || r.flag_height_px > r.pole_height_px
+            || r.line_width_px == 0
         {
             return Err(
                 "rally: every size must be above 0 and the flag no higher than the pole".into(),
@@ -149,6 +154,8 @@ mod tests {
             ),
             (30, 2, 18, 11)
         );
+        assert_eq!(look.rally.line, (255, 240, 150, 255));
+        assert_eq!(look.rally.line_width_px, 2);
     }
 
     #[test]

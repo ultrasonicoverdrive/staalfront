@@ -63,7 +63,7 @@ pub struct CursorSpec {
 }
 
 /// Every cursor of the set, in the order of `CursorKind` in `sf_game`.
-pub const NAMES: [&str; 24] = [
+pub const NAMES: [&str; 26] = [
     "select",
     "inspect",
     "move",
@@ -88,6 +88,8 @@ pub const NAMES: [&str; 24] = [
     "infiltrate",
     "sell",
     "place",
+    "rally",
+    "rally_clear",
 ];
 
 /// The specs of the whole set.
@@ -357,6 +359,34 @@ fn art(name: &str) -> Art {
             )],
             hotspot: MIDDLE,
         },
+        // ---- the rally point (WP6.9) ----
+        // A green flag on a pole standing on a foot: a right-click plants the rally point
+        // where the foot of the pole is (the hotspot).
+        "rally" => Art {
+            layers: vec![
+                (bar(-4.0, -10.0, -4.0, 12.0, 1.5), WHITE),
+                (polygon(&[(-3.0, 12.0), (12.0, 6.5), (-3.0, 1.0)]), GREEN),
+                (circle(-4.0, -11.0, 2.6), WHITE),
+            ],
+            hotspot: at(-4.0, -11.0),
+        },
+        // The same flag, gold, struck through with a red cross: a right-click on the factory takes
+        // its rally point away.
+        "rally_clear" => Art {
+            layers: vec![
+                (bar(-4.0, -10.0, -4.0, 12.0, 1.5), WHITE),
+                (polygon(&[(-3.0, 12.0), (12.0, 6.5), (-3.0, 1.0)]), GOLD),
+                (circle(-4.0, -11.0, 2.6), WHITE),
+                (
+                    union(vec![
+                        bar(2.0, -2.0, 12.0, -12.0, 1.8),
+                        bar(2.0, -12.0, 12.0, -2.0, 1.8),
+                    ]),
+                    RED,
+                ),
+            ],
+            hotspot: at(-4.0, -11.0),
+        },
         other => panic!("no art for the cursor {other}"),
     }
 }
@@ -477,7 +507,7 @@ mod tests {
         let mut names = NAMES.to_vec();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), 24);
+        assert_eq!(names.len(), 26);
         for (name, ..) in DIRECTIONS {
             assert!(NAMES.contains(&name), "{name}");
         }

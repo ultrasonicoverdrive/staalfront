@@ -35,8 +35,8 @@ use crate::selection::{Selection, facts};
 use crate::sim_snapshot::SimSnapshot;
 
 /// What the mouse looks like. The first eight are what [`cursor_context`] can
-/// answer today; the scroll cursors belong to the screen edges; the last eight
-/// are **placeholders**: their pictures exist so that later work packages
+/// answer today; the scroll cursors belong to the screen edges; the eight
+/// after them are **placeholders**: their pictures exist so that later work packages
 /// (capture, repair, enter: phase 6 to 10) only have to teach
 /// [`cursor_context`] when to answer them. Until then nothing returns them and
 /// [`order_for`] gives no order for them (`placeholders_never_order` tests it).
@@ -83,11 +83,16 @@ pub enum CursorKind {
     Sell,
     /// Placeholder (placing a structure).
     Place,
+    /// Only factories selected, over the ground: a right-click sets their rally point there
+    /// (WP6.9).
+    Rally,
+    /// Over one of the selected factories: a right-click clears its rally point (WP6.9).
+    RallyClear,
 }
 
 impl CursorKind {
     /// Every cursor, in the order of the files (`tools/sf_icon_gen`).
-    pub const ALL: [CursorKind; 24] = [
+    pub const ALL: [CursorKind; 26] = [
         CursorKind::Select,
         CursorKind::Inspect,
         CursorKind::Move,
@@ -112,6 +117,8 @@ impl CursorKind {
         CursorKind::Infiltrate,
         CursorKind::Sell,
         CursorKind::Place,
+        CursorKind::Rally,
+        CursorKind::RallyClear,
     ];
 
     /// The name in `cursors.ron` and the file stem of the picture.
@@ -141,6 +148,8 @@ impl CursorKind {
             CursorKind::Infiltrate => "infiltrate",
             CursorKind::Sell => "sell",
             CursorKind::Place => "place",
+            CursorKind::Rally => "rally",
+            CursorKind::RallyClear => "rally_clear",
         }
     }
 
@@ -162,6 +171,12 @@ impl CursorKind {
                 | CursorKind::ScrollW
                 | CursorKind::ScrollNw
         )
+    }
+
+    /// The two cursors of a selection of factories (WP6.9): they give no order to a unit, a
+    /// right-click sets or clears the rally point of the selected factories ([`crate::rally`]).
+    pub const fn is_rally(self) -> bool {
+        matches!(self, CursorKind::Rally | CursorKind::RallyClear)
     }
 
     /// A picture whose meaning a later work package gives; it never gives an
@@ -281,8 +296,9 @@ pub fn scroll_cursor(edges: Edges) -> Option<CursorKind> {
 ///
 /// 1. At a screen edge: the scroll cursor of that edge (it wins over all).
 /// 2. No selected unit can take an order (nothing selected, or only
-///    structures): over an enemy or neutral thing **Inspect**, else
-///    **Select**.
+///    structures): with a standing own factory selected, **RallyClear** over
+///    it and **Rally** over the ground (WP6.9, [`crate::rally::cursor`]); else
+///    over an enemy or neutral thing **Inspect**, else **Select**.
 /// 3. Over an enemy and at least one selected unit has a weapon: **Attack**.
 /// 4. Over one of ours that is not the only selected unit: **Guard**.
 /// 5. Over the ground (also under an entity the rules above did not take):
@@ -317,6 +333,10 @@ pub fn cursor_context(
             .is_some_and(|s| s.weapon_range > sf_math::Fx::ZERO);
     }
     if mobile == 0 {
+        // Factories selected (WP6.9): a right-click rallies them.
+        if let Some(kind) = crate::rally::cursor(world, selection, hover) {
+            return kind;
+        }
         return match under {
             Some((_, Relation::Enemy | Relation::Neutral)) => CursorKind::Inspect,
             _ => CursorKind::Select,
@@ -385,7 +405,9 @@ pub fn order_for(kind: CursorKind, hover: &Hover) -> Option<Order> {
         | CursorKind::Harvest
         | CursorKind::Infiltrate
         | CursorKind::Sell
-        | CursorKind::Place => None,
+        | CursorKind::Place
+        | CursorKind::Rally
+        | CursorKind::RallyClear => None,
     }
 }
 

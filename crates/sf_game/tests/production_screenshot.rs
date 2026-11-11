@@ -247,7 +247,7 @@ impl Scene {
                 &frame,
                 &height,
                 &snap,
-                Some(selected),
+                &[selected],
                 look,
             );
         }
