@@ -88,8 +88,9 @@ pub struct Outcome {
 pub struct Finished {
     /// What [`run`] returns.
     pub outcome: Outcome,
-    /// The world after the last tick.
-    pub world: World,
+    /// The world after the last tick. Boxed: a `World` is large and Windows gives the main thread 1 MB of stack, which
+    /// a few debug-build copies of it would fill (the CI run of the first version overflowed there).
+    pub world: Box<World>,
     /// The AIs after the last tick, ascending by player.
     pub ais: Vec<Ai>,
 }
@@ -120,7 +121,7 @@ pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, S
         });
     }
 
-    let mut world = scenario.build_world()?;
+    let mut world = Box::new(scenario.build_world()?);
     let commands_scheduled = world.pending_commands().len() + scenario.recorded.len();
     let initial_checksum = world.checksum();
 

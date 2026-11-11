@@ -116,6 +116,17 @@ fn recorded_commands_count_as_scheduled() {
     assert_eq!(run(&plain, &opts(30, 30)).unwrap().commands_scheduled, 40);
 }
 
+/// `Finished` travels by value through `run_full`, `run` and the CLI, in debug builds with a copy at every step, on
+/// the 1 MB main-thread stack of Windows (the first version of WP9.1a held the `World` inline and CI's Windows run
+/// overflowed in the `cli` tests). The world is boxed; this fails when it is put back inline.
+#[test]
+fn a_finished_run_is_small_to_move() {
+    let size = std::mem::size_of::<Finished>();
+    assert!(size < 2048, "Finished is {size} bytes");
+    let world = std::mem::size_of::<World>();
+    assert!(world > 16 * size, "World is {world} bytes");
+}
+
 #[test]
 fn counts_commands() {
     let s = crowd(
