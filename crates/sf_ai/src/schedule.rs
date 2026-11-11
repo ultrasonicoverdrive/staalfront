@@ -40,7 +40,7 @@ impl Manager {
 /// Whether `player` thinks at `tick` (the number of ticks the world has run so far, which is the tick the
 /// next step will run).
 pub fn due(tick: Tick, player: PlayerId, interval: u32, stagger: u32) -> bool {
-    (tick.0 + u64::from(stagger) * u64::from(player.0)) % u64::from(interval) == 0
+    (tick.0 + u64::from(stagger) * u64::from(player.0)).is_multiple_of(u64::from(interval))
 }
 
 #[cfg(test)]

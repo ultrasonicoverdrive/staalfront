@@ -97,66 +97,64 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 }
 
 #[test]
-fn every_number_is_checked_when_the_file_is_read() {
-    refused(
-        &edited("think_interval: 10", "think_interval: 0"),
-        "think_interval",
-    );
-    refused(
-        &edited("think_interval: 10", "think_interval: 601"),
-        "think_interval",
-    );
+fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
+    // (the text in the shipped file, the name the error mentions, the values just outside the range).
+    let table: [(&str, &str, [&str; 2]); 18] = [
+        ("think_interval: 10", "think_interval", ["0", "601"]),
+        ("power_margin: 20", "power_margin", ["1001", "1001"]),
+        (
+            "harvesters_per_refinery: 2",
+            "harvesters_per_refinery",
+            ["0", "9"],
+        ),
+        ("reserve: 300", "economy.reserve", ["1000001", "1000001"]),
+        ("max_parallel_builds: 1", "max_parallel_builds", ["0", "5"]),
+        ("silo_percent: 90", "silo_percent", ["0", "101"]),
+        (
+            "repair_below_percent: 70",
+            "repair_below_percent",
+            ["0", "101"],
+        ),
+        ("blocked_ticks: 600", "blocked_ticks", ["0", "72001"]),
+        ("placement_cap: 256", "placement_cap", ["0", "65537"]),
+        ("attack_value: 3000", "attack_value", ["0", "1000001"]),
+        ("max_wait: 3600", "max_wait", ["0", "72001"]),
+        ("min_units: 4", "min_units", ["0", "1001"]),
+        (
+            "first_attack_tick: 2400",
+            "first_attack_tick",
+            ["72001", "72001"],
+        ),
+        ("defend_ticks: 200", "defend_ticks", ["0", "72001"]),
+        ("gather_distance: 6", "gather_distance", ["0", "65"]),
+        (
+            "(\"barracks\", 1)",
+            "count",
+            ["(\"barracks\", 0)", "(\"barracks\", 33)"],
+        ),
+        (
+            "(\"rifleman\", 4)",
+            "weight",
+            ["(\"rifleman\", 0)", "(\"rifleman\", 1001)"],
+        ),
+        ("stagger: 3,", "stagger", ["stagger: 0,", "stagger: 5,"]),
+    ];
+    for (from, name, bad) in table {
+        let key = from.split(':').next().unwrap();
+        for value in bad {
+            let to = if from.starts_with('(') || from.ends_with(',') {
+                value.to_string()
+            } else {
+                format!("{key}: {value}")
+            };
+            refused(&edited(from, &to), name);
+        }
+    }
+    // The limits themselves are fine.
+    AiProfile::from_ron(&edited("think_interval: 10", "think_interval: 600")).unwrap();
+    AiProfile::from_ron(&edited("reserve: 300", "reserve: 1000000")).unwrap();
     // A stagger that lets two of eight players think together: 10 / gcd(10, 5) = 2.
     refused(&edited("stagger: 3", "stagger: 5"), "stagger");
-    refused(&edited("stagger: 3", "stagger: 0"), "stagger");
-    refused(
-        &edited("power_margin: 20", "power_margin: 1001"),
-        "power_margin",
-    );
-    refused(
-        &edited("harvesters_per_refinery: 2", "harvesters_per_refinery: 0"),
-        "harvesters_per_refinery",
-    );
-    refused(
-        &edited("max_parallel_builds: 1", "max_parallel_builds: 5"),
-        "max_parallel_builds",
-    );
-    refused(
-        &edited("silo_percent: 90", "silo_percent: 101"),
-        "silo_percent",
-    );
-    refused(
-        &edited("repair_below_percent: 70", "repair_below_percent: 0"),
-        "repair_below_percent",
-    );
-    refused(
-        &edited("blocked_ticks: 600", "blocked_ticks: 0"),
-        "blocked_ticks",
-    );
-    refused(
-        &edited("placement_cap: 256", "placement_cap: 0"),
-        "placement_cap",
-    );
-    refused(
-        &edited("attack_value: 3000", "attack_value: 0"),
-        "attack_value",
-    );
-    refused(&edited("max_wait: 3600", "max_wait: 0"), "max_wait");
-    refused(&edited("min_units: 4", "min_units: 0"), "min_units");
-    refused(
-        &edited("first_attack_tick: 2400", "first_attack_tick: 72001"),
-        "first_attack_tick",
-    );
-    refused(
-        &edited("defend_ticks: 200", "defend_ticks: 0"),
-        "defend_ticks",
-    );
-    refused(
-        &edited("gather_distance: 6", "gather_distance: 65"),
-        "gather_distance",
-    );
-    refused(&edited("(\"barracks\", 1)", "(\"barracks\", 0)"), "count");
-    refused(&edited("(\"rifleman\", 4)", "(\"rifleman\", 0)"), "weight");
     refused(&edited("name: \"normal\"", "name: \" \""), "name");
     refused(&edited("stagger: 3,", "stagger: 3, extra: 1,"), "extra");
 }
