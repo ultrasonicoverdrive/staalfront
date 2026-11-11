@@ -241,12 +241,9 @@ impl Scene {
         r.set_view_proj(vp);
         let frustum = Frustum::from_view_proj(vp);
         let eye = EyeView::from_view_proj(vp, H as f32);
-        let blend = self.instancer.icon_config().blend_for_view(
-            eye.focal_px,
-            cam.distance() as f32,
-            cam.max_distance() as f32,
-            1.0,
-        );
+        let blend = sf_render::CameraSettings::embedded()
+            .zoom
+            .blend(cam.zoom() as f32);
         let ground = self.ground.clone();
         let height = |x: f32, z: f32| ground.height(f64::from(x), f64::from(z)) as f32;
         self.instancer

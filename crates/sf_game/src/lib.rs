@@ -87,9 +87,9 @@
 //! click on the terrain plays a sound where it lands.
 //!
 //! **Model LOD, strategic icons and hover (WP1.9).** Each model has a chain of
-//! meshes chosen per unit by projected size (`assets/config/units.ron`); past
-//! a zoom threshold the units become screen-fixed icons in player colour,
-//! with a dithered cross-fade between the two. The unit under the cursor is
+//! meshes chosen per unit by projected size (`assets/config/units.ron`); the
+//! models are drawn at every zoom, with screen-fixed icons in player colour
+//! over them in the farthest zoom band (`assets/config/camera.ron`). The unit under the cursor is
 //! picked, highlighted and named in the F1 panel. `--hover x,y` fixes the
 //! cursor for screenshots, `--unit-display auto|models|icons` forces the
 //! display.
@@ -245,4 +245,45 @@ pub fn run(preset: Preset) -> i32 {
         return 1;
     }
     i32::from(failed.load(Ordering::Relaxed))
+}
+
+/// Test support (zoom fix round 4): the factor `motion` is drawn at on a `map_m` metre map at the farthest
+/// zoom with the shipped bands, as `Runner::build_units` passes them (unit and structure scale), measured
+/// as its drawn box (`Instancer::visit_drawn`) against the same frame at scale 1, rounded to 0.01.
+#[cfg(test)]
+pub(crate) fn drawn_scale_at_zoom_one(
+    style: &sf_render::Style,
+    motion: sf_render::Motion,
+    map_m: f32,
+) -> f32 {
+    use sf_render::model::EyeView;
+    use sf_render::{Blend, Camera, CameraConfig, FrameView, Frustum, Instancer};
+    let bands = sf_render::CameraSettings::embedded().zoom;
+    let mut cam = Camera::new(
+        CameraConfig {
+            map_size: sf_render::camera::DVec2::new(f64::from(map_m), f64::from(map_m)),
+            ..CameraConfig::default()
+        },
+        960,
+        720,
+    );
+    cam.set_zoom(1.0);
+    let vp = cam.view_proj();
+    let frustum = Frustum::from_view_proj(vp);
+    let eye = EyeView::from_view_proj(vp, 720.0);
+    let mut inst = Instancer::new(style.clone(), (map_m, map_m));
+    inst.update_tick([motion]);
+    let mut size = |view: FrameView| {
+        inst.build_frame(&view, |_, _| 0.0);
+        let mut x = None;
+        inst.visit_drawn(|_| true, |d| x = Some(d.size[0]));
+        x.expect("the motion is drawn")
+    };
+    let true_size = size(FrameView::new(&frustum, 0.0, eye, Blend::MODELS, 1.0));
+    let drawn = size(
+        FrameView::new(&frustum, 0.0, eye, bands.blend(1.0), 1.0)
+            .with_model_scale(bands.model_scale(1.0))
+            .with_structure_scale(bands.structure_scale(1.0)),
+    );
+    (drawn / true_size * 100.0).round() / 100.0
 }

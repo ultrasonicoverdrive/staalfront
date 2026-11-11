@@ -224,6 +224,9 @@ pub struct SimSnapshot {
     /// The footprint of each structure view, `(anchor cell, width, height)`, parallel to `views`
     /// (`None` for a unit). Filled only in a world with vision rules: the ghosts (WP8.3) remember it.
     foot: Vec<Option<(Cell, u8, u8)>>,
+    /// Per view: whether it is a structure (it has a footprint), in every world; the picture
+    /// draws structures at their own scale (zoom fix round 3).
+    structure: Vec<bool>,
 }
 
 impl SimSnapshot {
@@ -270,6 +273,7 @@ impl SimSnapshot {
             seen: Vec::new(),
             local: crate::commands::LOCAL_PLAYER,
             foot: Vec::new(),
+            structure: Vec::new(),
         }
     }
 
@@ -361,6 +365,12 @@ impl SimSnapshot {
         self.gave_up.clear();
         self.gave_up
             .extend(self.views.iter().map(|v| world.gave_up_at(v.id)));
+        self.structure.clear();
+        self.structure.extend(
+            self.views
+                .iter()
+                .map(|v| world.footprint_of(v.id).is_some()),
+        );
         // The occupancy, for the cell grid overlay: nothing to look up in a
         // world without structures (the crowd benchmark).
         self.structures.clear();
@@ -602,6 +612,11 @@ impl SimSnapshot {
     /// the world has vision rules (the ghosts remember it).
     pub fn footprint_at(&self, index: usize) -> Option<(Cell, u8, u8)> {
         self.foot.get(index).copied().flatten()
+    }
+
+    /// Whether the view at `index` is a structure (it has a footprint), in every world.
+    pub fn is_structure_at(&self, index: usize) -> bool {
+        self.structure.get(index).copied().unwrap_or(false)
     }
 
     /// Whether the cell `cell` is visible to the local player now; true in a world without vision rules.

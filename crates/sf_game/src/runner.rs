@@ -173,7 +173,9 @@ struct BenchRun {
 /// State of the `--shots` run.
 struct ShotRun {
     dir: PathBuf,
-    /// Index into [`SHOTS`].
+    /// Name, zoom and panels of every shot: [`SHOTS`], or the zooms of `--shots-zooms`.
+    steps: Vec<(String, f64, bool)>,
+    /// Index into `steps`.
     step: usize,
     settled: u32,
     requested: bool,
@@ -194,6 +196,12 @@ pub struct Runner {
     /// Why the last sound-browser play failed (shown in the browser).
     ra_play_error: Option<String>,
     camera: Camera,
+    /// What the picture does with the zoom: the icon overlay band and the far-zoom
+    /// model scale (`assets/config/camera.ron`).
+    zoom_bands: sf_render::ZoomBands,
+    /// The strategic icons over the far zoom: on by default, `ToggleIcons` (K)
+    /// switches them; off = models only at every zoom.
+    icons_on: bool,
     hud: Hud,
     /// Frames counted in the last full second, for the top bar.
     fps_shown: u32,
@@ -439,12 +447,11 @@ impl Runner {
             instancer.set_aim(Some([0.5 * map_metres.0, 0.5 * map_metres.1]));
         }
         instancer.update_tick(motions_of(&looks, &snap));
+        let camera_settings = sf_render::CameraSettings::embedded();
         let ground = Arc::new(TerrainGround::new(&map));
         instancer.set_height_range(ground.min_height() as f32, ground.max_height() as f32);
-        let camera_config = CameraConfig {
-            map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
-            ..CameraConfig::default()
-        };
+        let camera_config = camera_settings
+            .camera_config(DVec2::new(f64::from(map.width()), f64::from(map.height())));
         let mut camera = Camera::new(camera_config, 1280, 720);
         camera.set_ground(ground.clone());
         let bench = options.bench.clone().map(|opts| BenchRun {
@@ -460,6 +467,16 @@ impl Runner {
         });
         let shots = options.shots.clone().map(|dir| ShotRun {
             dir,
+            steps: match &options.shots_zooms {
+                Some(zooms) => zooms
+                    .iter()
+                    .map(|z| (format!("zoom_{z}"), *z, false))
+                    .collect(),
+                None => SHOTS
+                    .iter()
+                    .map(|&(n, z, p)| (n.to_string(), z, p))
+                    .collect(),
+            },
             step: 0,
             settled: 0,
             requested: false,
@@ -511,6 +528,8 @@ impl Runner {
             audio: None,
             ra_play_error: None,
             camera,
+            zoom_bands: camera_settings.zoom,
+            icons_on: true,
             hud,
             fps_shown: 0,
             map,
@@ -766,6 +785,8 @@ impl Runner {
             rejected_seen,
             refusal,
             camera,
+            zoom_bands: _,
+            icons_on: _,
             // The shell.
             started: _,
             report_at: _,
@@ -1016,6 +1037,12 @@ pub fn motion_of(looks: &Looks, snap: &SimSnapshot, v: &EntityView) -> Motion {
     }
 }
 
+/// The motion of the view at `index` of `snap`, as [`motions_of`] draws it: [`motion_of`], marked as
+/// a structure when it has a footprint, so it is drawn at the structure scale (zoom fix round 3).
+pub fn view_motion(looks: &Looks, snap: &SimSnapshot, index: usize) -> Motion {
+    motion_of(looks, snap, &snap.views()[index]).with_structure(snap.is_structure_at(index))
+}
+
 /// Everything the instancer draws for a snapshot: the entities, then the wrecks and the rubble (WP5.5),
 /// which are numbered from the first slot no entity has. In a world with vision rules (WP8.3, WP8.4) an
 /// entity the local player does not see is left out, and so is a wreck on a cell it does not see: the
@@ -1029,7 +1056,7 @@ pub fn motions_of<'a>(
         .iter()
         .enumerate()
         .filter(move |&(i, _)| snap.view_shown(i))
-        .map(move |(_, v)| motion_of(looks, snap, v))
+        .map(move |(i, _)| view_motion(looks, snap, i))
         .chain(
             snap.wrecks()
                 .iter()
@@ -1946,6 +1973,13 @@ impl Runner {
     /// F1 handling, the panel pass and the terrain debug view. While the
     /// panels are hidden the egui pass does not run at all.
     fn update_debug_ui(&mut self, ctx: &Context) {
+        if ctx.actions().pressed(Action::ToggleIcons) {
+            self.icons_on = !self.icons_on;
+            println!(
+                "strategic icons: {}",
+                if self.icons_on { "on" } else { "off" }
+            );
+        }
         if ctx.actions().pressed(Action::ToggleDebug) {
             let visible = self.debug.toggle();
             println!("debug panels: {}", if visible { "on" } else { "off" });
@@ -2003,7 +2037,7 @@ impl Runner {
 
 impl Runner {
     /// Build this frame's models and icons (level of detail per unit, the
-    /// cross-fade by zoom), pick the unit under the cursor in what was built
+    /// icon band and the far-zoom scales by zoom), pick the unit under the cursor in what was built
     /// and highlight it. A click on it selects it ([`Runner::handle_selection`]).
     fn build_units(&mut self, alpha: f32, cursor: Option<(f32, f32)>) {
         let view_proj = self.camera.view_proj();
@@ -2013,15 +2047,21 @@ impl Runner {
         let scale = self.hud.scale();
         let icons = *self.instancer.icon_config();
         let distance = self.camera.distance() as f32;
-        let blend = match self.debug.state.unit_display {
-            UnitDisplay::Auto => icons.blend_for_view(
-                eye.focal_px,
-                distance,
-                self.camera.max_distance() as f32,
-                scale,
+        let zoom = self.camera.zoom() as f32;
+        // Models at every zoom; the icons over them in the far band; the models
+        // larger toward the far end, the structures less than the units (camera.ron, `zoom`).
+        let (blend, model_scale, structure_scale) = match self.debug.state.unit_display {
+            UnitDisplay::Auto => (
+                self.zoom_bands.blend_toggled(zoom, self.icons_on),
+                self.zoom_bands.model_scale(zoom),
+                self.zoom_bands.structure_scale(zoom),
             ),
-            UnitDisplay::Models => Blend::MODELS,
-            UnitDisplay::Icons => Blend::ICONS,
+            UnitDisplay::Models => (
+                Blend::MODELS,
+                self.zoom_bands.model_scale(zoom),
+                self.zoom_bands.structure_scale(zoom),
+            ),
+            UnitDisplay::Icons => (Blend::ICONS, 1.0, 1.0),
         };
 
         // Cull by tile, interpolate, put the units on the ground, choose the
@@ -2029,7 +2069,9 @@ impl Runner {
         let started = Instant::now();
         let ground = &self.ground;
         self.stats = self.instancer.build_frame(
-            &FrameView::new(&frustum, alpha, eye, blend, scale),
+            &FrameView::new(&frustum, alpha, eye, blend, scale)
+                .with_model_scale(model_scale)
+                .with_structure_scale(structure_scale),
             |x, z| ground.height(f64::from(x), f64::from(z)) as f32,
         );
         self.build_ms.push(started.elapsed());
@@ -2074,24 +2116,14 @@ impl Runner {
                     .map_or_else(String::new, |o| order_text(o, &self.snap)),
             }
         });
-        let (above, below) = (icons.model_above_px * scale, icons.icon_below_px * scale);
-        // The band as `blend_for_view` applies it (with its shrink on a map
-        // whose whole-map view would still show models).
-        let band = icons.view_band(
-            eye.focal_px,
-            distance,
-            self.camera.max_distance() as f32,
-            scale,
-        );
         self.unit_view = UnitView {
-            model_weight: blend.model(),
-            zoom: self.camera.zoom() as f32,
+            icon_alpha: blend.icon(),
+            effects_weight: sf_render::effects_weight(blend),
+            model_scale,
+            icons_from_zoom: self.zoom_bands.icons_from,
+            zoom,
             distance,
-            reference_px: band.reference_px,
-            model_above_px: above,
-            icon_below_px: below,
-            models_until: band.models_until,
-            icons_from: band.icons_from,
+            reference_px: icons.reference_px(eye.focal_px, distance),
             ui_scale: scale,
             hovered,
         };
@@ -2109,7 +2141,10 @@ impl Runner {
             view_proj,
             focal_px: eye.focal_px,
             viewport: [width as f32, height as f32],
-            model_weight: self.unit_view.model_weight,
+            // The effects fade out as the zoom goes into the icon band: on the
+            // ramp, not on the capped icon opacity, so the strategic band (only the
+            // death flash) is still reached.
+            model_weight: self.unit_view.effects_weight,
             reference_px: self.unit_view.reference_px,
             icon_px: self.instancer.icon_params().size_px,
             dt,
@@ -2232,7 +2267,7 @@ impl Runner {
             return Some((pose.zoom, pose.focus, pose.segment));
         }
         if let Some(shot) = &self.shots {
-            let zoom = SHOTS[shot.step.min(SHOTS.len() - 1)].1;
+            let zoom = shot.steps[shot.step.min(shot.steps.len() - 1)].1;
             // `--focus x,z` (metres) decides where the shots look; the middle of the map without it.
             let focus = self.options.focus.unwrap_or((map.0 * 0.5, map.1 * 0.5));
             return Some((zoom, focus, 0));
@@ -2257,7 +2292,7 @@ impl Runner {
             }
             return true;
         }
-        let name = SHOTS[shot.step].0;
+        let name = shot.steps[shot.step].0.clone();
         let Some(image) = renderer.take_capture() else {
             eprintln!("sf_game: --shots: the window could not be captured ({name})");
             self.failed.store(true, Ordering::Relaxed);
@@ -2284,13 +2319,13 @@ impl Runner {
         shot.step += 1;
         shot.settled = 0;
         shot.requested = false;
-        shot.step < SHOTS.len()
+        shot.step < shot.steps.len()
     }
 
     /// Ask for the capture once the camera has settled on the step's pose.
     fn shots_before_render(&mut self) {
         let Some(shot) = &mut self.shots else { return };
-        let panels = SHOTS[shot.step.min(SHOTS.len() - 1)].2;
+        let panels = shot.steps[shot.step.min(shot.steps.len() - 1)].2;
         if self.debug.visible() != panels {
             self.debug.set_visible(panels);
             if !panels && let Some(renderer) = &mut self.renderer {
@@ -3022,14 +3057,15 @@ impl App for Runner {
         );
         println!(
             "summary: last frame {} models (levels {:?}, {} triangles, {} draw calls), \
-             {} icons ({} draw call), model weight {:.2}, hovered {}",
+             {} icons ({} draw call), icon alpha {:.2}, model scale {:.2}, hovered {}",
             self.stats.models,
             self.stats.per_lod,
             self.stats.model_triangles,
             self.stats.model_draw_calls,
             self.stats.icons,
             self.stats.icon_draw_calls,
-            self.unit_view.model_weight,
+            self.unit_view.icon_alpha,
+            self.unit_view.model_scale,
             self.unit_view
                 .hovered
                 .as_ref()

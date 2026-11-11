@@ -252,17 +252,13 @@ fn testpack_5000_units_report() {
         .collect();
     let mut inst = with_pack(&motions);
     inst.set_aim(Some([128.0, 128.0]));
-    let icons = *inst.icon_config();
     for (name, zoom) in [("close", 0.15), ("mid", 0.5), ("strategic", 1.0)] {
         let cam = camera(zoom, (128.0, 128.0));
         let vp = cam.view_proj();
         let eye = EyeView::from_view_proj(vp, H);
-        let blend = icons.blend_for_view(
-            eye.focal_px,
-            cam.distance() as f32,
-            cam.max_distance() as f32,
-            1.0,
-        );
+        let blend = crate::CameraSettings::embedded()
+            .zoom
+            .blend(cam.zoom() as f32);
         let frustum = Frustum::from_view_proj(vp);
         build(&mut inst, &cam, blend);
         let rounds = 20;

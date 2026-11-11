@@ -94,6 +94,8 @@ struct Scene {
     /// The cursor, in pixels, if the next frame is drawn with the mouse over
     /// the picture: the unit under it is highlighted as the game does.
     hover: Option<[f32; 2]>,
+    /// The icon opacity cap of the frames (`camera.ron`'s `icons_max_alpha` unless a test sets it).
+    icon_cap: Option<f32>,
 }
 
 impl Scene {
@@ -148,6 +150,7 @@ impl Scene {
             own,
             enemy,
             hover: None,
+            icon_cap: None,
         }
     }
 
@@ -193,12 +196,11 @@ impl Scene {
         let vp = cam.view_proj();
         let frustum = Frustum::from_view_proj(vp);
         let eye = EyeView::from_view_proj(vp, H as f32);
-        let blend = self.instancer.icon_config().blend_for_view(
-            eye.focal_px,
-            cam.distance() as f32,
-            cam.max_distance() as f32,
-            1.0,
-        );
+        let mut bands = sf_render::CameraSettings::embedded().zoom;
+        if let Some(cap) = self.icon_cap {
+            bands.icons_max_alpha = cap;
+        }
+        let blend = bands.blend(cam.zoom() as f32);
         let ground = &self.ground;
         self.instancer
             .build_frame(&FrameView::new(&frustum, 0.0, eye, blend, 1.0), |x, z| {
@@ -208,8 +210,14 @@ impl Scene {
     }
 
     fn camera(&self, zoom: f64, focus: [f32; 2]) -> Camera {
+        self.camera_with_margin(zoom, focus, CameraConfig::default().far_margin)
+    }
+
+    /// [`Scene::camera`] with the farthest zoom at another `far_margin`.
+    fn camera_with_margin(&self, zoom: f64, focus: [f32; 2], far_margin: f64) -> Camera {
         let cfg = CameraConfig {
             map_size: DVec2::new(f64::from(self.map.width()), f64::from(self.map.height())),
+            far_margin,
             ..CameraConfig::default()
         };
         let mut c = Camera::new(cfg, W, H);
@@ -446,7 +454,10 @@ fn the_ring_is_green_and_surrounds_the_unit() {
 fn selected_icons_are_highlighted_and_the_others_are_not() {
     let mut scene = Scene::new();
     let mut r = renderer(&scene.map);
-    let cam = scene.camera(1.0, [128.0, 128.0]);
+    // The icon band at the farthest zoom of round 1 (a quarter-map margin): with the full-map margin
+    // of zoom fix round 2 the sandbox's units and structures are too close on the screen to tell
+    // one icon's outline from the next. What is tested is the highlight, not the framing.
+    let cam = scene.camera_with_margin(1.0, [128.0, 128.0], 0.25);
     let none = Selection::new(LOCAL_PLAYER);
     let (base, _) = scene.shoot(&mut r, &cam, &none, None);
     assert!(scene.instancer.blend().dominant() == sf_render::icons::Dominant::Icon);
@@ -496,18 +507,27 @@ fn selected_icons_are_highlighted_and_the_others_are_not() {
     for id in far {
         assert_eq!(changed(&base, &img, icon(*id)), 0, "{id}");
     }
-    // The other side is untouched, except where its icon sits within a selected unit's bar or ring:
-    // on this small map the two sides' units stand a lattice step apart (since WP6.11 the denser
-    // base pushes them closer), so the same distance as above is left out.
-    for id in &scene.enemy {
-        let p = scene.screen(&cam, *id);
-        let by_a_selected = mobile.iter().any(|m| {
-            let q = scene.screen(&cam, *m);
-            (p[0] - q[0]).abs() <= 30.0 && (p[1] - q[1]).abs() <= 40.0
-        });
-        if !by_a_selected {
-            assert_eq!(changed(&base, &img, icon(*id)), 0, "{id}");
-        }
+    // The other side is untouched (the icons of the far zoom sit close together on the screen since the
+    // farthest zoom shows a margin: only those not within reach of a selected unit's outline or bar count).
+    let far_enemies: Vec<_> = scene
+        .enemy
+        .iter()
+        .filter(|id| {
+            let p = scene.screen(&cam, **id);
+            mobile.iter().all(|m| {
+                let q = scene.screen(&cam, *m);
+                (p[0] - q[0]).abs() > 30.0 || (p[1] - q[1]).abs() > 40.0
+            })
+        })
+        .collect();
+    assert!(
+        2 * far_enemies.len() >= scene.enemy.len(),
+        "at least half of the other side is clear of the selection: {} of {}",
+        far_enemies.len(),
+        scene.enemy.len()
+    );
+    for id in far_enemies {
+        assert_eq!(changed(&base, &img, icon(*id)), 0, "{id}");
     }
 }
 
@@ -759,6 +779,9 @@ fn yellow(p: [u8; 4]) -> bool {
 #[test]
 fn an_icon_looks_different_plain_hovered_selected_and_both() {
     let mut scene = Scene::new();
+    // The four looks of the icon itself, at full opacity (the shipped cap of 60 % mixes the fill with
+    // the ground; that the outline keeps full opacity under the cap is `icons_screenshot.rs`).
+    scene.icon_cap = Some(1.0);
     let mut r = renderer(&scene.map);
     let cam = scene.camera(1.0, [128.0, 128.0]);
     // A unit of ours alone in a corner of the map, so no other icon is near it.

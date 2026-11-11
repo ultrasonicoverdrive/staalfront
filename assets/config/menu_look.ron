@@ -91,6 +91,7 @@
             (action: CameraPanRight, label: "Pan right"),
             (action: CameraRotateLeft, label: "Rotate left"),
             (action: CameraRotateRight, label: "Rotate right"),
+            (action: ToggleIcons, label: "Strategic icons on/off"),
         ]),
         (title: "Orders", rows: [
             (action: OrderStop, label: "Stop"),

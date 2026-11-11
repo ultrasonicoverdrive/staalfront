@@ -26,6 +26,8 @@ pub enum Action {
     CameraRotateLeft,
     CameraRotateRight,
     CameraDrag,
+    /// Switch the strategic icons over the far zoom off and on (models only when off).
+    ToggleIcons,
     ToggleFullscreen,
     ToggleDebug,
     /// Plays the audio test sound (engine smoke test, not a game command).
@@ -97,7 +99,7 @@ impl Action {
         Action::Group9,
     ];
 
-    pub const ALL: [Action; 36] = [
+    pub const ALL: [Action; 37] = [
         Action::CameraZoomIn,
         Action::CameraZoomOut,
         Action::CameraPanLeft,
@@ -107,6 +109,7 @@ impl Action {
         Action::CameraRotateLeft,
         Action::CameraRotateRight,
         Action::CameraDrag,
+        Action::ToggleIcons,
         Action::ToggleFullscreen,
         Action::ToggleDebug,
         Action::PlayTestSound,

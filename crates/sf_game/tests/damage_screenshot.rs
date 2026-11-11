@@ -401,15 +401,17 @@ impl Scene {
         let vp = cam.view_proj();
         let eye = EyeView::from_view_proj(vp, H as f32);
         let icons = *self.instancer.icon_config();
-        let (distance, max) = (cam.distance() as f32, cam.max_distance() as f32);
-        let blend = icons.blend_for_view(eye.focal_px, distance, max, 1.0);
-        let band = icons.view_band(eye.focal_px, distance, max, 1.0);
+        let distance = cam.distance() as f32;
+        let blend = sf_render::CameraSettings::embedded()
+            .zoom
+            .blend(cam.zoom() as f32);
+        let reference_px = icons.reference_px(eye.focal_px, distance);
         let frame = FxFrame {
             view_proj: vp,
             focal_px: eye.focal_px,
             viewport: [W as f32, H as f32],
-            model_weight: blend.model(),
-            reference_px: band.reference_px,
+            model_weight: 1.0 - blend.icon(),
+            reference_px,
             icon_px: self.instancer.icon_params().size_px,
             dt: 0.05,
             alpha: 1.0,
@@ -617,7 +619,8 @@ fn a_structure_shot_up_shows_its_damaged_models_smoke_and_fire() {
         assert_eq!(max, 600, "the power plant has 600 hit points");
         let v = scene.world.get(plant).unwrap();
         let [fx_m, fz_m] = sf_math::render_bridge::vec2_cells_to_metres(v.pos);
-        let cam = scene.camera(0.16, [fx_m, fz_m]);
+        // 0.13: the same eye distance as 0.16 before the farthest zoom grew by the margin.
+        let cam = scene.camera(0.13, [fx_m, fz_m]);
         let rect = scene.crop(&cam, plant, 20.0);
         let body = scene.crop(&cam, plant, 6.0);
         let (blend, frame) = scene.zoom_of(&cam);
