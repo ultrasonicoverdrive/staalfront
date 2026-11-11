@@ -118,6 +118,42 @@ the selected factory. Keys (`input.ron`; Q and E rotate the camera): **U** queue
 **I** picks the next unit on offer, **O** takes the last item out of the queue, **G** sets the rally
 point to the cell under the cursor. Production is on in the sandbox with `--harvest` (it needs money).
 
+## Rally by right-click (WP6.9)
+
+UI only: the sim command is the `SetRally` of WP6.5 (tag 15), nothing in `sf_sim` changed and no pin moved. Code:
+`crates/sf_game/src/rally.rs` (the decision), `commands::rally_clicks`, `runner.rs` (`handle_orders`, `draw_production`),
+`production_view::draw_rally_lines`. Tests: `rally/tests.rs`, `tests/production_screenshot.rs`.
+
+* **Whom it is for.** The selected **own factories that stand** (`rally::selected_factories`: a structure with a
+  production queue of the player, finished, not being sold, with hit points left). A factory under construction, being
+  sold or at 0 hit points is not one; the right-click on it is ground (`a_factory_being_sold_takes_no_rally_point`).
+* **Factories only selected.** A right-click on the ground sends `SetRally { factory, cell: Some(cell) }` for each of
+  them (in the selection's order, one command each); a right-click on **one of the selected factories** sends
+  `SetRally { factory, cell: None }` for **that** factory only, the other selected ones keep theirs
+  (`a_right_click_on_a_selected_factory_clears_its_rally_point_and_only_its`). Over an enemy or a neutral thing nothing
+  is sent (the cursor is Inspect); off the map nothing is sent (NoGo; the sim would refuse it: `OffMap`); with no ground
+  point (the sky, the UI) nothing is sent. A cell in shroud or fog is allowed, like a move order (the code never reads
+  visibility). A cell no unit can enter (the river) is allowed too: the sim's only check is the map
+  (`a_cell_nobody_can_walk_to_is_still_a_rally_cell`); a rally cell that a structure stands on is also accepted (the
+  walking unit goes as near as it can).
+* **Mixed selection** (units and factories). The units get the order of their cursor, exactly as without the factories
+  (`commands::right_click`), and the factories follow the same cursor kind (`rally::plan`): Move, Queue and AttackMove over
+  ground set the rally point of each selected factory to the same cell (the rally point is never queued); Attack (an
+  enemy) sets nothing; NoGo sets nothing, so the picture stays true over water the units cannot enter; Guard over a
+  selected factory clears **its** rally point and over anything else sets the rally cells to that cell. (Guard over a
+  selected factory is the one surprising row: the units guard the factory and its rally point goes. It follows the rule
+  "a right-click on a selected factory clears it" and is cheap to undo.)
+* **Voices.** A rally right-click raises no unit voice (`order_voice` knows only `Command::Order`); a mixed selection
+  speaks the units' order voice as for a plain order.
+* **The line.** From the middle of the factory's exit cell (`rally::exit_cell_centre`: `sf_sim::exit_cell` of the anchor,
+  the footprint and the exit side of the building table, which `ProductionMenu` now carries; the test
+  `the_exit_cell_of_the_snapshot_is_the_one_the_sim_gives` compares it with the sim's own for every factory) to the foot of
+  the flag, drawn **only while that factory is selected** and only when it has a rally point, as one straight screen line
+  under the flags (`draw_rally_lines`; colour and width are `rally.line` and `rally.line_width_px` of
+  `production_look.ron`, pinned in `the_shipped_look_is_pinned`). It is not bent along the terrain. The flag stays drawn
+  for every factory; **own flags are always shown** (`SimSnapshot::seen` is true for the player's own objects, fog or not).
+* **The debug key G** still sets the rally point of the first selected factory to the cell under the mouse.
+
 ## Pinned scenario `production`
 
 `assets/scenarios/production.ron` (frozen `harvest_defs`; numbers written out): two factories building
@@ -132,4 +168,5 @@ destroyed with its queue. `tools/sf_headless/tests/production.rs` asserts each o
 Defences (WP6.7, done); repair and sell (WP6.6, done: a factory being sold accepts nothing and its queue is lost with it, nothing refunded, `repair_sell.md`); the AI's
 use of production (phase 9); the hotkeys of the finished game (the sidebar itself is WP11.1);
 unit `requires` in the shipped data (balance, phase 15); a queue that survives a lost factory;
-choosing which factory of several gets a unit; production of structures through a factory queue.
+choosing which factory of several gets a unit; production of structures through a factory queue; a rally point on
+ore or on a unit, waypoints, a rally line bent along the terrain; the repeat toggle (WP6.10, `PLAN.md`).

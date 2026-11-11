@@ -2696,6 +2696,24 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
 - **Gaps:** sound of hidden events; ghosts only for structures and they do not age; the ghost is a team colour; no allied vision; the F1 cell
   grid overlay still marks every unit's cell; the shader's cost on a real GPU is not measured (only the software adapter).
 
+### WP6.9 notes: rally by right-click and the tab that follows the selection (Tijmen's wish after M1, 10-11-2026)
+
+- **What:** UI only. With own standing factories selected a right-click on the ground sends `SetRally` for each (a right-click on one
+  of the selected factories clears that one); the cursor shows `rally` / `rally_clear` (two new cursor pictures, 26 now); mixed
+  selections give the units their order and the factories the same cell; a line from the exit cell to the flag is drawn only while
+  the factory is selected; the sidebar shows the tab of a factory when the selection changes to hold one. Rules: `rules/production.md`
+  ("Rally by right-click"), `rules/cursor.md` (rows R1/R2), `rules/sidebar.md` ("The tab follows the selection"). Decisions: `PLAN.md`
+  note of 10-11-2026 (WP6.10, the repeat toggle, follows).
+- **Pins:** none moved; nothing in `crates/sf_sim/` changed (diff of that directory against origin/main is empty).
+- **Voices (#112, merged before this PR):** a rally right-click has no voice (`order_voice` only reads `Command::Order`); a mixed
+  selection speaks the units' order voice.
+- **Gaps:** the runner wiring (`handle_orders`, `follow_selection_tab`) is checked by reading and by the pure functions it calls, not
+  by a headless runner test; Guard over a selected factory in a mixed selection clears its rally point (documented, decided by the
+  literal rule); the line is a straight screen line, not bent along the terrain; no rally on ore or a unit; the pictures are
+  placeholders.
+- Also carried: the review nits of PR #111 (stale "cross-fade" wording in `fx.rs` and `effects_screenshot.rs`, the structure cap 1.6 in
+  `architecture.md`, one test moved to its own bullet in `camera.md`) and the agent rule for a twice-rejected PR in `CLAUDE.md`.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

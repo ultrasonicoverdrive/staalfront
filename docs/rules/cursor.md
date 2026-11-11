@@ -36,7 +36,9 @@ Inputs:
   never their keys.
 * **selection**: the selected units that can take an order (`Selection::orderable`, the own
   mobile ones; a selected structure counts for nothing, armed or not) and whether any of them
-  has a weapon (`UnitStats::weapon_range` > 0).
+  has a weapon (`UnitStats::weapon_range` > 0). Since WP6.9 also whether an own **factory that
+  stands** is selected (`rally::selected_factories`), which gives rows R1 and R2 below when no
+  unit can take an order.
 * **terrain**: `World::passable(class, cell)`, below.
 
 ## The decision table
@@ -44,11 +46,16 @@ Inputs:
 *Since WP11.1 (`sidebar.md`) the sidebar keeps out of the edge-scroll band, so row 1 and the sidebar never meet on a
 pixel. Row 1 still wins over a unit under the cursor inside the band (progress item 22): decided and kept, see there.*
 
-The first row that matches wins.
+The first row that matches wins. R1 and R2 stand before row 2 and only answer when a factory is selected and no unit
+can take an order; with an enemy or neutral thing under the mouse, no ground point or the point off the map they do not
+answer and rows 2, 3 and 7 below give Inspect, Select and NoGo (so over an enemy a factory selection shows Inspect, and
+off the map the forbidden sign, with no command). The scroll cursor of row 1 wins over them.
 
 | # | Situation | Cursor | A right-click gives |
 |---|---|---|---|
 | 1 | the mouse is at a screen edge that scrolls | the scroll cursor of that edge (8: N, NE, E, SE, S, SW, W, NW; the corners are the diagonals) | nothing |
+| R1 | **WP6.9** no selected unit can take an order, a selected own factory stands, and the mouse is over **one of the selected factories** | **RallyClear** (a struck-through flag) | `SetRally { factory, cell: None }` for that factory |
+| R2 | the same selection, over the ground (or over anything of ours that is not a selected factory, or something unseen), on the map | **Rally** (a flag on a pole; the foot of the pole is the hotspot) | `SetRally { factory, cell: Some(cell) }` for **each** selected factory |
 | 2 | no selected unit can take an order (nothing, or only structures) and the mouse is over an enemy or neutral thing | **Inspect** | nothing (a left-click inspects) |
 | 3 | the same, over anything else (own thing, ground, sky) | **Select** | nothing |
 | 4 | over an **enemy** unit or structure and at least one selected unit has a weapon | **Attack** | `Attack(entity)` |
@@ -87,6 +94,12 @@ Notes on the rows:
 * **Row 5, structures.** Guarding an own structure is allowed. Capture, repair, enter and the
   like (engineers on structures, repair trucks on vehicles) come in later phases and will
   take rows before this one.
+* **R1 and R2, the units' cursor wins a mixed selection (WP6.9).** With units and factories selected the picture is the
+  units' row (Move, Queue, AttackMove, Attack, Guard, NoGo); a right-click gives the units that order **and** the factories
+  follow the same cursor kind (`rally::plan`, `docs/rules/production.md`, "Rally by right-click"): Move, Queue, AttackMove
+  and Guard set the rally cells to the cell under the mouse (Guard over a selected factory clears its rally point
+  instead), Attack and NoGo give the factories nothing. A rally cell is never refused for terrain (no movement class
+  applies to a factory); the sim refuses only a cell off the map, which the cursor shows as NoGo.
 * **Row 7.** A selection is blocked only when **every** orderable unit is blocked: one unit
   that can go is enough, the order goes to all and the sim sorts out who arrives (path
   finding is phase 4). NoGo gives **no order** at all, so a unit is never sent into the river
@@ -112,7 +125,7 @@ source of truth, so the picture, the click and the walk cannot disagree
 
 ## The cursors
 
-24 pictures, `assets/ui/cursors/<name>.png`, 32 x 32 RGBA, named by `CursorKind::name`:
+26 pictures, `assets/ui/cursors/<name>.png`, 32 x 32 RGBA, named by `CursorKind::name`:
 
 * in use: `select` (a pointer), `inspect` (a lens), `move` (four arrows), `queue` (the same
   with a plus), `attack` (a crosshair), `attack_move` (a crosshair that leaves to the right),
@@ -124,7 +137,10 @@ source of truth, so the picture, the click and the walk cannot disagree
   `cursor_context` when to answer them. **`cursor_context` returns none of them and `order_for` gives no
   order for them** (`placeholders_never_come_out_of_the_context_and_never_order`); since WP6.6 `repair` and
   `sell` are shown by the sidebar's modes (below), a path of their own that never goes through the decision
-  table, and `place` and the others are still waiting.
+  table, and `place` and the others are still waiting;
+* **`rally`** (a green flag on a pole standing on a foot; hotspot the foot) and **`rally_clear`** (a gold flag with a red
+  cross; the same hotspot), WP6.9, in use: rows R1 and R2. Drawn by `tools/sf_icon_gen` like the others, with the dark
+  outline, no third-party material.
 
 ## Modes (WP6.6)
 
@@ -222,8 +238,15 @@ every zoom. I was the first wish but is `ProduceCycle`.
 * `crates/sf_game/src/cursor/tests.rs`: every row above, the modifiers, each movement class
   against water and rock, mixed selections, the eight scroll cursors and their precedence, the
   placeholders never being the answer, the right-click equal to the cursor over a sweep, each
-  order run through the sim, and that every kind has a picture in the shipped set.
-* `crates/sf_game/tests/cursor_screenshot.rs`: all 24 cursors over a generated terrain through
+  order run through the sim, and that every kind has a picture in the shipped set. The sweep of the placeholders
+  leaves out the two rally cursors (`is_rally`): they need a factory in the world.
+* `crates/sf_game/src/rally/tests.rs` (WP6.9): rows R1 and R2 and the mixed selection, and
+  `the_cursor_and_the_commands_of_a_right_click_never_disagree`, the sweep of eight selections (nothing, a tank, a power
+  plant, one factory, two, a tank with factories) over twelve hovers and the four modifier combinations: a Rally
+  cursor means no unit order and one `SetRally` per selected factory, RallyClear one clear, Move/Queue/AttackMove one per
+  factory, Guard one clear or one per factory, anything else nothing, and with no factory selected never a rally cursor
+  or command.
+* `crates/sf_game/tests/cursor_screenshot.rs`: all 26 cursors over a generated terrain through
   the real renderer (software adapter): drawn at the hotspot, the outline dark on any ground, one
   draw call, growing with the UI scale, clipped at the window edge, nothing drawn with no cursor.
   Frames: `docs/screenshots/wp3.5/` (`cursors-over-terrain.png`, and the move cursor at UI scale

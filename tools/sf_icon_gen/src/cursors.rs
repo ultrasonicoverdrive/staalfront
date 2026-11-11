@@ -364,19 +364,19 @@ fn art(name: &str) -> Art {
         // where the foot of the pole is (the hotspot).
         "rally" => Art {
             layers: vec![
-                (bar(-4.0, -10.0, -4.0, 12.0, 1.5), WHITE),
+                (bar(-4.0, -8.0, -4.0, 12.0, 1.5), WHITE),
                 (polygon(&[(-3.0, 12.0), (12.0, 6.5), (-3.0, 1.0)]), GREEN),
-                (circle(-4.0, -11.0, 2.6), WHITE),
+                (circle(-4.0, -9.0, 2.5), WHITE),
             ],
-            hotspot: at(-4.0, -11.0),
+            hotspot: at(-4.0, -9.0),
         },
         // The same flag, gold, struck through with a red cross: a right-click on the factory takes
         // its rally point away.
         "rally_clear" => Art {
             layers: vec![
-                (bar(-4.0, -10.0, -4.0, 12.0, 1.5), WHITE),
+                (bar(-4.0, -8.0, -4.0, 12.0, 1.5), WHITE),
                 (polygon(&[(-3.0, 12.0), (12.0, 6.5), (-3.0, 1.0)]), GOLD),
-                (circle(-4.0, -11.0, 2.6), WHITE),
+                (circle(-4.0, -9.0, 2.5), WHITE),
                 (
                     union(vec![
                         bar(2.0, -2.0, 12.0, -12.0, 1.8),
@@ -385,7 +385,7 @@ fn art(name: &str) -> Art {
                     RED,
                 ),
             ],
-            hotspot: at(-4.0, -11.0),
+            hotspot: at(-4.0, -9.0),
         },
         other => panic!("no art for the cursor {other}"),
     }

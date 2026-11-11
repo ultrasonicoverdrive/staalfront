@@ -606,7 +606,8 @@ PLAN.md §2.2 and §2.3 in code. Three CPU modules in `sf_render` (`model`, `ico
   switches them off), on top of the models. The
   blend of a frame is `Blend { model, icon }` (model weight 1 in play, icon alpha from `ZoomBands::icon_alpha`).
   (Before that the icons replaced the models by a dithered cross-fade driven by the apparent size of a reference unit.)
-  The models also grow with `ZoomBands::model_scale` (capped, 1 to 2.5) toward the far end.
+  The models also grow with `ZoomBands::model_scale` toward the far end, capped at 2.5 for a unit and 1.6 for a
+  structure (`rules/camera.md`).
 - **Icons.** One instanced quad per unit, one draw call (`IconInstance`, 32 bytes:
   world anchor, shape + flags, colour). The vertex shader projects the anchor and
   lays a quad of `size_px * ui_scale` **pixels** around it (centre snapped to the

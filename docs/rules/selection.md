@@ -26,7 +26,7 @@ Three things are kept:
 | Thing | Click | Drag rectangle | Double-click | Group | Gets orders |
 |---|---|---|---|---|---|
 | own unit (mobile) | yes | yes | yes | yes | yes |
-| own structure | yes | **no** | as a single click | yes | no (the sim refuses them anyway) |
+| own structure | yes | **no** | as a single click | yes | no (the sim refuses them anyway), but a selected own **factory** that stands takes a rally point from a right-click (WP6.9, `production.md`, `cursor.md` rows R1 and R2) and moves the sidebar to its tab when the selection changes (`sidebar.md`) |
 | enemy or neutral thing | **inspect** | no | as a single click | no | **never** |
 | entity without a unit-table entry (the crowd's placeholder wanderers) | no | no | no | no | no |
 
