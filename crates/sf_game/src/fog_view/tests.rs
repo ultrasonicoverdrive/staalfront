@@ -233,6 +233,13 @@ fn the_icon_list_and_the_model_lists_leave_out_what_is_not_seen() {
     );
     assert_eq!(models.models, 3);
     assert_eq!(models.visible, 3);
+    // The overlay band of play: models and icons together, and still only what is seen.
+    let both = inst.build_frame(
+        &FrameView::new(&frustum, 0.0, eye, Blend::overlay(0.5), 1.0),
+        flat,
+    );
+    assert_eq!((both.models, both.icons), (3, 3));
+    assert_eq!(inst.icon_instances().len(), 3);
 }
 
 #[test]
@@ -385,6 +392,23 @@ fn a_structure_seen_and_then_left_behind_becomes_a_ghost_and_is_removed_when_see
     let ghost_motion = ghost_motion.expect("a motion in the ghost colour");
     assert!(ghost_motion.id.index() >= crate::looks::first_wreck_slot(&snap));
     assert_eq!(ghost_motion.id.generation(), u32::MAX - 1);
+    // A ghost is a structure: at the farthest zoom it is drawn at the structure scale (1.6, zoom fix
+    // round 4), not at the units' 2.5, through the real instancer.
+    assert!(ghost_motion.is_structure());
+    let style = crate::looks::with_wreck_colour(Style::embedded().scaled(3.0));
+    assert_eq!(
+        crate::drawn_scale_at_zoom_one(&style, *ghost_motion, W as f32 * 4.0),
+        1.6
+    );
+    let scout = m
+        .iter()
+        .find(|m| m.player != crate::looks::GHOST_COLOUR)
+        .unwrap();
+    assert!(!scout.is_structure());
+    assert_eq!(
+        crate::drawn_scale_at_zoom_one(&style, *scout, W as f32 * 4.0),
+        2.5
+    );
     // On the minimap it is a ghost dot at its middle.
     let dots: Vec<_> = minimap_dots(&snap, &book).collect();
     assert_eq!(dots.iter().filter(|d| d.1 == Dot::Ghost).count(), 1);

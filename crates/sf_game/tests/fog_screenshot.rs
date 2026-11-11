@@ -402,7 +402,8 @@ fn the_start_of_the_first_match_has_shroud_round_the_base_and_a_dimmed_explored_
     let tick = snap.tick().0;
     save(&format!("m1_t{tick:05}_start_base.png"), &with_fog);
     // The whole map: the pixel checks below are made on it.
-    let cam = scene.camera(0.9, (48.0, 48.0));
+    // 0.77 is the eye distance 0.9 was before the full-map margin of zoom fix round 2.
+    let cam = scene.camera(0.77, (48.0, 48.0));
     let (with_fog, snap) = scene.shoot_with(&mut r, &cam, true);
     save(&format!("m1_t{tick:05}_start_whole_map.png"), &with_fog);
 

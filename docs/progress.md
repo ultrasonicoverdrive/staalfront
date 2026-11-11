@@ -1971,6 +1971,17 @@ Status: WP6.1, WP6.2, WP6.3 and WP6.8 are in; WP6.5 is in (PR #96, built before 
   share the remaining 66. No hysteresis around the thresholds (noted in `damage.md`): once WP6.6 repair lands an object
   on 660/330 per mille can flip stage.
 
+- WP6.8b Structure fire bigger than vehicle fire (Tijmen, 31-10-2026): `damage.ron` `emitters` gets
+  `structure_smoke_effect` / `structure_fire_effect` and `structure_damaged` / `structure_heavy` rates; `effects.ron` gets
+  `damage_smoke_structure` and `damage_fire_structure` (flame 5.6 m against 2.8 m, smoke 6.4 m against 3.2 m; heavy
+  10 fire puffs/s against 7); `FxPlayer` picks per object by the footprint it already used. Mobile objects keep their
+  effect and rates. Presentation only: `sf_sim`, `sf_bridge`, scenarios and `sf_headless` untouched, no checksum moved.
+  `docs/rules/damage.md`, screenshots in `docs/screenshots/wp6.8b/`: done
+  Gaps: **all the new numbers are placeholders for Tijmen to tune**; no sound; cost measured on software only.
+  **Open for Tijmen:** a short M0c check on the GTX 1650 laptop with the larger building fires (`sf_demo --bench --fight`),
+  compared with the 31-10 damage run (p99 4.34 ms, `docs/bench/README.md`, "M0c with damage", which lands with PR #93).
+  The larger structure smoke and fire discs raise the overdraw at close zoom; the budget is 16.7 ms.
+
 ### WP6.3 notes
 
 - **Order inside a tick.** The constructions advance first, then the commands run, so a `BuildStructure` of the
@@ -2827,6 +2838,7 @@ fixed, delete the entry in the same PR.
     vision and scales with the units that change cell and the area of their disc. The next step if a crowd with a large sight ever
     shows in a profile is to stamp only the difference of two discs one cell apart (about 2 x (2r + 1) cells instead of
     2 x (2r + 1)^2). Nothing in a match shows it (`vision.md`, "Cost").
+
 35. **Stutter in play** (M1 on the laptop, 10-11-2026; plan: **WP1.16** in the PLAN.md queue). Tijmen played `sf_game --match
     --ra-audio` from main `4944d5c` on the reference laptop (GTX 1650, DX12, 1600 x 900 windowed, later maximised), 8,710 ticks
     (7 min 15 s), with vsync on (`present Fifo`), and felt it stutter. The run's own summary: frame ms avg 17.0, **p99
@@ -2860,3 +2872,30 @@ fixed, delete the entry in the same PR.
     that was re-created for every fog version is fixed. Open until Tijmen's log: suspects 3 and 5, the swap-chain timeout (the log now
     records it), the CPU cost of `Minimap::set_fog`, and the sim thread's own CPU time (not measured; a 62 ms tick could be that thread
     not running).
+
+36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
+    to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side
+    (`far_margin` 0.25, `assets/config/camera.ron`, which now holds every camera number); the models are drawn at every zoom and the
+    strategic icons are an overlay fading in over the last 15 % of the zoom range (`icons_from` 0.85); the models are drawn up to 1.6 times
+    larger toward the far end (the click volumes keep their size). Effects fade with the icons. Measured in the container (llvmpipe, release,
+    1,000 units, farthest zoom, six alternating runs, the machine shared and loaded at about 8): the models cost +3.0 ms on a 29.1 ms frame
+    (medians 32.0 against 29.1 ms for icons only); no cliff, so no simpler distance level was needed. The GTX 1650 number has to come from
+    Tijmen's laptop or the M0 benchmarks. Images that use the default camera above zoom 0 were re-pinned (cause measured: all match again with
+    `far_margin: 0`); no `sf_sim` pin moved. Gap: at the very farthest zoom the opaque icon hides the model under it; a soldier is 1 to 2 px as
+    a model at 1280 x 720.
+    **Fix round 2 (10-11-2026)**, after Tijmen played again ("much farther out, they turn into icons far too soon"): `far_margin` 1.0 (a full
+    map size of margin), the icons only from zoom 0.95 and at most 40 % opaque, the models up to 2.5 times (the cap the file may set),
+    `start_zoom` 0.30 (the same start distance as before), the key K (`ToggleIcons`) switches the icons off, and a death flash keeps at
+    least 6 px (`effects.ron` `strategic_flash_min_px`; at true size it was 2 px from the new distance). Measured (llvmpipe, release, 1,000
+    crowd units at the farthest zoom, six alternating runs against 8207a4f, load about 2.2): median frame 17.4 ms against 23.2 ms (the units
+    are half as big on the screen), terrain 1,024 of 1,024 chunks at the coarsest level, 9,984 triangles, one draw call, the same in both;
+    icons off 13.4 to 14.9 ms. No cliff, no distance LOD added. The scaled structure boxes of the M1 base now overlap in 8 pairs, at worst
+    13.0 m (a measured bound in the test).
+    **Fix round 3 (10-11-2026)**: that overlap broke picking, so structures have their own cap `structure_scale_max` 1.6 on the
+    same ramp, units stay at 2.5. The game marks a motion as a structure from the snapshot (`view_motion`), also rubble and fog
+    ghosts. M1 base again 2 pairs, 0.40 m. 1,000 crowd units at the farthest zoom, 3 alternating runs against 689ce04: 15.8 /
+    17.6 / 16.8 ms against 16.6 / 17.8 / 16.0 ms (no difference beyond the noise; the crowd has no structures).
+    **Fix round 4 (10-11-2026)**, after the second review and a Fable research round: every reader of a model's size is listed in
+    `rules/camera.md` rule 4 (drawn / true / does not care); the drag rectangle, the selection marks (one helper with `visit_drawn`),
+    the tile frustum culling and the muzzle and smoke anchors follow the drawn size; ghosts and rubble are tested at 1.6; the stale
+    "click volume keeps its size" and "cross-fade" texts are gone. Follow-ups listed under "Not done" there.

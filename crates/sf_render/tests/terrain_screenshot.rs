@@ -81,6 +81,10 @@ fn renderer(map: &Map, markers: bool) -> Renderer {
 fn camera(map: &Map, zoom: f64, focus: (f64, f64)) -> Camera {
     let cfg = CameraConfig {
         map_size: DVec2::new(f64::from(map.width()), f64::from(map.height())),
+        // The framing these pictures were made for: the quarter-map margin of the zoom work package's
+        // first round. The full-map margin of fix round 2 is checked by `terrain_lod_screenshot` and
+        // `camera_screenshot`; here it would only move the eye.
+        far_margin: 0.25,
         ..CameraConfig::default()
     };
     let mut c = Camera::new(cfg, W, H);
@@ -331,7 +335,8 @@ fn flattened(map: &Map) -> Map {
 #[test]
 fn sun_facing_slopes_are_brighter_than_shaded_ones() {
     let map = test_map();
-    let c = camera(&map, 0.55, (32.0, 32.0));
+    // 0.5, not 0.55: the farthest zoom grew by the margin (WP2.x), this is the same eye distance.
+    let c = camera(&map, 0.5, (32.0, 32.0));
     let img = shot(&mut renderer(&map, false), &c);
     let (lit, shaded, spread) = slope_contrast(&map, &img, &c);
     println!("relief: lit {lit:.1}, shaded {shaded:.1}, facing spread {spread:.2}");

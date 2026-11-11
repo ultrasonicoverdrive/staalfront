@@ -59,6 +59,8 @@ pub struct Limits {
     pub smoke_refuse_percent: u32,
     /// The alpha a death flash keeps at strategic zoom.
     pub strategic_flash_alpha: f32,
+    /// The least size of a death flash on the screen, physical pixels (still at most an icon).
+    pub strategic_flash_min_px: f32,
     /// Events older than this many ticks are dropped when the picture takes them.
     pub max_event_age_ticks: u32,
     /// A particle rises at `rise_mps` times a factor spread evenly over `1 ± rise_jitter / 2`.
@@ -309,6 +311,12 @@ impl Effects {
             0.5,
             1.0,
         )?;
+        in_range(
+            "limits.strategic_flash_min_px",
+            l.strategic_flash_min_px,
+            1.0,
+            64.0,
+        )?;
         if !(1..=1000).contains(&l.max_event_age_ticks) {
             return err("limits.max_event_age_ticks must be 1 to 1000");
         }
@@ -541,6 +549,7 @@ mod tests {
         assert_eq!(l.middle_factor, 0.5);
         assert_eq!(l.smoke_refuse_percent, 75);
         assert_eq!(l.strategic_flash_alpha, 0.6);
+        assert_eq!(l.strategic_flash_min_px, 6.0);
         assert_eq!(l.max_event_age_ticks, 40);
         assert_eq!(
             (l.rise_jitter, l.smoke_fade_in, l.flash_hold, l.tracer_taper),
@@ -577,7 +586,9 @@ mod tests {
             ("blast_rocket",     5,  0.40, 2.4, 8.0,  (255, 150, 70),  1.0,  true,  1.0, 4.0, "impact.rocket"),
             ("blast_shell",      8,  0.50, 3.6, 9.0,  (255, 160, 70),  1.0,  true,  1.0, 6.0, "impact.shell"),
             ("damage_fire",      1,  0.80, 2.8, 0.8,  (255, 150, 50),  1.0,  true,  2.0, 0.5, ""),
+            ("damage_fire_structure", 1, 0.90, 5.6, 1.6, (255, 150, 50),  1.0,  true,  3.0, 0.8, ""),
             ("damage_smoke",     1,  3.00, 3.2, 1.8,  (40, 38, 36),    0.70, false, 2.6, 0.5, ""),
+            ("damage_smoke_structure", 1, 3.50, 6.4, 3.2, (40, 38, 36), 0.70, false, 3.2, 0.8, ""),
             ("dust_puff",        3,  0.80, 1.4, 2.5,  (165, 140, 105), 0.45, false, 0.8, 2.5, "impact.miss"),
             ("explosion_large",  14, 0.90, 6.0, 10.0, (255, 140, 50),  1.0,  true,  2.0, 9.0, "explosion.large"),
             ("explosion_medium", 9,  0.60, 3.0, 8.0,  (255, 150, 60),  1.0,  true,  1.5, 5.0, "explosion.medium"),

@@ -416,7 +416,10 @@ fn zooming_in_culls_most_chunks() {
     let (view, fr) = view_of(&near);
     let close = p.select(&view, &fr, &cfg, None).stats;
     assert!(close.chunks_visible >= 1 && close.chunks_visible * 4 < all.chunks_visible);
-    assert!(close.triangles < all.triangles, "{close:?} vs {all:?}");
+    // Since the full-map margin of the farthest zoom (zoom fix round 2) every chunk is at a
+    // coarse level there, so the close view at full detail may have more triangles; it has
+    // far fewer draw calls.
+    assert!(close.draw_calls < all.draw_calls, "{close:?} vs {all:?}");
 }
 
 #[test]

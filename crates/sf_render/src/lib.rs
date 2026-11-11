@@ -23,11 +23,11 @@
 //! seams between chunks of different levels, and ray picking against the
 //! terrain ([`ground`]) for the camera.
 //!
-//! WP1.9 adds model levels of detail ([`model`]), strategic icons with a
-//! dithered cross-fade ([`icons`]) and picking per zoom ([`pick`]): a chain of
+//! WP1.9 adds model levels of detail ([`model`]), strategic icons ([`icons`], an overlay
+//! over the models in the farthest zoom band since the zoom work package, [`zoom`]) and picking per zoom ([`pick`]): a chain of
 //! meshes per model chosen by projected size with hysteresis, screen-fixed
-//! icons in player colour past a zoom threshold, and a click volume that is the
-//! model's box when zoomed in and the icon's quad when zoomed out.
+//! icons in player colour drawn over the models in the far band, and a click volume
+//! that is the model's box when zoomed in and the icon's quad when zoomed out.
 //!
 //! WP1.11 adds the debug overlay layer ([`overlay`]): the egui painter
 //! (`egui-wgpu`) on this crate's wgpu device, the terrain LOD tint and a 4 m cell
@@ -40,8 +40,8 @@
 //! instance ([`model::pose_parts`]), one draw call per part per level.
 //!
 //! WP5.6a adds the effects ([`effects`]): a particle pool and tracer dots drawn as screen-facing soft discs
-//! in one instanced, premultiplied-alpha call, with the zoom rules (pixel clamp, fade with the icon
-//! cross-fade, fewer particles at middle zoom, a death flash kept at strategic zoom).
+//! in one instanced, premultiplied-alpha call, with the zoom rules (pixel clamp, fade over the icon
+//! band, fewer particles at middle zoom, a death flash kept at strategic zoom).
 //!
 //! This crate does not depend on `sf_sim` or on a windowing library; the
 //! window is passed in as a `wgpu::SurfaceTarget` (e.g. `Arc<winit::Window>`).
@@ -71,18 +71,19 @@ mod shader_watch;
 pub mod style;
 pub mod terrain;
 mod terrain_gpu;
+pub mod zoom;
 pub use terrain_gpu::FogShading;
 pub mod terrain_look;
 
 pub use camera::{Camera, CameraConfig, CameraInput};
-pub use effects::{EffectInstance, EmitView, ParticlePool, ZoomBand};
+pub use effects::{EffectInstance, EmitView, ParticlePool, ZoomBand, effects_weight};
 pub use frustum::{Aabb, Frustum, Visibility};
 /// Re-exported so the game can name the `Mat4` and `Vec3` of the camera and the picking without a second dependency.
 pub use glam;
 pub use gpu::{Gpu, GpuOptions, Present, RenderError};
 pub use ground::{FlatGround, Ground, TerrainGround};
 pub use icon_atlas::IconAtlas;
-pub use icons::{Blend, IconConfig, IconId, IconShape, ViewBand};
+pub use icons::{Blend, IconConfig, IconId, IconShape};
 pub use image::{Rgba8, Tolerance};
 pub use instancing::{DrawnUnit, FrameView, InstanceStats, Instancer, Motion};
 pub use lod::{LodConfig, TerrainConfig, TerrainStats};
@@ -96,3 +97,4 @@ pub use renderer::{
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
 pub use wgpu;
+pub use zoom::{CameraSettings, ZoomBands};

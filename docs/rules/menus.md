@@ -155,7 +155,7 @@ file on every system (the tests and the screenshots use it) (`the_settings_file_
 
 ## Keys
 
-The key list shows **the 30 actions of `input.ron` that a key can be given to** (`menu_look.ron` `key_groups`: Camera, Orders,
+The key list shows **the 31 actions of `input.ron` that a key can be given to** (31 since the zoom fix round 2 added `ToggleIcons`, K, "Strategic icons on/off" under Camera) (`menu_look.ron` `key_groups`: Camera, Orders,
 Building and production, Selection, Window and tools) plus the fixed menu key; `no_action_with_a_key_is_missing_from_the_list`
 fails if `input.ron` gains a key action that is not listed (and if the list names one that has no key). Actions that are only on
 the mouse, the wheel or the screen edge (zoom, drag, the select and order buttons) are not in the list and cannot be changed

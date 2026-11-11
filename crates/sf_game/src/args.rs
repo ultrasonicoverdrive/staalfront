@@ -107,6 +107,9 @@ pub struct Options {
     /// `--shots-tick N`: the screenshots of `--shots` begin only once the simulation has reached tick N
     /// (so that a fight started with `--fight` has happened); 0 = at once.
     pub shots_tick: u64,
+    /// `--shots-zooms 0.1,0.45,1`: take the screenshots of `--shots` at these camera zooms (0 = closest,
+    /// 1 = farthest) instead of the three standard ones; the files are named `zoom_<z>.png`.
+    pub shots_zooms: Option<Vec<f64>>,
     /// `--fight` (sandbox scene): at the start every armed mobile unit of each side is sent on attack-move
     /// to the other side's base, so the sandbox fights without anyone giving an order (WP5.5): to see
     /// shots, deaths, wrecks and rubble in the viewer. Without it the sides stand still, out of reach.
@@ -191,6 +194,7 @@ impl Options {
             bench: None,
             shots: None,
             shots_tick: 0,
+            shots_zooms: None,
             fight: false,
             harvest: false,
             match_file: None,
@@ -365,6 +369,19 @@ impl Options {
                     }
                 }
                 "--shots" => o.shots = value(&mut o.warnings).map(PathBuf::from),
+                "--shots-zooms" => {
+                    if let Some(v) = value(&mut o.warnings) {
+                        let zooms: Result<Vec<f64>, _> = v.split(',').map(str::parse).collect();
+                        match zooms {
+                            Ok(z) if !z.is_empty() && z.iter().all(|z| (0.0..=1.0).contains(z)) => {
+                                o.shots_zooms = Some(z)
+                            }
+                            _ => o.warnings.push(format!(
+                                "--shots-zooms {v}: expected zooms 0 to 1, comma separated"
+                            )),
+                        }
+                    }
+                }
                 "--shots-tick" => {
                     if let Some(v) = value(&mut o.warnings) {
                         match v.parse() {

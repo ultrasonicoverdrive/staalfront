@@ -378,7 +378,7 @@ mod tests {
             ]
         );
         let rows: usize = l.key_groups.iter().map(|g| g.rows.len()).sum();
-        assert_eq!(rows, 30);
+        assert_eq!(rows, 31);
         let w = &l.words;
         assert_eq!(
             (&*w.game_title, &*w.paused_title, &*w.settings_title),

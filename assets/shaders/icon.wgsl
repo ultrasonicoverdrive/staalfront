@@ -20,9 +20,9 @@
 // antialiasing. Hover and selection (WP3.3) add a light outline *outside* the
 // shape, so the player colour keeps the same area in every state.
 //
-// Cross-fade to the models: the alpha of the instance color is the model's
-// weight `w`. The model (scene.wgsl) keeps the pixels whose 8x8 Bayer dither
-// threshold is below `w`; the icon draws exactly the others. No pixel is both.
+// Overlay on the models: the alpha of the instance color is the opacity of the
+// icon (icons.rs, Blend::icon), which multiplies the coverage. The icons are
+// drawn on top of the models; they do not replace them.
 //
 // Not depth tested: icons are drawn over terrain and models (see icons.rs).
 
@@ -79,7 +79,7 @@ fn outline_reach(flags: u32) -> f32 {
 struct VertexIn {
     @builtin(vertex_index) vertex: u32,
     // Per instance: world anchor, atlas layer and flags, fill color (linear)
-    // with the model weight in alpha.
+    // with the icon opacity in alpha.
     @location(0) position: vec3<f32>,
     @location(1) flags: u32,
     @location(2) color: vec4<f32>,
@@ -137,21 +137,9 @@ fn vs_main(in: VertexIn) -> VertexOut {
     return out;
 }
 
-// Threshold of the pixel in the 8x8 Bayer ordering, in (0, 1). The same
-// integer formula as sf_render::icons::dither_rank (keep scene.wgsl in step).
-fn dither_threshold(pixel: vec2<f32>) -> f32 {
-    let x = u32(pixel.x) & 7u;
-    let y = u32(pixel.y) & 7u;
-    let xy = x ^ y;
-    let rank = ((xy & 1u) << 5u) | ((y & 1u) << 4u) | ((xy & 2u) << 2u)
-        | ((y & 2u) << 1u) | ((xy & 4u) >> 1u) | ((y & 4u) >> 2u);
-    return (f32(rank) + 0.5) / 64.0;
-}
-
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    // The icon is drawn where the model is not.
-    if (dither_threshold(in.clip.xy) < in.weight) {
+    if (in.weight <= 0.0) {
         discard;
     }
     let highlighted = (in.flags & HIGHLIGHT_BIT) != 0u;
@@ -194,12 +182,14 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let sign = clamp(0.5 - d_sign, 0.0, 1.0);
     let inside = mix(mix(in.color, DARK, sign), DARK, rim);
     if (reach <= 0.0) {
-        return vec4<f32>(inside, coverage);
+        return vec4<f32>(inside, coverage * in.weight);
     }
     // Outside the shape: the light outline, yellow when both hovered and
     // selected. The shape's own antialiased edge blends into it.
     var outline = vec3<f32>(1.0);
     outline = select(outline, vec3<f32>(1.0, 0.85, 0.2), highlighted && selected);
+    // The outline is the selection and hover feedback in the far band: it keeps
+    // full opacity, only the shape itself is dimmed by the icon opacity (its cap).
     let shape_cover = clamp(0.5 - d, 0.0, 1.0);
-    return vec4<f32>(mix(outline, inside, shape_cover), coverage);
+    return vec4<f32>(mix(outline, inside, shape_cover), coverage * mix(1.0, in.weight, shape_cover));
 }

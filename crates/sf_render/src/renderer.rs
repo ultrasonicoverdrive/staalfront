@@ -1812,8 +1812,8 @@ const INSTANCE_ATTRS: [wgpu::VertexAttribute; 5] = wgpu::vertex_attr_array![
     2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4
 ];
 /// The model instances: one step per instance, so every vertex of an instance
-/// reads the same matrix and color, and with it the same cross-fade weight
-/// (`color.a`, location 6).
+/// reads the same matrix and color, and with it the same model weight
+/// (`color.a`, location 6; 1 in play, below 1 only for the debug display).
 const INSTANCE_LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
     array_stride: std::mem::size_of::<Instance>() as u64,
     step_mode: wgpu::VertexStepMode::Instance,
@@ -2101,7 +2101,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<EffectInstance>(), 32);
     }
 
-    /// The model's cross-fade weight is the alpha of the instance color: it
+    /// The model weight (debug dither) is the alpha of the instance color: it
     /// must step per instance (every vertex of an instance carries the same
     /// weight) and reach the fragment shader flat, as in icon.wgsl, so the
     /// two dither tests see the identical number.

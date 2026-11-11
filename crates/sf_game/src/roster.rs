@@ -1848,4 +1848,59 @@ mod tests {
         assert_eq!(fallback_shape(Category::Structure), ModelShape::Cube);
         assert_eq!(fallback_shape(Category::Object), ModelShape::Cube);
     }
+
+    fn wreck_view(defs: &UnitDefs, role: &str, rubble: bool) -> WreckView {
+        WreckView {
+            kind: if rubble {
+                WreckKind::Rubble
+            } else {
+                WreckKind::Vehicle
+            },
+            unit: Kind(defs.kind_of(role).unwrap()),
+            owner: sf_sim::PlayerId(sandbox::MERIDIAN),
+            pos: sf_math::Vec2::new(sf_math::Fx::from_int(32), sf_math::Fx::from_int(32)),
+            facing: sf_math::Facing::default(),
+            size: if rubble {
+                sf_math::Fx::ZERO
+            } else {
+                sf_math::Fx::ONE
+            },
+            footprint: rubble.then_some(sf_sim::units::Footprint {
+                width: 2,
+                height: 2,
+            }),
+            anchor: rubble.then_some(sf_sim::Cell::new(31, 31)),
+            born: sf_sim::Tick(0),
+            ticks_left: 100,
+            lifetime: 100,
+        }
+    }
+
+    /// Zoom fix round 4 (review): the rubble of a structure goes to the instancer marked as a structure
+    /// (`Looks::wreck_motion`), so at the farthest zoom it is drawn at the structure scale (1.6) and a
+    /// vehicle hulk at the unit scale (2.5). Through the production motion and the real instancer.
+    #[test]
+    fn structure_rubble_is_drawn_at_the_structure_scale_and_a_hulk_at_the_unit_scale() {
+        let (defs, roster) = built(false);
+        let style = roster.style(&base());
+        let looks = Looks::Roster {
+            roster: Box::new(roster),
+            crowd: crate::population::Population::new(None),
+        };
+        let bands = sf_render::CameraSettings::embedded().zoom;
+        let rubble = looks
+            .wreck_motion(&wreck_view(&defs, "power_plant", true), 500)
+            .expect("rubble has a look");
+        let hulk = looks
+            .wreck_motion(&wreck_view(&defs, "light_tank", false), 501)
+            .expect("a hulk has a look");
+        assert!(rubble.is_structure(), "rubble is a structure");
+        assert!(!hulk.is_structure(), "a hulk is not");
+        assert_eq!(
+            crate::drawn_scale_at_zoom_one(&style, rubble, 256.0),
+            bands.structure_scale(1.0)
+        );
+        assert_eq!(crate::drawn_scale_at_zoom_one(&style, rubble, 256.0), 1.6);
+        assert_eq!(crate::drawn_scale_at_zoom_one(&style, hulk, 256.0), 2.5);
+    }
 }
