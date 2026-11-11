@@ -14,3 +14,7 @@ Red Alert file was used or is shown.
   the folder is shown, and the status line says "Red Alert files not found in /home/player/redalert. The game's own sounds play."
 * `settings_sound_cli_folder_t00100.png`: no settings file, `--ra-audio /home/player/redalert` on the command line: the same
   page, so the flag turns the switch on and shows its folder for the run (and writes nothing).
+
+**Re-taken 11-11-2026** (follow-up of #117, same recipes, a debug build): the Music row now keeps the empty place of the Test button, so
+its `-`, value and `+` line up with the other three rows; the hint now reads "Start once with --ra-audio FOLDER and click On to remember
+it." The pictures show the page only; the interface-group test sound cannot be heard in the container (no audio device).

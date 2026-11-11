@@ -99,7 +99,33 @@ pub fn with_combat(world: World, defs: &UnitDefs) -> World {
 /// If the building table is refused or the world has started; the definitions' own checks rule
 /// the first out for any definitions that loaded, and the sandbox has not started its world.
 pub fn with_buildings(world: World, defs: &UnitDefs) -> World {
-    let table = sf_bridge::building_table(defs).expect("the building rules make a valid table");
+    with_buildings_at(world, defs, sf_sim::BuildSpeed::FULL)
+}
+
+/// [`with_buildings`] for the sandbox (follow-up of WP6.11): with `production` the world will get
+/// [`with_production`], which scales the build times itself, so the table keeps the data's; without
+/// it the table is scaled here by the same `build_speed` of `production.ron`, so the plain sandbox
+/// builds as fast as the match does (decision Tijmen 08-11-2026: everything builds 1.5 times faster).
+pub fn with_sandbox_buildings(world: World, defs: &UnitDefs, production: bool) -> World {
+    let speed = if production {
+        sf_sim::BuildSpeed::FULL
+    } else {
+        shipped_build_speed()
+    };
+    with_buildings_at(world, defs, speed)
+}
+
+/// The build speed of the shipped `production.ron`: the one number every build time of the game is
+/// scaled by (the sim's tables through [`with_production`] or [`with_sandbox_buildings`], the
+/// sidebar's catalogue).
+pub fn shipped_build_speed() -> sf_sim::BuildSpeed {
+    sf_bridge::build_speed(&sf_data::production::ProductionSettings::embedded())
+}
+
+/// [`with_buildings`] with the build times scaled by `speed`.
+pub fn with_buildings_at(world: World, defs: &UnitDefs, speed: sf_sim::BuildSpeed) -> World {
+    let table =
+        sf_bridge::building_table_at(defs, speed).expect("the building rules make a valid table");
     let seats: Vec<(PlayerId, u8)> = [crate::sandbox::MERIDIAN, crate::sandbox::VEYRAN]
         .into_iter()
         .filter_map(|owner| {

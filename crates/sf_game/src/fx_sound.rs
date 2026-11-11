@@ -93,12 +93,15 @@ pub fn apply_mix(audio: &mut AudioSystem, mix: &Mix) {
 }
 
 /// The sound of a slider's test button: a CC0 sound of the bank (never a Red Alert one), in the volume
-/// group of that slider, so what is heard is what the slider sets. The music has none.
+/// group of that slider, so what is heard is what the slider sets: the effects' test in the effects,
+/// the voices' in the voices, the master's in the interface group, which only the master volume
+/// governs, so it is heard with the effects at 0 %. The music has none.
 pub const TEST_SOUND: &str = "test_click";
 
 pub fn play_test_sound(audio: &mut AudioSystem, which: Volume) {
     match which {
-        Volume::Master | Volume::Effects => audio.play(TEST_SOUND),
+        Volume::Master => audio.play_as(TEST_SOUND, Category::Ui),
+        Volume::Effects => audio.play_as(TEST_SOUND, Category::Sfx),
         Volume::Voices => audio.play_as(TEST_SOUND, Category::Voice),
         Volume::Music => {}
     }
@@ -1141,6 +1144,28 @@ mod tests {
     }
 
     #[test]
+    fn the_master_test_is_heard_with_the_effects_and_the_voices_at_zero() {
+        let root = root_with("master_test", &[TEST_SOUND]);
+        let mut audio = tracing_audio(&root.0);
+        let saved = SoundSettings {
+            master: Some(80),
+            effects: Some(0),
+            voices: Some(0),
+            ..SoundSettings::default()
+        };
+        start_audio_with(&root.0, None, &saved, &mut audio);
+        play_test_sound(&mut audio, Volume::Master);
+        play_test_sound(&mut audio, Volume::Effects);
+        let gains: Vec<f32> = audio.take_trace().iter().map(|t| t.gain).collect();
+        assert_eq!(gains.len(), 2, "{gains:?}");
+        assert!(near(gains[0], 0.8), "master test: {gains:?}");
+        assert!(
+            near(gains[1], 0.0),
+            "the effects test follows its slider: {gains:?}"
+        );
+    }
+
+    #[test]
     fn the_test_sounds_are_in_the_group_of_their_slider_and_the_music_has_none() {
         let root = root_with("test_sound", &[TEST_SOUND]);
         let mut audio = tracing_audio(&root.0);
@@ -1153,8 +1178,8 @@ mod tests {
         let gains: Vec<f32> = audio.take_trace().iter().map(|t| t.gain).collect();
         assert_eq!(gains.len(), 3, "the music has no test sound: {gains:?}");
         assert!(
-            near(gains[0], 0.5 * 0.9),
-            "master test plays as an effect: {gains:?}"
+            near(gains[0], 0.9),
+            "master test plays in the interface group, under the master volume only: {gains:?}"
         );
         assert!(near(gains[1], 0.5 * 0.9), "{gains:?}");
         assert!(near(gains[2], 0.3 * 0.9), "{gains:?}");

@@ -75,6 +75,7 @@ fn controls(model: &Model, lay: &Layout) -> Vec<(Rect, Item)> {
                     .controls
                     .iter()
                     .zip(controls)
+                    .filter(|(_, c)| !c.blank)
                     .map(|(r, c)| (*r, c.item)),
             );
         }
@@ -103,6 +104,48 @@ fn the_key_list_gets_two_columns_when_the_window_is_wide_and_fewer_rows_when_it_
     assert_eq!(fit(screen(1280, 720), 2.0, l).columns, 1);
     // Never fewer than 3 rows, however small the window.
     assert_eq!(fit(screen(300, 200), 2.0, l).rows, 3);
+}
+
+#[test]
+fn the_music_row_lines_up_with_the_other_volume_rows() {
+    let l = look();
+    let mut m = menu();
+    m.open_settings(Page::Sound);
+    let w = screen(1280, 720);
+    let model = m.model(fit(w, 1.0, l)).unwrap();
+    let lay = layout(&model, l, w, 1.0, &measure(1.0));
+    let rects = |label: &str| -> Vec<Rect> {
+        model
+            .rows
+            .iter()
+            .zip(&lay.rows)
+            .find_map(|(r, placed)| match r {
+                Row::Setting { label: n, .. } if n == label => Some(placed.controls.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no row {label:?}"))
+    };
+    let master = rects("Master");
+    let music = rects("Music");
+    assert_eq!(master.len(), 4);
+    for i in 0..3 {
+        assert_eq!(
+            (music[i].x, music[i].w),
+            (master[i].x, master[i].w),
+            "control {i} of the music row"
+        );
+    }
+    // Nothing is hit on the blank place: a click there finds no item.
+    let blank = music[3];
+    assert_eq!(
+        hit(
+            &model,
+            &lay,
+            blank.x + blank.w * 0.5,
+            blank.y + blank.h * 0.5
+        ),
+        None
+    );
 }
 
 #[test]

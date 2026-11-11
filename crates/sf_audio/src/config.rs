@@ -255,11 +255,11 @@ impl AudioConfig {
             return Err("spatial.audible_gain must be in (0, 1)".into());
         }
         let v = self.mix.master_volume;
-        if !(0.0..=2.0).contains(&v) {
+        if !(v.is_finite() && (0.0..=2.0).contains(&v)) {
             return Err("mix.master_volume must be in [0, 2]".into());
         }
         let v = self.mix.voice();
-        if !(0.0..=2.0).contains(&v) {
+        if !(v.is_finite() && (0.0..=2.0).contains(&v)) {
             return Err("mix.voice_volume must be in [0, 2]".into());
         }
         let v = self.mix.sfx_volume;
@@ -455,6 +455,15 @@ mod tests {
             ("vol", Box::new(|c| c.mix.sfx_volume = -0.1)),
             ("mvol", Box::new(|c| c.mix.music_volume = 3.0)),
             ("master", Box::new(|c| c.mix.master_volume = -1.0)),
+            ("master nan", Box::new(|c| c.mix.master_volume = f32::NAN)),
+            (
+                "master inf",
+                Box::new(|c| c.mix.master_volume = f32::INFINITY),
+            ),
+            (
+                "voice nan",
+                Box::new(|c| c.mix.voice_volume = Some(f32::NAN)),
+            ),
             ("voice", Box::new(|c| c.mix.voice_volume = Some(2.5))),
             ("mradius", Box::new(|c| c.music.mood.radius_m = 0.0)),
             ("mwindow", Box::new(|c| c.music.mood.window_ticks = 0)),

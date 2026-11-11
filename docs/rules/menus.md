@@ -247,8 +247,11 @@ Decisions of the orchestrator under Tijmen's rule "your proposal holds if I do n
 `menu::Menu::sound_rows`, the words are `menu_look.ron`.
 
 **The page** has two columns (one in a narrow window). Left, **Volume**: four rows, **Master**, **Music**, **Effects** and **Unit
-voices**, each `-`, the value in percent, `+` and (not for the music) **Test**. Right, **Original Red Alert audio**: **Use
-original audio** On / Off, the folder, a hint, and one status line. The tab bar and the panel stand where they stand on the other
+voices**, each `-`, the value in percent, `+` and (not for the music) **Test**; the music row keeps an empty, dead place where the button
+would be (`Control::blank`, nothing drawn, nothing hit), so its `-`, value and `+` are as wide as and under those of the other
+rows (`the_music_row_lines_up_with_the_other_volume_rows`). Right, **Original Red Alert audio**: **Use
+original audio** On / Off, the folder, a hint ("Start once with --ra-audio FOLDER and click On to remember it.",
+`the_folder_hint_says_to_start_once_with_the_flag_and_click_on`), and one status line. The tab bar and the panel stand where they stand on the other
 pages (`the_tabs_and_the_title_stay_in_place_from_page_to_page`, four window sizes).
 
 **The volume "sliders" are step buttons, not a draggable bar** (a deviation from the word "slider" in the brief): the menu is
@@ -263,8 +266,10 @@ the effects); Music is the `Music` group (a running track follows at once). Each
 
 **Applied at once and heard.** A click on `-` or `+` gives the audio the new mix and plays the test sound of that row (not for
 the music: the shipped bank has no CC0 music, and a running track follows the slider anyway); **Test** plays it again without
-changing anything. The test sound is `test_click` of the shipped CC0 bank, in the group of its row (Master and Effects as an
-effect, Unit voices as a voice), never a Red Alert sound (`the_test_sounds_are_in_the_group_of_their_slider_and_the_music_has_none`).
+changing anything. The test sound is `test_click` of the shipped CC0 bank, in the group of its row (Effects as an
+effect, Unit voices as a voice, **Master in the interface group**, which only the master volume governs, so it is heard with Effects
+and Unit voices at 0 %), never a Red Alert sound (`the_test_sounds_are_in_the_group_of_their_slider_and_the_music_has_none`,
+`the_master_test_is_heard_with_the_effects_and_the_voices_at_zero`).
 The call from the runner (`Runner::apply_change`, `apply_outcomes`) needs a window and is checked by reading; the functions it
 calls (`fx_sound::apply_mix`, `play_test_sound`) are tested.
 

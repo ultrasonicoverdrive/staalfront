@@ -40,9 +40,18 @@ _Decision Tijmen 08-11-2026, after playing M1: everything builds 1.5 times faste
 * **Where it is applied: once.** `World::with_production(rules, table)` scales the build ticks of the production table
   *and* of the building table and takes their digests again; from then on every tick count in the sim (the progress
   total, the payment per tick, the scaffold of `BuildStructure`, `construction_of().total`, the view's `front_ticks`) is
-  the scaled one and no other code knows the factor. A world **without** production rules (the earlier headless
-  scenarios without a `production` block, the bench scenes) keeps the data's own ticks; the headless
-  `production` block takes `build_speed: (num, den)` and leaves it out as `(1, 1)`.
+  the scaled one and no other code knows the factor. A world **without** production rules in the headless scenarios (no `production` block) and the bench scenes keeps the
+  data's own ticks; the headless `production` block takes `build_speed: (num, den)` and leaves it out as `(1, 1)`.
+  **The plain sandbox of `sf_game`** (no `--harvest`) has building rules but no production rules, so since the 11-11-2026
+  follow-up the game scales its building table itself, by the same `build_speed` of `production.ron` and the same
+  `BuildSpeed::ticks` (`playfield::with_sandbox_buildings(world, defs, production)`, which hands `sf_bridge::building_table_at`
+  the shipped speed): the power plant takes 200 ticks there, not 300. With `--harvest` (and in `--match`) the table keeps the
+  data's ticks until `with_production` scales it once, so it is never scaled twice (`the_plain_sandbox_builds_at_the_shipped_speed_and_is_scaled_once`:
+  plain 200 / 267, data 300, after `with_production` the same table digest as the plain one). The sim has no change for this.
+* **The sidebar shows the same ticks.** `Catalog::build(defs, faction, look, speed)` scales the data's `build_seconds` by the
+  shipped speed (`playfield::shipped_build_speed`), so an entry's `ticks` equal what the production and building tables count
+  (`the_catalogue_times_are_the_scaled_ticks_the_world_counts`: all 22 entries, and 67 / 200 / 267 for the rifleman, power plant
+  and barracks).
 * **The money stays exact.** The price is not scaled; it is paid over the scaled ticks with the same rules as before
   (`C*(k+1)/T - C*k/T` for a structure, `paid_at` for a unit). The sum over the ticks is the price for every
   price, base time and factor tried (`the_money_adds_up_for_every_price_and_every_factor`: 8 factors x 8 prices x

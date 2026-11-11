@@ -3050,3 +3050,14 @@ fixed, delete the entry in the same PR.
     `rules/camera.md` rule 4 (drawn / true / does not care); the drag rectangle, the selection marks (one helper with `visit_drawn`),
     the tile frustum culling and the muzzle and smoke anchors follow the drawn size; ghosts and rubble are tested at 1.6; the stale
     "click volume keeps its size" and "cross-fade" texts are gone. Follow-ups listed under "Not done" there.
+
+### Follow-ups of #115 and #117 (11-11-2026)
+
+* **Plain sandbox at 3 / 2.** `sf_game` without `--harvest` scales its building table by `production.ron`'s `build_speed`
+  (`playfield::with_sandbox_buildings`); `--harvest` and `--match` are scaled once by `with_production`. No `sf_sim` change and no pin
+  moved (the headless scenarios never go through this path). Test: `the_plain_sandbox_builds_at_the_shipped_speed_and_is_scaled_once`.
+* **Sidebar build times** are the scaled ticks (`Catalog::build` takes the speed): `the_catalogue_times_are_the_scaled_ticks_the_world_counts`.
+* **Sound page**: the folder hint says to start once with `--ra-audio FOLDER` and click On; the Master test plays in the interface
+  group (heard with Effects at 0 %); the Music row keeps the place of the missing Test button so it lines up (screenshot
+  `docs/screenshots/wp11.5b/`); `is_finite()` on the master and voice range checks. Gap: not stored in `--record` files yet (the build
+  speed, #115 review point 6; it touches `tools/sf_headless/src/scenario*`).

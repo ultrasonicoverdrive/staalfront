@@ -145,8 +145,28 @@ pub fn building_stats_of(building: &SimBuildingDef) -> BuildingStats {
 /// simulation's reason if the table is refused (the definitions' own checks rule that out for
 /// any definitions that loaded).
 pub fn building_table(defs: &UnitDefs) -> Result<BuildingTable, String> {
-    BuildingTable::new(defs.sim_buildings().iter().map(building_stats_of).collect())
-        .map_err(|e| e.to_string())
+    building_table_at(defs, sf_sim::BuildSpeed::FULL)
+}
+
+/// [`building_table`] with every build time scaled by `speed` ([`sf_sim::BuildSpeed::ticks`], the
+/// rule `World::with_production` applies). For a world that has building rules but no production
+/// rules, which would otherwise keep the data's own build times; never hand a table made here to a
+/// world that gets `with_production` as well (it would be scaled twice).
+pub fn building_table_at(
+    defs: &UnitDefs,
+    speed: sf_sim::BuildSpeed,
+) -> Result<BuildingTable, String> {
+    BuildingTable::new(
+        defs.sim_buildings()
+            .iter()
+            .map(|b| {
+                let mut stats = building_stats_of(b);
+                stats.build_ticks = speed.ticks(stats.build_ticks);
+                stats
+            })
+            .collect(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// One weapon of the data, as the simulation has it (WP5.1): every number is already in cells,
@@ -430,10 +450,17 @@ pub fn production_rules(settings: &ProductionSettings) -> sf_sim::ProductionRule
     sf_sim::ProductionRules {
         queue_limit: settings.queue_limit,
         exit_radius: settings.exit_radius,
-        build_speed: sf_sim::BuildSpeed {
-            num: settings.build_speed.num,
-            den: settings.build_speed.den,
-        },
+        build_speed: build_speed(settings),
+    }
+}
+
+/// The build speed of `production.ron` as the simulation has it: the one number that
+/// [`production_rules`] hands to the world, that the plain sandbox applies to its building table
+/// ([`building_table_at`]) and that the sidebar scales its build times by.
+pub fn build_speed(settings: &ProductionSettings) -> sf_sim::BuildSpeed {
+    sf_sim::BuildSpeed {
+        num: settings.build_speed.num,
+        den: settings.build_speed.den,
     }
 }
 

@@ -3531,7 +3531,8 @@ fn sandbox_scene(
                 .with_units(table)
                 .expect("a world that has not started takes its unit table");
             // WP6.2: `BuildStructure` is checked; the sandbox itself places with `PlaceStructure`.
-            world = crate::playfield::with_buildings(world, &defs);
+            // Build times: scaled here without `--harvest`, by `with_production` with it.
+            world = crate::playfield::with_sandbox_buildings(world, &defs, options.harvest);
             // WP7.2 (`--harvest`): the harvesters work. Off by default, so the sandbox stands as it did.
             if options.harvest {
                 world = crate::playfield::with_harvest(world, &defs);
@@ -3594,6 +3595,7 @@ fn sandbox_scene(
             &defs,
             local_faction(),
             crate::sidebar_view::shipped_look(),
+            crate::playfield::shipped_build_speed(),
         )),
         focus: None,
     }
@@ -3657,6 +3659,7 @@ fn match_scene(
             &defs,
             local_faction(),
             crate::sidebar_view::shipped_look(),
+            crate::playfield::shipped_build_speed(),
         )),
         focus: crate::matchplay::focus_metres(&def, commands::LOCAL_PLAYER),
     })

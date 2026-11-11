@@ -179,7 +179,7 @@
         sound_ra_switch: "Use original audio",
         sound_ra_folder: "Folder: {path}",
         sound_ra_folder_none: "none set",
-        sound_ra_hint: "Your own Red Alert files: nothing from them is copied, only this folder is remembered. Set it with --ra-audio FOLDER.",
+        sound_ra_hint: "Your own Red Alert files: nothing from them is copied, only this folder is remembered. Start once with --ra-audio FOLDER and click On to remember it.",
         sound_ra_no_folder: "Red Alert files not found: no folder is set. The game's own sounds play.",
         sound_ra_not_found: "Red Alert files not found in {path}. The game's own sounds play.",
         sound_ra_loading: "Reading the Red Alert files...",
