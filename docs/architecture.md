@@ -28,6 +28,7 @@ fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows
 | `sf_audio` | Sound, voices, music; optional original Red Alert audio (`sf_audio::ra`, WP11.7). |
 | `sf_cutscene` | Cartoon player and script format. The RON scene format, its loader/validator, the render-free `Scene::sample` and the Fountain importer (WP12.1), the player state machine, the wgpu renderer on top of the engine renderer's frame hook, the `play_scene` viewer (WP12.2), and the live preview `play_scene --watch` (WP12.6: polling file watcher, reload state machine, writer HUD); `docs/cutscene-format.md`. |
 | `sf_net` | Lockstep network (later, phase 14). |
+| `sf_thread_cpu` | The CPU time of the calling thread (Windows `GetThreadTimes` via `windows-sys`, WP1.16a). The only crate allowed unsafe code: crate-level `deny`, one function with `#[allow(unsafe_code)]`; every other crate keeps the workspace's `forbid`. |
 | `sf_game` | The game shell: a library (window loop, camera, HUD, F1 panels, the benchmark) and the development viewer binary. |
 | `tools/sf_editor` | Map and mission editor. |
 | `tools/sf_headless` | Simulation without a screen: tests, balance, AI-vs-AI. |
@@ -69,6 +70,8 @@ graph TD
   sf_game --> sf_audio
   sf_game --> sf_cutscene
   sf_game --> sf_net
+  sf_game --> sf_thread_cpu
+  sf_game --> sf_headless
   sf_cutscene --> sf_engine
   sf_cutscene --> sf_render
   sf_cutscene --> sf_ui

@@ -2714,6 +2714,40 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
 - Also carried: the review nits of PR #111 (stale "cross-fade" wording in `fx.rs` and `effects_screenshot.rs`, the structure cap 1.6 in
   `architecture.md`, one test moved to its own bullet in `camera.md`) and the agent rule for a twice-rejected PR in `CLAUDE.md`.
 
+### WP1.16a notes: the hitch log, the command record and what could be measured here (10-11-2026)
+
+The measuring half of WP1.16 (stutter in play). Rules and file formats: `docs/rules/hitch_log.md`. What was built: the hitch log
+(`--hitch-log`, every frame over 50 ms with its laps, the CPU time of the main thread on Windows, window and music events, slow sim
+ticks, instance buffer growth, the swap-chain acquire outcome and the `on_resize` time; the exit summary counts frames over 25 and 50
+ms), the command record (`--record`, an `sf_headless` scenario with a `game` block and exact commands; `--replay` feeds one back into the
+game) and the test that plays 7,000 ticks of M1 on the game's sim thread and in `sf_headless` with the same checksum at every tick.
+Nothing in `crates/sf_sim/` moved; no pin or `.expected` moved.
+
+What the container measured (debug build, software rendering on lavapipe, a busy 4-core machine; relative numbers only, the fps
+requirement is the laptop's, PLAN section 13):
+
+* **Suspect 1, instance buffers: ruled out as the cause of long frames.** A 5.5-minute replay of M1: 4 buffers reserved at start, 26 at the
+  end; 12 frames grew them; the upload lap of those frames was at most 10.1 ms (lavapipe, debug) against 4.5 ms for an ordinary frame
+  there. Nothing near a second. Not changed.
+* **Suspect 2, the music hand-over: ruled out on the main thread.** With generated audio (3 minutes, stereo, 22.05 kHz, 30 MiB) and kira's
+  mock backend, 8 forced switches: the call that takes the finished track and starts it (`inject`, `play_music`, dropping the old data)
+  took 7 to 30 microseconds; the worst `set_music_mood` + `update` call of 341 was 55 microseconds; freeing 30 MiB of frames takes 1.1 ms
+  (50 MiB: under 2 ms). The decode thread took 39 to 63 ms (IMA decode 17 ms, copy into kira frames 37 ms), as the 37 to 56 ms in
+  `audio.md`. **The 804 ms decode was not reproduced** and is not explained here: the thread's timer covers the file open and read, the decode
+  and the copy, and only the first can take that long (a cold read, an antivirus scan); the hitch log now writes the decode time on the line
+  of the frame it was noticed in. The mock backend has no audio thread, so where kira frees the old track is not measured.
+* **Suspect 4, the sim thread in M1: not reproduced as compute.** Release build, the pinned `match` scenario (7,000 ticks): mean 0.024 ms,
+  p99 0.03 ms, p99.9 5 ms; the slowest ticks are tick 0 (31 ms, building the world and its path graph), tick 305 (14 ms, a structure placed:
+  `place_footprint` refreshes the path graph; 28 % of the instructions of the whole run, callgrind) and the ticks where a structure dies (5 to 7 ms). A
+  62 ms tick (follow-up 35) does not come from the rules at this unit count; no sampling profiler (`perf`) exists in the container, so
+  valgrind's callgrind (instruction counts per function, exact rather than sampled) was used on the replay of the record. The hitch log
+  writes the sim ticks over 20 ms with their numbers, so the laptop run shows whether they line up with long frames.
+* **The minimap** (diagnosis of the orchestrator, confirmed): `UiRenderer::set_minimap` created a texture, view and bind group for every fog
+  version: 201 textures for 200 updates in the test, 583 in the replay. It now keeps them while the size is the same and only writes the pixels
+  (1 texture; `tests/minimap_textures.rs` fails without the change). The fog work that stays is on the CPU: `Minimap::set_fog` clones the image
+  and recolours every pixel (mean 2.7 ms, max 18 ms in the debug replay); an incremental version waits for the laptop log.
+* Windows modal loops, the GTX 1650 driver and the machine itself (suspects 3 and 5) can only be measured on the laptop.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -2851,6 +2885,11 @@ fixed, delete the entry in the same PR.
     at most, for meshes that had no instance at the start; it is unlikely to explain frames of a second.
     On the machine (read afterwards, not in the log): 15.3 GB RAM, 9.0 GB free, page file peak 3.4 GB; a Bitdefender
     service runs (its exclusions need administrator rights to read). Not known yet: what made the long frames.
+    **WP1.16a (10-11-2026):** the hitch log and the command record exist (`docs/rules/hitch_log.md`); suspects 1, 2 and 4 are ruled out as
+    the cause of the long frames in the container (numbers in "WP1.16a notes"), the 804 ms decode was not reproduced, the minimap texture
+    that was re-created for every fog version is fixed. Open until Tijmen's log: suspects 3 and 5, the swap-chain timeout (the log now
+    records it), the CPU cost of `Minimap::set_fog`, and the sim thread's own CPU time (not measured; a 62 ms tick could be that thread
+    not running).
 
 36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
     to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side

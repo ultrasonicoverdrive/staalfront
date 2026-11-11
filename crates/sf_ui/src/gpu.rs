@@ -50,6 +50,7 @@ pub struct UiRenderer {
     atlas_height: u32,
     atlas_revision: u64,
     minimap: Option<Bound>,
+    textures_created: u64,
     vertices: wgpu::Buffer,
     vertex_capacity: u64,
     indices: wgpu::Buffer,
@@ -185,12 +186,19 @@ impl UiRenderer {
             atlas_height: 0,
             atlas_revision: u64::MAX,
             minimap: None,
+            textures_created: 0,
             vertices: buffer(device, wgpu::BufferUsages::VERTEX, 4096),
             vertex_capacity: 4096,
             indices: buffer(device, wgpu::BufferUsages::INDEX, 4096),
             index_capacity: 4096,
             draw_calls: 0,
         }
+    }
+
+    /// Textures the minimap upload has created so far (a new picture size makes one; an update of the
+    /// same size makes none).
+    pub fn minimap_textures_created(&self) -> u64 {
+        self.textures_created
     }
 
     /// Draw calls of the last [`UiRenderer::render`] (one per texture batch).
@@ -268,14 +276,27 @@ impl UiRenderer {
         } else {
             wgpu::TextureFormat::Rgba8Unorm
         };
-        let bound = self.bound(
-            device,
-            "ui minimap",
-            image.width,
-            image.height,
-            format,
-            false,
-        );
+        // The fog changes the picture about 20 times a second in play: the texture and its bind group
+        // stay when the size does, only the pixels are written again (WP1.16a). The format follows
+        // `self.srgb`, which never changes after the renderer is made.
+        let reuse = self.minimap.take().filter(|b| {
+            let size = b.texture.size();
+            (size.width, size.height) == (image.width, image.height) && b.texture.format() == format
+        });
+        let bound = match reuse {
+            Some(bound) => bound,
+            None => {
+                self.textures_created += 1;
+                self.bound(
+                    device,
+                    "ui minimap",
+                    image.width,
+                    image.height,
+                    format,
+                    false,
+                )
+            }
+        };
         queue.write_texture(
             bound.texture.as_image_copy(),
             &image.rgba,

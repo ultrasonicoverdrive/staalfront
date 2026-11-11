@@ -212,6 +212,10 @@ pub struct Renderer {
     /// Time the last [`Renderer::render_with`] spent waiting for the swap
     /// chain to hand out an image (the display pacing it, not CPU work).
     acquire_wait: std::time::Duration,
+    /// How long the last frame's `queue.submit` and `queue.present` took (WP1.16a, the hitch log).
+    submit_time: std::time::Duration,
+    acquire_outcome: AcquireOutcome,
+    present_time: std::time::Duration,
     /// An offscreen renderer holds the process's one headless slot
     /// ([`HeadlessSlot`]). **Keep this the last field**: fields drop in
     /// order, so the slot is released only after the device and every
@@ -237,6 +241,61 @@ pub struct AllocStats {
     pub instance_buffers: u64,
     /// Bytes of those buffers (cumulative).
     pub instance_bytes: u64,
+}
+
+/// What asking the swap chain for an image gave (WP1.16a). A `Timeout` was silently dropped before: on
+/// DX12 wgpu waits at most 1,000 ms for the display, so a frame of about a second with a long acquire
+/// is this outcome.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum AcquireOutcome {
+    /// An image, as configured.
+    #[default]
+    Success,
+    /// An image, but the surface wants configuring again.
+    Suboptimal,
+    /// No image within the wait; the frame was skipped.
+    Timeout,
+    /// The window is hidden or minimised; the frame was skipped.
+    Occluded,
+    /// The surface changed; it was configured again and the frame skipped.
+    Outdated,
+    /// The surface was lost; it was configured again and the frame skipped.
+    Lost,
+    /// A validation error, or anything else; the frame was skipped.
+    Other,
+}
+
+impl AcquireOutcome {
+    /// The outcome of a `get_current_texture` result.
+    pub fn of(result: &wgpu::CurrentSurfaceTexture) -> AcquireOutcome {
+        use wgpu::CurrentSurfaceTexture as C;
+        match result {
+            C::Success(_) => AcquireOutcome::Success,
+            C::Suboptimal(_) => AcquireOutcome::Suboptimal,
+            C::Timeout => AcquireOutcome::Timeout,
+            C::Occluded => AcquireOutcome::Occluded,
+            C::Outdated => AcquireOutcome::Outdated,
+            C::Lost => AcquireOutcome::Lost,
+            _ => AcquireOutcome::Other,
+        }
+    }
+
+    /// True for an outcome that is not a normal image: the hitch log writes these down.
+    pub fn is_trouble(self) -> bool {
+        !matches!(self, AcquireOutcome::Success)
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            AcquireOutcome::Success => "success",
+            AcquireOutcome::Suboptimal => "suboptimal",
+            AcquireOutcome::Timeout => "timeout",
+            AcquireOutcome::Occluded => "occluded",
+            AcquireOutcome::Outdated => "outdated",
+            AcquireOutcome::Lost => "lost",
+            AcquireOutcome::Other => "other",
+        }
+    }
 }
 
 /// Terrain debug visualisations, switched from the F1 panel (WP1.11).
@@ -560,6 +619,9 @@ impl Renderer {
             capture_requested: false,
             captured: None,
             acquire_wait: std::time::Duration::ZERO,
+            submit_time: std::time::Duration::ZERO,
+            acquire_outcome: AcquireOutcome::Success,
+            present_time: std::time::Duration::ZERO,
             headless_slot: None,
         }
     }
@@ -622,6 +684,19 @@ impl Renderer {
     /// from a frame's wall time it leaves the CPU work.
     pub fn last_acquire_wait(&self) -> std::time::Duration {
         self.acquire_wait
+    }
+
+    /// What the swap chain gave the last frame (WP1.16a). Anything but `Success` is a frame that was
+    /// skipped or drawn on a surface that wants configuring again.
+    pub fn last_acquire_outcome(&self) -> AcquireOutcome {
+        self.acquire_outcome
+    }
+
+    /// How long the last frame's `queue.submit` took, and its `queue.present` (zero when the frame
+    /// was not presented). With [`Renderer::last_acquire_wait`] these are the parts of a frame that
+    /// can wait for the display or the driver (the hitch log, WP1.16a).
+    pub fn last_submit_and_present(&self) -> (std::time::Duration, std::time::Duration) {
+        (self.submit_time, self.present_time)
     }
 
     /// GPU buffers created after start-up so far.
@@ -743,6 +818,10 @@ impl Renderer {
         &mut self,
         overlay: impl FnOnce(&mut FrameTarget),
     ) -> Result<(), RenderError> {
+        self.acquire_wait = std::time::Duration::ZERO;
+        self.acquire_outcome = AcquireOutcome::Success;
+        self.submit_time = std::time::Duration::ZERO;
+        self.present_time = std::time::Duration::ZERO;
         let _ = self.poll_shader_reload();
         self.prepare_frame();
         let mut encoder = self
@@ -762,6 +841,7 @@ impl Renderer {
                 let waiting = std::time::Instant::now();
                 let acquired = surface.get_current_texture();
                 self.acquire_wait = waiting.elapsed();
+                self.acquire_outcome = AcquireOutcome::of(&acquired);
                 match acquired {
                     C::Success(t) | C::Suboptimal(t) => {
                         let v = t
@@ -774,7 +854,8 @@ impl Renderer {
                         surface.configure(&self.gpu.device, config);
                         return Ok(());
                     }
-                    // Timeout, occluded or anything else: skip this frame.
+                    // Timeout, occluded or anything else: skip this frame (the outcome is kept,
+                    // `Renderer::last_acquire_outcome`).
                     _ => return Ok(()),
                 }
             }
@@ -806,14 +887,19 @@ impl Renderer {
         if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
             timer.end(&mut encoder, slot);
         }
+        let submitting = std::time::Instant::now();
         self.gpu
             .queue
             .submit(extra.into_iter().chain([encoder.finish()]));
+        self.submit_time = submitting.elapsed();
         if let (Some(timer), Some(slot)) = (&mut self.gpu_timer, slot) {
             timer.submitted(slot, self.gpu_frame_tag);
         }
+        self.present_time = std::time::Duration::ZERO;
         if let Some(frame) = frame {
+            let presenting = std::time::Instant::now();
             self.gpu.queue.present(frame);
+            self.present_time = presenting.elapsed();
         }
         if let Some(readback) = readback {
             let bgra = matches!(
@@ -2061,5 +2147,32 @@ mod tests {
             body.contains("draw_calls += 1"),
             "and it counts right there"
         );
+    }
+}
+
+#[cfg(test)]
+mod acquire_outcome_tests {
+    use super::*;
+    use wgpu::CurrentSurfaceTexture as C;
+
+    #[test]
+    fn every_way_the_swap_chain_can_refuse_has_its_own_outcome() {
+        assert_eq!(AcquireOutcome::of(&C::Timeout), AcquireOutcome::Timeout);
+        assert_eq!(AcquireOutcome::of(&C::Occluded), AcquireOutcome::Occluded);
+        assert_eq!(AcquireOutcome::of(&C::Outdated), AcquireOutcome::Outdated);
+        assert_eq!(AcquireOutcome::of(&C::Lost), AcquireOutcome::Lost);
+        assert_eq!(AcquireOutcome::of(&C::Validation), AcquireOutcome::Other);
+        for o in [
+            AcquireOutcome::Suboptimal,
+            AcquireOutcome::Timeout,
+            AcquireOutcome::Occluded,
+            AcquireOutcome::Outdated,
+            AcquireOutcome::Lost,
+            AcquireOutcome::Other,
+        ] {
+            assert!(o.is_trouble(), "{o:?}");
+        }
+        assert!(!AcquireOutcome::Success.is_trouble());
+        assert_eq!(AcquireOutcome::Timeout.name(), "timeout");
     }
 }

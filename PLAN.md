@@ -69,6 +69,7 @@ staalfront/
 │  ├─ sf_audio     sound, voices, music
 │  ├─ sf_cutscene  cartoon player + script format
 │  ├─ sf_net       lockstep network (later)
+│  ├─ sf_thread_cpu  CPU time of the calling thread (Windows `GetThreadTimes`); the only crate allowed unsafe code
 │  └─ sf_game      binary app: glues everything together
 ├─ tools/
 │  ├─ sf_editor    map and mission editor
@@ -334,8 +335,12 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
      `render_ms`, which includes present). **New in this WP:** the event-loop gap before the frame (the time the
      main thread was not in the frame callback), surface acquire and present measured apart from the rest of
      `render_ms`, and the CPU time of the main thread in that frame. `std` has no thread CPU time, so on Windows it comes
-     from `GetThreadTimes`, through a direct `windows-sys` dependency of `sf_game` with the feature
-     `Win32_System_Threading`, for Windows only. That crate is already in `Cargo.lock` as a transitive dependency, and it
+     from `GetThreadTimes`, through a direct `windows-sys` dependency with the feature
+     `Win32_System_Threading`, for Windows only. *(11-11-2026, WP1.16a as built: that dependency sits in the
+     new crate `crates/sf_thread_cpu`, not in `sf_game`, because the workspace forbids unsafe code; the crate
+     has `unsafe_code = "deny"` and one function with `#[allow(unsafe_code)]` and a SAFETY comment, every
+     other crate keeps the workspace's `forbid`. `sf_game` now also has a normal dependency on `sf_headless`
+     for the record format.)* That crate is already in `Cargo.lock` as a transitive dependency, and it
      is motivated here because suspect 5 needs to tell a thread that was not running from one that was busy. On other
      platforms the field reads "not measured". Plus what happened in the frame: window events (resize, move, focus,
      occlusion), a music track start or decode result with its time, the number of sound starts, and the tick number of
@@ -377,6 +382,11 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 
      And Tijmen does not feel it stutter. A p99 frame time is not the criterion with vsync on, because a quiet second
      already sits at about 17 ms. The laptop play is Tijmen's; the PR gives him the command.
+   *10-11-2026 (orchestrator): **WP1.16 is split.** **WP1.16a** builds the measuring half: (a) the hitch log with `--hitch-log`, (b) the
+   command record with `--record` and its replay test, and from (c) the suspects that can be measured in the container (1, 2, 4) with the
+   fixes that a measurement proves; it also records the swap-chain acquire outcome and the `on_resize` time, and reuses the minimap texture
+   (confirmed waste). **WP1.16b** fixes what Tijmen's hitch-log file from the laptop shows (suspects 3 and 5 and anything new). Rules:
+   `docs/rules/hitch_log.md`.*
 4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision

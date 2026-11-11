@@ -135,6 +135,12 @@ const CHECKPOINT_EVERY: u64 = 100;
 /// The most per-tick times kept (about 2.7 hours of game time).
 const TICK_TIMES_CAP: usize = 200_000;
 
+/// A tick that takes longer than this is kept with its number ([`SimHandle::slow_ticks`], the hitch log).
+pub const SLOW_TICK_MICROS: u32 = 20_000;
+
+/// The most slow ticks kept.
+pub const SLOW_TICKS_CAP: usize = 2_000;
+
 /// The most moved commands kept ([`SimHandle::moved_commands`]).
 pub const MOVED_LOG_CAP: usize = 1000;
 
@@ -312,6 +318,8 @@ struct Shared {
     fx_unresolved: AtomicU64,
     /// Commands that were moved to a later tick, the last [`MOVED_LOG_CAP`].
     moved: Mutex<Vec<LoggedCommand>>,
+    /// `(tick number, microseconds)` of every tick over [`SLOW_TICK_MICROS`], the first [`SLOW_TICKS_CAP`].
+    slow: Mutex<Vec<(u64, u32)>>,
     /// Every `BuildStructure` the world refused (WP6.2): how many in all, and the last
     /// [`REJECTED_LOG_CAP`] of them.
     rejected: Mutex<(u64, Vec<PlacementRejection>)>,
@@ -357,6 +365,7 @@ impl SimHandle {
             fx_dropped: AtomicU64::new(0),
             fx_unresolved: AtomicU64::new(0),
             moved: Mutex::new(Vec::new()),
+            slow: Mutex::new(Vec::new()),
             rejected: Mutex::new((0, Vec::new())),
             fx: Mutex::new(FxQueue::new()),
         });
@@ -509,6 +518,22 @@ impl SimHandle {
     /// [`SimConfig::record_commands`] says.
     pub fn moved_commands(&self) -> Vec<LoggedCommand> {
         lock(&self.shared.moved).clone()
+    }
+
+    /// The ticks that took longer than [`SLOW_TICK_MICROS`] and whose number is in `from..=to`, as
+    /// `(tick number, milliseconds)`; the tick number is the one that ran (the first is 0). The hitch
+    /// log asks for the range of a slow frame; [`SimHandle::all_slow_ticks`] for the whole play.
+    pub fn slow_ticks(&self, from: u64, to: u64) -> Vec<(u64, f64)> {
+        lock(&self.shared.slow)
+            .iter()
+            .filter(|&&(tick, _)| (from..=to).contains(&tick))
+            .map(|&(tick, us)| (tick, f64::from(us) / 1e3))
+            .collect()
+    }
+
+    /// Every tick over [`SLOW_TICK_MICROS`] so far (the first [`SLOW_TICKS_CAP`]).
+    pub fn all_slow_ticks(&self) -> Vec<(u64, f64)> {
+        self.slow_ticks(0, u64::MAX)
     }
 
     /// `(ticks run, checksum)` after every 100th tick.
@@ -840,6 +865,12 @@ impl Sim {
             let mut times = lock(&shared.tick_micros);
             if times.len() < TICK_TIMES_CAP {
                 times.push(micros);
+            }
+        }
+        if micros > SLOW_TICK_MICROS {
+            let mut slow = lock(&shared.slow);
+            if slow.len() < SLOW_TICKS_CAP {
+                slow.push((number, micros));
             }
         }
         let ran = self.world.tick().0;

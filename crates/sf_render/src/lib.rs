@@ -91,7 +91,8 @@ pub use model::{EyeView, MeshId, ModelLods, ModelSet};
 pub use overlay::OverlayFrame;
 pub use pick::{Pick, PickQuery, PickRay, PickVia, RectQuery, ScreenRect, UnitId};
 pub use renderer::{
-    AllocStats, DebugView, DrawStats, EMBEDDED_SHADER, FrameTarget, PresentInfo, Renderer,
+    AcquireOutcome, AllocStats, DebugView, DrawStats, EMBEDDED_SHADER, FrameTarget, PresentInfo,
+    Renderer,
 };
 pub use style::Style;
 /// Re-exported so callers can name wgpu types (e.g. `SurfaceTarget`) without a second dependency.
