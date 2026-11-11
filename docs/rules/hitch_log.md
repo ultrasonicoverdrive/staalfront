@@ -1,8 +1,9 @@
 # The hitch log and the command record (WP1.16a)
 
 Why: a play of M1 on the reference laptop stuttered (follow-up 35 in `docs/progress.md`: frames of 0.6 to 1.6 s with vsync on,
-125 late snapshots) and the game could not say what a long frame was made of. WP1.16a measures; WP1.16b fixes what the
-measurement shows. Code: `crates/sf_game/src/hitch.rs`, `record.rs`, `runner.rs` (the laps), `tools/sf_headless/src/scenario/`
+125 late snapshots) and the game could not say what a long frame was made of. WP1.16a measures; WP1.16b was to fix what the
+measurement shows. The laptop run of 11-11-2026 showed nothing to fix and Tijmen closed WP1.16 that day, so WP1.16b is not built
+(follow-up 35). Code: `crates/sf_game/src/hitch.rs`, `record.rs`, `runner.rs` (the laps), `tools/sf_headless/src/scenario/`
 (`exact.rs`, `game.rs`).
 
 ## Flags

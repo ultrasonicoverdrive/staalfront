@@ -397,10 +397,12 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
    is over 50 ms without a resize, and the play was shorter than 10 minutes. Proposal for Tijmen to decide: the done-when counts
    frames after the first 90, as the hitch log does. Open: one 10-minute play to close the WP. Numbers and files:
    `docs/progress.md` follow-up 35.*
-   ***Closed 11-11-2026 (Tijmen: "Sluit WP1.16").** WP1.16 is closed on this run and on Tijmen not feeling any stutter; the
-   10-minute play is not required and WP1.16b is not built. The two proposals above hold as decisions (Tijmen's rule "your
-   proposal holds if I do not answer"): the done-when of a measured play counts the frames after the first 90, and no agent
-   builds or tests on the laptop during a measured play. If stutter comes back, the hitch log and the record are the first step.*
+   ***Closed 11-11-2026 (Tijmen: "Sluit WP1.16" to the orchestrator; confirmed in chat the same day: "Yes, close it").** WP1.16
+   is closed on this run and on Tijmen not feeling any stutter; the 10-minute play is not required and WP1.16b is not built.
+   Tijmen was asked about the two proposals in chat on 11-11 and did not answer them, so the orchestrator applies his rule "your
+   proposal holds if I do not answer": no agent builds or tests on the laptop during a measured play, and this run is read after
+   its first 90 frames. A warm-up rule for later measured plays is not decided here. If stutter comes back, the hitch log and the
+   record are the first step.*
 4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision
