@@ -30,9 +30,10 @@ Decisions:
   of the selection: a drag held for 30 frames says nothing until the button is released, and a selection that
   just stays says nothing on the frames after it. Clicking the same unit again is a new step, so it speaks again
   if the brake allows it.
-* **Not positional.** A unit voice is the player's own interface: `AudioSystem::play`, full volume, category Sfx,
-  so `mix.sfx_volume` of `audio.ron` applies. (WP11.5b, the sound settings, is not built; when it is, a voice
-  volume belongs next to the sfx volume. No hook beyond the category exists yet.)
+* **Not positional.** A unit voice is the player's own interface: `AudioSystem::play_as(.., Category::Voice)`, full
+  volume, so the **voice volume** (`mix.voice_volume`, the Unit voices row of the sound settings) and the master volume
+  apply; the effects volume no longer does (WP11.5b; `each_slider_reaches_its_own_category_and_the_voices_are_not_the_effects`).
+  Without a `voice_volume` in an older `audio.ron` the voices follow `sfx_volume`, as before.
 
 ## 2. The brake
 
