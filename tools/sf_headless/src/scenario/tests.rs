@@ -774,3 +774,206 @@ fn a_scenario_without_a_match_file_has_no_match() {
         (None, true, 0)
     );
 }
+
+// ---- the command record (WP1.16a) ------------------------------------------------------------
+
+mod record {
+    use super::*;
+    use sf_math::{Fx, Vec2};
+    use sf_sim::{Area, Cell, Command, EntityId, GuardTarget, Kind, Order, Tick};
+
+    /// A position that is not a cell middle: the value of a click on the ground.
+    fn odd(x: i64, y: i64) -> Vec2 {
+        Vec2::new(Fx::from_raw(x), Fx::from_raw(y))
+    }
+
+    fn e(i: u32, g: u32) -> EntityId {
+        EntityId::new(i, g)
+    }
+
+    /// One command of every kind `sf_sim` has, with values a person would never write by hand.
+    fn every_command() -> Vec<Command> {
+        let ids = vec![e(3, 1), e(9, 0)];
+        let mut all = vec![
+            Command::Spawn {
+                kind: Kind(2),
+                pos: odd(123_457, -3),
+                owner: PlayerId(3),
+            },
+            Command::Place {
+                kind: Kind(1),
+                cell: Cell::new(4, 5),
+                owner: PlayerId(2),
+            },
+            Command::SpawnUnit {
+                kind: Kind(12),
+                pos: odd(65_537, 99_999),
+                owner: PlayerId(1),
+            },
+            Command::PlaceStructure {
+                kind: Kind(3),
+                cell: Cell::new(70, 71),
+                owner: PlayerId(0),
+            },
+            Command::BuildStructure {
+                kind: Kind(2),
+                cell: Cell::new(18, 62),
+            },
+            Command::QueueUnit {
+                factory: e(14, 2),
+                kind: Kind(13),
+            },
+            Command::CancelUnit {
+                factory: e(14, 2),
+                index: 3,
+            },
+            Command::SetRally {
+                factory: e(14, 2),
+                cell: Some(Cell::new(34, 60)),
+            },
+            Command::SetRally {
+                factory: e(14, 2),
+                cell: None,
+            },
+            Command::Repair {
+                structure: e(12, 0),
+                on: true,
+            },
+            Command::Sell {
+                structure: e(13, 4),
+            },
+            Command::Stop { ids: ids.clone() },
+            Command::AimTurret {
+                ids: ids.clone(),
+                target: Some(e(5, 5)),
+            },
+            Command::AimTurret {
+                ids: ids.clone(),
+                target: None,
+            },
+            Command::TakeOre {
+                cell: Cell::new(9, 10),
+                amount: 40,
+            },
+            Command::Despawn { id: e(11, 7) },
+            Command::SetWanderArea {
+                ids: ids.clone(),
+                area: Area::new(odd(1_000, 2_000), odd(300_000, 400_001)),
+            },
+            Command::MoveTo {
+                ids: ids.clone(),
+                target: odd(70_001, -70_001),
+            },
+        ];
+        let orders = [
+            Order::Idle,
+            Order::HoldPosition,
+            Order::Move(odd(262_145, 131_073)),
+            Order::Attack(e(24, 3)),
+            Order::AttackMove(odd(-1, i64::from(i32::MAX))),
+            Order::Guard(GuardTarget::Point(odd(5, 6))),
+            Order::Guard(GuardTarget::Entity(e(2, 2))),
+            Order::Scatter,
+            Order::Pursue(e(7, 1)),
+        ];
+        for order in orders {
+            for queued in [false, true] {
+                all.push(Command::Order {
+                    ids: ids.clone(),
+                    order,
+                    queued,
+                });
+            }
+        }
+        all
+    }
+
+    /// Every command the simulation has survives the file: the value, written to text and read back,
+    /// is the same command, fixed-point bits included.
+    #[test]
+    fn every_command_round_trips() {
+        for command in every_command() {
+            let recorded = RecordedCommand::new(Tick(7), Tick(9), PlayerId(1), &command);
+            let text = ron::to_string(&recorded).unwrap();
+            let back: RecordedCommand = ron::from_str(&text).unwrap_or_else(|e| {
+                panic!("{command:?} written as {text} does not read back: {e}")
+            });
+            assert_eq!(back, recorded, "{text}");
+            assert_eq!(back.command.to_command(), command, "{text}");
+            assert_eq!((back.arrived, back.tick, back.player), (7, 9, 1));
+        }
+    }
+
+    fn recorded_file(extra: &str, recorded: &str, ticks: u64) -> String {
+        format!(
+            "Scenario(seed: 1, map: (width: 96, height: 96), \
+             game: Some((assets: \"x\", match_path: \"m.ron\", speed_raw: 98304)), \
+             ticks: {ticks}, {extra} recorded: [{recorded}])"
+        )
+    }
+
+    #[test]
+    fn a_recorded_game_parses_and_its_commands_keep_their_order() {
+        let text = recorded_file(
+            "",
+            "(arrived: 5, tick: 6, player: 0, command: Stop(ids: [(1, 0)])), \
+             (arrived: 5, tick: 7, player: 0, command: Despawn(id: (2, 0)))",
+            10,
+        );
+        let s = parse(&text).unwrap();
+        assert_eq!(s.recorded.len(), 2);
+        assert_eq!(s.recorded[1].tick, 7);
+        assert!(s.game.is_some());
+    }
+
+    #[test]
+    fn a_recorded_game_with_the_wrong_order_or_times_is_refused() {
+        let p = problems(&recorded_file(
+            "",
+            "(arrived: 6, tick: 7, player: 0, command: Stop(ids: [(1, 0)])), \
+             (arrived: 5, tick: 7, player: 0, command: Stop(ids: [(1, 0)]))",
+            10,
+        ));
+        assert!(has(&p, "recorded[1]: arrived 5 is before"), "{p:?}");
+        let p = problems(&recorded_file(
+            "",
+            "(arrived: 6, tick: 5, player: 0, command: Stop(ids: [(1, 0)]))",
+            10,
+        ));
+        assert!(has(&p, "cannot run before it arrives"), "{p:?}");
+        let p = problems(&recorded_file(
+            "",
+            "(arrived: 10, tick: 11, player: 0, command: Stop(ids: [(1, 0)]))",
+            10,
+        ));
+        assert!(has(&p, "would never reach the world"), "{p:?}");
+    }
+
+    #[test]
+    fn the_game_block_takes_no_rule_fields() {
+        let p = problems(&recorded_file("combat: true,", "", 10));
+        assert!(has(&p, "`combat` must be left out"), "{p:?}");
+    }
+
+    /// Commands that arrive at the same moment go in file order; one that arrives later is not in
+    /// the world before then (pending commands are in the checksum).
+    #[test]
+    fn arrivals_hand_the_world_each_command_at_its_moment() {
+        let text = "Scenario(seed: 1, map: (width: 16, height: 16), ticks: 4, recorded: [\
+            (arrived: 0, tick: 1, player: 0, command: Despawn(id: (0, 0))), \
+            (arrived: 2, tick: 3, player: 0, command: Despawn(id: (1, 0))), \
+            (arrived: 2, tick: 3, player: 1, command: Despawn(id: (2, 0)))])";
+        let s = parse(text).unwrap();
+        let mut world = s.build_world().unwrap();
+        let mut arrivals = s.arrivals();
+        let mut pending = Vec::new();
+        for _ in 0..4 {
+            arrivals.schedule_due(&mut world).unwrap();
+            pending.push(world.pending_commands().len());
+            world.step();
+        }
+        // Counted before each step: the two that arrive at 2 are not in the world before the third step.
+        assert_eq!(pending, vec![1, 1, 2, 2]);
+        assert_eq!(arrivals.remaining(), 0);
+    }
+}

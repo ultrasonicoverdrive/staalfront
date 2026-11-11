@@ -12,6 +12,7 @@ members = [
     "crates/sf_audio",
     "crates/sf_cutscene",
     "crates/sf_net",
+    "crates/sf_thread_cpu",
     "crates/sf_game",
     "tools/sf_editor",
     "tools/sf_headless",

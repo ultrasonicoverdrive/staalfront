@@ -147,6 +147,17 @@ pub struct Options {
     /// would (WP1.15): to see the sim fall behind (the F1 panel says so) while
     /// the frames stay smooth. Zero = off.
     pub sim_delay: Duration,
+    /// `--record FILE` (WP1.16a, only with `--match`): write every command the player gave, with the tick it
+    /// ran at, to `FILE` when the game ends, as an `sf_headless` scenario (`docs/rules/hitch_log.md`).
+    pub record: Option<PathBuf>,
+    /// `--hitch-log FILE` (WP1.16a): write the hitch log (every frame over 50 ms with its parts, the
+    /// totals, the slow sim ticks) to `FILE` as JSON when the game ends.
+    pub hitch_log: Option<PathBuf>,
+    /// `--replay FILE` (WP1.16a, only with `--match`): feed the commands of a record (`--record`) into the
+    /// running game at the ticks they ran at, so that a play can be repeated for a measurement without
+    /// anyone at the keyboard. The commands are sent as the player's are (a tick ahead of the snapshot),
+    /// so the play follows the record but is not tick-exact (`docs/rules/hitch_log.md`).
+    pub replay: Option<PathBuf>,
     /// Flags that were given but could not be used.
     pub warnings: Vec<String>,
 }
@@ -195,6 +206,9 @@ impl Options {
             open_menu: None,
             reserve: true,
             sim_delay: Duration::ZERO,
+            record: None,
+            hitch_log: None,
+            replay: None,
             warnings: Vec::new(),
         };
         let mut units_given = false;
@@ -420,6 +434,9 @@ impl Options {
                     }
                 }
                 "--no-reserve" => o.reserve = false,
+                "--record" => o.record = value(&mut o.warnings).map(PathBuf::from),
+                "--hitch-log" => o.hitch_log = value(&mut o.warnings).map(PathBuf::from),
+                "--replay" => o.replay = value(&mut o.warnings).map(PathBuf::from),
                 "--sim-delay-ms" => {
                     if let Some(v) = value(&mut o.warnings) {
                         match v.parse::<u32>() {
@@ -436,6 +453,17 @@ impl Options {
             }
         }
 
+        // The record is of a match: the world it is made of is the match file's (`docs/rules/hitch_log.md`).
+        if o.record.is_some() && o.scene != Scene::Match {
+            o.warnings
+                .push("--record needs --match: nothing is recorded".to_owned());
+            o.record = None;
+        }
+        if o.replay.is_some() && o.scene != Scene::Match {
+            o.warnings
+                .push("--replay needs --match: nothing is replayed".to_owned());
+            o.replay = None;
+        }
         // The viewer's crowd is the old 2,000 placeholder units.
         if !demo && o.scene == Scene::Crowd && !units_given {
             o.units = GAME_UNITS;
@@ -720,5 +748,31 @@ mod tests {
         let bad = parse(Preset::Game, "--sim-delay-ms slow");
         assert_eq!(bad.sim_delay, Duration::ZERO);
         assert_eq!(bad.warnings.len(), 1);
+    }
+
+    #[test]
+    fn record_and_hitch_log_take_a_file_and_the_record_needs_a_match() {
+        let o = parse(
+            Preset::Game,
+            "--match --record play.ron --hitch-log hitch.json",
+        );
+        assert_eq!(o.record, Some(PathBuf::from("play.ron")));
+        assert_eq!(o.hitch_log, Some(PathBuf::from("hitch.json")));
+        assert!(o.warnings.is_empty(), "{:?}", o.warnings);
+        let plain = parse(Preset::Game, "");
+        assert_eq!((plain.record, plain.hitch_log), (None, None));
+        // The sandbox has no match file to name the world by: the flag is dropped, and said so.
+        let sandbox = parse(Preset::Game, "--record play.ron");
+        assert_eq!(sandbox.record, None);
+        assert_eq!(sandbox.warnings.len(), 1, "{:?}", sandbox.warnings);
+        // The hitch log works in every scene.
+        assert_eq!(
+            parse(Preset::Game, "--crowd --hitch-log h.json").hitch_log,
+            Some(PathBuf::from("h.json"))
+        );
+        assert_eq!(parse(Preset::Game, "--hitch-log").warnings.len(), 1);
+        let replay = parse(Preset::Game, "--match --replay play.ron");
+        assert_eq!(replay.replay, Some(PathBuf::from("play.ron")));
+        assert_eq!(parse(Preset::Game, "--replay play.ron").replay, None);
     }
 }

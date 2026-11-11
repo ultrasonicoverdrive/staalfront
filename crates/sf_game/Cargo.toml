@@ -34,6 +34,13 @@ sf_ui = { path = "../../crates/sf_ui" }
 sf_audio = { path = "../../crates/sf_audio" }
 sf_cutscene = { path = "../../crates/sf_cutscene" }
 sf_net = { path = "../../crates/sf_net" }
+# The CPU time of the main thread for the hitch log (WP1.16a); the only crate with unsafe code.
+sf_thread_cpu = { path = "../../crates/sf_thread_cpu" }
+# The command record (WP1.16a, `--record`) is written as an sf_headless scenario, with the types and the
+# writer that sf_headless reads it back with, so the file format has one definition. The threaded sim is
+# also checked tick by tick against the headless runner (tests/sim_thread.rs). A workspace crate, not a
+# new external dependency; it depends on no rendering crate, so nothing cycles.
+sf_headless = { path = "../../tools/sf_headless" }
 # F1 debug panels (WP1.11): the UI itself and the winit event/platform glue.
 # 0.36.x matches wgpu 30 (egui-wgpu in sf_render) and winit 0.30.13. Default
 # features off: no clipboard (arboard) and no link opening (webbrowser); the
@@ -49,9 +56,3 @@ serde_json = "1"
 # assets/config/wrecks.ron (WP5.5, how wrecks and rubble are drawn) is parsed here. ron 0.12 is already
 # in the lockfile (sf_data and sf_render use it); no new crate is added.
 ron = "0.12"
-
-[dev-dependencies]
-# The threaded sim is checked tick by tick against the headless runner
-# (tests/sim_thread.rs). A workspace crate, not a new external dependency; the
-# runner depends on no rendering crate, so nothing cycles.
-sf_headless = { path = "../../tools/sf_headless" }
