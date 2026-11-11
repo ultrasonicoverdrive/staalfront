@@ -13,6 +13,7 @@ mod common;
 use std::time::{Duration, Instant};
 
 use common::scenario_path;
+use sf_headless::run::{RunOptions, run_full};
 use sf_headless::scenario::{Rect, Scenario, SpawnGroup};
 
 struct Cost {
@@ -112,5 +113,44 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
                 c.worst
             );
         }
+    }
+}
+
+/// The wall time of a whole run (`run_full`, the runner's own loop) of `ticks` ticks.
+fn timed_run(s: &Scenario, ticks: u64) -> Duration {
+    let started = Instant::now();
+    let finished = run_full(s, &RunOptions { ticks, every: 100 }).unwrap();
+    let spent = started.elapsed();
+    assert_eq!(finished.outcome.ticks, ticks);
+    spent
+}
+
+#[test]
+fn a_whole_run_with_the_ai_against_the_same_run_without_it() {
+    let ticks = if cfg!(debug_assertions) { 200 } else { 800 };
+    let with = crowded(5000);
+    let mut without = crowded(5000);
+    without.ais.clear();
+    // Alternating, three pairs; the median of each.
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for _ in 0..3 {
+        a.push(timed_run(&with, ticks));
+        b.push(timed_run(&without, ticks));
+    }
+    a.sort();
+    b.sort();
+    let per_second = |d: Duration| ticks as f64 / d.as_secs_f64();
+    println!(
+        "whole run, ai_fog + 5000 wanderers, {ticks} ticks: with the AI {:.0} ticks/s, without {:.0} ticks/s (medians of 3 alternating runs)",
+        per_second(a[1]),
+        per_second(b[1])
+    );
+    if !cfg!(debug_assertions) {
+        assert!(
+            a[1] <= b[1] + b[1] / 2,
+            "with the AI {:?}, without {:?}",
+            a[1],
+            b[1]
+        );
     }
 }

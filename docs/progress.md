@@ -2759,6 +2759,37 @@ requirement is the laptop's, PLAN section 13):
   and recolours every pixel (mean 2.7 ms, max 18 ms in the debug replay); an incremental version waits for the laptop log.
 * Windows modal loops, the GTX 1650 driver and the machine itself (suspects 3 and 5) can only be measured on the laptop.
 
+### WP9.1a notes: the computer opponent's frame (11-11-2026)
+
+First part of phase 9, started before WP1.16 is finished (Tijmen, 10-11-2026). Rules and formats: `docs/rules/ai.md`. Nothing in
+`crates/sf_sim/` changed and no existing pin moved (the `.expected` files, `golden.rs` constants and bridge digests are the same; the only new
+pins are those of `ai_fog`).
+
+- **Built.** `sf_ai`: the observation and its fence (only `observe.rs` names the world; `tests/fence.rs`), the last-seen memory of structures,
+  the state with `Ai::digest()`, the think schedule (every 10 ticks, `(tick + 3 * player) % 10 == 0`, one manager of four per think, the managers are stubs
+  that only count), `Profile::resolve` and `start_sites`. `sf_data::ai_profile` and `assets/ai/normal.ron` (the goal-list build order, the unit mix
+  and the numbers, every one range-checked, the lists checked against the unit definitions). `sf_headless`: the `ai` field of the scenario file, the
+  driver in `run::run_full` (`run` wraps it; the AI thinks right before the step it is due at), the AI digests in the summary and, for a scenario with
+  `ai`, in the log; the scenario `ai_fog`. The determinism script scans `crates/sf_ai/src` (also for the clock and I/O); `crates/sf_ai/clippy.toml` and the
+  float lints in its `Cargo.toml`. CI lists `ai_fog` in the headless job, so the Linux and Windows logs, digest included, are compared.
+- **Measured.** `ai_fog`: final checksum `0xd369218db6025eff`, AI digest `0x993afc7cd2c42cfd`, 800 ticks. The AI knows exactly the two structures the scout saw and
+  nothing in shroud; an army in the far corner changes neither its observation nor its digest; it forgets a structure it sees gone and keeps one that left its
+  sight. Think cost (release, container, load about 2): 0.05 to 0.07 us per AI per tick in `ai_fog`, 6.2 to 6.6 us with 5,000 wanderers (worst think 101 to 113 us);
+  budget 20 us and 1 ms. A whole crowd run with and without the AI: 633 against 623 ticks/s.
+- **Mutations** (each broken in a scratch edit, the named tests failed, reverted): the observation leaks everything (`seen` always true) fails 6 tests of
+  `ai_fog`; the memory forgets what is out of sight fails 2 memory unit tests (`a_structure_stays_in_memory_when_it_is_no_longer_seen`, `a_structure_seen_gone_is_forgotten`) and 2 `ai_fog` tests; the memory never
+  forgets a gone structure fails `memory::tests::a_structure_seen_gone_is_forgotten` and 2 `ai_fog` tests; thinking every tick fails 4 schedule and `ai` tests and 4 `ai_fog` tests;
+  no stagger fails 3 unit tests and `two_ais_think_on_different_ticks`; a profile check removed (`reserve`, `silo_percent`, `gather_distance`) fails
+  `every_number_is_checked_at_both_ends_when_the_file_is_read`; an `f32` in `sf_ai` fails the determinism script and clippy (`float_arithmetic`), a `HashMap` fails both
+  too; another file naming the world fails `only_the_fence_file_names_the_world`. The first version of the profile test did not check the `reserve` range at all
+  (found by the mutation, then the test was made to check both ends of every number).
+- **Nits of the PR #114 review carried here.** `sf_headless` warns on stderr when `assets/config` does not load for a record replay (the game's own warning is its
+  model); a test pins the summary count of recorded commands (`recorded_commands_count_as_scheduled`; removing the record from `commands_scheduled` fails it); the
+  comment in `crates/sf_game/tests/record_replay.rs` says riflemen; `docs/conventions.md` says `sf_thread_cpu` is the only crate allowed `unsafe`.
+  The stderr warning has no test (it needs a scenario whose assets directory has no loadable `config`).
+- **Not done.** Every rule of the AI (WP9.1b, WP9.1c); the game hookup (WP9.1d); the public tables, terrain and ore in the observation; a test of the allowed command
+  set (no command exists yet); a shuffled-spawn-order digest test; difficulty levels; saving the AI state.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
