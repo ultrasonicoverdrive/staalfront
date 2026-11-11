@@ -527,7 +527,7 @@ store ore. The store has a **capacity**; a refinery takes off a harvester only w
   ore one such standing building holds for its owner (a whole number, default 0, at most
   `MAX_STORAGE` = 1 000 000; `sf_data::units::building`, refused at the line otherwise). As
   shipped the **refinery** stores **2000** and the **ore silo** 1500 (placeholders for phase 15; the refinery's is ten harvester loads).
-  The **ore silo** (WP7.3b, `ore_silo`, **1500**, a proposal that waits for Tijmen, `buildings.md`) is such a
+  The **ore silo** (WP7.3b, `ore_silo`, **1500**, place in the tree approved 08-11-2026, `buildings.md`) is such a
   record: a `storage` number and no Rust change. Pinned: `sf_data/tests/buildings.rs`
   (`only_the_refinery_stores_ore_and_it_stores_the_shipped_amount`,
   `storage_is_a_whole_number_up_to_the_maximum`); the frozen copies have no `storage` and store
@@ -577,14 +577,20 @@ The silo is a structure whose only job is storage: its `storage` is summed into 
 the refinery's is (standing = complete and with hit points), so a silo under construction, destroyed or sold
 adds nothing and the cap rule above applies unchanged: the ore stays, nothing more goes in until there is room.
 No rule in `sf_sim` or `sf_bridge` changed; the silo is picked up by `storage_capacities` and shows the same fill
-bar as the refinery (`silo_screenshot.rs`). The sandbox of `sf_game` leaves it out (`sandbox::LEFT_OUT`) until its place is
-confirmed. Tests: `sf_bridge/tests/harvest.rs` (`the_shipped_storage_reaches_the_world` pins `[(Kind(2), 2000), (Kind(43), 1500)]`),
+bar as the refinery (`silo_screenshot.rs`). The sandbox of `sf_game` places one for each side since WP6.11 (the place in the tree is
+approved; `sandbox::LEFT_OUT` is gone). A silo shot to zero by a weapon lowers the owner's capacity by what it stored,
+at the next sync (`a_silo_destroyed_by_damage_lowers_the_capacity`: six Veyran heavy tanks destroy Meridian's silo in
+the sandbox world with its weapons, and the capacity falls by exactly 1500); sold or despawned it did already
+(`the_silo_adds_its_storage_only_while_it_stands`, the scenario `silo`). Tests: `sf_bridge/tests/harvest.rs` (`the_shipped_storage_reaches_the_world` pins `[(Kind(2), 2000), (Kind(43), 1500)]`),
 `sf_bridge/tests/silo.rs` (`the_silo_needs_a_standing_refinery`, `the_silo_adds_its_storage_only_while_it_stands`), and the scenario `silo`.
 Its cost and place in the tree are proposals (`buildings.md`).
 
 The scenario `silo` (6000 ticks, `silo_defs` = a copy of `harvest_defs` with the silo, capacities `[(2, 600), (43, 400)]` written
 in the scenario; `assets/scenarios/silo.expected` = `0x937182f6b4e6c09e`, `tools/sf_headless/tests/silo.rs`, CI job `headless`):
-the store is full at 600 by tick 2157; `BuildStructure` of the silo at tick 2600, which stands at tick 2841 (capacity 1000 from then,
+the store is full at 600 at tick **2157, asserted exactly since WP6.11** (`assert_eq!(full, 2157)`; it was `< 2400`). The build speed
+of WP6.11 does not move it, measured: 2157 at 3 / 2 and at 1 / 1, because the fill is the harvesters' work alone and the scenario has
+no production rules, so its silo still takes the data's 240 ticks and stands at 2841 (a world with production rules would
+build it in 160 ticks, `production.md`, "Build speed"); `BuildStructure` of the silo at tick 2600, which stands at tick 2841 (capacity 1000 from then,
 600 before: `the_silo_adds_room_once_built_and_takes_it_away_when_sold_without_losing_ore`); the store reaches 1000 before the sale
 at tick 4400; the capacity is 600 again at tick 4401 and the 1000 stay stored. `Sell` needs `repair` rules, which the scenario gives
 and does not otherwise use. Picture: `docs/screenshots/wp7.3b/`.

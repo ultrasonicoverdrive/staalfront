@@ -597,3 +597,35 @@ fn the_opponents_tower_goes_dark_when_its_plant_is_below_420_of_600() {
     assert!(dark < 420, "dark at {dark} hit points");
     assert!(lit >= 420, "last lit at {lit} hit points");
 }
+
+/// The tick the first match is decided in when the scripted match is built at the shipped build speed
+/// of 3 / 2 (WP6.11): the same match file, the same script, everything built one and a half times as
+/// fast. The scenario itself is frozen at 1 / 1 (`DECIDED`); this is the same game with the shipped
+/// speed written into its production rules, measured: 6238 -> 5656.
+const DECIDED_AT_SHIPPED_SPEED: u64 = 5656;
+/// Its final checksum.
+const PIN_SHIPPED_SPEED: &str = "0xda53debc239be030";
+
+#[test]
+fn the_match_at_the_shipped_build_speed_is_won_sooner_and_one_over_one_is_the_old_match() {
+    let mut fast = scenario();
+    fast.production.as_mut().unwrap().build_speed = (3, 2);
+    let (_, rows) = play(&fast);
+    let won = rows
+        .iter()
+        .find(|r| r.result.is_some())
+        .expect("the human wins");
+    assert_eq!(won.tick, DECIDED_AT_SHIPPED_SPEED);
+    assert_eq!(
+        won.result.map(|r| r.verdict),
+        Some(sf_sim::Verdict::Won(P0))
+    );
+    assert!(won.tick < DECIDED);
+    let end = |s: &Scenario| run(s, &RunOptions::for_scenario(s)).unwrap().final_checksum;
+    assert_eq!(end(&fast), parse_checksum(PIN_SHIPPED_SPEED).unwrap());
+    // Written out as 1 / 1 it is the pinned match of every earlier phase.
+    let mut one = scenario();
+    one.production.as_mut().unwrap().build_speed = (1, 1);
+    assert_eq!(end(&one), parse_checksum(EXPECTED).unwrap());
+    assert_ne!(end(&fast), end(&one));
+}

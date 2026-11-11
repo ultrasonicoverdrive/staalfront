@@ -48,7 +48,9 @@ fn the_silo_adds_room_once_built_and_takes_it_away_when_sold_without_losing_ore(
     let at = |t: u64| rows[(t - 1) as usize];
     // (1) The refinery alone: the store fills to 600 and stays there.
     let full = rows.iter().find(|r| r.1 == 600).unwrap().0;
-    assert!(full < 2400, "full at {full}");
+    // Exactly 2157: the fill is the harvesters' work alone. The scenario has no production rules, so the
+    // build speed of WP6.11 does not touch it (measured: 2157 before and after; the silo stands at 2841).
+    assert_eq!(full, 2157, "full at {full}");
     for t in full..=2600 {
         assert_eq!((at(t).1, at(t).2), (600, 600), "tick {t}");
     }

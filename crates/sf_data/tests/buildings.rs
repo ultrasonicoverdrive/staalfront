@@ -142,7 +142,7 @@ const TREE: &[(&str, BuildingFunction, Option<Side>, &[&str])] = &[
         None,
         &["barracks"],
     ),
-    // Proposed (WP7.3b), waiting for Tijmen: not part of the approved tree above.
+    // WP7.3b, place approved by Tijmen on 08-11-2026 (WP6.11): requires the refinery.
     ("ore_silo", BuildingFunction::None, None, &["refinery"]),
     ("relay_transmitter", BuildingFunction::None, None, &[]),
     ("fuel_depot", BuildingFunction::None, None, &[]),
@@ -470,7 +470,7 @@ fn the_copy_that_builds_keeps_the_blocks_it_was_made_with() {
 /// swapped fields fail. A move of the place in the tree is a data edit plus this row and
 /// `docs/rules/buildings.md`.
 #[test]
-fn the_proposed_ore_silo_is_the_documented_one() {
+fn the_approved_ore_silo_is_the_documented_one() {
     let defs = shipped();
     let silo = defs.unit("ore_silo").unwrap();
     assert_eq!(silo.kind, 43);

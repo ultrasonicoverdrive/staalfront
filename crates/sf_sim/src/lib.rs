@@ -411,9 +411,10 @@ pub use placement::{
 };
 pub use power::{PowerRules, PowerTotals, advances_on, speed_for};
 pub use production::{
-    FULL_SPEED_PERMILLE, FactoryStatus, FactoryView, MAX_EXIT_RADIUS, MAX_QUEUE_LIMIT, Produced,
-    ProductionError, ProductionRejection, ProductionRules, ProductionTable, ProductionTableError,
-    QueueItem, UnitBuild, paid_at,
+    BuildSpeed, FULL_SPEED_PERMILLE, FactoryStatus, FactoryView, MAX_BUILD_SPEED_RATIO,
+    MAX_BUILD_SPEED_TERM, MAX_EXIT_RADIUS, MAX_QUEUE_LIMIT, Produced, ProductionError,
+    ProductionRejection, ProductionRules, ProductionTable, ProductionTableError, QueueItem,
+    UnitBuild, paid_at,
 };
 pub use projectiles::{GUIDED_FLIGHT_FACTOR, HIT_SLACK, ImpactCause, ProjectileId};
 pub use repair::{

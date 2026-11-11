@@ -2696,6 +2696,35 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
 - **Gaps:** sound of hidden events; ghosts only for structures and they do not age; the ghost is a team colour; no allied vision; the F1 cell
   grid overlay still marks every unit's cell; the shader's cost on a real GPU is not measured (only the software adapter).
 
+### WP6.11 notes: build speed 1.5x, power in the sandbox base, the silo in the sandbox (10-11-2026)
+
+- **Done.** (1) `build_speed: (num: 3, den: 2)` in `production.ron` (exact fraction, terms 1 to 100, within 4 times either way;
+  a file without it means 1 / 1). `World::with_production` scales the build ticks of the production table and of the building table once
+  (`ceil(B * den / num)`), so units and structures are 1.5 times as fast and every price is still paid exactly. Written down in
+  `production.md` ("Build speed"), `construction.md`. (2) `sandbox::schedule` places extra power plants so a side's base makes at least
+  what it uses (two more per side: 300 made against 250 used, 280 with the `--harvest` refinery; it was 270 used of 100 made;
+  `power.md`, screenshot `docs/screenshots/wp6.11/`). (3) The silo is in the sandbox (`LEFT_OUT` is gone), its place in the tree is
+  recorded as approved on 08-11-2026 (`buildings.md`, `economy.md`); a silo shot to zero by a weapon lowers the capacity (test added); the silo scenario
+  asserts the fill tick 2157 exactly.
+- **Measured, in steps (the same workspace tests after each).** At `build_speed: (1, 1)` (the code in, the shipped file at 1 / 1) the whole workspace
+  test run passed with every old pin unchanged (1397 tests passed; the one failing test was the literal that expects 3 / 2 in the shipped file). Then at 3 / 2:
+  `sf_sim`, `sf_data`, `sf_bridge`, `sf_headless`, `sf_ai` and the `sf_game` lib, `bench_scene`, `formation_base` and snapshot tests all passed with **no `.expected`,
+  no `golden.rs` constant, no `pinned.rs` value, no `FIGHT`/`PLAIN` and no bridge table digest moved**: the headless scenarios write their own production rules and
+  take 1 / 1 when `build_speed` is left out, the bench scenes never call `with_production`, and the bridge tables are the unscaled ones. Then the sandbox
+  power plants moved only `formation_base`'s shape bounds, and the silo moved them again: the table in `formation_base.rs` has the measured numbers of the old base, with
+  only the plants, with only the silo, and with both (cause: the layout of the structures the march goes round; same code), and the bounds
+  were lowered to a few points under the new numbers.
+- **Also moved by the denser sandbox base: `selection_screenshot.rs`** (the first full workspace run had 3 failures there, nothing else). Cause measured by
+  taking each change out in turn: with only the extra plants two of the tests fail (the tanks the pick test spawns at fixed cells now stood among the base's own
+  units; the camera on the third unit no longer saw three unselected units), with the silo as well the third fails (an enemy icon one lattice step from a selected
+  Meridian unit on that 64-cell map gets that unit's bar). Fixed in the tests, not in the rule: the three tanks spawn at (16..20, 40..42), the close camera is on the
+  fourth unit, units behind the camera are skipped, and an enemy icon within a selected unit's bar distance is left out of the "untouched" check (PR #111, the zoom, made the same change to that check at the same time; its version is the one kept in the merge).
+- **The M1 match.** The pinned scenario `match` is frozen at 1 / 1, so it did not move (6238, `0xb709cd3110af3c0f`). With `build_speed: (3, 2)` written into its production
+  block the same script wins at **tick 5656** (checksum `0xda53debc239be030`), pinned by `match_m1.rs`; written as 1 / 1 the old pin comes back.
+- **Not done.** No scenario was changed to 3 / 2 (a new `*_defs`-style copy at 3 / 2 would be a new scenario, not needed to prove the rule); the silo scenario does not use the build
+  speed (no production rules), so its silo still takes 240 ticks there; the sidebar shows the scaled times without a test of its own beyond the view's `front_ticks`; nothing was measured on
+  the laptop (the factor changes no per-tick work).
+
 ### WP1.16a notes: the hitch log, the command record and what could be measured here (10-11-2026)
 
 The measuring half of WP1.16 (stutter in play). Rules and file formats: `docs/rules/hitch_log.md`. What was built: the hitch log
