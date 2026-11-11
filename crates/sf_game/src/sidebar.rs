@@ -83,6 +83,45 @@ pub const fn factory_for(category: Category) -> Option<BuildingFunction> {
     }
 }
 
+/// The tab that builds what a factory of `function` produces; `None` for any other function.
+pub const fn tab_of_factory(function: BuildingFunction) -> Option<Tab> {
+    match function {
+        BuildingFunction::InfantryFactory => Some(Tab::Infantry),
+        BuildingFunction::VehicleFactory => Some(Tab::Vehicles),
+        BuildingFunction::VesselFactory => Some(Tab::Vessels),
+        _ => None,
+    }
+}
+
+/// Makes the sidebar follow the selection (WP6.9): when the selection changes and holds an own
+/// factory that stands, the sidebar switches to the tab of the first such factory in the selection's
+/// stable order (ascending by id; it is also the primary factory of that tab, `Situation::primary`).
+/// It remembers the selection it last saw and answers only when that changes: a frame with the same
+/// selection answers `None`, so a tab the player picks by hand stays, and a selection of units only
+/// changes nothing.
+#[derive(Clone, Debug, Default)]
+pub struct TabFollow {
+    seen: Vec<EntityId>,
+}
+
+impl TabFollow {
+    /// The tab to show for this frame's selection, if the selection changed since the last call and
+    /// holds a factory with a unit tab.
+    pub fn update(
+        &mut self,
+        snap: &SimSnapshot,
+        selection: &crate::selection::Selection,
+    ) -> Option<Tab> {
+        if self.seen == selection.ids() {
+            return None;
+        }
+        self.seen.clear();
+        self.seen.extend_from_slice(selection.ids());
+        crate::rally::selected_factories(snap, selection)
+            .find_map(|(_, function)| tab_of_factory(function))
+    }
+}
+
 /// The factory a unit tab is built from; `None` for the structures tab.
 pub const fn factory_of_tab(tab: Tab) -> Option<BuildingFunction> {
     match tab {
@@ -283,6 +322,14 @@ pub struct Situation {
     pub anchor: bool,
 }
 
+/// Whether the finished structure `v` still stands, the simulation's `World::is_standing`: not being
+/// sold (WP6.6: a structure being sold stands no more) and hit points left or a kind that cannot be
+/// damaged (0 in the unit table). A wreck-to-be at 0 HP stands not. (A structure still going up is
+/// told apart before this, by [`SimSnapshot::construction_of`].)
+pub fn stands_when_built(snap: &SimSnapshot, v: &sf_sim::EntityView) -> bool {
+    snap.sale_of(v.id).is_none() && !(v.hp == 0 && !snap.stats_for(v).is_some_and(|t| t.hp == 0))
+}
+
 impl Situation {
     /// Reads what `player` has in `snap`; `selected` are the ids of the selected entities.
     pub fn read(
@@ -306,11 +353,7 @@ impl Situation {
                     permille: c.permille(),
                     stalled: snap.stalled().contains(&v.id),
                 }),
-                // A structure being sold stands no more (WP6.6, `World::is_standing`).
-                None if snap.sale_of(v.id).is_some() => {}
-                // The simulation's `World::is_standing`: complete, and hit points left or a kind
-                // that cannot be damaged (0 in the unit table). A wreck-to-be at 0 HP stands not.
-                None if v.hp == 0 && !snap.stats_for(v).is_some_and(|t| t.hp == 0) => {}
+                None if !stands_when_built(snap, v) => {}
                 None => {
                     s.standing.push(v.kind);
                     s.anchor |= catalog.is_anchor(v.kind);

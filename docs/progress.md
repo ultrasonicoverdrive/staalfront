@@ -2740,6 +2740,26 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
 - **Gaps:** sound of hidden events; ghosts only for structures and they do not age; the ghost is a team colour; no allied vision; the F1 cell
   grid overlay still marks every unit's cell; the shader's cost on a real GPU is not measured (only the software adapter).
 
+### WP6.9 notes: rally by right-click and the tab that follows the selection (Tijmen's wish after M1, 10-11-2026)
+
+- **What:** UI only. With own standing factories selected a right-click on the ground sends `SetRally` for each (a right-click on one
+  of the selected factories clears that one); the cursor shows `rally` / `rally_clear` (two new cursor pictures, 26 now); mixed
+  selections give the units their order and the factories the same cell; a line from the exit cell to the flag is drawn only while
+  the factory is selected; the sidebar shows the tab of a factory when the selection changes to hold one. Rules: `rules/production.md`
+  ("Rally by right-click"), `rules/cursor.md` (rows R1/R2), `rules/sidebar.md` ("The tab follows the selection"). Decisions: `PLAN.md`
+  note of 10-11-2026 (WP6.10, the repeat toggle, follows).
+- **Pins:** none moved; nothing in `crates/sf_sim/` changed (diff of that directory against origin/main is empty).
+- **Voices (#112, merged before this PR):** a rally right-click has no voice (`order_voice` only reads `Command::Order`); a mixed
+  selection speaks the units' order voice.
+- **Gaps:** `handle_orders` (needs a `Context`) is checked by reading and by the pure functions it calls; `follow_selection_tab` has a
+  headless runner test; a tab picked by hand jumps back when the selection changes because a selected unit dies (`sidebar.md`); the line is a straight screen line, not bent along the terrain; no rally on ore or a unit; the pictures are
+  placeholders.
+- **Fix round (review 11-11-2026):** Guard over a selected factory in a mixed selection now leaves its rally point alone (it
+  cleared it); only RallyClear (factories alone) clears. The sweep checks the rally cell against the units' order cell; the
+  re-rendered WP6.5 shots in `docs/screenshots/wp6.9/` are removed.
+- Also carried: the review nits of PR #111 (stale "cross-fade" wording in `fx.rs` and `effects_screenshot.rs`, the structure cap 1.6 in
+  `architecture.md`, one test moved to its own bullet in `camera.md`) and the agent rule for a twice-rejected PR in `CLAUDE.md`.
+
 ### WP6.11 notes: build speed 1.5x, power in the sandbox base, the silo in the sandbox (10-11-2026)
 
 - **Done.** (1) `build_speed: (num: 3, den: 2)` in `production.ron` (exact fraction, terms 1 to 100, within 4 times either way;

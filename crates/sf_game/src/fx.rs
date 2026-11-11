@@ -91,7 +91,9 @@ pub struct FxFrame {
     pub focal_px: f32,
     /// The viewport in physical pixels.
     pub viewport: [f32; 2],
-    /// The model weight of the model/icon cross-fade (`1` models only, `0` icons only).
+    /// The effects weight of the frame, `sf_render::effects_weight` (`1` before the icon band, `0` at
+    /// its far end). The models are drawn at every zoom and the icons are an overlay on them
+    /// (`docs/rules/camera.md`), so this weight only says how far into the icon band the camera is.
     pub model_weight: f32,
     /// The apparent size of the 2 m reference unit, pixels.
     pub reference_px: f32,
