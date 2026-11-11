@@ -489,9 +489,11 @@ mod tests {
 
     #[test]
     fn a_name_with_no_sound_is_silent_and_gives_no_error() {
-        // The shipped bank has no weapon, impact or explosion sounds: nothing plays, nothing is counted as unknown.
+        // A bank without the fight sounds (the shipped one has them since WP11.3b): nothing plays, nothing is
+        // counted as unknown.
         let (mut fx, mut sound) = setup();
-        let mut audio = tracing_audio(&assets());
+        let root = root_with("silent", &[]);
+        let mut audio = tracing_audio(&root.0);
         fx.push_events(&[
             fire_at(weapon("rifle"), [12.0, 12.0], 0),
             death_at(8.0, true, [12.0, 12.0], 0),
@@ -891,6 +893,176 @@ mod tests {
             t.silent / n,
         );
         assert!(total / frames < std::time::Duration::from_millis(20));
+    }
+
+    // ---- the CC0 fight sounds (WP11.3b) --------------------------------------------------------------------
+
+    /// Every fight event and the file of its CC0 sound in the shipped bank, as literals (swap-proof: a bank
+    /// entry that points at another event's file, or a file that is not there, fails).
+    const FIGHT_FILES: [(&str, &str); 18] = [
+        ("weapon.fire.bullet", "audio/sfx/weapon_fire_bullet.wav"),
+        (
+            "weapon.fire.precision",
+            "audio/sfx/weapon_fire_precision.wav",
+        ),
+        ("weapon.fire.cannon", "audio/sfx/weapon_fire_cannon.wav"),
+        ("weapon.fire.rocket", "audio/sfx/weapon_fire_rocket.wav"),
+        ("weapon.fire.shell", "audio/sfx/weapon_fire_shell.wav"),
+        ("weapon.fire.howitzer", "audio/sfx/weapon_fire_howitzer.wav"),
+        (
+            "weapon.fire.demolition",
+            "audio/sfx/weapon_fire_demolition.wav",
+        ),
+        ("impact.bullet", "audio/sfx/impact_bullet.wav"),
+        ("impact.precision", "audio/sfx/impact_precision.wav"),
+        ("impact.cannon", "audio/sfx/impact_cannon.wav"),
+        ("impact.rocket", "audio/sfx/impact_rocket.wav"),
+        ("impact.shell", "audio/sfx/impact_shell.wav"),
+        ("impact.demolition", "audio/sfx/impact_demolition.wav"),
+        ("impact.miss", "audio/sfx/impact_miss.wav"),
+        (
+            "unit.destroyed.infantry",
+            "audio/sfx/unit_destroyed_infantry.wav",
+        ),
+        ("explosion.small", "audio/sfx/explosion_small.wav"),
+        ("explosion.medium", "audio/sfx/explosion_medium.wav"),
+        ("explosion.large", "audio/sfx/explosion_large.wav"),
+    ];
+
+    fn shipped_bank() -> sf_audio::Bank {
+        sf_audio::Bank::load(&assets().join("audio/bank.ron")).unwrap()
+    }
+
+    /// The 16-bit samples of a generated file (a 44-byte header, mono).
+    fn wav_samples(file: &str) -> Vec<i16> {
+        let b = std::fs::read(assets().join(file)).unwrap();
+        assert_eq!(&b[36..40], b"data", "{file}");
+        b[44..]
+            .chunks(2)
+            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .collect()
+    }
+
+    #[test]
+    fn every_fight_event_has_a_non_silent_cc0_sound_in_the_shipped_bank() {
+        let bank = shipped_bank();
+        // The literal list is the event list of effects.ron (plus the large explosion).
+        let mut listed: Vec<&str> = FIGHT_FILES.iter().map(|(e, _)| *e).collect();
+        let mut named: Vec<&str> = NAMES.to_vec();
+        named.push("explosion.large");
+        listed.sort_unstable();
+        named.sort_unstable();
+        assert_eq!(listed, named);
+        for (event, file) in FIGHT_FILES {
+            let def = bank
+                .get(event)
+                .unwrap_or_else(|| panic!("{event} has no bank entry"));
+            assert_eq!(def.file, file, "{event}");
+            assert_eq!(def.category, sf_audio::Category::Sfx, "{event}");
+            assert!(
+                def.volume > 0.0 && def.volume <= 1.0,
+                "{event} volume {}",
+                def.volume
+            );
+            let samples = wav_samples(file);
+            assert!(samples.iter().any(|s| s.abs() > 10_000), "{file} is silent");
+        }
+        // And the game's own path: each event is a sound for the audio system and plays at full gain x volume.
+        let mut audio = tracing_audio(&assets());
+        for (event, _) in FIGHT_FILES {
+            assert!(audio.has_sound(event), "{event}");
+            audio.set_listener(listener(30.0));
+            audio.play_at(event, [12.0, 0.0, 12.0]);
+        }
+        let trace = audio.take_trace();
+        assert_eq!(trace.len(), 18);
+        for (t, (event, _)) in trace.iter().zip(FIGHT_FILES) {
+            assert_eq!(t.name, event);
+            assert_eq!(t.gain, bank.get(event).unwrap().volume, "{event}");
+        }
+        assert_eq!(audio.stats().unknown, 0);
+    }
+
+    /// Plays `frames` (events per tick, 20 ticks a second) through the planner and the audio system and mixes the
+    /// traced playbacks, each file times its traced gain, at sample accuracy. Returns the peak of the sum as a
+    /// share of full scale. Pan is ignored: with the player's pan law the louder channel is never above the
+    /// centre gain, so this is an upper bound; pitch variation and the voice limits are ignored too.
+    fn mixed_peak(frames: &[Vec<FxEvent>]) -> f32 {
+        let bank = shipped_bank();
+        let (fx, mut sound) = setup();
+        let mut audio = tracing_audio(&assets());
+        let l = listener(30.0);
+        audio.set_listener(l);
+        let per_tick = 22_050 / 20;
+        let mut mix = vec![0.0f32; frames.len() * per_tick + 3 * 22_050];
+        let mut cues = Vec::new();
+        let mut cache: std::collections::BTreeMap<String, Vec<i16>> = Default::default();
+        for (f, events) in frames.iter().enumerate() {
+            sound.plan_events(
+                &fx,
+                events,
+                &l,
+                &audio.spatial_params(),
+                |n| audio.has_sound(n),
+                &mut cues,
+            );
+            for c in &cues {
+                audio.play_at(c.sound, c.pos);
+            }
+            for t in audio.take_trace() {
+                let samples = cache
+                    .entry(t.name.clone())
+                    .or_insert_with(|| wav_samples(&bank.get(&t.name).unwrap().file));
+                for (i, s) in samples.iter().enumerate() {
+                    mix[f * per_tick + i] += f32::from(*s) / 32_768.0 * t.gain;
+                }
+            }
+        }
+        mix.iter().fold(0.0f32, |m, v| m.max(v.abs()))
+    }
+
+    /// 20 tanks in a cluster at the focus fire a volley every 30 ticks, staggered, each shell hits 4 ticks later;
+    /// two medium and one large explosion on top and a few infantry deaths: ten seconds of the loudest ordinary fight.
+    fn tank_fight() -> Vec<Vec<FxEvent>> {
+        let cannon = weapon("cannon");
+        (0..200u64)
+            .map(|t| {
+                let mut v = Vec::new();
+                for i in 0..20u64 {
+                    let p = [12.0 + (i % 5) as f32, 12.0 + (i / 5) as f32];
+                    if t % 30 == i * 3 % 30 {
+                        v.push(fire_at(cannon, p, t));
+                    }
+                    if t >= 4 && (t - 4) % 30 == i * 3 % 30 {
+                        v.push(hit_at(cannon, true, false, [p[0] + 8.0, p[1]], t));
+                    }
+                }
+                if t == 60 || t == 62 {
+                    v.push(death_at(6.0, false, [20.0, 14.0], t));
+                }
+                if t == 100 {
+                    v.push(death_at(8.0, true, [14.0, 14.0], t));
+                }
+                if t % 40 == 0 {
+                    v.push(death_at(1.6, false, [18.0, 16.0], t));
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// Decision 3 of WP11.3b: a 20-tank fight at the default settings is not louder than the music. The music
+    /// at `music_volume` 0.6 (audio.ron) peaks at 0.6 of full scale at most (a normalised track), so the fight's
+    /// mixed peak must stay at or below 0.5; a muffled bank (all volumes 0) fails the other way, the fight must be heard.
+    #[test]
+    fn a_20_tank_fight_is_not_louder_than_the_music() {
+        let cfg = AudioConfig::embedded();
+        assert_eq!(cfg.mix.music_volume, 0.6);
+        assert_eq!(cfg.mix.sfx_volume, 1.0);
+        let peak = mixed_peak(&tank_fight());
+        println!("WP11.3b: mixed peak of the 20-tank fight {peak:.3} of full scale (music 0.6)");
+        assert!(peak <= 0.5, "peak {peak}");
+        assert!(peak >= 0.15, "the fight is too quiet to hear: {peak}");
     }
 
     // ---- the music mood (WP11.4) -------------------------------------------------------------------------

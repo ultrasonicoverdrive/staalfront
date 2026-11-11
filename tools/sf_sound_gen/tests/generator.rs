@@ -104,3 +104,24 @@ fn every_file_is_a_loud_unclipped_mono_wav_of_its_length_and_all_stay_in_budget(
         "all fight sounds: {total} bytes, budget 2 MB"
     );
 }
+
+#[test]
+fn every_sound_has_its_bank_entry_with_its_file() {
+    let bank = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/audio/bank.ron"),
+    )
+    .unwrap();
+    for s in &SOUNDS {
+        let head = format!("\"{}\": (", s.event);
+        let at = bank
+            .find(&head)
+            .unwrap_or_else(|| panic!("no bank entry for {}", s.event));
+        let rest = bank[at + head.len()..].trim_start();
+        assert!(
+            rest.starts_with(&format!("file: \"audio/sfx/{}\"", s.file)),
+            "{} does not point at {}",
+            s.event,
+            s.file
+        );
+    }
+}
