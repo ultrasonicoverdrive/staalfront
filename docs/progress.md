@@ -2714,6 +2714,11 @@ of WP8.2 is in PLAN.md Phase 8 (orchestrator, 05-11-2026), the joining of WP8.3 
   power plants moved only `formation_base`'s shape bounds, and the silo moved them again: the table in `formation_base.rs` has the measured numbers of the old base, with
   only the plants, with only the silo, and with both (cause: the layout of the structures the march goes round; same code), and the bounds
   were lowered to a few points under the new numbers.
+- **Also moved by the denser sandbox base: `selection_screenshot.rs`** (the first full workspace run had 3 failures there, nothing else). Cause measured by
+  taking each change out in turn: with only the extra plants two of the tests fail (the tanks the pick test spawns at fixed cells now stood among the base's own
+  units; the camera on the third unit no longer saw three unselected units), with the silo as well the third fails (an enemy icon one lattice step from a selected
+  Meridian unit on that 64-cell map gets that unit's bar). Fixed in the tests, not in the rule: the three tanks spawn at (16..20, 40..42), the close camera is on the
+  fourth unit, units behind the camera are skipped, and an enemy icon within a selected unit's bar distance is left out of the "untouched" check.
 - **The M1 match.** The pinned scenario `match` is frozen at 1 / 1, so it did not move (6238, `0xb709cd3110af3c0f`). With `build_speed: (3, 2)` written into its production
   block the same script wins at **tick 5656** (checksum `0xda53debc239be030`), pinned by `match_m1.rs`; written as 1 / 1 the old pin comes back.
 - **Not done.** No scenario was changed to 3 / 2 (a new `*_defs`-style copy at 3 / 2 would be a new scenario, not needed to prove the rule); the silo scenario does not use the build
