@@ -19,6 +19,8 @@
         "no_go": (file: "no_go.png", hotspot: (16, 16)),
         "place": (file: "place.png", hotspot: (16, 16)),
         "queue": (file: "queue.png", hotspot: (16, 16)),
+        "rally": (file: "rally.png", hotspot: (12, 25)),
+        "rally_clear": (file: "rally_clear.png", hotspot: (12, 25)),
         "repair": (file: "repair.png", hotspot: (16, 16)),
         "scroll_e": (file: "scroll_e.png", hotspot: (16, 16)),
         "scroll_n": (file: "scroll_n.png", hotspot: (16, 16)),

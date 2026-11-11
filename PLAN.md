@@ -286,6 +286,10 @@ _Note 27-10-2026: WP5.6 ("visual effects: muzzle flash, impact, explosions, smok
 - WP6.6 Repair and sell as processes with progress.
 - WP6.7 Defensive buildings with turrets.
 - WP6.8 Damage display: damaged and heavily damaged model, smoke, fire.
+- WP6.9 Controls for production buildings: a rally point by right-click and a sidebar tab that follows the selected factory (UI only, no `sf_sim` change).
+- WP6.10 Repeat toggle ("herhaalknop") per factory: a finished item goes to the back of the queue (sim: a command, hashed state, re-pinned scenarios).
+
+_Note 10-11-2026 (Tijmen after playing M1: "ik mis dat je een gebouw aanklikt en dat je een marker neer kunt zetten waar ze heen moeten als ze gebouwd zijn" and "als ik barak kies kan ik ook gelijk menu voor de soldaten"; the decisions below are the orchestrator's, under Tijmen's rule that his proposal holds if he does not answer): **WP6.9** is UI only and uses the existing sim command `SetRally`. (1) With own standing factories selected, a right-click on the map sends `SetRally { cell: Some(cell) }` for each of them; a right-click on one of the selected factories sends `cell: None` (clear); the cursor shows a rally cursor over the ground (and a struck-through flag over the factory), a cell in shroud is allowed like a move order, off the map gives no command. (2) A mixed selection: the units get their normal order and the factories rally to the same cell (as in StarCraft II); a right-click on an enemy makes the units attack and the factories set nothing; a right-click on a selected own factory makes the units guard it and leaves its rally point alone (a clear is only done with factories alone selected; review of PR #116, 11-11-2026). (3) The rally flag stays; a line from the factory's exit cell to the flag is drawn only while that factory is selected, its colour and width in `production_look.ron`; own flags are always shown. (4) When the selection changes and holds an own factory, the sidebar shows that factory's tab (the first one in the stable selection order, which is also its primary); only on a change of the selection, never every frame, so a tab picked by hand stays; units only leave the tab as it is. (5) The debug key G stays. (6) A rally right-click raises no unit voice; with a mixed selection the units' order voice plays as for a plain order. **WP6.10** (repeat) follows, decided by Tijmen on 10-11-2026: a "herhaalknop" per factory (a repeat toggle, not a longer queue); it needs a sim command and re-pins, so it is a separate work package._
 
 _Note 31-10-2026: WP6.5 (production) is built before WP6.4 (power), decided by the orchestrator. Milestone M1 ("build a base, harvest, make units, attack, win") needs units to be made and does not need power. WP6.4 later hooks into production through a speed factor that WP6.5 leaves as a documented hook, fixed at 1 (`docs/rules/production.md`)._
 
@@ -324,7 +328,7 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 *08-11-2026 (orchestrator, with Tijmen: "follow your own proposals"; built in WP7.7): the #105 measurement showed that with the gate on a unit whose sight equals its weapon reach loses targets at the limit of its reach (the rocket trooper, sight 5 and reach 5, did not pick a tower at squared distance 26). Decision: **the visibility test for target acquisition is measured to the target's edge, like the reach** (a structure: any footprint cell or a visible cell beside it; a unit: its own cell or a neighbour cell its body reaches), in integers, before the gate goes on, so M1 does not get that regression. Rules: `docs/rules/vision.md`, "Measured to the edge".*
 
 2. **WP11.2** *(built 09-11-2026, PR in review; `docs/rules/voices.md`)* Voice responses (see Phase 11), built now: `sf_game` raises `unit.select`, `unit.move` and `unit.attack` (the bank events, mapped to Red Alert voices in `assets/audio/ra_mapping.ron`) on the player's own selection and orders, from the UI side (no sim event needed: these are the player's own actions), with a brake against spam (one voice at a time, a minimum gap, not on every box-select frame). Without the Red Alert files the events stay silent unless the bank has a CC0 sound. Test: the brake and which event each action raises, headless where the runner allows.
-3. **WP1.16 Stutter in play** *(10-11-2026, orchestrator, with Tijmen: "make a plan to fix it and put it on GitHub",
+3. ~~**WP1.16 Stutter in play**~~ **Closed 11-11-2026** (see the note at the end of this item) *(10-11-2026, orchestrator, with Tijmen: "make a plan to fix it and put it on GitHub",
    after an M1 play on the laptop that stuttered; evidence in `docs/progress.md` follow-up 35: frames of 0.6 to 1.6 s
    with vsync on, 125 late snapshots)*. Built **before phase 9**. Measure first, then fix only what the measurement
    shows; no fix on a guess.
@@ -385,6 +389,20 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
    fixes that a measurement proves; it also records the swap-chain acquire outcome and the `on_resize` time, and reuses the minimap texture
    (confirmed waste). **WP1.16b** fixes what Tijmen's hitch-log file from the laptop shows (suspects 3 and 5 and anything new). Rules:
    `docs/rules/hitch_log.md`.*
+   *11-11-2026 (Tijmen's laptop run with the hitch log, main `a0acd79`): **the stutter did not come back in a play of 5 min 44 s**
+   (2 frames over 50 ms: frame 1 and the window maximise; 0.039 % over 25 ms; 0 late snapshots; Tijmen felt none). The play
+   stopped at tick 6887, before the part of the match in which the worst frames of 10-11 fell (ticks 7476 to 8003). The log gives
+   **WP1.16b nothing to fix**. The cause of 10-11 is not proven; two candidates are the minimap texture reuse of WP1.16a and the
+   reviewer agent that ran the full gate on the laptop during that play. The done-when is not met as written: frame 1 (69.3 ms)
+   is over 50 ms without a resize, and the play was shorter than 10 minutes. Proposal for Tijmen to decide: the done-when counts
+   frames after the first 90, as the hitch log does. Open: one 10-minute play to close the WP. Numbers and files:
+   `docs/progress.md` follow-up 35.*
+   ***Closed 11-11-2026 (Tijmen: "Sluit WP1.16" to the orchestrator; confirmed in chat the same day: "Yes, close it").** WP1.16
+   is closed on this run and on Tijmen not feeling any stutter; the 10-minute play is not required and WP1.16b is not built.
+   Tijmen was asked about the two proposals in chat on 11-11 and did not answer them, so the orchestrator applies his rule "your
+   proposal holds if I do not answer": no agent builds or tests on the laptop during a measured play, and this run is read after
+   its first 90 frames. A warm-up rule for later measured plays is not decided here. If stutter comes back, the hitch log and the
+   record are the first step.*
 4. Then phase 9 (computer opponent) as planned.
    *10-11-2026 (Tijmen: "fase 9 mag eerder beginnen"): phase 9 starts before WP1.16 is fully done; WP1.16b waits for Tijmen's laptop log
    and does not block it. The AI parts edit `ci.yml` and `pinned.rs`, so they are built in sequence with the `sf_sim` work packages:

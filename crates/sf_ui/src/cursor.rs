@@ -409,7 +409,7 @@ mod tests {
         let dir =
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/ui/cursors");
         let set = CursorSet::load(&dir, &mut Atlas::default()).unwrap();
-        assert_eq!(set.len(), 24);
+        assert_eq!(set.len(), 26);
         assert!(set.index_of("select").is_some());
         assert_eq!(set.size_px(), 32.0);
     }

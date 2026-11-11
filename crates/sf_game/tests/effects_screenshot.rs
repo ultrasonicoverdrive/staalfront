@@ -276,8 +276,9 @@ impl Scene {
         r.render_to_image().expect("render")
     }
 
-    /// What a frame of the game knows of this camera: the cross-fade of the instancer's icon settings, as
-    /// `Runner::build_units` takes it.
+    /// What a frame of the game knows of this camera: the blend of the zoom bands (the icons are an
+    /// overlay on the models, `camera.md`) and the instancer's icon settings, as `Runner::build_units`
+    /// takes them.
     fn zoom_of(&self, cam: &Camera) -> (Blend, FxFrame) {
         let vp = cam.view_proj();
         let eye = EyeView::from_view_proj(vp, H as f32);
@@ -390,8 +391,8 @@ fn shots_hits_and_deaths_are_drawn_close_up_and_fade_to_a_flash_from_afar() {
             fx: FxPlayer::embedded(),
         },
     ];
-    // The three views are what they are named: models up close, the cross-fade or small models in the
-    // middle, only icons from afar.
+    // The three views are what they are named: models up close, models with the icon overlay coming in
+    // (or small models) in the middle, models under the full icon overlay from afar.
     let weights: Vec<f32> = eyes
         .iter()
         .map(|e| scene.zoom_of(&e.cam).1.model_weight)
@@ -401,7 +402,7 @@ fn shots_hits_and_deaths_are_drawn_close_up_and_fade_to_a_flash_from_afar() {
     }
     assert_eq!(weights[0], 1.0, "close: models only");
     assert!(weights[1] > 0.0, "middle: models are still drawn");
-    assert_eq!(weights[2], 0.0, "strategic: icons only");
+    assert_eq!(weights[2], 0.0, "strategic: the far end of the icon band");
     let middle_ref = scene.zoom_of(&eyes[1].cam).1.reference_px;
     let close_ref = scene.zoom_of(&eyes[0].cam).1.reference_px;
     assert!(

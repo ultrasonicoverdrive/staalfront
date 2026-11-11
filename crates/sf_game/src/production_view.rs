@@ -110,14 +110,16 @@ pub fn flag_quads(
     (pole, flag)
 }
 
-/// Draws the rally flag of every factory that has a rally point; the one of `selected` in its own
-/// colour. Returns the number of flags drawn.
+/// Draws the rally flag of every factory that has a rally point; the ones of the `selected`
+/// factories in their own colour. A flag of the local player's own factory is always drawn
+/// ([`SimSnapshot::seen`] is true for the player's own objects, fog or not). Returns the number of
+/// flags drawn.
 pub fn draw_rally_flags(
     layer: &mut Layer<'_>,
     frame: &GhostFrame,
     height: &dyn Fn(f32, f32) -> f32,
     snap: &SimSnapshot,
-    selected: Option<EntityId>,
+    selected: &[EntityId],
     look: &ProductionLook,
 ) -> usize {
     let mut drawn = 0;
@@ -138,12 +140,66 @@ pub fn draw_rally_flags(
         };
         let (pole, flag) = flag_quads(foot, &look.rally, frame.ui_scale);
         layer.fill_quad(pole, color(look.rally.pole));
-        let c = if selected == Some(*id) {
+        let c = if selected.contains(id) {
             look.rally.flag_selected
         } else {
             look.rally.flag
         };
         layer.fill_quad(flag, color(c));
+        drawn += 1;
+    }
+    drawn
+}
+
+/// The two ends of the rally line of the factory `id` on the screen: from the middle of its exit
+/// cell to the foot of its flag. `None` when the factory has no rally point, is not seen, has no exit
+/// side, or either end is off the screen.
+pub fn rally_line_ends(
+    frame: &GhostFrame,
+    height: &dyn Fn(f32, f32) -> f32,
+    snap: &SimSnapshot,
+    id: EntityId,
+) -> Option<([f32; 2], [f32; 2])> {
+    let cell = snap.factory_of(id)?.rally?;
+    if !snap.seen(id) {
+        return None;
+    }
+    let (ex, ey) = crate::rally::exit_cell_centre(snap, id)?;
+    let at = |cx: f32, cy: f32| {
+        let (x, z) = (cx * METRES_PER_CELL, cy * METRES_PER_CELL);
+        project_px(
+            &frame.view_proj,
+            Vec3::new(x, height(x, z), z),
+            frame.viewport,
+        )
+        .map(|(p, _)| p)
+    };
+    Some((at(ex, ey)?, at(cell.x as f32 + 0.5, cell.y as f32 + 0.5)?))
+}
+
+/// Draws the rally line (the colour and width of `production_look.ron`, `rally.line`) of each of the
+/// `selected` factories that has a rally point: **only the selected ones**, so the map is not
+/// crossed by a line per factory. Returns the number of lines drawn.
+pub fn draw_rally_lines(
+    layer: &mut Layer<'_>,
+    frame: &GhostFrame,
+    height: &dyn Fn(f32, f32) -> f32,
+    snap: &SimSnapshot,
+    selected: &[EntityId],
+    look: &ProductionLook,
+) -> usize {
+    let width = f32::from(look.rally.line_width_px) * frame.ui_scale;
+    let mut drawn = 0;
+    for &id in selected {
+        let Some((from, to)) = rally_line_ends(frame, height, snap, id) else {
+            continue;
+        };
+        layer.line(
+            (from[0], from[1]),
+            (to[0], to[1]),
+            width,
+            color(look.rally.line),
+        );
         drawn += 1;
     }
     drawn

@@ -170,6 +170,12 @@ flight and a wave that has died is replaced. The units are made by `SpawnUnit` c
 In the headless twin the fight makes between 143 and 536 shots and 6 to 44 deaths per hundred ticks, up to 32 events in one
 tick (`bench_scene.rs` asserts that every hundred ticks has shots, hits and deaths).
 
+## Hitch log of a play (11-11-2026)
+
+Not a benchmark: `hitch-2026-11-11-a.json` and `play-2026-11-11-a.ron` are the hitch log and the command record of Tijmen's
+M1 play on the laptop with vsync on (`sf_game --match --ra-audio --hitch-log --record`, main `a0acd79`, WP1.16a). How to read
+them is in `docs/rules/hitch_log.md`; the result is in `docs/progress.md`, follow-up 35.
+
 ## Without the laptop
 
 `sf_demo --bench --fight --seconds 45 --windowed` runs on any machine with a Vulkan, DX12 or software adapter (lavapipe in

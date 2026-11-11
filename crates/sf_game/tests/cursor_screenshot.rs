@@ -28,8 +28,8 @@ const W: u32 = 960;
 const H: u32 = 540;
 const CELLS: u32 = 64;
 /// Cursors per row of the contact sheet, and the spacing in pixels.
-const PER_ROW: usize = 8;
-const SPACING: (f32, f32) = (112.0, 150.0);
+const PER_ROW: usize = 9;
+const SPACING: (f32, f32) = (96.0, 150.0);
 const ORIGIN: (f32, f32) = (80.0, 90.0);
 
 fn renderer(map: &Map) -> Renderer {
