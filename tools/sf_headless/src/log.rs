@@ -32,6 +32,16 @@
 //! }
 //! ```
 //!
+//! A scenario with computer opponents (`ai`) has one more key between `checksums` and `host`, because
+//! the AIs live outside the world and are not in its checksum (WP9.1a): the digest of each at the end.
+//! A scenario without `ai` has no such key, so every earlier log is unchanged.
+//!
+//! ```text
+//!   "ai": [
+//!     {"player": 0, "digest": "0x..."}
+//!   ],
+//! ```
+//!
 //! Everything above `host` is deterministic and must be equal on every
 //! machine; `host` describes the machine and the wall time and is the last
 //! key, so removing it (CI does, with `jq 'del(.host)'`) leaves exactly the
@@ -147,6 +157,18 @@ fn write_log(s: &mut String, o: &Outcome, host: &Host) -> std::fmt::Result {
         )?;
     }
     writeln!(s, "  ],")?;
+    if !o.ai_digests.is_empty() {
+        writeln!(s, "  \"ai\": [")?;
+        for (i, (player, digest)) in o.ai_digests.iter().enumerate() {
+            let comma = if i + 1 < o.ai_digests.len() { "," } else { "" };
+            writeln!(
+                s,
+                "    {{\"player\": {player}, \"digest\": \"{}\"}}{comma}",
+                hex(*digest)
+            )?;
+        }
+        writeln!(s, "  ],")?;
+    }
     writeln!(s, "  \"host\": {{")?;
     writeln!(s, "    \"os\": {},", json_string(host.os))?;
     writeln!(s, "    \"arch\": {},", json_string(host.arch))?;

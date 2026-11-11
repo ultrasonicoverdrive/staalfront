@@ -88,6 +88,11 @@ Sources: CLAUDE.md, PLAN.md §5 rules 1-3, §6, WP0.1, WP1.3.
 - No `HashMap`/`HashSet` iteration order; `BTreeMap` or sorted vectors (§5 rule 3;
   CI lint, WP0.1).
 - No clock and no I/O (CLAUDE.md).
+- `sf_ai` follows the same rules (WP9.1a): no floats, no hash collections, no clock, no I/O, randomness
+  from `sf_math::Rng` only; the determinism script scans its `src/`, and it has its own `clippy.toml`.
+- `crates/sf_thread_cpu` is the only crate allowed `unsafe` code: crate-level `deny`, one named function with
+  `#[allow(unsafe_code)]` and a SAFETY comment; every other crate keeps the workspace's `forbid`
+  (PLAN.md section 1.1, `docs/architecture.md`).
 - Threads are listed as a determinism leak (PLAN.md §6). Whether the sim may use
   threads at all: undecided (see PLAN.md §6).
 - No world mutation outside the sim tick; the UI issues commands (§5 rule 1).

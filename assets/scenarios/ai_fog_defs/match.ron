@@ -1,0 +1,39 @@
+// The match file of the scenario `ai_fog` (WP9.1a, docs/rules/ai.md): two players on an open 96 by 96 map
+// (the `map` name is only a name here, the scenario has no terrain layer). Player 0, Meridian, is the AI;
+// player 1, Veyran, does nothing. Read by sf_data::match_def like assets/matches/m1.ron.
+//
+// Slots (the order objects enter the world, player after player):
+//   0 construction_center (4 x 4, sight 10)  player 0  (8, 80)    the AI's base
+//   1 scout (sight 8)                        player 0  (24, 72)   walks to the enemy structures and back
+//   2 construction_center                    player 1  (80, 8)    a start site; never seen by player 0
+//   3 power_plant (2 x 3, sight 5)           player 1  (40, 60)   seen by the scout, stays known after it leaves
+//   4 barracks (2 x 3)                       player 1  (30, 56)   seen by the scout, removed at tick 500
+//   5 refinery (3 x 4)                       player 1  (80, 80)   far corner; never seen
+// The scenario adds an army of player 1 in the far corner (slots 6 to 8), which player 0 never sees.
+(
+    name: "ai_fog",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 1500,
+            objects: [
+                (role: "construction_center", cell: (8, 80)),
+                (role: "scout", cell: (24, 72)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (80, 8)),
+                (role: "power_plant", cell: (40, 60)),
+                (role: "barracks", cell: (30, 56)),
+                (role: "refinery", cell: (80, 80)),
+            ],
+        ),
+    ],
+)

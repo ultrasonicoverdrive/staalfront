@@ -21,7 +21,7 @@ fallback is deferred (WP12.4; stack in PLAN §1.0). Target platforms v1: Windows
 | `sf_sim` | The complete game simulation. No GPU, no I/O, no clock. |
 | `sf_data` | Unit/building/weapon definitions (RON), validation, loading. |
 | `sf_bridge` | Copies the unit definitions of `sf_data` into the unit table of `sf_sim` (WP3.2): the one place that sees both, shared by `sf_game` and `sf_headless`. |
-| `sf_ai` | Computer opponent. Talks to `sf_sim` only via commands. |
+| `sf_ai` | Computer opponent (WP9.1a: the frame). A deterministic player outside `sf_sim`: acts only via commands, reads only through a fog-filtered observation (`docs/rules/ai.md`). |
 | `sf_engine` | Main loop, window, input, time, assets. No game rules. |
 | `sf_render` | wgpu: terrain, models, camera, zoom, effects, LOD. |
 | `sf_ui` | Own UI: widgets, text, minimap; later sidebar, selection, menus. |
@@ -53,6 +53,7 @@ graph TD
   sf_bridge --> sf_data
   sf_ai --> sf_math
   sf_ai --> sf_sim
+  sf_ai --> sf_data
   sf_render --> sf_math
   sf_render --> sf_data
   sf_ui --> sf_math
@@ -106,7 +107,7 @@ Rules stated in PLAN.md:
 
 1. **`sf_sim` does not depend on `sf_render`** (§1.1). The simulation must be able
    to run thousands of ticks per second in `sf_headless` without a GPU.
-2. `sf_ai` talks to `sf_sim` only via commands (§1.1).
+2. `sf_ai` acts only via commands and reads only through the fog-filtered observation (§1.1; WP9.1a, `docs/rules/ai.md`).
 3. In phase 1 the engine crates know no game rules: no "tank", no "ore", only
    meshes, instances, entities, commands and checksums (§3, phase 1).
 4. `glam` is used only in the presentation; the sim uses fixed-point (§1.0).
@@ -1049,3 +1050,21 @@ the sim thread spent in ticks that finished since the previous frame. **Numbers
 taken before WP1.15 are not comparable with numbers taken after it** (the sim
 ran inside the frame before, and a hitch every third frame was part of p99).
 
+
+## 19. The computer opponent (WP9.1a)
+
+Rules, formats and measurements: [`rules/ai.md`](rules/ai.md). The shape, in short:
+
+- **Outside the simulation.** The AI is a deterministic player in `crates/sf_ai`, not part of `sf_sim`. The host calls
+  `Ai::due(tick)` and `Ai::think(&World, &mut Vec<Command>)` immediately before `World::step` and schedules what comes out for the tick
+  about to run, under the AI's player id, so the AI's commands are in the command queue and the checksum like a human's. `sf_headless`
+  does this in `run::run_full`; the game's sim thread will in WP9.1d. Nothing in `crates/sf_sim/` knows the AI exists.
+- **The fence.** `sf_ai::observe` is the only file that names `World`; it builds an `Observation` (own things in full, of others only what
+  is `Visible` for the player) and everything else in the crate takes only that. A source test fails when another file names the world.
+  This is what makes rule 2 of section 2 ("acts only via commands and reads only through the fog-filtered observation") checkable.
+- **State and digest.** `AiState` is plain data with `Ai::digest()`; it is not in the world checksum, so the headless log carries each
+  AI's digest and CI compares it between Linux and Windows.
+- **Data.** `assets/ai/<profile>.ron` (`sf_data::ai_profile`), checked against `unit_defs.ron`; `sf_ai::Profile::resolve` turns the roles of
+  one faction's section into kinds. This is why `sf_ai` depends on `sf_data`.
+- **Determinism rules apply to `sf_ai`** (no floats, no hash collections, no clock, no I/O): the determinism script scans its `src/`, and it
+  has its own `clippy.toml` and float lints.

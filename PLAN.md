@@ -62,7 +62,7 @@ staalfront/
 │  ├─ sf_data      unit/building/weapon definitions (RON), validation, loading
 │  ├─ sf_bridge    copies the sf_data definitions into the sf_sim tables (unit stats, terrain,
 │  │               movement costs) at world creation; sf_sim and sf_data may not know each other
-│  ├─ sf_ai        computer opponent, talks to sf_sim only via commands
+│  ├─ sf_ai        computer opponent: acts only via commands, reads only the fog-filtered observation
 │  ├─ sf_engine    main loop, window, input, time, assets (no game rules)
 │  ├─ sf_render    wgpu: terrain, models, camera, zoom, effects, LOD
 │  ├─ sf_ui        own UI: widgets, text, minimap; later sidebar, selection, menus
@@ -406,6 +406,9 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
    its first 90 frames. A warm-up rule for later measured plays is not decided here. If stutter comes back, the hitch log and the
    record are the first step.*
 4. Then phase 9 (computer opponent) as planned.
+   *10-11-2026 (Tijmen: "fase 9 mag eerder beginnen"): phase 9 starts before WP1.16 is fully done; WP1.16b waits for Tijmen's laptop log
+   and does not block it. The AI parts edit `ci.yml` and `pinned.rs`, so they are built in sequence with the `sf_sim` work packages:
+   WP6.11 (build speed), then WP9.1a, then WP6.10 (repeat toggle), then WP9.1b, then WP9.1c and WP9.1d.*
 
 ### Phase 8 — Vision
 - WP8.1 Shroud (never seen) and fog of war (seen, not current) per player, cell-based in the sim.
@@ -421,6 +424,13 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 ### Phase 9 — Computer opponent
 Layered (analysis §12, §22G):
 - WP9.1 **[xhigh]** Strategic: build order, economy, tech choice, attack timing.
+  *10-11-2026 (orchestrator, design memo `wp9.1-ai-ontwerp`; Tijmen: "fase 9 mag eerder beginnen"): WP9.1 is built in four parts, none of which
+  touches `crates/sf_sim/`. **9.1a** the frame (built): `sf_ai` with the observation fence, the last-seen memory, the state and its digest, the
+  think schedule; `sf_data::ai_profile` and `assets/ai/normal.ron`; the `ai` field and the driver in `sf_headless`; the scenario `ai_fog`;
+  the lints. The AI observes and sends no command. **9.1b** [xhigh] base and economy (goal list, placement, power, harvesters, silo, repair,
+  rebuild; scenario `ai_base`). **9.1c** army and timing (production mix, scouting, minimal operations, attack timing, defence;
+  `ai_vs_passive`; the rules in `docs/rules/ai.md`). **9.1d** the game hookup (`controller` field in the match file, the sim thread calls
+  the driver). Architecture rule 2 now reads "acts only via commands and reads only through the fog-filtered observation".*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

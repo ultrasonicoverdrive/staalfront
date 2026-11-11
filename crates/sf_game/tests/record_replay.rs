@@ -55,8 +55,8 @@ fn script() -> Vec<(u64, PlayerId, Command)> {
         .filter(|(tick, ..)| tick.0 >= 1)
         .map(|(tick, player, command)| (tick.0, player, command.clone()))
         .collect();
-    // Orders to a spot a click would give: not the middle of a cell. They go to the first three tanks
-    // while they wait at the rally point, before the script's attack-move of tick 2400 replaces them, so
+    // Orders to a spot a click would give: not the middle of a cell. They go to slots 15 to 17, the first
+    // three units of the barracks queue (riflemen), while they wait at the rally point, before the script's attack-move of tick 2400 replaces them, so
     // the scripted attack is left intact and the match is decided by the script itself.
     let army: Vec<EntityId> = [15, 16, 17].map(|i| EntityId::new(i, 0)).to_vec();
     let odd = |x: i64, y: i64| Vec2::new(Fx::from_raw(x), Fx::from_raw(y));
