@@ -2828,7 +2828,8 @@ requirement is the laptop's, PLAN section 13):
 * **The minimap** (diagnosis of the orchestrator, confirmed): `UiRenderer::set_minimap` created a texture, view and bind group for every fog
   version: 201 textures for 200 updates in the test, 583 in the replay. It now keeps them while the size is the same and only writes the pixels
   (1 texture; `tests/minimap_textures.rs` fails without the change). The fog work that stays is on the CPU: `Minimap::set_fog` clones the image
-  and recolours every pixel (mean 2.7 ms, max 18 ms in the debug replay); an incremental version waits for the laptop log.
+  and recolours every pixel (mean 2.7 ms, max 18 ms in the debug replay); an incremental version was to wait for the laptop log. That log (11-11-2026,
+  release) has the minimap fog uploads at most 1.53 ms (follow-up 35), so none is planned.
 * Windows modal loops, the GTX 1650 driver and the machine itself (suspects 3 and 5) can only be measured on the laptop.
 
 ## Open follow-ups
@@ -2973,6 +2974,55 @@ fixed, delete the entry in the same PR.
     that was re-created for every fog version is fixed. Open until Tijmen's log: suspects 3 and 5, the swap-chain timeout (the log now
     records it), the CPU cost of `Minimap::set_fog`, and the sim thread's own CPU time (not measured; a 62 ms tick could be that thread
     not running).
+    **Laptop run with the hitch log (11-11-2026): the stutter did not come back.** Tijmen played `sf_game --match --ra-audio
+    --hitch-log --record` from main `a0acd79` (release) on the same laptop, on mains power, started from PowerShell with stdout
+    going to a file: 6,887 ticks (5 min 44 s), 115 commands, the window maximised once at tick 312. He felt no stutter. The
+    files are `docs/bench/hitch-2026-11-11-a.json` and `docs/bench/play-2026-11-11-a.ron`, as the game wrote them (the record
+    names the laptop's assets folder).
+
+    | | 10-11 (`4944d5c`) | 11-11 (`a0acd79`) |
+    |---|---|---|
+    | longest frame | 1,627.8 ms | 253.8 ms (the maximise) |
+    | frames over 50 ms | not counted | 2 of 22,876 |
+    | frames over 25 ms | not counted | 9 (0.039 %); after the first 90 frames 6 (0.026 %) |
+    | frame ms avg / p99 | 17.0 / 25.5 | 16.7 / 17.9 |
+    | late snapshots, behind passes | 125, 3 | 0, 0 |
+    | sim tick ms max | 62.3 | 8.8 |
+    | instance upload ms max | 40.1 | 1.6 |
+    | music decode | 43, 56, 804 ms | 34, 41, 42 ms |
+
+    The two frames over 50 ms: frame 1 (69.3 ms; `present_ms` 53.0, `submit_ms` 13.6: the first image), and the maximise
+    (253.8 ms; `gap_ms` 237.3 with `cpu_ms` 0.0 and the events `moved`, `resized 1920x991`, `on_resize` 33.0 ms: the window
+    system held the event loop, suspect 3, which the done-when excepts). Every swap-chain acquire gave a normal image (timeout,
+    occluded, outdated, lost, suboptimal all 0). Instance buffers grew in 41 frames to 67 buffers (274,432 bytes), upload lap
+    at most 0.51 ms: suspect 1 is ruled out on the laptop too. The minimap fog uploads cost avg 0.27, p99 0.46, max 1.53 ms
+    (787 uploads). The CPU clock cost 54.9 ms over 22,877 calls (2.4 µs a frame).
+    **The play was shorter than the one of 10-11.** It stopped at tick 6887 (the window stayed open some 37 s longer). On
+    10-11 the 885 ms frame (tick ~7476), the 1,628 ms frame (~7896), the 804 ms decode (~7926 to 7942) and the seconds with
+    a p99 of 122 to 163 ms (7945 to 8003) all came after that tick, so this run says nothing about that part of a match.
+    That was the concrete reason to ask for a 10-minute play (Tijmen closed the WP without it, see the last paragraph).
+    **What this does not show: the cause of 10-11.** Much differs between the two plays: 8 commits (`4944d5c..a0acd79`, among
+    them #94, #111, #112, #114, #115, #116, #117), other music tracks, 1,730 against 369 fight sounds requested. Of the
+    differences, two are candidates this run cannot tell apart: (1) the minimap texture reuse of WP1.16a; (2) the load on the
+    laptop: during the 10-11 play a reviewer agent ran the full gate (`cargo test --workspace` and clippy, for #94) on the
+    same machine, which fits that the sim thread and the music decode were slow as well as the main thread. During the 11-11
+    play the orchestrating session ran no agent, build or test; other load on the laptop was not checked.
+    *11-11-2026 (orchestrator, proposal for Tijmen to confirm): no agent builds or tests on the laptop during a measured play.*
+    **Against the done-when of WP1.16:** not met as written, on two points. (1) Frame 1 (69.3 ms) is over 50 ms and is not a
+    window resize or move (no events, `gap_ms` 0.13); the rule holds only without the 90 warm-up frames the hitch log already
+    sets apart (then 1 frame over 50 ms, the maximise), and the done-when does not say so. *11-11-2026 (orchestrator, proposal
+    for Tijmen to decide): the done-when counts frames after the first 90, as the hitch log's `frames_after_warmup` does.*
+    (2) The play was 5 min 44 s, not 10 minutes. The other two numbers hold (0.039 % over 25 ms, 0 late snapshots) and Tijmen
+    felt no stutter. Nothing in this log gives WP1.16b something to fix. What was open at this point: one 10-minute play to
+    close the WP, and, if the cause of 10-11 were to be proven, the same play once with a workspace test running beside it.
+    **Closed 11-11-2026 (Tijmen: "Sluit WP1.16" to the orchestrator; confirmed in chat the same day: "Yes, close it").** The
+    follow-up is closed on this run and on Tijmen not feeling any stutter; the 10-minute play is not required and WP1.16b
+    is not built. Tijmen was asked about the two proposals above in chat on 11-11 and did not answer them, so the
+    orchestrator applies his rule "your proposal holds if I do not answer" (PLAN.md): no agent builds or tests on the laptop
+    during a measured play, and this run is read after its first 90 frames (1 frame over 50 ms, the maximise). A warm-up rule
+    for later measured plays is not decided here. The cause of 10-11 stays unproven; if stutter comes back, `--hitch-log`
+    and `--record` are the first step. This entry keeps its text, against the rule above to delete a fixed entry: it is the
+    record of both measurements, and PLAN.md queue item 3, `docs/rules/hitch_log.md` and `docs/bench/README.md` point to it.
 
 36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
     to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side
