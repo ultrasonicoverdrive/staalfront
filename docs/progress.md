@@ -3104,7 +3104,7 @@ fixed, delete the entry in the same PR.
   scenario `production_repeat` (in the CI list). UI: the Loop button in the Repair/Sell row (primary factory of the open tab, lit when on)
   and a loop sign on queued items; no key. Rules: `rules/production.md` "Repeat", `rules/sidebar.md` "The loop button".
 * **Pins.** None moved, on purpose. The flag is added to the tag byte of the rally point (+2 while repeating), so a world where no factory
-  repeats hashes as before: `cargo test --workspace` (golden.rs and every pinned test) green and all scenarios of the CI list (35 with the new one) match their
+  repeats hashes as before: `cargo test --workspace` (golden.rs and every pinned test) green and all 34 scenarios of the CI list (33 old + the new one) match their
   `.expected` in release (`production`, `command_mix`, `wander_5000`, `terrain_256`, `units_spawn` included). New pin: `production_repeat`
   `0xd6f33f0ad1c56117`.
 * **Measured, not assumed.** A queue-full check on the copy is kept but is never the one that stops a copy (the finished item has left

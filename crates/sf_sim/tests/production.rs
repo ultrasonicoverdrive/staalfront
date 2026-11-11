@@ -1924,19 +1924,37 @@ fn a_repeat_is_refused_for_what_is_not_the_senders_standing_factory() {
 
 #[test]
 fn a_repeat_does_not_add_a_copy_whose_requirement_no_longer_stands() {
-    let mut w = free_world(5, 4);
-    let b = barracks(&w);
-    place(&mut w, P0, RADAR, (20, 10));
-    run(&mut w, 25);
-    queue(&mut w, b, SNIPER);
-    set_repeat(&mut w, b, true);
-    let radar = w.occupant_at(Cell::new(20, 10)).unwrap();
-    run(&mut w, 3);
-    send(&mut w, P0, Command::Despawn { id: radar });
-    run(&mut w, 60);
-    // The sniper in the queue is held; nothing was added behind it.
-    assert_eq!(queue_len(&w, b), 1);
-    assert!(units_of(&w, SNIPER, P0).is_empty());
+    // The sniper (needs the radar) is finished behind a walled-in exit, so that it is the exit and
+    // not the build that waits when the radar goes. A radar that still stands is the control: the
+    // copy goes in. Exit radius 1: the wall on (12, 10) closes every free cell by the exit (12, 11).
+    let run_case = |radar_goes: bool| {
+        let mut w = free_world(5, 1);
+        let b = barracks(&w);
+        place(&mut w, P0, RADAR, (20, 10));
+        place(&mut w, P0, WALL, (12, 10));
+        run(&mut w, 25);
+        queue(&mut w, b, SNIPER);
+        set_repeat(&mut w, b, true);
+        run(&mut w, 30);
+        assert_eq!(
+            w.production_of(b).unwrap().status,
+            FactoryStatus::WaitingForExit,
+            "finished and held at the exit"
+        );
+        let radar = w.occupant_at(Cell::new(20, 10)).unwrap();
+        let wall = w.occupant_at(Cell::new(12, 10)).unwrap();
+        let tick = w.tick();
+        if radar_goes {
+            w.schedule(tick, P0, Command::Despawn { id: radar })
+                .unwrap();
+        }
+        w.schedule(tick, P0, Command::Despawn { id: wall }).unwrap();
+        w.step();
+        assert_eq!(units_of(&w, SNIPER, P0).len(), 1, "it came out");
+        queue_len(&w, b)
+    };
+    assert_eq!(run_case(false), 1, "control: the copy goes in");
+    assert_eq!(run_case(true), 0, "no copy without the radar");
 }
 
 #[test]

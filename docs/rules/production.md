@@ -85,11 +85,13 @@ _Decision Tijmen 08-11-2026, after playing M1: everything builds 1.5 times faste
 * **`SetRepeat { factory, on }`** (tag 18) switches a per-factory flag, **off by default**. With it on, a unit that has come out of the
   factory goes back at the **end of the same queue at zero progress**, in the same tick: the finished item has left, so the queue is as
   long as before and `queue_limit` (5) is never passed (`a_full_queue_on_repeat_never_passes_the_limit_and_keeps_its_mix`: five items
-  stay five over 300 ticks; a mix of two kinds comes round again in order). The copy goes through the checks of a new `QueueUnit` that
-  can change while it is built: the unit is still in the table, built by this kind of factory, open to the owner's faction, every
-  structure it `requires` stands (`World::repeatable`; `a_repeat_does_not_add_a_copy_whose_requirement_no_longer_stands`). The queue-full
-  check is kept as well, but it cannot be the one that stops a copy, since the item has left first; it is a guard, not a tested rule.
-  When a check fails nothing is added and the flag stays on.
+  stay five over 300 ticks; a mix of two kinds comes round again in order). The copy goes through `World::repeatable`, the checks of a new `QueueUnit`. **The one that can
+  fail is the requirements check:** every structure the unit `requires` must still stand. A sniper finished behind a closed exit while its
+  radar is sold or destroyed gets no copy (`a_repeat_does_not_add_a_copy_whose_requirement_no_longer_stands`, with a control where the
+  radar stands and the copy goes in). The other checks in `repeatable()` (the unit is in the table, built by this kind of factory, open
+  to the owner's faction) and the queue-full check cannot change between the moment the item was queued and the moment it finishes, so
+  they are **guards that cannot trigger**, not rules, and no test reaches them (a mutation removing the queue-full check changes no test).
+  When the requirements check fails nothing is added and the flag stays on.
 * **Money: no new rule.** A repeated item pays per tick like any other and waits in `WaitingForMoney` when the credits run out. Repeat does
   **not** switch itself off without money and never runs into debt (`a_repeating_factory_waits_for_money_and_resumes_when_it_is_back`:
   waiting with the flag still on, resuming after a cancelled tank gave its credits back).
@@ -102,8 +104,10 @@ _Decision Tijmen 08-11-2026, after playing M1: everything builds 1.5 times faste
   construction or without hit points (`NotStanding`). No new refusal kind. A refusal counts as ignored and makes no record
   (`a_repeat_is_refused_for_what_is_not_the_senders_standing_factory`).
 * **Checksum.** The flag is in the factory section next to the rally point, as part of its tag byte: 0 or 1 as before (rally point none or
-  set), **plus 2 while the factory repeats**. So a world where nothing repeats hashes exactly as before WP6.10 (no pin moved, see
-  `progress.md`), and the flag is hashed when it is on (`the_repeat_flag_is_part_of_the_checksum_and_a_world_that_never_repeats_hashes_as_before`).
+  set), **plus 2 while the factory repeats**: the byte is 0, 1, 2 or 3, and a rally cell follows only for 1 and 3. So a world where
+  nothing repeats hashes exactly as before WP6.10 (no pin moved, see `progress.md`). The flag is hashed when it is on
+  (`the_repeat_flag_is_part_of_the_checksum_and_a_world_that_never_repeats_hashes_as_before`) and the four byte values are pinned as
+  literals (`the_repeat_flag_is_the_plus_two_on_the_rally_tag_in_the_factory_section`, in `production.rs`).
   `SetRepeat { on: false }` for a factory that has no record changes nothing and makes none, so switching off a switch that was never on
   is invisible. Tag 18 of the pending-command hash is pinned as literal bytes (`set_repeat_has_the_permanent_tag_18_in_the_pending_hash`).
 * **Scenario** `production_repeat` (`tools/sf_headless/tests/production_repeat.rs`): one barracks on repeat from tick 1 to tick 1500

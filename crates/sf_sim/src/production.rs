@@ -1242,4 +1242,48 @@ mod tests {
         }
         assert!(w.production_of(f).unwrap().queue.is_empty());
     }
+    /// WP6.10: the factory section as literal bytes. The tag byte after the id is 0 (no rally, no
+    /// repeat), 1 (rally), 2 (repeat) or 3 (rally and repeat); a rally cell follows only for 1 and 3.
+    #[test]
+    fn the_repeat_flag_is_the_plus_two_on_the_rally_tag_in_the_factory_section() {
+        let w = world();
+        let id = EntityId::new(5, 2);
+        for (rally, repeat, tag) in [
+            (None, false, 0u8),
+            (Some(Cell::new(7, 9)), false, 1),
+            (None, true, 2),
+            (Some(Cell::new(7, 9)), true, 3),
+        ] {
+            let mut p = (**w.production.as_ref().unwrap()).clone();
+            p.factories.push(Factory {
+                id,
+                rally,
+                repeat,
+                items: Vec::new(),
+                done: 0,
+                status: FactoryStatus::Idle,
+            });
+            let mut got = Fnv1a64::new();
+            p.write_hash(&mut got);
+            let mut want = Fnv1a64::new();
+            want.write_u8(3); // queue_limit
+            want.write_u8(2); // exit_radius
+            want.write_u64(p.table.digest());
+            want.write_u64(1); // one record
+            want.write_u32(5);
+            want.write_u32(2);
+            want.write_u8(tag);
+            if rally.is_some() {
+                want.write_u32(7);
+                want.write_u32(9);
+            }
+            want.write_u32(0); // progress
+            want.write_u64(0); // no items
+            assert_eq!(
+                got.finish(),
+                want.finish(),
+                "rally {rally:?} repeat {repeat}"
+            );
+        }
+    }
 }
