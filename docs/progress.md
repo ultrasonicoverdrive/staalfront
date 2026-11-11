@@ -2988,13 +2988,23 @@ fixed, delete the entry in the same PR.
     occluded, outdated, lost, suboptimal all 0). Instance buffers grew in 41 frames to 67 buffers (274,432 bytes), upload lap
     at most 0.51 ms: suspect 1 is ruled out on the laptop too. The minimap fog uploads cost avg 0.27, p99 0.46, max 1.53 ms
     (787 uploads). The CPU clock cost 54.9 ms over 22,877 calls (2.4 µs a frame).
-    **What this does not show: the cause of 10-11.** Two things differ between the plays and this run cannot tell them apart:
-    (1) the minimap texture reuse of WP1.16a; (2) the load on the laptop: during the 10-11 play a reviewer agent ran the full
-    gate (`cargo test --workspace` and clippy, for #94) on the same machine, which fits that the sim thread and the music
-    decode were slow as well as the main thread. On 11-11 nothing else was building. Rule from now on: no agent builds or
-    tests on the laptop during a measured play.
-    **Against the done-when of WP1.16:** all three numbers hold and Tijmen felt no stutter, but the play was 5 min 44 s, not
-    10 minutes. Nothing in this log gives WP1.16b something to fix. Open: one 10-minute play to close the WP, and, if the
+    **The play was shorter than the one of 10-11.** It stopped at tick 6887 (the window stayed open some 37 s longer). On
+    10-11 the 885 ms frame (tick ~7476), the 1,628 ms frame (~7896), the 804 ms decode (~7926 to 7942) and the seconds with
+    a p99 of 122 to 163 ms (7945 to 8003) all came after that tick, so this run says nothing about that part of a match.
+    That is the concrete reason the 10-minute play is still needed.
+    **What this does not show: the cause of 10-11.** Much differs between the two plays: 8 commits (`4944d5c..a0acd79`, among
+    them #94, #111, #112, #114, #115, #116, #117), other music tracks, 1,730 against 369 fight sounds requested. Of the
+    differences, two are candidates this run cannot tell apart: (1) the minimap texture reuse of WP1.16a; (2) the load on the
+    laptop: during the 10-11 play a reviewer agent ran the full gate (`cargo test --workspace` and clippy, for #94) on the
+    same machine, which fits that the sim thread and the music decode were slow as well as the main thread. During the 11-11
+    play the orchestrating session ran no agent, build or test; other load on the laptop was not checked.
+    *11-11-2026 (orchestrator, proposal for Tijmen to confirm): no agent builds or tests on the laptop during a measured play.*
+    **Against the done-when of WP1.16:** not met as written, on two points. (1) Frame 1 (69.3 ms) is over 50 ms and is not a
+    window resize or move (no events, `gap_ms` 0.13); the rule holds only without the 90 warm-up frames the hitch log already
+    sets apart (then 1 frame over 50 ms, the maximise), and the done-when does not say so. *11-11-2026 (orchestrator, proposal
+    for Tijmen to decide): the done-when counts frames after the first 90, as the hitch log's `frames_after_warmup` does.*
+    (2) The play was 5 min 44 s, not 10 minutes. The other two numbers hold (0.039 % over 25 ms, 0 late snapshots) and Tijmen
+    felt no stutter. Nothing in this log gives WP1.16b something to fix. Open: one 10-minute play to close the WP, and, if the
     cause of 10-11 is to be proven, the same play once with a workspace test running beside it.
 
 36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and

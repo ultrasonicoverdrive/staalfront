@@ -389,11 +389,14 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
    fixes that a measurement proves; it also records the swap-chain acquire outcome and the `on_resize` time, and reuses the minimap texture
    (confirmed waste). **WP1.16b** fixes what Tijmen's hitch-log file from the laptop shows (suspects 3 and 5 and anything new). Rules:
    `docs/rules/hitch_log.md`.*
-   *11-11-2026 (Tijmen's laptop run with the hitch log, main `a0acd79`): **the stutter did not come back** (5 min 44 s, 2 frames
-   over 50 ms: start-up and the window maximise; 0.039 % over 25 ms; 0 late snapshots; Tijmen felt none). The log gives **WP1.16b
-   nothing to fix**. The cause of 10-11 is not proven: the minimap texture reuse of WP1.16a, or the reviewer agent that ran the
-   full gate on the laptop during that play. Open: one 10-minute play to close the WP. Numbers and files: `docs/progress.md`
-   follow-up 35.*
+   *11-11-2026 (Tijmen's laptop run with the hitch log, main `a0acd79`): **the stutter did not come back in a play of 5 min 44 s**
+   (2 frames over 50 ms: frame 1 and the window maximise; 0.039 % over 25 ms; 0 late snapshots; Tijmen felt none). The play
+   stopped at tick 6887, before the part of the match in which the worst frames of 10-11 fell (ticks 7476 to 8003). The log gives
+   **WP1.16b nothing to fix**. The cause of 10-11 is not proven; two candidates are the minimap texture reuse of WP1.16a and the
+   reviewer agent that ran the full gate on the laptop during that play. The done-when is not met as written: frame 1 (69.3 ms)
+   is over 50 ms without a resize, and the play was shorter than 10 minutes. Proposal for Tijmen to decide: the done-when counts
+   frames after the first 90, as the hitch log does. Open: one 10-minute play to close the WP. Numbers and files:
+   `docs/progress.md` follow-up 35.*
 4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision
