@@ -1,0 +1,20 @@
+[package]
+name = "sf_thread_cpu"
+description = "The CPU time of the calling thread (Windows: GetThreadTimes). The one place with unsafe code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The workspace forbids unsafe code (Cargo.toml). The one call that needs it, `GetThreadTimes`, lives in
+# this crate alone so that the rest stays forbidden: `lints.workspace = true` cannot be combined with an
+# override, so the lint is written out here, denied everywhere but the one function that allows it by name.
+[lints.rust]
+unsafe_code = "deny"
+
+# `std` has no thread CPU time. Windows only. The crate is already in the lockfile (winit, wgpu and kira
+# use it); `Win32_System_Threading` has the call and `Win32_Foundation` the `FILETIME` and `HANDLE`
+# types in its signature.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }

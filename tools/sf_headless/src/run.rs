@@ -59,7 +59,8 @@ pub struct Outcome {
     pub ticks: u64,
     /// Checksum interval.
     pub every: u64,
-    /// Commands scheduled before tick 0 (spawns included).
+    /// Commands scheduled before tick 0 (spawns included), plus the commands of a record
+    /// (`recorded`), which are handed to the world when they arrived.
     pub commands_scheduled: usize,
     /// Commands that ran and changed something.
     pub commands_executed: u64,
@@ -93,13 +94,17 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
     }
 
     let mut world = scenario.build_world()?;
-    let commands_scheduled = world.pending_commands().len();
+    let commands_scheduled = world.pending_commands().len() + scenario.recorded.len();
     let initial_checksum = world.checksum();
 
     let mut samples = Vec::new();
     let (mut executed, mut ignored) = (0u64, 0u64);
     let mut last = initial_checksum;
-    for done in 1..=options.ticks {
+    // A recorded game starts after its first tick (`Scenario::game`): the loop counts world ticks.
+    let first = world.tick().0 + 1;
+    let mut arrivals = scenario.arrivals();
+    for done in first..=options.ticks {
+        arrivals.schedule_due(&mut world)?;
         let report = world.step();
         executed += u64::from(report.commands_executed);
         ignored += u64::from(report.commands_ignored);

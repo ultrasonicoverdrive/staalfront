@@ -132,3 +132,24 @@ fn usage_errors_exit_two_and_print_the_usage() {
     );
     assert!(out.is_empty());
 }
+
+/// The command a record's header gives for its replay is one this CLI accepts.
+#[test]
+fn the_record_header_command_is_the_real_cli_form() {
+    let game = crate::scenario::GameSpec {
+        assets: "assets".into(),
+        match_path: "matches/m1.ron".into(),
+        speed_raw: 1,
+    };
+    let text = crate::scenario::render_recording("r", 1, (8, 8), &game, 10, &[]).unwrap();
+    let line = text
+        .lines()
+        .find_map(|l| {
+            l.trim_start_matches('/')
+                .trim()
+                .strip_prefix("sf_headless ")
+        })
+        .expect("the header names the replay command");
+    let words: Vec<&str> = line.split_whitespace().collect();
+    assert_eq!(run_args(&words).scenario, PathBuf::from("THIS_FILE"));
+}

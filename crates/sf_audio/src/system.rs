@@ -1658,18 +1658,53 @@ mod tests {
             "scan + load of the archive (3 tracks, none decoded): {:?}",
             t.elapsed()
         );
+        // WP1.16a: the pieces of one decode on this machine (the thread's `decode` time is all of them
+        // plus the read of the entry from the file): the IMA decode, and the copy into kira frames.
+        let t = Instant::now();
+        let decoded = crate::ra::aud::decode(&aud).unwrap();
+        let ima = t.elapsed();
+        let t = Instant::now();
+        let sound = decoded.to_static_sound();
+        let frames_copy = t.elapsed();
+        drop(decoded);
+        let t = Instant::now();
+        drop(sound);
+        println!(
+            "one 3-minute track in pieces: IMA decode {ima:?}, copy into kira frames {frames_copy:?}, \
+             free of the {:.0} MiB frames {:?}",
+            frames as f64 * 8.0 / 1048576.0,
+            t.elapsed()
+        );
         let mut worst = Duration::ZERO;
+        let mut worst_handover = Duration::ZERO;
         let mut calls = 0;
-        for mood in [Mood::Calm, Mood::Combat, Mood::Calm] {
+        // A forced switch every time: calm, combat, calm, ... (the game switches when the fight does).
+        for mood in [
+            Mood::Calm,
+            Mood::Combat,
+            Mood::Calm,
+            Mood::Combat,
+            Mood::Calm,
+            Mood::Combat,
+            Mood::Calm,
+            Mood::Combat,
+        ] {
             let started = Instant::now();
             let mut waited = 0;
             loop {
                 let t = Instant::now();
                 s.set_music_mood(mood);
                 s.update();
-                worst = worst.max(t.elapsed());
+                let took = t.elapsed();
+                worst = worst.max(took);
                 calls += 1;
                 if s.music.pending.is_none() {
+                    // The call that picked the finished track up: `inject`, `play_music`, and the old
+                    // track's data dropped from the map.
+                    worst_handover = worst_handover.max(took);
+                    println!(
+                        "  hand-over call (inject + play_music + drop of the old track): {took:?}"
+                    );
                     break;
                 }
                 waited += 1;
@@ -1687,7 +1722,8 @@ mod tests {
             );
         }
         println!(
-            "worst main-thread cost of one set_music_mood + update call over {calls} calls: {worst:?}"
+            "worst main-thread cost of one set_music_mood + update call over {calls} calls: {worst:?}; \
+             of the hand-over calls: {worst_handover:?}"
         );
         std::fs::remove_dir_all(d).ok();
     }

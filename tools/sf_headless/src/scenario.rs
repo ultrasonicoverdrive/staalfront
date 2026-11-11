@@ -35,6 +35,12 @@
 //! skipped by `sf_sim`, which counts the command as ignored when none of its
 //! ids hit.
 
+mod exact;
+mod game;
+
+pub use exact::{ExactCommand, ExactOrder, RawPos, RecordedCommand, render_recording};
+pub use game::GameSpec;
+
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -260,6 +266,16 @@ pub struct Scenario {
     #[serde(skip)]
     pub match_commands: Vec<(PlayerId, Command)>,
 
+    /// A recorded game (WP1.16a, `docs/rules/hitch_log.md`): the world is the one `sf_game --match`
+    /// makes, from the assets named here and the settings compiled into this build, instead of the
+    /// rule fields above, which must all be left out. The world is taken after its first tick (the
+    /// one the game runs for the starting objects), so `ticks` is the world tick the run ends at.
+    #[serde(default)]
+    pub game: Option<GameSpec>,
+    /// What [`Scenario::load`] read for `game`. Not part of the file.
+    #[serde(skip)]
+    pub game_loaded: Option<game::LoadedGame>,
+
     /// How many ticks to run; at least 1.
     pub ticks: u64,
     /// Groups of entities to create.
@@ -268,6 +284,12 @@ pub struct Scenario {
     /// Commands for later ticks.
     #[serde(default)]
     pub commands: Vec<TimedCommand>,
+    /// Commands handed to the world while it ran, each at the tick it arrived (a recorded game).
+    /// Unlike `commands` they are not scheduled before tick 0: [`crate::run::run`] (through
+    /// [`Arrivals`]) schedules each one when the world has run `arrived` ticks, because pending
+    /// commands are part of the checksum. Left out: none.
+    #[serde(default)]
+    pub recorded: Vec<RecordedCommand>,
 }
 
 /// The ore rules of a scenario (`sf_sim::OreRules`).
@@ -570,6 +592,38 @@ pub struct SpawnGroup {
     pub owners: Vec<u8>,
     /// Where they appear, inside the map.
     pub area: Rect,
+}
+
+/// The recorded commands of a scenario, in the order they are due. [`Arrivals::schedule_due`] hands
+/// the world every command whose `arrived` is the number of ticks the world has run, which the
+/// caller calls before each `World::step` (and once before the first).
+#[derive(Debug)]
+pub struct Arrivals<'a> {
+    list: &'a [RecordedCommand],
+    next: usize,
+}
+
+impl Arrivals<'_> {
+    /// Schedules the commands that arrive now; returns how many.
+    pub fn schedule_due(&mut self, world: &mut World) -> Result<usize, ScenarioError> {
+        let now = world.tick().0;
+        let mut n = 0;
+        while let Some(c) = self.list.get(self.next)
+            && c.arrived <= now
+        {
+            world
+                .schedule(Tick(c.tick), PlayerId(c.player), c.command.to_command())
+                .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+            self.next += 1;
+            n += 1;
+        }
+        Ok(n)
+    }
+
+    /// Commands not yet handed to a world.
+    pub fn remaining(&self) -> usize {
+        self.list.len() - self.next
+    }
 }
 
 /// A command for a later tick.
@@ -1040,6 +1094,13 @@ impl Scenario {
         if let (Some(dir), Some(file)) = (scenario.unit_defs.clone(), scenario.match_file.clone()) {
             scenario.load_match(&dir, &file, path)?;
         }
+        if let Some(game) = scenario.game.clone() {
+            scenario.game_loaded = Some(game::load_game(
+                &game,
+                path,
+                (scenario.map.width, scenario.map.height),
+            )?);
+        }
         if let Some(name) = scenario.map_name.clone() {
             let costs = match (own_costs, shipped) {
                 (Some(own), _) => own,
@@ -1112,6 +1173,76 @@ impl Scenario {
         // digest: it comes from the scenario's own costs (see `Scenario::load`).
         let defs = sim_definitions(&TerrainTypes::embedded(), costs);
         Terrain::from_layer(width, height, layer.ids(), &defs).map_err(|e| invalid(e.to_string()))
+    }
+
+    /// The problems of the `game` block and of `recorded` (WP1.16a).
+    fn game_problems(&self, p: &mut Vec<String>) {
+        if self.game.is_some() {
+            let others = [
+                ("map_name", self.map_name.is_some()),
+                ("unit_defs", self.unit_defs.is_some()),
+                ("match_file", self.match_file.is_some()),
+                ("buildings", self.buildings),
+                ("combat", self.combat),
+                ("targeting", self.targeting),
+                ("destruction", self.destruction),
+                ("factions", !self.factions.is_empty()),
+                ("ore", self.ore.is_some()),
+                ("harvest", self.harvest.is_some()),
+                ("storage", self.storage.is_some()),
+                ("money", self.money.is_some()),
+                ("production", self.production.is_some()),
+                ("power", self.power.is_some()),
+                ("repair", self.repair.is_some()),
+                ("vision", self.vision.is_some()),
+                ("path_budget", self.path_budget.is_some()),
+                ("flowfield_threshold", self.flowfield_threshold.is_some()),
+                ("collision", self.collision.is_some()),
+                ("formation", self.formation.is_some()),
+                ("formation_max_units", self.formation_max_units.is_some()),
+                ("spawns", !self.spawns.is_empty()),
+                ("commands", !self.commands.is_empty()),
+            ];
+            for (name, set) in others {
+                if set {
+                    p.push(format!(
+                        "game: the world is the game's own, so `{name}` must be left out \
+                         (a recorded game has its commands in `recorded`)"
+                    ));
+                }
+            }
+        }
+        let mut last = 0;
+        for (i, c) in self.recorded.iter().enumerate() {
+            let at = format!("recorded[{i}]");
+            if c.arrived < last {
+                p.push(format!(
+                    "{at}: arrived {} is before the command above it ({last}); the list is in the order the world got them",
+                    c.arrived
+                ));
+            }
+            last = last.max(c.arrived);
+            if c.tick < c.arrived {
+                p.push(format!(
+                    "{at}: tick {} is before arrived {}: a command cannot run before it arrives",
+                    c.tick, c.arrived
+                ));
+            }
+            if c.arrived >= self.ticks {
+                p.push(format!(
+                    "{at}: arrived {} is not before the last tick ({}); it would never reach the world",
+                    c.arrived, self.ticks
+                ));
+            }
+        }
+    }
+
+    /// The recorded commands, to be handed to a world as it runs (see [`Arrivals`]).
+    pub fn arrivals(&self) -> Arrivals<'_> {
+        Arrivals {
+            list: &self.recorded,
+            next: 0,
+        }
     }
 
     /// Parses and validates scenario text.
@@ -1340,6 +1471,8 @@ impl Scenario {
                 );
             }
         }
+
+        self.game_problems(&mut p);
 
         if self.targeting && !self.combat {
             p.push("targeting needs `combat` (a unit picks targets for its weapons)".to_string());
@@ -1590,6 +1723,24 @@ impl Scenario {
                         .into(),
                 ],
             });
+        }
+        if let Some(game) = &self.game {
+            let Some(loaded) = &self.game_loaded else {
+                return Err(ScenarioError::Invalid {
+                    path: None,
+                    problems: vec![
+                        "game: the assets are read from the files the block names, so the \
+                         scenario must be loaded with Scenario::load"
+                            .into(),
+                    ],
+                });
+            };
+            return game::build_game_world(
+                self.seed,
+                (self.map.width, self.map.height),
+                game,
+                loaded,
+            );
         }
         let config = WorldConfig::new(self.seed).with_map_size(self.map.width, self.map.height);
         let mut world = match &self.terrain {

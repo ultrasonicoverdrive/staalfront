@@ -46,6 +46,7 @@ use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::fx::{DrawnAnchors, FxFrame, FxPlayer};
 use crate::fx_sound::{FxSound, start_audio};
+use crate::hitch::{HitchLog, Lap, SimTotals};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
 use crate::menu::{Change, Event, Live, Menu, Outcome, Preset};
@@ -181,6 +182,39 @@ struct ShotRun {
     requested: bool,
 }
 
+/// The sim thread of the game: its own clock, held until the window exists; with `--record` it keeps
+/// every command with the tick it ran at (WP1.16a).
+fn sim_config(options: &Options) -> SimConfig {
+    SimConfig {
+        start_paused: true,
+        extra_tick_time: options.sim_delay,
+        record_commands: options.record.is_some(),
+        ..SimConfig::realtime()
+    }
+}
+
+/// The commands of a record that `--replay` feeds into the game (WP1.16a).
+struct Replay {
+    commands: Vec<sf_headless::scenario::RecordedCommand>,
+    next: usize,
+}
+
+impl Replay {
+    fn load(path: &std::path::Path) -> Result<Replay, String> {
+        let scenario = sf_headless::scenario::Scenario::load(path).map_err(|e| e.to_string())?;
+        println!(
+            "replay: {} commands from {} ({} ticks)",
+            scenario.recorded.len(),
+            path.display(),
+            scenario.ticks
+        );
+        Ok(Replay {
+            commands: scenario.recorded,
+            next: 0,
+        })
+    }
+}
+
 pub struct Runner {
     started: Option<Instant>,
     report_at: Instant,
@@ -262,7 +296,16 @@ pub struct Runner {
     /// Converting and bucketing a new snapshot for the instancer, per
     /// snapshot (this used to be the whole tick; the sim runs elsewhere now).
     tick_ms: Samples,
+    /// The fog uploads to the minimap (WP1.16a): how long each took, in `sync_fog`.
+    fog_ms: Samples,
     last_frame: Option<Instant>,
+    /// The hitch log (WP1.16a, `docs/rules/hitch_log.md`): every frame over 50 ms with its parts, and the
+    /// totals of the play. Belongs to the window, not to a scene.
+    hitch: HitchLog,
+    /// Games the command record (`--record`) already wrote because a restart ended them.
+    record_restarts: u32,
+    /// The commands `--replay` still has to send into the running game.
+    replay: Option<Replay>,
     auto_zoom: bool,
     /// The unit under the cursor in the last frame, highlighted in the
     /// picture and named in the F1 panel; a click selects it.
@@ -375,11 +418,7 @@ impl Runner {
         failed: Arc<AtomicBool>,
     ) -> Result<Self, String> {
         // The clock is held until the window and the renderer exist (`on_start`).
-        let sim = SimConfig {
-            start_paused: true,
-            extra_tick_time: options.sim_delay,
-            ..SimConfig::realtime()
-        };
+        let sim = sim_config(&options);
         Self::with_sim(options, map, lod, pack, failed, sim)
     }
 
@@ -517,6 +556,7 @@ impl Runner {
             menu.open_start();
         }
         let pending_menu = options.open_menu.filter(|p| menus && *p != Preset::Start);
+        let replay = options.replay.as_deref().map(Replay::load).transpose()?;
         Ok(Self {
             started: None,
             report_at: now + Duration::from_secs(1),
@@ -565,7 +605,11 @@ impl Runner {
             upload_ms: Samples::default(),
             render_ms: Samples::default(),
             tick_ms: Samples::default(),
+            fog_ms: Samples::default(),
             last_frame: None,
+            hitch: HitchLog::new(now),
+            record_restarts: 0,
+            replay,
             auto_zoom: options.auto_zoom,
             hovered: None,
             unit_view: UnitView::default(),
@@ -732,6 +776,12 @@ impl Runner {
         });
         match made {
             Ok(fresh) => {
+                // The game that ends here keeps its own record (`--record`).
+                if self.options.record.is_some() {
+                    self.record_restarts += 1;
+                    let exit = self.sim.stop().clone();
+                    self.write_record(&exit, Some(self.record_restarts));
+                }
                 self.replace_scene(fresh, options);
                 self.attach_scene();
                 self.apply_look_settings();
@@ -812,7 +862,11 @@ impl Runner {
             upload_ms: _,
             render_ms: _,
             tick_ms: _,
+            fog_ms: _,
             last_frame: _,
+            hitch: _,
+            record_restarts: _,
+            replay: _,
             auto_zoom: _,
             unit_view: _,
             hover_at: _,
@@ -875,6 +929,66 @@ impl Runner {
         self.ticks = 0;
         self.fx_sound.reset();
         self.unit_voices.reset();
+    }
+
+    /// `--replay`: sends the commands of the record that are due, as the player's own are sent (the tick
+    /// after the newest snapshot).
+    fn feed_replay(&mut self) {
+        let Some(replay) = &mut self.replay else {
+            return;
+        };
+        let ahead = self.snap.tick().0 + crate::sim_thread::INPUT_DELAY_TICKS;
+        while let Some(c) = replay.commands.get(replay.next)
+            && c.tick <= ahead
+        {
+            self.sim
+                .send(sf_sim::PlayerId(c.player), c.command.to_command());
+            replay.next += 1;
+            if replay.next == replay.commands.len() {
+                println!(
+                    "replay: all {} commands sent, the last at tick {}",
+                    replay.commands.len(),
+                    self.snap.tick().0
+                );
+            }
+        }
+    }
+
+    /// What the sim thread says about the play, for the hitch log (WP1.16a).
+    fn sim_totals(&self, exit: &crate::sim_thread::SimExit, tick_ms: &Samples) -> SimTotals {
+        let counters = self.sim.counters();
+        SimTotals {
+            ticks: exit.ticks,
+            late_snapshots: counters.late_publishes,
+            behind_passes: counters.behind_passes,
+            clock_resets: counters.clock_resets,
+            late_commands: counters.late_commands,
+            tick_ms_max: tick_ms.0.iter().copied().fold(0.0, f64::max),
+            slow_ticks: self.sim.all_slow_ticks(),
+        }
+    }
+
+    /// Writes the command record of the game that just ended (`--record`, WP1.16a); `restart` is
+    /// `Some(n)` for the n-th game a restart ended, which gets a file of its own.
+    fn write_record(&self, exit: &crate::sim_thread::SimExit, restart: Option<u32>) {
+        let Some(path) = &self.options.record else {
+            return;
+        };
+        if self.options.scene != Scene::Match {
+            return;
+        }
+        let assets = sf_engine::AssetRoot::resolve().root().to_path_buf();
+        let named = self.options.match_file.as_ref().and_then(Option::as_deref);
+        let match_file = crate::matchplay::file_path(named, &assets);
+        let path = restart.map_or_else(|| path.clone(), |n| crate::record::restart_path(path, n));
+        match crate::record::write(&path, exit, self.cells, &assets, &match_file) {
+            Ok(n) => println!(
+                "record: wrote {} ({n} commands, {} ticks)",
+                path.display(),
+                exit.ticks
+            ),
+            Err(e) => eprintln!("sf_game: record: {e}"),
+        }
     }
 
     /// The landmarks the scene shows on the ground (a grid of pillars and a few blocks, development
@@ -1888,6 +2002,7 @@ impl Runner {
         match crate::fog_view::fog_step(self.fog_applied.minimap, current) {
             crate::fog_view::FogStep::Keep => {}
             crate::fog_view::FogStep::Upload(v) => {
+                let started = Instant::now();
                 let states = sf_ui::fog_states(w, h, visible, explored);
                 self.hud.set_minimap_fog(
                     renderer,
@@ -1895,6 +2010,7 @@ impl Runner {
                     Some((&states, crate::fog_view::minimap_fog_of(look))),
                 );
                 self.fog_applied.minimap = Some(v);
+                self.fog_ms.push(started.elapsed());
             }
             crate::fog_view::FogStep::Clear => {
                 self.hud.set_minimap_fog(renderer, &self.map, None);
@@ -2697,10 +2813,18 @@ impl App for Runner {
     fn render(&mut self, ctx: &mut Context, _engine_alpha: f32) {
         self.frames += 1;
         let now = Instant::now();
+        // The hitch log: one comparison for a frame that was not slow (`docs/rules/hitch_log.md`).
+        let sim = &self.sim;
+        self.hitch.begin_frame(now, |from| {
+            sim.slow_ticks(from, sim.latest().tick().0.max(from))
+        });
         // The sim thread's newest snapshot is this frame's world. How far
         // between its last two states the picture is comes from the sim's own
         // clock, not from the engine's accumulator.
         self.pull_snapshot(now);
+        self.feed_replay();
+        self.hitch.set_tick(self.snap.tick().0);
+        self.hitch.lap(Lap::Snapshot, Instant::now());
         let alpha = interpolation_alpha(now, self.snap.pace(), self.sim.period());
         if !self.sim.is_running() {
             // `stop` joins the finished thread and prints its panic message,
@@ -2765,6 +2889,7 @@ impl App for Runner {
             };
             self.camera.update(dt, &input);
         }
+        self.hitch.lap(Lap::Ui, Instant::now());
         if self.renderer.is_some() {
             let view_proj = self.camera.view_proj();
             if let Some(renderer) = &mut self.renderer {
@@ -2794,11 +2919,23 @@ impl App for Runner {
                 game_cursor_at(self.shots.is_some(), self.hover_at, cursor).filter(|_| !menu_open);
             self.update_cursor(ctx, game_cursor);
             let started = Instant::now();
+            self.hitch.lap(Lap::Scene, started);
+            let mut buffers = None;
             if let Some(renderer) = &mut self.renderer {
                 renderer.upload_units(&self.instancer);
+                let a = renderer.alloc_stats();
+                buffers = Some((a.instance_buffers, a.instance_bytes));
             }
-            self.upload_ms.push(started.elapsed());
+            let uploaded = Instant::now();
+            let upload = uploaded.duration_since(started);
+            self.upload_ms.push(upload);
+            self.hitch.lap(Lap::Upload, uploaded);
+            if let Some((total, bytes)) = buffers {
+                self.hitch
+                    .observe_buffers(total, bytes, upload.as_secs_f64() * 1e3);
+            }
         }
+        let mut sounds_started = 0u32;
         // The listener follows the camera (it does not rotate, so right = +X).
         // The camera works in metres, so does the audio.
         let focus = self.camera.focus();
@@ -2817,11 +2954,25 @@ impl App for Runner {
                     .music_frame(&self.fx, [focus.x as f32, focus.y as f32], now, audio);
             for t in audio.take_music_trace() {
                 println!("music: tick {now} mood {} track {}", t.mood.name(), t.track);
+                self.hitch.note(|| {
+                    format!(
+                        "music: tick {now} mood {} track {} starts",
+                        t.mood.name(),
+                        t.track
+                    )
+                });
             }
             if let Some(l) = audio.last_music_load()
                 && self.music_load_logged != Some(l)
             {
                 self.music_load_logged = Some(l);
+                self.hitch.note(|| {
+                    format!(
+                        "music: a track was decoded on the background thread in {:.0} ms ({} frames)",
+                        l.decode.as_secs_f64() * 1000.0,
+                        l.frames
+                    )
+                });
                 println!(
                     "music: track decoded on a background thread in {:.0} ms, {} frames ({:.1} MiB in memory); mood now {}",
                     l.decode.as_secs_f64() * 1000.0,
@@ -2831,8 +2982,9 @@ impl App for Runner {
                 );
             }
             // The shots, hits and deaths the picture showed this frame, heard from where the camera is.
-            self.fx_sound.play_frame(&mut self.fx, audio);
+            sounds_started = self.fx_sound.play_frame(&mut self.fx, audio).planned;
         }
+        self.hitch.lap(Lap::Audio, Instant::now());
         if let Some(renderer) = &mut self.renderer {
             // The GPU time of this frame arrives frames later; the number
             // lets the benchmark credit it to this frame (`bench_after_render`
@@ -2840,7 +2992,15 @@ impl App for Runner {
             renderer.set_gpu_frame_tag(self.bench.as_ref().map_or(0, |b| u64::from(b.frame)));
             let drawing = Instant::now();
             let drawn = self.hud.draw(renderer);
-            self.render_ms.push(drawing.elapsed());
+            let drew = Instant::now();
+            self.render_ms.push(drew.duration_since(drawing));
+            let (submit, present) = renderer.last_submit_and_present();
+            self.hitch
+                .lap_draw(drew, renderer.last_acquire_wait(), submit, present);
+            self.hitch.observe_acquire(
+                renderer.last_acquire_outcome(),
+                renderer.last_acquire_wait(),
+            );
             if let Err(e) = drawn {
                 eprintln!("sf_game: render failed: {e}");
                 self.failed.store(true, Ordering::Relaxed);
@@ -2942,19 +3102,39 @@ impl App for Runner {
             self.ticks = 0;
             self.report_at += Duration::from_secs(1);
         }
+        let end = Instant::now();
+        self.hitch.lap(Lap::Input, end);
+        self.hitch.end_frame(end, sounds_started);
     }
 
     fn on_window_event(&mut self, ctx: &mut Context, event: &winit::event::WindowEvent) -> bool {
+        // The hitch log keeps the events that move or hide the window: they belong on the line of the
+        // frame they fell in (cursor moves and keys do not).
+        if let Some(text) = crate::hitch::window_note(event) {
+            self.hitch.note(|| text);
+        }
         // egui sees events first while the panels are open; hidden = free.
         self.debug.on_event(ctx.window(), event)
     }
 
     fn on_resize(&mut self, _ctx: &mut Context, size: Resized) {
+        // Runs in the event handler, so its time lands in the gap of the frame; the hitch log names it
+        // (surface configure waits for the GPU, the depth texture is made again).
+        let started = Instant::now();
         self.viewport = (size.width, size.height);
         self.camera.set_viewport(size.width, size.height);
         if let Some(renderer) = &mut self.renderer {
             renderer.resize(size.width, size.height);
         }
+        let took = started.elapsed();
+        self.hitch.note(|| {
+            format!(
+                "on_resize {}x{}: surface configure and depth texture took {:.1} ms",
+                size.width,
+                size.height,
+                took.as_secs_f64() * 1e3
+            )
+        });
         println!(
             "resized {}x{} @ {}",
             size.width, size.height, size.scale_factor
@@ -2981,11 +3161,38 @@ impl App for Runner {
             ctx.window().set_cursor_visible(true);
             self.os_cursor_hidden = false;
         }
+        if let Some(renderer) = &self.renderer {
+            let a = renderer.alloc_stats();
+            let grew = self.hitch.growth();
+            let slowest = grew.iter().map(|g| g.upload_ms).fold(0.0, f64::max);
+            println!(
+                "summary: instance buffers {} ({} bytes) at exit; {} frames grew them, their upload lap max {:.2} ms",
+                a.instance_buffers,
+                a.instance_bytes,
+                grew.len(),
+                slowest
+            );
+        }
         self.renderer = None; // release the surface before the window goes
         // Stop the sim thread first: the summary reads its final numbers.
         let exit = self.sim.stop().clone();
         let tick_ms = Samples(self.sim.tick_ms_since(0));
         println!("exit after {} ticks", exit.ticks);
+        // The hitch log (WP1.16a): the totals first, then the file `--hitch-log` asked for.
+        let sim_totals = self.sim_totals(&exit, &tick_ms);
+        println!("summary: {}", self.hitch.summary(&sim_totals));
+        if let Some(path) = &self.options.hitch_log {
+            match self.hitch.write(path, &sim_totals) {
+                Ok(()) => println!(
+                    "hitch log: wrote {} ({} frames over {} ms described)",
+                    path.display(),
+                    self.hitch.lines().len(),
+                    crate::hitch::LOG_MS
+                ),
+                Err(e) => eprintln!("sf_game: hitch log: {e}"),
+            }
+        }
+        self.write_record(&exit, None);
         println!("summary: fight sounds {:?}", self.fx_sound.totals());
         // Summary for the stress test (software rendering: no fps claim).
         println!(
@@ -3013,6 +3220,10 @@ impl App for Runner {
         println!(
             "summary: per-snapshot convert+bucket ms (main thread) {}",
             self.tick_ms.describe(WARMUP_FRAMES / 3)
+        );
+        println!(
+            "summary: minimap fog uploads ms (inside the snapshot lap) {}",
+            self.fog_ms.describe(0)
         );
         println!(
             "summary: sim thread tick ms {}",
@@ -3494,6 +3705,17 @@ fn select_press_starts_selection(ui_busy: bool, build_active: bool, tool_active:
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_sim_thread_records_commands_only_with_record() {
+        let parse =
+            |line: &str| Options::parse(Preset::Game, line.split_whitespace().map(str::to_owned));
+        assert!(sim_config(&parse("--match --record play.ron")).record_commands);
+        assert!(!sim_config(&parse("--match")).record_commands);
+        // The sandbox has nothing to record: the flag is dropped by the parser.
+        assert!(!sim_config(&parse("--record play.ron")).record_commands);
+        assert!(sim_config(&parse("--match")).start_paused);
+    }
+
     use super::*;
     use crate::args::Preset;
     use sf_data::map::generate::generate_cells;
