@@ -3006,6 +3006,9 @@ fixed, delete the entry in the same PR.
     (2) The play was 5 min 44 s, not 10 minutes. The other two numbers hold (0.039 % over 25 ms, 0 late snapshots) and Tijmen
     felt no stutter. Nothing in this log gives WP1.16b something to fix. Open: one 10-minute play to close the WP, and, if the
     cause of 10-11 is to be proven, the same play once with a workspace test running beside it.
+    **Closed 11-11-2026 (Tijmen: "Sluit WP1.16").** The follow-up is closed on this run; the 10-minute play is not
+    required and WP1.16b is not built. The two proposals above hold as decisions. The cause of 10-11 stays unproven; if
+    stutter comes back, `--hitch-log` and `--record` are the first step.
 
 36. **The far zoom and the models** (zoom work package, 08-11-2026, `rules/camera.md`): after playing M1 Tijmen asked to zoom out further and
     to keep seeing buildings and soldiers as models. The farthest zoom is now the whole map plus a quarter map of margin on every side

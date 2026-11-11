@@ -328,7 +328,7 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
 *08-11-2026 (orchestrator, with Tijmen: "follow your own proposals"; built in WP7.7): the #105 measurement showed that with the gate on a unit whose sight equals its weapon reach loses targets at the limit of its reach (the rocket trooper, sight 5 and reach 5, did not pick a tower at squared distance 26). Decision: **the visibility test for target acquisition is measured to the target's edge, like the reach** (a structure: any footprint cell or a visible cell beside it; a unit: its own cell or a neighbour cell its body reaches), in integers, before the gate goes on, so M1 does not get that regression. Rules: `docs/rules/vision.md`, "Measured to the edge".*
 
 2. **WP11.2** *(built 09-11-2026, PR in review; `docs/rules/voices.md`)* Voice responses (see Phase 11), built now: `sf_game` raises `unit.select`, `unit.move` and `unit.attack` (the bank events, mapped to Red Alert voices in `assets/audio/ra_mapping.ron`) on the player's own selection and orders, from the UI side (no sim event needed: these are the player's own actions), with a brake against spam (one voice at a time, a minimum gap, not on every box-select frame). Without the Red Alert files the events stay silent unless the bank has a CC0 sound. Test: the brake and which event each action raises, headless where the runner allows.
-3. **WP1.16 Stutter in play** *(10-11-2026, orchestrator, with Tijmen: "make a plan to fix it and put it on GitHub",
+3. ~~**WP1.16 Stutter in play**~~ **Closed 11-11-2026** (see the note at the end of this item) *(10-11-2026, orchestrator, with Tijmen: "make a plan to fix it and put it on GitHub",
    after an M1 play on the laptop that stuttered; evidence in `docs/progress.md` follow-up 35: frames of 0.6 to 1.6 s
    with vsync on, 125 late snapshots)*. Built **before phase 9**. Measure first, then fix only what the measurement
    shows; no fix on a guess.
@@ -397,6 +397,10 @@ Red Alert audio on (`--ra-audio`) and won; "went well". Decisions from that play
    is over 50 ms without a resize, and the play was shorter than 10 minutes. Proposal for Tijmen to decide: the done-when counts
    frames after the first 90, as the hitch log does. Open: one 10-minute play to close the WP. Numbers and files:
    `docs/progress.md` follow-up 35.*
+   ***Closed 11-11-2026 (Tijmen: "Sluit WP1.16").** WP1.16 is closed on this run and on Tijmen not feeling any stutter; the
+   10-minute play is not required and WP1.16b is not built. The two proposals above hold as decisions (Tijmen's rule "your
+   proposal holds if I do not answer"): the done-when of a measured play counts the frames after the first 90, and no agent
+   builds or tests on the laptop during a measured play. If stutter comes back, the hitch log and the record are the first step.*
 4. Then phase 9 (computer opponent) as planned.
 
 ### Phase 8 — Vision
