@@ -45,7 +45,7 @@ use crate::construction_view;
 use crate::cursor::{self, CursorArt, CursorKind, Hover, Modifiers};
 use crate::debug_ui::{DebugUi, HoveredUnit, PanelData, SimPanel, UnitDisplay, UnitView};
 use crate::fx::{DrawnAnchors, FxFrame, FxPlayer};
-use crate::fx_sound::{FxSound, start_audio};
+use crate::fx_sound::{FxSound, apply_mix, play_test_sound, start_audio_with};
 use crate::hitch::{HitchLog, Lap, SimTotals};
 use crate::hud::{Hud, HudStats};
 use crate::looks::Looks;
@@ -718,6 +718,11 @@ impl Runner {
                     ctx.request_exit();
                 }
                 Outcome::Changed(change) => self.apply_change(ctx, change),
+                Outcome::PlayTest(which) => {
+                    if let Some(audio) = &mut self.audio {
+                        play_test_sound(audio, which);
+                    }
+                }
                 _ => {}
             }
         }
@@ -739,7 +744,7 @@ impl Runner {
                 Outcome::Restart => self.begin(None),
                 Outcome::StartMatch => self.begin(Some(Scene::Match)),
                 Outcome::StartSandbox => self.begin(Some(Scene::Sandbox)),
-                Outcome::Quit | Outcome::Changed(_) => left.push(outcome),
+                Outcome::Quit | Outcome::Changed(_) | Outcome::PlayTest(_) => left.push(outcome),
             }
         }
         left
@@ -1080,8 +1085,40 @@ impl Runner {
             Change::UiScale => self.hud.set_user_scale(settings.ui_scale),
             Change::Palette => self.apply_palette(settings.palette, true),
             Change::Keys => ctx.set_bindings(settings.effective_bindings(self.menu.shipped())),
+            Change::Volume(which) => {
+                let now = self.menu.sound_now();
+                if let Some(audio) = &mut self.audio {
+                    apply_mix(audio, &now.mix);
+                    // Heard at once, so the player can set it by ear.
+                    play_test_sound(audio, which);
+                }
+            }
+            Change::RaAudio => {
+                let now = self.menu.sound_now();
+                if let Some(audio) = &mut self.audio {
+                    audio.enable_original_audio(&now.ra);
+                }
+            }
         }
         self.store.save(&settings);
+    }
+
+    /// How far the reading of the player's Red Alert files is, for the sound page.
+    fn ra_load(&self) -> crate::menu::RaLoad {
+        use crate::menu::RaLoad;
+        let Some(audio) = &self.audio else {
+            return RaLoad::Off;
+        };
+        match audio.original_audio_status() {
+            sf_audio::RaStatus::Off => RaLoad::Off,
+            sf_audio::RaStatus::Loading => RaLoad::Loading,
+            sf_audio::RaStatus::Ready { mapped } => RaLoad::Ready {
+                mapped,
+                found: audio
+                    .original_audio_catalog()
+                    .map_or(0, |c| c.sound_count()),
+            },
+        }
     }
 }
 
@@ -2694,11 +2731,16 @@ impl App for Runner {
         let mut audio = AudioSystem::new(ctx.assets().root());
         // audio.ron (`--ra-audio` wins over its ra_audio): original audio, spatial numbers, volume, the
         // fight-sound rules. Tested in fx_sound.rs (`start_audio_follows_the_file_on_disk`).
-        let (fx_sound, warning) = start_audio(
+        // The player's saved volumes and Red Alert setting are applied the same way (WP11.5b); the menu
+        // gets the numbers of the file to show where the player has chosen nothing.
+        let (fx_sound, warning, base) = start_audio_with(
             ctx.assets().root(),
             self.options.ra_audio.clone(),
+            &self.menu.settings().sound,
             &mut audio,
         );
+        self.menu
+            .set_sound_base(base, self.options.ra_audio.clone());
         if let Some(w) = warning {
             eprintln!("sf_audio: {w}");
         }
@@ -2845,6 +2887,7 @@ impl App for Runner {
         // The menus (WP11.5a): what the window is doing, and a menu that `--menu` asked for.
         self.menu.set_live(Live {
             fullscreen: ctx.is_fullscreen(),
+            ra: self.ra_load(),
         });
         self.open_pending_menu(ctx);
         let menu_was_open = self.menu.is_open();

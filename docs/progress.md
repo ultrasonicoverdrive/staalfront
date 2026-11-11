@@ -2571,6 +2571,50 @@ Branch `wp/11.1-sidebar`, **stacked on WP6.5** (PR #96, branch `wp/6.5-productio
   `Renderer::set_present` (the last one only on a real window: the offscreen renderer ignores it, and the real-window check
   saw `present: Immediate`).
 
+### WP11.5b notes: the sound settings (orchestrator decisions 11-11-2026, branch `wp/11.5b-sound-settings`)
+
+The Sound page of the settings screen, `docs/rules/menus.md` "Sound" and `docs/rules/audio.md` "Volumes". **No change in
+`sf_sim`, `unit_defs.ron` or a scenario: no pin moved** (nothing in `crates/sf_sim` is in the diff).
+
+- **Built.** `sf_audio`: `Category::Voice`, `AudioSystem::{set_master_volume, master_volume, effective_volume, play_as}`, every gain is
+  bank volume x group x master; `mix.master_volume` and `mix.voice_volume` in `audio.ron` (an older file still reads: master
+  1.0, voices follow `sfx_volume`). `sf_game`: `settings::SoundSettings` (`Option` per field, `None` = the number of `audio.ron`),
+  `SoundBase`, `resolve`; `fx_sound::{start_audio_with, apply_mix, play_test_sound}`; the unit voices play as `Voice`; the menu
+  has the page, `Item::{SetVolume, TestVolume, SetRaAudio}`, `Change::{Volume, RaAudio}`, `Outcome::PlayTest`; the runner applies
+  them (`apply_change`, `ra_load` for the status line).
+- **Decisions** (as in the brief, all in `menus.md`): volumes in steps of 5, defaults from `audio.ron`; the voices are their own
+  slider (the split was small: one enum variant and one `play_as`); mute on focus loss not built; the flag wins over the saved
+  switch for the run; the folder is shown read-only; the test sound is the CC0 `test_click`.
+- **Deviations to look at.** (1) The "sliders" are `-`/`+` step buttons with the value between, because the menu has no drag
+  widget. (2) Clicking the Red Alert switch also saves the folder in use (the flag's), the only way a path gets saved without
+  editing the file by hand. (3) "Switch on without files = silence": what happens is the existing WP11.7 fallback (the game's own
+  sounds, silent where the bank has none) plus the status line; no new rule was made. (4) Every volume change also plays the
+  test sound of its row (hear it while stepping), except the music.
+- **Tests** (all in this PR): `menu::tests` (page controls, defaults from `audio.ron`, steps and ends, test button, switch and
+  flag, status line), `settings::tests` (round trip with four distinct volumes, old file, saved beats file, flag beats saved,
+  hand-edited volumes), `fx_sound::tests` (each slider to its own group through the output trace, defaults and an older
+  `audio.ron`, flag at the start, switch on without files, test sounds), `system::tests` (master x group, `play_as`, master on a
+  running Red Alert track), `menu_view::tests::the_tabs_and_the_title_stay_in_place_from_page_to_page` (the Sound page fits the
+  space of the tallest page at four window sizes). The 11.5a test that the Sound page had no controls was replaced.
+- **Mutations** (scratch edits, reverted; failing tests): effects slider wired to the voices' number in `apply_mix`
+  (`each_slider_reaches_its_own_category...`, `a_player_who_never_opened_the_page...`, `the_test_sounds_are_in_the_group...`,
+  `start_audio_follows_the_file_on_disk`); saved volumes ignored in `resolve` (7 tests, among them
+  `a_saved_volume_beats_audio_ron...`, `a_slider_steps_by_five...`); default music hard-coded in `SoundBase::from_config`
+  (`the_default_of_every_slider_is_the_value_of_audio_ron`, `a_player_who_never_opened_the_page...`, 4 more); the command line
+  ignored (`the_command_line_folder_wins_over_the_saved_red_alert_setting_for_the_run`,
+  `the_command_line_folder_wins_over_the_saved_switch_at_the_start`, 2 menu tests); voices played as `play` instead of
+  `play_as` (`each_slider_reaches_its_own_category_and_the_voices_are_not_the_effects`); saved sound dropped on load
+  (`a_saved_file_reads_back_the_same_and_the_directory_is_made`, `an_old_settings_file...`, `a_hand_edited_volume...`).
+- **Seen in the game** (Xvfb + lavapipe, `docs/screenshots/wp11.5b/`): the page with chosen volumes, with the switch on and a
+  folder that does not exist (the status line), and with `--ra-audio` on the command line. No audio device exists in the
+  container (`sf_audio: no audio output ... running silently`), so **nothing was heard**; the gains are the ones the output
+  trace records.
+- **Gaps.** Nothing heard by a person; the runner's calls (`apply_change` for `Volume` and `RaAudio`, the start-up call) are
+  checked by reading and by the screenshots (the saved volumes show on the page), not by a test that reaches the window; no
+  mute on focus loss; no drag bar, text field or file dialog; the interface sounds have only the master volume; a player
+  cannot clear the saved folder from the page (the switch Off keeps it). Cost: a click applies four `set_*_volume` calls and
+  one test sound; there is no per-frame work, so no timing was taken.
+
 ## WP11.2 notes: unit voices
 
 Branch `wp/11.2-voices`. The player's own units answer when selected, told to move and told to attack (`unit.select`,
@@ -2888,9 +2932,9 @@ fixed, delete the entry in the same PR.
     adds them to `bank.ron` (CC0, each with its line in `assets/LICENSES.md`); the orchestrator schedules it. The
     original-audio side is done (PR #87, 28-10-2026): `ra_mapping.ron` maps every fight event by role except
     `weapon.fire.demolition`, `impact.bullet`, `impact.precision` and `impact.miss`, which have no Red Alert sound.
-32. **WP11.5b: the sound settings** (volume sliders, the Red Alert audio switch), to be built with the audio work in agreement
-    with it. The settings screen has the marked empty "Sound (WP11.5b)" page and the settings file ignores unknown fields, so
-    a later `sound:` section can be added without breaking files written now (`docs/rules/menus.md`).
+32. ~~**WP11.5b: the sound settings** (volume sliders, the Red Alert audio switch)~~ **Closed by WP11.5b** (11-11-2026, see the
+    "WP11.5b notes" section): the Sound page has Master, Music, Effects and Unit voices (step buttons, see its gaps) and the
+    Red Alert switch; saved in the settings file. What it left open is in that section, not here.
 33. **Menus are mouse-driven** (WP11.5a): no keyboard or gamepad navigation, no tooltips, no confirmation for Quit or Restart,
     Esc does not first cancel a chosen structure. Owner: Tijmen; each is a small follow-up on `menu.rs` and `menu_view.rs`.
 34. **The crowd cost of vision** (WP8.1, measured in the review of #104): with vision on, the pass costs +0.66 ms a tick at sight 5 and

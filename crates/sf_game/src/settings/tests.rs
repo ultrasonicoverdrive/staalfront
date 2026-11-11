@@ -107,6 +107,16 @@ fn a_saved_file_reads_back_the_same_and_the_directory_is_made() {
         vsync: false,
         ui_scale: 1.5,
         palette: PaletteChoice::ColourBlind,
+        // Four different volumes and the Red Alert switch (WP11.5b): a field lost or swapped on the way
+        // through the file shows.
+        sound: SoundSettings {
+            master: Some(85),
+            music: Some(25),
+            effects: Some(55),
+            voices: Some(10),
+            ra_enabled: Some(true),
+            ra_path: Some("/games/ra".into()),
+        },
         ..Settings::default()
     };
     s.rebind(&shipped(), Action::OrderStop, KeyCode::KeyV)
@@ -627,4 +637,105 @@ fn a_hot_reloaded_input_ron_is_checked_against_the_overrides_again() {
             .for_action(Action::CameraPanLeft),
         disk.for_action(Action::CameraPanLeft)
     );
+}
+
+/// The shipped `audio.ron` numbers.
+fn base() -> SoundBase {
+    SoundBase::default()
+}
+
+#[test]
+fn an_old_settings_file_without_sound_keeps_the_numbers_of_audio_ron() {
+    let dir = scratch("old_file");
+    let path = dir.join("settings.ron");
+    // What 11.5a wrote: no `sound` at all.
+    std::fs::write(&path, "(window: Borderless, vsync: false, keys: {})").unwrap();
+    let loaded = load_from(&path, &shipped());
+    assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+    assert_eq!(loaded.settings.window, WindowMode::Borderless);
+    assert_eq!(loaded.settings.sound, SoundSettings::default());
+    let now = loaded.settings.sound.resolve(&base(), None);
+    let config = sf_audio::AudioConfig::embedded();
+    assert_eq!(
+        now.mix,
+        Mix {
+            master: config.mix.master_volume,
+            music: config.mix.music_volume,
+            effects: config.mix.sfx_volume,
+            voices: config.mix.voice(),
+        }
+    );
+    assert_eq!(now.ra, config.ra_audio);
+    // A file with some of the fields: the rest stay on the file's numbers.
+    std::fs::write(&path, "(sound: (voices: Some(40)))").unwrap();
+    let s = load_from(&path, &shipped()).settings.sound;
+    let now = s.resolve(&base(), None);
+    assert_eq!(now.mix.voices, 0.4);
+    assert_eq!(now.mix.effects, config.mix.sfx_volume);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_saved_volume_beats_audio_ron_and_each_goes_to_its_own_category() {
+    let sound = SoundSettings {
+        master: Some(90),
+        music: Some(70),
+        effects: Some(50),
+        voices: Some(30),
+        ..SoundSettings::default()
+    };
+    let mix = sound.resolve(&base(), None).mix;
+    assert_eq!(
+        (mix.master, mix.music, mix.effects, mix.voices),
+        (0.9, 0.7, 0.5, 0.3)
+    );
+    // `audio.ron` of the disk with other numbers is what a field left out falls back to.
+    let mut config = sf_audio::AudioConfig::embedded();
+    config.mix.music_volume = 0.35;
+    let base = SoundBase::from_config(&config);
+    let only_effects = SoundSettings {
+        effects: Some(20),
+        ..SoundSettings::default()
+    };
+    let mix = only_effects.resolve(&base, None).mix;
+    assert_eq!((mix.music, mix.effects), (0.35, 0.2));
+}
+
+#[test]
+fn the_command_line_folder_wins_over_the_saved_red_alert_setting_for_the_run() {
+    let saved = SoundSettings {
+        ra_enabled: Some(false),
+        ra_path: Some("/saved/ra".into()),
+        ..SoundSettings::default()
+    };
+    let cli = saved.resolve(&base(), Some("/cli/ra")).ra;
+    assert!(cli.enabled, "--ra-audio switches it on");
+    assert_eq!(cli.path, "/cli/ra");
+    // Without the flag: the saved choice, then the file's.
+    let own = saved.resolve(&base(), None).ra;
+    assert!(!own.enabled);
+    assert_eq!(own.path, "/saved/ra");
+    let none = SoundSettings::default().resolve(&base(), None).ra;
+    assert_eq!(none, sf_audio::AudioConfig::embedded().ra_audio);
+    // The flag is not part of the settings: nothing of it is in what would be written.
+    assert_eq!(saved.ra_path.as_deref(), Some("/saved/ra"));
+}
+
+#[test]
+fn a_hand_edited_volume_is_moved_to_a_step_and_said() {
+    let dir = scratch("sound_sanitize");
+    let path = dir.join("settings.ron");
+    std::fs::write(
+        &path,
+        "(sound: (master: Some(33), music: Some(200), effects: Some(50), voices: Some(0)))",
+    )
+    .unwrap();
+    let loaded = load_from(&path, &shipped());
+    let s = loaded.settings.sound;
+    assert_eq!(
+        (s.master, s.music, s.effects, s.voices),
+        (Some(35), Some(100), Some(50), Some(0))
+    );
+    assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
+    let _ = std::fs::remove_dir_all(&dir);
 }

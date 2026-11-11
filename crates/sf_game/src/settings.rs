@@ -1,4 +1,4 @@
-//! The player's settings (WP11.5a): keys, graphics and accessibility, kept in a RON file in the user's
+//! The player's settings (WP11.5a, sound WP11.5b): keys, graphics, accessibility and sound, kept in a RON file in the user's
 //! configuration directory, read at the start, written on every change, and replaced by the defaults
 //! when the file is missing or cannot be used. Nothing here touches the shipped `input.ron`: the keys
 //! the player changed are kept as overrides over it ([`Settings::effective_bindings`]).
@@ -43,9 +43,9 @@ pub enum PaletteChoice {
     ColourBlind,
 }
 
-/// Everything the player can set. A field that is missing from the file keeps its default; a field
-/// the file has that this version does not know is ignored (a later version may add the sound
-/// settings), and is dropped the next time the file is written.
+/// Everything the player can set. A field that is missing from the file keeps its default (a file from
+/// before the sound settings has no `sound`); a field the file has that this version does not know is
+/// ignored, and is dropped the next time the file is written.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -58,6 +58,8 @@ pub struct Settings {
     pub palette: PaletteChoice,
     /// The keys the player changed: the whole binding list of each such action, over `input.ron`.
     pub keys: BTreeMap<Action, Vec<Binding>>,
+    /// The volumes and the original Red Alert audio switch (WP11.5b).
+    pub sound: SoundSettings,
 }
 
 impl Default for Settings {
@@ -70,7 +72,183 @@ impl Default for Settings {
             ui_scale: d.ui_scale,
             palette: d.palette,
             keys: BTreeMap::new(),
+            sound: SoundSettings::default(),
         }
+    }
+}
+
+/// The step of a volume slider, in percent.
+pub const VOLUME_STEP: u8 = 5;
+
+/// The sound settings (WP11.5b). Every field is what the player chose, or `None` when they never did:
+/// then the value of `audio.ron` stands ([`SoundBase`]), so a player who never opens the sound page
+/// hears what they heard before. Volumes are percent, 0 to 100 in steps of [`VOLUME_STEP`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SoundSettings {
+    pub master: Option<u8>,
+    pub music: Option<u8>,
+    /// The sounds of the game's events (shots, hits, deaths).
+    pub effects: Option<u8>,
+    /// The replies of the player's own units.
+    pub voices: Option<u8>,
+    /// "Use original Red Alert audio".
+    pub ra_enabled: Option<bool>,
+    /// The folder the player gave for the Red Alert files. Only this path is stored, never anything from
+    /// the files (B11).
+    pub ra_path: Option<String>,
+}
+
+/// Which volume.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Volume {
+    Master,
+    Music,
+    Effects,
+    Voices,
+}
+
+impl Volume {
+    /// The sliders, top to bottom.
+    pub const ALL: [Volume; 4] = [
+        Volume::Master,
+        Volume::Music,
+        Volume::Effects,
+        Volume::Voices,
+    ];
+}
+
+/// What the sound is with nothing chosen: the numbers of `audio.ron` (the file on disk, else the one
+/// compiled in) and its original-audio switch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundBase {
+    pub master: f32,
+    pub music: f32,
+    pub effects: f32,
+    pub voices: f32,
+    pub ra: sf_audio::ra::RaAudioConfig,
+}
+
+impl SoundBase {
+    pub fn from_config(config: &sf_audio::AudioConfig) -> SoundBase {
+        SoundBase {
+            master: config.mix.master_volume,
+            music: config.mix.music_volume,
+            effects: config.mix.sfx_volume,
+            voices: config.mix.voice(),
+            ra: config.ra_audio.clone(),
+        }
+    }
+}
+
+impl Default for SoundBase {
+    /// The shipped `audio.ron`.
+    fn default() -> SoundBase {
+        SoundBase::from_config(&sf_audio::AudioConfig::embedded())
+    }
+}
+
+/// The volumes the audio runs with, linear.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mix {
+    pub master: f32,
+    pub music: f32,
+    pub effects: f32,
+    pub voices: f32,
+}
+
+/// What the sound settings come to: the volumes and the Red Alert audio setting the audio runs with.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SoundNow {
+    pub mix: Mix,
+    pub ra: sf_audio::ra::RaAudioConfig,
+}
+
+/// A linear volume as the percent the page shows (at most 100).
+pub fn percent_of(volume: f32) -> u8 {
+    (volume * 100.0).round().clamp(0.0, 100.0) as u8
+}
+
+/// The next step down from `percent` (a value off the grid goes to the step below it).
+pub fn step_down(percent: u8) -> u8 {
+    percent.saturating_sub(1) / VOLUME_STEP * VOLUME_STEP
+}
+
+/// The next step up from `percent`, at most 100.
+pub fn step_up(percent: u8) -> u8 {
+    ((percent / VOLUME_STEP + 1) * VOLUME_STEP).min(100)
+}
+
+impl SoundSettings {
+    fn slot(&mut self, volume: Volume) -> &mut Option<u8> {
+        match volume {
+            Volume::Master => &mut self.master,
+            Volume::Music => &mut self.music,
+            Volume::Effects => &mut self.effects,
+            Volume::Voices => &mut self.voices,
+        }
+    }
+
+    /// The volume of `which` the player chose, as percent.
+    pub fn chosen(&self, which: Volume) -> Option<u8> {
+        match which {
+            Volume::Master => self.master,
+            Volume::Music => self.music,
+            Volume::Effects => self.effects,
+            Volume::Voices => self.voices,
+        }
+    }
+
+    /// The player chooses `percent` for `which`.
+    pub fn set_volume(&mut self, which: Volume, percent: u8) {
+        *self.slot(which) = Some(percent.min(100));
+    }
+
+    /// What the sound is: the player's choice where there is one, else `base`; and `cli_ra` (the path of
+    /// `--ra-audio`), when given, wins over the saved original-audio setting for this run: the switch is
+    /// on and the folder is that path.
+    pub fn resolve(&self, base: &SoundBase, cli_ra: Option<&str>) -> SoundNow {
+        let linear =
+            |chosen: Option<u8>, default: f32| chosen.map_or(default, |p| f32::from(p) / 100.0);
+        let ra = match cli_ra {
+            Some(path) => sf_audio::ra::RaAudioConfig {
+                enabled: true,
+                path: path.to_owned(),
+            },
+            None => sf_audio::ra::RaAudioConfig {
+                enabled: self.ra_enabled.unwrap_or(base.ra.enabled),
+                path: self.ra_path.clone().unwrap_or_else(|| base.ra.path.clone()),
+            },
+        };
+        SoundNow {
+            mix: Mix {
+                master: linear(self.master, base.master),
+                music: linear(self.music, base.music),
+                effects: linear(self.effects, base.effects),
+                voices: linear(self.voices, base.voices),
+            },
+            ra,
+        }
+    }
+
+    /// Brings a hand-edited file into what the page offers: a volume to the nearest step, at most 100.
+    fn sanitize(&mut self) -> Vec<String> {
+        let mut said = Vec::new();
+        for (name, which) in [
+            ("master", Volume::Master),
+            ("music", Volume::Music),
+            ("effects", Volume::Effects),
+            ("voices", Volume::Voices),
+        ] {
+            let Some(p) = *self.slot(which) else { continue };
+            let nearest = ((u16::from(p) + 2) / u16::from(VOLUME_STEP) * u16::from(VOLUME_STEP))
+                .min(100) as u8;
+            if nearest != p {
+                said.push(format!("sound.{name} {p} is not a step; using {nearest}"));
+                *self.slot(which) = Some(nearest);
+            }
+        }
+        said
     }
 }
 
@@ -132,6 +310,7 @@ impl Settings {
             }
             _ => {}
         }
+        said.extend(self.sound.sanitize());
         said.extend(self.sanitize_keys(shipped));
         said
     }

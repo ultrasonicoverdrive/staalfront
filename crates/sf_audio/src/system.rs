@@ -44,7 +44,8 @@ pub struct AudioSystem {
     listener: Listener,
     params: SpatialParams,
     crossfade: Duration,
-    category_volume: [f32; 3],
+    category_volume: [f32; 4],
+    master_volume: f32,
     rng: u32,
     stats: Stats,
     warned: BTreeSet<String>,
@@ -223,7 +224,8 @@ impl AudioSystem {
             listener: Listener::default(),
             params: SpatialParams::default(),
             crossfade: DEFAULT_CROSSFADE,
-            category_volume: [1.0; 3],
+            category_volume: [1.0; 4],
+            master_volume: 1.0,
             rng: 0x9E37_79B9,
             stats: Stats::default(),
             warned: BTreeSet::new(),
@@ -338,33 +340,71 @@ impl AudioSystem {
             1.0
         };
         self.category_volume[category.index()] = v;
-        if category == Category::Music
+        self.refresh_music_gain(Some(category));
+    }
+
+    /// The volume of a category on its own, without the master volume.
+    pub fn category_volume(&self, category: Category) -> f32 {
+        self.category_volume[category.index()]
+    }
+
+    /// The master volume (`1.0` default, WP11.5b): multiplies every category, the interface sounds
+    /// included. Applied to new sounds and to the running music track.
+    pub fn set_master_volume(&mut self, volume: f32) {
+        self.master_volume = if volume.is_finite() {
+            volume.max(0.0)
+        } else {
+            1.0
+        };
+        self.refresh_music_gain(None);
+    }
+
+    pub fn master_volume(&self) -> f32 {
+        self.master_volume
+    }
+
+    /// What a sound of `category` is multiplied by: its own volume times the master volume.
+    pub fn effective_volume(&self, category: Category) -> f32 {
+        self.category_volume[category.index()] * self.master_volume
+    }
+
+    /// The running music track follows a volume change: a Red Alert track at once with the music
+    /// volume; a bank track by its own category (`only`), or whichever it is when the master changed.
+    fn refresh_music_gain(&mut self, only: Option<Category>) {
+        let ra_gain = self.effective_volume(Category::Music);
+        let ra_wanted = only.is_none_or(|c| c == Category::Music);
+        if ra_wanted
             && self.music.ra_track
             && let Some(p) = &mut self.player
         {
-            p.set_music_gain(v);
+            p.set_music_gain(ra_gain);
         } else if let Some(p) = &mut self.player
             && let Some(def) = p.music_name().and_then(|n| self.bank.get(n))
-            && def.category == category
+            && only.is_none_or(|c| def.category == c)
         {
-            p.set_music_gain(def.volume * v);
+            p.set_music_gain(
+                def.volume * self.category_volume[def.category.index()] * self.master_volume,
+            );
         }
-    }
-
-    pub fn category_volume(&self, category: Category) -> f32 {
-        self.category_volume[category.index()]
     }
 
     // ---- playing ----------------------------------------------------------
 
     /// Play a sound without position (UI, announcements).
     pub fn play(&mut self, name: &str) {
-        self.play_with(name, None);
+        self.play_with(name, None, None);
+    }
+
+    /// Play a sound without position in `category`, whatever the sound's own entry says: how the unit
+    /// voices get the voice volume (WP11.5b) and the settings screen's test sounds the volume of their
+    /// slider.
+    pub fn play_as(&mut self, name: &str, category: Category) {
+        self.play_with(name, None, Some(category));
     }
 
     /// Play a sound at a world position (`+Y` up), relative to the listener.
     pub fn play_at(&mut self, name: &str, world_pos: [f32; 3]) {
-        self.play_with(name, Some(world_pos));
+        self.play_with(name, Some(world_pos), None);
     }
 
     /// Whether `name` has a sound to play: in the bank, or replaced by a
@@ -394,7 +434,7 @@ impl AudioSystem {
         self.trace.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
-    fn play_with(&mut self, name: &str, pos: Option<[f32; 3]>) {
+    fn play_with(&mut self, name: &str, pos: Option<[f32; 3]>, category: Option<Category>) {
         // Look the name up first so unknown names warn even without a device.
         let Some((def, path)) = self.resolve(name) else {
             return;
@@ -402,7 +442,7 @@ impl AudioSystem {
         if self.player.is_none() && self.trace.is_none() {
             return;
         }
-        let (mut gain, mut pan) = (self.base_gain(&def), 0.0);
+        let (mut gain, mut pan) = (self.base_gain(&def, category), 0.0);
         if let Some(pos) = pos {
             let m = spatial::mix(&self.listener, pos, &self.params);
             if !m.is_audible(&self.params) {
@@ -443,7 +483,7 @@ impl AudioSystem {
         if self.player.is_none() {
             return;
         }
-        let gain = self.base_gain(&def);
+        let gain = self.base_gain(&def, None);
         let fade = self.crossfade;
         let outcome = self.player.as_mut().map(|p| {
             p.play_music(
@@ -636,7 +676,7 @@ impl AudioSystem {
         let key = ra_key(&format!("music.{}", self.music.slot));
         self.music.slot ^= 1;
         let fade = self.crossfade;
-        let gain = self.category_volume[Category::Music.index()];
+        let gain = self.effective_volume(Category::Music);
         let Some(p) = &mut self.player else { return };
         p.inject(key.clone(), data);
         let outcome = p.play_music(
@@ -720,6 +760,7 @@ impl AudioSystem {
     /// position). Returns the decode error to show next to the entry.
     pub fn play_original_entry(&mut self, entry: &EntryInfo) -> Result<(), String> {
         let pcm = ra::decode_entry(entry)?;
+        let ui_gain = self.effective_volume(Category::Ui);
         let Some(p) = &mut self.player else {
             return Ok(());
         };
@@ -729,7 +770,7 @@ impl AudioSystem {
         let outcome = p.play(&Play {
             name: "ra.browser",
             path: &key,
-            gain: self.category_volume[Category::Ui.index()],
+            gain: ui_gain,
             pan: 0.0,
             rate: 1.0,
             max_instances: 4,
@@ -808,8 +849,9 @@ impl AudioSystem {
         }
     }
 
-    fn base_gain(&self, def: &SoundDef) -> f32 {
-        def.volume * self.category_volume[def.category.index()]
+    /// The sound's own volume times its category's (`category` when the caller names one) and the master.
+    fn base_gain(&self, def: &SoundDef, category: Option<Category>) -> f32 {
+        def.volume * self.effective_volume(category.unwrap_or(def.category))
     }
 
     /// Playback rate with the sound's random pitch variation applied.
@@ -1573,6 +1615,52 @@ mod tests {
             vec![0.25],
             "the running track got the gain"
         );
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    #[test]
+    fn the_master_volume_multiplies_every_category_and_a_voice_has_its_own() {
+        // Four different numbers, so a pair swapped anywhere shows: master 0.5, effects 0.4, interface
+        // 1.0 (never set), voices 0.25; the bank entry's own volume is 0.8.
+        let mut s = AudioSystem::silent(assets());
+        s.set_trace(true);
+        s.set_master_volume(0.5);
+        s.set_category_volume(Category::Sfx, 0.4);
+        s.set_category_volume(Category::Voice, 0.25);
+        s.set_category_volume(Category::Music, 0.9);
+        s.play("test_click"); // category Sfx
+        s.play_as("test_click", Category::Voice);
+        s.play_as("test_click", Category::Ui);
+        let gains: Vec<f32> = s.take_trace().iter().map(|t| t.gain).collect();
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+        assert!(near(gains[0], 0.8 * 0.4 * 0.5), "effects: {gains:?}");
+        assert!(near(gains[1], 0.8 * 0.25 * 0.5), "voices: {gains:?}");
+        assert!(
+            near(gains[2], 0.8 * 0.5),
+            "interface, master only: {gains:?}"
+        );
+        assert_eq!(s.category_volume(Category::Voice), 0.25);
+        assert_eq!(s.master_volume(), 0.5);
+        assert!(near(s.effective_volume(Category::Music), 0.45));
+        // Not a number a volume can be: the default, and never below nothing.
+        s.set_master_volume(f32::NAN);
+        assert_eq!(s.master_volume(), 1.0);
+        s.set_master_volume(-3.0);
+        assert_eq!(s.master_volume(), 0.0);
+    }
+
+    #[test]
+    fn the_master_volume_reaches_a_running_red_alert_track() {
+        let (d, install) = music_root("master_vol", "(sounds: {})", 1, false);
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let started = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let gains = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut s = AudioSystem::with_player(&d, fake(&ended, &started, &gains));
+        ra_on(&mut s, &install);
+        settle(&mut s, Mood::Calm);
+        s.set_category_volume(Category::Music, 0.5);
+        s.set_master_volume(0.5);
+        assert_eq!(*gains.lock().unwrap(), vec![0.5, 0.25]);
         std::fs::remove_dir_all(d).ok();
     }
 

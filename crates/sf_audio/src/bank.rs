@@ -25,22 +25,30 @@ use std::path::{Component, Path};
 
 use serde::Deserialize;
 
-/// Volume group, for later per-category volume settings.
+/// Volume group, one volume each (the settings screen, WP11.5b). `Voice` is the unit voices: the game plays
+/// the voice events as `Voice` whatever their bank entry says (`AudioSystem::play_as`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
 pub enum Category {
     Sfx,
     Ui,
     Music,
+    Voice,
 }
 
 impl Category {
-    pub const ALL: [Category; 3] = [Category::Sfx, Category::Ui, Category::Music];
+    pub const ALL: [Category; 4] = [
+        Category::Sfx,
+        Category::Ui,
+        Category::Music,
+        Category::Voice,
+    ];
 
     pub(crate) fn index(self) -> usize {
         match self {
             Category::Sfx => 0,
             Category::Ui => 1,
             Category::Music => 2,
+            Category::Voice => 3,
         }
     }
 }

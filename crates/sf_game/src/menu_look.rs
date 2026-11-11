@@ -174,7 +174,24 @@ pub struct Words {
     pub player_colours: String,
     pub palette_standard: String,
     pub palette_colour_blind: String,
-    pub sound_empty: String,
+    pub sound_volumes: String,
+    pub sound_master: String,
+    pub sound_music: String,
+    pub sound_effects: String,
+    pub sound_voices: String,
+    pub sound_less: String,
+    pub sound_more: String,
+    pub sound_percent: String,
+    pub sound_test: String,
+    pub sound_ra_heading: String,
+    pub sound_ra_switch: String,
+    pub sound_ra_folder: String,
+    pub sound_ra_folder_none: String,
+    pub sound_ra_hint: String,
+    pub sound_ra_no_folder: String,
+    pub sound_ra_not_found: String,
+    pub sound_ra_loading: String,
+    pub sound_ra_found: String,
 }
 
 /// The whole of `menu_look.ron`, checked.
@@ -399,7 +416,7 @@ mod tests {
                 &*w.tab_accessibility,
                 &*w.tab_sound
             ],
-            ["Keys", "Graphics", "Accessibility", "Sound (WP11.5b)"]
+            ["Keys", "Graphics", "Accessibility", "Sound"]
         );
     }
 

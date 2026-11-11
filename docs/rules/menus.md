@@ -2,7 +2,7 @@
 
 Work package **WP11.5a** (PLAN.md phase 11): the start menu, the pause menu with restart, and a settings screen for keys,
 graphics and accessibility. The sound settings are **WP11.5b** (decision of the orchestrator, 03-11-2026: the sound is
-built later, in agreement with the audio work; the settings screen has a marked empty place for it). Presentation only:
+built later, in agreement with the audio work; built 11-11-2026, see "Sound" below). Presentation only:
 **no `sf_sim` code changed**, no pin moved, nothing in the menus is a command (pausing is not one, see below).
 Code: `crates/sf_game/src/{menu.rs, menu_view.rs, menu_look.rs, settings.rs, palette.rs}` (new) with small hooks in
 `runner.rs`, `hud.rs`, `args.rs`, `lib.rs`, `sim_thread.rs`; `sf_engine` (bindings and frame cap can be set while the
@@ -18,8 +18,8 @@ game runs), `sf_ui` (`Ui::set_input`, `Ui::block_rect`) and `sf_render` (`Style:
   The simulation takes no tick while it is open.
 * **After the match is decided** (the Victory, Defeat or Draw banner of `match.md`) two buttons stand under the banner,
   **Restart** and **Main menu**; Esc still opens the pause menu as well. The game keeps running behind the banner.
-* **The settings screen** with four tabs: **Keys**, **Graphics**, **Accessibility** and **Sound (WP11.5b)** (marked, with a
-  heading, a line of text and no control). It opens from either menu and **Back** (or Esc) returns to the one it came from.
+* **The settings screen** with four tabs: **Keys**, **Graphics**, **Accessibility** and **Sound** (the volumes and the original
+  Red Alert audio switch, WP11.5b). It opens from either menu and **Back** (or Esc) returns to the one it came from.
   Every change is applied at once and written to the user's settings file.
 
 All words, sizes and colours are `menu_look.ron` (`sf_game::menu_look`, checked when it parses and pinned by
@@ -139,7 +139,7 @@ file on every system (the tests and the screenshots use it) (`the_settings_file_
 * **Missing file** = the first run: the defaults, no warning. **A file that cannot be read or parsed**
   (`this is not ron`, a wrong value, a directory) = the defaults and **one** warning on stderr that says the file is replaced on
   the next change; it is never a panic (`a_bad_file_gives_the_defaults_and_one_warning_and_never_a_panic`).
-* **A partial file** keeps what it says; unknown fields (a later version's sound settings) are ignored
+* **A partial file** keeps what it says (a file from before WP11.5b has no `sound`: see "Sound"); unknown fields are ignored
   (`a_partial_file_keeps_what_it_says_and_unknown_fields_are_ignored`). **Values the game cannot use** are changed into ones it
   can and said, one warning each: the UI scale to the nearest choice, a frame cap of 0 to "no cap" and one out of 10 to 1000 into
   it, key overrides for the menu key or with no key dropped (`values_the_game_cannot_use_are_changed_and_said`).
@@ -243,9 +243,59 @@ foot of a column, `a_heading_never_ends_a_column_and_the_pages_keep_every_row_in
 
 ## Sound (WP11.5b)
 
-A marked place: the tab "Sound (WP11.5b)" with its heading and the line "The sound settings (volume sliders and the original Red
-Alert audio switch) come with WP11.5b." and no control (`the_tabs_switch_the_page_and_the_sound_page_is_marked_and_has_no_controls`).
-`audio.ron`, `sf_audio` and the sound parts of the runner are untouched by this WP.
+Decisions of the orchestrator under Tijmen's rule "your proposal holds if I do not answer" (11-11-2026); the tab and its rows are
+`menu::Menu::sound_rows`, the words are `menu_look.ron`.
+
+**The page** has two columns (one in a narrow window). Left, **Volume**: four rows, **Master**, **Music**, **Effects** and **Unit
+voices**, each `-`, the value in percent, `+` and (not for the music) **Test**. Right, **Original Red Alert audio**: **Use
+original audio** On / Off, the folder, a hint, and one status line. The tab bar and the panel stand where they stand on the other
+pages (`the_tabs_and_the_title_stay_in_place_from_page_to_page`, four window sizes).
+
+**The volume "sliders" are step buttons, not a draggable bar** (a deviation from the word "slider" in the brief): the menu is
+click-driven and has no drag widget (`menus.md` "Not done"); `-` and `+` move the value by 5 points, 0 to 100, at once. A value
+off the grid (a hand-edited 33) steps to the next multiple of 5 in the direction clicked; the buttons are dead at 0 and at 100
+(`a_slider_steps_by_five_and_each_one_sets_its_own_volume`, `a_slider_stops_at_nothing_and_at_full_and_a_value_off_the_grid_steps_onto_it`).
+
+**What each volume is** (`sf_audio`, `audio.md` "Volumes"): Master multiplies every group, the interface sounds included;
+Effects is the `Sfx` group (shots, hits, deaths); Unit voices is the new `Voice` group (WP11.2's replies, which used to be part of
+the effects); Music is the `Music` group (a running track follows at once). Each click goes to its own group
+(`each_slider_reaches_its_own_category_and_the_voices_are_not_the_effects`, four different numbers).
+
+**Applied at once and heard.** A click on `-` or `+` gives the audio the new mix and plays the test sound of that row (not for
+the music: the shipped bank has no CC0 music, and a running track follows the slider anyway); **Test** plays it again without
+changing anything. The test sound is `test_click` of the shipped CC0 bank, in the group of its row (Master and Effects as an
+effect, Unit voices as a voice), never a Red Alert sound (`the_test_sounds_are_in_the_group_of_their_slider_and_the_music_has_none`).
+The call from the runner (`Runner::apply_change`, `apply_outcomes`) needs a window and is checked by reading; the functions it
+calls (`fx_sound::apply_mix`, `play_test_sound`) are tested.
+
+**Saved** in the settings file next to the rest, as `sound: (master: Some(85), music: ..., effects: ..., voices: ..., ra_enabled:
+..., ra_path: ...)`. Every field is `None` until the player chooses, and then **the value of `audio.ron` stands** (the file on
+disk, else the one compiled in): a player who never opens the page hears what they heard before, and a file from 11.5a (no
+`sound`) loads without a warning (`an_old_settings_file_without_sound_keeps_the_numbers_of_audio_ron`,
+`a_player_who_never_opened_the_page_hears_what_audio_ron_says`, `the_default_of_every_slider_is_the_value_of_audio_ron`). A hand-edited
+volume that is not a step goes to the nearest step, at most 100, with one warning each
+(`a_hand_edited_volume_is_moved_to_a_step_and_said`). The round trip with four different volumes and the switch is part of
+`a_saved_file_reads_back_the_same_and_the_directory_is_made`.
+
+**The Red Alert switch and `--ra-audio`.** Order of precedence at the start: `--ra-audio FOLDER` (on, that folder) over the saved
+switch and folder over `audio.ron`'s `ra_audio` (`the_command_line_folder_wins_over_the_saved_red_alert_setting_for_the_run`,
+`the_command_line_folder_wins_over_the_saved_switch_at_the_start`). The flag is not written. The folder is shown as text and
+cannot be edited on the page (the menu has no text field; a file dialog is out of scope). **Clicking the switch** (On or Off) is
+the player's own choice: from then on the flag has given way for the run, the choice is saved, and **with it the folder in use
+(the flag's, else the saved one)**, so one run with `--ra-audio FOLDER` and a click on On keeps the folder for later runs
+(`the_red_alert_switch_keeps_the_folder_and_the_command_line_gives_way_once_it_is_touched`). The switch reads the folder again at
+once (`AudioSystem::enable_original_audio`). **B11:** only the path the player typed is stored; nothing from the Red Alert files
+is copied, cached or written, in the settings file, the screenshots or the tests (the tests use a folder that does not exist).
+
+**Status line** (only with the switch on): no folder set = "Red Alert files not found: no folder is set. The game's own sounds
+play."; reading = "Reading the Red Alert files..."; read and nothing found = "Red Alert files not found in FOLDER. The game's own
+sounds play."; found = "Red Alert audio is on: N game sounds use it." (`the_status_line_says_what_became_of_reading_the_red_alert_files`).
+**Switch on without files is never an error and nothing breaks:** no original sound plays; the events keep the CC0 sound the
+bank has for them and are silent where it has none, which is the WP11.7 fallback that already existed (the orchestrator's brief
+said "silence"; the game's own sounds were kept rather than a new rule made) (`the_switch_on_without_files_reads_nothing_and_the_game_keeps_its_own_sounds`).
+Known edge: if the loader thread cannot be started the status stays "Reading ..."; the audio already prints that failure once.
+
+Pictures: `docs/screenshots/wp11.5b/` (see its README).
 
 ## What it costs
 
@@ -286,7 +336,12 @@ generator is the cost; the match map is loaded, not generated).
 
 ## Not done, on purpose
 
-* **The sound settings** (WP11.5b).
+* **Mute when the window loses focus** (WP11.5b, listed as not done): the engine does track the window focus (`InputState::set_focused`), but a mute
+  needs a setting, a row on the page and a per-frame check in the runner: more than a one-line toggle.
+* **A draggable volume bar and a text field or file dialog for the Red Alert folder** (WP11.5b): the menu has neither; see
+  "Sound".
+* **A test sound for the music** and **a volume for the interface sounds** (WP11.5b): the music has no CC0 track to play; the
+  interface sounds follow the master volume only.
 * **Keyboard and gamepad navigation of the menus**: they are mouse-driven (Esc and the key capture are the only keys). No
   tooltips, no confirmation for Quit or Restart (they act at once), no "are you sure".
 * **Save and load** of a game (phase 13): the pause menu has no such entry.
