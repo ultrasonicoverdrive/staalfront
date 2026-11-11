@@ -25,8 +25,11 @@
 //!
 //! When nothing is slow, a frame costs one comparison against [`crate::bench::HITCH_MS`] plus the
 //! laps (one clock read each) and, on Windows, one `GetThreadTimes` call; a frame over the threshold
-//! also counts. A line is built only for a frame over [`LOG_MS`]. [`HitchLog::overhead`] measures the
-//! per-frame cost on the machine it runs on (the test `the_bookkeeping_of_a_quiet_frame_is_small`).
+//! also counts. A line is built only for a frame over [`LOG_MS`]. The test
+//! `the_bookkeeping_of_a_quiet_frame_is_small` measures the per-frame cost on the machine it runs on
+//! (the best of five batches against a generous bound). That a quiet frame does no slow-path work is counted, not
+//! timed, on synthetic frame times (the test `a_quiet_frame_does_no_slow_path_work`): no hitch counted, no
+//! line, `slow_ticks` not asked, one thread-clock read per frame where it is measured.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -787,29 +790,65 @@ mod tests {
         assert!(log.summary(&SimTotals::default()).contains("timeout 1,"));
     }
 
-    /// What a quiet frame costs: the bookkeeping of `begin_frame`, five laps and `end_frame`, with the
-    /// clock read each of them takes in the runner, per frame, measured here (printed with
-    /// `--nocapture`). It has to be small against a 17 ms frame; the bound is generous so that a busy
-    /// machine does not fail it, the number is what the PR quotes.
+    /// What a quiet frame does, counted instead of timed: after 1,000 frames that all stay at or under
+    /// [`HITCH_MS`] (synthetic times, so no pause of the machine can change the result) nothing was
+    /// counted as a hitch, no line or event was built, `slow_ticks` was never asked, and the thread
+    /// clock was read once per frame where it is measured and never elsewhere (so a second clock read
+    /// is caught only on Windows, where `sf_thread_cpu::MEASURED` is true; on Linux the count is 0 by
+    /// construction). The cost in time is
+    /// `the_bookkeeping_of_a_quiet_frame_is_small`.
+    #[test]
+    fn a_quiet_frame_does_no_slow_path_work() {
+        let begun = Instant::now();
+        let mut log = HitchLog::new(begun);
+        let n = 1_000u64;
+        for i in 0..n {
+            // Frames of 17 ms, every tenth of exactly HITCH_MS: not over it, so still quiet.
+            let start = i * 17 + (i / 10) * 8;
+            let ask = |_: u64| -> Vec<(u64, f64)> { panic!("slow_ticks asked in a quiet frame") };
+            log.begin_frame(at(begun, start), ask);
+            log.lap(Lap::Scene, at(begun, start + 1));
+            log.end_frame(at(begun, start + 2), 0);
+        }
+        let t = log.totals();
+        assert_eq!(t.frames, n - 1);
+        assert_eq!((t.over_hitch, t.over_log), (0, 0), "{t:?}");
+        assert_eq!(t.longest_ms, 0.0, "the slow path was entered: {t:?}");
+        assert!(log.lines().is_empty());
+        assert!(log.events.is_empty());
+        let reads = if sf_thread_cpu::MEASURED { n } else { 0 };
+        assert_eq!(log.cpu.calls(), reads, "thread clock reads, one per frame");
+        assert_eq!(log.cpu_measured(), sf_thread_cpu::MEASURED);
+    }
+
+    /// What a quiet frame costs in time: the bookkeeping of `begin_frame`, five laps and `end_frame`,
+    /// with the clock read each of them takes in the runner, per frame, measured here (printed with
+    /// `--nocapture`). The frame times are the real clock, so a pause of the machine can make one frame
+    /// a hitch; whether a quiet frame stays out of the slow path is therefore not asserted here but in
+    /// `a_quiet_frame_does_no_slow_path_work`. The number is the best of five batches (one pause spoils
+    /// one batch, not all), and the bound is generous so that a busy machine does not fail it: it has
+    /// to be small against a 17 ms frame, the number is what the PR quotes.
     #[test]
     fn the_bookkeeping_of_a_quiet_frame_is_small() {
         let mut log = HitchLog::new(Instant::now());
-        let n = 200_000u32;
-        let started = Instant::now();
-        for _ in 0..n {
-            log.begin_frame(Instant::now(), no_ticks);
-            log.lap(Lap::Snapshot, Instant::now());
-            log.lap(Lap::Ui, Instant::now());
-            log.lap(Lap::Scene, Instant::now());
-            log.lap(Lap::Upload, Instant::now());
-            log.lap(Lap::Audio, Instant::now());
-            log.end_frame(Instant::now(), 0);
+        let n = 40_000u32;
+        let mut best = f64::MAX;
+        for _ in 0..5 {
+            let started = Instant::now();
+            for _ in 0..n {
+                log.begin_frame(Instant::now(), no_ticks);
+                log.lap(Lap::Snapshot, Instant::now());
+                log.lap(Lap::Ui, Instant::now());
+                log.lap(Lap::Scene, Instant::now());
+                log.lap(Lap::Upload, Instant::now());
+                log.lap(Lap::Audio, Instant::now());
+                log.end_frame(Instant::now(), 0);
+            }
+            best = best.min(started.elapsed().as_nanos() as f64 / f64::from(n));
         }
-        let per_frame = started.elapsed().as_nanos() as f64 / f64::from(n);
         println!(
-            "hitch bookkeeping, quiet frame, 7 clock reads: {per_frame:.0} ns (a frame is 16,700,000 ns)"
+            "hitch bookkeeping, quiet frame, 7 clock reads: {best:.0} ns (a frame is 16,700,000 ns)"
         );
-        assert_eq!(log.totals().over_hitch, 0);
-        assert!(per_frame < 20_000.0, "{per_frame} ns per frame");
+        assert!(best < 20_000.0, "{best} ns per frame");
     }
 }
