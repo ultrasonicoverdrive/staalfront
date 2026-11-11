@@ -1,15 +1,26 @@
 [package]
 name = "sf_ai"
-description = "Computer opponent; talks to sf_sim only through commands."
+description = "Computer opponent: reads the world through a fog-filtered observation and acts only through commands."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+# `lints.workspace = true` cannot be combined with extra lints, so the workspace lints are repeated here,
+# with the float lints of sf_sim: the AI follows the simulation's determinism rules (no floats, no hash
+# collections, no clock, no I/O; PLAN section 5 and docs/rules/ai.md).
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+float_arithmetic = "deny"
+float_cmp = "deny"
+float_cmp_const = "deny"
+cast_precision_loss = "deny"
 
 [dependencies]
 sf_math = { path = "../../crates/sf_math" }
 sf_sim = { path = "../../crates/sf_sim" }
+# The profile format and the unit definitions it is checked against; `Profile::resolve` turns roles into kinds.
+sf_data = { path = "../../crates/sf_data" }

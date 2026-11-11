@@ -6,6 +6,9 @@
 //! measured around it by the caller ([`crate::cli`]) and goes into the `host`
 //! block of the log, which no checksum ever depends on.
 
+use sf_ai::Ai;
+use sf_sim::World;
+
 use crate::scenario::{Scenario, ScenarioError};
 
 /// How often a checksum is recorded when `--every` is not given.
@@ -75,10 +78,35 @@ pub struct Outcome {
     pub final_checksum: u64,
     /// Checksums at multiples of `every` and at the last tick, ascending.
     pub samples: Vec<Sample>,
+    /// `(player, Ai::digest)` of every AI of the scenario at the end, ascending by player; empty without
+    /// `ai`. The AIs live outside the world and are not in its checksum, so this is how a diverging AI
+    /// shows up; the log carries it and CI compares it between Linux and Windows.
+    pub ai_digests: Vec<(u8, u64)>,
+}
+
+/// A finished run with the world and the AIs it ended with, for tests that look inside.
+pub struct Finished {
+    /// What [`run`] returns.
+    pub outcome: Outcome,
+    /// The world after the last tick. Boxed: a `World` is large and Windows gives the main thread 1 MB of stack, which
+    /// a few debug-build copies of it would fill (the CI run of the first version overflowed there).
+    pub world: Box<World>,
+    /// The AIs after the last tick, ascending by player.
+    pub ais: Vec<Ai>,
 }
 
 /// Runs `scenario` for `options.ticks` ticks.
 pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, ScenarioError> {
+    run_full(scenario, options).map(|f| f.outcome)
+}
+
+/// Runs `scenario` for `options.ticks` ticks, like [`run`], and also hands back the world and the AIs.
+///
+/// The AIs (`Scenario::ais`, ascending by player) are driven here, immediately before each step: an AI
+/// that is [`due`](Ai::due) at the tick about to run thinks on the world as it is and the commands it
+/// pushes are scheduled for that tick under its player id, so they are in the command queue and the
+/// checksum like any other. The AI reads the world only through the fog-filtered observation of `sf_ai`.
+pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, ScenarioError> {
     let mut problems = Vec::new();
     if options.ticks == 0 {
         problems.push("ticks must be at least 1".to_string());
@@ -93,7 +121,7 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
         });
     }
 
-    let mut world = scenario.build_world()?;
+    let mut world = Box::new(scenario.build_world()?);
     let commands_scheduled = world.pending_commands().len() + scenario.recorded.len();
     let initial_checksum = world.checksum();
 
@@ -103,8 +131,21 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
     // A recorded game starts after its first tick (`Scenario::game`): the loop counts world ticks.
     let first = world.tick().0 + 1;
     let mut arrivals = scenario.arrivals();
+    let mut ais = scenario.ais.clone();
+    let mut wanted = Vec::new();
     for done in first..=options.ticks {
         arrivals.schedule_due(&mut world)?;
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                wanted.clear();
+                ai.think(&world, &mut wanted);
+                for command in wanted.drain(..) {
+                    world
+                        .schedule(world.tick(), ai.player(), command)
+                        .map_err(|e| ScenarioError::Sim(e.to_string()))?;
+                }
+            }
+        }
         let report = world.step();
         executed += u64::from(report.commands_executed);
         ignored += u64::from(report.commands_ignored);
@@ -117,7 +158,7 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
         }
     }
 
-    Ok(Outcome {
+    let outcome = Outcome {
         scenario: scenario.display_name().to_string(),
         seed: scenario.seed,
         map_width: scenario.map.width,
@@ -131,6 +172,12 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
         initial_checksum,
         final_checksum: last,
         samples,
+        ai_digests: ais.iter().map(|a| (a.player().0, a.digest())).collect(),
+    };
+    Ok(Finished {
+        outcome,
+        world,
+        ais,
     })
 }
 

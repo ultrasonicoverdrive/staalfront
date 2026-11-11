@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Determinism lint for sf_sim and sf_math (PLAN.md section 5, rules 2 and 3).
+# Determinism lint for sf_sim, sf_math and sf_ai (PLAN.md section 5, rules 2 and 3).
 # Fails if a forbidden token or a float literal appears anywhere under
-# crates/sf_sim/src or crates/sf_math/src, including comments and strings
-# (keep the code free of them on purpose). Complements the clippy float lints
-# in the crates' Cargo.toml.
+# crates/sf_sim/src, crates/sf_math/src or crates/sf_ai/src, including comments
+# and strings (keep the code free of them on purpose). Complements the clippy
+# float lints in the crates' Cargo.toml.
+#
+# sf_ai (WP9.1a) is a player outside the simulation that follows the
+# simulation's rules, so it gets the same patterns plus the clock and I/O
+# (the host reads the profile file and hands it over; the AI never does).
 #
 # sf_math is shared with rendering, so it has exactly one exempt file,
 # crates/sf_math/src/render_bridge.rs (f32 conversion at the rendering
@@ -27,6 +31,13 @@ patterns=(
 sim_only_patterns=(
     '\brender_bridge\b'
 )
+# Only forbidden in sf_ai besides the common ones: the float bridge, the clock,
+# files, the environment and threads.
+ai_only_patterns=(
+    '\brender_bridge\b'
+    '\b(Instant|SystemTime)\b'
+    '\bstd::(fs|io|env|time|thread|process)\b'
+)
 
 fail=0
 
@@ -49,6 +60,7 @@ scan() {
 
 scan crates/sf_sim/src "" "${patterns[@]}" "${sim_only_patterns[@]}"
 scan crates/sf_math/src crates/sf_math/src/render_bridge.rs "${patterns[@]}"
+scan crates/sf_ai/src "" "${patterns[@]}" "${ai_only_patterns[@]}"
 
 # render_bridge only exists with sf_math's `render` cargo feature. sf_sim must
 # never switch that feature on, or the compiler stops guarding the boundary.

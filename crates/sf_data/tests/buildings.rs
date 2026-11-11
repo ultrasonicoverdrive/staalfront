@@ -413,14 +413,16 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 /// on purpose: the scenarios that build (`BuildStructure`, WP6.2) need the tech tree, the exit sides
 /// and the base radius, and the harvest scenario (WP7.2) needs the refinery's `HarvesterDock`
 /// function and exit side, and the match scenario (WP7.6) builds the whole base (power plant, refinery,
-/// barracks) and has the opponent's structures. Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 6] = [
+/// barracks) and has the opponent's structures, and the ai_fog scenario (WP9.1a, a copy of `match_defs`)
+/// has structures of both players. Every other copy predates the block.
+const COPIES_WITH_BLOCKS: [&str; 7] = [
     "placement_defs",
     "harvest_defs",
     "match_defs",
     "defences_defs",
     "repair_sell_defs",
     "silo_defs",
+    "ai_fog_defs",
 ];
 
 #[test]
