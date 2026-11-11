@@ -188,7 +188,7 @@ fn a_long_line_wraps_at_the_width_and_a_long_word_stays_whole() {
     assert_eq!(wrap("one two three", 40.0, &m), ["one", "two", "three"]);
     assert_eq!(wrap("extraordinary x", 50.0, &m), ["extraordinary", "x"]);
     assert_eq!(wrap("", 50.0, &m), [""]);
-    for line in wrap(&look().words.sound_empty, 400.0, &m) {
+    for line in wrap(&look().words.sound_ra_hint, 400.0, &m) {
         assert!(m(&line) <= 400.0, "{line:?}");
     }
 }

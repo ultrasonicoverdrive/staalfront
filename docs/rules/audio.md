@@ -40,7 +40,8 @@ Each frame the runner calls `FxSound::play_frame` after `FxPlayer::frame` and af
    skipped and counted (`silent`), no message, no `unknown` count. Only the CC0 bank and the existing mapping are used;
    no sound was added by WP11.3, so until the bank has the fight sounds only mapped events are heard.
 4. `Planner::plan` (`sf_audio::positional`) chooses the playbacks; the runner then calls `AudioSystem::play_at` for
-   each, which applies the bank's volume, the category volume (`mix.sfx_volume`) and the same `mix`.
+   each, which applies the bank's volume, the category volume (`mix.sfx_volume`, or the player's Effects volume), the master
+   volume (WP11.5b) and the same `mix`.
 
 ### The planner, per frame
 
@@ -59,6 +60,22 @@ still caps the voices alive at once (`voices.rs`).
 
 Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `weapon.fire.bullet`), then the
 `fallback`. The shipped values are in `audio.ron`; `the_shipped_audio_ron_is_these_numbers` pins them all.
+
+## Volumes (WP11.5b)
+
+`sf_audio::Category` has four groups: `Sfx`, `Ui`, `Music` and `Voice`. A sound's gain is **its own bank volume x the volume of
+its group x the master volume** (`AudioSystem::effective_volume`; `set_master_volume`, `set_category_volume`,
+`the_master_volume_multiplies_every_category_and_a_voice_has_its_own`). A group of the bank entry is only the default: the unit
+voices are played as `Voice` whatever their entry says (`AudioSystem::play_as`, used by `unit_voice` and the settings screen's test
+sounds). The master volume reaches a running Red Alert track like the music volume does
+(`the_master_volume_reaches_a_running_red_alert_track`). The interface sounds (`Ui`, also the sound browser) have no slider and
+follow the master volume only.
+
+`audio.ron` `mix` gained `master_volume` (default 1.0 when a file leaves it out) and `voice_volume` (written `Some(1.0)`; left
+out, the voices follow `sfx_volume`, which is what they did before). Both are range-checked 0 to 2 like the others. These are the
+values the game uses until the player moves a slider; the player's choice is in the settings file (`menus.md` "Sound"), resolved
+by `settings::SoundSettings::resolve`, and `fx_sound::start_audio_with` applies it at the start (`start_audio` is the same
+without settings).
 
 ## 3. Tests
 
@@ -96,7 +113,7 @@ Rules are looked up by event name, then by dotted prefix (`weapon.fire` covers `
   Red Alert has no sound for those, so they stay silent until WP11.3b.
 * The sim emits no event for a structure placed or finished, or a harvester unloading: those are later WPs; nothing
   was added to `sf_sim`. The replies to selecting and ordering a unit are WP11.2 (`voices.md`), raised on the UI side.
-* The settings screen (WP11.5) is not part of this; `mix.sfx_volume` and `mix.music_volume` are set in the file.
+* The volumes are set in the file (`mix`) and, since WP11.5b, on the settings screen's Sound page (see "Volumes").
 * `audio.ron` is read once at start; no hot reload.
 * A moving unit's sound stops at the place it had when the event happened (no Doppler, no following).
 * Music is decoded whole on a background thread, not streamed from disk: 30 MiB per running track (normally two

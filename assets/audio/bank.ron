@@ -5,7 +5,7 @@
 //   volume:          linear base volume, default 1.0
 //   pitch_variation: random playback-rate spread, 0.05 = +-5 %, default 0
 //   max_instances:   simultaneous voices of this sound, default 8
-//   category:        Sfx | Ui | Music (for volume settings), default Sfx
+//   category:        Sfx | Ui | Music | Voice (volume groups, WP11.5b), default Sfx
 //   looped:          repeat until stopped, default false
 //
 // Every file needs a line in assets/LICENSES.md.

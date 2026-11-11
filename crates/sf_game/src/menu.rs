@@ -13,8 +13,12 @@ use sf_engine::{Action, Bindings};
 use crate::menu_look::{MenuLook, fill};
 use crate::palette::Palette;
 use crate::settings::{
-    PaletteChoice, RebindError, Settings, WindowMode, binding_name, key_name, primary_key_name,
+    PaletteChoice, RebindError, Settings, SoundBase, SoundNow, Volume, WindowMode, binding_name,
+    key_name, percent_of, primary_key_name, step_down, step_up,
 };
+
+/// The rows of the volumes on the sound page: the heading and the four sliders (the left column).
+const SOUND_VOLUME_ROWS: usize = 5;
 
 /// A page of the settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +69,12 @@ pub enum Item {
     /// The choice with this index in `ui_scales`.
     SetUiScale(usize),
     SetPalette(PaletteChoice),
+    /// Choose this volume, in percent.
+    SetVolume(Volume, u8),
+    /// Play the test sound at this volume.
+    TestVolume(Volume),
+    /// "Use original Red Alert audio" on or off.
+    SetRaAudio(bool),
 }
 
 /// What reaches the menu.
@@ -86,6 +96,10 @@ pub enum Change {
     UiScale,
     Palette,
     Keys,
+    /// A volume: the audio takes the new mix and the test sound of that slider plays.
+    Volume(Volume),
+    /// The original Red Alert audio switch.
+    RaAudio,
 }
 
 /// What the game has to do.
@@ -105,6 +119,8 @@ pub enum Outcome {
     MainMenu,
     Quit,
     Changed(Change),
+    /// The test button of a slider: play the test sound at that volume (no setting changed).
+    PlayTest(Volume),
 }
 
 /// What the screen shows of the world outside the menu.
@@ -112,6 +128,20 @@ pub enum Outcome {
 pub struct Live {
     /// The window is in fullscreen now (F11 changes it without the settings).
     pub fullscreen: bool,
+    /// How far the reading of the Red Alert files is (the sound page says so).
+    pub ra: RaLoad,
+}
+
+/// What the audio knows of the player's Red Alert files.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RaLoad {
+    /// Not reading and nothing read.
+    #[default]
+    Off,
+    /// The folder is being read.
+    Loading,
+    /// Read: `found` sounds in the folder, `mapped` game events that now use one of them.
+    Ready { mapped: usize, found: usize },
 }
 
 /// How much of the key list fits the window: rows in a column and columns.
@@ -281,6 +311,10 @@ pub struct Menu {
     settings: Settings,
     shipped: Bindings,
     live: Live,
+    /// What the sound is with nothing chosen (`audio.ron`), and the `--ra-audio` folder of this run
+    /// until the player touches the switch (WP11.5b).
+    sound_base: SoundBase,
+    cli_ra: Option<String>,
 }
 
 impl Menu {
@@ -300,6 +334,8 @@ impl Menu {
             settings,
             shipped,
             live: Live::default(),
+            sound_base: SoundBase::default(),
+            cli_ra: None,
         }
     }
 
@@ -314,6 +350,20 @@ impl Menu {
     /// The settings read from the file at the start.
     pub fn set_settings(&mut self, settings: Settings) {
         self.settings = settings;
+    }
+
+    /// What the sound is with nothing chosen (the numbers of `audio.ron`), and the folder `--ra-audio`
+    /// gave, which wins over the saved Red Alert setting until the player touches the switch.
+    pub fn set_sound_base(&mut self, base: SoundBase, cli_ra: Option<String>) {
+        self.sound_base = base;
+        self.cli_ra = cli_ra;
+    }
+
+    /// The volumes and the Red Alert setting the audio runs with now.
+    pub fn sound_now(&self) -> SoundNow {
+        self.settings
+            .sound
+            .resolve(&self.sound_base, self.cli_ra.as_deref())
     }
 
     /// The bindings of `input.ron`, as the game started with them.
@@ -566,6 +616,21 @@ impl Menu {
                 self.settings.palette = choice;
                 vec![Outcome::Changed(Change::Palette)]
             }
+            Item::SetVolume(which, percent) => {
+                self.settings.sound.set_volume(which, percent);
+                vec![Outcome::Changed(Change::Volume(which))]
+            }
+            Item::TestVolume(which) => vec![Outcome::PlayTest(which)],
+            Item::SetRaAudio(on) => {
+                // The folder in use (the one of `--ra-audio` this run, else the saved one) is kept with
+                // the switch: the only way the player's own path gets saved. The command line has given
+                // way from here on.
+                let path = self.sound_now().ra.path;
+                self.cli_ra = None;
+                self.settings.sound.ra_enabled = Some(on);
+                self.settings.sound.ra_path = (!path.is_empty()).then_some(path);
+                vec![Outcome::Changed(Change::RaAudio)]
+            }
         }
     }
 
@@ -719,14 +784,93 @@ impl Menu {
                 ];
             }
             Page::Sound => {
-                // The place for the sound settings of WP11.5b: marked, and with no controls.
-                model.rows = vec![
-                    Row::Heading(w.tab_sound.clone()),
-                    Row::Note(w.sound_empty.clone()),
-                ];
+                // The volumes stand in the left column and the Red Alert audio in the right one, so the
+                // page is no taller than a screen of the key list; a narrow window has one column.
+                model.rows = self.sound_rows();
+                if fit.columns > 1 {
+                    model.columns = fit.columns.min(2);
+                    model.rows_per_column = SOUND_VOLUME_ROWS;
+                }
+                // Room for the wrapped lines of the right column.
+                let need = if model.columns > 1 {
+                    SOUND_VOLUME_ROWS + 2
+                } else {
+                    model.rows.len() + 3
+                };
+                model.rows_reserved = model.rows_reserved.max(need);
             }
         }
         model
+    }
+
+    /// The sound page (WP11.5b): a row of `-`, the value, `+` and a test button for each volume, then
+    /// the original Red Alert audio switch with its folder and what became of reading it.
+    fn sound_rows(&self) -> Vec<Row> {
+        let w = &self.look.words;
+        let now = self.sound_now();
+        let mut rows = vec![Row::Heading(w.sound_volumes.clone())];
+        for which in Volume::ALL {
+            let (label, linear) = match which {
+                Volume::Master => (&w.sound_master, now.mix.master),
+                Volume::Music => (&w.sound_music, now.mix.music),
+                Volume::Effects => (&w.sound_effects, now.mix.effects),
+                Volume::Voices => (&w.sound_voices, now.mix.voices),
+            };
+            let percent = percent_of(linear);
+            let mut controls = vec![
+                Control::new(&w.sound_less, Item::SetVolume(which, step_down(percent)))
+                    .disabled_if(percent == 0),
+                Control::new(
+                    fill(&w.sound_percent, &[("percent", &percent.to_string())]),
+                    Item::Noop,
+                )
+                .disabled()
+                .weighted(2),
+                Control::new(&w.sound_more, Item::SetVolume(which, step_up(percent)))
+                    .disabled_if(percent >= 100),
+            ];
+            // The music has no test sound: there is no CC0 music to play, and the running music
+            // follows the slider at once.
+            if which != Volume::Music {
+                controls.push(Control::new(&w.sound_test, Item::TestVolume(which)).weighted(2));
+            }
+            rows.push(Row::Setting {
+                label: label.clone(),
+                controls,
+            });
+        }
+        rows.push(Row::Heading(w.sound_ra_heading.clone()));
+        rows.push(Row::Setting {
+            label: w.sound_ra_switch.clone(),
+            controls: vec![
+                Control::new(&w.on, Item::SetRaAudio(true)).chosen(now.ra.enabled),
+                Control::new(&w.off, Item::SetRaAudio(false)).chosen(!now.ra.enabled),
+            ],
+        });
+        let folder = if now.ra.path.is_empty() {
+            w.sound_ra_folder_none.as_str()
+        } else {
+            now.ra.path.as_str()
+        };
+        rows.push(Row::Note(fill(&w.sound_ra_folder, &[("path", folder)])));
+        rows.push(Row::Note(w.sound_ra_hint.clone()));
+        if now.ra.enabled {
+            let line = if now.ra.path.trim().is_empty() {
+                w.sound_ra_no_folder.clone()
+            } else {
+                match self.live.ra {
+                    RaLoad::Off | RaLoad::Loading => w.sound_ra_loading.clone(),
+                    RaLoad::Ready { found: 0, .. } => {
+                        fill(&w.sound_ra_not_found, &[("path", now.ra.path.trim())])
+                    }
+                    RaLoad::Ready { mapped, .. } => {
+                        fill(&w.sound_ra_found, &[("count", &mapped.to_string())])
+                    }
+                }
+            };
+            rows.push(Row::Note(line));
+        }
+        rows
     }
 
     /// The rows of the key list, all pages.

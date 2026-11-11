@@ -156,6 +156,11 @@ nothing of Red Alert is ever part of Staalfront.
 2. Point Staalfront at that directory, either for one run with
    `sf_game --ra-audio <directory>`, or permanently in
    `assets/config/audio.ron`: `ra_audio: (enabled: true, path: "<directory>")`.
+   In the game, **Settings > Sound** has the switch **Use original audio** (On / Off) and shows the folder. Run once with
+   `--ra-audio <directory>` and click On there: the folder is remembered in your settings file and the switch is on from
+   then on. The flag wins over the saved setting for the run it is given. If the files are not found the page says so and the
+   game keeps its own sounds. Only the folder you typed is stored; nothing of the Red Alert files is copied or saved. The same
+   page has the volumes: Master, Music, Effects and Unit voices, 0 to 100 % in steps of 5.
 3. Which original sound plays for which event is set in
    `assets/audio/ra_mapping.ron`. The F1 panel's *Sound browser* lists every
    archive and sound found, plays them, and shows the names (or `#id`s) to put
