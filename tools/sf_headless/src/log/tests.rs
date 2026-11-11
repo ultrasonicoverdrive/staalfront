@@ -15,6 +15,7 @@ fn outcome() -> Outcome {
         entities: 3,
         initial_checksum: 0xAB,
         final_checksum: 0xFFFF_FFFF_FFFF_FFFF,
+        ai_digests: Vec::new(),
         samples: vec![
             Sample {
                 ticks: 10,

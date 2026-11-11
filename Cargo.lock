@@ -2415,6 +2415,7 @@ dependencies = [
 name = "sf_ai"
 version = "0.1.0"
 dependencies = [
+ "sf_data",
  "sf_math",
  "sf_sim",
 ]

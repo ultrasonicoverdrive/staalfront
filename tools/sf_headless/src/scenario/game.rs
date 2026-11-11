@@ -80,8 +80,15 @@ pub fn load_game(
     let text = std::fs::read_to_string(&match_path)
         .map_err(|e| invalid(format!("{}: {e}", match_path.display())))?;
     let def = MatchDef::from_ron(&text).map_err(|e| invalid(e.to_string()))?;
-    let defs =
-        UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|_| UnitDefs::embedded());
+    // The same fallback as the game (`sf_game::runner::load_defs`), and the same warning: a replay on the
+    // compiled-in definitions is a replay of different numbers, so it must not pass unnoticed.
+    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|e| {
+        eprintln!(
+            "sf_headless: {}: {e}; using the unit definitions compiled in",
+            assets.join("config").display()
+        );
+        UnitDefs::embedded()
+    });
     def.check(&defs, cells)
         .map_err(|e| invalid(e.to_string()))?;
     let map_dir = assets.join("maps").join(&def.map);

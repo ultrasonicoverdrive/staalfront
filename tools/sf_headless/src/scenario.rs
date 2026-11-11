@@ -46,6 +46,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use sf_data::ai_profile::AiProfile;
 use sf_data::map::Map;
 use sf_data::match_def::MatchDef;
 use sf_data::movement::MovementCosts;
@@ -266,6 +267,19 @@ pub struct Scenario {
     #[serde(skip)]
     pub match_commands: Vec<(PlayerId, Command)>,
 
+    /// Computer opponents (WP9.1a, `docs/rules/ai.md`): `(player: 0, profile: "normal.ron", seed: 1)` makes
+    /// player 0 an AI that thinks before every step the runner takes (`run::run`) and schedules its
+    /// commands under that player. `profile` is the name of an AI profile file in the `unit_defs`
+    /// directory (a frozen copy of `assets/ai/normal.ron`, checked against that directory's definitions
+    /// when the scenario is loaded); the player's faction and the start sites come from `match_file`, so
+    /// both are needed. The AI observes through the fog and sends no command yet (WP9.1a). Left out: no
+    /// AI, which is every scenario of the earlier phases.
+    #[serde(default)]
+    pub ai: Vec<AiSpec>,
+    /// The AIs made from `ai` by [`Scenario::load`], ascending by player. Not part of the file.
+    #[serde(skip)]
+    pub ais: Vec<sf_ai::Ai>,
+
     /// A recorded game (WP1.16a, `docs/rules/hitch_log.md`): the world is the one `sf_game --match`
     /// makes, from the assets named here and the settings compiled into this build, instead of the
     /// rule fields above, which must all be left out. The world is taken after its first tick (the
@@ -290,6 +304,18 @@ pub struct Scenario {
     /// commands are part of the checksum. Left out: none.
     #[serde(default)]
     pub recorded: Vec<RecordedCommand>,
+}
+
+/// One computer opponent of a scenario (`ai`).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiSpec {
+    /// The player it plays: a player of the match file.
+    pub player: u8,
+    /// The profile file in the `unit_defs` directory, for example `"normal.ron"`.
+    pub profile: String,
+    /// The seed of its random numbers (decimal or `0x` hex).
+    pub seed: u64,
 }
 
 /// The ore rules of a scenario (`sf_sim::OreRules`).
@@ -1093,6 +1119,7 @@ impl Scenario {
         }
         if let (Some(dir), Some(file)) = (scenario.unit_defs.clone(), scenario.match_file.clone()) {
             scenario.load_match(&dir, &file, path)?;
+            scenario.load_ais(&dir, path)?;
         }
         if let Some(game) = scenario.game.clone() {
             scenario.game_loaded = Some(game::load_game(
@@ -1135,6 +1162,49 @@ impl Scenario {
             .map_err(|e| invalid(e.to_string()))?;
         self.match_commands = sf_bridge::match_commands(&def, &defs).map_err(invalid)?;
         self.match_def = Some(def);
+        Ok(())
+    }
+
+    /// Makes the AIs of `ai`: reads each profile from the `unit_defs` directory `dir`, checks it against
+    /// that directory's definitions and resolves it for the faction the match file gives the player.
+    fn load_ais(&mut self, dir: &str, scenario_file: &Path) -> Result<(), ScenarioError> {
+        if self.ai.is_empty() {
+            return Ok(());
+        }
+        let invalid = |problem: String| ScenarioError::Invalid {
+            path: Some(scenario_file.to_path_buf()),
+            problems: vec![format!("ai: {problem}")],
+        };
+        let scenarios = scenario_file.parent().unwrap_or(Path::new(""));
+        let defs = UnitDefs::load(&scenarios.join(dir), &scenarios.join(".."))
+            .map_err(|e| invalid(e.to_string()))?;
+        let Some(def) = &self.match_def else {
+            return Err(invalid("needs `match_file`".into()));
+        };
+        let sites = sf_ai::start_sites(def, &defs);
+        let mut ais = Vec::new();
+        for spec in &self.ai {
+            let at = format!("player {} ({})", spec.player, spec.profile);
+            let faction = def
+                .players
+                .iter()
+                .find(|p| p.id == spec.player)
+                .map(|p| p.faction)
+                .ok_or_else(|| invalid(format!("{at}: the match file has no such player")))?;
+            let text = std::fs::read_to_string(scenarios.join(dir).join(&spec.profile))
+                .map_err(|e| invalid(format!("{at}: {e}")))?;
+            let profile = AiProfile::from_ron(&text).map_err(|e| invalid(format!("{at}: {e}")))?;
+            let profile = sf_ai::Profile::resolve(&profile, faction, &defs)
+                .map_err(|e| invalid(format!("{at}: {e}")))?;
+            ais.push(sf_ai::Ai::new(
+                PlayerId(spec.player),
+                profile,
+                spec.seed,
+                sites.clone(),
+            ));
+        }
+        ais.sort_by_key(sf_ai::Ai::player);
+        self.ais = ais;
         Ok(())
     }
 
@@ -1182,6 +1252,7 @@ impl Scenario {
                 ("map_name", self.map_name.is_some()),
                 ("unit_defs", self.unit_defs.is_some()),
                 ("match_file", self.match_file.is_some()),
+                ("ai", !self.ai.is_empty()),
                 ("buildings", self.buildings),
                 ("combat", self.combat),
                 ("targeting", self.targeting),
@@ -1469,6 +1540,30 @@ impl Scenario {
                     "match_file gives the starting credits: `money.starting` must be left empty"
                         .to_string(),
                 );
+            }
+        }
+
+        if !self.ai.is_empty() {
+            if self.match_file.is_none() {
+                p.push(
+                    "ai needs `match_file` (the faction of the player and the start sites come from it)"
+                        .to_string(),
+                );
+            }
+            let mut seen = Vec::new();
+            for (i, a) in self.ai.iter().enumerate() {
+                if seen.contains(&a.player) {
+                    p.push(format!("ai[{i}]: player {} has two AIs", a.player));
+                }
+                seen.push(a.player);
+                if let Err(e) = sf_data::map::check_file_name("ai profile", &a.profile) {
+                    p.push(format!("ai[{i}]: {e}"));
+                } else if a.profile.contains('/') {
+                    p.push(format!(
+                        "ai[{i}]: profile \"{}\" must be the name of one file in the unit_defs directory, without '/'",
+                        a.profile
+                    ));
+                }
             }
         }
 

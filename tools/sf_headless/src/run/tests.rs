@@ -96,6 +96,26 @@ fn a_different_seed_gives_a_different_world() {
     );
 }
 
+/// The summary count of commands includes the commands of a record, which are handed to the world while it
+/// runs, not scheduled before tick 0 (WP1.16a). Leaving `scenario.recorded` out of the count in `run_full`
+/// makes this fail: 40 spawns + 2 recorded = 42, not 40.
+#[test]
+fn recorded_commands_count_as_scheduled() {
+    let s = crowd(
+        ", recorded: [(arrived: 2, tick: 3, player: 0, command: Despawn(id: (0, 0))), \
+         (arrived: 5, tick: 6, player: 1, command: Despawn(id: (1, 0)))]",
+    );
+    let o = run(&s, &opts(30, 30)).unwrap();
+    assert_eq!(o.commands_scheduled, 42);
+    // Both ran: 40 spawns and the two despawns.
+    assert_eq!(o.commands_executed, 42);
+    assert_eq!(o.commands_ignored, 0);
+    assert_eq!(o.entities, 38);
+    // Without the record the count is the 40 spawns.
+    let plain = crowd("");
+    assert_eq!(run(&plain, &opts(30, 30)).unwrap().commands_scheduled, 40);
+}
+
 #[test]
 fn counts_commands() {
     let s = crowd(

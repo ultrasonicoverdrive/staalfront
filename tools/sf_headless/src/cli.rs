@@ -186,6 +186,7 @@ fn summary(outcome: &Outcome, scenario_path: &str, host: &Host) -> String {
          commands:   {} scheduled, {} executed, {} ignored\n\
          initial:    {}\n\
          final:      {}\n\
+         {}\
          speed:      {} ticks/s ({} ms)\n",
         outcome.scenario,
         log::hex(outcome.seed),
@@ -197,6 +198,15 @@ fn summary(outcome: &Outcome, scenario_path: &str, host: &Host) -> String {
         outcome.commands_ignored,
         log::hex(outcome.initial_checksum),
         log::hex(outcome.final_checksum),
+        outcome
+            .ai_digests
+            .iter()
+            .map(|(player, digest)| format!(
+                "{:<12}{}\n",
+                format!("ai {player}:"),
+                log::hex(*digest)
+            ))
+            .collect::<String>(),
         host.ticks_per_second(outcome.ticks),
         host.elapsed_micros / 1_000,
     )
