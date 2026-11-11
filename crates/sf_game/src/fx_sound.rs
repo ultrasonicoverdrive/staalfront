@@ -1045,9 +1045,13 @@ mod tests {
         std::fs::create_dir_all(root.0.join("config")).unwrap();
         let text = sf_audio::config::EMBEDDED_CONFIG
             .replace("sfx_volume: 1.0", "sfx_volume: 0.5")
-            .replace("music_volume: 0.6", "music_volume: 0.35")
-            .replace("        voice_volume: Some(1.0),\n", "")
-            .replace("        master_volume: 1.0,\n", "");
+            .replace("music_volume: 0.6", "music_volume: 0.35");
+        // Drop the two lines whole, whatever the line endings of the checkout are (CRLF on Windows).
+        let text: String = text
+            .lines()
+            .filter(|l| !l.contains("voice_volume: Some") && !l.contains("master_volume: 1.0"))
+            .flat_map(|l| [l, "\n"])
+            .collect();
         assert!(!text.contains("voice_volume: Some") && !text.contains("master_volume: 1.0"));
         std::fs::write(root.0.join("config/audio.ron"), text).unwrap();
         let mut audio = tracing_audio(&root.0);
