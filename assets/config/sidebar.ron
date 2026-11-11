@@ -20,7 +20,8 @@
 
     money_height_px: 26,
     power_height_px: 16,
-    // The row of two mode buttons under the power bar (WP6.6): Repair and Sell. Click one and a left
+    // The row of buttons under the power bar: Repair and Sell (WP6.6) and the repeat toggle of the
+    // factory of the open tab (WP6.10, `words.repeat`). Click one and a left
     // click on one of your structures repairs or sells it; right click, Esc or the button again leaves.
     tool_height_px: 24,
     tool_labels: ("Repair", "Sell"),
@@ -70,6 +71,10 @@
         low_power: "low power",
         needs: "needs",
         nothing: "Nothing to build",
+        // The repeat button next to Repair and Sell (WP6.10), and the sign on an item of a factory
+        // that repeats.
+        repeat: "Loop",
+        repeating: "loop",
     ),
 
     colors: (

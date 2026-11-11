@@ -2019,6 +2019,7 @@ impl World {
             | Command::QueueUnit { .. }
             | Command::CancelUnit { .. }
             | Command::SetRally { .. }
+            | Command::SetRepeat { .. }
             | Command::Repair { .. }
             | Command::Sell { .. } => false,
             Command::Despawn { id } => self.despawn(id),

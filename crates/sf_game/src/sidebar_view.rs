@@ -153,6 +153,11 @@ pub fn frame(
                     Button::Left => Action::ToggleMode(mode),
                     Button::Right => Action::LeaveMode,
                 }),
+                // The repeat button (WP6.10): a left click flips the repeat of the factory of the
+                // open tab; dim and silent while that tab has no factory.
+                Some(Hit::Repeat) if button == Button::Left => {
+                    actions.extend(model.repeat.map(|r| Action::Send(r.click())));
+                }
                 _ => {}
             }
         }
@@ -243,6 +248,27 @@ fn draw_tools(
         };
         centered(ui, rect, labels[mode.index()], px, color(text));
     }
+    // The repeat button (WP6.10), lit while the factory of the open tab repeats.
+    let rect = lay.repeat;
+    let live = model.repeat.is_some();
+    let on = model.repeat.is_some_and(|r| r.on);
+    let hovered = live && cursor.is_some_and(|(x, y)| rect.contains(x, y));
+    let back = if on {
+        c.tool_active
+    } else if hovered {
+        c.tool_hover
+    } else {
+        c.tool
+    };
+    ui.fill(rect, color(back));
+    let text = if !live {
+        c.tab_empty_text
+    } else if on {
+        c.tile_back
+    } else {
+        c.text
+    };
+    centered(ui, rect, &look.words.repeat, px, color(text));
 }
 
 fn draw_tabs(
@@ -364,6 +390,20 @@ fn draw_tile(
             &text,
             small,
             color(c.text),
+        );
+    }
+    // The loop sign (WP6.10) on an item of a factory that repeats, top left.
+    if item.repeating {
+        let text = &look.words.repeating;
+        let (w, h) = ui.measure_px(text, small);
+        let badge = Rect::new(picture.x, picture.y, w + 2.0 * pad, h + pad);
+        ui.fill(badge, color(c.tool_active));
+        ui.text_px_at(
+            badge.x + pad,
+            badge.y + (pad * 0.5).round(),
+            text,
+            small,
+            color(c.tile_back),
         );
     }
     // The strip under the picture: the price left, why it waits right.

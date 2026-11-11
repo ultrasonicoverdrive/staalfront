@@ -147,6 +147,17 @@ pub enum Command {
         /// The rally cell.
         cell: Option<Cell>,
     },
+    /// Switch the repeat of the factory on or off (WP6.10, `docs/rules/production.md`). With
+    /// repeat on, a unit that comes out of the factory goes back at the end of its queue, at zero
+    /// progress, if it would be accepted as a new [`Command::QueueUnit`]. Refused (and reported as
+    /// the other production commands are) for anything that is not a standing factory of the
+    /// sender's.
+    SetRepeat {
+        /// The factory.
+        factory: EntityId,
+        /// True to repeat, false to let the queue run out.
+        on: bool,
+    },
     /// Start (`on`) or stop repairing the structure (WP6.6, `docs/rules/repair_sell.md`). The owner
     /// is the player who sent the command, who must own the structure. A refusal is reported
     /// ([`World::repair_rejections`](crate::World::repair_rejections)) and counts as ignored: not

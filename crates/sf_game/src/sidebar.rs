@@ -433,6 +433,8 @@ pub struct Item {
     /// A unit: the place in that queue a right-click takes out (the last of its kind; free items
     /// cannot be taken out).
     pub cancel_index: Option<u8>,
+    /// Some of it is queued at a factory that repeats (WP6.10): it shows the loop sign.
+    pub repeating: bool,
 }
 
 /// A mouse button on the sidebar.
@@ -529,6 +531,7 @@ fn item(e: &Entry, sit: &Situation) -> Item {
         low_power: false,
         factory: None,
         cancel_index: None,
+        repeating: false,
     };
     match e.factory {
         None => {
@@ -553,6 +556,7 @@ fn item(e: &Entry, sit: &Situation) -> Item {
             };
             let queued = view.queue.iter().filter(|q| q.kind == e.kind).count();
             it.count = u8::try_from(queued).unwrap_or(u8::MAX);
+            it.repeating = view.repeat && queued > 0;
             it.cancel_index = view
                 .queue
                 .iter()
@@ -643,6 +647,28 @@ pub struct SidebarModel {
     /// The Repair and Sell buttons (WP6.6): `None` while the world has no repair and sale rules (the
     /// buttons are drawn dim and do nothing), else the mode that is on.
     pub tools: Option<Tools>,
+    /// The repeat button (WP6.10): `None` while the open tab has no factory of the player (the
+    /// button is drawn dim and does nothing), else the factory it acts on and whether it repeats.
+    pub repeat: Option<RepeatButton>,
+}
+
+/// The repeat button of the open tab (WP6.10): the primary factory of the tab and its state.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct RepeatButton {
+    /// The factory a click switches.
+    pub factory: EntityId,
+    /// Whether it repeats now.
+    pub on: bool,
+}
+
+impl RepeatButton {
+    /// What a left click on the button asks: the command that flips the state.
+    pub fn click(self) -> Command {
+        Command::SetRepeat {
+            factory: self.factory,
+            on: !self.on,
+        }
+    }
 }
 
 /// The state of the Repair and Sell buttons.
@@ -705,6 +731,12 @@ pub fn model(
         chosen,
         power,
         tools: None,
+        repeat: factory_of_tab(tab)
+            .and_then(|function| sit.primary(function))
+            .map(|f| RepeatButton {
+                factory: f.id,
+                on: f.view.as_ref().is_some_and(|v| v.repeat),
+            }),
     }
 }
 

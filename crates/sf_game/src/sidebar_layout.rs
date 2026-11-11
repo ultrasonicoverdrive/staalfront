@@ -24,6 +24,8 @@ pub struct Layout {
     pub power: Rect,
     /// The Repair and Sell buttons (WP6.6), in [`ToolMode::ALL`] order, side by side under the power bar.
     pub tools: [Rect; 2],
+    /// The repeat button (WP6.10), right of the Sell button in the same row.
+    pub repeat: Rect,
     /// The four tabs, in [`Tab::ALL`] order.
     pub tabs: [Rect; 4],
     /// The grid of items.
@@ -43,6 +45,8 @@ pub struct Layout {
 pub enum Hit {
     /// A Repair or Sell button.
     Tool(ToolMode),
+    /// The repeat button (WP6.10).
+    Repeat,
     /// A tab.
     Tab(Tab),
     /// The item with this index in the tab's list (scrolling already taken into account).
@@ -91,11 +95,12 @@ pub fn layout(
     y += power.h + gap;
 
     let tool_h = px(look.tool_height_px, scale);
-    let tool_w = ((inner_w - gap) / 2.0).floor();
+    let tool_w = ((inner_w - 2.0 * gap) / 3.0).floor();
     let mut tools = [Rect::default(); 2];
     for (i, tool) in tools.iter_mut().enumerate() {
         *tool = Rect::new(inner_x + i as f32 * (tool_w + gap), y, tool_w, tool_h);
     }
+    let repeat = Rect::new(inner_x + 2.0 * (tool_w + gap), y, tool_w, tool_h);
     y += tool_h + gap;
 
     let tab_columns = usize::from(look.tab_columns);
@@ -128,6 +133,7 @@ pub fn layout(
         money,
         power,
         tools,
+        repeat,
         tabs,
         area: Rect::new(inner_x, y, inner_w, area_h),
         tile: (tile_w, tile_h),
@@ -159,6 +165,9 @@ impl Layout {
     pub fn hit(&self, x: f32, y: f32, scroll: usize, items: usize) -> Option<Hit> {
         if !self.column.contains(x, y) {
             return None;
+        }
+        if self.repeat.contains(x, y) {
+            return Some(Hit::Repeat);
         }
         if let Some(i) = self.tools.iter().position(|t| t.contains(x, y)) {
             return Some(Hit::Tool(ToolMode::ALL[i]));
