@@ -385,7 +385,7 @@ pub fn render_recording(
     let mut out = String::new();
     out.push_str(
         "// A recorded game (sf_game --match --record, WP1.16a): replay it with\n\
-         //   sf_headless --scenario THIS_FILE\n\
+         //   sf_headless THIS_FILE\n\
          // It is made for the build that wrote it (the rules are the ones compiled into that build, see\n\
          // docs/rules/hitch_log.md, \"The command record\").\n",
     );

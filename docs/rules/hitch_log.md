@@ -88,8 +88,12 @@ Scenario(
   when the world has run `arrived` ticks (`Scenario::arrivals`, used by `run::run`), not before tick 0 as it does for `commands`. Without
   it the checksums differ (`the_arrival_tick_is_what_makes_the_checksums_equal`). A command that arrived after the last tick is not written.
 * Replay: `sf_headless FILE [--every 1 --out log.json]`. The test `tests/record_replay.rs` of `sf_game` plays 7,000 ticks of M1 on the
-  game's sim thread (the production world builders, `SimHandle::send`), writes the record with the production writer, loads it with
+  game's sim thread (the production world builders, `SimHandle::send`; the pinned `match` script decides the match, the human wins), writes the record with the production writer, loads it with
   `sf_headless` and compares the checksum at every tick (`a_recorded_match_replays_to_the_same_checksum_at_every_tick`).
+* `game.assets` is the absolute path of the machine that wrote the record (for example `C:/...` on the laptop); `GameSpec` also takes
+  a path relative to the record file. To replay a record on another machine, set `assets` to that machine's `assets/` (absolute, or
+  relative to where the record lies) and use a build with the same rules.
+* The summary's `scheduled` count includes the recorded commands (`commands_scheduled` = scheduled before tick 0 + `recorded`).
 * A restart from the menu ends the record of that game: it is written to `FILE` with `.restartN` before the extension, and the new game
   is recorded under `FILE`.
 * `--replay` is not tick-exact: the game's sim has its own clock and the commands are sent a tick ahead of the snapshot, like a player's.

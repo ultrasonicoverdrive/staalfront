@@ -3,7 +3,7 @@
 //! The sim thread keeps every command it was handed with the tick it actually ran at and the tick the
 //! world had reached when it got it ([`crate::sim_thread::SimConfig::record_commands`]); at the end of
 //! the play this module writes them as an `sf_headless` scenario, so that
-//! `sf_headless --scenario FILE` runs the same match without a window, for a profiler. The file
+//! `sf_headless FILE` runs the same match without a window, for a profiler. The file
 //! format, with the `game` block and the exact values, is defined in `sf_headless::scenario`
 //! (`exact.rs`); `docs/rules/hitch_log.md` ("The command record") describes it.
 //!

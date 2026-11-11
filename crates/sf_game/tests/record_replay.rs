@@ -55,37 +55,27 @@ fn script() -> Vec<(u64, PlayerId, Command)> {
         .filter(|(tick, ..)| tick.0 >= 1)
         .map(|(tick, player, command)| (tick.0, player, command.clone()))
         .collect();
-    // Orders to a spot a click would give: not the middle of a cell.
-    let army: Vec<EntityId> = [15, 16, 17, 19, 20, 21]
-        .map(|i| EntityId::new(i, 0))
-        .to_vec();
+    // Orders to a spot a click would give: not the middle of a cell. They go to the first three tanks
+    // while they wait at the rally point, before the script's attack-move of tick 2400 replaces them, so
+    // the scripted attack is left intact and the match is decided by the script itself.
+    let army: Vec<EntityId> = [15, 16, 17].map(|i| EntityId::new(i, 0)).to_vec();
     let odd = |x: i64, y: i64| Vec2::new(Fx::from_raw(x), Fx::from_raw(y));
     list.push((
-        2_600,
+        2_000,
         PlayerId(0),
         Command::Order {
             ids: army.clone(),
-            order: Order::Move(odd(66 * 65_536 + 12_345, 22 * 65_536 + 54_321)),
+            order: Order::Move(odd(36 * 65_536 + 12_345, 58 * 65_536 + 54_321)),
             queued: false,
         },
     ));
     list.push((
-        2_650,
+        2_050,
         PlayerId(0),
         Command::Order {
             ids: army,
-            order: Order::AttackMove(odd(70 * 65_536 + 1, 20 * 65_536 + 65_535)),
+            order: Order::AttackMove(odd(35 * 65_536 + 1, 60 * 65_536 + 65_535)),
             queued: true,
-        },
-    ));
-    // With today's definitions the army of that script no longer wins by itself (the opponent's defenders
-    // kill it; measured: no human unit but the harvester is left at tick 7000). The match is ended by
-    // taking the opponent's construction centre (slot 11) away, so the record covers the decided state.
-    list.push((
-        6_500,
-        PlayerId(0),
-        Command::Despawn {
-            id: EntityId::new(11, 0),
         },
     ));
     list.sort_by_key(|(tick, ..)| *tick);
@@ -182,7 +172,7 @@ fn mismatches(scenario: &Scenario, exit: &SimExit) -> Vec<u64> {
 fn a_recorded_match_replays_to_the_same_checksum_at_every_tick() {
     let ticks = 7_000;
     let (exit, cells, result) = play(ticks);
-    // The match was played to its end: the opponent's centre fell (the script's last command) and the human won.
+    // The match was played to its end: the script's attack took the opponent's centre and the human won.
     let result = result.expect("the match is decided within the play");
     assert_eq!(result.verdict, sf_sim::Verdict::Won(PlayerId(0)));
     println!("the match was won at tick {}", result.tick.0);
@@ -207,9 +197,7 @@ fn a_recorded_match_replays_to_the_same_checksum_at_every_tick() {
         .collect();
     assert_eq!(
         kinds,
-        ["build", "order", "other", "queue", "rally"]
-            .into_iter()
-            .collect()
+        ["build", "order", "queue", "rally"].into_iter().collect()
     );
     assert_eq!(scenario.recorded.len(), exit.commands.len());
 
@@ -252,11 +240,11 @@ fn the_arrival_tick_is_what_makes_the_checksums_equal() {
 /// middle is in the record as the raw numbers, and a record with that spot moved by one bit differs.
 #[test]
 fn fixed_point_positions_are_recorded_exactly() {
-    let (exit, cells, _) = play(2_700);
+    let (exit, cells, _) = play(2_100);
     let scratch = Scratch::new("exact");
     let path = write_record(&exit, cells, &scratch.0, "play.ron");
     let text = std::fs::read_to_string(&path).unwrap();
-    let want = format!("Move(({},{}))", 66 * 65_536 + 12_345, 22 * 65_536 + 54_321);
+    let want = format!("Move(({},{}))", 36 * 65_536 + 12_345, 58 * 65_536 + 54_321);
     assert!(text.contains(&want), "{want} is not in the record");
     let mut scenario = Scenario::load(&path).unwrap();
     assert!(mismatches(&scenario, &exit).is_empty());
@@ -271,7 +259,7 @@ fn fixed_point_positions_are_recorded_exactly() {
             _ => None,
         })
         .expect("the odd move is in the record");
-    assert_eq!(*moved, (66 * 65_536 + 12_345, 22 * 65_536 + 54_321));
+    assert_eq!(*moved, (36 * 65_536 + 12_345, 58 * 65_536 + 54_321));
     moved.0 += 1;
     assert!(
         !mismatches(&scenario, &exit).is_empty(),
