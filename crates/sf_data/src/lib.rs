@@ -13,6 +13,7 @@
 //! the settings of the simulation itself ([`sim_settings`], `sim.ron`): today the
 //! node budget of the path service.
 
+pub mod ai_profile;
 pub mod build_stages;
 pub mod damage;
 pub mod effects;
