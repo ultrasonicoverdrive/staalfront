@@ -59,7 +59,7 @@ mod tests {
     fn the_players_are_staggered_by_three_ticks() {
         for p in 0..4u8 {
             let first = (0..10).find(|&t| due(Tick(t), PlayerId(p), 10, 3)).unwrap();
-            // (tick + 3 p) % 10 == 0: player 0 at 0, player 1 at 7, player 2 at 4, player 3 at 1.
+            // (tick + 3 p) % 10 == 0: player 0 at 0, player 1 at 7, player 2 at 4, player 3 at 1 (mod 10).
             assert_eq!(first, [0, 7, 4, 1][usize::from(p)], "player {p}");
         }
     }

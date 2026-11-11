@@ -30,3 +30,20 @@ pub fn start_sites(def: &MatchDef, defs: &UnitDefs) -> Vec<(PlayerId, Cell)> {
     sites.sort();
     sites
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_start_sites_of_the_first_match_are_the_two_construction_centres() {
+        let sites = start_sites(&MatchDef::embedded(), &UnitDefs::embedded());
+        assert_eq!(
+            sites,
+            vec![
+                (PlayerId(0), Cell::new(12, 68)),
+                (PlayerId(1), Cell::new(72, 14))
+            ]
+        );
+    }
+}

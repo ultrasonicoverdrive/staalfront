@@ -86,3 +86,106 @@ impl Profile {
         h.finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolved(faction: Faction) -> Profile {
+        Profile::resolve(&AiProfile::embedded(), faction, &UnitDefs::embedded()).unwrap()
+    }
+
+    #[test]
+    fn the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions() {
+        // Both sides of the mapping: the role names of assets/ai/normal.ron and the kind numbers of
+        // unit_defs.ron (1 power_plant, 2 refinery, 3 barracks, 4 vehicle_factory, 5 radar,
+        // 6 defence_tower, 7 advanced_defences, 10 fortified_bunker; 12 rifleman, 13 rocket_trooper,
+        // 19 light_tank).
+        let defs = UnitDefs::embedded();
+        for (role, kind) in [
+            ("power_plant", 1),
+            ("refinery", 2),
+            ("barracks", 3),
+            ("vehicle_factory", 4),
+            ("radar", 5),
+            ("defence_tower", 6),
+            ("advanced_defences", 7),
+            ("fortified_bunker", 10),
+            ("rifleman", 12),
+            ("rocket_trooper", 13),
+            ("light_tank", 19),
+        ] {
+            assert_eq!(defs.kind_of(role), Some(kind), "{role}");
+        }
+        let pairs = |list: &[(Kind, u16)]| -> Vec<(u16, u16)> {
+            list.iter().map(|&(k, n)| (k.0, n)).collect()
+        };
+        let m = resolved(Faction::Meridian);
+        assert_eq!(
+            pairs(&m.build_order),
+            [
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (1, 2),
+                (4, 1),
+                (6, 1),
+                (2, 2),
+                (5, 1),
+                (6, 2),
+                (7, 1)
+            ]
+        );
+        assert_eq!(pairs(&m.unit_mix), [(12, 4), (13, 2), (19, 3)]);
+        // Veyran adds the fortified bunker after the first tower.
+        let v = resolved(Faction::Veyran);
+        assert_eq!(pairs(&v.build_order)[5..8], [(6, 1), (10, 1), (2, 2)]);
+        assert_eq!(v.build_order.len(), 11);
+    }
+
+    #[test]
+    fn the_numbers_come_through() {
+        let p = resolved(Faction::Meridian);
+        assert_eq!(
+            (p.name.as_str(), p.think_interval, p.stagger),
+            ("normal", 10, 3)
+        );
+        assert_eq!((p.economy.reserve, p.army.attack_value), (300, 3000));
+    }
+
+    #[test]
+    fn a_faction_without_a_section_is_an_error() {
+        let mut def = AiProfile::embedded();
+        def.factions.retain(|f| f.faction == Faction::Meridian);
+        let e = Profile::resolve(&def, Faction::Veyran, &UnitDefs::embedded()).unwrap_err();
+        assert!(e.contains("no section for Veyran"), "{e}");
+    }
+
+    #[test]
+    fn a_profile_that_fails_the_check_does_not_resolve() {
+        let mut def = AiProfile::embedded();
+        def.factions[0].build_order[0].0 = "no_such_role".to_string();
+        let e = Profile::resolve(&def, Faction::Meridian, &UnitDefs::embedded()).unwrap_err();
+        assert!(e.contains("no such role"), "{e}");
+    }
+
+    #[test]
+    fn the_digest_sees_every_number_and_list() {
+        let base = resolved(Faction::Meridian);
+        let digest = base.digest();
+        assert_eq!(digest, resolved(Faction::Meridian).digest());
+        assert_ne!(digest, resolved(Faction::Veyran).digest());
+        let mut p = base.clone();
+        p.economy.reserve += 1;
+        assert_ne!(digest, p.digest());
+        let mut p = base.clone();
+        p.army.gather_distance += 1;
+        assert_ne!(digest, p.digest());
+        let mut p = base.clone();
+        p.build_order.swap(0, 1);
+        assert_ne!(digest, p.digest());
+        let mut p = base;
+        p.unit_mix[0].1 += 1;
+        assert_ne!(digest, p.digest());
+    }
+}

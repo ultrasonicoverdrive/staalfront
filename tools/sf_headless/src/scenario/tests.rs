@@ -976,4 +976,49 @@ mod record {
         assert_eq!(pending, vec![1, 1, 2, 2]);
         assert_eq!(arrivals.remaining(), 0);
     }
+
+    fn ai_file(extra: &str, ai: &str) -> String {
+        format!("Scenario(seed: 1, map: (width: 16, height: 16), ticks: 10, {extra} ai: [{ai}])")
+    }
+
+    #[test]
+    fn an_ai_needs_a_match_file() {
+        let p = problems(&ai_file(
+            "",
+            "(player: 0, profile: \"normal.ron\", seed: 1)",
+        ));
+        assert!(has(&p, "ai needs `match_file`"), "{p:?}");
+    }
+
+    #[test]
+    fn an_ai_per_player_and_a_plain_file_name() {
+        let p = problems(&ai_file(
+            "",
+            "(player: 0, profile: \"normal.ron\", seed: 1), (player: 0, profile: \"normal.ron\", seed: 2)",
+        ));
+        assert!(has(&p, "ai[1]: player 0 has two AIs"), "{p:?}");
+        let p = problems(&ai_file("", "(player: 0, profile: \"a/b.ron\", seed: 1)"));
+        assert!(has(&p, "without '/'"), "{p:?}");
+        let p = problems(&ai_file("", "(player: 0, profile: \"../x.ron\", seed: 1)"));
+        assert!(has(&p, "ai[0]"), "{p:?}");
+    }
+
+    #[test]
+    fn an_ai_field_with_an_unknown_key_is_a_syntax_error() {
+        let text = ai_file(
+            "",
+            "(player: 0, profile: \"normal.ron\", seed: 1, level: 3)",
+        );
+        assert!(matches!(parse(&text), Err(ScenarioError::Syntax { .. })));
+    }
+
+    #[test]
+    fn the_game_block_takes_no_ai() {
+        let p = problems(&recorded_file(
+            "ai: [(player: 0, profile: \"normal.ron\", seed: 1)],",
+            "",
+            10,
+        ));
+        assert!(has(&p, "`ai` must be left out"), "{p:?}");
+    }
 }
