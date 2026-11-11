@@ -195,6 +195,7 @@ fn world_with(rules: Option<RepairRules>, credits: u64) -> World {
             ProductionRules {
                 queue_limit: 5,
                 exit_radius: 4,
+                build_speed: crate::BuildSpeed::FULL,
             },
             table,
         )

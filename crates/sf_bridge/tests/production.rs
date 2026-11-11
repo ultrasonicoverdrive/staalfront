@@ -2,11 +2,11 @@
 //! each one as itself, and the limits of the data file are the simulation's.
 
 use sf_bridge::{production_rules, production_table};
-use sf_data::production::{self, ProductionSettings};
+use sf_data::production::{self, BuildSpeedSetting, ProductionSettings};
 use sf_data::units::{
     DefFile, DefSources, EMBEDDED_CLASSES, EMBEDDED_UNITS, EMBEDDED_WEAPONS, UnitDefs,
 };
-use sf_sim::{BuildingFunction, Kind, ProductionRules, World, WorldConfig};
+use sf_sim::{BuildSpeed, BuildingFunction, Kind, ProductionRules, World, WorldConfig};
 
 fn repo() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -18,12 +18,14 @@ fn each_production_number_arrives_as_itself() {
     let settings = ProductionSettings {
         queue_limit: 7,
         exit_radius: 3,
+        build_speed: BuildSpeedSetting { num: 5, den: 4 },
     };
     assert_eq!(
         production_rules(&settings),
         ProductionRules {
             queue_limit: 7,
-            exit_radius: 3
+            exit_radius: 3,
+            build_speed: BuildSpeed { num: 5, den: 4 }
         }
     );
 }
@@ -136,7 +138,8 @@ fn the_shipped_production_reaches_the_world() {
         world.production_rules(),
         Some(ProductionRules {
             queue_limit: 5,
-            exit_radius: 4
+            exit_radius: 4,
+            build_speed: BuildSpeed { num: 3, den: 2 }
         })
     );
     assert_eq!(

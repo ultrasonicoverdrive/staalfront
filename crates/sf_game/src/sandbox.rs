@@ -92,18 +92,71 @@ pub fn faction_of_owner(owner: u8) -> Option<Faction> {
         .map(|side| side.faction)
 }
 
-/// Roles the sandbox leaves out: the ore silo is a proposal that waits for Tijmen (WP7.3b,
-/// `docs/rules/buildings.md`), and a sandbox base with one more structure moves where the units
-/// are put (the pinned formation tests of `formation_base.rs` and the bench would move with it).
-/// It joins the sandbox when its place in the tree is confirmed.
-const LEFT_OUT: [&str; 1] = ["ore_silo"];
-
-/// Whether `side` gets this role: its faction is among the role's, it is
-/// not a vessel and it is not left out ([`LEFT_OUT`]).
+/// Whether `side` gets this role: its faction is among the role's and it is not a vessel. (The ore
+/// silo joined the sandbox with WP6.11, once Tijmen had approved its place in the tree.)
 fn belongs_to(def: &UnitDef, side: &Side) -> bool {
-    def.category != Category::Vessel
-        && !LEFT_OUT.contains(&def.id.as_str())
-        && def.factions.contains(&side.faction)
+    def.category != Category::Vessel && def.factions.contains(&side.faction)
+}
+
+/// The role whose power the `--harvest` refinery adds to Meridian's base ([`start_harvest`]): the
+/// sandbox base keeps room for it in its power (WP6.11), so the demo does not fall into a shortage
+/// when the refinery is placed.
+const HARVEST_SPARE: &str = "refinery";
+
+/// The extra power plants a side's base gets so that it makes at least what it uses (WP6.11): the
+/// sandbox places one of every role, which uses far more power than the one plant makes. Returns the
+/// plant (the lowest kind of the side's faction with the power-plant function that can be built) and
+/// how many more copies of it the base needs: enough that the power made is at least the power used by
+/// the side's structures, with the `--harvest` spare ([`HARVEST_SPARE`]) counted for Meridian. `None`
+/// for a side that cannot build a plant (the neutral roles have power of their own) or needs none.
+fn extra_plants<'a>(defs: &'a UnitDefs, side: &Side) -> Option<(&'a UnitDef, u32)> {
+    let buildings = defs.sim_buildings();
+    let plant = defs
+        .units()
+        .iter()
+        .filter(|d| belongs_to(d, side))
+        .find(|d| {
+            buildings.iter().any(|b| {
+                b.kind == d.kind
+                    && b.function == sf_data::units::BuildingFunction::PowerPlant
+                    && b.cost.is_some()
+                    && b.power > 0
+            })
+        })?;
+    let power_of = |kind: u16| {
+        buildings
+            .iter()
+            .find(|b| b.kind == kind)
+            .map_or(0, |b| b.power)
+    };
+    let mut made: i64 = 0;
+    let mut used: i64 = 0;
+    for d in defs
+        .units()
+        .iter()
+        .filter(|d| belongs_to(d, side) && d.category == Category::Structure)
+    {
+        let p = i64::from(power_of(d.kind));
+        if p > 0 {
+            made += p;
+        } else {
+            used -= p;
+        }
+    }
+    if let Some(kind) = defs
+        .kind_of(HARVEST_SPARE)
+        .filter(|_| side.owner == MERIDIAN)
+    {
+        used -= i64::from(power_of(kind)).min(0);
+    }
+    let each = i64::from(power_of(plant.kind));
+    let missing = used - made;
+    (missing > 0).then(|| {
+        (
+            plant,
+            u32::try_from((missing + each - 1) / each).unwrap_or(0),
+        )
+    })
 }
 
 /// How many structures and units (and objects) the definitions give the
@@ -118,6 +171,7 @@ pub fn wanted(defs: &UnitDefs) -> (u32, u32) {
                 count.1 += 1;
             }
         }
+        count.0 += extra_plants(defs, side).map_or(0, |(_, n)| n);
     }
     count
 }
@@ -148,8 +202,12 @@ pub fn schedule(world: &mut World, defs: &UnitDefs) -> Plan {
         let front = (anchor.0 + side.toward * FRONT, anchor.1 + 2 + FRONT / 3);
         let roles = defs.units().iter().filter(|d| belongs_to(d, side));
         // Structures first, so units are placed around them; both in kind order.
-        let (structures, others): (Vec<&UnitDef>, Vec<&UnitDef>) =
+        let (mut structures, others): (Vec<&UnitDef>, Vec<&UnitDef>) =
             roles.partition(|d| d.category == Category::Structure);
+        // Enough power plants that the base makes what it uses (WP6.11).
+        if let Some((plant, n)) = extra_plants(defs, side) {
+            structures.extend((0..n).map(|_| plant));
+        }
         for def in structures {
             let footprint = defs.sim_unit(def.kind).and_then(|u| u.footprint);
             let spot = footprint.and_then(|(w, h)| find_structure(world, &taken, anchor, w, h));
@@ -532,5 +590,143 @@ mod tests {
                 assert!(!world.is_occupied(cell), "{} in a structure", v.kind.0);
             }
         }
+    }
+
+    /// The sandbox as `--harvest` runs it for power: unit, building, production and power rules.
+    fn powered_world() -> (World, UnitDefs) {
+        let (world, defs) = world_for(256, 1);
+        let world = crate::playfield::with_buildings(world, &defs);
+        let world = crate::playfield::with_production(world, &defs);
+        let world = crate::playfield::with_power(world);
+        (world, defs)
+    }
+
+    /// WP6.11: the demo base makes at least what it uses (it was 270 used of 100 made, a permanent
+    /// shortage), with room left for the refinery `--harvest` adds to Meridian's base.
+    #[test]
+    fn the_demo_base_makes_at_least_the_power_it_uses() {
+        let (mut world, defs) = powered_world();
+        schedule(&mut world, &defs);
+        // The sandbox places its structures complete (`PlaceStructure`), so a few ticks count the power.
+        for _ in 0..5 {
+            world.step();
+        }
+        let refinery = defs
+            .sim_buildings()
+            .iter()
+            .find(|b| Some(b.kind) == defs.kind_of("refinery"))
+            .unwrap()
+            .power;
+        for (owner, made, used) in [(MERIDIAN, 300, 250), (VEYRAN, 300, 250)] {
+            let t = world
+                .power_of(PlayerId(owner))
+                .expect("a side with structures");
+            assert_eq!((t.made, t.used), (made, used), "owner {owner}");
+            assert_eq!(world.power_speed_permille(PlayerId(owner)), 1000);
+        }
+        // The refinery `--harvest` adds still fits.
+        let t = world.power_of(PlayerId(MERIDIAN)).unwrap();
+        assert!(t.made >= t.used + u64::from(refinery.unsigned_abs()));
+    }
+
+    /// The silo (approved on 08-11-2026) is in the sandbox base of both sides that can build it.
+    #[test]
+    fn the_ore_silo_is_in_the_demo_base_of_both_sides() {
+        let (mut world, defs) = world_for(256, 1);
+        schedule(&mut world, &defs);
+        world.step();
+        let silo = Kind(defs.kind_of("ore_silo").unwrap());
+        for owner in [MERIDIAN, VEYRAN] {
+            let n = world
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == PlayerId(owner) && v.kind == silo)
+                .count();
+            assert_eq!(n, 1, "owner {owner}");
+        }
+    }
+
+    /// WP6.11: a silo shot to zero by a weapon (not sold, not set to zero by hand) stops adding room:
+    /// the capacity of its owner falls by what it stored, at the next sync after it is destroyed.
+    #[test]
+    fn a_silo_destroyed_by_damage_lowers_the_capacity() {
+        let (world, defs) = world_for(256, 1);
+        let world = crate::playfield::with_buildings(world, &defs);
+        let world = crate::playfield::with_harvest(world, &defs);
+        let world = crate::playfield::with_storage(world, &defs);
+        let mut world = crate::playfield::with_combat(world, &defs);
+        let plan = schedule(&mut world, &defs);
+        assert_eq!(plan.skipped, 0);
+        world.step();
+        let mut taken = Taken(BTreeSet::new());
+        let silo_kind = Kind(defs.kind_of("ore_silo").unwrap());
+        let silo = world
+            .snapshot()
+            .iter()
+            .find(|v| v.owner == PlayerId(MERIDIAN) && v.kind == silo_kind)
+            .map(|v| v.id)
+            .expect("Meridian's silo");
+        let before = world.storage_capacity(PlayerId(MERIDIAN));
+        let silo_stores = u64::from(
+            sf_bridge::storage_capacities(&defs)
+                .iter()
+                .find(|&&(k, _)| k == silo_kind)
+                .unwrap()
+                .1,
+        );
+        assert!(before > silo_stores, "the refinery stores too: {before}");
+        // Six Veyran heavy tanks beside the silo (the base's defences kill fewer than that), all sent
+        // at it.
+        let at = world.cell_of(silo).unwrap();
+        let tank = Kind(defs.kind_of("heavy_tank").unwrap());
+        for _ in 0..6 {
+            let spot = find_unit(&world, &taken, (at.x as i32 + 5, at.y as i32)).unwrap();
+            taken.0.insert(spot);
+            send(
+                &mut world,
+                VEYRAN,
+                Command::SpawnUnit {
+                    kind: tank,
+                    pos: Vec2::new(
+                        Fx::from_int(spot.0) + Fx::HALF,
+                        Fx::from_int(spot.1) + Fx::HALF,
+                    ),
+                    owner: PlayerId(VEYRAN),
+                },
+            );
+            world.step();
+        }
+        let tanks: Vec<_> = world
+            .snapshot()
+            .iter()
+            .filter(|v| v.owner == PlayerId(VEYRAN) && v.kind == tank)
+            .map(|v| v.id)
+            .collect();
+        assert!(tanks.len() >= 6, "the tanks stand: {}", tanks.len());
+        send(
+            &mut world,
+            VEYRAN,
+            Command::Order {
+                ids: tanks,
+                order: sf_sim::Order::Attack(silo),
+                queued: false,
+            },
+        );
+        let mut gone = None;
+        for _ in 0..4000 {
+            world.step();
+            if gone.is_none() && world.hp_of(silo).is_none() {
+                gone = Some(world.tick().0);
+            }
+            if gone.is_some() {
+                break;
+            }
+        }
+        assert!(gone.is_some(), "the silo was destroyed by the tank");
+        world.step();
+        assert_eq!(
+            world.storage_capacity(PlayerId(MERIDIAN)),
+            before - silo_stores
+        );
     }
 }

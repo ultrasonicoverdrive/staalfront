@@ -232,13 +232,16 @@ impl Scene {
         vec2_cells_to_metres(self.world.get(id).unwrap().pos)
     }
 
-    /// The screen position of an entity's ground point.
-    fn screen(&self, cam: &Camera, id: EntityId) -> [f32; 2] {
+    /// The screen position of an entity's ground point; `None` behind the camera.
+    fn try_screen(&self, cam: &Camera, id: EntityId) -> Option<[f32; 2]> {
         let [x, z] = self.metres(id);
         let y = self.ground.height(f64::from(x), f64::from(z)) as f32;
-        project_px(&cam.view_proj(), [x, y, z].into(), [W as f32, H as f32])
-            .expect("in front of the camera")
-            .0
+        project_px(&cam.view_proj(), [x, y, z].into(), [W as f32, H as f32]).map(|p| p.0)
+    }
+
+    /// The screen position of an entity's ground point.
+    fn screen(&self, cam: &Camera, id: EntityId) -> [f32; 2] {
+        self.try_screen(cam, id).expect("in front of the camera")
     }
 
     /// One frame as `sf_game` draws it: build the units, mark the selection
@@ -349,7 +352,9 @@ fn selected_models_get_rings_and_health_bars_and_the_others_do_not() {
         .collect();
     assert!(units.len() >= 6, "the sandbox has own units");
     // Look at the first few own units; select the first and the third.
-    let focus = scene.metres(units[2]);
+    // The camera is on the fourth unit (it was the third before WP6.11 re-laid the base: the
+    // denser base puts fewer units round the third in view, and this one shows enough of them).
+    let focus = scene.metres(units[3]);
     let cam = scene.camera(0.08, focus);
     let none = Selection::new(LOCAL_PLAYER);
     let (base, base_calls) = scene.shoot(&mut r, &cam, &none, None);
@@ -363,7 +368,10 @@ fn selected_models_get_rings_and_health_bars_and_the_others_do_not() {
 
     let mut checked = 0;
     for id in &units {
-        let p = scene.screen(&cam, *id);
+        // A unit of the denser base (WP6.11) may stand behind this close camera.
+        let Some(p) = scene.try_screen(&cam, *id) else {
+            continue;
+        };
         if !(80.0..(W as f32 - 80.0)).contains(&p[0]) || !(120.0..(H as f32 - 60.0)).contains(&p[1])
         {
             continue;
@@ -626,11 +634,11 @@ fn clicks_drags_and_double_clicks_pick_through_models_and_icons() {
     // The sandbox has one of each role: add two more light tanks of the local
     // player beside it, one at the far corner of the map, and one of the
     // enemy's right by them.
-    let first = scene.spawn("light_tank", MERIDIAN, (32, 40));
-    let same_a = scene.spawn("light_tank", MERIDIAN, (34, 40));
-    let same_b = scene.spawn("light_tank", MERIDIAN, (34, 42));
+    let first = scene.spawn("light_tank", MERIDIAN, (16, 40));
+    let same_a = scene.spawn("light_tank", MERIDIAN, (18, 40));
+    let same_b = scene.spawn("light_tank", MERIDIAN, (18, 42));
     let far = scene.spawn("light_tank", MERIDIAN, (3, 3));
-    let enemy = scene.spawn("light_tank", VEYRAN, (36, 42));
+    let enemy = scene.spawn("light_tank", VEYRAN, (20, 42));
     let wanted = [first, same_a, same_b];
     let local = Selection::new(LOCAL_PLAYER);
     let size = [W as f32, H as f32];

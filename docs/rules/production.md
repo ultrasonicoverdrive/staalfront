@@ -20,7 +20,39 @@ Work package WP6.5 (PLAN.md phase 6). Built before WP6.4 (power) by the orchestr
   matter of phase 15.
 * **Who**: the faction of the sender must be in the unit's `factions` (`WrongFaction`), and the factory
   must be the sender's own (`NotYours`).
-* **What it costs**: `cost` credits over `build_ticks` ticks (`build_seconds` x 20).
+* **What it costs**: `cost` credits over `build_ticks` ticks (`build_seconds` x 20, then the build speed
+  below).
+
+## Build speed (WP6.11)
+
+_Decision Tijmen 08-11-2026, after playing M1: everything builds 1.5 times faster, structures and units._
+
+* **One factor**, `build_speed: (num: 3, den: 2)` in `assets/config/production.ron`: an exact fraction, both
+  terms 1 to 100, the factor within 4 times faster or slower (`sf_data::production`, `sf_sim::BuildSpeed::is_valid`;
+  a file without the line means 1 / 1). It lives in `production.ron` because that file already holds the numbers of
+  how things are built (queue, exit) and reaches the world through the same call, `World::with_production`; it is
+  the one number for units *and* structures.
+* **Rounding rule.** A build of `B` ticks (from `build_seconds` x 20) takes `ceil(B * den / num)` ticks
+  (`BuildSpeed::ticks`): never less than the factor allows, and never zero for a build that has a time. At 3 / 2:
+  45 -> 30, 80 -> 54 (53.33), 14 -> 10 (9.33), 100 -> 67 (66.67), 1 -> 1, 0 -> 0
+  (`ticks_are_the_base_times_den_over_num_rounded_up`). Shipped: rifleman 100 -> 67, harvester 600 -> 400, power plant
+  300 -> 200, barracks 400 -> 267, refinery 800 -> 534, silo 240 -> 160 (`a_few_shipped_builds_in_ticks`).
+* **Where it is applied: once.** `World::with_production(rules, table)` scales the build ticks of the production table
+  *and* of the building table and takes their digests again; from then on every tick count in the sim (the progress
+  total, the payment per tick, the scaffold of `BuildStructure`, `construction_of().total`, the view's `front_ticks`) is
+  the scaled one and no other code knows the factor. A world **without** production rules (the earlier headless
+  scenarios without a `production` block, the bench scenes) keeps the data's own ticks; the headless
+  `production` block takes `build_speed: (num, den)` and leaves it out as `(1, 1)`.
+* **The money stays exact.** The price is not scaled; it is paid over the scaled ticks with the same rules as before
+  (`C*(k+1)/T - C*k/T` for a structure, `paid_at` for a unit). The sum over the ticks is the price for every
+  price, base time and factor tried (`the_money_adds_up_for_every_price_and_every_factor`: 8 factors x 8 prices x
+  8 times) and for every shipped unit and structure (`every_shipped_price_is_paid_exactly_in_the_scaled_ticks`);
+  a unit of 100 base ticks and 333 credits costs 333 in 67 ticks, a plant of 45 base ticks and 301 credits 301 in 30
+  (`units_are_built_in_the_scaled_ticks_and_cost_exactly_their_price`, `structures_are_built_in_the_scaled_ticks_and_cost_exactly_their_price`).
+* **Power on top.** The shortage speed (below) multiplies the scaled progress: a rifleman of 14 base ticks is 10 ticks
+  at 3 / 2 and 27 ticks in a shortage of 384 thousandths (`a_shortage_slows_the_build_speed_on_top_of_it`).
+* **1 / 1 is the old game.** At 1 / 1 the tables are the data's own (same digests), and every pin of every earlier
+  phase came back unchanged when the shipped file said 1 / 1 (workspace test run, below in the checksum section).
 
 ## Queues
 
@@ -95,6 +127,11 @@ spot. The free harvester gets no rally order (it finds its ore by itself). The p
 (`OffMap`) and the sender's own factory. A rally point stays when the queue is empty.
 
 ## Checksum (section `Y`)
+
+**WP6.11:** after `queue_limit` and `exit_radius`, the build speed in lowest terms (two `u32`, 3 and 2) is written
+**only when it is not 1 / 1**, so a world at the data's own build times hashes as before. The scaled tick counts are
+in the digests of the two tables. Two factors that scale every build of a world alike still hash differently
+(`the_factor_is_in_the_checksum`: 3 / 2 against 2 / 1 on a world of one-tick builds; 6 / 4 against 3 / 2 equal).
 
 Written last, after `M`, **only in a world given production rules** (`World::with_production`), so every
 earlier world hashes as before. It holds the rules (queue limit, exit radius), the table's digest, the

@@ -247,6 +247,24 @@ impl BuildingTable {
         BuildingTable::default()
     }
 
+    /// The same table with every build time scaled by `speed` (`BuildSpeed::ticks`, WP6.11) and
+    /// the digests taken again. Called once, by `World::with_production`.
+    pub(crate) fn with_build_speed(&self, speed: crate::production::BuildSpeed) -> BuildingTable {
+        if speed == crate::production::BuildSpeed::FULL {
+            return self.clone();
+        }
+        let stats = self
+            .stats
+            .iter()
+            .cloned()
+            .map(|mut s| {
+                s.build_ticks = speed.ticks(s.build_ticks);
+                s
+            })
+            .collect();
+        BuildingTable::new(stats).expect("scaling keeps a valid table valid")
+    }
+
     /// Checks `stats`, sorts them by kind and each `requires` list ascending:
     /// the order of the input does not matter, any order gives an equal table
     /// with an equal digest.

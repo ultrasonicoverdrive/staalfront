@@ -303,7 +303,7 @@ flowchart TD
 | shipyard | yes | yes | VesselFactory | +x | vehicle_factory | 1000 | 40 | -40 |
 | decoy_emplacement | **yes** | no | Decoy | | barracks | 150 | 8 | 0 |
 | fortified_bunker | no | **yes** | Defence | | barracks | 600 | 25 | 0 |
-| ore_silo _(proposed, waiting for Tijmen)_ | yes | yes | None (stores ore) | | refinery | 250 | 12 | -10 |
+| ore_silo _(approved 08-11-2026)_ | yes | yes | None (stores ore) | | refinery | 250 | 12 | -10 |
 
 The two factions share one tree and differ only in the last two rows: the Meridian decoy and the Veyran bunker
 hang on the shared barracks. The decoy needs only the barracks (decision orchestrator, review of PR #69) so
@@ -313,12 +313,12 @@ from the start (`f1_m05_can_build_the_decoy_from_its_starting_structures`). Foot
 `unmanned_artillery`) are Neutral, cannot be built and have no prerequisites; `automated_gun` and
 `unmanned_artillery` are `Defence`, `generator` is a `PowerPlant`, the rest `None`.
 
-### The ore silo (WP7.3b), proposed, waiting for Tijmen
+### The ore silo (WP7.3b), approved 08-11-2026
 
-The `ore_silo` is **not** in the approved tree above (its arrows and rows are unchanged); the last table row and
-this section are a proposal that Tijmen confirms or changes in the WP7.3b PR. It is built with the proposal so it
-can be played; moving it is a data edit (`requires`, `cost`, `build_seconds`, `power`, `footprint`, `storage` in
-`unit_defs.ron`) plus the literal row in `crates/sf_data/tests/buildings.rs` (`the_proposed_ore_silo_is_the_documented_one`).
+**Approved by Tijmen on 08-11-2026 ("requires refinery"), recorded in WP6.11.** It is part of the tree now; the other
+rows and arrows above were not touched. It was built with the proposal (WP7.3b) so it could be played, and the sandbox
+leaves it out no more (`sandbox::LEFT_OUT` is gone, `the_ore_silo_is_in_the_demo_base_of_both_sides`). Moving it is a data edit (`requires`, `cost`, `build_seconds`, `power`, `footprint`, `storage` in
+`unit_defs.ron`) plus the literal row in `crates/sf_data/tests/buildings.rs` (`the_approved_ore_silo_is_the_documented_one`).
 
 * **Place:** `requires: ["refinery"]`. The silo adds room to a store that only exists once ore comes in, so it
   makes no sense before a refinery stands. Both factions, no other prerequisite; nothing in the approved tree

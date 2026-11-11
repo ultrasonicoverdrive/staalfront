@@ -49,6 +49,61 @@ pub const MAX_QUEUE_LIMIT: u8 = 20;
 /// The widest search for a free spot, in cells round the exit cell (`exit_radius`).
 pub const MAX_EXIT_RADIUS: u8 = 8;
 
+/// How much faster than the build times of the data everything is built (WP6.11): the exact
+/// fraction `num / den`, so 3 / 2 builds one and a half times as fast. It covers units and
+/// structures alike. [`World::with_production`] applies it once, to the production table and the
+/// building table, so every later tick count (progress, payment, the construction scaffold) is the
+/// scaled one. Integers only; the rounding rule is [`BuildSpeed::ticks`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BuildSpeed {
+    /// Numerator, `1..=`[`MAX_BUILD_SPEED_TERM`].
+    pub num: u32,
+    /// Denominator, `1..=`[`MAX_BUILD_SPEED_TERM`].
+    pub den: u32,
+}
+
+/// The largest numerator or denominator of a [`BuildSpeed`].
+pub const MAX_BUILD_SPEED_TERM: u32 = 100;
+/// The factor may speed building up or slow it down by at most this many times.
+pub const MAX_BUILD_SPEED_RATIO: u32 = 4;
+
+impl BuildSpeed {
+    /// No change: 1 / 1, the build times as the data gives them.
+    pub const FULL: BuildSpeed = BuildSpeed { num: 1, den: 1 };
+
+    /// Whether both terms are in `1..=`[`MAX_BUILD_SPEED_TERM`] and the factor lies within
+    /// `1 / MAX_BUILD_SPEED_RATIO ..= MAX_BUILD_SPEED_RATIO`.
+    pub const fn is_valid(self) -> bool {
+        self.num >= 1
+            && self.den >= 1
+            && self.num <= MAX_BUILD_SPEED_TERM
+            && self.den <= MAX_BUILD_SPEED_TERM
+            && self.num <= MAX_BUILD_SPEED_RATIO * self.den
+            && self.den <= MAX_BUILD_SPEED_RATIO * self.num
+    }
+
+    /// The ticks a build of `base` ticks takes at this speed: `base * den / num` **rounded up**,
+    /// so a build never takes less than the factor allows and a build of at least one tick still
+    /// takes at least one. Zero stays zero (a thing that cannot be built). At 1 / 1 it is `base`.
+    pub fn ticks(self, base: u32) -> u32 {
+        let n = u64::from(base) * u64::from(self.den);
+        let d = u64::from(self.num.max(1));
+        u32::try_from(n.div_ceil(d)).unwrap_or(u32::MAX)
+    }
+
+    /// The fraction in lowest terms (6 / 4 is 3 / 2).
+    fn reduced(self) -> (u32, u32) {
+        let (mut a, mut b) = (self.num, self.den);
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        // The terms of a valid factor are above zero, so `a` is too; `max(1)` keeps an invalid
+        // one from dividing by zero.
+        let g = a.max(1);
+        (self.num / g, self.den / g)
+    }
+}
+
 /// The tuning numbers of production, from `assets/config/production.ron`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ProductionRules {
@@ -57,6 +112,8 @@ pub struct ProductionRules {
     /// How far, in cells (chessboard distance), from the exit cell a finished unit looks for a
     /// free spot: 1 to [`MAX_EXIT_RADIUS`].
     pub exit_radius: u8,
+    /// How much faster everything is built than the data's build times (WP6.11).
+    pub build_speed: BuildSpeed,
 }
 
 impl ProductionRules {
@@ -66,6 +123,7 @@ impl ProductionRules {
             && self.queue_limit <= MAX_QUEUE_LIMIT
             && self.exit_radius >= 1
             && self.exit_radius <= MAX_EXIT_RADIUS
+            && self.build_speed.is_valid()
     }
 }
 
@@ -205,6 +263,20 @@ impl ProductionTable {
             comes_with,
             digest,
         })
+    }
+
+    /// The same table with every build time scaled by `speed` ([`BuildSpeed::ticks`]) and the
+    /// digest taken again. Called once, by [`World::with_production`].
+    fn with_build_speed(mut self, speed: BuildSpeed) -> ProductionTable {
+        if speed == BuildSpeed::FULL {
+            return self;
+        }
+        let comes_with = core::mem::take(&mut self.comes_with);
+        for b in &mut self.builds {
+            b.build_ticks = speed.ticks(b.build_ticks);
+        }
+        ProductionTable::new(core::mem::take(&mut self.builds), comes_with)
+            .expect("scaling keeps a valid table valid")
     }
 
     /// The entry of unit kind `kind`.
@@ -412,6 +484,13 @@ impl Production {
     pub(crate) fn write_hash(&self, h: &mut Fnv1a64) {
         h.write_u8(self.rules.queue_limit);
         h.write_u8(self.rules.exit_radius);
+        // The factor, in lowest terms, only when it is not 1 / 1: a world at the data's own build
+        // times hashes as it did before WP6.11. The scaled tick counts are in the table digests.
+        let (num, den) = self.rules.build_speed.reduced();
+        if (num, den) != (1, 1) {
+            h.write_u32(num);
+            h.write_u32(den);
+        }
         h.write_u64(self.table.digest());
         h.write_u64(self.factories.len() as u64);
         for f in &self.factories {
@@ -489,6 +568,9 @@ impl World {
         {
             return Err(ConfigError::Production);
         }
+        // The build speed (WP6.11) is applied here, once: both tables keep only scaled tick counts.
+        let table = table.with_build_speed(rules.build_speed);
+        self.buildings = self.buildings.with_build_speed(rules.build_speed);
         self.production = Some(Box::new(Production {
             rules,
             table,
@@ -1017,6 +1099,7 @@ mod tests {
                 ProductionRules {
                     queue_limit: 3,
                     exit_radius: 2,
+                    build_speed: BuildSpeed::FULL,
                 },
                 table,
             )

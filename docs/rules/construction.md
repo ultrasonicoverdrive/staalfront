@@ -17,7 +17,9 @@ unit, every object and every structure placed with `PlaceStructure` has (a missi
 sandbox, a scenario's start state: `a_pre_placed_structure_starts_complete`). `BuildStructure` sets it to the
 structure's `build_ticks` in the tick it places it (`World::apply_from`).
 
-The total is not stored: it is the building table's `build_ticks`, which is already hashed (section `B`).
+The total is not stored: it is the building table's `build_ticks`, which is already hashed (section `B`). **Since
+WP6.11** the table a world with production rules holds has the ticks scaled by the build speed (`production.md`, "Build
+speed": shipped 3 / 2, so a power plant of 15 s goes up in 200 ticks, not 300), and `BuildStructure` sets `build_left` to that.
 `World::construction_of(id)` answers `Construction { left, total }` (`permille()` = progress in thousandths,
 rounded down, never 1000 while it is going up) or `None` for a complete structure.
 
@@ -146,7 +148,7 @@ Screenshots with the tick in the name: `docs/screenshots/wp6.3/` (`build_screens
   Rate of build is the table's `build_ticks` at full speed; **since WP6.4 a power shortage slows it** (`power.md`): the structure
   advances on `speed` ticks of every thousand (`tick * speed / 1000` steps up), pays the same `C * (k + 1) / T - C * k / T` on a tick it
   advances and nothing on the others, so the price is still paid exactly. Without power rules (every world of the earlier phases) it
-  is the table's `build_ticks` alone.
+  is the table's `build_ticks` alone (scaled by the build speed in a world with production rules, WP6.11).
 * A structure under construction is not repaired or sold (WP6.6: both are refused, `UnderConstruction`; `repair_sell.md`), and it cannot be cancelled.
 * Hit points do not rise with progress (above).
 * No sound or voice for "construction complete" (a hook: `World::completions()`).

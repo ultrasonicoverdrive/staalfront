@@ -13,4 +13,12 @@
     // distance, each row by row from the north-west (1 to 8). If every cell in reach is blocked the
     // unit waits inside and the queue holds. 4 cells is a square of 9 by 9 round the exit.
     exit_radius: 4,
+    // How much faster than the build times of unit_defs.ron (`build_seconds`) everything is built,
+    // units and structures alike (WP6.11, decision Tijmen 08-11-2026 after playing M1): the exact
+    // fraction num / den, each 1 to 100, within 4 times faster or slower. 3 / 2 is one and a half
+    // times as fast. A build of B ticks takes B * den / num ticks rounded up, and still costs
+    // exactly its price in all (docs/rules/production.md). It lives here, with the other numbers
+    // of how things are built, and is applied to the building table and the production table
+    // when the world gets its production rules. 1 / 1 gives the data's own build times.
+    build_speed: (num: 3, den: 2),
 )
