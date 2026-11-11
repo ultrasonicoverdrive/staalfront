@@ -432,7 +432,7 @@ fn the_catalogue_times_are_the_scaled_ticks_the_world_counts() {
         .unwrap()
         .with_units(sf_bridge::unit_table(&defs).unwrap())
         .unwrap();
-    let world = crate::playfield::with_buildings(world, &defs);
+    let world = with_storage(with_harvest(with_buildings(world, &defs), &defs), &defs);
     let world = crate::playfield::with_production(crate::playfield::with_money(world), &defs);
     let speed = crate::playfield::shipped_build_speed();
     let catalog = Catalog::build(&defs, Faction::Meridian, &SidebarLook::embedded(), speed);

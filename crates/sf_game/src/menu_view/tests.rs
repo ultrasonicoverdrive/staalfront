@@ -75,6 +75,7 @@ fn controls(model: &Model, lay: &Layout) -> Vec<(Rect, Item)> {
                     .controls
                     .iter()
                     .zip(controls)
+                    .filter(|(_, c)| !c.blank)
                     .map(|(r, c)| (*r, c.item)),
             );
         }

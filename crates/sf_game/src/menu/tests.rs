@@ -224,7 +224,7 @@ fn the_tabs_switch_the_page_and_the_sound_page_has_its_controls() {
     // but the music.
     let shown = |label: &str| texts(row(&sound, label)).join(" ");
     assert_eq!(shown("Master"), "- 100% + Test");
-    assert_eq!(shown("Music"), "- 60% +");
+    assert_eq!(shown("Music"), "- 60% + ");
     // The music row keeps the place of the test button, empty and dead, so it lines up.
     let music = row(&sound, "Music");
     assert_eq!(music.len(), 4);
