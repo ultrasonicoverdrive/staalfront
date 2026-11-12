@@ -47,7 +47,7 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected")
 /// threat and attack state (at its start values: the threat rule is off with the managers). Measured: with
 /// those left out of `Profile::digest` and `AiState::digest` the WP9.1c-1 digests of all seven frozen
 /// scenarios come back.
-const AI_DIGEST: u64 = 0xa64a_9f8d_cca2_e6af;
+const AI_DIGEST: u64 = 0xb2d3_2130_3984_abad;
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);

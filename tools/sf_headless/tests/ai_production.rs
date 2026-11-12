@@ -34,7 +34,7 @@ const SCOUT_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_scout.ex
 /// `Ai::digest` of player 0 at the end of `ai_scout`. Re-pinned by WP9.1c-2 with the checksum (was
 /// `0xf2be53002209e2f6`, digest `0x584e_81c7_938e_7859`): the army now attacks; measured by
 /// `the_ai_scout_repin_of_wp9_1c_2_is_the_attack`.
-const SCOUT_DIGEST: u64 = 0xb120_89bc_36f9_09d9;
+const SCOUT_DIGEST: u64 = 0x6d29_cd88_97b3_0178;
 
 /// The kinds of the frozen definitions (`ai_scout_defs/unit_defs.ron`).
 const CENTRE: Kind = Kind(0);

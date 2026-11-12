@@ -228,7 +228,11 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
     let mut used: Vec<EntityId> = Vec::new();
     // The army floor: what the army is worth, this turn's orders added as they go.
     let floor = u64::from(state.profile.army.army_floor_value);
-    let floor_on = state.attacks_launched == 0 || state.directive.posture == Posture::Defend;
+    // Decision of 12-11-2026 (fix round 1): before the first attack only until `max_wait`, so the floor can never
+    // hold the goal list past it outside a defence.
+    let floor_on = (state.attacks_launched == 0
+        && obs.tick.0 < u64::from(state.profile.army.max_wait))
+        || state.directive.posture == Posture::Defend;
     let mut worth = army_value(state, obs, lens);
     // At most one order per factory per turn, so at most one per factory function in this loop's passes.
     loop {

@@ -66,6 +66,7 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     let live = |id: &EntityId| obs.own.binary_search_by_key(id, |o| o.id).is_ok();
     state.sent.retain(|id, _| live(id));
     state.attackers.retain(live);
+    state.recalled.retain(live);
     if let Some(gather) = gather {
         let home = decide(state, obs, lens, gather);
         let budget = ARMY_COMMANDS_PER_TURN.saturating_sub(out.len() - before);
@@ -175,9 +176,14 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
         state.threat = Some((at, now));
         state.defend_since.get_or_insert(now);
         if anchor && !state.attackers.is_empty() {
-            // The construction centre is the match: the attack is called back.
-            state.attackers.clear();
+            // The construction centre is the match: the attack is called back. The former attackers get the
+            // defence order once whatever their order is (a wave on its `AttackMove` too): `recalled`.
+            let back = std::mem::take(&mut state.attackers);
+            state.recalled.extend(back);
+            state.recalled.sort();
+            state.recalled.dedup();
             state.attack_target = None;
+            state.target_hp = None;
         }
         state.directive = Directive {
             posture: Posture::Defend,
@@ -190,6 +196,7 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
     {
         state.threat = None;
         state.defend_since = None;
+        state.recalled.clear();
         state.directive = match state.attack_target {
             Some(t) if !state.attackers.is_empty() => Directive {
                 posture: Posture::Attack,
@@ -369,8 +376,30 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
         {
             state.attack_started = now;
         }
+        // At the target: the structure being finished must keep losing hit points, else the attack ends after
+        // `attack_patience` too (units that stand there and cannot kill it).
+        let near = tgt.is_some_and(|t| {
+            obs.own.iter().any(|o| {
+                state.attackers.binary_search(&o.id).is_ok()
+                    && cheb(o.cell, t) <= u32::from(a.arrive_radius)
+            })
+        });
+        let victim = tgt
+            .filter(|_| near)
+            .and_then(|t| finishing_target(state, obs, lens, t))
+            .and_then(|id| obs.visible.iter().find(|s| s.id == id).map(|s| (id, s.hp)));
+        state.target_hp = match (victim, state.target_hp) {
+            (Some((id, hp)), Some((old, seen, since))) if id == old && hp >= seen => {
+                Some((old, seen, since))
+            }
+            (Some((id, hp)), _) => Some((id, hp, now)),
+            (None, _) => None,
+        };
+        let stuck = state
+            .target_hp
+            .is_some_and(|(_, _, since)| now.0 >= since.0 + u64::from(a.attack_patience));
         let patience_out = now.0 >= state.attack_started.0 + u64::from(a.attack_patience);
-        if tgt.is_none() || patience_out {
+        if tgt.is_none() || patience_out || stuck {
             let home = std::mem::take(&mut state.attackers);
             end_attack(state);
             return home;
@@ -414,6 +443,7 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
 fn end_attack(state: &mut AiState) {
     state.attackers.clear();
     state.attack_target = None;
+    state.target_hp = None;
     if state.threat.is_none() {
         state.directive = Directive::default();
     }
@@ -430,6 +460,15 @@ fn orderable(state: &AiState, o: &Own, now: sf_sim::Tick, since: Option<sf_sim::
         Order::Move(_) => since.is_some_and(|s| last.is_none_or(|t| t < s)),
         _ => false,
     }
+}
+
+/// Whether `o` was not ordered within `resend_ticks`.
+fn resent_ok(state: &AiState, o: &Own, now: sf_sim::Tick) -> bool {
+    let resend = u64::from(state.profile.army.resend_ticks);
+    state
+        .sent
+        .get(&o.id)
+        .is_none_or(|&(t, _)| now.0 >= t.0 + resend)
 }
 
 /// Step (4): the directive turned into orders, at most `budget` commands: the defence (`AttackMove` to the
@@ -474,10 +513,17 @@ pub fn operations_minimal(
                 is_army(state.scout, lens, o) && state.attackers.binary_search(&o.id).is_err()
             })
             .filter(|o| !(o.order == Order::Idle && cheb(o.cell, cell) <= arrive))
-            .filter(|o| orderable(state, o, now, state.defend_since))
+            .filter(|o| {
+                orderable(state, o, now, state.defend_since)
+                    || (state.recalled.binary_search(&o.id).is_ok() && resent_ok(state, o, now))
+            })
             .map(|o| o.id)
             .collect();
-        send(state, out, ids, Order::AttackMove(middle(cell)));
+        let before = out.len();
+        send(state, out, ids.clone(), Order::AttackMove(middle(cell)));
+        if out.len() > before {
+            state.recalled.retain(|id| ids.binary_search(id).is_err());
+        }
     }
     // The attack: march, then finish.
     if let Some(t) = state.attack_target

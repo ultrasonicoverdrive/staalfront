@@ -158,6 +158,12 @@ pub struct AiState {
     pub attack_started: Tick,
     /// How many attacks went out in the match.
     pub attacks_launched: u32,
+    /// Fix round 1: the structure the attackers at the target finish, its hit points when last seen to drop
+    /// and that tick; the attack ends when they have not dropped for `attack_patience`.
+    pub target_hp: Option<(EntityId, u32, Tick)>,
+    /// Fix round 1: former attackers called back by a hit on the construction centre that have not had the
+    /// defence order yet, ascending; they get it whatever their order is.
+    pub recalled: Vec<EntityId>,
     /// The other players whose start site the AI has seen empty (no construction centre on its cell),
     /// ascending.
     pub sites_cleared: Vec<PlayerId>,
@@ -237,6 +243,8 @@ impl AiState {
             last_attack_tick: Tick(0),
             attack_started: Tick(0),
             attacks_launched: 0,
+            target_hp: None,
+            recalled: Vec::new(),
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
         }
@@ -419,6 +427,21 @@ impl AiState {
         h.write_u64(self.last_attack_tick.0);
         h.write_u64(self.attack_started.0);
         h.write_u32(self.attacks_launched);
+        match self.target_hp {
+            Some((id, hp, t)) => {
+                h.write_u8(1);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+                h.write_u32(hp);
+                h.write_u64(t.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.recalled.len() as u32);
+        for id in &self.recalled {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+        }
         h.write_u32(self.sites_cleared.len() as u32);
         for p in &self.sites_cleared {
             h.write_u8(p.0);
@@ -503,6 +526,9 @@ mod tests {
         s.last_attack_tick = Tick(1200);
         s.attack_started = Tick(1300);
         s.attacks_launched = 1;
+        s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1450)));
+        s.recalled.push(EntityId::new(22, 0));
+        s.recalled.push(EntityId::new(23, 1));
         s.sites_cleared.push(PlayerId(1));
         s.sites_cleared.push(PlayerId(2));
         s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
@@ -514,7 +540,7 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0x9118_1c76_578f_6f1f);
+        assert_eq!(base_state().digest(), 0x7b3d_17f7_7965_7857);
     }
 
     #[test]
@@ -621,7 +647,13 @@ mod tests {
     #[test]
     fn every_part_of_the_threat_and_attack_state_moves_the_digest() {
         let d = base_state().digest();
-        let changes: [fn(&mut AiState); 24] = [
+        let changes: [fn(&mut AiState); 30] = [
+            |s| s.target_hp = None,
+            |s| s.target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
+            |s| s.target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),
+            |s| s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1451))),
+            |s| s.recalled.reverse(),
+            |s| s.recalled.clear(),
             |s| {
                 s.hp_seen.remove(&EntityId::new(0, 0));
             },

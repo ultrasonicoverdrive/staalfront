@@ -688,7 +688,7 @@ once the match is decided).
 New in `AiState`, hashed after the scout state in this order: `hp_seen: BTreeMap<EntityId, (Kind, Cell, u32)>`, `threat: Option<(Cell, Tick)>`,
 `defend_since: Option<Tick>`, `directive` (posture number, target cell), `attackers: Vec<EntityId>` (ascending), `attack_target: Option<Cell>`,
 `last_attack_tick`, `attack_started`, `attacks_launched: u32`, `sites_cleared: Vec<PlayerId>` (ascending), then `sent` as before (now the tick of
-any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x91181c76578f6f1f`, two entries in every
+any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x7b3d17f779657857`, two entries in every
 map and list) and `every_part_of_the_threat_and_attack_state_moves_the_digest` (24 changes, the posture numbers 0, 1, 2 as literals).
 
 New profile numbers, with serde defaults so that every frozen profile still reads: `arrive_radius` 6 (1 to 32), `attack_patience` 2,400 (1 to
@@ -700,7 +700,7 @@ production they had). Changed in `normal.ron`: `defend_ticks` 200 → 400, `max_
 
 **`ai_vs_passive`** (`assets/scenarios/ai_vs_passive.ron`, `ai_vs_passive_defs/`: frozen copies of the shipped definitions and of
 `normal.ron` as this WP leaves it, and a match file with m1's static opponent exactly as `m1.ron` lists it). 16,000 ticks (T2). Checksum
-`0x3b5a509e49e43343`, AI digest `0x89eef52a8ef2c614`. Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
+`0x3b5a509e49e43343`, AI digest `0x1c77ff82b6f4ab36`. Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
 
 | Wave | Launched | Units | Value | Survivors | Ended |
 |---|---|---|---|---|---|
@@ -714,7 +714,7 @@ the second wave's `AttackMove` fights the centre on its own (the rule has its ow
 
 **`ai_raid`** (`ai_raid.ron`, `ai_raid_defs/`: the definitions and profile of `ai_vs_passive_defs`, the match file of `ai_scout`): at tick 4,001
 the script puts three riflemen of player 1 west of the AI's base and orders them to attack its first power plant. 5,600 ticks (before the
-first attack at `max_wait`). Checksum `0x7b8f040e80571984`, AI digest `0x34c5afbb20cf5694`. Measured and pinned
+first attack at `max_wait`). Checksum `0x7b8f040e80571984`, AI digest `0x7934cfb90be5288e`. Measured and pinned
 (`a_raid_is_answered_within_one_think_...`): first hit 4,022, posture `Defend` from the think at 4,030 (within one think), the eleven army units
 ordered with one `AttackMove` at 4,030 (within 40 ticks), last hit 4,582, the raiders dead at 4,587, back to `Gather` at 4,990 (`defend_ticks`
 after the last hit, at the next think), and no `AttackMove` or `Attack` after that: the only order left is the gather `Move` back.
@@ -755,7 +755,7 @@ assert is 100 us per turn (release).
   of `AiState::digest`, the WP9.1c-1 digests of all seven come back (`0xacb2c8e5fb876451`, `0x4dd11cc733dd4b46`, `0x94e97ccd07405cba`,
   `0x5b7d1adaf26aa90f`, `0xf94be57bd5f168e4`, `0xdf9bfa7c2721ec51`, `0x3cba4a139131b094` for `ai_fog`, `ai_base`, `ai_noore`, `ai_boxed`,
   `ai_economy`, `ai_rebuild`, `ai_deadlock`).
-* **`ai_scout`** (9.1c-1's own scenario): checksum `0xf2be53002209e2f6` → `0xd6a5c9b3d0bf4aa4`, digest → `0xb12089bc36f909d9`. Its frozen
+* **`ai_scout`** (9.1c-1's own scenario): checksum `0xf2be53002209e2f6` → `0xd6a5c9b3d0bf4aa4`, digest → `0x6d29cd8897b30178`. Its frozen
   profile is left as it is (no floor by default; its attack numbers 3,000 / 3,600 / 4 / 2,400 now act): the army attacks the lone centre. Measured
   (`the_ai_scout_repin_of_wp9_1c_2_is_the_attack`): with the trigger made unreachable the old checksum comes back. Consequences in its tests:
   the army at the gather cell at 20,000 is 4 (was 10), and without a scout the AI learns where the centre stands when the first attack arrives
