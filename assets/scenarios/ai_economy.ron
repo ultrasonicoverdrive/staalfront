@@ -1,0 +1,69 @@
+// The AI's economy (WP9.1b-2, docs/rules/ai.md, "The economy"): player 0 (Meridian) is the AI with a
+// construction centre and 4000 credits on the first match's map (`assets/maps/m1`); player 1 (Veyran) is a lone
+// static construction centre. Its profile (`ai_economy_defs/normal.ron`, a frozen copy of the profile of
+// `ai_base_defs` with a goal list of four: power plant, refinery, barracks, vehicle factory) is short on purpose,
+// so the economy turn is what acts for most of the 12,000 ticks: it buys a harvester when the vehicle factory
+// stands (tick 2000), builds one ore silo when the store has been 90 percent full for two economy turns after
+// the goal list is done (tick 6610), and replaces a lost harvester.
+//
+// The ore is richer than the shipped one (160 per cell, regrowth 8 per 40 ticks) so that the harvesters never run
+// dry. Everything else (harvest, storage, money, production, power, vision) is `ai_base`'s, written out.
+//
+// The script, by entity id (slots are handed out in the order things appear: 0 the AI's centre, 1 player 1's
+// centre, 2 the first power plant, 3 the refinery, 4 the harvester that comes free with the refinery):
+//   tick 8001   Despawn Id(4, 0): that free harvester is lost. The AI orders a replacement at its next economy
+//               turn (tick 8040; tools/sf_headless/tests/ai_economy.rs checks the tick and that only one is ordered).
+// `unit_defs` names the FROZEN copy `ai_economy_defs`, so editing the shipped definitions or profile never moves
+// this checksum or the AI digest.
+Scenario(
+    name: "ai_economy",
+    seed: 0xA1_BA5E,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("ai_economy_defs"),
+    match_file: Some("match.ron"),
+    ai: [(player: 0, profile: "normal.ron", seed: 0xA1_0001)],
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 160, max: 160, regrow_amount: 8, regrow_period: 40)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 2000), (43, 1500)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
+    ticks: 12000,
+    commands: [
+        (tick: 8001, player: 1, command: Despawn(ids: [Id(4, 0)])),
+    ],
+)
