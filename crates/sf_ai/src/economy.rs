@@ -46,12 +46,12 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
 }
 
 /// Whether the own structure `o` is complete: it stands and is not going up.
-fn complete(o: &Own) -> bool {
+pub(crate) fn complete(o: &Own) -> bool {
     o.footprint.is_some() && o.standing && o.building.is_none() && !o.selling
 }
 
 /// The function of the table entry of `o`'s kind.
-fn function_of(lens: &Lens<'_>, o: &Own) -> Option<BuildingFunction> {
+pub(crate) fn function_of(lens: &Lens<'_>, o: &Own) -> Option<BuildingFunction> {
     lens.building(o.kind).map(|b| b.function)
 }
 
@@ -101,6 +101,35 @@ fn harvester_order(obs: &Observation, lens: &Lens<'_>) -> Option<(Kind, EntityId
             .min_by_key(|o| o.factory.as_ref().map_or(0, |f| f.queue.len()))
             .map(|o| (kind, o.id))
     })
+}
+
+/// Whether the economy turn would still buy a harvester: fewer than wanted (own harvesters plus harvester
+/// items in queues against standing docks times `harvesters_per_refinery`), a factory to make it, the map has
+/// ore ground and the kind is not blocked. Production leaves the money alone while this holds (WP9.1c-1):
+/// the harvester comes first.
+pub fn harvester_wanted(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> bool {
+    let kinds = lens.harvester_kinds();
+    let queued = obs
+        .own
+        .iter()
+        .filter_map(|o| o.factory.as_ref())
+        .flat_map(|f| f.queue.iter())
+        .filter(|(k, _)| kinds.contains(k))
+        .count();
+    let units = obs
+        .own
+        .iter()
+        .filter(|o| o.footprint.is_none() && kinds.contains(&o.kind))
+        .count();
+    let docks = obs
+        .own
+        .iter()
+        .filter(|o| complete(o) && function_of(lens, o) == Some(BuildingFunction::HarvesterDock))
+        .count();
+    let want = docks * usize::from(state.profile.economy.harvesters_per_refinery);
+    units + queued < want
+        && lens.has_ore_ground()
+        && harvester_order(obs, lens).is_some_and(|(kind, _)| !blocked(state, kind, obs.tick))
 }
 
 fn harvesters(
@@ -193,11 +222,7 @@ fn silo(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
     let Some(kind) = silo_kind(lens) else {
         return;
     };
-    let goal_open = state
-        .profile
-        .build_order
-        .iter()
-        .any(|&(k, count)| base::have(obs, k) < usize::from(count));
+    let goal_open = base::goal_open(state, obs);
     let docks = obs
         .own
         .iter()

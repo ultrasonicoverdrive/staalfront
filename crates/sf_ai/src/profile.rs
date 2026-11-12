@@ -23,6 +23,8 @@ pub struct Profile {
     pub build_order: Vec<(Kind, u16)>,
     /// `(kind, weight)`: the share of the army each kind aims at.
     pub unit_mix: Vec<(Kind, u16)>,
+    /// WP9.1c-1: the kind of the scout; `None`: no scout.
+    pub scout: Option<Kind>,
 }
 
 impl Profile {
@@ -51,7 +53,22 @@ impl Profile {
             army: def.army,
             build_order: kinds(&plan.build_order)?,
             unit_mix: kinds(&plan.unit_mix)?,
+            scout: match &plan.scout {
+                Some(role) => Some(
+                    defs.kind_of(role)
+                        .map(Kind)
+                        .ok_or_else(|| format!("no role \"{role}\""))?,
+                ),
+                None => None,
+            },
         })
+    }
+
+    /// Whether the production and army managers have anything to do: a unit mix or a scout. A profile with
+    /// neither (the frozen profiles of the WP9.1b scenarios) leaves them off, so no rally point is set and no
+    /// unit is ordered.
+    pub fn makes_units(&self) -> bool {
+        !self.unit_mix.is_empty() || self.scout.is_some()
     }
 
     /// A hash of everything in the profile.
@@ -70,6 +87,7 @@ impl Profile {
         h.write_u32(e.blocked_ticks);
         h.write_u32(e.placement_cap);
         h.write_u8(e.lane);
+        h.write_u8(e.max_queue);
         for (width, depth) in [e.refinery_apron, e.factory_apron] {
             h.write_u8(width);
             h.write_u8(depth);
@@ -81,12 +99,27 @@ impl Profile {
         h.write_u32(a.first_attack_tick);
         h.write_u32(a.defend_ticks);
         h.write_u8(a.gather_distance);
+        h.write_u8(a.gather_radius);
+        h.write_u8(a.gather_group);
+        h.write_u8(a.gather_tries);
+        h.write_u32(a.resend_ticks);
+        h.write_u8(a.scouts_max);
+        h.write_u32(a.scout_tick);
+        h.write_u32(a.scout_patience);
+        h.write_u32(a.scout_retry);
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
                 h.write_u32(u32::from(kind.0));
                 h.write_u32(u32::from(*n));
             }
+        }
+        match self.scout {
+            Some(kind) => {
+                h.write_u8(1);
+                h.write_u32(u32::from(kind.0));
+            }
+            None => h.write_u8(0),
         }
         h.finish()
     }
@@ -175,6 +208,22 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_makes_units_when_it_has_a_mix_or_a_scout() {
+        let base = resolved(Faction::Meridian);
+        assert!(base.makes_units());
+        let mut p = base.clone();
+        p.scout = None;
+        assert!(p.makes_units());
+        p.unit_mix.clear();
+        assert!(!p.makes_units());
+        let mut p = base;
+        p.unit_mix.clear();
+        assert!(p.makes_units());
+        // The scout of the shipped profile is kind 15 (unit_defs.ron).
+        assert_eq!(p.scout, Some(Kind(15)));
+    }
+
+    #[test]
     fn the_digest_sees_every_number_and_list() {
         let base = resolved(Faction::Meridian);
         let digest = base.digest();
@@ -194,6 +243,27 @@ mod tests {
         assert_ne!(digest, p.digest());
         let mut p = base.clone();
         p.army.gather_distance += 1;
+        assert_ne!(digest, p.digest());
+        // WP9.1c-1: every new number and the scout.
+        let changes: [fn(&mut Profile); 10] = [
+            |p| p.economy.max_queue += 1,
+            |p| p.army.gather_radius += 1,
+            |p| p.army.gather_group += 1,
+            |p| p.army.gather_tries += 1,
+            |p| p.army.resend_ticks += 1,
+            |p| p.army.scouts_max += 1,
+            |p| p.army.scout_tick += 1,
+            |p| p.army.scout_patience += 1,
+            |p| p.army.scout_retry += 1,
+            |p| p.scout = None,
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut p = base.clone();
+            change(&mut p);
+            assert_ne!(digest, p.digest(), "change {i}");
+        }
+        let mut p = base.clone();
+        p.scout = Some(Kind(16));
         assert_ne!(digest, p.digest());
         let mut p = base.clone();
         p.build_order.swap(0, 1);

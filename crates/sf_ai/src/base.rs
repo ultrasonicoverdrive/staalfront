@@ -154,6 +154,44 @@ fn choose(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Kind> {
         .map(|&(kind, _)| kind)
 }
 
+/// Whether a goal entry is open: some `(kind, count)` of the list has fewer than `count` standing or going
+/// up, blocked or not (WP9.1c-1: the silo rule and the production money rule read the same test).
+pub fn goal_open(state: &AiState, obs: &Observation) -> bool {
+    state
+        .profile
+        .build_order
+        .iter()
+        .any(|&(k, count)| have(obs, k) < usize::from(count))
+}
+
+/// What the construction turn would build now, before the money question: the choice and the power rule
+/// (steps (3) and (4)). `None` when nothing is chosen (the list is done, or every open entry is blocked
+/// or waits for a prerequisite).
+pub fn next_build(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Kind> {
+    let chosen = choose(state, obs, lens)?;
+    Some(power_first(
+        state,
+        obs,
+        lens,
+        chosen,
+        nominal_power(obs, lens),
+    ))
+}
+
+/// What the construction turn saves before it starts `kind`: its price, or what the store can hold when that
+/// is less (the cap of step (5)).
+pub fn saving_for(state: &AiState, obs: &Observation, lens: &Lens<'_>, kind: Kind) -> u64 {
+    let cost = lens
+        .building(kind)
+        .and_then(|b| b.cost)
+        .map_or(0, u64::from);
+    if obs.storage_capacity > 0 {
+        cost.min(obs.storage_capacity * u64::from(state.profile.economy.silo_percent) / 100)
+    } else {
+        cost
+    }
+}
+
 /// `(made, used)` by the table: the `power` of every own structure standing or going up, a producer at
 /// its full number whatever its damage. `None` in a game without power rules.
 fn nominal_power(obs: &Observation, lens: &Lens<'_>) -> Option<(u64, u64)> {
@@ -256,10 +294,7 @@ fn affordable(
     let cost = u64::from(b.cost.unwrap_or(0));
     let free = budget::free(obs, lens);
     // The full price, or what the store can hold when that is less.
-    let mut need = cost;
-    if obs.storage_capacity > 0 {
-        need = need.min(obs.storage_capacity * u64::from(state.profile.economy.silo_percent) / 100);
-    }
+    let need = saving_for(state, obs, lens, kind);
     if free < need {
         return false;
     }

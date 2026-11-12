@@ -172,15 +172,20 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
     assert!(p.think_max_micros <= p.think_micros);
     let ai: Vec<_> = p.exit.commands.iter().filter(|c| c.player == AI).collect();
     assert!(!ai.is_empty(), "the AI sent commands");
-    // The human sent none, and the AI sent only what its managers may send: builds, harvesters to queue,
-    // repairs and (once per match, in a deadlock) a sale. Production and army send nothing yet.
+    // The human sent none, and the AI sent only what its managers may send (`sf_ai`'s whitelist since
+    // WP9.1c-1): builds, units to queue, rally points, repairs, (once per match, in a deadlock) a sale and a
+    // plain `Move` of units (the scout and the gathering army); no attack.
     assert!(p.exit.commands.iter().all(|c| c.player == AI));
     assert!(ai.iter().all(|c| matches!(
         c.command,
         sf_sim::Command::BuildStructure { .. }
             | sf_sim::Command::QueueUnit { .. }
+            | sf_sim::Command::SetRally { .. }
             | sf_sim::Command::Repair { .. }
             | sf_sim::Command::Sell { .. }
+    ) || matches!(
+        &c.command,
+        sf_sim::Command::Order { order: sf_sim::Order::Move(_), queued: false, ids } if !ids.is_empty()
     )));
     // Every command was scheduled for the tick about to run, in the tick the AI was due: before the step.
     let reference = game(&ai_file()).2.remove(0);
@@ -199,7 +204,8 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
     // The opening of the goal list: the power plant first, then the refinery.
     let builds = builds_of(&p.exit, AI);
     assert!(builds.len() >= 2, "{builds:?}");
-    // Think 0 (tick 7) is the economy manager's turn, a stub; think 1 (tick 17) the construction manager's.
+    // Think 0 (tick 7) is the economy manager's turn (no refinery yet, nothing to send); think 1 (tick 17) the
+    // construction manager's.
     assert_eq!(
         builds[0].0, 17,
         "the first build of the goal list: {builds:?}"
@@ -221,7 +227,25 @@ fn the_ai_builds_its_base_in_the_game() {
     };
     let builds_sent = sent(|c| matches!(c, sf_sim::Command::BuildStructure { .. }));
     let queued = sent(|c| matches!(c, sf_sim::Command::QueueUnit { .. }));
-    println!("tick 4000: {builds_sent} builds, {queued} units queued by the AI");
+    // The commands the whitelist above allows are also really sent: the barracks gets its rally point and the
+    // scout is ordered to its first leg (a plain `Move`) within these 4000 ticks.
+    let rallies = sent(|c| matches!(c, sf_sim::Command::SetRally { .. }));
+    let moves = sent(|c| {
+        matches!(
+            c,
+            sf_sim::Command::Order {
+                order: sf_sim::Order::Move(_),
+                ..
+            }
+        )
+    });
+    println!(
+        "tick 4000: {builds_sent} builds, {queued} units queued, {rallies} rally points, {moves} moves"
+    );
+    assert!(
+        rallies >= 1 && moves >= 1,
+        "{rallies} rallies, {moves} moves"
+    );
     assert!(
         builds_sent > 0 && queued > 0,
         "{builds_sent} builds, {queued} queues"
@@ -229,8 +253,8 @@ fn the_ai_builds_its_base_in_the_game() {
     let builds = builds_of(&p.exit, AI);
     // What the rule promises: the first three goals of the list (power plant, refinery, barracks: 1900 of the
     // 4000 credits) are ordered whatever the harvesters of the economy manager cost afterwards. Since WP9.1b-2
-    // the economy spends on harvesters too, so by tick 4000 the later goals are not promised (measured: 4 kinds,
-    // 6 structures; before the economy 6 kinds, 8 structures).
+    // the economy spends on harvesters too, so by tick 4000 the later goals are not promised (measured, again
+    // after WP9.1c-1 with its scout: 4 kinds, 6 structures; before the economy 6 kinds, 8 structures).
     let kinds: std::collections::BTreeSet<u16> = builds.iter().map(|b| b.1).collect();
     assert!(
         kinds.len() >= 3,
@@ -474,3 +498,78 @@ fn two_ais_think_in_ascending_player_order_whatever_order_they_are_given() {
     }
     assert!(both > 0, "the two AIs sent commands in the same tick");
 }
+
+/// The army timing in the real game seat: `m1_ai`, the AI as player 1 (north-east, 4,000 credits) against the
+/// idle human, driven the way the sim thread drives it (think before the step). `ai_scout` of
+/// `sf_headless` has the AI as player 0 on the human's site against a passive enemy; this is the seat the
+/// game uses. Measured, and pinned (WP9.1c-1 fix round 1): the last structure of the goal list, the first
+/// army unit, the army at the gather cell at ticks 4000 to 20000, and that a rally point and a plain `Move`
+/// (the scout) are really sent.
+#[test]
+fn the_army_timing_in_the_game_seat() {
+    let (mut world, _, mut ais) = game(&ai_file());
+    let mut last_build = 0;
+    let mut first_army = None;
+    let (mut rallies, mut moves) = (0, 0);
+    let mut at = Vec::new();
+    while world.tick().0 < 20_000 {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                let mut out = Vec::new();
+                ai.think(&world, &mut out);
+                for c in out {
+                    match &c {
+                        sf_sim::Command::BuildStructure { .. } => last_build = world.tick().0,
+                        sf_sim::Command::QueueUnit { kind, .. }
+                            if [12, 13, 19].contains(&kind.0) && first_army.is_none() =>
+                        {
+                            first_army = Some(world.tick().0);
+                        }
+                        sf_sim::Command::SetRally { .. } => rallies += 1,
+                        sf_sim::Command::Order {
+                            order: sf_sim::Order::Move(_),
+                            ..
+                        } => moves += 1,
+                        _ => {}
+                    }
+                    world.schedule(world.tick(), ai.player(), c).unwrap();
+                }
+            }
+        }
+        world.step();
+        let t = world.tick().0;
+        if [4000, 8000, 12000, 16000, 20000].contains(&t) {
+            let ai = &ais[0];
+            let g = ai.state().gather.expect("a gather cell");
+            let near = world
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == AI && world.footprint_of(v.id).is_none())
+                .filter(|v| ![11, 15].contains(&v.kind.0))
+                .filter_map(|v| world.cell_at(v.pos))
+                .filter(|c| c.x.abs_diff(g.x).max(c.y.abs_diff(g.y)) <= 8)
+                .count();
+            at.push(near);
+        }
+    }
+    println!(
+        "m1_ai: last goal structure ordered at {last_build}, first army unit queued at {first_army:?}, army at the gather cell at 4000/8000/12000/16000/20000: {at:?}; {rallies} rally points, {moves} moves"
+    );
+    assert!(
+        rallies >= 1 && moves >= 1,
+        "{rallies} rallies, {moves} moves"
+    );
+    assert_eq!(
+        (last_build, first_army, at),
+        (
+            M1_AI_LAST_BUILD,
+            Some(M1_AI_FIRST_ARMY),
+            M1_AI_ARMY.to_vec()
+        )
+    );
+}
+
+/// Measured: the last of the eleven builds of the goal list, the first army unit, the army at the gather cell.
+const M1_AI_LAST_BUILD: u64 = 17_817;
+const M1_AI_FIRST_ARMY: u64 = 17_867;
+const M1_AI_ARMY: [usize; 5] = [0, 0, 0, 0, 2];

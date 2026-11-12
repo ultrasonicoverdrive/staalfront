@@ -211,7 +211,24 @@ fn the_ai_builds_its_base_in_the_games_picture() {
     println!("structures of the AI by tick: {counts:?}");
     // The construction centre alone at the start, and the goal list walked by tick 4000.
     assert_eq!(counts[0], (2, 1));
-    assert!(counts.windows(2).all(|w| w[0].1 <= w[1].1), "{counts:?}");
+    // The count never drops while nothing is sold: a rescue `Sell` (once per match, only in a money deadlock)
+    // takes a structure from the first tick of the sale, so only the pictures before the first `Sell` count.
+    let exit = sim.stop();
+    assert!(!exit.panicked);
+    let first_sale = exit
+        .commands
+        .iter()
+        .find(|c| c.player == AI && matches!(c.command, sf_sim::Command::Sell { .. }))
+        .map(|c| c.effective.0);
+    println!("first sale of the AI: {first_sale:?}");
+    let before_sale: Vec<_> = counts
+        .iter()
+        .filter(|(t, _)| first_sale.is_none_or(|s| *t < s))
+        .collect();
+    assert!(
+        before_sale.windows(2).all(|w| w[0].1 <= w[1].1),
+        "{counts:?}"
+    );
     // The rule: construction centre plus the first three goals (1900 of 4000 credits) stand by tick 4000; the
     // later goals compete with the economy manager's harvesters for money (measured 6; 8 before WP9.1b-2).
     assert!(counts[3].1 >= 4, "{counts:?}");
@@ -220,5 +237,4 @@ fn the_ai_builds_its_base_in_the_games_picture() {
         diff > 3_000,
         "the base is in the picture: {diff} pixels differ"
     );
-    assert!(!sim.stop().panicked);
 }

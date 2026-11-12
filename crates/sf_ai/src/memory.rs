@@ -68,6 +68,7 @@ mod tests {
                 height: 3,
             }),
             hp: 100,
+            armed: false,
         }
     }
 
@@ -79,6 +80,7 @@ mod tests {
             cell: Cell::new(5, 5),
             footprint: None,
             hp: 50,
+            armed: false,
         }
     }
 

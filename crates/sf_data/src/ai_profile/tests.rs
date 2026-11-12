@@ -58,7 +58,24 @@ fn the_shipped_profile_is_pinned() {
             a.defend_ticks,
             a.gather_distance
         ),
-        (3000, 3600, 4, 2400, 200, 6)
+        (3000, 3600, 4, 2400, 200, 10)
+    );
+    // WP9.1c-1: the numbers of production and the scout, written out in the file; the ones that equal the
+    // default of a profile that leaves them out are checked against it in
+    // `a_profile_without_the_numbers_of_wp9_1c_1_reads_with_the_defaults`.
+    assert_eq!(e.max_queue, 2);
+    assert_eq!(
+        (
+            a.gather_radius,
+            a.gather_group,
+            a.gather_tries,
+            a.resend_ticks,
+            a.scouts_max,
+            a.scout_tick,
+            a.scout_patience,
+            a.scout_retry
+        ),
+        (8, 19, 3, 120, 2, 600, 1200, 3000)
     );
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
@@ -80,6 +97,7 @@ fn the_shipped_profile_is_pinned() {
         ])
     );
     assert_eq!(meridian.unit_mix, mix);
+    assert_eq!(meridian.scout.as_deref(), Some("scout"));
     let veyran = &p.factions[1];
     assert_eq!(veyran.faction, Faction::Veyran);
     assert_eq!(
@@ -99,6 +117,7 @@ fn the_shipped_profile_is_pinned() {
         ])
     );
     assert_eq!(veyran.unit_mix, mix);
+    assert_eq!(veyran.scout.as_deref(), Some("scout"));
 }
 
 #[test]
@@ -109,7 +128,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 21] = [
+    let table: [(&str, &str, [&str; 2]); 30] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -147,7 +166,16 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
             ["72001", "72001"],
         ),
         ("defend_ticks: 200", "defend_ticks", ["0", "72001"]),
-        ("gather_distance: 6", "gather_distance", ["0", "65"]),
+        ("gather_distance: 10", "gather_distance", ["0", "65"]),
+        ("max_queue: 2", "economy.max_queue", ["0", "6"]),
+        ("gather_radius: 8", "gather_radius", ["0", "33"]),
+        ("gather_group: 19", "gather_group", ["0", "65"]),
+        ("gather_tries: 3", "gather_tries", ["0", "11"]),
+        ("resend_ticks: 120", "resend_ticks", ["0", "72001"]),
+        ("scouts_max: 2", "scouts_max", ["5", "5"]),
+        ("scout_tick: 600", "scout_tick", ["72001", "72001"]),
+        ("scout_patience: 1200", "scout_patience", ["0", "72001"]),
+        ("scout_retry: 3000", "scout_retry", ["0", "72001"]),
         (
             "(\"barracks\", 1)",
             "count",
@@ -205,6 +233,115 @@ fn a_profile_without_the_base_numbers_of_wp9_1b_reads_with_the_defaults() {
     );
     let frozen = include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron");
     assert_eq!(AiProfile::from_ron(frozen).unwrap().economy.lane, 1);
+}
+
+#[test]
+fn a_profile_without_the_numbers_of_wp9_1c_1_reads_with_the_defaults() {
+    // The frozen profile of ai_fog_defs was written before WP9.1c-1: no production or scout number, no scout.
+    let frozen = include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron");
+    let p = AiProfile::from_ron(frozen).unwrap();
+    assert_eq!(p.economy.max_queue, DEFAULT_MAX_QUEUE);
+    let a = p.army;
+    assert_eq!(
+        (
+            a.gather_radius,
+            a.gather_group,
+            a.gather_tries,
+            a.resend_ticks,
+            a.scouts_max,
+            a.scout_tick,
+            a.scout_patience,
+            a.scout_retry
+        ),
+        (
+            DEFAULT_GATHER_RADIUS,
+            DEFAULT_GATHER_GROUP,
+            DEFAULT_GATHER_TRIES,
+            DEFAULT_RESEND_TICKS,
+            DEFAULT_SCOUTS_MAX,
+            DEFAULT_SCOUT_TICK,
+            DEFAULT_SCOUT_PATIENCE,
+            DEFAULT_SCOUT_RETRY
+        )
+    );
+    // The defaults as literals.
+    assert_eq!(
+        (
+            DEFAULT_MAX_QUEUE,
+            DEFAULT_GATHER_RADIUS,
+            DEFAULT_GATHER_GROUP,
+            DEFAULT_GATHER_TRIES
+        ),
+        (2, 8, 19, 3)
+    );
+    assert_eq!(
+        (
+            DEFAULT_RESEND_TICKS,
+            DEFAULT_SCOUTS_MAX,
+            DEFAULT_SCOUT_TICK,
+            DEFAULT_SCOUT_PATIENCE,
+            DEFAULT_SCOUT_RETRY
+        ),
+        (120, 2, 600, 1200, 3000)
+    );
+    assert!(p.factions.iter().all(|f| f.scout.is_none()));
+    // The frozen profiles of the WP9.1b scenarios have no unit mix and no scout.
+    for name in [
+        "ai_base",
+        "ai_economy",
+        "ai_rebuild",
+        "ai_deadlock",
+        "ai_fog",
+    ] {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("../../assets/scenarios/{name}_defs/normal.ron"));
+        let p = AiProfile::from_ron(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(
+            p.factions
+                .iter()
+                .all(|f| f.unit_mix.is_empty() && f.scout.is_none()),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_unit_mix_is_a_profile_that_makes_no_units() {
+    meridian(&BASE, &[]).check(&UnitDefs::embedded()).unwrap();
+    // The shipped text with line endings made `\n` (a Windows checkout has `\r\n`), the Meridian mix and scout
+    // cut out.
+    let shipped = EMBEDDED_NORMAL.replace("\r\n", "\n");
+    let from = "unit_mix: [(\"rifleman\", 4), (\"rocket_trooper\", 2), (\"light_tank\", 3)],\n            scout: Some(\"scout\"),\n        ),\n        (\n            faction: Veyran";
+    assert!(shipped.contains(from));
+    let text = shipped.replacen(
+        from,
+        "unit_mix: [],\n        ),\n        (\n            faction: Veyran",
+        1,
+    );
+    let p = AiProfile::from_ron(&text).unwrap();
+    assert!(p.factions[0].unit_mix.is_empty() && p.factions[0].scout.is_none());
+    p.check(&UnitDefs::embedded()).unwrap();
+}
+
+#[test]
+fn the_scout_is_checked_like_a_unit_of_the_mix() {
+    let with = |role: &str| {
+        let mut p = meridian(&BASE, &[("rifleman", 1)]);
+        p.factions[0].scout = Some(role.to_string());
+        p
+    };
+    with("scout").check(&UnitDefs::embedded()).unwrap();
+    refused_check(&with("no_such_role"), "scout (no_such_role): no such role");
+    refused_check(&with("power_plant"), "only infantry and vehicles");
+    refused_check(&with("harvester"), "harvesters");
+    // The scout comes out of a barracks, which the list must have.
+    let mut p = meridian(&[("power_plant", 1)], &[]);
+    p.factions[0].scout = Some("scout".to_string());
+    refused_check(&p, "InfantryFactory missing");
+    // It may also be a role of the mix.
+    let mut p = meridian(&BASE, &[("scout", 1)]);
+    p.factions[0].scout = Some("scout".to_string());
+    p.check(&UnitDefs::embedded()).unwrap();
 }
 
 #[test]

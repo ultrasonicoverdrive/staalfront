@@ -36,7 +36,12 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected")
 /// measured, with the economy manager off and those left out of `AiState::digest` the WP9.1b-1 value
 /// `0x630c_0979_a8ae_4749` comes back (with the manager off but the state hashed it is `0x08e8_a7b3_e1e2_b2e3`: the economy turn also counts the
 /// turns its refinery is stalled for money, `stalled_turns`, which the state then holds).
-const AI_DIGEST: u64 = 0xce7a_0b6f_b57c_9cee;
+///
+/// Re-pinned by WP9.1c-1 to `0xacb2_c8e5_fb87_6451`; the checksum did not move. The frozen profile has an empty
+/// `unit_mix` and no scout, so the production and army managers are off (`Profile::makes_units`), and the
+/// digest moved only because it now hashes the new profile numbers and the production and army state (at their
+/// start values). Measured in `the_new_managers_are_off_for_the_frozen_profiles` (ai_production.rs).
+const AI_DIGEST: u64 = 0xacb2_c8e5_fb87_6451;
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);

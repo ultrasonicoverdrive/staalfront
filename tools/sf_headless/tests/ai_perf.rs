@@ -137,6 +137,9 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
         "ai_boxed.ron",
         "ai_economy.ron",
         "ai_rebuild.ron",
+        // WP9.1c-1: production, rally points, the scout (long enough for the scout's legs; the army exists
+        // only from tick 15,020, `what_one_production_turn_and_one_army_turn_cost_on_their_own` has it).
+        "ai_scout.ron",
     ] {
         let alone = measure(&Scenario::load(&scenario_path(name)).unwrap(), long);
         report(name, &alone);
@@ -277,6 +280,86 @@ fn what_one_economy_turn_costs_on_its_own() {
     );
     if !cfg!(debug_assertions) {
         assert!(total / runs <= Duration::from_micros(100));
+    }
+}
+
+#[test]
+fn what_one_production_turn_and_one_army_turn_cost_on_their_own() {
+    // WP9.1c-1: the production turn and the army turn alone, on the observation of `ai_scout` late in the run
+    // (the army exists, the factories have queues) with 200 more soldiers idle far from the gather cell added to
+    // it, so that the army turn sends two gather orders of 19 and keeps the bookkeeping of 200 units. The
+    // observation is built once; each turn is called 20,000 times on a copy of the state.
+    let s = Scenario::load(&scenario_path("ai_scout.ron")).unwrap();
+    let mut world = s.build_world().unwrap();
+    let mut ais = s.ais.clone();
+    let mut out = Vec::new();
+    let until = if cfg!(debug_assertions) { 2500 } else { 17_000 };
+    while world.tick().0 < until {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                out.clear();
+                ai.think(&world, &mut out);
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        world.step();
+    }
+    let player = sf_sim::PlayerId(0);
+    let state = ais[0].state().clone();
+    let mut obs = sf_ai::Observation::build(&world, player, &state.known_structures);
+    // Rich, so that the production turn runs to the end of its loop (one order per factory).
+    obs.credits = 100_000;
+    let first = obs.own.iter().map(|o| o.id.index()).max().unwrap_or(0) + 1000;
+    for i in 0..200u32 {
+        obs.own.push(sf_ai::Own {
+            id: sf_sim::EntityId::new(first + i, 0),
+            kind: sf_sim::Kind(12),
+            cell: sf_sim::Cell::new(60 + i % 10, 60 + i / 10 % 10),
+            footprint: None,
+            hp: 50,
+            order: sf_sim::Order::Idle,
+            standing: true,
+            max_hp: 50,
+            building: None,
+            repairing: false,
+            factory: None,
+            selling: false,
+            armed: true,
+            mobile: true,
+        });
+    }
+    let runs = 20_000u32;
+    for (name, army) in [("production", false), ("army", true)] {
+        let mut worst = Duration::ZERO;
+        let mut total = Duration::ZERO;
+        let mut sent = 0;
+        for _ in 0..runs {
+            let mut st = state.clone();
+            let mut lens = sf_ai::Lens::new(&world, player);
+            out.clear();
+            let started = Instant::now();
+            if army {
+                sf_ai::army::turn(&mut st, &obs, &mut lens, &mut out);
+            } else {
+                sf_ai::production::turn(&mut st, &obs, &mut lens, &mut out);
+            }
+            let spent = started.elapsed();
+            total += spent;
+            worst = worst.max(spent);
+            sent += out.len();
+        }
+        println!(
+            "one {name} turn (observation of {} own entities, {} entities in the world, {sent} commands in {runs} turns): mean {:.2} us, worst {:.1} us (the state is cloned outside the clock)",
+            obs.own.len(),
+            world.len(),
+            total.as_secs_f64() * 1e6 / f64::from(runs),
+            worst.as_secs_f64() * 1e6
+        );
+        if !cfg!(debug_assertions) {
+            assert!(total / runs <= Duration::from_micros(100), "{name}");
+        }
     }
 }
 

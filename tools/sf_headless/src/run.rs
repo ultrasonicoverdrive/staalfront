@@ -119,6 +119,16 @@ pub fn run_watched(
     options: &RunOptions,
     mut watch: impl FnMut(&World),
 ) -> Result<Finished, ScenarioError> {
+    run_observed(scenario, options, |world, _| watch(world))
+}
+
+/// [`run_watched`] that also shows the AIs (ascending by player) after every step, for tests that ask what
+/// an AI knows or has decided at a given tick (WP9.1c-1). The watcher only reads.
+pub fn run_observed(
+    scenario: &Scenario,
+    options: &RunOptions,
+    mut watch: impl FnMut(&World, &[Ai]),
+) -> Result<Finished, ScenarioError> {
     let mut problems = Vec::new();
     if options.ticks == 0 {
         problems.push("ticks must be at least 1".to_string());
@@ -161,7 +171,7 @@ pub fn run_watched(
             }
         }
         let report = world.step();
-        watch(&world);
+        watch(&world, &ais);
         executed += u64::from(report.commands_executed);
         ignored += u64::from(report.commands_ignored);
         last = report.checksum;

@@ -38,6 +38,8 @@
         // from the side): a refinery's harvesters park 4 cells out, a factory's units come out one by one.
         refinery_apron: (3, 5),
         factory_apron: (1, 3),
+        // WP9.1c-1: the most items kept in one factory's queue (the one being built included).
+        max_queue: 2,
     ),
     army: (
         // Attack when the army's value (sum of unit costs) reaches this ...
@@ -49,8 +51,24 @@
         first_attack_tick: 2400,
         // How long the army defends after a structure was hit.
         defend_ticks: 200,
-        // Cells from the base towards the map centre where the army gathers.
-        gather_distance: 6,
+        // Cells from the base towards the map centre where the army gathers (WP9.1c-1: 10, was 6: the anchor is
+        // 4 x 4 and the build radius 8, so 6 lies inside the base).
+        gather_distance: 10,
+        // WP9.1c-1: a unit within this many cells (Chebyshev) of the gather cell has arrived.
+        gather_radius: 8,
+        // The most units one gather order carries (the largest formation of the simulation settings).
+        gather_group: 19,
+        // Gather orders a unit gets without arriving before it is left where it is.
+        gather_tries: 3,
+        // A unit is not ordered again within this many ticks.
+        resend_ticks: 120,
+        // The scout: bought from tick `scout_tick` (the first unit made), a replacement `scout_retry` ticks after
+        // the last was lost, at most `scouts_max` in a match; it goes on to the next waypoint after
+        // `scout_patience` ticks.
+        scouts_max: 2,
+        scout_tick: 600,
+        scout_patience: 1200,
+        scout_retry: 3000,
     ),
     factions: [
         (
@@ -69,6 +87,7 @@
             ],
             // (role, weight): the share of the army each role aims at.
             unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
+            scout: Some("scout"),
         ),
         (
             faction: Veyran,
@@ -86,6 +105,7 @@
                 ("advanced_defences", 1),
             ],
             unit_mix: [("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)],
+            scout: Some("scout"),
         ),
     ],
 )

@@ -2977,6 +2977,41 @@ earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `
   screenshots. Not run: a destroyed (not removed) refinery, a silo with two refineries in a scenario, a second vehicle factory in a scenario,
   harvester traffic through a one-cell lane (all in `ai.md`, "Not done").
 
+### WP9.1c-1 notes: the computer opponent's production and scout (12-11-2026)
+
+First half of WP9.1c (split in two, PLAN.md phase 9). Rules, numbers and measurements: `docs/rules/ai.md`, "Production" and "The army in WP9.1c-1". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and every
+`.expected` but the new `ai_scout`).
+
+- **Built.** `sf_ai::production` (rally point per factory to the gather cell, the unit mix by share, one order per factory per turn, `max_queue` 2, the
+  money rule: nothing while a harvester is wanted, `reserve` plus the price of the next goal entry held back while a goal is open, the scout held back by
+  the reserve only, a refused order blocks its kind) and `sf_ai::army` (the gather cell, the scout with its five legs, gathering of idle army units in groups
+  of 19). Observation: `Own.armed`, `Own.mobile`, `Seen.armed`. Profile: `max_queue`, `gather_radius`, `gather_group`, `gather_tries`, `resend_ticks`,
+  `scouts_max`, `scout_tick`, `scout_patience`, `scout_retry`, `scout` per faction (all with defaults), `gather_distance` 10, an empty `unit_mix` allowed.
+  `Profile::makes_units()` keeps both managers off for a profile with neither a mix nor a scout. `base::goal_open`, `base::next_build`, `base::saving_for`
+  and `economy::harvester_wanted` are shared with the construction and economy turns. `run::run_observed` (the runner's loop with a look at the AIs after every
+  step). Scenario `ai_scout` on its own frozen `ai_scout_defs/`, in the CI headless list. `tools/sf_headless/tests/ai_production.rs`: 36 tests.
+- **Measured** (release, this container; every number is printed by its test). Scout queued at tick 1,100, first leg 1,270, the enemy construction centre in
+  the AI's memory at **2,351**, the scout within 3 cells of the site at 2,439, the other legs at 2,470, 3,190, 3,870, 4,870; without a scout the memory never holds
+  it (20,000 ticks). **The first army unit is queued at tick 15,020 on M1's 4,000 credits (`ai_scout`; 17,867 in the game seat `m1_ai`)**: the last structure of the list of ten entries is ordered at tick 14,610 and production
+  holds back the next goal's price; the army at the gather cell is 0, 0, 0, 2, 10 at ticks 4,000, 8,000, 12,000, 16,000, 20,000. With the `reserve` alone as the holdback (an
+  experiment, reverted) there are 7 army units at tick 2,000 and 31 at 20,000, and the AI never builds a vehicle factory. That trade-off is Tijmen's to settle
+  before WP9.1c-2's attack timing (`first_attack_tick` 2,400) can mean anything on M1. At most 6 commands in any 1,000 ticks over 20,000 and over 40,000 ticks.
+- **Fix round 1 (sweep of 12-11-2026).** Gather cell kept free of own placement (3 x 3) and worked out again when a known or own structure stands on it; a scout the match
+  starts with counts as the first (and production does not wait for one); an order is accepted when the factory's queue of the kind grew or a unit came out, never by the live
+  count (a death in the 40 ticks is no refusal; an accepted scout is never taken back); no rally point on a factory that makes harvesters (15 percent of the ore, measured);
+  the army timing measured in the game seat `m1_ai` (last goal structure 17,817, first army unit 17,867, army at the gather cell 0, 0, 0, 0, 2 at 4000 to 20000);
+  `SetRally` and `Move` are asserted to occur in `m1_ai`; the scout costs the list 1,960 ticks (14,610 against 12,650). The frozen-profile proof is "mix on, checksums move" plus
+  unchanged `.expected` files, not "manager off, old values back".
+- **Re-pinned.** The AI digests of all seven older AI scenarios (profile numbers and state layout); their checksums did not move. The frozen profiles got
+  `unit_mix: []` (a deliberate edit of the frozen copies, noted at the top of each file); measured cause: with the old mix put back each ends on another
+  checksum (table in `ai.md`).
+- **Folded in from the review of #126.** The anchor exclusion of the rescue is pinned where it is used (a building table that gives the construction centre a
+  price: `the_anchor_is_never_sold_even_when_the_definitions_give_it_a_price`) and "two stalled economy turns in a row" has its own test (stalled, not stalled,
+  stalled: no sale).
+- **Not done.** Threat and defence, attack timing, the target, marching and finishing, `ai_vs_passive`, `ai_raid` (WP9.1c-2); the game does not run the AI
+  (WP9.1d, #127), so nothing to see in `sf_game` and no screenshots; a scout that dies on the way to a defended start site (the scenario's enemy has no gun);
+  harvesters bought through the queue rally to the gather cell and the delivered ore rises in every 2,000-tick window, but there is no run without the rally point to compare with.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -3304,16 +3339,17 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   (`(tick, ms)` is `(tick, ms, think_ms)` now; `hitch.rs` tests).
 * **Measured** (`tests/ai_in_game.rs`, human idle, 20,000 ticks = 2,000 thinks; relative numbers, container shared with other agents' cargo runs):
   debug build mean 24 us, worst 751 us, thinking 1.0 % of the step time; **release build mean 2 us, worst 57 us, 1.5 % of the step time**
-  (225,847 us of step in all). In the real game window under Xvfb (debug build, llvmpipe, 4,068 ticks, 407 thinks): mean 0.097 ms, worst 4.8 ms
-  (the first slow-tick lines of its hitch log are `[257, 64.1, 1.14]` and `[817, 87.5, 0.0]`: the think was 1.1 ms of a 64 ms debug tick and none of the
-  other). The AI's goal list is all there is to think about today (economy, production and army are stubs), so these numbers will grow with WP9.1b-2 and
-  WP9.1c; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
+  (225,847 us of step in all). In the real game window under Xvfb (debug build, llvmpipe, 4,068 ticks, 407 thinks): mean 0.097 ms, worst 1.04 ms
+  after the merge with #126 (first run of this entry: worst 4.8 ms, a shared-machine spike; its slow-tick lines were `[257, 64.1, 1.14]` and `[817, 87.5, 0.0]`,
+  the think 1.1 ms of a 64 ms debug tick). These numbers date from the construction manager alone; the later managers' costs are in
+  `docs/rules/ai.md`; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
 * **Seen.** `docs/screenshots/wp9.1d/` (README there): the AI's base at ticks 2, 1000, 2500 and 4000 (1, 4, 6, 6 structures after the merge with #126; 1, 4, 7, 8 before it); the real game window shows
   the human only its own base (the AI's is behind the fog).
-* **Follow-up.** `matchplay::ais` is a copy of `Scenario::load_ais` (sf_headless); it moves into `sf_ai` next to `start_sites` in a follow-up after
-  #126 merges (error text, seed source and profile naming differ today).
-* **Asserted and only printed.** Asserted: thinks 100 / 4 / 4 by tick, first build at tick 17, at least 4 kinds and 4 structures (6 in the picture
-  test) by tick 4000, a slow think reaches `slow_ticks`' third number and the counters (`SimConfig::think_hitch` makes one), two AIs think in
+* **One loader (WP9.1c-1).** `matchplay::ais` and `Scenario::load_ais` both call `sf_ai::make_ai` (profile text checked, resolved for the faction, AI
+  made); each host keeps its own file reading, its own error context (player and profile; the scenario's `ai:` prefix) and its seed (headless: the `ai` entry's
+  seed; game: the match seed).
+* **Asserted and only printed.** Asserted: thinks 100 / 4 / 4 by tick, first build at tick 17, at least 3 kinds of structure ordered and at least 4 structures standing
+  (the construction centre included) by tick 4000 (the picture test asserts the same floor, 4, at tick 4000 and a non-decreasing count while no `Sell` has been sent), a slow think reaches `slow_ticks`' third number and the counters (`SimConfig::think_hitch` makes one), two AIs think in
   ascending player order. **Only printed, not asserted:** 4 / 6 / 6 structures at ticks 1000 / 2500 / 4000, "5 builds of 4 kinds, 1 unit queued", the think-cost
   numbers; the `mean < 5 ms` bound is a loose sanity bound.
 * **Gaps.** The JSON shape is pinned in `hitch.rs` `--replay` of a record of an AI match is untested apart from

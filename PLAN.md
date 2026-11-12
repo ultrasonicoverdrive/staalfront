@@ -455,6 +455,21 @@ Layered (analysis §12, §22G):
   smallest refunds added until the sum covers it, else nothing. Never the anchor, a harvester dock, a power plant, what the stalled structure
   requires or the stalled structure itself. If the simulation refuses every sale it tries again after `blocked_ticks` and the rescue stays unspent.
   It replaces "never sells"; selling for any other reason stays out of 9.1 (retreat and economy choices are WP9.4).*
+  *12-11-2026 (Tijmen: the orchestrator's recommendations for WP9.1c hold; design memo `wp9.1c-ontwerp`): **9.1c is split in two**: **9.1c-1** production and scout
+  (the production manager, the rally point and gather cell, one scout; the army only gathers) and **9.1c-2** [xhigh] the army (threat and defence,
+  attack timing, target, marching and finishing; `ai_vs_passive`, `ai_raid`). A dedicated `scout` unit (role `scout`, 400 credits), one per match and at
+  most one replacement (`scouts_max` 2, `scout_retry` 3000). The attack target will be the enemy construction centre (it is the win rule), only units at home
+  defend and the attack is recalled only for the construction centre (all 9.1c-2). `gather_distance` 6 becomes **10** (inside the base before);
+  `defend_ticks` 400 is for 9.1c-2, and the builder's measured values win over the memo's guesses. Production holds back the price of the next goal entry the
+  construction turn is saving for, not just `reserve`. The frozen profiles of the older AI scenarios get `unit_mix: []`, so only their AI digests move, not
+  their checksums. Built in 9.1c-1: nothing in `crates/sf_sim/` changed; the measured consequence of the holdback on M1's credits (first army unit at tick 15,020 in `ai_scout`, 17,867 in `m1_ai`)
+  is in `docs/rules/ai.md`, "Production".*
+  *12-11-2026 (decisions of the orchestrator after the first sweep of PR #128): **the scout is held back by `reserve` only**, a deviation from P3 (which holds back the next goal's price
+  for every unit): it has to be bought early to find the enemy, and it delays the goal list by 1,960 ticks on `ai_scout` (measured). **The missing army on M1** (first army unit at tick
+  15,020 in `ai_scout` and 17,867 in `m1_ai`, the real seat) **is solved in 9.1c-2 by an army floor**: `army_floor_value`, start value 1,000; below it production holds back only the `reserve`
+  (not the next goal's price); the army value is the cost of the own army units, the queued mix items and what this turn has ordered already. Also decided: a factory that can make a harvester gets
+  no rally point (a rally point on the vehicle factory cost 15 percent of the ore in 20,000 ticks, measured, more than the 10 percent limit); the gather cell and the 8 cells round it are kept free of
+  the AI's own structures.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

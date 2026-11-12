@@ -46,7 +46,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
-use sf_data::ai_profile::AiProfile;
 use sf_data::map::Map;
 use sf_data::match_def::MatchDef;
 use sf_data::movement::MovementCosts;
@@ -1200,15 +1199,17 @@ impl Scenario {
                 .ok_or_else(|| invalid(format!("{at}: the match file has no such player")))?;
             let text = std::fs::read_to_string(scenarios.join(dir).join(&spec.profile))
                 .map_err(|e| invalid(format!("{at}: {e}")))?;
-            let profile = AiProfile::from_ron(&text).map_err(|e| invalid(format!("{at}: {e}")))?;
-            let profile = sf_ai::Profile::resolve(&profile, faction, &defs)
-                .map_err(|e| invalid(format!("{at}: {e}")))?;
-            ais.push(sf_ai::Ai::new(
-                PlayerId(spec.player),
-                profile,
-                spec.seed,
-                sites.clone(),
-            ));
+            ais.push(
+                sf_ai::make_ai(
+                    PlayerId(spec.player),
+                    faction,
+                    &text,
+                    &defs,
+                    spec.seed,
+                    sites.clone(),
+                )
+                .map_err(|e| invalid(format!("{at}: {e}")))?,
+            );
         }
         ais.sort_by_key(sf_ai::Ai::player);
         self.ais = ais;

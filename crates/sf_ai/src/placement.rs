@@ -72,7 +72,7 @@ pub fn apron(
 }
 
 /// The apron size of a structure function, if it has one.
-fn apron_size(state: &AiState, function: BuildingFunction) -> Option<(u8, u8)> {
+pub(crate) fn apron_size(state: &AiState, function: BuildingFunction) -> Option<(u8, u8)> {
     let e = &state.profile.economy;
     if function == BuildingFunction::HarvesterDock {
         Some(e.refinery_apron)
@@ -254,6 +254,16 @@ pub fn search(
         {
             for (x, y) in apron(at, sfp, side, size) {
                 mask.block_foot(x, y);
+            }
+        }
+    }
+
+    // The gather cell and the eight cells round it stay free of structures (WP9.1c-1): the army gathers
+    // there and the rally point of every factory that makes no harvester is on it, and a structure on it would end both.
+    if let Some(g) = state.gather {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                mask.block_foot(i64::from(g.x) + dx, i64::from(g.y) + dy);
             }
         }
     }

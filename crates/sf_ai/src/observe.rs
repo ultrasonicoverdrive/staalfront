@@ -65,6 +65,10 @@ pub struct Own {
     pub factory: Option<OwnFactory>,
     /// Whether it is being sold (WP9.1b-2: the sale started and cannot be cancelled).
     pub selling: bool,
+    /// WP9.1c-1: whether its kind carries a weapon (the public weapon table).
+    pub armed: bool,
+    /// WP9.1c-1: whether its kind moves (it has a movement class: not a structure, not an object).
+    pub mobile: bool,
 }
 
 /// The production queue of one of the player's own structures.
@@ -96,6 +100,9 @@ pub struct Seen {
     pub footprint: Option<Footprint>,
     /// Its hit points (a player sees them); zero for an entity without unit-table stats.
     pub hp: u32,
+    /// WP9.1c-1: whether its kind carries a weapon (the public weapon table: what a seen unit can do is
+    /// no secret once it is seen).
+    pub armed: bool,
 }
 
 /// What one player can know at one tick.
@@ -164,6 +171,10 @@ impl Observation {
                     building: world.construction_of(view.id),
                     repairing: world.is_repairing(view.id),
                     selling: world.sale_of(view.id).is_some(),
+                    armed: !world.weapon_table().loadout(view.kind).is_empty(),
+                    mobile: world
+                        .stats_of(view.id)
+                        .is_some_and(|s| s.movement_class.is_some()),
                     factory: world.production_of(view.id).map(|f| OwnFactory {
                         queue: f.queue.iter().map(|q| (q.kind, q.free)).collect(),
                         front_paid: f.front_paid,
@@ -185,6 +196,7 @@ impl Observation {
                     cell,
                     footprint,
                     hp: view.hp,
+                    armed: !world.weapon_table().loadout(view.kind).is_empty(),
                 });
             }
         }

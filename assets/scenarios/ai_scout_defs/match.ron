@@ -1,0 +1,33 @@
+// The match file of the scenario `ai_scout` (WP9.1c-1, docs/rules/ai.md): the AI builds its base, buys units and
+// sends a scout on the first match's map. Player 0, Meridian, is the AI, with a construction centre where the human
+// of `assets/matches/m1.ron` starts and the 4000 credits of that file; player 1, Veyran, is a lone static
+// construction centre where the opponent of m1 has its own, with a power plant beside it and nothing that shoots
+// (the scout must reach it alive; the real opponent of m1, with its tower, is the test of WP9.1c-2). Read by
+// sf_data::match_def like assets/matches/m1.ron.
+//
+// Slots: 0 the AI's construction centre (4 x 4, x 12..15, y 68..71), 1 player 1's centre (x 72..75, y 14..17),
+// 2 player 1's power plant, then what the AI builds and makes, in the order it appears.
+(
+    name: "ai_scout",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (72, 14)),
+                (role: "power_plant", cell: (78, 20)),
+            ],
+        ),
+    ],
+)

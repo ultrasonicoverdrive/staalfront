@@ -1,3 +1,6 @@
+// WP9.1c-1 (deliberate, see docs/rules/ai.md, "Pins that moved (WP9.1c-1)"): `unit_mix` is now empty for both factions (it was `[("rifleman", 4), ("light_tank", 3)]`),
+// so the production and army managers stay off in this scenario and its world checksum is the one it always had;
+// only the AI digest moved. No other line of this file changed.
 // FROZEN copy (WP9.1b-2, for the scenario `ai_deadlock`) of `ai_base_defs/normal.ron`, which is the shipped
 // `assets/ai/normal.ron` of 12-11-2026 (WP9.1b-1). What differs from it: `build_order` is power plant, refinery,
 // barracks, vehicle factory, radar for both factions (shipped: ten entries for Meridian, eleven for Veyran), and
@@ -69,7 +72,7 @@
                 ("vehicle_factory", 1),
                 ("radar", 1),
             ],
-            unit_mix: [("rifleman", 4), ("light_tank", 3)],
+            unit_mix: [],
         ),
         (
             faction: Veyran,
@@ -80,7 +83,7 @@
                 ("vehicle_factory", 1),
                 ("radar", 1),
             ],
-            unit_mix: [("rifleman", 4), ("light_tank", 3)],
+            unit_mix: [],
         ),
     ],
 )

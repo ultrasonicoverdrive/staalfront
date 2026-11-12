@@ -34,6 +34,30 @@ pub struct Known {
     pub seen_tick: Tick,
 }
 
+/// What the army manager wants the army to do. WP9.1c-1 holds the seam only: the posture is always
+/// [`Posture::Gather`] and nothing reads the target; WP9.1c-2 adds the postures `Attack` and `Defend` and the
+/// function that turns a directive into orders (`docs/rules/ai.md`, "The army in WP9.1c-1").
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Directive {
+    /// What the army does.
+    pub posture: Posture,
+    /// Where it does it; `None` while gathering.
+    pub target: Option<Cell>,
+}
+
+/// The army's posture. The numbers are hashed, so they are permanent.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Posture {
+    /// Units gather at the gather cell and wait (the only posture of WP9.1c-1).
+    #[default]
+    Gather = 0,
+}
+
+/// A unit order the production turn sent and has not yet seen take effect: `(factory, kind, tick, how many
+/// units of the kind the player had before the order, how many items of the kind that factory had queued
+/// before it)`.
+pub type UnitSent = (EntityId, Kind, Tick, u32, u32);
+
 /// Everything an AI remembers between thinks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiState {
@@ -86,6 +110,31 @@ pub struct AiState {
     pub sales: Vec<(EntityId, Tick)>,
     /// After a refused rescue: the tick from which it may be tried again.
     pub rescue_after: Tick,
+    /// WP9.1c-1, the gather cell (`docs/rules/ai.md`, "The gather cell"): computed once, again only when
+    /// it is `None`, its cell stops being open ground or it lies under a structure the AI knows.
+    pub gather: Option<Cell>,
+    /// A factory a rally point was sent for, and the tick until which it is not asked again unless the
+    /// observation shows another rally point; entries go when the rally point is right, the factory is gone
+    /// or the time is up.
+    pub rally_backoff: BTreeMap<EntityId, Tick>,
+    /// The unit orders sent at the last production turn, ascending by factory id, until the next turn sees
+    /// whether the player has more of the kind (`docs/rules/ai.md`, "Production").
+    pub units_sent: Vec<UnitSent>,
+    /// The scout, once a unit of the scout kind has been seen.
+    pub scout: Option<EntityId>,
+    /// Which waypoint the scout is on (an index into the legs, see `army::waypoints`).
+    pub scout_leg: u8,
+    /// The tick the scout was sent to its current leg; `None` until it is.
+    pub scout_leg_sent: Option<Tick>,
+    /// How many scouts were ordered in the match (a refused order is taken back).
+    pub scouts_sent: u8,
+    /// The tick the AI saw that its scout was gone (dead, or lost in a queue); `None` while it has one.
+    pub scout_gone_at: Option<Tick>,
+    /// The seam to WP9.1c-2 (above).
+    pub directive: Directive,
+    /// Per army unit: the tick of the last gather order and how many it got without arriving; pruned to
+    /// the live units every army turn.
+    pub sent: BTreeMap<EntityId, (Tick, u8)>,
 }
 
 /// The most entries of [`AiState::refused`]; the one that expires first goes when it is full.
@@ -121,6 +170,16 @@ impl AiState {
             rescue_used: false,
             sales: Vec::new(),
             rescue_after: Tick(0),
+            gather: None,
+            rally_backoff: BTreeMap::new(),
+            units_sent: Vec::new(),
+            scout: None,
+            scout_leg: 0,
+            scout_leg_sent: None,
+            scouts_sent: 0,
+            scout_gone_at: None,
+            directive: Directive::default(),
+            sent: BTreeMap::new(),
         }
     }
 
@@ -222,6 +281,70 @@ impl AiState {
             h.write_u64(tick.0);
         }
         h.write_u64(self.rescue_after.0);
+        // WP9.1c-1: production, the scout and the army.
+        match self.gather {
+            Some(c) => {
+                h.write_u8(1);
+                h.write_u32(c.x);
+                h.write_u32(c.y);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.rally_backoff.len() as u32);
+        for (id, until) in &self.rally_backoff {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u64(until.0);
+        }
+        h.write_u32(self.units_sent.len() as u32);
+        for (id, kind, tick, units, queued) in &self.units_sent {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u32(u32::from(kind.0));
+            h.write_u64(tick.0);
+            h.write_u32(*units);
+            h.write_u32(*queued);
+        }
+        match self.scout {
+            Some(id) => {
+                h.write_u8(1);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u8(self.scout_leg);
+        match self.scout_leg_sent {
+            Some(t) => {
+                h.write_u8(1);
+                h.write_u64(t.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u8(self.scouts_sent);
+        match self.scout_gone_at {
+            Some(t) => {
+                h.write_u8(1);
+                h.write_u64(t.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u8(self.directive.posture as u8);
+        match self.directive.target {
+            Some(c) => {
+                h.write_u8(1);
+                h.write_u32(c.x);
+                h.write_u32(c.y);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.sent.len() as u32);
+        for (id, (tick, tries)) in &self.sent {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u64(tick.0);
+            h.write_u8(*tries);
+        }
         h.finish()
     }
 }
@@ -269,6 +392,21 @@ mod tests {
         s.sales.push((EntityId::new(4, 0), Tick(300)));
         s.sales.push((EntityId::new(6, 1), Tick(300)));
         s.rescue_after = Tick(1200);
+        s.gather = Some(Cell::new(24, 64));
+        s.rally_backoff.insert(EntityId::new(5, 0), Tick(1500));
+        s.rally_backoff.insert(EntityId::new(8, 1), Tick(1600));
+        s.units_sent
+            .push((EntityId::new(5, 0), Kind(12), Tick(1400), 3, 1));
+        s.units_sent
+            .push((EntityId::new(8, 1), Kind(19), Tick(1400), 1, 0));
+        s.scout = Some(EntityId::new(11, 0));
+        s.scout_leg = 2;
+        s.scout_leg_sent = Some(Tick(1390));
+        s.scouts_sent = 1;
+        s.scout_gone_at = Some(Tick(1380));
+        s.directive.target = Some(Cell::new(60, 20));
+        s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
+        s.sent.insert(EntityId::new(14, 2), (Tick(1560), 2));
         s
     }
 
@@ -276,7 +414,7 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0xb3c2_9db9_5d8d_85f4);
+        assert_eq!(base_state().digest(), 0xaec6_1e09_52ce_b855);
     }
 
     #[test]
@@ -327,6 +465,57 @@ mod tests {
             change(&mut s);
             assert_ne!(s.digest(), d, "change {i}");
         }
+    }
+
+    #[test]
+    fn every_part_of_the_production_and_army_state_moves_the_digest() {
+        let d = base_state().digest();
+        let changes: [fn(&mut AiState); 25] = [
+            |s| s.gather = None,
+            |s| s.gather = Some(Cell::new(24, 65)),
+            |s| s.gather = Some(Cell::new(25, 64)),
+            |s| {
+                s.rally_backoff.remove(&EntityId::new(5, 0));
+            },
+            |s| {
+                s.rally_backoff.insert(EntityId::new(8, 1), Tick(1601));
+            },
+            |s| {
+                s.rally_backoff.insert(EntityId::new(8, 2), Tick(1600));
+            },
+            |s| s.units_sent.clear(),
+            |s| s.units_sent.reverse(),
+            |s| s.units_sent[0].1 = Kind(13),
+            |s| s.units_sent[0].2 = Tick(1401),
+            |s| s.units_sent[1].3 = 2,
+            |s| s.units_sent[1].4 = 1,
+            |s| s.scout = None,
+            |s| s.scout = Some(EntityId::new(11, 1)),
+            |s| s.scout_leg = 3,
+            |s| s.scout_leg_sent = None,
+            |s| s.scout_leg_sent = Some(Tick(1391)),
+            |s| s.scouts_sent = 2,
+            |s| s.scout_gone_at = None,
+            |s| s.scout_gone_at = Some(Tick(1381)),
+            |s| s.directive.target = None,
+            |s| s.directive.target = Some(Cell::new(60, 21)),
+            |s| {
+                s.sent.remove(&EntityId::new(12, 0));
+            },
+            |s| {
+                s.sent.insert(EntityId::new(14, 2), (Tick(1560), 3));
+            },
+            |s| {
+                s.sent.insert(EntityId::new(14, 2), (Tick(1561), 2));
+            },
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut s = base_state();
+            change(&mut s);
+            assert_ne!(s.digest(), d, "change {i}");
+        }
+        // The posture's number is hashed: the permanent value.
+        assert_eq!(crate::state::Posture::Gather as u8, 0);
     }
 
     #[test]
