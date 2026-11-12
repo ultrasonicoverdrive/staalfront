@@ -1,0 +1,41 @@
+// The first match against the computer opponent (WP9.1d, docs/rules/match.md and docs/rules/ai.md): the map
+// `assets/maps/m1` and the human as in `m1.ron` (player 0, Meridian, south-west, a construction centre and 4000
+// credits), but player 1 is not a static base any more. It is Veyran under `controller: Ai(profile: "normal")`
+// (the profile `assets/ai/normal.ron`): it starts with a construction centre on the very cell the static
+// base's centre stands on (72, 14, 4 by 4 cells) and the same 4000 credits as the human, and builds the rest
+// itself from the goal list of its profile (power plant, refinery, barracks, power plant, vehicle factory,
+// defence tower, fortified bunker, refinery, radar, defence tower, advanced defences). 4000 is the human's
+// start: the AI does not get more money than the player it is watched against; the refinery it builds
+// brings a free harvester that mines the ore field beside the base, and that income pays for the rest.
+// What it does besides building is what the AI of that day does (docs/rules/ai.md): its economy manager queues
+// harvesters, repairs and keeps the silo rule (WP9.1b-2); the production and army managers come with WP9.1c,
+// so today it builds and mines but makes no combat units and does not attack.
+//
+// `m1.ron` itself is unchanged and still the default of `sf_game --match`: this file is started with
+// `sf_game --match assets/matches/m1_ai.ron` (or `--match m1_ai`, a bare name is looked up under
+// assets/matches). A player is defeated when it owns no standing construction centre (WP7.7), as in m1.
+// Objects enter the world on tick 0 in the order written here.
+(
+    name: "m1_ai",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (72, 14)),
+            ],
+            controller: Ai(profile: "normal"),
+        ),
+    ],
+)

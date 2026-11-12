@@ -122,8 +122,9 @@ pub struct Options {
     /// Without it the sandbox has no harvest rules and its harvesters stand where they are put.
     pub harvest: bool,
     /// `--match [FILE]` (WP7.6): play the match of `FILE` (`assets/matches/m1.ron` when no file follows):
-    /// its map, its players, their credits and starting objects, against a static opponent. Sets the
-    /// scene to [`Scene::Match`]. `Some(None)` is the default match; `None` is no match.
+    /// its map, its players, their credits and starting objects, against a static opponent or, since WP9.1d,
+    /// the computer opponent the file gives a player (`FILE` may be a bare name: `m1_ai` is
+    /// `assets/matches/m1_ai.ron`). Sets the scene to [`Scene::Match`]. `Some(None)` is the default match; `None` is no match.
     pub match_file: Option<Option<PathBuf>>,
     pub screen: ScreenMode,
     pub present: Present,
@@ -565,6 +566,9 @@ mod tests {
             Some(Some(PathBuf::from("assets/matches/other.ron")))
         );
         assert_eq!(o.exit_after, Some(Duration::from_secs(3)));
+        // A bare name is kept as given; `matchplay::file_path` looks it up under assets/matches (WP9.1d).
+        let o = parse(Preset::Game, "--match m1_ai");
+        assert_eq!(o.match_file, Some(Some(PathBuf::from("m1_ai"))));
         // The next flag is not taken for a file name.
         let o = parse(Preset::Game, "--match --harvest");
         assert_eq!((o.scene, o.match_file), (Scene::Match, Some(None)));

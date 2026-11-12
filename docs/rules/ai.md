@@ -480,8 +480,51 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
   not in a scenario: the goal list has one.
 * `refused` after a sent build only matters when the mask cannot see why the simulation said no; the one test of it is the unit that
   drives off (above).
-* The game does not run an AI (WP9.1d). `sf_game --match` is unchanged and its opponent is static.
 * Difficulty levels (WP9.4), the "unfair" level and its two cheats, AI-vs-AI (WP9.5).
 * The AI state is plain data but is not saved anywhere (WP13.1).
 * A shuffled spawn order test (the iteration-order check of the memo) is not built: the AI iterates `BTreeMap`s and ascending vectors only, and the
   determinism script forbids hash collections, but no test shuffles.
+
+## In the game (WP9.1d)
+
+The game runs the AI that a match file gives a player. Code:
+`crates/sf_game/src/sim_thread.rs` (`SimHandle::spawn_with_ais`, `Sim::think_ais`), `matchplay.rs` (`ais`), `runner.rs` (`match_scene`), the
+field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, "Controllers"). Data: `assets/matches/m1_ai.ron`. Tests:
+`crates/sf_game/tests/ai_in_game.rs`, `ai_screenshot.rs`, the unit tests of `matchplay.rs` and `match_def.rs`.
+
+* **One driver for game and headless.** The sim thread holds one `sf_ai::Ai` per AI player, ascending by player id. In every tick, **immediately
+  before `World::step`**, each AI whose `Ai::due(world.tick())` holds calls `Ai::think(&world, ..)` and the commands are scheduled for the tick
+  about to run under the AI's own player id through the thread's own `schedule`, the path a human's command takes (`sf_headless::run::run_watched`
+  does the same in the same order). So they are in the command log, in `--record` and in the checksum. The AI never sees anything but the world
+  it is handed, through its fenced observation (above).
+* **Making the AIs.** `matchplay::ais(def, defs, assets)` reads `<assets>/ai/<profile>.ron` for every player with `controller: Ai(profile: ..)`,
+  checks and resolves it for the player's faction against the unit definitions, and tells every AI the start sites of the match (`sf_ai::start_sites`)
+  as `Scenario::load_ais` of `sf_headless` does; the code is copied (about ten lines) and not shared, because that function is private to the
+  scenario loader and `sf_ai` is not touched by this work package. The AI's seed is the match's `seed` (pinned: two seeds give two digests, `the_match_seed_reaches_the_ai_...`). `spawn_with_ais` sorts the AIs by player id; `two_ais_think_in_ascending_player_order_...` gives two AIs, made due on the same ticks, in swapped order and checks the order in the log. A missing profile or one that does not fit is an
+  error that names the player and the profile and stops the start. `--replay` does not run the AIs (the record holds their commands).
+* **The match file.** `assets/matches/m1_ai.ron`: the map and the human as in `m1.ron`, player 1 Veyran with one construction centre on the cell of
+  `m1`'s static centre (72, 14) and **4000 credits, the human's own start**: the AI is not given more than the player it is watched against; the
+  refinery its goal list builds brings the free harvester and the ore the rest. Start it with `sf_game --match m1_ai` (a bare name is looked up under
+  `assets/matches`; `--match assets/matches/m1_ai.ron` is the same). `m1.ron` is unchanged and still the default.
+* **What the AI does there** is what its managers do (construction WP9.1b-1, economy WP9.1b-2: harvesters, silo, repair, the once-per-match rescue
+  sale). Production and army are stubs (WP9.1c), so it makes no combat units and does not attack, and the human cannot lose to it yet. The commands it
+  may send are `BuildStructure`, `QueueUnit`, `Repair` and `Sell`; the test lets nothing else through and checks that builds and queued harvesters
+  both occur. Measured on the sim thread after the merge with #126 (`ai_in_game.rs`, `ai_screenshot.rs`; the human idle; printed, not asserted):
+  first build at tick 17 (think 0 is the economy manager's turn); 1 structure at tick 2, 4 at tick 1000, 6 at tick 2500 and 6 at tick 4000; by tick 4000 5
+  builds of 4 kinds and 1 unit queued (before the economy: 7 structures at 2500, 8 at 4000, 7 builds of 6 kinds, the harvesters now cost money). Asserted:
+  the first three goals of the list (1900 of the 4000 credits) are ordered and standing by tick 4000.
+* **Thinks per tick.** The profile's `think_interval` 10 and `stagger` 3 give player 1 the ticks 7, 17, 27 ...: 100 thinks in the first 1000 ticks
+  (pinned: `the_ai_thinks_when_it_is_due_...`).
+* **The cost of a think** is part of the sim tick (`step_once` starts its clock before the thinks) and is counted on its own:
+  `SimCounters::thinks`, `think_micros`, `think_max_micros`, and in the hitch log per slow tick and as totals (`docs/rules/hitch_log.md`). Measured after the merge with
+  the economy manager (2,000 thinks, relative numbers, shared container): sim thread release, mean 1-2 us, worst 59-94 us, 1.1-1.3 % of the step time (two
+  runs); sim thread debug, mean 36 us, worst 984 us, 1.3 %; real game window under Xvfb (debug, 401 thinks) mean 0.097 ms, worst 1.04 ms. The profile's
+  budget is 1 ms a think; nothing enforces it.
+* **A record replays without the AI.** The AI's commands are in the record, so `sf_headless FILE` gives the same checksum at every tick without
+  running it (`a_recorded_match_with_an_ai_replays_without_the_ai_to_the_same_checksum_at_every_tick`); and the sim thread and
+  `sf_headless::run::run_full` with the same AI give the same checksum at every tick
+  (`the_sim_thread_and_the_headless_host_run_the_ai_to_the_same_checksums`).
+* **Not done in WP9.1d.** No AI state in the game's save (WP13.1); no difficulty choice (the profile name in the file is the only choice, WP9.4); the
+  restart from the menu makes a fresh AI with the world (`a_restart_equals_a_fresh_start` runs it for `--match m1_ai`: the thinks of the restarted game equal a fresh start's); the
+  F1 panel shows no AI numbers; the AI has no sight of what the human's fog hides, so it cannot find the human's base, as designed (it knows only the start
+  sites).

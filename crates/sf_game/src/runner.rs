@@ -461,6 +461,7 @@ impl Runner {
             mut build,
             focus,
             catalog,
+            ais,
         } = start;
         if let Some(role) = &options.build
             && !build.choose(role)
@@ -476,7 +477,7 @@ impl Runner {
         // From here on the world belongs to the sim thread. Its clock stays
         // held until the window and the renderer exist (`on_start`), so the
         // units do not wander off while the GPU starts.
-        let sim = SimHandle::spawn(world, sim_config.clone())
+        let sim = SimHandle::spawn_with_ais(world, sim_config.clone(), ais)
             .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
         let snap = sim.latest();
 
@@ -975,6 +976,13 @@ impl Runner {
             late_commands: counters.late_commands,
             tick_ms_max: tick_ms.0.iter().copied().fold(0.0, f64::max),
             slow_ticks: self.sim.all_slow_ticks(),
+            thinks: counters.thinks,
+            think_ms_mean: if counters.thinks == 0 {
+                0.0
+            } else {
+                counters.think_micros as f64 / counters.thinks as f64 / 1e3
+            },
+            think_ms_max: counters.think_max_micros as f64 / 1e3,
         }
     }
 
@@ -3408,6 +3416,8 @@ struct SceneStart {
     focus: Option<(f64, f64)>,
     /// What the sidebar offers (WP11.1); none in the crowd scenes, which have no sidebar.
     catalog: Option<Catalog>,
+    /// The computer opponents the sim thread thinks for (WP9.1d); only the match has any.
+    ais: Vec<sf_ai::Ai>,
 }
 
 /// The engine demo's scene: a crowd of placeholder wanderers and, with a model
@@ -3432,6 +3442,7 @@ fn crowd_scene(
         build: BuildMode::empty(),
         focus: None,
         catalog: None,
+        ais: Vec::new(),
     }
 }
 
@@ -3512,6 +3523,7 @@ fn fight_scene(
         build: BuildMode::empty(),
         focus: None,
         catalog: None,
+        ais: Vec::new(),
     }
 }
 
@@ -3601,6 +3613,7 @@ fn sandbox_scene(
             crate::playfield::shipped_build_speed(),
         )),
         focus: None,
+        ais: Vec::new(),
     }
 }
 
@@ -3622,6 +3635,16 @@ fn match_scene(
     crate::matchplay::check(&def, &defs, cells, commands::LOCAL_PLAYER)?;
     world = crate::matchplay::configure(world, &def, &defs)?;
     let roster = load_roster(options, &defs, style, icons, &assets);
+    // The computer opponents (WP9.1d). A replay feeds the commands of a record into the game, the AI's
+    // included, so the AIs stay silent then: they would play on top of the record.
+    let mut ais = crate::matchplay::ais(&def, &defs, &assets)?;
+    if options.replay.is_some() && !ais.is_empty() {
+        println!(
+            "match {}: --replay: the computer opponents are not run, the record holds their commands",
+            def.name
+        );
+        ais.clear();
+    }
     let start = crate::matchplay::schedule(&mut world, &def, &defs)?;
     let mut views = Vec::new();
     let report = world.step();
@@ -3665,6 +3688,7 @@ fn match_scene(
             crate::playfield::shipped_build_speed(),
         )),
         focus: crate::matchplay::focus_metres(&def, commands::LOCAL_PLAYER),
+        ais,
     })
 }
 
@@ -4157,7 +4181,7 @@ mod tests {
     /// ticks, the checksum at tick N is the one of a fresh start, for the sandbox and for the match.
     #[test]
     fn a_restart_equals_a_fresh_start() {
-        for line in ["--sandbox", "--match"] {
+        for line in ["--sandbox", "--match", "--match m1_ai"] {
             let reference = runner(line);
             let start = reference.sim.latest().tick();
             let (fresh, at) = run_ticks(&reference, 40);
@@ -4187,7 +4211,55 @@ mod tests {
             let (again, tick) = run_ticks(&played, 40);
             assert_eq!(tick, at, "{line}");
             assert_eq!(again, fresh, "{line}: the restarted game is the fresh one");
+            // The AI of the match file is made again with the world: it thought as often as a fresh one did.
+            assert_eq!(
+                played.sim.counters().thinks,
+                reference.sim.counters().thinks,
+                "{line}: the restarted game has a fresh AI"
+            );
         }
+    }
+
+    /// WP9.1d: the runner's own match scene gives the sim thread the computer opponent of the match file
+    /// (`--match m1_ai`, a bare name under assets/matches): player 1 thinks at the ticks 7, 17, 27 and 37 of
+    /// the first 40 ticks and the world is another one than the default match's, while the default match
+    /// has no AI and no think. With `--replay` the AIs stay out (the record holds their commands).
+    #[test]
+    fn the_match_scene_hands_the_ai_of_the_match_file_to_the_sim_thread() {
+        let with_ai = runner("--match m1_ai");
+        let default = runner("--match");
+        let (ai_sum, tick) = run_ticks(&with_ai, 40);
+        let (default_sum, same_tick) = run_ticks(&default, 40);
+        assert_eq!(tick, same_tick);
+        assert_eq!(
+            with_ai.sim.counters().thinks,
+            4,
+            "the thinks at 7, 17, 27, 37"
+        );
+        assert_eq!(default.sim.counters().thinks, 0);
+        assert_ne!(
+            ai_sum, default_sum,
+            "the AI's first build at tick 17 changed the world"
+        );
+        // A record is replayed without them: the file's AI is not run.
+        let dir = std::env::temp_dir().join(format!("sf_runner_replay_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let record = dir.join("empty.ron");
+        let assets = sf_engine::AssetRoot::resolve().root().display().to_string();
+        std::fs::write(
+            &record,
+            format!(
+                "Scenario(name: \"recorded_match\", seed: 1, map: (width: 96, height: 96), \
+                 game: Some((assets: \"{}\", match_path: \"matches/m1_ai.ron\", speed_raw: 98304)), \
+                 ticks: 10, recorded: [])",
+                assets.replace('\\', "/")
+            ),
+        )
+        .unwrap();
+        let replaying = runner(&format!("--match m1_ai --replay {}", record.display()));
+        run_ticks(&replaying, 40);
+        assert_eq!(replaying.sim.counters().thinks, 0, "no AI under --replay");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Restart keeps the match file or the sandbox it was started with: the match is still the match.
