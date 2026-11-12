@@ -13,13 +13,14 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::scenario_path;
-use sf_ai::Lens;
+use sf_ai::placement::search;
+use sf_ai::{Lens, Observation};
 use sf_headless::cli::parse_checksum;
 use sf_headless::run::{Finished, RunOptions, run, run_full, run_watched};
-use sf_headless::scenario::{Action, Scenario, TimedCommand};
+use sf_headless::scenario::{Action, IdSpec, Scenario, TimedCommand};
 use sf_sim::{
-    BuildingFunction, Cell, Command, EntityId, Kind, PlacementError, PlayerId, Visibility, World,
-    gap,
+    BuildingFunction, Cell, Command, EntityId, Footprint, Kind, PlacementError, PlayerId,
+    Visibility, World, gap,
 };
 
 const P0: PlayerId = PlayerId(0);
@@ -295,8 +296,10 @@ fn boxed_in_the_refinery_is_blocked_and_later_goals_are_built() {
 #[test]
 fn a_build_the_simulation_refuses_is_noticed_and_built_elsewhere() {
     // The first build of `ai_base` is the power plant at (9, 68), sent at tick 10. A unit of player 0 put
-    // on that cell at the same tick, before the AI's command runs, makes the simulation refuse it. The next
-    // construction turn sees no plant there, remembers the refusal and builds it elsewhere.
+    // on that cell at the same tick, before the AI's command runs, makes the simulation refuse it; the unit
+    // drives off at tick 20. The next construction turn (tick 50) sees no plant there, remembers the
+    // refusal (the cell is free again, so only that memory keeps the AI from the same cell) and builds the
+    // plant elsewhere.
     let mut s = scenario("ai_base");
     let plain = go(&s, 300);
     assert_eq!(
@@ -319,17 +322,40 @@ fn a_build_the_simulation_refuses_is_noticed_and_built_elsewhere() {
             cell: (9, 68),
         },
     });
+    s.commands.push(TimedCommand {
+        tick: 20,
+        player: 0,
+        command: Action::OrderMove {
+            ids: vec![IdSpec::Id(2, 0)],
+            target: (6, 58),
+            queued: false,
+        },
+    });
+    let at_50 = go(&s, 50);
+    let truck = at_50.world.cell_of(EntityId::new(2, 0)).or_else(|| {
+        at_50
+            .world
+            .snapshot()
+            .iter()
+            .find(|v| v.id == EntityId::new(2, 0))
+            .and_then(|v| at_50.world.cell_at(v.pos))
+    });
+    let truck = truck.unwrap();
+    assert!(
+        !((9..11).contains(&truck.x) && (68..71).contains(&truck.y)),
+        "the truck is still on the plant's cells at tick 50: {truck:?}"
+    );
     let f = go(&s, 2500);
     assert_eq!(f.outcome.commands_ignored, 1);
+    // The first plant (the lowest id) stands elsewhere; (9, 68) may be used again once the refusal has
+    // expired (`blocked_ticks` later).
     let plants: Vec<Cell> = structures(&f.world)
         .iter()
         .filter(|s| s.1 == PLANT)
         .map(|s| s.2)
         .collect();
-    assert!(
-        !plants.is_empty() && !plants.contains(&Cell::new(9, 68)),
-        "{plants:?}"
-    );
+    assert_ne!(plants[0], Cell::new(9, 68), "{plants:?}");
+    assert_eq!(f.ai_commands[1].0, 50, "{:?}", f.ai_commands);
     // The base goes on: the vehicle factory stands.
     assert!(
         structures(&f.world)
@@ -407,6 +433,49 @@ fn the_lens_does_not_ask_about_ground_the_player_does_not_see() {
     assert_eq!(f.world.visibility(P0, left), Visibility::Shroud);
     assert_eq!(lens.placement(PLANT, left), None);
     assert_eq!(lens.previews(), 1);
+}
+
+#[test]
+fn the_search_keeps_off_the_apron_of_an_own_refinery() {
+    // The placement search of the AI on the world of `ai_base` after one tick. Alone, the best place for a
+    // power plant is (9, 68), west of the centre. The same search with a refinery the AI believes it has at
+    // (5, 67) (exit side +x, so its apron is x 8..12, y 68..70) must keep the plant off that apron; the
+    // world has no refinery there, so only the AI's own rule can keep it off.
+    let f = go(&scenario("ai_base"), 1);
+    let mut obs = Observation::build(&f.world, P0, &BTreeMap::new());
+    let mut lens = Lens::new(&f.world, P0);
+    let mut state = f.ais[0].state().clone();
+    assert_eq!(
+        search(&mut state.clone(), &obs, &mut lens, PLANT),
+        Some(Cell::new(9, 68))
+    );
+    let mut refinery = obs.own[0].clone();
+    refinery.id = EntityId::new(1000, 0);
+    refinery.kind = REFINERY;
+    refinery.cell = Cell::new(5, 67);
+    refinery.footprint = Some(Footprint {
+        width: 3,
+        height: 4,
+    });
+    obs.own.push(refinery);
+    let got = search(&mut state, &obs, &mut lens, PLANT).unwrap();
+    let b = f.world.building_table().get(REFINERY).unwrap();
+    let e = state.profile.economy;
+    for (x, y) in sf_ai::placement::apron(
+        Cell::new(5, 67),
+        b.footprint,
+        b.exit_side.unwrap(),
+        e.refinery_apron,
+    ) {
+        let inside = x >= i64::from(got.x)
+            && x < i64::from(got.x) + 2
+            && y >= i64::from(got.y)
+            && y < i64::from(got.y) + 3;
+        assert!(
+            !inside,
+            "the plant at {got:?} covers ({x}, {y}) of the apron"
+        );
+    }
 }
 
 #[test]
