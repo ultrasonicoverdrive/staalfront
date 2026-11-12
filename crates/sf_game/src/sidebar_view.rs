@@ -51,12 +51,13 @@ fn tile_color(c: (u8, u8, u8)) -> Color {
 }
 
 /// The box of the loop sign at the top left of `picture` (WP6.10): the word `words.repeating` at
-/// `repeating_px`, a padding left and right, no padding above or below.
+/// `repeating_px`, a padding left and right, no padding above or below; the height is whole pixels, rounded up, so the label
+/// that is centred below it (also on whole pixels) never meets it.
 fn loop_sign_rect(ui: &Ui, look: &SidebarLook, picture: Rect) -> Rect {
     let scale = ui.scale();
     let pad = (f32::from(look.text_pad_px) * scale).round();
     let (w, h) = ui.measure_px(&look.words.repeating, f32::from(look.repeating_px) * scale);
-    Rect::new(picture.x, picture.y, w + 2.0 * pad, h)
+    Rect::new(picture.x, picture.y, w + 2.0 * pad, h.ceil())
 }
 
 /// The box of the label of a picture, centred in the picture; under the loop sign when the item
