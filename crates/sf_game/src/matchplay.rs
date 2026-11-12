@@ -243,6 +243,22 @@ mod tests {
         assert!(e.contains("player 1") && e.contains("nonesuch"), "{e}");
     }
 
+    /// WP9.5a: `m1_duel` has the computer on both seats and is for `sf_headless tournament` only: the game
+    /// refuses it, because the local player takes its orders from the keyboard.
+    #[test]
+    fn the_game_refuses_the_duel_match_and_the_ais_make_both_seats() {
+        let duel = load(&file_path(Some(Path::new("m1_duel")), &assets())).unwrap();
+        let defs = UnitDefs::embedded();
+        let map = Map::load(&map_dir(&duel, &assets())).unwrap();
+        let e = check(&duel, &defs, map.size_in_cells(), PlayerId(0)).unwrap_err();
+        assert!(e.contains("player 0") && e.contains("local player"), "{e}");
+        let made = ais(&duel, &defs, &assets()).unwrap();
+        assert_eq!(
+            made.iter().map(|a| a.player().0).collect::<Vec<_>>(),
+            [0, 1]
+        );
+    }
+
     #[test]
     fn the_match_seed_reaches_the_ai_and_a_profile_without_the_faction_is_refused() {
         let (_, defs, _) = m1();

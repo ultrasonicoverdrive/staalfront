@@ -383,6 +383,19 @@ pub fn load_setup(assets: &Path, match_path: &Path) -> Result<Setup, String> {
     })
 }
 
+/// The faction of each seat in `loaded`, by the player id of the seat.
+fn seat_factions(loaded: &LoadedGame, seats: &[PlayerId; 2]) -> [Faction; 2] {
+    let of = |seat: PlayerId| {
+        loaded
+            .def
+            .players
+            .iter()
+            .find(|p| PlayerId(p.id) == seat)
+            .map_or(Faction::Neutral, |p| p.faction)
+    };
+    [of(seats[0]), of(seats[1])]
+}
+
 /// Plays game `index`: the factions, the seeds, the world and the AIs of [`factions_for`] and [`seeds_for`],
 /// the AIs thinking right before the step they are due at (as `run::run_full` and the game's sim thread do),
 /// until the match has a result or `cap` ticks have run.
@@ -470,7 +483,9 @@ pub fn play_game(
         index,
         world_seed,
         ai_seed,
-        factions,
+        // What the world and the AIs were made with, read back from the match they were made from: the
+        // record does not repeat the schedule, it shows what was played.
+        factions: seat_factions(&loaded, &setup.seats),
         ending,
         defeat_tick: decided.map(|(tick, _)| tick),
         ticks,
