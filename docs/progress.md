@@ -3231,3 +3231,28 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   bytes 0, 1, 2, 3 as literals (mutations "rally branch drops `+ repeat`" and "+2 to +4" fail it). The kind, factory and faction checks
   and the queue-full check in `repeatable()` are documented as guards that cannot trigger. Repair and Sell are a third of the row wide
   now (`repair_sell.md`). The scenario count is 34 (33 + new).
+
+### WP9.1d notes: the computer opponent in the game (12-11-2026)
+
+* **What exists.** `controller` per player in the match file (`Standard` by default, `Ai(profile: "normal")`), `assets/matches/m1_ai.ron` (the M1 map,
+  the human as in `m1`, Veyran as the AI with a construction centre and 4000 credits: the human's own start), the sim thread as host of the `sf_ai`
+  driver (think immediately before `World::step` when `Ai::due`, commands through the thread's own `schedule`, so in the log and in `--record`),
+  the think time in the hitch log, `sf_game --match m1_ai` (a bare name is looked up under `assets/matches`). Rules: `docs/rules/match.md`
+  ("Controllers"), `docs/rules/ai.md` ("In the game (WP9.1d)"), `docs/rules/hitch_log.md`. Nothing changed in `crates/sf_sim` or `crates/sf_ai`.
+* **Unchanged on purpose.** `m1.ron` and every frozen copy are byte-identical; no scenario checksum, golden or `.expected` moved (release
+  `sf_headless --expect` on all scenarios, see the PR). Tests that count or pin the hitch log's slow ticks changed shape only
+  (`(tick, ms)` is `(tick, ms, think_ms)` now; `hitch.rs` tests).
+* **Measured** (`tests/ai_in_game.rs`, human idle, 20,000 ticks = 2,000 thinks; relative numbers, container shared with other agents' cargo runs):
+  debug build mean 24 us, worst 751 us, thinking 1.0 % of the step time; **release build mean 2 us, worst 57 us, 1.5 % of the step time**
+  (225,847 us of step in all). In the real game window under Xvfb (debug build, llvmpipe, 4,068 ticks, 407 thinks): mean 0.097 ms, worst 4.8 ms
+  (the first slow-tick lines of its hitch log are `[257, 64.1, 1.14]` and `[817, 87.5, 0.0]`: the think was 1.1 ms of a 64 ms debug tick and none of the
+  other). The AI's goal list is all there is to think about today (economy, production and army are stubs), so these numbers will grow with WP9.1b-2 and
+  WP9.1c; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
+* **Seen.** `docs/screenshots/wp9.1d/` (README there): the AI's base at ticks 2, 1000, 2500 and 4000 (1, 4, 7, 8 structures); the real game window shows
+  the human only its own base (the AI's is behind the fog).
+* **Gaps.** `sim_thread::slow_ticks`' third number and `slow_thinks` have no test that makes a think slow (the thinks of today are under 1 ms in release
+  and the AI cannot be slowed from outside); the JSON shape is pinned in `hitch.rs` and the real game's log shows it (above). The sim thread's AI order
+  (ascending player) is checked by reading (`spawn_with_ais` sorts); `m1_ai` has one AI. `--replay` of a record of an AI match is untested apart from
+  the runner test that no AI runs under `--replay`. Thinking before the step or after it is the same sequence of world states (a think after step T is
+  a think before step T+1), so no checksum can tell them apart; what a test can pin, and does, is the tick the commands are made for (the tick about to
+  run, `requested == effective`, `late_commands` 0).

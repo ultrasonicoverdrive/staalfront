@@ -61,6 +61,7 @@ struct Played {
     think_micros: u64,
     think_max_micros: u64,
     step_micros: u64,
+    late_commands: u64,
 }
 
 /// Plays `ticks` ticks of `file` on the sim thread, one tick at a time, nobody sending a command (the human
@@ -90,6 +91,7 @@ fn play(file: &Path, ticks: u64) -> Played {
         think_micros: c.think_micros,
         think_max_micros: c.think_max_micros,
         step_micros: c.step_micros,
+        late_commands: c.late_commands,
     }
 }
 
@@ -163,6 +165,10 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
         "one think per due tick of the 1000 ticks run"
     );
     assert!(p.think_micros > 0 && p.think_micros <= p.step_micros);
+    assert_eq!(
+        p.late_commands, 0,
+        "no AI command was moved to a later tick"
+    );
     assert!(p.think_max_micros <= p.think_micros);
     let ai: Vec<_> = p.exit.commands.iter().filter(|c| c.player == AI).collect();
     assert!(!ai.is_empty(), "the AI sent commands");
