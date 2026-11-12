@@ -53,7 +53,10 @@ dim and silent. It does not depend on the repair rules. A queued item of a repea
 its picture (`words.repeating` at `repeating_px`, 8 px; `Item::repeating`; the same colour as the lit button). The label of that item is centred in
 the picture **below** the sign (`sidebar_view::label_rect`, `loop_sign_rect`), so the sign never covers a letter; the test
 `the_loop_sign_never_covers_the_label_of_its_picture` calls both functions for every label of the shipped catalog at 1280 x 720, 1920 x 1080 and
-800 x 600, scale 0.5 to 2, and checks the boxes do not meet and stay in the picture; the screenshot test checks the pixels. Mouse only: no key in this WP (letters such as R and L are free in `input.ron`, but a key needs a decision with the
+800 x 600, scale 0.5 to 2, and checks that the boxes do not meet (at scale 1 and above the label also stays inside the picture; at scale 0.5 the picture is too small for
+sign and label and only the first claim holds). `picture_rect` and `count_badge_rect` are the functions `draw_tile` and the test share. **Gap, measured**: a count badge of
+one digit never reaches the moved label (all labels, scale 1 to 2), but with a count of ten or more the badge reaches into the glyph box of
+DECOY, ROCKT and SCOUT (1280 x 720, scale 1; the set is pinned in the test); nothing was widened for it. The screenshot test checks the pixels. Mouse only: no key in this WP (letters such as R and L are free in `input.ron`, but a key needs a decision with the
 rest of the key map; the button is one click). The row is three equal buttons now. Tests: `sidebar/tests.rs`
 (`the_repeat_button_acts_on_the_primary_factory_...`), `sidebar_view/tests.rs` (press, lit, sign), `sidebar_layout/tests.rs`
 (`the_repeat_button_is_the_third_in_the_row_of_buttons`), `tests/sidebar_screenshot.rs` (pixels from a real world;

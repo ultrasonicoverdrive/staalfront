@@ -128,9 +128,10 @@ pub struct EventRule {
 pub struct PositionalConfig {
     /// Playbacks started per frame over all events, at most.
     pub max_cues_per_frame: u32,
-    /// The most the playbacks of one frame may add up to in gain (each one's volume x spatial gain), in
-    /// full-scale units. A frame above it is turned down as a whole (`FxSound::start_cues`), so a heavy
-    /// moment does not clip; a frame below it plays unchanged.
+    /// The most the playbacks of one frame may add up to in gain (each one's volume x category volume x
+    /// master volume x spatial gain), in full-scale units. A frame above it is turned down as a whole
+    /// (`FxSound::start_cues`), so a heavy moment does not clip; a frame below it plays unchanged. The
+    /// bound holds per frame only: playbacks of frames that overlap in time are not limited together.
     pub max_summed_gain: f32,
     /// The rule of an event that no entry of `events` covers.
     pub fallback: EventRule,
