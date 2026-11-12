@@ -2866,6 +2866,42 @@ pins are those of `ai_fog`).
 - **Not done.** Every rule of the AI (WP9.1b, WP9.1c); the game hookup (WP9.1d); the public tables, terrain and ore in the observation; a test of the allowed command
   set (no command exists yet); a shuffled-spawn-order digest test; difficulty levels; saving the AI state.
 
+### WP9.1b-1 notes: the computer opponent builds its base (12-11-2026)
+
+First half of WP9.1b (design memo of 11-11-2026, split in two; the open choices hold as recommended, PLAN.md phase 9). Rules and numbers:
+`docs/rules/ai.md`, "The base". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved (`golden.rs`, `wander_5000`,
+`command_mix`, `terrain_256`, `units_spawn` and every other `.expected` but `ai_fog` are the same).
+
+- **Built.** `sf_ai`: `Own` with `max_hp`, `building`, `repairing`, `factory`; the fenced `Lens` (public rules, terrain, visibility, and the
+  simulation's placement rule asked only for a fully visible footprint and exit); `budget` (stateless free credits); `base` (the construction
+  manager: verify the last build, the parallel cap, the goal list, power first, the money rule with its emergencies and the harvester
+  reserve, then place); `placement` (window, mask with lane and aprons, score, at most `placement_cap` previews). New state in the digest.
+  `sf_data::ai_profile`: `lane`, `refinery_apron`, `factory_apron` with defaults; `placement_cap` 32 in `normal.ron`. `sf_headless`:
+  `run_watched`, `Finished::ai_commands`; the scenarios `ai_base`, `ai_noore`, `ai_boxed` on the frozen copy `ai_base_defs`, the maps
+  `m1_noore` and `m1_boxed` (`examples/gen_ai_maps.rs`); all three in the CI headless list and so in the Linux/Windows log comparison.
+- **Measured.** `ai_base`: T1 (up to the vehicle factory) tick 1998, T1b (the whole list, with a third power plant before the radar) tick
+  6518, 11 builds, none refused, no stall, power never short. `ai_noore`: 8 builds before tick 3000, then nothing for 37,000 ticks.
+  `ai_boxed`: the refinery is blocked, the barracks, second plant and both towers are built. Think cost in `ai_perf.rs`: mean 0.1 us per AI
+  per tick alone, 6.6 to 7.6 us with 5,000 wanderers; worst think 137 to 890 us with the crowd; at most 1 placement question per think; one
+  question costs 7.8 to 8.1 us in the crowd, hence `placement_cap` 32 (256 would be about 2 ms).
+- **Re-pinned.** `ai_fog`: checksum `0xd369218db6025eff` to `0x768b77651509db8c`, AI digest `0x993afc7cd2c42cfd` to `0x54a924e86710242c`; its AI
+  now builds a power plant and a refinery. Measured cause: with the construction manager switched off the old checksum comes back; with the
+  new state and the profile's lane and aprons also left out of the digests the old digest comes back. The frozen `ai_fog_defs` is unchanged
+  (its profile reads with the defaults).
+- **Mutations** (scratch edits, reverted; failing tests named): power rule removed fails `power_made_is_never_below_power_used` (and 3
+  more); money rule removed fails `nothing_stalls_for_lack_of_money` and `without_income_the_ai_builds_what_it_can_pay_and_then_waits`; lane
+  0 fails `no_two_structures_touch_and_every_apron_is_free`; the visible-only rule of `Lens::placement` removed fails
+  `the_lens_does_not_ask_about_ground_the_player_does_not_see`; `blocked_until` ignored fails
+  `boxed_in_the_refinery_is_blocked_and_later_goals_are_built`; the verify step removed fails
+  `a_build_the_simulation_refuses_is_noticed_and_built_elsewhere` (and 7 more); a refused sent build not remembered fails
+  `a_build_the_simulation_refuses_is_noticed_and_built_elsewhere`; the own aprons left out of the mask fail
+  `the_search_keeps_off_the_apron_of_an_own_refinery`; a candidate's own apron not checked fails
+  `boxed_in_the_refinery_is_blocked_and_later_goals_are_built`; the `refused` map hashed in reverse fails
+  `the_digest_of_the_base_state_is_pinned`. Every one also moves a pinned checksum or digest.
+- **Not done.** The economy manager (harvesters, silo, repair) and `ai_economy`/`ai_rebuild` (WP9.1b-2); production and army (WP9.1c); the
+  game does not run the AI (WP9.1d), so there is nothing new to see in `sf_game` and no screenshots; whether a one-cell lane is wide enough
+  for harvester traffic is not checked.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
