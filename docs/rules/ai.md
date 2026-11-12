@@ -162,7 +162,7 @@ and of the defaults), `every_number_is_checked_at_both_ends_when_the_file_is_rea
 `a_profile_without_the_base_numbers_of_wp9_1b_reads_with_the_defaults`. Acting since WP9.1b-1: the schedule numbers, `power_margin`,
 `max_parallel_builds`, `silo_percent` (as the cap of what a build saves up), `blocked_ticks`, `placement_cap`, `lane`, the aprons.
 Acting since WP9.1b-2: `harvesters_per_refinery`, `repair_below_percent`, `silo_percent` (now also the silo rule) and `blocked_ticks`
-(also the backoff of repair and of a refused harvester order). `reserve` acts since WP9.1c-1 (production), the army numbers in part (see "The army, as far as 9.1c-1 goes").
+(also the backoff of repair and of a refused harvester order). `reserve` acts since WP9.1c-1 (production), the army numbers in part (see "The army in WP9.1c-1").
 
 ### State
 
@@ -432,7 +432,7 @@ start. (This is the cost of the order of the list, which puts two refineries, a 
 unit.) **WP9.1c-2's attack timing (`first_attack_tick` 2,400, `max_wait` 3,600, `min_units` 4) will see no army before tick 15,700 on M1 with
 this profile**; shortening the goal list for the opening or letting the army have a share of the income is a decision for Tijmen, not made here.
 
-## The army, as far as 9.1c-1 goes
+## The army in WP9.1c-1
 
 `army::turn`, every 40 ticks (manager 3: thinks 3, 7, 11, ...). Also off for a profile that makes no units. **No army unit attacks in this
 WP.** `AiState::directive` (`Directive { posture: Posture::Gather, target: None }`, hashed) is the seam for WP9.1c-2: the army manager of
@@ -566,7 +566,7 @@ check requires `think_interval / gcd(think_interval, stagger) >= 8`, the most pl
 player 1 at 7, player 2 at 4, ...). Each think runs the observation, the memory update and **one** manager in rotation, so each of the
 four managers (`Economy`, `Construction`, `Production`, `Army`, numbered 0 to 3, which are hashed) runs every 40 ticks. **Construction has
 rules since WP9.1b-1** (above), **economy since WP9.1b-2** ("The economy"), **production and the first half of the army since WP9.1c-1**
-("Production", "The army, as far as 9.1c-1 goes"). The army manager's attack half is WP9.1c-2.
+("Production", "The army in WP9.1c-1"). The army manager's attack half is WP9.1c-2.
 
 **The driver.** `Ai::due(tick)` and `Ai::think(&World, &mut Vec<Command>)`, called by the host immediately before `World::step`; the host
 schedules the commands for `world.tick()` under the AI's player id, AIs in ascending player id. In `sf_headless` that is `run::run_full`

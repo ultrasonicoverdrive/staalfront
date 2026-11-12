@@ -1,4 +1,4 @@
-//! The army manager as far as WP9.1c-1 goes (`docs/rules/ai.md`, "The army, as far as 9.1c-1 goes"): the
+//! The army manager in WP9.1c-1 (`docs/rules/ai.md`, "The army in WP9.1c-1"): the
 //! gather cell, the scout and the gathering of the army. **Army units never attack here**; the army manager
 //! of WP9.1c-2 (threat, attack timing, target, marching) slots into [`AiState::directive`].
 //!

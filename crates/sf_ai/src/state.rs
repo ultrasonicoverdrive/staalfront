@@ -36,7 +36,7 @@ pub struct Known {
 
 /// What the army manager wants the army to do. WP9.1c-1 holds the seam only: the posture is always
 /// [`Posture::Gather`] and nothing reads the target; WP9.1c-2 adds the postures `Attack` and `Defend` and the
-/// function that turns a directive into orders (`docs/rules/ai.md`, "The army, as far as 9.1c-1 goes").
+/// function that turns a directive into orders (`docs/rules/ai.md`, "The army in WP9.1c-1").
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Directive {
     /// What the army does.

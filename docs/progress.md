@@ -2979,8 +2979,7 @@ earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `
 
 ### WP9.1c-1 notes: the computer opponent's production and scout (12-11-2026)
 
-First half of WP9.1c (split in two, PLAN.md phase 9). Rules, numbers and measurements: `docs/rules/ai.md`, "Production" and "The army, as far as 9.1c-1
-goes". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and every
+First half of WP9.1c (split in two, PLAN.md phase 9). Rules, numbers and measurements: `docs/rules/ai.md`, "Production" and "The army in WP9.1c-1". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and every
 `.expected` but the new `ai_scout`).
 
 - **Built.** `sf_ai::production` (rally point per factory to the gather cell, the unit mix by share, one order per factory per turn, `max_queue` 2, the
