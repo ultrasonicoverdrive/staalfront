@@ -1,12 +1,12 @@
-// A raid on the AI's base (WP9.1c-2, docs/rules/ai.md, "Threat"): the AI of `ai_vs_passive` (the same frozen
-// profile) on the first match's map against a lone static construction centre (the match file of `ai_scout`). At
+// A raid on the AI's base (WP9.1c-2, docs/rules/ai.md, "Threat"): the AI of `ai_vs_passive` as WP9.1c-2 left it (the
+// same frozen profile then; `ai_vs_passive_defs` was refrozen in WP9.1c-3, this one was not) on the first match's map against a lone static construction centre (the match file of `ai_scout`). At
 // tick 4001 the script puts three riflemen of player 1 west of the AI's base and orders them to attack the AI's first
 // power plant (slot 3, the first structure it builds). The AI must see the hits within one think, defend with the
 // army at home and go back to gathering `defend_ticks` after the last hit. The run ends at 5600, before the AI's
 // first attack (`max_wait` 6000).
 //
 // `unit_defs` names a FROZEN copy (ai_raid_defs, made for WP9.1c-2): the definitions and profile of
-// `ai_vs_passive_defs` and the match file of `ai_scout_defs`. The ore, harvest, storage, money, production, power and
+// `ai_vs_passive_defs` as WP9.1c-2 left them (not the refrozen profile of WP9.1c-3) and the match file of `ai_scout_defs`. The ore, harvest, storage, money, production, power and
 // vision numbers are those of `ai_scout`.
 Scenario(
     name: "ai_raid",

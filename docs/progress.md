@@ -3046,20 +3046,17 @@ WP9.1c-2". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved
 
 Follow-up of WP9.1c-2 (#129), data only: economy before army. Rules, numbers and measurements: `docs/rules/ai.md`, "The opening (WP9.1c-3)". Nothing in
 `crates/sf_sim/` changed. One line of `sf_ai` changed (the centre recall clears `closing`, from the re-review of #129). `ai_raid` and every earlier phase's
-pin are unchanged; `ai_vs_passive` and its frozen profile were deliberately re-pinned (cause measured, `ai.md` "Pins that moved (WP9.1c-3)").
+pin are unchanged; `ai_vs_passive` and its frozen profile were deliberately re-pinned (cause as a test, `the_repin_of_ai_vs_passive_in_wp9_1c_3_is_the_profile`).
 
-- **Built.** `assets/ai/normal.ron`: the vehicle factory second in both goal lists (power plant, refinery, vehicle factory, barracks, ...), `max_wait`
-  14,000 (was 6,000), `army_floor_value` unchanged (2,000). `ai_vs_passive_defs/normal.ron` refrozen to it, the scenario 20,000 ticks. `army::watch`
-  clears `closing` on a centre recall (`a_centre_recall_leaves_no_attacker_on_the_closing_list`).
-- **Measured.** Second harvester at 1,880 (`ai_vs_passive`) and 1,887 (`m1_ai`), the barracks at 2,890 and 3,017, the first unit of the mix queued at 5,860
-  and 7,387, the floor reached at 12,567 and 13,494, the first wave 6 units / 2,000 at 14,030 and 14,037, **the win at 16,726 and 16,023** (was 14,659
-  and 8,396). With the attack off the goal list **completes at 22,970 and 24,417** (was: not in 30,000 ticks). `max_wait` 8,000, 10,000 and 12,000 give a
-  first wave of 1,200; 14,000 is the smallest round value that carries 2,000 in both seats.
-- **Gap, stated.** The acceptance target "goal list complete by 20,000 with the attack off" is **not met** (22,970 and 24,417); a floor of 1,000 would meet
-  it (19,930) but loses the first wave (1,200) and the win comes at 27,209. The cost of the opening, accepted by the decision: no barracks before
-  about 2,900 and no unit before about 5,900, so an early infantry rush by a human beats it; not tested against a rushing opponent.
-- **Moved with it.** The fence test's riflemen moved to (57, 28) (the wave now passes there); `the_ai_builds_its_base_in_the_game` looks at 9,000
-  ticks; the attack-wave pictures were re-taken at 14,000, 15,000 and 16,000 (`docs/screenshots/wp9.1c-2/`).
+- **Built.** `assets/ai/normal.ron`: the vehicle factory second in both goal lists, the second refinery before the first tower, `attack_value` 2,000 (= the floor),
+  `max_wait` 12,000 (was 6,000). `ai_vs_passive_defs/normal.ron` refrozen to it (the scenario stays 16,000 ticks). `army::watch` clears `closing` on a centre
+  recall. Pictures re-taken: `docs/screenshots/wp9.1c-2/` (ticks 9,600, 10,600, 11,500) and `wp9.1d/` (1000, 2500, 4000).
+- **Measured.** Second harvester at 1,880 (`ai_vs_passive`) and 1,887 (`m1_ai`), barracks 2,890 / 3,017, first unit of the mix queued 4,460 / 4,587, floor reached 10,687 / 9,374, first
+  wave 6 units worth 2,000 at 11,150 / 9,717, **the win at 13,839 / 11,664** (WP9.1c-2: 14,659 / 8,396). With the attack off the goal list **completes at 22,730 / 19,777** (was: not in 30,000 ticks).
+- **Gap, stated.** The target "list complete by 20,000 with the attack off" is met in `m1_ai` and **not in `ai_vs_passive`** (22,730); the cause is the map's ore. The cost accepted by
+  the decision: no barracks before about 2,900, so an early human rush beats it; not tested against a rusher.
+- **Moved with it.** The fence test's riflemen moved to (57, 28); the two defeated-AI tests remove the centre at 6,501 (after the AI has units); `the_ai_builds_its_base_in_the_game` looks
+  at 9,000 ticks; new `later_waves_are_max_wait_apart_unless_attack_value_is_reached`; `ai_perf` re-measured.
 
 ## Open follow-ups
 

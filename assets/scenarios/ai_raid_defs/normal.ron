@@ -1,4 +1,4 @@
-// FROZEN copy (WP9.1c-2, for the scenarios `ai_vs_passive` and `ai_raid`) of the shipped `assets/ai/normal.ron` as WP9.1c-2 leaves it:
+// FROZEN copy (WP9.1c-2, for the scenario `ai_raid`; `ai_vs_passive` used it too until WP9.1c-3 refroze its own) of the shipped `assets/ai/normal.ron` as WP9.1c-2 leaves it:
 // the goal lists, the unit mix, the scout, the attack numbers and the army floor. Editing the shipped profile never
 // moves this scenario.
 //

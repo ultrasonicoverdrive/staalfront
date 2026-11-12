@@ -1,7 +1,7 @@
 // FROZEN copy (WP9.1c-3, for the scenario `ai_vs_passive`) of the shipped `assets/ai/normal.ron` as WP9.1c-3 leaves it:
-// the goal lists (the vehicle factory second, after the refinery), the unit mix, the scout, the attack numbers and
-// the army floor. Editing the shipped profile never moves this scenario. (Refrozen in WP9.1c-3 from the WP9.1c-2 copy;
-// `ai_raid_defs` keeps the WP9.1c-2 profile.)
+// the goal lists (the vehicle factory second, the second refinery before the first tower), the unit mix, the scout, the
+// attack numbers (`attack_value` 2,000, `max_wait` 12,000) and the army floor. Editing the shipped profile never moves
+// this scenario. (Refrozen in WP9.1c-3 from the WP9.1c-2 copy; `ai_raid_defs` keeps the WP9.1c-2 profile.)
 //
 // The computer opponent's profile "normal" (WP9.1a, docs/rules/ai.md). Read and checked by
 // sf_data::ai_profile against unit_defs.ron; sf_ai::Profile turns the roles into kinds. Every number is a
@@ -48,13 +48,15 @@
     ),
     army: (
         // Attack when the army's value (sum of unit costs) reaches this ...
-        attack_value: 3000,
+        // (WP9.1c-3: 2000, was 3000: equal to `army_floor_value`, so the first wave leaves as soon as the floor's worth of units
+        // stands gathered, in every seat; `max_wait` is then the fallback. Measured, docs/rules/ai.md "The opening".)
+        attack_value: 2000,
         // ... or after this many ticks since the last attack with at least `min_units` units ...
-        // (WP9.1c-3: 14000, was 6000. The vehicle factory now comes second in the goal list, so the barracks stands at
-        // about 2,900 and the army floor (2,000) is reached at about 12,600 in `ai_vs_passive`, 13,500 in `m1_ai`;
-        // the first wave carries 2,000 from 14,000 on, 1,900 at 12,600, 1,200 at 6,000 to 12,000. Measured,
-        // docs/rules/ai.md "The opening".)
-        max_wait: 14000,
+        // (WP9.1c-3: 12000, was 6000. The vehicle factory now comes second in the goal list, so the army floor (2,000) is
+        // reached at about 10,700 in `ai_vs_passive` and 9,400 in `m1_ai`, and the first wave leaves on `attack_value` (11,150
+        // and 9,717). `max_wait` ends the floor and is the fallback: a wave that leaves on `max_wait` alone carries 2,000
+        // only from 12,000 on (1,900 at 11,000, 1,200 at 10,000). Measured, docs/rules/ai.md "The opening".)
+        max_wait: 12000,
         min_units: 4,
         // ... but never before this tick.
         first_attack_tick: 2400,
@@ -96,14 +98,16 @@
             // refinery, before the barracks. One harvester earns about 0.27 credits per tick, so every 100 credits
             // spent before the second harvester costs it about 370 ticks. Cost: no barracks before about tick 2,900
             // and no unit before about 5,900 (docs/rules/ai.md "The opening").
+            // The second refinery comes before the first tower (WP9.1c-3: measured, the list completes earlier and the floor is
+            // reached sooner, docs/rules/ai.md "The opening").
             build_order: [
                 ("power_plant", 1),
                 ("refinery", 1),
                 ("vehicle_factory", 1),
                 ("barracks", 1),
                 ("power_plant", 2),
-                ("defence_tower", 1),
                 ("refinery", 2),
+                ("defence_tower", 1),
                 ("radar", 1),
                 ("defence_tower", 2),
                 ("advanced_defences", 1),
@@ -120,9 +124,9 @@
                 ("vehicle_factory", 1),
                 ("barracks", 1),
                 ("power_plant", 2),
+                ("refinery", 2),
                 ("defence_tower", 1),
                 ("fortified_bunker", 1),
-                ("refinery", 2),
                 ("radar", 1),
                 ("defence_tower", 2),
                 ("advanced_defences", 1),

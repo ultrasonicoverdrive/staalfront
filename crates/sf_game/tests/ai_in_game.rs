@@ -586,9 +586,8 @@ fn the_army_timing_in_the_game_seat() {
     let (attack_tick, size) = first_attack.expect("an attack goes out");
     assert!(attack_tick >= u64::from(profile.army.first_attack_tick));
     assert!(size >= usize::from(profile.army.min_units));
-    // The army floor: the first army unit long before the 17,867 of WP9.1c-1 (the goal list then had to be done
-    // first).
-    assert!(first_army.unwrap() < 17_867);
+    // The first army unit is queued after the second harvester (1,887 in this seat, `the_opening_in_the_game_seat`).
+    assert!(first_army.unwrap() > 1_887);
     assert_eq!(after_end, 0, "nothing sent once the match is decided");
     let won = won.expect("the AI wins against the idle human");
     assert_eq!(won.verdict, sf_sim::Verdict::Won(AI));
@@ -607,15 +606,15 @@ fn the_army_timing_in_the_game_seat() {
 /// Measured (WP9.1c-2): the last build before the win, the first army unit, the army at the gather cell at
 /// 4000, 8000 and 12000, the first attack, the win. (WP9.1c-1, without the floor and the attack: the last of
 /// the eleven builds at 17,817, the first army unit at 17,867, the army 0, 0, 0, 0, 2 at 4000 to 20000.)
-/// WP9.1c-3 (the vehicle factory second in the list, `max_wait` 14,000): last build 5,577 (the fortified bunker of the Veyran list; the list
-/// stops after the tower at 4,417, the floor takes the money until the first wave leaves at 14,037 with 6 units,
-/// 2,000 credits), first army unit 7,387, army at the gather cell 0, 1, 4, win 16,023. (WP9.1c-2, vehicle factory
-/// fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)
-const M1_AI_LAST_BUILD: u64 = 5_577;
-const M1_AI_FIRST_ARMY: u64 = 7_387;
-const M1_AI_ARMY: [usize; 3] = [0, 1, 4];
-const M1_AI_FIRST_ATTACK: u64 = 14_037;
-const M1_AI_WON: u64 = 16_023;
+/// WP9.1c-3 (the vehicle factory second in the list, the second refinery before the first tower, `attack_value` 2,000,
+/// `max_wait` 12,000): last build 3,017 (the barracks; the list then waits for the second refinery while the floor takes
+/// the money), first army unit 4,587, army at the gather cell 0, 4, 0 (the wave of 6, value 2,000, leaves at 9,717
+/// on `attack_value`), win 11,664. (WP9.1c-2, vehicle factory fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)
+const M1_AI_LAST_BUILD: u64 = 3_017;
+const M1_AI_FIRST_ARMY: u64 = 4_587;
+const M1_AI_ARMY: [usize; 3] = [0, 4, 0];
+const M1_AI_FIRST_ATTACK: u64 = 9_717;
+const M1_AI_WON: u64 = 11_664;
 
 /// Drives `ais` on `world` to `until` the way the sim thread does, calling `look` after every step.
 fn drive(
@@ -641,8 +640,8 @@ fn drive(
     }
 }
 
-/// Fix round 1 (item 4): the money of the AI in the game seat between ticks 13,500 and 16,100 (WP9.1c-3: the first
-/// attack at 14,037, and the win at 16,023; was 5,500 to 8,500 around 6,037 and 8,396). Printed every 250 ticks:
+/// Fix round 1 (item 4): the money of the AI in the game seat between ticks 9,000 and 11,800 (WP9.1c-3: the first
+/// attack at 9,717, and the win at 11,664; was 5,500 to 8,500 around 6,037 and 8,396). Printed every 250 ticks:
 /// credits, free (`budget::free`), what production holds back (`reserve` + the next goal's saving), the next goal,
 /// the items queued, the harvesters and the ore delivered so far. A measurement trace, not a pin: its only assert
 /// is that rows were printed; the four values `docs/rules/ai.md` quotes are read from its output (fix round 2).
@@ -650,9 +649,9 @@ fn drive(
 fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
     let (mut world, _, mut ais) = game(&ai_file());
     let mut rows = Vec::new();
-    drive(&mut world, &mut ais, 16_100, |w, ais, _| {
+    drive(&mut world, &mut ais, 11_800, |w, ais, _| {
         let t = w.tick().0;
-        if t >= 13_500 && t.is_multiple_of(250) {
+        if t >= 9_000 && t.is_multiple_of(250) {
             let st = ais[0].state();
             let obs = sf_ai::Observation::build(w, AI, &st.known_structures);
             let lens = sf_ai::Lens::new(w, AI);
@@ -721,12 +720,13 @@ fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
         world.match_result()
     );
     assert_eq!(world.match_result(), None);
-    // Measured (WP9.1c-3): the list's last build at 24,417 (was 29,777 and not complete: the vehicle factory
-    // waited for the 4,000 credits the floor spent on twelve units). The target of 20,000 is NOT met: the income
-    // of two harvesters is the limit (ore delivered: 4,200 by 12,000), see docs/rules/ai.md "The opening".
-    assert_eq!(last_build, 24_417);
+    // Measured (WP9.1c-3): the list's last build at 19,777 (was 29,777 and not complete: the vehicle factory
+    // waited for the 4,000 credits the floor spent on twelve units). The target of 20,000 is met in this seat (not in
+    // `ai_vs_passive`, 22,730); the ore of the map is the limit, see docs/rules/ai.md "The opening".
+    assert_eq!(last_build, 19_777);
     // The last structure ordered is the list's last entry, the advanced defences (kind 7).
     assert_eq!(last_kind, 7);
+    assert!(last_build <= 20_000, "{last_build}");
 }
 
 /// What `the_opening_in_the_game_seat` reads off a run.
@@ -834,21 +834,21 @@ fn opening(attack: bool, ticks: u64) -> Opening {
 /// WP9.1c-3, the opening in the game seat (`m1_ai`, shipped profile; 4,000 credits, one free harvester):
 /// the vehicle factory is the third build, the bought harvester is queued as soon as it stands and the second
 /// harvester exists at 1,887 (well before 4,000), the barracks comes after it, and the first unit of the mix is
-/// queued at 7,387. The army floor (2,000) is reached at 13,494, before `max_wait` (14,000) ends it, so the
-/// first wave carries 2,000 (6 units) and the match is won at 16,023. Credits every 500 ticks are pinned
-/// (they sit at the reserve while the floor spends everything above it).
+/// queued at 4,587. The army floor (2,000) is reached at 9,374 and the first wave leaves at 9,717 on `attack_value`
+/// (2,000, equal to the floor) with 6 units worth 2,000; the match is won at 11,664. Credits every 500 ticks are
+/// pinned (they sit near the reserve while the floor spends everything above it).
 #[test]
 fn the_opening_in_the_game_seat() {
-    let o = opening(true, 16_100);
+    let o = opening(true, 11_800);
     println!("{o:#?}");
     assert_eq!(o.vehicle_factory_ordered, Some(817));
     assert_eq!(o.harvester_queued, Some(1_487));
     assert_eq!(o.second_harvester, Some(1_887));
     assert_eq!(o.barracks_ordered, Some(3_017));
-    assert_eq!(o.first_unit_queued, Some(7_387));
-    assert_eq!(o.floor_reached, Some(13_494));
-    assert_eq!(o.first_wave, Some((14_037, 6, 2_000)));
-    assert_eq!(o.won, Some(16_023));
+    assert_eq!(o.first_unit_queued, Some(4_587));
+    assert_eq!(o.floor_reached, Some(9_374));
+    assert_eq!(o.first_wave, Some((9_717, 6, 2_000)));
+    assert_eq!(o.won, Some(11_664));
     assert_eq!(
         o.builds[..5],
         [(17, 1), (257, 2), (817, 4), (2_177, 1), (3_017, 3)]
@@ -856,6 +856,10 @@ fn the_opening_in_the_game_seat() {
     // What the rules promise: two harvesters by 4,000 and before the first unit of the mix.
     assert!(o.second_harvester.unwrap() < 4_000);
     assert!(o.second_harvester < o.first_unit_queued);
+    // The first wave leaves on `attack_value`, long before `max_wait` ends the floor.
+    let profile = game(&ai_file()).2[0].state().profile.clone();
+    assert_eq!(profile.army.attack_value, profile.army.army_floor_value);
+    assert!(o.first_wave.unwrap().0 + 1_000 < u64::from(profile.army.max_wait));
     assert_eq!(
         o.credits,
         [
@@ -867,22 +871,21 @@ fn the_opening_in_the_game_seat() {
             (3_000, 380),
             (3_500, 0),
             (4_000, 400),
-            (4_500, 447),
+            (4_500, 600),
             (5_000, 300),
             (5_500, 500),
-            (6_000, 100),
-            (6_500, 500),
-            (7_000, 500),
+            (6_000, 400),
+            (6_500, 800),
+            (7_000, 800),
             (7_500, 400),
-            (8_000, 460),
-            (8_500, 500),
-            (9_000, 500),
-            (9_500, 700),
-            (10_000, 900),
-            (10_500, 950),
-            (11_000, 300),
-            (11_500, 500),
-            (12_000, 700)
+            (8_000, 400),
+            (8_500, 800),
+            (9_000, 830),
+            (9_500, 400),
+            (10_000, 400),
+            (10_500, 800),
+            (11_000, 800),
+            (11_500, 1_000),
         ]
     );
 }

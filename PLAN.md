@@ -487,11 +487,13 @@ Layered (analysis §12, §22G):
   has not lost hit points for `attack_patience` while an attacker stands at the target. (6) The defence cell rule gets unit tests and a fence
   test. (7) The finishing `Attack` is sent and taken on the real world in a test; the owner filter is pinned. (8) Survivors of an ended attack
   walk home with `Move`, a retreat on purpose.*
-  *12-11-2026 (decision of the orchestrator, built in WP9.1c-3: economy before army, option A of the opening design): the goal list of both factions puts the
-  **vehicle factory right after the refinery** (and with it the second harvester), before the barracks; `max_wait` **14,000** (was 6,000), measured: the first
-  wave carries 2,000 only when `max_wait` is after the army floor is reached (12,567 in `ai_vs_passive`, 13,494 in `m1_ai`); `army_floor_value` stays 2,000. Accepted risk:
-  no barracks before about tick 2,900, so an early infantry rush by a human beats the opening. Measured result and the missed target (the goal list with
-  the attack off completes at 22,970 and 24,417, not by 20,000): `docs/rules/ai.md`, "The opening (WP9.1c-3)".*
+  *12-11-2026 (decisions of the orchestrator, built in WP9.1c-3 and its fix round 1: economy before army): the goal list of both factions puts the
+  **vehicle factory right after the refinery** (and with it the second harvester), before the barracks (option A of the opening design). Fix round 1, adopted on
+  measurement: the **second refinery before the first tower**, **`attack_value` 2,000 = `army_floor_value`** (the first wave is value-driven, seat-independent) and
+  `max_wait` **12,000** (was 6,000; it ends the floor and is the fallback; also the least gap between later waves unless `attack_value` is reached). Accepted risk: no barracks before
+  about tick 2,900, so an early infantry rush by a human beats the opening. The target "goal list complete by 20,000 with the attack off" is met in `m1_ai` (19,777) and missed in
+  `ai_vs_passive` (22,730); decision: the miss is accepted, its cause is the map's ore (174 cells in six fields of 3,480; the near field is mined out at about 9,000 to 10,000). Numbers and
+  tables: `docs/rules/ai.md`, "The opening (WP9.1c-3)".*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

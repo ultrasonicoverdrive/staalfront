@@ -404,7 +404,7 @@ fn a_whole_run_with_the_ai_against_the_same_run_without_it() {
 
 #[test]
 fn what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march() {
-    // WP9.1c-2: the army turn alone on the observation of `ai_vs_passive` at tick 4000 (the base and a few units)
+    // WP9.1c-2: the army turn alone on the observation of `ai_vs_passive` at tick 4000 (the base and, since WP9.1c-3, one or two units: the first is queued at 4,460)
     // with N riflemen added idle at the gather cell, so that the turn launches an attack (the trigger, the target,
     // one `AttackMove` with N ids), and the turn after it with the N attackers idle half-way (the march: one
     // `AttackMove` again). 20,000 turns each on a copy of the state; the clock is outside the clone.
@@ -503,12 +503,12 @@ fn what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march
 
 #[test]
 fn ai_vs_passive_with_and_without_the_ai_and_the_tick_of_the_launch() {
-    // WP9.1c-2: `ai_vs_passive` to the win (14,659; 16,726 since WP9.1c-3, run 16,800 ticks), the AI's thinks timed (mean, worst), and the step time of
+    // WP9.1c-2: `ai_vs_passive` to the win (14,659; 13,839 since WP9.1c-3, run 14,700 ticks), the AI's thinks timed (mean, worst), and the step time of
     // the tick in which each attack is launched (the simulation plans the `AttackMove` for the whole wave then)
     // against the mean step. Then the whole run with and without the AI, alternating, medians of three (without
     // the AI nothing happens on player 0's side, so this is an upper bound of what the AI and what it makes cost).
     let s = Scenario::load(&scenario_path("ai_vs_passive.ron")).unwrap();
-    let ticks = if cfg!(debug_assertions) { 2000 } else { 16_800 };
+    let ticks = if cfg!(debug_assertions) { 2000 } else { 14_700 };
     let cost = measure(&s, ticks);
     report("ai_vs_passive", &cost);
     let mut world = s.build_world().unwrap();

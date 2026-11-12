@@ -7,8 +7,8 @@
 // and wins when that falls (docs/rules/match.md).
 //
 // `unit_defs` names a FROZEN copy (ai_vs_passive_defs, made for WP9.1c-2) of the shipped definitions, a match file of
-// its own and the profile `assets/ai/normal.ron` of that day (refrozen in WP9.1c-3: the opening, `max_wait` 14,000; the
-// run is 20,000 ticks, the win comes at 16,726), so editing the shipped definitions or profile never
+// its own and the profile `assets/ai/normal.ron` of that day (refrozen in WP9.1c-3: the opening, `attack_value` 2,000, `max_wait`
+// 12,000; the win comes at 13,839, inside the 16,000 ticks), so editing the shipped definitions or profile never
 // moves this checksum or the AI digest. The ore, harvest, storage, money, production, power and vision numbers are
 // those of `ai_scout`.
 Scenario(
@@ -58,6 +58,6 @@ Scenario(
     production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
     power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
     vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
-    ticks: 20000,
+    ticks: 16000,
     commands: [],
 )
