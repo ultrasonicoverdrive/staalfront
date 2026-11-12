@@ -1,5 +1,6 @@
-// The AI frame (WP9.1a, docs/rules/ai.md): a computer opponent that observes through the fog and sends no
-// command yet. Player 0 (Meridian) is the AI; player 1 (Veyran) is static. The scenario proves the fence:
+// The AI frame (WP9.1a, docs/rules/ai.md): a computer opponent that observes through the fog. Since
+// WP9.1b-1 it also builds: a power plant at tick 10 and a refinery at tick 330 (its 1500 credits pay for no
+// more), which moved the pinned checksum and AI digest (tests/ai_fog.rs says how the cause was measured). Player 0 (Meridian) is the AI; player 1 (Veyran) is static. The scenario proves the fence:
 // what player 0 has not seen never gets into its observation or its memory.
 //
 // `unit_defs` names a FROZEN copy of the shipped definitions (ai_fog_defs, made for WP9.1a) with the match

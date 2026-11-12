@@ -20,11 +20,16 @@ use sf_data::units::{Faction, UnitDefs};
 use sf_headless::cli::parse_checksum;
 use sf_headless::run::{Finished, RunOptions, run, run_full};
 use sf_headless::scenario::{Action, IdSpec, Scenario, TimedCommand};
-use sf_sim::{Cell, EntityId, Kind, PlayerId, Tick};
+use sf_sim::{Cell, Command, EntityId, Kind, PlayerId, Tick};
 
 const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected");
 /// `Ai::digest` of player 0's AI at the end of the shipped scenario (800 ticks).
-const AI_DIGEST: u64 = 0x993a_fc7c_d2c4_2cfd;
+///
+/// Re-pinned by WP9.1b-1 (was `0x993a_fc7c_d2c4_2cfd`, with the checksum `0xd369218db6025eff`): the AI now
+/// builds (a power plant at tick 10, a refinery at tick 330) and its digest hashes the new state and the
+/// profile's lane and aprons. Measured: with the construction manager switched off, the new state left out
+/// of `AiState::digest` and the lane and aprons left out of `Profile::digest`, both old values come back.
+const AI_DIGEST: u64 = 0x54a9_24e8_6710_242c;
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
@@ -200,11 +205,20 @@ fn the_observation_holds_the_players_own_things_in_full() {
     let f = go(&scenario(), 400);
     let o = observe(&f);
     assert_eq!((o.player, o.tick, o.map), (P0, Tick(400), (96, 96)));
-    assert_eq!(o.credits, 1500);
+    // Since WP9.1b-1 the AI builds: a power plant (slot 9) and a refinery going up (slot 10).
+    assert_eq!(o.credits, f.world.credits(P0));
+    assert!(o.credits < 1500);
     assert_eq!(
-        o.own.iter().map(|e| e.id.index()).collect::<Vec<_>>(),
-        [0, 1]
+        o.own
+            .iter()
+            .map(|e| (e.id.index(), e.kind.0))
+            .collect::<Vec<_>>(),
+        [(0, 0), (1, 15), (9, 1), (10, 2)]
     );
+    let refinery = &o.own[3];
+    assert!(!refinery.standing);
+    assert_eq!(refinery.building, f.world.construction_of(refinery.id));
+    assert_eq!(o.own[2].max_hp, 600);
     let centre = &o.own[0];
     assert_eq!((centre.kind, centre.cell), (Kind(0), Cell::new(8, 80)));
     assert!(centre.standing && centre.footprint.is_some() && centre.hp > 0);
@@ -220,11 +234,26 @@ fn an_invisible_army_changes_nothing_the_ai_sees_or_does() {
     // Control: the worlds do differ.
     assert_ne!(with.world.checksum(), without.world.checksum());
     assert_eq!(with.world.len(), without.world.len() + 3);
-    // The AI cannot tell: same observation, same memory, same digest.
-    assert_eq!(observe(&with), observe(&without));
+    // The AI cannot tell: same observation, same memory, same commands, same digest. The handles of the
+    // structures it builds are other slots in the world with the army (which took slots 6 to 8 first);
+    // ids are opaque (docs/rules/ai.md), so they are compared by their order.
+    assert_eq!(
+        with_own_ids_in_order(observe(&with)),
+        with_own_ids_in_order(observe(&without))
+    );
+    assert_eq!(with.ai_commands, without.ai_commands);
+    assert!(!with.ai_commands.is_empty());
     assert_eq!(known(&with), known(&without));
     assert_eq!(with.ais[0].digest(), without.ais[0].digest());
     assert_eq!(with.outcome.ai_digests, without.outcome.ai_digests);
+}
+
+/// `o` with the ids of the player's own entities replaced by their place in the list.
+fn with_own_ids_in_order(mut o: Observation) -> Observation {
+    for (i, e) in o.own.iter_mut().enumerate() {
+        e.id = EntityId::new(i as u32, 0);
+    }
+    o
 }
 
 #[test]
@@ -280,14 +309,39 @@ fn two_ais_think_on_different_ticks() {
 }
 
 #[test]
-fn the_ai_sends_no_command_yet() {
+fn the_ai_sends_its_two_builds_and_nothing_else() {
+    // WP9.1b-1: with 1500 credits the AI builds its power plant and its refinery (an emergency: none
+    // stands), then has nothing left for the barracks.
     let s = scenario();
-    let o = run(&s, &RunOptions::for_scenario(&s)).unwrap();
-    // Everything the world ran was scheduled by the scenario: nothing was added by the AI.
+    let f = go(&s, s.ticks);
+    let o = &f.outcome;
+    assert_eq!(
+        f.ai_commands,
+        vec![
+            (
+                10,
+                0,
+                Command::BuildStructure {
+                    kind: Kind(1),
+                    cell: Cell::new(5, 80)
+                }
+            ),
+            (
+                330,
+                0,
+                Command::BuildStructure {
+                    kind: Kind(2),
+                    cell: Cell::new(13, 80)
+                }
+            ),
+        ]
+    );
+    // Everything else the world ran was scheduled by the scenario.
     assert_eq!(
         o.commands_executed + o.commands_ignored,
-        o.commands_scheduled as u64
+        o.commands_scheduled as u64 + f.ai_commands.len() as u64
     );
+    assert_eq!(o.commands_ignored, 0);
 }
 
 #[test]
