@@ -398,6 +398,10 @@ mod tests {
                 &format!("credits: 0, controller: Ai(profile: \"{profile}\"),"),
             )
         };
+        // Lower-case letters, digits and '_' are all fine.
+        for ok in ["normal", "hard_2", "a1", "_x9"] {
+            MatchDef::from_ron(&ai(ok)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
         let m = MatchDef::from_ron(&ai("normal")).unwrap();
         assert_eq!(
             m.players[1].controller,

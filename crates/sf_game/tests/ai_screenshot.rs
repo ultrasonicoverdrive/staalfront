@@ -193,10 +193,10 @@ fn the_ai_builds_its_base_in_the_games_picture() {
         assert_eq!(snap.tick().0, tick);
         counts.push((tick, structures_of_ai(&snap)));
         let close = pics.shoot(&mut r, &at_ai, &snap);
-        save(&format!("m1_ai_t{tick:05}_ai_base.png"), &close);
+        save(&format!("m1_ai_t{tick:05}_ai_base_all_views.png"), &close);
         if tick == 2 || tick == 4_000 {
             let all = pics.shoot(&mut r, &whole, &snap);
-            save(&format!("m1_ai_t{tick:05}_whole_map.png"), &all);
+            save(&format!("m1_ai_t{tick:05}_whole_map_all_views.png"), &all);
         }
         ai_close.push(close);
         if tick == 4_000 {

@@ -5,10 +5,10 @@ The match is `assets/matches/m1_ai.ron` (`sf_game --match m1_ai`): the human (Me
 
 | File | What it shows |
 |---|---|
-| `m1_ai_t00002_ai_base.png`, `m1_ai_t00002_whole_map.png` | **The start.** The AI has its construction centre and nothing else (top of the close-up; the whole map shows the two centres far apart). |
-| `m1_ai_t01000_ai_base.png` | **Tick 1000.** 4 structures: the construction centre, a power plant, a refinery and a barracks (the first three goals of its list, built one at a time on 4000 credits). |
-| `m1_ai_t02500_ai_base.png` | **Tick 2500.** 7 structures. |
-| `m1_ai_t04000_ai_base.png`, `m1_ai_t04000_whole_map.png` | **Tick 4000.** 8 structures round the construction centre (placeholder models, blue is Veyran), the ore field to the east; the whole map shows both bases. |
+| `m1_ai_t00002_ai_base_all_views.png`, `m1_ai_t00002_whole_map_all_views.png` | **The start.** The AI has its construction centre and nothing else (top of the close-up; the whole map shows the two centres far apart). |
+| `m1_ai_t01000_ai_base_all_views.png` | **Tick 1000.** 4 structures (counted by the test and printed; their names here are read off the picture and the goal list, not asserted): the construction centre, a power plant, a refinery and a barracks (the first three goals of its list, built one at a time on 4000 credits). |
+| `m1_ai_t02500_ai_base_all_views.png` | **Tick 2500.** 7 structures. |
+| `m1_ai_t04000_ai_base_all_views.png`, `m1_ai_t04000_whole_map_all_views.png` | **Tick 4000.** 8 structures round the construction centre (placeholder models, blue is Veyran), the ore field to the east; the whole map shows both bases. |
 | `game_window_t04062_human_view.png` | **The real game window** at tick 4062 (`xvfb-run target/debug/sf_game --match m1_ai --shots DIR --shots-tick 4000`, 1280 x 720, whole map): what the human sees. Only the ground round its own base is known; the AI's base is behind the fog, as it should be (the AI sees only what its own units and structures see, and the human likewise). |
 
 The `m1_ai_*` pictures draw **every** view, seen or not (as `match_screenshot` does), because they are made to show what the AI did; in the game the human

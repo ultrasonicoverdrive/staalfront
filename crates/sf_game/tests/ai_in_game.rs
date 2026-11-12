@@ -318,8 +318,9 @@ fn the_default_match_has_no_ai_and_the_opponent_sends_nothing() {
 }
 
 /// What a think costs, measured on the sim thread's own counters over 20,000 ticks (16 minutes of game time)
-/// of the match with the AI. Printed; the only thing asserted is the profile's own budget on the mean
-/// ("a think may take 1 ms", `assets/ai/normal.ron`), with a wide margin for a busy machine.
+/// of the match with the AI. Printed. The only bound asserted, a mean under 5 ms, is a loose sanity bound
+/// (five times the profile's budget of 1 ms a think, `assets/ai/normal.ron`, so that a busy shared machine
+/// cannot fail it); it pins nothing about the budget, which nothing enforces.
 #[test]
 fn the_cost_of_a_think_in_the_game_loop_is_measured() {
     let ticks = 20_000;
@@ -336,4 +337,117 @@ fn the_cost_of_a_think_in_the_game_loop_is_measured() {
     );
     assert_eq!(p.thinks, ticks / 10);
     assert!(mean < 5_000.0, "mean think {mean:.0} us");
+}
+
+/// The think time reaches the counters and the hitch log (WP9.1d). The test hooks make the think of tick 27
+/// take 8 ms and the step of that tick 25 ms more (`SimConfig::think_hitch`, `hitch`): the tick is slow, and
+/// the third number of `slow_ticks` is the think. The think is part of the tick's time (the clock starts
+/// before it), and the longest think is the longest, not the last.
+#[test]
+fn a_slow_think_is_in_the_counters_and_in_the_slow_tick_of_the_hitch_log() {
+    let (world, _, ais) = game(&ai_file());
+    let mut sim = SimHandle::spawn_with_ais(
+        world,
+        SimConfig {
+            think_hitch: Some((27, Duration::from_millis(8))),
+            hitch: Some((27, Duration::from_millis(25))),
+            ..SimConfig::manual()
+        },
+        ais,
+    )
+    .unwrap();
+    for ran in 1..40u64 {
+        sim.advance(1);
+        sim.wait_for_tick(Tick(ran + 1), WAIT).expect("a tick");
+    }
+    let c = sim.counters();
+    assert_eq!(c.thinks, 4, "thinks at 7, 17, 27, 37");
+    assert!(
+        c.think_max_micros >= 8_000,
+        "the longest think is the one of tick 27, not the last: {} us",
+        c.think_max_micros
+    );
+    assert!(c.think_micros >= 8_000 && c.think_micros >= c.think_max_micros);
+    let slow = sim.all_slow_ticks();
+    let at_27: Vec<_> = slow.iter().filter(|s| s.0 == 27).collect();
+    assert_eq!(at_27.len(), 1, "{slow:?}");
+    let (_, tick_ms, think_ms) = *at_27[0];
+    assert!(think_ms >= 8.0, "the think of the slow tick: {think_ms} ms");
+    assert!(
+        tick_ms >= 33.0 && tick_ms >= think_ms,
+        "the tick took the hitch and the think: {tick_ms} ms"
+    );
+    // The same tick in the per-tick times (tick number 27 is the 27th, the first being tick 1).
+    assert!(sim.tick_ms_since(0)[26] >= 33.0);
+    // Another slow tick would carry the think of its own tick and nothing of this one's.
+    assert!(slow.iter().filter(|s| s.0 != 27).all(|s| s.2 < 8.0));
+    sim.stop();
+}
+
+/// Two AIs given in swapped order think in ascending player id. Both are made due on the same ticks
+/// (stagger 10 with interval 10), so the order they think in is the order of their commands in the log.
+#[test]
+fn two_ais_think_in_ascending_player_order_whatever_order_they_are_given() {
+    use sf_ai::{Ai, Profile};
+    use sf_data::ai_profile::AiProfile;
+    let assets = assets();
+    let mut def = matchplay::load(&ai_file()).unwrap();
+    // Player 0 becomes a second computer opponent (the file check is not asked: this is the host's order).
+    def.players[0].controller = sf_data::match_def::Controller::Ai {
+        profile: "normal".to_string(),
+    };
+    let map = Map::load(&matchplay::map_dir(&def, &assets)).unwrap();
+    let cells = map.size_in_cells();
+    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap();
+    let make_ais = || -> Vec<Ai> {
+        let mut profile = AiProfile::embedded();
+        profile.stagger = 10;
+        let sites = sf_ai::start_sites(&def, &defs);
+        [1u8, 0]
+            .map(|p| {
+                let faction = def.players.iter().find(|q| q.id == p).unwrap().faction;
+                let resolved = Profile::resolve(&profile, faction, &defs).unwrap();
+                Ai::new(PlayerId(p), resolved, 1, sites.clone())
+            })
+            .into_iter()
+            .collect()
+    };
+    let ais = make_ais();
+    assert_eq!(ais[0].player(), PlayerId(1), "given in swapped order");
+    let world = playfield::make_world(bench_scene::world_config(cells), &map).unwrap();
+    let mut world = matchplay::configure(world, &def, &defs).unwrap();
+    matchplay::schedule(&mut world, &def, &defs).unwrap();
+    world.step();
+    let mut sim = SimHandle::spawn_with_ais(
+        world,
+        SimConfig {
+            record_commands: true,
+            ..SimConfig::manual()
+        },
+        ais,
+    )
+    .unwrap();
+    for ran in 1..300u64 {
+        sim.advance(1);
+        sim.wait_for_tick(Tick(ran + 1), WAIT).expect("a tick");
+    }
+    let exit = sim.stop().clone();
+    // Per tick the log has player 0's commands before player 1's, and some tick has both.
+    let mut both = 0;
+    let mut ticks: Vec<u64> = exit.commands.iter().map(|c| c.effective.0).collect();
+    ticks.dedup();
+    for t in ticks {
+        let players: Vec<u8> = exit
+            .commands
+            .iter()
+            .filter(|c| c.effective.0 == t)
+            .map(|c| c.player.0)
+            .collect();
+        assert!(
+            players.windows(2).all(|w| w[0] <= w[1]),
+            "tick {t}: {players:?}"
+        );
+        both += usize::from(players.contains(&0) && players.contains(&1));
+    }
+    assert!(both > 0, "the two AIs sent commands in the same tick");
 }

@@ -265,6 +265,52 @@ mod tests {
     }
 
     #[test]
+    fn the_match_seed_reaches_the_ai_and_a_profile_without_the_faction_is_refused() {
+        let (_, defs, _) = m1();
+        let digest = |seed: u64| {
+            let mut def = MatchDef::embedded_ai();
+            def.seed = seed;
+            ais(&def, &defs, &assets()).unwrap()[0].digest()
+        };
+        // The random stream is part of the AI's digest: the seed of the file is the AI's seed.
+        assert_eq!(digest(7), digest(7));
+        assert_ne!(digest(7), digest(8));
+        // Two AI players listed in descending order come out ascending.
+        let mut two = MatchDef::embedded_ai();
+        two.players[0].controller = Controller::Ai {
+            profile: "normal".to_string(),
+        };
+        two.players.reverse();
+        let made = ais(&two, &defs, &assets()).unwrap();
+        assert_eq!(
+            made.iter().map(|a| a.player().0).collect::<Vec<_>>(),
+            [0, 1]
+        );
+        // A profile file with a section for Meridian only, for the Veyran player: refused, naming both.
+        let normal = std::fs::read_to_string(assets().join("ai/normal.ron")).unwrap();
+        let cut = normal
+            .find("        (\n            faction: Veyran")
+            .unwrap();
+        let end = normal.rfind("    ],\n)").unwrap();
+        let only_meridian = format!("{}{}", &normal[..cut], &normal[end..]);
+        let dir = std::env::temp_dir().join(format!("sf_matchplay_faction_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("ai")).unwrap();
+        std::fs::write(dir.join("ai/only_meridian.ron"), only_meridian).unwrap();
+        let mut def = MatchDef::embedded_ai();
+        def.players[1].controller = Controller::Ai {
+            profile: "only_meridian".to_string(),
+        };
+        let e = ais(&def, &defs, &dir).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            e.contains("player 1")
+                && e.contains("only_meridian")
+                && e.contains("no section for Veyran"),
+            "{e}"
+        );
+    }
+
+    #[test]
     fn the_camera_opens_on_the_first_object_of_the_local_player() {
         let (def, ..) = m1();
         // The construction centre on cell (12, 68): the middle of the cell, 4 m to a cell.

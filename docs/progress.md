@@ -3250,9 +3250,13 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   WP9.1c; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
 * **Seen.** `docs/screenshots/wp9.1d/` (README there): the AI's base at ticks 2, 1000, 2500 and 4000 (1, 4, 7, 8 structures); the real game window shows
   the human only its own base (the AI's is behind the fog).
-* **Gaps.** `sim_thread::slow_ticks`' third number and `slow_thinks` have no test that makes a think slow (the thinks of today are under 1 ms in release
-  and the AI cannot be slowed from outside); the JSON shape is pinned in `hitch.rs` and the real game's log shows it (above). The sim thread's AI order
-  (ascending player) is checked by reading (`spawn_with_ais` sorts); `m1_ai` has one AI. `--replay` of a record of an AI match is untested apart from
+* **Follow-up.** `matchplay::ais` is a copy of `Scenario::load_ais` (sf_headless); it moves into `sf_ai` next to `start_sites` in a follow-up after
+  #126 merges (error text, seed source and profile naming differ today).
+* **Asserted and only printed.** Asserted: thinks 100 / 4 / 4 by tick, first build at tick 17, at least 4 kinds and 4 structures (6 in the picture
+  test) by tick 4000, a slow think reaches `slow_ticks`' third number and the counters (`SimConfig::think_hitch` makes one), two AIs think in
+  ascending player order. **Only printed, not asserted:** 4 / 7 / 8 structures at ticks 1000 / 2500 / 4000, "7 builds of 6 kinds", the think-cost
+  numbers; the `mean < 5 ms` bound is a loose sanity bound.
+* **Gaps.** The JSON shape is pinned in `hitch.rs` `--replay` of a record of an AI match is untested apart from
   the runner test that no AI runs under `--replay`. Thinking before the step or after it is the same sequence of world states (a think after step T is
   a think before step T+1), so no checksum can tell them apart; what a test can pin, and does, is the tick the commands are made for (the tick about to
   run, `requested == effective`, `late_commands` 0).

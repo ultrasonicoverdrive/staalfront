@@ -151,8 +151,8 @@ const TICK_TIMES_CAP: usize = 200_000;
 /// A tick that takes longer than this is kept with its number ([`SimHandle::slow_ticks`], the hitch log).
 pub const SLOW_TICK_MICROS: u32 = 20_000;
 
-/// A think counts as slow when it took longer than this (the profile's budget: "a think may take 1 ms",
-/// `assets/ai/normal.ron`); every slow think is kept with its tick number, to the same cap as the slow ticks.
+/// The thinks of a tick count as slow when together they took longer than this (the profile's budget: "a think may take 1 ms",
+/// `assets/ai/normal.ron`); every such tick is kept with its tick number, to the same cap as the slow ticks.
 pub const SLOW_THINK_MICROS: u32 = 1_000;
 
 /// The most slow ticks kept.
@@ -197,6 +197,10 @@ pub struct SimConfig {
     /// Panic in the step of this tick number: the test hook for a sim thread
     /// that dies.
     pub panic_at: Option<u64>,
+    /// Sleep this long once, inside the think of the computer opponents of this tick number (the tick
+    /// that is about to run, as for `hitch`): the test hook for a slow think (WP9.1d). Ignored in a tick
+    /// where no AI is due.
+    pub think_hitch: Option<(u64, Duration)>,
     /// Keep every command with the tick it really ran at ([`SimExit::commands`]).
     pub record_commands: bool,
 }
@@ -213,6 +217,7 @@ impl SimConfig {
             extra_tick_time: Duration::ZERO,
             hitch: None,
             panic_at: None,
+            think_hitch: None,
             record_commands: false,
         }
     }
@@ -342,8 +347,8 @@ struct Shared {
     thinks: AtomicU64,
     think_micros: AtomicU64,
     think_max_micros: AtomicU64,
-    /// `(tick number, microseconds)` of every think over [`SLOW_THINK_MICROS`], the first [`SLOW_TICKS_CAP`]
-    /// (the sum of the thinks of that tick, when two AIs think in one).
+    /// `(tick number, microseconds)` of every tick whose thinks together took over [`SLOW_THINK_MICROS`], the
+    /// first [`SLOW_TICKS_CAP`]; the third number of [`SimHandle::slow_ticks`] reads it.
     slow_thinks: Mutex<Vec<(u64, u32)>>,
     /// Commands that were moved to a later tick, the last [`MOVED_LOG_CAP`].
     moved: Mutex<Vec<LoggedCommand>>,
@@ -587,15 +592,6 @@ impl SimHandle {
                     .map_or(0, |&(_, us)| us);
                 (tick, f64::from(us) / 1e3, f64::from(think) / 1e3)
             })
-            .collect()
-    }
-
-    /// The thinks over [`SLOW_THINK_MICROS`] so far, as `(tick number, milliseconds)` (the first
-    /// [`SLOW_TICKS_CAP`]), whether or not their tick was slow.
-    pub fn slow_thinks(&self) -> Vec<(u64, f64)> {
-        lock(&self.shared.slow_thinks)
-            .iter()
-            .map(|&(tick, us)| (tick, f64::from(us) / 1e3))
             .collect()
     }
 
@@ -915,6 +911,11 @@ impl Sim {
             let began = Instant::now();
             self.wanted.clear();
             ai.think(&self.world, &mut self.wanted);
+            if let Some((at, extra)) = self.config.think_hitch
+                && at == self.world.tick().0
+            {
+                thread::sleep(extra);
+            }
             let micros = u32::try_from(began.elapsed().as_micros()).unwrap_or(u32::MAX);
             spent = spent.saturating_add(micros);
             let shared = &self.shared;

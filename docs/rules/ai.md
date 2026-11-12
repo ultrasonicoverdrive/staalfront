@@ -278,7 +278,6 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
   leaves the same state as destruction by weapons (WP9.1b-2's `ai_rebuild`).
 * `refused` after a sent build only matters when the mask cannot see why the simulation said no; the one test of it is the unit that
   drives off (above).
-* The game does not run an AI (WP9.1d). `sf_game --match` is unchanged and its opponent is static.
 * Difficulty levels (WP9.4), the "unfair" level and its two cheats, AI-vs-AI (WP9.5).
 * The AI state is plain data but is not saved anywhere (WP13.1).
 * A shuffled spawn order test (the iteration-order check of the memo) is not built: the AI iterates `BTreeMap`s and ascending vectors only, and the
@@ -286,7 +285,7 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
 
 ## In the game (WP9.1d)
 
-*Supersedes the line "The game does not run an AI (WP9.1d)" in the list above.* The game runs the AI that a match file gives a player. Code:
+The game runs the AI that a match file gives a player. Code:
 `crates/sf_game/src/sim_thread.rs` (`SimHandle::spawn_with_ais`, `Sim::think_ais`), `matchplay.rs` (`ais`), `runner.rs` (`match_scene`), the
 field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, "Controllers"). Data: `assets/matches/m1_ai.ron`. Tests:
 `crates/sf_game/tests/ai_in_game.rs`, `ai_screenshot.rs`, the unit tests of `matchplay.rs` and `match_def.rs`.
@@ -299,7 +298,7 @@ field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, 
 * **Making the AIs.** `matchplay::ais(def, defs, assets)` reads `<assets>/ai/<profile>.ron` for every player with `controller: Ai(profile: ..)`,
   checks and resolves it for the player's faction against the unit definitions, and tells every AI the start sites of the match (`sf_ai::start_sites`)
   as `Scenario::load_ais` of `sf_headless` does; the code is copied (about ten lines) and not shared, because that function is private to the
-  scenario loader and `sf_ai` is not touched by this work package. The AI's seed is the match's `seed`. A missing profile or one that does not fit is an
+  scenario loader and `sf_ai` is not touched by this work package. The AI's seed is the match's `seed` (pinned: two seeds give two digests, `the_match_seed_reaches_the_ai_...`). `spawn_with_ais` sorts the AIs by player id; `two_ais_think_in_ascending_player_order_...` gives two AIs, made due on the same ticks, in swapped order and checks the order in the log. A missing profile or one that does not fit is an
   error that names the player and the profile and stops the start. `--replay` does not run the AIs (the record holds their commands).
 * **The match file.** `assets/matches/m1_ai.ron`: the map and the human as in `m1.ron`, player 1 Veyran with one construction centre on the cell of
   `m1`'s static centre (72, 14) and **4000 credits, the human's own start**: the AI is not given more than the player it is watched against; the
@@ -320,6 +319,6 @@ field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, 
   `sf_headless::run::run_full` with the same AI give the same checksum at every tick
   (`the_sim_thread_and_the_headless_host_run_the_ai_to_the_same_checksums`).
 * **Not done in WP9.1d.** No AI state in the game's save (WP13.1); no difficulty choice (the profile name in the file is the only choice, WP9.4); the
-  restart from the menu makes a fresh AI with the world (checked by reading `Runner`: the scene, with its AIs, is made again; not run); the
+  restart from the menu makes a fresh AI with the world (`a_restart_equals_a_fresh_start` runs it for `--match m1_ai`: the thinks of the restarted game equal a fresh start's); the
   F1 panel shows no AI numbers; the AI has no sight of what the human's fog hides, so it cannot find the human's base, as designed (it knows only the start
   sites).
