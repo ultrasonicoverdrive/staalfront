@@ -91,7 +91,7 @@ Every 40 ticks (manager 1 of the rotation), `base::turn`:
    cell (standing or going up). If not, the simulation refused it (a unit on the cell, say), and `(kind, cell)` goes into `refused` until
    `now + blocked_ticks`. The latch is cleared either way. Expired entries of `refused` and `blocked_until` are dropped. `refused` holds at
    most 64 entries (`REFUSED_CAP`); a new one pushes out the one that expires first.
-2. **Parallel cap.** With `max_parallel_builds` own structures going up (the latch counts as one), nothing starts.
+2. **Parallel cap.** With `max_parallel_builds` own structures going up, nothing starts. (The count and the goal count also include the latch, which step 1 has always cleared by then: a turn that skipped the verify would stop building rather than send a second build; the mutation of the verify step shows it.)
 3. **Choose** the first goal entry `(kind, count)` with fewer than `count` standing or going up, not blocked (`blocked_until[kind] > now`),
    whose `requires` all stand.
 4. **Power first** (only in a game with power rules). With the table's numbers, `made` = the `power` of own producers standing or going up,

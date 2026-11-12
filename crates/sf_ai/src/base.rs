@@ -96,8 +96,8 @@ pub fn refuse(state: &mut AiState, kind: Kind, cell: sf_sim::Cell, until: Tick) 
     }
 }
 
-/// How many of `kind` the player has standing or going up (and the latched build, which the next turn
-/// verifies).
+/// How many of `kind` the player has standing or going up, and the latched build (always cleared by the
+/// verify step before this is asked; counted so that a turn without the verify stops instead of sending twice).
 fn have(state: &AiState, obs: &Observation, kind: Kind) -> usize {
     obs.own
         .iter()
