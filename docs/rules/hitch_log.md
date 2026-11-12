@@ -40,11 +40,11 @@ frame that ran long:
 | `cpu_ms` | CPU time of the main thread over `frame_ms`; `null` where it is not measured |
 | `sounds_started` | sounds started in the callback |
 | `events` | window events (resize, move, focus, occlusion, scale factor), `on_resize` and its time, a music track that started or was decoded (with its decode time), instance buffers that grew, a swap-chain acquire that gave no image (`timeout after 1000 ms`) |
-| `sim_slow_ticks` | `(tick, ms)` of sim ticks over 20 ms that ran since the long frame's snapshot |
+| `sim_slow_ticks` | `(tick, ms, think_ms)` of sim ticks over 20 ms that ran since the long frame's snapshot; since WP9.1d the third number is the time the computer opponents thought in that tick (part of `ms`, 0 in a match without an AI, and 0 when the think was under 1 ms: only thinks over `sim_thread::SLOW_THINK_MICROS` are kept) |
 
 The parts are laps of one callback in the order it runs, so they add up to `callback_ms` (the draw lap is split by what the renderer
 measured; `record_ms` is the rest). The file also has the totals, the sim thread's numbers (late snapshots, behind passes, clock
-restarts, slow ticks), `buffer_growth` (every frame in which instance buffers were created or grown, with the upload time) and
+restarts, slow ticks as `(tick, ms, think_ms)`, and since WP9.1d `thinks`, `think_ms_mean` and `think_ms_max`: the number of thinks of the computer opponents, their mean and their longest, in ms, 0 without an AI; the think is part of the tick's time, it runs on the sim thread immediately before `World::step`, `docs/rules/ai.md` "In the game"), `buffer_growth` (every frame in which instance buffers were created or grown, with the upload time) and
 the cost of the CPU clock.
 
 **Reading it.** `acquire_ms` near 1000 with a `timeout` event: the display did not give an image (wgpu caps the DX12 wait at 1,000 ms).
@@ -98,5 +98,10 @@ Scenario(
 * The summary's `scheduled` count includes the recorded commands (`commands_scheduled` = scheduled before tick 0 + `recorded`).
 * A restart from the menu ends the record of that game: it is written to `FILE` with `.restartN` before the extension, and the new game
   is recorded under `FILE`.
+* **A match with a computer opponent (WP9.1d)**: the AI's commands go through the sim thread's own `schedule`, so the record holds them
+  under the AI's player id, with the tick they were made for (`arrived` = `tick`: the AI thinks immediately before the step). The record
+  has no `ai` block: `sf_headless FILE` replays it **without** the AI and to the same checksum at every tick
+  (`tests/ai_in_game.rs`, `a_recorded_match_with_an_ai_replays_without_the_ai_to_the_same_checksum_at_every_tick`). `sf_game --replay` of such
+  a record does not run the AIs of the match file (they would play on top of the record).
 * `--replay` is not tick-exact: the game's sim has its own clock and the commands are sent a tick ahead of the snapshot, like a player's.
   It is for repeating a play for a measurement, not for checksums.
