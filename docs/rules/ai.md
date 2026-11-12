@@ -740,9 +740,9 @@ after the end. `the_ai_builds_its_base_in_the_game` re-measured: 4 builds of 3 k
 6,030) took 874 us against a mean step of 20 us** (the simulation's planning of one `AttackMove` for 12 units, not the AI's think; the second launch, 5
 units, 16 us); the whole run 47,454 ticks/s with the AI and 82,645 without (medians of 3 alternating runs; without the AI player 0 builds and makes
 nothing, so this bounds the AI and everything it makes, not the think). `what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march`
-(20,000 turns each, the observation of `ai_vs_passive` at tick 4,000 with N riflemen added at the gather cell): 50 units 6.6 us at the launch (worst 74
-us in the first run), 6.6 us on the march; **200 units 24.3 us at the launch, 27.5 us on the march** (worst 499 and 1,467 us: spikes of a shared
-machine). Before the attackers' list was searched by bisection instead of `contains` (first run, same machine, minutes earlier): 7.7 / 8.1 us with 50
+(20,000 turns each, the observation of `ai_vs_passive` at tick 4,000 with N riflemen added at the gather cell): 50 units 6.6 and 5.1 us on the march (two
+runs); **200 units 24.3 and 19.0 us at the launch, 27.5 and 25.8 us on the march** (worst 460 to 1,467 us: spikes of a shared machine, load average
+0.4 to 2.2). A second run of the scenario: 0.32 us per AI per tick, worst think 66 us, launch step 882 us against 20.8 us, 43,879 against 75,758 ticks/s. Before the attackers' list was searched by bisection instead of `contains` (first run, same machine, minutes earlier): 7.7 / 8.1 us with 50
 and 45.4 / 48.0 us with 200. A turn every 40 ticks: 200 units cost about 0.7 us per tick. Budget: mean 20 us per AI per tick, worst think 1 ms; the
 assert is 100 us per turn (release).
 

@@ -107,7 +107,7 @@ impl Profile {
         h.write_u32(a.scout_tick);
         h.write_u32(a.scout_patience);
         h.write_u32(a.scout_retry);
-        // WP9.1c-2.
+        // The numbers of WP9.1c-2
         h.write_u8(a.arrive_radius);
         h.write_u32(a.attack_patience);
         h.write_u32(a.army_floor_value);

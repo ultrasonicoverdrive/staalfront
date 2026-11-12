@@ -92,7 +92,7 @@ impl Ai {
 }
 
 /// Runs one manager. Construction is WP9.1b-1, economy WP9.1b-2, production and the scout and gathering of
-/// the army WP9.1c-1, the army's attack and defence WP9.1c-2.
+/// the army WP9.1c-1, the army's attack and defence WP9.1c-2 (the threat rule runs at every think)
 fn run_manager(
     manager: Manager,
     state: &mut AiState,
