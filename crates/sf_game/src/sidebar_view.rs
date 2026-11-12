@@ -50,6 +50,33 @@ fn tile_color(c: (u8, u8, u8)) -> Color {
     Color(c.0, c.1, c.2, 255)
 }
 
+/// The box of the loop sign at the top left of `picture` (WP6.10): the word `words.repeating` at
+/// `repeating_px`, a padding left and right, no padding above or below.
+fn loop_sign_rect(ui: &Ui, look: &SidebarLook, picture: Rect) -> Rect {
+    let scale = ui.scale();
+    let pad = (f32::from(look.text_pad_px) * scale).round();
+    let (w, h) = ui.measure_px(&look.words.repeating, f32::from(look.repeating_px) * scale);
+    Rect::new(picture.x, picture.y, w + 2.0 * pad, h)
+}
+
+/// The box of the label of a picture, centred in the picture; under the loop sign when the item
+/// `repeating` wears one, so the two boxes never meet.
+fn label_rect(ui: &Ui, look: &SidebarLook, picture: Rect, label: &str, repeating: bool) -> Rect {
+    let mut area = picture;
+    if repeating {
+        let sign = loop_sign_rect(ui, look, picture);
+        area.y += sign.h;
+        area.h = (area.h - sign.h).max(0.0);
+    }
+    let (w, h) = ui.measure_px(label, f32::from(look.label_px) * ui.scale());
+    Rect::new(
+        (area.x + (area.w - w) * 0.5).round(),
+        (area.y + (area.h - h) * 0.5).round(),
+        w,
+        h,
+    )
+}
+
 /// Text with its box centred in `rect`.
 fn centered(ui: &mut Ui, rect: Rect, text: &str, px: f32, c: Color) {
     let (w, h) = ui.measure_px(text, px);
@@ -366,9 +393,10 @@ fn draw_tile(
         (rect.h - strip_h - bar_h - inset).max(0.0),
     );
     ui.fill(picture, tile_color(item.picture.color));
-    centered(
-        ui,
-        picture,
+    let label = label_rect(ui, look, picture, &item.picture.label, item.repeating);
+    ui.text_px_at(
+        label.x,
+        label.y,
         &item.picture.label,
         f32::from(look.label_px) * scale,
         color(c.text),
@@ -392,17 +420,17 @@ fn draw_tile(
             color(c.text),
         );
     }
-    // The loop sign (WP6.10) on an item of a factory that repeats, top left.
+    // The loop sign (WP6.10) on an item of a factory that repeats, top left. The label of that item
+    // sits below it (`label_rect`), so the sign never covers a letter.
     if item.repeating {
         let text = &look.words.repeating;
-        let (w, h) = ui.measure_px(text, small);
-        let badge = Rect::new(picture.x, picture.y, w + 2.0 * pad, h + pad);
+        let badge = loop_sign_rect(ui, look, picture);
         ui.fill(badge, color(c.tool_active));
         ui.text_px_at(
             badge.x + pad,
-            badge.y + (pad * 0.5).round(),
+            badge.y,
             text,
-            small,
+            f32::from(look.repeating_px) * scale,
             color(c.tile_back),
         );
     }

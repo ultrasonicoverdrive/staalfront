@@ -791,3 +791,61 @@ fn an_item_of_a_repeating_factory_wears_the_loop_sign() {
     let slot = l.slot(0);
     assert!(lit[0].x >= slot.x && lit[0].y >= slot.y && lit[0].right() < slot.right());
 }
+
+fn meets(a: Rect, b: Rect) -> bool {
+    a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
+}
+
+#[test]
+fn the_loop_sign_never_covers_the_label_of_its_picture() {
+    let f = fixture();
+    let sit = f.situation(Some(1000));
+    let mut labels = std::collections::BTreeSet::new();
+    for tab in [Tab::Structures, Tab::Infantry, Tab::Vehicles, Tab::Vessels] {
+        for item in &f.model(&sit, tab).items {
+            labels.insert(item.picture.label.clone());
+        }
+    }
+    assert!(labels.contains("RIFLE") && labels.len() >= 10);
+    for size in [(1280, 720), (1920, 1080), (800, 600)] {
+        for scale in [0.5, 1.0, 1.5, 2.0] {
+            let mut ui = Ui::new(UiConfig::default());
+            ui.begin_frame(at(0.0, 0.0), size, scale);
+            let l = sidebar_layout::layout(
+                Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32),
+                scale,
+                &f.look,
+                4.0,
+                true,
+            );
+            let slot = l.slot(0);
+            let inset = (f32::from(f.look.picture_inset_px) * scale).round();
+            let strip =
+                (f32::from(f.look.small_px) * scale * f32::from(f.look.strip_pct) / 100.0).round();
+            let bar = (f32::from(f.look.bar_height_px) * scale).round().max(1.0);
+            let picture = Rect::new(
+                slot.x + inset,
+                slot.y + inset,
+                slot.w - 2.0 * inset,
+                (slot.h - strip - bar - inset).max(0.0),
+            );
+            let sign = loop_sign_rect(&ui, &f.look, picture);
+            for label in &labels {
+                let r = label_rect(&ui, &f.look, picture, label, true);
+                assert!(
+                    !meets(sign, r),
+                    "{label} at {size:?} x{scale}: sign {sign:?} meets label {r:?}"
+                );
+                // Both stay inside the picture.
+                assert!(
+                    r.x >= picture.x && r.right() <= picture.right(),
+                    "{label} {r:?}"
+                );
+                assert!(
+                    r.y >= picture.y && r.bottom() <= picture.bottom(),
+                    "{label} {r:?}"
+                );
+            }
+        }
+    }
+}
