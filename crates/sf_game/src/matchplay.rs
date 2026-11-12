@@ -287,7 +287,10 @@ mod tests {
             [0, 1]
         );
         // A profile file with a section for Meridian only, for the Veyran player: refused, naming both.
-        let normal = std::fs::read_to_string(assets().join("ai/normal.ron")).unwrap();
+        // A Windows checkout has CRLF line ends; the cut below looks for LF.
+        let normal = std::fs::read_to_string(assets().join("ai/normal.ron"))
+            .unwrap()
+            .replace("\r\n", "\n");
         let cut = normal
             .find("        (\n            faction: Veyran")
             .unwrap();
