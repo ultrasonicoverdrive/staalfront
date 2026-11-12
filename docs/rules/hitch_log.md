@@ -85,7 +85,7 @@ Scenario(
 * `recorded` holds the commands in the order the world got them. Values are exact: positions are raw fixed-point numbers (`Fx::raw`, 16
   fractional bits), ids are `(index, generation)`. `ExactCommand` has one variant per `sf_sim::Command` (the conversion is exhaustive, so a new
   command does not compile until it is covered) and `every_command_round_trips` writes and reads one of each, fixed-point bits included.
-  WP6.10 added `SetRepeat(factory:(1,0),on:true)` to that list (and to the scenario file's `commands`, `Action::SetRepeat`).
+  WP6.10 added `SetRepeat(factory: (14, 2), on: true)` and `SetRepeat(factory: (14, 2), on: false)` (the ids and both `on` values `every_command_round_trips` uses) to that list (and to the scenario file's `commands`, `Action::SetRepeat`).
 * **`arrived` matters.** The world's checksum includes the commands waiting for their tick, so `sf_headless` schedules each recorded command
   when the world has run `arrived` ticks (`Scenario::arrivals`, used by `run::run`), not before tick 0 as it does for `commands`. Without
   it the checksums differ (`the_arrival_tick_is_what_makes_the_checksums_equal`). A command that arrived after the last tick is not written.

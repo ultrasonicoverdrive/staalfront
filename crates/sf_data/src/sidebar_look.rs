@@ -139,6 +139,8 @@ pub struct SidebarLook {
     pub small_px: u16,
     /// Size of the label on a picture.
     pub label_px: u16,
+    /// Size of the loop sign on a picture (WP6.10 follow-up); the label of that picture sits below it.
+    pub repeating_px: u16,
     /// Size of the credits figure, in percent of `text_px`.
     pub credits_text_pct: u16,
     /// Distance of the credits figure from the left edge of its block.
@@ -176,6 +178,7 @@ impl SidebarLook {
             ("text_px", look.text_px),
             ("small_px", look.small_px),
             ("label_px", look.label_px),
+            ("repeating_px", look.repeating_px),
             ("credits_text_pct", look.credits_text_pct),
             ("strip_pct", look.strip_pct),
             ("chosen_ring_px", look.chosen_ring_px),
@@ -258,7 +261,15 @@ mod tests {
                 "Vessels".to_owned()
             )
         );
-        assert_eq!((look.text_px, look.small_px, look.label_px), (14, 12, 17));
+        assert_eq!(
+            (
+                look.text_px,
+                look.small_px,
+                look.label_px,
+                look.repeating_px
+            ),
+            (14, 12, 17, 8)
+        );
         assert_eq!(
             (
                 look.credits_text_pct,
