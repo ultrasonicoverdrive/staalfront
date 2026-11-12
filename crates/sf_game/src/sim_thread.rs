@@ -77,6 +77,19 @@
 //! ([`SimHandle::drain_fx`] empties it, once per frame); it holds at most
 //! [`crate::fx_events::FX_QUEUE_CAP`] events and counts what it drops ([`SimCounters::fx_dropped`]).
 //!
+//! # Computer opponents (WP9.1d)
+//!
+//! A match can have computer opponents ([`SimHandle::spawn_with_ais`], one `sf_ai::Ai` per AI player, in
+//! ascending player id). The thread is their host, as `sf_headless::run` is for a scenario: in every tick,
+//! **immediately before `World::step`**, each AI that is due (`Ai::due(world.tick())`) thinks on the world
+//! as it is, and the commands it returns are scheduled for the tick about to run under its own player id
+//! through the thread's own `schedule` ([`Sim::schedule`]), the same path as a human's command: they reach
+//! the world's queue, the command log (`record_commands`, `--record`) and the checksum like any other, so
+//! a record of the match replays in `sf_headless` without the AI. The think time is part of the tick
+//! (`step_once` starts its clock before the thinks) and is also counted on its own
+//! ([`SimCounters::thinks`], [`SimCounters::think_micros`], [`SimCounters::think_max_micros`]); the hitch
+//! log shows it per slow tick (`docs/rules/hitch_log.md`).
+//!
 //! # Determinism
 //!
 //! Nothing here touches the rules: the thread only calls `World::schedule`
@@ -137,6 +150,10 @@ const TICK_TIMES_CAP: usize = 200_000;
 
 /// A tick that takes longer than this is kept with its number ([`SimHandle::slow_ticks`], the hitch log).
 pub const SLOW_TICK_MICROS: u32 = 20_000;
+
+/// A think counts as slow when it took longer than this (the profile's budget: "a think may take 1 ms",
+/// `assets/ai/normal.ron`); every slow think is kept with its tick number, to the same cap as the slow ticks.
+pub const SLOW_THINK_MICROS: u32 = 1_000;
 
 /// The most slow ticks kept.
 pub const SLOW_TICKS_CAP: usize = 2_000;
@@ -276,6 +293,12 @@ pub struct SimCounters {
     pub fx_dropped: u64,
     /// Effects events that could not be given a position.
     pub fx_unresolved: u64,
+    /// Thinks of computer opponents run (WP9.1d), one per AI per tick it was due.
+    pub thinks: u64,
+    /// Total time spent in thinks, in microseconds; part of `step_micros`.
+    pub think_micros: u64,
+    /// The longest single think, in microseconds.
+    pub think_max_micros: u64,
 }
 
 enum Msg {
@@ -316,6 +339,12 @@ struct Shared {
     fx_recorded: AtomicU64,
     fx_dropped: AtomicU64,
     fx_unresolved: AtomicU64,
+    thinks: AtomicU64,
+    think_micros: AtomicU64,
+    think_max_micros: AtomicU64,
+    /// `(tick number, microseconds)` of every think over [`SLOW_THINK_MICROS`], the first [`SLOW_TICKS_CAP`]
+    /// (the sum of the thinks of that tick, when two AIs think in one).
+    slow_thinks: Mutex<Vec<(u64, u32)>>,
     /// Commands that were moved to a later tick, the last [`MOVED_LOG_CAP`].
     moved: Mutex<Vec<LoggedCommand>>,
     /// `(tick number, microseconds)` of every tick over [`SLOW_TICK_MICROS`], the first [`SLOW_TICKS_CAP`].
@@ -346,6 +375,17 @@ impl SimHandle {
     /// Moves `world` onto a new thread. A first snapshot is taken here, so
     /// [`SimHandle::latest`] always has something to return.
     pub fn spawn(world: World, config: SimConfig) -> std::io::Result<SimHandle> {
+        SimHandle::spawn_with_ais(world, config, Vec::new())
+    }
+
+    /// Like [`SimHandle::spawn`], with the computer opponents the thread thinks for (WP9.1d, see the module
+    /// documentation). They are kept in ascending player id whatever the order given.
+    pub fn spawn_with_ais(
+        world: World,
+        config: SimConfig,
+        mut ais: Vec<sf_ai::Ai>,
+    ) -> std::io::Result<SimHandle> {
+        ais.sort_by_key(sf_ai::Ai::player);
         let statics = Statics::new(&world);
         let mut first = SimSnapshot::blank();
         first.fill(&world, &statics, Pace::now());
@@ -364,6 +404,10 @@ impl SimHandle {
             fx_recorded: AtomicU64::new(0),
             fx_dropped: AtomicU64::new(0),
             fx_unresolved: AtomicU64::new(0),
+            thinks: AtomicU64::new(0),
+            think_micros: AtomicU64::new(0),
+            think_max_micros: AtomicU64::new(0),
+            slow_thinks: Mutex::new(Vec::new()),
             moved: Mutex::new(Vec::new()),
             slow: Mutex::new(Vec::new()),
             rejected: Mutex::new((0, Vec::new())),
@@ -384,6 +428,8 @@ impl SimHandle {
             log: Vec::new(),
             last_step: Duration::ZERO,
             fx_scratch: Vec::with_capacity(256),
+            ais,
+            wanted: Vec::new(),
         };
         let join = thread::Builder::new()
             .name("sf-sim".into())
@@ -499,6 +545,9 @@ impl SimHandle {
             fx_recorded: s.fx_recorded.load(Ordering::Relaxed),
             fx_dropped: s.fx_dropped.load(Ordering::Relaxed),
             fx_unresolved: s.fx_unresolved.load(Ordering::Relaxed),
+            thinks: s.thinks.load(Ordering::Relaxed),
+            think_micros: s.think_micros.load(Ordering::Relaxed),
+            think_max_micros: s.think_max_micros.load(Ordering::Relaxed),
         }
     }
 
@@ -521,18 +570,37 @@ impl SimHandle {
     }
 
     /// The ticks that took longer than [`SLOW_TICK_MICROS`] and whose number is in `from..=to`, as
-    /// `(tick number, milliseconds)`; the tick number is the one that ran (the first is 0). The hitch
-    /// log asks for the range of a slow frame; [`SimHandle::all_slow_ticks`] for the whole play.
-    pub fn slow_ticks(&self, from: u64, to: u64) -> Vec<(u64, f64)> {
+    /// `(tick number, milliseconds, of which thinking)`; the tick number is the one that ran (the first
+    /// is 0). The third number (WP9.1d) is the time the computer opponents thought in that tick, which is
+    /// part of the first; 0 when none thought, or when the thinks were not slow enough to be kept
+    /// ([`SLOW_THINK_MICROS`]). The hitch log asks for the range of a slow frame;
+    /// [`SimHandle::all_slow_ticks`] for the whole play.
+    pub fn slow_ticks(&self, from: u64, to: u64) -> Vec<(u64, f64, f64)> {
+        let thinks = lock(&self.shared.slow_thinks);
         lock(&self.shared.slow)
             .iter()
             .filter(|&&(tick, _)| (from..=to).contains(&tick))
+            .map(|&(tick, us)| {
+                let think = thinks
+                    .iter()
+                    .find(|&&(t, _)| t == tick)
+                    .map_or(0, |&(_, us)| us);
+                (tick, f64::from(us) / 1e3, f64::from(think) / 1e3)
+            })
+            .collect()
+    }
+
+    /// The thinks over [`SLOW_THINK_MICROS`] so far, as `(tick number, milliseconds)` (the first
+    /// [`SLOW_TICKS_CAP`]), whether or not their tick was slow.
+    pub fn slow_thinks(&self) -> Vec<(u64, f64)> {
+        lock(&self.shared.slow_thinks)
+            .iter()
             .map(|&(tick, us)| (tick, f64::from(us) / 1e3))
             .collect()
     }
 
     /// Every tick over [`SLOW_TICK_MICROS`] so far (the first [`SLOW_TICKS_CAP`]).
-    pub fn all_slow_ticks(&self) -> Vec<(u64, f64)> {
+    pub fn all_slow_ticks(&self) -> Vec<(u64, f64, f64)> {
         self.slow_ticks(0, u64::MAX)
     }
 
@@ -624,6 +692,10 @@ struct Sim {
     last_step: Duration,
     /// Where [`fx_events::record`] puts a tick's events before they join the queue (reused).
     fx_scratch: Vec<FxEvent>,
+    /// The computer opponents (WP9.1d), ascending by player.
+    ais: Vec<sf_ai::Ai>,
+    /// Where an AI's commands are collected in a think (reused).
+    wanted: Vec<Command>,
 }
 
 impl Sim {
@@ -829,10 +901,51 @@ impl Sim {
         }
     }
 
-    /// One `World::step`, timed.
+    /// The thinks of this tick (WP9.1d): every AI that is due thinks on the world as it is, before the step,
+    /// and its commands are scheduled for the tick about to run through [`Sim::schedule`]. Returns the time
+    /// the thinks took, in microseconds.
+    fn think_ais(&mut self) -> u32 {
+        let mut spent = 0u32;
+        let mut ais = std::mem::take(&mut self.ais);
+        for ai in &mut ais {
+            let tick = self.world.tick();
+            if !ai.due(tick) {
+                continue;
+            }
+            let began = Instant::now();
+            self.wanted.clear();
+            ai.think(&self.world, &mut self.wanted);
+            let micros = u32::try_from(began.elapsed().as_micros()).unwrap_or(u32::MAX);
+            spent = spent.saturating_add(micros);
+            let shared = &self.shared;
+            shared.thinks.fetch_add(1, Ordering::Relaxed);
+            shared
+                .think_micros
+                .fetch_add(u64::from(micros), Ordering::Relaxed);
+            shared
+                .think_max_micros
+                .fetch_max(u64::from(micros), Ordering::Relaxed);
+            let mut commands = std::mem::take(&mut self.wanted);
+            for command in commands.drain(..) {
+                self.schedule(tick, ai.player(), command);
+            }
+            self.wanted = commands;
+        }
+        self.ais = ais;
+        if spent > SLOW_THINK_MICROS {
+            let mut slow = lock(&self.shared.slow_thinks);
+            if slow.len() < SLOW_TICKS_CAP {
+                slow.push((self.world.tick().0, spent));
+            }
+        }
+        spent
+    }
+
+    /// One `World::step`, timed; the thinks of the computer opponents come first and are part of the time.
     fn step_once(&mut self) {
         let began = Instant::now();
         let number = self.world.tick().0;
+        self.think_ais();
         let report = self.world.step();
         self.record_fx();
         if report.placements_rejected > 0 {

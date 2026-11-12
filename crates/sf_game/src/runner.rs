@@ -461,6 +461,7 @@ impl Runner {
             mut build,
             focus,
             catalog,
+            ais,
         } = start;
         if let Some(role) = &options.build
             && !build.choose(role)
@@ -476,7 +477,7 @@ impl Runner {
         // From here on the world belongs to the sim thread. Its clock stays
         // held until the window and the renderer exist (`on_start`), so the
         // units do not wander off while the GPU starts.
-        let sim = SimHandle::spawn(world, sim_config.clone())
+        let sim = SimHandle::spawn_with_ais(world, sim_config.clone(), ais)
             .map_err(|e| format!("cannot start the simulation thread: {e}"))?;
         let snap = sim.latest();
 
@@ -975,6 +976,13 @@ impl Runner {
             late_commands: counters.late_commands,
             tick_ms_max: tick_ms.0.iter().copied().fold(0.0, f64::max),
             slow_ticks: self.sim.all_slow_ticks(),
+            thinks: counters.thinks,
+            think_ms_mean: if counters.thinks == 0 {
+                0.0
+            } else {
+                counters.think_micros as f64 / counters.thinks as f64 / 1e3
+            },
+            think_ms_max: counters.think_max_micros as f64 / 1e3,
         }
     }
 
@@ -3408,6 +3416,8 @@ struct SceneStart {
     focus: Option<(f64, f64)>,
     /// What the sidebar offers (WP11.1); none in the crowd scenes, which have no sidebar.
     catalog: Option<Catalog>,
+    /// The computer opponents the sim thread thinks for (WP9.1d); only the match has any.
+    ais: Vec<sf_ai::Ai>,
 }
 
 /// The engine demo's scene: a crowd of placeholder wanderers and, with a model
@@ -3432,6 +3442,7 @@ fn crowd_scene(
         build: BuildMode::empty(),
         focus: None,
         catalog: None,
+        ais: Vec::new(),
     }
 }
 
@@ -3512,6 +3523,7 @@ fn fight_scene(
         build: BuildMode::empty(),
         focus: None,
         catalog: None,
+        ais: Vec::new(),
     }
 }
 
@@ -3601,6 +3613,7 @@ fn sandbox_scene(
             crate::playfield::shipped_build_speed(),
         )),
         focus: None,
+        ais: Vec::new(),
     }
 }
 
@@ -3622,6 +3635,16 @@ fn match_scene(
     crate::matchplay::check(&def, &defs, cells, commands::LOCAL_PLAYER)?;
     world = crate::matchplay::configure(world, &def, &defs)?;
     let roster = load_roster(options, &defs, style, icons, &assets);
+    // The computer opponents (WP9.1d). A replay feeds the commands of a record into the game, the AI's
+    // included, so the AIs stay silent then: they would play on top of the record.
+    let mut ais = crate::matchplay::ais(&def, &defs, &assets)?;
+    if options.replay.is_some() && !ais.is_empty() {
+        println!(
+            "match {}: --replay: the computer opponents are not run, the record holds their commands",
+            def.name
+        );
+        ais.clear();
+    }
     let start = crate::matchplay::schedule(&mut world, &def, &defs)?;
     let mut views = Vec::new();
     let report = world.step();
@@ -3665,6 +3688,7 @@ fn match_scene(
             crate::playfield::shipped_build_speed(),
         )),
         focus: crate::matchplay::focus_metres(&def, commands::LOCAL_PLAYER),
+        ais,
     })
 }
 

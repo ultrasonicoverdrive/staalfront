@@ -106,8 +106,10 @@ pub struct HitchLine {
     pub sounds_started: u32,
     /// Window events and music events of the frame, in words.
     pub events: Vec<String>,
-    /// Sim ticks over 20 ms that ran between this frame's snapshot and the next: `(tick, ms)`.
-    pub sim_slow_ticks: Vec<(u64, f64)>,
+    /// Sim ticks over 20 ms that ran between this frame's snapshot and the next: `(tick, ms, think_ms)`;
+    /// the third number is the time the computer opponents thought in that tick (WP9.1d), part of the
+    /// second, 0 without an AI.
+    pub sim_slow_ticks: Vec<(u64, f64, f64)>,
 }
 
 /// What the sim thread says about the whole play, handed in when the log is written.
@@ -119,7 +121,12 @@ pub struct SimTotals {
     pub clock_resets: u64,
     pub late_commands: u64,
     pub tick_ms_max: f64,
-    pub slow_ticks: Vec<(u64, f64)>,
+    pub slow_ticks: Vec<(u64, f64, f64)>,
+    /// Thinks of computer opponents run in the play (WP9.1d), their mean and their longest, in ms; all 0
+    /// in a match without one.
+    pub thinks: u64,
+    pub think_ms_mean: f64,
+    pub think_ms_max: f64,
 }
 
 /// The counts of a play, for the summary line and the file.
@@ -235,7 +242,11 @@ impl HitchLog {
     /// [`LOG_MS`] a line is built for it; `slow_ticks` is asked for the sim ticks over 20 ms that ran
     /// since the tick the long frame drew (given), up to the newest one, and is called only then.
     /// When nothing is slow this is one comparison, and on Windows one `GetThreadTimes` call.
-    pub fn begin_frame(&mut self, now: Instant, slow_ticks: impl FnOnce(u64) -> Vec<(u64, f64)>) {
+    pub fn begin_frame(
+        &mut self,
+        now: Instant,
+        slow_ticks: impl FnOnce(u64) -> Vec<(u64, f64, f64)>,
+    ) {
         let cpu_now = self.cpu.now();
         if let Some(previous) = self.last_start.replace(now) {
             let ms = now.duration_since(previous).as_secs_f64() * 1e3;
@@ -262,7 +273,7 @@ impl HitchLog {
         now: Instant,
         ms: f64,
         cpu_now: Option<Duration>,
-        slow_ticks: impl FnOnce(u64) -> Vec<(u64, f64)>,
+        slow_ticks: impl FnOnce(u64) -> Vec<(u64, f64, f64)>,
     ) {
         let warm = self.frame_no >= u64::from(WARMUP_FRAMES);
         self.totals.over_hitch += 1;
@@ -567,7 +578,7 @@ mod tests {
         begun + Duration::from_millis(ms)
     }
 
-    fn no_ticks(_: u64) -> Vec<(u64, f64)> {
+    fn no_ticks(_: u64) -> Vec<(u64, f64, f64)> {
         Vec::new()
     }
 
@@ -631,7 +642,7 @@ mod tests {
         log.note(|| "resized 1920x991".to_owned());
         log.begin_frame(at(begun, 130), |from| {
             assert_eq!(from, 10, "from the tick the long frame drew");
-            vec![(10, 62.5)]
+            vec![(10, 62.5, 3.0)]
         });
         let line = &log.lines()[0];
         assert_eq!((line.frame, line.tick, line.sounds_started), (1, 10, 4));
@@ -644,7 +655,7 @@ mod tests {
         // 20 ms of drawing, of which 15 were waits: 5 ms of recording.
         assert!((p.record_ms - 5.0).abs() < 1e-6, "{p:?}");
         assert_eq!(line.events, vec!["resized 1920x991".to_owned()]);
-        assert_eq!(line.sim_slow_ticks, vec![(10, 62.5)]);
+        assert_eq!(line.sim_slow_ticks, vec![(10, 62.5, 3.0)]);
         // Off Windows the CPU time is not measured; the field says so.
         assert_eq!(line.cpu_ms.is_some(), cfg!(windows));
     }
@@ -696,7 +707,10 @@ mod tests {
         let log = run(&[0, 17, 200, 217]);
         let sim = SimTotals {
             late_snapshots: 3,
-            slow_ticks: vec![(7, 31.0)],
+            slow_ticks: vec![(7, 31.0, 4.5)],
+            thinks: 40,
+            think_ms_mean: 0.25,
+            think_ms_max: 4.5,
             ..SimTotals::default()
         };
         let value: serde_json::Value = serde_json::from_str(&log.to_json(&sim).unwrap()).unwrap();
@@ -704,6 +718,14 @@ mod tests {
         assert_eq!(value["totals"]["frames"], 3);
         assert_eq!(value["totals"]["over_hitch"], 1);
         assert_eq!(value["sim"]["late_snapshots"], 3);
+        // WP9.1d: the think time is in the file, per slow tick and as totals.
+        assert_eq!(
+            value["sim"]["slow_ticks"][0],
+            serde_json::json!([7, 31.0, 4.5])
+        );
+        assert_eq!(value["sim"]["thinks"], 40);
+        assert_eq!(value["sim"]["think_ms_mean"], 0.25);
+        assert_eq!(value["sim"]["think_ms_max"], 4.5);
         assert_eq!(value["hitches"][0]["frame"], 2);
         assert!(value["hitches"][0]["cpu_ms"].is_null() || cfg!(windows));
         assert_eq!(value["cpu_measured"], cfg!(windows));
@@ -805,7 +827,8 @@ mod tests {
         for i in 0..n {
             // Frames of 17 ms, every tenth of exactly HITCH_MS: not over it, so still quiet.
             let start = i * 17 + (i / 10) * 8;
-            let ask = |_: u64| -> Vec<(u64, f64)> { panic!("slow_ticks asked in a quiet frame") };
+            let ask =
+                |_: u64| -> Vec<(u64, f64, f64)> { panic!("slow_ticks asked in a quiet frame") };
             log.begin_frame(at(begun, start), ask);
             log.lap(Lap::Scene, at(begun, start + 1));
             log.end_frame(at(begun, start + 2), 0);
