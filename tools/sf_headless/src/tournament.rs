@@ -424,13 +424,16 @@ pub fn play_game(
         })
         .collect();
     let loaded = setup.loaded.with_factions(&by_player, setup.cells)?;
-    let mut world = game::build_world_at_speed(
-        world_seed,
-        setup.cells,
-        Fx::from_raw(GAME_SPEED_RAW),
-        &loaded,
-    )
-    .map_err(|e| e.to_string())?;
+    // Boxed like the world of `run::run_full`: a `World` is large and Windows gives a thread 1 to 2 MB of stack.
+    let mut world = Box::new(
+        game::build_world_at_speed(
+            world_seed,
+            setup.cells,
+            Fx::from_raw(GAME_SPEED_RAW),
+            &loaded,
+        )
+        .map_err(|e| e.to_string())?,
+    );
     let mut ais = sf_ai::match_ais(&loaded.def, &loaded.defs, ai_seed, &|name| {
         setup
             .profiles

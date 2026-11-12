@@ -3391,3 +3391,20 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   to 4, so the asserted floors became what the rule promises (the first three goals, 1900 of 4000 credits: at least 3 kinds, 4 structures). Think cost re-measured:
   release sim thread mean 1-2 us, worst 59-94 us, 1.1-1.3 % of the step (two runs); debug sim thread mean 36 us, worst 984 us, 1.3 %; real game window
   under Xvfb (debug, 4,013 ticks, 401 thinks) mean 0.097 ms, worst 1.04 ms (its one slow-tick line: `[257, 50.1, 1.04]`).
+
+### WP9.5a notes: the AI tournament (12-11-2026)
+
+* **What exists.** `sf_headless tournament <match.ron> [--games N] [--cap TICKS] [--seed S] [--json PATH] [--assets DIR] [--stalemate TICKS]`
+  (`tools/sf_headless/src/tournament.rs`), the match `assets/matches/m1_duel.ron` (both seats `Ai(profile: "normal")`, headless only: the game refuses it),
+  `sf_ai::match_ais` (the match-to-AIs loop, moved from `sf_game::matchplay::ais`, which wraps it; `sf_ai` reads no file, the host passes a reader), and the
+  rules in `docs/rules/ai.md` "AI against AI (WP9.5a)". Nothing changed in `crates/sf_sim`, `ci.yml`, `pinned.rs` or `assets/ai/normal.ron`; no scenario
+  checksum, golden or `.expected` moved (the m1_ai tests in `sf_game` are unchanged and green).
+* **Measured** (release, 100 games `m1_duel`, cap 60,000, container with load average about 4): 153.4 s total, 1.2 to 2.0 s a game; 7 decided (all won by the
+  north-east seat), 1 stalemate, 92 capped; 100 distinct final checksums. These are a baseline: WP9.1c-3 changes `normal.ron`.
+* **Tests.** Unit tests (`src/tournament/tests.rs`: schedule, seeds pinned, classification at its boundary, median, permille, summary, table, JSON shape,
+  arguments) and `tests/tournament.rs` (m1_duel's content against `m1_ai`, the seat swap read back from the played world, the cap and the stalemate label on real
+  games, the 4-game smoke with the second-run table comparison, JSON, exit codes); `sf_ai` unit tests of `match_ais`; one `sf_game` test that the game refuses
+  `m1_duel`.
+* **Not done / gaps.** No tuning, no pass criterion, no threads, the 100 games are not in CI; the AI seed has no effect on a game yet (no rule draws from it);
+  the table equality is checked on one machine only. See `ai.md` "Not done in WP9.5a".
+

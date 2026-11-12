@@ -487,6 +487,13 @@ Layered (analysis §12, §22G):
   has not lost hit points for `attack_patience` while an attacker stands at the target. (6) The defence cell rule gets unit tests and a fence
   test. (7) The finishing `Attack` is sent and taken on the real world in a test; the owner filter is pinned. (8) Survivors of an ended attack
   walk home with `Move`, a retreat on purpose.*
+  *12-11-2026 (orchestrator; design memo `wp9.2-9.5-ontwerp`): **the rest of phase 9 is built in the order 9.5a, 9.2a, 9.2b, 9.3a [xhigh], 9.3b [xhigh], 9.4, 9.5b.**
+  9.5 is split: **9.5a** the AI-vs-AI tournament runner (`sf_headless tournament`, the match `m1_duel`, built first because every later WP changes army
+  behaviour and today the only evidence is two scenarios against a passive opponent) and **9.5b** the 100-game report and tuning. The tournament runs
+  on **shipped assets** through the game's loader, not on frozen copies; the match-to-AIs loop moved from `sf_game` into `sf_ai` (`match_ais`); a seeded
+  jitter profile number is added **only if** fewer than about half the games are distinct, then in 9.2a. Built in 9.5a: the baseline of 100 games has 100
+  distinct final checksums, so no jitter number is needed; it also shows that the normal AI decides only 7 of 100 games against itself (`docs/rules/ai.md`,
+  "AI against AI (WP9.5a)").*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.
