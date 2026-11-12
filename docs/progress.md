@@ -3136,6 +3136,19 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 | `explosion.medium` | `explosion_medium.wav` | 1.2 s | medium explosion with a rumbling tail |
 | `explosion.large` | `explosion_large.wav` | 2 s | large explosion (80 to 26 Hz), long rumble |
 
+### Follow-ups of #122 and #123 (12-11-2026)
+
+* **Loop sign** (#123): the sign covered the first letters of the label ("IFLE" in the screenshot). Now it is 8 px (`repeating_px` in
+  `sidebar.ron`, pinned in `sidebar_look.rs`) and the label of a repeating item sits below it. Test
+  `the_loop_sign_never_covers_the_label_of_its_picture`; screenshot `docs/screenshots/wp6.10/sidebar_t00277_repeat_on.png` re-taken
+  (RIFLE readable; the off picture is byte-identical). The sign is small: 8 px text.
+* **Record with SetRepeat** (#123): the scripted play of `tests/record_replay.rs` has a Loop on at tick 1300 and off at 2600 on the
+  barracks (14, 0); the record carries both and the 7,000-tick replay matches at every tick. `a_record_without_its_set_repeat_does_not_replay`
+  shows the commands matter (removing them from the record changes a checksum).
+* **hitch_log.md**: the example id is `(14, 2)` with both `on` values.
+* **Limiter for fight sounds** (#122): `positional.max_summed_gain` 1.2, see `audio.md` section 4 for the numbers and the gaps.
+* Skipped: the "How tested" wording of #122 (PR body only).
+
 ### WP6.10 notes: the repeat toggle per factory ("herhaalknop", 11-11-2026)
 
 * **Done.** `Command::SetRepeat { factory, on }` (tag 18), `repeat: bool` per factory record (`FactoryView::repeat`), the loop in
