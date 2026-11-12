@@ -488,8 +488,8 @@ the AI learns that an order had no effect is always the observation (still `Idle
 New in `AiState` with WP9.1c-1, all in the digest in this order after the rescue state: `gather: Option<Cell>`, `rally_backoff: BTreeMap<EntityId,
 Tick>`, `units_sent: Vec<(EntityId, Kind, Tick, u32)>`, `scout: Option<EntityId>`, `scout_leg: u8`, `scout_leg_sent: Option<Tick>`, `scouts_sent:
 u8`, `scout_gone_at: Option<Tick>`, `directive` (posture number and target), `sent: BTreeMap<EntityId, (Tick, u8)>`. Pinned by
-`the_digest_of_the_base_state_is_pinned` (a literal, now `0xe7fb6ca95910959e`, with two entries in every map and list so that an iteration in reverse
-fails it) and `every_part_of_the_production_and_army_state_moves_the_digest` (24 changes); the profile digest hashes the new numbers
+`the_digest_of_the_base_state_is_pinned` (a literal, now `0xaec61e0952ceb855`, with two entries in every map and list so that an iteration in reverse
+fails it) and `every_part_of_the_production_and_army_state_moves_the_digest` (25 changes); the profile digest hashes the new numbers
 (`the_digest_sees_every_number_and_list`).
 
 ### The numbers (profile, data)
