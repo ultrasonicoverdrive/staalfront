@@ -1766,7 +1766,7 @@ fn the_gather_cell_and_its_eight_neighbours_are_kept_free_of_the_ais_own_structu
     assert_ne!(got, best);
     // The plant is 2 x 3 cells at `got`; the keep-out is x g-1..=g+1, y g-1..=g+1.
     let (w, h) = (2, 3);
-    let apart = got.x + w <= g.x - 1 || got.x > g.x + 1 || got.y + h <= g.y - 1 || got.y > g.y + 1;
+    let apart = got.x + w < g.x || got.x > g.x + 1 || got.y + h < g.y || got.y > g.y + 1;
     assert!(
         apart,
         "the plant at {got:?} covers part of the 3 x 3 round {g:?}"
@@ -1920,7 +1920,7 @@ fn a_scout_that_entered_a_queue_is_never_taken_back() {
     let obs = observation(&world, 780, 10_000, own.clone());
     production_turn(&world, &mut state, &obs);
     assert_eq!(state.scouts_sent, 1);
-    assert!(state.blocked_until.get(&SCOUT).is_none());
+    assert!(!state.blocked_until.contains_key(&SCOUT));
     // The scout came out and died within the 40 ticks: no item in the queue, no unit, but the order had
     // been seen in the queue at the turn before. (A scout that came out and is alive: a unit more.)
     let mut s2 = rig().1;
