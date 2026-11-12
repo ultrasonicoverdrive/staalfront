@@ -1590,3 +1590,43 @@ fn the_finishing_attack_never_goes_to_an_own_structure() {
         [(vec![20, 21, 22, 23], EntityId::new(11, 0))]
     );
 }
+
+#[test]
+fn the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks() {
+    // Fix round 1 (item 4): `ai_vs_passive` with the attack switched off (no win), to see when the goal list
+    // completes with the army floor and how the army grows. Printed and pinned.
+    let s = with_profile(load("ai_vs_passive"), |p| {
+        p.army.attack_value = 1_000_000;
+        p.army.max_wait = 72_000;
+    });
+    let st = story(&s, 30_000);
+    let builds: Vec<u64> = st
+        .finished
+        .ai_commands
+        .iter()
+        .filter(|c| matches!(c.2, Command::BuildStructure { .. }))
+        .map(|c| c.0)
+        .collect();
+    let army = |f: &Finished| {
+        f.world
+            .snapshot()
+            .iter()
+            .filter(|v| v.owner == P0 && [12, 13, 19].contains(&v.kind.0))
+            .count()
+    };
+    println!(
+        "ai_vs_passive, no attack: {} builds, the last at {:?}; army at the gather cell {:?}; {} army units at 30,000",
+        builds.len(),
+        builds.last(),
+        st.at_gather,
+        army(&st.finished)
+    );
+    assert!(st.waves.is_empty());
+    // Measured: the list does NOT complete in 30,000 ticks (9 of its builds; the vehicle factory waits until
+    // 11,650): the floor spent the 4,000 starting credits on twelve units, and one harvester brings about 200
+    // credits per 750 ticks (`the_money_of_the_ai_in_the_game_seat_...` in sf_game shows the same in the game seat).
+    assert_eq!(
+        builds,
+        [10, 250, 810, 1090, 11_650, 19_250, 22_810, 26_970, 29_090]
+    );
+}

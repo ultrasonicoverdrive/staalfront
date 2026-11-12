@@ -612,3 +612,111 @@ const M1_AI_FIRST_ARMY: u64 = 1_147;
 const M1_AI_ARMY: [usize; 3] = [10, 0, 0];
 const M1_AI_FIRST_ATTACK: u64 = 6_037;
 const M1_AI_WON: u64 = 8_396;
+
+/// Drives `ais` on `world` to `until` the way the sim thread does, calling `look` after every step.
+fn drive(
+    world: &mut World,
+    ais: &mut [sf_ai::Ai],
+    until: u64,
+    mut look: impl FnMut(&World, &[sf_ai::Ai], &[sf_sim::Command]),
+) {
+    while world.tick().0 < until {
+        let mut sent = Vec::new();
+        for ai in ais.iter_mut() {
+            if ai.due(world.tick()) {
+                let mut out = Vec::new();
+                ai.think(world, &mut out);
+                for c in out {
+                    sent.push(c.clone());
+                    world.schedule(world.tick(), ai.player(), c).unwrap();
+                }
+            }
+        }
+        world.step();
+        look(world, ais, &sent);
+    }
+}
+
+/// Fix round 1 (item 4): the money of the AI in the game seat between ticks 5,500 and 8,500 (the floor is off
+/// after the first attack at 6,037, yet nothing is built until the win at 8,396). Printed every 250 ticks:
+/// credits, free (`budget::free`), what production holds back (`reserve` + the next goal's saving), the next goal,
+/// the items queued, the harvesters and the ore delivered so far. Measurement; the asserts are what the rules say.
+#[test]
+fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
+    let (mut world, _, mut ais) = game(&ai_file());
+    let mut rows = Vec::new();
+    drive(&mut world, &mut ais, 8_500, |w, ais, _| {
+        let t = w.tick().0;
+        if t >= 5_500 && t.is_multiple_of(250) {
+            let st = ais[0].state();
+            let obs = sf_ai::Observation::build(w, AI, &st.known_structures);
+            let lens = sf_ai::Lens::new(w, AI);
+            let next = sf_ai::base::next_build(st, &obs, &lens);
+            let saving = next.map_or(0, |k| sf_ai::base::saving_for(st, &obs, &lens, k));
+            let queued: Vec<u16> = obs
+                .own
+                .iter()
+                .filter_map(|o| o.factory.as_ref())
+                .flat_map(|f| f.queue.iter().map(|q| q.0.0))
+                .collect();
+            let harvesters = obs.own.iter().filter(|o| o.kind.0 == 11).count();
+            rows.push((
+                t,
+                obs.credits,
+                sf_ai::budget::free(&obs, &lens),
+                u64::from(st.profile.economy.reserve) + saving,
+                next.map(|k| k.0),
+                queued,
+                harvesters,
+                w.ore_delivered(AI),
+            ));
+        }
+    });
+    for r in &rows {
+        println!(
+            "tick {}: credits {}, free {}, holdback {} (next goal {:?}), queued {:?}, {} harvesters, ore delivered {}",
+            r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7
+        );
+    }
+    assert!(!rows.is_empty());
+}
+
+/// Fix round 1 (item 4): `m1_ai` to 30,000 ticks with the attack switched off (`attack_value` and `max_wait`
+/// beyond reach: no attack, so no win and the floor stays on while the army is below it), to see when the goal
+/// list completes with the floor. Printed: the last build, the army every 4,000 ticks.
+#[test]
+fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
+    let (mut world, _, mut ais) = game(&ai_file());
+    for ai in &mut ais {
+        let st = ai.state().clone();
+        let mut p = st.profile.clone();
+        p.army.attack_value = 1_000_000;
+        p.army.max_wait = 72_000;
+        *ai = sf_ai::Ai::new(st.player, p, 458758, st.start_sites.clone());
+    }
+    let (mut last_build, mut army) = (0, Vec::new());
+    drive(&mut world, &mut ais, 30_000, |w, _, sent| {
+        if sent
+            .iter()
+            .any(|c| matches!(c, sf_sim::Command::BuildStructure { .. }))
+        {
+            last_build = w.tick().0 - 1;
+        }
+        if w.tick().0.is_multiple_of(4000) {
+            let n = w
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == AI && [12, 13, 19].contains(&v.kind.0))
+                .count();
+            army.push((w.tick().0, n));
+        }
+    });
+    println!(
+        "m1_ai, no attack: last build at {last_build}, army {army:?}, result {:?}",
+        world.match_result()
+    );
+    assert_eq!(world.match_result(), None);
+    // Measured: the list's last build at 29,777; the army stays at 12 (the floor reached, then the goal list's
+    // price is held back and one harvester's income goes to the list).
+    assert_eq!(last_build, 29_777);
+}
