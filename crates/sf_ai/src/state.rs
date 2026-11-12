@@ -66,6 +66,16 @@ pub struct AiState {
     pub resume: BTreeMap<Kind, u32>,
     /// Placement questions passed on to the simulation in all its thinks.
     pub previews: u64,
+    /// WP9.1b-2, the economy: the harvester sent at the last economy turn, `(kind, tick)`, until the next
+    /// turn sees it in a queue (`docs/rules/ai.md`, "The economy turn").
+    pub harvester_sent: Option<(Kind, Tick)>,
+    /// How many economy turns in a row the ore store was at least `silo_percent` full.
+    pub full_turns: u32,
+    /// A structure the economy turn wants built before the goal list: the ore silo.
+    pub emergency: Option<Kind>,
+    /// A structure a repair was sent for, and the tick until which it is not asked again unless it is
+    /// seen repairing; entries go when the structure is repaired, gone, repairing or the time is up.
+    pub repair_backoff: BTreeMap<EntityId, Tick>,
 }
 
 /// The most entries of [`AiState::refused`]; the one that expires first goes when it is full.
@@ -93,6 +103,10 @@ impl AiState {
             refused: BTreeMap::new(),
             resume: BTreeMap::new(),
             previews: 0,
+            harvester_sent: None,
+            full_turns: 0,
+            emergency: None,
+            repair_backoff: BTreeMap::new(),
         }
     }
 
@@ -162,6 +176,29 @@ impl AiState {
             h.write_u32(*n);
         }
         h.write_u64(self.previews);
+        // WP9.1b-2: the economy.
+        match self.harvester_sent {
+            Some((kind, tick)) => {
+                h.write_u8(1);
+                h.write_u32(u32::from(kind.0));
+                h.write_u64(tick.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.full_turns);
+        match self.emergency {
+            Some(kind) => {
+                h.write_u8(1);
+                h.write_u32(u32::from(kind.0));
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.repair_backoff.len() as u32);
+        for (id, until) in &self.repair_backoff {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u64(until.0);
+        }
         h.finish()
     }
 }
@@ -199,6 +236,11 @@ mod tests {
         s.resume.insert(Kind(2), 32);
         s.resume.insert(Kind(4), 64);
         s.previews = 7;
+        s.harvester_sent = Some((Kind(11), Tick(240)));
+        s.full_turns = 3;
+        s.emergency = Some(Kind(43));
+        s.repair_backoff.insert(EntityId::new(7, 0), Tick(900));
+        s.repair_backoff.insert(EntityId::new(9, 1), Tick(950));
         s
     }
 
@@ -206,13 +248,13 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0xa42f_3565_6d0b_2ce2);
+        assert_eq!(base_state().digest(), 0x28bb_194b_3822_2820);
     }
 
     #[test]
     fn every_new_part_of_the_state_moves_the_digest() {
         let d = base_state().digest();
-        let changes: [fn(&mut AiState); 7] = [
+        let changes: [fn(&mut AiState); 16] = [
             |s| s.pending_build = None,
             |s| s.pending_build = Some((Kind(2), Cell::new(17, 65), Tick(250))),
             |s| {
@@ -228,6 +270,21 @@ mod tests {
                 s.resume.insert(Kind(4), 65);
             },
             |s| s.previews += 1,
+            |s| s.harvester_sent = None,
+            |s| s.harvester_sent = Some((Kind(12), Tick(240))),
+            |s| s.harvester_sent = Some((Kind(11), Tick(241))),
+            |s| s.full_turns += 1,
+            |s| s.emergency = None,
+            |s| s.emergency = Some(Kind(44)),
+            |s| {
+                s.repair_backoff.remove(&EntityId::new(7, 0));
+            },
+            |s| {
+                s.repair_backoff.insert(EntityId::new(9, 1), Tick(951));
+            },
+            |s| {
+                s.repair_backoff.insert(EntityId::new(9, 2), Tick(950));
+            },
         ];
         for (i, change) in changes.iter().enumerate() {
             let mut s = base_state();

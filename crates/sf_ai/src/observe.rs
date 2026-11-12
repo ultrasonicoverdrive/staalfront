@@ -29,8 +29,9 @@
 use std::collections::BTreeMap;
 
 use sf_sim::{
-    BuildingStats, Cell, Command, Construction, EntityId, FactoryStatus, Footprint, Kind, Order,
-    PlacementError, PlayerId, PowerTotals, Tick, Visibility, World, exit_cell,
+    BuildingFunction, BuildingStats, Cell, Command, Construction, EntityId, FactoryStatus,
+    Footprint, Kind, Order, PlacementError, PlayerId, PowerTotals, Tick, Visibility, World,
+    exit_cell,
 };
 
 use crate::ai::Ai;
@@ -249,6 +250,32 @@ impl<'w> Lens<'w> {
             .production_table()
             .and_then(|t| t.get(kind))
             .map(|u| u.cost)
+    }
+
+    /// What one standing structure of `kind` stores (public rules); zero for a kind that stores nothing.
+    pub fn storage_of(&self, kind: Kind) -> u32 {
+        self.world.storage_of_kind(kind)
+    }
+
+    /// The building table, ascending by kind (public rules).
+    pub fn buildings(&self) -> impl Iterator<Item = &'w BuildingStats> {
+        self.world.building_table().iter()
+    }
+
+    /// The faction bit of the player (public: a player knows what it plays); `None` in a game without
+    /// factions.
+    pub fn faction_bit(&self) -> Option<u8> {
+        self.world.faction_of(self.player)
+    }
+
+    /// The function of the factory that makes the unit `kind`, when the player's faction may have it;
+    /// `None` for a kind no factory makes or that is not the player's (public rules).
+    pub fn unit_factory(&self, kind: Kind) -> Option<BuildingFunction> {
+        let build = self.world.production_table()?.get(kind)?;
+        let open = self
+            .faction_bit()
+            .is_none_or(|bit| build.factions & bit != 0);
+        open.then_some(build.factory)
     }
 
     /// Whether a structure may stand on the terrain of `cell` (the map; false off the map).

@@ -29,7 +29,12 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected")
 /// builds (a power plant at tick 10, a refinery at tick 330) and its digest hashes the new state and the
 /// profile's lane and aprons. Measured: with the construction manager switched off, the new state left out
 /// of `AiState::digest` and the lane and aprons left out of `Profile::digest`, both old values come back.
-const AI_DIGEST: u64 = 0x630c_0979_a8ae_4749;
+///
+/// Re-pinned by WP9.1b-2 to `0x4a4e_ffe3_e0fa_05d1`; the checksum `0x768b77651509db8c` did not move (no
+/// harvester is ordered: the AI has no vehicle factory in 800 ticks, and nothing is damaged). The digest moved
+/// because it now hashes the economy state (`harvester_sent`, `full_turns`, `emergency`, `repair_backoff`):
+/// measured, with those left out of `AiState::digest` the value above comes back.
+const AI_DIGEST: u64 = 0x4a4e_ffe3_e0fa_05d1;
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);

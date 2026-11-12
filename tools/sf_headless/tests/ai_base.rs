@@ -29,9 +29,9 @@ const BASE_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_base.expe
 const NOORE_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_noore.expected");
 const BOXED_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_boxed.expected");
 /// `Ai::digest` of player 0 at the end of each scenario.
-const BASE_DIGEST: u64 = 0xa1bd_d2e1_6f8d_b63b;
-const NOORE_DIGEST: u64 = 0x94c9_2875_5b79_9c2f;
-const BOXED_DIGEST: u64 = 0x5c40_c9e2_637e_1194;
+const BASE_DIGEST: u64 = 0x11dd_e9a0_0dc1_4f23;
+const NOORE_DIGEST: u64 = 0x4920_9649_c89c_7ba9;
+const BOXED_DIGEST: u64 = 0x7814_85e5_5788_ab34;
 
 /// The kinds of the frozen definitions (`ai_base_defs/unit_defs.ron`).
 const PLANT: Kind = Kind(1);
@@ -43,10 +43,11 @@ const TOWER: Kind = Kind(6);
 const ADVANCED: Kind = Kind(7);
 const HARVESTER: Kind = Kind(11);
 
-/// Measured: the last goal up to the vehicle factory stands at tick 1998, the last of the list at 6518; the
+/// Measured: the last goal up to the vehicle factory stands at tick 1998, the last of the list at 8078 (6518
+/// before WP9.1b-2: the two harvesters the economy buys cost 2,200 credits the list then waits for); the
 /// bounds leave 20 percent.
 const T1: u64 = 2400;
-const T1B: u64 = 7800;
+const T1B: u64 = 9700;
 
 fn scenario(name: &str) -> Scenario {
     Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap()
@@ -148,8 +149,13 @@ fn the_goal_list_stands_by_t1_up_to_the_vehicle_factory_and_by_t1b_in_full() {
         "by T1 = {T1}: {list:?}"
     );
     assert!(last <= T1B, "by T1b = {T1B}: {list:?}");
-    // Exactly one build per structure, nothing refused.
-    assert_eq!(f.ai_commands.len(), 11);
+    // Exactly one build per structure, one harvester bought per refinery, nothing refused.
+    let builds = f
+        .ai_commands
+        .iter()
+        .filter(|c| matches!(c.2, Command::BuildStructure { .. }))
+        .count();
+    assert_eq!((builds, f.ai_commands.len()), (11, 13));
     assert_eq!(f.outcome.commands_ignored, 0);
 }
 
@@ -182,7 +188,8 @@ fn the_simulation_refuses_no_build() {
 
 #[test]
 fn no_two_structures_touch_and_every_apron_is_free() {
-    let f = go(&scenario("ai_base"), 8000);
+    let s = scenario("ai_base");
+    let f = go(&s, s.ticks);
     let e = f.ais[0].state().profile.economy;
     let list = structures(&f.world);
     assert_eq!(list.len(), 12);
@@ -225,22 +232,23 @@ fn no_two_structures_touch_and_every_apron_is_free() {
 }
 
 #[test]
-fn two_harvesters_mine_and_bring_credits() {
-    let f = go(&scenario("ai_base"), 8000);
+fn four_harvesters_mine_and_bring_credits() {
+    let s = scenario("ai_base");
+    let f = go(&s, s.ticks);
     let harvesters = f
         .world
         .snapshot()
         .iter()
         .filter(|v| v.owner == P0 && v.kind == HARVESTER)
         .count();
-    // One free with each refinery.
-    assert_eq!(harvesters, 2);
+    // One free with each refinery and one the economy buys for each (WP9.1b-2).
+    assert_eq!(harvesters, 4);
     assert!(f.world.ore_delivered(P0) > 0);
 }
 
 #[test]
 fn the_ai_sends_only_what_a_player_may_send() {
-    // The whitelist of the design: building, queueing units and repairing. WP9.1b-1 sends only builds.
+    // The whitelist of the design: building, queueing units and repairing.
     for name in ["ai_base", "ai_noore", "ai_boxed"] {
         let s = scenario(name);
         let f = go(&s, s.ticks);
@@ -248,7 +256,12 @@ fn the_ai_sends_only_what_a_player_may_send() {
         for (tick, player, c) in &f.ai_commands {
             assert_eq!(*player, 0);
             assert!(
-                matches!(c, Command::BuildStructure { .. }),
+                matches!(
+                    c,
+                    Command::BuildStructure { .. }
+                        | Command::QueueUnit { .. }
+                        | Command::Repair { .. }
+                ),
                 "{name}: tick {tick}: {c:?}"
             );
         }
@@ -291,7 +304,12 @@ fn boxed_in_the_refinery_is_blocked_and_later_goals_are_built() {
     let state = f.ais[0].state();
     assert!(state.blocked_until.contains_key(&REFINERY));
     // The search asks the simulation only about candidates its mask lets through: one question per build.
-    assert_eq!(state.previews, f.ai_commands.len() as u64);
+    let builds = f
+        .ai_commands
+        .iter()
+        .filter(|c| matches!(c.2, Command::BuildStructure { .. }))
+        .count();
+    assert_eq!(state.previews, builds as u64);
 }
 
 #[test]
@@ -399,7 +417,9 @@ fn a_unit_hidden_in_the_reach_changes_nothing_the_ai_does() {
     // Most of the base is built by then.
     assert!(until >= T1, "seen at {until}");
     let with = go(&s, until);
-    let without = go(&scenario("ai_base"), until);
+    // The other world has the same truck far away (also in the shroud), not no truck: an entity takes an
+    // id, the ids of the AI's own things shift by one, and a `QueueUnit` names a factory by its id.
+    let without = go(&with_hidden_truck(scenario("ai_base"), (92, 92)), until);
     assert_ne!(with.world.checksum(), without.world.checksum());
     assert_eq!(with.ai_commands, without.ai_commands);
     assert!(with.ai_commands.len() >= 6);
