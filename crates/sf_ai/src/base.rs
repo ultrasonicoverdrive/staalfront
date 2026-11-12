@@ -101,7 +101,12 @@ pub fn refuse(state: &mut AiState, kind: Kind, cell: sf_sim::Cell, until: Tick) 
 pub(crate) fn have(obs: &Observation, kind: Kind) -> usize {
     obs.own
         .iter()
-        .filter(|o| o.kind == kind && o.footprint.is_some() && (o.standing || o.building.is_some()))
+        .filter(|o| {
+            o.kind == kind
+                && o.footprint.is_some()
+                && !o.selling
+                && (o.standing || o.building.is_some())
+        })
         .count()
 }
 
@@ -110,7 +115,7 @@ fn standing_kinds(obs: &Observation) -> Vec<Kind> {
     let mut kinds: Vec<Kind> = obs
         .own
         .iter()
-        .filter(|o| o.footprint.is_some() && o.standing)
+        .filter(|o| o.footprint.is_some() && o.standing && !o.selling)
         .map(|o| o.kind)
         .collect();
     kinds.sort();

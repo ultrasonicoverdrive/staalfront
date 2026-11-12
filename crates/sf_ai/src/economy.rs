@@ -21,6 +21,9 @@
 //!    money only the anchor is repaired (and its repair may take credits the build waits for: not counted in
 //!    `budget::committed`, see `ai.md`). A repair that is sent but never shows (a game without repair
 //!    rules ignores it) is not sent again before `blocked_ticks` have passed.
+//! (4) **Rescue.** Once per match, when an emergency build has been stalled for lack of money on two economy
+//!    turns in a row and no income can arrive, the structures that cover what is owed on it are sold
+//!    ([`pick_sales`], never the anchor, a dock or a power plant); see `ai.md`, "The rescue".
 
 use sf_sim::{BuildingFunction, Command, EntityId, Kind, Tick};
 
@@ -38,12 +41,13 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     let later = Tick(now.0 + u64::from(state.profile.economy.blocked_ticks));
     harvesters(state, obs, lens, out, later);
     silo(state, obs, lens);
+    rescue(state, obs, lens, out, later);
     repair(state, obs, lens, out, later);
 }
 
 /// Whether the own structure `o` is complete: it stands and is not going up.
 fn complete(o: &Own) -> bool {
-    o.footprint.is_some() && o.standing && o.building.is_none()
+    o.footprint.is_some() && o.standing && o.building.is_none() && !o.selling
 }
 
 /// The function of the table entry of `o`'s kind.
@@ -57,8 +61,14 @@ fn function_of(lens: &Lens<'_>, o: &Own) -> Option<BuildingFunction> {
 /// order and every repair but the anchor's keep their hands off the money until it stands. The anchor's
 /// repair does not: it may take credits an emergency build is waiting for (see `repair`).
 pub fn emergency_stalled(obs: &Observation, lens: &Lens<'_>) -> bool {
+    stalled_structure(obs, lens).is_some()
+}
+
+/// The structure an emergency build is stalled on (see [`emergency_stalled`]): the first own structure going
+/// up that the base cannot do without, when nothing is free.
+fn stalled_structure<'o>(obs: &'o Observation, lens: &Lens<'_>) -> Option<&'o Own> {
     if budget::free(obs, lens) > 0 {
-        return false;
+        return None;
     }
     let dock_stands = obs
         .own
@@ -68,7 +78,7 @@ pub fn emergency_stalled(obs: &Observation, lens: &Lens<'_>) -> bool {
     obs.own
         .iter()
         .filter(|o| o.footprint.is_some() && o.building.is_some())
-        .any(|o| match function_of(lens, o) {
+        .find(|o| match function_of(lens, o) {
             Some(BuildingFunction::HarvesterDock) => !dock_stands,
             Some(BuildingFunction::PowerPlant) => short,
             _ => false,
@@ -241,5 +251,143 @@ fn repair(
             on: true,
         });
         state.repair_backoff.insert(o.id, later);
+    }
+}
+
+/// Every kind `kind` needs, directly or through others (`requires` of the building table), ascending.
+fn requires_closure(lens: &Lens<'_>, kind: Kind) -> Vec<Kind> {
+    let mut found: Vec<Kind> = Vec::new();
+    let mut todo = vec![kind];
+    while let Some(k) = todo.pop() {
+        for &r in lens.building(k).map_or(&[][..], |b| &b.requires[..]) {
+            if !found.contains(&r) {
+                found.push(r);
+                todo.push(r);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// Whether a structure of this function may be sold in the rescue: never the anchor (selling it is defeat),
+/// a harvester dock (income) or a power plant (the base stops without it).
+pub fn sellable(function: BuildingFunction) -> bool {
+    !matches!(
+        function,
+        BuildingFunction::Anchor | BuildingFunction::HarvesterDock | BuildingFunction::PowerPlant
+    )
+}
+
+/// The position of `kind` in the goal list, the last entry that names it; a kind that is not in the list
+/// ranks after all of them.
+fn goal_position(state: &AiState, kind: Kind) -> usize {
+    state
+        .profile
+        .build_order
+        .iter()
+        .rposition(|&(k, _)| k == kind)
+        .unwrap_or(usize::MAX)
+}
+
+/// The structures to sell to cover `need` credits, from `eligible` `(refund, goal position, id)`: the one
+/// with the smallest refund that covers it alone (ties: the latest in the goal list, then the lowest id);
+/// else the smallest refunds in that order one after the other until their sum covers it; nothing when all of
+/// them together fall short (a sale that does not finish the build buys nothing).
+pub fn pick_sales(mut eligible: Vec<(u64, usize, EntityId)>, need: u64) -> Vec<EntityId> {
+    eligible.sort_by_key(|&(refund, pos, id)| (refund, std::cmp::Reverse(pos), id));
+    if let Some(&(_, _, id)) = eligible.iter().find(|&&(refund, ..)| refund >= need) {
+        return vec![id];
+    }
+    let mut sum = 0u64;
+    let mut chosen = Vec::new();
+    for &(refund, _, id) in &eligible {
+        chosen.push(id);
+        sum += refund;
+        if sum >= need {
+            return chosen;
+        }
+    }
+    Vec::new()
+}
+
+/// The rescue (decision of 12-11-2026, replacing "the AI never sells"): once per match, when an emergency
+/// build has been stalled for lack of money on two economy turns in a row and no income can arrive (no
+/// harvester, or no complete dock), the AI sells structures to pay what is still owed on it. See `ai.md`.
+fn rescue(
+    state: &mut AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    out: &mut Vec<Command>,
+    later: Tick,
+) {
+    // Verify the last sales: any that shows `selling` or is gone started, and the rescue is spent; when
+    // the simulation refused every one it is tried again after `blocked_ticks`.
+    if !state.sales.is_empty() {
+        let sent = std::mem::take(&mut state.sales);
+        let started = sent.iter().any(|(id, _)| {
+            obs.own
+                .iter()
+                .find(|o| o.id == *id)
+                .is_none_or(|o| o.selling)
+        });
+        if started {
+            state.rescue_used = true;
+        } else {
+            state.rescue_after = later;
+        }
+    }
+    let stalled = stalled_structure(obs, lens);
+    state.stalled_turns = if stalled.is_some() {
+        state.stalled_turns + 1
+    } else {
+        0
+    };
+    let Some(stalled) = stalled else {
+        return;
+    };
+    if state.rescue_used || state.stalled_turns < 2 || obs.tick < state.rescue_after {
+        return;
+    }
+    let kinds = lens.harvester_kinds();
+    let harvester = obs
+        .own
+        .iter()
+        .any(|o| o.footprint.is_none() && kinds.contains(&o.kind));
+    let dock = obs
+        .own
+        .iter()
+        .any(|o| complete(o) && function_of(lens, o) == Some(BuildingFunction::HarvesterDock));
+    if harvester && dock {
+        return;
+    }
+    // What is still owed on the stalled structure, as `budget::committed` counts it, less the credits.
+    let Some(c) = stalled.building else {
+        return;
+    };
+    let Some(cost) = lens.building(stalled.kind).and_then(|b| b.cost) else {
+        return;
+    };
+    let owed = (u64::from(cost) * u64::from(c.left)).div_ceil(u64::from(c.total.max(1)));
+    let need = owed.saturating_sub(obs.credits);
+    if need == 0 {
+        return;
+    }
+    let needed = requires_closure(lens, stalled.kind);
+    let mut eligible = Vec::new();
+    for o in &obs.own {
+        if !complete(o) || o.id == stalled.id || needed.binary_search(&o.kind).is_ok() {
+            continue;
+        }
+        if !function_of(lens, o).is_some_and(sellable) {
+            continue;
+        }
+        if let Some(refund) = lens.sale_refund(o.kind, o.hp, o.max_hp) {
+            eligible.push((refund, goal_position(state, o.kind), o.id));
+        }
+    }
+    for id in pick_sales(eligible, need) {
+        out.push(Command::Sell { structure: id });
+        state.sales.push((id, obs.tick));
     }
 }

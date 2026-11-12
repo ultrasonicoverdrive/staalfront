@@ -76,6 +76,16 @@ pub struct AiState {
     /// A structure a repair was sent for, and the tick until which it is not asked again unless it is
     /// seen repairing; entries go when the structure is repaired, gone, repairing or the time is up.
     pub repair_backoff: BTreeMap<EntityId, Tick>,
+    /// WP9.1b-2, the rescue (decision of 12-11-2026): how many economy turns in a row an emergency build has
+    /// been stalled for lack of money with no income possible.
+    pub stalled_turns: u32,
+    /// Whether the one rescue of the match (selling structures to pay a stalled emergency build) is spent.
+    pub rescue_used: bool,
+    /// The sales sent at the last economy turn and the tick they were sent, until the next turn sees them
+    /// start (or be refused).
+    pub sales: Vec<(EntityId, Tick)>,
+    /// After a refused rescue: the tick from which it may be tried again.
+    pub rescue_after: Tick,
 }
 
 /// The most entries of [`AiState::refused`]; the one that expires first goes when it is full.
@@ -107,6 +117,10 @@ impl AiState {
             full_turns: 0,
             emergency: None,
             repair_backoff: BTreeMap::new(),
+            stalled_turns: 0,
+            rescue_used: false,
+            sales: Vec::new(),
+            rescue_after: Tick(0),
         }
     }
 
@@ -199,6 +213,15 @@ impl AiState {
             h.write_u32(id.generation());
             h.write_u64(until.0);
         }
+        h.write_u32(self.stalled_turns);
+        h.write_u8(u8::from(self.rescue_used));
+        h.write_u32(self.sales.len() as u32);
+        for (id, tick) in &self.sales {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u64(tick.0);
+        }
+        h.write_u64(self.rescue_after.0);
         h.finish()
     }
 }
@@ -241,6 +264,11 @@ mod tests {
         s.emergency = Some(Kind(43));
         s.repair_backoff.insert(EntityId::new(7, 0), Tick(900));
         s.repair_backoff.insert(EntityId::new(9, 1), Tick(950));
+        s.stalled_turns = 2;
+        s.rescue_used = true;
+        s.sales.push((EntityId::new(4, 0), Tick(300)));
+        s.sales.push((EntityId::new(6, 1), Tick(300)));
+        s.rescue_after = Tick(1200);
         s
     }
 
@@ -248,13 +276,13 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0x28bb_194b_3822_2820);
+        assert_eq!(base_state().digest(), 0xb3c2_9db9_5d8d_85f4);
     }
 
     #[test]
     fn every_new_part_of_the_state_moves_the_digest() {
         let d = base_state().digest();
-        let changes: [fn(&mut AiState); 16] = [
+        let changes: [fn(&mut AiState); 24] = [
             |s| s.pending_build = None,
             |s| s.pending_build = Some((Kind(2), Cell::new(17, 65), Tick(250))),
             |s| {
@@ -285,6 +313,14 @@ mod tests {
             |s| {
                 s.repair_backoff.insert(EntityId::new(9, 2), Tick(950));
             },
+            |s| s.stalled_turns += 1,
+            |s| s.rescue_used = false,
+            |s| s.sales.clear(),
+            |s| s.sales[0].1 = Tick(301),
+            |s| s.sales[1].0 = EntityId::new(6, 2),
+            |s| s.sales.reverse(),
+            |s| s.sales.push((EntityId::new(7, 0), Tick(300))),
+            |s| s.rescue_after = Tick(1201),
         ];
         for (i, change) in changes.iter().enumerate() {
             let mut s = base_state();

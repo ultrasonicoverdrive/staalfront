@@ -31,8 +31,8 @@ const P0: PlayerId = PlayerId(0);
 const ECONOMY_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_economy.expected");
 const REBUILD_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_rebuild.expected");
 /// `Ai::digest` of player 0 at the end of each scenario.
-const ECONOMY_DIGEST: u64 = 0xb244_e3ea_8dd7_26ad;
-const REBUILD_DIGEST: u64 = 0xc541_cd51_b2e4_5292;
+const ECONOMY_DIGEST: u64 = 0xc79c_0cba_b7c6_ddb7;
+const REBUILD_DIGEST: u64 = 0x15af_ee5a_c92b_e396;
 
 /// The kinds of the frozen definitions.
 const CENTRE: Kind = Kind(0);
@@ -293,6 +293,7 @@ fn the_new_scenarios_send_only_what_a_player_may_send() {
                     Command::BuildStructure { .. }
                         | Command::QueueUnit { .. }
                         | Command::Repair { .. }
+                        | Command::Sell { .. }
                 ),
                 "{name}: tick {tick}: {c:?}"
             );
@@ -347,6 +348,7 @@ fn structure(world: &World, id: u32, kind: Kind) -> Own {
         building: None,
         repairing: false,
         factory: None,
+        selling: false,
     }
 }
 
@@ -387,6 +389,7 @@ fn unit(id: u32, kind: Kind) -> Own {
         building: None,
         repairing: false,
         factory: None,
+        selling: false,
     }
 }
 
@@ -1028,4 +1031,436 @@ fn the_harvester_rule_adds_ore_the_scenario_would_not_deliver_without_it() {
     println!("ore delivered in 12,000 ticks: with the harvester rule {with}, without it {without}");
     assert!(with >= without + 1500, "{with} against {without}");
     assert!(with >= 5000);
+}
+
+// ---- the rescue: selling structures out of a money deadlock, once per match --------------------------
+
+/// The world of `ai_rebuild` (it has repair and sale rules) after one tick, and the AI's state.
+fn rig_rebuild() -> (World, sf_ai::AiState) {
+    let f = go(&load("ai_rebuild"), 1);
+    (*f.world, f.ais[0].state().clone())
+}
+
+const RADAR: Kind = Kind(5);
+
+/// A deadlocked base: the centre (id 0), a power plant (1), a barracks (2), a vehicle factory (3), a radar (4)
+/// and a refinery going up (5) with nothing to pay it with and no harvester.
+fn deadlock(world: &World) -> Vec<Own> {
+    vec![
+        structure(world, 0, CENTRE),
+        structure(world, 1, PLANT),
+        structure(world, 2, BARRACKS),
+        structure(world, 3, FACTORY),
+        structure(world, 4, RADAR),
+        going_up(structure(world, 5, REFINERY)),
+    ]
+}
+
+fn sells(out: &[Command]) -> Vec<u32> {
+    out.iter()
+        .filter_map(|c| match c {
+            Command::Sell { structure } => Some(structure.index()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_sale_refunds_are_the_simulations_at_the_current_hit_points() {
+    let (world, _) = rig_rebuild();
+    let lens = Lens::new(&world, P0);
+    // The shipped prices at 500 thousandths: the vehicle factory 750, the radar 450, the barracks 200.
+    assert_eq!(lens.sale_refund(FACTORY, 1000, 1000), Some(750));
+    assert_eq!(lens.sale_refund(RADAR, 700, 700), Some(450));
+    assert_eq!(lens.sale_refund(BARRACKS, 700, 700), Some(200));
+    // The current hit points count: a factory at a tenth of its hit points pays a tenth.
+    assert_eq!(lens.sale_refund(FACTORY, 100, 1000), Some(75));
+    // A world without sale rules (`ai_economy`) answers nothing.
+    let (plain, _) = rig();
+    assert_eq!(Lens::new(&plain, P0).sale_refund(FACTORY, 1000, 1000), None);
+}
+
+#[test]
+fn the_cheapest_sufficient_sale_wins_and_a_sum_is_taken_only_when_none_suffices() {
+    let id = |i| EntityId::new(i, 0);
+    let list = vec![(750, 3, id(3)), (450, 4, id(4)), (200, 2, id(2))];
+    // One suffices: the smallest refund that covers it.
+    assert_eq!(economy::pick_sales(list.clone(), 150), [id(2)]);
+    assert_eq!(economy::pick_sales(list.clone(), 200), [id(2)]);
+    assert_eq!(economy::pick_sales(list.clone(), 201), [id(4)]);
+    assert_eq!(economy::pick_sales(list.clone(), 451), [id(3)]);
+    assert_eq!(economy::pick_sales(list.clone(), 750), [id(3)]);
+    // None suffices alone: the smallest first until the sum covers it.
+    assert_eq!(
+        economy::pick_sales(list.clone(), 751),
+        [id(2), id(4), id(3)]
+    );
+    assert_eq!(economy::pick_sales(list.clone(), 650), [id(3)]);
+    assert_eq!(
+        economy::pick_sales(list.clone(), 1400),
+        [id(2), id(4), id(3)]
+    );
+    // All together fall short: nothing.
+    assert_eq!(economy::pick_sales(list.clone(), 1401), []);
+    assert_eq!(economy::pick_sales(Vec::new(), 1), []);
+    // Ties: the later goal entry first, then the lower id.
+    let tie = vec![(450, 3, id(8)), (450, 5, id(9)), (450, 5, id(7))];
+    assert_eq!(economy::pick_sales(tie, 400), [id(7)]);
+}
+
+#[test]
+fn nothing_is_sold_on_the_first_stalled_turn_and_the_sales_go_out_together_on_the_second() {
+    let (world, mut state) = rig_rebuild();
+    let obs = observation(&world, 5000, 0, deadlock(&world));
+    assert_eq!(sells(&turn(&world, &mut state, &obs)), []);
+    assert_eq!(state.stalled_turns, 1);
+    let obs = observation(&world, 5040, 0, deadlock(&world));
+    // The refinery owes half of its price, 600: more than the radar or the barracks pay, less than the factory:
+    // the one smallest sufficient sale. (The numbers: owed 600 of 1200, refunds 750, 450, 200.)
+    let out = turn(&world, &mut state, &obs);
+    let owed = sf_ai::budget::committed(&obs, &Lens::new(&world, P0));
+    println!("owed {owed}, sells {:?}", sells(&out));
+    assert_eq!(state.stalled_turns, 2);
+    assert_eq!(sells(&out), [3]);
+    assert_eq!(state.sales, [(EntityId::new(3, 0), Tick(5040))]);
+    assert!(!state.rescue_used);
+}
+
+#[test]
+fn when_no_one_structure_pays_enough_the_smallest_are_added_until_the_sum_does() {
+    let (world, mut state) = rig_rebuild();
+    // The refinery has barely started: it still owes nearly its whole price, 1,188 of 1,200.
+    let mut own = deadlock(&world);
+    own[5].building = Some(Construction {
+        left: 990,
+        total: 1000,
+    });
+    for t in [5000, 5040] {
+        let out = turn(&world, &mut state, &observation(&world, t, 0, own.clone()));
+        if t == 5040 {
+            assert_eq!(sells(&out), [2, 4, 3]);
+        } else {
+            assert_eq!(sells(&out), []);
+        }
+    }
+}
+
+#[test]
+fn nothing_is_sold_when_all_the_eligible_structures_together_fall_short() {
+    let (world, mut state) = rig_rebuild();
+    // No factory and no radar: only the barracks (200) can be sold, and the refinery owes far more.
+    let own = vec![
+        structure(&world, 0, CENTRE),
+        structure(&world, 1, PLANT),
+        structure(&world, 2, BARRACKS),
+        going_up(structure(&world, 5, REFINERY)),
+    ];
+    for t in [5000, 5040, 5080, 5120] {
+        let out = turn(&world, &mut state, &observation(&world, t, 0, own.clone()));
+        assert_eq!(sells(&out), [], "tick {t}");
+    }
+    assert!(!state.rescue_used);
+    assert!(state.stalled_turns >= 4);
+}
+
+#[test]
+fn the_anchor_a_dock_a_power_plant_and_the_stalled_structure_are_never_sold() {
+    // By function, for every function there is: only the anchor, the dock and the plants are kept.
+    for (function, sold) in [
+        (BuildingFunction::None, true),
+        (BuildingFunction::Anchor, false),
+        (BuildingFunction::PowerPlant, false),
+        (BuildingFunction::HarvesterDock, false),
+        (BuildingFunction::InfantryFactory, true),
+        (BuildingFunction::VehicleFactory, true),
+        (BuildingFunction::VesselFactory, true),
+        (BuildingFunction::Radar, true),
+        (BuildingFunction::Defence, true),
+        (BuildingFunction::Decoy, true),
+    ] {
+        assert_eq!(economy::sellable(function), sold, "{function:?}");
+    }
+    // In a deadlock where every single sale falls short, the smallest are added: the barracks, the radar and
+    // the factory, and never the two power plants (150 each, which would come first) or the centre.
+    let (world, mut state) = rig_rebuild();
+    let mut own = deadlock(&world);
+    own[5].building = Some(Construction {
+        left: 990,
+        total: 1000,
+    });
+    own.push(structure(&world, 6, PLANT));
+    own.sort_by_key(|o| o.id);
+    let mut sold = Vec::new();
+    for t in [5000, 5040] {
+        sold = sells(&turn(
+            &world,
+            &mut state,
+            &observation(&world, t, 0, own.clone()),
+        ));
+    }
+    assert_eq!(sold, [2, 4, 3]);
+    // A refinery that stands (a dock) is not sold either, although its 600 would cover a small debt that the
+    // barracks cannot: a plant going up for lack of power, no harvester left, so no income comes.
+    let (_, mut state) = rig_rebuild();
+    let mut own = vec![
+        structure(&world, 0, CENTRE),
+        structure(&world, 2, BARRACKS),
+        structure(&world, 7, REFINERY),
+        going_up(structure(&world, 5, PLANT)),
+    ];
+    own[3].building = Some(Construction {
+        left: 990,
+        total: 1000,
+    });
+    own.sort_by_key(|o| o.id);
+    for t in [5000, 5040, 5080] {
+        let mut obs = observation(&world, t, 0, own.clone());
+        obs.power = Some(PowerTotals { made: 0, used: 50 });
+        assert_eq!(sells(&turn(&world, &mut state, &obs)), [], "tick {t}");
+    }
+    assert!(!state.rescue_used);
+}
+
+#[test]
+fn a_standing_dock_with_a_harvester_means_income_and_no_sale() {
+    let (world, mut state) = rig_rebuild();
+    // A power plant going up while power is short, nothing free: stalled. But a refinery stands and a
+    // harvester mines: income can arrive, so nothing is sold, however long it lasts.
+    let mut own = vec![
+        structure(&world, 0, CENTRE),
+        structure(&world, 2, BARRACKS),
+        structure(&world, 3, FACTORY),
+        structure(&world, 4, RADAR),
+        structure(&world, 6, REFINERY),
+        going_up(structure(&world, 5, PLANT)),
+        unit(10, HARVESTER),
+    ];
+    own.sort_by_key(|o| o.id);
+    for t in [5000, 5040, 5080, 5120] {
+        let mut obs = observation(&world, t, 0, own.clone());
+        obs.power = Some(PowerTotals { made: 0, used: 50 });
+        assert_eq!(sells(&turn(&world, &mut state, &obs)), [], "tick {t}");
+    }
+    assert!(state.stalled_turns >= 4);
+    // Without the harvester there is none coming: the rescue goes.
+    let mut state = rig_rebuild().1;
+    own.retain(|o| o.footprint.is_some());
+    let mut last = Vec::new();
+    for t in [5000, 5040] {
+        let mut obs = observation(&world, t, 0, own.clone());
+        obs.power = Some(PowerTotals { made: 0, used: 50 });
+        last = sells(&turn(&world, &mut state, &obs));
+    }
+    assert!(!last.is_empty());
+}
+
+#[test]
+fn a_refused_sale_does_not_spend_the_rescue_and_a_started_one_does() {
+    let (world, mut state) = rig_rebuild();
+    let blocked = u64::from(state.profile.economy.blocked_ticks);
+    let own = deadlock(&world);
+    turn(
+        &world,
+        &mut state,
+        &observation(&world, 5000, 0, own.clone()),
+    );
+    assert_eq!(
+        sells(&turn(
+            &world,
+            &mut state,
+            &observation(&world, 5040, 0, own.clone())
+        )),
+        [3]
+    );
+    // The next turn: the factory is neither selling nor gone, so the simulation refused: not spent, and
+    // quiet until `blocked_ticks` have passed.
+    let out = turn(
+        &world,
+        &mut state,
+        &observation(&world, 5080, 0, own.clone()),
+    );
+    assert_eq!(sells(&out), []);
+    assert!(!state.rescue_used);
+    assert_eq!(state.rescue_after, Tick(5080 + blocked));
+    assert!(state.sales.is_empty());
+    let out = turn(
+        &world,
+        &mut state,
+        &observation(&world, 5080 + blocked - 40, 0, own.clone()),
+    );
+    assert_eq!(sells(&out), []);
+    // After it, it tries again, and this time the factory shows `selling`: spent.
+    let out = turn(
+        &world,
+        &mut state,
+        &observation(&world, 5080 + blocked, 0, own.clone()),
+    );
+    assert_eq!(sells(&out), [3]);
+    let mut selling = own.clone();
+    selling[3].selling = true;
+    let out = turn(
+        &world,
+        &mut state,
+        &observation(&world, 5080 + blocked + 40, 0, selling),
+    );
+    assert_eq!(sells(&out), []);
+    assert!(state.rescue_used);
+    assert!(state.sales.is_empty());
+    // Spent: a later deadlock sells nothing, however long.
+    for k in 2..8 {
+        let t = 5080 + blocked + 40 * k;
+        assert_eq!(
+            sells(&turn(
+                &world,
+                &mut state,
+                &observation(&world, t, 0, own.clone())
+            )),
+            []
+        );
+    }
+    // A structure that is gone counts as started too.
+    let mut state = rig_rebuild().1;
+    turn(
+        &world,
+        &mut state,
+        &observation(&world, 5000, 0, own.clone()),
+    );
+    turn(
+        &world,
+        &mut state,
+        &observation(&world, 5040, 0, own.clone()),
+    );
+    let mut gone = own;
+    gone.remove(3);
+    turn(&world, &mut state, &observation(&world, 5080, 0, gone));
+    assert!(state.rescue_used);
+}
+
+#[test]
+fn a_structure_being_sold_is_not_counted_as_standing_by_the_construction_turn() {
+    // The base of `ai_economy` at tick 2100 with its goal list closed: nothing to build. With the barracks
+    // shown as being sold the goal "a barracks" is open again (and, as it needs a standing power plant, it
+    // is built).
+    let f = go(&load("ai_economy"), 2100);
+    let world = &*f.world;
+    let mut state = f.ais[0].state().clone();
+    state.pending_build = None;
+    state.blocked_until.clear();
+    let mut obs = Observation::build(world, P0, &state.known_structures);
+    obs.credits = 5000;
+    assert_eq!(build_turn(world, &mut state.clone(), &obs), []);
+    for o in obs.own.iter_mut().filter(|o| o.kind == BARRACKS) {
+        o.selling = true;
+    }
+    assert_eq!(
+        kinds_built(&build_turn(world, &mut state, &obs)),
+        [BARRACKS]
+    );
+}
+
+// ---- the scenario `ai_deadlock` --------------------------------------------------------------------
+
+const DEADLOCK_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_deadlock.expected");
+/// `Ai::digest` of player 0 at the end of `ai_deadlock`.
+const DEADLOCK_DIGEST: u64 = 0x2613_96ec_364c_3dc4;
+
+#[test]
+fn the_deadlock_scenario_is_pinned() {
+    let s = load("ai_deadlock");
+    let outcome = run(&s, &RunOptions::for_scenario(&s)).unwrap();
+    assert_eq!(
+        outcome.final_checksum,
+        parse_checksum(DEADLOCK_EXPECTED).unwrap()
+    );
+    assert_eq!(outcome.ai_digests, vec![(0, DEADLOCK_DIGEST)]);
+    assert_eq!(outcome, run(&s, &RunOptions::for_scenario(&s)).unwrap());
+}
+
+/// T for the deadlock, measured: the refinery lost at tick 3601 is ordered at 3610, the sales go out at the economy
+/// turn of tick 3680 and it stands again at tick 4314 (T = 713); 20 percent more.
+const T_DEADLOCK: u64 = 860;
+
+#[test]
+fn a_money_deadlock_is_rescued_once_by_selling_what_covers_the_refinery() {
+    let s = load("ai_deadlock");
+    let mut stood: BTreeMap<EntityId, (Kind, u64)> = BTreeMap::new();
+    let mut delivered = BTreeMap::new();
+    let f = run_watched(&s, &RunOptions::for_scenario(&s), |w| {
+        for v in w.snapshot().iter().filter(|v| v.owner == P0) {
+            if w.footprint_of(v.id).is_some() && w.stands(v.id) {
+                stood.entry(v.id).or_insert((v.kind, w.tick().0));
+            }
+        }
+        delivered.insert(w.tick().0, w.ore_delivered(P0));
+    })
+    .unwrap();
+    let f_cmds = go(&s, s.ticks);
+    // The credits are at (about) zero when the refinery and the harvesters go.
+    let credits_at = |t: u64| {
+        let mut c = 0;
+        run_watched(
+            &s,
+            &RunOptions {
+                ticks: t,
+                every: 100,
+            },
+            |w| c = w.credits(P0),
+        )
+        .unwrap();
+        c
+    };
+    assert!(credits_at(3601) <= 10);
+    // All the sales go out in one economy turn: the barracks, the radar and the vehicle factory.
+    let sales: Vec<(u64, EntityId)> = f_cmds
+        .ai_commands
+        .iter()
+        .filter_map(|(t, _, c)| match c {
+            Command::Sell { structure } => Some((*t, *structure)),
+            _ => None,
+        })
+        .collect();
+    println!("the sales: {sales:?}");
+    assert_eq!(
+        sales,
+        [
+            (3680, EntityId::new(5, 0)),
+            (3680, EntityId::new(8, 0)),
+            (3680, EntityId::new(7, 0)),
+        ]
+    );
+    // The refinery stands again after T; ore is delivered afterwards.
+    let again = stood
+        .values()
+        .find(|&&(k, t)| k == REFINERY && t > 3601)
+        .map(|&(_, t)| t)
+        .unwrap();
+    println!(
+        "the refinery lost at 3601 is ordered at 3610, the sales are sent at 3680, it stands again at {again} (T = {})",
+        again - 3601
+    );
+    assert!(again <= 3601 + T_DEADLOCK, "again at {again}");
+    assert!(
+        delivered[&8600] > delivered[&again],
+        "{:?}",
+        (delivered[&8600], delivered[&again])
+    );
+    // The second deadlock (the loss at 8601) sells nothing and the refinery is not rebuilt: it was ordered
+    // again at 8610, paid what the credits held and stands still.
+    let late = f_cmds
+        .ai_commands
+        .iter()
+        .filter(|(t, ..)| *t > 8601)
+        .map(|(t, _, c)| {
+            (
+                *t,
+                matches!(c, Command::BuildStructure { kind, .. } if *kind == REFINERY),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(late, [(8610, true)]);
+    assert!(!stood.values().any(|&(k, t)| k == REFINERY && t > 8601));
+    let state = f.ais[0].state();
+    assert!(state.rescue_used);
+    assert!(state.sales.is_empty());
+    assert_eq!(f.outcome.commands_ignored, 0);
 }

@@ -63,6 +63,8 @@ pub struct Own {
     pub repairing: bool,
     /// A factory (or a structure with a production record): its queue.
     pub factory: Option<OwnFactory>,
+    /// Whether it is being sold (WP9.1b-2: the sale started and cannot be cancelled).
+    pub selling: bool,
 }
 
 /// The production queue of one of the player's own structures.
@@ -161,6 +163,7 @@ impl Observation {
                     max_hp: world.stats_of(view.id).map_or(0, |s| s.hp),
                     building: world.construction_of(view.id),
                     repairing: world.is_repairing(view.id),
+                    selling: world.sale_of(view.id).is_some(),
                     factory: world.production_of(view.id).map(|f| OwnFactory {
                         queue: f.queue.iter().map(|q| (q.kind, q.free)).collect(),
                         front_paid: f.front_paid,
@@ -307,6 +310,20 @@ impl<'w> Lens<'w> {
     pub fn has_ore_ground(&self) -> bool {
         let (w, h) = self.world.map_size();
         (0..h).any(|y| (0..w).any(|x| self.harvestable(Cell::new(x, y))))
+    }
+
+    /// What selling a structure of `kind` with `hp` of `max_hp` hit points pays when the sale ends (the
+    /// simulation's own rule, `sale_refund`, with the price of the building table); `None` in a world without
+    /// repair and sale rules and for a kind with no price (public rules).
+    pub fn sale_refund(&self, kind: Kind, hp: u32, max_hp: u32) -> Option<u64> {
+        let rules = self.world.repair_rules()?;
+        let price = self.building(kind)?.cost?;
+        Some(sf_sim::sale_refund(
+            price,
+            rules.refund_permille,
+            hp,
+            max_hp,
+        ))
     }
 
     /// Whether the player sees `cell` now (false off the map).

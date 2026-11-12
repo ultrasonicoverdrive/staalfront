@@ -415,9 +415,9 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 /// function and exit side, and the match scenario (WP7.6) builds the whole base (power plant, refinery,
 /// barracks) and has the opponent's structures, and the ai_fog scenario (WP9.1a, a copy of `match_defs`)
 /// has structures of both players, and the ai_base scenarios (WP9.1b-1) let the AI build its whole base, and the
-/// ai_economy and ai_rebuild scenarios (WP9.1b-2) are copies of those.
+/// ai_economy, ai_rebuild and ai_deadlock scenarios (WP9.1b-2) are copies of those.
 /// Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 10] = [
+const COPIES_WITH_BLOCKS: [&str; 11] = [
     "placement_defs",
     "harvest_defs",
     "match_defs",
@@ -428,6 +428,7 @@ const COPIES_WITH_BLOCKS: [&str; 10] = [
     "ai_base_defs",
     "ai_economy_defs",
     "ai_rebuild_defs",
+    "ai_deadlock_defs",
 ];
 
 #[test]

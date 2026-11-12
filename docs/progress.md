@@ -2963,10 +2963,16 @@ earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `
   harvester rule (5560 against 3200 ore in 12,000 ticks); `ai_perf` prints the manager of the worst think (it was Production or Army, the stubs, in
   most runs, once Economy in `ai_boxed` where the economy turn does nothing); the anchor's repair is allowed to take credits a stalled emergency
   waits for and a running repair is not in `budget::committed` (both written in `ai.md`).
+- **One rescue per match (decision of Tijmen, 12-11-2026, decision 7 reworded).** `economy::rescue`: after two stalled economy turns with no income
+  possible the AI sells the structures that cover what is still owed on the stalled emergency build (smallest sufficient refund, else the smallest
+  added until the sum covers it, else nothing; never the anchor, a dock or a plant), once per match; a refused sale does not spend it. New: `Own.selling`,
+  `Lens::sale_refund`, state `stalled_turns`/`rescue_used`/`sales`/`rescue_after`, the whitelist gains `Sell`, `base::have` skips a structure being sold.
+  Scenario `ai_deadlock` (in the CI list): the three sales go out at tick 3680 (loss at 3601), the refinery stands again at 4314 (T = 713), ore flows
+  again, and the second deadlock at 8601 sells nothing. Mutations in the PR body. All digests moved once more (layout); checksums did not.
 - **Found on the way.** The hidden-unit test of 9.1b-1 compared the world with a truck against the world without one; the truck takes an id
   and `QueueUnit` names the factory by id, so it now compares two worlds with the truck in two places that are both in the shroud. A refinery lost
-  at zero credits cannot be paid and the AI is stuck (it never sells): a gap in `ai.md`, found when `ai_rebuild` ran out of money with 4,000
-  credits.
+  at zero credits could not be paid: found when `ai_rebuild` ran out of money with 4,000 credits; Tijmen's decision of 12-11-2026 (one rescue per
+  match, which may sell several structures) is built, see the next bullet.
 - **Not done.** Production and army (WP9.1c); the game does not run the AI (WP9.1d), so there is nothing to see in `sf_game` and no
   screenshots. Not run: a destroyed (not removed) refinery, a silo with two refineries in a scenario, a second vehicle factory in a scenario,
   harvester traffic through a one-cell lane (all in `ai.md`, "Not done").

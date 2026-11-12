@@ -1,0 +1,81 @@
+// The AI in a money deadlock (WP9.1b-2, docs/rules/ai.md, "The rescue"): player 0 (Meridian) is the AI with a
+// construction centre and 6000 credits on the first match's map (`assets/maps/m1`, rich ore as in `ai_economy`);
+// player 1 (Veyran) is a lone static construction centre. Its profile (`ai_deadlock_defs/normal.ron`, a frozen
+// copy of the one of `ai_base_defs`) has a goal list of five: power plant, refinery, barracks, vehicle factory,
+// radar. The world has the repair and sale rules of `ai_rebuild` (a sale takes 100 ticks and pays 500
+// thousandths of the price at the hit points the structure has then).
+//
+// The script, by entity id (0 the AI's centre, 1 player 1's centre, 2 the first power plant, 3 the refinery, 4
+// its free harvester, 5 the barracks, 6 the second power plant, 7 the vehicle factory, 8 the radar, 9 the
+// harvester the economy buys at tick 2000):
+//   tick 3000   player 0 queues four light tanks (kind 19) at the vehicle factory, Id(7, 0): 2,800 credits that
+//               are paid as they are built, so the credits fall to about 0 by tick 3400 and stay there (the
+//               first tank is Id(10, 0))
+//   tick 3601   Despawn Id(3, 0), Id(4, 0), Id(9, 0): the refinery and both harvesters are lost with the
+//               credits at 2. The goal list wants the refinery (an unfunded emergency, ordered at tick 3610) and
+//               nothing pays for it: a deadlock. The economy turn sees it stalled at ticks 3640 and 3680 and,
+//               with no harvester and no dock, sells the barracks, the radar and the vehicle factory at
+//               tick 3680 (refunds 200, 450 and 750: no one of them covers the 1,200 owed, the three do).
+//   tick 8601   Despawn Id(9, 1), Id(8, 1): the rebuilt refinery and its free harvester (the slots of the sold
+//               radar and of the first refinery, one generation later) are lost again with 1,002 credits. The
+//               rescue is spent: the AI orders the refinery again (tick 8610), pays what it has and waits for
+//               the end of the run, selling nothing.
+// `unit_defs` names the FROZEN copy `ai_deadlock_defs`.
+Scenario(
+    name: "ai_deadlock",
+    seed: 0xA1_BA5E,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("ai_deadlock_defs"),
+    match_file: Some("match.ron"),
+    ai: [(player: 0, profile: "normal.ron", seed: 0xA1_0001)],
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 160, max: 160, regrow_amount: 8, regrow_period: 40)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 2000), (43, 1500)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    repair: Some((hp_per_tick: 3, full_cost_permille: 250, sell_ticks: 100, refund_permille: 500)),
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
+    ticks: 12000,
+    commands: [
+        (tick: 3000, player: 0, command: QueueUnit(factory: (7, 0), kind: 19)),
+        (tick: 3000, player: 0, command: QueueUnit(factory: (7, 0), kind: 19)),
+        (tick: 3000, player: 0, command: QueueUnit(factory: (7, 0), kind: 19)),
+        (tick: 3000, player: 0, command: QueueUnit(factory: (7, 0), kind: 19)),
+        (tick: 3601, player: 1, command: Despawn(ids: [Id(3, 0), Id(4, 0), Id(9, 0)])),
+        (tick: 8601, player: 1, command: Despawn(ids: [Id(9, 1), Id(8, 1)])),
+    ],
+)

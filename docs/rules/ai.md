@@ -59,7 +59,7 @@ the world and the player and answers only what a player may know beyond the obse
 
 | Question | Rule |
 |---|---|
-| `building(kind)`, `buildings()`, `harvester_kinds()`, `unit_cost(kind)`, `storage_of(kind)`, `faction_bit()`, `unit_factory(kind)` | the public rules (building table, the kinds that harvest, a unit's price, what a structure stores, the player's own faction, which factory function makes a unit that the faction may have; the last four since WP9.1b-2) |
+| `building(kind)`, `buildings()`, `harvester_kinds()`, `unit_cost(kind)`, `storage_of(kind)`, `faction_bit()`, `unit_factory(kind)`, `sale_refund(kind, hp, max_hp)`, `has_ore_ground()` | the public rules (building table, the kinds that harvest, a unit's price, what a structure stores, the player's own faction, which factory function makes a unit that the faction may have; the last six since WP9.1b-2: which factory function makes a unit the faction may have, what a sale pays at given hit points by the simulation's own rule, and whether the map has any ore ground) |
 | `buildable(cell)`, `ground(cell)`, `harvestable(cell)` | the terrain of the map: a human sees the map. **Ore field locations are map knowledge; the amount of ore is not in the lens** (decision 2 of the WP9.1b memo) |
 | `visible(cell)` | whether the player sees the cell now |
 | `placement(kind, cell)` | the simulation's own rule (`World::check_placement`), **asked only when every cell of the footprint and the exit cell (when it is on the map) is `Visible` now**; `None` otherwise, without asking. A preview in the fog or shroud would reveal a hidden unit (`UnitInTheWay`) or structure. The lens counts the questions it passes on (`previews`) |
@@ -116,7 +116,7 @@ Every 40 ticks (manager 1 of the rotation), `base::turn`:
    `blocked_until[kind] = now + blocked_ticks`, and the next turn tries the next entry.
 
 Rebuilding has no rule of its own: a lost structure makes its goal entry unsatisfied again (tested by WP9.1b-2's `ai_rebuild`, "The
-economy"). The AI never sells (decision 7).
+economy"). The AI sells only in the one rescue per match (decision 7 as reworded 12-11-2026, "The rescue").
 
 ### Placement
 
@@ -181,7 +181,7 @@ shipped ones of that day, written out. No scripted command.
 | Scenario | Map | Ticks | Checksum | AI digest |
 |---|---|---|---|---|
 | `ai_base` | `m1` | 10,000 (8000 until WP9.1b-2) | `0xb38833330ef15577` | `0x11dde9a00dc14f23` |
-| `ai_noore` | `m1_noore` (no ore) | 40,000 | `0x4c0e8ed5d1f89874` | `0xa911d417181bc767` |
+| `ai_noore` | `m1_noore` (no ore) | 40,000 | `0x4c0e8ed5d1f89874` | `0xe10155cd63724d45` |
 | `ai_boxed` | `m1_boxed` (rock round the base, a pocket x 5..17, y 66..73) | 8000 | `0x212468ddebc97ff5` | `0x781485e55788ab34` |
 
 (WP9.1b-1 pinned `0x1b2eb3765910e496` / `0xa1bdd2e16f8db63b`, `0x4c0e8ed5d1f89874` / `0x94c928755b799c2f` and `0x212468ddebc97ff5` /
@@ -205,7 +205,7 @@ What `tools/sf_headless/tests/ai_base.rs` checks:
 * A build the simulation refuses (a unit of player 0 put on the plant's cell at tick 10, driving off at tick 20) is noticed at the next turn
   (tick 50) and the plant is built elsewhere, although the cell is free again by then.
 * The search keeps a plant off the apron of a refinery the AI believes it has (`the_search_keeps_off_the_apron_of_an_own_refinery`).
-* The whitelist: every command the AI sends in the three scenarios is `BuildStructure`, `QueueUnit` or `Repair` (the design's whitelist; the
+* The whitelist: every command the AI sends in the three scenarios is `BuildStructure`, `QueueUnit`, `Repair` or `Sell` (the design's whitelist plus the rescue's sale; the
   last two come with WP9.1b-2, `ai_economy.rs` checks it for its two scenarios as well).
 * A hidden unit changes nothing: the truck at (4, 60) is compared with the same truck at (92, 92), not with no truck, since a spawned entity
   takes an id and the ids of the AI's own things (which `QueueUnit` names) shift by one.
@@ -213,7 +213,7 @@ What `tools/sf_headless/tests/ai_base.rs` checks:
 `ai_fog` moved with this part: its AI now builds a power plant (tick 10) and a refinery (tick 330, an emergency; its 1500 credits pay for no
 more). New pins `0x768b77651509db8c` and `0x630c0979a8ae4749`; with the construction manager off and the new state and profile numbers left
 out of the digests, both old values come back (measured).
-WP9.1b-2 moved its digest again (checksum unchanged): `0x4a4effe3e0fa05d1`, because the digest hashes the economy state; "The economy" has the
+WP9.1b-2 moved its digest again (checksum unchanged): `0xce7a0b6fb57c9cee`, because the digest hashes the economy and rescue state; "The economy" has the
 measurement.
 
 ## The economy (WP9.1b-2)
@@ -259,12 +259,69 @@ backoff of a repair and of a refused harvester order), all of them in `normal.ro
 
 **State** (hashed after the base state, in this order): `harvester_sent: Option<(Kind, Tick)>`, `full_turns`, `emergency: Option<Kind>`,
 `repair_backoff: BTreeMap<EntityId, Tick>`. The design memo's `ore_cells` cache was not built (9.1b-1 lists the ore ground at every search).
-Pinned by `the_digest_of_the_base_state_is_pinned` (a literal, now `0x28bb194b38222820`; it holds two backoff entries, so an iteration in
-reverse fails it) and `every_new_part_of_the_state_moves_the_digest` (nine changes of the new parts).
+Pinned by `the_digest_of_the_base_state_is_pinned` (a literal, now `0xb3c29db95d8d85f4`; it holds two backoff entries, so an iteration in
+reverse fails it) and `every_new_part_of_the_state_moves_the_digest` (seventeen changes of the new parts, the rescue state included).
+
+### The rescue (decision 7, reworded 12-11-2026)
+
+**Once per match the AI may rescue itself from a money deadlock, and in that one rescue it sells as many structures as it takes to cover the
+shortfall** (Tijmen, 12-11-2026; it replaces "the AI never sells"; spec: design memo WP9.1c, "One sale per match", with several structures instead
+of one). The case it answers: an emergency build (the first refinery, a power plant while less is made than used) has started with no credits
+to pay it and nothing can bring credits in. The sim never refuses for lack of money (`economy.md`), so such a build waits for ever.
+
+* **Trigger** (economy turn; the observation and the budget only). `emergency_stalled` (above) on **two economy turns in a row**
+  (`stalled_turns >= 2`, 80 ticks: a harvester may be about to unload), the rescue not used, **no income possible** (no own harvester unit, or no
+  complete harvester dock), and the world has sale rules (`Lens::sale_refund` answers; `ai_base`'s world has none, so nothing is sold there).
+  `need` = what is still owed on the stalled structure, `cost * left / total` rounded up (the formula of `budget::committed`), less the credits;
+  nothing is sold when it is 0.
+* **Eligible**: an own structure that is complete (standing, not going up, not already being sold) and has a price, **never** the anchor (selling it
+  is defeat), a harvester dock, a power plant (`economy::sellable`, by function), a kind in the `requires` closure of the stalled kind
+  (`requires_closure`; with the shipped data the plant, which is excluded by function already, so this is a guard), or the stalled structure
+  itself. Its refund is `Lens::sale_refund(kind, hp, max_hp)`: the simulation's own `sale_refund` (`price * refund_permille * hp / (max_hp * 1000)`,
+  `repair_sell.md` "Sale") at the **current** hit points, which is what it pays when the sale ends if the structure is not hurt more before.
+* **Choice** (`economy::pick_sales`). If one eligible structure's refund covers `need`, the one with the **smallest sufficient refund** (ties: the
+  latest in the goal list, a kind that is not in the list counting as latest, then the lowest id). Otherwise structures are added in ascending
+  refund order (the same ties) until the sum covers `need`. If all of them together fall short **nothing is sold** and the rescue stays unused (a
+  sale that does not finish the build buys nothing). All the `Sell { structure }` of the rescue go out in the same economy turn.
+* **Latch.** `sales: Vec<(EntityId, Tick)>` holds them until the next economy turn: when any shows `selling` (`Own.selling`, from `World::sale_of`)
+  or is gone, the sale started and `rescue_used = true` (for ever: a second deadlock in the match is not rescued); when the simulation refused all of
+  them (not seen selling and not gone) `rescue_after = now + blocked_ticks` and the rescue stays unspent. A partly refused rescue counts as used.
+* The construction turn does not count a structure that is being sold (`base::have` and the standing kinds skip `selling`), so a goal entry whose
+  structure was sold is open again and is rebuilt normally, at full price, when the money comes.
+* New state, hashed after the economy state in this order: `stalled_turns`, `rescue_used`, `sales`, `rescue_after`.
+* The whitelist gains `Sell`: `BuildStructure`, `QueueUnit`, `Repair`, `Sell`.
+
+**Arithmetic with the shipped prices** (refund 500 thousandths at full hit points): vehicle factory 750, radar 450, defence tower 250, barracks 200, silo
+125, power plant 150 (never sold). A refinery costs 1,200, so one sale rescues a refinery lost at 0 credits only when at most 750 of it is
+unpaid; at exactly 0 it takes the barracks, the radar and the vehicle factory (1,400) together. That is why the rescue adds structures.
+
+**Scenario `ai_deadlock`** (`ai_deadlock_defs/`, a copy of `ai_rebuild_defs` with radar added to the goal list; the script is in the file):
+player 0 queues four light tanks at tick 3000, which drains its credits to about 0 by tick 3400; at tick 3601 the refinery and both harvesters are
+removed (credits 2). Measured (`a_money_deadlock_is_rescued_once_by_selling_what_covers_the_refinery`): the refinery is ordered at 3610; the
+economy turn sees it stalled at 3640 and 3680 and **sends the three `Sell` at tick 3680** (barracks, radar, vehicle factory, in that order:
+refunds 200, 450, 750); the refund pays the 1,200 and the **refinery stands again at tick 4314 (T = 713 ticks after the loss)**, with its free
+harvester; the ore delivered rises again (800 at tick 3601 to 2,000 at 8,600). At tick 8601 the rebuilt refinery and its harvester are removed again
+(1,002 credits): the refinery is ordered at 8610, paid as far as the credits go (to 0) and **stays unfinished to the end of the run**, with no
+`Sell`. Pins: checksum `0x368ee3baa5362c04`, AI digest `0x261396ec364c3dc4`.
+
+Unit tests (`tools/sf_headless/tests/ai_economy.rs`): the refunds at the current hit points (750, 450, 200; 75 for a factory at a tenth of its
+hit points; none in a world without sale rules); `pick_sales` (smallest sufficient, a sum only when none suffices, nothing when short, the
+ties); nothing on the first stalled turn and the sales together on the second; the sum of several; nothing when all together fall short; the
+anchor, dock, power plant (by function, and in a deadlock where the plants would be chosen first) never sold; a standing dock with a harvester
+means income and no sale; a refused sale does not spend the rescue and a started one does, also one that is gone; a structure being sold is not
+counted by the construction turn. Mutations (each fails the named tests, see the PR): latch not set, anchor, dock or plant exclusion removed,
+`sum >= need` removed, the two-turn wait removed, accumulation removed (the 0-credit refinery stays stuck: `ai_deadlock`), the income check
+removed, a refused sale spending the rescue, the largest instead of the smallest sufficient refund, `have` counting a structure being sold, the
+refund ignoring hit points, the sale ticks left out of the digest.
+
+**Not covered.** A rescue for anything but a stalled emergency build (a harvester that cannot be paid, a goal entry that waits for ever) is not
+made. A sale that is refused for a reason the observation cannot show (the structure was hit to 0) simply looks like a refusal and is tried
+again after `blocked_ticks`. The refund is counted at the hit points seen when the sale is sent; a structure that is hurt during the 100 ticks of
+the sale pays less, and the rescue may then fall short without noticing (the build stays stalled and no second rescue is made).
 
 ### Scenarios
 
-`ai_economy` and `ai_rebuild`: the first match's map, player 0 the AI with 4,000 (`ai_economy`) or 6,000 credits (`ai_rebuild`), player 1 a lone
+`ai_economy` and `ai_rebuild` (and `ai_deadlock`, described under "The rescue"): the first match's map, player 0 the AI with 4,000 (`ai_economy`) or 6,000 credits (`ai_rebuild`), player 1 a lone
 static construction centre; each on its own frozen copy of `ai_base_defs` (`ai_economy_defs/`, `ai_rebuild_defs/`) whose profile has a goal list
 of four: power plant, refinery, barracks, vehicle factory. Both have the world rules of `ai_base`; `ai_economy` has richer ore (160 per cell,
 regrowth 8 per 40 ticks) and 12,000 ticks, `ai_rebuild` has the repair rules of `repair_sell` (3 hit points per tick, a full repair costs 250
@@ -272,8 +329,9 @@ thousandths) and 12,000 ticks.
 
 | Scenario | Script | Checksum | AI digest |
 |---|---|---|---|
-| `ai_economy` | tick 8001: the free harvester (id 4) removed | `0x432124f0b362c856` | `0xb244e3ea8dd726ad` |
-| `ai_rebuild` | 3001 the refinery removed, 6001 the barracks removed, 8001 two Veyran light tanks spawned west of the plant and ordered to shoot it, 8250 they are removed | `0x92e27c78699ea7dd` | `0xc541cd51b2e45292` |
+| `ai_economy` | tick 8001: the free harvester (id 4) removed | `0x432124f0b362c856` | `0xc79c0cbab7c6ddb7` |
+| `ai_rebuild` | 3001 the refinery removed, 6001 the barracks removed, 8001 two Veyran light tanks spawned west of the plant and ordered to shoot it, 8250 they are removed | `0x92e27c78699ea7dd` | `0x15afee5ac92be396` |
+| `ai_deadlock` | see "The rescue": tanks drain the credits at 3000, refinery and harvesters removed at 3601 and again (rebuilt) at 8601 | `0x368ee3baa5362c04` | `0x261396ec364c3dc4` |
 
 Measured (`tools/sf_headless/tests/ai_economy.rs`, release; every number is printed by its test):
 
@@ -290,23 +348,27 @@ Measured (`tools/sf_headless/tests/ai_economy.rs`, release; every number is prin
 * **Repair.** The plant falls to 378 of 600 hit points (below 420), exactly one `Repair` is sent, at tick 8200, and the plant is full again at
   tick 8299. In the same scenario without repair rules the AI asks at 8200, 8800, 9400, 10000, 10600, 11200, 11800 (every 600 ticks) and the
   simulation ignores all seven.
-* No command of the AI is refused in either scenario; every command is `BuildStructure`, `QueueUnit` or `Repair`.
+* No command of the AI is refused in either scenario; every command is `BuildStructure`, `QueueUnit`, `Repair` or `Sell` (`ai_deadlock`: the three sales of the rescue).
 
 `ai_base` now runs 10,000 ticks (was 8,000) because the harvesters delay the list; its checksum and digest are in the table of the base, and
 so are those of `ai_noore` and `ai_boxed`.
+
+All the AI digests of the tables moved a second time with the rescue state (layout only; no checksum moved with it).
 
 ### Pins that moved (WP9.1b-2) and why
 
 | Pin | Before | After | Cause, measured |
 |---|---|---|---|
-| `ai_base` (8000 ticks before, now 10000) | `0x1b2eb3765910e496` / `0xa1bdd2e16f8db63b` | `0xb38833330ef15577` / `0x11dde9a00dc14f23` | the economy turn buys two harvesters; with the economy manager off (and, for the digest, its state left out of `AiState::digest`) both old values come back at 8000 ticks |
-| `ai_noore` | `0x4c0e8ed5d1f89874` / `0x94c928755b799c2f` | checksum same / `0xa911d417181bc767` | no harvester is ordered (no ore on the map), so only the digest layout moved; with the economy state left out of the digest the old digest comes back |
-| `ai_boxed` | `0x212468ddebc97ff5` / `0x5c40c9e2637e1194` | checksum same / `0x781485e55788ab34` | no refinery, so no harvester: only the digest layout moved; old digest back with the economy state left out |
-| `ai_fog` | `0x768b77651509db8c` / `0x630c0979a8ae4749` | checksum same / `0x4a4effe3e0fa05d1` | likewise (no vehicle factory in 800 ticks) |
+| `ai_base` (8000 ticks before, now 10000) | `0x1b2eb3765910e496` / `0xa1bdd2e16f8db63b` | `0xb38833330ef15577` / `0x8630b1327e0feeb9` | the economy turn buys two harvesters; with the economy manager off (and, for the digest, its state left out of `AiState::digest`) both old values come back at 8000 ticks |
+| `ai_noore` | `0x4c0e8ed5d1f89874` / `0x94c928755b799c2f` | checksum same / `0xe10155cd63724d45` | no harvester is ordered (no ore on the map), so only the digest layout moved; with the economy state left out of the digest the old digest comes back |
+| `ai_boxed` | `0x212468ddebc97ff5` / `0x5c40c9e2637e1194` | checksum same / `0x31c680678a61e05c` | no refinery, so no harvester: only the digest layout moved; old digest back with the economy state left out |
+| `ai_fog` | `0x768b77651509db8c` / `0x630c0979a8ae4749` | checksum same / `0xce7a0b6fb57c9cee` | likewise (no vehicle factory in 800 ticks); with the manager off and the state hashed it is `0x08e8a7b3e1e2b2e3`, since the economy turn counts `stalled_turns` of its stalled refinery |
 
 With the economy turn switched off but the new state still hashed, the checksums of all four are the old ones and the digests are the new
-ones for `ai_boxed`, `ai_fog` and `ai_noore` (their state stays at its start values and only the layout differs; `ai_noore` has the same
-digest with the economy on, because the ore guard keeps it from ordering anything) and different again for `ai_base`. No pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and the others).
+ones for `ai_boxed` and `ai_noore` (their state stays at its start values and only the layout differs; `ai_noore` has the same
+digest with the economy on, because the ore guard keeps it from ordering anything) and different again for `ai_base` and `ai_fog` (the
+latter's stalled refinery makes the economy turn count `stalled_turns`). WP9.1b-2 changed the layout twice in this PR (the rescue state); the
+values of the tables are the last, and the experiment above was repeated on it. No pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and the others).
 
 ### Cost of the economy turn
 
@@ -365,7 +427,7 @@ come from `match_file`, so both are needed; the problems are reported when the s
 **`ai_fog`** (`assets/scenarios/ai_fog.ron`, `ai_fog_defs/`): player 0 (Meridian, the AI) has a construction centre and a scout; player 1
 (Veyran) is static with a construction centre, a power plant, a barracks and a refinery, and an army in the far corner. The scout walks to
 the power plant and barracks, the barracks is removed at tick 500, the scout walks home at 520. Pinned: final checksum `0x768b77651509db8c`
-(`ai_fog.expected`), AI digest `0x4a4effe3e0fa05d1` (a literal in `tests/ai_fog.rs`; `0x630c0979a8ae4749` until WP9.1b-2), 800 ticks
+(`ai_fog.expected`), AI digest `0xce7a0b6fb57c9cee` (a literal in `tests/ai_fog.rs`; `0x630c0979a8ae4749` until WP9.1b-2), 800 ticks
 (WP9.1a pinned `0xd369218db6025eff` and
 `0x993afc7cd2c42cfd`; re-pinned by WP9.1b-1, see "The base"). The tests assert: the AI knows exactly the
 two structures the scout saw (kind, anchor, footprint, tick) and not the centre, refinery or army; it forgets the removed barracks and keeps
@@ -401,9 +463,11 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
 * Not checked: whether a lane of one cell is wide enough for harvester traffic (bodies are 1.5 cells); whether `Despawn` of a structure
   leaves the same state as destruction by weapons: `ai_rebuild` removes the refinery and the barracks with `Despawn` and only damages the plant
   by fire, so a structure shot to pieces and rebuilt is not run.
-* **No income, no recovery.** A refinery lost while the credits are zero is ordered unfunded and waits for money that cannot come (no harvester
-  can unload): the position is lost, as the design memo says (the AI never sells). Found while building `ai_rebuild`, where 4,000 credits ran out
-  this way; the scenario starts with 6,000. The silo is built when the store is full, never to rescue a store that cannot fill.
+* **No income, no recovery after the rescue.** A refinery lost while the credits are zero is ordered unfunded and waits for money that cannot
+  come (no harvester can unload). The rescue ("The rescue") pays for it once per match; a second deadlock in the same match is not rescued
+  (`ai_deadlock`, the loss at tick 8601: the refinery is ordered, paid as far as the credits go and stands unfinished to the end of the run).
+  Found while building `ai_rebuild`, where 4,000 credits ran out this way; that scenario starts with 6,000. The silo is built when the store
+  is full, never to rescue a store that cannot fill.
 * The silo rule counts the starting credits as ore (credits are the store): with more credits than 90 percent of the first refinery's 2,000
   the store is "full" at once, and the silo comes as soon as the goal list is closed.
 * The ore guard is the terrain of the whole map, not the reach of a harvester: ore ground that exists but is out of every harvester's
