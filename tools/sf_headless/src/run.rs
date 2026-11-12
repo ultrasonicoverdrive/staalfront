@@ -7,7 +7,7 @@
 //! block of the log, which no checksum ever depends on.
 
 use sf_ai::Ai;
-use sf_sim::World;
+use sf_sim::{Command, World};
 
 use crate::scenario::{Scenario, ScenarioError};
 
@@ -93,6 +93,8 @@ pub struct Finished {
     pub world: Box<World>,
     /// The AIs after the last tick, ascending by player.
     pub ais: Vec<Ai>,
+    /// Every command an AI sent, `(tick it was scheduled for, player, command)`, in the order sent.
+    pub ai_commands: Vec<(u64, u8, Command)>,
 }
 
 /// Runs `scenario` for `options.ticks` ticks.
@@ -107,6 +109,16 @@ pub fn run(scenario: &Scenario, options: &RunOptions) -> Result<Outcome, Scenari
 /// pushes are scheduled for that tick under its player id, so they are in the command queue and the
 /// checksum like any other. The AI reads the world only through the fog-filtered observation of `sf_ai`.
 pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, ScenarioError> {
+    run_watched(scenario, options, |_| {})
+}
+
+/// [`run_full`] with a look at the world after every step (`watch`), for tests that check a property at
+/// every tick. The watcher only reads; the run is the same as without it.
+pub fn run_watched(
+    scenario: &Scenario,
+    options: &RunOptions,
+    mut watch: impl FnMut(&World),
+) -> Result<Finished, ScenarioError> {
     let mut problems = Vec::new();
     if options.ticks == 0 {
         problems.push("ticks must be at least 1".to_string());
@@ -133,6 +145,7 @@ pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, S
     let mut arrivals = scenario.arrivals();
     let mut ais = scenario.ais.clone();
     let mut wanted = Vec::new();
+    let mut ai_commands = Vec::new();
     for done in first..=options.ticks {
         arrivals.schedule_due(&mut world)?;
         for ai in &mut ais {
@@ -140,6 +153,7 @@ pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, S
                 wanted.clear();
                 ai.think(&world, &mut wanted);
                 for command in wanted.drain(..) {
+                    ai_commands.push((world.tick().0, ai.player().0, command.clone()));
                     world
                         .schedule(world.tick(), ai.player(), command)
                         .map_err(|e| ScenarioError::Sim(e.to_string()))?;
@@ -147,6 +161,7 @@ pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, S
             }
         }
         let report = world.step();
+        watch(&world);
         executed += u64::from(report.commands_executed);
         ignored += u64::from(report.commands_ignored);
         last = report.checksum;
@@ -178,6 +193,7 @@ pub fn run_full(scenario: &Scenario, options: &RunOptions) -> Result<Finished, S
         outcome,
         world,
         ais,
+        ai_commands,
     })
 }
 

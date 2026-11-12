@@ -18,14 +18,19 @@
 //!   alive, which would tell the AI about structures it cannot see.
 //! * A world without vision rules shows everything to everyone (as `World::visibility` does for a human).
 //!
-//! Left for later parts (documented in `docs/rules/ai.md`): the public tables (unit, building and
-//! production data, terrain) and the ore on seen or explored cells; WP9.1b asks for them when the build
-//! rules need them.
+//! The second fenced type is the [`Lens`] (WP9.1b-1): the managers' window on what a player may know
+//! that is not in the observation. The public rules (the building table, the cost of a unit, the kinds
+//! that harvest), the terrain of a cell (a human sees the map: buildable ground, ore ground), whether a
+//! cell is visible now, and the simulation's own placement rule, which it answers **only for a footprint
+//! whose every cell and exit cell is visible now**: a preview on a cell in the fog or shroud could reveal
+//! a hidden unit (`UnitInTheWay`) or structure, so it is not asked. The amount of ore on a cell is not
+//! in the lens (only what is seen; not needed yet).
 
 use std::collections::BTreeMap;
 
 use sf_sim::{
-    Cell, Command, EntityId, Footprint, Kind, Order, PlayerId, PowerTotals, Tick, Visibility, World,
+    BuildingStats, Cell, Command, Construction, EntityId, FactoryStatus, Footprint, Kind, Order,
+    PlacementError, PlayerId, PowerTotals, Tick, Visibility, World, exit_cell,
 };
 
 use crate::ai::Ai;
@@ -49,6 +54,27 @@ pub struct Own {
     pub order: Order,
     /// A structure: complete and with hit points left. A unit: always true.
     pub standing: bool,
+    /// Its full hit points (the unit table's); zero for an entity without unit-table stats.
+    pub max_hp: u32,
+    /// A structure under construction: the ticks left and in all. `None` when complete.
+    pub building: Option<Construction>,
+    /// Whether it is being repaired.
+    pub repairing: bool,
+    /// A factory (or a structure with a production record): its queue.
+    pub factory: Option<OwnFactory>,
+}
+
+/// The production queue of one of the player's own structures.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnFactory {
+    /// The items, the one being built first: `(kind, free)`; a free one comes with a structure.
+    pub queue: Vec<(Kind, bool)>,
+    /// Credits paid for the front item so far.
+    pub front_paid: u64,
+    /// What it is doing.
+    pub status: FactoryStatus,
+    /// The rally point.
+    pub rally: Option<Cell>,
 }
 
 /// One entity of another player (or of nobody) that is seen now.
@@ -131,6 +157,15 @@ impl Observation {
                     hp: view.hp,
                     order: world.order_of(view.id).unwrap_or(Order::Idle),
                     standing: footprint.is_none() || world.stands(view.id),
+                    max_hp: world.stats_of(view.id).map_or(0, |s| s.hp),
+                    building: world.construction_of(view.id),
+                    repairing: world.is_repairing(view.id),
+                    factory: world.production_of(view.id).map(|f| OwnFactory {
+                        queue: f.queue.iter().map(|q| (q.kind, q.free)).collect(),
+                        front_paid: f.front_paid,
+                        status: f.status,
+                        rally: f.rally,
+                    }),
                 });
                 continue;
             }
@@ -179,6 +214,111 @@ impl Observation {
     }
 }
 
+/// The managers' fenced window on the public rules, the terrain, what is visible now, and the
+/// simulation's placement rule for visible ground (module documentation). Made per think by
+/// [`Ai::think`]; it counts the placement questions it passes on to the simulation.
+pub struct Lens<'w> {
+    world: &'w World,
+    player: PlayerId,
+    previews: u32,
+}
+
+impl<'w> Lens<'w> {
+    /// The lens of `player` on `world`.
+    pub fn new(world: &'w World, player: PlayerId) -> Lens<'w> {
+        Lens {
+            world,
+            player,
+            previews: 0,
+        }
+    }
+
+    /// The building table entry of `kind` (public rules).
+    pub fn building(&self, kind: Kind) -> Option<&'w BuildingStats> {
+        self.world.building_table().get(kind)
+    }
+
+    /// The kinds that harvest, ascending (public rules).
+    pub fn harvester_kinds(&self) -> &'w [Kind] {
+        self.world.harvester_kinds()
+    }
+
+    /// The price of the unit `kind` in a factory queue; `None` for a kind no factory makes.
+    pub fn unit_cost(&self, kind: Kind) -> Option<u32> {
+        self.world
+            .production_table()
+            .and_then(|t| t.get(kind))
+            .map(|u| u.cost)
+    }
+
+    /// Whether a structure may stand on the terrain of `cell` (the map; false off the map).
+    pub fn buildable(&self, cell: Cell) -> bool {
+        self.world
+            .terrain()
+            .flags_at(cell)
+            .is_some_and(|f| f.buildable)
+    }
+
+    /// Whether the terrain of `cell` is open ground every ground unit can enter (false off the map).
+    pub fn ground(&self, cell: Cell) -> bool {
+        self.world
+            .terrain()
+            .flags_at(cell)
+            .is_some_and(|f| f.ground)
+    }
+
+    /// Whether the terrain of `cell` is ore ground (the map, not the amount: false off the map).
+    pub fn harvestable(&self, cell: Cell) -> bool {
+        self.world
+            .terrain()
+            .flags_at(cell)
+            .is_some_and(|f| f.harvestable)
+    }
+
+    /// Whether the player sees `cell` now (false off the map).
+    pub fn visible(&self, cell: Cell) -> bool {
+        let (w, h) = self.world.map_size();
+        cell.x < w && cell.y < h && self.world.visibility(self.player, cell) == Visibility::Visible
+    }
+
+    /// The simulation's verdict on building `kind` anchored on `cell` now ([`World::check_placement`]),
+    /// asked **only** when every cell of the footprint and the exit cell (of a structure with an exit
+    /// side, when it is on the map) is visible to the player; `None` without asking otherwise, and for a
+    /// kind that is not in the building table or a footprint that leaves the map.
+    pub fn placement(&mut self, kind: Kind, cell: Cell) -> Option<Result<(), PlacementError>> {
+        let b = self.building(kind)?;
+        let fp = b.footprint;
+        let (map_w, map_h) = self.world.map_size();
+        let (x1, y1) = (
+            u64::from(cell.x) + u64::from(fp.width),
+            u64::from(cell.y) + u64::from(fp.height),
+        );
+        if x1 > u64::from(map_w) || y1 > u64::from(map_h) {
+            return None;
+        }
+        if !cells_of(cell, fp).all(|c| self.visible(c)) {
+            return None;
+        }
+        if let Some(side) = b.exit_side {
+            let (ex, ey) = exit_cell(cell, fp, side);
+            if let (Ok(x), Ok(y)) = (u32::try_from(ex), u32::try_from(ey))
+                && x < map_w
+                && y < map_h
+                && !self.visible(Cell::new(x, y))
+            {
+                return None;
+            }
+        }
+        self.previews += 1;
+        Some(self.world.check_placement(kind, cell, self.player))
+    }
+
+    /// How many placement questions this lens has passed on to the simulation.
+    pub fn previews(&self) -> u32 {
+        self.previews
+    }
+}
+
 impl Ai {
     /// One think: observe `world` through the fence, update the memory, run the manager whose turn it is,
     /// and push the commands it wants to send onto `out`. The host calls it when [`Ai::due`] says so,
@@ -186,6 +326,13 @@ impl Ai {
     /// player id.
     pub fn think(&mut self, world: &World, out: &mut Vec<Command>) {
         let obs = Observation::build(world, self.player(), &self.state().known_structures);
-        self.think_with(&obs, out);
+        let mut lens = Lens::new(world, self.player());
+        self.think_with(&obs, &mut lens, out);
     }
+}
+
+/// An open world of `width` by `height` cells with no rules: the lens of a unit test that needs one.
+#[cfg(test)]
+pub(crate) fn open_world(width: u32, height: u32) -> World {
+    World::new(sf_sim::WorldConfig::new(1).with_map_size(width, height)).unwrap()
 }

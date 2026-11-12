@@ -272,7 +272,7 @@ pub struct Scenario {
     /// commands under that player. `profile` is the name of an AI profile file in the `unit_defs`
     /// directory (a frozen copy of `assets/ai/normal.ron`, checked against that directory's definitions
     /// when the scenario is loaded); the player's faction and the start sites come from `match_file`, so
-    /// both are needed. The AI observes through the fog and sends no command yet (WP9.1a). Left out: no
+    /// both are needed. The AI observes through the fog and, since WP9.1b-1, builds its base. Left out: no
     /// AI, which is every scenario of the earlier phases.
     #[serde(default)]
     pub ai: Vec<AiSpec>,
