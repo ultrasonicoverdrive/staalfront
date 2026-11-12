@@ -32,7 +32,7 @@ const ECONOMY_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_econom
 const REBUILD_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_rebuild.expected");
 /// `Ai::digest` of player 0 at the end of each scenario.
 const ECONOMY_DIGEST: u64 = 0x565f_cb1b_a89c_919e;
-const REBUILD_DIGEST: u64 = 0xc7e6_1017_59b0_16fb;
+const REBUILD_DIGEST: u64 = 0xcd26_581c_3194_582b;
 
 /// The kinds of the frozen definitions.
 const CENTRE: Kind = Kind(0);
