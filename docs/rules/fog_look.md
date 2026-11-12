@@ -119,9 +119,9 @@ same generic words as the top bar.
 
 ## Gaps (known and left)
 
-* **Sound.** The audio plays `FxPlayer::shown()` as before, so a shot or an explosion in the shroud is still heard. That is an audio
-  question (volume by distance exists; "no sound from what I cannot see" is a design choice), left for the audio work; nothing in
-  `sf_audio` or `audio.ron` changed here.
+* **Sound.** The audio plays `FxPlayer::shown()` as before, so a shot or an explosion in the shroud is still heard. **Current rule (WP11.3b): sounds of hidden events are audible**, at their
+  distance volume (`audio.md` 3c); since the CC0 fight sounds exist this is true in the shipped game. Tijmen may change this ("no sound
+  from what I cannot see" is a design choice); nothing in `sf_audio` or `audio.ron` changed for fog.
 * **Ghosts are only structures**, and a ghost does not show damage that happened out of sight, or the real progress of something
   under construction that was seen once.
 * **A ghost is a team colour and not a desaturated model.** The model keeps its materials.

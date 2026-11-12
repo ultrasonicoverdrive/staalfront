@@ -169,6 +169,7 @@ fn default_def(key: &Path) -> SoundDef {
         max_instances: crate::bank::DEFAULT_MAX_INSTANCES,
         category: Category::Sfx,
         looped: false,
+        original_as_is: false,
     }
 }
 
@@ -817,18 +818,19 @@ impl AudioSystem {
     // ---- helpers ----------------------------------------------------------
 
     /// The definition and file for a name: a mapped Red Alert sound first
-    /// (with the bank's volume and category when the event has one), else
-    /// the bank.
+    /// (with the bank's volume and category when the event has one, unless
+    /// that entry is `original_as_is`), else the bank.
     fn resolve(&mut self, name: &str) -> Option<(SoundDef, PathBuf)> {
         if let Ra::Ready { events, .. } = &self.ra
             && events.contains(name)
         {
             let key = ra_key(name);
-            let def = self
-                .bank
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| default_def(&key));
+            // The bank's volume, pitch and cap are tuned for the CC0 file; an entry marked `original_as_is`
+            // (the fight sounds) gives the original the plain playback it had before the bank had them.
+            let def = match self.bank.get(name) {
+                Some(d) if !d.original_as_is => d.clone(),
+                _ => default_def(&key),
+            };
             return Some((def, key));
         }
         let def = self.lookup(name)?;
@@ -915,7 +917,7 @@ mod tests {
     fn has_sound_never_warns_and_the_trace_records_gain_and_pan() {
         let mut s = AudioSystem::silent(assets());
         assert!(s.has_sound("test_click"));
-        assert!(!s.has_sound("weapon.fire.cannon"));
+        assert!(!s.has_sound("unit.attack"));
         assert_eq!(s.stats().unknown, 0, "asking is not playing");
         // Not tracing: nothing recorded.
         s.play_at("test_click", [1.0, 0.0, 1.0]);
@@ -1086,6 +1088,7 @@ mod tests {
             max_instances: 1,
             category: Category::Sfx,
             looped: false,
+            original_as_is: false,
         };
         let rates: Vec<f64> = (0..200).map(|_| s.rate_for(&def)).collect();
         assert!(rates.iter().all(|r| (0.9..=1.1).contains(r)));
@@ -1183,6 +1186,125 @@ mod tests {
         let mut broken = entry.clone();
         broken.size = 10;
         assert!(s.play_original_entry(&broken).is_err());
+        std::fs::remove_dir_all(d).ok();
+    }
+
+    /// The 18 sound events of the fight (effects.ron), as literals.
+    const FIGHT_EVENTS: [&str; 18] = [
+        "weapon.fire.bullet",
+        "weapon.fire.precision",
+        "weapon.fire.cannon",
+        "weapon.fire.rocket",
+        "weapon.fire.shell",
+        "weapon.fire.howitzer",
+        "weapon.fire.demolition",
+        "impact.bullet",
+        "impact.precision",
+        "impact.cannon",
+        "impact.rocket",
+        "impact.shell",
+        "impact.demolition",
+        "impact.miss",
+        "unit.destroyed.infantry",
+        "explosion.small",
+        "explosion.medium",
+        "explosion.large",
+    ];
+
+    /// The four fight events Red Alert has no sound for (`ra_mapping.ron`).
+    const UNMAPPED: [&str; 4] = [
+        "weapon.fire.demolition",
+        "impact.bullet",
+        "impact.precision",
+        "impact.miss",
+    ];
+
+    /// WP11.3b: the shipped bank (copied) with a fixture Red Alert install that maps every fight event but the
+    /// four Red Alert has no sound for. With the original audio on, a mapped event resolves to the Red Alert
+    /// sound and the four play the CC0 file; with it off, all 18 play the CC0 file.
+    #[test]
+    fn the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise() {
+        use crate::ra::aud::{Compression, Pcm, encode};
+        use crate::ra::mix::{MixFormat, mix_id, write_mix};
+        let bank = std::fs::read_to_string(assets().join("audio/bank.ron")).unwrap();
+        let d = scratch("ra_fight", &bank);
+        for e in FIGHT_EVENTS {
+            let f = format!("audio/sfx/{}.wav", e.replace('.', "_"));
+            std::fs::copy(assets().join(&f), d.join(&f)).unwrap();
+        }
+        let mut mapping = String::from("(sounds: {");
+        for e in FIGHT_EVENTS.iter().filter(|e| !UNMAPPED.contains(e)) {
+            mapping += &format!("\"{e}\": \"FIGHT.AUD\", ");
+        }
+        mapping += "})";
+        std::fs::write(d.join("audio/ra_mapping.ron"), mapping).unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let mix = write_mix(
+            &[(mix_id("FIGHT.AUD"), &encode(&pcm, Compression::Ima))],
+            MixFormat::Plain,
+        );
+        let install = d.join("redalert");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+
+        let cc0 = |s: &mut AudioSystem, e: &str| {
+            let (_, path) = s.resolve(e).unwrap_or_else(|| panic!("{e} has no sound"));
+            path == d.join(format!("audio/sfx/{}.wav", e.replace('.', "_")))
+        };
+        // Off: every fight event is a CC0 sound.
+        let mut s = mock_at(&d);
+        for e in FIGHT_EVENTS {
+            assert!(s.has_sound(e), "{e}");
+            assert!(
+                cc0(&mut s, e),
+                "{e} is not the CC0 sound with the original audio off"
+            );
+        }
+        // On: 14 events are the original, the four unmapped ones stay CC0 and have a sound.
+        s.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        wait_for_ra(&mut s);
+        assert_eq!(s.original_audio_status(), RaStatus::Ready { mapped: 14 });
+        s.set_trace(true);
+        for e in FIGHT_EVENTS {
+            assert!(s.has_sound(e), "{e}");
+            let (_, path) = s.resolve(e).unwrap();
+            let (def, _) = s.resolve(e).unwrap();
+            let bank_def = s.bank.get(e).unwrap().clone();
+            if UNMAPPED.contains(&e) {
+                assert!(
+                    cc0(&mut s, e),
+                    "{e} must play the CC0 sound with --ra-audio"
+                );
+                // The CC0 file keeps the bank's tuning.
+                assert_eq!(def, bank_def, "{e}");
+            } else {
+                assert_eq!(path, ra_key(e), "{e} must be the original");
+                // The original plays exactly as before the bank had fight sounds: volume 1, no pitch spread,
+                // the default voice cap (WP11.3b sweep).
+                assert_eq!(
+                    (def.volume, def.pitch_variation, def.max_instances),
+                    (1.0, 0.0, crate::bank::DEFAULT_MAX_INSTANCES),
+                    "{e}"
+                );
+            }
+            s.play(e);
+            let gain = s.take_trace().last().unwrap().gain;
+            let want = if UNMAPPED.contains(&e) {
+                bank_def.volume
+            } else {
+                1.0
+            };
+            assert_eq!(gain, want, "{e} gain");
+        }
+        assert_eq!(s.stats().played, 18);
+        assert_eq!(s.stats().unknown, 0);
         std::fs::remove_dir_all(d).ok();
     }
 

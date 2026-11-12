@@ -20,6 +20,7 @@ members = [
     "tools/sf_ra_extract",
     "tools/sf_asset_check",
     "tools/sf_icon_gen",
+    "tools/sf_sound_gen",
 ]
 
 [workspace.package]

@@ -4,7 +4,9 @@
 //
 // Used only when "Use original Red Alert audio" is on (assets/config/audio.ron
 // or `sf_game --ra-audio <path>`). An event whose file is not found keeps
-// its CC0 sound from bank.ron (or stays silent if it has none yet).
+// its CC0 sound from bank.ron (every fight event has one since WP11.3b; a few
+// events like unit.select have none yet and stay silent). A mapped original plays as-is:
+// volume 1, no pitch spread, default voice cap (bank entries with original_as_is: true).
 //
 //   sounds: event -> file name inside the MIX archives ("NAME.AUD", or "NAME.V01" for a voice line), or the
 //           raw id "#1A2B3C4D" the F1 sound browser shows for entries whose
@@ -38,7 +40,8 @@
         // Fight sounds (28-10-2026): each event matched by role (who fires it, see weapon_defs.ron) to the
         // Red Alert sound of the same role, one fact at a time, checked by onderzoeker; tried by ear by Tijmen.
         // Red Alert has no sound for placing a demolition charge, for bullet hits or for a miss, so
-        // weapon.fire.demolition, impact.bullet, impact.precision and impact.miss stay unmapped.
+        // weapon.fire.demolition, impact.bullet, impact.precision and impact.miss stay unmapped and
+        // play their CC0 sound from bank.ron also with Red Alert audio on (WP11.3b).
         "explosion.small": "KABOOM15.AUD",
         "weapon.fire.bullet": "GUN11.AUD",
         "weapon.fire.precision": "GUN5.AUD",
