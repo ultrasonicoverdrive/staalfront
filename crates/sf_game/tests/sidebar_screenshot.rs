@@ -520,6 +520,15 @@ fn the_repeat_button_is_lit_and_the_queued_item_wears_the_loop_sign_while_the_fa
     );
     let sign = count_in(&on, picture_corner(0), lit, 6);
     assert!(sign > 40, "the loop sign on the rifleman: {sign} px");
+    // The label is readable and sits below the sign: no letter ink (text colour) in the band under the
+    // sign (a label centred in the whole picture has its capitals there), plenty of it further down.
+    let ink = (236, 240, 246, 255);
+    let slot0 = layout.slot(0);
+    let band = Rect::new(slot0.x + 1.0, slot0.y + 1.0, 80.0, 14.0);
+    assert_eq!(count_in(&on, band, ink, 40), 0, "label ink under the sign");
+    let below = Rect::new(slot0.x + 1.0, slot0.y + 16.0, 92.0, 20.0);
+    let label_ink = count_in(&on, below, ink, 40);
+    assert!(label_ink > 60, "the label RIFLE is drawn: {label_ink} px");
     // The scout is not queued: no sign on it.
     assert_eq!(count_in(&on, picture_corner(3), lit, 6), 0);
     // On the structures tab there is no factory to act on: the button is dim again.

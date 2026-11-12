@@ -44,6 +44,9 @@
     text_px: 14,
     small_px: 12,
     label_px: 17,
+    // The loop sign on an item of a repeating factory (WP6.10), at the top left of its picture. That
+    // item draws its label below the sign, so the two never overlap.
+    repeating_px: 8,
     // The credits figure, in percent of `text_px`, and its distance from the left edge of its block.
     credits_text_pct: 115,
     credits_inset_px: 6,
