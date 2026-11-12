@@ -688,7 +688,7 @@ once the match is decided).
 New in `AiState`, hashed after the scout state in this order: `hp_seen: BTreeMap<EntityId, (Kind, Cell, u32)>`, `threat: Option<(Cell, Tick)>`,
 `defend_since: Option<Tick>`, `directive` (posture number, target cell), `attackers: Vec<EntityId>` (ascending), `attack_target: Option<Cell>`,
 `last_attack_tick`, `attack_started`, `attacks_launched: u32`, `sites_cleared: Vec<PlayerId>` (ascending), then `sent` as before (now the tick of
-any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x3f96608b487a80a7`, two entries in every
+any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x91181c76578f6f1f`, two entries in every
 map and list) and `every_part_of_the_threat_and_attack_state_moves_the_digest` (24 changes, the posture numbers 0, 1, 2 as literals).
 
 New profile numbers, with serde defaults so that every frozen profile still reads: `arrive_radius` 6 (1 to 32), `attack_patience` 2,400 (1 to

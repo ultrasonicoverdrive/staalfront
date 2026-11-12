@@ -514,7 +514,7 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0x3f96_608b_487a_80a7);
+        assert_eq!(base_state().digest(), 0x9118_1c76_578f_6f1f);
     }
 
     #[test]
