@@ -126,34 +126,14 @@ pub fn configure(world: World, def: &MatchDef, defs: &UnitDefs) -> Result<World,
 
 /// The computer opponents of the match (WP9.1d), ascending by player id: one `sf_ai::Ai` for every player
 /// whose controller is `Ai`, made by the loader `sf_headless` uses for the AIs of a scenario too
-/// (`sf_ai::make_ai`: the profile text is checked, resolved for the player's faction against the unit
+/// (`sf_ai::match_ais`, WP9.5a, which uses `sf_ai::make_ai`: the profile text is checked, resolved for the player's faction against the unit
 /// definitions, and every AI is told the start sites of the match). The profile is read from `<assets>/ai/<profile>.ron`; a profile that is not there, or does not fit, is an
 /// error that names the player and the profile. The random seed of an AI is the match's `seed`.
 pub fn ais(def: &MatchDef, defs: &UnitDefs, assets: &Path) -> Result<Vec<sf_ai::Ai>, String> {
-    let sites = sf_ai::start_sites(def, defs);
-    let mut ais = Vec::new();
-    for p in &def.players {
-        let Controller::Ai { profile } = &p.controller else {
-            continue;
-        };
-        let at = format!("player {} (ai profile \"{profile}\")", p.id);
+    sf_ai::match_ais(def, defs, def.seed, &|profile| {
         let file = assets.join("ai").join(format!("{profile}.ron"));
-        let text = std::fs::read_to_string(&file)
-            .map_err(|e| format!("{at}: cannot read {}: {e}", file.display()))?;
-        ais.push(
-            sf_ai::make_ai(
-                PlayerId(p.id),
-                p.faction,
-                &text,
-                defs,
-                def.seed,
-                sites.clone(),
-            )
-            .map_err(|e| format!("{at}: {e}"))?,
-        );
-    }
-    ais.sort_by_key(sf_ai::Ai::player);
-    Ok(ais)
+        std::fs::read_to_string(&file).map_err(|e| format!("cannot read {}: {e}", file.display()))
+    })
 }
 
 /// What [`schedule`] did.

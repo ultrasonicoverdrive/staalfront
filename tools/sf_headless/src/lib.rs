@@ -131,6 +131,7 @@ pub mod cli;
 pub mod log;
 pub mod run;
 pub mod scenario;
+pub mod tournament;
 
 pub use run::{Outcome, RunOptions, Sample};
 pub use scenario::{Scenario, ScenarioError};

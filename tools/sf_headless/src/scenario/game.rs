@@ -41,10 +41,10 @@ pub struct GameSpec {
 /// What [`load_game`] reads for [`build_game_world`].
 #[derive(Clone, Debug)]
 pub struct LoadedGame {
-    pub(super) def: MatchDef,
-    pub(super) defs: UnitDefs,
-    pub(super) terrain: Terrain,
-    pub(super) commands: Vec<(PlayerId, sf_sim::Command)>,
+    pub(crate) def: MatchDef,
+    pub(crate) defs: UnitDefs,
+    pub(crate) terrain: Terrain,
+    pub(crate) commands: Vec<(PlayerId, sf_sim::Command)>,
 }
 
 impl PartialEq for LoadedGame {
@@ -64,6 +64,84 @@ fn resolve(base: &Path, p: &str) -> std::path::PathBuf {
     }
 }
 
+/// The unit definitions of `assets`: the same fallback as the game (`sf_game::runner::load_defs`), and the
+/// same warning: a replay on the compiled-in definitions is a replay of different numbers, so it must not
+/// pass unnoticed.
+pub(crate) fn load_defs(assets: &Path) -> UnitDefs {
+    UnitDefs::load(&assets.join("config"), assets).unwrap_or_else(|e| {
+        eprintln!(
+            "sf_headless: {}: {e}; using the unit definitions compiled in",
+            assets.join("config").display()
+        );
+        UnitDefs::embedded()
+    })
+}
+
+/// Reads the match file at `match_path`, the unit definitions of `assets` and the map the match names, for a
+/// match that is played without a scenario file around it (`sf_headless tournament`, WP9.5a). Returns the
+/// match and the size of its map in cells. The error is the whole message.
+pub(crate) fn load_match_file(
+    assets: &Path,
+    match_path: &Path,
+) -> Result<(LoadedGame, (u32, u32)), String> {
+    let text = std::fs::read_to_string(match_path)
+        .map_err(|e| format!("cannot read {}: {e}", match_path.display()))?;
+    let def = MatchDef::from_ron(&text).map_err(|e| format!("{}: {e}", match_path.display()))?;
+    let defs = load_defs(assets);
+    let map_dir = assets.join("maps").join(&def.map);
+    let map = Map::load(&map_dir).map_err(|e| format!("{}: {e}", map_dir.display()))?;
+    let layer = map
+        .terrain()
+        .ok_or_else(|| format!("{}: the map has no terrain layer", map_dir.display()))?;
+    let cells = (layer.width(), layer.height());
+    def.check(&defs, cells)
+        .map_err(|e| format!("{}: {e}", match_path.display()))?;
+    let terrain_defs =
+        sf_bridge::terrain_defs(&TerrainTypes::embedded(), &MovementCosts::embedded());
+    let terrain = Terrain::from_layer(cells.0, cells.1, layer.ids(), &terrain_defs)
+        .map_err(|e| e.to_string())?;
+    let commands = sf_bridge::match_commands(&def, &defs)?;
+    let loaded = LoadedGame {
+        def,
+        defs,
+        terrain,
+        commands,
+    };
+    Ok((loaded, cells))
+}
+
+impl LoadedGame {
+    /// The same match with the players given other factions (`factions[i]` for the i-th player of the file)
+    /// and the starting commands made again for them: the seat swap of the tournament. The objects stay
+    /// where the file puts them (a faction sits on a start site), so the roles must exist for the new
+    /// faction; the match is checked again against the definitions.
+    pub(crate) fn with_factions(
+        &self,
+        factions: &[sf_data::units::Faction],
+        cells: (u32, u32),
+    ) -> Result<LoadedGame, String> {
+        let mut def = self.def.clone();
+        if factions.len() != def.players.len() {
+            return Err(format!(
+                "{} factions for {} players",
+                factions.len(),
+                def.players.len()
+            ));
+        }
+        for (player, faction) in def.players.iter_mut().zip(factions) {
+            player.faction = *faction;
+        }
+        def.check(&self.defs, cells).map_err(|e| e.to_string())?;
+        let commands = sf_bridge::match_commands(&def, &self.defs)?;
+        Ok(LoadedGame {
+            def,
+            defs: self.defs.clone(),
+            terrain: self.terrain.clone(),
+            commands,
+        })
+    }
+}
+
 /// Reads the match file, the unit definitions and the map of `game`, relative to `scenario_file`.
 pub fn load_game(
     game: &GameSpec,
@@ -80,15 +158,7 @@ pub fn load_game(
     let text = std::fs::read_to_string(&match_path)
         .map_err(|e| invalid(format!("{}: {e}", match_path.display())))?;
     let def = MatchDef::from_ron(&text).map_err(|e| invalid(e.to_string()))?;
-    // The same fallback as the game (`sf_game::runner::load_defs`), and the same warning: a replay on the
-    // compiled-in definitions is a replay of different numbers, so it must not pass unnoticed.
-    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap_or_else(|e| {
-        eprintln!(
-            "sf_headless: {}: {e}; using the unit definitions compiled in",
-            assets.join("config").display()
-        );
-        UnitDefs::embedded()
-    });
+    let defs = load_defs(&assets);
     def.check(&defs, cells)
         .map_err(|e| invalid(e.to_string()))?;
     let map_dir = assets.join("maps").join(&def.map);
@@ -125,11 +195,22 @@ pub fn build_game_world(
     game: &GameSpec,
     loaded: &LoadedGame,
 ) -> Result<World, ScenarioError> {
+    build_world_at_speed(seed, cells, Fx::from_raw(game.speed_raw), loaded)
+}
+
+/// [`build_game_world`] with the walking speed given directly: the world of a match played without a scenario
+/// file (`sf_headless tournament`).
+pub(crate) fn build_world_at_speed(
+    seed: u64,
+    cells: (u32, u32),
+    speed: Fx,
+    loaded: &LoadedGame,
+) -> Result<World, ScenarioError> {
     let sim = |e: String| ScenarioError::Sim(e);
     let defs = &loaded.defs;
     let def = &loaded.def;
     let config = WorldConfig {
-        speed: Fx::from_raw(game.speed_raw),
+        speed,
         ..WorldConfig::new(seed).with_map_size(cells.0, cells.1)
     };
     // `playfield::make_world`.

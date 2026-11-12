@@ -1,0 +1,35 @@
+// The computer against the computer (WP9.5a, docs/rules/ai.md "AI against AI"): the map `assets/maps/m1` and
+// the start of `m1_ai.ron` (a construction centre and 4000 credits each, the south-west and the north-east
+// start site), but BOTH players are under `controller: Ai(profile: "normal")`.
+//
+// Headless only. The game refuses an AI on the local seat (docs/rules/match.md: the local player takes its
+// orders from the keyboard), so `sf_game --match m1_duel` stops with that error. It is played by
+// `sf_headless tournament assets/matches/m1_duel.ron`, which plays it many times: the factions and the
+// seeds of a game are the tool's to vary (the faction written here is game 0's seat 0 and seat 1; the tool
+// swaps them, mirrors included), and the first game of a run is this file as it stands.
+// A player is defeated when it owns no standing construction centre (WP7.7), as in m1.
+(
+    name: "m1_duel",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+            ],
+            controller: Ai(profile: "normal"),
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (72, 14)),
+            ],
+            controller: Ai(profile: "normal"),
+        ),
+    ],
+)
