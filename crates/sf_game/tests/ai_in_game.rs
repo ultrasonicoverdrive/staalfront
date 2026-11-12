@@ -607,7 +607,7 @@ fn the_army_timing_in_the_game_seat() {
 /// Measured (WP9.1c-2): the last build before the win, the first army unit, the army at the gather cell at
 /// 4000, 8000 and 12000, the first attack, the win. (WP9.1c-1, without the floor and the attack: the last of
 /// the eleven builds at 17,817, the first army unit at 17,867, the army 0, 0, 0, 0, 2 at 4000 to 20000.)
-/// WP9.1c-3 (the vehicle factory second in the list, `max_wait` 14,000): last build 5,577 (the ore silo; the list
+/// WP9.1c-3 (the vehicle factory second in the list, `max_wait` 14,000): last build 5,577 (the fortified bunker of the Veyran list; the list
 /// stops after the tower at 4,417, the floor takes the money until the first wave leaves at 14,037 with 6 units,
 /// 2,000 credits), first army unit 7,387, army at the gather cell 0, 1, 4, win 16,023. (WP9.1c-2, vehicle factory
 /// fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)

@@ -503,12 +503,12 @@ fn what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march
 
 #[test]
 fn ai_vs_passive_with_and_without_the_ai_and_the_tick_of_the_launch() {
-    // WP9.1c-2: `ai_vs_passive` to the win (14,659), the AI's thinks timed (mean, worst), and the step time of
+    // WP9.1c-2: `ai_vs_passive` to the win (14,659; 16,726 since WP9.1c-3, run 16,800 ticks), the AI's thinks timed (mean, worst), and the step time of
     // the tick in which each attack is launched (the simulation plans the `AttackMove` for the whole wave then)
     // against the mean step. Then the whole run with and without the AI, alternating, medians of three (without
     // the AI nothing happens on player 0's side, so this is an upper bound of what the AI and what it makes cost).
     let s = Scenario::load(&scenario_path("ai_vs_passive.ron")).unwrap();
-    let ticks = if cfg!(debug_assertions) { 2000 } else { 14_700 };
+    let ticks = if cfg!(debug_assertions) { 2000 } else { 16_800 };
     let cost = measure(&s, ticks);
     report("ai_vs_passive", &cost);
     let mut world = s.build_world().unwrap();

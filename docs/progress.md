@@ -3042,6 +3042,25 @@ WP9.1c-2". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved
 - **Not done.** See `ai.md` "Not done" (WP9.1c-2 gaps): one group at a time, no retreat, the defence gap with the army out, the finishing rule not needed in
   a scenario, only passive opponents.
 
+### WP9.1c-3 notes: the computer opponent's opening (12-11-2026)
+
+Follow-up of WP9.1c-2 (#129), data only: economy before army. Rules, numbers and measurements: `docs/rules/ai.md`, "The opening (WP9.1c-3)". Nothing in
+`crates/sf_sim/` changed. One line of `sf_ai` changed (the centre recall clears `closing`, from the re-review of #129). `ai_raid` and every earlier phase's
+pin are unchanged; `ai_vs_passive` and its frozen profile were deliberately re-pinned (cause measured, `ai.md` "Pins that moved (WP9.1c-3)").
+
+- **Built.** `assets/ai/normal.ron`: the vehicle factory second in both goal lists (power plant, refinery, vehicle factory, barracks, ...), `max_wait`
+  14,000 (was 6,000), `army_floor_value` unchanged (2,000). `ai_vs_passive_defs/normal.ron` refrozen to it, the scenario 20,000 ticks. `army::watch`
+  clears `closing` on a centre recall (`a_centre_recall_leaves_no_attacker_on_the_closing_list`).
+- **Measured.** Second harvester at 1,880 (`ai_vs_passive`) and 1,887 (`m1_ai`), the barracks at 2,890 and 3,017, the first unit of the mix queued at 5,860
+  and 7,387, the floor reached at 12,567 and 13,494, the first wave 6 units / 2,000 at 14,030 and 14,037, **the win at 16,726 and 16,023** (was 14,659
+  and 8,396). With the attack off the goal list **completes at 22,970 and 24,417** (was: not in 30,000 ticks). `max_wait` 8,000, 10,000 and 12,000 give a
+  first wave of 1,200; 14,000 is the smallest round value that carries 2,000 in both seats.
+- **Gap, stated.** The acceptance target "goal list complete by 20,000 with the attack off" is **not met** (22,970 and 24,417); a floor of 1,000 would meet
+  it (19,930) but loses the first wave (1,200) and the win comes at 27,209. The cost of the opening, accepted by the decision: no barracks before
+  about 2,900 and no unit before about 5,900, so an early infantry rush by a human beats it; not tested against a rushing opponent.
+- **Moved with it.** The fence test's riflemen moved to (57, 28) (the wave now passes there); `the_ai_builds_its_base_in_the_game` looks at 9,000
+  ticks; the attack-wave pictures were re-taken at 14,000, 15,000 and 16,000 (`docs/screenshots/wp9.1c-2/`).
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
