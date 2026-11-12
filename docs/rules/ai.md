@@ -160,9 +160,9 @@ shipped ones of that day, written out. No scripted command.
 
 | Scenario | Map | Ticks | Checksum | AI digest |
 |---|---|---|---|---|
-| `ai_base` | `m1` | 8000 | `0x1b2eb3765910e496` | `0x485156104bc0ebb7` |
-| `ai_noore` | `m1_noore` (no ore) | 40,000 | `0x4c0e8ed5d1f89874` | `0x17fe214bd5dcaf8a` |
-| `ai_boxed` | `m1_boxed` (rock round the base, a pocket x 5..17, y 66..73) | 8000 | `0x212468ddebc97ff5` | `0xad6a07ba89ea0052` |
+| `ai_base` | `m1` | 8000 | `0x1b2eb3765910e496` | `0xa1bdd2e16f8db63b` |
+| `ai_noore` | `m1_noore` (no ore) | 40,000 | `0x4c0e8ed5d1f89874` | `0x94c928755b799c2f` |
+| `ai_boxed` | `m1_boxed` (rock round the base, a pocket x 5..17, y 66..73) | 8000 | `0x212468ddebc97ff5` | `0x5c40c9e2637e1194` |
 
 The maps are drawn by `tools/sf_headless/examples/gen_ai_maps.rs` from `gen_match_map.rs` (a test draws them again and compares).
 What `tools/sf_headless/tests/ai_base.rs` checks:
@@ -183,7 +183,7 @@ What `tools/sf_headless/tests/ai_base.rs` checks:
   `QueueUnit`, `Repair`; the last two come with WP9.1b-2).
 
 `ai_fog` moved with this part: its AI now builds a power plant (tick 10) and a refinery (tick 330, an emergency; its 1500 credits pay for no
-more). New pins `0x768b77651509db8c` and `0x54a924e86710242c`; with the construction manager off and the new state and profile numbers left
+more). New pins `0x768b77651509db8c` and `0x630c0979a8ae4749`; with the construction manager off and the new state and profile numbers left
 out of the digests, both old values come back (measured).
 
 ## The schedule

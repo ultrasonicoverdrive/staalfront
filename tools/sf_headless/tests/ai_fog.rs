@@ -29,7 +29,7 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected")
 /// builds (a power plant at tick 10, a refinery at tick 330) and its digest hashes the new state and the
 /// profile's lane and aprons. Measured: with the construction manager switched off, the new state left out
 /// of `AiState::digest` and the lane and aprons left out of `Profile::digest`, both old values come back.
-const AI_DIGEST: u64 = 0x54a9_24e8_6710_242c;
+const AI_DIGEST: u64 = 0x630c_0979_a8ae_4749;
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);

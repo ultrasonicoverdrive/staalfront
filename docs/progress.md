@@ -2884,7 +2884,7 @@ First half of WP9.1b (design memo of 11-11-2026, split in two; the open choices 
   `ai_boxed`: the refinery is blocked, the barracks, second plant and both towers are built. Think cost in `ai_perf.rs`: mean 0.1 us per AI
   per tick alone, 6.6 to 7.6 us with 5,000 wanderers; worst think 137 to 890 us with the crowd; at most 1 placement question per think; one
   question costs 7.8 to 8.1 us in the crowd, hence `placement_cap` 32 (256 would be about 2 ms).
-- **Re-pinned.** `ai_fog`: checksum `0xd369218db6025eff` to `0x768b77651509db8c`, AI digest `0x993afc7cd2c42cfd` to `0x54a924e86710242c`; its AI
+- **Re-pinned.** `ai_fog`: checksum `0xd369218db6025eff` to `0x768b77651509db8c`, AI digest `0x993afc7cd2c42cfd` to `0x630c0979a8ae4749`; its AI
   now builds a power plant and a refinery. Measured cause: with the construction manager switched off the old checksum comes back; with the
   new state and the profile's lane and aprons also left out of the digests the old digest comes back. The frozen `ai_fog_defs` is unchanged
   (its profile reads with the defaults).
