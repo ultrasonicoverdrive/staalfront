@@ -259,7 +259,7 @@ pub fn search(
     }
 
     // The gather cell and the eight cells round it stay free of structures (WP9.1c-1): the army gathers
-    // there and every factory's rally point is on it, and a structure on it would end both.
+    // there and the rally point of every factory that makes no harvester is on it, and a structure on it would end both.
     if let Some(g) = state.gather {
         for dy in -1..=1 {
             for dx in -1..=1 {

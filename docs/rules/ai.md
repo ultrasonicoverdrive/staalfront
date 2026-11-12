@@ -449,7 +449,10 @@ that WP writes the posture and a function turns it into orders; here the posture
 ### The gather cell
 
 `army::ensure_gather` (rule P2), computed once into `AiState::gather` and worked out again only when it is `None` (no anchor yet, or no cell
-found) or its cell is no longer open ground (`Lens::ground`). From the middle of the own standing anchor (the lowest id) `gather_distance`
+found), its cell is no longer open ground (`Lens::ground`), or it lies under a structure the AI knows, its own, a visible or a remembered one
+(`a_gather_cell_under_a_structure_is_worked_out_again`). The other way round, `placement::search` keeps the gather cell and its **8 neighbours**
+free of the AI's own structures (they are blocked in the placement mask while `gather` is set;
+`the_gather_cell_and_its_eight_neighbours_are_kept_free_of_the_ais_own_structures`). From the middle of the own standing anchor (the lowest id) `gather_distance`
 cells towards the middle of the map, an integer step on the larger axis (a tie goes to x; the other axis is `d * dist / |d_large|`, truncated;
 clamped to the map), then the first cell in the order **ring, y, x** over rings 0 to 3 (49 cells at most) that is open ground, under no
 structure the AI knows (own, visible or remembered), **off the apron** of an own factory or dock (`placement::apron`, with the
@@ -486,7 +489,7 @@ the AI learns that an order had no effect is always the observation (still `Idle
 ### State
 
 New in `AiState` with WP9.1c-1, all in the digest in this order after the rescue state: `gather: Option<Cell>`, `rally_backoff: BTreeMap<EntityId,
-Tick>`, `units_sent: Vec<(EntityId, Kind, Tick, u32)>`, `scout: Option<EntityId>`, `scout_leg: u8`, `scout_leg_sent: Option<Tick>`, `scouts_sent:
+Tick>`, `units_sent: Vec<UnitSent>` (`UnitSent = (factory, kind, tick, units of the kind before, items of the kind that factory had queued before)`, i.e. `(EntityId, Kind, Tick, u32, u32)`), `scout: Option<EntityId>`, `scout_leg: u8`, `scout_leg_sent: Option<Tick>`, `scouts_sent:
 u8`, `scout_gone_at: Option<Tick>`, `directive` (posture number and target), `sent: BTreeMap<EntityId, (Tick, u8)>`. Pinned by
 `the_digest_of_the_base_state_is_pinned` (a literal, now `0xaec61e0952ceb855`, with two entries in every map and list so that an iteration in reverse
 fails it) and `every_part_of_the_production_and_army_state_moves_the_digest` (25 changes); the profile digest hashes the new numbers
@@ -514,7 +517,7 @@ Not acting yet: `attack_value`, `max_wait`, `min_units`, `first_attack_tick`, `d
 `assets/scenarios/ai_scout.ron`, `ai_scout_defs/` (a frozen copy of the shipped definitions and of `assets/ai/normal.ron` as 9.1c-1 leaves it, and a
 match file of its own): M1's map, player 0 the AI (Meridian, 4,000 credits as in `m1.ron`), player 1 a static construction centre at (72, 14) with a
 power plant at (78, 20) and nothing that shoots (the real opponent of M1, with its tower, is the test of WP9.1c-2). No scripted command. 20,000
-ticks. Checksum `0x30f01b24ba9edf1f` (`ai_scout.expected`), AI digest `0x584e81c7938e7859`; in the CI list and so in the Linux/Windows log
+ticks. Checksum `0xf2be53002209e2f6` (`ai_scout.expected`), AI digest `0x584e81c7938e7859`; in the CI list and so in the Linux/Windows log
 comparison, which includes the AI digest.
 
 Measured (`tools/sf_headless/tests/ai_production.rs`, every number printed by its test):
@@ -526,7 +529,7 @@ Measured (`tools/sf_headless/tests/ai_production.rs`, every number printed by it
 | the AI's memory holds the enemy construction centre (the scout's sight is 8) | **2,351** |
 | the scout stands within 3 cells of the start site | 2,439 |
 | the other four legs are ordered | 2,470, 3,190, 3,870, 4,870 |
-| the first harvester is queued (the vehicle factory stands), and the vehicle factory gets its rally point | 2,080, 2,100 |
+| the first harvester is queued (the vehicle factory stands; it gets no rally point) | 2,080 |
 | the last structure of the goal list is ordered | 14,610 |
 | the first army unit is queued | **15,020** |
 
@@ -658,8 +661,11 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
   only towards the other players' start sites.
 * **WP9.1c-1 gaps.** No army before tick 15,020 (`ai_scout`) or 17,867 (`m1_ai`) on M1's credits (see "Production"; the army floor of WP9.1c-2 answers it). A scout that dies on the way is replaced once
   and not told where it died; the scenario's enemy has no gun, so a scout under fire is not run. The gather cell is not checked for a route from
-  the base (no `plan_route`): a cell behind rock shows only as units idle far away, which are ordered `gather_tries` times and then left. A unit of
-  the mix that dies within the 40 ticks after its order looks like a refused order and blocks its kind for `blocked_ticks`. The army does not
+  the base (no `plan_route`): a cell behind rock shows only as units idle far away, which are ordered `gather_tries` times and then left. A refused unit
+  order is read as accepted when another unit of the same kind comes out of another factory within the check, so the refusal goes unseen.
+  The AI digest hashes the AI's state, which is transient latches and memory that settle: a changed decision may show only in the world
+  checksum (measured: the vehicle-factory rally point forced back on gives other checksums at ticks 4,000, 10,000 and 20,000 of `ai_scout`
+  and the same AI digest at all three). The army does not
   defend: it has no rule for a base under attack until WP9.1c-2 (what an idle unit does by its own stance, `targeting.md`, is all there is).
 * Not checked: whether a lane of one cell is wide enough for harvester traffic (bodies are 1.5 cells); whether `Despawn` of a structure
   leaves the same state as destruction by weapons: `ai_rebuild` removes the refinery and the barracks with `Despawn` and only damages the plant

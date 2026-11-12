@@ -111,7 +111,7 @@ pub struct AiState {
     /// After a refused rescue: the tick from which it may be tried again.
     pub rescue_after: Tick,
     /// WP9.1c-1, the gather cell (`docs/rules/ai.md`, "The gather cell"): computed once, again only when
-    /// it is `None` or its cell stops being open ground.
+    /// it is `None`, its cell stops being open ground or it lies under a structure the AI knows.
     pub gather: Option<Cell>,
     /// A factory a rally point was sent for, and the tick until which it is not asked again unless the
     /// observation shows another rally point; entries go when the rally point is right, the factory is gone

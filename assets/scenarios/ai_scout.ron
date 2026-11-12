@@ -3,7 +3,7 @@
 // (`assets/maps/m1`); player 1 (Veyran) is a static construction centre with a power plant and nothing that shoots.
 // No scripted command: everything player 0 does is the AI's. It builds its base by the goal list of the shipped
 // profile, buys harvesters first, then a scout (the first unit made, from tick 600) and units by the mix
-// rifleman 4, rocket trooper 2, light tank 3, and every factory rallies to the gather cell. The scout walks to the
+// rifleman 4, rocket trooper 2, light tank 3, and every factory but the vehicle factory rallies to the gather cell. The scout walks to the
 // other player's start site and sees its centre; the army gathers and never attacks (WP9.1c-2).
 //
 // `unit_defs` names a FROZEN copy (ai_scout_defs, made for WP9.1c-1) of the shipped definitions, the match file of

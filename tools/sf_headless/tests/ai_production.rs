@@ -1,7 +1,7 @@
 //! The AI's production manager, scout and gathering (WP9.1c-1, `docs/rules/ai.md`, "Production" and "The
 //! army in WP9.1c-1"). The scenario `ai_scout` with its checksum and AI digest pinned and the rules
 //! seen from outside (the first unit is the scout, the scout visits the other player's start site once and
-//! finds its construction centre, units are bought by the mix, every factory rallies to the gather cell, the
+//! finds its construction centre, units are bought by the mix, every factory that makes no harvester rallies to the gather cell, the
 //! command set and rate), then each rule where it decides: the production or army turn called on an
 //! observation that is the world's own with the entities the test needs put in (the way `ai_economy.rs`
 //! does), so every test runs the production code (`sf_ai::production::turn`, `army::turn`, `Lens`, the
