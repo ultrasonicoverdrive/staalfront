@@ -390,6 +390,21 @@ mod tests {
         s.sales.push((EntityId::new(4, 0), Tick(300)));
         s.sales.push((EntityId::new(6, 1), Tick(300)));
         s.rescue_after = Tick(1200);
+        s.gather = Some(Cell::new(24, 64));
+        s.rally_backoff.insert(EntityId::new(5, 0), Tick(1500));
+        s.rally_backoff.insert(EntityId::new(8, 1), Tick(1600));
+        s.units_sent
+            .push((EntityId::new(5, 0), Kind(12), Tick(1400), 3));
+        s.units_sent
+            .push((EntityId::new(8, 1), Kind(19), Tick(1400), 1));
+        s.scout = Some(EntityId::new(11, 0));
+        s.scout_leg = 2;
+        s.scout_leg_sent = Some(Tick(1390));
+        s.scouts_sent = 1;
+        s.scout_gone_at = Some(Tick(1380));
+        s.directive.target = Some(Cell::new(60, 20));
+        s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
+        s.sent.insert(EntityId::new(14, 2), (Tick(1560), 2));
         s
     }
 
@@ -397,7 +412,7 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0xb3c2_9db9_5d8d_85f4);
+        assert_eq!(base_state().digest(), 0xe7fb_6ca9_5910_959e);
     }
 
     #[test]
@@ -448,6 +463,56 @@ mod tests {
             change(&mut s);
             assert_ne!(s.digest(), d, "change {i}");
         }
+    }
+
+    #[test]
+    fn every_part_of_the_production_and_army_state_moves_the_digest() {
+        let d = base_state().digest();
+        let changes: [fn(&mut AiState); 24] = [
+            |s| s.gather = None,
+            |s| s.gather = Some(Cell::new(24, 65)),
+            |s| s.gather = Some(Cell::new(25, 64)),
+            |s| {
+                s.rally_backoff.remove(&EntityId::new(5, 0));
+            },
+            |s| {
+                s.rally_backoff.insert(EntityId::new(8, 1), Tick(1601));
+            },
+            |s| {
+                s.rally_backoff.insert(EntityId::new(8, 2), Tick(1600));
+            },
+            |s| s.units_sent.clear(),
+            |s| s.units_sent.reverse(),
+            |s| s.units_sent[0].1 = Kind(13),
+            |s| s.units_sent[0].2 = Tick(1401),
+            |s| s.units_sent[1].3 = 2,
+            |s| s.scout = None,
+            |s| s.scout = Some(EntityId::new(11, 1)),
+            |s| s.scout_leg = 3,
+            |s| s.scout_leg_sent = None,
+            |s| s.scout_leg_sent = Some(Tick(1391)),
+            |s| s.scouts_sent = 2,
+            |s| s.scout_gone_at = None,
+            |s| s.scout_gone_at = Some(Tick(1381)),
+            |s| s.directive.target = None,
+            |s| s.directive.target = Some(Cell::new(60, 21)),
+            |s| {
+                s.sent.remove(&EntityId::new(12, 0));
+            },
+            |s| {
+                s.sent.insert(EntityId::new(14, 2), (Tick(1560), 3));
+            },
+            |s| {
+                s.sent.insert(EntityId::new(14, 2), (Tick(1561), 2));
+            },
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut s = base_state();
+            change(&mut s);
+            assert_ne!(s.digest(), d, "change {i}");
+        }
+        // The posture's number is hashed: the permanent value.
+        assert_eq!(crate::state::Posture::Gather as u8, 0);
     }
 
     #[test]

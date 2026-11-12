@@ -208,6 +208,22 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_makes_units_when_it_has_a_mix_or_a_scout() {
+        let base = resolved(Faction::Meridian);
+        assert!(base.makes_units());
+        let mut p = base.clone();
+        p.scout = None;
+        assert!(p.makes_units());
+        p.unit_mix.clear();
+        assert!(!p.makes_units());
+        let mut p = base;
+        p.unit_mix.clear();
+        assert!(p.makes_units());
+        // The scout of the shipped profile is kind 15 (unit_defs.ron).
+        assert_eq!(p.scout, Some(Kind(15)));
+    }
+
+    #[test]
     fn the_digest_sees_every_number_and_list() {
         let base = resolved(Faction::Meridian);
         let digest = base.digest();
@@ -227,6 +243,27 @@ mod tests {
         assert_ne!(digest, p.digest());
         let mut p = base.clone();
         p.army.gather_distance += 1;
+        assert_ne!(digest, p.digest());
+        // WP9.1c-1: every new number and the scout.
+        let changes: [fn(&mut Profile); 10] = [
+            |p| p.economy.max_queue += 1,
+            |p| p.army.gather_radius += 1,
+            |p| p.army.gather_group += 1,
+            |p| p.army.gather_tries += 1,
+            |p| p.army.resend_ticks += 1,
+            |p| p.army.scouts_max += 1,
+            |p| p.army.scout_tick += 1,
+            |p| p.army.scout_patience += 1,
+            |p| p.army.scout_retry += 1,
+            |p| p.scout = None,
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut p = base.clone();
+            change(&mut p);
+            assert_ne!(digest, p.digest(), "change {i}");
+        }
+        let mut p = base.clone();
+        p.scout = Some(Kind(16));
         assert_ne!(digest, p.digest());
         let mut p = base.clone();
         p.build_order.swap(0, 1);

@@ -9,9 +9,9 @@
 //! (2) **Rally** (P1). Every complete factory whose rally point is not the gather cell gets one `SetRally`;
 //!    the observation (`OwnFactory.rally`) says whether it took, and a factory asked is left alone for
 //!    `blocked_ticks` (`rally_backoff`).
-//! (3) **Queue** (P3). Nothing while an emergency build is stalled for lack of money or a harvester is wanted
-//!    ([`economy::harvester_wanted`]; the economy comes first). Otherwise, one unit at a time, the scout when
-//!    one is due, else the kind of the mix furthest below its share, on the complete factory of its function
+//! (3) **Queue** (P3). Nothing while a harvester is wanted ([`economy::harvester_wanted`]; the economy comes
+//!    first). Otherwise, one unit at a time, the scout when one is due (and nothing else before the first
+//!    scout is ordered), else the kind of the mix furthest below its share, on the complete factory of its function
 //!    with the shortest queue (the lowest id among equals), at most `max_queue` items in a factory and one
 //!    order per factory per turn, while the free credits cover `holdback + price`. `holdback` is nothing when no
 //!    goal entry is open, else `reserve` plus what the construction turn is saving for ([`base::next_build`]).
@@ -84,7 +84,8 @@ fn rally(
     let wrong = |o: &crate::observe::Own| {
         complete(o)
             && function_of(lens, o).is_some_and(|f| f.is_factory())
-            && o.factory.as_ref().is_some_and(|f| f.rally != Some(gather))
+            // A factory with no production record (nothing queued yet) has no rally point.
+            && o.factory.as_ref().and_then(|f| f.rally) != Some(gather)
     };
     // Drop what no longer needs the backoff: the rally point is right, the factory is gone or the time is up.
     state.rally_backoff.retain(|id, until| {
@@ -167,7 +168,9 @@ fn scout_due(state: &AiState, obs: &Observation, kind: Kind) -> bool {
 
 /// Step (3).
 fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<Command>) {
-    if economy::emergency_stalled(obs, lens) || economy::harvester_wanted(state, obs, lens) {
+    // The economy comes first. (An emergency build waiting for money needs no check of its own here: it is
+    // stalled only with no free credits at all, and then nothing below can be paid.)
+    if economy::harvester_wanted(state, obs, lens) {
         return;
     }
     let e = state.profile.economy;
@@ -213,6 +216,16 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
             {
                 choice = Some((mix[i].0, factory, Some(i)));
             }
+        }
+        // Until the first scout is ordered it is the first unit made: no unit of the mix goes before it (unless
+        // the scout is blocked, a refused order that waits `blocked_ticks`).
+        if choice.as_ref().is_none_or(|c| c.2.is_some())
+            && let Some(kind) = state.profile.scout
+            && state.profile.army.scouts_max > 0
+            && state.scouts_sent == 0
+            && !blocked(state, kind, now)
+        {
+            return;
         }
         let Some((kind, factory, index)) = choice else {
             return;
