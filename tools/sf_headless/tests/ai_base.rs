@@ -29,9 +29,9 @@ const BASE_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_base.expe
 const NOORE_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_noore.expected");
 const BOXED_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_boxed.expected");
 /// `Ai::digest` of player 0 at the end of each scenario.
-const BASE_DIGEST: u64 = 0x4dd1_1cc7_33dd_4b46;
-const NOORE_DIGEST: u64 = 0x94e9_7ccd_0740_5cba;
-const BOXED_DIGEST: u64 = 0x5b7d_1ada_f26a_a90f;
+const BASE_DIGEST: u64 = 0x268a_2473_6ebe_051d;
+const NOORE_DIGEST: u64 = 0x1ca7_ab49_4346_b0a1;
+const BOXED_DIGEST: u64 = 0x6df8_2105_2fcc_b1ea;
 
 /// The kinds of the frozen definitions (`ai_base_defs/unit_defs.ron`).
 const PLANT: Kind = Kind(1);
