@@ -15,4 +15,8 @@ The `m1_ai_*` pictures draw **every** view, seen or not (as `match_screenshot` d
 would not see it (the test asserts that the human sees none of the AI's things at tick 4000). Made by `crates/sf_game/tests/ai_screenshot.rs` with
 `SF_SAVE_SHOTS=docs/screenshots/wp9.1d xvfb-run cargo test -p sf_game --test ai_screenshot`.
 
-What they do not show: the AI making combat units or attacking (its production and army managers are not built yet, WP9.1c). Made after the merge with the economy manager (WP9.1b-2): it queues harvesters, which cost money, so it stands at 6 structures at tick 4000 where it stood at 8 before.
+**Identical pictures.** `m1_ai_t02500_ai_base_all_views.png` and `m1_ai_t04000_ai_base_all_views.png` are byte-identical: between tick 2500 and 4000 the AI
+ordered nothing that shows in this close-up (6 structures at both ticks, none of the AI's units is in this view), so the picture does not change.
+`m1_ai_t04000_whole_map_all_views.png` was drawn again after WP9.1c-1 (a scout is out on the map; the other pictures came out the same).
+
+What they do not show: the AI making combat units or attacking (since WP9.1c-1 it buys a scout and, once its goal list is done, units, but in `ai_scout` (4,000 credits) the units come after tick 15,000, and the army does not attack before WP9.1c-2). Made after the merge with the economy manager (WP9.1b-2): it queues harvesters, which cost money, so it stands at 6 structures at tick 4000 where it stood at 8 before.

@@ -3333,16 +3333,17 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   (`(tick, ms)` is `(tick, ms, think_ms)` now; `hitch.rs` tests).
 * **Measured** (`tests/ai_in_game.rs`, human idle, 20,000 ticks = 2,000 thinks; relative numbers, container shared with other agents' cargo runs):
   debug build mean 24 us, worst 751 us, thinking 1.0 % of the step time; **release build mean 2 us, worst 57 us, 1.5 % of the step time**
-  (225,847 us of step in all). In the real game window under Xvfb (debug build, llvmpipe, 4,068 ticks, 407 thinks): mean 0.097 ms, worst 4.8 ms
-  (the first slow-tick lines of its hitch log are `[257, 64.1, 1.14]` and `[817, 87.5, 0.0]`: the think was 1.1 ms of a 64 ms debug tick and none of the
-  other). The AI's goal list is all there is to think about today (economy, production and army are stubs), so these numbers will grow with WP9.1b-2 and
-  WP9.1c; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
+  (225,847 us of step in all). In the real game window under Xvfb (debug build, llvmpipe, 4,068 ticks, 407 thinks): mean 0.097 ms, worst 1.04 ms
+  after the merge with #126 (first run of this entry: worst 4.8 ms, a shared-machine spike; its slow-tick lines were `[257, 64.1, 1.14]` and `[817, 87.5, 0.0]`,
+  the think 1.1 ms of a 64 ms debug tick). These numbers date from the construction manager alone; the later managers' costs are in
+  `docs/rules/ai.md`; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
 * **Seen.** `docs/screenshots/wp9.1d/` (README there): the AI's base at ticks 2, 1000, 2500 and 4000 (1, 4, 6, 6 structures after the merge with #126; 1, 4, 7, 8 before it); the real game window shows
   the human only its own base (the AI's is behind the fog).
-* **Follow-up.** `matchplay::ais` is a copy of `Scenario::load_ais` (sf_headless); it moves into `sf_ai` next to `start_sites` in a follow-up after
-  #126 merges (error text, seed source and profile naming differ today).
-* **Asserted and only printed.** Asserted: thinks 100 / 4 / 4 by tick, first build at tick 17, at least 4 kinds and 4 structures (6 in the picture
-  test) by tick 4000, a slow think reaches `slow_ticks`' third number and the counters (`SimConfig::think_hitch` makes one), two AIs think in
+* **One loader (WP9.1c-1).** `matchplay::ais` and `Scenario::load_ais` both call `sf_ai::make_ai` (profile text checked, resolved for the faction, AI
+  made); each host keeps its own file reading, its own error context (player and profile; the scenario's `ai:` prefix) and its seed (headless: the `ai` entry's
+  seed; game: the match seed).
+* **Asserted and only printed.** Asserted: thinks 100 / 4 / 4 by tick, first build at tick 17, at least 3 kinds of structure ordered and at least 4 structures standing
+  (the construction centre included) by tick 4000 (the picture test asserts the same floor, 4, at tick 4000 and a non-decreasing count while no `Sell` has been sent), a slow think reaches `slow_ticks`' third number and the counters (`SimConfig::think_hitch` makes one), two AIs think in
   ascending player order. **Only printed, not asserted:** 4 / 6 / 6 structures at ticks 1000 / 2500 / 4000, "5 builds of 4 kinds, 1 unit queued", the think-cost
   numbers; the `mean < 5 ms` bound is a loose sanity bound.
 * **Gaps.** The JSON shape is pinned in `hitch.rs` `--replay` of a record of an AI match is untested apart from

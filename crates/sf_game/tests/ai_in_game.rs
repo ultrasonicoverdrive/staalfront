@@ -172,15 +172,20 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
     assert!(p.think_max_micros <= p.think_micros);
     let ai: Vec<_> = p.exit.commands.iter().filter(|c| c.player == AI).collect();
     assert!(!ai.is_empty(), "the AI sent commands");
-    // The human sent none, and the AI sent only what its managers may send: builds, harvesters to queue,
-    // repairs and (once per match, in a deadlock) a sale. Production and army send nothing yet.
+    // The human sent none, and the AI sent only what its managers may send (`sf_ai`'s whitelist since
+    // WP9.1c-1): builds, units to queue, rally points, repairs, (once per match, in a deadlock) a sale and a
+    // plain `Move` of units (the scout and the gathering army); no attack.
     assert!(p.exit.commands.iter().all(|c| c.player == AI));
     assert!(ai.iter().all(|c| matches!(
         c.command,
         sf_sim::Command::BuildStructure { .. }
             | sf_sim::Command::QueueUnit { .. }
+            | sf_sim::Command::SetRally { .. }
             | sf_sim::Command::Repair { .. }
             | sf_sim::Command::Sell { .. }
+    ) || matches!(
+        &c.command,
+        sf_sim::Command::Order { order: sf_sim::Order::Move(_), queued: false, ids } if !ids.is_empty()
     )));
     // Every command was scheduled for the tick about to run, in the tick the AI was due: before the step.
     let reference = game(&ai_file()).2.remove(0);
@@ -199,7 +204,8 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
     // The opening of the goal list: the power plant first, then the refinery.
     let builds = builds_of(&p.exit, AI);
     assert!(builds.len() >= 2, "{builds:?}");
-    // Think 0 (tick 7) is the economy manager's turn, a stub; think 1 (tick 17) the construction manager's.
+    // Think 0 (tick 7) is the economy manager's turn (no refinery yet, nothing to send); think 1 (tick 17) the
+    // construction manager's.
     assert_eq!(
         builds[0].0, 17,
         "the first build of the goal list: {builds:?}"
@@ -229,8 +235,8 @@ fn the_ai_builds_its_base_in_the_game() {
     let builds = builds_of(&p.exit, AI);
     // What the rule promises: the first three goals of the list (power plant, refinery, barracks: 1900 of the
     // 4000 credits) are ordered whatever the harvesters of the economy manager cost afterwards. Since WP9.1b-2
-    // the economy spends on harvesters too, so by tick 4000 the later goals are not promised (measured: 4 kinds,
-    // 6 structures; before the economy 6 kinds, 8 structures).
+    // the economy spends on harvesters too, so by tick 4000 the later goals are not promised (measured, again
+    // after WP9.1c-1 with its scout: 4 kinds, 6 structures; before the economy 6 kinds, 8 structures).
     let kinds: std::collections::BTreeSet<u16> = builds.iter().map(|b| b.1).collect();
     assert!(
         kinds.len() >= 3,

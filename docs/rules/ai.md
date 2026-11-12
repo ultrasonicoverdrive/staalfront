@@ -700,12 +700,15 @@ field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, 
   refinery its goal list builds brings the free harvester and the ore the rest. Start it with `sf_game --match m1_ai` (a bare name is looked up under
   `assets/matches`; `--match assets/matches/m1_ai.ron` is the same). `m1.ron` is unchanged and still the default.
 * **What the AI does there** is what its managers do (construction WP9.1b-1, economy WP9.1b-2: harvesters, silo, repair, the once-per-match rescue
-  sale). Production and army are stubs (WP9.1c), so it makes no combat units and does not attack, and the human cannot lose to it yet. The commands it
-  may send are `BuildStructure`, `QueueUnit`, `Repair` and `Sell`; the test lets nothing else through and checks that builds and queued harvesters
+  sale). Since WP9.1c-1 it also buys units (a scout from tick 600, then the unit mix once its goal list is done), sets rally points and sends the scout
+  and the gathering army `Move` orders; it still does not attack (WP9.1c-2), so the human cannot lose to it yet. The commands it may send are `BuildStructure`,
+  `QueueUnit`, `SetRally`, `Repair`, `Sell` and `Order { Move, not queued }`; the test lets nothing else through and checks that builds and queued units
   both occur. Measured on the sim thread after the merge with #126 (`ai_in_game.rs`, `ai_screenshot.rs`; the human idle; printed, not asserted):
   first build at tick 17 (think 0 is the economy manager's turn); 1 structure at tick 2, 4 at tick 1000, 6 at tick 2500 and 6 at tick 4000; by tick 4000 5
-  builds of 4 kinds and 1 unit queued (before the economy: 7 structures at 2500, 8 at 4000, 7 builds of 6 kinds, the harvesters now cost money). Asserted:
-  the first three goals of the list (1900 of the 4000 credits) are ordered and standing by tick 4000.
+  builds of 4 kinds and 1 unit queued (before the economy: 7 structures at 2500, 8 at 4000, 7 builds of 6 kinds, the harvesters now cost money). Re-measured after WP9.1c-1: the same
+  (5 builds, 4 kinds, 6 structures at tick 4000; no sale). Asserted: at least 3 kinds of structure are ordered and at least 4 structures stand (the
+  construction centre included) by tick 4000, which is what the rule promises (power plant, refinery and barracks, 1900 of the 4000 credits); the
+  count in the picture test does not drop while no `Sell` has been sent.
 * **Thinks per tick.** The profile's `think_interval` 10 and `stagger` 3 give player 1 the ticks 7, 17, 27 ...: 100 thinks in the first 1000 ticks
   (pinned: `the_ai_thinks_when_it_is_due_...`).
 * **The cost of a think** is part of the sim tick (`step_once` starts its clock before the thinks) and is counted on its own:

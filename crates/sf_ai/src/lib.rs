@@ -40,5 +40,5 @@ pub use ai::Ai;
 pub use observe::{Lens, Observation, Own, OwnFactory, Seen};
 pub use profile::Profile;
 pub use schedule::{Manager, due};
-pub use sites::start_sites;
+pub use sites::{make_ai, start_sites};
 pub use state::{AI_STREAM, AiState, Known, REFUSED_CAP};
