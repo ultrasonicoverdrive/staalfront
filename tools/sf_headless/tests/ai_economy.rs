@@ -686,6 +686,17 @@ fn repair_goes_by_rank_two_at_a_time_and_only_below_the_threshold() {
     assert_eq!(repairs(&out), [2, 3]);
     let out = turn(&world, &mut state, &observation(&world, 180, 500, own));
     assert_eq!(repairs(&out), [4]);
+    // A power plant before the dock although the dock has the lower id, and the dock before the tower
+    // that has a lower id still.
+    let (_, mut state) = rig();
+    let own = vec![
+        structure(&world, 0, CENTRE),
+        damaged(structure(&world, 1, TOWER), 100),
+        damaged(structure(&world, 2, REFINERY), 100),
+        damaged(structure(&world, 3, PLANT), 100),
+    ];
+    let out = turn(&world, &mut state, &observation(&world, 100, 500, own));
+    assert_eq!(repairs(&out), [3, 2]);
     // The dock before the rest, whatever the ids: tower 1, dock 2.
     let (_, mut state) = rig();
     let own = vec![
