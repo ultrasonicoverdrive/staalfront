@@ -2992,10 +2992,16 @@ First half of WP9.1c (split in two, PLAN.md phase 9). Rules, numbers and measure
   step). Scenario `ai_scout` on its own frozen `ai_scout_defs/`, in the CI headless list. `tools/sf_headless/tests/ai_production.rs`: 36 tests.
 - **Measured** (release, this container; every number is printed by its test). Scout queued at tick 1,100, first leg 1,270, the enemy construction centre in
   the AI's memory at **2,351**, the scout within 3 cells of the site at 2,439, the other legs at 2,470, 3,190, 3,870, 4,870; without a scout the memory never holds
-  it (20,000 ticks). **The first army unit is queued at tick 15,700 on M1's 4,000 credits**: the last structure of the list of ten entries is ordered at tick 15,650 and production
-  holds back the next goal's price; the army at the gather cell is 0, 0, 0, 1, 4 at ticks 4,000, 8,000, 12,000, 16,000, 20,000. With the `reserve` alone as the holdback (an
+  it (20,000 ticks). **The first army unit is queued at tick 15,020 on M1's 4,000 credits (`ai_scout`; 17,867 in the game seat `m1_ai`)**: the last structure of the list of ten entries is ordered at tick 14,610 and production
+  holds back the next goal's price; the army at the gather cell is 0, 0, 0, 2, 10 at ticks 4,000, 8,000, 12,000, 16,000, 20,000. With the `reserve` alone as the holdback (an
   experiment, reverted) there are 7 army units at tick 2,000 and 31 at 20,000, and the AI never builds a vehicle factory. That trade-off is Tijmen's to settle
   before WP9.1c-2's attack timing (`first_attack_tick` 2,400) can mean anything on M1. At most 6 commands in any 1,000 ticks over 20,000 and over 40,000 ticks.
+- **Fix round 1 (sweep of 12-11-2026).** Gather cell kept free of own placement (3 x 3) and worked out again when a known or own structure stands on it; a scout the match
+  starts with counts as the first (and production does not wait for one); an order is accepted when the factory's queue of the kind grew or a unit came out, never by the live
+  count (a death in the 40 ticks is no refusal; an accepted scout is never taken back); no rally point on a factory that makes harvesters (15 percent of the ore, measured);
+  the army timing measured in the game seat `m1_ai` (last goal structure 17,817, first army unit 17,867, army at the gather cell 0, 0, 0, 0, 2 at 4000 to 20000);
+  `SetRally` and `Move` are asserted to occur in `m1_ai`; the scout costs the list 1,960 ticks (14,610 against 12,650). The frozen-profile proof is "mix on, checksums move" plus
+  unchanged `.expected` files, not "manager off, old values back".
 - **Re-pinned.** The AI digests of all seven older AI scenarios (profile numbers and state layout); their checksums did not move. The frozen profiles got
   `unit_mix: []` (a deliberate edit of the frozen copies, noted at the top of each file); measured cause: with the old mix put back each ends on another
   checksum (table in `ai.md`).

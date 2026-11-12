@@ -388,17 +388,22 @@ machine, but that is not proven: the 1 ms worst think is a printed measurement a
 (`Profile::makes_units()` false) for a profile with an empty `unit_mix` and no scout: the frozen profiles of the WP9.1b scenarios, whose
 checksums therefore stay what they were. Three steps in order:
 
-1. **Verify.** `units_sent` holds, per unit order of the last turn (ascending by factory id), `(factory, kind, tick, how many of the kind the
-   player had, own units plus queue items, before the order)`. When the player does not have more of the kind now, the simulation refused
-   the order (a prerequisite, the queue limit, a factory sold meanwhile), and the kind goes into `blocked_until` for `blocked_ticks`; a
-   refused scout is also taken back from `scouts_sent`. (A unit of the kind that died within the 40 ticks looks like a refusal and costs
-   the kind 600 ticks: accepted, not measured.)
-2. **Rally** (P1). Every complete factory (barracks, vehicle factory, ...; `Own.factory` with no record counts as "no rally point") whose
+1. **Verify.** `units_sent` holds, per unit order of the last turn (ascending by factory id), `(factory, kind, tick, how many units of the kind
+   the player had, how many items of the kind that factory had queued, both before the order)`. The order was **accepted** when that factory has more items
+   of the kind queued now, or the player has more units of the kind (the item came out within the 40 ticks). Otherwise the simulation refused it (a
+   prerequisite, the queue limit, a factory sold meanwhile) and the kind goes into `blocked_until` for `blocked_ticks`; a refused scout is also taken back
+   from `scouts_sent`. A unit that died meanwhile is neither a refusal nor an acceptance (the first version compared the live count of the kind and read a
+   death as a refusal: 600 ticks blocked, and a third scout possible). An accepted scout is never taken back, so `scouts_max` is a hard cap on scouts that
+   entered a queue (`an_order_whose_kind_lost_a_unit_meanwhile_is_not_read_as_refused`, `a_scout_that_entered_a_queue_is_never_taken_back`). A weak
+   spot left: a refused order is read as accepted when another unit of the kind comes out in the same 40 ticks.
+2. **Rally** (P1). Every complete factory **that makes no harvester** (barracks, ...; `Own.factory` with no record counts as "no rally point") whose
    rally point is not the gather cell gets one `SetRally { factory, cell: Some(gather) }`; `rally_backoff[factory] = now + blocked_ticks`
    holds it back until the observation shows the point, the factory is gone or the time is up. The gather cell is
    [`army::ensure_gather`](#the-gather-cell). The sim sends each new unit (the free harvester of a refinery excepted) to the rally point with
-   `Order::Move`; a harvester bought through the queue goes there too and mines on from there (`ai_scout`: the delivered ore rises in every window
-   of 2,000 ticks, 200 to 1,600; not compared with a run without the rally point, which the AI cannot be told to leave out: the ore field lies beside the gather cell).
+   `Order::Move`; **the vehicle factory gets none**: a harvester sent to the gather cell first mines later, measured on `ai_scout` by forcing the point on
+   the vehicle factory by hand (a scripted `SetRally` at tick 2,100): 8,330 ore delivered in 20,000 ticks against 9,800 with the AI's rule, 15 percent less, so the rule
+   (decision of the orchestrator: more than 10 percent, no rally on a factory that can make a harvester) is in force (`a_rally_point_on_the_vehicle_factory_costs_ore_so_the_ai_gives_it_none`).
+   Units from such a factory stand at its exit until the gathering rule of the army turn (idle, farther than `gather_radius`) orders them to the cell.
 3. **Queue** (P3). One unit at a time, until nothing can be queued:
    * **Economy first.** Nothing while `economy::harvester_wanted` (fewer harvesters, queued ones included, than standing docks times
      `harvesters_per_refinery`, and a factory, ore on the map and the kind not blocked: the economy turn, which runs one think earlier in the rotation, buys it). An emergency build stalled for lack of money needs no check of its own: it is stalled only with no free credit at all.
@@ -414,23 +419,26 @@ checksums therefore stay what they were. Three steps in order:
      **no goal entry open** (`base::goal_open`: some `(kind, count)` of the build list has fewer than `count` standing or going up, blocked
      or not); else the `reserve` (300) plus **what the construction turn is saving for** (`base::next_build`: its choice and the power rule,
      priced as step (5) of the construction turn does, `base::saving_for`: the price, or what the stores can hold at `silo_percent` when that
-     is less). So production and construction read the same stateless `budget::free`, a queued unit is booked once, and units cannot starve
-     the goal list. **The scout is held back by the `reserve` alone** (not by the next goal's price: it has to go while the list is open, and
-     400 credits delay the list a little); with no goal open nothing is held back.
+     is less). So production and construction read the same stateless `budget::free`, a queued unit is booked once, and **units of the mix cannot starve
+     the goal list**. **The scout is held back by the `reserve` alone** (not by the next goal's price: it has to go while the list is open); it
+     does cost the list: measured on `ai_scout`, the last goal structure is ordered at tick 14,610 with the scout and 12,650 without
+     (`what_the_scouts_400_credits_cost_the_goal_list`), 1,960 ticks. With no goal open nothing is held back.
 
 Decisions this follows (Tijmen, 12-11-2026, the orchestrator's recommendations): a dedicated `scout` unit (400 credits), one per match and at
 most one replacement; production holds back the price of the next goal entry, not just `reserve`.
 
 **Measured, and the consequence** (`ai_scout`, M1's map and credits: 4,000, release): the list of ten entries (7,700 credits of structures at list
-prices, a third power plant by the power rule, two more harvesters of 1,100) has its last structure ordered at **tick 15,650** (eleven builds, at 10, 250, 810,
-1,090, 1,410, 7,090, 9,890, 12,410, 13,490, 14,530, 15,650), so with the holdback the first army unit is queued at **tick 15,700** and the army at the gather cell is 0, 0, 0, 1, 4
-at ticks 4,000, 8,000, 12,000, 16,000, 20,000. The same AI with the goal price left out of the holdback (the `reserve` alone, an experiment,
+prices, a third power plant by the power rule, two more harvesters of 1,100) has its last structure ordered at **tick 14,610**, so with the holdback the first army unit is queued at **tick 15,020** and the army at the gather cell is 0, 0, 0, 2, 10
+at ticks 4,000, 8,000, 12,000, 16,000, 20,000. **In the real game seat** (`m1_ai`, the AI as player 1, `the_army_timing_in_the_game_seat` in `sf_game`): last goal
+structure at **17,817**, first army unit at **17,867**, army at the gather cell 0, 0, 0, 0, 2 at the same ticks (one rally point, the barracks'; the first measurements of this section, 15,650 and 15,700,
+were taken before the vehicle factory lost its rally point and are superseded). The same AI with the goal price left out of the holdback (the `reserve` alone, an experiment,
 reverted) buys a rifleman at 1,140, has 7 army units at the gather cell at tick 2,000 and 31 at 20,000, and **builds no vehicle factory**: no tank and
 one harvester (the free one of the first refinery) at tick 20,000, because every credit above 300 goes into infantry. So the decision
-(hold the goal's price back) is what keeps the base growing, and it is also why there is no army for the first 15,000 ticks on a 4,000-credit
+(hold the goal's price back) is what keeps the base growing, and it is also why there is no army for the first 15,000 to 18,000 ticks on a 4,000-credit
 start. (This is the cost of the order of the list, which puts two refineries, a vehicle factory, two towers, a radar and the advanced defences before any
-unit.) **WP9.1c-2's attack timing (`first_attack_tick` 2,400, `max_wait` 3,600, `min_units` 4) will see no army before tick 15,700 on M1 with
-this profile**; shortening the goal list for the opening or letting the army have a share of the income is a decision for Tijmen, not made here.
+unit.) **WP9.1c-2's attack timing (`first_attack_tick` 2,400, `max_wait` 3,600, `min_units` 4) will see no army before tick 15,020 (`ai_scout`) or 17,867 (`m1_ai`) with
+this profile**. Decision of the orchestrator, built in WP9.1c-2: an **army floor** (`army_floor_value`, start value 1,000): below it production holds back only the `reserve`; the army value is
+the cost of the own army units, the queued mix items and what this turn has ordered already.
 
 ## The army in WP9.1c-1
 
@@ -519,11 +527,11 @@ Measured (`tools/sf_headless/tests/ai_production.rs`, every number printed by it
 | the scout stands within 3 cells of the start site | 2,439 |
 | the other four legs are ordered | 2,470, 3,190, 3,870, 4,870 |
 | the first harvester is queued (the vehicle factory stands), and the vehicle factory gets its rally point | 2,080, 2,100 |
-| the last structure of the goal list is ordered | 15,650 |
-| the first army unit is queued | **15,700** |
+| the last structure of the goal list is ordered | 14,610 |
+| the first army unit is queued | **15,020** |
 
 Without a scout (`scouts_max` 0) the memory never holds the enemy centre in 20,000 ticks (nothing else leaves the base, the army only
-gathers), and no `Order` is sent at all. A scout lost at tick 3,000 is replaced at **8,060** (`scout_retry` 3,000 puts it after 6,000; the
+gathers), and no `Order` goes anywhere but to the gather cell. A scout lost at tick 3,000 is replaced at **7,980** (`scout_retry` 3,000 puts it after 6,000; the
 money decides the rest: free credits stay at 0 while the goal list spends everything, and the scout needs the reserve and its 400), the
 replacement is sent to leg 0 again, and with the second one lost as well nothing is bought again (`scouts_max` 2).
 
@@ -648,7 +656,7 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
 
 * **WP9.1c-2**: attacks, the defence posture, the attack timing and target, marching and finishing, `ai_vs_passive`, `ai_raid`. Defences are placed
   only towards the other players' start sites.
-* **WP9.1c-1 gaps.** No army before tick 15,700 on M1's credits (see "Production"; a decision for Tijmen). A scout that dies on the way is replaced once
+* **WP9.1c-1 gaps.** No army before tick 15,020 (`ai_scout`) or 17,867 (`m1_ai`) on M1's credits (see "Production"; the army floor of WP9.1c-2 answers it). A scout that dies on the way is replaced once
   and not told where it died; the scenario's enemy has no gun, so a scout under fire is not run. The gather cell is not checked for a route from
   the base (no `plan_route`): a cell behind rock shows only as units idle far away, which are ordered `gather_tries` times and then left. A unit of
   the mix that dies within the 40 ticks after its order looks like a refused order and blocks its kind for `blocked_ticks`. The army does not

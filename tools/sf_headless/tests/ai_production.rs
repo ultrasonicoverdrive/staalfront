@@ -1934,3 +1934,22 @@ fn a_scout_that_entered_a_queue_is_never_taken_back() {
     production_turn(&world, &mut s2, &obs);
     assert_eq!((s2.scouts_sent, s2.blocked_until.len()), (1, 0));
 }
+
+#[test]
+fn what_the_scouts_400_credits_cost_the_goal_list() {
+    // Measured, `ai_scout`: the tick of the last structure of the goal list with the scout and without one.
+    let last_build = |s: &Scenario| {
+        let f = go(s, s.ticks);
+        *sent(&f, |c| matches!(c, Command::BuildStructure { .. }))
+            .last()
+            .unwrap()
+    };
+    let with = last_build(&load("ai_scout"));
+    let without = last_build(&with_profile(load("ai_scout"), |p| p.army.scouts_max = 0));
+    println!("last goal structure ordered at {with} with the scout, at {without} without");
+    assert_eq!(with, LIST_DONE_TICK);
+    assert_eq!((with, without), (LIST_WITH_SCOUT, LIST_WITHOUT_SCOUT));
+}
+
+const LIST_WITH_SCOUT: u64 = 14_610;
+const LIST_WITHOUT_SCOUT: u64 = 12_650;

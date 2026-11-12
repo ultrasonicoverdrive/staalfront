@@ -138,7 +138,7 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
         "ai_economy.ron",
         "ai_rebuild.ron",
         // WP9.1c-1: production, rally points, the scout (long enough for the scout's legs; the army exists
-        // only from tick 15,700, `what_one_production_turn_and_one_army_turn_cost_on_their_own` has it).
+        // only from tick 15,020, `what_one_production_turn_and_one_army_turn_cost_on_their_own` has it).
         "ai_scout.ron",
     ] {
         let alone = measure(&Scenario::load(&scenario_path(name)).unwrap(), long);

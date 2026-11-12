@@ -6,7 +6,8 @@
 //! (1) **Verify.** The unit orders sent at the last turn (`units_sent`) must have raised the player's count of
 //!    their kind (own units plus queue items): if not, the simulation refused them, and the kind goes into
 //!    `blocked_until` for `blocked_ticks` (a refused scout is taken back from `scouts_sent`).
-//! (2) **Rally** (P1). Every complete factory that makes no harvester and whose rally point is not the gather cell gets one `SetRally`;
+//! (2) **Rally** (P1). Every complete factory that makes no harvester and whose rally point is not the
+//!    gather cell gets one `SetRally`;
 //!    the observation (`OwnFactory.rally`) says whether it took, and a factory asked is left alone for
 //!    `blocked_ticks` (`rally_backoff`).
 //! (3) **Queue** (P3). Nothing while a harvester is wanted ([`economy::harvester_wanted`]; the economy comes
@@ -266,7 +267,7 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
         };
         let price = u64::from(lens.unit_cost(kind).unwrap_or(0));
         // The scout (once per match, and a replacement) is held back by the reserve only: it must go while the
-        // goal list is still open, which is when it is useful, and 400 credits delay the list by little.
+        // goal list is still open, which is when it is useful, (it delays the list by 1,960 ticks on `ai_scout`, measured).
         let held = if index.is_none() { reserve } else { holdback };
         if free < held + price {
             return;
