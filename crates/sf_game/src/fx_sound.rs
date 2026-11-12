@@ -1202,7 +1202,7 @@ mod tests {
 
     /// A heavy moment: four kinds on one tick at one spot (a cannon shot and its hit, a rocket, a medium explosion)
     /// must not clip. Measured and written down in `audio.md` (gaps): eight kinds on one tick at one spot sum to
-    /// about 1.13 and all 18 to about 1.37, which would clip; the game does not produce that.
+    /// about 1.13 and all 18 to about 1.37, which would clip; not seen in the tested fights (open item in `audio.md`).
     #[test]
     fn a_heavy_moment_of_four_kinds_does_not_clip() {
         let four = [

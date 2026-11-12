@@ -818,8 +818,8 @@ impl AudioSystem {
     // ---- helpers ----------------------------------------------------------
 
     /// The definition and file for a name: a mapped Red Alert sound first
-    /// (with the bank's volume and category when the event has one), else
-    /// the bank.
+    /// (with the bank's volume and category when the event has one, unless
+    /// that entry is `original_as_is`), else the bank.
     fn resolve(&mut self, name: &str) -> Option<(SoundDef, PathBuf)> {
         if let Ra::Ready { events, .. } = &self.ra
             && events.contains(name)

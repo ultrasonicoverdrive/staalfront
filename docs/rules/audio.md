@@ -120,7 +120,7 @@ bytes are the same on every platform. Nothing is sampled from or made to imitate
   peak (26000 of 32767), so **the loudness of an event is its bank `volume`** (0.125 to 0.35), not the file.
 * **A mapped original plays as it did before this WP** (sweep of PR #122): the 18 bank entries carry `original_as_is: true`, so a Red Alert sound that replaces the event plays with volume 1.0, no pitch spread and the default voice cap, **not** with the bank's volume, pitch spread and `max_instances`, which are tuned for the CC0 file. Without that flag `resolve` would give a mapped original the bank entry's 0.125 to 0.35 and its cap. Other bank entries (`ui.click`) keep handing their volume and category to a mapped original as before. Test `the_original_wins_where_mapped_and_the_cc0_fight_sound_plays_otherwise` checks the resolved definition and the traced gain of all 18 (mapped: volume 1.0, pitch spread 0, cap 8; unmapped: the bank's).
 * **Precedence**: unchanged, `AudioSystem::resolve`: with the original audio on and the event mapped in `ra_mapping.ron` the Red Alert
-  sound plays (with the bank's volume and category), otherwise the CC0 sound. The four events Red Alert has no sound for
+  sound plays (with the bank's volume and category, unless the entry is `original_as_is`, as all 18 fight entries are), otherwise the CC0 sound. The four events Red Alert has no sound for
   (`weapon.fire.demolition`, `impact.bullet`, `impact.precision`, `impact.miss`) play the CC0 sound also with `--ra-audio`.
 * **Volume**: the mixed peak of a 20-tank fight at the default settings is 0.466 of full scale, below the music (`music_volume`
   0.6, peak at most 0.6); see `a_20_tank_fight_is_not_louder_than_the_music`. The positional and zoom rules (section 1 and 2) and the
@@ -155,7 +155,7 @@ and trace), `a_20_tank_fight_is_not_louder_than_the_music`; `sf_audio` `the_orig
 
 ## 4. Gaps
 
-* Clipping (WP11.3b, measured by `a_heavy_moment_of_four_kinds_does_not_clip`): four kinds on one tick at one spot peak at 0.485, **eight kinds at 1.13 and all 18 at 1.37 of full scale, which would clip**; the game does not produce that (merge and the cue limits thin real fights, a 20-tank volley on one tick is 0.238, a staggered 20-tank fight 0.466). No limiter exists; if a real fight ever clips, lower the volumes or add one.
+* Clipping (WP11.3b, measured by `a_heavy_moment_of_four_kinds_does_not_clip`): four kinds on one tick at one spot peak at 0.485, **eight kinds at 1.13 and all 18 at 1.37 of full scale, which would clip**; that was not seen in the tested fights (merge and the cue limits thin real fights, a 20-tank volley on one tick is 0.238, a staggered 20-tank fight 0.466). No limiter exists and nothing proves a mixed fight cannot reach eight kinds on one tick (`max_cues_per_frame` is 16 and different names do not merge): open item, lower the volumes or add a limiter if a real fight clips.
 * Fight sounds (WP11.3b): the bank has one file per event, no variants (the bank format has one file per name), so the only
   variety is `pitch_variation`. Nobody could listen in the build container: the volumes come from a measured mix, the character
   of each sound from the table in 3c above; Tijmen to listen, `weapon.fire.demolition` (two ticks and a rising beep) first, for any likeness to a Red Alert sound (B11). The sim has no event for a structure being hit, so there is no such sound.
