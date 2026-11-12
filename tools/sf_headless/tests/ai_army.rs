@@ -1488,9 +1488,17 @@ fn a_hidden_raider_beside_the_raided_plant_changes_nothing_until_it_is_seen() {
             rig_world.terrain().flags_at(c).is_some_and(|f| f.ground)
                 && base_run.world.visibility(P0, c) != Visibility::Visible
         })
-        .max_by_key(|&(x, y)| (x.abs_diff(19).max(y.abs_diff(61)), std::cmp::Reverse((y, x))))
+        .max_by_key(|&(x, y)| {
+            (
+                x.abs_diff(19).max(y.abs_diff(61)),
+                std::cmp::Reverse((y, x)),
+            )
+        })
         .expect("a fogged cell beside the plant");
-    assert!(near.0 + 8 >= 18 && near.0 < 28 && near.1 + 8 >= 60 && near.1 < 70, "{near:?}");
+    assert!(
+        near.0 + 8 >= 18 && near.0 < 28 && near.1 + 8 >= 60 && near.1 < 70,
+        "{near:?}"
+    );
     let far = ground(86..94, 2..8);
     let s = with_extra(near);
     // Seen: the cell the extra rifleman stands in (it may move) is visible to player 0.
