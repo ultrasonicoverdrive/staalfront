@@ -15,7 +15,7 @@
 //!   apron on the map, open ground, visible and free of structures.
 //! * **Refused.** `(kind, cell)` pairs the simulation refused recently are left out.
 //! * **Score**, lowest first, ties by `(y, x)`, squared distances in half cells: a refinery by its exit
-//!   cell to the nearest ore ground of the map (terrain, listed once in `AiState::ore_cells`); a defence by
+//!   cell to the nearest ore ground of the map (terrain, listed again at every search); a defence by
 //!   its middle to the nearest start site of another player; everything else by its middle to the middle of
 //!   the nearest own anchor. Without ore or other sites the anchor rule applies.
 //! * **Preview.** Best first, at most `placement_cap` questions; a `Some(Err)` goes into `refused`; the
@@ -127,11 +127,9 @@ fn cell(x: i64, y: i64) -> Cell {
     Cell::new(x as u32, y as u32)
 }
 
-/// Lists the ore ground round the anchors once (map knowledge, the terrain only).
-fn ore_cells(state: &mut AiState, lens: &Lens<'_>, anchors: &[Anchor], map: (i64, i64)) {
-    if state.ore_cells.is_some() {
-        return;
-    }
+/// The ore ground round the anchors (map knowledge, the terrain only), ascending by (y, x). Listed again at
+/// every search, so it follows the anchors the player has now (a few thousand terrain lookups).
+fn ore_cells(lens: &Lens<'_>, anchors: &[Anchor], map: (i64, i64)) -> Vec<Cell> {
     let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
     for &(ax, ay, aw, ah, r) in anchors {
         x0 = x0.min(ax - r - ORE_MARGIN);
@@ -147,7 +145,7 @@ fn ore_cells(state: &mut AiState, lens: &Lens<'_>, anchors: &[Anchor], map: (i64
             }
         }
     }
-    state.ore_cells = Some(cells);
+    cells
 }
 
 fn nearest(from: (i64, i64), to: impl Iterator<Item = (i64, i64)>) -> Option<u64> {
@@ -174,7 +172,6 @@ pub fn search(
     if anchors.is_empty() || w > map.0 || h > map.1 {
         return None;
     }
-    ore_cells(state, lens, &anchors, map);
 
     // The window of anchor cells.
     let (mut wx0, mut wy0, mut wx1, mut wy1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
@@ -273,10 +270,7 @@ pub fn search(
         .iter()
         .map(|&(ax, ay, aw, ah, _)| (2 * ax + aw, 2 * ay + ah))
         .collect();
-    let ore: Vec<(i64, i64)> = state
-        .ore_cells
-        .as_deref()
-        .unwrap_or(&[])
+    let ore: Vec<(i64, i64)> = ore_cells(lens, &anchors, map)
         .iter()
         .map(|c| (2 * i64::from(c.x) + 1, 2 * i64::from(c.y) + 1))
         .collect();
@@ -321,14 +315,27 @@ pub fn search(
     candidates.sort_unstable();
 
     // The previews, best first.
+    // The resumption: a search that used up its questions starts the next one after them, so a kind whose
+    // first `placement_cap` candidates all fail reaches the ones behind (its refusals expire with its block,
+    // so the list is the same again). Back to the start when the list is shorter.
     let cap = state.profile.economy.placement_cap as usize;
     let later = Tick(obs.tick.0 + u64::from(e.blocked_ticks));
-    for &(_, y, x) in candidates.iter().take(cap) {
+    let skip = state.resume.get(&kind).map_or(0, |&n| n as usize);
+    let skip = if skip >= candidates.len() { 0 } else { skip };
+    for &(_, y, x) in candidates.iter().skip(skip).take(cap) {
         match lens.placement(kind, cell(x, y)) {
-            Some(Ok(())) => return Some(cell(x, y)),
+            Some(Ok(())) => {
+                state.resume.remove(&kind);
+                return Some(cell(x, y));
+            }
             Some(Err(_)) => base::refuse(state, kind, cell(x, y), later),
             None => {}
         }
+    }
+    if candidates.len() - skip > cap {
+        state.resume.insert(kind, (skip + cap) as u32);
+    } else {
+        state.resume.remove(&kind);
     }
     None
 }

@@ -16,7 +16,8 @@
 //! (5) **Afford.** The full price is saved first: free credits at least the cost, or at least
 //!    `capacity * silo_percent / 100` when that is less (the store cannot hold more). An emergency starts
 //!    unfunded: a refinery when none stands or goes up, a power plant when less power is made than used.
-//!    With no harvester at all and a refinery standing, a normal build also keeps the price of a harvester.
+//!    With no harvester at all and a refinery standing, a normal build also needs its full price plus a
+//!    harvester's (not capped: the memo's rule).
 //! (6) **Place** ([`crate::placement::search`]). Found: `BuildStructure` is sent and latched. Nothing
 //!    fits: the kind is blocked for `blocked_ticks` and the next entry gets its turn next time.
 
@@ -47,8 +48,7 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     state.blocked_until.retain(|_, until| *until > now);
 
     // (2) The parallel cap.
-    let going_up = obs.own.iter().filter(|o| o.building.is_some()).count()
-        + usize::from(state.pending_build.is_some());
+    let going_up = obs.own.iter().filter(|o| o.building.is_some()).count();
     if going_up >= usize::from(state.profile.economy.max_parallel_builds) {
         return;
     }
@@ -96,14 +96,12 @@ pub fn refuse(state: &mut AiState, kind: Kind, cell: sf_sim::Cell, until: Tick) 
     }
 }
 
-/// How many of `kind` the player has standing or going up, and the latched build (always cleared by the
-/// verify step before this is asked; counted so that a turn without the verify stops instead of sending twice).
-fn have(state: &AiState, obs: &Observation, kind: Kind) -> usize {
+/// How many of `kind` the player has standing or going up.
+fn have(obs: &Observation, kind: Kind) -> usize {
     obs.own
         .iter()
         .filter(|o| o.kind == kind && o.footprint.is_some() && (o.standing || o.building.is_some()))
         .count()
-        + usize::from(state.pending_build.is_some_and(|(k, _, _)| k == kind))
 }
 
 /// The kinds of the player's standing structures, ascending.
@@ -136,7 +134,7 @@ fn choose(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Kind> {
         .build_order
         .iter()
         .find(|&&(kind, count)| {
-            have(state, obs, kind) < usize::from(count)
+            have(obs, kind) < usize::from(count)
                 && !blocked(state, kind, obs.tick)
                 && requirements_stand(lens, kind, &standing)
         })
@@ -242,7 +240,16 @@ fn affordable(
     if emergency {
         return true;
     }
-    let mut need = u64::from(b.cost.unwrap_or(0));
+    let cost = u64::from(b.cost.unwrap_or(0));
+    let free = budget::free(obs, lens);
+    // The full price, or what the store can hold when that is less.
+    let mut need = cost;
+    if obs.storage_capacity > 0 {
+        need = need.min(obs.storage_capacity * u64::from(state.profile.economy.silo_percent) / 100);
+    }
+    if free < need {
+        return false;
+    }
     let harvesters = lens.harvester_kinds();
     let have_harvester = obs.own.iter().any(|o| {
         harvesters.contains(&o.kind)
@@ -250,14 +257,13 @@ fn affordable(
                 .as_ref()
                 .is_some_and(|f| f.queue.iter().any(|(k, _)| harvesters.contains(k)))
     });
+    // The harvester reserve: the price and a harvester's, not capped (design memo section 2, step 5).
     if !have_harvester && has_function(obs, lens, BuildingFunction::HarvesterDock, true) {
-        need += harvesters
+        let harvester = harvesters
             .iter()
             .find_map(|&h| lens.unit_cost(h))
             .map_or(0, u64::from);
+        return free >= cost + harvester;
     }
-    if obs.storage_capacity > 0 {
-        need = need.min(obs.storage_capacity * u64::from(state.profile.economy.silo_percent) / 100);
-    }
-    budget::free(obs, lens) >= need
+    true
 }

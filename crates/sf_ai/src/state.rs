@@ -61,9 +61,9 @@ pub struct AiState {
     /// `(kind, anchor cell)` the simulation refused (a preview that said no, or a sent build that does
     /// not stand), and the tick from which it may be tried again; at most [`REFUSED_CAP`] entries.
     pub refused: BTreeMap<(Kind, Cell), Tick>,
-    /// The ore ground near the base (terrain: map knowledge), ascending by (y, x); listed at the first
-    /// construction turn with an anchor, `None` before.
-    pub ore_cells: Option<Vec<Cell>>,
+    /// Per kind, how many candidates the next search skips: the ones the last search asked about without
+    /// a yes (`docs/rules/ai.md`, "Placement", the resumption).
+    pub resume: BTreeMap<Kind, u32>,
     /// Placement questions passed on to the simulation in all its thinks.
     pub previews: u64,
 }
@@ -91,7 +91,7 @@ impl AiState {
             pending_build: None,
             blocked_until: BTreeMap::new(),
             refused: BTreeMap::new(),
-            ore_cells: None,
+            resume: BTreeMap::new(),
             previews: 0,
         }
     }
@@ -156,16 +156,10 @@ impl AiState {
             h.write_u32(cell.y);
             h.write_u64(until.0);
         }
-        match &self.ore_cells {
-            Some(cells) => {
-                h.write_u8(1);
-                h.write_u32(cells.len() as u32);
-                for c in cells {
-                    h.write_u32(c.x);
-                    h.write_u32(c.y);
-                }
-            }
-            None => h.write_u8(0),
+        h.write_u32(self.resume.len() as u32);
+        for (kind, n) in &self.resume {
+            h.write_u32(u32::from(kind.0));
+            h.write_u32(*n);
         }
         h.write_u64(self.previews);
         h.finish()
@@ -202,7 +196,8 @@ mod tests {
         s.blocked_until.insert(Kind(4), Tick(900));
         s.refused.insert((Kind(1), Cell::new(9, 68)), Tick(610));
         s.refused.insert((Kind(1), Cell::new(9, 72)), Tick(650));
-        s.ore_cells = Some(vec![Cell::new(24, 66), Cell::new(25, 66)]);
+        s.resume.insert(Kind(2), 32);
+        s.resume.insert(Kind(4), 64);
         s.previews = 7;
         s
     }
@@ -226,8 +221,12 @@ mod tests {
             |s| {
                 s.refused.remove(&(Kind(1), Cell::new(9, 72)));
             },
-            |s| s.ore_cells = None,
-            |s| s.ore_cells = Some(vec![Cell::new(24, 66)]),
+            |s| {
+                s.resume.remove(&Kind(2));
+            },
+            |s| {
+                s.resume.insert(Kind(4), 65);
+            },
             |s| s.previews += 1,
         ];
         for (i, change) in changes.iter().enumerate() {
