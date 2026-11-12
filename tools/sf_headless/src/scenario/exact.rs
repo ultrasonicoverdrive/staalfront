@@ -140,6 +140,10 @@ pub enum ExactCommand {
         factory: (u32, u32),
         cell: Option<(u32, u32)>,
     },
+    SetRepeat {
+        factory: (u32, u32),
+        on: bool,
+    },
     Repair {
         structure: (u32, u32),
         on: bool,
@@ -233,6 +237,10 @@ impl ExactCommand {
                 factory: id(*factory),
                 cell: c.map(cell),
             },
+            Command::SetRepeat { factory, on } => ExactCommand::SetRepeat {
+                factory: id(*factory),
+                on: *on,
+            },
             Command::Repair { structure, on } => ExactCommand::Repair {
                 structure: id(*structure),
                 on: *on,
@@ -309,6 +317,10 @@ impl ExactCommand {
             ExactCommand::SetRally { factory, cell } => Command::SetRally {
                 factory: entity(*factory),
                 cell: cell.map(to_cell),
+            },
+            ExactCommand::SetRepeat { factory, on } => Command::SetRepeat {
+                factory: entity(*factory),
+                on: *on,
             },
             ExactCommand::Repair { structure, on } => Command::Repair {
                 structure: entity(*structure),

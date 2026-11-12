@@ -3135,3 +3135,35 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 | `explosion.small` | `explosion_small.wav` | 0.8 s | small explosion, no tail |
 | `explosion.medium` | `explosion_medium.wav` | 1.2 s | medium explosion with a rumbling tail |
 | `explosion.large` | `explosion_large.wav` | 2 s | large explosion (80 to 26 Hz), long rumble |
+
+### WP6.10 notes: the repeat toggle per factory ("herhaalknop", 11-11-2026)
+
+* **Done.** `Command::SetRepeat { factory, on }` (tag 18), `repeat: bool` per factory record (`FactoryView::repeat`), the loop in
+  `advance_production` pass 2 (a finished, non-free item is pushed at the back of its queue when the copy passes the checks of a new
+  `QueueUnit`), refusals as `SetRally`. Headless: `Action::SetRepeat`, `ExactCommand::SetRepeat` (so `--record` files carry it), the
+  scenario `production_repeat` (in the CI list). UI: the Loop button in the Repair/Sell row (primary factory of the open tab, lit when on)
+  and a loop sign on queued items; no key. Rules: `rules/production.md` "Repeat", `rules/sidebar.md` "The loop button".
+* **Pins.** None moved, on purpose. The flag is added to the tag byte of the rally point (+2 while repeating), so a world where no factory
+  repeats hashes as before: `cargo test --workspace` (golden.rs and every pinned test) green and all 34 scenarios of the CI list (33 old + the new one) match their
+  `.expected` in release (`production`, `command_mix`, `wander_5000`, `terrain_256`, `units_spawn` included). New pin: `production_repeat`
+  `0xd6f33f0ad1c56117`.
+* **Measured, not assumed.** A queue-full check on the copy is kept but is never the one that stops a copy (the finished item has left
+  first, so there is always room): a mutation that removed it changed no test, so it is a guard and the docs say so. The mutation that does
+  break the limit (pushing two copies) fails four tests.
+* **Mutations (each reverted).** repeat ignored: 4 tests of `tests/production.rs` fail; flag not hashed:
+  `the_repeat_flag_is_part_of_the_checksum_...`; free item repeated: `the_free_harvester_is_never_repeated`; two copies pushed:
+  `a_full_queue_on_repeat_never_passes_the_limit_...` and 3 more; cancelled item pushed back: `a_cancelled_item_does_not_come_back`;
+  enemy factory accepted: `a_repeat_is_refused_for_what_is_not_the_senders_standing_factory`; tag 18 -> 19:
+  `set_repeat_has_the_permanent_tag_18_in_the_pending_hash`; click does not flip: two sidebar tests; loop sign never set: the sidebar test;
+  `ExactCommand` converts `on` as true: `every_command_round_trips`.
+* **Screenshots** `docs/screenshots/wp6.10/`: `sidebar_t00009_repeat_off.png` (Loop dim, no sign) and `sidebar_t00277_repeat_on.png` (Loop
+  lit, "loop" sign on the rifleman, four riflemen out, queue still 2, credits 590).
+* **Not done / gaps.** No key. Performance was not measured: the change is one bool test per finished unit and one more byte per factory
+  in the hash. The loop sign overlaps the first letters of the picture label a little at 1280 x 720 (seen in the screenshot). The AI
+  (`sf_ai`) does not use `SetRepeat`.
+* **Sweep findings fixed (11-11-2026).** `repeatable()` was not reached by its test (the radar went before the item finished): the test now
+  finishes the sniper behind a walled exit first, with a control where the radar stands (mutation "call removed" fails it). The hashed
+  flag was unpinned when a rally point is set: `the_repeat_flag_is_the_plus_two_on_the_rally_tag_in_the_factory_section` pins the tag
+  bytes 0, 1, 2, 3 as literals (mutations "rally branch drops `+ repeat`" and "+2 to +4" fail it). The kind, factory and faction checks
+  and the queue-full check in `repeatable()` are documented as guards that cannot trigger. Repair and Sell are a third of the row wide
+  now (`repair_sell.md`). The scenario count is 34 (33 + new).

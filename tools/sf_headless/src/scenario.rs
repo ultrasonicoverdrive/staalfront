@@ -846,6 +846,13 @@ pub enum Action {
         #[serde(default)]
         cell: Option<(u32, u32)>,
     },
+    /// `Command::SetRepeat` (WP6.10): switch the repeat of `factory` on or off. Needs `production`.
+    SetRepeat {
+        /// The factory.
+        factory: (u32, u32),
+        /// True to repeat, false to let the queue run out.
+        on: bool,
+    },
     /// `Command::Repair` (WP6.6): the player who sends the command starts (`on`) or stops
     /// repairing `structure`, an entity as `(index, generation)`. Needs `repair`.
     Repair {
@@ -1710,7 +1717,9 @@ impl Scenario {
                     id_problems(&at, ids, &mut p);
                 }
                 Action::Despawn { ids } => id_problems(&at, ids, &mut p),
-                Action::QueueUnit { factory, .. } | Action::CancelUnit { factory, .. } => {
+                Action::QueueUnit { factory, .. }
+                | Action::CancelUnit { factory, .. }
+                | Action::SetRepeat { factory, .. } => {
                     if self.production.is_none() {
                         p.push(format!("{at}: production commands need `production`"));
                     }
@@ -2191,6 +2200,13 @@ impl Scenario {
                     let command = Command::SetRally {
                         factory: EntityId::new(factory.0, factory.1),
                         cell: cell.map(|c| Cell::new(c.0, c.1)),
+                    };
+                    world.schedule(tick, player, command).map_err(sim)?;
+                }
+                Action::SetRepeat { factory, on } => {
+                    let command = Command::SetRepeat {
+                        factory: EntityId::new(factory.0, factory.1),
+                        on: *on,
                     };
                     world.schedule(tick, player, command).map_err(sim)?;
                 }

@@ -456,7 +456,10 @@ impl World {
             // The production commands (WP6.5) need to know who sent them too.
             if matches!(
                 command,
-                Command::QueueUnit { .. } | Command::CancelUnit { .. } | Command::SetRally { .. }
+                Command::QueueUnit { .. }
+                    | Command::CancelUnit { .. }
+                    | Command::SetRally { .. }
+                    | Command::SetRepeat { .. }
             ) {
                 return self.apply_production(player, command);
             }

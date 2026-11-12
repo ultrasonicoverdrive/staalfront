@@ -669,9 +669,10 @@ fn the_button_of_the_mode_that_is_on_is_lit_and_the_others_are_not() {
         SIZE,
     );
     assert!(lit(&out.ui).is_empty());
+    // (The repeat button is dim on the structures tab, which has no factory: also at rest.)
     assert_eq!(
         quads_in(&out.ui, color_array(c.tool)),
-        [l.tools[0], l.tools[1]]
+        [l.tools[0], l.tools[1], l.repeat]
     );
     // Sell on: the second button is lit, the first at rest.
     let out = run(
@@ -682,7 +683,10 @@ fn the_button_of_the_mode_that_is_on_is_lit_and_the_others_are_not() {
         SIZE,
     );
     assert_eq!(lit(&out.ui), [l.tools[1]]);
-    assert_eq!(quads_in(&out.ui, color_array(c.tool)), [l.tools[0]]);
+    assert_eq!(
+        quads_in(&out.ui, color_array(c.tool)),
+        [l.tools[0], l.repeat]
+    );
     // Repair on: the first.
     let out = run(
         &f,
@@ -692,4 +696,98 @@ fn the_button_of_the_mode_that_is_on_is_lit_and_the_others_are_not() {
         SIZE,
     );
     assert_eq!(lit(&out.ui), [l.tools[0]]);
+}
+
+#[test]
+fn a_left_press_on_the_repeat_button_flips_the_repeat_of_the_factory_of_the_open_tab() {
+    let f = fixture();
+    let l = lay(&f, SIZE);
+    let (x, y) = l.repeat.center();
+    let mut state = SidebarState::default();
+    // The structures tab has no factory: the button is silent.
+    let none = f.model(&f.situation(Some(1000)), Tab::Structures);
+    assert!(none.repeat.is_none());
+    for button in [MouseButton::Left, MouseButton::Right] {
+        let out = run(&f, &mut state, &none, press(at(x, y), button), SIZE);
+        assert!(out.actions.is_empty());
+    }
+    // The infantry tab: a left press switches the barracks on, and off again once it is on.
+    let mut model = f.model(&f.situation(Some(1000)), Tab::Infantry);
+    let out = run(
+        &f,
+        &mut state,
+        &model,
+        press(at(x, y), MouseButton::Left),
+        SIZE,
+    );
+    assert_eq!(
+        out.actions,
+        [Action::Send(Command::SetRepeat {
+            factory: BARRACKS_SLOT,
+            on: true
+        })]
+    );
+    model.repeat = Some(crate::sidebar::RepeatButton {
+        factory: BARRACKS_SLOT,
+        on: true,
+    });
+    let out = run(
+        &f,
+        &mut state,
+        &model,
+        press(at(x, y), MouseButton::Left),
+        SIZE,
+    );
+    assert_eq!(
+        out.actions,
+        [Action::Send(Command::SetRepeat {
+            factory: BARRACKS_SLOT,
+            on: false
+        })]
+    );
+    // A right press does nothing, and the press is the UI's: no tab changes.
+    let out = run(
+        &f,
+        &mut state,
+        &model,
+        press(at(x, y), MouseButton::Right),
+        SIZE,
+    );
+    assert!(out.actions.is_empty());
+    assert_eq!(state.tab, Tab::Structures);
+}
+
+#[test]
+fn the_repeat_button_is_lit_while_the_factory_repeats() {
+    let f = fixture();
+    let l = lay(&f, SIZE);
+    let c = &f.look.colors;
+    let mut state = SidebarState::default();
+    let mut model = f.model(&f.situation(Some(1000)), Tab::Infantry);
+    let out = run(&f, &mut state, &model, at(10.0, 10.0), SIZE);
+    assert!(quads_in(&out.ui, color_array(c.tool_active)).is_empty());
+    assert!(quads_in(&out.ui, color_array(c.tool)).contains(&l.repeat));
+    model.repeat = Some(crate::sidebar::RepeatButton {
+        factory: BARRACKS_SLOT,
+        on: true,
+    });
+    let out = run(&f, &mut state, &model, at(10.0, 10.0), SIZE);
+    assert_eq!(quads_in(&out.ui, color_array(c.tool_active)), [l.repeat]);
+}
+
+#[test]
+fn an_item_of_a_repeating_factory_wears_the_loop_sign() {
+    let f = fixture();
+    let c = &f.look.colors;
+    let mut state = SidebarState::default();
+    let mut model = f.model(&f.situation(Some(1000)), Tab::Infantry);
+    assert!(model.items.len() >= 2);
+    model.items[0].repeating = true;
+    let l = lay(&f, SIZE);
+    let out = run(&f, &mut state, &model, at(10.0, 10.0), SIZE);
+    // Only the repeating item has the badge, at the top left of its picture (tool_active colour).
+    let lit = quads_in(&out.ui, color_array(c.tool_active));
+    assert_eq!(lit.len(), 1);
+    let slot = l.slot(0);
+    assert!(lit[0].x >= slot.x && lit[0].y >= slot.y && lit[0].right() < slot.right());
 }
