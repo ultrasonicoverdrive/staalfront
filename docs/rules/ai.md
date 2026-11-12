@@ -725,11 +725,26 @@ into view, with the scout (tick 2,110) and without one (tick 7,421, after the fi
 
 ### The game seat (`m1_ai`)
 
-M1_AI_SEAT
+`the_army_timing_in_the_game_seat` (`crates/sf_game/tests/ai_in_game.rs`, the AI as player 1 at (72, 14) with 4,000 credits, the human idle with
+its construction centre only, driven as the sim thread drives it): the first army unit is queued at **1,147** (WP9.1c-1: 17,867), 10 army units at
+the gather cell at tick 4,000, the first wave of **12** leaves at **6,037** (`max_wait`), and **the AI wins at tick 8,396** (the human's centre falls; the
+finishing rule is not needed). The goal list stops at its fourth entry (the second power plant, ordered at 1,097) until then: below the floor the units
+take the money. After the win nothing is sent. Pinned, with the rule-level asserts (first attack not before `first_attack_tick`, at least `min_units`,
+nothing after the match is decided). Pictures: `docs/screenshots/wp9.1c-2/`. In the game a refused AI command is only an `eprintln`; none is sent
+after the end. `the_ai_builds_its_base_in_the_game` re-measured: 4 builds of 3 kinds and 12 units queued by tick 4,000, 5 structures stand.
 
 ### Cost
 
-ARMY_COST
+`ai_perf.rs`, release, this container, load average 0.4 to 1.0. `ai_vs_passive_with_and_without_the_ai_and_the_tick_of_the_launch`: to the win
+(14,700 ticks) **0.42 us per AI per tick, worst think 94 us** (a construction turn); the **step of the tick in which the first wave is launched (tick
+6,030) took 874 us against a mean step of 20 us** (the simulation's planning of one `AttackMove` for 12 units, not the AI's think; the second launch, 5
+units, 16 us); the whole run 47,454 ticks/s with the AI and 82,645 without (medians of 3 alternating runs; without the AI player 0 builds and makes
+nothing, so this bounds the AI and everything it makes, not the think). `what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march`
+(20,000 turns each, the observation of `ai_vs_passive` at tick 4,000 with N riflemen added at the gather cell): 50 units 6.6 us at the launch (worst 74
+us in the first run), 6.6 us on the march; **200 units 24.3 us at the launch, 27.5 us on the march** (worst 499 and 1,467 us: spikes of a shared
+machine). Before the attackers' list was searched by bisection instead of `contains` (first run, same machine, minutes earlier): 7.7 / 8.1 us with 50
+and 45.4 / 48.0 us with 200. A turn every 40 ticks: 200 units cost about 0.7 us per tick. Budget: mean 20 us per AI per tick, worst think 1 ms; the
+assert is 100 us per turn (release).
 
 ### Pins that moved (WP9.1c-2) and why
 

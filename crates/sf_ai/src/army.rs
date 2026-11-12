@@ -250,7 +250,7 @@ pub fn gathered(
     obs.own
         .iter()
         .filter(|o| is_army(state.scout, lens, o) && o.order == Order::Idle)
-        .filter(|o| !state.attackers.contains(&o.id))
+        .filter(|o| state.attackers.binary_search(&o.id).is_err())
         .filter(|o| {
             cheb(o.cell, gather) <= radius
                 || state
@@ -262,11 +262,11 @@ pub fn gathered(
         .collect()
 }
 
-/// What the own units `ids` cost (`Lens::unit_cost`).
+/// What the own units `ids` (ascending) cost (`Lens::unit_cost`).
 pub fn value_of(obs: &Observation, lens: &Lens<'_>, ids: &[EntityId]) -> u64 {
     obs.own
         .iter()
-        .filter(|o| ids.contains(&o.id))
+        .filter(|o| ids.binary_search(&o.id).is_ok())
         .map(|o| u64::from(lens.unit_cost(o.kind).unwrap_or(0)))
         .sum()
 }
@@ -363,7 +363,8 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
         let tgt = target(state, lens, gather);
         if let Some(t) = tgt
             && obs.own.iter().any(|o| {
-                state.attackers.contains(&o.id) && cheb(o.cell, t) <= u32::from(a.arrive_radius)
+                state.attackers.binary_search(&o.id).is_ok()
+                    && cheb(o.cell, t) <= u32::from(a.arrive_radius)
             })
         {
             state.attack_started = now;
@@ -469,7 +470,9 @@ pub fn operations_minimal(
         let ids: Vec<EntityId> = obs
             .own
             .iter()
-            .filter(|o| is_army(state.scout, lens, o) && !state.attackers.contains(&o.id))
+            .filter(|o| {
+                is_army(state.scout, lens, o) && state.attackers.binary_search(&o.id).is_err()
+            })
             .filter(|o| !(o.order == Order::Idle && cheb(o.cell, cell) <= arrive))
             .filter(|o| orderable(state, o, now, state.defend_since))
             .map(|o| o.id)
@@ -482,7 +485,11 @@ pub fn operations_minimal(
     {
         let mut march = Vec::new();
         let mut arrived = Vec::new();
-        for o in obs.own.iter().filter(|o| state.attackers.contains(&o.id)) {
+        for o in obs
+            .own
+            .iter()
+            .filter(|o| state.attackers.binary_search(&o.id).is_ok())
+        {
             if !orderable(state, o, now, None) {
                 continue;
             }
@@ -802,7 +809,9 @@ fn gather_units(
     let scout = state.scout;
     let mut to_send = Vec::new();
     for o in obs.own.iter().filter(|o| {
-        is_army(scout, lens, o) && !state.attackers.contains(&o.id) && !home.contains(&o.id)
+        is_army(scout, lens, o)
+            && state.attackers.binary_search(&o.id).is_err()
+            && home.binary_search(&o.id).is_err()
     }) {
         if cheb(o.cell, gather) <= radius {
             state.sent.remove(&o.id);

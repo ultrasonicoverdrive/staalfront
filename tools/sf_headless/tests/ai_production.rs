@@ -1476,7 +1476,7 @@ fn the_ai_of_ai_scout_sends_only_what_the_list_allows_and_at_a_bounded_rate() {
         }
     }
     assert!(per_turn.values().all(|&n| n <= ARMY_COMMANDS_PER_TURN));
-    assert!(GATHER_COMMANDS_PER_TURN <= ARMY_COMMANDS_PER_TURN);
+    assert_eq!((GATHER_COMMANDS_PER_TURN, ARMY_COMMANDS_PER_TURN), (2, 4));
 }
 
 /// Measured: the most in any window of 1,000 ticks over `ai_scout` is 6, and 6 over its 40,000-tick run; the bound
