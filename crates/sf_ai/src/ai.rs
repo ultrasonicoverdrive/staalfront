@@ -7,12 +7,14 @@
 //! `sf_math::Rng` only), enforced by `scripts/check-sim-determinism.sh`, `clippy.toml` and the float lints
 //! of `Cargo.toml`.
 //!
-//! WP9.1a is the frame: the AI observes, remembers and keeps its schedule, and sends no command yet.
+//! WP9.1a is the frame: the AI observes, remembers and keeps its schedule. WP9.1b-1 adds the first
+//! manager with rules, construction ([`crate::base`]); economy, production and army are still stubs.
 
 use sf_sim::{Cell, Command, PlayerId, Tick};
 
+use crate::base;
 use crate::memory;
-use crate::observe::Observation;
+use crate::observe::{Lens, Observation};
 use crate::profile::Profile;
 use crate::schedule::{self, Manager};
 use crate::state::AiState;
@@ -62,25 +64,39 @@ impl Ai {
         self.state.digest()
     }
 
-    /// One think from an observation: update the memory, run the manager whose turn it is, count the think.
-    /// The commands go onto `out`; the managers send none yet.
-    pub fn think_with(&mut self, obs: &Observation, out: &mut Vec<Command>) {
+    /// One think from an observation and the lens of the same world: update the memory, run the manager
+    /// whose turn it is, count the think and the placement questions. The commands go onto `out`.
+    pub fn think_with(&mut self, obs: &Observation, lens: &mut Lens<'_>, out: &mut Vec<Command>) {
         memory::update(&mut self.state.known_structures, obs);
         let manager = Manager::of_think(self.state.thinks);
         self.state.manager_runs[manager as usize] += 1;
-        run_manager(manager, obs, out);
+        let asked = lens.previews();
+        run_manager(manager, &mut self.state, obs, lens, out);
+        self.state.previews += u64::from(lens.previews() - asked);
         self.state.thinks += 1;
         self.state.last_think = Some(obs.tick);
     }
 }
 
-/// Runs one manager. The managers are the later parts: economy and construction in WP9.1b, production and
-/// army in WP9.1c. Until then a manager's turn only counts.
-fn run_manager(_manager: Manager, _obs: &Observation, _out: &mut Vec<Command>) {}
+/// Runs one manager. Construction is WP9.1b-1; economy is WP9.1b-2, production and army WP9.1c, and until
+/// then their turn only counts.
+fn run_manager(
+    manager: Manager,
+    state: &mut AiState,
+    obs: &Observation,
+    lens: &mut Lens<'_>,
+    out: &mut Vec<Command>,
+) {
+    match manager {
+        Manager::Construction => base::turn(state, obs, lens, out),
+        Manager::Economy | Manager::Production | Manager::Army => {}
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::observe::open_world;
     use sf_data::ai_profile::AiProfile;
     use sf_data::units::{Faction, UnitDefs};
 
@@ -127,13 +143,15 @@ mod tests {
     }
 
     #[test]
-    fn a_think_counts_and_rotates_the_managers_and_sends_nothing() {
+    fn a_think_counts_and_rotates_the_managers_and_without_a_base_sends_nothing() {
         let mut a = ai(0);
         let mut out = Vec::new();
+        let w = open_world(32, 32);
         for i in 0..9u64 {
-            a.think_with(&obs(i * 10), &mut out);
+            a.think_with(&obs(i * 10), &mut Lens::new(&w, PlayerId(0)), &mut out);
         }
-        assert!(out.is_empty(), "WP9.1a sends no command: {out:?}");
+        // No anchor and no building table: nothing can be built.
+        assert!(out.is_empty(), "{out:?}");
         let s = a.state();
         assert_eq!((s.thinks, s.last_think), (9, Some(Tick(80))));
         // Thinks 0 to 8: Economy 3 times, the others twice.
@@ -148,10 +166,11 @@ mod tests {
         // Another player: another digest.
         assert_ne!(first, ai(1).digest());
         let mut out = Vec::new();
-        a.think_with(&obs(10), &mut out);
+        let w = open_world(32, 32);
+        a.think_with(&obs(10), &mut Lens::new(&w, PlayerId(0)), &mut out);
         let one = a.digest();
         assert_ne!(first, one);
-        a.think_with(&obs(20), &mut out);
+        a.think_with(&obs(20), &mut Lens::new(&w, PlayerId(0)), &mut out);
         assert_ne!(one, a.digest());
         // The random stream is part of it.
         let mut b = a.clone();
@@ -163,9 +182,10 @@ mod tests {
     fn two_ais_with_the_same_input_stay_equal() {
         let (mut a, mut b) = (ai(0), ai(0));
         let mut out = Vec::new();
+        let w = open_world(32, 32);
         for i in 0..20u64 {
-            a.think_with(&obs(i * 10), &mut out);
-            b.think_with(&obs(i * 10), &mut out);
+            a.think_with(&obs(i * 10), &mut Lens::new(&w, PlayerId(0)), &mut out);
+            b.think_with(&obs(i * 10), &mut Lens::new(&w, PlayerId(0)), &mut out);
         }
         assert_eq!(a, b);
         assert_eq!(a.digest(), b.digest());

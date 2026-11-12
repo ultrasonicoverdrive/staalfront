@@ -38,6 +38,16 @@ fn the_shipped_profile_is_pinned() {
         ),
         (20, 2, 300, 1, 90, 70, 600, 256)
     );
+    // WP9.1b-1: the lane and the aprons, written out in the file and equal to the defaults of a profile that
+    // leaves them out.
+    assert_eq!(
+        (e.lane, e.refinery_apron, e.factory_apron),
+        (1, (3, 5), (1, 3))
+    );
+    assert_eq!(
+        (DEFAULT_LANE, DEFAULT_REFINERY_APRON, DEFAULT_FACTORY_APRON),
+        (1, (3, 5), (1, 3))
+    );
     let a = p.army;
     assert_eq!(
         (
@@ -99,7 +109,18 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 18] = [
+    let table: [(&str, &str, [&str; 2]); 21] = [
+        ("lane: 1", "economy.lane", ["5", "5"]),
+        (
+            "refinery_apron: (3, 5)",
+            "refinery_apron",
+            ["(3, 0)", "(11, 5)"],
+        ),
+        (
+            "factory_apron: (1, 3)",
+            "factory_apron",
+            ["(2, 3)", "(1, 10)"],
+        ),
         ("think_interval: 10", "think_interval", ["0", "601"]),
         ("power_margin: 20", "power_margin", ["1001", "1001"]),
         (
@@ -157,6 +178,33 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     refused(&edited("stagger: 3", "stagger: 5"), "stagger");
     refused(&edited("name: \"normal\"", "name: \" \""), "name");
     refused(&edited("stagger: 3,", "stagger: 3, extra: 1,"), "extra");
+}
+
+#[test]
+fn a_profile_without_the_base_numbers_of_wp9_1b_reads_with_the_defaults() {
+    // The frozen copies of earlier scenarios (ai_fog_defs/normal.ron) were written before the lane and the
+    // aprons existed and must keep reading.
+    let old = EMBEDDED_NORMAL
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            !(t.starts_with("lane:")
+                || t.starts_with("refinery_apron:")
+                || t.starts_with("factory_apron:"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let p = AiProfile::from_ron(&old).unwrap();
+    assert_eq!(
+        (
+            p.economy.lane,
+            p.economy.refinery_apron,
+            p.economy.factory_apron
+        ),
+        (DEFAULT_LANE, DEFAULT_REFINERY_APRON, DEFAULT_FACTORY_APRON)
+    );
+    let frozen = include_str!("../../../../assets/scenarios/ai_fog_defs/normal.ron");
+    assert_eq!(AiProfile::from_ron(frozen).unwrap().economy.lane, 1);
 }
 
 #[test]

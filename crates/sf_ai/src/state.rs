@@ -53,7 +53,23 @@ pub struct AiState {
     pub manager_runs: [u32; Manager::ALL.len()],
     /// The structures of others it has seen and not seen gone.
     pub known_structures: BTreeMap<EntityId, Known>,
+    /// WP9.1b-1, the base: the build it sent at the last construction turn, `(kind, anchor cell, tick)`,
+    /// until the next turn checks that it stands there (`docs/rules/ai.md`, "The construction turn").
+    pub pending_build: Option<(Kind, Cell, Tick)>,
+    /// A kind for which no place was found, and the tick from which it is tried again.
+    pub blocked_until: BTreeMap<Kind, Tick>,
+    /// `(kind, anchor cell)` the simulation refused (a preview that said no, or a sent build that does
+    /// not stand), and the tick from which it may be tried again; at most [`REFUSED_CAP`] entries.
+    pub refused: BTreeMap<(Kind, Cell), Tick>,
+    /// The ore ground near the base (terrain: map knowledge), ascending by (y, x); listed at the first
+    /// construction turn with an anchor, `None` before.
+    pub ore_cells: Option<Vec<Cell>>,
+    /// Placement questions passed on to the simulation in all its thinks.
+    pub previews: u64,
 }
+
+/// The most entries of [`AiState::refused`]; the one that expires first goes when it is full.
+pub const REFUSED_CAP: usize = 64;
 
 impl AiState {
     /// A fresh state for `player` with the random stream of `seed`.
@@ -72,6 +88,11 @@ impl AiState {
             last_think: None,
             manager_runs: [0; Manager::ALL.len()],
             known_structures: BTreeMap::new(),
+            pending_build: None,
+            blocked_until: BTreeMap::new(),
+            refused: BTreeMap::new(),
+            ore_cells: None,
+            previews: 0,
         }
     }
 
@@ -112,6 +133,41 @@ impl AiState {
             h.write_u8(k.height);
             h.write_u64(k.seen_tick.0);
         }
+        // WP9.1b-1: the base.
+        match self.pending_build {
+            Some((kind, cell, tick)) => {
+                h.write_u8(1);
+                h.write_u32(u32::from(kind.0));
+                h.write_u32(cell.x);
+                h.write_u32(cell.y);
+                h.write_u64(tick.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.blocked_until.len() as u32);
+        for (kind, until) in &self.blocked_until {
+            h.write_u32(u32::from(kind.0));
+            h.write_u64(until.0);
+        }
+        h.write_u32(self.refused.len() as u32);
+        for ((kind, cell), until) in &self.refused {
+            h.write_u32(u32::from(kind.0));
+            h.write_u32(cell.x);
+            h.write_u32(cell.y);
+            h.write_u64(until.0);
+        }
+        match &self.ore_cells {
+            Some(cells) => {
+                h.write_u8(1);
+                h.write_u32(cells.len() as u32);
+                for c in cells {
+                    h.write_u32(c.x);
+                    h.write_u32(c.y);
+                }
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u64(self.previews);
         h.finish()
     }
 }

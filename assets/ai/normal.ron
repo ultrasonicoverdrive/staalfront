@@ -1,7 +1,8 @@
 // The computer opponent's profile "normal" (WP9.1a, docs/rules/ai.md). Read and checked by
 // sf_data::ai_profile against unit_defs.ron; sf_ai::Profile turns the roles into kinds. Every number is a
-// placeholder (design memo 10-11-2026) that WP9.1b and WP9.1c tune against measured matches; the rules that
-// USE the numbers are not built yet (WP9.1a only observes), so today only the schedule numbers act.
+// placeholder (design memo 10-11-2026) that WP9.1b and WP9.1c tune against measured matches. Acting since
+// WP9.1b-1 (the base): the schedule numbers, power_margin, max_parallel_builds, silo_percent (the most a
+// build saves up), blocked_ticks, placement_cap, lane and the two aprons; the others from WP9.1b-2 and WP9.1c.
 //
 // The build order is a goal list: (role, count) means "have at least `count` of the role". The AI walks the
 // list from the top and builds the first entry it does not satisfy, so the order is the opening, the tech
@@ -29,6 +30,12 @@
         blocked_ticks: 600,
         // The most placement previews one think may ask for.
         placement_cap: 256,
+        // Free cells kept between a new structure and every own structure (traffic between them).
+        lane: 1,
+        // Cells in front of the exit kept free of structures, (width centred on the exit cell, depth out
+        // from the side): a refinery's harvesters park 4 cells out, a factory's units come out one by one.
+        refinery_apron: (3, 5),
+        factory_apron: (1, 3),
     ),
     army: (
         // Attack when the army's value (sum of unit costs) reaches this ...

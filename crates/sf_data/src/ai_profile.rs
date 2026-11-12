@@ -76,6 +76,54 @@ pub struct EconomyRules {
     pub blocked_ticks: u32,
     /// The most placement previews one think asks for, 1 to 65,536.
     pub placement_cap: u32,
+    /// WP9.1b: the free cells kept between a new structure and every own structure, 0 to
+    /// [`MAX_LANE`]. Left out: [`DEFAULT_LANE`], so a profile written before WP9.1b still reads.
+    #[serde(default = "default_lane")]
+    pub lane: u8,
+    /// WP9.1b: the cells in front of a refinery's exit kept free of structures, `(width, depth)`: `width`
+    /// cells centred on the exit cell (odd, 1 to [`MAX_APRON`]), `depth` cells out from the side (1 to
+    /// [`MAX_APRON`]), the exit cell the first row. Left out: [`DEFAULT_REFINERY_APRON`].
+    #[serde(default = "default_refinery_apron")]
+    pub refinery_apron: (u8, u8),
+    /// WP9.1b: the same for a factory. Left out: [`DEFAULT_FACTORY_APRON`].
+    #[serde(default = "default_factory_apron")]
+    pub factory_apron: (u8, u8),
+}
+
+/// The widest lane (WP9.1b).
+pub const MAX_LANE: u8 = 4;
+/// The largest side of an apron (WP9.1b).
+pub const MAX_APRON: u8 = 9;
+/// The lane of a profile that does not write one (decision of 12-11-2026, design memo WP9.1b open choice 5):
+/// the value of the shipped `normal.ron`.
+pub const DEFAULT_LANE: u8 = 1;
+/// The refinery apron of a profile that does not write one: 3 wide, 5 deep (a parked harvester stands 4
+/// cells out, `docs/rules/economy.md`).
+pub const DEFAULT_REFINERY_APRON: (u8, u8) = (3, 5);
+/// The factory apron of a profile that does not write one: 1 wide, 3 deep.
+pub const DEFAULT_FACTORY_APRON: (u8, u8) = (1, 3);
+
+fn default_lane() -> u8 {
+    DEFAULT_LANE
+}
+
+fn default_refinery_apron() -> (u8, u8) {
+    DEFAULT_REFINERY_APRON
+}
+
+fn default_factory_apron() -> (u8, u8) {
+    DEFAULT_FACTORY_APRON
+}
+
+fn apron(what: &str, (width, depth): (u8, u8)) -> Result<(), AiProfileError> {
+    range(&format!("{what} width"), width, 1, MAX_APRON)?;
+    range(&format!("{what} depth"), depth, 1, MAX_APRON)?;
+    if width % 2 == 0 {
+        return err(format!(
+            "{what} width is {width}, it must be odd (centred on the exit cell)"
+        ));
+    }
+    Ok(())
 }
 
 /// The numbers of the army rules (WP9.1c).
@@ -176,6 +224,9 @@ impl AiProfile {
         )?;
         range("economy.blocked_ticks", e.blocked_ticks, 1, MAX_TICKS)?;
         range("economy.placement_cap", e.placement_cap, 1, 65_536)?;
+        range("economy.lane", e.lane, 0, MAX_LANE)?;
+        apron("economy.refinery_apron", e.refinery_apron)?;
+        apron("economy.factory_apron", e.factory_apron)?;
         let a = &p.army;
         range("army.attack_value", a.attack_value, 1, 1_000_000)?;
         range("army.max_wait", a.max_wait, 1, MAX_TICKS)?;

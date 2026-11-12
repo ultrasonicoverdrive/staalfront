@@ -69,6 +69,11 @@ impl Profile {
         h.write_u8(e.repair_below_percent);
         h.write_u32(e.blocked_ticks);
         h.write_u32(e.placement_cap);
+        h.write_u8(e.lane);
+        for (width, depth) in [e.refinery_apron, e.factory_apron] {
+            h.write_u8(width);
+            h.write_u8(depth);
+        }
         let a = &self.army;
         h.write_u32(a.attack_value);
         h.write_u32(a.max_wait);
@@ -177,6 +182,15 @@ mod tests {
         assert_ne!(digest, resolved(Faction::Veyran).digest());
         let mut p = base.clone();
         p.economy.reserve += 1;
+        assert_ne!(digest, p.digest());
+        let mut p = base.clone();
+        p.economy.lane += 1;
+        assert_ne!(digest, p.digest());
+        let mut p = base.clone();
+        p.economy.refinery_apron.1 += 1;
+        assert_ne!(digest, p.digest());
+        let mut p = base.clone();
+        p.economy.factory_apron.0 += 2;
         assert_ne!(digest, p.digest());
         let mut p = base.clone();
         p.army.gather_distance += 1;
