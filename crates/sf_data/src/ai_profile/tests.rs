@@ -308,9 +308,15 @@ fn a_profile_without_the_numbers_of_wp9_1c_1_reads_with_the_defaults() {
 #[test]
 fn an_empty_unit_mix_is_a_profile_that_makes_no_units() {
     meridian(&BASE, &[]).check(&UnitDefs::embedded()).unwrap();
-    let text = edited(
-        "unit_mix: [(\"rifleman\", 4), (\"rocket_trooper\", 2), (\"light_tank\", 3)],\n            scout: Some(\"scout\"),\n        ),\n        (\n            faction: Veyran",
+    // The shipped text with line endings made `\n` (a Windows checkout has `\r\n`), the Meridian mix and scout
+    // cut out.
+    let shipped = EMBEDDED_NORMAL.replace("\r\n", "\n");
+    let from = "unit_mix: [(\"rifleman\", 4), (\"rocket_trooper\", 2), (\"light_tank\", 3)],\n            scout: Some(\"scout\"),\n        ),\n        (\n            faction: Veyran";
+    assert!(shipped.contains(from));
+    let text = shipped.replacen(
+        from,
         "unit_mix: [],\n        ),\n        (\n            faction: Veyran",
+        1,
     );
     let p = AiProfile::from_ron(&text).unwrap();
     assert!(p.factions[0].unit_mix.is_empty() && p.factions[0].scout.is_none());
