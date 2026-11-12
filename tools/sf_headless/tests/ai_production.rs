@@ -16,7 +16,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::scenario_path;
-use sf_ai::army::{self, GATHER_COMMANDS_PER_TURN};
+use sf_ai::army::{self, ARMY_COMMANDS_PER_TURN, GATHER_COMMANDS_PER_TURN};
 use sf_ai::production;
 use sf_ai::{Ai, AiState, Lens, Observation, Own, OwnFactory};
 use sf_headless::cli::parse_checksum;
@@ -31,8 +31,10 @@ const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);
 
 const SCOUT_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_scout.expected");
-/// `Ai::digest` of player 0 at the end of `ai_scout`.
-const SCOUT_DIGEST: u64 = 0x584e_81c7_938e_7859;
+/// `Ai::digest` of player 0 at the end of `ai_scout`. Re-pinned by WP9.1c-2 with the checksum (was
+/// `0xf2be53002209e2f6`, digest `0x584e_81c7_938e_7859`): the army now attacks; measured by
+/// `the_ai_scout_repin_of_wp9_1c_2_is_the_attack`.
+const SCOUT_DIGEST: u64 = 0x3c88_41f5_b721_2ab8;
 
 /// The kinds of the frozen definitions (`ai_scout_defs/unit_defs.ron`).
 const CENTRE: Kind = Kind(0);
@@ -222,19 +224,36 @@ const ARRIVED: u64 = 2439;
 const REPLACEMENT_TICK: u64 = 7980;
 
 #[test]
-fn without_a_scout_the_ai_never_learns_where_the_centre_stands() {
-    // `scouts_max` 0: no scout is bought. Nothing else leaves the base (the army only gathers), so the
-    // memory stays empty for the whole run; with the scout it holds the centre from tick 2351.
+fn without_a_scout_the_ai_never_learns_where_the_centre_stands_before_the_first_attack() {
+    // `scouts_max` 0: no scout is bought. Nothing leaves the base before the first attack (the army gathers),
+    // so the memory is empty until the attack arrives (WP9.1c-2: the attack marches on the start site and sees
+    // the centre there, measured at tick 15,781); with the scout it holds the centre from tick 2351.
     let s = with_profile(load("ai_scout"), |p| p.army.scouts_max = 0);
     let st = story(&s, s.ticks);
-    assert_eq!(st.anchor_known, None);
-    assert!(st.finished.ais[0].state().known_structures.is_empty());
+    let attack = sent(&st.finished, |c| {
+        matches!(
+            c,
+            Command::Order {
+                order: Order::AttackMove(_),
+                ..
+            }
+        )
+    });
+    let first_attack = *attack.first().expect("an attack goes out");
+    println!(
+        "without a scout: first attack at {first_attack}, the centre known from {:?}",
+        st.anchor_known
+    );
+    let known = st.anchor_known.expect("the attack finds the centre");
+    assert!(known > first_attack, "{known} {first_attack}");
+    assert_eq!(known, 15_781);
     assert_eq!(sent(&st.finished, |c| is_queue_of(c, SCOUT)), []);
-    // The only orders are gather orders (to the gather cell), none to a leg.
+    // Before the attack the only orders are gather orders (to the gather cell), none to a leg.
     assert!(
         st.finished
             .ai_commands
             .iter()
+            .filter(|(t, _, _)| *t < first_attack)
             .all(|(_, _, c)| !matches!(c, Command::Order { order: Order::Move(v), .. } if *v != middle(24, 64)))
     );
     // The first unit is then an army unit; and the scenario with the scout does know (control).
@@ -1230,7 +1249,8 @@ fn the_group_size_is_the_profiles_and_dead_units_leave_the_bookkeeping() {
 }
 
 #[test]
-fn the_army_turn_never_attacks_and_a_profile_without_units_leaves_both_managers_off() {
+fn soldiers_far_from_the_gather_cell_are_gathered_and_a_profile_without_units_leaves_both_managers_off()
+ {
     let (world, mut state) = army_state();
     let mut own = base(&world);
     own.extend((0..6).map(|i| soldier(20 + i, 60, 60)));
@@ -1243,8 +1263,10 @@ fn the_army_turn_never_attacks_and_a_profile_without_units_leaves_both_managers_
             ..
         }
     )));
+    // Six soldiers far away are not gathered: no attack (WP9.1c-2 counts only gathered units).
     assert_eq!(state.directive, sf_ai::state::Directive::default());
     assert_eq!(state.directive.posture, sf_ai::state::Posture::Gather);
+    assert_eq!(state.attacks_launched, 0);
     // No unit mix and no scout: neither manager does anything, whatever stands in the observation.
     let mut off = state.clone();
     off.profile.unit_mix.clear();
@@ -1412,8 +1434,14 @@ fn on_the_list(c: &Command) -> bool {
         | Command::SetRally { .. }
         | Command::Repair { .. }
         | Command::Sell { .. } => true,
+        // WP9.1c-2: the army attack-moves and attacks too.
         Command::Order { ids, order, queued } => {
-            !ids.is_empty() && !queued && matches!(order, Order::Move(_))
+            !ids.is_empty()
+                && !queued
+                && matches!(
+                    order,
+                    Order::Move(_) | Order::AttackMove(_) | Order::Attack(_)
+                )
         }
         _ => false,
     }
@@ -1439,18 +1467,16 @@ fn the_ai_of_ai_scout_sends_only_what_the_list_allows_and_at_a_bounded_rate() {
     let worst = worst_window(&f);
     println!("most commands in 1,000 ticks over 20,000: {worst}");
     assert!(worst <= COMMANDS_PER_1000, "{worst}");
-    // And one order of units to the gather cell at most `GATHER_COMMANDS_PER_TURN` per army turn.
+    // And at most `ARMY_COMMANDS_PER_TURN` orders per army turn (WP9.1c-2; the scout's included), of which at
+    // most `GATHER_COMMANDS_PER_TURN` to the gather cell.
     let mut per_turn: BTreeMap<u64, usize> = BTreeMap::new();
     for (t, _, c) in &f.ai_commands {
         if matches!(c, Command::Order { .. }) {
             *per_turn.entry(*t).or_default() += 1;
         }
     }
-    assert!(
-        per_turn
-            .values()
-            .all(|&n| n <= GATHER_COMMANDS_PER_TURN + 1)
-    );
+    assert!(per_turn.values().all(|&n| n <= ARMY_COMMANDS_PER_TURN));
+    assert_eq!((GATHER_COMMANDS_PER_TURN, ARMY_COMMANDS_PER_TURN), (2, 4));
 }
 
 /// Measured: the most in any window of 1,000 ticks over `ai_scout` is 6, and 6 over its 40,000-tick run; the bound
@@ -1475,8 +1501,9 @@ fn worst_window(f: &Finished) -> usize {
 
 #[test]
 fn over_forty_thousand_ticks_the_ai_stays_on_the_list_and_under_the_rate_bound() {
-    // The enemy is not attacked in this WP, so this is the "no enemy reachable" run of the memo: the AI's
-    // whole economy and production for 40,000 ticks, the army gathering and growing.
+    // The AI's whole economy and production for 40,000 ticks. Since WP9.1c-2 the army attacks the static centre
+    // and wins (the run goes on after the match is decided, the AI then sends nothing); the "no enemy reachable"
+    // run of the memo is `with_no_enemy_known_...` in ai_army.rs.
     let s = load("ai_scout");
     let f = go(&s, 40_000);
     for (t, _, c) in &f.ai_commands {
@@ -1496,7 +1523,10 @@ fn over_forty_thousand_ticks_the_ai_stays_on_the_list_and_under_the_rate_bound()
         f.ai_commands.len()
     );
     assert!(worst <= COMMANDS_PER_1000, "{worst}");
-    assert!(army >= 20, "{army}");
+    assert_eq!(
+        f.world.match_result().map(|r| r.verdict),
+        Some(sf_sim::Verdict::Won(P0))
+    );
 }
 
 // ---- the older scenarios: the managers are off for their frozen profiles ---------------------------------
@@ -1559,6 +1589,24 @@ fn the_managers_stay_off_for_the_frozen_profiles_and_the_old_mix_would_move_ever
                 fresh.scouts_sent,
                 &fresh.sent,
                 fresh.directive
+            ),
+            "{name}"
+        );
+        // WP9.1c-2: the threat and attack state too (the threat rule is off with the managers).
+        assert_eq!(
+            (
+                &s0.hp_seen,
+                s0.threat,
+                &s0.attackers,
+                s0.attacks_launched,
+                &s0.sites_cleared
+            ),
+            (
+                &fresh.hp_seen,
+                fresh.threat,
+                &fresh.attackers,
+                fresh.attacks_launched,
+                &fresh.sites_cleared
             ),
             "{name}"
         );
@@ -1632,7 +1680,9 @@ fn the_army_at_the_gather_cell_by_tick_on_the_first_matchs_map() {
 }
 
 /// The army at the gather cell at ticks 4,000, 8,000, 12,000, 16,000 and 20,000 of `ai_scout`.
-const ARMY_AT_GATHER: [usize; 5] = [0, 0, 0, 2, 10];
+/// WP9.1c-2: 10 at 20,000 became 4, because an attack went out (the frozen profile of `ai_scout` has no army
+/// floor, so the list and the timing of 9.1c-1 hold until then).
+const ARMY_AT_GATHER: [usize; 5] = [0, 0, 0, 2, 4];
 const FIRST_ARMY_TICK: u64 = 15_020;
 /// The tick of the last `BuildStructure` of the goal list (the eleventh: a third power plant comes by the
 /// power rule): the list is done and the holdback ends.
@@ -1953,3 +2003,27 @@ fn what_the_scouts_400_credits_cost_the_goal_list() {
 
 const LIST_WITH_SCOUT: u64 = 14_610;
 const LIST_WITHOUT_SCOUT: u64 = 12_650;
+
+#[test]
+fn the_ai_scout_repin_of_wp9_1c_2_is_the_attack() {
+    // The cause of the re-pin, measured: `ai_scout` with the attack trigger made unreachable (no value reaches
+    // it, `max_wait` beyond the run) ends on the checksum it had in WP9.1c-1. So the move is the attack and what
+    // follows it; the threat rule and the new state send nothing else here.
+    let s = with_profile(load("ai_scout"), |p| {
+        p.army.attack_value = 1_000_000;
+        p.army.max_wait = 72_000;
+    });
+    let f = go(&s, s.ticks);
+    assert_eq!(f.outcome.final_checksum, 0xf2be_5300_2209_e2f6);
+    assert!(f.ai_commands.iter().all(|c| !matches!(
+        c.2,
+        Command::Order {
+            order: Order::AttackMove(_) | Order::Attack(_),
+            ..
+        }
+    )));
+    assert_ne!(
+        f.outcome.final_checksum,
+        parse_checksum(SCOUT_EXPECTED).unwrap()
+    );
+}

@@ -436,9 +436,9 @@ reverted) buys a rifleman at 1,140, has 7 army units at the gather cell at tick 
 one harvester (the free one of the first refinery) at tick 20,000, because every credit above 300 goes into infantry. So the decision
 (hold the goal's price back) is what keeps the base growing, and it is also why there is no army for the first 15,000 to 18,000 ticks on a 4,000-credit
 start. (This is the cost of the order of the list, which puts two refineries, a vehicle factory, two towers, a radar and the advanced defences before any
-unit.) **WP9.1c-2's attack timing (`first_attack_tick` 2,400, `max_wait` 3,600, `min_units` 4) will see no army before tick 15,020 (`ai_scout`) or 17,867 (`m1_ai`) with
-this profile**. Decision of the orchestrator, built in WP9.1c-2: an **army floor** (`army_floor_value`, start value 1,000): below it production holds back only the `reserve`; the army value is
-the cost of the own army units, the queued mix items and what this turn has ordered already.
+unit.) **WP9.1c-2's attack timing (`first_attack_tick` 2,400, `max_wait` 3,600, `min_units` 4) would see no army before tick 15,020 (`ai_scout`) or 17,867 (`m1_ai`) with
+this profile**. Decision of the orchestrator, built in WP9.1c-2: an **army floor** (`army_floor_value`, start value 1,000, shipped 2,000): below it production holds back only the `reserve`; the army value is
+the cost of the own army units, the queued mix items and what this turn has ordered already ("The army in WP9.1c-2", "The army floor").
 
 ## The army in WP9.1c-1
 
@@ -509,8 +509,8 @@ Not acting yet: `attack_value`, `max_wait`, `min_units`, `first_attack_tick`, `d
 ### The commands the AI sends now
 
 `BuildStructure`, `QueueUnit`, `SetRally`, `Repair`, `Sell` (the rescue) and `Order { ids, Move(..), queued: false }`: no `Attack`, no
-`AttackMove`. `the_ai_of_ai_scout_sends_only_what_the_list_allows_and_at_a_bounded_rate` checks every command of 20,000 ticks, and
-`over_forty_thousand_ticks_...` of 40,000: the most in any 1,000 ticks is **6** in both (bound 10), every `Order` is a plain `Move`.
+`AttackMove` (WP9.1c-1; since WP9.1c-2 also `AttackMove` and `Attack`, at most `ARMY_COMMANDS_PER_TURN` orders per army turn). `the_ai_of_ai_scout_sends_only_what_the_list_allows_and_at_a_bounded_rate` checks every command of 20,000 ticks, and
+`over_forty_thousand_ticks_...` of 40,000: the most in any 1,000 ticks is **6** in both (bound 10), every `Order` is a plain `Move`. (Historical, WP9.1c-1. Since WP9.1c-2 the bound is 15 and `AttackMove` and `Attack` are allowed: "The army in WP9.1c-2".)
 
 ### Scenario `ai_scout`
 
@@ -575,6 +575,227 @@ turn; 2.8 us when no order is sent), army **mean 2.9 us, worst 270 us** (two gat
 (a turn every 40 ticks). Budget: mean 20 us per AI per tick, worst think 1 ms; the worst thinks above are spikes of a shared machine that the turns themselves
 (microseconds) do not explain, but that is not proven.
 
+## The army in WP9.1c-2
+
+The attack half of the army manager: threat and defence, the attack timing, the target, marching and finishing, the army floor of production,
+and an AI that is out of play. Code: `crates/sf_ai/src/army.rs` (`watch`, `decide`, `target`, `beside`, `operations_minimal`, `finishing_target`),
+`production.rs` (`army_value`, the floor at the holdback), `ai.rs` (`think_with`), `observe.rs` (`Observation::out_of_play`). Tests:
+`tools/sf_headless/tests/ai_army.rs` (scenarios `ai_vs_passive` and `ai_raid`, and every rule on an observation the test builds), the profile
+tests in `crates/sf_data/src/ai_profile/tests.rs`, `crates/sf_ai/src/state.rs` and `ai.rs` (unit tests), `crates/sf_game/tests/ai_in_game.rs`.
+Decisions of 12-11-2026 this follows (the orchestrator; dated in PLAN Phase 9): the target is the enemy construction centre; only the units at
+home defend and an attack is called back only for the construction centre; `defend_ticks` 400; the army floor; a defeated AI stops; a sold
+structure is no hit.
+
+**The seam.** The rules write `AiState::directive` (`Posture` `Gather` 0, `Attack` 1, `Defend` 2, hashed, and a target cell);
+`army::operations_minimal(state, obs, lens, out, gather, home, budget)` turns it into orders. WP9.2 replaces that function.
+
+### Threat (A3, every think)
+
+`army::watch`, called by `Ai::think_with` after the memory update and before the manager of the turn, so **every think** (every 10 ticks, not
+only the army turn). `hp_seen` holds every own structure that is not being sold, `(kind, anchor cell, hit points)`, refreshed at every think. A
+**hit** is a structure whose hit points fell since the last think, or one that is gone from `obs.own` and is not in the economy's `sales`. A
+repair only raises hit points; a structure being sold (`Own.selling`) is left out of `hp_seen`, and **the economy drops a structure from
+`hp_seen` when it sends its sale** (decision 6), so the rescue sale never reads as an attack (`a_hit_turns_the_posture_to_defend_a_repair_or_a_sale_does_not`).
+On a hit: `threat = (cell, tick)`, `defend_since` is set at the first hit of a defence, and the posture is `Defend` at once. The cell is the cell of
+the nearest **armed unit of another player that is seen** within `gather_radius` of the hit structure's footprint (a cell, never a unit id), else open
+ground beside the footprint facing the gather cell (`army::beside`). (Measured on `ai_raid`: with the cell beside the structure alone the defenders
+stood idle out of reach of two of the three raiders, which shot the plant to the end of the run; with the raiders' cell all three die.) Every new
+hit renews the tick. **`defend_ticks` (400) after the last hit** the threat is cleared at the next think and the posture goes back to `Attack`
+(if an attack is still out) or `Gather`. A hit on a **construction centre** while an attack is out **calls the attack back**: the attackers are
+no longer attackers and defend with the rest. *Fix round 1 (decision of 12-11-2026):* the former attackers go into `recalled` and get the
+defence `AttackMove` **once whatever their observed order is** (a wave on its `AttackMove` too; still under `resend_ticks` and the command cap);
+the first version only turned the idle ones, so a marching wave marched on
+(`a_hit_on_the_centre_calls_back_a_wave_that_is_still_marching`). `recalled` empties when the order is sent or the threat ends. A hit on any other structure leaves the attackers on their attack.
+
+**Who defends.** Every army unit that is not an attacker: one `AttackMove(threat cell)` for all of them, given to a unit that is `Idle` (and
+farther than `arrive_radius` from the threat cell, not ordered within `resend_ticks`) or on a `Move` it got before the defence began
+(`defend_since`, so a unit walking to the gather cell is turned round once). A unit with any other order (an `AttackMove`, a `Pursue` of its own)
+is left alone. While a threat stands nothing is gathered and no attack is launched.
+
+**Known gap** (decision 3): while the whole army is out on an attack, a hit on a structure that is not the construction centre is answered by
+nothing but the towers (no unit is at home, and the attackers are not called back).
+
+### The attack (A4, A5, A6)
+
+**Trigger** (army turn, posture `Gather`, no threat, no attack out). `gathered` = the army units that are `Idle` and within `gather_radius` (8)
+of the gather cell, and those given up on after `gather_tries` orders (counted where they stand). `value` = the sum of `Lens::unit_cost` over
+them. Attack when `tick >= first_attack_tick` and (`value >= attack_value` or (`tick >= last_attack_tick + max_wait` and at least `min_units`
+gathered)); `last_attack_tick` starts at 0, so `max_wait` also times the first attack. Then `attackers = gathered` (ascending ids),
+`attack_target`, `last_attack_tick = attack_started = tick`, `attacks_launched += 1`, posture `Attack`. Only gathered idle units count and go:
+units made later wait for the next wave. Pinned: `the_attack_goes_at_attack_value_and_not_one_credit_below`,
+`never_before_first_attack_tick_and_max_wait_needs_min_units`, `only_idle_units_within_the_gather_radius_count_and_go`; every wave of
+`ai_vs_passive` has at least `min_units`.
+
+**Target** (`army::target`, decision 2). The construction centre of another player in the AI's memory (`known_structures`), the nearest to
+the gather cell by squared distance (the lowest id among equals); else the start site of another player whose cell the AI has not seen empty
+(`sites_cleared`: the site's cell visible and no construction centre of that player on it), the nearest (the lowest player among equals),
+as a 4 x 4 footprint (the building table's anchor); else the nearest structure of another player it remembers; else none (the army stays
+gathered). The cell marched on is `army::beside`: open ground just outside the footprint, rings 1 to 3, nearest to the gather cell (the first in
+ring, y, x order among equals). A cell under the structure would be a move that never ends. Pinned: `the_target_is_the_known_centre_then_the_start_site_then_any_known_structure`.
+
+**Marching and finishing** (`operations_minimal`), each army turn while an attack is out:
+* attackers that are `Idle` (and not ordered within `resend_ticks`) farther than `arrive_radius` (6, Chebyshev) from the target cell: **one**
+  `AttackMove(target)` with all their ids (an `AttackMove` stops to fight what it meets and marches on; a `Move` never fights);
+* attackers that are `Idle` within `arrive_radius`: **one** `Attack(id)` on the **visible** construction centre of another player nearest to the
+  target cell, else on the nearest visible structure of another player (the finishing rule: an idle unit only fires at what is in its reach,
+  `targeting.md`). The id comes only from `obs.visible`, and only a structure: never a unit, never an id from memory
+  (`idle_attackers_at_the_target_finish_the_visible_centre_and_never_an_unseen_one`);
+* *fix round 2*: an idle attacker within `arrive_radius` that sees no structure to finish gets one `AttackMove` onto the middle of the
+  target structure (or the start site), once per attacker per attack (`AiState::closing`, cleared at the end), under `resend_ticks` and the
+  command cap, so it closes in and sees it (same test);
+* an attacker with any other order is left alone (`attackers_are_ordered_only_when_idle_and_not_again_within_resend_ticks`).
+
+**The end.** No attacker alive (back to `Gather`); no target left; `attack_patience` (2,400) ticks with no attacker within `arrive_radius` of
+the target **with a victim in sight** (*fix round 2, decision of 12-11-2026*: `attack_started` is moved to the turn only when an attacker
+stands there **and** `finishing_target` sees a structure to finish; attackers that stand there seeing nothing no longer keep the attack alive,
+`attackers_at_the_target_that_see_nothing_close_in_once_and_the_attack_still_ends`); or (*fix round 1, decision of 12-11-2026*) `attack_patience` ticks
+in which the structure being finished (`finishing_target`, seen) has not lost hit points while an attacker stands at the target (`target_hp`;
+units there that cannot kill it no longer keep the attack alive for ever,
+`an_attack_ends_when_the_target_stops_losing_hit_points_for_attack_patience`). The survivors get one `Move(gather)` and the posture is `Gather`.
+**That `Move` is a retreat on purpose**: a `Move` never fights, so the survivors walk home without stopping for what shoots at them; an
+`AttackMove` home would stop them at every enemy on the way, the fight the attack just gave up. They are gathered again and go with the next wave
+(`an_attack_ends_with_its_attackers_its_target_or_its_patience_and_the_survivors_go_home`). The target is worked out again every turn, so a
+centre seen gone moves the attack to the next target.
+
+**The rate.** At most `ARMY_COMMANDS_PER_TURN` = 4 commands per army turn (the scout's included; of which at most `GATHER_COMMANDS_PER_TURN` = 2
+gather orders), each carrying many ids; a unit is ordered only when its observed order is `Idle` (or once, on a `Move`, when a defence began),
+and not again within `resend_ticks`. How the AI learns that an order had no effect is the observation (the unit is `Idle` again where it was).
+
+### The army floor (decision 1)
+
+`army_floor_value` (profile, **2,000**, measured; the start value was 1,000). *Fix round 1 (decision of 12-11-2026): the floor applies only while
+no attack has gone out yet **and the tick is before `max_wait`**, or while the posture is `Defend`*, so it can never hold the goal list past
+`max_wait` (6,000) outside a defence, also when units die at the gather cell with no structure hit and no attack ever goes
+(`the_army_floor_ends_at_max_wait_before_the_first_attack`). The army's value (`production::army_value`) is the price of every own
+army unit (`army::is_army`) plus every item of a kind of the unit mix in an own queue plus what the production turn running has ordered (without
+that last part each factory would overshoot by one: `the_army_value_counts_the_queue_and_what_this_turn_ordered`). While it is below the floor,
+**and** no attack has gone out yet (`attacks_launched == 0`) and the tick is before `max_wait`, **or** the posture is `Defend`, a unit of the mix is held back by the `reserve` alone
+(like the scout); otherwise by the `reserve` and the next goal's price, as in WP9.1c-1. One condition at the holdback, no second money path
+(`below_the_army_floor_production_holds_back_only_the_reserve`).
+
+**The money, measured (fix round 1).** In `m1_ai` the floor is reached by the 12th unit (about tick 4,400) and is off after the first attack
+(6,037), yet nothing is built until the win at 8,396. The credits trace (`the_money_of_the_ai_in_the_game_seat_around_the_first_attack`,
+every 250 ticks from 5,500 to 8,500): credits = free = 600 at 5,500, 800 at 6,500, 1,000 at 7,250, 1,200 at 8,250; nothing queued; one
+harvester; ore delivered 1,200 → 1,800. The next goal is the vehicle factory (1,500), so production holds back 1,800 (reserve 300 + 1,500) and
+construction saves for 1,500: the gap is the income of **one harvester, about 200 credits per 750 ticks**. The floor spent the 4,000 starting
+credits on twelve units (2,000) and the first four goals, and the second harvester comes only with the vehicle factory. With the attack switched
+off (no win) **the goal list does not complete in 30,000 ticks**: `ai_vs_passive` makes 9 of its builds (the vehicle factory at 11,650, the last at
+29,090), `m1_ai` its last at 29,777; the army stays at 12 (`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`,
+`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. The guard against the known risk (under steady losses the army stays below the
+floor and the goal list stalls): once an attack has gone out, the floor holds only while the army defends.
+
+Measured on `ai_vs_passive` (the AI as player 0 at (12, 68) with 4,000 credits against m1's static opponent, release, 40,000 ticks, the tick the
+match names the AI the winner):
+
+| `army_floor_value` | `max_wait` 3,600 | `max_wait` 6,000 | `max_wait` 9,000 |
+|---|---|---|---|
+| 0 (no floor) | 24,745 | 25,744 | |
+| 1,000 | 26,387 | 26,387 | |
+| 1,500 | 35,943 | 34,828 | 35,628 |
+| 2,000 | 35,426 | **14,659** | 21,062 |
+| 3,000 | 35,426 | 9,260 (goal list stalled at its 4th entry) | 12,229 (stalled) |
+
+The first wave goes at `max_wait` (or at `attack_value`, which the floor never lets the army reach while goals are open). With 3,600 it leaves
+before the army reaches the floor and bounces off m1's tower, four riflemen and tank; the goal list then holds the money (the floor is off after
+the first attack) and the second wave comes 20,000 to 30,000 ticks later. With a floor of 3,000 the list stalls until the attack wins: the AI wins
+sooner on this map but has no base. So **`army_floor_value` 2,000 and `max_wait` 6,000** (was 3,600; both builder's measured values, decision 4).
+
+### A defeated AI (decision 5)
+
+`Observation::out_of_play` is true when `World::defeat_tick(player)` is set or `World::match_result()` is decided (both public: a player knows it
+has lost and that the match is over). `Ai::think_with` then returns at once: no command, no memory update, no count, so the digest stands still.
+In the game a refused command is only an `eprintln`; after this rule none is sent. Tests: `an_ai_out_of_play_sends_nothing_and_its_state_stands_still`
+(unit), `a_defeated_ai_sends_nothing_and_its_state_stands_still` (the AI's centre removed at tick 3,001: no command after it, the digest equal at
+3,100 and 6,000), `the_ai_of_ai_vs_passive_sends_..._nothing_after_the_win`, and in the game seat `the_army_timing_in_the_game_seat` (nothing sent
+once the match is decided).
+
+### State and numbers
+
+New in `AiState`, hashed after the scout state in this order: `hp_seen: BTreeMap<EntityId, (Kind, Cell, u32)>`, `threat: Option<(Cell, Tick)>`,
+`defend_since: Option<Tick>`, `directive` (posture number, target cell), `attackers: Vec<EntityId>` (ascending), `attack_target: Option<Cell>`,
+`last_attack_tick`, `attack_started`, `attacks_launched: u32`, (fix round 1) `target_hp: Option<(EntityId, u32, Tick)>`, `recalled: Vec<EntityId>` (ascending), `sites_cleared: Vec<PlayerId>` (ascending), then `sent` as before (now the tick of
+any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x392b1f3256aa3c19` since fix round 2 (`closing` hashed), two entries in every
+map and list) and `every_part_of_the_threat_and_attack_state_moves_the_digest` (32 changes, the posture numbers 0, 1, 2 as literals).
+
+New profile numbers, with serde defaults so that every frozen profile still reads: `arrive_radius` 6 (1 to 32), `attack_patience` 2,400 (1 to
+72,000), `army_floor_value` 2,000 in `normal.ron` (0 to 1,000,000; **default 0, no floor**, so the frozen profiles of 9.1c-1 and earlier keep the
+production they had). Changed in `normal.ron`: `defend_ticks` 200 → 400, `max_wait` 3,600 → 6,000. Acting from WP9.1c-2: `attack_value`,
+`max_wait`, `min_units`, `first_attack_tick`, `defend_ticks`. All hashed by `Profile::digest`.
+
+### Scenarios
+
+**`ai_vs_passive`** (`assets/scenarios/ai_vs_passive.ron`, `ai_vs_passive_defs/`: frozen copies of the shipped definitions and of
+`normal.ron` as this WP leaves it, and a match file with m1's static opponent exactly as `m1.ron` lists it). 16,000 ticks (T2). Checksum
+`0x3b5a509e49e43343`, AI digest `0x74e38ea1d028c406`. Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
+
+| Wave | Launched | Units | Value | Survivors | Ended |
+|---|---|---|---|---|---|
+| 1 | 6,030 | 12 | 2,000 | 5 | 8,430 (`attack_patience`: no attacker reached the target, the tower and the units held them) |
+| 2 | 12,030 | 5 | 1,100 | 5 | the win |
+
+**The AI wins at tick 14,659** (the opponent's construction centre falls), T2 = 16,000. Army at the gather cell 11, 0, 5, 0 at 4,000, 8,000,
+12,000, 16,000; the last build before the win at 11,650 (the vehicle factory: the list is not complete when the match ends). 26 commands in all,
+the most in any 1,000 ticks 12 (bound 15), at most one order per army turn, nothing after the win. The finishing `Attack` is not needed there:
+the second wave's `AttackMove` fights the centre on its own (the rule has its own unit test).
+
+**The finishing `Attack` on the real world** (fix round 1): `the_finishing_attack_is_sent_on_the_real_world_and_the_simulation_takes_it` runs the
+army turn on the world of `ai_vs_passive` with four riflemen of player 0 put idle beside the enemy centre (arrive radius 12 there): it sends one
+`Attack` on the centre, the simulation takes it (nothing ignored) and every one of them has that order after the step. The owner filter is
+pinned by `the_finishing_attack_never_goes_to_an_own_structure`. **The defence cell** (`the_defence_goes_to_the_nearest_seen_armed_raider_...`:
+the nearer of two armed raiders, not an unarmed one, not one 9 cells off the footprint, beside the structure with none) and its fence
+(`a_hidden_raider_in_reach_of_the_raided_plant_changes_nothing_until_it_is_seen`: a fourth rifleman in fog at (10, 52), within the 8-cell reach of the plant (fix round 2; it was 16 cells off before), never seen in the run, against
+the same far away: commands and digest equal over the whole run). **A defeated AI while the match goes on**: `a_defeated_ai_stops_also_while_the_match_goes_on`
+(three players; player 0's centre removed at 3,001, the match undecided).
+
+**`ai_raid`** (`ai_raid.ron`, `ai_raid_defs/`: the definitions and profile of `ai_vs_passive_defs`, the match file of `ai_scout`): at tick 4,001
+the script puts three riflemen of player 1 west of the AI's base and orders them to attack its first power plant. 5,600 ticks (before the
+first attack at `max_wait`). Checksum `0x7b8f040e80571984`, AI digest `0x13d1a4466b23765e`. Measured and pinned
+(`a_raid_is_answered_within_one_think_...`): first hit 4,022, posture `Defend` from the think at 4,030 (within one think), the eleven army units
+ordered with one `AttackMove` at 4,030 (within 40 ticks), last hit 4,582, the raiders dead at 4,587, back to `Gather` at 4,990 (`defend_ticks`
+after the last hit, at the next think), and no `AttackMove` or `Attack` after that: the only order left is the gather `Move` back.
+
+**The fence.** `a_unit_hidden_in_the_reach_changes_nothing_the_ai_does_also_an_army_beside_the_route`: three enemy riflemen at the north-east
+shore of the lake on the way to the enemy centre against the same three in a far corner: the AI's commands and digest are equal until they come
+into view, with the scout (tick 2,110) and without one (tick 7,421, after the first attack went out).
+
+### The game seat (`m1_ai`)
+
+`the_army_timing_in_the_game_seat` (`crates/sf_game/tests/ai_in_game.rs`, the AI as player 1 at (72, 14) with 4,000 credits, the human idle with
+its construction centre only, driven as the sim thread drives it): the first army unit is queued at **1,147** (WP9.1c-1: 17,867), 10 army units at
+the gather cell at tick 4,000, the first wave of **12** leaves at **6,037** (`max_wait`), and **the AI wins at tick 8,396** (the human's centre falls; the
+finishing rule is not needed). The goal list stops at its fourth entry (the second power plant, ordered at 1,097) until then: below the floor the units
+take the money. After the win nothing is sent. Pinned, with the rule-level asserts (first attack not before `first_attack_tick`, at least `min_units`,
+nothing after the match is decided). Pictures: `docs/screenshots/wp9.1c-2/`. In the game a refused AI command is only an `eprintln`; none is sent
+after the end. `the_ai_builds_its_base_in_the_game` re-measured: 4 builds of 3 kinds and 12 units queued by tick 4,000, 5 structures stand.
+
+### Cost
+
+`ai_perf.rs`, release, this container, load average 0.4 to 1.0. `ai_vs_passive_with_and_without_the_ai_and_the_tick_of_the_launch`: to the win
+(14,700 ticks) **0.42 us per AI per tick, worst think 94 us** (a construction turn); the **step of the tick in which the first wave is launched (tick
+6,030) took 874 us against a mean step of 20 us** (the simulation's planning of one `AttackMove` for 12 units, not the AI's think; the second launch, 5
+units, 16 us); the whole run 47,454 ticks/s with the AI and 82,645 without (medians of 3 alternating runs; without the AI player 0 builds and makes
+nothing, so this bounds the AI and everything it makes, not the think). `what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march`
+(20,000 turns each, the observation of `ai_vs_passive` at tick 4,000 with N riflemen added at the gather cell): 50 units 6.6 and 5.1 us on the march (two
+runs); **200 units 24.3 and 19.0 us at the launch, 27.5 and 25.8 us on the march** (worst 460 to 1,467 us: spikes of a shared machine, load average
+0.4 to 2.2). A second run of the scenario: 0.32 us per AI per tick, worst think 66 us, launch step 882 us against 20.8 us, 43,879 against 75,758 ticks/s. Before the attackers' list was searched by bisection instead of `contains` (first run, same machine, minutes earlier): 7.7 / 8.1 us with 50
+and 45.4 / 48.0 us with 200. A turn every 40 ticks: 200 units cost about 0.7 us per tick. Budget: mean 20 us per AI per tick, worst think 1 ms; the
+assert is 100 us per turn (release).
+
+### Pins that moved (WP9.1c-2) and why
+
+* **Every AI digest** moved: the profile digest hashes the three new numbers and the state the new parts. **No checksum of an earlier phase
+  moved** (`golden.rs`, the `.expected` of every scenario but `ai_scout`). The seven frozen profiles of 9.1a and 9.1b have `unit_mix: []`, so
+  production, the army and the threat rule stay off (the new state at its start values, asserted in
+  `the_managers_stay_off_for_the_frozen_profiles_...`). Measured: with the new numbers left out of `Profile::digest` and the new state left out
+  of `AiState::digest`, the WP9.1c-1 digests of all seven come back (`0xacb2c8e5fb876451`, `0x4dd11cc733dd4b46`, `0x94e97ccd07405cba`,
+  `0x5b7d1adaf26aa90f`, `0xf94be57bd5f168e4`, `0xdf9bfa7c2721ec51`, `0x3cba4a139131b094` for `ai_fog`, `ai_base`, `ai_noore`, `ai_boxed`,
+  `ai_economy`, `ai_rebuild`, `ai_deadlock`).
+* **`ai_scout`** (9.1c-1's own scenario): checksum `0xf2be53002209e2f6` → `0xd6a5c9b3d0bf4aa4`, digest → `0x3c8841f5b7212ab8`. Its frozen
+  profile is left as it is (no floor by default; its attack numbers 3,000 / 3,600 / 4 / 2,400 now act): the army attacks the lone centre. Measured
+  (`the_ai_scout_repin_of_wp9_1c_2_is_the_attack`): with the trigger made unreachable the old checksum comes back. Consequences in its tests:
+  the army at the gather cell at 20,000 is 4 (was 10), and without a scout the AI learns where the centre stands when the first attack arrives
+  (15,781), not never.
+
 ## The schedule
 
 An AI thinks when `(tick + stagger * player) % think_interval == 0` (`schedule::due`; `tick` is the number of ticks the world has run, the
@@ -583,7 +804,8 @@ check requires `think_interval / gcd(think_interval, stagger) >= 8`, the most pl
 player 1 at 7, player 2 at 4, ...). Each think runs the observation, the memory update and **one** manager in rotation, so each of the
 four managers (`Economy`, `Construction`, `Production`, `Army`, numbered 0 to 3, which are hashed) runs every 40 ticks. **Construction has
 rules since WP9.1b-1** (above), **economy since WP9.1b-2** ("The economy"), **production and the first half of the army since WP9.1c-1**
-("Production", "The army in WP9.1c-1"). The army manager's attack half is WP9.1c-2.
+("Production", "The army in WP9.1c-1"), **the army's threat, attack and finishing since WP9.1c-2** ("The army in WP9.1c-2"; the threat
+rule itself runs at every think, `army::watch`).
 
 **The driver.** `Ai::due(tick)` and `Ai::think(&World, &mut Vec<Command>)`, called by the host immediately before `World::step`; the host
 schedules the commands for `world.tick()` under the AI's player id, AIs in ascending player id. In `sf_headless` that is `run::run_full`
@@ -657,16 +879,22 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
 
 ## Not done
 
-* **WP9.1c-2**: attacks, the defence posture, the attack timing and target, marching and finishing, `ai_vs_passive`, `ai_raid`. Defences are placed
-  only towards the other players' start sites.
+* **WP9.1c-2 gaps.** The army floor costs the economy: on M1's 4,000 credits the goal list does not complete in 30,000 ticks without an attack
+  ("The army floor", the money). One group at a time (no second wave while one is out; units made meanwhile gather); no retreat, regroup, focus fire or
+  target priority beyond "the construction centre first" (9.2/9.3); while the whole army is out, a hit on a structure other than the centre is
+  answered only by the towers (decision 3, "Threat"); the finishing `Attack` is tested on an observation the test builds, not in a scenario (in
+  `ai_vs_passive` the second wave's `AttackMove` brings the centre down on its own); the defence is a cell, not a unit, so raiders that run are
+  not chased beyond what an `AttackMove` meets; `ai_vs_passive` and `m1_ai` are won against a passive opponent only, no opponent that rebuilds or
+  answers. The army floor stalls the goal list until the army reaches it (on `m1_ai` the list stops at its fourth entry until the AI has won at
+  8,396). Defences are placed only towards the other players' start sites.
 * **WP9.1c-1 gaps.** No army before tick 15,020 (`ai_scout`) or 17,867 (`m1_ai`) on M1's credits (see "Production"; the army floor of WP9.1c-2 answers it). A scout that dies on the way is replaced once
   and not told where it died; the scenario's enemy has no gun, so a scout under fire is not run. The gather cell is not checked for a route from
   the base (no `plan_route`): a cell behind rock shows only as units idle far away, which are ordered `gather_tries` times and then left. A refused unit
-  order is read as accepted when another unit of the same kind comes out of another factory within the check, so the refusal goes unseen.
+  order is read as accepted when any new unit of the same kind appears within the check (out of another factory, or an earlier item of the same
+  factory finishing), so the refusal goes unseen.
   The AI digest hashes the AI's state, which is transient latches and memory that settle: a changed decision may show only in the world
   checksum (measured: the vehicle-factory rally point forced back on gives other checksums at ticks 4,000, 10,000 and 20,000 of `ai_scout`
-  and the same AI digest at all three). The army does not
-  defend: it has no rule for a base under attack until WP9.1c-2 (what an idle unit does by its own stance, `targeting.md`, is all there is).
+  and the same AI digest at all three). (The army defends since WP9.1c-2.)
 * Not checked: whether a lane of one cell is wide enough for harvester traffic (bodies are 1.5 cells); whether `Despawn` of a structure
   leaves the same state as destruction by weapons: `ai_rebuild` removes the refinery and the barracks with `Despawn` and only damages the plant
   by fire, so a structure shot to pieces and rebuilt is not run.
@@ -714,10 +942,12 @@ field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, 
   refinery its goal list builds brings the free harvester and the ore the rest. Start it with `sf_game --match m1_ai` (a bare name is looked up under
   `assets/matches`; `--match assets/matches/m1_ai.ron` is the same). `m1.ron` is unchanged and still the default.
 * **What the AI does there** is what its managers do (construction WP9.1b-1, economy WP9.1b-2: harvesters, silo, repair, the once-per-match rescue
-  sale). Since WP9.1c-1 it also buys units (a scout from tick 600, then the unit mix once its goal list is done), sets rally points and sends the scout
-  and the gathering army `Move` orders; it still does not attack (WP9.1c-2), so the human cannot lose to it yet. The commands it may send are `BuildStructure`,
-  `QueueUnit`, `SetRally`, `Repair`, `Sell` and `Order { Move, not queued }`; the test lets nothing else through and checks that builds and queued units
-  both occur. Measured on the sim thread after the merge with #126 (`ai_in_game.rs`, `ai_screenshot.rs`; the human idle; printed, not asserted):
+  sale). Since WP9.1c-1 it also buys units (a scout from tick 600, then the unit mix; WP9.1c-1: once its goal list is done), sets rally points and sends the scout
+  and the gathering army `Move` orders (since WP9.1c-2 the units come first, below the army floor, not after the goal list); **since WP9.1c-2 it attacks** (the army floor gives it an army early; the first wave goes at `max_wait`), so
+  an idle human loses to it (`m1_ai`: first wave of 12 at tick 6,037, the human's construction centre falls at 8,396; "The army in WP9.1c-2", "The
+  game seat"). The commands it may send are `BuildStructure`, `QueueUnit`, `SetRally`, `Repair`, `Sell` and `Order { Move | AttackMove | Attack, not
+  queued }`; the test lets nothing else through and checks that builds and queued units both occur. Re-measured after WP9.1c-2 (the army floor
+  takes the money first): by tick 4000 4 builds of 3 kinds, 12 units queued, 5 structures stand. Measured on the sim thread after the merge with #126 (`ai_in_game.rs`, `ai_screenshot.rs`; the human idle; printed, not asserted):
   first build at tick 17 (think 0 is the economy manager's turn); 1 structure at tick 2, 4 at tick 1000, 6 at tick 2500 and 6 at tick 4000; by tick 4000 5
   builds of 4 kinds and 1 unit queued (before the economy: 7 structures at 2500, 8 at 4000, 7 builds of 6 kinds, the harvesters now cost money). Re-measured after WP9.1c-1: the same
   (5 builds, 4 kinds, 6 structures at tick 4000; no sale). Asserted: at least 3 kinds of structure are ordered and at least 4 structures stand (the

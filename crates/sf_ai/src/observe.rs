@@ -128,6 +128,10 @@ pub struct Observation {
     pub visible: Vec<Seen>,
     /// The remembered structures that are seen to be gone, ascending by id.
     pub gone: Vec<EntityId>,
+    /// WP9.1c-2: the player is defeated or the match is decided (`World::defeat_tick`,
+    /// `World::match_result`, both public: a player knows it has lost and that the match is over). An AI
+    /// stops thinking then.
+    pub out_of_play: bool,
 }
 
 /// The cells of a footprint at `anchor`, row by row.
@@ -226,6 +230,7 @@ impl Observation {
             own,
             visible,
             gone,
+            out_of_play: world.defeat_tick(player).is_some() || world.match_result().is_some(),
         }
     }
 }

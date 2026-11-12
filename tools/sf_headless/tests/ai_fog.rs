@@ -41,7 +41,13 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected")
 /// `unit_mix` and no scout, so the production and army managers are off (`Profile::makes_units`), and the
 /// digest moved only because it now hashes the new profile numbers and the production and army state (at their
 /// start values). Measured in `the_new_managers_are_off_for_the_frozen_profiles` (ai_production.rs).
-const AI_DIGEST: u64 = 0xacb2_c8e5_fb87_6451;
+///
+/// Re-pinned by WP9.1c-2 (from `0xacb2_c8e5_fb87_6451`); the checksum did not move. The digest hashes three new
+/// profile numbers (`arrive_radius`, `attack_patience`, `army_floor_value`, at their defaults here) and the
+/// threat and attack state (at its start values: the threat rule is off with the managers). Measured: with
+/// those left out of `Profile::digest` and `AiState::digest` the WP9.1c-1 digests of all seven frozen
+/// scenarios come back.
+const AI_DIGEST: u64 = 0x71b3_4a19_ab09_48fd;
 
 const P0: PlayerId = PlayerId(0);
 const P1: PlayerId = PlayerId(1);

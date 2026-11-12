@@ -9,8 +9,8 @@
 //!
 //! WP9.1a is the frame: the AI observes, remembers and keeps its schedule. WP9.1b-1 adds the first
 //! manager with rules, construction ([`crate::base`]), WP9.1b-2 the economy ([`crate::economy`]), WP9.1c-1
-//! production ([`crate::production`]) and the army's scout and gathering ([`crate::army`]); the army does not
-//! attack yet (WP9.1c-2).
+//! production ([`crate::production`]) and the army's scout and gathering ([`crate::army`]), WP9.1c-2 the army's
+//! threat, attack timing, target and finishing ([`crate::army`]).
 
 use sf_sim::{Cell, Command, PlayerId, Tick};
 
@@ -69,10 +69,18 @@ impl Ai {
         self.state.digest()
     }
 
-    /// One think from an observation and the lens of the same world: update the memory, run the manager
-    /// whose turn it is, count the think and the placement questions. The commands go onto `out`.
+    /// One think from an observation and the lens of the same world: update the memory, watch the own
+    /// structures for hits (the threat rule, [`army::watch`], every think), run the manager whose turn it is,
+    /// count the think and the placement questions. The commands go onto `out`.
+    ///
+    /// WP9.1c-2: an AI whose player is defeated, or whose match is decided, does nothing at all
+    /// ([`Observation::out_of_play`]): no command, and its state (and so its digest) stays as it was.
     pub fn think_with(&mut self, obs: &Observation, lens: &mut Lens<'_>, out: &mut Vec<Command>) {
+        if obs.out_of_play {
+            return;
+        }
         memory::update(&mut self.state.known_structures, obs);
+        army::watch(&mut self.state, obs, lens);
         let manager = Manager::of_think(self.state.thinks);
         self.state.manager_runs[manager as usize] += 1;
         let asked = lens.previews();
@@ -84,7 +92,7 @@ impl Ai {
 }
 
 /// Runs one manager. Construction is WP9.1b-1, economy WP9.1b-2, production and the scout and gathering of
-/// the army WP9.1c-1 (the army attacks in WP9.1c-2).
+/// the army WP9.1c-1, the army's attack and defence WP9.1c-2 (the threat rule runs at every think)
 fn run_manager(
     manager: Manager,
     state: &mut AiState,
@@ -134,6 +142,7 @@ mod tests {
             own: Vec::new(),
             visible: Vec::new(),
             gone: Vec::new(),
+            out_of_play: false,
         }
     }
 
@@ -183,6 +192,25 @@ mod tests {
         let mut b = a.clone();
         b.state.rng.next_u32();
         assert_ne!(a.digest(), b.digest());
+    }
+
+    #[test]
+    fn an_ai_out_of_play_sends_nothing_and_its_state_stands_still() {
+        let mut a = ai(0);
+        let w = open_world(32, 32);
+        let mut out = Vec::new();
+        a.think_with(&obs(0), &mut Lens::new(&w, PlayerId(0)), &mut out);
+        let before = a.clone();
+        let mut o = obs(10);
+        o.out_of_play = true;
+        a.think_with(&o, &mut Lens::new(&w, PlayerId(0)), &mut out);
+        assert!(out.is_empty());
+        assert_eq!(a, before);
+        assert_eq!(a.digest(), before.digest());
+        // The control: the same think in play counts.
+        o.out_of_play = false;
+        a.think_with(&o, &mut Lens::new(&w, PlayerId(0)), &mut out);
+        assert_ne!(a.digest(), before.digest());
     }
 
     #[test]

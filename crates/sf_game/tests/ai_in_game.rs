@@ -173,8 +173,9 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
     let ai: Vec<_> = p.exit.commands.iter().filter(|c| c.player == AI).collect();
     assert!(!ai.is_empty(), "the AI sent commands");
     // The human sent none, and the AI sent only what its managers may send (`sf_ai`'s whitelist since
-    // WP9.1c-1): builds, units to queue, rally points, repairs, (once per match, in a deadlock) a sale and a
-    // plain `Move` of units (the scout and the gathering army); no attack.
+    // WP9.1c-2): builds, units to queue, rally points, repairs, (once per match, in a deadlock) a sale and unit
+    // orders that are not queued: `Move` (the scout, the gathering army, survivors home), `AttackMove` (the
+    // attack, the defence) and `Attack` (the finishing rule, on a structure it sees).
     assert!(p.exit.commands.iter().all(|c| c.player == AI));
     assert!(ai.iter().all(|c| matches!(
         c.command,
@@ -185,7 +186,11 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
             | sf_sim::Command::Sell { .. }
     ) || matches!(
         &c.command,
-        sf_sim::Command::Order { order: sf_sim::Order::Move(_), queued: false, ids } if !ids.is_empty()
+        sf_sim::Command::Order {
+            order: sf_sim::Order::Move(_) | sf_sim::Order::AttackMove(_) | sf_sim::Order::Attack(_),
+            queued: false,
+            ids,
+        } if !ids.is_empty()
     )));
     // Every command was scheduled for the tick about to run, in the tick the AI was due: before the step.
     let reference = game(&ai_file()).2.remove(0);
@@ -500,16 +505,21 @@ fn two_ais_think_in_ascending_player_order_whatever_order_they_are_given() {
 }
 
 /// The army timing in the real game seat: `m1_ai`, the AI as player 1 (north-east, 4,000 credits) against the
-/// idle human, driven the way the sim thread drives it (think before the step). `ai_scout` of
-/// `sf_headless` has the AI as player 0 on the human's site against a passive enemy; this is the seat the
-/// game uses. Measured, and pinned (WP9.1c-1 fix round 1): the last structure of the goal list, the first
-/// army unit, the army at the gather cell at ticks 4000 to 20000, and that a rally point and a plain `Move`
-/// (the scout) are really sent.
+/// idle human, driven the way the sim thread drives it (think before the step). `ai_vs_passive` of
+/// `sf_headless` has the AI as player 0 on the human's site against m1's static opponent; this is the seat the
+/// game uses. Measured, and pinned (WP9.1c-2, re-measured with the army floor and the attack): the last
+/// structure of the goal list before the match ends, the first army unit, the army at the gather cell at ticks
+/// 4000, 8000 and 12000, the first attack, and the tick the AI wins (the idle human has only its construction
+/// centre, which the attack finds on the human's start site). Asserted beyond the pins, as the rules promise:
+/// the first army unit comes long before the 17,867 of WP9.1c-1 (the army floor), the first attack not before
+/// `first_attack_tick` and with at least `min_units`, and after the win the AI sends nothing (decision 5).
 #[test]
 fn the_army_timing_in_the_game_seat() {
     let (mut world, _, mut ais) = game(&ai_file());
     let mut last_build = 0;
     let mut first_army = None;
+    let mut first_attack = None;
+    let mut after_end = 0;
     let (mut rallies, mut moves) = (0, 0);
     let mut at = Vec::new();
     while world.tick().0 < 20_000 {
@@ -517,6 +527,9 @@ fn the_army_timing_in_the_game_seat() {
             if ai.due(world.tick()) {
                 let mut out = Vec::new();
                 ai.think(&world, &mut out);
+                if world.match_result().is_some() {
+                    after_end += out.len();
+                }
                 for c in out {
                     match &c {
                         sf_sim::Command::BuildStructure { .. } => last_build = world.tick().0,
@@ -530,6 +543,13 @@ fn the_army_timing_in_the_game_seat() {
                             order: sf_sim::Order::Move(_),
                             ..
                         } => moves += 1,
+                        sf_sim::Command::Order {
+                            order: sf_sim::Order::AttackMove(_),
+                            ids,
+                            ..
+                        } if first_attack.is_none() => {
+                            first_attack = Some((world.tick().0, ids.len()));
+                        }
                         _ => {}
                     }
                     world.schedule(world.tick(), ai.player(), c).unwrap();
@@ -538,7 +558,7 @@ fn the_army_timing_in_the_game_seat() {
         }
         world.step();
         let t = world.tick().0;
-        if [4000, 8000, 12000, 16000, 20000].contains(&t) {
+        if [4000, 8000, 12000].contains(&t) {
             let ai = &ais[0];
             let g = ai.state().gather.expect("a gather cell");
             let near = world
@@ -552,24 +572,152 @@ fn the_army_timing_in_the_game_seat() {
             at.push(near);
         }
     }
+    let won = world.match_result();
     println!(
-        "m1_ai: last goal structure ordered at {last_build}, first army unit queued at {first_army:?}, army at the gather cell at 4000/8000/12000/16000/20000: {at:?}; {rallies} rally points, {moves} moves"
+        "m1_ai: last structure ordered at {last_build}, first army unit queued at {first_army:?}, army at the gather cell at 4000/8000/12000: {at:?}; first attack {first_attack:?}; result {won:?}; {rallies} rally points, {moves} moves"
     );
     assert!(
         rallies >= 1 && moves >= 1,
         "{rallies} rallies, {moves} moves"
     );
+    let profile = &ais[0].state().profile;
+    let (attack_tick, size) = first_attack.expect("an attack goes out");
+    assert!(attack_tick >= u64::from(profile.army.first_attack_tick));
+    assert!(size >= usize::from(profile.army.min_units));
+    // The army floor: the first army unit long before the 17,867 of WP9.1c-1 (the goal list then had to be done
+    // first).
+    assert!(first_army.unwrap() < 17_867);
+    assert_eq!(after_end, 0, "nothing sent once the match is decided");
+    let won = won.expect("the AI wins against the idle human");
+    assert_eq!(won.verdict, sf_sim::Verdict::Won(AI));
     assert_eq!(
-        (last_build, first_army, at),
+        (last_build, first_army, at, attack_tick, won.tick.0),
         (
             M1_AI_LAST_BUILD,
             Some(M1_AI_FIRST_ARMY),
-            M1_AI_ARMY.to_vec()
+            M1_AI_ARMY.to_vec(),
+            M1_AI_FIRST_ATTACK,
+            M1_AI_WON
         )
     );
 }
 
-/// Measured: the last of the eleven builds of the goal list, the first army unit, the army at the gather cell.
-const M1_AI_LAST_BUILD: u64 = 17_817;
-const M1_AI_FIRST_ARMY: u64 = 17_867;
-const M1_AI_ARMY: [usize; 5] = [0, 0, 0, 0, 2];
+/// Measured (WP9.1c-2): the last build before the win, the first army unit, the army at the gather cell at
+/// 4000, 8000 and 12000, the first attack, the win. (WP9.1c-1, without the floor and the attack: the last of
+/// the eleven builds at 17,817, the first army unit at 17,867, the army 0, 0, 0, 0, 2 at 4000 to 20000.)
+/// (The goal list stops at its fourth entry, the second power plant at 1,097: below the floor the units take the
+/// money, and the first wave wins before the list goes on; the idle human has no defence.)
+const M1_AI_LAST_BUILD: u64 = 1_097;
+const M1_AI_FIRST_ARMY: u64 = 1_147;
+const M1_AI_ARMY: [usize; 3] = [10, 0, 0];
+const M1_AI_FIRST_ATTACK: u64 = 6_037;
+const M1_AI_WON: u64 = 8_396;
+
+/// Drives `ais` on `world` to `until` the way the sim thread does, calling `look` after every step.
+fn drive(
+    world: &mut World,
+    ais: &mut [sf_ai::Ai],
+    until: u64,
+    mut look: impl FnMut(&World, &[sf_ai::Ai], &[sf_sim::Command]),
+) {
+    while world.tick().0 < until {
+        let mut sent = Vec::new();
+        for ai in ais.iter_mut() {
+            if ai.due(world.tick()) {
+                let mut out = Vec::new();
+                ai.think(world, &mut out);
+                for c in out {
+                    sent.push(c.clone());
+                    world.schedule(world.tick(), ai.player(), c).unwrap();
+                }
+            }
+        }
+        world.step();
+        look(world, ais, &sent);
+    }
+}
+
+/// Fix round 1 (item 4): the money of the AI in the game seat between ticks 5,500 and 8,500 (the floor is off
+/// after the first attack at 6,037, yet nothing is built until the win at 8,396). Printed every 250 ticks:
+/// credits, free (`budget::free`), what production holds back (`reserve` + the next goal's saving), the next goal,
+/// the items queued, the harvesters and the ore delivered so far. A measurement trace, not a pin: its only assert
+/// is that rows were printed; the four values `docs/rules/ai.md` quotes are read from its output (fix round 2).
+#[test]
+fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
+    let (mut world, _, mut ais) = game(&ai_file());
+    let mut rows = Vec::new();
+    drive(&mut world, &mut ais, 8_500, |w, ais, _| {
+        let t = w.tick().0;
+        if t >= 5_500 && t.is_multiple_of(250) {
+            let st = ais[0].state();
+            let obs = sf_ai::Observation::build(w, AI, &st.known_structures);
+            let lens = sf_ai::Lens::new(w, AI);
+            let next = sf_ai::base::next_build(st, &obs, &lens);
+            let saving = next.map_or(0, |k| sf_ai::base::saving_for(st, &obs, &lens, k));
+            let queued: Vec<u16> = obs
+                .own
+                .iter()
+                .filter_map(|o| o.factory.as_ref())
+                .flat_map(|f| f.queue.iter().map(|q| q.0.0))
+                .collect();
+            let harvesters = obs.own.iter().filter(|o| o.kind.0 == 11).count();
+            rows.push((
+                t,
+                obs.credits,
+                sf_ai::budget::free(&obs, &lens),
+                u64::from(st.profile.economy.reserve) + saving,
+                next.map(|k| k.0),
+                queued,
+                harvesters,
+                w.ore_delivered(AI),
+            ));
+        }
+    });
+    for r in &rows {
+        println!(
+            "tick {}: credits {}, free {}, holdback {} (next goal {:?}), queued {:?}, {} harvesters, ore delivered {}",
+            r.0, r.1, r.2, r.3, r.4, r.5, r.6, r.7
+        );
+    }
+    assert!(!rows.is_empty());
+}
+
+/// Fix round 1 (item 4): `m1_ai` to 30,000 ticks with the attack switched off (`attack_value` and `max_wait`
+/// beyond reach: no attack, so no win and the floor stays on while the army is below it), to see when the goal
+/// list completes with the floor. Printed: the last build, the army every 4,000 ticks.
+#[test]
+fn the_goal_list_in_the_game_seat_with_the_floor_and_no_attack() {
+    let (mut world, _, mut ais) = game(&ai_file());
+    for ai in &mut ais {
+        let st = ai.state().clone();
+        let mut p = st.profile.clone();
+        p.army.attack_value = 1_000_000;
+        p.army.max_wait = 72_000;
+        *ai = sf_ai::Ai::new(st.player, p, 458758, st.start_sites.clone());
+    }
+    let (mut last_build, mut army) = (0, Vec::new());
+    drive(&mut world, &mut ais, 30_000, |w, _, sent| {
+        if sent
+            .iter()
+            .any(|c| matches!(c, sf_sim::Command::BuildStructure { .. }))
+        {
+            last_build = w.tick().0 - 1;
+        }
+        if w.tick().0.is_multiple_of(4000) {
+            let n = w
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == AI && [12, 13, 19].contains(&v.kind.0))
+                .count();
+            army.push((w.tick().0, n));
+        }
+    });
+    println!(
+        "m1_ai, no attack: last build at {last_build}, army {army:?}, result {:?}",
+        world.match_result()
+    );
+    assert_eq!(world.match_result(), None);
+    // Measured: the list's last build at 29,777; the army stays at 12 (the floor reached, then the goal list's
+    // price is held back and one harvester's income goes to the list).
+    assert_eq!(last_build, 29_777);
+}

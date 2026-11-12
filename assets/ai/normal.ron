@@ -45,12 +45,15 @@
         // Attack when the army's value (sum of unit costs) reaches this ...
         attack_value: 3000,
         // ... or after this many ticks since the last attack with at least `min_units` units ...
-        max_wait: 3600,
+        // (WP9.1c-2: 6000, was 3600, measured on `ai_vs_passive`: with 3600 the first wave leaves at tick 3,631 before the
+        // army floor is reached and bounces off m1's tower; with 6000 the AI wins at tick 14,659.)
+        max_wait: 6000,
         min_units: 4,
         // ... but never before this tick.
         first_attack_tick: 2400,
-        // How long the army defends after a structure was hit.
-        defend_ticks: 200,
+        // How long the army defends after a structure was hit (WP9.1c-2: 400, was 200: ten army turns, as the
+        // army may still be walking after five; decision of 12-11-2026).
+        defend_ticks: 400,
         // Cells from the base towards the map centre where the army gathers (WP9.1c-1: 10, was 6: the anchor is
         // 4 x 4 and the build radius 8, so 6 lies inside the base).
         gather_distance: 10,
@@ -69,6 +72,15 @@
         scout_tick: 600,
         scout_patience: 1200,
         scout_retry: 3000,
+        // WP9.1c-2: an attacker within this many cells of its target has arrived and is given the finishing
+        // Attack on a visible enemy structure.
+        arrive_radius: 6,
+        // WP9.1c-2: an attack ends after this many ticks with no attacker within arrive_radius of its target.
+        attack_patience: 2400,
+        // WP9.1c-2, the army floor (decision of 12-11-2026): below this army value (unit costs) production holds
+        // back only the reserve, while no attack has gone out yet or the army defends. (2000, measured on
+        // `ai_vs_passive`; the start value 1000 wins at 26,387, docs/rules/ai.md "The army floor".)
+        army_floor_value: 2000,
     ),
     factions: [
         (

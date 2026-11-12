@@ -3012,6 +3012,36 @@ First half of WP9.1c (split in two, PLAN.md phase 9). Rules, numbers and measure
   (WP9.1d, #127), so nothing to see in `sf_game` and no screenshots; a scout that dies on the way to a defended start site (the scenario's enemy has no gun);
   harvesters bought through the queue rally to the gather cell and the delivered ore rises in every 2,000-tick window, but there is no run without the rally point to compare with.
 
+### WP9.1c-2 notes: the computer opponent's army (12-11-2026)
+
+Second half of WP9.1c (PLAN.md phase 9, decisions of 12-11-2026 dated there). Rules, numbers and measurements: `docs/rules/ai.md`, "The army in
+WP9.1c-2". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`,
+`units_spawn` and every `.expected` but `ai_scout` and the two new ones); every AI digest moved (cause measured, `ai.md` "Pins that moved (WP9.1c-2)").
+
+- **Built.** `sf_ai::army`: the threat rule at every think (`watch`, `hp_seen`, `Defend` until `defend_ticks` after the last hit, the attack called
+  back only for the construction centre, a sold structure no hit), the attack trigger (`gathered`, `attack_due`), the target (`target`, `beside`,
+  `sites_cleared`), marching, the finishing `Attack` on a visible structure only (`finishing_target`), the attack's end, `operations_minimal` (at most
+  `ARMY_COMMANDS_PER_TURN` = 4 commands per army turn). `sf_ai::production`: the army floor (`army_value`). `Observation::out_of_play` and an AI out of
+  play that does nothing. Profile: `arrive_radius`, `attack_patience`, `army_floor_value` (defaults; 0 = no floor), `defend_ticks` 400, `max_wait`
+  6,000, `army_floor_value` 2,000. Scenarios `ai_vs_passive` and `ai_raid` on their own frozen copies, in the CI headless list.
+  `tools/sf_headless/tests/ai_army.rs` (18 tests); `ai_perf.rs` gains two; `ai_in_game.rs` and `ai_screenshot.rs` re-measured and extended.
+- **Measured.** `ai_vs_passive`: waves at 6,030 (12 units, 2,000 credits, 5 survivors, ended by `attack_patience` at 8,430) and 12,030 (5 units, 1,100);
+  **the AI wins at tick 14,659** (T2 16,000). Game seat `m1_ai` against the idle human: first army unit 1,147, first wave of 12 at 6,037, **the AI wins
+  at 8,396**; the goal list stops at its fourth entry until then. `ai_raid`: first hit 4,022, `Defend` at 4,030, defenders ordered at 4,030, raiders dead
+  at 4,587, back to `Gather` at 4,990 (last hit 4,582 + 400 + the next think). Commands: at most 12 in any 1,000 ticks (bound 15) in `ai_vs_passive` and
+  over 40,000 ticks with no enemy known, at most one order per army turn there; nothing after the match is decided. Cost (release, this container,
+  load average 0.4 to 1.0): `ai_vs_passive` 0.42 us per AI per tick, worst think 94 us; the step of the launch tick 874 us against a mean step of 20 us
+  (the simulation plans the wave's `AttackMove`); one army turn with 200 riflemen 24 us at the launch, 28 us on the march (45 and 48 us before the
+  attackers' list was searched by bisection; with 50: 7.7 → 6.6 us).
+- **Fix round 1 (sweep of PR #129).** The centre recall now turns a marching wave (`recalled`); the army floor ends at `max_wait` before the
+  first attack; an attack ends when its target stops losing hit points for `attack_patience`; a defeated AI stops while the match goes on (three
+  players); new tests for the defence cell, its fence, the finishing `Attack` on the real world, the owner filter. Measured: the money around the
+  first attack in `m1_ai` (one harvester, ~200 credits per 750 ticks, the vehicle factory waits) and the goal list without an attack over 30,000
+  ticks (does not complete: 9 builds in `ai_vs_passive`, last at 29,777 in `m1_ai`). Wins, waves and the raid unchanged; only AI digests moved
+  (two new state fields).
+- **Not done.** See `ai.md` "Not done" (WP9.1c-2 gaps): one group at a time, no retreat, the defence gap with the army out, the finishing rule not needed in
+  a scenario, only passive opponents.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

@@ -34,24 +34,31 @@ pub struct Known {
     pub seen_tick: Tick,
 }
 
-/// What the army manager wants the army to do. WP9.1c-1 holds the seam only: the posture is always
-/// [`Posture::Gather`] and nothing reads the target; WP9.1c-2 adds the postures `Attack` and `Defend` and the
-/// function that turns a directive into orders (`docs/rules/ai.md`, "The army in WP9.1c-1").
+/// What the army manager wants the army to do (`docs/rules/ai.md`, "The army"): written by the army rules
+/// (threat, timing, target) and turned into orders by `army::operations_minimal`, the seam that WP9.2 replaces.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Directive {
     /// What the army does.
     pub posture: Posture,
-    /// Where it does it; `None` while gathering.
+    /// Where it does it: the attack's target cell, the cell beside the structure that was hit; `None` while
+    /// gathering.
     pub target: Option<Cell>,
 }
 
 /// The army's posture. The numbers are hashed, so they are permanent.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum Posture {
-    /// Units gather at the gather cell and wait (the only posture of WP9.1c-1).
+    /// Units gather at the gather cell and wait.
     #[default]
     Gather = 0,
+    /// WP9.1c-2: the attackers march on the target (the units at home keep gathering).
+    Attack = 1,
+    /// WP9.1c-2: a structure was hit; the units at home go there.
+    Defend = 2,
 }
+
+/// An own structure as the threat rule last saw it: `(kind, anchor cell, hit points)`.
+pub type HpSeen = (Kind, Cell, u32);
 
 /// A unit order the production turn sent and has not yet seen take effect: `(factory, kind, tick, how many
 /// units of the kind the player had before the order, how many items of the kind that factory had queued
@@ -130,11 +137,63 @@ pub struct AiState {
     pub scouts_sent: u8,
     /// The tick the AI saw that its scout was gone (dead, or lost in a queue); `None` while it has one.
     pub scout_gone_at: Option<Tick>,
-    /// The seam to WP9.1c-2 (above).
+    /// WP9.1c-2, the threat rule (`docs/rules/ai.md`, "Threat"): every own structure that is not being sold,
+    /// as the last think saw it; refreshed at every think.
+    pub hp_seen: BTreeMap<EntityId, HpSeen>,
+    /// The cell to defend (beside the structure hit last) and the tick of the last hit; `None` when there is
+    /// nothing to defend.
+    pub threat: Option<(Cell, Tick)>,
+    /// The tick of the first hit of the defence going on; a unit not ordered since is ordered once.
+    pub defend_since: Option<Tick>,
+    /// What the army does now (above).
     pub directive: Directive,
-    /// Per army unit: the tick of the last gather order and how many it got without arriving; pruned to
-    /// the live units every army turn.
+    /// The units sent on the attack going on, ascending by id; pruned to the live ones every army turn.
+    pub attackers: Vec<EntityId>,
+    /// The target cell of the attack going on.
+    pub attack_target: Option<Cell>,
+    /// The tick the last attack went out (0 before the first).
+    pub last_attack_tick: Tick,
+    /// The tick the attack going on went out, or the last army turn an attacker stood within `arrive_radius`
+    /// of its target: `attack_patience` counts from here.
+    pub attack_started: Tick,
+    /// How many attacks went out in the match.
+    pub attacks_launched: u32,
+    /// Fix round 1: the structure the attackers at the target finish, its hit points when last seen to drop
+    /// and that tick; the attack ends when they have not dropped for `attack_patience`.
+    pub target_hp: Option<(EntityId, u32, Tick)>,
+    /// Fix round 1: former attackers called back by a hit on the construction centre that have not had the
+    /// defence order yet, ascending; they get it whatever their order is.
+    pub recalled: Vec<EntityId>,
+    /// Fix round 2: attackers at the target that saw no enemy structure and got the one `AttackMove` onto the
+    /// middle of the target structure (or start site) of this attack, ascending; cleared when the attack ends.
+    pub closing: Vec<EntityId>,
+    /// The other players whose start site the AI has seen empty (no construction centre on its cell),
+    /// ascending.
+    pub sites_cleared: Vec<PlayerId>,
+    /// Per army unit: the tick of the last order (gather, attack or defence) and how many gather orders it got
+    /// without arriving; pruned to the live units every army turn.
     pub sent: BTreeMap<EntityId, (Tick, u8)>,
+}
+
+fn write_cell(h: &mut Fnv1a64, c: Option<Cell>) {
+    match c {
+        Some(c) => {
+            h.write_u8(1);
+            h.write_u32(c.x);
+            h.write_u32(c.y);
+        }
+        None => h.write_u8(0),
+    }
+}
+
+fn write_tick(h: &mut Fnv1a64, t: Option<Tick>) {
+    match t {
+        Some(t) => {
+            h.write_u8(1);
+            h.write_u64(t.0);
+        }
+        None => h.write_u8(0),
+    }
 }
 
 /// The most entries of [`AiState::refused`]; the one that expires first goes when it is full.
@@ -178,7 +237,19 @@ impl AiState {
             scout_leg_sent: None,
             scouts_sent: 0,
             scout_gone_at: None,
+            hp_seen: BTreeMap::new(),
+            threat: None,
+            defend_since: None,
             directive: Directive::default(),
+            attackers: Vec::new(),
+            attack_target: None,
+            last_attack_tick: Tick(0),
+            attack_started: Tick(0),
+            attacks_launched: 0,
+            target_hp: None,
+            recalled: Vec::new(),
+            closing: Vec::new(),
+            sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
         }
     }
@@ -329,14 +400,60 @@ impl AiState {
             }
             None => h.write_u8(0),
         }
-        h.write_u8(self.directive.posture as u8);
-        match self.directive.target {
-            Some(c) => {
+        // WP9.1c-2: the threat, the posture and the attack.
+        h.write_u32(self.hp_seen.len() as u32);
+        for (id, (kind, cell, hp)) in &self.hp_seen {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u32(u32::from(kind.0));
+            h.write_u32(cell.x);
+            h.write_u32(cell.y);
+            h.write_u32(*hp);
+        }
+        match self.threat {
+            Some((c, t)) => {
                 h.write_u8(1);
                 h.write_u32(c.x);
                 h.write_u32(c.y);
+                h.write_u64(t.0);
             }
             None => h.write_u8(0),
+        }
+        write_tick(&mut h, self.defend_since);
+        h.write_u8(self.directive.posture as u8);
+        write_cell(&mut h, self.directive.target);
+        h.write_u32(self.attackers.len() as u32);
+        for id in &self.attackers {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+        }
+        write_cell(&mut h, self.attack_target);
+        h.write_u64(self.last_attack_tick.0);
+        h.write_u64(self.attack_started.0);
+        h.write_u32(self.attacks_launched);
+        match self.target_hp {
+            Some((id, hp, t)) => {
+                h.write_u8(1);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+                h.write_u32(hp);
+                h.write_u64(t.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.recalled.len() as u32);
+        for id in &self.recalled {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+        }
+        h.write_u32(self.closing.len() as u32);
+        for id in &self.closing {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+        }
+        h.write_u32(self.sites_cleared.len() as u32);
+        for p in &self.sites_cleared {
+            h.write_u8(p.0);
         }
         h.write_u32(self.sent.len() as u32);
         for (id, (tick, tries)) in &self.sent {
@@ -404,7 +521,27 @@ mod tests {
         s.scout_leg_sent = Some(Tick(1390));
         s.scouts_sent = 1;
         s.scout_gone_at = Some(Tick(1380));
+        s.hp_seen
+            .insert(EntityId::new(0, 0), (Kind(0), Cell::new(12, 68), 2000));
+        s.hp_seen
+            .insert(EntityId::new(3, 1), (Kind(1), Cell::new(18, 60), 700));
+        s.threat = Some((Cell::new(17, 60), Tick(1490)));
+        s.defend_since = Some(Tick(1450));
+        s.directive.posture = Posture::Defend;
         s.directive.target = Some(Cell::new(60, 20));
+        s.attackers.push(EntityId::new(20, 0));
+        s.attackers.push(EntityId::new(21, 1));
+        s.attack_target = Some(Cell::new(71, 16));
+        s.last_attack_tick = Tick(1200);
+        s.attack_started = Tick(1300);
+        s.attacks_launched = 1;
+        s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1450)));
+        s.recalled.push(EntityId::new(22, 0));
+        s.recalled.push(EntityId::new(23, 1));
+        s.closing.push(EntityId::new(24, 0));
+        s.closing.push(EntityId::new(25, 1));
+        s.sites_cleared.push(PlayerId(1));
+        s.sites_cleared.push(PlayerId(2));
         s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
         s.sent.insert(EntityId::new(14, 2), (Tick(1560), 2));
         s
@@ -414,7 +551,7 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0xaec6_1e09_52ce_b855);
+        assert_eq!(base_state().digest(), 0x392b_1f32_56aa_3c19);
     }
 
     #[test]
@@ -516,6 +653,72 @@ mod tests {
         }
         // The posture's number is hashed: the permanent value.
         assert_eq!(crate::state::Posture::Gather as u8, 0);
+    }
+
+    #[test]
+    fn every_part_of_the_threat_and_attack_state_moves_the_digest() {
+        let d = base_state().digest();
+        let changes: [fn(&mut AiState); 32] = [
+            |s| s.closing.reverse(),
+            |s| s.closing.clear(),
+            |s| s.target_hp = None,
+            |s| s.target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
+            |s| s.target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),
+            |s| s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1451))),
+            |s| s.recalled.reverse(),
+            |s| s.recalled.clear(),
+            |s| {
+                s.hp_seen.remove(&EntityId::new(0, 0));
+            },
+            |s| {
+                s.hp_seen
+                    .insert(EntityId::new(3, 1), (Kind(1), Cell::new(18, 60), 699));
+            },
+            |s| {
+                s.hp_seen
+                    .insert(EntityId::new(3, 1), (Kind(2), Cell::new(18, 60), 700));
+            },
+            |s| {
+                s.hp_seen
+                    .insert(EntityId::new(3, 1), (Kind(1), Cell::new(18, 61), 700));
+            },
+            |s| s.threat = None,
+            |s| s.threat = Some((Cell::new(17, 61), Tick(1490))),
+            |s| s.threat = Some((Cell::new(17, 60), Tick(1491))),
+            |s| s.defend_since = None,
+            |s| s.defend_since = Some(Tick(1451)),
+            |s| s.directive.posture = Posture::Attack,
+            |s| s.directive.posture = Posture::Gather,
+            |s| s.attackers.clear(),
+            |s| s.attackers.reverse(),
+            |s| s.attackers[1] = EntityId::new(21, 2),
+            |s| s.attack_target = None,
+            |s| s.attack_target = Some(Cell::new(71, 17)),
+            |s| s.last_attack_tick = Tick(1201),
+            |s| s.attack_started = Tick(1301),
+            |s| s.attacks_launched = 2,
+            |s| s.sites_cleared.clear(),
+            |s| s.sites_cleared.reverse(),
+            |s| s.sites_cleared[1] = PlayerId(3),
+            |s| {
+                s.sent.insert(EntityId::new(12, 0), (Tick(1500), 2));
+            },
+            |s| s.directive.target = Some(Cell::new(61, 20)),
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut s = base_state();
+            change(&mut s);
+            assert_ne!(s.digest(), d, "change {i}");
+        }
+        // The postures' numbers are hashed: the permanent values.
+        assert_eq!(
+            (
+                Posture::Gather as u8,
+                Posture::Attack as u8,
+                Posture::Defend as u8
+            ),
+            (0, 1, 2)
+        );
     }
 
     #[test]

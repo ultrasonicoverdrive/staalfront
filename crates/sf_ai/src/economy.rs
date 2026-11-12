@@ -414,5 +414,7 @@ fn rescue(
     for id in pick_sales(eligible, need) {
         out.push(Command::Sell { structure: id });
         state.sales.push((id, obs.tick));
+        // WP9.1c-2 (decision 6 of 12-11-2026): a structure sold is no hit for the threat rule.
+        state.hp_seen.remove(&id);
     }
 }

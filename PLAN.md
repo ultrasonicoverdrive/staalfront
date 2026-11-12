@@ -470,6 +470,23 @@ Layered (analysis §12, §22G):
   (not the next goal's price); the army value is the cost of the own army units, the queued mix items and what this turn has ordered already. Also decided: a factory that can make a harvester gets
   no rally point (a rally point on the vehicle factory cost 15 percent of the ore in 20,000 ticks, measured, more than the 10 percent limit); the gather cell and the 8 cells round it are kept free of
   the AI's own structures.*
+  *12-11-2026 (decisions of the orchestrator for WP9.1c-2, built there): (1) **the army floor**: profile number `army_floor_value`; while the army value
+  (unit costs of the own army units, the queued mix items and what the production turn running has ordered) is below it, production holds back only the
+  `reserve`; the floor applies only while no attack has gone out yet or while the army defends. Start value 1,000; **built with 2,000** (measured on
+  `ai_vs_passive`: 1,000 wins at tick 26,387, 2,000 at 14,659) and `max_wait` **6,000** (was 3,600: the first wave left before the floor was reached).
+  (2) **The target is the enemy construction centre**; anything else only when it shoots back on the way. (3) **Only units at home defend**; the attack is
+  called back only when the construction centre is hit (known gap, in `ai.md`: with the whole army out a hit elsewhere is answered by the towers only).
+  (4) `defend_ticks` 400, the rest as in `normal.ron`, measured values win. (5) **A defeated AI stops**: no think once its player is defeated or the match
+  is decided (`Observation::out_of_play`). (6) A structure the AI sells is dropped from `hp_seen` when the sale is sent, so a rescue sale is no attack.*
+  *12-11-2026 (decisions of the orchestrator after the sweep of PR #129, built in its fix round 1): (1) a hit on the construction centre is an
+  order change: every former attacker gets the defence `AttackMove` once, whatever its order (a marching wave too), under `resend_ticks` and
+  the command cap. (2) The defeat clause of `out_of_play` is pinned by a three-player run (defeat while the match goes on). (3) **The army floor
+  applies only while no attack has gone out and the tick is before `max_wait`, or while the army defends**, so it never holds the goal list past
+  `max_wait` outside a defence. (4) The money around the first attack is traced and explained (one harvester's income), and the goal list with
+  the floor and no attack is measured to 30,000 ticks (it does not complete: a gap). (5) An attack also ends when the structure being finished
+  has not lost hit points for `attack_patience` while an attacker stands at the target. (6) The defence cell rule gets unit tests and a fence
+  test. (7) The finishing `Attack` is sent and taken on the real world in a test; the owner filter is pinned. (8) Survivors of an ended attack
+  walk home with `Move`, a retreat on purpose.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

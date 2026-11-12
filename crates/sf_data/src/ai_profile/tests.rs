@@ -58,7 +58,7 @@ fn the_shipped_profile_is_pinned() {
             a.defend_ticks,
             a.gather_distance
         ),
-        (3000, 3600, 4, 2400, 200, 10)
+        (3000, 6000, 4, 2400, 400, 10)
     );
     // WP9.1c-1: the numbers of production and the scout, written out in the file; the ones that equal the
     // default of a profile that leaves them out are checked against it in
@@ -76,6 +76,11 @@ fn the_shipped_profile_is_pinned() {
             a.scout_retry
         ),
         (8, 19, 3, 120, 2, 600, 1200, 3000)
+    );
+    // WP9.1c-2: the attack numbers and the army floor.
+    assert_eq!(
+        (a.arrive_radius, a.attack_patience, a.army_floor_value),
+        (6, 2400, 2000)
     );
     assert_eq!(p.factions.len(), 2);
     let mix = roles(&[("rifleman", 4), ("rocket_trooper", 2), ("light_tank", 3)]);
@@ -128,7 +133,7 @@ fn the_shipped_profile_fits_the_shipped_definitions() {
 #[test]
 fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
     // (the text in the shipped file, the name the error mentions, the values just outside the range).
-    let table: [(&str, &str, [&str; 2]); 30] = [
+    let table: [(&str, &str, [&str; 2]); 33] = [
         ("lane: 1", "economy.lane", ["5", "5"]),
         (
             "refinery_apron: (3, 5)",
@@ -158,14 +163,21 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
         ("blocked_ticks: 600", "blocked_ticks", ["0", "72001"]),
         ("placement_cap: 32", "placement_cap", ["0", "65537"]),
         ("attack_value: 3000", "attack_value", ["0", "1000001"]),
-        ("max_wait: 3600", "max_wait", ["0", "72001"]),
+        ("max_wait: 6000", "max_wait", ["0", "72001"]),
         ("min_units: 4", "min_units", ["0", "1001"]),
         (
             "first_attack_tick: 2400",
             "first_attack_tick",
             ["72001", "72001"],
         ),
-        ("defend_ticks: 200", "defend_ticks", ["0", "72001"]),
+        ("defend_ticks: 400", "defend_ticks", ["0", "72001"]),
+        ("arrive_radius: 6", "arrive_radius", ["0", "33"]),
+        ("attack_patience: 2400", "attack_patience", ["0", "72001"]),
+        (
+            "army_floor_value: 2000",
+            "army_floor_value",
+            ["1000001", "1000001"],
+        ),
         ("gather_distance: 10", "gather_distance", ["0", "65"]),
         ("max_queue: 2", "economy.max_queue", ["0", "6"]),
         ("gather_radius: 8", "gather_radius", ["0", "33"]),
@@ -285,6 +297,23 @@ fn a_profile_without_the_numbers_of_wp9_1c_1_reads_with_the_defaults() {
         (120, 2, 600, 1200, 3000)
     );
     assert!(p.factions.iter().all(|f| f.scout.is_none()));
+    // WP9.1c-2: the attack numbers and the floor read with their defaults too (no floor).
+    assert_eq!(
+        (a.arrive_radius, a.attack_patience, a.army_floor_value),
+        (
+            DEFAULT_ARRIVE_RADIUS,
+            DEFAULT_ATTACK_PATIENCE,
+            DEFAULT_ARMY_FLOOR_VALUE
+        )
+    );
+    assert_eq!(
+        (
+            DEFAULT_ARRIVE_RADIUS,
+            DEFAULT_ATTACK_PATIENCE,
+            DEFAULT_ARMY_FLOOR_VALUE
+        ),
+        (6, 2400, 0)
+    );
     // The frozen profiles of the WP9.1b scenarios have no unit mix and no scout.
     for name in [
         "ai_base",
