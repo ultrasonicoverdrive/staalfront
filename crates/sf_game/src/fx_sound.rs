@@ -111,6 +111,8 @@ pub fn play_test_sound(audio: &mut AudioSystem, which: Volume) {
 pub struct FxSound {
     voices: sf_audio::VoiceConfig,
     planner: Planner,
+    /// `positional.max_summed_gain` of `audio.ron`.
+    max_summed_gain: f32,
     totals: SoundTotals,
     mood: MoodTracker,
 }
@@ -131,6 +133,7 @@ impl FxSound {
         FxSound {
             voices: config.voices,
             planner: Planner::new(config.positional.clone()),
+            max_summed_gain: config.positional.max_summed_gain,
             totals: SoundTotals::default(),
             mood: MoodTracker::new(config.music.mood),
         }
@@ -212,6 +215,34 @@ impl FxSound {
         stats
     }
 
+    /// Starts the planned `cues` on `audio`. The limiter: when the gains of the frame's cues (what
+    /// `AudioSystem::play_at` would give each) add up to more than `max_summed_gain`, all are turned down
+    /// by the same factor, so a heavy moment does not clip; a quieter frame plays unchanged. A mapped
+    /// original sound is neither counted nor turned down (it plays as it did before the limiter, 3c of
+    /// `audio.md`). Returns the factor (1.0 = untouched).
+    pub fn start_cues(&self, audio: &mut AudioSystem, cues: &[Cue]) -> f32 {
+        let mut sum = 0.0;
+        for cue in cues {
+            if !audio.is_original(cue.sound) {
+                sum += audio.gain_at(cue.sound, cue.pos);
+            }
+        }
+        let scale = if sum > self.max_summed_gain {
+            self.max_summed_gain / sum
+        } else {
+            1.0
+        };
+        for cue in cues {
+            let own = if audio.is_original(cue.sound) {
+                1.0
+            } else {
+                scale
+            };
+            audio.play_at_scaled(cue.sound, cue.pos, own);
+        }
+        scale
+    }
+
     /// What the runner calls once a frame, after `fx.frame(..)`: plan the sounds of the events just shown and
     /// start them on `audio`, whose listener the caller has set from the camera. Without an output device the
     /// plan is made all the same and nothing is heard.
@@ -227,9 +258,7 @@ impl FxSound {
             |name| audio.has_sound(name),
             &mut cues,
         );
-        for cue in &cues {
-            audio.play_at(cue.sound, cue.pos);
-        }
+        self.start_cues(audio, &cues);
         drop(cues);
         fx.clear_shown();
         stats
@@ -574,6 +603,8 @@ mod tests {
     fn a_sound_far_away_is_quieter_and_beyond_the_radius_gone() {
         let (mut fx, mut sound) = setup();
         let mut audio = all_names_audio("far");
+        // This test is about distance: its bank plays every name at volume 1.0, which the limiter would turn down.
+        sound.max_summed_gain = f32::MAX;
         fx.push_events(&[
             fire_at(weapon("cannon"), [12.0, 12.0], 0),
             fire_at(weapon("cannon"), [12.0, 72.0], 0),
@@ -1028,8 +1059,16 @@ mod tests {
     /// share of full scale. Pan is ignored: with the player's pan law the louder channel is never above the
     /// centre gain, so this is an upper bound; pitch variation and the voice limits are ignored too.
     fn mixed_peak(frames: &[Vec<FxEvent>]) -> f32 {
+        mixed_peak_limited(frames, None)
+    }
+
+    /// [`mixed_peak`] with the frame limiter set to `limit` (`None`: the shipped `max_summed_gain`).
+    fn mixed_peak_limited(frames: &[Vec<FxEvent>], limit: Option<f32>) -> f32 {
         let bank = shipped_bank();
         let (fx, mut sound) = setup();
+        if let Some(limit) = limit {
+            sound.max_summed_gain = limit;
+        }
         let mut audio = tracing_audio(&assets());
         let l = listener(30.0);
         audio.set_listener(l);
@@ -1046,9 +1085,7 @@ mod tests {
                 |n| audio.has_sound(n),
                 &mut cues,
             );
-            for c in &cues {
-                audio.play_at(c.sound, c.pos);
-            }
+            sound.start_cues(&mut audio, &cues);
             for t in audio.take_trace() {
                 let samples = cache
                     .entry(t.name.clone())
@@ -1178,12 +1215,20 @@ mod tests {
             .collect();
         let peak = mixed_peak(&frames);
         println!("WP11.3b: simultaneous 20-tank volley peaks at {peak:.3}");
+        assert!(
+            (peak - 0.238).abs() < 0.002,
+            "the limiter must not touch it: {peak}"
+        );
         assert!(peak <= 0.5, "peak {peak}");
         assert!(peak >= 0.15, "{peak}");
     }
 
     /// Peak of `names` fired together on the same tick at the focus, repeated four times.
     fn together_peak(names: &[&str]) -> f32 {
+        together_peak_limited(names, None)
+    }
+
+    fn together_peak_limited(names: &[&str], limit: Option<f32>) -> f32 {
         let frames: Vec<Vec<FxEvent>> = (0..40u64)
             .map(|t| {
                 if t % 10 == 0 {
@@ -1197,14 +1242,25 @@ mod tests {
                 }
             })
             .collect();
-        mixed_peak(&frames)
+        mixed_peak_limited(&frames, limit)
     }
 
-    /// A heavy moment: four kinds on one tick at one spot (a cannon shot and its hit, a rocket, a medium explosion)
-    /// must not clip. Measured and written down in `audio.md` (gaps): eight kinds on one tick at one spot sum to
-    /// about 1.13 and all 18 to about 1.37, which would clip; not seen in the tested fights (open item in `audio.md`).
+    const EIGHT: [&str; 8] = [
+        "weapon.fire.cannon",
+        "impact.cannon",
+        "weapon.fire.rocket",
+        "impact.rocket",
+        "weapon.fire.howitzer",
+        "impact.shell",
+        "explosion.medium",
+        "explosion.large",
+    ];
+
+    /// A heavy moment: four kinds on one tick at one spot (a cannon shot and its hit, a rocket, a medium
+    /// explosion) sum to 0.485 and are untouched by the limiter; eight kinds (1.13 before the limiter) and all 18
+    /// (1.37) stay at or below full scale, with the shipped `max_summed_gain`.
     #[test]
-    fn a_heavy_moment_of_four_kinds_does_not_clip() {
+    fn a_heavy_moment_does_not_clip() {
         let four = [
             "weapon.fire.cannon",
             "impact.cannon",
@@ -1212,27 +1268,70 @@ mod tests {
             "explosion.medium",
         ];
         let peak = together_peak(&four);
-        println!("WP11.3b: four kinds at once peak at {peak:.3}");
-        assert!(peak <= 0.95, "peak {peak}");
-        let eight = [
-            "weapon.fire.cannon",
-            "impact.cannon",
-            "weapon.fire.rocket",
-            "impact.rocket",
-            "weapon.fire.howitzer",
-            "impact.shell",
-            "explosion.medium",
-            "explosion.large",
-        ];
-        println!(
-            "WP11.3b: eight kinds at once peak at {:.3}",
-            together_peak(&eight)
-        );
+        println!("limiter: four kinds at once peak at {peak:.3}");
+        assert!((peak - 0.485).abs() < 0.002, "peak {peak}");
+        let eight = together_peak(&EIGHT);
         let all: Vec<&str> = FIGHT_FILES.iter().map(|(e, _)| *e).collect();
-        println!(
-            "WP11.3b: all 18 kinds at once peak at {:.3}",
-            together_peak(&all)
+        let eighteen = together_peak(&all);
+        println!("limiter: eight kinds {eight:.3}, all 18 kinds {eighteen:.3}");
+        assert!(eight <= 1.0 && eighteen <= 1.0, "{eight} {eighteen}");
+        // The cause: with the limiter out of the way the old numbers come back.
+        let (eight_free, all_free) = (
+            together_peak_limited(&EIGHT, Some(f32::MAX)),
+            together_peak_limited(&all, Some(f32::MAX)),
         );
+        println!("limiter off: eight {eight_free:.3}, all 18 {all_free:.3}");
+        assert!((eight_free - 1.13).abs() < 0.01, "{eight_free}");
+        assert!((all_free - 1.37).abs() < 0.01, "{all_free}");
+    }
+
+    /// The ordinary fights are below the limit, so the limiter leaves them as they were (WP11.3b numbers).
+    #[test]
+    fn the_limiter_leaves_the_20_tank_fights_as_they_were() {
+        let staggered = mixed_peak(&tank_fight());
+        assert!((staggered - 0.466).abs() < 0.002, "{staggered}");
+        assert_eq!(staggered, mixed_peak_limited(&tank_fight(), Some(f32::MAX)));
+    }
+
+    /// Through `start_cues`: a frame at the limit is untouched (factor 1), one above it is turned down to the limit.
+    #[test]
+    fn start_cues_turns_a_loud_frame_down_to_the_limit() {
+        let (fx, mut sound) = setup();
+        let mut audio = tracing_audio(&assets());
+        let l = listener(30.0);
+        audio.set_listener(l);
+        let all: Vec<FxEvent> = every_fight_event([12.0, 12.0], 0)
+            .into_iter()
+            .map(|(_, e)| e)
+            .collect();
+        let mut cues = Vec::new();
+        sound.plan_events(
+            &fx,
+            &all,
+            &l,
+            &audio.spatial_params(),
+            |n| audio.has_sound(n),
+            &mut cues,
+        );
+        let scale = sound.start_cues(&mut audio, &cues);
+        let played: f32 = audio.take_trace().iter().map(|t| t.gain).sum();
+        println!(
+            "limiter: {} cues, factor {scale:.3}, summed gain {played:.3}",
+            cues.len()
+        );
+        assert!(scale < 1.0);
+        assert!((played - sound.max_summed_gain).abs() < 1e-3, "{played}");
+        // One quiet cue is not touched.
+        sound.reset();
+        sound.plan_events(
+            &fx,
+            &all[..1],
+            &l,
+            &audio.spatial_params(),
+            |n| audio.has_sound(n),
+            &mut cues,
+        );
+        assert_eq!(sound.start_cues(&mut audio, &cues), 1.0);
     }
 
     // ---- the music mood (WP11.4) -------------------------------------------------------------------------

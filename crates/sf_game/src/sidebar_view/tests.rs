@@ -808,9 +808,9 @@ fn the_loop_sign_never_covers_the_label_of_its_picture() {
     }
     assert!(labels.contains("RIFLE") && labels.len() >= 10);
     for size in [(1280, 720), (1920, 1080), (800, 600)] {
-        for scale in [0.5, 1.0, 1.5, 2.0] {
+        for scale in [0.5f32, 1.0, 1.5, 2.0] {
             let mut ui = Ui::new(UiConfig::default());
-            ui.begin_frame(at(0.0, 0.0), size, scale);
+            ui.begin_frame(at(0.0, 0.0), size, f64::from(scale));
             let l = sidebar_layout::layout(
                 Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32),
                 scale,

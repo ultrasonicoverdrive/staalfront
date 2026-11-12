@@ -393,19 +393,38 @@ impl AudioSystem {
 
     /// Play a sound without position (UI, announcements).
     pub fn play(&mut self, name: &str) {
-        self.play_with(name, None, None);
+        self.play_with(name, None, None, 1.0);
     }
 
     /// Play a sound without position in `category`, whatever the sound's own entry says: how the unit
     /// voices get the voice volume (WP11.5b) and the settings screen's test sounds the volume of their
     /// slider.
     pub fn play_as(&mut self, name: &str, category: Category) {
-        self.play_with(name, None, Some(category));
+        self.play_with(name, None, Some(category), 1.0);
     }
 
     /// Play a sound at a world position (`+Y` up), relative to the listener.
     pub fn play_at(&mut self, name: &str, world_pos: [f32; 3]) {
-        self.play_with(name, Some(world_pos), None);
+        self.play_with(name, Some(world_pos), None, 1.0);
+    }
+
+    /// [`play_at`](Self::play_at) with the gain multiplied by `scale` (the frame limiter of `FxSound`).
+    pub fn play_at_scaled(&mut self, name: &str, world_pos: [f32; 3], scale: f32) {
+        self.play_with(name, Some(world_pos), None, scale);
+    }
+
+    /// The gain [`play_at`](Self::play_at) would give `name` at `world_pos` (volume, category, master
+    /// and distance); 0 when it would not play. Starts nothing.
+    pub fn gain_at(&mut self, name: &str, world_pos: [f32; 3]) -> f32 {
+        let Some((def, _)) = self.resolve(name) else {
+            return 0.0;
+        };
+        let m = spatial::mix(&self.listener, world_pos, &self.params);
+        if m.is_audible(&self.params) {
+            self.base_gain(&def, None) * m.gain
+        } else {
+            0.0
+        }
     }
 
     /// Whether `name` has a sound to play: in the bank, or replaced by a
@@ -413,6 +432,11 @@ impl AudioSystem {
     pub fn has_sound(&self, name: &str) -> bool {
         self.bank.get(name).is_some()
             || matches!(&self.ra, Ra::Ready { events, .. } if events.contains(name))
+    }
+
+    /// Whether `name` plays as a mapped original (Red Alert) sound instead of the bank's own file.
+    pub fn is_original(&self, name: &str) -> bool {
+        matches!(&self.ra, Ra::Ready { events, .. } if events.contains(name))
     }
 
     /// Whether a voice of any of the sounds `names` is still sounding. Always `false` without an output
@@ -435,7 +459,13 @@ impl AudioSystem {
         self.trace.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
-    fn play_with(&mut self, name: &str, pos: Option<[f32; 3]>, category: Option<Category>) {
+    fn play_with(
+        &mut self,
+        name: &str,
+        pos: Option<[f32; 3]>,
+        category: Option<Category>,
+        scale: f32,
+    ) {
         // Look the name up first so unknown names warn even without a device.
         let Some((def, path)) = self.resolve(name) else {
             return;
@@ -443,7 +473,7 @@ impl AudioSystem {
         if self.player.is_none() && self.trace.is_none() {
             return;
         }
-        let (mut gain, mut pan) = (self.base_gain(&def, category), 0.0);
+        let (mut gain, mut pan) = (self.base_gain(&def, category) * scale, 0.0);
         if let Some(pos) = pos {
             let m = spatial::mix(&self.listener, pos, &self.params);
             if !m.is_audible(&self.params) {

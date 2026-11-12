@@ -128,6 +128,10 @@ pub struct EventRule {
 pub struct PositionalConfig {
     /// Playbacks started per frame over all events, at most.
     pub max_cues_per_frame: u32,
+    /// The most the playbacks of one frame may add up to in gain (each one's volume x spatial gain), in
+    /// full-scale units. A frame above it is turned down as a whole (`FxSound::start_cues`), so a heavy
+    /// moment does not clip; a frame below it plays unchanged.
+    pub max_summed_gain: f32,
     /// The rule of an event that no entry of `events` covers.
     pub fallback: EventRule,
     /// Rules by event name. A rule for `weapon.fire` covers `weapon.fire.bullet`
@@ -276,6 +280,9 @@ impl AudioConfig {
         if p.max_cues_per_frame == 0 {
             return Err("positional.max_cues_per_frame must be at least 1".into());
         }
+        if !(p.max_summed_gain.is_finite() && p.max_summed_gain > 0.0 && p.max_summed_gain <= 4.0) {
+            return Err("positional.max_summed_gain must be in (0, 4]".into());
+        }
         check_rule("positional.fallback", &p.fallback)?;
         for (name, rule) in &p.events {
             let ok = !name.is_empty()
@@ -381,6 +388,7 @@ mod tests {
         assert_eq!(c.music.fallback.combat, None);
         let p = &c.positional;
         assert_eq!(p.max_cues_per_frame, 16);
+        assert_eq!(p.max_summed_gain, 1.2);
         assert_eq!(p.fallback, rule(1, 3, 1, 6, 6.0));
         let want: Vec<(&str, EventRule)> = vec![
             ("explosion", rule(4, 3, 1, 6, 10.0)),
@@ -471,6 +479,12 @@ mod tests {
             ("mcalm", Box::new(|c| c.music.mood.calm_after_ticks = 0)),
             ("mfade", Box::new(|c| c.music.crossfade_ms = 31_000)),
             ("cap", Box::new(|c| c.positional.max_cues_per_frame = 0)),
+            ("sum0", Box::new(|c| c.positional.max_summed_gain = 0.0)),
+            ("sum5", Box::new(|c| c.positional.max_summed_gain = 5.0)),
+            (
+                "sumnan",
+                Box::new(|c| c.positional.max_summed_gain = f32::NAN),
+            ),
             (
                 "max0",
                 Box::new(|c| c.positional.fallback.max_per_batch = 0),
