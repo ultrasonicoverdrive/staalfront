@@ -4,13 +4,15 @@
 //! schedules the starting objects through the command queue (nothing writes the world directly).
 //!
 //! The player has the sandbox's controls: build with B and the mouse, produce with the WP6.5 keys,
-//! order units, attack. The opponent is **static**: no AI before phase 9 (it does not build, produce
-//! or attack); its units stand where they are and fire back on their own (WP5.4), and its harvester
-//! mines on its own (WP7.2). What is decided when is `docs/rules/match.md`.
+//! order units, attack. The opponent is **static** unless the match file gives it a computer
+//! controller (WP9.1d, [`ais`]): a static one does not build, produce or attack; its units stand where they
+//! are and fire back on their own (WP5.4), and its harvester mines on its own (WP7.2). What is decided
+//! when is `docs/rules/match.md`.
 
 use std::path::{Path, PathBuf};
 
-use sf_data::match_def::MatchDef;
+use sf_data::ai_profile::AiProfile;
+use sf_data::match_def::{Controller, MatchDef};
 use sf_data::units::UnitDefs;
 use sf_sim::{PlayerId, World};
 
@@ -19,9 +21,17 @@ use crate::{playfield, sandbox};
 /// The match file `--match` starts without a name, relative to the assets directory.
 pub const DEFAULT_MATCH: &str = "matches/m1.ron";
 
-/// The match file to read: the one named on the command line, or the default under `assets`.
+/// The match file to read: the one named on the command line, or the default under `assets`. A bare name
+/// (one component, no extension: `m1_ai`) is the file of that name under `assets/matches` (WP9.1d); anything
+/// else is a path as given.
 pub fn file_path(named: Option<&Path>, assets: &Path) -> PathBuf {
-    named.map_or_else(|| assets.join(DEFAULT_MATCH), Path::to_path_buf)
+    match named {
+        None => assets.join(DEFAULT_MATCH),
+        Some(path) if path.components().count() == 1 && path.extension().is_none() => {
+            assets.join("matches").join(path).with_extension("ron")
+        }
+        Some(path) => path.to_path_buf(),
+    }
 }
 
 /// Reads and checks the shape of the match file at `path`.
@@ -66,6 +76,16 @@ pub fn check(
             local.0
         ));
     }
+    if let Some(p) = def
+        .players
+        .iter()
+        .find(|p| p.id == local.0 && p.controller != Controller::Standard)
+    {
+        return Err(format!(
+            "player {} is the local player and takes its orders from the keyboard: it cannot have the controller {:?}",
+            p.id, p.controller
+        ));
+    }
     for p in &def.players {
         if sandbox::faction_of_owner(p.id) != Some(p.faction) {
             return Err(format!(
@@ -105,6 +125,38 @@ pub fn configure(world: World, def: &MatchDef, defs: &UnitDefs) -> Result<World,
     playfield::with_match(world, def)
 }
 
+/// The computer opponents of the match (WP9.1d), ascending by player id: one `sf_ai::Ai` for every player
+/// whose controller is `Ai`, made the way `sf_headless` makes the AIs of a scenario (`Scenario::load_ais`:
+/// the profile file is read and checked, resolved for the player's faction against the unit definitions,
+/// and every AI is told the start sites of the match; copied here and not shared because that function is
+/// private to the scenario loader and `sf_ai` is changed by another work package at the same time). The
+/// profile is read from `<assets>/ai/<profile>.ron`; a profile that is not there, or does not fit, is an
+/// error that names the player and the profile. The random seed of an AI is the match's `seed`.
+pub fn ais(def: &MatchDef, defs: &UnitDefs, assets: &Path) -> Result<Vec<sf_ai::Ai>, String> {
+    let sites = sf_ai::start_sites(def, defs);
+    let mut ais = Vec::new();
+    for p in &def.players {
+        let Controller::Ai { profile } = &p.controller else {
+            continue;
+        };
+        let at = format!("player {} (ai profile \"{profile}\")", p.id);
+        let file = assets.join("ai").join(format!("{profile}.ron"));
+        let text = std::fs::read_to_string(&file)
+            .map_err(|e| format!("{at}: cannot read {}: {e}", file.display()))?;
+        let parsed = AiProfile::from_ron(&text).map_err(|e| format!("{at}: {e}"))?;
+        let resolved =
+            sf_ai::Profile::resolve(&parsed, p.faction, defs).map_err(|e| format!("{at}: {e}"))?;
+        ais.push(sf_ai::Ai::new(
+            PlayerId(p.id),
+            resolved,
+            def.seed,
+            sites.clone(),
+        ));
+    }
+    ais.sort_by_key(sf_ai::Ai::player);
+    Ok(ais)
+}
+
 /// What [`schedule`] did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Start {
@@ -130,7 +182,7 @@ mod tests {
     use sf_data::map::Map;
     use sf_sim::{Verdict, WorldConfig};
 
-    fn assets() -> PathBuf {
+    pub(super) fn assets() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets")
     }
 
@@ -161,6 +213,103 @@ mod tests {
         assert_eq!(
             load(&file_path(None, &assets())).unwrap(),
             MatchDef::embedded()
+        );
+    }
+
+    #[test]
+    fn a_bare_name_is_a_match_under_assets_matches_and_anything_else_a_path() {
+        let assets = Path::new("assets");
+        let at = |name: &str| file_path(Some(Path::new(name)), assets);
+        assert_eq!(at("m1_ai"), Path::new("assets/matches/m1_ai.ron"));
+        assert_eq!(at("m1.ron"), Path::new("m1.ron"));
+        assert_eq!(at("x/m1_ai"), Path::new("x/m1_ai"));
+        // The shipped file the bare name finds loads and has the AI.
+        let def = load(&file_path(
+            Some(Path::new("m1_ai")),
+            &super::tests::assets(),
+        ))
+        .unwrap();
+        assert_eq!(def, MatchDef::embedded_ai());
+    }
+
+    #[test]
+    fn the_local_player_cannot_be_an_ai() {
+        let (def, defs, map) = m1();
+        let mut ai = MatchDef::embedded_ai();
+        check(&ai, &defs, map.size_in_cells(), PlayerId(0)).unwrap();
+        ai.players[0].controller = Controller::Ai {
+            profile: "normal".to_string(),
+        };
+        let e = check(&ai, &defs, map.size_in_cells(), PlayerId(0)).unwrap_err();
+        assert!(e.contains("player 0") && e.contains("local player"), "{e}");
+        // The default match is untouched by the rule.
+        check(&def, &defs, map.size_in_cells(), PlayerId(0)).unwrap();
+    }
+
+    #[test]
+    fn the_ais_come_from_the_controllers_and_a_missing_profile_is_named() {
+        let (def, defs, _) = m1();
+        // Standard players only: no AI.
+        assert!(ais(&def, &defs, &assets()).unwrap().is_empty());
+        let ai = MatchDef::embedded_ai();
+        let made = ais(&ai, &defs, &assets()).unwrap();
+        assert_eq!(made.len(), 1);
+        assert_eq!(made[0].player(), PlayerId(1));
+        // A profile that is not under assets/ai: the error names the player and the profile.
+        let mut other = ai.clone();
+        other.players[1].controller = Controller::Ai {
+            profile: "nonesuch".to_string(),
+        };
+        let e = ais(&other, &defs, &assets()).unwrap_err();
+        assert!(e.contains("player 1") && e.contains("nonesuch"), "{e}");
+    }
+
+    #[test]
+    fn the_match_seed_reaches_the_ai_and_a_profile_without_the_faction_is_refused() {
+        let (_, defs, _) = m1();
+        let digest = |seed: u64| {
+            let mut def = MatchDef::embedded_ai();
+            def.seed = seed;
+            ais(&def, &defs, &assets()).unwrap()[0].digest()
+        };
+        // The random stream is part of the AI's digest: the seed of the file is the AI's seed.
+        assert_eq!(digest(7), digest(7));
+        assert_ne!(digest(7), digest(8));
+        // Two AI players listed in descending order come out ascending.
+        let mut two = MatchDef::embedded_ai();
+        two.players[0].controller = Controller::Ai {
+            profile: "normal".to_string(),
+        };
+        two.players.reverse();
+        let made = ais(&two, &defs, &assets()).unwrap();
+        assert_eq!(
+            made.iter().map(|a| a.player().0).collect::<Vec<_>>(),
+            [0, 1]
+        );
+        // A profile file with a section for Meridian only, for the Veyran player: refused, naming both.
+        // A Windows checkout has CRLF line ends; the cut below looks for LF.
+        let normal = std::fs::read_to_string(assets().join("ai/normal.ron"))
+            .unwrap()
+            .replace("\r\n", "\n");
+        let cut = normal
+            .find("        (\n            faction: Veyran")
+            .unwrap();
+        let end = normal.rfind("    ],\n)").unwrap();
+        let only_meridian = format!("{}{}", &normal[..cut], &normal[end..]);
+        let dir = std::env::temp_dir().join(format!("sf_matchplay_faction_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("ai")).unwrap();
+        std::fs::write(dir.join("ai/only_meridian.ron"), only_meridian).unwrap();
+        let mut def = MatchDef::embedded_ai();
+        def.players[1].controller = Controller::Ai {
+            profile: "only_meridian".to_string(),
+        };
+        let e = ais(&def, &defs, &dir).unwrap_err();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            e.contains("player 1")
+                && e.contains("only_meridian")
+                && e.contains("no section for Veyran"),
+            "{e}"
         );
     }
 

@@ -124,6 +124,29 @@ an order, and a base without it would look dead; the credits it brings (the refi
 and the harvester then waits) are never spent. To win (WP7.7) the human destroys its construction centre; before it had to destroy its four structures *and* its
 four riflemen and tank (the harvester did not count).
 
+## Controllers (WP9.1d)
+
+Each player of a match file has a `controller` (`sf_data::match_def::Controller`). Left out it is `Standard`, which is what every file meant
+before: the player with the id of the game's local player (0) is the human at the keyboard and every other player is **static** (above). `Ai(profile:
+"normal")` makes the player a computer opponent (`sf_ai`) with the profile `assets/ai/<profile>.ron`; the game's sim thread thinks for it
+(`docs/rules/ai.md`, "In the game"). Checked when the file is read: the profile is a plain name (lower-case letters, digits and `_`);
+`matchplay::check`: the local player cannot be an AI; `matchplay::ais`: the profile file exists and fits the player's faction, the error names the
+player and the profile. An AI player needs a construction centre like every player (`MatchDef::check`). `m1.ron` and every frozen copy of it have no
+`controller` and are unchanged; `assets/matches/m1_ai.ron` is the first match with an AI, started with `sf_game --match m1_ai`. Pinned in
+`match_def.rs` (`the_controller_defaults_to_standard_...`, `the_shipped_match_with_an_ai_is_pinned`, `an_ai_controller_is_read_and_its_profile_name_is_checked`)
+and `matchplay.rs` (`the_local_player_cannot_be_an_ai`, `the_ais_come_from_the_controllers_and_a_missing_profile_is_named`,
+`the_match_seed_reaches_the_ai_and_a_profile_without_the_faction_is_refused`).
+
+Edges, as built (WP9.1d):
+
+* **Match file and menu.** `--match m1_ai` and Restart keep the file (`a_restart_equals_a_fresh_start`). Choosing **Match** in the start menu
+  afterwards starts the plain default `m1` (`Runner::begin` sets the match file to the default when a scene is chosen); the menu has no file choice.
+* **Bare names.** `--match NAME` where `NAME` is one component without an extension now means `assets/matches/NAME.ron`. A match file without an
+  extension, named without a directory, in the working directory is no longer reachable that way (write `./NAME`).
+* **`sf_headless` ignores `controller`.** A scenario's `match_file` with `controller: Ai` runs that player static; headless AIs come only from the
+  scenario's `ai` block (profile written with `.ron`, as `"normal.ron"`). This is what lets a record of an AI match replay without the AI.
+* **A refused AI command** is an `eprintln` on the sim thread in the game (as for a human's), but an error in `sf_headless::run` (`Sim`).
+
 ## The game mode
 
 `sf_game --match [FILE]` (default `assets/matches/m1.ron`) starts the match scene: the map, the economy

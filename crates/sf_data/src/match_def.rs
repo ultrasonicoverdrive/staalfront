@@ -30,6 +30,9 @@ use crate::units::{BuildingFunction, Category, Faction, UnitDefs};
 /// The shipped first match, compiled in.
 pub const EMBEDDED_M1: &str = include_str!("../../../assets/matches/m1.ron");
 
+/// The shipped match against a computer opponent (WP9.1d), compiled in.
+pub const EMBEDDED_M1_AI: &str = include_str!("../../../assets/matches/m1_ai.ron");
+
 /// The most players a match file can list (the simulation's limit, `sf_sim::MAX_MATCH_PLAYERS`).
 pub const MAX_PLAYERS: usize = 8;
 /// The most credits a player can start with (the money rules' limit, `sf_sim::MAX_STARTING_CREDITS`).
@@ -62,6 +65,24 @@ pub struct MatchObject {
     pub cell: (u32, u32),
 }
 
+/// Who plays a seat (WP9.1d). Left out of the file it is [`Controller::Standard`], which is what every
+/// match file before WP9.1d meant.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub enum Controller {
+    /// The rules of the first match: the player with the id of the game's local player is the human at the
+    /// keyboard, every other player is static (it builds, produces and attacks nothing).
+    #[default]
+    Standard,
+    /// A computer opponent (`sf_ai`) with the profile `assets/ai/<profile>.ron` (the name without `.ron`,
+    /// for example `normal`). The game's sim thread thinks for it before every step it is due. That the
+    /// name is a plain name is checked here; that the file exists and fits the player's faction where the
+    /// game reads it (`sf_game::matchplay::ais`), which names the profile in its error.
+    Ai {
+        /// The profile's file name under `assets/ai/`, without `.ron`.
+        profile: String,
+    },
+}
+
 /// One player.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,6 +95,9 @@ pub struct MatchPlayer {
     pub credits: u64,
     /// What it starts with, in the order the objects enter the world (which fixes their slots).
     pub objects: Vec<MatchObject>,
+    /// Who plays it; `Standard` when the file does not say.
+    #[serde(default)]
+    pub controller: Controller,
 }
 
 /// The file as written.
@@ -130,6 +154,18 @@ impl MatchDef {
             if p.objects.is_empty() {
                 return err(format!("player {} starts with nothing", p.id));
             }
+            if let Controller::Ai { profile } = &p.controller
+                && (profile.is_empty()
+                    || !profile
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+            {
+                return err(format!(
+                    "player {}: ai profile \"{profile}\" must be a name of lower-case letters, digits and '_' \
+                     (the file assets/ai/<name>.ron), like \"normal\"",
+                    p.id
+                ));
+            }
         }
         Ok(def)
     }
@@ -137,6 +173,12 @@ impl MatchDef {
     /// The shipped first match. Panics if the shipped file is wrong (a test reads it).
     pub fn embedded() -> MatchDef {
         MatchDef::from_ron(EMBEDDED_M1).unwrap_or_else(|e| panic!("assets/matches/m1.ron: {e}"))
+    }
+
+    /// The shipped match against a computer opponent (WP9.1d), compiled in.
+    pub fn embedded_ai() -> MatchDef {
+        MatchDef::from_ron(EMBEDDED_M1_AI)
+            .unwrap_or_else(|e| panic!("assets/matches/m1_ai.ron: {e}"))
     }
 
     /// Checks the file against the unit definitions and the size of its map (in cells): every role
@@ -283,6 +325,106 @@ mod tests {
                 ("construction_center".to_string(), 72, 14),
             ]
         );
+    }
+
+    /// WP9.1d: a file that does not say who plays a player means what every file meant before.
+    #[test]
+    fn the_controller_defaults_to_standard_and_the_shipped_first_match_has_only_standard_players() {
+        assert_eq!(Controller::default(), Controller::Standard);
+        for p in &MatchDef::embedded().players {
+            assert_eq!(p.controller, Controller::Standard, "player {}", p.id);
+        }
+        let m = MatchDef::from_ron(&file(&object("power_plant", 40, 40))).unwrap();
+        assert!(
+            m.players
+                .iter()
+                .all(|p| p.controller == Controller::Standard)
+        );
+        // Written out, it is the same.
+        let text = file(&object("power_plant", 40, 40))
+            .replace("credits: 0,", "credits: 0, controller: Standard,");
+        assert_eq!(MatchDef::from_ron(&text).unwrap(), m);
+    }
+
+    #[test]
+    fn the_shipped_match_with_an_ai_is_pinned() {
+        // The literal values of assets/matches/m1_ai.ron.
+        let m = MatchDef::embedded_ai();
+        assert_eq!(
+            (m.name.as_str(), m.map.as_str(), m.seed),
+            ("m1_ai", "m1", 458_758)
+        );
+        assert_eq!(m.players.len(), 2);
+        let (p0, p1) = (&m.players[0], &m.players[1]);
+        assert_eq!(
+            (p0.id, p0.faction, p0.credits),
+            (0, Faction::Meridian, 4000)
+        );
+        assert_eq!((p1.id, p1.faction, p1.credits), (1, Faction::Veyran, 4000));
+        assert_eq!(p0.controller, Controller::Standard);
+        assert_eq!(
+            p1.controller,
+            Controller::Ai {
+                profile: "normal".to_string()
+            }
+        );
+        // The same start of the human as in m1, and one construction centre on the cell of m1's.
+        assert_eq!(p0.objects, MatchDef::embedded().players[0].objects);
+        assert_eq!(
+            p1.objects,
+            vec![MatchObject {
+                role: "construction_center".to_string(),
+                cell: (72, 14)
+            }]
+        );
+        let map = crate::map::Map::load(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../assets/maps")
+                .join(&m.map),
+        )
+        .unwrap();
+        m.check(&UnitDefs::embedded(), map.size_in_cells()).unwrap();
+        // The profile it names is shipped: the file under assets/ai.
+        let profile =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/ai/normal.ron");
+        assert!(profile.is_file());
+    }
+
+    #[test]
+    fn an_ai_controller_is_read_and_its_profile_name_is_checked() {
+        let ai = |profile: &str| {
+            file(&object("power_plant", 40, 40)).replace(
+                "credits: 0,",
+                &format!("credits: 0, controller: Ai(profile: \"{profile}\"),"),
+            )
+        };
+        // Lower-case letters, digits and '_' are all fine.
+        for ok in ["normal", "hard_2", "a1", "_x9"] {
+            MatchDef::from_ron(&ai(ok)).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        let m = MatchDef::from_ron(&ai("normal")).unwrap();
+        assert_eq!(
+            m.players[1].controller,
+            Controller::Ai {
+                profile: "normal".to_string()
+            }
+        );
+        assert_eq!(m.players[0].controller, Controller::Standard);
+        // A name that could leave the directory, or is empty, is refused naming the profile.
+        for bad in ["", "../x", "a/b", "n.ron", "N", "a b"] {
+            let e = MatchDef::from_ron(&ai(bad)).unwrap_err().to_string();
+            assert!(
+                e.contains("ai profile") && e.contains("player 1"),
+                "{bad:?}: {e}"
+            );
+        }
+        // An unknown field of the controller, or a variant that is not one, is a read error.
+        assert!(MatchDef::from_ron(&ai("normal").replace("profile:", "prof:")).is_err());
+        let e = MatchDef::from_ron(
+            &file(&object("power_plant", 40, 40))
+                .replace("credits: 0,", "credits: 0, controller: Human,"),
+        );
+        assert!(e.is_err());
     }
 
     #[test]

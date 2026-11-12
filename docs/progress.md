@@ -3320,3 +3320,37 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   bytes 0, 1, 2, 3 as literals (mutations "rally branch drops `+ repeat`" and "+2 to +4" fail it). The kind, factory and faction checks
   and the queue-full check in `repeatable()` are documented as guards that cannot trigger. Repair and Sell are a third of the row wide
   now (`repair_sell.md`). The scenario count is 34 (33 + new).
+
+### WP9.1d notes: the computer opponent in the game (12-11-2026)
+
+* **What exists.** `controller` per player in the match file (`Standard` by default, `Ai(profile: "normal")`), `assets/matches/m1_ai.ron` (the M1 map,
+  the human as in `m1`, Veyran as the AI with a construction centre and 4000 credits: the human's own start), the sim thread as host of the `sf_ai`
+  driver (think immediately before `World::step` when `Ai::due`, commands through the thread's own `schedule`, so in the log and in `--record`),
+  the think time in the hitch log, `sf_game --match m1_ai` (a bare name is looked up under `assets/matches`). Rules: `docs/rules/match.md`
+  ("Controllers"), `docs/rules/ai.md` ("In the game (WP9.1d)"), `docs/rules/hitch_log.md`. Nothing changed in `crates/sf_sim` or `crates/sf_ai`.
+* **Unchanged on purpose.** `m1.ron` and every frozen copy are byte-identical; no scenario checksum, golden or `.expected` moved (release
+  `sf_headless --expect` on all scenarios, see the PR). Tests that count or pin the hitch log's slow ticks changed shape only
+  (`(tick, ms)` is `(tick, ms, think_ms)` now; `hitch.rs` tests).
+* **Measured** (`tests/ai_in_game.rs`, human idle, 20,000 ticks = 2,000 thinks; relative numbers, container shared with other agents' cargo runs):
+  debug build mean 24 us, worst 751 us, thinking 1.0 % of the step time; **release build mean 2 us, worst 57 us, 1.5 % of the step time**
+  (225,847 us of step in all). In the real game window under Xvfb (debug build, llvmpipe, 4,068 ticks, 407 thinks): mean 0.097 ms, worst 4.8 ms
+  (the first slow-tick lines of its hitch log are `[257, 64.1, 1.14]` and `[817, 87.5, 0.0]`: the think was 1.1 ms of a 64 ms debug tick and none of the
+  other). The AI's goal list is all there is to think about today (economy, production and army are stubs), so these numbers will grow with WP9.1b-2 and
+  WP9.1c; the profile's budget is 1 ms a think (`SLOW_THINK_MICROS`).
+* **Seen.** `docs/screenshots/wp9.1d/` (README there): the AI's base at ticks 2, 1000, 2500 and 4000 (1, 4, 6, 6 structures after the merge with #126; 1, 4, 7, 8 before it); the real game window shows
+  the human only its own base (the AI's is behind the fog).
+* **Follow-up.** `matchplay::ais` is a copy of `Scenario::load_ais` (sf_headless); it moves into `sf_ai` next to `start_sites` in a follow-up after
+  #126 merges (error text, seed source and profile naming differ today).
+* **Asserted and only printed.** Asserted: thinks 100 / 4 / 4 by tick, first build at tick 17, at least 4 kinds and 4 structures (6 in the picture
+  test) by tick 4000, a slow think reaches `slow_ticks`' third number and the counters (`SimConfig::think_hitch` makes one), two AIs think in
+  ascending player order. **Only printed, not asserted:** 4 / 6 / 6 structures at ticks 1000 / 2500 / 4000, "5 builds of 4 kinds, 1 unit queued", the think-cost
+  numbers; the `mean < 5 ms` bound is a loose sanity bound.
+* **Gaps.** The JSON shape is pinned in `hitch.rs` `--replay` of a record of an AI match is untested apart from
+  the runner test that no AI runs under `--replay`. Thinking before the step or after it is the same sequence of world states (a think after step T is
+  a think before step T+1), so no checksum can tell them apart; what a test can pin, and does, is the tick the commands are made for (the tick about to
+  run, `requested == effective`, `late_commands` 0).
+* **After the merge with #126 (WP9.1b-2).** The AI now also queues harvesters (and may repair and, once, sell): `ai_in_game` allows exactly those four commands
+  and checks that builds and queues both occur. The money the harvesters cost moved the counts at tick 4000 from 8 structures to 6 and from 6 kinds
+  to 4, so the asserted floors became what the rule promises (the first three goals, 1900 of 4000 credits: at least 3 kinds, 4 structures). Think cost re-measured:
+  release sim thread mean 1-2 us, worst 59-94 us, 1.1-1.3 % of the step (two runs); debug sim thread mean 36 us, worst 984 us, 1.3 %; real game window
+  under Xvfb (debug, 4,013 ticks, 401 thinks) mean 0.097 ms, worst 1.04 ms (its one slow-tick line: `[257, 50.1, 1.04]`).
