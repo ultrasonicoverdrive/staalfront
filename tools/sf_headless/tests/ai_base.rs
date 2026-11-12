@@ -43,9 +43,10 @@ const TOWER: Kind = Kind(6);
 const ADVANCED: Kind = Kind(7);
 const HARVESTER: Kind = Kind(11);
 
-/// Measured: the last goal up to the vehicle factory stands at tick 1998, the last of the list at 6518.
-const T1: u64 = 2000;
-const T1B: u64 = 6600;
+/// Measured: the last goal up to the vehicle factory stands at tick 1998, the last of the list at 6518; the
+/// bounds leave 20 percent.
+const T1: u64 = 2400;
+const T1B: u64 = 7800;
 
 fn scenario(name: &str) -> Scenario {
     Scenario::load(&scenario_path(&format!("{name}.ron"))).unwrap()

@@ -439,8 +439,8 @@ Layered (analysis §12, §22G):
   harvesters, silo, repair; `ai_economy`, `ai_rebuild`). Decisions: (1) the full price is saved before a normal build starts; emergencies
   (no refinery, a power shortage) start unfunded; (2) ore field locations are map knowledge (terrain), amounts only when seen; (3) the AI
   builds only on ground it sees now (`Lens::placement` answers only for a fully visible footprint and exit); (4) `placement_cap` 256 until
-  measured, 32 if a think could exceed 1 ms: one question costs about 8 us with 5,000 entities, so 256 would be about 2 ms, and 9.1b-1
-  set it to 32; (5) lane 1 cell, refinery apron 3 x 5, factory apron 1 x 3, new profile numbers with defaults so the frozen `ai_fog`
+  measured, 32 if the worst think exceeds 1 ms: measured with 5,000 entities, a think whose every question fails takes 2.4 to 4.9 ms
+  at 256 and 0.36 to 0.82 ms at 32 (64: up to 1.3 ms), so 9.1b-1 set it to 32; (5) lane 1 cell, refinery apron 3 x 5, factory apron 1 x 3, new profile numbers with defaults so the frozen `ai_fog`
   profile still reads; (6) a blocked power plant does not hold up the goal list; (7) the AI never sells in 9.1.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.

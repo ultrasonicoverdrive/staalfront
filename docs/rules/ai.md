@@ -78,7 +78,8 @@ second). The AI is also given **map knowledge**: `start_sites`, the cell of ever
 
 ### The budget
 
-`budget::committed` = the unpaid part of every own structure going up (`cost * left / total`, rounded up) plus the unpaid price of every
+`budget::committed` = the unpaid part of every own structure going up (`cost * left / total`, rounded up, which is exactly what the
+simulation still charges: it pays `cost * done / total` rounded down after `done` ticks, `tick_cost` in `money.rs`) plus the unpaid price of every
 queued unit that is not free (the front item minus `front_paid`). `budget::free` = credits minus that, at least zero. **Stateless**: worked
 out from the observation at every turn, so there is no ledger to drift. The simulation never refuses for lack of money (`economy.md`), so
 this is the AI's own count. Credits are the ore store (`World::credits`).
@@ -91,7 +92,7 @@ Every 40 ticks (manager 1 of the rotation), `base::turn`:
    cell (standing or going up). If not, the simulation refused it (a unit on the cell, say), and `(kind, cell)` goes into `refused` until
    `now + blocked_ticks`. The latch is cleared either way. Expired entries of `refused` and `blocked_until` are dropped. `refused` holds at
    most 64 entries (`REFUSED_CAP`); a new one pushes out the one that expires first.
-2. **Parallel cap.** With `max_parallel_builds` own structures going up, nothing starts. (The count and the goal count also include the latch, which step 1 has always cleared by then: a turn that skipped the verify would stop building rather than send a second build; the mutation of the verify step shows it.)
+2. **Parallel cap.** With `max_parallel_builds` own structures going up, nothing starts.
 3. **Choose** the first goal entry `(kind, count)` with fewer than `count` standing or going up, not blocked (`blocked_until[kind] > now`),
    whose `requires` all stand.
 4. **Power first** (only in a game with power rules). With the table's numbers, `made` = the `power` of own producers standing or going up,
@@ -102,8 +103,13 @@ Every 40 ticks (manager 1 of the rotation), `base::turn`:
 5. **Afford: the full price is saved first (decision 1).** Free credits at least the cost, or, with storage, at least
    `capacity * silo_percent / 100` when that is less (the store cannot hold more). **Emergencies start unfunded**: a refinery when none
    stands or goes up, a power plant when less power is made than used. With no harvester at all (none queued either) and a refinery
-   standing, a normal build also keeps the price of a harvester (capped the same way), so a broke AI does not lock its last credits into a
-   structure it cannot cancel.
+   standing, a normal build also needs its full price plus a harvester's, **not capped** (the memo's rule, section 2 step 5), so a broke AI
+   does not lock its last credits into a structure it cannot cancel. Tests (`tools/sf_headless/tests/ai_rules.rs`, each where the rule
+   decides): `a_refinery_starts_unfunded_when_none_stands` (400 credits), `a_power_plant_starts_unfunded_when_power_is_short` (a barracks,
+   no plant, 100 credits), `a_normal_build_waits_for_its_full_price`, `without_a_harvester_a_build_also_keeps_a_harvesters_price` (1400
+   credits wait, 1500 build), `a_build_saves_up_no_more_than_the_store_can_hold` (refineries of 1000: the vehicle factory is sent with
+   900 to 1499 credits), `the_budget_counts_what_a_structure_going_up_still_costs` (two builds at once; and `committed` equals the sum of
+   the simulation's `tick_cost` over the ticks still to build).
 6. **Place** (below). Found: `BuildStructure { kind, cell }` is sent and latched in `pending_build`. Nothing fits:
    `blocked_until[kind] = now + blocked_ticks`, and the next turn tries the next entry.
 
@@ -125,14 +131,19 @@ The AI never sells (decision 7).
   also needs its own apron on the map, open ground (`ground`), visible and free of structures.
 * **Refused** `(kind, cell)` pairs are left out until they expire.
 * **Score**, lowest first, ties by `(y, x)`; squared distances in half cells, integers only. A refinery: its exit cell to the nearest ore
-  ground (`ore_cells`, the harvestable terrain within the reach plus 16 cells, listed once at the first search). A defence: its middle to
+  ground (`ore_cells`, the harvestable terrain within the reach plus 16 cells, listed again at every search, so it follows the anchors the player has now). A defence: its middle to
   the nearest start site of another player. Everything else, and a refinery without ore or a defence without other sites: its middle to the
   middle of the nearest own anchor.
 * **Preview**, best first, at most `placement_cap` questions per search: `Some(Ok)` wins, `Some(Err)` goes into `refused`, `None` (not all
-  visible) is skipped. **`placement_cap` is 32** (was 256; decision 4): one question costs about 8 us with 5,000 entities on the map
-  (`what_one_placement_question_costs_in_a_crowd`), so 256 would be about 2 ms, over the 1 ms a think may take. The measured worst think
-  stayed under 1 ms, because in every scenario the mask makes the first question the answer (at most 1 per think); the cap is the ceiling
-  for a base where many questions fail.
+  visible) is skipped. **The resumption** (`AiState::resume`): a search that used up its `placement_cap` questions without a yes makes the
+  next search of that kind skip that many candidates (its refusals expire together with its block, so the list is the same again), so the
+  places behind the first `cap` are reached; back to the start when the list is shorter, cleared when a place is found
+  (`the_search_asks_at_most_the_cap_remembers_the_refusals_and_resumes_behind_them`: two hidden units, cap 2, the second search asks one
+  question and lands on the third place). **`placement_cap` is 32** (was 256; decision 4: 32 if the worst think exceeds 1 ms). Measured
+  (`a_think_whose_every_placement_question_fails`: the observation and a search whose every question is refused, `ai_base` with 5,000
+  wanderers, release, slowest of 5, three runs at load 4.8): cap 32 360 to 822 us, 64 637 to 1278 us, 128 1116 to 2266 us, 256 2351 to
+  4893 us. So 256 exceeds 1 ms and 64 does on a busy machine; 32 stays under. In the scenarios the mask makes the first question the answer
+  (at most 1 per think).
 
 ### The numbers (profile, data)
 
@@ -147,7 +158,7 @@ and of the defaults), `every_number_is_checked_at_both_ends_when_the_file_is_rea
 ### State
 
 New in `AiState`, all in the digest in this order: `pending_build`, `blocked_until: BTreeMap<Kind, Tick>`,
-`refused: BTreeMap<(Kind, Cell), Tick>`, `ore_cells: Option<Vec<Cell>>`, `previews` (questions passed to the simulation in all thinks).
+`refused: BTreeMap<(Kind, Cell), Tick>`, `resume: BTreeMap<Kind, u32>`, `previews` (questions passed to the simulation in all thinks).
 Integers, ordered maps and sorted vectors; no random draw (ties by `(y, x)`). Pinned by `the_digest_of_the_base_state_is_pinned` (a
 literal) and `every_new_part_of_the_state_moves_the_digest`. The profile digest hashes `lane` and the aprons.
 
@@ -169,7 +180,7 @@ What `tools/sf_headless/tests/ai_base.rs` checks:
 
 * `ai_base`: the goal list in order (centre, plant, refinery, barracks, plant, vehicle factory, tower, refinery, **plant** by the power
   rule, radar, tower, advanced defences); everything up to the vehicle factory standing by **T1 = tick 1998** and the whole list by **T1b =
-  tick 6518** (measured; the test allows 2000 and 6600); 11 builds, none refused; power made at least power used after every tick; no stall
+  tick 6518** (measured; the test allows 2400 and 7800); 11 builds, none refused; power made at least power used after every tick; no stall
   after every tick; the lane between every two structures and no structure on any of the four aprons (from `placement::apron`); two
   harvesters (one free per refinery) and ore delivered.
 * `ai_noore`: the 40,000 ticks end; at most 25 commands per 1000 ticks; the last build before tick 3000 (8 builds, what 6000 credits pay
@@ -232,8 +243,9 @@ come from `match_file`, so both are needed; the problems are reported when the s
 
 **`ai_fog`** (`assets/scenarios/ai_fog.ron`, `ai_fog_defs/`): player 0 (Meridian, the AI) has a construction centre and a scout; player 1
 (Veyran) is static with a construction centre, a power plant, a barracks and a refinery, and an army in the far corner. The scout walks to
-the power plant and barracks, the barracks is removed at tick 500, the scout walks home at 520. Pinned (WP9.1a; re-pinned by WP9.1b-1, see "The base"): final checksum `0xd369218db6025eff`
-(`ai_fog.expected`), AI digest `0x993afc7cd2c42cfd` (a literal in `tests/ai_fog.rs`), 800 ticks. The tests assert: the AI knows exactly the
+the power plant and barracks, the barracks is removed at tick 500, the scout walks home at 520. Pinned: final checksum `0x768b77651509db8c`
+(`ai_fog.expected`), AI digest `0x630c0979a8ae4749` (a literal in `tests/ai_fog.rs`), 800 ticks (WP9.1a pinned `0xd369218db6025eff` and
+`0x993afc7cd2c42cfd`; re-pinned by WP9.1b-1, see "The base"). The tests assert: the AI knows exactly the
 two structures the scout saw (kind, anchor, footprint, tick) and not the centre, refinery or army; it forgets the removed barracks and keeps
 the power plant after the scout leaves, also when it is destroyed out of sight at tick 700 (same memory and digest as without); without the scout it knows nothing; the observation at six ticks never holds a shrouded entity;
 **an invisible army changes nothing the AI sees or does** (same observation, memory and digest as a world without the army, while the world

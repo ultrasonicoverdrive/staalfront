@@ -2898,6 +2898,21 @@ First half of WP9.1b (design memo of 11-11-2026, split in two; the open choices 
   `the_search_keeps_off_the_apron_of_an_own_refinery`; a candidate's own apron not checked fails
   `boxed_in_the_refinery_is_blocked_and_later_goals_are_built`; the `refused` map hashed in reverse fails
   `the_digest_of_the_base_state_is_pinned`. Every one also moves a pinned checksum or digest.
+- **Fix round after the pre-review sweep (12-11-2026).** Each money rule now has a test where it decides
+  (`tools/sf_headless/tests/ai_rules.rs`); mutations: `emergency = false` fails the two emergency tests, only the refinery emergency fails
+  `a_power_plant_starts_unfunded_when_power_is_short`, the harvester reserve deleted fails
+  `without_a_harvester_a_build_also_keeps_a_harvesters_price`, `free = credits` fails
+  `the_budget_counts_what_a_structure_going_up_still_costs`, the store cap (`min`) removed fails
+  `a_build_saves_up_no_more_than_the_store_can_hold`. The budget equals the simulation's `tick_cost` over the ticks still to build
+  (checked in that test, and by reading `money.rs`). The harvester reserve follows the memo: price plus a harvester, not capped. The
+  search no longer livelocks when its first `placement_cap` candidates all fail: a resumption (`AiState::resume`) starts the next search
+  behind them; the cap ignored, a preview refusal not remembered and the resumption removed each fail
+  `the_search_asks_at_most_the_cap_remembers_the_refusals_and_resumes_behind_them`. The exit cell of the fence is tested
+  (`the_lens_does_not_ask_when_the_exit_cell_is_hidden`; removing that check fails it). The ore ground is listed at every search instead
+  of once (`ore_cells` left the state). The latch terms that were always zero are gone. `placement_cap` 32 now rests on a measured think
+  whose every question fails (`a_think_whose_every_placement_question_fails`: 256 takes 2.4 to 4.9 ms, 32 takes 0.36 to 0.82 ms). The
+  AI digests moved with the state layout (checksums unchanged): `ai_fog` `0x630c0979a8ae4749`, `ai_base` `0xa1bdd2e16f8db63b`,
+  `ai_noore` `0x94c928755b799c2f`, `ai_boxed` `0x5c40c9e2637e1194`. T1/T1b bounds now 2400 and 7800 (20 percent over the measured).
 - **Not done.** The economy manager (harvesters, silo, repair) and `ai_economy`/`ai_rebuild` (WP9.1b-2); production and army (WP9.1c); the
   game does not run the AI (WP9.1d), so there is nothing new to see in `sf_game` and no screenshots; whether a one-cell lane is wide enough
   for harvester traffic is not checked.

@@ -149,6 +149,42 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
 }
 
 #[test]
+fn a_think_whose_every_placement_question_fails() {
+    // The worst think of the construction manager, measured: the observation and a search in which every
+    // question the cap allows is asked and refused, on `ai_base` with 5,000 wanderers on the map. The vehicle
+    // factory needs a refinery, which does not stand at tick 1, so the simulation refuses every place
+    // (`MissingPrerequisite`, after walking every entity like any other answer); the AI's own turn never
+    // asks for it then, the search is called directly. Five runs per cap; the slowest is printed.
+    let s = crowded_in("ai_base.ron", 5000);
+    let mut world = s.build_world().unwrap();
+    world.step();
+    let player = sf_sim::PlayerId(0);
+    for cap in [32u32, 64, 128, 256] {
+        let mut slowest = Duration::ZERO;
+        let mut asked = 0;
+        for _ in 0..5 {
+            let mut state = s.ais[0].state().clone();
+            state.profile.economy.placement_cap = cap;
+            let started = Instant::now();
+            let mut obs = sf_ai::Observation::build(&world, player, &state.known_structures);
+            // The wanderers would shut most places out of the mask; without them every place gets asked.
+            obs.visible.clear();
+            let mut lens = sf_ai::Lens::new(&world, player);
+            let found = sf_ai::placement::search(&mut state, &obs, &mut lens, sf_sim::Kind(3));
+            slowest = slowest.max(started.elapsed());
+            assert_eq!(found, None);
+            asked = lens.previews();
+        }
+        assert_eq!(asked, cap, "every question is asked");
+        println!(
+            "a think with cap {cap}: {asked} failing placement questions, {} entities: slowest of 5 {:.0} us",
+            world.len(),
+            slowest.as_secs_f64() * 1e6
+        );
+    }
+}
+
+#[test]
 fn what_one_placement_question_costs_in_a_crowd() {
     // The cost a full `placement_cap` would have, measured instead of estimated: the AI's own lens asked
     // 256 times on visible ground of `ai_base` with 5,000 wanderers on the map (each question walks every
