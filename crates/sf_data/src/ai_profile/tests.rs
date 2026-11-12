@@ -58,7 +58,7 @@ fn the_shipped_profile_is_pinned() {
             a.defend_ticks,
             a.gather_distance
         ),
-        (3000, 6000, 4, 2400, 400, 10)
+        (3000, 14_000, 4, 2400, 400, 10)
     );
     // WP9.1c-1: the numbers of production and the scout, written out in the file; the ones that equal the
     // default of a profile that leaves them out are checked against it in
@@ -91,9 +91,9 @@ fn the_shipped_profile_is_pinned() {
         roles(&[
             ("power_plant", 1),
             ("refinery", 1),
+            ("vehicle_factory", 1),
             ("barracks", 1),
             ("power_plant", 2),
-            ("vehicle_factory", 1),
             ("defence_tower", 1),
             ("refinery", 2),
             ("radar", 1),
@@ -110,9 +110,9 @@ fn the_shipped_profile_is_pinned() {
         roles(&[
             ("power_plant", 1),
             ("refinery", 1),
+            ("vehicle_factory", 1),
             ("barracks", 1),
             ("power_plant", 2),
-            ("vehicle_factory", 1),
             ("defence_tower", 1),
             ("fortified_bunker", 1),
             ("refinery", 2),
@@ -163,7 +163,7 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
         ("blocked_ticks: 600", "blocked_ticks", ["0", "72001"]),
         ("placement_cap: 32", "placement_cap", ["0", "65537"]),
         ("attack_value: 3000", "attack_value", ["0", "1000001"]),
-        ("max_wait: 6000", "max_wait", ["0", "72001"]),
+        ("max_wait: 14000", "max_wait", ["0", "72001"]),
         ("min_units: 4", "min_units", ["0", "1001"]),
         (
             "first_attack_tick: 2400",

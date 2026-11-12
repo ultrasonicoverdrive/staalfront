@@ -45,9 +45,11 @@
         // Attack when the army's value (sum of unit costs) reaches this ...
         attack_value: 3000,
         // ... or after this many ticks since the last attack with at least `min_units` units ...
-        // (WP9.1c-2: 6000, was 3600, measured on `ai_vs_passive`: with 3600 the first wave leaves at tick 3,631 before the
-        // army floor is reached and bounces off m1's tower; with 6000 the AI wins at tick 14,659.)
-        max_wait: 6000,
+        // (WP9.1c-3: 14000, was 6000. The vehicle factory now comes second in the goal list, so the barracks stands at
+        // about 2,900 and the army floor (2,000) is reached at about 12,600 in `ai_vs_passive`, 13,500 in `m1_ai`;
+        // the first wave carries 2,000 from 14,000 on, 1,900 at 12,600, 1,200 at 6,000 to 12,000. Measured,
+        // docs/rules/ai.md "The opening".)
+        max_wait: 14000,
         min_units: 4,
         // ... but never before this tick.
         first_attack_tick: 2400,
@@ -85,12 +87,16 @@
     factions: [
         (
             faction: Meridian,
+            // WP9.1c-3, the opening: the vehicle factory (and with it the second harvester) comes right after the
+            // refinery, before the barracks. One harvester earns about 0.27 credits per tick, so every 100 credits
+            // spent before the second harvester costs it about 370 ticks. Cost: no barracks before about tick 2,900
+            // and no unit before about 5,900 (docs/rules/ai.md "The opening").
             build_order: [
                 ("power_plant", 1),
                 ("refinery", 1),
+                ("vehicle_factory", 1),
                 ("barracks", 1),
                 ("power_plant", 2),
-                ("vehicle_factory", 1),
                 ("defence_tower", 1),
                 ("refinery", 2),
                 ("radar", 1),
@@ -106,9 +112,9 @@
             build_order: [
                 ("power_plant", 1),
                 ("refinery", 1),
+                ("vehicle_factory", 1),
                 ("barracks", 1),
                 ("power_plant", 2),
-                ("vehicle_factory", 1),
                 ("defence_tower", 1),
                 ("fortified_bunker", 1),
                 ("refinery", 2),

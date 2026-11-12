@@ -31,7 +31,7 @@ const P1: PlayerId = PlayerId(1);
 const VS_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_vs_passive.expected");
 const RAID_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_raid.expected");
 /// `Ai::digest` of player 0 at the end of `ai_vs_passive` and of `ai_raid`.
-const VS_DIGEST: u64 = 0x74e3_8ea1_d028_c406;
+const VS_DIGEST: u64 = 0xf99d_e96f_6fa2_ca6f;
 const RAID_DIGEST: u64 = 0x13d1_a446_6b23_765e;
 
 /// The kinds of the frozen definitions (`ai_vs_passive_defs/unit_defs.ron`, the shipped ones of 12-11-2026).
@@ -163,16 +163,15 @@ fn story(s: &Scenario, ticks: u64) -> Story {
 }
 
 /// T2: the length of `ai_vs_passive`; the AI must have won before it.
-const T2: u64 = 16_000;
+const T2: u64 = 20_000;
 /// The tick the match names the AI the winner (the static opponent's construction centre falls).
-const WON: u64 = 14_659;
+const WON: u64 = 16_726;
 /// The waves of `ai_vs_passive`: (tick, units, value, survivors, ended).
-const WAVES: [(u64, usize, u64, usize, Option<u64>); 2] =
-    [(6030, 12, 2000, 5, Some(8430)), (12_030, 5, 1100, 5, None)];
-/// Army units at the gather cell at ticks 4,000, 8,000, 12,000 and 16,000 (the match is over at 14,659).
-const VS_AT_GATHER: [usize; 4] = [11, 0, 5, 0];
+const WAVES: [(u64, usize, u64, usize, Option<u64>); 1] = [(14_030, 6, 2000, 6, None)];
+/// Army units at the gather cell at ticks 4,000, 8,000, 12,000 and 16,000 (the match is over at 16,726).
+const VS_AT_GATHER: [usize; 4] = [0, 2, 4, 0];
 /// The tick of the last `BuildStructure` before the win.
-const VS_LAST_BUILD: u64 = 11_650;
+const VS_LAST_BUILD: u64 = 16_330;
 
 #[test]
 fn the_checksums_and_ai_digests_of_ai_vs_passive_and_ai_raid_are_pinned() {
@@ -542,8 +541,10 @@ fn a_unit_hidden_in_the_reach_changes_nothing_the_ai_does_also_an_army_beside_th
     // AI's commands and digest must be equal. Twice: with the scout (which sees them first), and without one,
     // so that the attack marches past them before they are seen. (The straight line crosses the lake in the
     // middle of the map, x 38..55, y 36..53; the cells are open ground at its north-east shore.)
-    let near = [(58, 34), (59, 34), (58, 35)];
-    let probe = Cell::new(58, 34);
+    // (WP9.1c-3: the cells moved from (58, 34) to (57, 28): the first wave now carries light tanks and leaves at 14,030,
+    // and its way passes the lake's north-east shore at y 25 to 30, not at y 34.)
+    let near = [(57, 28), (58, 28), (57, 29)];
+    let probe = Cell::new(57, 28);
     for scouts in [2u8, 0] {
         let scout = |p: &mut sf_ai::Profile| p.army.scouts_max = scouts;
         let s = with_profile(with_riflemen_at(near), scout);
@@ -766,7 +767,7 @@ fn never_before_first_attack_tick_and_max_wait_needs_min_units() {
     let a = base_state.profile.army;
     assert_eq!(
         (a.first_attack_tick, a.max_wait, a.min_units),
-        (2400, 6000, 4)
+        (2400, 14_000, 4)
     );
     let run = |n: u32, tick: u64| {
         let mut s = base_state.clone();
@@ -777,9 +778,9 @@ fn never_before_first_attack_tick_and_max_wait_needs_min_units() {
     };
     // `max_wait` after the last attack (none yet: tick 0) with `min_units` gathered: the attack goes; with one
     // fewer it does not; one tick before `max_wait` neither.
-    assert_eq!(run(4, 6000), 1);
-    assert_eq!(run(3, 6000), 0);
-    assert_eq!(run(4, 5999), 0);
+    assert_eq!(run(4, 14_000), 1);
+    assert_eq!(run(3, 14_000), 0);
+    assert_eq!(run(4, 13_999), 0);
     // Before `first_attack_tick` never, whatever the value.
     let mut s = base_state.clone();
     s.profile.army.attack_value = 1;
@@ -1278,6 +1279,25 @@ fn a_hit_on_the_centre_calls_back_a_wave_that_is_still_marching() {
     assert!(attack_moves(&out).is_empty(), "{out:?}");
 }
 
+#[test]
+fn a_centre_recall_leaves_no_attacker_on_the_closing_list() {
+    // WP9.1c-3 (the re-review of #129): `closing` holds the attackers that were given the finishing Attack; a
+    // recall ends the attack without `end_attack`, which used to leave their ids on the list (the reviewer's
+    // probe left 4).
+    let (world, s0, own) = at_the_target();
+    let mut s = s0.clone();
+    watch(&world, &mut s, &observation(&world, 3100, own.clone()));
+    s.closing = s.attackers.clone();
+    s.closing.sort();
+    assert_eq!(s.closing.len(), 4);
+    let mut hit = own;
+    hit[0].hp = 900;
+    watch(&world, &mut s, &observation(&world, 3110, hit));
+    assert!(s.attackers.is_empty());
+    assert_eq!(s.recalled.len(), 4);
+    assert!(s.closing.is_empty(), "{:?}", s.closing);
+}
+
 /// `s` with its match file changed by `change` (the starting objects made again, as `Scenario::load` does).
 fn with_match(mut s: Scenario, change: impl FnOnce(&mut sf_data::match_def::MatchDef)) -> Scenario {
     let mut def = s.match_def.clone().unwrap();
@@ -1339,7 +1359,7 @@ fn the_army_floor_ends_at_max_wait_before_the_first_attack() {
     let c = rifleman_cost(&world);
     let credits = u64::from(s0.profile.economy.reserve) + c;
     let max_wait = u64::from(s0.profile.army.max_wait);
-    assert_eq!(max_wait, 6000);
+    assert_eq!(max_wait, 14_000);
     let at = |tick: u64| {
         let mut o = observation(&world, tick, base(&world));
         o.credits = credits;
@@ -1646,13 +1666,112 @@ fn the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks() {
         army(&st.finished)
     );
     assert!(st.waves.is_empty());
-    // Measured: the list does NOT complete in 30,000 ticks (9 of its builds; the vehicle factory waits until
-    // 11,650): the floor spent the 4,000 starting credits on twelve units, and one harvester brings about 200
-    // credits per 750 ticks (`the_money_of_the_ai_in_the_game_seat_...` in sf_game shows the same in the game seat).
+    // WP9.1c-3 (was: the list does not complete in 30,000 ticks, 9 builds, the vehicle factory at 11,650): with the
+    // vehicle factory second in the list the list completes at 22,970 (11 builds: the second power plant and a
+    // third one for the radar included); the army floor is reached at 12,567 (pinned in
+    // `the_vehicle_factory_comes_before_...`). The
+    // acceptance target of the brief was 20,000: NOT met, income is the limit (docs/rules/ai.md "The opening").
     assert_eq!(
         builds,
-        [10, 250, 810, 1090, 11_650, 19_250, 22_810, 26_970, 29_090]
+        [
+            10, 250, 810, 2170, 2890, 3970, 16_370, 19_810, 20_690, 21_810, 22_970
+        ]
     );
+    let last = *builds.last().unwrap();
+    assert!(last <= 23_000, "{last}");
+    // The last structure of the list, the advanced defences (kind 7), is the final build.
+    let last_kind = st
+        .finished
+        .ai_commands
+        .iter()
+        .filter_map(|c| match &c.2 {
+            Command::BuildStructure { kind, .. } => Some(kind.0),
+            _ => None,
+        })
+        .next_back();
+    assert_eq!(last_kind, Some(7));
+}
+
+#[test]
+fn the_vehicle_factory_comes_before_the_barracks_and_the_second_harvester_before_the_first_army_unit()
+ {
+    // WP9.1c-3: the opening of `ai_vs_passive` (shipped profile, frozen copy): the goal list's third build is the
+    // vehicle factory (kind 4), the barracks (kind 3) comes after it, the bought harvester is queued as soon as
+    // the factory stands, the second harvester exists well before tick 4,000, and the first unit of the mix
+    // (rifleman, rocket trooper, light tank) is queued only after it.
+    let s = load("ai_vs_passive");
+    let mut second_harvester = None;
+    let mut first_unit_exists = None;
+    let mut floor_reached = None;
+    let f = run_observed(
+        &s,
+        &RunOptions {
+            ticks: 13_000,
+            every: 100,
+        },
+        |w, ais| {
+            let t = w.tick().0;
+            let mine = |pick: fn(u16) -> bool| {
+                w.snapshot()
+                    .iter()
+                    .filter(|v| v.owner == P0 && pick(v.kind.0))
+                    .count()
+            };
+            if second_harvester.is_none() && mine(|k| k == HARVESTER.0) >= 2 {
+                second_harvester = Some(t);
+            }
+            if first_unit_exists.is_none() && mine(|k| [12, 13, 19].contains(&k)) >= 1 {
+                first_unit_exists = Some(t);
+            }
+            let value: u64 = w
+                .snapshot()
+                .iter()
+                .filter(|v| v.owner == P0 && [12, 13, 19].contains(&v.kind.0))
+                .map(|v| {
+                    u64::from(
+                        w.production_table()
+                            .and_then(|t| t.get(v.kind))
+                            .map_or(0, |u| u.cost),
+                    )
+                })
+                .sum();
+            if floor_reached.is_none()
+                && value >= u64::from(ais[0].state().profile.army.army_floor_value)
+            {
+                floor_reached = Some(t);
+            }
+        },
+    )
+    .unwrap();
+    let builds: Vec<(u64, u16)> = f
+        .ai_commands
+        .iter()
+        .filter_map(|c| match &c.2 {
+            Command::BuildStructure { kind, .. } => Some((c.0, kind.0)),
+            _ => None,
+        })
+        .collect();
+    // power plant, refinery, vehicle factory, (the second power plant before the barracks: `power_first`), barracks.
+    assert_eq!(
+        builds[..5],
+        [(10, 1), (250, 2), (810, 4), (2170, 1), (2890, 3)]
+    );
+    let queued = |pick: fn(u16) -> bool| {
+        f.ai_commands.iter().find_map(|c| match &c.2 {
+            Command::QueueUnit { kind, .. } if pick(kind.0) => Some(c.0),
+            _ => None,
+        })
+    };
+    let harvester_queued = queued(|k| k == HARVESTER.0).expect("a harvester is bought");
+    let unit_queued = queued(|k| [12, 13, 19].contains(&k)).expect("the mix starts");
+    assert_eq!(harvester_queued, 1480);
+    assert_eq!(second_harvester, Some(1880));
+    assert_eq!(unit_queued, 5860);
+    assert_eq!(first_unit_exists, Some(5927));
+    // The army floor (2,000 credits of units) is reached at 12,567, before `max_wait` (14,000) ends it.
+    assert_eq!(floor_reached, Some(12_567));
+    assert!(second_harvester.unwrap() < 4000);
+    assert!(harvester_queued < unit_queued);
 }
 
 // ---- fix round 2 (review of PR #129, decision orchestrator 12-11-2026) -----------------------------------------
