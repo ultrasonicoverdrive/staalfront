@@ -67,6 +67,7 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     state.sent.retain(|id, _| live(id));
     state.attackers.retain(live);
     state.recalled.retain(live);
+    state.closing.retain(live);
     if let Some(gather) = gather {
         let home = decide(state, obs, lens, gather);
         let budget = ARMY_COMMANDS_PER_TURN.saturating_sub(out.len() - before);
@@ -296,6 +297,17 @@ pub fn attack_due(state: &AiState, now: sf_sim::Tick, value: u64, count: usize) 
 /// site of another player not seen empty (the nearest, the lowest player among equals); else beside the
 /// nearest structure of another player it remembers; else `None`.
 pub fn target(state: &AiState, lens: &Lens<'_>, gather: Cell) -> Option<Cell> {
+    target_and_centre(state, lens, gather).map(|(t, _)| t)
+}
+
+/// The middle cell of the structure (or start site) [`target`] picks.
+fn target_centre(state: &AiState, lens: &Lens<'_>, gather: Cell) -> Option<Cell> {
+    target_and_centre(state, lens, gather).map(|(_, c)| c)
+}
+
+/// [`target`]'s cell beside the footprint and the footprint's middle cell.
+fn target_and_centre(state: &AiState, lens: &Lens<'_>, gather: Cell) -> Option<(Cell, Cell)> {
+    let mid = |at: Cell, w: u32, h: u32| Cell::new(at.x + w / 2, at.y + h / 2);
     let me = state.player;
     let nearest = |anchors_only: bool| {
         let mut best: Option<(u64, Cell, u32, u32)> = None;
@@ -311,7 +323,7 @@ pub fn target(state: &AiState, lens: &Lens<'_>, gather: Cell) -> Option<Cell> {
         best
     };
     if let Some((_, at, w, h)) = nearest(true) {
-        return Some(beside(lens, at, w, h, gather));
+        return Some((beside(lens, at, w, h, gather), mid(at, w, h)));
     }
     let (w, h) = lens
         .buildings()
@@ -330,9 +342,9 @@ pub fn target(state: &AiState, lens: &Lens<'_>, gather: Cell) -> Option<Cell> {
         }
     }
     if let Some((_, c)) = site {
-        return Some(beside(lens, c, w, h, gather));
+        return Some((beside(lens, c, w, h, gather), mid(c, w, h)));
     }
-    nearest(false).map(|(_, at, w, h)| beside(lens, at, w, h, gather))
+    nearest(false).map(|(_, at, w, h)| (beside(lens, at, w, h, gather), mid(at, w, h)))
 }
 
 /// The start sites of other players whose cell is visible with no construction centre of theirs on it go
@@ -368,16 +380,7 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
     let a = state.profile.army;
     if !state.attackers.is_empty() {
         let tgt = target(state, lens, gather);
-        if let Some(t) = tgt
-            && obs.own.iter().any(|o| {
-                state.attackers.binary_search(&o.id).is_ok()
-                    && cheb(o.cell, t) <= u32::from(a.arrive_radius)
-            })
-        {
-            state.attack_started = now;
-        }
-        // At the target: the structure being finished must keep losing hit points, else the attack ends after
-        // `attack_patience` too (units that stand there and cannot kill it).
+        // An attacker within `arrive_radius` of the target.
         let near = tgt.is_some_and(|t| {
             obs.own.iter().any(|o| {
                 state.attackers.binary_search(&o.id).is_ok()
@@ -388,6 +391,11 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
             .filter(|_| near)
             .and_then(|t| finishing_target(state, obs, lens, t))
             .and_then(|id| obs.visible.iter().find(|s| s.id == id).map(|s| (id, s.hp)));
+        // Fix round 2: the patience clock moves only while an attacker is near *and* a victim is in sight;
+        // attackers standing there seeing nothing run `attack_patience` out and go home.
+        if victim.is_some() {
+            state.attack_started = now;
+        }
         state.target_hp = match (victim, state.target_hp) {
             (Some((id, hp)), Some((old, seen, since))) if id == old && hp >= seen => {
                 Some((old, seen, since))
@@ -444,6 +452,7 @@ fn end_attack(state: &mut AiState) {
     state.attackers.clear();
     state.attack_target = None;
     state.target_hp = None;
+    state.closing.clear();
     if state.threat.is_none() {
         state.directive = Directive::default();
     }
@@ -546,10 +555,23 @@ pub fn operations_minimal(
             }
         }
         send(state, out, march, Order::AttackMove(middle(t)));
-        if !arrived.is_empty()
-            && let Some(victim) = finishing_target(state, obs, lens, t)
-        {
-            send(state, out, arrived, Order::Attack(victim));
+        if !arrived.is_empty() {
+            if let Some(victim) = finishing_target(state, obs, lens, t) {
+                send(state, out, arrived, Order::Attack(victim));
+            } else if let Some(centre) = target_centre(state, lens, gather) {
+                // Fix round 2: nothing in sight from where they stand: one `AttackMove` onto the middle of the
+                // target structure (or start site), once per attacker per attack, so they close in and see it.
+                let ids: Vec<EntityId> = arrived
+                    .into_iter()
+                    .filter(|id| state.closing.binary_search(id).is_err())
+                    .collect();
+                let before = out.len();
+                send(state, out, ids.clone(), Order::AttackMove(middle(centre)));
+                if out.len() > before {
+                    state.closing.extend(ids);
+                    state.closing.sort();
+                }
+            }
         }
     }
     // The survivors of an attack that ended.

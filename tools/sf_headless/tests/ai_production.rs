@@ -1527,7 +1527,6 @@ fn over_forty_thousand_ticks_the_ai_stays_on_the_list_and_under_the_rate_bound()
         f.world.match_result().map(|r| r.verdict),
         Some(sf_sim::Verdict::Won(P0))
     );
-    let _ = army;
 }
 
 // ---- the older scenarios: the managers are off for their frozen profiles ---------------------------------

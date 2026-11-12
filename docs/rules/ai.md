@@ -640,10 +640,15 @@ ring, y, x order among equals). A cell under the structure would be a move that 
   target cell, else on the nearest visible structure of another player (the finishing rule: an idle unit only fires at what is in its reach,
   `targeting.md`). The id comes only from `obs.visible`, and only a structure: never a unit, never an id from memory
   (`idle_attackers_at_the_target_finish_the_visible_centre_and_never_an_unseen_one`);
+* *fix round 2*: an idle attacker within `arrive_radius` that sees no structure to finish gets one `AttackMove` onto the middle of the
+  target structure (or the start site), once per attacker per attack (`AiState::closing`, cleared at the end), under `resend_ticks` and the
+  command cap, so it closes in and sees it (same test);
 * an attacker with any other order is left alone (`attackers_are_ordered_only_when_idle_and_not_again_within_resend_ticks`).
 
 **The end.** No attacker alive (back to `Gather`); no target left; `attack_patience` (2,400) ticks with no attacker within `arrive_radius` of
-the target (`attack_started` is moved to the turn whenever one stands there); or (*fix round 1, decision of 12-11-2026*) `attack_patience` ticks
+the target **with a victim in sight** (*fix round 2, decision of 12-11-2026*: `attack_started` is moved to the turn only when an attacker
+stands there **and** `finishing_target` sees a structure to finish; attackers that stand there seeing nothing no longer keep the attack alive,
+`attackers_at_the_target_that_see_nothing_close_in_once_and_the_attack_still_ends`); or (*fix round 1, decision of 12-11-2026*) `attack_patience` ticks
 in which the structure being finished (`finishing_target`, seen) has not lost hit points while an attacker stands at the target (`target_hp`;
 units there that cannot kill it no longer keep the attack alive for ever,
 `an_attack_ends_when_the_target_stops_losing_hit_points_for_attack_patience`). The survivors get one `Move(gather)` and the posture is `Gather`.
@@ -664,7 +669,7 @@ no attack has gone out yet **and the tick is before `max_wait`**, or while the p
 (`the_army_floor_ends_at_max_wait_before_the_first_attack`). The army's value (`production::army_value`) is the price of every own
 army unit (`army::is_army`) plus every item of a kind of the unit mix in an own queue plus what the production turn running has ordered (without
 that last part each factory would overshoot by one: `the_army_value_counts_the_queue_and_what_this_turn_ordered`). While it is below the floor,
-**and** no attack has gone out yet (`attacks_launched == 0`) **or** the posture is `Defend`, a unit of the mix is held back by the `reserve` alone
+**and** no attack has gone out yet (`attacks_launched == 0`) and the tick is before `max_wait`, **or** the posture is `Defend`, a unit of the mix is held back by the `reserve` alone
 (like the scout); otherwise by the `reserve` and the next goal's price, as in WP9.1c-1. One condition at the holdback, no second money path
 (`below_the_army_floor_production_holds_back_only_the_reserve`).
 
@@ -709,8 +714,8 @@ once the match is decided).
 New in `AiState`, hashed after the scout state in this order: `hp_seen: BTreeMap<EntityId, (Kind, Cell, u32)>`, `threat: Option<(Cell, Tick)>`,
 `defend_since: Option<Tick>`, `directive` (posture number, target cell), `attackers: Vec<EntityId>` (ascending), `attack_target: Option<Cell>`,
 `last_attack_tick`, `attack_started`, `attacks_launched: u32`, (fix round 1) `target_hp: Option<(EntityId, u32, Tick)>`, `recalled: Vec<EntityId>` (ascending), `sites_cleared: Vec<PlayerId>` (ascending), then `sent` as before (now the tick of
-any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x7b3d17f779657857`, two entries in every
-map and list) and `every_part_of_the_threat_and_attack_state_moves_the_digest` (30 changes, the posture numbers 0, 1, 2 as literals).
+any army order; the tries count only gather orders). Pinned: `the_digest_of_the_base_state_is_pinned` (`0x392b1f3256aa3c19` since fix round 2 (`closing` hashed), two entries in every
+map and list) and `every_part_of_the_threat_and_attack_state_moves_the_digest` (32 changes, the posture numbers 0, 1, 2 as literals).
 
 New profile numbers, with serde defaults so that every frozen profile still reads: `arrive_radius` 6 (1 to 32), `attack_patience` 2,400 (1 to
 72,000), `army_floor_value` 2,000 in `normal.ron` (0 to 1,000,000; **default 0, no floor**, so the frozen profiles of 9.1c-1 and earlier keep the

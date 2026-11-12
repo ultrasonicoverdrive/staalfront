@@ -164,6 +164,9 @@ pub struct AiState {
     /// Fix round 1: former attackers called back by a hit on the construction centre that have not had the
     /// defence order yet, ascending; they get it whatever their order is.
     pub recalled: Vec<EntityId>,
+    /// Fix round 2: attackers at the target that saw no enemy structure and got the one `AttackMove` onto the
+    /// middle of the target structure (or start site) of this attack, ascending; cleared when the attack ends.
+    pub closing: Vec<EntityId>,
     /// The other players whose start site the AI has seen empty (no construction centre on its cell),
     /// ascending.
     pub sites_cleared: Vec<PlayerId>,
@@ -245,6 +248,7 @@ impl AiState {
             attacks_launched: 0,
             target_hp: None,
             recalled: Vec::new(),
+            closing: Vec::new(),
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
         }
@@ -442,6 +446,11 @@ impl AiState {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
+        h.write_u32(self.closing.len() as u32);
+        for id in &self.closing {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+        }
         h.write_u32(self.sites_cleared.len() as u32);
         for p in &self.sites_cleared {
             h.write_u8(p.0);
@@ -529,6 +538,8 @@ mod tests {
         s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1450)));
         s.recalled.push(EntityId::new(22, 0));
         s.recalled.push(EntityId::new(23, 1));
+        s.closing.push(EntityId::new(24, 0));
+        s.closing.push(EntityId::new(25, 1));
         s.sites_cleared.push(PlayerId(1));
         s.sites_cleared.push(PlayerId(2));
         s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
@@ -540,7 +551,7 @@ mod tests {
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
         // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0x7b3d_17f7_7965_7857);
+        assert_eq!(base_state().digest(), 0x392b_1f32_56aa_3c19);
     }
 
     #[test]
@@ -647,7 +658,9 @@ mod tests {
     #[test]
     fn every_part_of_the_threat_and_attack_state_moves_the_digest() {
         let d = base_state().digest();
-        let changes: [fn(&mut AiState); 30] = [
+        let changes: [fn(&mut AiState); 32] = [
+            |s| s.closing.reverse(),
+            |s| s.closing.clear(),
             |s| s.target_hp = None,
             |s| s.target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
             |s| s.target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),

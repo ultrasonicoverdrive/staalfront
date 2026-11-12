@@ -1478,7 +1478,19 @@ fn a_hidden_raider_beside_the_raided_plant_changes_nothing_until_it_is_seen() {
             })
             .unwrap()
     };
-    let near = ground(2..8, 76..82);
+    // Fix round 2: `near` is a ground cell in fog at tick 4,003 within `threat_cell`'s reach (8 cells) of the
+    // raided plant (2 x 2 at (18, 60)), the one farthest from it, so the visibility rule is what keeps it out.
+    let base_run = go(&load("ai_raid"), 4003);
+    let near = (52..70u32)
+        .flat_map(|y| (10..28u32).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let c = Cell::new(x, y);
+            rig_world.terrain().flags_at(c).is_some_and(|f| f.ground)
+                && base_run.world.visibility(P0, c) != Visibility::Visible
+        })
+        .max_by_key(|&(x, y)| (x.abs_diff(19).max(y.abs_diff(61)), std::cmp::Reverse((y, x))))
+        .expect("a fogged cell beside the plant");
+    assert!(near.0 + 8 >= 18 && near.0 < 28 && near.1 + 8 >= 60 && near.1 < 70, "{near:?}");
     let far = ground(86..94, 2..8);
     let s = with_extra(near);
     // Seen: the cell the extra rifleman stands in (it may move) is visible to player 0.
@@ -1633,4 +1645,40 @@ fn the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks() {
         builds,
         [10, 250, 810, 1090, 11_650, 19_250, 22_810, 26_970, 29_090]
     );
+}
+
+// ---- fix round 2 (review of PR #129, decision orchestrator 12-11-2026) -----------------------------------------
+
+#[test]
+fn attackers_at_the_target_that_see_nothing_close_in_once_and_the_attack_still_ends() {
+    // The reviewer's probe: four attackers idle within `arrive_radius` of the target, no enemy structure in
+    // sight (`obs.visible` empty), an army turn every 40 ticks. Before fix round 2 the attack stayed out forever
+    // (`attack_started` renewed on `near` alone, no order for the arrived attackers).
+    let (world, s0, own) = at_the_target();
+    let centre = middle(Cell::new(74, 16));
+    let mut s = s0.clone();
+    let mut closing = Vec::new();
+    let mut ended_at = None;
+    for t in (3200..=20_000).step_by(40) {
+        let out = army_turn(&world, &mut s, &observation(&world, t, own.clone()));
+        let to_centre: Vec<_> = attack_moves(&out)
+            .into_iter()
+            .filter(|(_, p)| *p == centre)
+            .collect();
+        if !to_centre.is_empty() {
+            assert_eq!(to_centre, [(vec![20, 21, 22, 23], centre)], "tick {t}");
+            println!("closing at {t}, attack {}", s.attacks_launched);
+            closing.push(s.attacks_launched);
+        }
+        if ended_at.is_none() && s.attackers.is_empty() {
+            ended_at = Some(t);
+        }
+    }
+    // Nothing came into sight: the first attack ends when `attack_patience` (2,400) after its launch (3,000) runs
+    // out. The units never move here, so the AI launches again from where they stand and each attack ends the
+    // same way (seven in all up to 20,000).
+    assert_eq!(ended_at, Some(5400));
+    // The closing `AttackMove` onto the middle of the remembered centre: once per attack, not every turn.
+    assert_eq!(closing, (1..=s.attacks_launched).collect::<Vec<_>>());
+    assert_eq!(s.attacks_launched, 7);
 }

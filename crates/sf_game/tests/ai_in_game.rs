@@ -640,7 +640,8 @@ fn drive(
 /// Fix round 1 (item 4): the money of the AI in the game seat between ticks 5,500 and 8,500 (the floor is off
 /// after the first attack at 6,037, yet nothing is built until the win at 8,396). Printed every 250 ticks:
 /// credits, free (`budget::free`), what production holds back (`reserve` + the next goal's saving), the next goal,
-/// the items queued, the harvesters and the ore delivered so far. Measurement; the asserts are what the rules say.
+/// the items queued, the harvesters and the ore delivered so far. A measurement trace, not a pin: its only assert
+/// is that rows were printed; the four values `docs/rules/ai.md` quotes are read from its output (fix round 2).
 #[test]
 fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
     let (mut world, _, mut ais) = game(&ai_file());
