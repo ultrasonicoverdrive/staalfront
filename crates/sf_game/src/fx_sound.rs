@@ -1293,6 +1293,110 @@ mod tests {
         assert_eq!(staggered, mixed_peak_limited(&tank_fight(), Some(f32::MAX)));
     }
 
+    /// Three bank sounds at volume 1.0 at the focus: the frame sums to 3.0 at the listener's centre.
+    fn loud_events(fx: &mut FxPlayer) {
+        let at = [12.0, 12.0];
+        fx.push_events(&[
+            fire_at(weapon("cannon"), at, 0),
+            fire_at(weapon("rocket"), at, 0),
+            fire_at(weapon("battery_shell"), at, 0),
+        ]);
+    }
+
+    /// The wiring: a loud frame through `play_frame` (what the runner calls), not through `start_cues`,
+    /// plays at the limit. The system under test has no original sounds.
+    #[test]
+    fn play_frame_turns_a_loud_frame_down_to_the_limit() {
+        let (mut fx, mut sound) = setup();
+        let mut audio = all_names_audio("loud_frame");
+        loud_events(&mut fx);
+        let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 1, listener(30.0));
+        let sum: f32 = trace.iter().map(|t| t.gain).sum();
+        println!(
+            "limiter: {} cues through play_frame sum to {sum:.3}",
+            trace.len()
+        );
+        assert_eq!(trace.len(), 3);
+        assert!(
+            (sum - sound.max_summed_gain).abs() < 1e-3,
+            "summed gain {sum}"
+        );
+    }
+
+    /// A scratch root whose bank holds every fight name (volume 1.0) and whose fixture "Red Alert" install,
+    /// made here from our own encoder (no real file), maps `explosion.large` to a sound: with the original
+    /// audio on, that event plays as an original.
+    fn audio_with_one_original(tag: &str) -> Traced {
+        use sf_audio::ra::RaAudioConfig;
+        use sf_audio::ra::aud::{Compression, Pcm, encode};
+        use sf_audio::ra::mix::{MixFormat, mix_id, write_mix};
+        let root = all_names_root(tag);
+        let d = &root.0;
+        std::fs::write(
+            d.join("audio/ra_mapping.ron"),
+            r#"(sounds: {"explosion.large": "FIX.AUD"})"#,
+        )
+        .unwrap();
+        let pcm = Pcm {
+            sample_rate: 22050,
+            channels: 1,
+            samples: (0..2000).map(|i| ((i % 50) * 400 - 10000) as i16).collect(),
+        };
+        let mix = write_mix(
+            &[(mix_id("FIX.AUD"), &encode(&pcm, Compression::Ima))],
+            MixFormat::Plain,
+        );
+        let install = d.join("fixture_install");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("SOUNDS.MIX"), mix).unwrap();
+        let mut audio = tracing_audio(d);
+        audio.enable_original_audio(&RaAudioConfig {
+            enabled: true,
+            path: install.display().to_string(),
+        });
+        for _ in 0..500 {
+            audio.update();
+            if audio.original_audio_status() != sf_audio::RaStatus::Loading {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            audio.original_audio_status(),
+            sf_audio::RaStatus::Ready { mapped: 1 }
+        );
+        Traced { audio, _root: root }
+    }
+
+    /// R4: a mapped original in a loud frame is neither counted in the sum nor turned down; the bank
+    /// sounds still add up to the limit by themselves.
+    #[test]
+    fn a_mapped_original_is_not_counted_and_not_turned_down() {
+        let (mut fx, mut sound) = setup();
+        let mut audio = audio_with_one_original("original");
+        assert!(audio.is_original("explosion.large") && !audio.is_original("weapon.fire.cannon"));
+        loud_events(&mut fx);
+        fx.push_events(&[death_at(8.0, true, [12.0, 12.0], 0)]);
+        let (trace, _) = game_frame(&mut fx, &mut sound, &mut audio, 1, listener(30.0));
+        assert_eq!(trace.len(), 4);
+        let original: Vec<f32> = trace
+            .iter()
+            .filter(|t| t.name == "explosion.large")
+            .map(|t| t.gain)
+            .collect();
+        let bank: f32 = trace
+            .iter()
+            .filter(|t| t.name != "explosion.large")
+            .map(|t| t.gain)
+            .sum();
+        println!("limiter: original {original:?}, bank sounds sum {bank:.3}");
+        assert_eq!(original, [1.0], "the original is not turned down");
+        assert!(
+            (bank - sound.max_summed_gain).abs() < 1e-3,
+            "the original is not counted: bank sum {bank}"
+        );
+    }
+
     /// Through `start_cues`: a frame at the limit is untouched (factor 1), one above it is turned down to the limit.
     #[test]
     fn start_cues_turns_a_loud_frame_down_to_the_limit() {
