@@ -3172,7 +3172,7 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Screenshots** `docs/screenshots/wp6.10/`: `sidebar_t00009_repeat_off.png` (Loop dim, no sign) and `sidebar_t00277_repeat_on.png` (Loop
   lit, "loop" sign on the rifleman, four riflemen out, queue still 2, credits 590).
 * **Not done / gaps.** No key. Performance was not measured: the change is one bool test per finished unit and one more byte per factory
-  in the hash. The loop sign overlaps the first letters of the picture label a little at 1280 x 720 (seen in the screenshot). The AI
+  in the hash. The loop sign overlapped the first letters of the picture label at 1280 x 720 (fixed in the follow-ups of 12-11-2026, above). The AI
   (`sf_ai`) does not use `SetRepeat`.
 * **Sweep findings fixed (11-11-2026).** `repeatable()` was not reached by its test (the radar went before the item finished): the test now
   finishes the sniper behind a walled exit first, with a control where the radar stands (mutation "call removed" fails it). The hashed
