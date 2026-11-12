@@ -78,6 +78,19 @@ fn script() -> Vec<(u64, PlayerId, Command)> {
             queued: true,
         },
     ));
+    // The Loop button (WP6.10): the barracks repeats its queue from tick 1300 and stops at 2600, so the
+    // record carries a `SetRepeat` on and one off, and the repeat changes what the sim does in between.
+    let barracks = EntityId::new(14, 0);
+    for (tick, on) in [(1_300, true), (2_600, false)] {
+        list.push((
+            tick,
+            PlayerId(0),
+            Command::SetRepeat {
+                factory: barracks,
+                on,
+            },
+        ));
+    }
     list.sort_by_key(|(tick, ..)| *tick);
     list
 }
@@ -192,13 +205,29 @@ fn a_recorded_match_replays_to_the_same_checksum_at_every_tick() {
             sf_headless::scenario::ExactCommand::QueueUnit { .. } => "queue",
             sf_headless::scenario::ExactCommand::SetRally { .. } => "rally",
             sf_headless::scenario::ExactCommand::Order { .. } => "order",
+            sf_headless::scenario::ExactCommand::SetRepeat { .. } => "repeat",
             _ => "other",
         })
         .collect();
     assert_eq!(
         kinds,
-        ["build", "order", "queue", "rally"].into_iter().collect()
+        ["build", "order", "queue", "rally", "repeat"]
+            .into_iter()
+            .collect()
     );
+    // The Loop click is in the record twice, on and then off, for the barracks (14, 0).
+    let repeats: Vec<(u64, bool)> = scenario
+        .recorded
+        .iter()
+        .filter_map(|c| match c.command {
+            sf_headless::scenario::ExactCommand::SetRepeat { factory, on } => {
+                assert_eq!(factory, (14, 0));
+                Some((c.tick, on))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(repeats, [(1_300, true), (2_600, false)]);
     assert_eq!(scenario.recorded.len(), exit.commands.len());
 
     let wrong = mismatches(&scenario, &exit);
@@ -264,5 +293,28 @@ fn fixed_point_positions_are_recorded_exactly() {
     assert!(
         !mismatches(&scenario, &exit).is_empty(),
         "one bit of a position changes the replay"
+    );
+}
+
+/// The Loop click is part of the replay: a record without its `SetRepeat` commands gives other
+/// checksums, so a recorder that dropped `ExactCommand::SetRepeat` would be caught here.
+#[test]
+fn a_record_without_its_set_repeat_does_not_replay() {
+    let (exit, cells, _) = play(3_000);
+    let scratch = Scratch::new("repeat");
+    let path = write_record(&exit, cells, &scratch.0, "play.ron");
+    let mut scenario = Scenario::load(&path).unwrap();
+    assert!(mismatches(&scenario, &exit).is_empty());
+    let before = scenario.recorded.len();
+    scenario.recorded.retain(|c| {
+        !matches!(
+            c.command,
+            sf_headless::scenario::ExactCommand::SetRepeat { .. }
+        )
+    });
+    assert_eq!(scenario.recorded.len(), before - 2);
+    assert!(
+        !mismatches(&scenario, &exit).is_empty(),
+        "the repeat changed the match, so its absence changes a checksum"
     );
 }
