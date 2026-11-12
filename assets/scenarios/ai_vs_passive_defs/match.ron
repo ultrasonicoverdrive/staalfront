@@ -1,0 +1,42 @@
+// The match file of the scenario `ai_vs_passive` (WP9.1c-2, docs/rules/ai.md): the AI against the static opponent
+// of the first match. Player 0, Meridian, is the AI, with a construction centre where the human of
+// `assets/matches/m1.ron` starts and the 4000 credits of that file; player 1, Veyran, is m1's static opponent exactly
+// as `assets/matches/m1.ron` lists it (a power plant, a refinery, a barracks, a defence tower, a harvester, four
+// riflemen, a light tank and its construction centre), which never builds, produces or attacks. Read by
+// sf_data::match_def like assets/matches/m1.ron.
+//
+// Slots: 0 the AI's construction centre (4 x 4, x 12..15, y 68..71), 1 to 11 player 1's objects in the order
+// below (11 its construction centre, x 72..75, y 14..17), then what the AI builds and makes.
+(
+    name: "ai_vs_passive",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 4000,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "power_plant", cell: (76, 20)),
+                (role: "refinery", cell: (70, 26)),
+                (role: "barracks", cell: (80, 14)),
+                (role: "defence_tower", cell: (66, 22)),
+                (role: "harvester", cell: (74, 31)),
+                (role: "rifleman", cell: (64, 24)),
+                (role: "rifleman", cell: (64, 26)),
+                (role: "rifleman", cell: (66, 28)),
+                (role: "rifleman", cell: (68, 20)),
+                (role: "light_tank", cell: (62, 22)),
+                (role: "construction_center", cell: (72, 14)),
+            ],
+        ),
+    ],
+)

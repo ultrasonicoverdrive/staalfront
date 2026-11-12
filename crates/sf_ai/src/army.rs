@@ -110,7 +110,8 @@ pub fn beside(lens: &Lens<'_>, at: Cell, width: u32, height: u32, toward: Cell) 
         let mut best: Option<(u64, Cell)> = None;
         for y in y0 - ring..y1 + ring {
             for x in x0 - ring..x1 + ring {
-                let on_ring = x == x0 - ring || x == x1 + ring - 1 || y == y0 - ring || y == y1 + ring - 1;
+                let on_ring =
+                    x == x0 - ring || x == x1 + ring - 1 || y == y0 - ring || y == y1 + ring - 1;
                 if !on_ring || x < 0 || y < 0 {
                     continue;
                 }
@@ -170,8 +171,7 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
         .collect();
     if let Some(((kind, cell, _), anchor)) = hit {
         let (w, h) = size_of(lens, kind);
-        let toward = state.gather.unwrap_or(cell);
-        let at = beside(lens, cell, w, h, toward);
+        let at = threat_cell(state, obs, lens, cell, w, h);
         state.threat = Some((at, now));
         state.defend_since.get_or_insert(now);
         if anchor && !state.attackers.is_empty() {
@@ -200,9 +200,51 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
     }
 }
 
+/// Where the defence goes for a structure hit at `(at, w, h)`: the cell of the nearest armed unit of another
+/// player that is seen within `gather_radius` of the footprint (the lowest id among equals), else open ground
+/// beside the footprint facing the gather cell ([`beside`]). A cell, never a unit: the defenders `AttackMove`
+/// there and fight what they meet. (Measured on `ai_raid`: with the cell beside the structure alone the
+/// defenders stood idle out of reach of two of the three raiders, which shot the power plant for a minute.)
+fn threat_cell(
+    state: &AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    at: Cell,
+    w: u32,
+    h: u32,
+) -> Cell {
+    let reach = u32::from(state.profile.army.gather_radius);
+    let mid = Cell::new(at.x + w / 2, at.y + h / 2);
+    let near = |c: Cell| {
+        c.x + reach >= at.x
+            && c.x < at.x + w + reach
+            && c.y + reach >= at.y
+            && c.y < at.y + h + reach
+    };
+    let mut best: Option<(u64, Cell)> = None;
+    for s in &obs.visible {
+        if s.owner == state.player || s.footprint.is_some() || !s.armed || !near(s.cell) {
+            continue;
+        }
+        let d = dist2(s.cell, mid);
+        if best.is_none_or(|(b, _)| d < b) {
+            best = Some((d, s.cell));
+        }
+    }
+    match best {
+        Some((_, c)) => c,
+        None => beside(lens, at, w, h, state.gather.unwrap_or(at)),
+    }
+}
+
 /// The army units within `gather_radius` of the gather cell that are `Idle` (and those given up on after
 /// `gather_tries`, counted where they stand): who goes when an attack goes out (A4). Never an attacker.
-pub fn gathered(state: &AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell) -> Vec<EntityId> {
+pub fn gathered(
+    state: &AiState,
+    obs: &Observation,
+    lens: &Lens<'_>,
+    gather: Cell,
+) -> Vec<EntityId> {
     let a = &state.profile.army;
     let radius = u32::from(a.gather_radius);
     obs.own
@@ -406,21 +448,22 @@ pub fn operations_minimal(
     let now = obs.tick;
     let arrive = u32::from(state.profile.army.arrive_radius);
     let mut left = budget;
-    let mut send = |state: &mut AiState, out: &mut Vec<Command>, ids: Vec<EntityId>, order: Order| {
-        if ids.is_empty() || left == 0 {
-            return;
-        }
-        left -= 1;
-        for id in &ids {
-            let n = state.sent.get(id).map_or(0, |&(_, n)| n);
-            state.sent.insert(*id, (now, n));
-        }
-        out.push(Command::Order {
-            ids,
-            order,
-            queued: false,
-        });
-    };
+    let mut send =
+        |state: &mut AiState, out: &mut Vec<Command>, ids: Vec<EntityId>, order: Order| {
+            if ids.is_empty() || left == 0 {
+                return;
+            }
+            left -= 1;
+            for id in &ids {
+                let n = state.sent.get(id).map_or(0, |&(_, n)| n);
+                state.sent.insert(*id, (now, n));
+            }
+            out.push(Command::Order {
+                ids,
+                order,
+                queued: false,
+            });
+        };
     // The defence: every army unit at home.
     if let Some((cell, _)) = state.threat {
         let ids: Vec<EntityId> = obs
@@ -460,7 +503,15 @@ pub fn operations_minimal(
     send(state, out, home.to_vec(), Order::Move(middle(gather)));
     // The gathering, while nothing is defended.
     if state.threat.is_none() {
-        gather_units(state, obs, lens, out, gather, left.min(GATHER_COMMANDS_PER_TURN), home);
+        gather_units(
+            state,
+            obs,
+            lens,
+            out,
+            gather,
+            left.min(GATHER_COMMANDS_PER_TURN),
+            home,
+        );
     }
 }
 

@@ -45,7 +45,9 @@
         // Attack when the army's value (sum of unit costs) reaches this ...
         attack_value: 3000,
         // ... or after this many ticks since the last attack with at least `min_units` units ...
-        max_wait: 3600,
+        // (WP9.1c-2: 6000, was 3600, measured on `ai_vs_passive`: with 3600 the first wave leaves at tick 3,631 before the
+        // army floor is reached and bounces off m1's tower; with 6000 the AI wins at tick 14,659.)
+        max_wait: 6000,
         min_units: 4,
         // ... but never before this tick.
         first_attack_tick: 2400,
@@ -76,8 +78,9 @@
         // WP9.1c-2: an attack ends after this many ticks with no attacker within arrive_radius of its target.
         attack_patience: 2400,
         // WP9.1c-2, the army floor (decision of 12-11-2026): below this army value (unit costs) production holds
-        // back only the reserve, while no attack has gone out yet or the army defends.
-        army_floor_value: 1000,
+        // back only the reserve, while no attack has gone out yet or the army defends. (2000, measured on
+        // `ai_vs_passive`; the start value 1000 wins at 26,387, docs/rules/ai.md "The army floor".)
+        army_floor_value: 2000,
     ),
     factions: [
         (
