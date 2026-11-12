@@ -107,6 +107,10 @@ impl Profile {
         h.write_u32(a.scout_tick);
         h.write_u32(a.scout_patience);
         h.write_u32(a.scout_retry);
+        // WP9.1c-2.
+        h.write_u8(a.arrive_radius);
+        h.write_u32(a.attack_patience);
+        h.write_u32(a.army_floor_value);
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
@@ -245,7 +249,7 @@ mod tests {
         p.army.gather_distance += 1;
         assert_ne!(digest, p.digest());
         // WP9.1c-1: every new number and the scout.
-        let changes: [fn(&mut Profile); 10] = [
+        let changes: [fn(&mut Profile); 18] = [
             |p| p.economy.max_queue += 1,
             |p| p.army.gather_radius += 1,
             |p| p.army.gather_group += 1,
@@ -256,6 +260,15 @@ mod tests {
             |p| p.army.scout_patience += 1,
             |p| p.army.scout_retry += 1,
             |p| p.scout = None,
+            // WP9.1c-2, and the numbers that act from it on.
+            |p| p.army.arrive_radius += 1,
+            |p| p.army.attack_patience += 1,
+            |p| p.army.army_floor_value += 1,
+            |p| p.army.attack_value += 1,
+            |p| p.army.max_wait += 1,
+            |p| p.army.min_units += 1,
+            |p| p.army.first_attack_tick += 1,
+            |p| p.army.defend_ticks += 1,
         ];
         for (i, change) in changes.iter().enumerate() {
             let mut p = base.clone();

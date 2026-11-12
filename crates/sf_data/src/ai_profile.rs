@@ -188,6 +188,20 @@ pub struct ArmyRules {
     /// [`MAX_TICKS`]. Left out: [`DEFAULT_SCOUT_RETRY`].
     #[serde(default = "default_scout_retry")]
     pub scout_retry: u32,
+    /// WP9.1c-2: an attacker within this many cells (Chebyshev) of the target cell has arrived and is given
+    /// the finishing `Attack`, 1 to 32. Left out: [`DEFAULT_ARRIVE_RADIUS`].
+    #[serde(default = "default_arrive_radius")]
+    pub arrive_radius: u8,
+    /// WP9.1c-2: an attack with no attacker within `arrive_radius` of its target for this many ticks ends (an
+    /// unreachable target), 1 to [`MAX_TICKS`]. Left out: [`DEFAULT_ATTACK_PATIENCE`].
+    #[serde(default = "default_attack_patience")]
+    pub attack_patience: u32,
+    /// WP9.1c-2, the army floor (decision of 12-11-2026): while the army is worth less than this (unit costs)
+    /// and no attack has gone out yet, or the army defends, production holds back only the `reserve`, not the
+    /// next goal's price, 0 to 1,000,000. Left out: [`DEFAULT_ARMY_FLOOR_VALUE`], 0, no floor (the frozen
+    /// profiles written before it keep the production they had).
+    #[serde(default)]
+    pub army_floor_value: u32,
 }
 
 /// The gather radius of a profile that does not write one.
@@ -207,6 +221,12 @@ pub const DEFAULT_SCOUT_TICK: u32 = 600;
 pub const DEFAULT_SCOUT_PATIENCE: u32 = 1200;
 /// The scout retry of a profile that does not write one.
 pub const DEFAULT_SCOUT_RETRY: u32 = 3000;
+/// The arrive radius of a profile that does not write one.
+pub const DEFAULT_ARRIVE_RADIUS: u8 = 6;
+/// The attack patience of a profile that does not write one (two minutes).
+pub const DEFAULT_ATTACK_PATIENCE: u32 = 2400;
+/// The army floor of a profile that does not write one: none.
+pub const DEFAULT_ARMY_FLOOR_VALUE: u32 = 0;
 
 fn default_gather_radius() -> u8 {
     DEFAULT_GATHER_RADIUS
@@ -231,6 +251,12 @@ fn default_scout_patience() -> u32 {
 }
 fn default_scout_retry() -> u32 {
     DEFAULT_SCOUT_RETRY
+}
+fn default_arrive_radius() -> u8 {
+    DEFAULT_ARRIVE_RADIUS
+}
+fn default_attack_patience() -> u32 {
+    DEFAULT_ATTACK_PATIENCE
 }
 
 /// What one faction builds and makes.
@@ -337,6 +363,9 @@ impl AiProfile {
         range("army.scout_tick", a.scout_tick, 0, MAX_TICKS)?;
         range("army.scout_patience", a.scout_patience, 1, MAX_TICKS)?;
         range("army.scout_retry", a.scout_retry, 1, MAX_TICKS)?;
+        range("army.arrive_radius", a.arrive_radius, 1, 32)?;
+        range("army.attack_patience", a.attack_patience, 1, MAX_TICKS)?;
+        range("army.army_floor_value", a.army_floor_value, 0, 1_000_000)?;
         if p.factions.is_empty() {
             return err("no faction section");
         }

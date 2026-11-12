@@ -3,9 +3,11 @@
 //!
 //! One turn, in order:
 //!
-//! (1) **Verify.** The unit orders sent at the last turn (`units_sent`) must have raised the player's count of
-//!    their kind (own units plus queue items): if not, the simulation refused them, and the kind goes into
-//!    `blocked_until` for `blocked_ticks` (a refused scout is taken back from `scouts_sent`).
+//! (1) **Verify.** A unit order sent at the last turn (`units_sent`) took when the factory's queue holds more
+//!    items of its kind than before it, or a new unit of the kind appeared (any unit of the kind, from any
+//!    factory: an earlier item of the same factory finishing masks a refusal too); if neither, the simulation
+//!    refused it, and the kind goes into `blocked_until` for `blocked_ticks` (a refused scout is taken back
+//!    from `scouts_sent`).
 //! (2) **Rally** (P1). Every complete factory that makes no harvester and whose rally point is not the
 //!    gather cell gets one `SetRally`;
 //!    the observation (`OwnFactory.rally`) says whether it took, and a factory asked is left alone for
@@ -16,6 +18,8 @@
 //!    with the shortest queue (the lowest id among equals), at most `max_queue` items in a factory and one
 //!    order per factory per turn, while the free credits cover `holdback + price`. `holdback` is nothing when no
 //!    goal entry is open, else `reserve` plus what the construction turn is saving for ([`base::next_build`]).
+//!    **The army floor** (WP9.1c-2): while the army is worth less than `army_floor_value` ([`army_value`]) and
+//!    no attack has gone out yet, or the army defends, a unit of the mix is held back by the `reserve` alone.
 
 use sf_sim::{BuildingFunction, Cell, Command, EntityId, Kind, Tick};
 
@@ -24,7 +28,7 @@ use crate::base;
 use crate::budget;
 use crate::economy::{self, complete, function_of};
 use crate::observe::{Lens, Observation};
-use crate::state::AiState;
+use crate::state::{AiState, Posture};
 
 /// One production turn; see the module documentation.
 pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &mut Vec<Command>) {
@@ -222,6 +226,10 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
     let mut have_k: Vec<u32> = mix.iter().map(|&(k, _)| have(obs, k)).collect();
     let mut free = budget::free(obs, lens);
     let mut used: Vec<EntityId> = Vec::new();
+    // The army floor: what the army is worth, this turn's orders added as they go.
+    let floor = u64::from(state.profile.army.army_floor_value);
+    let floor_on = state.attacks_launched == 0 || state.directive.posture == Posture::Defend;
+    let mut worth = army_value(state, obs, lens);
     // At most one order per factory per turn, so at most one per factory function in this loop's passes.
     loop {
         let now = obs.tick;
@@ -268,7 +276,12 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
         let price = u64::from(lens.unit_cost(kind).unwrap_or(0));
         // The scout (once per match, and a replacement) is held back by the reserve only: it must go while the
         // goal list is still open, which is when it is useful, (it delays the list by 1,960 ticks on `ai_scout`, measured).
-        let held = if index.is_none() { reserve } else { holdback };
+        let below_floor = floor_on && worth < floor;
+        let held = if index.is_none() || below_floor {
+            reserve
+        } else {
+            holdback
+        };
         if free < held + price {
             return;
         }
@@ -278,11 +291,35 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
         state.units_sent.push((factory, kind, now, units, queued));
         used.push(factory);
         match index {
-            Some(i) => have_k[i] += 1,
+            Some(i) => {
+                have_k[i] += 1;
+                worth += price;
+            }
             None => state.scouts_sent += 1,
         }
         state.units_sent.sort_by_key(|u| u.0);
     }
+}
+
+/// What the army is worth for the army floor: the price (`Lens::unit_cost`) of every own army unit
+/// ([`army::is_army`]) and of every item of a kind of the unit mix in an own factory's queue (a free one
+/// included: it is an army unit to come). The orders of the turn running are added by the caller.
+pub fn army_value(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> u64 {
+    let units: u64 = obs
+        .own
+        .iter()
+        .filter(|o| army::is_army(state.scout, lens, o))
+        .map(|o| u64::from(lens.unit_cost(o.kind).unwrap_or(0)))
+        .sum();
+    let queued: u64 = obs
+        .own
+        .iter()
+        .filter_map(|o| o.factory.as_ref())
+        .flat_map(|f| f.queue.iter())
+        .filter(|(k, _)| state.profile.unit_mix.iter().any(|(m, _)| m == k))
+        .map(|&(k, _)| u64::from(lens.unit_cost(k).unwrap_or(0)))
+        .sum();
+    units + queued
 }
 
 /// How many orders of `kind` this turn has sent already (they are not in the observation yet).

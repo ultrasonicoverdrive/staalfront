@@ -54,6 +54,7 @@ mod tests {
             own: Vec::new(),
             visible,
             gone,
+            out_of_play: false,
         }
     }
 
