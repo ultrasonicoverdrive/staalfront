@@ -9,7 +9,7 @@
 //!    a standing factory of the right kind and no emergency build stalled for lack of money: one
 //!    `QueueUnit` on the factory with the shortest queue (the lowest id among equals). The command is
 //!    latched in `harvester_sent`; when the next turn finds no harvester in any queue, the simulation
-//!    refused it and the kind is blocked for `blocked_ticks`. It ignores `reserve` (for the army, 9.1c).
+//!    refused it and the kind is blocked for `blocked_ticks`. It ignores `reserve` (that is for the army).
 //! (2) **Silo.** `full_turns` counts the turns in a row with the store at least `silo_percent` full. With
 //!    two of them, no goal entry open, fewer silos (standing or going up) than standing refineries and a
 //!    silo kind in the table, `emergency` is the silo kind and the construction turn builds it first;
