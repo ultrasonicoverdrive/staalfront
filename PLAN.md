@@ -478,6 +478,15 @@ Layered (analysis §12, §22G):
   called back only when the construction centre is hit (known gap, in `ai.md`: with the whole army out a hit elsewhere is answered by the towers only).
   (4) `defend_ticks` 400, the rest as in `normal.ron`, measured values win. (5) **A defeated AI stops**: no think once its player is defeated or the match
   is decided (`Observation::out_of_play`). (6) A structure the AI sells is dropped from `hp_seen` when the sale is sent, so a rescue sale is no attack.*
+  *12-11-2026 (decisions of the orchestrator after the sweep of PR #129, built in its fix round 1): (1) a hit on the construction centre is an
+  order change: every former attacker gets the defence `AttackMove` once, whatever its order (a marching wave too), under `resend_ticks` and
+  the command cap. (2) The defeat clause of `out_of_play` is pinned by a three-player run (defeat while the match goes on). (3) **The army floor
+  applies only while no attack has gone out and the tick is before `max_wait`, or while the army defends**, so it never holds the goal list past
+  `max_wait` outside a defence. (4) The money around the first attack is traced and explained (one harvester's income), and the goal list with
+  the floor and no attack is measured to 30,000 ticks (it does not complete: a gap). (5) An attack also ends when the structure being finished
+  has not lost hit points for `attack_patience` while an attacker stands at the target. (6) The defence cell rule gets unit tests and a fence
+  test. (7) The finishing `Attack` is sent and taken on the real world in a test; the owner filter is pinned. (8) Survivors of an ended attack
+  walk home with `Move`, a retreat on purpose.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

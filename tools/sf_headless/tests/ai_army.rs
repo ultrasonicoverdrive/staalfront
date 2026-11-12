@@ -280,8 +280,12 @@ fn worst_window(f: &Finished) -> usize {
         .unwrap_or(0)
 }
 
-/// The bound on commands in 1,000 ticks: measured 12 in both runs below (the opening, when the barracks queues
-/// unit after unit below the army floor), the bound leaves room.
+/// The bound on commands in 1,000 ticks: measured 12 in both runs below, in the opening, when the barracks queues
+/// unit after unit below the army floor (about one `QueueUnit` per production turn, 25 turns per 1,000 ticks, but the
+/// money limits it to about 8), plus the four first builds, a rally point and the scout's leg. 15 is 12 and room for
+/// one more army turn's worth of orders in the same window (an attack, a march, a defence: up to 3 on top of a
+/// gather order), so the bound fails on a spam (an order every turn would be 25) but not on one more wave. (WP9.1c-1's
+/// bound was 10 for 6 measured, before the floor queued units in the opening.)
 const COMMANDS_PER_1000: usize = 15;
 
 /// The most `Order` commands the AI sent at one tick (one army turn).

@@ -3033,6 +3033,12 @@ WP9.1c-2". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved
   load average 0.4 to 1.0): `ai_vs_passive` 0.42 us per AI per tick, worst think 94 us; the step of the launch tick 874 us against a mean step of 20 us
   (the simulation plans the wave's `AttackMove`); one army turn with 200 riflemen 24 us at the launch, 28 us on the march (45 and 48 us before the
   attackers' list was searched by bisection; with 50: 7.7 → 6.6 us).
+- **Fix round 1 (sweep of PR #129).** The centre recall now turns a marching wave (`recalled`); the army floor ends at `max_wait` before the
+  first attack; an attack ends when its target stops losing hit points for `attack_patience`; a defeated AI stops while the match goes on (three
+  players); new tests for the defence cell, its fence, the finishing `Attack` on the real world, the owner filter. Measured: the money around the
+  first attack in `m1_ai` (one harvester, ~200 credits per 750 ticks, the vehicle factory waits) and the goal list without an attack over 30,000
+  ticks (does not complete: 9 builds in `ai_vs_passive`, last at 29,777 in `m1_ai`). Wins, waves and the raid unchanged; only AI digests moved
+  (two new state fields).
 - **Not done.** See `ai.md` "Not done" (WP9.1c-2 gaps): one group at a time, no retreat, the defence gap with the army out, the finishing rule not needed in
   a scenario, only passive opponents.
 
