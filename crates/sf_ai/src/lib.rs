@@ -14,19 +14,25 @@
 //!   (`sf_headless` today, the game's sim thread in WP9.1d) right before the world's step, which schedules
 //!   the commands under the AI's player id.
 //!
-//! WP9.1a is the frame only: the AI observes and remembers, and sends no command.
+//! * WP9.1b-1: [`observe::Lens`] (the second fenced type: public rules, terrain, visibility and the
+//!   simulation's placement rule for visible ground), [`budget`] (free credits), [`base`] (the construction
+//!   manager: goal list, power rule, money rule) and [`placement`] (where to build). The only commands it
+//!   sends are `BuildStructure`.
 
 pub mod ai;
+pub mod base;
+pub mod budget;
 pub mod memory;
 pub mod observe;
+pub mod placement;
 pub mod profile;
 pub mod schedule;
 pub mod sites;
 pub mod state;
 
 pub use ai::Ai;
-pub use observe::{Observation, Own, Seen};
+pub use observe::{Lens, Observation, Own, OwnFactory, Seen};
 pub use profile::Profile;
 pub use schedule::{Manager, due};
 pub use sites::start_sites;
-pub use state::{AI_STREAM, AiState, Known};
+pub use state::{AI_STREAM, AiState, Known, REFUSED_CAP};
