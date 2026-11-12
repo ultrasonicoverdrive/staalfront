@@ -334,6 +334,7 @@ mod tests {
             front_ticks: 80,
             status,
             rally: Some(Cell::new(31, 12)),
+            repeat: false,
             front_paid: 85,
         }
     }

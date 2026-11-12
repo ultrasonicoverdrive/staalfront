@@ -1168,3 +1168,49 @@ fn without_a_standing_construction_centre_no_structure_is_offered() {
         Some("Needs a construction centre")
     );
 }
+
+// ---- repeat (WP6.10) -------------------------------------------------------------------------------
+
+#[test]
+fn the_repeat_button_acts_on_the_primary_factory_of_the_open_tab_and_shows_its_state() {
+    let mut r = with_barracks(5000, 4);
+    let barracks = r.id_of("barracks");
+    let rifleman = kind(&r.defs, "rifleman");
+    let button = |r: &Rig, tab| model(&r.catalog, &r.sit(&[]), tab, None, None, &r.look).repeat;
+    // No factory on the structures tab, none of vehicles yet.
+    assert_eq!(button(&r, Tab::Structures), None);
+    assert_eq!(button(&r, Tab::Vehicles), None);
+    let b = button(&r, Tab::Infantry).expect("the barracks has a tab");
+    assert_eq!((b.factory, b.on), (barracks, false));
+    assert_eq!(
+        b.click(),
+        Command::SetRepeat {
+            factory: barracks,
+            on: true
+        }
+    );
+    // The loop sign is on a queued item only while the factory repeats.
+    r.send(Command::QueueUnit {
+        factory: barracks,
+        kind: rifleman,
+    });
+    r.run(2);
+    assert!(!r.item(Tab::Infantry, "rifleman").repeating);
+    // The click's own command, through the simulation.
+    r.send(b.click());
+    r.run(2);
+    let b = button(&r, Tab::Infantry).unwrap();
+    assert!(b.on);
+    assert!(r.item(Tab::Infantry, "rifleman").repeating);
+    assert!(!r.item(Tab::Infantry, "scout").repeating, "not queued");
+    assert_eq!(
+        b.click(),
+        Command::SetRepeat {
+            factory: barracks,
+            on: false
+        }
+    );
+    r.send(b.click());
+    r.run(2);
+    assert!(!button(&r, Tab::Infantry).unwrap().on);
+}

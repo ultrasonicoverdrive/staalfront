@@ -43,6 +43,19 @@ geometry (centring, both sides of a padding), not looks; the picture of an item 
 (`the_column_lies_on_the_right_edge_above_the_minimap`, `the_parts_stand_top_to_bottom_money_power_tabs_items`,
 `the_column_is_laid_out_in_physical_pixels_at_any_scale`, `a_tiny_window_gets_no_item_rows_and_does_not_panic`).
 
+## The loop button (WP6.10)
+
+A third button in the row of Repair and Sell, **Loop** (`sidebar.ron`: `words.repeat`; the colours are the tool colours). It acts on the
+**primary factory of the open tab** (`Situation::primary`: the selected one, else the lowest slot) and is **lit while that factory repeats**
+(`SidebarModel::repeat`, a `RepeatButton { factory, on }`). A left click sends `SetRepeat { factory, on: !on }`
+(`RepeatButton::click`); a right click does nothing. On the structures tab, and on a unit tab whose factory does not stand, the button is
+dim and silent. It does not depend on the repair rules. A queued item of a repeating factory wears a small **loop sign** at the top left of
+its picture (`words.repeating`, `Item::repeating`; the same colour as the lit button). Mouse only: no key in this WP (letters such as R and L are free in `input.ron`, but a key needs a decision with the
+rest of the key map; the button is one click). The row is three equal buttons now. Tests: `sidebar/tests.rs`
+(`the_repeat_button_acts_on_the_primary_factory_...`), `sidebar_view/tests.rs` (press, lit, sign), `sidebar_layout/tests.rs`
+(`the_repeat_button_is_the_third_in_the_row_of_buttons`), `tests/sidebar_screenshot.rs` (pixels from a real world;
+`docs/screenshots/wp6.10/`: `sidebar_t00009_repeat_off.png`, `sidebar_t00277_repeat_on.png` with four riflemen out and two in the queue).
+
 ## The Repair and Sell buttons (WP6.6)
 
 A row of two buttons under the power bar, **Repair** and **Sell** (`sidebar.ron`: `tool_height_px`, `tool_labels` and the colours `tool`,

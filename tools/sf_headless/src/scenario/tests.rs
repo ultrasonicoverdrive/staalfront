@@ -835,6 +835,14 @@ mod record {
                 factory: e(14, 2),
                 cell: None,
             },
+            Command::SetRepeat {
+                factory: e(14, 2),
+                on: true,
+            },
+            Command::SetRepeat {
+                factory: e(14, 2),
+                on: false,
+            },
             Command::Repair {
                 structure: e(12, 0),
                 on: true,

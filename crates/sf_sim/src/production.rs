@@ -423,6 +423,8 @@ pub(crate) struct Factory {
     pub(crate) id: EntityId,
     /// Where finished units walk to; `None`: they stay on their spot.
     pub(crate) rally: Option<Cell>,
+    /// Whether a unit that comes out goes back at the end of the queue (WP6.10).
+    pub(crate) repeat: bool,
     /// The items, the one being built first.
     pub(crate) items: Vec<QueueItem>,
     /// Progress of the front item in thousandths of a tick.
@@ -461,6 +463,7 @@ impl Production {
         let fresh = Factory {
             id,
             rally: None,
+            repeat: false,
             items: Vec::new(),
             done: 0,
             status: FactoryStatus::Idle,
@@ -496,13 +499,16 @@ impl Production {
         for f in &self.factories {
             h.write_u32(f.id.index());
             h.write_u32(f.id.generation());
+            // The rally tag is 0 or 1 as before; a repeating factory adds 2 (WP6.10), so a world
+            // where no factory repeats hashes as it did before.
+            let repeat = if f.repeat { 2 } else { 0 };
             match f.rally {
                 Some(c) => {
-                    h.write_u8(1);
+                    h.write_u8(1 + repeat);
                     h.write_u32(c.x);
                     h.write_u32(c.y);
                 }
-                None => h.write_u8(0),
+                None => h.write_u8(repeat),
             }
             h.write_u32(f.done);
             h.write_u64(f.items.len() as u64);
@@ -538,6 +544,8 @@ pub struct FactoryView {
     pub status: FactoryStatus,
     /// The rally point.
     pub rally: Option<Cell>,
+    /// Whether the factory repeats what it builds (WP6.10).
+    pub repeat: bool,
     /// Credits paid for the front item so far.
     pub front_paid: u64,
 }
@@ -626,6 +634,7 @@ impl World {
             front_ticks,
             status: f.status,
             rally: f.rally,
+            repeat: f.repeat,
             front_paid,
         })
     }
@@ -775,6 +784,52 @@ impl World {
         Ok(())
     }
 
+    /// Switches the repeat of `factory` (WP6.10). Switching it off for a factory without a record
+    /// changes nothing and makes no record, so a world that never repeats hashes as before.
+    fn set_repeat(
+        &mut self,
+        player: PlayerId,
+        factory: EntityId,
+        on: bool,
+    ) -> Result<(), ProductionError> {
+        self.production_factory(player, factory)?;
+        if let Some(p) = self.production.as_deref_mut() {
+            if on {
+                p.get_or_insert(factory).repeat = true;
+            } else if let Some(k) = p.factories.iter().position(|f| f.id == factory) {
+                p.factories[k].repeat = false;
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a unit of `kind` is accepted at the factory `id` of `owner` now, apart from the
+    /// queue limit: the checks of [`World::queue_unit`] (WP6.10).
+    fn repeatable(
+        &self,
+        table: &ProductionTable,
+        id: EntityId,
+        owner: PlayerId,
+        kind: Kind,
+    ) -> bool {
+        let Some(build) = table.get(kind) else {
+            return false;
+        };
+        let Some(i) = self.live_index(id) else {
+            return false;
+        };
+        let function = self
+            .buildings
+            .get(self.entities.kind[i])
+            .map_or(BuildingFunction::None, |b| b.function);
+        let Some(bit) = self.faction_of(owner) else {
+            return false;
+        };
+        build.factory == function
+            && build.factions & bit != 0
+            && self.missing_prerequisite(owner, &build.requires).is_none()
+    }
+
     /// Runs a production command of `player`. False when there are no production rules, and
     /// when it is refused (then it is listed in [`World::production_rejections`]).
     pub(crate) fn apply_production(&mut self, player: PlayerId, command: Command) -> bool {
@@ -785,6 +840,7 @@ impl World {
             Command::QueueUnit { factory, kind } => self.queue_unit(player, factory, kind),
             Command::CancelUnit { factory, index } => self.cancel_unit(player, factory, index),
             Command::SetRally { factory, cell } => self.set_rally(player, factory, cell),
+            Command::SetRepeat { factory, on } => self.set_repeat(player, factory, on),
             _ => return false,
         };
         match result {
@@ -891,6 +947,25 @@ impl World {
             let f = &mut p.factories[k];
             f.items.remove(0);
             f.done = 0;
+            // Repeat (WP6.10): the finished item has left, so its copy goes in at the back through
+            // the checks of a new `QueueUnit`, and the limit is never passed. The free unit of a
+            // structure never repeats.
+            let again = f.repeat
+                && !front.free
+                && f.items.len() < usize::from(p.rules.queue_limit)
+                && self.repeatable(
+                    &p.table,
+                    id,
+                    self.entities.owner[unit.index() as usize],
+                    front.kind,
+                );
+            let f = &mut p.factories[k];
+            if again {
+                f.items.push(QueueItem {
+                    kind: front.kind,
+                    free: false,
+                });
+            }
             f.status = if f.items.is_empty() {
                 FactoryStatus::Idle
             } else {
@@ -1166,5 +1241,49 @@ mod tests {
             w.step();
         }
         assert!(w.production_of(f).unwrap().queue.is_empty());
+    }
+    /// WP6.10: the factory section as literal bytes. The tag byte after the id is 0 (no rally, no
+    /// repeat), 1 (rally), 2 (repeat) or 3 (rally and repeat); a rally cell follows only for the tags with a rally point (one and three)
+    #[test]
+    fn the_repeat_flag_is_the_plus_two_on_the_rally_tag_in_the_factory_section() {
+        let w = world();
+        let id = EntityId::new(5, 2);
+        for (rally, repeat, tag) in [
+            (None, false, 0u8),
+            (Some(Cell::new(7, 9)), false, 1),
+            (None, true, 2),
+            (Some(Cell::new(7, 9)), true, 3),
+        ] {
+            let mut p = (**w.production.as_ref().unwrap()).clone();
+            p.factories.push(Factory {
+                id,
+                rally,
+                repeat,
+                items: Vec::new(),
+                done: 0,
+                status: FactoryStatus::Idle,
+            });
+            let mut got = Fnv1a64::new();
+            p.write_hash(&mut got);
+            let mut want = Fnv1a64::new();
+            want.write_u8(3); // queue_limit
+            want.write_u8(2); // exit_radius
+            want.write_u64(p.table.digest());
+            want.write_u64(1); // one record
+            want.write_u32(5);
+            want.write_u32(2);
+            want.write_u8(tag);
+            if rally.is_some() {
+                want.write_u32(7);
+                want.write_u32(9);
+            }
+            want.write_u32(0); // progress
+            want.write_u64(0); // no items
+            assert_eq!(
+                got.finish(),
+                want.finish(),
+                "rally {rally:?} repeat {repeat}"
+            );
+        }
     }
 }

@@ -154,7 +154,7 @@ the slot order. Re-pins: see "What moved" below.
 
 ## The picture and the player's way in (presentation only)
 
-* **Sidebar.** Under the power bar two buttons, **Repair** and **Sell** (`sidebar.ron`: `tool_height_px`, `tool_labels`,
+* **Sidebar.** Under the power bar two buttons, **Repair** and **Sell** (since WP6.10 they share the row with a third button, **Loop**, so each is a third of the row wide instead of half; `sidebar.md`) (`sidebar.ron`: `tool_height_px`, `tool_labels`,
   the colours `tool`, `tool_hover`, `tool_active`; all words, sizes and colours are data). A left click switches the mode on, or
   off when it is the one that is on; a right click leaves it. The lit button is the mode that is on
   (`the_button_of_the_mode_that_is_on_is_lit_and_the_others_are_not`, `a_left_click_on_a_tool_button_switches_its_mode_and_a_right_click_leaves_it`).

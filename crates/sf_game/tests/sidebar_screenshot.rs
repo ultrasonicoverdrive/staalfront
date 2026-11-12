@@ -458,3 +458,71 @@ fn the_sidebar_shows_the_state_of_the_game_on_every_tab() {
     let later = scene.shoot(&mut r, &cam, Tab::Structures);
     save(&format!("sidebar_t{t1:05}_structures.png"), &later);
 }
+
+/// WP6.10: the loop button next to Repair and Sell, and the loop sign on the queued item, drawn from
+/// a snapshot of the real simulation (`SetRepeat` through the world, `Situation::read`, `sidebar::model`).
+#[test]
+fn the_repeat_button_is_lit_and_the_queued_item_wears_the_loop_sign_while_the_factory_repeats() {
+    let look = SidebarLook::embedded();
+    let mut scene = Scene::new();
+    let mut r = renderer(&scene.map);
+    let cam = scene.camera();
+    let barracks = scene.id_of("barracks");
+    let rifle = scene.kind("rifleman");
+    let layout = sidebar_layout::layout(
+        Rect::new(0.0, 0.0, W as f32, H as f32),
+        1.0,
+        &look,
+        4.0,
+        true,
+    );
+    let lit = opaque((
+        look.colors.tool_active.0,
+        look.colors.tool_active.1,
+        look.colors.tool_active.2,
+    ));
+    let picture_corner = |n: usize| {
+        let slot = layout.slot(n);
+        Rect::new(slot.x + 1.0, slot.y + 1.0, 30.0, 14.0)
+    };
+    for _ in 0..2 {
+        scene.command(Command::QueueUnit {
+            factory: barracks,
+            kind: rifle,
+        });
+    }
+    let t0 = scene.run_until(300, |w| {
+        w.production_of(barracks)
+            .is_some_and(|v| v.front_permille >= 100)
+    });
+    // Repeat off: the button is at rest and the item has no sign.
+    let off = scene.shoot(&mut r, &cam, Tab::Infantry);
+    save(&format!("sidebar_t{t0:05}_repeat_off.png"), &off);
+    assert_eq!(count_in(&off, layout.repeat, lit, 6), 0);
+    assert_eq!(count_in(&off, picture_corner(0), lit, 6), 0);
+
+    scene.command(Command::SetRepeat {
+        factory: barracks,
+        on: true,
+    });
+    // Four riflemen later (the queue held two): the queue is still two long.
+    let t1 = scene.run_until(2000, |w| {
+        w.production_of(barracks)
+            .is_some_and(|v| v.repeat && v.queue.len() == 2 && v.front_permille >= 100)
+            && w.snapshot().iter().filter(|v| v.kind == rifle).count() >= 4
+    });
+    let on = scene.shoot(&mut r, &cam, Tab::Infantry);
+    save(&format!("sidebar_t{t1:05}_repeat_on.png"), &on);
+    let button = count_in(&on, layout.repeat, lit, 6);
+    assert!(
+        button > layout.repeat.w as usize * 8,
+        "the button is lit: {button} px"
+    );
+    let sign = count_in(&on, picture_corner(0), lit, 6);
+    assert!(sign > 40, "the loop sign on the rifleman: {sign} px");
+    // The scout is not queued: no sign on it.
+    assert_eq!(count_in(&on, picture_corner(3), lit, 6), 0);
+    // On the structures tab there is no factory to act on: the button is dim again.
+    let other = scene.shoot(&mut r, &cam, Tab::Structures);
+    assert_eq!(count_in(&other, layout.repeat, lit, 6), 0);
+}

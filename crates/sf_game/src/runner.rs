@@ -1704,6 +1704,9 @@ impl Runner {
                         sf_sim::Command::CancelUnit { index, .. } => {
                             println!("sidebar: cancel the unit in place {index}");
                         }
+                        sf_sim::Command::SetRepeat { on, .. } => {
+                            println!("sidebar: repeat {}", if *on { "on" } else { "off" });
+                        }
                         _ => {}
                     }
                     commands::issue(&self.sim, command);

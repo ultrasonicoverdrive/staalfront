@@ -315,6 +315,12 @@ fn write_command(h: &mut Fnv1a64, c: &Command) {
                 None => h.write_u8(0),
             }
         }
+        Command::SetRepeat { factory, on } => {
+            h.write_u8(18);
+            h.write_u32(factory.index());
+            h.write_u32(factory.generation());
+            h.write_u8(u8::from(*on));
+        }
         Command::Repair { structure, on } => {
             h.write_u8(16);
             h.write_u32(structure.index());

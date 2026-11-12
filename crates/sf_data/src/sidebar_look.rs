@@ -41,6 +41,10 @@ pub struct Words {
     pub needs: String,
     /// What an empty tab says when nothing is missing, there is just nothing to build.
     pub nothing: String,
+    /// The label of the repeat button (WP6.10).
+    pub repeat: String,
+    /// The small sign on an item of a factory that repeats (WP6.10).
+    pub repeating: String,
 }
 
 /// The colours of the sidebar.
@@ -287,6 +291,8 @@ mod tests {
                 low_power: "low power".into(),
                 needs: "needs".into(),
                 nothing: "Nothing to build".into(),
+                repeat: "Loop".into(),
+                repeating: "loop".into(),
             }
         );
         assert_eq!(
