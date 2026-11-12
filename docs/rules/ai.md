@@ -553,10 +553,16 @@ scout is an armed unit the army turn gathers.) `sf_data/tests/buildings.rs` list
 
 ### Cost
 
-`ai_perf.rs`, release, this container, load average 0.7 to 2: `ai_scout` alone 0.21 us per AI per tick (worst think 52.6 us, 900 thinks), with
-5,000 wanderers 9.82 us (worst think 292.5 us), against 0.33 and 9.14 us (worst 63.4 and 173.5 us) for `ai_fog` in the same run: the observation of
-5,000 entities per think dominates, as before. The production turn and the army turn on their own (`what_one_production_turn_and_one_army_turn_cost_on_their_own`,
-20,000 turns each on the observation of `ai_scout` at tick 17,000 with 200 more idle soldiers added): see the PR body for the final numbers.
+`ai_perf.rs`, release, this container, load average 0.7 to 2.0 (other jobs ran), two runs: `ai_scout` alone 0.21 and 0.43 us per AI per tick (worst think 52.6
+and 63.2 us, 900 thinks), with 5,000 wanderers 9.82 and 9.34 us (worst think 292.5 us in `Construction`, 371.5 us in `Production`), against 0.33 and 0.21 us alone and 9.14 and
+8.03 us with the crowd for `ai_fog` (managers off) in the same runs: the observation of 5,000 entities per think dominates, as before, and the
+difference of `ai_scout` to `ai_fog` is inside the noise between the two runs. A whole run of `ai_fog` with 5,000 wanderers, alternating, medians of three: 564 and 603 ticks/s
+with the AI against 666 and 620 without. The production turn and the army turn on their own
+(`what_one_production_turn_and_one_army_turn_cost_on_their_own`, 20,000 turns each on the observation of `ai_scout` at tick 17,000 with 200 more idle soldiers
+added, a rich player so that production runs its whole loop; the state is cloned outside the clock): production **mean 5.7 us, worst 184 us** (two orders per
+turn; 2.8 us when no order is sent), army **mean 2.9 us, worst 270 us** (two gather orders of 19 and the bookkeeping of 200 units; 2.2 us in the first run), that is about 0.14 and 0.07 us per tick
+(a turn every 40 ticks). Budget: mean 20 us per AI per tick, worst think 1 ms; the worst thinks above are spikes of a shared machine that the turns themselves
+(microseconds) do not explain, but that is not proven.
 
 ## The schedule
 
