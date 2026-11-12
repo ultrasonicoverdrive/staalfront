@@ -1131,6 +1131,61 @@ fn nothing_is_sold_on_the_first_stalled_turn_and_the_sales_go_out_together_on_th
 }
 
 #[test]
+fn two_stalled_turns_in_a_row_are_needed_a_turn_that_is_not_stalled_starts_the_count_again() {
+    // WP9.1c-1, from the review of WP9.1b-2: "in a row" was pinned only by the digest of `ai_deadlock`.
+    let (world, mut state) = rig_rebuild();
+    // Stalled, not stalled (free credits: the build can be paid), stalled: the count is one again, nothing is
+    // sold at the third turn; the next stalled turn is the second in a row and sells.
+    let stalled = |t| observation(&world, t, 0, deadlock(&world));
+    let paid = |t| observation(&world, t, 10_000, deadlock(&world));
+    assert_eq!(sells(&turn(&world, &mut state, &stalled(5000))), []);
+    assert_eq!(state.stalled_turns, 1);
+    assert_eq!(sells(&turn(&world, &mut state, &paid(5040))), []);
+    assert_eq!(state.stalled_turns, 0);
+    assert_eq!(sells(&turn(&world, &mut state, &stalled(5080))), []);
+    assert_eq!(state.stalled_turns, 1);
+    assert_eq!(sells(&turn(&world, &mut state, &stalled(5120))), [3]);
+    assert_eq!(state.stalled_turns, 2);
+}
+
+#[test]
+fn the_anchor_is_never_sold_even_when_the_definitions_give_it_a_price() {
+    // WP9.1c-1, from the review of WP9.1b-2: the shipped construction centre has no price, so `sale_refund`
+    // says nothing about it and the exclusion was not reached. Here the building table gives it one (4,000, a
+    // refund of 2,000, more than the whole debt of the refinery): were it eligible, it would be the one
+    // smallest sufficient sale. It is not sold; the three that are, are.
+    let mut s = load("ai_rebuild");
+    let table = s.building_table.take().unwrap();
+    let mut stats: Vec<sf_sim::BuildingStats> = table.iter().cloned().collect();
+    for b in &mut stats {
+        if b.kind == CENTRE {
+            b.cost = Some(4000);
+            b.build_ticks = 100;
+        }
+    }
+    s.building_table = Some(sf_sim::BuildingTable::new(stats).unwrap());
+    let f = go(&s, 1);
+    let (world, mut state) = (*f.world, f.ais[0].state().clone());
+    let lens = Lens::new(&world, P0);
+    assert_eq!(lens.sale_refund(CENTRE, 1000, 1000), Some(2000));
+    let mut own = deadlock(&world);
+    own[5].building = Some(Construction {
+        left: 990,
+        total: 1000,
+    });
+    let mut sold = Vec::new();
+    for t in [5000, 5040] {
+        sold = sells(&turn(
+            &world,
+            &mut state,
+            &observation(&world, t, 0, own.clone()),
+        ));
+    }
+    // The barracks, the radar and the factory, as without a price on the centre; never the centre (id 0).
+    assert_eq!(sold, [2, 4, 3]);
+}
+
+#[test]
 fn when_no_one_structure_pays_enough_the_smallest_are_added_until_the_sum_does() {
     let (world, mut state) = rig_rebuild();
     // The refinery has barely started: it still owes nearly its whole price, 1,188 of 1,200.

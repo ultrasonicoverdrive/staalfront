@@ -198,7 +198,7 @@ fn the_first_unit_is_the_scout_it_visits_each_leg_once_and_finds_the_centre() {
         (st.anchor_known, st.arrived),
         (Some(ANCHOR_KNOWN), Some(ARRIVED))
     );
-    assert!(ANCHOR_KNOWN <= ARRIVED);
+    assert!(st.anchor_known <= st.arrived);
     let known = f.ais[0]
         .state()
         .known_structures
@@ -1448,10 +1448,10 @@ fn the_ai_of_ai_scout_sends_only_what_the_list_allows_and_at_a_bounded_rate() {
     );
 }
 
-/// Measured: the most in any window of 1,000 ticks over `ai_scout` is 6 and over its 40,000-tick run 7; the bound
+/// Measured: the most in any window of 1,000 ticks over `ai_scout` is 6, and 6 over its 40,000-tick run; the bound
 /// leaves room for a busier start of the same AI (a turn sends at most one order per factory, a rally point per
 /// factory and two gather orders).
-const COMMANDS_PER_1000: usize = 12;
+const COMMANDS_PER_1000: usize = 10;
 
 /// The most commands the AI sent in any run of 1,000 ticks that starts on a multiple of 100.
 fn worst_window(f: &Finished) -> usize {
@@ -1492,4 +1492,200 @@ fn over_forty_thousand_ticks_the_ai_stays_on_the_list_and_under_the_rate_bound()
     );
     assert!(worst <= COMMANDS_PER_1000, "{worst}");
     assert!(army >= 20, "{army}");
+}
+
+// ---- the older scenarios: the managers are off for their frozen profiles ---------------------------------
+
+/// The scenarios of WP9.1a and WP9.1b, each on a frozen profile with an empty `unit_mix` and no scout, with the
+/// checksum pinned in its own test file.
+const FROZEN: [&str; 7] = [
+    "ai_fog",
+    "ai_base",
+    "ai_noore",
+    "ai_boxed",
+    "ai_economy",
+    "ai_rebuild",
+    "ai_deadlock",
+];
+
+#[test]
+fn the_managers_stay_off_for_the_frozen_profiles_and_the_old_mix_would_move_every_checksum() {
+    for name in FROZEN {
+        let s = load(name);
+        let expected = parse_checksum(
+            &std::fs::read_to_string(scenario_path(&format!("{name}.expected"))).unwrap(),
+        )
+        .unwrap();
+        assert!(!s.ais[0].state().profile.makes_units(), "{name}");
+        let f = go(&s, s.ticks);
+        // The pinned checksum is the one it always had, and the AI sent nothing of WP9.1c: no rally point, no
+        // order of units, no unit but a harvester; the state of the new parts is at its start values.
+        assert_eq!(f.outcome.final_checksum, expected, "{name}");
+        for (t, _, c) in &f.ai_commands {
+            let ok = match c {
+                Command::SetRally { .. } | Command::Order { .. } => false,
+                Command::QueueUnit { kind, .. } => *kind == HARVESTER,
+                _ => true,
+            };
+            assert!(ok, "{name}, tick {t}: {c:?}");
+        }
+        let fresh = AiState::new(
+            P0,
+            f.ais[0].state().profile.clone(),
+            0,
+            f.ais[0].state().start_sites.clone(),
+        );
+        let s0 = f.ais[0].state();
+        assert_eq!(
+            (
+                s0.gather,
+                &s0.rally_backoff,
+                &s0.units_sent,
+                s0.scout,
+                s0.scouts_sent,
+                &s0.sent,
+                s0.directive
+            ),
+            (
+                fresh.gather,
+                &fresh.rally_backoff,
+                &fresh.units_sent,
+                fresh.scout,
+                fresh.scouts_sent,
+                &fresh.sent,
+                fresh.directive
+            ),
+            "{name}"
+        );
+        // The cause of the re-pin, measured: the same scenario with the unit mix the profile had before WP9.1c-1
+        // (the managers on) ends on another checksum. (Cause: units are bought, rally points and gather orders
+        // are sent.)
+        let on = with_profile(s.clone(), |p| {
+            p.unit_mix = vec![(RIFLEMAN, 4), (ROCKET, 2), (TANK, 3)];
+        });
+        let moved = go(&on, s.ticks).outcome.final_checksum;
+        assert_ne!(moved, expected, "{name}");
+    }
+}
+
+// ---- how big the army is at the gather cell --------------------------------------------------------------
+
+/// The units of player 0 that are army (not a harvester, not the scout) within the gather radius of its gather
+/// cell: what `army::is_army` and `gather_radius` call arrived.
+fn gathered(w: &World, ai: &Ai) -> usize {
+    let g = ai.state().gather.expect("a gather cell");
+    let r = u32::from(ai.state().profile.army.gather_radius);
+    w.snapshot()
+        .iter()
+        .filter(|v| v.owner == P0 && w.footprint_of(v.id).is_none())
+        .filter(|v| v.kind != HARVESTER)
+        .filter(|v| ai.state().scout != Some(v.id))
+        .filter_map(|v| w.cell_at(v.pos))
+        .filter(|c| c.x.abs_diff(g.x).max(c.y.abs_diff(g.y)) <= r)
+        .count()
+}
+
+#[test]
+fn the_army_at_the_gather_cell_by_tick_on_the_first_matchs_map() {
+    let s = load("ai_scout");
+    let mut at = BTreeMap::new();
+    let f = run_observed(
+        &s,
+        &RunOptions {
+            ticks: 20_000,
+            every: 100,
+        },
+        |w, ais| {
+            let t = w.tick().0;
+            if [4000, 8000, 12000, 16000, 20000].contains(&t) {
+                at.insert(t, gathered(w, &ais[0]));
+            }
+        },
+    )
+    .unwrap();
+    let first_army = sent(
+        &f,
+        |c| matches!(c, Command::QueueUnit { kind, .. } if [RIFLEMAN, ROCKET, TANK].contains(kind)),
+    );
+    println!(
+        "army at the gather cell: {at:?}; first army unit queued at {:?}",
+        first_army.first()
+    );
+    // Measured. The goal list (ten entries, 9,300 credits of structures, two harvesters) takes the first 15,000
+    // ticks of 4,000 credits and the ore of one refinery, and production holds back the next goal's price, so
+    // the first army unit is queued at tick 15,700 and there is no army at 4,000, 8,000 or 12,000.
+    assert_eq!(
+        at.values().copied().collect::<Vec<_>>(),
+        ARMY_AT_GATHER,
+        "{at:?}"
+    );
+    assert_eq!(first_army.first(), Some(&FIRST_ARMY_TICK));
+}
+
+/// The army at the gather cell at ticks 4,000, 8,000, 12,000, 16,000 and 20,000 of `ai_scout`.
+const ARMY_AT_GATHER: [usize; 5] = [0, 0, 0, 1, 4];
+const FIRST_ARMY_TICK: u64 = 15_700;
+
+// ---- the fence --------------------------------------------------------------------------------------------
+
+/// `ai_scout` with three Veyran riflemen standing at `cells`.
+fn with_riflemen_at(cells: [(u32, u32); 3]) -> Scenario {
+    let mut s = load("ai_scout");
+    for cell in cells {
+        s.commands.push(TimedCommand {
+            tick: 0,
+            player: 1,
+            command: Action::SpawnUnit {
+                kind: 12,
+                owner: 1,
+                cell,
+            },
+        });
+    }
+    s
+}
+
+#[test]
+fn an_army_the_ai_has_not_seen_changes_nothing_it_does() {
+    // The same three riflemen in two far corners of the map, which neither the scout's legs (sight 8) nor the
+    // base reach: the worlds differ, and the AI's commands, memory and digest do not. (The units are in both
+    // worlds, so that the slots of everything the AI builds are the same: the harvest loop times itself by slot, and
+    // a world with three more entities delivers its first ore later, which the AI would rightly answer.)
+    let a = go(&with_riflemen_at([(90, 90), (91, 90), (90, 91)]), 12_000);
+    let b = go(&with_riflemen_at([(90, 6), (91, 6), (90, 7)]), 12_000);
+    assert_eq!(a.world.len(), b.world.len());
+    assert_ne!(a.world.checksum(), b.world.checksum());
+    assert!(!a.ai_commands.is_empty());
+    assert_eq!(a.ai_commands, b.ai_commands);
+    assert_eq!(
+        a.ais[0].state().known_structures,
+        b.ais[0].state().known_structures
+    );
+    assert_eq!(a.ais[0].digest(), b.ais[0].digest());
+    // The control: the AI does see units that come into the scout's sight. A rifleman of player 1 beside the
+    // last leg's waypoint (72, 72) is in the observation at the tick the scout stands there, hit points and
+    // the armed flag included, and the digest is another one (the AI's `known_structures` stays the same: only
+    // structures are remembered).
+    let mut seen_at = None;
+    let s = with_riflemen_at([(90, 90), (91, 90), (74, 70)]);
+    let c = run_observed(
+        &s,
+        &RunOptions {
+            ticks: 12_000,
+            every: 100,
+        },
+        |w, ais| {
+            if seen_at.is_none() && w.tick().0.is_multiple_of(10) {
+                let obs = Observation::build(w, P0, &ais[0].state().known_structures);
+                if obs.visible.iter().any(|e| e.kind == RIFLEMAN && e.armed) {
+                    seen_at = Some(w.tick().0);
+                }
+            }
+        },
+    )
+    .unwrap();
+    println!("a rifleman beside the last waypoint is in the observation from tick {seen_at:?}");
+    let t = seen_at.expect("the scout comes within sight of a unit beside its last waypoint");
+    assert!((4870..12_000).contains(&t), "{t}");
+    assert_ne!(c.world.checksum(), a.world.checksum());
 }
