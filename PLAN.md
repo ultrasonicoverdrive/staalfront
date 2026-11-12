@@ -442,6 +442,14 @@ Layered (analysis §12, §22G):
   measured, 32 if the worst think exceeds 1 ms: measured with 5,000 entities, a think whose every question fails takes 2.4 to 4.9 ms
   at 256 and 0.36 to 0.82 ms at 32 (64: up to 1.3 ms), so 9.1b-1 set it to 32; (5) lane 1 cell, refinery apron 3 x 5, factory apron 1 x 3, new profile numbers with defaults so the frozen `ai_fog`
   profile still reads; (6) a blocked power plant does not hold up the goal list; (7) the AI never sells in 9.1.*
+  *12-11-2026 (WP9.1b-2, decisions taken while building the economy manager, no new profile number): (8) a harvester is ordered for every
+  refinery up to `harvesters_per_refinery` (2) at once, ignoring `reserve` (that is for the army), so the goal list waits 2,200 credits for
+  them: the whole list of `ai_base` stands at tick 8078, not 6518, and that scenario runs 10,000 ticks; (9) the silo is built only when no goal entry is
+  open (a blocked entry counts as open), the store has been 90 percent full for two economy turns, and there are fewer silos than refineries;
+  (10) a repair that never shows (a world without repair rules) is asked again after `blocked_ticks` only, which doubles as the backoff of a refused
+  harvester order; (11) repair order is anchor, power plants and factories, harvester dock, the rest, two per turn, and only the anchor while an
+  emergency build waits for money. Known consequence, to be settled in WP9.4 or by Tijmen: a refinery lost at zero credits cannot be paid
+  and the AI is stuck (it never sells).*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

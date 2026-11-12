@@ -114,7 +114,7 @@ fn the_delivered_ore_rises_in_every_window_of_2000_ticks() {
     for (i, pair) in delivered.windows(2).enumerate() {
         assert!(pair[1] > pair[0], "window {i}: {delivered:?}");
     }
-    // Measured: 310 in the first window, over 500 in each later one; none is a trickle.
+    // Measured: 310 in the first window, 690 to 1,330 in the others; none is a trickle.
     assert!(delivered.windows(2).all(|p| p[1] - p[0] >= 250));
 }
 
@@ -193,8 +193,8 @@ fn a_harvester_lost_at_tick_t_is_replaced_and_only_once() {
     assert_eq!(at(s.ticks), 2);
 }
 
-/// Measured: the ordered harvester leaves the factory 40 ticks after the order; 20 percent more.
-const REPLACEMENT_TICKS: u64 = 700;
+/// Measured: the harvester ordered at tick 8040 is out of the factory at tick 8440 (400 ticks); 20 percent more.
+const REPLACEMENT_TICKS: u64 = 480;
 
 #[test]
 fn a_lost_refinery_and_a_lost_barracks_are_rebuilt() {
@@ -236,9 +236,10 @@ fn a_lost_refinery_and_a_lost_barracks_are_rebuilt() {
     let _ = f;
 }
 
-/// Measured: 785 ticks (the refinery's build time, ordered unfunded at the first turn) and 200; 20 percent more.
-const T3_REFINERY: u64 = 1000;
-const T3_BARRACKS: u64 = 400;
+/// T3, measured: the refinery lost at tick 3001 stands again at 3545 (544 ticks: ordered at 3010, unfunded, and
+/// built in 535) and the barracks lost at 6001 at 6278 (277 ticks); 20 percent more.
+const T3_REFINERY: u64 = 660;
+const T3_BARRACKS: u64 = 340;
 
 #[test]
 fn a_damaged_power_plant_is_repaired_to_full_with_exactly_one_command() {
@@ -434,7 +435,7 @@ fn a_harvester_is_ordered_when_fewer_than_wanted_and_never_two_at_once() {
         factory: EntityId::new(5, 0),
         kind: HARVESTER,
     };
-    assert_eq!(turn(&world, &mut state, &obs), [order.clone()]);
+    assert_eq!(turn(&world, &mut state, &obs), [order]);
     assert_eq!(state.harvester_sent, Some((HARVESTER, Tick(2000))));
     // It is in the queue now: three of four, but one is on its way, so nothing more is ordered.
     let mut own = base_with(&world, 2);
@@ -668,9 +669,7 @@ fn repair_goes_by_rank_two_at_a_time_and_only_below_the_threshold() {
     // The anchor first, then a power plant or a factory, then the dock, then the rest; two a turn.
     let (_, mut state) = rig();
     let mut own = repair_base(&world);
-    for i in 0..5 {
-        own[i] = damaged(own[i].clone(), 100);
-    }
+    own = own.into_iter().map(|o| damaged(o, 100)).collect();
     let out = turn(
         &world,
         &mut state,

@@ -33,7 +33,8 @@ const EXPECTED: &str = include_str!("../../../assets/scenarios/ai_fog.expected")
 /// Re-pinned by WP9.1b-2 to `0x4a4e_ffe3_e0fa_05d1`; the checksum `0x768b77651509db8c` did not move (no
 /// harvester is ordered: the AI has no vehicle factory in 800 ticks, and nothing is damaged). The digest moved
 /// because it now hashes the economy state (`harvester_sent`, `full_turns`, `emergency`, `repair_backoff`):
-/// measured, with those left out of `AiState::digest` the value above comes back.
+/// measured, with the economy manager off and those left out of `AiState::digest` the WP9.1b-1 value
+/// `0x630c_0979_a8ae_4749` comes back (and with the manager off but the state hashed the digest stays `0x4a4e...`).
 const AI_DIGEST: u64 = 0x4a4e_ffe3_e0fa_05d1;
 
 const P0: PlayerId = PlayerId(0);
