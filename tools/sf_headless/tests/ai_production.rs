@@ -174,7 +174,9 @@ fn the_first_unit_is_the_scout_it_visits_each_leg_once_and_finds_the_centre() {
     let legs: Vec<(u64, Command)> = f
         .ai_commands
         .iter()
-        .filter(|(_, _, c)| matches!(c, Command::Order { .. }))
+        .filter(
+            |(_, _, c)| matches!(c, Command::Order { ids, .. } if ids == &[EntityId::new(8, 0)]),
+        )
         .map(|(t, _, c)| (*t, c.clone()))
         .collect();
     let want = [
@@ -217,7 +219,7 @@ const SCOUT_LEG_TICKS: [u64; 5] = [1270, 2470, 3190, 3870, 4870];
 const ANCHOR_KNOWN: u64 = 2351;
 const ARRIVED: u64 = 2439;
 /// The replacement of a scout lost at tick 3000.
-const REPLACEMENT_TICK: u64 = 8060;
+const REPLACEMENT_TICK: u64 = 7980;
 
 #[test]
 fn without_a_scout_the_ai_never_learns_where_the_centre_stands() {
@@ -228,9 +230,12 @@ fn without_a_scout_the_ai_never_learns_where_the_centre_stands() {
     assert_eq!(st.anchor_known, None);
     assert!(st.finished.ais[0].state().known_structures.is_empty());
     assert_eq!(sent(&st.finished, |c| is_queue_of(c, SCOUT)), []);
-    assert_eq!(
-        sent(&st.finished, |c| matches!(c, Command::Order { .. })),
-        [] as [u64; 0]
+    // The only orders are gather orders (to the gather cell), none to a leg.
+    assert!(
+        st.finished
+            .ai_commands
+            .iter()
+            .all(|(_, _, c)| !matches!(c, Command::Order { order: Order::Move(v), .. } if *v != middle(24, 64)))
     );
     // The first unit is then an army unit; and the scenario with the scout does know (control).
     assert!(sent(&st.finished, |c| is_queue_of(c, RIFLEMAN)).len() > 1);
@@ -256,7 +261,7 @@ fn a_lost_scout_is_replaced_after_scout_retry_and_at_most_scouts_max_times() {
     assert_eq!(bought.len(), 2, "{bought:?}");
     assert_eq!(bought[0], FIRST_UNIT_TICK);
     // Not before `scout_retry` (3,000) ticks after the loss at 3,000; the money (700 free: the goal list is
-    // still spending everything it earns) decides the rest: measured 8060.
+    // still spending everything it earns) decides the rest: measured 7980.
     assert_eq!(bought[1], REPLACEMENT_TICK, "{bought:?}");
     assert!(bought[1] >= 3000 + 3000);
     assert_eq!(f.ais[0].state().scouts_sent, 2);
@@ -697,7 +702,7 @@ fn an_order_the_simulation_refused_blocks_its_kind_for_blocked_ticks() {
     );
     assert_eq!(
         state.units_sent,
-        [(EntityId::new(3, 0), RIFLEMAN, Tick(5000), 0)]
+        [(EntityId::new(3, 0), RIFLEMAN, Tick(5000), 0, 0)]
     );
     // Turn 2: it is in the queue. Nothing is blocked, and by share the rocket trooper is next.
     let mut seen = own.clone();
@@ -898,11 +903,12 @@ fn every_complete_factory_gets_one_rally_point_to_the_gather_cell_and_only_when_
             })
             .collect()
     };
-    // No rally point: both factories are sent one, the refinery and the centre are not.
+    // No rally point: the barracks is sent one; the vehicle factory (it makes harvesters, which would mine
+    // later for the detour: see `makes_harvesters`), the refinery and the centre are not.
     let obs = observation(&world, 5000, 0, own.clone());
     assert_eq!(
         rally(&production_turn(&world, &mut state, &obs)),
-        [(3, Some(g)), (4, Some(g))]
+        [(3, Some(g))]
     );
     assert_eq!(state.gather, Some(g));
     // Both show the point at the next turn: nothing, and the backoff is gone.
@@ -1615,8 +1621,8 @@ fn the_army_at_the_gather_cell_by_tick_on_the_first_matchs_map() {
     assert_eq!(builds.last(), Some(&LIST_DONE_TICK));
     // Measured. The goal list (ten entries, 7,700 credits of structures at list prices and a third power plant,
     // two more harvesters) takes the 4,000 credits and the ore the harvesters bring until its last structure is
-    // ordered at tick 15,650, and production holds back the next goal's price, so the first army unit is queued
-    // at tick 15,700 and there is no army at 4,000, 8,000 or 12,000.
+    // ordered at tick 14,610, and production holds back the next goal's price, so the first army unit is queued
+    // at tick 15,020 and there is no army at 4,000, 8,000 or 12,000.
     assert_eq!(
         at.values().copied().collect::<Vec<_>>(),
         ARMY_AT_GATHER,
@@ -1626,11 +1632,11 @@ fn the_army_at_the_gather_cell_by_tick_on_the_first_matchs_map() {
 }
 
 /// The army at the gather cell at ticks 4,000, 8,000, 12,000, 16,000 and 20,000 of `ai_scout`.
-const ARMY_AT_GATHER: [usize; 5] = [0, 0, 0, 1, 4];
-const FIRST_ARMY_TICK: u64 = 15_700;
+const ARMY_AT_GATHER: [usize; 5] = [0, 0, 0, 2, 10];
+const FIRST_ARMY_TICK: u64 = 15_020;
 /// The tick of the last `BuildStructure` of the goal list (the eleventh: a third power plant comes by the
 /// power rule): the list is done and the holdback ends.
-const LIST_DONE_TICK: u64 = 15_650;
+const LIST_DONE_TICK: u64 = 14_610;
 
 // ---- the fence --------------------------------------------------------------------------------------------
 
@@ -1694,26 +1700,237 @@ fn an_army_the_ai_has_not_seen_changes_nothing_it_does() {
     assert_ne!(c.world.checksum(), a.world.checksum());
 }
 
-#[test]
-fn harvesters_bought_through_a_rallied_factory_still_deliver_ore() {
-    // The vehicle factory has its rally point on the gather cell, so the harvesters the economy buys walk there
-    // first (the free one of a refinery does not). They mine all the same: the delivered ore rises in every
-    // window of 2,000 ticks. (Measured: 200, 600, 400, 1,050, 750, 1,000, 1,600, 1,200, 600, 930; not compared
-    // with a run without the rally point, which the AI cannot be told to leave out.)
-    let s = load("ai_scout");
+/// Ore delivered by player 0 at ticks 2,000, 4,000, ... 20,000 of `s`, as the difference per window.
+fn ore_windows(s: &Scenario) -> Vec<u64> {
     let mut delivered = vec![0u64];
-    run_observed(&s, &RunOptions::for_scenario(&s), |w, _| {
+    run_observed(s, &RunOptions::for_scenario(s), |w, _| {
         if w.tick().0 % 2000 == 0 {
             delivered.push(w.ore_delivered(P0));
         }
     })
     .unwrap();
-    println!("delivered ore at 0, 2000, ...: {delivered:?}");
-    assert_eq!(delivered.len(), 11);
-    let windows: Vec<u64> = delivered.windows(2).map(|p| p[1] - p[0]).collect();
-    assert!(windows.iter().all(|&n| n >= 150), "{windows:?}");
-    assert_eq!(
-        windows,
-        [200, 600, 400, 1050, 750, 1000, 1600, 1200, 600, 930]
+    delivered.windows(2).map(|p| p[1] - p[0]).collect()
+}
+
+#[test]
+fn a_rally_point_on_the_vehicle_factory_costs_ore_so_the_ai_gives_it_none() {
+    // The vehicle factory (id 9) makes the harvesters the economy buys; a harvester with a rally point walks
+    // to the gather cell first. The AI therefore sets no rally point there (`makes_harvesters`). Baseline,
+    // measured: the same scenario with the point set by hand at tick 2,100 (the AI sees it is right and leaves
+    // it) delivers 8,330 ore in 20,000 ticks, the AI's own 9,800: the point costs 15 percent. (The rule: more
+    // than 10 percent, no rally on a factory that can make a harvester.)
+    let s = load("ai_scout");
+    let mut with = s.clone();
+    with.commands.push(TimedCommand {
+        tick: 2100,
+        player: 0,
+        command: Action::SetRally {
+            factory: (9, 0),
+            cell: Some((24, 64)),
+        },
+    });
+    let (own, forced) = (ore_windows(&s), ore_windows(&with));
+    println!(
+        "delivered per 2,000 ticks: the AI's rule {own:?}, rally forced on the vehicle factory {forced:?}"
     );
+    let (a, b): (u64, u64) = (own.iter().sum(), forced.iter().sum());
+    assert_eq!((a, b), (9800, 8330));
+    assert!(b * 100 < a * 90, "the point costs more than 10 percent");
+    // The AI's own windows: every one is at least 150, and the pinned values.
+    assert!(own.iter().all(|&n| n >= 150), "{own:?}");
+    assert_eq!(own, [200, 600, 400, 1200, 800, 1160, 1840, 1400, 1210, 990]);
+    // And the AI sent no rally point to the vehicle factory.
+    let f = go(&s, 5000);
+    assert!(
+        !f.ai_commands.iter().any(|(_, _, c)| matches!(c,
+            Command::SetRally { factory, .. } if factory.index() == 9)),
+        "no rally on the vehicle factory"
+    );
+}
+
+// ---- fix round 1: the gather cell and the AI's own placement ------------------------------------------------
+
+#[test]
+fn the_gather_cell_and_its_eight_neighbours_are_kept_free_of_the_ais_own_structures() {
+    // The best place for a power plant on the world of `ai_scout` after one tick is some cell c. With the
+    // gather cell on the middle of that plant, the search must put it elsewhere, off the 3 x 3 cells round the
+    // gather cell.
+    let (world, state) = rig();
+    let obs = Observation::build(&world, P0, &BTreeMap::new());
+    let mut lens = Lens::new(&world, P0);
+    let best = sf_ai::placement::search(&mut state.clone(), &obs, &mut lens, PLANT).unwrap();
+    let mut with_gather = state.clone();
+    let g = Cell::new(best.x + 1, best.y + 1);
+    with_gather.gather = Some(g);
+    let got = sf_ai::placement::search(&mut with_gather, &obs, &mut lens, PLANT).unwrap();
+    assert_ne!(got, best);
+    // The plant is 2 x 3 cells at `got`; the keep-out is x g-1..=g+1, y g-1..=g+1.
+    let (w, h) = (2, 3);
+    let apart = got.x + w <= g.x - 1 || got.x > g.x + 1 || got.y + h <= g.y - 1 || got.y > g.y + 1;
+    assert!(
+        apart,
+        "the plant at {got:?} covers part of the 3 x 3 round {g:?}"
+    );
+    // A gather cell elsewhere changes nothing (the same best place).
+    let mut far = state;
+    far.gather = Some(Cell::new(60, 60));
+    assert_eq!(
+        sf_ai::placement::search(&mut far, &obs, &mut lens, PLANT),
+        Some(best)
+    );
+}
+
+#[test]
+fn a_gather_cell_under_a_structure_is_worked_out_again() {
+    let (world, mut state) = rig();
+    let lens = Lens::new(&world, P0);
+    let g = Cell::new(24, 64);
+    assert!(lens.ground(g));
+    // Own structure on the kept cell (a plant of 2 x 3 at (23, 63) covers (24, 64)).
+    let mut own = base(&world);
+    own.push(structure_at(&world, 9, PLANT, 23, 63));
+    own.sort_by_key(|o| o.id);
+    let obs = observation(&world, 100, 0, own);
+    state.gather = Some(g);
+    // (Every cell of the rings is within the lane of that plant, so there is no new cell: `None`, again at
+    // the next turn. What matters is that the kept cell is not kept.)
+    let new = army::ensure_gather(&mut state, &obs, &lens);
+    assert_ne!(new, Some(g));
+    assert_eq!(state.gather, new);
+    // The same for a structure the AI has seen of another player, and one it remembers.
+    let mut seen = observation(&world, 100, 0, base(&world));
+    seen.visible.push(sf_ai::Seen {
+        id: EntityId::new(50, 0),
+        kind: PLANT,
+        owner: P1,
+        cell: Cell::new(23, 63),
+        footprint: world.building_table().get(PLANT).map(|b| b.footprint),
+        hp: 600,
+        armed: false,
+    });
+    let mut s2 = rig().1;
+    s2.gather = Some(g);
+    assert_ne!(army::ensure_gather(&mut s2, &seen, &lens), Some(g));
+    let mut s3 = rig().1;
+    s3.gather = Some(g);
+    s3.known_structures.insert(
+        EntityId::new(51, 0),
+        sf_ai::Known {
+            kind: PLANT,
+            owner: P1,
+            anchor: Cell::new(23, 63),
+            width: 2,
+            height: 3,
+            seen_tick: Tick(50),
+        },
+    );
+    let plain = observation(&world, 100, 0, base(&world));
+    assert_ne!(army::ensure_gather(&mut s3, &plain, &lens), Some(g));
+    // Kept when nothing stands on it.
+    let mut s4 = rig().1;
+    s4.gather = Some(g);
+    assert_eq!(army::ensure_gather(&mut s4, &plain, &lens), Some(g));
+}
+
+// ---- fix round 1: a scout the AI starts with, and a unit that dies in the verify window ---------------------
+
+#[test]
+fn an_unordered_scout_the_match_starts_with_is_the_first_scout() {
+    let (world, mut state) = rig();
+    short_list(&mut state);
+    let mut own = base(&world);
+    own.push(unit_at(20, SCOUT, true, 26, 66));
+    own.sort_by_key(|o| o.id);
+    let obs = observation(&world, 700, 10_000, own.clone());
+    // Production, which runs first: with a scout alive the AI does not wait for one, it makes units.
+    assert_eq!(
+        queues(&production_turn(&world, &mut state, &obs)),
+        [(3, 12)]
+    );
+    assert_eq!(state.scouts_sent, 0);
+    // The army turn makes it the scout and counts it: it is the first of `scouts_max`.
+    let out = army_turn(&world, &mut state, &obs);
+    assert_eq!(state.scout, Some(EntityId::new(20, 0)));
+    assert_eq!(state.scouts_sent, 1);
+    assert_eq!(out, [move_order(&[20], 72, 14)]);
+    // Lost, it is replaced once after the retry and then never again (max 2).
+    let mut gone = base(&world);
+    gone.sort_by_key(|o| o.id);
+    let obs = observation(&world, 1000, 10_000, gone.clone());
+    army_turn(&world, &mut state, &obs);
+    assert_eq!(state.scout_gone_at, Some(Tick(1000)));
+    let obs = observation(&world, 4000, 10_000, gone);
+    assert_eq!(
+        queues(&production_turn(&world, &mut state, &obs))
+            .iter()
+            .filter(|q| q.1 == 15)
+            .count(),
+        1
+    );
+    assert_eq!(state.scouts_sent, 2);
+}
+
+#[test]
+fn an_order_whose_kind_lost_a_unit_meanwhile_is_not_read_as_refused() {
+    let (world, _) = rig();
+    let mut own = base(&world);
+    own.push(soldier(20, 24, 64));
+    own.sort_by_key(|o| o.id);
+    let mut state = rig().1;
+    short_list(&mut state);
+    state.profile.army.scouts_max = 0;
+    state.profile.unit_mix = vec![(RIFLEMAN, 1)];
+    // A rifleman stands (id 20); a second is ordered.
+    let obs = observation(&world, 5000, 10_000, own.clone());
+    assert_eq!(
+        queues(&production_turn(&world, &mut state, &obs)),
+        [(3, 12)]
+    );
+    assert_eq!(
+        state.units_sent[0].3, 1,
+        "one rifleman stood before the order"
+    );
+    // 40 ticks later the order is in the barracks' queue, and the old rifleman is dead: the live count of
+    // the kind (units plus queue) is 1, as before, but the order was accepted.
+    let mut after = base(&world);
+    after[3] = with_queue(after[3].clone(), &[RIFLEMAN], Some(gather()));
+    let obs = observation(&world, 5040, 10_000, after);
+    production_turn(&world, &mut state, &obs);
+    assert!(state.blocked_until.is_empty(), "{:?}", state.blocked_until);
+}
+
+#[test]
+fn a_scout_that_entered_a_queue_is_never_taken_back() {
+    let (world, mut state) = rig();
+    short_list(&mut state);
+    let own = base(&world);
+    let obs = observation(&world, 700, 10_000, own.clone());
+    assert_eq!(
+        queues(&production_turn(&world, &mut state, &obs)),
+        [(3, 15)]
+    );
+    // It is in the queue at the next turn: accepted, `scouts_sent` stays 1 ...
+    let mut queued = own.clone();
+    queued[3] = with_queue(queued[3].clone(), &[SCOUT], Some(gather()));
+    let obs = observation(&world, 740, 10_000, queued);
+    production_turn(&world, &mut state, &obs);
+    assert_eq!(state.scouts_sent, 1);
+    // ... and when it is lost at once (no unit, no item at the turn after), it stays counted: the latch of
+    // the order is gone, nothing takes it back, and the replacement waits for `scout_retry`.
+    let obs = observation(&world, 780, 10_000, own.clone());
+    production_turn(&world, &mut state, &obs);
+    assert_eq!(state.scouts_sent, 1);
+    assert!(state.blocked_until.get(&SCOUT).is_none());
+    // The scout came out and died within the 40 ticks: no item in the queue, no unit, but the order had
+    // been seen in the queue at the turn before. (A scout that came out and is alive: a unit more.)
+    let mut s2 = rig().1;
+    short_list(&mut s2);
+    let obs = observation(&world, 700, 10_000, own.clone());
+    production_turn(&world, &mut s2, &obs);
+    let mut out = own;
+    out.push(unit_at(20, SCOUT, true, 26, 66));
+    out.sort_by_key(|o| o.id);
+    let obs = observation(&world, 740, 10_000, out);
+    production_turn(&world, &mut s2, &obs);
+    assert_eq!((s2.scouts_sent, s2.blocked_until.len()), (1, 0));
 }

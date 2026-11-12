@@ -54,8 +54,9 @@ pub enum Posture {
 }
 
 /// A unit order the production turn sent and has not yet seen take effect: `(factory, kind, tick, how many
-/// of the kind the player had, units and queue items, before the order)`.
-pub type UnitSent = (EntityId, Kind, Tick, u32);
+/// units of the kind the player had before the order, how many items of the kind that factory had queued
+/// before it)`.
+pub type UnitSent = (EntityId, Kind, Tick, u32, u32);
 
 /// Everything an AI remembers between thinks.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,12 +297,13 @@ impl AiState {
             h.write_u64(until.0);
         }
         h.write_u32(self.units_sent.len() as u32);
-        for (id, kind, tick, have) in &self.units_sent {
+        for (id, kind, tick, units, queued) in &self.units_sent {
             h.write_u32(id.index());
             h.write_u32(id.generation());
             h.write_u32(u32::from(kind.0));
             h.write_u64(tick.0);
-            h.write_u32(*have);
+            h.write_u32(*units);
+            h.write_u32(*queued);
         }
         match self.scout {
             Some(id) => {
@@ -394,9 +396,9 @@ mod tests {
         s.rally_backoff.insert(EntityId::new(5, 0), Tick(1500));
         s.rally_backoff.insert(EntityId::new(8, 1), Tick(1600));
         s.units_sent
-            .push((EntityId::new(5, 0), Kind(12), Tick(1400), 3));
+            .push((EntityId::new(5, 0), Kind(12), Tick(1400), 3, 1));
         s.units_sent
-            .push((EntityId::new(8, 1), Kind(19), Tick(1400), 1));
+            .push((EntityId::new(8, 1), Kind(19), Tick(1400), 1, 0));
         s.scout = Some(EntityId::new(11, 0));
         s.scout_leg = 2;
         s.scout_leg_sent = Some(Tick(1390));
@@ -468,7 +470,7 @@ mod tests {
     #[test]
     fn every_part_of_the_production_and_army_state_moves_the_digest() {
         let d = base_state().digest();
-        let changes: [fn(&mut AiState); 24] = [
+        let changes: [fn(&mut AiState); 25] = [
             |s| s.gather = None,
             |s| s.gather = Some(Cell::new(24, 65)),
             |s| s.gather = Some(Cell::new(25, 64)),
@@ -486,6 +488,7 @@ mod tests {
             |s| s.units_sent[0].1 = Kind(13),
             |s| s.units_sent[0].2 = Tick(1401),
             |s| s.units_sent[1].3 = 2,
+            |s| s.units_sent[1].4 = 1,
             |s| s.scout = None,
             |s| s.scout = Some(EntityId::new(11, 1)),
             |s| s.scout_leg = 3,

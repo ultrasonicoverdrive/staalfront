@@ -6,7 +6,7 @@
 //! (1) **Verify.** The unit orders sent at the last turn (`units_sent`) must have raised the player's count of
 //!    their kind (own units plus queue items): if not, the simulation refused them, and the kind goes into
 //!    `blocked_until` for `blocked_ticks` (a refused scout is taken back from `scouts_sent`).
-//! (2) **Rally** (P1). Every complete factory whose rally point is not the gather cell gets one `SetRally`;
+//! (2) **Rally** (P1). Every complete factory that makes no harvester and whose rally point is not the gather cell gets one `SetRally`;
 //!    the observation (`OwnFactory.rally`) says whether it took, and a factory asked is left alone for
 //!    `blocked_ticks` (`rally_backoff`).
 //! (3) **Queue** (P3). Nothing while a harvester is wanted ([`economy::harvester_wanted`]; the economy comes
@@ -59,10 +59,32 @@ fn blocked(state: &AiState, kind: Kind, now: Tick) -> bool {
     state.blocked_until.get(&kind).is_some_and(|t| *t > now)
 }
 
-/// Step (1).
+/// How many own units of `kind` stand.
+pub fn units_of(obs: &Observation, kind: Kind) -> u32 {
+    obs.own
+        .iter()
+        .filter(|o| o.footprint.is_none() && o.kind == kind)
+        .count() as u32
+}
+
+/// How many items of `kind` the factory `id` has queued.
+pub fn queued_in(obs: &Observation, id: EntityId, kind: Kind) -> u32 {
+    obs.own
+        .iter()
+        .filter(|o| o.id == id)
+        .filter_map(|o| o.factory.as_ref())
+        .flat_map(|f| f.queue.iter())
+        .filter(|&&(k, _)| k == kind)
+        .count() as u32
+}
+
+/// Step (1). An order was accepted when the factory has more items of the kind queued than before it, or
+/// the player has more units of the kind (the item came out within the 40 ticks). A unit of the kind that
+/// died meanwhile is neither: the live count alone would read it as a refusal. A scout order that was
+/// accepted is never taken back, so `scouts_max` is a hard cap on scouts that entered a queue.
 fn verify(state: &mut AiState, obs: &Observation, later: Tick) {
-    for (_, kind, _, before) in std::mem::take(&mut state.units_sent) {
-        if have(obs, kind) > before {
+    for (factory, kind, _, units, queued) in std::mem::take(&mut state.units_sent) {
+        if queued_in(obs, factory, kind) > queued || units_of(obs, kind) > units {
             continue;
         }
         state.blocked_until.insert(kind, later);
@@ -70,6 +92,16 @@ fn verify(state: &mut AiState, obs: &Observation, later: Tick) {
             state.scouts_sent = state.scouts_sent.saturating_sub(1);
         }
     }
+}
+
+/// Whether the factories of `function` make a harvester kind. They get no rally point: a harvester sent to
+/// the gather cell first mines later (measured on `ai_scout`: 15 percent less ore delivered in 20,000 ticks
+/// with the rally point on the vehicle factory), and the units of such a factory are brought to the gather
+/// cell by the gathering rule of the army turn instead.
+fn makes_harvesters(lens: &Lens<'_>, function: BuildingFunction) -> bool {
+    lens.harvester_kinds()
+        .iter()
+        .any(|&k| lens.unit_factory(k) == Some(function))
 }
 
 /// Step (2).
@@ -83,7 +115,8 @@ fn rally(
 ) {
     let wrong = |o: &crate::observe::Own| {
         complete(o)
-            && function_of(lens, o).is_some_and(|f| f.is_factory())
+            && function_of(lens, o)
+                .is_some_and(|f| f.is_factory() && !makes_harvesters(lens, f))
             // A factory with no production record (nothing queued yet) has no rally point.
             && o.factory.as_ref().and_then(|f| f.rally) != Some(gather)
     };
@@ -223,6 +256,7 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
             && let Some(kind) = state.profile.scout
             && state.profile.army.scouts_max > 0
             && state.scouts_sent == 0
+            && have(obs, kind) == 0
             && !blocked(state, kind, now)
         {
             return;
@@ -238,9 +272,9 @@ fn queue(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, out: &mut Vec<
             return;
         }
         free -= price;
-        let before = have(obs, kind) + used_of(state, kind);
+        let (units, queued) = (units_of(obs, kind), queued_in(obs, factory, kind));
         out.push(Command::QueueUnit { factory, kind });
-        state.units_sent.push((factory, kind, now, before));
+        state.units_sent.push((factory, kind, now, units, queued));
         used.push(factory);
         match index {
             Some(i) => have_k[i] += 1,
@@ -255,6 +289,6 @@ fn used_of(state: &AiState, kind: Kind) -> u32 {
     state
         .units_sent
         .iter()
-        .filter(|&&(_, k, _, _)| k == kind)
+        .filter(|&&(_, k, _, _, _)| k == kind)
         .count() as u32
 }

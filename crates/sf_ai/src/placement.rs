@@ -258,6 +258,16 @@ pub fn search(
         }
     }
 
+    // The gather cell and the eight cells round it stay free of structures (WP9.1c-1): the army gathers
+    // there and every factory's rally point is on it, and a structure on it would end both.
+    if let Some(g) = state.gather {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                mask.block_foot(i64::from(g.x) + dx, i64::from(g.y) + dy);
+            }
+        }
+    }
+
     // The candidates.
     let own_apron = b.exit_side.zip(apron_size(state, b.function));
     let site_targets: Vec<(i64, i64)> = state

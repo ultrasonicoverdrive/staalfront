@@ -72,11 +72,34 @@ fn cheb(a: Cell, b: Cell) -> u32 {
 pub fn ensure_gather(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Cell> {
     if let Some(g) = state.gather
         && lens.ground(g)
+        && !under_a_structure(state, obs, g)
     {
         return Some(g);
     }
     state.gather = find_gather(state, obs, lens);
     state.gather
+}
+
+/// Whether `cell` lies under a structure the AI knows: its own, a visible one or a remembered one.
+fn under_a_structure(state: &AiState, obs: &Observation, cell: Cell) -> bool {
+    let inside = |at: Cell, w: u32, h: u32| {
+        cell.x >= at.x && cell.x < at.x + w && cell.y >= at.y && cell.y < at.y + h
+    };
+    let own = obs.own.iter().filter_map(|o| {
+        o.footprint
+            .map(|f| (o.cell, u32::from(f.width), u32::from(f.height)))
+    });
+    let seen = obs.visible.iter().filter_map(|s| {
+        s.footprint
+            .map(|f| (s.cell, u32::from(f.width), u32::from(f.height)))
+    });
+    let known = state
+        .known_structures
+        .values()
+        .map(|k| (k.anchor, u32::from(k.width), u32::from(k.height)));
+    own.chain(seen)
+        .chain(known)
+        .any(|(at, w, h)| inside(at, w, h))
 }
 
 fn find_gather(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Cell> {
@@ -209,6 +232,10 @@ fn scout(state: &mut AiState, obs: &Observation, out: &mut Vec<Command>) {
             .find(|o| o.footprint.is_none() && o.kind == kind)
         {
             state.scout = Some(o.id);
+            // A scout nobody ordered (the match starts with one) counts as the first.
+            if state.scouts_sent == 0 {
+                state.scouts_sent = 1;
+            }
             state.scout_leg = 0;
             state.scout_leg_sent = None;
             state.scout_gone_at = None;
