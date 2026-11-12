@@ -259,6 +259,15 @@ mod tests {
         );
     }
 
+    /// WP9.5a: the tournament plays at the walking speed of the game; its constant is the game's own.
+    #[test]
+    fn the_tournament_speed_is_the_games_walking_speed() {
+        assert_eq!(
+            sf_headless::tournament::GAME_SPEED_RAW,
+            crate::bench_scene::DEMO_SPEED.raw()
+        );
+    }
+
     #[test]
     fn the_match_seed_reaches_the_ai_and_a_profile_without_the_faction_is_refused() {
         let (_, defs, _) = m1();

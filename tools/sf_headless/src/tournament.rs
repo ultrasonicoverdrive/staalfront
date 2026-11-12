@@ -40,10 +40,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use sf_ai::Ai;
 use sf_data::match_def::Controller;
 use sf_data::units::Faction;
 use sf_math::Fx;
-use sf_sim::{PlayerId, Verdict};
+use sf_sim::{PlayerId, Verdict, World};
 
 use crate::cli::{EXIT_INVALID, EXIT_OK};
 use crate::log::{self, Host};
@@ -241,7 +242,7 @@ pub fn seeds_for(base: u64, index: u32) -> (u64, u64) {
 // ---------------------------------------------------------------------------------------------------
 
 /// How a game ended.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Ending {
     /// The seat (0 or 1, the order of the match file) won.
     Won(usize),
@@ -271,8 +272,9 @@ impl Ending {
 }
 
 /// How a game that ran `ticks` ticks ended. `decided` is `Some(Some(seat))` for a winner, `Some(None)` for
-/// both defeated at once and `None` when the match had no result; `last_loss` is the last tick in which
-/// something was destroyed (0: nothing was).
+/// both defeated at once and `None` when the match had no result; `last_loss` is the tick count after the
+/// last step in which something was destroyed (0: nothing was), so `ticks - last_loss` is the number of
+/// steps at the end without a loss.
 pub fn classify(decided: Option<Option<usize>>, ticks: u64, last_loss: u64, window: u64) -> Ending {
     match decided {
         Some(Some(seat)) => Ending::Won(seat),
@@ -302,20 +304,44 @@ pub struct GameRecord {
     pub world_seed: u64,
     /// The seed of the AIs.
     pub ai_seed: u64,
-    /// The faction on each seat.
+    /// The faction on each seat, read from the world that was played.
     pub factions: [Faction; 2],
+    /// The faction each seat's AI was made for; equal to `factions` in every game that is played.
+    pub ai_factions: [Faction; 2],
     /// How it ended.
     pub ending: Ending,
-    /// The tick the match was decided in (the tick of the last defeat); `None` for a draw by the cap.
+    /// The tick count the match was decided at (see [`play_seeded`]; equal to `ticks`); `None` for a draw by
+    /// the cap.
     pub defeat_tick: Option<u64>,
     /// Ticks played.
     pub ticks: u64,
-    /// The last tick in which something was destroyed; 0 when nothing was.
+    /// The tick count after the last step in which something was destroyed; 0 when nothing was.
     pub last_loss: u64,
     /// The world's checksum at the end.
     pub final_checksum: u64,
     /// One entry per AI, ascending by player.
     pub ais: Vec<AiRecord>,
+}
+
+impl GameRecord {
+    /// What a game looks like from outside, without anything that its seeds alone would change: the ending,
+    /// the tick counts and the attacks each AI launched. Two games with the same key played alike.
+    pub fn outcome_key(&self) -> (Ending, u64, u64, Vec<u32>) {
+        (
+            self.ending,
+            self.ticks,
+            self.last_loss,
+            self.ais.iter().map(|a| a.attacks).collect(),
+        )
+    }
+
+    /// [`outcome_key`](GameRecord::outcome_key) plus both AI digests. The digest hashes the AI's random
+    /// stream, which the AI seed sets, so this key is different for every game by construction; it is
+    /// reported because it was asked for, and the key without digests is the one to judge divergence by.
+    pub fn digest_key(&self) -> (Ending, u64, u64, Vec<u32>, Vec<u64>) {
+        let (e, t, l, a) = self.outcome_key();
+        (e, t, l, a, self.ais.iter().map(|x| x.digest).collect())
+    }
 }
 
 /// A match file read and checked, ready to be played many times.
@@ -383,31 +409,36 @@ pub fn load_setup(assets: &Path, match_path: &Path) -> Result<Setup, String> {
     })
 }
 
-/// The faction of each seat in `loaded`, by the player id of the seat.
-fn seat_factions(loaded: &LoadedGame, seats: &[PlayerId; 2]) -> [Faction; 2] {
-    let of = |seat: PlayerId| {
-        loaded
-            .def
-            .players
-            .iter()
-            .find(|p| PlayerId(p.id) == seat)
-            .map_or(Faction::Neutral, |p| p.faction)
-    };
-    [of(seats[0]), of(seats[1])]
+/// The faction a faction bit stands for (`Faction::bit`); `Neutral` for none.
+fn faction_of_bit(bit: Option<u8>) -> Faction {
+    [Faction::Meridian, Faction::Veyran]
+        .into_iter()
+        .find(|f| Some(f.bit()) == bit)
+        .unwrap_or(Faction::Neutral)
 }
 
-/// Plays game `index`: the factions, the seeds, the world and the AIs of [`factions_for`] and [`seeds_for`],
-/// the AIs thinking right before the step they are due at (as `run::run_full` and the game's sim thread do),
-/// until the match has a result or `cap` ticks have run.
-pub fn play_game(
+/// A game made and not yet run: the world, the AIs, and what each of them says its seats are.
+pub struct Prepared {
+    /// The world after its first tick, as the game's sim thread has it. Boxed like the world of
+    /// `run::run_full`: a `World` is large and Windows gives a thread 1 to 2 MB of stack.
+    pub world: Box<World>,
+    /// The AIs, ascending by player.
+    pub ais: Vec<Ai>,
+    /// The faction of each seat as the **world** has it (`World::faction_of`).
+    pub world_factions: [Faction; 2],
+    /// The faction each seat's **AI** was made for (`Profile::faction`).
+    pub ai_factions: [Faction; 2],
+}
+
+/// Makes a game: the match with `factions` on the seats, a world on `world_seed` at the game's speed
+/// ([`GAME_SPEED_RAW`]) and the AIs on `ai_seed`. It refuses a game in which the world and an AI disagree on
+/// the faction of a seat.
+pub fn prepare(
     setup: &Setup,
-    base_seed: u64,
-    index: u32,
-    cap: u64,
-    stalemate_window: u64,
-) -> Result<GameRecord, String> {
-    let factions = factions_for(setup.file_factions, index);
-    let (world_seed, ai_seed) = seeds_for(base_seed, index);
+    factions: [Faction; 2],
+    world_seed: u64,
+    ai_seed: u64,
+) -> Result<Prepared, String> {
     // The loaded match lists its players in file order, which need not be ascending by id: the factions are
     // by seat (ascending id), so they are matched to the players by id.
     let by_player: Vec<Faction> = setup
@@ -424,8 +455,7 @@ pub fn play_game(
         })
         .collect();
     let loaded = setup.loaded.with_factions(&by_player, setup.cells)?;
-    // Boxed like the world of `run::run_full`: a `World` is large and Windows gives a thread 1 to 2 MB of stack.
-    let mut world = Box::new(
+    let world = Box::new(
         game::build_world_at_speed(
             world_seed,
             setup.cells,
@@ -434,13 +464,69 @@ pub fn play_game(
         )
         .map_err(|e| e.to_string())?,
     );
-    let mut ais = sf_ai::match_ais(&loaded.def, &loaded.defs, ai_seed, &|name| {
+    let ais = sf_ai::match_ais(&loaded.def, &loaded.defs, ai_seed, &|name| {
         setup
             .profiles
             .get(name)
             .cloned()
             .ok_or_else(|| format!("profile {name} was not read"))
     })?;
+    let world_factions = [0, 1].map(|i| faction_of_bit(world.faction_of(setup.seats[i])));
+    let ai_factions = [0, 1].map(|i| {
+        ais.iter()
+            .find(|a| a.player() == setup.seats[i])
+            .map_or(Faction::Neutral, |a| a.state().profile.faction)
+    });
+    if world_factions != ai_factions {
+        return Err(format!(
+            "the world has {world_factions:?} on the seats and the AIs were made for {ai_factions:?}"
+        ));
+    }
+    Ok(Prepared {
+        world,
+        ais,
+        world_factions,
+        ai_factions,
+    })
+}
+
+/// Plays game `index`: the factions and seeds of [`factions_for`] and [`seeds_for`], see [`play_seeded`].
+pub fn play_game(
+    setup: &Setup,
+    base_seed: u64,
+    index: u32,
+    cap: u64,
+    stalemate_window: u64,
+) -> Result<GameRecord, String> {
+    let factions = factions_for(setup.file_factions, index);
+    let seeds = seeds_for(base_seed, index);
+    play_seeded(setup, index, factions, seeds, cap, stalemate_window)
+}
+
+/// Plays one game with the given factions and seeds (`seeds` = world seed, AI seed): the AIs think right
+/// before the step they are due at (as `run::run_full` and the game's sim thread do), until the match has a
+/// result or `cap` ticks have run.
+///
+/// **Tick numbers** in the record are all counts of ticks run, the way `World::tick()` counts after a step:
+/// `ticks` is how many steps were made, `defeat_tick` is the step the match was decided in counted the same
+/// way (so equal to `ticks` for a decided game), and `last_loss` is the count after the last step in which
+/// something was destroyed. `ticks - last_loss` is therefore the number of steps at the end without a loss,
+/// which is what the stalemate window is compared with.
+pub fn play_seeded(
+    setup: &Setup,
+    index: u32,
+    factions: [Faction; 2],
+    seeds: (u64, u64),
+    cap: u64,
+    stalemate_window: u64,
+) -> Result<GameRecord, String> {
+    let (world_seed, ai_seed) = seeds;
+    let Prepared {
+        mut world,
+        mut ais,
+        world_factions,
+        ai_factions,
+    } = prepare(setup, factions, world_seed, ai_seed)?;
     let mut wanted = Vec::new();
     let mut last_loss = 0u64;
     let mut decided = None;
@@ -458,7 +544,7 @@ pub fn play_game(
         }
         let report = world.step();
         if report.deaths > 0 {
-            last_loss = report.tick.0;
+            last_loss = world.tick().0;
         }
         if let Some(result) = world.match_result() {
             let winner = match result.verdict {
@@ -471,7 +557,8 @@ pub fn play_game(
                 ),
                 Verdict::Draw => None,
             };
-            decided = Some((result.tick.0, winner));
+            // `result.tick` is the step's own number; the record counts ticks run.
+            decided = Some((result.tick.0 + 1, winner));
             break;
         }
     }
@@ -486,9 +573,10 @@ pub fn play_game(
         index,
         world_seed,
         ai_seed,
-        // What the world and the AIs were made with, read back from the match they were made from: the
-        // record does not repeat the schedule, it shows what was played.
-        factions: seat_factions(&loaded, &setup.seats),
+        // What the world and the AIs were made with, read back from the world (`World::faction_of`) and
+        // from the AIs; `prepare` has checked that they agree.
+        factions: world_factions,
+        ai_factions,
         ending,
         defeat_tick: decided.map(|(tick, _)| tick),
         ticks,
@@ -577,6 +665,30 @@ pub struct Summary {
     pub durations: Option<Durations>,
     /// How many different final checksums the games ended with.
     pub distinct_checksums: u32,
+    /// How many different [`GameRecord::outcome_key`]s the games have: the measure of how differently the
+    /// games were played (a checksum differs from the first spawn on, so it says little).
+    pub distinct_outcomes: u32,
+    /// How many different [`GameRecord::digest_key`]s (always the number of games: see there).
+    pub distinct_with_digests: u32,
+    /// The same counts per seating, ascending by name.
+    pub seatings: Vec<SeatingRow>,
+    /// Minimum, median and maximum of `last_loss` over the games in which something was destroyed.
+    pub last_loss: Option<Durations>,
+}
+
+/// The distinct counts of the games of one seating.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeatingRow {
+    /// `Meridian v Veyran`: the factions on seat 0 and seat 1.
+    pub seating: String,
+    /// Games with this seating.
+    pub games: u32,
+    /// Different final checksums among them.
+    pub distinct_checksums: u32,
+    /// Different outcome keys among them.
+    pub distinct_outcomes: u32,
+    /// Different outcome keys with digests among them.
+    pub distinct_with_digests: u32,
 }
 
 impl Summary {
@@ -593,8 +705,28 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
     let mut factions: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut durations = Vec::new();
     let mut checksums = BTreeSet::new();
+    let mut outcomes = BTreeSet::new();
+    let mut with_digests = BTreeSet::new();
+    let mut losses = Vec::new();
+    type Sets = (
+        u32,
+        BTreeSet<u64>,
+        BTreeSet<(Ending, u64, u64, Vec<u32>)>,
+        BTreeSet<(Ending, u64, u64, Vec<u32>, Vec<u64>)>,
+    );
+    let mut seatings: BTreeMap<String, Sets> = BTreeMap::new();
     for r in records {
         checksums.insert(r.final_checksum);
+        outcomes.insert(r.outcome_key());
+        with_digests.insert(r.digest_key());
+        if r.last_loss > 0 {
+            losses.push(r.last_loss);
+        }
+        let row = seatings.entry(faction_names(r)).or_default();
+        row.0 += 1;
+        row.1.insert(r.final_checksum);
+        row.2.insert(r.outcome_key());
+        row.3.insert(r.digest_key());
         match r.ending {
             Ending::Won(seat) => seat_wins[seat] += 1,
             Ending::MutualDefeat => mutual += 1,
@@ -628,15 +760,33 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
                 wins,
             })
             .collect(),
-        durations: match (
-            durations.iter().min(),
-            median(&durations),
-            durations.iter().max(),
-        ) {
-            (Some(&min), Some(median), Some(&max)) => Some(Durations { min, median, max }),
-            _ => None,
-        },
-        distinct_checksums: u32::try_from(checksums.len()).unwrap_or(u32::MAX),
+        durations: spread(&durations),
+        distinct_checksums: count(&checksums),
+        distinct_outcomes: count(&outcomes),
+        distinct_with_digests: count(&with_digests),
+        seatings: seatings
+            .into_iter()
+            .map(|(seating, (games, c, o, d))| SeatingRow {
+                seating,
+                games,
+                distinct_checksums: count(&c),
+                distinct_outcomes: count(&o),
+                distinct_with_digests: count(&d),
+            })
+            .collect(),
+        last_loss: spread(&losses),
+    }
+}
+
+fn count<T>(set: &BTreeSet<T>) -> u32 {
+    u32::try_from(set.len()).unwrap_or(u32::MAX)
+}
+
+/// Minimum, median and maximum of `values`; `None` for none.
+fn spread(values: &[u64]) -> Option<Durations> {
+    match (values.iter().min(), median(values), values.iter().max()) {
+        (Some(&min), Some(median), Some(&max)) => Some(Durations { min, median, max }),
+        _ => None,
     }
 }
 
@@ -769,7 +919,31 @@ fn write_table(s: &mut String, report: &Report) -> std::fmt::Result {
         s,
         "distinct final checksums: {} of {} games",
         sum.distinct_checksums, sum.games
-    )
+    )?;
+    writeln!(
+        s,
+        "distinct outcomes (ending, ticks, last loss, attacks): {} of {} games; with the AI digests: {}",
+        sum.distinct_outcomes, sum.games, sum.distinct_with_digests
+    )?;
+    for row in &sum.seatings {
+        writeln!(
+            s,
+            "  {}: {} games, {} checksums, {} outcomes, {} with digests",
+            row.seating,
+            row.games,
+            row.distinct_checksums,
+            row.distinct_outcomes,
+            row.distinct_with_digests
+        )?;
+    }
+    match sum.last_loss {
+        Some(d) => writeln!(
+            s,
+            "last loss:     min {} / median {} / max {} ticks",
+            d.min, d.median, d.max
+        ),
+        None => writeln!(s, "last loss:     nothing was destroyed"),
+    }
 }
 
 /// The JSON: `format`, the arguments, one object per game, the summary, and `host` last (CI-style
@@ -881,9 +1055,38 @@ fn write_json(
     }
     writeln!(
         s,
-        "    \"distinct_final_checksums\": {}",
+        "    \"distinct_final_checksums\": {},",
         sum.distinct_checksums
     )?;
+    writeln!(s, "    \"distinct_outcomes\": {},", sum.distinct_outcomes)?;
+    writeln!(
+        s,
+        "    \"distinct_outcomes_with_digests\": {},",
+        sum.distinct_with_digests
+    )?;
+    let seatings: Vec<String> = sum
+        .seatings
+        .iter()
+        .map(|r| {
+            format!(
+                "{{\"seating\": {}, \"games\": {}, \"distinct_checksums\": {}, \"distinct_outcomes\": {}, \"distinct_outcomes_with_digests\": {}}}",
+                log::json_string(&r.seating),
+                r.games,
+                r.distinct_checksums,
+                r.distinct_outcomes,
+                r.distinct_with_digests
+            )
+        })
+        .collect();
+    writeln!(s, "    \"seatings\": [{}],", seatings.join(", "))?;
+    match sum.last_loss {
+        Some(d) => writeln!(
+            s,
+            "    \"last_loss_ticks\": {{\"min\": {}, \"median\": {}, \"max\": {}}}",
+            d.min, d.median, d.max
+        )?,
+        None => writeln!(s, "    \"last_loss_ticks\": null")?,
+    }
     writeln!(s, "  }},")?;
     writeln!(s, "  \"host\": {{")?;
     writeln!(s, "    \"os\": {},", log::json_string(host.os))?;

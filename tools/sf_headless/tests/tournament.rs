@@ -14,8 +14,8 @@ use sf_data::match_def::{Controller, MatchDef};
 use sf_data::units::Faction;
 use sf_headless::cli::{EXIT_INVALID, EXIT_OK, run_cli};
 use sf_headless::tournament::{
-    Ending, GameRecord, Report, STALEMATE_WINDOW, factions_for, load_setup, play_game,
-    render_table, run_games, seeds_for,
+    Ending, GAME_SPEED_RAW, GameRecord, Report, STALEMATE_WINDOW, factions_for, load_setup,
+    play_game, play_seeded, prepare, render_table, run_games, seeds_for,
 };
 
 /// The cap of the smoke games, in ticks. The AIs have built and the first attack waves are out by then.
@@ -143,6 +143,46 @@ fn the_seat_swap_reaches_the_world_the_game_is_played_in() {
     // The seeds of the record are the schedule's.
     let r = play_game(&setup, 1, 3, 200, STALEMATE_WINDOW).unwrap();
     assert_eq!((r.world_seed, r.ai_seed), seeds_for(1, 3));
+}
+
+/// The seats of a game are what the **world** and the **AIs** have, not what the schedule says: read from
+/// `World::faction_of` and from each AI's profile, both checked against the schedule, and the world's speed.
+#[test]
+fn the_world_and_the_ais_have_the_factions_of_the_schedule_and_the_games_speed() {
+    let setup = load_setup(&assets(), &duel_path()).unwrap();
+    let file = setup.file_factions();
+    for index in 0..4 {
+        let want = factions_for(file, index);
+        let p = prepare(&setup, want, 1, 2).unwrap();
+        assert_eq!(p.world_factions, want, "world, game {index}");
+        assert_eq!(p.ai_factions, want, "AIs, game {index}");
+        assert_eq!(p.world.config().speed.raw(), GAME_SPEED_RAW, "game {index}");
+        assert_eq!(p.ais.len(), 2);
+        // And the record of a played game says the same.
+        let r = play_seeded(&setup, index, want, (1, 2), 50, STALEMATE_WINDOW).unwrap();
+        assert_eq!((r.factions, r.ai_factions), (want, want));
+    }
+}
+
+/// The AI's random stream is not drawn by any rule yet: a game with only the AI seed changed is the same
+/// world to the last checksum (the AIs' digests, which hash the stream, differ).
+#[test]
+fn the_ai_seed_alone_does_not_change_a_game() {
+    let setup = load_setup(&assets(), &duel_path()).unwrap();
+    let file = setup.file_factions();
+    let play =
+        |ai_seed: u64| play_seeded(&setup, 0, file, (77, ai_seed), 3000, STALEMATE_WINDOW).unwrap();
+    let (a, b) = (play(1), play(2));
+    assert_eq!(a.final_checksum, b.final_checksum);
+    assert_eq!(a.outcome_key(), b.outcome_key());
+    assert_ne!(
+        a.ais.iter().map(|x| x.digest).collect::<Vec<_>>(),
+        b.ais.iter().map(|x| x.digest).collect::<Vec<_>>(),
+        "the digest hashes the stream, so it follows the seed"
+    );
+    // The world seed alone does change the game.
+    let c = play_seeded(&setup, 0, file, (78, 1), 3000, STALEMATE_WINDOW).unwrap();
+    assert_ne!(a.final_checksum, c.final_checksum);
 }
 
 /// A game that never ends still stops, at the cap, as a draw; and the label follows the last loss.

@@ -84,30 +84,11 @@ pub(crate) fn load_match_file(
     assets: &Path,
     match_path: &Path,
 ) -> Result<(LoadedGame, (u32, u32)), String> {
+    let at = |e: String| format!("{}: {e}", match_path.display());
     let text = std::fs::read_to_string(match_path)
         .map_err(|e| format!("cannot read {}: {e}", match_path.display()))?;
-    let def = MatchDef::from_ron(&text).map_err(|e| format!("{}: {e}", match_path.display()))?;
-    let defs = load_defs(assets);
-    let map_dir = assets.join("maps").join(&def.map);
-    let map = Map::load(&map_dir).map_err(|e| format!("{}: {e}", map_dir.display()))?;
-    let layer = map
-        .terrain()
-        .ok_or_else(|| format!("{}: the map has no terrain layer", map_dir.display()))?;
-    let cells = (layer.width(), layer.height());
-    def.check(&defs, cells)
-        .map_err(|e| format!("{}: {e}", match_path.display()))?;
-    let terrain_defs =
-        sf_bridge::terrain_defs(&TerrainTypes::embedded(), &MovementCosts::embedded());
-    let terrain = Terrain::from_layer(cells.0, cells.1, layer.ids(), &terrain_defs)
-        .map_err(|e| e.to_string())?;
-    let commands = sf_bridge::match_commands(&def, &defs)?;
-    let loaded = LoadedGame {
-        def,
-        defs,
-        terrain,
-        commands,
-    };
-    Ok((loaded, cells))
+    let def = MatchDef::from_ron(&text).map_err(|e| at(e.to_string()))?;
+    load_parts(assets, def, None).map_err(at)
 }
 
 impl LoadedGame {
@@ -158,34 +139,52 @@ pub fn load_game(
     let text = std::fs::read_to_string(&match_path)
         .map_err(|e| invalid(format!("{}: {e}", match_path.display())))?;
     let def = MatchDef::from_ron(&text).map_err(|e| invalid(e.to_string()))?;
-    let defs = load_defs(&assets);
-    def.check(&defs, cells)
-        .map_err(|e| invalid(e.to_string()))?;
+    load_parts(&assets, def, Some(cells))
+        .map(|(loaded, _)| loaded)
+        .map_err(invalid)
+}
+
+/// The one loader behind [`load_game`] and [`load_match_file`]: the unit definitions of `assets`, the map of
+/// `def`, its terrain and the starting commands. With `expected` (a scenario's map size) the match is checked
+/// against that size before the map is read and the map must have it; without, the map's own size is the
+/// size and the match is checked against it. Returns the loaded game and the size of the map in cells.
+fn load_parts(
+    assets: &Path,
+    def: MatchDef,
+    expected: Option<(u32, u32)>,
+) -> Result<(LoadedGame, (u32, u32)), String> {
+    let defs = load_defs(assets);
+    if let Some(cells) = expected {
+        def.check(&defs, cells).map_err(|e| e.to_string())?;
+    }
     let map_dir = assets.join("maps").join(&def.map);
-    let map = Map::load(&map_dir).map_err(|e| invalid(format!("{}: {e}", map_dir.display())))?;
+    let map = Map::load(&map_dir).map_err(|e| format!("{}: {e}", map_dir.display()))?;
     let layer = map
         .terrain()
-        .ok_or_else(|| invalid("the map has no terrain layer".into()))?;
-    if (layer.width(), layer.height()) != cells {
-        return Err(invalid(format!(
-            "the map is {}x{} cells but the scenario's map is {}x{}",
-            layer.width(),
-            layer.height(),
-            cells.0,
-            cells.1
-        )));
+        .ok_or_else(|| "the map has no terrain layer".to_string())?;
+    let cells = (layer.width(), layer.height());
+    match expected {
+        Some(want) if want != cells => {
+            return Err(format!(
+                "the map is {}x{} cells but the scenario's map is {}x{}",
+                cells.0, cells.1, want.0, want.1
+            ));
+        }
+        Some(_) => {}
+        None => def.check(&defs, cells).map_err(|e| e.to_string())?,
     }
     let terrain_defs =
         sf_bridge::terrain_defs(&TerrainTypes::embedded(), &MovementCosts::embedded());
     let terrain = Terrain::from_layer(cells.0, cells.1, layer.ids(), &terrain_defs)
-        .map_err(|e| invalid(e.to_string()))?;
-    let commands = sf_bridge::match_commands(&def, &defs).map_err(invalid)?;
-    Ok(LoadedGame {
+        .map_err(|e| e.to_string())?;
+    let commands = sf_bridge::match_commands(&def, &defs)?;
+    let loaded = LoadedGame {
         def,
         defs,
         terrain,
         commands,
-    })
+    };
+    Ok((loaded, cells))
 }
 
 /// The game's world after its first tick, as the sim thread receives it.

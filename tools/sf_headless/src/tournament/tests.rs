@@ -147,6 +147,7 @@ fn record(
         world_seed: u64::from(index),
         ai_seed: u64::from(index) + 100,
         factions,
+        ai_factions: factions,
         ending,
         defeat_tick: ending.decided().then_some(ticks),
         ticks,
@@ -214,6 +215,53 @@ fn the_summary_counts_wins_draws_durations_and_distinct_checksums() {
     );
     // 0xA, 0xB, 0xC, 0xD: four values in six games.
     assert_eq!(s.distinct_checksums, 4);
+    // Outcome keys (ending, ticks, last loss, attacks): all six differ here, and with digests too.
+    assert_eq!((s.distinct_outcomes, s.distinct_with_digests), (6, 6));
+    // Per seating, ascending by name: M v M, M v V (games 0 and 4), V v M (1 and 5), V v V.
+    let names: Vec<(&str, u32, u32)> = s
+        .seatings
+        .iter()
+        .map(|r| (r.seating.as_str(), r.games, r.distinct_checksums))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            ("Meridian v Meridian", 1, 1),
+            ("Meridian v Veyran", 2, 2),
+            ("Veyran v Meridian", 2, 1),
+            ("Veyran v Veyran", 1, 1),
+        ]
+    );
+    // The last loss (here: the tick count of each game) over the six games.
+    assert_eq!(
+        s.last_loss,
+        Some(Durations {
+            min: 7000,
+            median: 10_500,
+            max: 60_000
+        })
+    );
+}
+
+#[test]
+fn games_played_alike_share_an_outcome_key_and_the_digests_tell_them_apart() {
+    // Five games with the same ending, ticks, last loss and attacks, only the final checksum and the AI
+    // digests differ: one outcome, as many digest keys as games.
+    let mut games: Vec<GameRecord> = (0..5)
+        .map(|i| record(i, [M, V], Ending::Won(0), 5000, 0x90 + u64::from(i)))
+        .collect();
+    for (i, g) in games.iter_mut().enumerate() {
+        g.ais[0].digest = 100 + i as u64;
+    }
+    let s = summarize(&games);
+    assert_eq!(s.distinct_checksums, 5);
+    assert_eq!((s.distinct_outcomes, s.distinct_with_digests), (1, 5));
+    assert_eq!(s.seatings[0].distinct_outcomes, 1);
+    // A different attack count or last loss is a different outcome.
+    games[1].ais[1].attacks = 9;
+    games[2].last_loss = 4000;
+    assert_eq!(summarize(&games).distinct_outcomes, 3);
+    assert_eq!(summarize(&[]).distinct_outcomes, 0);
 }
 
 #[test]
@@ -272,6 +320,9 @@ fn the_table_has_a_line_per_game_and_the_summary() {
         "draws:         3 (1 mutual defeat, 1 stalemate, 1 capped)",
         "duration:      min 7000 / median 8500 / max 12000 ticks (decided games)",
         "distinct final checksums: 4 of 6 games",
+        "distinct outcomes (ending, ticks, last loss, attacks): 6 of 6 games; with the AI digests: 6",
+        "  Meridian v Veyran: 2 games, 2 checksums, 2 outcomes, 2 with digests",
+        "last loss:     min 7000 / median 10500 / max 60000 ticks",
     ] {
         assert!(text.contains(needle), "missing {needle:?} in\n{text}");
     }
@@ -306,6 +357,10 @@ fn the_json_has_the_games_the_summary_and_the_host_last() {
         "\"draws\": 3",
         "\"duration_ticks\": {\"min\": 7000, \"median\": 8500, \"max\": 12000}",
         "\"distinct_final_checksums\": 4",
+        "\"distinct_outcomes\": 6",
+        "\"distinct_outcomes_with_digests\": 6",
+        "\"seatings\": [{\"seating\": \"Meridian v Meridian\", \"games\": 1,",
+        "\"last_loss_ticks\": {\"min\": 7000, \"median\": 10500, \"max\": 60000}",
         "\"host\": {",
         "\"game_elapsed_ms\": [1, 1, 1, 1, 1, 1]",
     ];
