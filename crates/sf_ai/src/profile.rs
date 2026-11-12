@@ -23,6 +23,8 @@ pub struct Profile {
     pub build_order: Vec<(Kind, u16)>,
     /// `(kind, weight)`: the share of the army each kind aims at.
     pub unit_mix: Vec<(Kind, u16)>,
+    /// WP9.1c-1: the kind of the scout; `None`: no scout.
+    pub scout: Option<Kind>,
 }
 
 impl Profile {
@@ -51,7 +53,22 @@ impl Profile {
             army: def.army,
             build_order: kinds(&plan.build_order)?,
             unit_mix: kinds(&plan.unit_mix)?,
+            scout: match &plan.scout {
+                Some(role) => Some(
+                    defs.kind_of(role)
+                        .map(Kind)
+                        .ok_or_else(|| format!("no role \"{role}\""))?,
+                ),
+                None => None,
+            },
         })
+    }
+
+    /// Whether the production and army managers have anything to do: a unit mix or a scout. A profile with
+    /// neither (the frozen profiles of the WP9.1b scenarios) leaves them off, so no rally point is set and no
+    /// unit is ordered.
+    pub fn makes_units(&self) -> bool {
+        !self.unit_mix.is_empty() || self.scout.is_some()
     }
 
     /// A hash of everything in the profile.
@@ -70,6 +87,7 @@ impl Profile {
         h.write_u32(e.blocked_ticks);
         h.write_u32(e.placement_cap);
         h.write_u8(e.lane);
+        h.write_u8(e.max_queue);
         for (width, depth) in [e.refinery_apron, e.factory_apron] {
             h.write_u8(width);
             h.write_u8(depth);
@@ -81,12 +99,27 @@ impl Profile {
         h.write_u32(a.first_attack_tick);
         h.write_u32(a.defend_ticks);
         h.write_u8(a.gather_distance);
+        h.write_u8(a.gather_radius);
+        h.write_u8(a.gather_group);
+        h.write_u8(a.gather_tries);
+        h.write_u32(a.resend_ticks);
+        h.write_u8(a.scouts_max);
+        h.write_u32(a.scout_tick);
+        h.write_u32(a.scout_patience);
+        h.write_u32(a.scout_retry);
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {
                 h.write_u32(u32::from(kind.0));
                 h.write_u32(u32::from(*n));
             }
+        }
+        match self.scout {
+            Some(kind) => {
+                h.write_u8(1);
+                h.write_u32(u32::from(kind.0));
+            }
+            None => h.write_u8(0),
         }
         h.finish()
     }

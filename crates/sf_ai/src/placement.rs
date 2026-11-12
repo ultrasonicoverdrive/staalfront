@@ -72,7 +72,7 @@ pub fn apron(
 }
 
 /// The apron size of a structure function, if it has one.
-fn apron_size(state: &AiState, function: BuildingFunction) -> Option<(u8, u8)> {
+pub(crate) fn apron_size(state: &AiState, function: BuildingFunction) -> Option<(u8, u8)> {
     let e = &state.profile.economy;
     if function == BuildingFunction::HarvesterDock {
         Some(e.refinery_apron)

@@ -34,6 +34,29 @@ pub struct Known {
     pub seen_tick: Tick,
 }
 
+/// What the army manager wants the army to do. WP9.1c-1 holds the seam only: the posture is always
+/// [`Posture::Gather`] and nothing reads the target; WP9.1c-2 adds the postures `Attack` and `Defend` and the
+/// function that turns a directive into orders (`docs/rules/ai.md`, "The army, as far as 9.1c-1 goes").
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Directive {
+    /// What the army does.
+    pub posture: Posture,
+    /// Where it does it; `None` while gathering.
+    pub target: Option<Cell>,
+}
+
+/// The army's posture. The numbers are hashed, so they are permanent.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Posture {
+    /// Units gather at the gather cell and wait (the only posture of WP9.1c-1).
+    #[default]
+    Gather = 0,
+}
+
+/// A unit order the production turn sent and has not yet seen take effect: `(factory, kind, tick, how many
+/// of the kind the player had, units and queue items, before the order)`.
+pub type UnitSent = (EntityId, Kind, Tick, u32);
+
 /// Everything an AI remembers between thinks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AiState {
@@ -86,6 +109,31 @@ pub struct AiState {
     pub sales: Vec<(EntityId, Tick)>,
     /// After a refused rescue: the tick from which it may be tried again.
     pub rescue_after: Tick,
+    /// WP9.1c-1, the gather cell (`docs/rules/ai.md`, "The gather cell"): computed once, again only when
+    /// it is `None` or its cell stops being open ground.
+    pub gather: Option<Cell>,
+    /// A factory a rally point was sent for, and the tick until which it is not asked again unless the
+    /// observation shows another rally point; entries go when the rally point is right, the factory is gone
+    /// or the time is up.
+    pub rally_backoff: BTreeMap<EntityId, Tick>,
+    /// The unit orders sent at the last production turn, ascending by factory id, until the next turn sees
+    /// whether the player has more of the kind (`docs/rules/ai.md`, "Production").
+    pub units_sent: Vec<UnitSent>,
+    /// The scout, once a unit of the scout kind has been seen.
+    pub scout: Option<EntityId>,
+    /// Which waypoint the scout is on (an index into the legs, see `army::waypoints`).
+    pub scout_leg: u8,
+    /// The tick the scout was sent to its current leg; `None` until it is.
+    pub scout_leg_sent: Option<Tick>,
+    /// How many scouts were ordered in the match (a refused order is taken back).
+    pub scouts_sent: u8,
+    /// The tick the AI saw that its scout was gone (dead, or lost in a queue); `None` while it has one.
+    pub scout_gone_at: Option<Tick>,
+    /// The seam to WP9.1c-2 (above).
+    pub directive: Directive,
+    /// Per army unit: the tick of the last gather order and how many it got without arriving; pruned to
+    /// the live units every army turn.
+    pub sent: BTreeMap<EntityId, (Tick, u8)>,
 }
 
 /// The most entries of [`AiState::refused`]; the one that expires first goes when it is full.
@@ -121,6 +169,16 @@ impl AiState {
             rescue_used: false,
             sales: Vec::new(),
             rescue_after: Tick(0),
+            gather: None,
+            rally_backoff: BTreeMap::new(),
+            units_sent: Vec::new(),
+            scout: None,
+            scout_leg: 0,
+            scout_leg_sent: None,
+            scouts_sent: 0,
+            scout_gone_at: None,
+            directive: Directive::default(),
+            sent: BTreeMap::new(),
         }
     }
 
@@ -222,6 +280,69 @@ impl AiState {
             h.write_u64(tick.0);
         }
         h.write_u64(self.rescue_after.0);
+        // WP9.1c-1: production, the scout and the army.
+        match self.gather {
+            Some(c) => {
+                h.write_u8(1);
+                h.write_u32(c.x);
+                h.write_u32(c.y);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.rally_backoff.len() as u32);
+        for (id, until) in &self.rally_backoff {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u64(until.0);
+        }
+        h.write_u32(self.units_sent.len() as u32);
+        for (id, kind, tick, have) in &self.units_sent {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u32(u32::from(kind.0));
+            h.write_u64(tick.0);
+            h.write_u32(*have);
+        }
+        match self.scout {
+            Some(id) => {
+                h.write_u8(1);
+                h.write_u32(id.index());
+                h.write_u32(id.generation());
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u8(self.scout_leg);
+        match self.scout_leg_sent {
+            Some(t) => {
+                h.write_u8(1);
+                h.write_u64(t.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u8(self.scouts_sent);
+        match self.scout_gone_at {
+            Some(t) => {
+                h.write_u8(1);
+                h.write_u64(t.0);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u8(self.directive.posture as u8);
+        match self.directive.target {
+            Some(c) => {
+                h.write_u8(1);
+                h.write_u32(c.x);
+                h.write_u32(c.y);
+            }
+            None => h.write_u8(0),
+        }
+        h.write_u32(self.sent.len() as u32);
+        for (id, (tick, tries)) in &self.sent {
+            h.write_u32(id.index());
+            h.write_u32(id.generation());
+            h.write_u64(tick.0);
+            h.write_u8(*tries);
+        }
         h.finish()
     }
 }

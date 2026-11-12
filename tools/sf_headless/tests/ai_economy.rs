@@ -349,6 +349,8 @@ fn structure(world: &World, id: u32, kind: Kind) -> Own {
         repairing: false,
         factory: None,
         selling: false,
+        armed: false,
+        mobile: false,
     }
 }
 
@@ -390,6 +392,8 @@ fn unit(id: u32, kind: Kind) -> Own {
         repairing: false,
         factory: None,
         selling: false,
+        armed: false,
+        mobile: true,
     }
 }
 

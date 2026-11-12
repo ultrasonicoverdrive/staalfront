@@ -1,0 +1,62 @@
+// The AI buys units and scouts (WP9.1c-1, docs/rules/ai.md, "Production" and "The army, as far as 9.1c-1 goes"):
+// player 0 (Meridian) is the AI with a construction centre and 4000 credits on the first match's map
+// (`assets/maps/m1`); player 1 (Veyran) is a static construction centre with a power plant and nothing that shoots.
+// No scripted command: everything player 0 does is the AI's. It builds its base by the goal list of the shipped
+// profile, buys harvesters first, then a scout (the first unit made, from tick 600) and units by the mix
+// rifleman 4, rocket trooper 2, light tank 3, and every factory rallies to the gather cell. The scout walks to the
+// other player's start site and sees its centre; the army gathers and never attacks (WP9.1c-2).
+//
+// `unit_defs` names a FROZEN copy (ai_scout_defs, made for WP9.1c-1) of the shipped definitions, the match file of
+// this scenario and the profile `assets/ai/normal.ron` of that day, so editing the shipped definitions or profile
+// never moves this checksum or the AI digest. The ore, harvest, storage, money, production (with the game's build
+// speed 3/2), power and vision numbers are those of `ai_base`.
+Scenario(
+    name: "ai_scout",
+    seed: 0xA1_BA5E,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("ai_scout_defs"),
+    match_file: Some("match.ron"),
+    ai: [(player: 0, profile: "normal.ron", seed: 0xA1_0001)],
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 2000), (43, 1500)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
+    ticks: 12000,
+    commands: [],
+)

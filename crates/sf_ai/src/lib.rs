@@ -17,16 +17,20 @@
 //! * WP9.1b-1: [`observe::Lens`] (the second fenced type: public rules, terrain, visibility and the
 //!   simulation's placement rule for visible ground), [`budget`] (free credits), [`base`] (the construction
 //!   manager: goal list, power rule, money rule) and [`placement`] (where to build).
-//! * WP9.1b-2: [`economy`] (harvesters, the ore silo, repair). The commands it sends are `BuildStructure`,
-//!   `QueueUnit` and `Repair`.
+//! * WP9.1b-2: [`economy`] (harvesters, the ore silo, repair, the rescue sale). The commands it sends are
+//!   `BuildStructure`, `QueueUnit`, `Repair` and `Sell`.
+//! * WP9.1c-1: [`production`] (which units, the rally point, the money rule) and [`army`] (the gather cell, the
+//!   scout, gathering; no attacks yet). New commands: `SetRally` and `Order { Move }`.
 
 pub mod ai;
+pub mod army;
 pub mod base;
 pub mod budget;
 pub mod economy;
 pub mod memory;
 pub mod observe;
 pub mod placement;
+pub mod production;
 pub mod profile;
 pub mod schedule;
 pub mod sites;
