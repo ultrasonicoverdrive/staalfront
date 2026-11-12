@@ -726,7 +726,7 @@ production they had). Changed in `normal.ron`: `defend_ticks` 200 → 400, `max_
 
 **`ai_vs_passive`** (`assets/scenarios/ai_vs_passive.ron`, `ai_vs_passive_defs/`: frozen copies of the shipped definitions and of
 `normal.ron` as this WP leaves it, and a match file with m1's static opponent exactly as `m1.ron` lists it). 16,000 ticks (T2). Checksum
-`0x3b5a509e49e43343`, AI digest `0x1c77ff82b6f4ab36`. Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
+`0x3b5a509e49e43343`, AI digest `0x74e38ea1d028c406`. Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
 
 | Wave | Launched | Units | Value | Survivors | Ended |
 |---|---|---|---|---|---|
@@ -743,13 +743,13 @@ army turn on the world of `ai_vs_passive` with four riflemen of player 0 put idl
 `Attack` on the centre, the simulation takes it (nothing ignored) and every one of them has that order after the step. The owner filter is
 pinned by `the_finishing_attack_never_goes_to_an_own_structure`. **The defence cell** (`the_defence_goes_to_the_nearest_seen_armed_raider_...`:
 the nearer of two armed raiders, not an unarmed one, not one 9 cells off the footprint, beside the structure with none) and its fence
-(`a_hidden_raider_beside_the_raided_plant_changes_nothing_until_it_is_seen`: a fourth rifleman south-west of the base, never seen in the run, against
+(`a_hidden_raider_in_reach_of_the_raided_plant_changes_nothing_until_it_is_seen`: a fourth rifleman in fog at (10, 52), within the 8-cell reach of the plant (fix round 2; it was 16 cells off before), never seen in the run, against
 the same far away: commands and digest equal over the whole run). **A defeated AI while the match goes on**: `a_defeated_ai_stops_also_while_the_match_goes_on`
 (three players; player 0's centre removed at 3,001, the match undecided).
 
 **`ai_raid`** (`ai_raid.ron`, `ai_raid_defs/`: the definitions and profile of `ai_vs_passive_defs`, the match file of `ai_scout`): at tick 4,001
 the script puts three riflemen of player 1 west of the AI's base and orders them to attack its first power plant. 5,600 ticks (before the
-first attack at `max_wait`). Checksum `0x7b8f040e80571984`, AI digest `0x7934cfb90be5288e`. Measured and pinned
+first attack at `max_wait`). Checksum `0x7b8f040e80571984`, AI digest `0x13d1a4466b23765e`. Measured and pinned
 (`a_raid_is_answered_within_one_think_...`): first hit 4,022, posture `Defend` from the think at 4,030 (within one think), the eleven army units
 ordered with one `AttackMove` at 4,030 (within 40 ticks), last hit 4,582, the raiders dead at 4,587, back to `Gather` at 4,990 (`defend_ticks`
 after the last hit, at the next think), and no `AttackMove` or `Attack` after that: the only order left is the gather `Move` back.
@@ -790,7 +790,7 @@ assert is 100 us per turn (release).
   of `AiState::digest`, the WP9.1c-1 digests of all seven come back (`0xacb2c8e5fb876451`, `0x4dd11cc733dd4b46`, `0x94e97ccd07405cba`,
   `0x5b7d1adaf26aa90f`, `0xf94be57bd5f168e4`, `0xdf9bfa7c2721ec51`, `0x3cba4a139131b094` for `ai_fog`, `ai_base`, `ai_noore`, `ai_boxed`,
   `ai_economy`, `ai_rebuild`, `ai_deadlock`).
-* **`ai_scout`** (9.1c-1's own scenario): checksum `0xf2be53002209e2f6` → `0xd6a5c9b3d0bf4aa4`, digest → `0x6d29cd8897b30178`. Its frozen
+* **`ai_scout`** (9.1c-1's own scenario): checksum `0xf2be53002209e2f6` → `0xd6a5c9b3d0bf4aa4`, digest → `0x3c8841f5b7212ab8`. Its frozen
   profile is left as it is (no floor by default; its attack numbers 3,000 / 3,600 / 4 / 2,400 now act): the army attacks the lone centre. Measured
   (`the_ai_scout_repin_of_wp9_1c_2_is_the_attack`): with the trigger made unreachable the old checksum comes back. Consequences in its tests:
   the army at the gather cell at 20,000 is 4 (was 10), and without a scout the AI learns where the centre stands when the first attack arrives

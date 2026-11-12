@@ -31,7 +31,7 @@ const P0: PlayerId = PlayerId(0);
 const ECONOMY_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_economy.expected");
 const REBUILD_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_rebuild.expected");
 /// `Ai::digest` of player 0 at the end of each scenario.
-const ECONOMY_DIGEST: u64 = 0x6522_f952_1dd7_bebe;
+const ECONOMY_DIGEST: u64 = 0x565f_cb1b_a89c_919e;
 const REBUILD_DIGEST: u64 = 0xc7e6_1017_59b0_16fb;
 
 /// The kinds of the frozen definitions.
@@ -1421,7 +1421,7 @@ fn a_structure_being_sold_is_not_counted_as_standing_by_the_construction_turn() 
 
 const DEADLOCK_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_deadlock.expected");
 /// `Ai::digest` of player 0 at the end of `ai_deadlock`.
-const DEADLOCK_DIGEST: u64 = 0x6710_119d_db25_5ea0;
+const DEADLOCK_DIGEST: u64 = 0x9755_48de_e8c8_18a0;
 
 #[test]
 fn the_deadlock_scenario_is_pinned() {

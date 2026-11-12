@@ -31,8 +31,8 @@ const P1: PlayerId = PlayerId(1);
 const VS_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_vs_passive.expected");
 const RAID_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_raid.expected");
 /// `Ai::digest` of player 0 at the end of `ai_vs_passive` and of `ai_raid`.
-const VS_DIGEST: u64 = 0x1c77_ff82_b6f4_ab36;
-const RAID_DIGEST: u64 = 0x7934_cfb9_0be5_288e;
+const VS_DIGEST: u64 = 0x74e3_8ea1_d028_c406;
+const RAID_DIGEST: u64 = 0x13d1_a446_6b23_765e;
 
 /// The kinds of the frozen definitions (`ai_vs_passive_defs/unit_defs.ron`, the shipped ones of 12-11-2026).
 const CENTRE: Kind = Kind(0);
@@ -1449,8 +1449,8 @@ fn the_defence_goes_to_the_nearest_seen_armed_raider_near_the_hit_structure() {
 }
 
 #[test]
-fn a_hidden_raider_beside_the_raided_plant_changes_nothing_until_it_is_seen() {
-    // `ai_raid` with a fourth rifleman of player 1 put south-west of the AI's base at tick 4,003 (after the raiders,
+fn a_hidden_raider_in_reach_of_the_raided_plant_changes_nothing_until_it_is_seen() {
+    // `ai_raid` with a fourth rifleman of player 1 put in fog within 8 cells of the raided plant at tick 4,003 (after the raiders,
     // so the slots the script names stay the same), against the same one in the far north-east. Until the AI sees
     // it the commands and the digest are equal: the threat cell uses only what is seen.
     let with_extra = |cell: (u32, u32)| {
