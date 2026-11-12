@@ -8,8 +8,9 @@
 //!    `(kind, cell)` goes into `refused` for `blocked_ticks`. Either way the latch is cleared. Expired
 //!    entries of `refused` and `blocked_until` are dropped.
 //! (2) **Parallel cap.** With `max_parallel_builds` own structures going up, nothing more starts.
-//! (3) **Choose.** The first goal entry `(kind, count)` with fewer than `count` standing or going up, not
-//!    blocked, whose `requires` all stand.
+//! (3) **Choose.** The ore silo when the economy turn asked for it (`emergency`, WP9.1b-2), else the first goal
+//!    entry `(kind, count)` with fewer than `count` standing or going up, not blocked, whose `requires` all
+//!    stand.
 //! (4) **Power first.** With the nominal numbers of the table (a damaged plant counts in full): when the
 //!    power made is below the power used plus what the choice uses plus `power_margin`, a power plant (the
 //!    first of the goal list) is built instead, unless the plant is blocked (then the choice stands).
@@ -97,10 +98,15 @@ pub fn refuse(state: &mut AiState, kind: Kind, cell: sf_sim::Cell, until: Tick) 
 }
 
 /// How many of `kind` the player has standing or going up.
-fn have(obs: &Observation, kind: Kind) -> usize {
+pub(crate) fn have(obs: &Observation, kind: Kind) -> usize {
     obs.own
         .iter()
-        .filter(|o| o.kind == kind && o.footprint.is_some() && (o.standing || o.building.is_some()))
+        .filter(|o| {
+            o.kind == kind
+                && o.footprint.is_some()
+                && !o.selling
+                && (o.standing || o.building.is_some())
+        })
         .count()
 }
 
@@ -109,7 +115,7 @@ fn standing_kinds(obs: &Observation) -> Vec<Kind> {
     let mut kinds: Vec<Kind> = obs
         .own
         .iter()
-        .filter(|o| o.footprint.is_some() && o.standing)
+        .filter(|o| o.footprint.is_some() && o.standing && !o.selling)
         .map(|o| o.kind)
         .collect();
     kinds.sort();
@@ -126,9 +132,16 @@ fn requirements_stand(lens: &Lens<'_>, kind: Kind, standing: &[Kind]) -> bool {
         .is_some_and(|b| b.requires.iter().all(|r| standing.binary_search(r).is_ok()))
 }
 
-/// The first goal entry that is not satisfied, not blocked and whose prerequisites stand.
+/// The economy's emergency (the ore silo) when it is not blocked and its prerequisites stand, else the
+/// first goal entry that is not satisfied, not blocked and whose prerequisites stand.
 fn choose(state: &AiState, obs: &Observation, lens: &Lens<'_>) -> Option<Kind> {
     let standing = standing_kinds(obs);
+    if let Some(kind) = state.emergency
+        && !blocked(state, kind, obs.tick)
+        && requirements_stand(lens, kind, &standing)
+    {
+        return Some(kind);
+    }
     state
         .profile
         .build_order

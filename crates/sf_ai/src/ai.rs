@@ -8,11 +8,13 @@
 //! of `Cargo.toml`.
 //!
 //! WP9.1a is the frame: the AI observes, remembers and keeps its schedule. WP9.1b-1 adds the first
-//! manager with rules, construction ([`crate::base`]); economy, production and army are still stubs.
+//! manager with rules, construction ([`crate::base`]), WP9.1b-2 the economy ([`crate::economy`]);
+//! production and army are still stubs.
 
 use sf_sim::{Cell, Command, PlayerId, Tick};
 
 use crate::base;
+use crate::economy;
 use crate::memory;
 use crate::observe::{Lens, Observation};
 use crate::profile::Profile;
@@ -78,7 +80,7 @@ impl Ai {
     }
 }
 
-/// Runs one manager. Construction is WP9.1b-1; economy is WP9.1b-2, production and army WP9.1c, and until
+/// Runs one manager. Construction is WP9.1b-1, economy WP9.1b-2; production and army are WP9.1c, and until
 /// then their turn only counts.
 fn run_manager(
     manager: Manager,
@@ -89,7 +91,8 @@ fn run_manager(
 ) {
     match manager {
         Manager::Construction => base::turn(state, obs, lens, out),
-        Manager::Economy | Manager::Production | Manager::Army => {}
+        Manager::Economy => economy::turn(state, obs, lens, out),
+        Manager::Production | Manager::Army => {}
     }
 }
 

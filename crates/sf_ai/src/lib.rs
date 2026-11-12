@@ -16,12 +16,14 @@
 //!
 //! * WP9.1b-1: [`observe::Lens`] (the second fenced type: public rules, terrain, visibility and the
 //!   simulation's placement rule for visible ground), [`budget`] (free credits), [`base`] (the construction
-//!   manager: goal list, power rule, money rule) and [`placement`] (where to build). The only commands it
-//!   sends are `BuildStructure`.
+//!   manager: goal list, power rule, money rule) and [`placement`] (where to build).
+//! * WP9.1b-2: [`economy`] (harvesters, the ore silo, repair). The commands it sends are `BuildStructure`,
+//!   `QueueUnit` and `Repair`.
 
 pub mod ai;
 pub mod base;
 pub mod budget;
+pub mod economy;
 pub mod memory;
 pub mod observe;
 pub mod placement;

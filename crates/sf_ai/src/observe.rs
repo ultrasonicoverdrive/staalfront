@@ -29,8 +29,9 @@
 use std::collections::BTreeMap;
 
 use sf_sim::{
-    BuildingStats, Cell, Command, Construction, EntityId, FactoryStatus, Footprint, Kind, Order,
-    PlacementError, PlayerId, PowerTotals, Tick, Visibility, World, exit_cell,
+    BuildingFunction, BuildingStats, Cell, Command, Construction, EntityId, FactoryStatus,
+    Footprint, Kind, Order, PlacementError, PlayerId, PowerTotals, Tick, Visibility, World,
+    exit_cell,
 };
 
 use crate::ai::Ai;
@@ -62,6 +63,8 @@ pub struct Own {
     pub repairing: bool,
     /// A factory (or a structure with a production record): its queue.
     pub factory: Option<OwnFactory>,
+    /// Whether it is being sold (WP9.1b-2: the sale started and cannot be cancelled).
+    pub selling: bool,
 }
 
 /// The production queue of one of the player's own structures.
@@ -160,6 +163,7 @@ impl Observation {
                     max_hp: world.stats_of(view.id).map_or(0, |s| s.hp),
                     building: world.construction_of(view.id),
                     repairing: world.is_repairing(view.id),
+                    selling: world.sale_of(view.id).is_some(),
                     factory: world.production_of(view.id).map(|f| OwnFactory {
                         queue: f.queue.iter().map(|q| (q.kind, q.free)).collect(),
                         front_paid: f.front_paid,
@@ -251,6 +255,32 @@ impl<'w> Lens<'w> {
             .map(|u| u.cost)
     }
 
+    /// What one standing structure of `kind` stores (public rules); zero for a kind that stores nothing.
+    pub fn storage_of(&self, kind: Kind) -> u32 {
+        self.world.storage_of_kind(kind)
+    }
+
+    /// The building table, ascending by kind (public rules).
+    pub fn buildings(&self) -> impl Iterator<Item = &'w BuildingStats> {
+        self.world.building_table().iter()
+    }
+
+    /// The faction bit of the player (public: a player knows what it plays); `None` in a game without
+    /// factions.
+    pub fn faction_bit(&self) -> Option<u8> {
+        self.world.faction_of(self.player)
+    }
+
+    /// The function of the factory that makes the unit `kind`, when the player's faction may have it;
+    /// `None` for a kind no factory makes or that is not the player's (public rules).
+    pub fn unit_factory(&self, kind: Kind) -> Option<BuildingFunction> {
+        let build = self.world.production_table()?.get(kind)?;
+        let open = self
+            .faction_bit()
+            .is_none_or(|bit| build.factions & bit != 0);
+        open.then_some(build.factory)
+    }
+
     /// Whether a structure may stand on the terrain of `cell` (the map; false off the map).
     pub fn buildable(&self, cell: Cell) -> bool {
         self.world
@@ -273,6 +303,27 @@ impl<'w> Lens<'w> {
             .terrain()
             .flags_at(cell)
             .is_some_and(|f| f.harvestable)
+    }
+
+    /// Whether any cell of the map is ore ground: the terrain of the whole map, which a human sees (decision 2
+    /// of the WP9.1b memo: ore field locations are map knowledge, the amounts are not).
+    pub fn has_ore_ground(&self) -> bool {
+        let (w, h) = self.world.map_size();
+        (0..h).any(|y| (0..w).any(|x| self.harvestable(Cell::new(x, y))))
+    }
+
+    /// What selling a structure of `kind` with `hp` of `max_hp` hit points pays when the sale ends (the
+    /// simulation's own rule, `sale_refund`, with the price of the building table); `None` in a world without
+    /// repair and sale rules and for a kind with no price (public rules).
+    pub fn sale_refund(&self, kind: Kind, hp: u32, max_hp: u32) -> Option<u64> {
+        let rules = self.world.repair_rules()?;
+        let price = self.building(kind)?.cost?;
+        Some(sf_sim::sale_refund(
+            price,
+            rules.refund_permille,
+            hp,
+            max_hp,
+        ))
     }
 
     /// Whether the player sees `cell` now (false off the map).

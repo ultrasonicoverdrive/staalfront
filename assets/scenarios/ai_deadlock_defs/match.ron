@@ -1,0 +1,31 @@
+// The match file of the scenario `ai_deadlock` (WP9.1b-2, docs/rules/ai.md; a copy of the one of `ai_base`): the
+// AI builds its base on the first match's map. Player 0, Meridian, is the AI, with a construction centre
+// where the human of `assets/matches/m1.ron` starts and 6000 credits; player 1, Veyran, is a lone static
+// construction centre where the opponent of m1 has its own (a match needs two players). Read by
+// sf_data::match_def like assets/matches/m1.ron.
+//
+// Slots: 0 the AI's construction centre (4 x 4, x 12..15, y 68..71), 1 player 1's centre (x 72..75,
+// y 14..17), then what the AI builds, in the order it is placed.
+(
+    name: "ai_deadlock",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 6000,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (72, 14)),
+            ],
+        ),
+    ],
+)

@@ -2917,6 +2917,66 @@ First half of WP9.1b (design memo of 11-11-2026, split in two; the open choices 
   game does not run the AI (WP9.1d), so there is nothing new to see in `sf_game` and no screenshots; whether a one-cell lane is wide enough
   for harvester traffic is not checked.
 
+### WP9.1b-2 notes: the computer opponent's economy (12-11-2026)
+
+Second half of WP9.1b. Rules, numbers and measurements: `docs/rules/ai.md`, "The economy". Nothing in `crates/sf_sim/` changed; no pin of an
+earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and every other `.expected` but the AI ones).
+
+- **Built.** `sf_ai::economy` (the manager of every fourth think): harvesters (one `QueueUnit` at most in flight, on the factory with the shortest
+  queue; a refused order blocks the kind for `blocked_ticks`), the silo (`full_turns`, `emergency`: built before the goal list when no goal is
+  open and there are fewer silos than refineries), repair (two per turn, anchor first, a backoff for a repair that never shows, only the anchor
+  while an emergency build waits for money). `base::choose` takes the silo emergency first. `Lens` gained `storage_of`, `buildings`,
+  `faction_bit` and `unit_factory`. New state in the digest: `harvester_sent`, `full_turns`, `emergency`, `repair_backoff`. No new profile
+  number (the existing ones act now). Scenarios `ai_economy` and `ai_rebuild` on their own frozen copies of `ai_base_defs`
+  (`ai_economy_defs/`, `ai_rebuild_defs/`, a goal list of four); both in the CI headless list and so in the Linux/Windows log comparison, which
+  includes the AI digests. `tools/sf_headless/tests/ai_economy.rs`: 17 tests.
+- **Measured** (release, this container): delivered ore per 2,000 ticks 310, 690, 1,200, 1,200, 830, 1,330; the silo ordered at tick 6610 (store
+  full from 6554); a harvester lost at 8001 is ordered at 8040 and out of the factory at 8440; T3 (rebuild latency) 544 ticks for the refinery
+  (ordered unfunded at the first construction turn) and 277 for the barracks; the damaged plant (378 of 600) gets exactly one `Repair`, at 8200,
+  and is full at 8299. The economy turn costs 0.26 us on its own (0.007 us per tick); with 5,000 wanderers the mean think cost is the same with and
+  without it (alternating runs); the worst think had spikes of 1.2 and 4.1 ms in two runs with it and 0.94 ms once without, on a busy machine,
+  so the 1 ms worst think stays a printed measurement and not a guarantee.
+- **Re-pinned.** `ai_base` (now 10,000 ticks, was 8,000: the two harvesters cost 2,200 credits the list waits for, T1b 6518 to 8078) and
+  `ai_base` moved in checksum and digest; `ai_noore`, `ai_boxed` and `ai_fog` only in the digest (state layout: `ai_noore` orders no harvester, the map has no ore, so its checksum is the old one). Measured cause: with the economy manager off the old checksums come back for all four, and with its state also left out of
+  `AiState::digest` the old digests come back (table in `ai.md`).
+- **Mutations** (scratch edits, reverted; failing tests named): harvester latch (`queued > 0`) removed fails
+  `a_harvester_is_ordered_when_fewer_than_wanted_and_never_two_at_once`; refusal not noticed fails
+  `a_harvester_order_the_simulation_refused_is_not_repeated_before_the_backoff`; "only when none is left" (a lost harvester not
+  replaced) fails `a_harvester_lost_at_tick_t_is_replaced_and_only_once` and 11 more; harvester ordered during a stalled emergency fails
+  `no_harvester_without_a_refinery_a_factory_or_while_an_emergency_build_waits_for_money`; repair latch (backoff) removed fails
+  `a_repair_is_not_repeated_while_it_runs_...`, `repair_goes_by_rank_...` and `without_repair_rules_the_ai_asks_again_only_after_the_backoff`; repair
+  during a stalled emergency fails `while_an_emergency_build_waits_for_money_only_the_anchor_is_repaired`; the dock ranked with the plants fails
+  `repair_goes_by_rank_two_at_a_time_and_only_below_the_threshold` (it survived the first version of that test: the ids hid it, fixed);
+  silo cap removed fails `at_most_one_silo_per_refinery_and_one_going_up_counts`, `exactly_one_silo_is_built_after_the_store_is_full` and the
+  `ai_economy` pin; silo with a goal open fails `the_silo_is_wanted_after_two_full_turns_with_no_goal_open` and 6 more; silo after one full turn
+  fails the same test and `exactly_one_silo_...`; construction ignoring the emergency fails `exactly_one_silo_...` and 5 more; the `repair_backoff`
+  hashed in reverse fails `the_digest_of_the_base_state_is_pinned`.
+- **Review points of 9.1b-1 folded in.** The `ai_perf.rs` comment now says the barracks (`Kind(3)`, which needs a power plant) is searched; `ai.md` says the
+  1 ms cap-32 think is a printed measurement with a thin margin (429 to 457 us quiet, 1037 us once under load) and that the resumption offset is an
+  index into the candidate list; the long comment line of `ai_fog.ron` is broken (the pin did not move).
+- **Sweep findings fixed (12-11-2026).** The two new scenario files have real headers with the script ids; the hidden-unit test is back to a
+  no-truck comparison as well (commands without ids up to tick 5000, the first tick the shifted ids change the income timing: the third plant at 5290
+  instead of 5250) and asserts the far truck's cell is shroud; no harvester is ordered on a map without ore ground (`Lens::has_ore_ground`;
+  `ai_noore` is back to its old checksum `0x4c0e8ed5d1f89874`, digest `0xa911d417181bc767`); tests for each condition of `emergency_stalled`
+  (second dock, `made == used`, free credits at the owed amount), `pick_silo` (storage, dock, price, faction), the faction of `unit_factory`, a
+  refinery still going up, the `base::choose` silo branch (wish, open goal, blocked, prerequisite), and a with/without comparison of the
+  harvester rule (5560 against 3200 ore in 12,000 ticks); `ai_perf` prints the manager of the worst think (it was Production or Army, the stubs, in
+  most runs, once Economy in `ai_boxed` where the economy turn does nothing); the anchor's repair is allowed to take credits a stalled emergency
+  waits for and a running repair is not in `budget::committed` (both written in `ai.md`).
+- **One rescue per match (decision of Tijmen, 12-11-2026, decision 7 reworded).** `economy::rescue`: after two stalled economy turns with no income
+  possible the AI sells the structures that cover what is still owed on the stalled emergency build (smallest sufficient refund, else the smallest
+  added until the sum covers it, else nothing; never the anchor, a dock or a plant), once per match; a refused sale does not spend it. New: `Own.selling`,
+  `Lens::sale_refund`, state `stalled_turns`/`rescue_used`/`sales`/`rescue_after`, the whitelist gains `Sell`, `base::have` skips a structure being sold.
+  Scenario `ai_deadlock` (in the CI list): the three sales go out at tick 3680 (loss at 3601), the refinery stands again at 4314 (T = 713), ore flows
+  again, and the second deadlock at 8601 sells nothing. Mutations in the PR body. All digests moved once more (layout); checksums did not.
+- **Found on the way.** The hidden-unit test of 9.1b-1 compared the world with a truck against the world without one; the truck takes an id
+  and `QueueUnit` names the factory by id, so it now compares two worlds with the truck in two places that are both in the shroud. A refinery lost
+  at zero credits could not be paid: found when `ai_rebuild` ran out of money with 4,000 credits; Tijmen's decision of 12-11-2026 (one rescue per
+  match, which may sell several structures) is built, see the next bullet.
+- **Not done.** Production and army (WP9.1c); the game does not run the AI (WP9.1d), so there is nothing to see in `sf_game` and no
+  screenshots. Not run: a destroyed (not removed) refinery, a silo with two refineries in a scenario, a second vehicle factory in a scenario,
+  harvester traffic through a one-cell lane (all in `ai.md`, "Not done").
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

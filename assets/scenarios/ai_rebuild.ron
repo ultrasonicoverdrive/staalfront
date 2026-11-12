@@ -1,0 +1,81 @@
+// The AI rebuilds and repairs (WP9.1b-2, docs/rules/ai.md, "The economy"): player 0 (Meridian) is the AI with a
+// construction centre and 6000 credits on the first match's map (`assets/maps/m1`); player 1 (Veyran) is a lone
+// static construction centre. Its profile (`ai_rebuild_defs/normal.ron`) is a frozen copy of the one of
+// `ai_base_defs` with a goal list of four (power plant, refinery, barracks, vehicle factory). The world has the
+// repair rules of `repair_sell` (3 hit points per tick, a full repair costs 250 thousandths of the price).
+// 6000 credits, not 4000: a refinery lost at zero credits cannot be paid (the AI never sells), see docs/rules/ai.md.
+//
+// The script, by entity id (0 the AI's centre, 1 player 1's centre, 2 the first power plant, 3 the first
+// refinery, 4 its free harvester, 5 the barracks; a slot freed by a Despawn is handed out again with the next
+// generation, which is why the rebuilt refinery and barracks are not named below):
+//   tick 3001   Despawn Id(3, 0): the refinery is lost. The goal list wants it again: an unfunded emergency,
+//               ordered at tick 3010, standing at 3545.
+//   tick 6001   Despawn Id(5, 0): the barracks is lost. Ordered again at 6010, standing at 6278.
+//   tick 8001   two Veyran light tanks are spawned west of the power plant (cells (6, 69) and (6, 71)); they take
+//               the next free ids, Id(11, 0) and Id(12, 0) (the ids of the silo, the harvesters and the others
+//               are 6 to 10)
+//   tick 8002   both are ordered to attack the power plant, Id(2, 0)
+//   tick 8250   Despawn Id(11, 0), Id(12, 0): the plant is down to 378 of 600 hit points; the AI sent exactly one
+//               Repair at tick 8200 and the plant is full again at 8299.
+// If the ids of the script stop matching (a rule that changes the order things appear in) tools/sf_headless/tests/
+// ai_economy.rs fails: it asserts the two rebuild orders (ticks 3010 and 6010), the one Repair (tick 8200) and the
+// plant's lowest hit points.
+// `unit_defs` names the FROZEN copy `ai_rebuild_defs`.
+Scenario(
+    name: "ai_rebuild",
+    seed: 0xA1_BA5E,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("ai_rebuild_defs"),
+    match_file: Some("match.ron"),
+    ai: [(player: 0, profile: "normal.ron", seed: 0xA1_0001)],
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 2000), (43, 1500)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    repair: Some((hp_per_tick: 3, full_cost_permille: 250, sell_ticks: 100, refund_permille: 500)),
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
+    ticks: 12000,
+    commands: [
+        (tick: 3001, player: 1, command: Despawn(ids: [Id(3, 0)])),
+        (tick: 6001, player: 1, command: Despawn(ids: [Id(5, 0)])),
+        (tick: 8001, player: 1, command: SpawnUnit(kind: 19, owner: 1, cell: (6, 69))),
+        (tick: 8001, player: 1, command: SpawnUnit(kind: 19, owner: 1, cell: (6, 71))),
+        (tick: 8002, player: 1, command: OrderAttack(ids: [Id(11, 0), Id(12, 0)], target: (2, 0))),
+        (tick: 8250, player: 1, command: Despawn(ids: [Id(11, 0), Id(12, 0)])),
+    ],
+)
