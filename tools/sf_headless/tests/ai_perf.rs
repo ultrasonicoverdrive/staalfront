@@ -118,10 +118,17 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
     report("ai_fog (9 entities)", &small);
     let big = measure(&crowded(5000), ticks);
     report("ai_fog + 5000 wanderers", &big);
-    // WP9.1b-1: the AI builds. Long enough for the whole goal list of `ai_base` (it stands at tick 6518).
-    let long = if cfg!(debug_assertions) { 400 } else { 7000 };
+    // WP9.1b-1: the AI builds. Long enough for the whole goal list of `ai_base` (it stands at tick 8078 since
+    // WP9.1b-2, when the economy buys two harvesters).
+    let long = if cfg!(debug_assertions) { 400 } else { 9000 };
     let mut costs = vec![small, big];
-    for name in ["ai_base.ron", "ai_boxed.ron"] {
+    // WP9.1b-2: and the economy turn at work, with the harvesters, the silo and a repair.
+    for name in [
+        "ai_base.ron",
+        "ai_boxed.ron",
+        "ai_economy.ron",
+        "ai_rebuild.ron",
+    ] {
         let alone = measure(&Scenario::load(&scenario_path(name)).unwrap(), long);
         report(name, &alone);
         let crowd = measure(&crowded_in(name, 5000), long);
@@ -151,8 +158,8 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
 #[test]
 fn a_think_whose_every_placement_question_fails() {
     // The worst think of the construction manager, measured: the observation and a search in which every
-    // question the cap allows is asked and refused, on `ai_base` with 5,000 wanderers on the map. The vehicle
-    // factory needs a refinery, which does not stand at tick 1, so the simulation refuses every place
+    // question the cap allows is asked and refused, on `ai_base` with 5,000 wanderers on the map. The barracks
+    // (`Kind(3)`) needs a power plant, which does not stand at tick 1, so the simulation refuses every place
     // (`MissingPrerequisite`, after walking every entity like any other answer); the AI's own turn never
     // asks for it then, the search is called directly. Five runs per cap; the slowest is printed.
     let s = crowded_in("ai_base.ron", 5000);
@@ -206,6 +213,62 @@ fn what_one_placement_question_costs_in_a_crowd() {
         spent.as_secs_f64() * 1e6,
         spent.as_secs_f64() * 1e6 / 256.0
     );
+}
+
+#[test]
+fn what_one_economy_turn_costs_on_its_own() {
+    // WP9.1b-2: the economy turn alone (harvesters, silo, repair), on the observation of `ai_rebuild` at tick
+    // 8200 with 5,000 wanderers on the map (the scenario's own script does not play out in that crowd: its
+    // ids are the wanderers'), with the power plant made damaged in the observation so that the repair path
+    // runs. The observation is built once (it is the same for every manager), the turn is called 20,000 times
+    // on a copy of the state.
+    let s = crowded_in("ai_rebuild.ron", 5000);
+    let mut world = s.build_world().unwrap();
+    let mut ais = s.ais.clone();
+    let mut out = Vec::new();
+    while world.tick().0 < 8200 {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                out.clear();
+                ai.think(&world, &mut out);
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        world.step();
+    }
+    let player = sf_sim::PlayerId(0);
+    let state = ais[0].state().clone();
+    let mut obs = sf_ai::Observation::build(&world, player, &state.known_structures);
+    for o in obs.own.iter_mut().filter(|o| o.kind == sf_sim::Kind(1)) {
+        o.hp = o.max_hp / 5;
+    }
+    let mut worst = Duration::ZERO;
+    let mut total = Duration::ZERO;
+    let runs = 20_000u32;
+    let mut sent = 0;
+    for _ in 0..runs {
+        let mut st = state.clone();
+        let mut lens = sf_ai::Lens::new(&world, player);
+        out.clear();
+        let started = Instant::now();
+        sf_ai::economy::turn(&mut st, &obs, &mut lens, &mut out);
+        let spent = started.elapsed();
+        total += spent;
+        worst = worst.max(spent);
+        sent += out.len();
+    }
+    println!(
+        "one economy turn (observation of {} own entities, {} entities in the world, {sent} commands in {runs} turns): mean {:.2} us, worst {:.1} us (the state is cloned outside the clock)",
+        obs.own.len(),
+        world.len(),
+        total.as_secs_f64() * 1e6 / f64::from(runs),
+        worst.as_secs_f64() * 1e6
+    );
+    if !cfg!(debug_assertions) {
+        assert!(total / runs <= Duration::from_micros(100));
+    }
 }
 
 /// The wall time of a whole run (`run_full`, the runner's own loop) of `ticks` ticks.
