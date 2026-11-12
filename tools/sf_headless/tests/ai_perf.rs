@@ -401,3 +401,165 @@ fn a_whole_run_with_the_ai_against_the_same_run_without_it() {
         );
     }
 }
+
+#[test]
+fn what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march() {
+    // WP9.1c-2: the army turn alone on the observation of `ai_vs_passive` at tick 4000 (the base and a few units)
+    // with N riflemen added idle at the gather cell, so that the turn launches an attack (the trigger, the target,
+    // one `AttackMove` with N ids), and the turn after it with the N attackers idle half-way (the march: one
+    // `AttackMove` again). 20,000 turns each on a copy of the state; the clock is outside the clone.
+    let s = Scenario::load(&scenario_path("ai_vs_passive.ron")).unwrap();
+    let mut world = s.build_world().unwrap();
+    let mut ais = s.ais.clone();
+    let mut out = Vec::new();
+    while world.tick().0 < 4000 {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                out.clear();
+                ai.think(&world, &mut out);
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        world.step();
+    }
+    let player = sf_sim::PlayerId(0);
+    let mut state = ais[0].state().clone();
+    state.profile.army.attack_value = 1;
+    let gather = state.gather.expect("a gather cell");
+    let runs = 20_000u32;
+    for n in [50u32, 200] {
+        let mut obs = sf_ai::Observation::build(&world, player, &state.known_structures);
+        obs.tick = sf_sim::Tick(6000);
+        let first = obs.own.iter().map(|o| o.id.index()).max().unwrap_or(0) + 1000;
+        let soldier = |i: u32, cell: sf_sim::Cell| sf_ai::Own {
+            id: sf_sim::EntityId::new(first + i, 0),
+            kind: sf_sim::Kind(12),
+            cell,
+            footprint: None,
+            hp: 50,
+            order: sf_sim::Order::Idle,
+            standing: true,
+            max_hp: 50,
+            building: None,
+            repairing: false,
+            factory: None,
+            selling: false,
+            armed: true,
+            mobile: true,
+        };
+        for i in 0..n {
+            obs.own.push(soldier(
+                i,
+                sf_sim::Cell::new(gather.x - 3 + i % 7, gather.y - 3 + i / 7 % 7),
+            ));
+        }
+        let mut launched = state.clone();
+        sf_ai::army::turn(
+            &mut launched,
+            &obs,
+            &mut sf_ai::Lens::new(&world, player),
+            &mut out,
+        );
+        assert!(
+            launched.attackers.len() as u32 >= n,
+            "the turn launches with the {n} added"
+        );
+        let mut march = obs.clone();
+        march.tick = sf_sim::Tick(6200);
+        for o in march.own.iter_mut().filter(|o| o.id.index() >= first) {
+            o.cell = sf_sim::Cell::new(48, 30);
+        }
+        for (label, st0, o) in [("launch", &state, &obs), ("march", &launched, &march)] {
+            let (mut total, mut worst, mut sent) = (Duration::ZERO, Duration::ZERO, 0);
+            for _ in 0..runs {
+                let mut st = st0.clone();
+                let mut lens = sf_ai::Lens::new(&world, player);
+                out.clear();
+                let started = Instant::now();
+                sf_ai::army::turn(&mut st, o, &mut lens, &mut out);
+                let spent = started.elapsed();
+                total += spent;
+                worst = worst.max(spent);
+                sent += out.len();
+            }
+            println!(
+                "one army turn, {label}, {n} riflemen added ({} own entities, {sent} commands in {runs} turns): mean {:.2} us, worst {:.1} us",
+                o.own.len(),
+                total.as_secs_f64() * 1e6 / f64::from(runs),
+                worst.as_secs_f64() * 1e6
+            );
+            assert!(
+                sent >= runs as usize,
+                "{label}: every turn orders the attack"
+            );
+            if !cfg!(debug_assertions) {
+                assert!(total / runs <= Duration::from_micros(100), "{label} {n}");
+            }
+        }
+    }
+}
+
+#[test]
+fn ai_vs_passive_with_and_without_the_ai_and_the_tick_of_the_launch() {
+    // WP9.1c-2: `ai_vs_passive` to the win (14,659), the AI's thinks timed (mean, worst), and the step time of
+    // the tick in which each attack is launched (the simulation plans the `AttackMove` for the whole wave then)
+    // against the mean step. Then the whole run with and without the AI, alternating, medians of three (without
+    // the AI nothing happens on player 0's side, so this is an upper bound of what the AI and what it makes cost).
+    let s = Scenario::load(&scenario_path("ai_vs_passive.ron")).unwrap();
+    let ticks = if cfg!(debug_assertions) { 2000 } else { 14_700 };
+    let cost = measure(&s, ticks);
+    report("ai_vs_passive", &cost);
+    let mut world = s.build_world().unwrap();
+    let mut ais = s.ais.clone();
+    let mut out = Vec::new();
+    let (mut steps, mut launches) = (Duration::ZERO, Vec::new());
+    for _ in 0..ticks {
+        let mut launch = false;
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                let before = ai.state().attacks_launched;
+                out.clear();
+                ai.think(&world, &mut out);
+                launch |= ai.state().attacks_launched > before;
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        let started = Instant::now();
+        world.step();
+        let spent = started.elapsed();
+        steps += spent;
+        if launch {
+            launches.push((world.tick().0 - 1, spent));
+        }
+    }
+    let mean = steps.as_secs_f64() * 1e6 / ticks as f64;
+    for (t, d) in &launches {
+        println!(
+            "ai_vs_passive: the step of tick {t} (an attack launched) took {:.1} us; mean step {mean:.1} us",
+            d.as_secs_f64() * 1e6
+        );
+    }
+    if !cfg!(debug_assertions) {
+        assert!(!launches.is_empty());
+        assert!(cost.worst <= Duration::from_millis(10), "{:?}", cost.worst);
+    }
+    let mut without = s.clone();
+    without.ais.clear();
+    let (mut a, mut b) = (Vec::new(), Vec::new());
+    for _ in 0..3 {
+        a.push(timed_run(&s, ticks));
+        b.push(timed_run(&without, ticks));
+    }
+    a.sort();
+    b.sort();
+    let per_second = |d: Duration| ticks as f64 / d.as_secs_f64();
+    println!(
+        "whole run, ai_vs_passive, {ticks} ticks: with the AI {:.0} ticks/s, without {:.0} ticks/s (medians of 3 alternating runs)",
+        per_second(a[1]),
+        per_second(b[1])
+    );
+}

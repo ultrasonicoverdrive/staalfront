@@ -10,7 +10,8 @@
 //! No golden image. The checks are on the simulation (the number of structures the AI owns grows as its
 //! goal list is walked) and on the pixels (the picture of the base at tick 4000 differs from the one at
 //! tick 2). Set `SF_SAVE_SHOTS=<dir>` to write the images with their tick in the name
-//! (`docs/screenshots/wp9.1d/`).
+//! (`docs/screenshots/wp9.1d/`). WP9.1c-2 adds the AI's first attack wave on the idle human
+//! (`an_ai_attack_wave_in_the_games_picture`, `docs/screenshots/wp9.1c-2/`).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -237,4 +238,84 @@ fn the_ai_builds_its_base_in_the_games_picture() {
         diff > 3_000,
         "the base is in the picture: {diff} pixels differ"
     );
+}
+
+/// The AI's units within `r` cells of `(x, y)` in the snapshot.
+fn ai_units_near(snap: &SimSnapshot, x: i64, y: i64, r: i64) -> usize {
+    (0..snap.views().len())
+        .filter(|&i| snap.views()[i].owner == AI && !snap.is_structure_at(i))
+        .filter(|&i| {
+            let p = snap.views()[i].pos;
+            (p.x.floor_int() - x).abs().max((p.y.floor_int() - y).abs()) <= r
+        })
+        .count()
+}
+
+#[test]
+fn an_ai_attack_wave_in_the_games_picture() {
+    // WP9.1c-2: the same match on the sim thread to the AI's win over the idle human (measured in
+    // `ai_in_game.rs`: the first wave of 12 leaves at tick 6,037, the match is decided at 8,396). Pictures, the
+    // camera on the middle of the AI's army: gathered beside its base (6,000), on the march (7,000), at the
+    // human's construction centre (8,000); and the whole map at 7,000.
+    let assets = assets();
+    let file = matchplay::file_path(Some(std::path::Path::new("m1_ai")), &assets);
+    let def = matchplay::load(&file).unwrap();
+    let map = Map::load(&matchplay::map_dir(&def, &assets)).unwrap();
+    let cells = map.size_in_cells();
+    let defs = UnitDefs::load(&assets.join("config"), &assets).unwrap();
+    let world = playfield::make_world(bench_scene::world_config(cells), &map).unwrap();
+    let mut world = matchplay::configure(world, &def, &defs).unwrap();
+    let ais = matchplay::ais(&def, &defs, &assets).unwrap();
+    matchplay::schedule(&mut world, &def, &defs).unwrap();
+    world.step();
+    let mut sim = SimHandle::spawn_with_ais(world, SimConfig::manual(), ais).unwrap();
+    let mut pics = Pictures::new();
+    let mut r = renderer(&pics.map);
+    let whole = pics.camera(0.9, (48.0, 48.0));
+    let mut near_human = Vec::new();
+    for tick in [6_000u64, 7_000, 8_000] {
+        let have = sim.latest().tick().0;
+        for t in have..tick {
+            sim.advance(1);
+            sim.wait_for_tick(Tick(t + 1), Duration::from_secs(120))
+                .unwrap();
+        }
+        let snap = sim.latest();
+        // The camera on the middle of the AI's riflemen, rocket troopers and tanks (kinds 12, 13, 19).
+        let army: Vec<_> = (0..snap.views().len())
+            .filter(|&i| {
+                snap.views()[i].owner == AI && [12, 13, 19].contains(&snap.views()[i].kind.0)
+            })
+            .map(|i| snap.views()[i].pos)
+            .collect();
+        let n = army.len().max(1) as f64;
+        let focus = (
+            army.iter().map(|p| p.x.floor_int() as f64).sum::<f64>() / n,
+            army.iter().map(|p| p.y.floor_int() as f64).sum::<f64>() / n,
+        );
+        println!("tick {tick}: {} army units round {focus:?}", army.len());
+        // At 8,000 half-way to the human's construction centre (x 12..15, y 68..71), so both are in the picture.
+        let focus = if tick == 8_000 {
+            ((focus.0 + 14.0) / 2.0, (focus.1 + 70.0) / 2.0)
+        } else {
+            focus
+        };
+        let cam = pics.camera(0.25, focus);
+        let close = pics.shoot(&mut r, &cam, &snap);
+        save(
+            &format!("m1_ai_t{tick:05}_attack_wave_all_views.png"),
+            &close,
+        );
+        if tick == 7_000 {
+            let all = pics.shoot(&mut r, &whole, &snap);
+            save(&format!("m1_ai_t{tick:05}_whole_map_all_views.png"), &all);
+        }
+        near_human.push((tick, ai_units_near(&snap, 14, 70, 12)));
+    }
+    println!("the AI's units within 12 cells of the human's construction centre: {near_human:?}");
+    // The wave is at the human's base at 8,000 and was not at 6,000.
+    assert_eq!(near_human[0].1, 0, "{near_human:?}");
+    assert!(near_human[2].1 >= 4, "{near_human:?}");
+    let exit = sim.stop();
+    assert!(!exit.panicked);
 }
