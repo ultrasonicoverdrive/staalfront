@@ -3,21 +3,21 @@
 //!
 //! One turn, in order:
 //!
-//! 1. **Verify.** The build sent at the last turn (`pending_build`) must stand (complete or going up) at
+//! (1) **Verify.** The build sent at the last turn (`pending_build`) must stand (complete or going up) at
 //!    its cell; if not, the simulation refused it (a unit stepped on the cell, the ground changed), and
 //!    `(kind, cell)` goes into `refused` for `blocked_ticks`. Either way the latch is cleared. Expired
 //!    entries of `refused` and `blocked_until` are dropped.
-//! 2. **Parallel cap.** With `max_parallel_builds` own structures going up, nothing more starts.
-//! 3. **Choose.** The first goal entry `(kind, count)` with fewer than `count` standing or going up, not
+//! (2) **Parallel cap.** With `max_parallel_builds` own structures going up, nothing more starts.
+//! (3) **Choose.** The first goal entry `(kind, count)` with fewer than `count` standing or going up, not
 //!    blocked, whose `requires` all stand.
-//! 4. **Power first.** With the nominal numbers of the table (a damaged plant counts in full): when the
+//! (4) **Power first.** With the nominal numbers of the table (a damaged plant counts in full): when the
 //!    power made is below the power used plus what the choice uses plus `power_margin`, a power plant (the
 //!    first of the goal list) is built instead, unless the plant is blocked (then the choice stands).
-//! 5. **Afford.** The full price is saved first: free credits at least the cost, or at least
+//! (5) **Afford.** The full price is saved first: free credits at least the cost, or at least
 //!    `capacity * silo_percent / 100` when that is less (the store cannot hold more). An emergency starts
 //!    unfunded: a refinery when none stands or goes up, a power plant when less power is made than used.
 //!    With no harvester at all and a refinery standing, a normal build also keeps the price of a harvester.
-//! 6. **Place** ([`crate::placement::search`]). Found: `BuildStructure` is sent and latched. Nothing
+//! (6) **Place** ([`crate::placement::search`]). Found: `BuildStructure` is sent and latched. Nothing
 //!    fits: the kind is blocked for `blocked_ticks` and the next entry gets its turn next time.
 
 use sf_sim::{BuildingFunction, Command, Kind, Tick};
@@ -33,7 +33,7 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     let blocked_ticks = u64::from(state.profile.economy.blocked_ticks);
     let later = Tick(now.0 + blocked_ticks);
 
-    // 1. Verify the last build.
+    // (1) Verify the last build.
     if let Some((kind, cell, _)) = state.pending_build.take() {
         let stands = obs
             .own
@@ -46,28 +46,28 @@ pub fn turn(state: &mut AiState, obs: &Observation, lens: &mut Lens<'_>, out: &m
     state.refused.retain(|_, until| *until > now);
     state.blocked_until.retain(|_, until| *until > now);
 
-    // 2. The parallel cap.
+    // (2) The parallel cap.
     let going_up = obs.own.iter().filter(|o| o.building.is_some()).count()
         + usize::from(state.pending_build.is_some());
     if going_up >= usize::from(state.profile.economy.max_parallel_builds) {
         return;
     }
 
-    // 3. Choose.
+    // (3) Choose.
     let Some(chosen) = choose(state, obs, lens) else {
         return;
     };
 
-    // 4. Power first.
+    // (4) Power first.
     let power = nominal_power(obs, lens);
     let kind = power_first(state, obs, lens, chosen, power);
 
-    // 5. Afford.
+    // (5) Afford.
     if !affordable(state, obs, lens, kind, power) {
         return;
     }
 
-    // 6. Place.
+    // (6) Place.
     match placement::search(state, obs, lens, kind) {
         Some(cell) => {
             out.push(Command::BuildStructure { kind, cell });
@@ -221,7 +221,7 @@ fn has_function(
     })
 }
 
-/// The money rule (step 5 of the turn).
+/// The money rule (step (5) of the turn).
 fn affordable(
     state: &AiState,
     obs: &Observation,
