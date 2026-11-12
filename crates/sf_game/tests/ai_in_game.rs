@@ -172,12 +172,16 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
     assert!(p.think_max_micros <= p.think_micros);
     let ai: Vec<_> = p.exit.commands.iter().filter(|c| c.player == AI).collect();
     assert!(!ai.is_empty(), "the AI sent commands");
-    // The human sent none, and the AI sent builds only (the construction manager is all there is today).
+    // The human sent none, and the AI sent only what its managers may send: builds, harvesters to queue,
+    // repairs and (once per match, in a deadlock) a sale. Production and army send nothing yet.
     assert!(p.exit.commands.iter().all(|c| c.player == AI));
-    assert!(
-        ai.iter()
-            .all(|c| matches!(c.command, sf_sim::Command::BuildStructure { .. }))
-    );
+    assert!(ai.iter().all(|c| matches!(
+        c.command,
+        sf_sim::Command::BuildStructure { .. }
+            | sf_sim::Command::QueueUnit { .. }
+            | sf_sim::Command::Repair { .. }
+            | sf_sim::Command::Sell { .. }
+    )));
     // Every command was scheduled for the tick about to run, in the tick the AI was due: before the step.
     let reference = game(&ai_file()).2.remove(0);
     for c in &ai {
@@ -207,11 +211,30 @@ fn the_ai_thinks_when_it_is_due_and_its_commands_are_in_the_log_under_its_player
 #[test]
 fn the_ai_builds_its_base_in_the_game() {
     let p = play(&ai_file(), 4_000);
+    // Both the construction and the economy manager act in the game: structures are built and harvesters queued.
+    let sent = |f: fn(&sf_sim::Command) -> bool| {
+        p.exit
+            .commands
+            .iter()
+            .filter(|c| c.player == AI && f(&c.command))
+            .count()
+    };
+    let builds_sent = sent(|c| matches!(c, sf_sim::Command::BuildStructure { .. }));
+    let queued = sent(|c| matches!(c, sf_sim::Command::QueueUnit { .. }));
+    println!("tick 4000: {builds_sent} builds, {queued} units queued by the AI");
+    assert!(
+        builds_sent > 0 && queued > 0,
+        "{builds_sent} builds, {queued} queues"
+    );
     let builds = builds_of(&p.exit, AI);
+    // What the rule promises: the first three goals of the list (power plant, refinery, barracks: 1900 of the
+    // 4000 credits) are ordered whatever the harvesters of the economy manager cost afterwards. Since WP9.1b-2
+    // the economy spends on harvesters too, so by tick 4000 the later goals are not promised (measured: 4 kinds,
+    // 6 structures; before the economy 6 kinds, 8 structures).
     let kinds: std::collections::BTreeSet<u16> = builds.iter().map(|b| b.1).collect();
     assert!(
-        kinds.len() >= 4,
-        "at least four kinds of structure were ordered by tick 4000: {builds:?}"
+        kinds.len() >= 3,
+        "at least three kinds of structure were ordered by tick 4000: {builds:?}"
     );
     let scratch = Scratch::new("builds");
     let scenario = scenario_of(&p.exit, p.cells, &ai_file(), &scratch.0);

@@ -7,9 +7,9 @@
 // defence tower, fortified bunker, refinery, radar, defence tower, advanced defences). 4000 is the human's
 // start: the AI does not get more money than the player it is watched against; the refinery it builds
 // brings a free harvester that mines the ore field beside the base, and that income pays for the rest.
-// What it does besides building is what the AI of that day does (docs/rules/ai.md "What exists and what is a
-// stub"): the economy, production and army managers come with WP9.1b-2 and WP9.1c, so today it builds a base
-// and does not attack.
+// What it does besides building is what the AI of that day does (docs/rules/ai.md): its economy manager queues
+// harvesters, repairs and keeps the silo rule (WP9.1b-2); the production and army managers come with WP9.1c,
+// so today it builds and mines but makes no combat units and does not attack.
 //
 // `m1.ron` itself is unchanged and still the default of `sf_game --match`: this file is started with
 // `sf_game --match assets/matches/m1_ai.ron` (or `--match m1_ai`, a bare name is looked up under

@@ -506,16 +506,20 @@ field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, 
   `m1`'s static centre (72, 14) and **4000 credits, the human's own start**: the AI is not given more than the player it is watched against; the
   refinery its goal list builds brings the free harvester and the ore the rest. Start it with `sf_game --match m1_ai` (a bare name is looked up under
   `assets/matches`; `--match assets/matches/m1_ai.ron` is the same). `m1.ron` is unchanged and still the default.
-* **What the AI does there today** is what its managers do today: it builds its base from the goal list (construction, WP9.1b-1). Economy,
-  production and army are stubs (WP9.1b-2, WP9.1c), so it does not make units, replace a harvester or attack, and the human cannot lose to it yet.
-  Measured on the sim thread (`ai_in_game.rs`, `ai_screenshot.rs`; the human idle): its first build is at tick 17 (think 0 is the economy manager's
-  turn, a stub), it owns 1 structure at tick 2, 4 at tick 1000, 7 at tick 2500 and 8 at tick 4000, and by tick 4000 it has ordered 7 builds of 6
-  kinds.
+* **What the AI does there** is what its managers do (construction WP9.1b-1, economy WP9.1b-2: harvesters, silo, repair, the once-per-match rescue
+  sale). Production and army are stubs (WP9.1c), so it makes no combat units and does not attack, and the human cannot lose to it yet. The commands it
+  may send are `BuildStructure`, `QueueUnit`, `Repair` and `Sell`; the test lets nothing else through and checks that builds and queued harvesters
+  both occur. Measured on the sim thread after the merge with #126 (`ai_in_game.rs`, `ai_screenshot.rs`; the human idle; printed, not asserted):
+  first build at tick 17 (think 0 is the economy manager's turn); 1 structure at tick 2, 4 at tick 1000, 6 at tick 2500 and 6 at tick 4000; by tick 4000 5
+  builds of 4 kinds and 1 unit queued (before the economy: 7 structures at 2500, 8 at 4000, 7 builds of 6 kinds, the harvesters now cost money). Asserted:
+  the first three goals of the list (1900 of the 4000 credits) are ordered and standing by tick 4000.
 * **Thinks per tick.** The profile's `think_interval` 10 and `stagger` 3 give player 1 the ticks 7, 17, 27 ...: 100 thinks in the first 1000 ticks
   (pinned: `the_ai_thinks_when_it_is_due_...`).
 * **The cost of a think** is part of the sim tick (`step_once` starts its clock before the thinks) and is counted on its own:
-  `SimCounters::thinks`, `think_micros`, `think_max_micros`, and in the hitch log per slow tick and as totals (`docs/rules/hitch_log.md`). Numbers
-  are in the PR and in `docs/progress.md` (WP9.1d notes).
+  `SimCounters::thinks`, `think_micros`, `think_max_micros`, and in the hitch log per slow tick and as totals (`docs/rules/hitch_log.md`). Measured after the merge with
+  the economy manager (2,000 thinks, relative numbers, shared container): sim thread release, mean 1-2 us, worst 59-94 us, 1.1-1.3 % of the step time (two
+  runs); sim thread debug, mean 36 us, worst 984 us, 1.3 %; real game window under Xvfb (debug, 401 thinks) mean 0.097 ms, worst 1.04 ms. The profile's
+  budget is 1 ms a think; nothing enforces it.
 * **A record replays without the AI.** The AI's commands are in the record, so `sf_headless FILE` gives the same checksum at every tick without
   running it (`a_recorded_match_with_an_ai_replays_without_the_ai_to_the_same_checksum_at_every_tick`); and the sim thread and
   `sf_headless::run::run_full` with the same AI give the same checksum at every tick

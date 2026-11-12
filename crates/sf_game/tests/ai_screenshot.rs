@@ -212,7 +212,9 @@ fn the_ai_builds_its_base_in_the_games_picture() {
     // The construction centre alone at the start, and the goal list walked by tick 4000.
     assert_eq!(counts[0], (2, 1));
     assert!(counts.windows(2).all(|w| w[0].1 <= w[1].1), "{counts:?}");
-    assert!(counts[3].1 >= 6, "{counts:?}");
+    // The rule: construction centre plus the first three goals (1900 of 4000 credits) stand by tick 4000; the
+    // later goals compete with the economy manager's harvesters for money (measured 6; 8 before WP9.1b-2).
+    assert!(counts[3].1 >= 4, "{counts:?}");
     let diff = changed(&ai_close[0], &ai_close[3]);
     assert!(
         diff > 3_000,
