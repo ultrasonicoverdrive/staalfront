@@ -28,8 +28,10 @@
         repair_below_percent: 70,
         // A role with no place found is skipped for this many ticks.
         blocked_ticks: 600,
-        // The most placement previews one think may ask for.
-        placement_cap: 256,
+        // The most placement previews one think may ask for. 32 since WP9.1b-1 (was 256): one preview costs
+        // about 8 us with 5,000 entities on the map (tools/sf_headless/tests/ai_perf.rs), so 256 would be
+        // about 2 ms, over the 1 ms a think may take; 32 is about 0.25 ms.
+        placement_cap: 32,
         // Free cells kept between a new structure and every own structure (traffic between them).
         lane: 1,
         // Cells in front of the exit kept free of structures, (width centred on the exit cell, depth out

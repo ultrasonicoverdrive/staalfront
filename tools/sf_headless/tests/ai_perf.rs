@@ -1,6 +1,8 @@
 //! What one AI think costs (WP9.1a): the mean per AI per tick and the worst single think, in `ai_fog` and in
 //! the same scenario with 5,000 wanderers of player 1 spread over the map (most of them in shroud, every one
-//! a cell test for the observation). Budget of the design memo: mean at most 20 microseconds per AI per tick,
+//! a cell test for the observation). WP9.1b-1 adds the scenarios where the AI builds, `ai_base` and the
+//! boxed-in `ai_boxed`, alone and with the same crowd, and counts the placement questions per think (each
+//! walks every entity of the world twice in the simulation). Budget of the design memo: mean at most 20 microseconds per AI per tick,
 //! worst think at most 1 millisecond, on the CI container. The assertions are loose (ten times the budget,
 //! release builds only: a debug build is far slower); the numbers are printed, and the PR reports them.
 //!
@@ -21,6 +23,9 @@ struct Cost {
     thinks: u64,
     total: Duration,
     worst: Duration,
+    /// Placement questions in all, and the most in one think.
+    previews: u64,
+    worst_previews: u64,
 }
 
 impl Cost {
@@ -39,9 +44,11 @@ fn measure(s: &Scenario, ticks: u64) -> Cost {
     let mut ais = s.ais.clone();
     let mut out = Vec::new();
     let (mut thinks, mut total, mut worst) = (0, Duration::ZERO, Duration::ZERO);
+    let mut worst_previews = 0;
     for _ in 0..ticks {
         for ai in &mut ais {
             if ai.due(world.tick()) {
+                let asked = ai.state().previews;
                 let started = Instant::now();
                 out.clear();
                 ai.think(&world, &mut out);
@@ -49,6 +56,10 @@ fn measure(s: &Scenario, ticks: u64) -> Cost {
                 thinks += 1;
                 total += spent;
                 worst = worst.max(spent);
+                worst_previews = worst_previews.max(ai.state().previews - asked);
+                for command in out.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
             }
         }
         world.step();
@@ -58,11 +69,17 @@ fn measure(s: &Scenario, ticks: u64) -> Cost {
         thinks,
         total,
         worst,
+        previews: ais.iter().map(|a| a.state().previews).sum(),
+        worst_previews,
     }
 }
 
 fn crowded(wanderers: u32) -> Scenario {
-    let mut s = Scenario::load(&scenario_path("ai_fog.ron")).unwrap();
+    crowded_in("ai_fog.ron", wanderers)
+}
+
+fn crowded_in(name: &str, wanderers: u32) -> Scenario {
+    let mut s = Scenario::load(&scenario_path(name)).unwrap();
     s.spawns.push(SpawnGroup {
         tick: 0,
         player: 1,
@@ -79,12 +96,15 @@ fn crowded(wanderers: u32) -> Scenario {
 
 fn report(label: &str, c: &Cost) {
     println!(
-        "ai think cost, {label}: {} thinks in {} AI ticks, mean {:.2} us per AI per tick, {:.1} us per think, worst think {:.1} us",
+        "ai think cost, {label}: {} thinks in {} AI ticks, mean {:.2} us per AI per tick, {:.1} us per think, worst think {:.1} us, {} placement questions ({:.3} per think, at most {} in one)",
         c.thinks,
         c.ticks,
         c.mean_per_tick_micros(),
         c.mean_think_micros(),
-        c.worst.as_secs_f64() * 1e6
+        c.worst.as_secs_f64() * 1e6,
+        c.previews,
+        c.previews as f64 / c.thinks.max(1) as f64,
+        c.worst_previews
     );
 }
 
@@ -98,10 +118,22 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
     report("ai_fog (9 entities)", &small);
     let big = measure(&crowded(5000), ticks);
     report("ai_fog + 5000 wanderers", &big);
-    assert!(small.thinks > 0 && big.thinks > 0);
+    // WP9.1b-1: the AI builds. Long enough for the whole goal list of `ai_base` (it stands at tick 6518).
+    let long = if cfg!(debug_assertions) { 400 } else { 7000 };
+    let mut costs = vec![small, big];
+    for name in ["ai_base.ron", "ai_boxed.ron"] {
+        let alone = measure(&Scenario::load(&scenario_path(name)).unwrap(), long);
+        report(name, &alone);
+        let crowd = measure(&crowded_in(name, 5000), long);
+        report(&format!("{name} + 5000 wanderers"), &crowd);
+        assert!(alone.previews > 0 && crowd.previews > 0, "{name}");
+        costs.push(alone);
+        costs.push(crowd);
+    }
+    assert!(costs.iter().all(|c| c.thinks > 0));
     if !cfg!(debug_assertions) {
         // Ten times the memo's budget: the container is noisy and shared.
-        for c in [&small, &big] {
+        for c in &costs {
             assert!(
                 c.mean_per_tick_micros() <= 200.0,
                 "mean {:.1} us per AI per tick",
@@ -114,6 +146,30 @@ fn the_think_cost_is_measured_in_ai_fog_and_in_a_crowd() {
             );
         }
     }
+}
+
+#[test]
+fn what_one_placement_question_costs_in_a_crowd() {
+    // The cost a full `placement_cap` would have, measured instead of estimated: the AI's own lens asked
+    // 256 times on visible ground of `ai_base` with 5,000 wanderers on the map (each question walks every
+    // entity twice in the simulation). The AI's mask normally makes the first question the last.
+    let s = crowded_in("ai_base.ron", 5000);
+    let mut world = s.build_world().unwrap();
+    world.step();
+    let player = sf_sim::PlayerId(0);
+    let mut lens = sf_ai::Lens::new(&world, player);
+    let started = Instant::now();
+    for i in 0..256u32 {
+        let _ = lens.placement(sf_sim::Kind(1), sf_sim::Cell::new(8 + i % 2, 66 + i % 3));
+    }
+    let spent = started.elapsed();
+    assert_eq!(lens.previews(), 256);
+    println!(
+        "256 placement questions with {} entities: {:.0} us, {:.2} us each",
+        world.len(),
+        spent.as_secs_f64() * 1e6,
+        spent.as_secs_f64() * 1e6 / 256.0
+    );
 }
 
 /// The wall time of a whole run (`run_full`, the runner's own loop) of `ticks` ticks.

@@ -171,3 +171,84 @@ impl AiState {
         h.finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::refuse;
+    use sf_data::ai_profile::AiProfile;
+    use sf_data::units::{Faction, UnitDefs};
+
+    fn state() -> AiState {
+        let profile = Profile::resolve(
+            &AiProfile::embedded(),
+            Faction::Meridian,
+            &UnitDefs::embedded(),
+        )
+        .unwrap();
+        AiState::new(
+            PlayerId(0),
+            profile,
+            5,
+            vec![(PlayerId(1), Cell::new(70, 10))],
+        )
+    }
+
+    /// A state with two entries in each map of WP9.1b-1 and the other new parts set.
+    fn base_state() -> AiState {
+        let mut s = state();
+        s.pending_build = Some((Kind(2), Cell::new(17, 64), Tick(250)));
+        s.blocked_until.insert(Kind(2), Tick(800));
+        s.blocked_until.insert(Kind(4), Tick(900));
+        s.refused.insert((Kind(1), Cell::new(9, 68)), Tick(610));
+        s.refused.insert((Kind(1), Cell::new(9, 72)), Tick(650));
+        s.ore_cells = Some(vec![Cell::new(24, 66), Cell::new(25, 66)]);
+        s.previews = 7;
+        s
+    }
+
+    #[test]
+    fn the_digest_of_the_base_state_is_pinned() {
+        // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
+        // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
+        assert_eq!(base_state().digest(), 0x188f_d194_100a_7ff4);
+    }
+
+    #[test]
+    fn every_new_part_of_the_state_moves_the_digest() {
+        let d = base_state().digest();
+        let changes: [fn(&mut AiState); 7] = [
+            |s| s.pending_build = None,
+            |s| s.pending_build = Some((Kind(2), Cell::new(17, 65), Tick(250))),
+            |s| {
+                s.blocked_until.insert(Kind(4), Tick(901));
+            },
+            |s| {
+                s.refused.remove(&(Kind(1), Cell::new(9, 72)));
+            },
+            |s| s.ore_cells = None,
+            |s| s.ore_cells = Some(vec![Cell::new(24, 66)]),
+            |s| s.previews += 1,
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut s = base_state();
+            change(&mut s);
+            assert_ne!(s.digest(), d, "change {i}");
+        }
+    }
+
+    #[test]
+    fn the_refusals_are_capped_and_the_first_to_expire_goes() {
+        let mut s = state();
+        for i in 0..REFUSED_CAP as u32 {
+            refuse(&mut s, Kind(1), Cell::new(i, 0), Tick(1000 + u64::from(i)));
+        }
+        assert_eq!(s.refused.len(), REFUSED_CAP);
+        refuse(&mut s, Kind(1), Cell::new(99, 0), Tick(5000));
+        assert_eq!(s.refused.len(), REFUSED_CAP);
+        // The one at tick 1000 is gone, the new one is in.
+        assert!(!s.refused.contains_key(&(Kind(1), Cell::new(0, 0))));
+        assert!(s.refused.contains_key(&(Kind(1), Cell::new(99, 0))));
+        assert_eq!(REFUSED_CAP, 64);
+    }
+}

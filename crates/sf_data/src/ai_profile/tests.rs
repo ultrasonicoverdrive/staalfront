@@ -36,7 +36,7 @@ fn the_shipped_profile_is_pinned() {
             e.blocked_ticks,
             e.placement_cap
         ),
-        (20, 2, 300, 1, 90, 70, 600, 256)
+        (20, 2, 300, 1, 90, 70, 600, 32)
     );
     // WP9.1b-1: the lane and the aprons, written out in the file and equal to the defaults of a profile that
     // leaves them out.
@@ -137,7 +137,7 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
             ["0", "101"],
         ),
         ("blocked_ticks: 600", "blocked_ticks", ["0", "72001"]),
-        ("placement_cap: 256", "placement_cap", ["0", "65537"]),
+        ("placement_cap: 32", "placement_cap", ["0", "65537"]),
         ("attack_value: 3000", "attack_value", ["0", "1000001"]),
         ("max_wait: 3600", "max_wait", ["0", "72001"]),
         ("min_units: 4", "min_units", ["0", "1001"]),
