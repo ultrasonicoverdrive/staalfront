@@ -8,8 +8,9 @@
 //!    `(kind, cell)` goes into `refused` for `blocked_ticks`. Either way the latch is cleared. Expired
 //!    entries of `refused` and `blocked_until` are dropped.
 //! (2) **Parallel cap.** With `max_parallel_builds` own structures going up, nothing more starts.
-//! (3) **Choose.** The ore silo when the economy turn asked for it (`emergency`, WP9.1b-2), else the first goal entry `(kind, count)` with fewer than `count` standing or going up, not
-//!    blocked, whose `requires` all stand.
+//! (3) **Choose.** The ore silo when the economy turn asked for it (`emergency`, WP9.1b-2), else the first goal
+//!    entry `(kind, count)` with fewer than `count` standing or going up, not blocked, whose `requires` all
+//!    stand.
 //! (4) **Power first.** With the nominal numbers of the table (a damaged plant counts in full): when the
 //!    power made is below the power used plus what the choice uses plus `power_margin`, a power plant (the
 //!    first of the goal list) is built instead, unless the plant is blocked (then the choice stands).

@@ -1,5 +1,11 @@
-// FROZEN copy for the economy scenario (WP9.1b-2) of the profile "normal" with a short goal list: power plant, refinery,
-// barracks, vehicle factory. The numbers are those of assets/ai/normal.ron of that day. Original header: the computer opponent's profile "normal" (WP9.1a, docs/rules/ai.md). Read and checked by
+// FROZEN copy (WP9.1b-2, for the scenario `ai_economy`) of `ai_base_defs/normal.ron`, which is the shipped
+// `assets/ai/normal.ron` of 12-11-2026 (WP9.1b-1). What differs from it: `build_order` is power plant, refinery,
+// barracks, vehicle factory for both factions (shipped: ten entries for Meridian, eleven for Veyran), and
+// `unit_mix` is rifleman 4, light_tank 3 (no rocket_trooper). Every number is the same. The comment of
+// `placement_cap` below is that of `ai_base_defs`, older than the shipped file's. The rest of this header is the
+// original one.
+//
+// The computer opponent's profile "normal" (WP9.1a, docs/rules/ai.md). Read and checked by
 // sf_data::ai_profile against unit_defs.ron; sf_ai::Profile turns the roles into kinds. Every number is a
 // placeholder (design memo 10-11-2026) that WP9.1b and WP9.1c tune against measured matches. Acting since
 // WP9.1b-1 (the base): the schedule numbers, power_margin, max_parallel_builds, silo_percent (the most a

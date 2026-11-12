@@ -30,7 +30,7 @@ const NOORE_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_noore.ex
 const BOXED_EXPECTED: &str = include_str!("../../../assets/scenarios/ai_boxed.expected");
 /// `Ai::digest` of player 0 at the end of each scenario.
 const BASE_DIGEST: u64 = 0x11dd_e9a0_0dc1_4f23;
-const NOORE_DIGEST: u64 = 0x4920_9649_c89c_7ba9;
+const NOORE_DIGEST: u64 = 0xa911_d417_181b_c767;
 const BOXED_DIGEST: u64 = 0x7814_85e5_5788_ab34;
 
 /// The kinds of the frozen definitions (`ai_base_defs/unit_defs.ron`).
@@ -417,13 +417,56 @@ fn a_unit_hidden_in_the_reach_changes_nothing_the_ai_does() {
     // Most of the base is built by then.
     assert!(until >= T1, "seen at {until}");
     let with = go(&s, until);
-    // The other world has the same truck far away (also in the shroud), not no truck: an entity takes an
-    // id, the ids of the AI's own things shift by one, and a `QueueUnit` names a factory by its id.
-    let without = go(&with_hidden_truck(scenario("ai_base"), (92, 92)), until);
-    assert_ne!(with.world.checksum(), without.world.checksum());
-    assert_eq!(with.ai_commands, without.ai_commands);
+    // The other world has the same truck far away, in the shroud too (asserted below): the same entities
+    // and ids, so everything the AI sends must be equal, ids included, for the whole run.
+    let far = go(&with_hidden_truck(scenario("ai_base"), (92, 92)), until);
+    assert_eq!(
+        far.world.visibility(P0, Cell::new(92, 92)),
+        Visibility::Shroud
+    );
+    assert_ne!(with.world.checksum(), far.world.checksum());
+    assert_eq!(with.ai_commands, far.ai_commands);
     assert!(with.ai_commands.len() >= 6);
-    assert_eq!(with.ais[0].digest(), without.ais[0].digest());
+    assert_eq!(with.ais[0].digest(), far.ais[0].digest());
+    // And against a world with no truck at all (the 9.1b-1 comparison, kept). A spawned entity takes an
+    // id: the ids of the AI's own things shift (a `QueueUnit` names a factory by its id) and the order in
+    // which the simulation serves them moves the income a little, so the third power plant is ordered at
+    // tick 5290 instead of 5250 (measured). So the commands are compared with the ids left out, up to
+    // tick 5000, the last tick before that first timing difference; the AI digest holds no id of the
+    // entities in these runs, so it is compared whole.
+    let with = go(&s, NO_TRUCK_UNTIL);
+    let none = go(&scenario("ai_base"), NO_TRUCK_UNTIL);
+    assert_ne!(with.world.checksum(), none.world.checksum());
+    assert_eq!(
+        without_ids(&with.ai_commands),
+        without_ids(&none.ai_commands)
+    );
+    assert!(with.ai_commands.len() >= 9, "{:?}", with.ai_commands);
+    assert!(
+        with.ai_commands
+            .iter()
+            .any(|c| matches!(c.2, Command::QueueUnit { .. }))
+    );
+    assert_eq!(with.ais[0].digest(), none.ais[0].digest());
+}
+
+/// The last tick before the shifted ids change the income timing in `ai_base` (see the test above).
+const NO_TRUCK_UNTIL: u64 = 5000;
+
+/// The AI's commands with the ids of entities left out: a `QueueUnit` without its factory, a `Repair` without
+/// its structure.
+fn without_ids(commands: &[(u64, u8, Command)]) -> Vec<(u64, u8, String)> {
+    commands
+        .iter()
+        .map(|(t, p, c)| {
+            let text = match c {
+                Command::QueueUnit { kind, .. } => format!("QueueUnit {kind:?}"),
+                Command::Repair { on, .. } => format!("Repair {on}"),
+                other => format!("{other:?}"),
+            };
+            (*t, *p, text)
+        })
+        .collect()
 }
 
 #[test]

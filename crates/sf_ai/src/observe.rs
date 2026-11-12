@@ -302,6 +302,13 @@ impl<'w> Lens<'w> {
             .is_some_and(|f| f.harvestable)
     }
 
+    /// Whether any cell of the map is ore ground: the terrain of the whole map, which a human sees (decision 2
+    /// of the WP9.1b memo: ore field locations are map knowledge, the amounts are not).
+    pub fn has_ore_ground(&self) -> bool {
+        let (w, h) = self.world.map_size();
+        (0..h).any(|y| (0..w).any(|x| self.harvestable(Cell::new(x, y))))
+    }
+
     /// Whether the player sees `cell` now (false off the map).
     pub fn visible(&self, cell: Cell) -> bool {
         let (w, h) = self.world.map_size();

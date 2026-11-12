@@ -18,7 +18,8 @@
 //!    and not in `repair_backoff`, the anchor first, then power plants and factories, then the harvester
 //!    dock, then the rest, then by id; at most two `Repair { on: true }` per turn. The AI never stops a
 //!    repair (the simulation does at full hit points). While an emergency build is stalled for lack of
-//!    money only the anchor is repaired. A repair that is sent but never shows (a game without repair
+//!    money only the anchor is repaired (and its repair may take credits the build waits for: not counted in
+//!    `budget::committed`, see `ai.md`). A repair that is sent but never shows (a game without repair
 //!    rules ignores it) is not sent again before `blocked_ticks` have passed.
 
 use sf_sim::{BuildingFunction, Command, EntityId, Kind, Tick};
@@ -52,8 +53,9 @@ fn function_of(lens: &Lens<'_>, o: &Own) -> Option<BuildingFunction> {
 
 /// Whether an emergency build is waiting for money: a structure going up that the base cannot do
 /// without (the first harvester dock, a power plant while less is made than used) and nothing free to pay
-/// for it. The simulation pays structures first, so what is queued after it only waits, but the AI keeps
-/// its hands off the money until it stands.
+/// for it. The simulation pays structures first, so what is queued after it only waits; the harvester
+/// order and every repair but the anchor's keep their hands off the money until it stands. The anchor's
+/// repair does not: it may take credits an emergency build is waiting for (see `repair`).
 pub fn emergency_stalled(obs: &Observation, lens: &Lens<'_>) -> bool {
     if budget::free(obs, lens) > 0 {
         return false;
@@ -132,22 +134,44 @@ fn harvesters(
     if blocked(state, kind, obs.tick) {
         return;
     }
+    // No ore ground on the map (map knowledge): a harvester would have nothing to mine.
+    if !lens.has_ore_ground() {
+        return;
+    }
     out.push(Command::QueueUnit { factory, kind });
     state.harvester_sent = Some((kind, obs.tick));
 }
 
-/// The kind of the ore silo: the first kind of the table (ascending) that stores ore, is no harvester
-/// dock, can be bought and is open to the player's faction.
-fn silo_kind(lens: &Lens<'_>) -> Option<Kind> {
-    let bit = lens.faction_bit();
-    lens.buildings()
-        .find(|b| {
-            lens.storage_of(b.kind) > 0
-                && b.function != BuildingFunction::HarvesterDock
-                && b.cost.is_some()
-                && bit.is_none_or(|bit| b.factions & bit != 0)
+/// One entry of the building table as the silo choice sees it: `(kind, what it stores, function, price,
+/// faction mask)`.
+pub type SiloCandidate = (Kind, u32, BuildingFunction, Option<u32>, u8);
+
+/// The kind of the ore silo among `table` (ascending by kind): the first that stores ore, is no harvester
+/// dock, can be bought (has a price) and is open to the player's faction `bit` (any faction when `None`).
+pub fn pick_silo(mut table: impl Iterator<Item = SiloCandidate>, bit: Option<u8>) -> Option<Kind> {
+    table
+        .find(|&(_, stores, function, cost, factions)| {
+            stores > 0
+                && function != BuildingFunction::HarvesterDock
+                && cost.is_some()
+                && bit.is_none_or(|bit| factions & bit != 0)
         })
-        .map(|b| b.kind)
+        .map(|c| c.0)
+}
+
+fn silo_kind(lens: &Lens<'_>) -> Option<Kind> {
+    pick_silo(
+        lens.buildings().map(|b| {
+            (
+                b.kind,
+                lens.storage_of(b.kind),
+                b.function,
+                b.cost,
+                b.factions,
+            )
+        }),
+        lens.faction_bit(),
+    )
 }
 
 fn silo(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {

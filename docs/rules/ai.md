@@ -1,13 +1,15 @@
 # The computer opponent
 
-WP9.1a (the frame), WP9.1b-1 (the base) and WP9.1b-2 (the economy). Design memos of 10-11-2026 and 11-11-2026 (orchestrator, Fable); Tijmen: "fase 9 mag eerder
+WP9.1a (the frame), WP9.1b-1 (the base) and WP9.1b-2 (the economy). Design memos of 10-11-2026 and 11-11-2026 (orchestrator, Fable);
+Tijmen: "fase 9 mag eerder
 beginnen". WP9.1a builds what every later part stands on: the AI **observes through the fog, remembers what it saw and keeps its schedule**.
 WP9.1b-1 adds the first manager with rules, **construction** (the goal list, the power rule, the money rule, placement), so the AI builds
 its base. WP9.1b-2 adds the **economy** manager (harvesters, the ore silo, repair; a lost structure is rebuilt by the goal list). Production
 and army are WP9.1c and still stubs. This page says what exists and what is a stub.
 
 Code: `crates/sf_ai/src/` (`observe.rs`, `memory.rs`, `state.rs`, `schedule.rs`, `profile.rs`, `sites.rs`, `ai.rs`, and since WP9.1b-1
-`budget.rs`, `base.rs`, `placement.rs`, and since WP9.1b-2 `economy.rs`), the profile format `crates/sf_data/src/ai_profile.rs`, the data `assets/ai/normal.ron`, the driver
+`budget.rs`, `base.rs`, `placement.rs`, and since WP9.1b-2 `economy.rs`), the profile format `crates/sf_data/src/ai_profile.rs`, the data
+`assets/ai/normal.ron`, the driver
 `tools/sf_headless/src/run.rs` (`run_full`, `run_watched`), the scenarios `assets/scenarios/ai_fog.ron`, `ai_base.ron`, `ai_noore.ron`,
 `ai_boxed.ron`, `ai_economy.ron`, `ai_rebuild.ron`. Tests: `crates/sf_ai/tests/fence.rs`, the unit tests in each module,
 `tools/sf_headless/tests/ai_fog.rs`, `ai_base.rs`, `ai_rules.rs`, `ai_economy.rs`, `ai_perf.rs`.
@@ -131,7 +133,8 @@ economy"). The AI never sells (decision 7).
   also needs its own apron on the map, open ground (`ground`), visible and free of structures.
 * **Refused** `(kind, cell)` pairs are left out until they expire.
 * **Score**, lowest first, ties by `(y, x)`; squared distances in half cells, integers only. A refinery: its exit cell to the nearest ore
-  ground (`ore_cells`, the harvestable terrain within the reach plus 16 cells, listed again at every search, so it follows the anchors the player has now). A defence: its middle to
+  ground (`ore_cells`, the harvestable terrain within the reach plus 16 cells, listed again at every search, so it follows the anchors the
+  player has now). A defence: its middle to
   the nearest start site of another player. Everything else, and a refinery without ore or a defence without other sites: its middle to the
   middle of the nearest own anchor.
 * **Preview**, best first, at most `placement_cap` questions per search: `Some(Ok)` wins, `Some(Err)` goes into `refused`, `None` (not all
@@ -145,7 +148,8 @@ economy"). The AI never sells (decision 7).
   (`a_think_whose_every_placement_question_fails`: the observation and a search whose every question is refused, `ai_base` with 5,000
   wanderers, release, slowest of 5, three runs at load 4.8): cap 32 360 to 822 us, 64 637 to 1278 us, 128 1116 to 2266 us, 256 2351 to
   4893 us. So 256 exceeds 1 ms and 64 does on a busy machine; 32 stays under. **The 1 ms cap-32 worst think is a printed measurement with a thin
-  margin, not a guarantee**: the reviewer of WP9.1b-1 saw 429 to 457 us on a quiet machine and 1037 us once under load. In the scenarios the mask makes the first question the answer
+  margin, not a guarantee**: the reviewer of WP9.1b-1 saw 429 to 457 us on a quiet machine and 1037 us once under load. In the scenarios
+  the mask makes the first question the answer
   (at most 1 per think).
 
 ### The numbers (profile, data)
@@ -156,7 +160,8 @@ width odd, both 1 to 9; defaults (3, 5) and (1, 3)). `placement_cap` is 32. Pinn
 and of the defaults), `every_number_is_checked_at_both_ends_when_the_file_is_read` and
 `a_profile_without_the_base_numbers_of_wp9_1b_reads_with_the_defaults`. Acting since WP9.1b-1: the schedule numbers, `power_margin`,
 `max_parallel_builds`, `silo_percent` (as the cap of what a build saves up), `blocked_ticks`, `placement_cap`, `lane`, the aprons.
-Acting since WP9.1b-2: `harvesters_per_refinery`, `repair_below_percent`, `silo_percent` (now also the silo rule) and `blocked_ticks` (also the backoff of repair and of a refused harvester order). `reserve` and the army numbers are for WP9.1c.
+Acting since WP9.1b-2: `harvesters_per_refinery`, `repair_below_percent`, `silo_percent` (now also the silo rule) and `blocked_ticks`
+(also the backoff of repair and of a refused harvester order). `reserve` and the army numbers are for WP9.1c.
 
 ### State
 
@@ -176,7 +181,7 @@ shipped ones of that day, written out. No scripted command.
 | Scenario | Map | Ticks | Checksum | AI digest |
 |---|---|---|---|---|
 | `ai_base` | `m1` | 10,000 (8000 until WP9.1b-2) | `0xb38833330ef15577` | `0x11dde9a00dc14f23` |
-| `ai_noore` | `m1_noore` (no ore) | 40,000 | `0xe8a722997518f3a1` | `0x49209649c89c7ba9` |
+| `ai_noore` | `m1_noore` (no ore) | 40,000 | `0x4c0e8ed5d1f89874` | `0xa911d417181bc767` |
 | `ai_boxed` | `m1_boxed` (rock round the base, a pocket x 5..17, y 66..73) | 8000 | `0x212468ddebc97ff5` | `0x781485e55788ab34` |
 
 (WP9.1b-1 pinned `0x1b2eb3765910e496` / `0xa1bdd2e16f8db63b`, `0x4c0e8ed5d1f89874` / `0x94c928755b799c2f` and `0x212468ddebc97ff5` /
@@ -187,12 +192,14 @@ What `tools/sf_headless/tests/ai_base.rs` checks:
 
 * `ai_base`: the goal list in order (centre, plant, refinery, barracks, plant, vehicle factory, tower, refinery, **plant** by the power
   rule, radar, tower, advanced defences); everything up to the vehicle factory standing by **T1 = tick 1998** and the whole list by **T1b =
-  tick 8078** (measured; the test allows 2400 and 9700; 6518 before WP9.1b-2, which buys two harvesters); 11 builds and 2 harvester orders, none refused; power made at least power used after every tick; no stall
+  tick 8078** (measured; the test allows 2400 and 9700; 6518 before WP9.1b-2, which buys two harvesters); 11 builds and 2 harvester
+  orders, none refused; power made at least power used after every tick; no stall
   after every tick; the lane between every two structures and no structure on any of the four aprons (from `placement::apron`); four
   harvesters (one free and one bought per refinery) and ore delivered.
-* `ai_noore`: the 40,000 ticks end; at most 25 commands per 1000 ticks; the last command before tick 3000 (8 builds and, since WP9.1b-2, one
-  harvester order at tick 2000: 1100 credits for a harvester that has no ore to mine, the AI does not know the map has none), then
-  nothing; 700 credits left; no stall, nothing refused.
+* `ai_noore`: the 40,000 ticks end; at most 25 commands per 1000 ticks; the last build before tick 3000 (8 builds, what 6000 credits pay
+  for), then nothing; under 900 credits left (the radar, the next goal, costs 900); no stall, nothing refused. Since WP9.1b-2 the
+  vehicle factory stands at tick 1998 and a harvester is wanted, but **none is ordered: the map has no ore ground** (`Lens::has_ore_ground`,
+  terrain, map knowledge: `no_harvester_is_ordered_on_a_map_without_ore_ground`).
 * `ai_boxed`: the refinery fits nowhere (`blocked_until` holds it) and the later goals that do not need it are built (barracks, the second
   plant, both towers); one placement question per build.
 * A build the simulation refuses (a unit of player 0 put on the plant's cell at tick 10, driving off at tick 20) is noticed at the next turn
@@ -218,7 +225,7 @@ backoff of a repair and of a refused harvester order), all of them in `normal.ro
 
 1. **Harvesters.** `have` = own harvester units + harvester items in own factory queues (the free one that comes with a refinery counts);
    `want` = standing refineries x `harvesters_per_refinery`. When `have < want`, **no harvester is queued** (at most one in flight), a
-   standing factory of the right function exists and no emergency build is stalled for lack of money, one
+   standing factory of the right function exists, no emergency build is stalled for lack of money and **the map has ore ground at all** (`Lens::has_ore_ground`: terrain, map knowledge; without it a harvester has nothing to mine), one
    `QueueUnit { factory, kind }` is sent: the first harvester kind of the table that the player's faction may have and whose factory function
    (`Lens::unit_factory`, from the production table) the player has standing, on the factory with the **shortest queue, the lowest id among
    equals**. The order is latched in `harvester_sent = (kind, tick)`; at the next economy turn, when no harvester item is in any queue the
@@ -239,7 +246,11 @@ backoff of a repair and of a refused harvester order), all of them in `normal.ro
 3. **Repair.** Own complete structures (not going up) with `hp * 100 < max_hp * repair_below_percent` (exactly 70 percent is not below), not
    `repairing`, not in `repair_backoff`, in the order **anchor, power plants and factories, harvester dock, the rest**, then by id; at most
    `REPAIRS_PER_TURN` = 2 `Repair { on: true }` per turn. The AI never stops a repair (the simulation stops it at full hit points). While
-   an emergency build is stalled (above) only the anchor is repaired. A sent repair is in `repair_backoff[id] = now + blocked_ticks`; the
+   an emergency build is stalled (above) only the anchor is repaired (**decision: the anchor is repaired even then, so its repair may take
+   credits the stalled build waits for**: losing the anchor ends all building, and a full repair costs at most `full_cost_permille`
+   (shipped 250) thousandths of its price, paid per tick). **A running repair is not in `budget::committed`**: the repair price is a rule
+   of the simulation that the Lens does not carry, so a repair shrinks the free credits only after it has paid; for the others this is a
+   small, unmeasured error. A sent repair is in `repair_backoff[id] = now + blocked_ticks`; the
    entry is dropped when the structure is seen repairing, repaired above the threshold, gone, or the time is up. So a repair that runs is
    never repeated, a repair that never shows (a world without repair rules ignores `Repair` silently, `repair_sell.md`) is asked again
    at most once per `blocked_ticks`, and a structure that is hurt again after a repair is asked at once.
@@ -269,7 +280,8 @@ Measured (`tools/sf_headless/tests/ai_economy.rs`, release; every number is prin
 * **Delivered ore** at ticks 2000, 4000, ..., 12000: 310, 1000, 2200, 3400, 4230, 5560: it rises in every window of 2,000 ticks (the test asks at
   least 250 more each window). The store is full again at the end (3,410 of 3,500).
 * **The silo.** The store holds 90 percent for 636 ticks in all at the start, from tick 785 (the starting credits, with the goal list open: nothing
-  is built for it), and again from tick 6554 on; the silo is ordered at **tick 6610** (two economy turns, the construction turn 10 ticks later), is the only one
+  is built for it), and again from tick 6554 on; the silo is ordered at **tick 6610** (two economy turns, the construction turn 10 ticks
+  later), is the only one
   (one refinery, one silo; `at_most_one_silo_per_refinery_and_one_going_up_counts` and the scenario), and stands.
 * **Harvester replacement.** Orders at 2000 (the vehicle factory stood at 1998) and **8040** (the first economy turn after the loss at 8001),
   nothing else; the new harvester is out of the factory at tick **8440**; two harvesters again at the end.
@@ -288,13 +300,13 @@ so are those of `ai_noore` and `ai_boxed`.
 | Pin | Before | After | Cause, measured |
 |---|---|---|---|
 | `ai_base` (8000 ticks before, now 10000) | `0x1b2eb3765910e496` / `0xa1bdd2e16f8db63b` | `0xb38833330ef15577` / `0x11dde9a00dc14f23` | the economy turn buys two harvesters; with the economy manager off (and, for the digest, its state left out of `AiState::digest`) both old values come back at 8000 ticks |
-| `ai_noore` | `0x4c0e8ed5d1f89874` / `0x94c928755b799c2f` | `0xe8a722997518f3a1` / `0x49209649c89c7ba9` | one harvester ordered at tick 2000 (1100 credits, no ore to mine); same experiment, old values back |
+| `ai_noore` | `0x4c0e8ed5d1f89874` / `0x94c928755b799c2f` | checksum same / `0xa911d417181bc767` | no harvester is ordered (no ore on the map), so only the digest layout moved; with the economy state left out of the digest the old digest comes back |
 | `ai_boxed` | `0x212468ddebc97ff5` / `0x5c40c9e2637e1194` | checksum same / `0x781485e55788ab34` | no refinery, so no harvester: only the digest layout moved; old digest back with the economy state left out |
 | `ai_fog` | `0x768b77651509db8c` / `0x630c0979a8ae4749` | checksum same / `0x4a4effe3e0fa05d1` | likewise (no vehicle factory in 800 ticks) |
 
-With the economy turn switched off but the new state still hashed, the checksums of all four are the old ones; the digests are then the new
-ones for `ai_boxed` and `ai_fog` (their state stays at its start values and only the layout differs) and different again for `ai_base` and
-`ai_noore`. No pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and the others).
+With the economy turn switched off but the new state still hashed, the checksums of all four are the old ones and the digests are the new
+ones for `ai_boxed`, `ai_fog` and `ai_noore` (their state stays at its start values and only the layout differs; `ai_noore` has the same
+digest with the economy on, because the ore guard keeps it from ordering anything) and different again for `ai_base`. No pin of an earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `units_spawn` and the others).
 
 ### Cost of the economy turn
 
@@ -353,13 +365,16 @@ come from `match_file`, so both are needed; the problems are reported when the s
 **`ai_fog`** (`assets/scenarios/ai_fog.ron`, `ai_fog_defs/`): player 0 (Meridian, the AI) has a construction centre and a scout; player 1
 (Veyran) is static with a construction centre, a power plant, a barracks and a refinery, and an army in the far corner. The scout walks to
 the power plant and barracks, the barracks is removed at tick 500, the scout walks home at 520. Pinned: final checksum `0x768b77651509db8c`
-(`ai_fog.expected`), AI digest `0x4a4effe3e0fa05d1` (a literal in `tests/ai_fog.rs`; `0x630c0979a8ae4749` until WP9.1b-2), 800 ticks (WP9.1a pinned `0xd369218db6025eff` and
+(`ai_fog.expected`), AI digest `0x4a4effe3e0fa05d1` (a literal in `tests/ai_fog.rs`; `0x630c0979a8ae4749` until WP9.1b-2), 800 ticks
+(WP9.1a pinned `0xd369218db6025eff` and
 `0x993afc7cd2c42cfd`; re-pinned by WP9.1b-1, see "The base"). The tests assert: the AI knows exactly the
 two structures the scout saw (kind, anchor, footprint, tick) and not the centre, refinery or army; it forgets the removed barracks and keeps
-the power plant after the scout leaves, also when it is destroyed out of sight at tick 700 (same memory and digest as without); without the scout it knows nothing; the observation at six ticks never holds a shrouded entity;
+the power plant after the scout leaves, also when it is destroyed out of sight at tick 700 (same memory and digest as without); without
+the scout it knows nothing; the observation at six ticks never holds a shrouded entity;
 **an invisible army changes nothing the AI sees or does** (same observation, memory and digest as a world without the army, while the world
 checksums differ) and the positive control (a unit inside the scout's sight is seen); the AI thinks 80 times in 800 ticks, manager runs
-`[20, 20, 20, 20]`; two AIs think at tick % 10 == 0 and == 7. Since WP9.1b-1 the AI sends exactly its two builds (`the_ai_sends_its_two_builds_and_nothing_else`), and the invisible army also leaves its commands unchanged.
+`[20, 20, 20, 20]`; two AIs think at tick % 10 == 0 and == 7. Since WP9.1b-1 the AI sends exactly its two builds
+(`the_ai_sends_its_two_builds_and_nothing_else`), and the invisible army also leaves its commands unchanged.
 
 ## Cost
 
@@ -372,9 +387,11 @@ in the crowd: 7.8 to 8.1 us. Budget: mean 20 us, worst 1 ms.
 WP9.1a:
 
 Measured by `tools/sf_headless/tests/ai_perf.rs` (release, the container of this PR, load average about 2, three runs): in `ai_fog` the mean is
-0.05 to 0.07 microseconds per AI per tick (worst think 1.4 to 14 us); with 5,000 wanderers of player 1 over the map (every one a cell test) the mean is
+0.05 to 0.07 microseconds per AI per tick (worst think 1.4 to 14 us); with 5,000 wanderers of player 1 over the map (every one a cell
+test) the mean is
 6.2 to 6.6 us per AI per tick (62 to 66 us per think, worst think 101 to 113 us). The memo's budget: mean at most 20 us per AI per tick, worst at most
-1 ms. A whole run of that crowd, alternating, medians of three: 633 ticks/s with the AI against 623 without (noise). The assertions are loose (ten times the
+1 ms. A whole run of that crowd, alternating, medians of three: 633 ticks/s with the AI against 623 without (noise). The assertions are
+loose (ten times the
 budget, release only); the numbers are the evidence. The observation walks every entity once per think; a map with far more entities
 than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add to this.
 
@@ -389,12 +406,13 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
   this way; the scenario starts with 6,000. The silo is built when the store is full, never to rescue a store that cannot fill.
 * The silo rule counts the starting credits as ore (credits are the store): with more credits than 90 percent of the first refinery's 2,000
   the store is "full" at once, and the silo comes as soon as the goal list is closed.
-* Harvesters are ordered for every refinery whether or not there is ore to reach (`ai_noore` spends 1100 credits on one); the AI does not
-  know the amounts.
+* The ore guard is the terrain of the whole map, not the reach of a harvester: ore ground that exists but is out of every harvester's
+  search radius still gets harvesters (they are ordered, they idle). The amounts of ore are not known to the AI.
 * Not run: a repair of a structure that is destroyed while repairing, a silo with two refineries in a scenario (only in the unit test
   `at_most_one_silo_per_refinery_and_one_going_up_counts`), a faction other than Meridian (the economy has no faction rule except the open
   faction of the silo and the harvester).
-* **A second harvester factory** (two vehicle factories) is tested only with an observation the test builds (`a_harvester_goes_on_the_factory_with_the_shortest_queue_...`),
+* **A second harvester factory** (two vehicle factories) is tested only with an observation the test builds
+  (`a_harvester_goes_on_the_factory_with_the_shortest_queue_...`),
   not in a scenario: the goal list has one.
 * `refused` after a sent build only matters when the mask cannot see why the simulation said no; the one test of it is the unit that
   drives off (above).

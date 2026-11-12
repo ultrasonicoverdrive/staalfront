@@ -1,6 +1,6 @@
 // The match file of the scenario `ai_economy` (WP9.1b-2, docs/rules/ai.md; a copy of the one of `ai_base`): the
 // AI builds its base on the first match's map. Player 0, Meridian, is the AI, with a construction centre
-// where the human of `assets/matches/m1.ron` starts and 6000 credits; player 1, Veyran, is a lone static
+// where the human of `assets/matches/m1.ron` starts and 4000 credits; player 1, Veyran, is a lone static
 // construction centre where the opponent of m1 has its own (a match needs two players). Read by
 // sf_data::match_def like assets/matches/m1.ron.
 //

@@ -1,4 +1,26 @@
-// placeholder
+// The AI rebuilds and repairs (WP9.1b-2, docs/rules/ai.md, "The economy"): player 0 (Meridian) is the AI with a
+// construction centre and 6000 credits on the first match's map (`assets/maps/m1`); player 1 (Veyran) is a lone
+// static construction centre. Its profile (`ai_rebuild_defs/normal.ron`) is a frozen copy of the one of
+// `ai_base_defs` with a goal list of four (power plant, refinery, barracks, vehicle factory). The world has the
+// repair rules of `repair_sell` (3 hit points per tick, a full repair costs 250 thousandths of the price).
+// 6000 credits, not 4000: a refinery lost at zero credits cannot be paid (the AI never sells), see docs/rules/ai.md.
+//
+// The script, by entity id (0 the AI's centre, 1 player 1's centre, 2 the first power plant, 3 the first
+// refinery, 4 its free harvester, 5 the barracks; a slot freed by a Despawn is handed out again with the next
+// generation, which is why the rebuilt refinery and barracks are not named below):
+//   tick 3001   Despawn Id(3, 0): the refinery is lost. The goal list wants it again: an unfunded emergency,
+//               ordered at tick 3010, standing at 3545.
+//   tick 6001   Despawn Id(5, 0): the barracks is lost. Ordered again at 6010, standing at 6278.
+//   tick 8001   two Veyran light tanks are spawned west of the power plant (cells (6, 69) and (6, 71)); they take
+//               the next free ids, Id(11, 0) and Id(12, 0) (the ids of the silo, the harvesters and the others
+//               are 6 to 10)
+//   tick 8002   both are ordered to attack the power plant, Id(2, 0)
+//   tick 8250   Despawn Id(11, 0), Id(12, 0): the plant is down to 378 of 600 hit points; the AI sent exactly one
+//               Repair at tick 8200 and the plant is full again at 8299.
+// If the ids of the script stop matching (a rule that changes the order things appear in) tools/sf_headless/tests/
+// ai_economy.rs fails: it asserts the two rebuild orders (ticks 3010 and 6010), the one Repair (tick 8200) and the
+// plant's lowest hit points.
+// `unit_defs` names the FROZEN copy `ai_rebuild_defs`.
 Scenario(
     name: "ai_rebuild",
     seed: 0xA1_BA5E,

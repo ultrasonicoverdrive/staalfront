@@ -1,4 +1,20 @@
-// placeholder
+// The AI's economy (WP9.1b-2, docs/rules/ai.md, "The economy"): player 0 (Meridian) is the AI with a
+// construction centre and 4000 credits on the first match's map (`assets/maps/m1`); player 1 (Veyran) is a lone
+// static construction centre. Its profile (`ai_economy_defs/normal.ron`, a frozen copy of the profile of
+// `ai_base_defs` with a goal list of four: power plant, refinery, barracks, vehicle factory) is short on purpose,
+// so the economy turn is what acts for most of the 12,000 ticks: it buys a harvester when the vehicle factory
+// stands (tick 2000), builds one ore silo when the store has been 90 percent full for two economy turns after
+// the goal list is done (tick 6610), and replaces a lost harvester.
+//
+// The ore is richer than the shipped one (160 per cell, regrowth 8 per 40 ticks) so that the harvesters never run
+// dry. Everything else (harvest, storage, money, production, power, vision) is `ai_base`'s, written out.
+//
+// The script, by entity id (slots are handed out in the order things appear: 0 the AI's centre, 1 player 1's
+// centre, 2 the first power plant, 3 the refinery, 4 the harvester that comes free with the refinery):
+//   tick 8001   Despawn Id(4, 0): that free harvester is lost. The AI orders a replacement at its next economy
+//               turn (tick 8040; tools/sf_headless/tests/ai_economy.rs checks the tick and that only one is ordered).
+// `unit_defs` names the FROZEN copy `ai_economy_defs`, so editing the shipped definitions or profile never moves
+// this checksum or the AI digest.
 Scenario(
     name: "ai_economy",
     seed: 0xA1_BA5E,

@@ -22,8 +22,8 @@ use sf_headless::cli::parse_checksum;
 use sf_headless::run::{Finished, RunOptions, run, run_full, run_watched};
 use sf_headless::scenario::Scenario;
 use sf_sim::{
-    Command, Construction, EntityId, FactoryStatus, Footprint, Kind, Order, PlayerId, PowerTotals,
-    Tick, World,
+    BuildingFunction, Command, Construction, EntityId, FactoryStatus, Footprint, Kind, Order,
+    PlayerId, PowerTotals, Tick, World,
 };
 
 const P0: PlayerId = PlayerId(0);
@@ -200,7 +200,7 @@ const REPLACEMENT_TICKS: u64 = 480;
 fn a_lost_refinery_and_a_lost_barracks_are_rebuilt() {
     let s = load("ai_rebuild");
     let mut stood: BTreeMap<EntityId, (Kind, u64)> = BTreeMap::new();
-    let f = run_watched(&s, &RunOptions::for_scenario(&s), |w| {
+    run_watched(&s, &RunOptions::for_scenario(&s), |w| {
         for v in w.snapshot().iter().filter(|v| v.owner == P0) {
             if w.footprint_of(v.id).is_some() && w.stands(v.id) {
                 stood.entry(v.id).or_insert((v.kind, w.tick().0));
@@ -233,7 +233,6 @@ fn a_lost_refinery_and_a_lost_barracks_are_rebuilt() {
         })
         .collect();
     assert_eq!(orders, [(3010, REFINERY), (6010, BARRACKS)]);
-    let _ = f;
 }
 
 /// T3, measured: the refinery lost at tick 3001 stands again at 3545 (544 ticks: ordered at 3010, unfunded, and
@@ -447,7 +446,7 @@ fn a_harvester_is_ordered_when_fewer_than_wanted_and_never_two_at_once() {
     // Four of four: nothing.
     let obs = observation(&world, 2080, 0, base_with(&world, 4));
     assert_eq!(turn(&world, &mut state, &obs), []);
-    // Two harvesters and a harvester queued and a second wanted queued too: still one in flight at most.
+    // One harvester and one queued, two more wanted (four of four needs two): still one in flight at most.
     let mut own = base_with(&world, 1);
     own[4] = queued(own[4].clone(), &[HARVESTER]);
     let obs = observation(&world, 2120, 0, own);
@@ -784,4 +783,249 @@ fn while_an_emergency_build_waits_for_money_only_the_anchor_is_repaired() {
     let (_, mut state) = rig();
     let obs = observation(&world, 100, 5000, own);
     assert_eq!(repairs(&turn(&world, &mut state, &obs)), [0, 1]);
+}
+
+// ---- the sweep's gaps: each condition of the economy turn where it decides -----------------------------
+
+#[test]
+fn an_emergency_is_stalled_only_with_no_free_credit_and_the_first_dock_or_a_short_power_plant_going_up()
+ {
+    let (world, _) = rig();
+    let lens = Lens::new(&world, P0);
+    let short = Some(PowerTotals { made: 0, used: 50 });
+    // The first dock going up, nothing free: stalled. One credit free: not.
+    let own = vec![
+        structure(&world, 0, CENTRE),
+        going_up(structure(&world, 2, REFINERY)),
+    ];
+    let mut obs = observation(&world, 100, 0, own);
+    assert!(economy::emergency_stalled(&obs, &lens));
+    // Free credits are the credits less what the going-up refinery still costs: exactly that is not free.
+    let owed = sf_ai::budget::committed(&obs, &lens);
+    assert!(owed > 0);
+    obs.credits = owed;
+    assert!(economy::emergency_stalled(&obs, &lens));
+    obs.credits = owed + 1;
+    assert!(!economy::emergency_stalled(&obs, &lens));
+    // A second dock going up while one stands is no emergency (a mutation counting every dock fails here).
+    let mut own = vec![
+        structure(&world, 0, CENTRE),
+        structure(&world, 2, REFINERY),
+        going_up(structure(&world, 3, REFINERY)),
+    ];
+    let obs = observation(&world, 100, 0, own.clone());
+    assert!(!economy::emergency_stalled(&obs, &lens));
+    // A plant going up is an emergency only while less is made than used: equal is not short.
+    own.pop();
+    own.push(going_up(structure(&world, 3, PLANT)));
+    let mut obs = observation(&world, 100, 0, own.clone());
+    obs.power = short;
+    assert!(economy::emergency_stalled(&obs, &lens));
+    obs.power = Some(PowerTotals {
+        made: 100,
+        used: 100,
+    });
+    assert!(!economy::emergency_stalled(&obs, &lens));
+    obs.power = Some(PowerTotals {
+        made: 99,
+        used: 100,
+    });
+    assert!(economy::emergency_stalled(&obs, &lens));
+    // Anything else going up (a barracks) is none.
+    own.pop();
+    own.push(going_up(structure(&world, 3, BARRACKS)));
+    let mut obs = observation(&world, 100, 0, own);
+    obs.power = short;
+    assert!(!economy::emergency_stalled(&obs, &lens));
+}
+
+#[test]
+fn a_refinery_that_is_still_going_up_wants_no_harvester() {
+    let (world, mut state) = rig();
+    let own = vec![
+        structure(&world, 0, CENTRE),
+        going_up(structure(&world, 2, REFINERY)),
+        structure(&world, 5, FACTORY),
+    ];
+    assert_eq!(
+        turn(&world, &mut state, &observation(&world, 2000, 5000, own)),
+        []
+    );
+}
+
+#[test]
+fn the_silo_is_picked_by_storage_function_price_and_faction() {
+    let both = 3u8;
+    let none = BuildingFunction::None;
+    let dock = BuildingFunction::HarvesterDock;
+    let table = |bit: Option<u8>| {
+        economy::pick_silo(
+            [
+                (Kind(2), 2000, dock, Some(1400), both), // stores, but a dock
+                (Kind(40), 0, none, Some(100), both),    // stores nothing
+                (Kind(41), 900, none, None, both),       // cannot be bought
+                (Kind(42), 900, none, Some(200), 2),     // the other faction's only
+                (Kind(43), 1500, none, Some(250), both),
+                (Kind(44), 1500, none, Some(250), both),
+            ]
+            .into_iter(),
+            bit,
+        )
+    };
+    assert_eq!(table(Some(1)), Some(Kind(43)));
+    // The other faction takes the first of the table that fits it.
+    assert_eq!(table(Some(2)), Some(Kind(42)));
+    // No faction in the game: any, still not the dock, the free or the unbuyable one.
+    assert_eq!(table(None), Some(Kind(42)));
+    assert_eq!(economy::pick_silo(std::iter::empty(), Some(1)), None);
+    // The shipped table: the ore silo, kind 43, for either faction.
+    let (world, _) = rig();
+    for player in [0, 1] {
+        let lens = Lens::new(&world, PlayerId(player));
+        let silo = economy::pick_silo(
+            lens.buildings().map(|b| {
+                (
+                    b.kind,
+                    lens.storage_of(b.kind),
+                    b.function,
+                    b.cost,
+                    b.factions,
+                )
+            }),
+            lens.faction_bit(),
+        );
+        assert_eq!(silo, Some(SILO), "player {player}");
+    }
+}
+
+#[test]
+fn a_unit_of_the_other_faction_has_no_factory_for_the_lens() {
+    // Kind 16 (sniper) is Meridian's, 17 (medic) Veyran's; player 0 is Meridian, player 1 Veyran.
+    let (world, _) = rig();
+    let (meridian, veyran) = (Lens::new(&world, P0), Lens::new(&world, PlayerId(1)));
+    assert_eq!(
+        meridian.unit_factory(Kind(16)),
+        Some(BuildingFunction::InfantryFactory)
+    );
+    assert_eq!(meridian.unit_factory(Kind(17)), None);
+    assert_eq!(veyran.unit_factory(Kind(16)), None);
+    assert_eq!(
+        veyran.unit_factory(Kind(17)),
+        Some(BuildingFunction::InfantryFactory)
+    );
+    // A kind no factory makes (a structure).
+    assert_eq!(meridian.unit_factory(PLANT), None);
+}
+
+#[test]
+fn no_harvester_is_ordered_on_a_map_without_ore_ground() {
+    let noore = load("ai_noore");
+    let f = go(&noore, 6000);
+    assert!(!Lens::new(&f.world, P0).has_ore_ground());
+    // The vehicle factory stands (tick 1998) and a harvester is wanted, but none is ordered.
+    assert!(
+        f.world
+            .snapshot()
+            .iter()
+            .any(|v| v.owner == P0 && v.kind == FACTORY && f.world.stands(v.id))
+    );
+    assert_eq!(sent(&f, is_harvester_order), Vec::<u64>::new());
+    // Control: the map of `ai_economy` has ore ground, and there the order is sent.
+    let (world, _) = rig();
+    assert!(Lens::new(&world, P0).has_ore_ground());
+    let f = go(&load("ai_economy"), 2100);
+    assert_eq!(sent(&f, is_harvester_order), [2000]);
+}
+
+/// One construction turn: the commands it sends.
+fn build_turn(world: &World, state: &mut sf_ai::AiState, obs: &Observation) -> Vec<Command> {
+    let mut lens = Lens::new(world, P0);
+    let mut out = Vec::new();
+    sf_ai::base::turn(state, obs, &mut lens, &mut out);
+    out
+}
+
+fn kinds_built(out: &[Command]) -> Vec<Kind> {
+    out.iter()
+        .filter_map(|c| match c {
+            Command::BuildStructure { kind, .. } => Some(*kind),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_construction_turn_builds_the_silo_the_economy_asked_for_before_the_goal_list() {
+    // The real base of `ai_economy` at tick 2100 (its four goals stand, so the simulation's own placement
+    // rule accepts a silo), the AI's state with the latches cleared and 5,000 credits.
+    let f = go(&load("ai_economy"), 2100);
+    let world = &*f.world;
+    let mut state = f.ais[0].state().clone();
+    state.pending_build = None;
+    state.blocked_until.clear();
+    let mut obs = Observation::build(world, P0, &state.known_structures);
+    obs.credits = 5000;
+    let now = obs.tick;
+    let closed = |s: &mut sf_ai::AiState| s.profile.build_order = vec![(PLANT, 1), (REFINERY, 1)];
+    let open = |s: &mut sf_ai::AiState| {
+        s.profile.build_order = vec![(PLANT, 1), (REFINERY, 1), (TOWER, 1)]
+    };
+    // The wish and a closed list: the silo. No wish: nothing to build.
+    let mut s = state.clone();
+    closed(&mut s);
+    s.emergency = Some(SILO);
+    assert_eq!(kinds_built(&build_turn(world, &mut s, &obs)), [SILO]);
+    let mut s = state.clone();
+    closed(&mut s);
+    assert_eq!(build_turn(world, &mut s, &obs), []);
+    // The wish with a goal open (a tower): the silo still comes first; without the wish the tower does.
+    let mut s = state.clone();
+    open(&mut s);
+    s.emergency = Some(SILO);
+    assert_eq!(kinds_built(&build_turn(world, &mut s, &obs)), [SILO]);
+    let mut s = state.clone();
+    open(&mut s);
+    assert_eq!(kinds_built(&build_turn(world, &mut s, &obs)), [TOWER]);
+    // A blocked silo is not tried (the open goal goes on instead), and it is tried again when the block ends.
+    let mut s = state.clone();
+    open(&mut s);
+    s.emergency = Some(SILO);
+    s.blocked_until.insert(SILO, Tick(now.0 + 1));
+    assert_eq!(kinds_built(&build_turn(world, &mut s, &obs)), [TOWER]);
+    let mut s = state.clone();
+    open(&mut s);
+    s.emergency = Some(SILO);
+    s.blocked_until.insert(SILO, now);
+    assert_eq!(kinds_built(&build_turn(world, &mut s, &obs)), [SILO]);
+    // Its prerequisite does not stand (the observation shows no refinery): not built.
+    let mut s = state.clone();
+    s.profile.build_order = vec![(PLANT, 1)];
+    s.emergency = Some(SILO);
+    let mut no_refinery = obs.clone();
+    no_refinery.own.retain(|o| o.kind != REFINERY);
+    assert_eq!(build_turn(world, &mut s, &no_refinery), []);
+}
+
+#[test]
+fn the_harvester_rule_adds_ore_the_scenario_would_not_deliver_without_it() {
+    // The same scenario with `harvesters_per_refinery` 1: the free harvester is all that is wanted, so none is
+    // bought until the one removed at tick 8001 has to be replaced (at 8040).
+    let s = load("ai_economy");
+    let with = go(&s, s.ticks).world.ore_delivered(P0);
+    let mut one = s.clone();
+    let mut profile = one.ais[0].state().profile.clone();
+    profile.economy.harvesters_per_refinery = 1;
+    one.ais[0] = sf_ai::Ai::new(
+        P0,
+        profile,
+        0xA1_0001,
+        one.ais[0].state().start_sites.clone(),
+    );
+    let f = go(&one, one.ticks);
+    // Only the replacement of the one removed at tick 8001 (one is wanted, none is left): nothing bought before.
+    assert_eq!(sent(&f, is_harvester_order), [8040]);
+    let without = f.world.ore_delivered(P0);
+    println!("ore delivered in 12,000 ticks: with the harvester rule {with}, without it {without}");
+    assert!(with >= without + 1500, "{with} against {without}");
+    assert!(with >= 5000);
 }

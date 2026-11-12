@@ -2937,8 +2937,7 @@ earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `
   without it (alternating runs); the worst think had spikes of 1.2 and 4.1 ms in two runs with it and 0.94 ms once without, on a busy machine,
   so the 1 ms worst think stays a printed measurement and not a guarantee.
 - **Re-pinned.** `ai_base` (now 10,000 ticks, was 8,000: the two harvesters cost 2,200 credits the list waits for, T1b 6518 to 8078) and
-  `ai_noore` (a harvester ordered with no ore on the map) moved in checksum and digest; `ai_boxed` and `ai_fog` only in the digest (state
-  layout). Measured cause: with the economy manager off the old checksums come back for all four, and with its state also left out of
+  `ai_base` moved in checksum and digest; `ai_noore`, `ai_boxed` and `ai_fog` only in the digest (state layout: `ai_noore` orders no harvester, the map has no ore, so its checksum is the old one). Measured cause: with the economy manager off the old checksums come back for all four, and with its state also left out of
   `AiState::digest` the old digests come back (table in `ai.md`).
 - **Mutations** (scratch edits, reverted; failing tests named): harvester latch (`queued > 0`) removed fails
   `a_harvester_is_ordered_when_fewer_than_wanted_and_never_two_at_once`; refusal not noticed fails
@@ -2955,6 +2954,15 @@ earlier phase moved (`golden.rs`, `wander_5000`, `command_mix`, `terrain_256`, `
 - **Review points of 9.1b-1 folded in.** The `ai_perf.rs` comment now says the barracks (`Kind(3)`, which needs a power plant) is searched; `ai.md` says the
   1 ms cap-32 think is a printed measurement with a thin margin (429 to 457 us quiet, 1037 us once under load) and that the resumption offset is an
   index into the candidate list; the long comment line of `ai_fog.ron` is broken (the pin did not move).
+- **Sweep findings fixed (12-11-2026).** The two new scenario files have real headers with the script ids; the hidden-unit test is back to a
+  no-truck comparison as well (commands without ids up to tick 5000, the first tick the shifted ids change the income timing: the third plant at 5290
+  instead of 5250) and asserts the far truck's cell is shroud; no harvester is ordered on a map without ore ground (`Lens::has_ore_ground`;
+  `ai_noore` is back to its old checksum `0x4c0e8ed5d1f89874`, digest `0xa911d417181bc767`); tests for each condition of `emergency_stalled`
+  (second dock, `made == used`, free credits at the owed amount), `pick_silo` (storage, dock, price, faction), the faction of `unit_factory`, a
+  refinery still going up, the `base::choose` silo branch (wish, open goal, blocked, prerequisite), and a with/without comparison of the
+  harvester rule (5560 against 3200 ore in 12,000 ticks); `ai_perf` prints the manager of the worst think (it was Production or Army, the stubs, in
+  most runs, once Economy in `ai_boxed` where the economy turn does nothing); the anchor's repair is allowed to take credits a stalled emergency
+  waits for and a running repair is not in `budget::committed` (both written in `ai.md`).
 - **Found on the way.** The hidden-unit test of 9.1b-1 compared the world with a truck against the world without one; the truck takes an id
   and `QueueUnit` names the factory by id, so it now compares two worlds with the truck in two places that are both in the shroud. A refinery lost
   at zero credits cannot be paid and the AI is stuck (it never sells): a gap in `ai.md`, found when `ai_rebuild` ran out of money with 4,000

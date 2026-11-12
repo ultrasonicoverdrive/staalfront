@@ -23,6 +23,8 @@ struct Cost {
     thinks: u64,
     total: Duration,
     worst: Duration,
+    /// The manager whose turn the worst think was (WP9.1b-2: so a spike can be put on its owner).
+    worst_manager: Option<sf_ai::Manager>,
     /// Placement questions in all, and the most in one think.
     previews: u64,
     worst_previews: u64,
@@ -45,17 +47,22 @@ fn measure(s: &Scenario, ticks: u64) -> Cost {
     let mut out = Vec::new();
     let (mut thinks, mut total, mut worst) = (0, Duration::ZERO, Duration::ZERO);
     let mut worst_previews = 0;
+    let mut worst_manager = None;
     for _ in 0..ticks {
         for ai in &mut ais {
             if ai.due(world.tick()) {
                 let asked = ai.state().previews;
+                let manager = sf_ai::Manager::of_think(ai.state().thinks);
                 let started = Instant::now();
                 out.clear();
                 ai.think(&world, &mut out);
                 let spent = started.elapsed();
                 thinks += 1;
                 total += spent;
-                worst = worst.max(spent);
+                if spent > worst {
+                    worst = spent;
+                    worst_manager = Some(manager);
+                }
                 worst_previews = worst_previews.max(ai.state().previews - asked);
                 for command in out.drain(..) {
                     world.schedule(world.tick(), ai.player(), command).unwrap();
@@ -69,6 +76,7 @@ fn measure(s: &Scenario, ticks: u64) -> Cost {
         thinks,
         total,
         worst,
+        worst_manager,
         previews: ais.iter().map(|a| a.state().previews).sum(),
         worst_previews,
     }
@@ -96,12 +104,13 @@ fn crowded_in(name: &str, wanderers: u32) -> Scenario {
 
 fn report(label: &str, c: &Cost) {
     println!(
-        "ai think cost, {label}: {} thinks in {} AI ticks, mean {:.2} us per AI per tick, {:.1} us per think, worst think {:.1} us, {} placement questions ({:.3} per think, at most {} in one)",
+        "ai think cost, {label}: {} thinks in {} AI ticks, mean {:.2} us per AI per tick, {:.1} us per think, worst think {:.1} us (manager {:?}), {} placement questions ({:.3} per think, at most {} in one)",
         c.thinks,
         c.ticks,
         c.mean_per_tick_micros(),
         c.mean_think_micros(),
         c.worst.as_secs_f64() * 1e6,
+        c.worst_manager,
         c.previews,
         c.previews as f64 / c.thinks.max(1) as f64,
         c.worst_previews
