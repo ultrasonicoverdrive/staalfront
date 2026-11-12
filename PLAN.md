@@ -494,6 +494,10 @@ Layered (analysis §12, §22G):
   jitter profile number is added **only if** fewer than about half the games are distinct, then in 9.2a. Built in 9.5a: the baseline of 100 games has 100
   distinct final checksums, so no jitter number is needed; it also shows that the normal AI decides only 7 of 100 games against itself (`docs/rules/ai.md`,
   "AI against AI (WP9.5a)").*
+  *12-11-2026 (orchestrator, fix round 1 of WP9.5a, after the read-only sweep): (1) the seats of a tournament game are **read from the world and the AIs**, not from the schedule; (2) a decided
+  game is part of CI (a fixture, `tests/tournament_decided.rs`); (3) every tick number of the record is a **count of ticks run**; (4) the **divergence of the games is measured by distinct outcome keys**
+  (ending, ticks, last loss, attacks), per seating, not by distinct checksums, which spawn facing alone makes distinct; the jitter decision rests on that measure (Baseline A: 100 of 100, not needed);
+  (5) after WP9.1c-3 merges, the 100 games are run again and both baselines stay in `docs/rules/ai.md`.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

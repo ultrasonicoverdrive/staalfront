@@ -3408,3 +3408,14 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Not done / gaps.** No tuning, no pass criterion, no threads, the 100 games are not in CI; the AI seed has no effect on a game yet (no rule draws from it);
   the table equality is checked on one machine only. See `ai.md` "Not done in WP9.5a".
 
+### WP9.5a fix round 1 (12-11-2026)
+
+* **Seats read from the world.** `GameRecord::factions` is `World::faction_of` of each seat, `ai_factions` the faction each AI's profile was resolved for (`Profile::faction`, new field,
+  not hashed); `tournament::prepare` refuses a disagreement. Mutations (unswapped match to the world; unswapped match to `match_ais`) now fail
+  `the_world_and_the_ais_have_the_factions_of_the_schedule_and_the_games_speed`, `the_seat_swap_reaches_the_world_the_game_is_played_in` and `the_winner_is_the_seat_not_the_faction`.
+* **A decided game in CI** (`tests/tournament_decided.rs`, scratch assets with a shortened profile, twelve tanks): seat 0 strong wins at 1,315, seat 1 strong at 5,599; flipping the winner-to-seat mapping fails both tests.
+* **Off by one confirmed and fixed:** `MatchResult::tick` is the step's own number, `ticks` the count after it; the first version printed `ticks 51156, defeat 51155`. All tick numbers in the record are counts of ticks run now.
+* **AI seed:** `the_ai_seed_alone_does_not_change_a_game`. **Speed:** the tournament world's speed is asserted (`world.config().speed`), and `the_tournament_speed_is_the_games_walking_speed` in `sf_game` pins the constant to `bench_scene::DEMO_SPEED`.
+* **Divergence measure:** distinct outcome keys overall and per seating, spread of the last loss (table and JSON). Baseline A: 100 of 100 outcomes, 25 of 25 per seating; no jitter number needed. Baseline B (after 9.1c-3) is still to be measured when main moves.
+* **One loader** behind `load_game` and `load_match_file` (`load_parts`), `game:` scenarios unchanged (the workspace tests, and the 43 CI scenarios with `--expect`, are the proof). `Scenario::load_ais` keeps its own loop (`ai.md`).
+

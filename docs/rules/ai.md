@@ -936,7 +936,9 @@ field `controller` of `sf_data::match_def::MatchPlayer` (`docs/rules/match.md`, 
   checks and resolves it for the player's faction against the unit definitions, and tells every AI the start sites of the match (`sf_ai::start_sites`)
   as `Scenario::load_ais` of `sf_headless` does; since WP9.5a the match-to-AIs loop lives in `sf_ai` (`sf_ai::match_ais`, beside `make_ai` and
   `start_sites`: the host hands it a function that reads a profile's text, because `sf_ai` reads no file) and `matchplay::ais` is a thin wrapper that reads
-  `<assets>/ai/<profile>.ron` for it; `sf_headless tournament` calls the same function ("AI against AI (WP9.5a)"). The AI's seed is the match's `seed` (pinned: two seeds give two digests, `the_match_seed_reaches_the_ai_...`). `spawn_with_ais` sorts the AIs by player id; `two_ais_think_in_ascending_player_order_...` gives two AIs, made due on the same ticks, in swapped order and checks the order in the log. A missing profile or one that does not fit is an
+  `<assets>/ai/<profile>.ron` for it; `sf_headless tournament` calls the same function ("AI against AI (WP9.5a)"). `Scenario::load_ais` of
+  `sf_headless` does **not** use it: it reads the `ai:` specs of a scenario (profile file in the `unit_defs` directory, its own seed per entry), not
+  controllers, and keeps its own loop around `sf_ai::make_ai`. So `make_ai` is shared by all three hosts, `match_ais` by two. The AI's seed is the match's `seed` (pinned: two seeds give two digests, `the_match_seed_reaches_the_ai_...`). `spawn_with_ais` sorts the AIs by player id; `two_ais_think_in_ascending_player_order_...` gives two AIs, made due on the same ticks, in swapped order and checks the order in the log. A missing profile or one that does not fit is an
   error that names the player and the profile and stops the start. `--replay` does not run the AIs (the record holds their commands).
 * **The match file.** `assets/matches/m1_ai.ron`: the map and the human as in `m1.ron`, player 1 Veyran with one construction centre on the cell of
   `m1`'s static centre (72, 14) and **4000 credits, the human's own start**: the AI is not given more than the player it is watched against; the
@@ -985,26 +987,46 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
   on both, the second on both (`factions_for`, cycling with period 4; mirrors included). (2) The world seed and (3) the AI seed, from `--seed` (the file's
   seed when left out) and the game number through SplitMix64 (`seeds_for`; pinned, and `mix(0)` is the published first output). The AI seed feeds each AI's
   stream (`AI_STREAM` plus the player number) and so its digest, but **no rule draws from that stream yet** (checked by reading: the only draw outside the
-  digest is in a test, `ai.rs`), so it should not change a game (not measured by a run that varies it alone); what separates games today is the seating
-  and the world seed. Games with the same seating differ (the 25 games of each seating of the baseline below end in 25 different checksums).
+  digest is in a test, `ai.rs`), so it does not change a game, and a test shows it: `the_ai_seed_alone_does_not_change_a_game` plays one game twice with
+  only the AI seed changed (same final checksum and outcome, different AI digests, which hash the stream) and once with only the world seed changed
+  (different checksum). What separates games today is the seating and the world seed. **The AI stream is not drawn yet**: 9.4's `idle_permille` or a
+  jitter number would be the first rule to use it.
 * **When a game ends.** After the first step with a `match_result`, or after `--cap` ticks (default 60,000): a capped game is a draw. It is a **stalemate**
   when no unit or structure was destroyed in its last `--stalemate` ticks (default 10,000; a game shorter than the window cannot be one), otherwise
   **capped**. Both defeated in the same tick is a **mutual defeat**. `classify` is a pure function and pinned at the boundary (exactly the window is a stalemate).
-* **The numbers.** Per game: world and AI seed, the factions on the seats (read back from the match the world was made from, not from the schedule),
-  the ending, the defeat tick, ticks, the last tick something was destroyed, the final checksum, each AI's digest and `attacks_launched`. Aggregates, all
+* **The numbers.** Per game: world and AI seed, the factions on the seats **read back from the world that was played** (`World::faction_of`) and from each AI's profile (`Profile::faction`, new in
+  this WP, not part of the digest); `prepare` refuses a game in which the two disagree, and `the_world_and_the_ais_have_the_factions_of_the_schedule_and_the_games_speed`
+  asserts both against the schedule, so a seat swap that does not reach the world or an AI fails. Then the ending, the defeat tick, ticks, the last loss, the final
+  checksum, each AI's digest and `attacks_launched`. **Tick numbers are all counts of ticks run**, as `World::tick()` after a step: `ticks` is the number of steps,
+  `defeat_tick` is the same count at the step that decided the match (so equal to `ticks` in a decided game; `MatchResult::tick` itself is the step's own number, one
+  lower, which a first version of this tool mixed up: its 100-game table showed `ticks 51156, defeat 51155`), and `last_loss` is the count after the last step in which
+  something was destroyed, so `ticks - last_loss` is the number of loss-free steps at the end, which the stalemate window is compared with. Aggregates, all
   whole numbers (permille, printed with one decimal): wins per seat over all games, wins per faction over the games between **different** factions (a mirror
   says nothing about the factions), draws split into mutual defeat / stalemate / capped, min / median / max duration of the **decided** games (the median of
-  an even count is the rounded-down average of the middle two), and the number of **distinct final checksums**. The table and the JSON have no wall time; wall time goes
+  an even count is the rounded-down average of the middle two), the number of **distinct final checksums**, and, since the fix round, the number of **distinct outcomes** (the keys `(ending, ticks, last loss, attacks per AI)`; and the
+  same with both AI digests), overall and per seating, and min / median / max of the last loss. A final checksum differs from the first spawn on (the world seed
+  draws spawn facing), so 100 of 100 checksums would hold even for 100 strategically identical games; the outcome key is what shows whether the games were played
+  differently. The digest key is different for every game by construction (the digest hashes the AI's random stream, which the AI seed sets), so it is printed because
+  it was asked for and not to be judged by. The table and the JSON have no wall time; wall time goes
   to stderr and into the JSON's last key `host` (so `jq 'del(.host)'` leaves the part that must be equal between runs). The same arguments give the same table
   (`four_games_are_decided_or_labelled_and_the_table_is_the_same_on_a_second_run`; same machine, same build; a Linux/Windows comparison is not made and
   is not claimed).
+* **A decided game in CI** (`tests/tournament_decided.rs`): the smoke games are capped long before a base falls, so a fixture decides one in a few thousand ticks. A
+  match file in a scratch directory: one seat has a construction centre, 4,000 credits and twelve light tanks beside its centre, the other a construction centre and
+  nothing else; the profile is the shipped `normal.ron` with `attack_value`, `max_wait` and `first_attack_tick` set low in a scratch copy (the numbers are replaced by
+  key, so a later change of the shipped values does not break it). Pinned: seat 0 strong wins at 1,315 ticks, seat 1 strong at 5,599, `defeat_tick == ticks ==
+  last_loss`, and a second game with the factions swapped is still won by the same *seat*. A change of unit or weapon numbers moves the two tick pins (a re-pin).
+  Measured while building it: **four** tanks beside the centre, on this fixture, destroyed nothing in 20,000 ticks (about 100 shots per 1,000 ticks); twelve end it.
 * **CI.** The 4-game smoke runs as a normal test in debug with a cap of 9,000 ticks (the smoke plays its 4 games three times: two command-line runs and one through the library; the whole test file
   took 37 s in this container, debug build, loaded machine); the 100 games are a manual run in release.
 
-### The baseline: 100 games, `m1_duel`, normal against normal (release)
+### Baseline A: 100 games, `m1_duel`, normal against normal, before WP9.1c-3 (release)
+
+Main at 1586e1c plus this WP (fix round 1; the first version's table differed only in `defeat` being one lower). **Baseline B, after WP9.1c-3 has merged, is not measured yet**
+(the branch `wp/9.1c-3-ai-opening` was not on main when this round was pushed); it is added below when main moves.
 
 `sf_headless tournament assets/matches/m1_duel.ron --games 100` (cap 60,000, seed 458,758 = the file's), release build, one thread, this container with a
-load average of about 4 (other agents' cargo runs): **153.4 s for 100 games, 1.2 to 2.0 s a game (median 1.5 s)**, i.e. roughly 40,000 ticks/s for two AIs
+load average of about 4 (other agents' cargo runs): **149.1 s for 100 games (fix round; the first run 153.4 s), 1.2 to 2.0 s a game (median 1.5 s)**, i.e. roughly 40,000 ticks/s for two AIs
 (the design memo guessed 10,000 to 20,000).
 
 | | |
@@ -1013,17 +1035,31 @@ load average of about 4 (other agents' cargo runs): **153.4 s for 100 games, 1.2
 | By seating | Meridian v Veyran: 0 of 25 decided (1 stalemate, 24 capped); Veyran v Meridian: 4 of 25 (seat 1 = Meridian won all four); Meridian v Meridian: 3 of 25 (seat 1); Veyran v Veyran: 0 of 25 |
 | Per faction (different factions only, 50 games) | Meridian 4 wins (8.0 %), Veyran 0 wins (0.0 %) |
 | Per seat (all 100 games) | seat 0 0 wins (0.0 %), seat 1 7 wins (7.0 %) |
-| Draws | 93: 0 mutual defeat, **1 stalemate** (game 8, last loss at tick 41,238), 92 capped |
+| Draws | 93: 0 mutual defeat, **1 stalemate** (game 8, last loss at tick count 41,239), 92 capped |
 | Attacks launched | 1 to 9 per AI per game, mean 5.2 |
 | Distinct final checksums | **100 of 100 games** |
+| Distinct outcomes (ending, ticks, last loss, attacks) | **100 of 100 games, and 25 of 25 in each seating** (with digests: 100, by construction) |
+| Last loss | min 41,239 / median 59,031 / max 60,000 ticks |
 
 What it says: today's normal AI does not finish a game against itself. 96 of the 100 games had a unit or structure destroyed at or after tick 50,000: the armies keep trading,
 the bases keep being rebuilt (game 0, looked at every 5,000 ticks with a debug print that is not in the PR: 7 to 28 entities per side), and the construction centre
 falls in 7 games, always the north-east one. Whether the north-east site is easier to take or the south-west site's approach is worse is not measured here
-(seven decided games are too few to say; the seat table of a larger run, and 9.5b, will). All 100 games end differently, so the seating and the world seed
-alone separate the games and the jitter profile number of the design memo is **not needed** (its condition was fewer than about half distinct).
+(seven decided games are too few to say; the seat table of a larger run, and 9.5b, will). The games are played differently, not only seeded differently: all 100 outcome keys are distinct
+(25 of 25 per seating), so the seating and the world seed alone separate the games and the jitter profile number of the design memo is **not needed** (its
+condition was fewer than about half distinct). That is the measure the decision rests on; the 100 distinct checksums alone would have proved nothing.
 `assets/ai/normal.ron` is being changed by WP9.1c-3 at the same time, so these numbers are a **baseline of main at 1586e1c plus this WP**, not a result for
 the final profile.
+
+### Baseline causes (all [Gissing], from a read-only sweep; input for 9.2a, none measured here)
+
+* Waves are too small to kill a base: the trigger is `attack_value` 3,000 or `max_wait` 6,000 with `min_units` 4 (`army.rs`, `attack_due`), against towers and a rebuilding
+  goal list; `attack_patience` 2,400 then sends survivors home, so the armies trade for ever. (Consistent with the fixture above: four tanks do not kill an
+  undefended centre, twelve do.)
+* Veyran never wins as the attacker and is never beaten in a mirror: its list carries an extra `fortified_bunker`, which makes its base harder and its economy later.
+  Meridian wins only from seat 1.
+* Seat 1 wins only: a site asymmetry (the approach or the `beside` target cell at (12, 68) against (72, 14), the distance to ore) or the think order (player 0 always
+  thinks first, `stagger` 3). A map mirrored in code would separate the two.
+* The army floor is limited to before the first attack and before `max_wait` (`production.rs`), so it is unlikely to be the long-run stall.
 
 ### Not done in WP9.5a
 
