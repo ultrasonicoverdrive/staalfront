@@ -455,6 +455,15 @@ Layered (analysis §12, §22G):
   smallest refunds added until the sum covers it, else nothing. Never the anchor, a harvester dock, a power plant, what the stalled structure
   requires or the stalled structure itself. If the simulation refuses every sale it tries again after `blocked_ticks` and the rescue stays unspent.
   It replaces "never sells"; selling for any other reason stays out of 9.1 (retreat and economy choices are WP9.4).*
+  *12-11-2026 (Tijmen: the orchestrator's recommendations for WP9.1c hold; design memo `wp9.1c-ontwerp`): **9.1c is split in two**: **9.1c-1** production and scout
+  (the production manager, the rally point and gather cell, one scout; the army only gathers) and **9.1c-2** [xhigh] the army (threat and defence,
+  attack timing, target, marching and finishing; `ai_vs_passive`, `ai_raid`). A dedicated `scout` unit (role `scout`, 400 credits), one per match and at
+  most one replacement (`scouts_max` 2, `scout_retry` 3000). The attack target will be the enemy construction centre (it is the win rule), only units at home
+  defend and the attack is recalled only for the construction centre (all 9.1c-2). `gather_distance` 6 becomes **10** (inside the base before);
+  `defend_ticks` 400 is for 9.1c-2, and the builder's measured values win over the memo's guesses. Production holds back the price of the next goal entry the
+  construction turn is saving for, not just `reserve`. The frozen profiles of the older AI scenarios get `unit_mix: []`, so only their AI digests move, not
+  their checksums. Built in 9.1c-1: nothing in `crates/sf_sim/` changed; the measured consequence of the holdback on M1's credits (first army unit at tick 15,700)
+  is in `docs/rules/ai.md`, "Production".*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

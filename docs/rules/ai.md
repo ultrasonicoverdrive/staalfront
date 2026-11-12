@@ -1,18 +1,19 @@
 # The computer opponent
 
-WP9.1a (the frame), WP9.1b-1 (the base) and WP9.1b-2 (the economy). Design memos of 10-11-2026 and 11-11-2026 (orchestrator, Fable);
+WP9.1a (the frame), WP9.1b-1 (the base), WP9.1b-2 (the economy) and WP9.1c-1 (production and the scout). Design memos of 10-11-2026 and 11-11-2026 (orchestrator, Fable);
 Tijmen: "fase 9 mag eerder
 beginnen". WP9.1a builds what every later part stands on: the AI **observes through the fog, remembers what it saw and keeps its schedule**.
 WP9.1b-1 adds the first manager with rules, **construction** (the goal list, the power rule, the money rule, placement), so the AI builds
-its base. WP9.1b-2 adds the **economy** manager (harvesters, the ore silo, repair; a lost structure is rebuilt by the goal list). Production
-and army are WP9.1c and still stubs. This page says what exists and what is a stub.
+its base. WP9.1b-2 adds the **economy** manager (harvesters, the ore silo, repair; a lost structure is rebuilt by the goal list). WP9.1c-1 adds
+**production** (the unit mix, the rally point, the money rule) and the first half of the army manager: the gather cell, **one scout** and the gathering
+of army units, which **never attack** yet (WP9.1c-2). This page says what exists and what is a stub.
 
 Code: `crates/sf_ai/src/` (`observe.rs`, `memory.rs`, `state.rs`, `schedule.rs`, `profile.rs`, `sites.rs`, `ai.rs`, and since WP9.1b-1
-`budget.rs`, `base.rs`, `placement.rs`, and since WP9.1b-2 `economy.rs`), the profile format `crates/sf_data/src/ai_profile.rs`, the data
+`budget.rs`, `base.rs`, `placement.rs`, since WP9.1b-2 `economy.rs`, and since WP9.1c-1 `production.rs` and `army.rs`), the profile format `crates/sf_data/src/ai_profile.rs`, the data
 `assets/ai/normal.ron`, the driver
 `tools/sf_headless/src/run.rs` (`run_full`, `run_watched`), the scenarios `assets/scenarios/ai_fog.ron`, `ai_base.ron`, `ai_noore.ron`,
-`ai_boxed.ron`, `ai_economy.ron`, `ai_rebuild.ron`. Tests: `crates/sf_ai/tests/fence.rs`, the unit tests in each module,
-`tools/sf_headless/tests/ai_fog.rs`, `ai_base.rs`, `ai_rules.rs`, `ai_economy.rs`, `ai_perf.rs`.
+`ai_boxed.ron`, `ai_economy.ron`, `ai_rebuild.ron`, `ai_deadlock.ron`, `ai_scout.ron`. Tests: `crates/sf_ai/tests/fence.rs`, the unit tests in each module,
+`tools/sf_headless/tests/ai_fog.rs`, `ai_base.rs`, `ai_rules.rs`, `ai_economy.rs`, `ai_production.rs`, `ai_perf.rs`.
 
 ## Where it lives: outside the simulation, to the simulation's rules
 
@@ -161,7 +162,7 @@ and of the defaults), `every_number_is_checked_at_both_ends_when_the_file_is_rea
 `a_profile_without_the_base_numbers_of_wp9_1b_reads_with_the_defaults`. Acting since WP9.1b-1: the schedule numbers, `power_margin`,
 `max_parallel_builds`, `silo_percent` (as the cap of what a build saves up), `blocked_ticks`, `placement_cap`, `lane`, the aprons.
 Acting since WP9.1b-2: `harvesters_per_refinery`, `repair_below_percent`, `silo_percent` (now also the silo rule) and `blocked_ticks`
-(also the backoff of repair and of a refused harvester order). `reserve` and the army numbers are for WP9.1c.
+(also the backoff of repair and of a refused harvester order). `reserve` acts since WP9.1c-1 (production), the army numbers in part (see "The army, as far as 9.1c-1 goes").
 
 ### State
 
@@ -221,7 +222,7 @@ measurement.
 `economy::turn`, every 40 ticks (manager 0 of the rotation: thinks 0, 4, 8, ... of the AI). Three rules in this order. No new profile
 number: the numbers are `harvesters_per_refinery` (2), `silo_percent` (90), `repair_below_percent` (70) and `blocked_ticks` (600, also the
 backoff of a repair and of a refused harvester order), all of them in `normal.ron` since WP9.1a. The ones the economy does not use yet are
-`reserve` (it is for the army, WP9.1c: the harvester order ignores it) and the army numbers.
+`reserve` (it is for production since WP9.1c-1; the harvester order ignores it) and the army numbers.
 
 1. **Harvesters.** `have` = own harvester units + harvester items in own factory queues (the free one that comes with a refinery counts);
    `want` = standing refineries x `harvesters_per_refinery`. When `have < want`, **no harvester is queued** (at most one in flight), a
@@ -289,7 +290,8 @@ to pay it and nothing can bring credits in. The sim never refuses for lack of mo
 * The construction turn does not count a structure that is being sold (`base::have` and the standing kinds skip `selling`), so a goal entry whose
   structure was sold is open again and is rebuilt normally, at full price, when the money comes.
 * New state, hashed after the economy state in this order: `stalled_turns`, `rescue_used`, `sales`, `rescue_after`.
-* The whitelist gains `Sell`: `BuildStructure`, `QueueUnit`, `Repair`, `Sell`.
+* The whitelist gains `Sell`: `BuildStructure`, `QueueUnit`, `Repair`, `Sell`. (WP9.1c-1 adds `SetRally` and `Order { Move }`: "The commands the AI
+  sends now".)
 
 **Arithmetic with the shipped prices** (refund 500 thousandths at full hit points): vehicle factory 750, radar 450, defence tower 250, barracks 200, silo
 125, power plant 150 (never sold). A refinery costs 1,200, so one sale rescues a refinery lost at 0 credits only when at most 750 of it is
@@ -380,6 +382,182 @@ worst think in the crowd was 190 to 730 us in most runs and **1,173 us and 4,130
 the build without it also had a spike of 940 us; the economy turn costs microseconds, so those look like scheduling spikes of a shared
 machine, but that is not proven: the 1 ms worst think is a printed measurement and not a guarantee (see above).
 
+## Production (WP9.1c-1)
+
+`production::turn`, every 40 ticks (manager 2 of the rotation: thinks 2, 6, 10, ... of the AI, ten ticks after the construction turn). Off
+(`Profile::makes_units()` false) for a profile with an empty `unit_mix` and no scout: the frozen profiles of the WP9.1b scenarios, whose
+checksums therefore stay what they were. Three steps in order:
+
+1. **Verify.** `units_sent` holds, per unit order of the last turn (ascending by factory id), `(factory, kind, tick, how many of the kind the
+   player had, own units plus queue items, before the order)`. When the player does not have more of the kind now, the simulation refused
+   the order (a prerequisite, the queue limit, a factory sold meanwhile), and the kind goes into `blocked_until` for `blocked_ticks`; a
+   refused scout is also taken back from `scouts_sent`. (A unit of the kind that died within the 40 ticks looks like a refusal and costs
+   the kind 600 ticks: accepted, not measured.)
+2. **Rally** (P1). Every complete factory (barracks, vehicle factory, ...; `Own.factory` with no record counts as "no rally point") whose
+   rally point is not the gather cell gets one `SetRally { factory, cell: Some(gather) }`; `rally_backoff[factory] = now + blocked_ticks`
+   holds it back until the observation shows the point, the factory is gone or the time is up. The gather cell is
+   [`army::ensure_gather`](#the-gather-cell). The sim sends each new unit (the free harvester of a refinery excepted) to the rally point with
+   `Order::Move`; a harvester bought through the queue goes there too and mines on from there (`ai_scout`: the delivered ore rises in every window
+   of 2,000 ticks, 200 to 1,600; not compared with a run without the rally point, which the AI cannot be told to leave out: the ore field lies beside the gather cell).
+3. **Queue** (P3). One unit at a time, until nothing can be queued:
+   * **Economy first.** Nothing while `economy::harvester_wanted` (fewer harvesters, queued ones included, than standing docks times
+     `harvesters_per_refinery`, and a factory, ore on the map and the kind not blocked: the economy turn, which runs one think earlier in the rotation, buys it). An emergency build stalled for lack of money needs no check of its own: it is stalled only with no free credit at all.
+   * **The scout first.** `scout_due`: the profile has a scout kind, `scouts_sent < scouts_max`, no scout is alive or queued, and it is the first
+     (`tick >= scout_tick`, 600) or a replacement (`scout_retry`, 3,000 ticks after the AI saw the last one lost). Until the first scout is ordered
+     **no unit of the mix is queued** (unless the scout kind is blocked), so the first unit made is the scout.
+   * **Else the kind furthest below its share.** Among the kinds of `unit_mix` that are not blocked and have a factory with room, the one with
+     the smallest `have_k / weight_k` (cross-multiplied, `have_k * w_j < have_j * w_k`; integer division would tie them), ties by list
+     order. `have_k` counts the player's units and queue items of the kind and what this turn has ordered already.
+   * **Which factory.** The complete factory of the kind's function (`Lens::unit_factory`) with the shortest queue, the lowest id among
+     equals, with fewer than `max_queue` (2) items, and **at most one order per factory per turn**.
+   * **How much money.** `free = budget::free` less what this turn has ordered; an order needs `free >= holdback + price`. `holdback` is 0 with
+     **no goal entry open** (`base::goal_open`: some `(kind, count)` of the build list has fewer than `count` standing or going up, blocked
+     or not); else the `reserve` (300) plus **what the construction turn is saving for** (`base::next_build`: its choice and the power rule,
+     priced as step (5) of the construction turn does, `base::saving_for`: the price, or what the stores can hold at `silo_percent` when that
+     is less). So production and construction read the same stateless `budget::free`, a queued unit is booked once, and units cannot starve
+     the goal list. **The scout is held back by the `reserve` alone** (not by the next goal's price: it has to go while the list is open, and
+     400 credits delay the list a little); with no goal open nothing is held back.
+
+Decisions this follows (Tijmen, 12-11-2026, the orchestrator's recommendations): a dedicated `scout` unit (400 credits), one per match and at
+most one replacement; production holds back the price of the next goal entry, not just `reserve`.
+
+**Measured, and the consequence** (`ai_scout`, M1's map and credits: 4,000, release): the list of ten entries (7,700 credits of structures at list
+prices, a third power plant by the power rule, two more harvesters of 1,100) has its last structure ordered at **tick 15,650** (eleven builds, at 10, 250, 810,
+1,090, 1,410, 7,090, 9,890, 12,410, 13,490, 14,530, 15,650), so with the holdback the first army unit is queued at **tick 15,700** and the army at the gather cell is 0, 0, 0, 1, 4
+at ticks 4,000, 8,000, 12,000, 16,000, 20,000. The same AI with the goal price left out of the holdback (the `reserve` alone, an experiment,
+reverted) buys a rifleman at 1,140, has 7 army units at the gather cell at tick 2,000 and 31 at 20,000, and **builds no vehicle factory**: no tank and
+one harvester (the free one of the first refinery) at tick 20,000, because every credit above 300 goes into infantry. So the decision
+(hold the goal's price back) is what keeps the base growing, and it is also why there is no army for the first 15,000 ticks on a 4,000-credit
+start. (This is the cost of the order of the list, which puts two refineries, a vehicle factory, two towers, a radar and the advanced defences before any
+unit.) **WP9.1c-2's attack timing (`first_attack_tick` 2,400, `max_wait` 3,600, `min_units` 4) will see no army before tick 15,700 on M1 with
+this profile**; shortening the goal list for the opening or letting the army have a share of the income is a decision for Tijmen, not made here.
+
+## The army, as far as 9.1c-1 goes
+
+`army::turn`, every 40 ticks (manager 3: thinks 3, 7, 11, ...). Also off for a profile that makes no units. **No army unit attacks in this
+WP.** `AiState::directive` (`Directive { posture: Posture::Gather, target: None }`, hashed) is the seam for WP9.1c-2: the army manager of
+that WP writes the posture and a function turns it into orders; here the posture is always `Gather` and nothing reads the target.
+
+### The gather cell
+
+`army::ensure_gather` (rule P2), computed once into `AiState::gather` and worked out again only when it is `None` (no anchor yet, or no cell
+found) or its cell is no longer open ground (`Lens::ground`). From the middle of the own standing anchor (the lowest id) `gather_distance`
+cells towards the middle of the map, an integer step on the larger axis (a tie goes to x; the other axis is `d * dist / |d_large|`, truncated;
+clamped to the map), then the first cell in the order **ring, y, x** over rings 0 to 3 (49 cells at most) that is open ground, under no
+structure the AI knows (own, visible or remembered), **off the apron** of an own factory or dock (`placement::apron`, with the
+profile's apron sizes) and **more than `lane + 2` cells (`placement::gap`) from every own structure**. On M1 for the base at (12, 68):
+the middle is (14, 70), the map's (48, 48), so ten cells along x and 22 * 10 / 34 = 6 up: **(24, 64)** (pinned,
+`the_gather_cell_is_ten_cells_from_the_base_towards_the_middle_of_the_map`; the lane, the apron and the "kept" rules have their own tests with
+the expected cells worked out by a short script of the rule, apart from the code). `gather_distance` is **10** now (was 6, a placeholder
+inside the base: the anchor is 4 x 4 and the build radius 8). No `plan_route`: an unreachable cell shows as units going `Idle` elsewhere,
+which the gather rule below counts.
+
+### The scout
+
+`army::scout` (rule A2). The first own unit of the profile's scout kind that appears becomes `scout` (leg 0). The legs (`army::waypoints`) are the start
+sites of the other players in ascending player id, then the centres of the four map quarters (NW, NE, SW, SE): on M1 `(72,14) (24,24) (72,24)
+(24,72) (72,72)`. **Each leg is ordered once** (`scout_leg_sent`): `Order { [scout], Move(waypoint middle) }`, whatever the scout's order is
+(the one exception to "only an idle unit is ordered", because a waypoint on a structure is a `Move` that never ends: measured, the scout
+stands beside the enemy centre for ever with its `Move`). The leg advances when the scout is within 3 cells (Chebyshev) of the waypoint (and the next leg is
+ordered in the same turn) or when `scout_patience` (1,200) ticks have passed since the order; after the last leg nothing is ordered, ever (no
+loop). A scout that is gone from the observation sets `scout_gone_at`; so does an ordered scout that is neither a unit nor in a queue
+(lost before it came out); the production turn buys a replacement `scout_retry` (3,000) ticks later, at most `scouts_max` (2) in the match.
+What the scout learns needs no code: `memory::update` records every structure it sees.
+
+### Gathering
+
+`army::gather_units` (rule A7). An **army unit** (`army::is_army`) is an own unit with no footprint that is armed and mobile (`Own.armed`,
+`Own.mobile`: the weapon table's loadout and the movement class of the kind), not a harvester kind and not the scout. One that is **`Idle`**
+and farther than `gather_radius` (8, Chebyshev) from the gather cell gets `Order { Move(gather middle) }`, `gather_group` (19, the largest
+formation of `sim.ron`) units to a command in ascending id order, **at most `GATHER_COMMANDS_PER_TURN` = 2 commands per turn**. `sent[id] = (tick of
+the last order, how many without arriving)`: a unit is not ordered again within `resend_ticks` (120), and after `gather_tries` (3) orders
+without arriving it is left where it is; an entry goes when the unit is within the radius (so a unit that wanders off later starts again
+with a first order) or is dead (`sent` is pruned to the live units every turn). A unit with any order but `Idle` is never ordered: how
+the AI learns that an order had no effect is always the observation (still `Idle` far away: refused or given up after `replan_max`).
+
+### State
+
+New in `AiState` with WP9.1c-1, all in the digest in this order after the rescue state: `gather: Option<Cell>`, `rally_backoff: BTreeMap<EntityId,
+Tick>`, `units_sent: Vec<(EntityId, Kind, Tick, u32)>`, `scout: Option<EntityId>`, `scout_leg: u8`, `scout_leg_sent: Option<Tick>`, `scouts_sent:
+u8`, `scout_gone_at: Option<Tick>`, `directive` (posture number and target), `sent: BTreeMap<EntityId, (Tick, u8)>`. Pinned by
+`the_digest_of_the_base_state_is_pinned` (a literal, now `0xe7fb6ca95910959e`, with two entries in every map and list so that an iteration in reverse
+fails it) and `every_part_of_the_production_and_army_state_moves_the_digest` (24 changes); the profile digest hashes the new numbers
+(`the_digest_sees_every_number_and_list`).
+
+### The numbers (profile, data)
+
+New in `assets/ai/normal.ron`, all with defaults so that the frozen profiles still read (the five of WP9.1b have an empty `unit_mix` now, see
+"Pins that moved"): economy `max_queue` 2 (1 to 5); army `gather_radius` 8 (1 to 32), `gather_group` 19 (1 to 64), `gather_tries` 3 (1 to
+10), `resend_ticks` 120, `scouts_max` 2 (0 to 4), `scout_tick` 600, `scout_patience` 1200, `scout_retry` 3000; per faction `scout: Some("scout")`
+(a role checked like a unit of the mix: infantry or vehicle, open to the faction, with a cost, its factory in the build list; no default:
+**left out is no scout**, where the design memo had "the first rifleman is the scout"). `gather_distance` is 10. `unit_mix` may be empty
+(`an_empty_unit_mix_is_a_profile_that_makes_no_units`). Pinned by `the_shipped_profile_is_pinned` (literals), `every_number_is_checked_at_both_ends_when_the_file_is_read`,
+`a_profile_without_the_numbers_of_wp9_1c_1_reads_with_the_defaults` and `the_scout_is_checked_like_a_unit_of_the_mix` (`crates/sf_data/src/ai_profile/tests.rs`).
+Not acting yet: `attack_value`, `max_wait`, `min_units`, `first_attack_tick`, `defend_ticks` (WP9.1c-2).
+
+### The commands the AI sends now
+
+`BuildStructure`, `QueueUnit`, `SetRally`, `Repair`, `Sell` (the rescue) and `Order { ids, Move(..), queued: false }`: no `Attack`, no
+`AttackMove`. `the_ai_of_ai_scout_sends_only_what_the_list_allows_and_at_a_bounded_rate` checks every command of 20,000 ticks, and
+`over_forty_thousand_ticks_...` of 40,000: the most in any 1,000 ticks is **6** in both (bound 10), every `Order` is a plain `Move`.
+
+### Scenario `ai_scout`
+
+`assets/scenarios/ai_scout.ron`, `ai_scout_defs/` (a frozen copy of the shipped definitions and of `assets/ai/normal.ron` as 9.1c-1 leaves it, and a
+match file of its own): M1's map, player 0 the AI (Meridian, 4,000 credits as in `m1.ron`), player 1 a static construction centre at (72, 14) with a
+power plant at (78, 20) and nothing that shoots (the real opponent of M1, with its tower, is the test of WP9.1c-2). No scripted command. 20,000
+ticks. Checksum `0x30f01b24ba9edf1f` (`ai_scout.expected`), AI digest `0x584e81c7938e7859`; in the CI list and so in the Linux/Windows log
+comparison, which includes the AI digest.
+
+Measured (`tools/sf_headless/tests/ai_production.rs`, every number printed by its test):
+
+| What | Tick |
+|---|---|
+| the scout is queued (the first unit; `scout_tick` 600) and the barracks gets its rally point | 1,100 |
+| the scout is sent to the first leg, (72, 14) | 1,270 |
+| the AI's memory holds the enemy construction centre (the scout's sight is 8) | **2,351** |
+| the scout stands within 3 cells of the start site | 2,439 |
+| the other four legs are ordered | 2,470, 3,190, 3,870, 4,870 |
+| the first harvester is queued (the vehicle factory stands), and the vehicle factory gets its rally point | 2,080, 2,100 |
+| the last structure of the goal list is ordered | 15,650 |
+| the first army unit is queued | **15,700** |
+
+Without a scout (`scouts_max` 0) the memory never holds the enemy centre in 20,000 ticks (nothing else leaves the base, the army only
+gathers), and no `Order` is sent at all. A scout lost at tick 3,000 is replaced at **8,060** (`scout_retry` 3,000 puts it after 6,000; the
+money decides the rest: free credits stay at 0 while the goal list spends everything, and the scout needs the reserve and its 400), the
+replacement is sent to leg 0 again, and with the second one lost as well nothing is bought again (`scouts_max` 2).
+
+### Pins that moved (WP9.1c-1) and why
+
+Every AI digest moved (the profile digest hashes the new numbers, and the state layout has the new parts); **no checksum of an earlier phase
+moved** (`golden.rs` and every `.expected` but the new `ai_scout`). The frozen profiles of the seven AI scenarios of 9.1a and 9.1b got
+`unit_mix: []` (and have no `scout`), a deliberate edit of the frozen copies (a note at the top of each file): with the unit mix they had, production
+and rally would move their checksums, and "the managers off" is what keeps them meaningful. The cause is measured by
+`the_managers_stay_off_for_the_frozen_profiles_and_the_old_mix_would_move_every_checksum`: each runs on its frozen profile to the pinned
+checksum with no `SetRally`, no `Order` and no unit but a harvester ordered and the state of the new parts at its start values, and with the
+old unit mix put back in the profile ends on another checksum:
+
+| Scenario | Checksum (pinned, unchanged) | With the old unit mix (managers on) | AI digest before | AI digest after |
+|---|---|---|---|---|
+| `ai_fog` | `0x768b77651509db8c` | `0x55dccaee5a3b70f9` | `0xce7a0b6fb57c9cee` | `0xacb2c8e5fb876451` |
+| `ai_base` | `0xb38833330ef15577` | `0xf185f21cef6de9ac` | `0x8630b1327e0feeb9` | `0x4dd11cc733dd4b46` |
+| `ai_noore` | `0x4c0e8ed5d1f89874` | `0xe5b92f46ee9b48db` | `0xe10155cd63724d45` | `0x94e97ccd07405cba` |
+| `ai_boxed` | `0x212468ddebc97ff5` | `0x7b02a0328176580c` | `0x31c680678a61e05c` | `0x5b7d1adaf26aa90f` |
+| `ai_economy` | `0x432124f0b362c856` | `0xdd0ec233993b6920` | `0xc79c0cbab7c6ddb7` | `0xf94be57bd5f168e4` |
+| `ai_rebuild` | `0x92e27c78699ea7dd` | `0x91685b8297c593fa` | `0x15afee5ac92be396` | `0xdf9bfa7c2721ec51` |
+| `ai_deadlock` | `0x368ee3baa5362c04` | `0xa468d64dc6714a5a` | `0x261396ec364c3dc4` | `0x3cba4a139131b094` |
+
+(The "with the old mix" column puts `rifleman 4, rocket_trooper 2, light_tank 3` into each frozen profile, even where the frozen profile had no
+rocket trooper; it shows that the managers' commands move the checksum, not the exact old value. The `ai_fog` run moves because the scripted
+scout is an armed unit the army turn gathers.) `sf_data/tests/buildings.rs` lists `ai_scout_defs` among the copies with building blocks.
+
+### Cost
+
+`ai_perf.rs`, release, this container, load average 0.7 to 2: `ai_scout` alone 0.21 us per AI per tick (worst think 52.6 us, 900 thinks), with
+5,000 wanderers 9.82 us (worst think 292.5 us), against 0.33 and 9.14 us (worst 63.4 and 173.5 us) for `ai_fog` in the same run: the observation of
+5,000 entities per think dominates, as before. The production turn and the army turn on their own (`what_one_production_turn_and_one_army_turn_cost_on_their_own`,
+20,000 turns each on the observation of `ai_scout` at tick 17,000 with 200 more idle soldiers added): see the PR body for the final numbers.
+
 ## The schedule
 
 An AI thinks when `(tick + stagger * player) % think_interval == 0` (`schedule::due`; `tick` is the number of ticks the world has run, the
@@ -387,8 +565,8 @@ tick the next step runs). Shipped: interval 10 (half a second), stagger 3. So tw
 check requires `think_interval / gcd(think_interval, stagger) >= 8`, the most players of a match (player 0 thinks at tick % 10 == 0,
 player 1 at 7, player 2 at 4, ...). Each think runs the observation, the memory update and **one** manager in rotation, so each of the
 four managers (`Economy`, `Construction`, `Production`, `Army`, numbered 0 to 3, which are hashed) runs every 40 ticks. **Construction has
-rules since WP9.1b-1** (above) and **economy since WP9.1b-2** ("The economy"); the other two are still stubs whose turn only counts
-(`manager_runs`): production and army are WP9.1c.
+rules since WP9.1b-1** (above), **economy since WP9.1b-2** ("The economy"), **production and the first half of the army since WP9.1c-1**
+("Production", "The army, as far as 9.1c-1 goes"). The army manager's attack half is WP9.1c-2.
 
 **The driver.** `Ai::due(tick)` and `Ai::think(&World, &mut Vec<Command>)`, called by the host immediately before `World::step`; the host
 schedules the commands for `world.tick()` under the AI's player id, AIs in ascending player id. In `sf_headless` that is `run::run_full`
@@ -405,12 +583,15 @@ faction:
   first entry it does not satisfy (WP9.1b), which gives the opening, the tech choice and rebuilding with one rule. Checked: every role
   exists and is open to the faction, is a buildable structure (not the anchor), every `requires` of an entry is earlier in the list
   (the anchor counts as always there), a role that comes again asks for more than before, counts 1 to 32.
+* `scout`: (WP9.1c-1, optional, per faction) the role of the scout, checked like a unit of the mix; left out: no scout. `unit_mix` may be
+  empty (the AI then makes no units, the frozen profiles of the WP9.1b scenarios).
 * `unit_mix`: `[(role, weight)]`, the share of the army each role aims at. Checked: infantry or vehicle (no vessel, no harvester: the
   economy makes those), open to the faction, has a cost, listed once, weight 1 to 1000, the factory of its category and everything its
   `requires` names are in the build list.
 * Numbers: `think_interval`, `stagger`; `economy` (`power_margin`, `harvesters_per_refinery`, `reserve`, `max_parallel_builds`,
-  `silo_percent`, `repair_below_percent`, `blocked_ticks`, `placement_cap`); `army` (`attack_value`, `max_wait`, `min_units`,
-  `first_attack_tick`, `defend_ticks`, `gather_distance`). Every one is range-checked when the file is read; the values are placeholders of the memo.
+  `silo_percent`, `repair_below_percent`, `blocked_ticks`, `placement_cap`, `lane`, the aprons, `max_queue`); `army` (`attack_value`, `max_wait`, `min_units`,
+  `first_attack_tick`, `defend_ticks`, `gather_distance`, `gather_radius`, `gather_group`, `gather_tries`, `resend_ticks`, `scouts_max`, `scout_tick`,
+  `scout_patience`, `scout_retry`). Every one is range-checked when the file is read; the values are placeholders of the memo.
   In WP9.1a only `think_interval` and `stagger` acted; which act since WP9.1b-1 is under "The base".
 
 The shipped Meridian list: power_plant 1, refinery 1, barracks 1, power_plant 2, vehicle_factory 1, defence_tower 1, refinery 2, radar 1,
@@ -459,7 +640,13 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
 
 ## Not done
 
-* **WP9.1c**: production, army, scouting, attacks, defence posture. Defences are placed only towards the other players' start sites.
+* **WP9.1c-2**: attacks, the defence posture, the attack timing and target, marching and finishing, `ai_vs_passive`, `ai_raid`. Defences are placed
+  only towards the other players' start sites.
+* **WP9.1c-1 gaps.** No army before tick 15,700 on M1's credits (see "Production"; a decision for Tijmen). A scout that dies on the way is replaced once
+  and not told where it died; the scenario's enemy has no gun, so a scout under fire is not run. The gather cell is not checked for a route from
+  the base (no `plan_route`): a cell behind rock shows only as units idle far away, which are ordered `gather_tries` times and then left. A unit of
+  the mix that dies within the 40 ticks after its order looks like a refused order and blocks its kind for `blocked_ticks`. The army does not
+  defend: it has no rule for a base under attack until WP9.1c-2 (what an idle unit does by its own stance, `targeting.md`, is all there is).
 * Not checked: whether a lane of one cell is wide enough for harvester traffic (bodies are 1.5 cells); whether `Despawn` of a structure
   leaves the same state as destruction by weapons: `ai_rebuild` removes the refinery and the barracks with `Despawn` and only damages the plant
   by fire, so a structure shot to pieces and rebuilt is not run.

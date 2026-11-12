@@ -209,8 +209,7 @@ fn the_first_unit_is_the_scout_it_visits_each_leg_once_and_finds_the_centre() {
     assert!(k.seen_tick.0 >= ANCHOR_KNOWN);
 }
 
-/// Measured (release and debug, the same): the scout is queued at tick 1100 (the barracks stands at 1096), comes
-/// out and is sent to the first leg at 1270; the legs follow when it is within 3 cells of the one before (the
+/// Measured (release): the scout is queued at tick 1100, comes out and is sent to the first leg at 1270; the legs follow when it is within 3 cells of the one before (the
 /// first at tick 2439) and when the army turn after that finds it.
 const FIRST_UNIT_TICK: u64 = 1100;
 const SCOUT_LEG_TICKS: [u64; 5] = [1270, 2470, 3190, 3870, 4870];
@@ -1607,13 +1606,17 @@ fn the_army_at_the_gather_cell_by_tick_on_the_first_matchs_map() {
         &f,
         |c| matches!(c, Command::QueueUnit { kind, .. } if [RIFLEMAN, ROCKET, TANK].contains(kind)),
     );
+    let builds = sent(&f, |c| matches!(c, Command::BuildStructure { .. }));
     println!(
-        "army at the gather cell: {at:?}; first army unit queued at {:?}",
-        first_army.first()
+        "army at the gather cell: {at:?}; first army unit queued at {:?}; the last structure of the list ordered at {:?}",
+        first_army.first(),
+        builds.last()
     );
-    // Measured. The goal list (ten entries, 9,300 credits of structures, two harvesters) takes the first 15,000
-    // ticks of 4,000 credits and the ore of one refinery, and production holds back the next goal's price, so
-    // the first army unit is queued at tick 15,700 and there is no army at 4,000, 8,000 or 12,000.
+    assert_eq!(builds.last(), Some(&LIST_DONE_TICK));
+    // Measured. The goal list (ten entries, 7,700 credits of structures at list prices and a third power plant,
+    // two more harvesters) takes the 4,000 credits and the ore the harvesters bring until its last structure is
+    // ordered at tick 15,650, and production holds back the next goal's price, so the first army unit is queued
+    // at tick 15,700 and there is no army at 4,000, 8,000 or 12,000.
     assert_eq!(
         at.values().copied().collect::<Vec<_>>(),
         ARMY_AT_GATHER,
@@ -1625,6 +1628,9 @@ fn the_army_at_the_gather_cell_by_tick_on_the_first_matchs_map() {
 /// The army at the gather cell at ticks 4,000, 8,000, 12,000, 16,000 and 20,000 of `ai_scout`.
 const ARMY_AT_GATHER: [usize; 5] = [0, 0, 0, 1, 4];
 const FIRST_ARMY_TICK: u64 = 15_700;
+/// The tick of the last `BuildStructure` of the goal list (the eleventh: a third power plant comes by the
+/// power rule): the list is done and the holdback ends.
+const LIST_DONE_TICK: u64 = 15_650;
 
 // ---- the fence --------------------------------------------------------------------------------------------
 
@@ -1663,9 +1669,7 @@ fn an_army_the_ai_has_not_seen_changes_nothing_it_does() {
     );
     assert_eq!(a.ais[0].digest(), b.ais[0].digest());
     // The control: the AI does see units that come into the scout's sight. A rifleman of player 1 beside the
-    // last leg's waypoint (72, 72) is in the observation at the tick the scout stands there, hit points and
-    // the armed flag included, and the digest is another one (the AI's `known_structures` stays the same: only
-    // structures are remembered).
+    // last leg's waypoint (72, 72) is in the observation (armed flag included) once the scout stands there.
     let mut seen_at = None;
     let s = with_riflemen_at([(90, 90), (91, 90), (74, 70)]);
     let c = run_observed(
@@ -1688,4 +1692,28 @@ fn an_army_the_ai_has_not_seen_changes_nothing_it_does() {
     let t = seen_at.expect("the scout comes within sight of a unit beside its last waypoint");
     assert!((4870..12_000).contains(&t), "{t}");
     assert_ne!(c.world.checksum(), a.world.checksum());
+}
+
+#[test]
+fn harvesters_bought_through_a_rallied_factory_still_deliver_ore() {
+    // The vehicle factory has its rally point on the gather cell, so the harvesters the economy buys walk there
+    // first (the free one of a refinery does not). They mine all the same: the delivered ore rises in every
+    // window of 2,000 ticks. (Measured: 200, 600, 400, 1,050, 750, 1,000, 1,600, 1,200, 600, 930; not compared
+    // with a run without the rally point, which the AI cannot be told to leave out.)
+    let s = load("ai_scout");
+    let mut delivered = vec![0u64];
+    run_observed(&s, &RunOptions::for_scenario(&s), |w, _| {
+        if w.tick().0 % 2000 == 0 {
+            delivered.push(w.ore_delivered(P0));
+        }
+    })
+    .unwrap();
+    println!("delivered ore at 0, 2000, ...: {delivered:?}");
+    assert_eq!(delivered.len(), 11);
+    let windows: Vec<u64> = delivered.windows(2).map(|p| p[1] - p[0]).collect();
+    assert!(windows.iter().all(|&n| n >= 150), "{windows:?}");
+    assert_eq!(
+        windows,
+        [200, 600, 400, 1050, 750, 1000, 1600, 1200, 600, 930]
+    );
 }
