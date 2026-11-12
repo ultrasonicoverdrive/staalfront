@@ -50,6 +50,35 @@ fn tile_color(c: (u8, u8, u8)) -> Color {
     Color(c.0, c.1, c.2, 255)
 }
 
+/// The picture of the item whose slot is `tile`: the tile less its inset all round, the strip (price and
+/// state) and the progress bar at the bottom.
+fn picture_rect(ui: &Ui, look: &SidebarLook, tile: Rect) -> Rect {
+    let scale = ui.scale();
+    let small = f32::from(look.small_px) * scale;
+    let bar_h = (f32::from(look.bar_height_px) * scale).round().max(1.0);
+    let strip_h = (small * f32::from(look.strip_pct) / 100.0).round();
+    let inset = (f32::from(look.picture_inset_px) * scale).round();
+    Rect::new(
+        tile.x + inset,
+        tile.y + inset,
+        tile.w - 2.0 * inset,
+        (tile.h - strip_h - bar_h - inset).max(0.0),
+    )
+}
+
+/// The box of the count badge (the number of this item going up or waiting), top right of `picture`.
+fn count_badge_rect(ui: &Ui, look: &SidebarLook, picture: Rect, count: u8) -> Rect {
+    let scale = ui.scale();
+    let pad = (f32::from(look.text_pad_px) * scale).round();
+    let (w, h) = ui.measure_px(&count.to_string(), f32::from(look.small_px) * scale);
+    Rect::new(
+        picture.right() - w - 2.0 * pad,
+        picture.y,
+        w + 2.0 * pad,
+        h + pad,
+    )
+}
+
 /// The box of the loop sign at the top left of `picture` (WP6.10): the word `words.repeating` at
 /// `repeating_px`, a padding left and right, no padding above or below; the height is whole pixels, rounded up, so the label
 /// that is centred below it (also on whole pixels) never meets it.
@@ -387,12 +416,7 @@ fn draw_tile(
 
     ui.fill(rect, color(c.tile_back));
     // The picture: a coloured tile with the short name.
-    let picture = Rect::new(
-        rect.x + inset,
-        rect.y + inset,
-        rect.w - 2.0 * inset,
-        (rect.h - strip_h - bar_h - inset).max(0.0),
-    );
+    let picture = picture_rect(ui, look, rect);
     ui.fill(picture, tile_color(item.picture.color));
     let label = label_rect(ui, look, picture, &item.picture.label, item.repeating);
     ui.text_px_at(
@@ -405,13 +429,7 @@ fn draw_tile(
     // The count of this item that is going up or waits in a queue, top right.
     if item.count > 0 {
         let text = item.count.to_string();
-        let (w, h) = ui.measure_px(&text, small);
-        let badge = Rect::new(
-            picture.right() - w - 2.0 * pad,
-            picture.y,
-            w + 2.0 * pad,
-            h + pad,
-        );
+        let badge = count_badge_rect(ui, look, picture, item.count);
         ui.fill(badge, color(c.badge_back));
         ui.text_px_at(
             badge.x + pad,

@@ -807,6 +807,7 @@ fn the_loop_sign_never_covers_the_label_of_its_picture() {
         }
     }
     assert!(labels.contains("RIFLE") && labels.len() >= 10);
+    let mut touching_at_ten = std::collections::BTreeSet::new();
     for size in [(1280, 720), (1920, 1080), (800, 600)] {
         for scale in [0.5f32, 1.0, 1.5, 2.0] {
             let mut ui = Ui::new(UiConfig::default());
@@ -818,17 +819,7 @@ fn the_loop_sign_never_covers_the_label_of_its_picture() {
                 4.0,
                 true,
             );
-            let slot = l.slot(0);
-            let inset = (f32::from(f.look.picture_inset_px) * scale).round();
-            let strip =
-                (f32::from(f.look.small_px) * scale * f32::from(f.look.strip_pct) / 100.0).round();
-            let bar = (f32::from(f.look.bar_height_px) * scale).round().max(1.0);
-            let picture = Rect::new(
-                slot.x + inset,
-                slot.y + inset,
-                slot.w - 2.0 * inset,
-                (slot.h - strip - bar - inset).max(0.0),
-            );
+            let picture = picture_rect(&ui, &f.look, l.slot(0));
             let sign = loop_sign_rect(&ui, &f.look, picture);
             for label in &labels {
                 let r = label_rect(&ui, &f.look, picture, label, true);
@@ -836,6 +827,23 @@ fn the_loop_sign_never_covers_the_label_of_its_picture() {
                     !meets(sign, r),
                     "{label} at {size:?} x{scale}: sign {sign:?} meets label {r:?}"
                 );
+                // The moved label does not touch the count badge for a count of 1 to 9 (not at half scale,
+                // where the picture is too small). Two digits are a measured gap, pinned below.
+                if scale >= 1.0 {
+                    for count in [1u8, 9] {
+                        let badge = count_badge_rect(&ui, &f.look, picture, count);
+                        assert!(
+                            !meets(badge, r),
+                            "{label} at {size:?} x{scale}: badge {badge:?} meets label {r:?}"
+                        );
+                    }
+                }
+                if size == (1280, 720) && scale == 1.0 {
+                    let badge = count_badge_rect(&ui, &f.look, picture, 10);
+                    if meets(badge, r) {
+                        touching_at_ten.insert(label.clone());
+                    }
+                }
                 // The label stays inside the picture; at half scale the picture (about 19 px high) is too
                 // small for a sign and a label, there only the first claim holds.
                 if scale >= 1.0 {
@@ -851,4 +859,11 @@ fn the_loop_sign_never_covers_the_label_of_its_picture() {
             }
         }
     }
+    // The gap: with a count of ten or more the badge reaches into the boxes of the widest labels (the
+    // glyph boxes, not necessarily the ink). A change of this set has to be written into `sidebar.md`.
+    let want: std::collections::BTreeSet<String> = ["DECOY", "ROCKT", "SCOUT"]
+        .into_iter()
+        .map(String::from)
+        .collect();
+    assert_eq!(touching_at_ten, want);
 }
