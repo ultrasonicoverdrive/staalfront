@@ -493,7 +493,7 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
     assert_eq!(count_in(&with_cursor, map_area(), sign.plus, 6), 0);
     save(&format!("hurt_t{t0:05}_hp{hurt:03}.png"), &plain);
 
-    // The click sends the command the sim takes; the plant gains 3 hit points a tick under its sign.
+    // The click sends the command the sim takes; the plant gains 1 hit point a tick under its sign (the shipped `hp_per_tick`, WP9.1e).
     let command = repair_mode::click(&snap, ToolMode::Repair, Some(plant), P0).unwrap();
     assert_eq!(
         command,
@@ -503,13 +503,30 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
         }
     );
     scene.command_as(P0, command);
-    scene.run(40);
+    // The gain is the shipped rate on every tick the repair advances: the sim's own rule for a power
+    // shortage (`advances_on` with the owner's speed, `repair.rs` `repair_step`), counted tick by tick.
+    // The scene's plant is its own power source and damaged, so the world is short of power while it heals.
+    let rate = sf_data::repair::RepairSettings::embedded().hp_per_tick;
+    let mut advancing = 0u32;
+    for _ in 0..40 {
+        // The speed is read after the step: inside a step `refresh_power` runs before
+        // `advance_repair_sell`, so this is the speed the repair pass of that tick used.
+        let t = scene.world.tick();
+        scene.world.step();
+        if sf_sim::advances_on(t, scene.world.power_speed_permille(P0)) {
+            advancing += 1;
+        }
+    }
+    scene.sync();
     assert!(scene.world.is_repairing(plant));
     let mid = scene.world.hp_of(plant).unwrap();
+    assert!(advancing > 30 && advancing <= 40, "{advancing}");
+    // Exact: the gain is the rate times the advancing ticks (measured 39 at rate 1, 40 at rate 3).
+    let gained = mid - hurt;
     assert_eq!(
-        mid,
-        hurt + 3 * 40,
-        "3 hit points a tick from the tick after the command"
+        gained,
+        u32::from(rate) * advancing,
+        "{gained} hit points at {rate} a tick, {advancing} ticks counted as advancing"
     );
     // The price by hand: 300 credits * 250 / 1000 for a whole repair = h / 8 credits at h hit points.
     assert_eq!(

@@ -18,7 +18,9 @@ use sf_headless::tournament::{
     play_game, play_seeded, prepare, render_table, run_games, seeds_for,
 };
 
-/// The cap of the smoke games, in ticks. The AIs have built and the first attack waves are out by then.
+/// The cap of the smoke games, in ticks. The AIs have built by then, but since WP9.1c-3's opening no attack has
+/// been launched yet (0 attacks per AI in all four games, measured with `--games 4 --cap 9000` on the merged tree);
+/// the smoke games do not cover an attack, `tournament_decided.rs` does. The cap is left as it is (test time).
 const SMOKE_CAP: u64 = 9_000;
 
 fn assets() -> PathBuf {

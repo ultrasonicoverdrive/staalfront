@@ -16,7 +16,7 @@ Tests are named below. All numbers are placeholders for the balance rounds of ph
 
 | Field | Unit | Bounds | Shipped | Meaning |
 |---|---|---|---|---|
-| `hp_per_tick` | hit points | 1 to 1000 | 3 | what a repairing structure gains per tick at full speed |
+| `hp_per_tick` | hit points | 1 to 1000 | 1 (3 until WP9.1e) | what a repairing structure gains per tick at full speed |
 | `full_cost_permille` | thousandths of the price | 0 to 1000 | 250 | what a repair from 0 to full hit points costs |
 | `sell_ticks` | ticks | 1 to 6000 | 100 | how long a sale takes |
 | `refund_permille` | thousandths of the price | 0 to 1000 | 500 | what a sale pays at full hit points |
@@ -209,6 +209,69 @@ without the rules, 1.25 to 1.38 ms with the rules and nobody repairing and 1.28 
 Base (`origin/main`, built in a copy) against this branch on `wander_5000` in release, six alternating pairs: base 783 to 851 ticks per
 second, branch 816 to 844, the same final checksum `0x38d5e3c43358a889`. A world without the rules pays one `Option` test per tick.
 
+## What moved in WP9.1e (re-pins)
+
+Three pins moved with the rate 3 to 1: `sf_data` `the_shipped_numbers_are_pinned` (3 to 1), the two tick pins of `tools/sf_headless/tests/tournament_decided.rs`
+(1,315 to 1,224 and 5,546 to 2,885), and `crates/sf_game/tests/repair_screenshot.rs` (the plant gains the rate times the number of advancing ticks of the 40, counted with `advances_on` and the owner's power speed: 39 at rate 1 in the scene's power shortage, 940 to 960 thousandths, 40 at rate 3; the old `hurt + 3 * 40` was 40 advancing ticks; the speed is read after each step, the value the repair pass of that tick used, so the pin is exact).
+Cause measured: with `hp_per_tick` put back to 3 in the shipped file, `tournament_decided` gives 1,315 and 5,546 again. The frozen scenarios carry their own numbers
+(`repair_sell` and `silo` 5, `ai_rebuild` and `ai_deadlock` 3) and no `.expected` moved.
+
+## The rate and the wave (WP9.1e)
+
+The construction centre has no `cost` in `unit_defs.ron`, so a repair of it is free (`price_of` returns the building's cost; a structure without a
+price is charged 0 and never waits for money), and repair goes on under fire. At `hp_per_tick` 3 a repairing centre gained 3 hit points a tick
+against about 0.525 hit points a tick from every light tank (35 damage, one shot per 40 ticks, 60 % against a structure), so it out-healed up to five idle tanks
+for ever and six needed 6,052 ticks. Since WP9.1e the shipped rate is **1**.
+
+**This is a game rule that also affects the human player**: the human repairs the same centre for free with the same rate. What it means to the human, at 20 ticks a second
+(1 hit point a tick is 20 a second): a power plant of 600 hit points from nothing to full takes 30 s (10 s at 3); the construction centre of 1,500 takes 75 s from nothing (25 s) and
+22.5 s from 70 % (7.5 s); the largest other structure, 1,200 hit points, 60 s (20 s). A power shortage slows repair further (`repair_step` advances on `speed` thousandths of the ticks:
+in the repair scene the speed was 940 to 960 thousandths while the plant healed, so about 6 % longer). The credits a repair costs are unchanged
+(`full_cost_permille`). Not done, left to Tijmen as separate rule decisions: a repair price for a structure without one (the AI with income would still out-heal), and a pause of
+repair for some ticks after a hit (a new per-entity state in the checksum).
+
+**What the AI does with it.** The attack gives up in two cases (`army.rs`): `patience_out` (no victim in sight for `attack_patience` 2,400 ticks) and `stuck` (the victim's hit points
+made no new low for 2,400 ticks). There is **no** rule "kill within 2,400 ticks". A centre that repairs as fast as it is shot never makes a new low, so `stuck` fires; one that is
+shot a little faster than it heals keeps making new lows, however slowly, and the attack goes on.
+
+Measured (`tools/sf_headless/tests/repair_rate.rs`, `measure_kill_ticks` with `--ignored`, release; seed 1 for the world and the AI). The fixture is a **best case for the
+attackers**: N light tanks of seat 0 stand in range beside the enemy centre and are never shot at, there are no towers, the defender (seat 1) has a centre, 0 credits and the AI's
+repair below 70 %, and both profiles have `first_attack_tick` 72,000 so nobody attacks (the tanks fire as idle units do). Kill tick, "never" = not within 40,000 ticks;
+"stretch" = the longest run of ticks, from the first hit, in which the centre made no new hit-point low (what `stuck` compares with 2,400):
+
+| `hp_per_tick` | 2 tanks | 3 | 4 | 5 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|---|
+| 3 (before): kill | never | never | never | never | 6,052 | 851 | 332 |
+| 3: stretch | 39,549 | 39,709 | 39,789 | 39,829 | 40 | 39 | 33 |
+| 2: kill | never | never | 10,251 | 1,771 | 971 | 531 | 290 |
+| 2: stretch | 39,549 | 39,709 | 40 | 40 | 39 | 35 | 33 |
+| 1 (shipped): kill | 20,451 | 2,051 | 1,131 | 806 | 607 | 411 | 251 |
+| 1: stretch | 40 | 40 | 36 | 35 | 34 | 34 | 31 |
+
+Where the centre stands a "stretch" of about 39,500 to 39,800 ticks means no new low after the first few hits: `stuck` would end the attack. At rate 1 no tank count from 2 up has a
+stretch near 2,400 (all 31 to 40 ticks), so `stuck` never fires and the attack goes on until the centre falls. At rate 2 four tanks or more also keep making new lows (stretch 40), but they
+need 10,251 ticks with four tanks; two and three tanks are stuck. The stretch is read every tick, the AI reads the hit points at its thinks every 10 ticks, so its stretch is about this one (sampled at seat 0's thinks: 30 to 40 ticks, per tick 31 to 40, both far under 2,400).
+The rate cannot be varied in a scratch `--assets` copy (the world is given `RepairSettings::embedded()`, compiled in from the shipped file): the rows for rates 2 and 3 were taken by editing the shipped
+`assets/config/repair.ron`, rebuilding and restoring the file. (An earlier version of this table, with other seeds and a 20,000-tick cap, put two tanks at "never" at rate 1;
+with a 40,000-tick cap two tanks kill at tick 20,451.)
+
+The 100-game `sf_headless tournament assets/matches/m1_duel.ron` (release, one thread, rate changed by editing the shipped file and rebuilding). First look on main 1d210ee, before WP9.1c-3, and the real
+Baseline B on main d4c06f4 (with WP9.1c-3's opening), where rate 3 is #130's own run:
+
+| Tree | `hp_per_tick` | decided of 100 | seat 0 / seat 1 | median ticks (decided) | Meridian / Veyran wins (50 games) | stalemate / capped | distinct coarse (plain / last loss rounded) |
+|---|---|---|---|---|---|---|---|
+| 1d210ee | 3 | 7 | 0 / 7 | 51,156 | 4 / 0 | 1 / 92 | 27 / 51 |
+| 1d210ee | 2 | 14 | 1 / 13 | 50,608 | 6 / 1 | 0 / 86 | 32 / 51 |
+| 1d210ee | 1 | 59 | 0 / 59 | 43,276 | 18 / 12 | 0 / 41 | 69 / 83 |
+| d4c06f4 | 3 | 8 | 1 / 7 | 48,063 | 3 / 1 | 0 / 92 | 31 / 53 |
+| d4c06f4 + this WP | 1 | **35** | 25 / 10 | 39,632 | 9 / 13 | 0 / 65 | 54 / 75 |
+
+On the merged tree rate 1 decides 35 games, 4.4 times the 8 at rate 3, and the seat-1-only pattern is gone (25 won by seat 0, 10 by seat 1). The rate 2 row exists only on the older tree.
+
+**Why 1 and not 2.** Not because of the attack patience: at 2 four or more tanks are not stuck either. At 2 the fixture needs 10,251 ticks for four tanks and cannot kill with three, at 1 three tanks
+need 2,051 and two tanks 20,451; and the tournament decides 14 games at 2 and 59 at 1 on the older tree (Baseline B has no rate 2 row: 8 at 3 and 35 at 1). Rate 1 is at least as good as rate 2 on every number measured; its cost is the slower repair for the human
+(30 s for a power plant instead of 15 s at 2). Whether 2 would be the better rule for play is not measured here.
+
 ## Mutations (each reverted, each caught)
 
 Run on the committed code with one change at a time; the failing tests are named. Unit tests are
@@ -226,6 +289,7 @@ Run on the committed code with one change at a time; the failing tests are named
 | a repair stops when it cannot pay | `a_repair_waits_without_money_and_goes_on_when_there_is_some`, scenario |
 | a sale does not wake the match | scenario `the_opponent_sells_its_last_structure_and_is_defeated_in_the_tick_it_starts` |
 | a tower being sold still fires | `a_tower_being_sold_fires_nothing_and_drops_its_target` (`tests/defences.rs`) |
+| `hp_per_tick` back to 3 (WP9.1e) | `with_the_shipped_rate_idle_tanks_keep_taking_the_repairing_centre_down_and_stuck_never_fires` (kills at rate 3 `[never, never, never, never, 6,052, 851, 332]`), `the_shipped_numbers_are_pinned`, `tournament_decided` |
 | a sale one tick too long | `a_sale_takes_its_ticks_...`, the tower test, scenario |
 | `sell_ticks` and `refund_permille` swapped in the bridge | `each_repair_number_arrives_as_itself` |
 | a right click in a mode orders the selection | `the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing` |
