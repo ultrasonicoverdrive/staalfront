@@ -136,7 +136,7 @@ fn the_commands_of_a_duel_game_stay_at_a_bounded_rate() {
     // One duel game, new against old, 40,000 ticks (the armies are out in it: the old one launches at about
     // 9,700, the new one a little later). A spam of army orders (an order each army turn for every unit, or a
     // march command with no chunk bound sent again and again) would multiply the rate; the measured numbers are in
-    // docs/rules/ai.md "Groups", and the bound is about twice them.
+    // docs/rules/ai.md "Groups", and the bound is 1.3 times the higher of them.
     let dir = TempDir::new("ai_duel_rate");
     let (root, path) = duel_dir(&dir, 0);
     let setup = load_setup(&root, &path).unwrap();
@@ -162,5 +162,7 @@ fn the_commands_of_a_duel_game_stay_at_a_bounded_rate() {
     }
 }
 
-/// The most commands per 1,000 ticks (in hundredths) an AI may send in the duel game above.
-const RATE_BOUND: u64 = 350;
+/// The most commands per 1,000 ticks (in hundredths) an AI may send in the duel game above: the higher measured
+/// rate times 1.3, rounded up to one decimal (fix round 1 of WP9.2a, merged tree: 65 and 52 commands in 37,931
+/// ticks, 1.71 and 1.37 per 1,000; 1.71 x 1.3 = 2.22, so 2.3). A doubling of the orders fails it.
+const RATE_BOUND: u64 = 230;

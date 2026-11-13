@@ -1,5 +1,5 @@
 // The army is out and the guard answers a raid (WP9.2a, docs/rules/ai.md "Groups"): the AI of `ai_raid` with the profile of
-// WP9.2a (`ai_raid_guard_defs/normal.ron`: the shipped numbers, the attack at 800 value from tick 100) on the first match's map,
+// WP9.2a (`ai_raid_guard_defs/normal.ron`: a variant of the shipped profile with the guard on at 250 and staging patience 600, where the shipped one has 0 and 1800, and the attack at 800 value from tick 100) on the first match's map,
 // with twelve riflemen standing at its gather cell, a power plant and no money, against a lone static construction centre. The
 // strike (nine riflemen, the guard of three held back, highest ids first) leaves at once for the staging cell and the enemy
 // centre; at tick 1501 the script puts two riflemen of player 1 west of the AI's base and orders them to attack the power plant

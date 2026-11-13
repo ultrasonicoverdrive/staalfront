@@ -984,7 +984,7 @@ fn check_groups(s: &AiState, at: u64) {
 
 #[test]
 fn a_unit_is_in_at_most_one_group_in_every_army_turn_of_a_long_run() {
-    // The shipped numbers on the scenario of `ai_vs_passive` (the AI wins at about 14,000 ticks), observed after
+    // The shipped numbers on the scenario of `ai_vs_passive` (the AI wins at 15,908 ticks with these numbers), observed after
     // every tick.
     let s = {
         let mut s = load("ai_vs_passive");
