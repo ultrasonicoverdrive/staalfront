@@ -3419,3 +3419,12 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 * **Divergence measure:** distinct outcome keys overall and per seating, spread of the last loss (table and JSON). Fix round 2: also distinct coarse outcomes (ending, ticks, attacks per AI) and the same plus the last loss rounded down to 1,000 ticks. Baseline A: exact 100 of 100 outcomes (25 of 25 per seating), coarse 27 of 100 and 51 of 100; so the seeded jitter is needed and goes into WP9.2a (`timing_jitter_permille`, decision 13-11-2026). Baseline B (after 9.1c-3) is still to be measured when main moves.
 * **One loader** behind `load_game` and `load_match_file` (`load_parts`), `game:` scenarios unchanged (the workspace tests, and the 43 CI scenarios with `--expect`, are the proof). `Scenario::load_ais` keeps its own loop (`ai.md`).
 
+### WP9.1e notes: the repair rate (13-11-2026)
+
+* **What changed.** `assets/config/repair.ron` `hp_per_tick` 3 to 1 (data only; nothing in `sf_sim`, `sf_ai`, `ci.yml` or `pinned.rs`). The construction centre has no price, so its repair is free; at 3 it
+  out-healed up to five idle light tanks. **A game rule that also affects the human player** (a power plant takes 30 s to repair instead of 10; the credits a repair costs are the same). A repair price and a repair pause under fire are not built (for Tijmen).
+* **Measured** (release, `tools/sf_headless/tests/repair_rate.rs` and `sf_headless tournament assets/matches/m1_duel.ron --games 100`, on main 1d210ee without WP9.1c-3): four tanks never kill the repairing centre at 3, need 9,451 ticks at 2 and 1,091 at 1;
+  decided games of 100 are 7, 14 and 59 for rates 3, 2 and 1. Tables in `docs/rules/repair_sell.md` "The rate and the wave" and `docs/rules/ai.md`.
+* **Tests.** `four_tanks_take_down_a_repairing_centre_before_the_attack_patience_runs_out` and `two_tanks_cannot_take_down_a_repairing_centre` (shipped data); re-pins of `the_shipped_numbers_are_pinned`, `tournament_decided` and `repair_screenshot`.
+* **Folded in.** The seating-level coarse-key assertion in `a_tick_level_last_loss_shares_a_coarse_key_...`; `a_slow_think_is_in_the_counters_...` no longer bounds another slow tick's think by 8 ms of wall clock.
+* **Gaps.** The tournament was not re-run on a tree with WP9.1c-3 (Baseline B). All decided games are still won by seat 1. The 41 capped games are not explained.

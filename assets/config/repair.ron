@@ -5,8 +5,8 @@
     // Hit points a repairing structure gains per tick (1 to 1000). 1 per tick at 20 ticks a second
     // is 20 hit points a second: a power plant of 600 hit points is whole again in thirty seconds.
     // It was 3 until WP9.1e: the construction centre has no price, so its repair is free, and at 3 it
-    // out-healed four light tanks (2.1 hit points a tick of damage) and six (about 3.2) for ever;
-    // at 1 four tanks take it down in about 1,970 ticks (measured, docs/rules/repair_sell.md).
+    // out-healed up to five light tanks for ever (six needed 6,051 ticks); at 1 four tanks take it down in
+    // 1,091 ticks (measured, docs/rules/repair_sell.md "The rate and the wave").
     hp_per_tick: 1,
     // What a repair from nothing to full hit points costs, in thousandths of the structure's
     // price (0 to 1000). 250 means a quarter of the price for the whole of it; a repair of part of

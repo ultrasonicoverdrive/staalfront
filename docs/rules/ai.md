@@ -1016,9 +1016,10 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
 * **A decided game in CI** (`tests/tournament_decided.rs`): the smoke games are capped long before a base falls, so a fixture decides one in a few thousand ticks. A
   match file in a scratch directory: one seat has a construction centre, 4,000 credits and twelve light tanks beside its centre, the other a construction centre and
   nothing else; the profile is the shipped `normal.ron` with `attack_value`, `max_wait` and `first_attack_tick` set low in a scratch copy (the numbers are replaced by
-  key, so a later change of the shipped values does not break it). Pinned: seat 0 strong wins at 1,315 ticks, seat 1 strong at 5,599, `defeat_tick == ticks ==
+  key, so a later change of the shipped values does not break it). Pinned: seat 0 strong wins at 1,224 ticks, seat 1 strong at 2,885 (1,315 and 5,599 before WP9.1e, which set the repair rate to 1; with the rate back at 3 the old numbers return), `defeat_tick == ticks ==
   last_loss`, and a second game with the factions swapped is still won by the same *seat*. A change of unit or weapon numbers moves the two tick pins (a re-pin).
-  Measured while building it: **four** tanks beside the centre, on this fixture, destroyed nothing in 20,000 ticks (about 100 shots per 1,000 ticks); twelve end it.
+  Measured while building it: **four** tanks beside the centre, on this fixture, destroyed nothing in 20,000 ticks (about 100 shots per 1,000 ticks); twelve end it. That was the free
+  centre repair at 3 hit points a tick; WP9.1e measured it and set the rate to 1 (below).
 * **CI.** The 4-game smoke runs as a normal test in debug with a cap of 9,000 ticks (the smoke plays its 4 games three times: two command-line runs and one through the library; the whole test file
   took 37 s in this container, debug build, loaded machine); the 100 games are a manual run in release.
 
@@ -1056,14 +1057,30 @@ there on the coarse key.*
 `assets/ai/normal.ron` is being changed by WP9.1c-3 at the same time, so these numbers are a **baseline of main at 1586e1c plus this WP**, not a result for
 the final profile.
 
+### After the repair rate (WP9.1e): Baseline A with `hp_per_tick` 1
+
+Same 100 games, same seed and build as Baseline A (main at 1d210ee, so **without** WP9.1c-3's opening; not yet re-measured on a tree that has it, because #130
+had not merged when this was taken), only `assets/config/repair.ron` `hp_per_tick` 3 to 1 (the world reads the compiled-in file, so the number was edited in the shipped
+file and the binary rebuilt for each row; a `--assets` copy cannot carry it):
+
+| `hp_per_tick` | decided of 100 | per seat | median ticks | per faction (50 games) | stalemate / capped | distinct coarse (plain / rounded last loss) |
+|---|---|---|---|---|---|---|
+| 3 (Baseline A) | 7 | seat 0: 0, seat 1: 7 | 51,156 | Meridian 4, Veyran 0 | 1 / 92 | 27 / 51 |
+| 2 | 14 | 1 / 13 | 50,608 | Meridian 6, Veyran 1 | 0 / 86 | 32 / 51 |
+| **1 (shipped)** | **59** | 0 / 59 | 43,276 (min 11,512, max 58,091) | Meridian 18, Veyran 12 | 0 / 41 | **69 / 83** |
+
+The 59 decided games are 8.4 times Baseline A's 7, and the coarse keys now separate 69 and 83 of 100 games. Every decided game is still won by seat 1: the site asymmetry
+listed below is a separate cause. What this does not say: the remaining 41 capped games are not explained (towers, rebuilds and the army size are untouched), and whether
+the 59 decided games are decided well (by a real attack) is not looked at. **Baseline B (after WP9.1c-3 and this change together) is still to be measured when both are on main.**
+
 ### Baseline causes (all [Gissing], from a read-only sweep; input for 9.2a, none measured here)
 
 * Waves are too small to kill a base: the trigger is `attack_value` 3,000 or `max_wait` 6,000 with `min_units` 4 (`army.rs`, `attack_due`), against towers and a rebuilding
   goal list; `attack_patience` 2,400 then sends survivors home, so the armies trade for ever. (Consistent with the fixture above: four tanks do not kill a
   repairing centre, twelve do.)
-* A free, fast centre repair likely out-heals small waves (by reading, not run): the construction centre has no `cost`, so its repair is free; `repair.ron` has
-  `hp_per_tick` 3, and the AI repairs below 70 %. Four light tanks deal about 2.1 hp/tick against the centre (about 100 shots × 21 damage per 1,000 ticks), twelve about
-  6.3. No rule is changed here; input for a separate diagnosis.
+* A free, fast centre repair out-heals small waves: the construction centre has no `cost`, so its repair is free; `repair.ron` had
+  `hp_per_tick` 3, and the AI repairs below 70 %. Four light tanks deal about 2.1 hp/tick against the centre, twelve about 6.3. **Measured and changed in WP9.1e**
+  (below, and `docs/rules/repair_sell.md` "The rate and the wave"): the rate is 1 now.
 * Veyran never wins as the attacker and is never beaten in a mirror: its list carries an extra `fortified_bunker`, which makes its base harder and its economy later.
   Meridian wins only from seat 1.
 * Seat 1 wins only: a site asymmetry (the approach or the `beside` target cell at (12, 68) against (72, 14), the distance to ore) or the think order (player 0 always

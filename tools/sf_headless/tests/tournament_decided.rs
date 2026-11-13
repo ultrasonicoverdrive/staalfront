@@ -110,7 +110,7 @@ fn setup(strong: usize, dir: &TempDir) -> sf_headless::tournament::Setup {
 
 /// (strong seat, ticks the game ends at): pinned on the shipped definitions with base seed 1, game 0. A
 /// change of the unit or weapon numbers moves them and is a re-pin, not a failure of the tournament.
-const DECIDED: [(usize, u64); 2] = [(0, 1315), (1, 5599)];
+const DECIDED: [(usize, u64); 2] = [(0, 1224), (1, 2885)];
 
 #[test]
 fn the_seat_with_the_army_wins_and_the_tick_numbers_agree() {

@@ -16,7 +16,7 @@ Tests are named below. All numbers are placeholders for the balance rounds of ph
 
 | Field | Unit | Bounds | Shipped | Meaning |
 |---|---|---|---|---|
-| `hp_per_tick` | hit points | 1 to 1000 | 3 | what a repairing structure gains per tick at full speed |
+| `hp_per_tick` | hit points | 1 to 1000 | 1 (3 until WP9.1e) | what a repairing structure gains per tick at full speed |
 | `full_cost_permille` | thousandths of the price | 0 to 1000 | 250 | what a repair from 0 to full hit points costs |
 | `sell_ticks` | ticks | 1 to 6000 | 100 | how long a sale takes |
 | `refund_permille` | thousandths of the price | 0 to 1000 | 500 | what a sale pays at full hit points |
@@ -209,6 +209,48 @@ without the rules, 1.25 to 1.38 ms with the rules and nobody repairing and 1.28 
 Base (`origin/main`, built in a copy) against this branch on `wander_5000` in release, six alternating pairs: base 783 to 851 ticks per
 second, branch 816 to 844, the same final checksum `0x38d5e3c43358a889`. A world without the rules pays one `Option` test per tick.
 
+## What moved in WP9.1e (re-pins)
+
+Three pins moved with the rate 3 to 1: `sf_data` `the_shipped_numbers_are_pinned` (3 to 1), the two tick pins of `tools/sf_headless/tests/tournament_decided.rs`
+(1,315 to 1,224 and 5,599 to 2,885), and `crates/sf_game/tests/repair_screenshot.rs` (the plant gains `hurt + 40` in 40 ticks, not `hurt + 3 * 40`).
+Cause measured: with `hp_per_tick` put back to 3 in the shipped file, `tournament_decided` gives 1,315 and 5,599 again. The frozen scenarios carry their own numbers
+(`repair_sell` and `silo` 5, `ai_rebuild` and `ai_deadlock` 3) and no `.expected` moved.
+
+## The rate and the wave (WP9.1e)
+
+The construction centre has no `cost` in `unit_defs.ron`, so a repair of it is free (`price_of` returns the building's cost; a structure without a
+price is charged 0 and never waits for money), and repair goes on under fire. At `hp_per_tick` 3 a repairing centre therefore gained 3 hit points a tick
+against about 0.525 hit points a tick from every light tank (35 damage, one shot per 40 ticks, 60 % against a structure), so it out-healed up to five tanks
+for ever. **This is a game rule that also affects the human player**: the human repairs the same centre for free with the same rate. Since WP9.1e the shipped rate is
+**1**: a power plant of 600 hit points is repaired in thirty seconds instead of ten; the credits a repair costs are unchanged (`full_cost_permille`).
+Not done, left to Tijmen as separate rule decisions: a repair price for a structure without one (the AI with income would still out-heal), and a pause of
+repair for some ticks after a hit (a new per-entity state in the checksum).
+
+Measured (`tools/sf_headless/tests/repair_rate.rs`, `measure_kill_ticks` with `--ignored`, release; the fixture: N light tanks of seat 0 idle beside the enemy centre,
+seat 1 has a centre, 0 credits and the AI's repair below 70 %, both profiles with `first_attack_tick` 72,000 so nobody attacks; kill tick, "never" = not within 20,000 ticks).
+The rate cannot be changed in a scratch `--assets` copy (the world gets `RepairSettings::embedded()`, compiled in from the shipped file), so each row is the shipped
+file with the number edited and rebuilt, then restored:
+
+| `hp_per_tick` | 3 tanks | 4 | 5 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|
+| 3 (before) | never | never | never | 6,051 | 851 | 331 |
+| 2 | never | 9,451 | 1,770 | 969 | 530 | 288 |
+| 1 (shipped) | 1,970 | 1,091 | 807 | 607 | 409 | 250 |
+
+(A first layout put the tanks in columns of four; its fourth tank stood on a cell where it did not fire, so "four" killed at the tick of three. The layout is a row of
+four now, and tank counts 1 and 2 give "never" at every rate.) The attack gives up after `attack_patience` 2,400 ticks without progress; at rate 1 four tanks are well inside it.
+
+The 100-game `sf_headless tournament assets/matches/m1_duel.ron` (main at 1d210ee, before WP9.1c-3 merged, so a first look; release, one thread):
+
+| `hp_per_tick` | decided of 100 | seat 0 / seat 1 | median ticks (decided) | Meridian / Veyran wins (50 games) | stalemate / capped | distinct coarse (plain / last loss rounded) |
+|---|---|---|---|---|---|---|
+| 3 | 7 | 0 / 7 | 51,156 | 4 / 0 | 1 / 92 | 27 / 51 |
+| 2 | 14 | 1 / 13 | 50,608 | 6 / 1 | 0 / 86 | 32 / 51 |
+| 1 | 59 | 0 / 59 | 43,276 | 18 / 12 | 0 / 41 | 69 / 83 |
+
+Rate 1 decides 59 games, 8.4 times the 7 of rate 3. All 59 are still won by seat 1 (the seat asymmetry of Baseline A is not touched by this change). The tournament with
+the opening of WP9.1c-3 is a separate baseline, `ai.md` "AI against AI".
+
 ## Mutations (each reverted, each caught)
 
 Run on the committed code with one change at a time; the failing tests are named. Unit tests are
@@ -226,6 +268,7 @@ Run on the committed code with one change at a time; the failing tests are named
 | a repair stops when it cannot pay | `a_repair_waits_without_money_and_goes_on_when_there_is_some`, scenario |
 | a sale does not wake the match | scenario `the_opponent_sells_its_last_structure_and_is_defeated_in_the_tick_it_starts` |
 | a tower being sold still fires | `a_tower_being_sold_fires_nothing_and_drops_its_target` (`tests/defences.rs`) |
+| `hp_per_tick` back to 3 (WP9.1e) | `four_tanks_take_down_a_repairing_centre_before_the_attack_patience_runs_out` (kills `[never, never, never, 6,051, 851, 331]`), `the_shipped_numbers_are_pinned`, `tournament_decided` |
 | a sale one tick too long | `a_sale_takes_its_ticks_...`, the tower test, scenario |
 | `sell_ticks` and `refund_permille` swapped in the bridge | `each_repair_number_arrives_as_itself` |
 | a right click in a mode orders the selection | `the_right_click_that_leaves_a_repair_or_sell_mode_orders_nothing` |
