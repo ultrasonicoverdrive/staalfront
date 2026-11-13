@@ -1,12 +1,14 @@
-//! The army manager (`docs/rules/ai.md`, "The army in WP9.1c-1" and "The army in WP9.1c-2"): the gather
-//! cell, the scout, the gathering (WP9.1c-1), and the threat rule, the attack timing, the target, marching
-//! and finishing (WP9.1c-2). The rules write [`AiState::directive`]; [`operations_minimal`] turns it into
-//! orders (the seam that WP9.2 replaces).
+//! The army manager (`docs/rules/ai.md`, "The army in WP9.1c-1", "The army in WP9.1c-2" and "Groups"): the
+//! gather cell, the scout, the gathering (WP9.1c-1), the threat rule, the attack timing, the target, marching
+//! and finishing (WP9.1c-2), and since WP9.2a the army in groups ([`crate::state::Group`], at most
+//! `GROUPS_MAX`): the home guard, the staging cell, the reinforcement and its merge, the partial defence and
+//! the timing jitter. The rules write [`AiState::directive`] and the groups; [`operations`] turns them into
+//! orders. The army units that are in no group are the home.
 //!
 //! **Every think** ([`watch`], called by `Ai::think_with` before the manager of the turn): the own structures
 //! are compared with what the last think saw (`hp_seen`). One whose hit points fell, or that is gone without
 //! having been sold, is a hit: the posture becomes `Defend` at once, until `defend_ticks` after the last hit.
-//! A hit on the construction centre also calls the attackers back.
+//! A hit on the construction centre also calls every group out back (stage `Returning`).
 //!
 //! One army turn, every 40 ticks (one think in four), in order:
 //!
@@ -16,13 +18,17 @@
 //!    "only an idle unit is ordered": a waypoint on a structure is a `Move` that never ends); a lost scout is
 //!    noted and a replacement is bought by the production turn after `scout_retry` ticks, at most
 //!    `scouts_max` in a match.
-//! (3) **Decide** ([`decide`]): the start sites seen empty; with nothing to defend and no attack out, the
-//!    attack trigger (A4) on the units gathered; with an attack out, its end (no attacker left, no target, or
-//!    `attack_patience` without an attacker at the target).
-//! (4) **Orders** ([`operations_minimal`]): the defence, the march, the finishing `Attack`, the survivors
-//!    home, the gathering; at most [`ARMY_COMMANDS_PER_TURN`] commands in the turn, the scout's included. A
-//!    unit is ordered only when its observed order is `Idle` (or, once, when a defence began under its
-//!    `Move`), and not again within `resend_ticks`.
+//! (3) **Decide** ([`decide`]): the start sites seen empty; with nothing to defend and no group out, the
+//!    attack trigger (A4) on the units gathered that are no guard ([`hold_back`], G1: the strike that remains
+//!    must meet the trigger), which makes the strike, staging at a cell short of the target when
+//!    `stage_distance` is set ([`staging_cell`], G2); with a strike out, the staging exit, its end (no member
+//!    left, no target, or `attack_patience` without a member at the target) and the reinforcement
+//!    ([`reinforce`], G3: a second group that merges into the strike near its meeting point).
+//! (4) **Orders** ([`operations`]): the defence (G4: the units at home that [`defenders`] picks, to the
+//!    threat cell), then for each group out the staging, the march and the finishing `Attack`, the survivors
+//!    home, the gathering; at most [`ARMY_COMMANDS_PER_TURN`] commands in the turn, the scout's included, and
+//!    at most `gather_group` ids in one command. A unit is ordered only when its observed order is `Idle` (or,
+//!    once, when a defence began under its `Move`), and not again within `resend_ticks`.
 //!
 //! How the AI learns that an order had no effect is always the observation: a unit that is `Idle` again far
 //! from where it was sent was refused or gave the route up (`docs/rules/collision.md`, `replan_max`), and the

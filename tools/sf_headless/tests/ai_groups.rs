@@ -1201,3 +1201,56 @@ fn the_threat_value_and_the_defence_ignore_an_armed_enemy_that_is_not_visible() 
     );
     assert_eq!(sent, 5, "4.5 units' worth rounds up to five riflemen");
 }
+
+// ---- ai_vs_passive with the shipped numbers --------------------------------------------------------------------
+
+/// `ai_vs_passive` with the AI's army numbers those of the shipped profile.
+fn vs_passive_with_the_shipped_army() -> Scenario {
+    let mut s = load("ai_vs_passive");
+    let old = s.ais[0].state().clone();
+    let mut profile = old.profile.clone();
+    profile.army = sf_data::ai_profile::AiProfile::embedded().army;
+    s.ais[0] = Ai::new(old.player, profile, 0xA1_0001, old.start_sites);
+    s
+}
+
+/// The tick the match names the AI the winner in `ai_vs_passive` with the numbers off (13,839, pinned in
+/// `ai_army.rs`) and with the shipped numbers.
+const VS_PASSIVE_WON_OFF: u64 = 13_839;
+const VS_PASSIVE_WON_SHIPPED: u64 = 0;
+
+#[test]
+fn ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned() {
+    let s = vs_passive_with_the_shipped_army();
+    let mut won = None;
+    let mut waves = Vec::new();
+    let mut launched = 0;
+    run_observed(
+        &s,
+        &RunOptions {
+            ticks: s.ticks,
+            every: 100,
+        },
+        |w: &World, ais: &[Ai]| {
+            let st = ais[0].state();
+            if st.attacks_launched > launched {
+                launched = st.attacks_launched;
+                let g = &st.groups[0];
+                waves.push((w.tick().0 - 1, g.members.len(), g.launch_value));
+            }
+            if won.is_none()
+                && let Some(r) = w.match_result()
+                && r.verdict == sf_sim::Verdict::Won(P0)
+            {
+                won = Some(r.tick.0);
+            }
+        },
+    )
+    .unwrap();
+    println!(
+        "ai_vs_passive, shipped numbers: won at {won:?}, waves {waves:?} (numbers off: {VS_PASSIVE_WON_OFF})"
+    );
+    let won = won.expect("the AI wins");
+    assert!(won < s.ticks, "{won}");
+    assert_eq!(won, VS_PASSIVE_WON_SHIPPED);
+}

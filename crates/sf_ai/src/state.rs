@@ -35,7 +35,7 @@ pub struct Known {
 }
 
 /// What the army manager wants the army to do (`docs/rules/ai.md`, "The army"): written by the army rules
-/// (threat, timing, target) and turned into orders by `army::operations_minimal`, the seam that WP9.2 replaces.
+/// (threat, timing, target) and turned into orders by `army::operations` together with the groups.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Directive {
     /// What the army does.
