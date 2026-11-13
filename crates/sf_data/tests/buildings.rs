@@ -416,9 +416,9 @@ fn the_order_of_the_records_does_not_change_the_buildings() {
 /// barracks) and has the opponent's structures, and the ai_fog scenario (WP9.1a, a copy of `match_defs`)
 /// has structures of both players, and the ai_base scenarios (WP9.1b-1) let the AI build its whole base, and the
 /// ai_economy, ai_rebuild and ai_deadlock scenarios (WP9.1b-2) are copies of those, and the ai_scout scenario
-/// (WP9.1c-1) is a copy of the shipped file, and so are the ai_vs_passive and ai_raid scenarios (WP9.1c-2).
+/// (WP9.1c-1) is a copy of the shipped file, and so are the ai_vs_passive and ai_raid scenarios (WP9.1c-2) and ai_raid_guard (WP9.2a).
 /// Every other copy predates the block.
-const COPIES_WITH_BLOCKS: [&str; 14] = [
+const COPIES_WITH_BLOCKS: [&str; 15] = [
     "placement_defs",
     "harvest_defs",
     "match_defs",
@@ -433,6 +433,7 @@ const COPIES_WITH_BLOCKS: [&str; 14] = [
     "ai_scout_defs",
     "ai_vs_passive_defs",
     "ai_raid_defs",
+    "ai_raid_guard_defs",
 ];
 
 #[test]

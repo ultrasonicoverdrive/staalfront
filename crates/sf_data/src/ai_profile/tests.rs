@@ -90,7 +90,7 @@ fn the_shipped_profile_is_pinned() {
             a.stage_permille,
             a.stage_patience
         ),
-        (250, 14, 700, 600)
+        (0, 14, 700, 1800)
     );
     assert_eq!(
         (
@@ -220,13 +220,13 @@ fn every_number_is_checked_at_both_ends_when_the_file_is_read() {
         ),
         ("stagger: 3,", "stagger", ["stagger: 0,", "stagger: 5,"]),
         (
-            "home_guard_permille: 250",
+            "home_guard_permille: 0",
             "home_guard_permille",
             ["901", "901"],
         ),
         ("stage_distance: 14", "stage_distance", ["65", "65"]),
         ("stage_permille: 700", "stage_permille", ["0", "1001"]),
-        ("stage_patience: 600", "stage_patience", ["0", "72001"]),
+        ("stage_patience: 1800", "stage_patience", ["0", "72001"]),
         (
             "reinforce_value: 1000",
             "reinforce_value",

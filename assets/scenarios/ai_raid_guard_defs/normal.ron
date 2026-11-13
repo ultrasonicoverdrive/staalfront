@@ -1,6 +1,6 @@
 // FROZEN copy (WP9.2a, for the scenario `ai_raid_guard`) of the shipped `assets/ai/normal.ron` as WP9.2a leaves it, with
 // the attack timing shortened so that the army that stands at home at the start marches at once: `attack_value` 800,
-// `first_attack_tick` 100, and the numbers of WP9.2a as shipped (guard 250, staging 14, reinforcement 1000, defence 1500).
+// `first_attack_tick` 100, and the numbers of WP9.2a with the guard ON (guard 250, staging 14 with patience 600, reinforcement 1000, defence 1500: the shipped profile has the guard off, docs/rules/ai.md "Groups").
 // The goal list is the power plant and the barracks the match gives the AI, so it builds nothing and the gather cell stays free (the unit mix
 // is riflemen: the barracks is all it has).
 // Editing the shipped profile never moves this scenario.

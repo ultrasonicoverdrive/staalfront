@@ -503,7 +503,7 @@ fn at_most_one_reinforcement_is_out_and_a_third_group_is_never_made() {
     now.extend((0..10).map(|i| soldier(50 + i, 24 + i % 6, 67 + i / 6)));
     army_turn(&world, &mut s, &observation(&world, 3080, now));
     assert_eq!(s.groups.len(), 2, "no third group: {:?}", s.groups);
-    assert!(GROUPS_MAX >= 2);
+    const { assert!(GROUPS_MAX >= 2) };
 }
 
 #[test]
@@ -519,14 +519,10 @@ fn the_reinforcement_merges_into_the_strike_within_arrive_radius_of_its_staging_
     let stage = s.groups[0].staging.unwrap();
     let place = |near: bool| {
         let mut now = more_at_home(&own, 3);
-        for (i, o) in now
-            .iter_mut()
-            .filter(|o| (40..43).contains(&o.id.index()))
-            .enumerate()
-        {
+        for o in now.iter_mut().filter(|o| (40..43).contains(&o.id.index())) {
             o.order = Order::Idle;
             // `arrive_radius` is 6: the middle cell 6 cells from the staging cell is in, 7 is out.
-            o.cell = Cell::new(stage.x + if near { 6 } else { 7 }, stage.y + i as u32 % 1);
+            o.cell = Cell::new(stage.x + if near { 6 } else { 7 }, stage.y);
         }
         now
     };
@@ -1217,7 +1213,7 @@ fn vs_passive_with_the_shipped_army() -> Scenario {
 /// The tick the match names the AI the winner in `ai_vs_passive` with the numbers off (13,839, pinned in
 /// `ai_army.rs`) and with the shipped numbers.
 const VS_PASSIVE_WON_OFF: u64 = 13_839;
-const VS_PASSIVE_WON_SHIPPED: u64 = 0;
+const VS_PASSIVE_WON_SHIPPED: u64 = 15_908;
 
 #[test]
 fn ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned() {
