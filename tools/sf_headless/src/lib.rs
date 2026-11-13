@@ -22,6 +22,15 @@
 //!
 //! Options and exit codes are in [`cli`], the log layout in [`log`].
 //!
+//! `sf_headless tournament <match.ron>` (WP9.5a, [`tournament`]) is the AI-vs-AI runner: it plays a match
+//! file whose seats are all computer opponents many times (`assets/matches/m1_duel.ron`), varying the
+//! seats and the seeds, and prints wins, draws, durations and the number of distinct final checksums.
+//!
+//! ```text
+//! cargo run --release -p sf_headless -- tournament assets/matches/m1_duel.ron --games 100 \
+//!     --json target/m1_duel.json
+//! ```
+//!
 //! # The scenario file
 //!
 //! A RON file with one `Scenario(...)`. Unknown fields are errors, as are
@@ -131,6 +140,7 @@ pub mod cli;
 pub mod log;
 pub mod run;
 pub mod scenario;
+pub mod tournament;
 
 pub use run::{Outcome, RunOptions, Sample};
 pub use scenario::{Scenario, ScenarioError};

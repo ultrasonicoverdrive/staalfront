@@ -11,6 +11,9 @@ use sf_sim::Kind;
 pub struct Profile {
     /// The name of the file's profile.
     pub name: String,
+    /// The faction the profile was resolved for (WP9.5a: the tournament checks that the AI plays the faction
+    /// the world gave its seat). Not part of [`Profile::digest`]: the roles it turned into kinds are.
+    pub faction: Faction,
     /// A think runs when `(tick + stagger * player) % think_interval == 0`.
     pub think_interval: u32,
     /// The offset per player.
@@ -47,6 +50,7 @@ impl Profile {
         };
         Ok(Profile {
             name: def.name.clone(),
+            faction,
             think_interval: def.think_interval,
             stagger: def.stagger,
             economy: def.economy,
