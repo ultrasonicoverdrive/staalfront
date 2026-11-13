@@ -493,7 +493,7 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
     assert_eq!(count_in(&with_cursor, map_area(), sign.plus, 6), 0);
     save(&format!("hurt_t{t0:05}_hp{hurt:03}.png"), &plain);
 
-    // The click sends the command the sim takes; the plant gains 3 hit points a tick under its sign.
+    // The click sends the command the sim takes; the plant gains 1 hit point a tick under its sign (the shipped `hp_per_tick`, WP9.1e).
     let command = repair_mode::click(&snap, ToolMode::Repair, Some(plant), P0).unwrap();
     assert_eq!(
         command,
@@ -508,8 +508,8 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
     let mid = scene.world.hp_of(plant).unwrap();
     assert_eq!(
         mid,
-        hurt + 3 * 40,
-        "3 hit points a tick from the tick after the command"
+        hurt + 40,
+        "1 hit point a tick from the tick after the command"
     );
     // The price by hand: 300 credits * 250 / 1000 for a whole repair = h / 8 credits at h hit points.
     assert_eq!(

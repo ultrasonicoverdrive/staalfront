@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn the_shipped_numbers_are_pinned() {
         let s = RepairSettings::embedded();
-        assert_eq!(s.hp_per_tick, 3);
+        assert_eq!(s.hp_per_tick, 1);
         assert_eq!(s.full_cost_permille, 250);
         assert_eq!(s.sell_ticks, 100);
         assert_eq!(s.refund_permille, 500);
