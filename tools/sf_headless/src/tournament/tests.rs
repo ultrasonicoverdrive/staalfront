@@ -158,11 +158,15 @@ fn record(
                 player: 0,
                 digest: 1,
                 attacks: 2,
+                commands: 0,
+                profile: String::new(),
             },
             AiRecord {
                 player: 1,
                 digest: 3,
                 attacks: 4,
+                commands: 0,
+                profile: String::new(),
             },
         ],
     }

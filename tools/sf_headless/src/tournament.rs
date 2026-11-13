@@ -293,6 +293,11 @@ pub struct AiRecord {
     pub digest: u64,
     /// `AiState::attacks_launched`.
     pub attacks: u32,
+    /// How many commands it sent in the game (WP9.2a: the rate of the army's orders is pinned on a duel).
+    pub commands: u64,
+    /// The name of the profile it played with (`Profile::name`), so a match with a profile per seat shows
+    /// which seat had which.
+    pub profile: String,
 }
 
 /// Everything deterministic about one game.
@@ -552,11 +557,13 @@ pub fn play_seeded(
     let mut wanted = Vec::new();
     let mut last_loss = 0u64;
     let mut decided = None;
+    let mut sent = vec![0u64; ais.len()];
     while world.tick().0 < cap {
-        for ai in &mut ais {
+        for (seat, ai) in ais.iter_mut().enumerate() {
             if ai.due(world.tick()) {
                 wanted.clear();
                 ai.think(&world, &mut wanted);
+                sent[seat] += wanted.len() as u64;
                 for command in wanted.drain(..) {
                     world
                         .schedule(world.tick(), ai.player(), command)
@@ -606,10 +613,13 @@ pub fn play_seeded(
         final_checksum: world.checksum(),
         ais: ais
             .iter()
-            .map(|a| AiRecord {
+            .enumerate()
+            .map(|(seat, a)| AiRecord {
                 player: a.player().0,
                 digest: a.digest(),
                 attacks: a.state().attacks_launched,
+                commands: sent[seat],
+                profile: a.state().profile.name.clone(),
             })
             .collect(),
     })

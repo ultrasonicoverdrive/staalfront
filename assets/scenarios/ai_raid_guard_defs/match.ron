@@ -1,0 +1,44 @@
+// The match file of the scenario `ai_raid_guard` (WP9.2a, docs/rules/ai.md "Groups"): player 0, Meridian, is the AI, with a
+// construction centre where the human of `assets/matches/m1.ron` starts, a power plant (the raid's target) and a barracks beside the base,
+// no money and twelve riflemen standing at its gather cell; player 1, Veyran, is a lone static construction centre where
+// the opponent of m1 has its own (the raiders come from the script of the scenario). Read by sf_data::match_def like
+// assets/matches/m1.ron.
+//
+// Slots: 0 the AI's centre, 1 its power plant (x 18..19, y 60..61), 2 its barracks, 3 to 14 its riflemen, 15 player 1's centre.
+(
+    name: "ai_raid_guard",
+    map: "m1",
+    seed: 458758,
+    players: [
+        (
+            id: 0,
+            faction: Meridian,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (12, 68)),
+                (role: "power_plant", cell: (18, 60)),
+                (role: "barracks", cell: (12, 60)),
+                (role: "rifleman", cell: (24, 64)),
+                (role: "rifleman", cell: (25, 64)),
+                (role: "rifleman", cell: (26, 64)),
+                (role: "rifleman", cell: (27, 64)),
+                (role: "rifleman", cell: (28, 64)),
+                (role: "rifleman", cell: (29, 64)),
+                (role: "rifleman", cell: (24, 65)),
+                (role: "rifleman", cell: (25, 65)),
+                (role: "rifleman", cell: (26, 65)),
+                (role: "rifleman", cell: (27, 65)),
+                (role: "rifleman", cell: (28, 65)),
+                (role: "rifleman", cell: (29, 65)),
+            ],
+        ),
+        (
+            id: 1,
+            faction: Veyran,
+            credits: 0,
+            objects: [
+                (role: "construction_center", cell: (72, 14)),
+            ],
+        ),
+    ],
+)

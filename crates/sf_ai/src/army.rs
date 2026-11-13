@@ -393,7 +393,9 @@ fn cost_of(obs: &Observation, lens: &Lens<'_>, id: EntityId) -> u64 {
     obs.own
         .binary_search_by_key(&id, |o| o.id)
         .ok()
-        .map_or(0, |i| u64::from(lens.unit_cost(obs.own[i].kind).unwrap_or(0)))
+        .map_or(0, |i| {
+            u64::from(lens.unit_cost(obs.own[i].kind).unwrap_or(0))
+        })
 }
 
 /// The timing jitter (WP9.2a): once per launch the AI draws a number from minus to plus
@@ -584,7 +586,8 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
                         .iter()
                         .filter(|o| g.members.binary_search(&o.id).is_ok())
                         .filter(|o| {
-                            o.order == Order::Idle && cheb(o.cell, cell) <= u32::from(a.arrive_radius)
+                            o.order == Order::Idle
+                                && cheb(o.cell, cell) <= u32::from(a.arrive_radius)
                         })
                         .count() as u64;
                     idle_there * 1000 >= u64::from(a.stage_permille) * g.members.len() as u64

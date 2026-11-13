@@ -1,0 +1,64 @@
+// The army is out and the guard answers a raid (WP9.2a, docs/rules/ai.md "Groups"): the AI of `ai_raid` with the profile of
+// WP9.2a (`ai_raid_guard_defs/normal.ron`: the shipped numbers, the attack at 800 value from tick 100) on the first match's map,
+// with twelve riflemen standing at its gather cell, a power plant and no money, against a lone static construction centre. The
+// strike (nine riflemen, the guard of three held back, highest ids first) leaves at once for the staging cell and the enemy
+// centre; at tick 1501 the script puts two riflemen of player 1 west of the AI's base and orders them to attack the power plant
+// (slot 1). The units at home must kill them while the strike is still out; the strike is not called back (only a hit on the
+// construction centre does that). The run ends at 3000.
+//
+// `unit_defs` names a FROZEN copy (ai_raid_guard_defs, made for WP9.2a): the shipped definitions of 13-11-2026, the profile
+// above and a match file of its own. The ore, harvest, storage, money, production, power and vision numbers are those of `ai_raid`.
+Scenario(
+    name: "ai_raid_guard",
+    seed: 0xA1_BA5E,
+    map: (width: 96, height: 96),
+    map_name: Some("m1"),
+    unit_defs: Some("ai_raid_guard_defs"),
+    match_file: Some("match.ron"),
+    ai: [(player: 0, profile: "normal.ron", seed: 0xA1_0001)],
+    buildings: true,
+    combat: true,
+    targeting: true,
+    destruction: true,
+    ore: Some((start: 120, max: 160, regrow_amount: 1, regrow_period: 200)),
+    harvest: Some((
+        harvesters: [11],
+        capacity: 200,
+        mine_amount: 4,
+        mine_period: 8,
+        unload_amount: 10,
+        unload_period: 4,
+        search_radius: 40,
+        retry_period: 100,
+        call_range: 6,
+        grant_timeout: 400,
+        call_timeout: 10,
+        max_tries: 3,
+        park_distance: 4,
+        park_spread: 5,
+        park_near_tenths: 20,
+        mine_start_tenths: 10,
+        mine_reach_tenths: 15,
+        mine_lose_tenths: 25,
+        dock_reach_tenths: 20,
+        travel_cost: 16,
+        queue_cost: 100,
+        switch_margin: 100,
+        recheck_period: 20,
+        queue_gap: 3,
+        queue_start: 1,
+        queue_step: 2,
+        queue_rows: 8,
+    )),
+    storage: Some([(2, 2000), (43, 1500)]),
+    money: Some((credits_per_ore: 1)),
+    production: Some((queue_limit: 5, exit_radius: 4, build_speed: (3, 2))),
+    power: Some((shortage_floor_permille: 250, defence_cutoff_permille: 1000)),
+    vision: Some((legacy_sight_milli: 5000, acquire_needs_sight: true)),
+    ticks: 3000,
+    commands: [
+        (tick: 1500, player: 1, command: SpawnUnit(kind: 12, owner: 1, cell: (4, 64))),
+        (tick: 1500, player: 1, command: SpawnUnit(kind: 12, owner: 1, cell: (4, 66))),
+        (tick: 1501, player: 1, command: OrderAttack(ids: [Id(16, 0), Id(17, 0)], target: (1, 0))),
+    ],
+)

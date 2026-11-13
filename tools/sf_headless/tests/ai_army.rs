@@ -1353,10 +1353,7 @@ fn a_hit_on_the_centre_calls_back_a_wave_that_is_still_marching() {
     hit[0].hp = 900;
     watch(&world, &mut s, &observation(&world, 3110, hit.clone()));
     assert!(s.attackers().is_empty());
-    assert_eq!(
-        recalled_of(&s),
-        [20, 21, 22, 23]
-    );
+    assert_eq!(recalled_of(&s), [20, 21, 22, 23]);
     let out = army_turn(&world, &mut s, &observation(&world, 3240, hit.clone()));
     let moves = attack_moves(&out);
     assert_eq!(moves.len(), 1, "{out:?}");
@@ -1496,7 +1493,10 @@ fn an_attack_ends_when_the_target_stops_losing_hit_points_for_attack_patience() 
     };
     let mut s = s0.clone();
     army_turn(&world, &mut s, &obs_at(3200, 2000));
-    assert_eq!(s.strike().unwrap().target_hp, Some((EntityId::new(11, 0), 2000, Tick(3200))));
+    assert_eq!(
+        s.strike().unwrap().target_hp,
+        Some((EntityId::new(11, 0), 2000, Tick(3200)))
+    );
     army_turn(&world, &mut s, &obs_at(5560, 2000));
     assert_eq!(s.attackers().len(), 4);
     army_turn(&world, &mut s, &obs_at(5600, 2000));
