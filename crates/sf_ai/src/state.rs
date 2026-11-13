@@ -550,8 +550,9 @@ mod tests {
     #[test]
     fn the_digest_of_the_base_state_is_pinned() {
         // A literal: a change of the layout, or an iteration of a map in another order, fails here. It hashes
-        // the shipped profile too, so a change of assets/ai/normal.ron moves it as well.
-        assert_eq!(base_state().digest(), 0x392b_1f32_56aa_3c19);
+        // the shipped profile too, so a change of assets/ai/normal.ron moves it as well (WP9.1c-3: 0x392b1f3256aa3c19 ->
+        // 0xaa333a1fd36cb5a9, the goal list, `attack_value` and `max_wait`).
+        assert_eq!(base_state().digest(), 0xaa33_3a1f_d36c_b5a9);
     }
 
     #[test]

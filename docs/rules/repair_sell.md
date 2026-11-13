@@ -255,16 +255,21 @@ The rate cannot be varied in a scratch `--assets` copy (the world is given `Repa
 `assets/config/repair.ron`, rebuilding and restoring the file. (An earlier version of this table, with other seeds and a 20,000-tick cap, put two tanks at "never" at rate 1;
 with a 40,000-tick cap two tanks kill at tick 20,451.)
 
-The 100-game `sf_headless tournament assets/matches/m1_duel.ron` (main at 1d210ee, before WP9.1c-3 merged, so a first look; release, one thread; same editing and rebuilding):
+The 100-game `sf_headless tournament assets/matches/m1_duel.ron` (release, one thread, rate changed by editing the shipped file and rebuilding). First look on main 1d210ee, before WP9.1c-3, and the real
+Baseline B on main d4c06f4 (with WP9.1c-3's opening), where rate 3 is #130's own run:
 
-| `hp_per_tick` | decided of 100 | seat 0 / seat 1 | median ticks (decided) | Meridian / Veyran wins (50 games) | stalemate / capped | distinct coarse (plain / last loss rounded) |
-|---|---|---|---|---|---|---|
-| 3 | 7 | 0 / 7 | 51,156 | 4 / 0 | 1 / 92 | 27 / 51 |
-| 2 | 14 | 1 / 13 | 50,608 | 6 / 1 | 0 / 86 | 32 / 51 |
-| 1 | 59 | 0 / 59 | 43,276 | 18 / 12 | 0 / 41 | 69 / 83 |
+| Tree | `hp_per_tick` | decided of 100 | seat 0 / seat 1 | median ticks (decided) | Meridian / Veyran wins (50 games) | stalemate / capped | distinct coarse (plain / last loss rounded) |
+|---|---|---|---|---|---|---|---|
+| 1d210ee | 3 | 7 | 0 / 7 | 51,156 | 4 / 0 | 1 / 92 | 27 / 51 |
+| 1d210ee | 2 | 14 | 1 / 13 | 50,608 | 6 / 1 | 0 / 86 | 32 / 51 |
+| 1d210ee | 1 | 59 | 0 / 59 | 43,276 | 18 / 12 | 0 / 41 | 69 / 83 |
+| d4c06f4 | 3 | 8 | 1 / 7 | 48,063 | 3 / 1 | 0 / 92 | 31 / 53 |
+| d4c06f4 + this WP | 1 | **35** | 25 / 10 | 39,632 | 9 / 13 | 0 / 65 | 54 / 75 |
+
+On the merged tree rate 1 decides 35 games, 4.4 times the 8 at rate 3, and the seat-1-only pattern is gone (25 won by seat 0, 10 by seat 1). The rate 2 row exists only on the older tree.
 
 **Why 1 and not 2.** Not because of the attack patience: at 2 four or more tanks are not stuck either. At 2 the fixture needs 10,251 ticks for four tanks and cannot kill with three, at 1 three tanks
-need 2,051 and two tanks 20,451; and the tournament decides 14 games at 2 and 59 at 1. Rate 1 is at least as good as rate 2 on every number measured; its cost is the slower repair for the human
+need 2,051 and two tanks 20,451; and the tournament decides 14 games at 2 and 59 at 1 on the older tree (Baseline B has no rate 2 row: 8 at 3 and 35 at 1). Rate 1 is at least as good as rate 2 on every number measured; its cost is the slower repair for the human
 (30 s for a power plant instead of 15 s at 2). Whether 2 would be the better rule for play is not measured here.
 
 ## Mutations (each reverted, each caught)

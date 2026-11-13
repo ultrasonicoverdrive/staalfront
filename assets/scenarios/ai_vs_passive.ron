@@ -2,11 +2,13 @@
 // construction centre and 4000 credits on the first match's map (`assets/maps/m1`); player 1 (Veyran) is the static
 // opponent of `assets/matches/m1.ron` (tower, four riflemen, a light tank, a small base), which never builds, produces
 // or attacks. No scripted command: everything player 0 does is the AI's. It builds its base by the shipped goal list,
-// buys a scout and an army (the army floor gives it one early), gathers, attacks the opponent's construction centre
+// buys a scout and an army (the army floor holds the first wave back until the vehicle factory and the second harvester pay
+// for themselves, WP9.1c-3), gathers, attacks the opponent's construction centre
 // and wins when that falls (docs/rules/match.md).
 //
 // `unit_defs` names a FROZEN copy (ai_vs_passive_defs, made for WP9.1c-2) of the shipped definitions, a match file of
-// its own and the profile `assets/ai/normal.ron` of that day, so editing the shipped definitions or profile never
+// its own and the profile `assets/ai/normal.ron` of that day (refrozen in WP9.1c-3: the opening, `attack_value` 2,000, `max_wait`
+// 12,000; the win comes at 13,839, inside the 16,000 ticks), so editing the shipped definitions or profile never
 // moves this checksum or the AI digest. The ore, harvest, storage, money, production, power and vision numbers are
 // those of `ai_scout`.
 Scenario(

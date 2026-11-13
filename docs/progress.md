@@ -3042,6 +3042,22 @@ WP9.1c-2". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved
 - **Not done.** See `ai.md` "Not done" (WP9.1c-2 gaps): one group at a time, no retreat, the defence gap with the army out, the finishing rule not needed in
   a scenario, only passive opponents.
 
+### WP9.1c-3 notes: the computer opponent's opening (12-11-2026)
+
+Follow-up of WP9.1c-2 (#129), data only: economy before army. Rules, numbers and measurements: `docs/rules/ai.md`, "The opening (WP9.1c-3)". Nothing in
+`crates/sf_sim/` changed. One line of `sf_ai` changed (the centre recall clears `closing`, from the re-review of #129). `ai_raid` and every earlier phase's
+pin are unchanged; `ai_vs_passive` and its frozen profile were deliberately re-pinned (cause as a test, `the_repin_of_ai_vs_passive_in_wp9_1c_3_is_the_profile`).
+
+- **Built.** `assets/ai/normal.ron`: the vehicle factory second in both goal lists, the second refinery before the first tower, `attack_value` 2,000 (= the floor),
+  `max_wait` 12,000 (was 6,000). `ai_vs_passive_defs/normal.ron` refrozen to it (the scenario stays 16,000 ticks). `army::watch` clears `closing` on a centre
+  recall. Pictures re-taken: `docs/screenshots/wp9.1c-2/` (ticks 9,600, 10,600, 11,500) and `wp9.1d/` (1000, 2500, 4000).
+- **Measured.** Second harvester at 1,880 (`ai_vs_passive`) and 1,887 (`m1_ai`), barracks 2,890 / 3,017, first unit of the mix queued 4,460 / 4,587, floor reached 10,687 / 9,374, first
+  wave 6 units worth 2,000 at 11,150 / 9,717, **the win at 13,839 / 11,664** (WP9.1c-2: 14,659 / 8,396). With the attack off the goal list **completes at 22,730 / 19,777** (was: not in 30,000 ticks).
+- **Gap, stated.** The target "list complete by 20,000 with the attack off" is met in `m1_ai` and **not in `ai_vs_passive`** (22,730); the cause is the map's ore. The cost accepted by
+  the decision: no barracks before about 2,900, so an early human rush beats it; not tested against a rusher.
+- **Moved with it.** The fence test's riflemen moved to (57, 28); the two defeated-AI tests remove the centre at 6,501 (after the AI has units); `the_ai_builds_its_base_in_the_game` looks
+  at 9,000 ticks; new `later_waves_are_max_wait_apart_unless_attack_value_is_reached`; `ai_perf` re-measured.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for
@@ -3423,8 +3439,8 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
 
 * **What changed.** `assets/config/repair.ron` `hp_per_tick` 3 to 1 (data only; nothing in `sf_sim`, `sf_ai`, `ci.yml` or `pinned.rs`). The construction centre has no price, so its repair is free; at 3 it
   out-healed up to five idle light tanks. **A game rule that also affects the human player** (a power plant takes 30 s to repair instead of 10, the centre 75 s from nothing instead of 25; a power shortage slows it further; the credits a repair costs are the same). A repair price and a repair pause under fire are not built (for Tijmen).
-* **Measured** (release, `tools/sf_headless/tests/repair_rate.rs` and `sf_headless tournament assets/matches/m1_duel.ron --games 100`, on main 1d210ee without WP9.1c-3): four idle tanks (a best case: in range, never shot at, no towers, a defender with 0 credits) never kill the repairing centre at 3 within 40,000 ticks, need 10,251 ticks at 2 and 1,131 at 1; the AI's `stuck` rule (no new hit-point low for `attack_patience`) would fire for 2 to 5 tanks at 3 and for 2 and 3 tanks at 2, never at 1 (longest stretch 31 to 40 ticks); rates 2 and 3 were measured by editing the shipped `repair.ron` and rebuilding;
-  decided games of 100 are 7, 14 and 59 for rates 3, 2 and 1. Tables in `docs/rules/repair_sell.md` "The rate and the wave" and `docs/rules/ai.md`.
+* **Measured** (release, `tools/sf_headless/tests/repair_rate.rs` and `sf_headless tournament assets/matches/m1_duel.ron --games 100`, first look on main 1d210ee without WP9.1c-3, the real Baseline B on main d4c06f4 with it): four idle tanks (a best case: in range, never shot at, no towers, a defender with 0 credits) never kill the repairing centre at 3 within 40,000 ticks, need 10,251 ticks at 2 and 1,131 at 1; the AI's `stuck` rule (no new hit-point low for `attack_patience`) would fire for 2 to 5 tanks at 3 and for 2 and 3 tanks at 2, never at 1 (longest stretch 31 to 40 ticks); rates 2 and 3 were measured by editing the shipped `repair.ron` and rebuilding;
+  decided games of 100 are 7, 14 and 59 for rates 3, 2 and 1 on 1d210ee, and **8 at rate 3 and 35 at rate 1 on d4c06f4 (Baseline B, seats 25 / 10)**. Tables in `docs/rules/repair_sell.md` "The rate and the wave" and `docs/rules/ai.md`.
 * **Tests.** `with_the_shipped_rate_idle_tanks_keep_taking_the_repairing_centre_down_and_stuck_never_fires` (shipped data: kill ticks for 2 to 12 tanks and the longest stretch without a new low under 2,400); re-pins of `the_shipped_numbers_are_pinned`, `tournament_decided` and `repair_screenshot`.
 * **Folded in.** The seating-level coarse-key assertion in `a_tick_level_last_loss_shares_a_coarse_key_...`; `a_slow_think_is_in_the_counters_...` no longer bounds another slow tick's think by 8 ms of wall clock.
-* **Gaps.** The tournament was not re-run on a tree with WP9.1c-3 (Baseline B). All decided games are still won by seat 1. The 41 capped games are not explained.
+* **Gaps.** The 65 capped games at rate 1 on the merged tree are not explained; rate 2 was not run on the merged tree. `tournament_decided` re-pinned on the merged tree (1,224 / 2,885; rate 3 gives #130's 1,315 / 5,546). The stale `SMOKE_CAP` comment in `tests/tournament.rs` is corrected (0 attacks in the 4 smoke games).

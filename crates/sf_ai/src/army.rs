@@ -185,6 +185,7 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
             state.recalled.dedup();
             state.attack_target = None;
             state.target_hp = None;
+            state.closing.clear();
         }
         state.directive = Directive {
             posture: Posture::Defend,
