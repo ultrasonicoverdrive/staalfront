@@ -405,6 +405,8 @@ fn a_slow_think_is_in_the_counters_and_in_the_slow_tick_of_the_hitch_log() {
         SimConfig {
             think_hitch: Some((27, Duration::from_millis(8))),
             hitch: Some((27, Duration::from_millis(25))),
+            // Every tick is slow on purpose, so every tick is in the hitch log and a leak always shows.
+            extra_tick_time: Duration::from_millis(21),
             ..SimConfig::manual()
         },
         ais,
@@ -433,12 +435,15 @@ fn a_slow_think_is_in_the_counters_and_in_the_slow_tick_of_the_hitch_log() {
     );
     // The same tick in the per-tick times (tick number 27 is the 27th, the first being tick 1).
     assert!(sim.tick_ms_since(0)[26] >= 33.0);
-    // Another slow tick (a debug build on a busy machine has some) carries the think of its own tick and
-    // nothing of this one's. No wall-clock bound: the think of another tick is part of that tick's own
-    // time and is not the number of tick 27, and the tick time is the one the per-tick list has for it.
+    // Every other tick is slow too (`extra_tick_time`) and carries the think of its own tick and nothing
+    // of this one's: a tick without a think has 0, a thinking tick (7, 17, 37) never the number of tick 27.
     let tick_ms = sim.tick_ms_since(0);
+    assert_eq!(slow.len(), 39, "every tick is slow: {slow:?}");
     for s in slow.iter().filter(|s| s.0 != 27) {
         assert!(s.2 <= s.1, "a think is part of its tick: {s:?}");
+        if s.0 % 10 != 7 {
+            assert_eq!(s.2, 0.0, "a tick without a think has no think time: {s:?}");
+        }
         assert!(s.2 != think_ms, "the think of tick 27 leaked into {s:?}");
         assert_eq!(s.1, tick_ms[s.0 as usize - 1], "the time of tick {}", s.0);
     }

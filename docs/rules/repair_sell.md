@@ -212,8 +212,8 @@ second, branch 816 to 844, the same final checksum `0x38d5e3c43358a889`. A world
 ## What moved in WP9.1e (re-pins)
 
 Three pins moved with the rate 3 to 1: `sf_data` `the_shipped_numbers_are_pinned` (3 to 1), the two tick pins of `tools/sf_headless/tests/tournament_decided.rs`
-(1,315 to 1,224 and 5,599 to 2,885), and `crates/sf_game/tests/repair_screenshot.rs` (the plant gains the rate times the number of advancing ticks of the 40, counted with `advances_on` and the owner's power speed: 39 at rate 1 in the scene's power shortage, 940 to 960 thousandths; the old `hurt + 3 * 40` was 40 advancing ticks; the count is allowed to be one short because the speed read before a step is that of the previous step).
-Cause measured: with `hp_per_tick` put back to 3 in the shipped file, `tournament_decided` gives 1,315 and 5,599 again. The frozen scenarios carry their own numbers
+(1,315 to 1,224 and 5,546 to 2,885), and `crates/sf_game/tests/repair_screenshot.rs` (the plant gains the rate times the number of advancing ticks of the 40, counted with `advances_on` and the owner's power speed: 39 at rate 1 in the scene's power shortage, 940 to 960 thousandths, 40 at rate 3; the old `hurt + 3 * 40` was 40 advancing ticks; the speed is read after each step, the value the repair pass of that tick used, so the pin is exact).
+Cause measured: with `hp_per_tick` put back to 3 in the shipped file, `tournament_decided` gives 1,315 and 5,546 again. The frozen scenarios carry their own numbers
 (`repair_sell` and `silo` 5, `ai_rebuild` and `ai_deadlock` 3) and no `.expected` moved.
 
 ## The rate and the wave (WP9.1e)
@@ -250,7 +250,7 @@ repair below 70 %, and both profiles have `first_attack_tick` 72,000 so nobody a
 
 Where the centre stands a "stretch" of about 39,500 to 39,800 ticks means no new low after the first few hits: `stuck` would end the attack. At rate 1 no tank count from 2 up has a
 stretch near 2,400 (all 31 to 40 ticks), so `stuck` never fires and the attack goes on until the centre falls. At rate 2 four tanks or more also keep making new lows (stretch 40), but they
-need 10,251 ticks with four tanks; two and three tanks are stuck. The stretch is read every tick, the AI reads the hit points at its thinks every 10 ticks, so its stretch is at least this one.
+need 10,251 ticks with four tanks; two and three tanks are stuck. The stretch is read every tick, the AI reads the hit points at its thinks every 10 ticks, so its stretch is about this one (sampled at seat 0's thinks: 30 to 40 ticks, per tick 31 to 40, both far under 2,400).
 The rate cannot be varied in a scratch `--assets` copy (the world is given `RepairSettings::embedded()`, compiled in from the shipped file): the rows for rates 2 and 3 were taken by editing the shipped
 `assets/config/repair.ron`, rebuilding and restoring the file. (An earlier version of this table, with other seeds and a 20,000-tick cap, put two tanks at "never" at rate 1;
 with a 40,000-tick cap two tanks kill at tick 20,451.)

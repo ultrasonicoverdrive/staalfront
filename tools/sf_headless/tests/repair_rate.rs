@@ -50,7 +50,7 @@ fn scratch_assets(dir: &TempDir) -> PathBuf {
     copy_dir(&assets().join("maps/m1"), &root.join("maps/m1"));
     std::fs::create_dir_all(root.join("ai")).unwrap();
     let mut ai = std::fs::read_to_string(assets().join("ai/normal.ron")).unwrap();
-    // No attack is launched within the 20,000 ticks played (72,000 is the profile maximum): the tanks stay where the fixture puts them.
+    // No attack is launched within the 40,000 ticks played (72,000 is the profile maximum): the tanks stay where the fixture puts them.
     ai = set_number(&ai, "first_attack_tick", 72_000);
     std::fs::write(root.join("ai/normal.ron"), ai).unwrap();
     root
@@ -92,7 +92,7 @@ struct Run {
     /// The longest stretch of ticks in which the centre's hit points made no new low, from the first hit to
     /// the kill (or the cap), seen every tick. This is what `army.rs` `stuck` compares with
     /// `attack_patience` (it sees the hit points at the AI's thinks, every 10 ticks, so its number is
-    /// never smaller than this one).
+    /// about this one: 30 to 40 ticks sampled at the thinks, 31 to 40 per tick).
     longest_no_new_low: u64,
 }
 

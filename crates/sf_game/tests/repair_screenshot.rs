@@ -509,23 +509,23 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
     let rate = sf_data::repair::RepairSettings::embedded().hp_per_tick;
     let mut advancing = 0u32;
     for _ in 0..40 {
-        let speed = scene.world.power_speed_permille(P0);
-        if sf_sim::advances_on(scene.world.tick(), speed) {
+        // The speed is read after the step: inside a step `refresh_power` runs before
+        // `advance_repair_sell`, so this is the speed the repair pass of that tick used.
+        let t = scene.world.tick();
+        scene.world.step();
+        if sf_sim::advances_on(t, scene.world.power_speed_permille(P0)) {
             advancing += 1;
         }
-        scene.world.step();
     }
     scene.sync();
     assert!(scene.world.is_repairing(plant));
     let mid = scene.world.hp_of(plant).unwrap();
     assert!(advancing > 30 && advancing <= 40, "{advancing}");
-    // The speed read before a step is the one counted at the start of the previous step, so the count of
-    // advancing ticks can be one short of what the repair pass used (measured: exact at the shipped rate 1
-    // here, one short at the old rate 3, where the plant heals three times as fast and its power with it).
+    // Exact: the gain is the rate times the advancing ticks (measured 39 at rate 1, 40 at rate 3).
     let gained = mid - hurt;
-    assert_eq!(gained % u32::from(rate), 0, "whole steps of the rate");
-    assert!(
-        (advancing..=advancing + 1).contains(&(gained / u32::from(rate))),
+    assert_eq!(
+        gained,
+        u32::from(rate) * advancing,
         "{gained} hit points at {rate} a tick, {advancing} ticks counted as advancing"
     );
     // The price by hand: 300 credits * 250 / 1000 for a whole repair = h / 8 credits at h hit points.
