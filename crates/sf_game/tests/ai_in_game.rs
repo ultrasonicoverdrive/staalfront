@@ -610,11 +610,13 @@ fn the_army_timing_in_the_game_seat() {
 /// `max_wait` 12,000): last build 3,017 (the barracks; the list then waits for the second refinery while the floor takes
 /// the money), first army unit 4,587, army at the gather cell 0, 4, 0 (the wave of 6, value 2,000, leaves at 9,717
 /// on `attack_value`), win 11,664. (WP9.1c-2, vehicle factory fifth, `max_wait` 6,000: 1,097, 1,147, [10, 0, 0], 6,037, 8,396.)
-const M1_AI_LAST_BUILD: u64 = 3_017;
+// WP9.2a re-pin: 3,017 -> 12,097 (the AI rebuilds a structure while the strike is staging and marching); measured: with the staging, reinforcement and
+// partial-defence numbers of the shipped profile set to 0 the old values come back (3,017, win 11,664).
+const M1_AI_LAST_BUILD: u64 = 12_097;
 const M1_AI_FIRST_ARMY: u64 = 4_587;
 const M1_AI_ARMY: [usize; 3] = [0, 4, 0];
 const M1_AI_FIRST_ATTACK: u64 = 9_717;
-const M1_AI_WON: u64 = 11_664;
+const M1_AI_WON: u64 = 12_312;
 
 /// Drives `ais` on `world` to `until` the way the sim thread does, calling `look` after every step.
 fn drive(
@@ -649,7 +651,7 @@ fn drive(
 fn the_money_of_the_ai_in_the_game_seat_around_the_first_attack() {
     let (mut world, _, mut ais) = game(&ai_file());
     let mut rows = Vec::new();
-    drive(&mut world, &mut ais, 11_800, |w, ais, _| {
+    drive(&mut world, &mut ais, 12_400, |w, ais, _| {
         let t = w.tick().0;
         if t >= 9_000 && t.is_multiple_of(250) {
             let st = ais[0].state();
@@ -839,7 +841,7 @@ fn opening(attack: bool, ticks: u64) -> Opening {
 /// pinned (they sit near the reserve while the floor spends everything above it).
 #[test]
 fn the_opening_in_the_game_seat() {
-    let o = opening(true, 11_800);
+    let o = opening(true, 12_400);
     println!("{o:#?}");
     assert_eq!(o.vehicle_factory_ordered, Some(817));
     assert_eq!(o.harvester_queued, Some(1_487));
@@ -848,7 +850,7 @@ fn the_opening_in_the_game_seat() {
     assert_eq!(o.first_unit_queued, Some(4_587));
     assert_eq!(o.floor_reached, Some(9_374));
     assert_eq!(o.first_wave, Some((9_717, 6, 2_000)));
-    assert_eq!(o.won, Some(11_664));
+    assert_eq!(o.won, Some(12_312)); // WP9.2a: 11,664 before the staging (the strike waits at its cell)
     assert_eq!(
         o.builds[..5],
         [(17, 1), (257, 2), (817, 4), (2_177, 1), (3_017, 3)]
@@ -886,6 +888,7 @@ fn the_opening_in_the_game_seat() {
             (10_500, 800),
             (11_000, 800),
             (11_500, 1_000),
+            (12_000, 1_000),
         ]
     );
 }

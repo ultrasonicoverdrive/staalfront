@@ -512,7 +512,7 @@ pub fn threat_value(state: &AiState, obs: &Observation, lens: &Lens<'_>, at: Cel
 
 /// G4, partial defence: of the units at home (`pool`, ascending), the ones that go to a threat at `at`: the
 /// nearest first (squared distance, then the lowest id) until what they are worth reaches
-/// [`threat_value`] times `defend_ratio_permille` / 1000. All of them when the ratio is 0 or nothing armed is
+/// [`threat_value`] times `defend_ratio_permille` over 1000; all of them when the ratio is 0 or nothing armed is
 /// seen. Ascending.
 pub fn defenders(
     state: &AiState,
