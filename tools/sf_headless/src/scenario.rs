@@ -36,7 +36,7 @@
 //! ids hit.
 
 mod exact;
-mod game;
+pub(crate) mod game;
 
 pub use exact::{ExactCommand, ExactOrder, RawPos, RecordedCommand, render_recording};
 pub use game::GameSpec;

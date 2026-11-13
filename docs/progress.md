@@ -3391,3 +3391,31 @@ measurement (peak, length, silence, the mix below), not by ear. **Tijmen: please
   to 4, so the asserted floors became what the rule promises (the first three goals, 1900 of 4000 credits: at least 3 kinds, 4 structures). Think cost re-measured:
   release sim thread mean 1-2 us, worst 59-94 us, 1.1-1.3 % of the step (two runs); debug sim thread mean 36 us, worst 984 us, 1.3 %; real game window
   under Xvfb (debug, 4,013 ticks, 401 thinks) mean 0.097 ms, worst 1.04 ms (its one slow-tick line: `[257, 50.1, 1.04]`).
+
+### WP9.5a notes: the AI tournament (12-11-2026)
+
+* **What exists.** `sf_headless tournament <match.ron> [--games N] [--cap TICKS] [--seed S] [--json PATH] [--assets DIR] [--stalemate TICKS]`
+  (`tools/sf_headless/src/tournament.rs`), the match `assets/matches/m1_duel.ron` (both seats `Ai(profile: "normal")`, headless only: the game refuses it),
+  `sf_ai::match_ais` (the match-to-AIs loop, moved from `sf_game::matchplay::ais`, which wraps it; `sf_ai` reads no file, the host passes a reader), and the
+  rules in `docs/rules/ai.md` "AI against AI (WP9.5a)". Nothing changed in `crates/sf_sim`, `ci.yml`, `pinned.rs` or `assets/ai/normal.ron`; no scenario
+  checksum, golden or `.expected` moved (the m1_ai tests in `sf_game` are unchanged and green).
+* **Measured** (release, 100 games `m1_duel`, cap 60,000, container with load average about 4): 153.4 s total, 1.2 to 2.0 s a game; 7 decided (all won by the
+  north-east seat), 1 stalemate, 92 capped; 100 distinct final checksums. These are a baseline: WP9.1c-3 changes `normal.ron`.
+* **Tests.** Unit tests (`src/tournament/tests.rs`: schedule, seeds pinned, classification at its boundary, median, permille, summary, table, JSON shape,
+  arguments) and `tests/tournament.rs` (m1_duel's content against `m1_ai`, the seat swap read back from the played world, the cap and the stalemate label on real
+  games, the 4-game smoke with the second-run table comparison, JSON, exit codes); `sf_ai` unit tests of `match_ais`; one `sf_game` test that the game refuses
+  `m1_duel`.
+* **Not done / gaps.** No tuning, no pass criterion, no threads, the 100 games are not in CI; the AI seed has no effect on a game yet (no rule draws from it);
+  the table equality is checked on one machine only. See `ai.md` "Not done in WP9.5a".
+
+### WP9.5a fix round 1 (12-11-2026)
+
+* **Seats read from the world.** `GameRecord::factions` is `World::faction_of` of each seat, `ai_factions` the faction each AI's profile was resolved for (`Profile::faction`, new field,
+  not hashed); `tournament::prepare` refuses a disagreement. Mutations (unswapped match to the world; unswapped match to `match_ais`) now fail
+  `the_world_and_the_ais_have_the_factions_of_the_schedule_and_the_games_speed`, `the_seat_swap_reaches_the_world_the_game_is_played_in` and `the_winner_is_the_seat_not_the_faction`.
+* **A decided game in CI** (`tests/tournament_decided.rs`, scratch assets with a shortened profile, twelve tanks): seat 0 strong wins at 1,315, seat 1 strong at 5,599; flipping the winner-to-seat mapping fails both tests.
+* **Off by one confirmed and fixed:** `MatchResult::tick` is the step's own number, `ticks` the count after it; the first version printed `ticks 51156, defeat 51155`. All tick numbers in the record are counts of ticks run now.
+* **AI seed:** `the_ai_seed_alone_does_not_change_a_game`. **Speed:** the tournament world's speed is asserted (`world.config().speed`), and `the_tournament_speed_is_the_games_walking_speed` in `sf_game` pins the constant to `bench_scene::DEMO_SPEED`.
+* **Divergence measure:** distinct outcome keys overall and per seating, spread of the last loss (table and JSON). Fix round 2: also distinct coarse outcomes (ending, ticks, attacks per AI) and the same plus the last loss rounded down to 1,000 ticks. Baseline A: exact 100 of 100 outcomes (25 of 25 per seating), coarse 27 of 100 and 51 of 100; so the seeded jitter is needed and goes into WP9.2a (`timing_jitter_permille`, decision 13-11-2026). Baseline B (after 9.1c-3) is still to be measured when main moves.
+* **One loader** behind `load_game` and `load_match_file` (`load_parts`), `game:` scenarios unchanged (the workspace tests, and the 43 CI scenarios with `--expect`, are the proof). `Scenario::load_ais` keeps its own loop (`ai.md`).
+

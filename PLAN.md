@@ -487,6 +487,21 @@ Layered (analysis §12, §22G):
   has not lost hit points for `attack_patience` while an attacker stands at the target. (6) The defence cell rule gets unit tests and a fence
   test. (7) The finishing `Attack` is sent and taken on the real world in a test; the owner filter is pinned. (8) Survivors of an ended attack
   walk home with `Move`, a retreat on purpose.*
+  *12-11-2026 (orchestrator; design memo `wp9.2-9.5-ontwerp`): **the rest of phase 9 is built in the order 9.5a, 9.2a, 9.2b, 9.3a [xhigh], 9.3b [xhigh], 9.4, 9.5b.**
+  9.5 is split: **9.5a** the AI-vs-AI tournament runner (`sf_headless tournament`, the match `m1_duel`, built first because every later WP changes army
+  behaviour and today the only evidence is two scenarios against a passive opponent) and **9.5b** the 100-game report and tuning. The tournament runs
+  on **shipped assets** through the game's loader, not on frozen copies; the match-to-AIs loop moved from `sf_game` into `sf_ai` (`match_ais`); a seeded
+  jitter profile number is added **only if** fewer than about half the games are distinct, then in 9.2a. Built in 9.5a: the baseline of 100 games has 100
+  distinct final checksums, which prove nothing (see the fix-round notes below: on coarse outcome keys 27 and 51 of 100, so the jitter is needed); it also shows that the normal AI decides only 7 of 100 games against itself (`docs/rules/ai.md`,
+  "AI against AI (WP9.5a)").*
+  *12-11-2026 (orchestrator, fix round 1 of WP9.5a, after the read-only sweep): (1) the seats of a tournament game are **read from the world and the AIs**, not from the schedule; (2) a decided
+  game is part of CI (a fixture, `tests/tournament_decided.rs`); (3) every tick number of the record is a **count of ticks run**; (4) the **divergence of the games is measured by distinct outcome keys**
+  (ending, ticks, last loss, attacks), per seating, not by distinct checksums, which spawn facing alone makes distinct; (superseded by the next note: the exact key is about as weak as the checksum);
+  (5) after WP9.1c-3 merges, the 100 games are run again and both baselines stay in `docs/rules/ai.md`.*
+  *13-11-2026 (orchestrator, fix round 2 of WP9.5a): the exact outcome key holds the exact last-loss tick and 92 of 100 games are capped, so it is about as weak as the
+  checksum. On coarse keys Baseline A is **27 of 100** distinct for (ending, ticks, attacks per AI) and **51 of 100** with the last loss rounded to 1,000 ticks, at or below
+  the memo's "about half". **The seeded jitter is needed and goes into WP9.2a** (profile number `timing_jitter_permille`, default 0 for frozen profiles, set in the
+  shipped normal profile); its effect is measured there on the coarse key.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.

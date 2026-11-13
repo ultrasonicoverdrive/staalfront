@@ -1,5 +1,6 @@
 //! The command line: `sf_headless <scenario.ron> [--ticks N] [--every K]
-//! [--out log.json] [--expect HEX]`.
+//! [--out log.json] [--expect HEX]`, and `sf_headless tournament <match.ron> ..`
+//! ([`crate::tournament`], WP9.5a).
 //!
 //! Arguments are parsed by hand ([`parse_args`]); [`run_cli`] does the work
 //! and returns the exit code, writing to the streams it is given, so it can be
@@ -34,6 +35,7 @@ pub const EXIT_INVALID: u8 = 2;
 /// The help text.
 pub const USAGE: &str = "\
 Usage: sf_headless <scenario.ron> [options]
+       sf_headless tournament <match.ron> [options]   (AI against AI; `sf_headless tournament --help`)
 
 Runs a scenario on the deterministic simulation, without a window or a GPU,
 and prints the checksum of the final state.
@@ -215,6 +217,11 @@ fn summary(outcome: &Outcome, scenario_path: &str, host: &Host) -> String {
 /// Runs the tool with the given arguments (after the program name) and
 /// returns the exit code. Results go to `out`, problems to `err`.
 pub fn run_cli(args: Vec<String>, out: &mut dyn Write, err: &mut dyn Write) -> u8 {
+    // The subcommand of WP9.5a: `sf_headless tournament <match.ron> ..` (a scenario file is never called
+    // `tournament` without an extension, so the first word is unambiguous).
+    if args.first().is_some_and(|a| a == "tournament") {
+        return crate::tournament::run_cli(args[1..].to_vec(), out, err);
+    }
     let args = match parse_args(args) {
         Ok(Parsed::Help) => {
             let _ = out.write_all(USAGE.as_bytes());
