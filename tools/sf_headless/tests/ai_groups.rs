@@ -539,6 +539,36 @@ fn the_reinforcement_merges_into_the_strike_within_arrive_radius_of_its_staging_
 }
 
 #[test]
+fn a_merge_never_lists_a_unit_twice_even_if_the_two_groups_overlap() {
+    // The rules never put a unit in two groups, but the merge does not rely on it: a reinforcement that (by a
+    // state made by hand) shares a member with the strike merges into a strike that lists every unit once.
+    let (world, mut s, own) = with_a_strike(3);
+    let stage = s.groups[0].staging.unwrap();
+    let shared = s.groups[0].members[0];
+    let strike = s.groups[0].id;
+    let mut members = vec![shared];
+    members.extend((40..43).map(|i| EntityId::new(i, 0)));
+    s.add_group(
+        members,
+        stage,
+        GroupStage::Advancing,
+        Tick(3000),
+        0,
+        None,
+        Some(strike),
+    );
+    let mut now = more_at_home(&own, 3);
+    for o in now.iter_mut().filter(|o| (40..43).contains(&o.id.index())) {
+        o.order = Order::Idle;
+        o.cell = stage;
+    }
+    army_turn(&world, &mut s, &observation(&world, 3040, now));
+    assert_eq!(s.groups.len(), 1, "{:?}", s.groups);
+    check_groups(&s, 3040);
+    assert_eq!(s.groups[0].members.len(), 9);
+}
+
+#[test]
 fn a_strike_that_has_advanced_is_met_at_its_middle_cell() {
     let (world, s0, own) = with_a_strike(3);
     let mut s = s0.clone();
@@ -784,9 +814,11 @@ fn only_a_hit_on_the_construction_centre_recalls_a_group_and_the_defence_stays_w
 #[test]
 fn a_march_command_carries_at_most_gather_group_ids() {
     // 45 gathered units and an attack at 1 unit: the 45 go in commands of at most 19 (the shipped gather_group),
-    // 19 + 19 + 7, one turn.
+    // 19 + 19 + 7, one turn. Chunking is a WP9.2a rule, so a number of WP9.2a is on (partial defence, which
+    // changes nothing here); with them all off the list goes as one command (below).
     let (_, s, out, _) = launched(45, 1, |a| {
         assert_eq!(a.gather_group, 19);
+        a.defend_ratio_permille = 1500;
     });
     assert_eq!(s.groups[0].members.len(), 45);
     let moves = attack_moves(&out);
@@ -796,7 +828,10 @@ fn a_march_command_carries_at_most_gather_group_ids() {
     let all: Vec<u32> = moves.iter().flat_map(|m| m.0.clone()).collect();
     assert_eq!(all, (20..65).collect::<Vec<_>>());
     // The size is the profile's: 10 gives 10, 10, 10, 10 and the budget (4 commands) leaves 5 for the next turn.
-    let (world, mut s, out, own) = launched(45, 1, |a| a.gather_group = 10);
+    let (world, mut s, out, own) = launched(45, 1, |a| {
+        a.gather_group = 10;
+        a.defend_ratio_permille = 1500;
+    });
     let sizes: Vec<usize> = attack_moves(&out).iter().map(|m| m.0.len()).collect();
     assert_eq!(sizes, [10, 10, 10, 10]);
     // The 5 not sent are still idle at the gather cell: the next turn orders them.
@@ -993,6 +1028,7 @@ fn the_invariant_holds_through_launch_merge_death_and_recall_on_built_observatio
     let mut now = own;
     let mut tick = 3040;
     let mut next_id = 40;
+    let (mut two_out, mut merged) = (false, false);
     for round in 0..40u32 {
         // New units at home every other turn, one dies every third, everything idle half the time.
         if round % 2 == 0 {
@@ -1021,10 +1057,32 @@ fn the_invariant_holds_through_launch_merge_death_and_recall_on_built_observatio
             watch(&world, &mut s, &observation(&world, tick, now.clone()));
             watch(&world, &mut s, &observation(&world, tick + 10, hit));
         }
+        let before = s.groups.clone();
         army_turn(&world, &mut s, &observation(&world, tick, now.clone()));
         check_groups(&s, tick);
+        let out_now = s
+            .groups
+            .iter()
+            .filter(|g| g.stage != GroupStage::Returning)
+            .count();
+        two_out |= out_now >= 2;
+        // A merge: a reinforcement of the turn before is gone and its strike holds its members now.
+        for r in before.iter().filter(|g| g.merge_into.is_some()) {
+            let strike = s.groups.iter().find(|g| Some(g.id) == r.merge_into);
+            if s.groups.iter().all(|g| g.id != r.id)
+                && let Some(strike) = strike
+                && !r.members.is_empty()
+                && r.members
+                    .iter()
+                    .all(|m| strike.members.binary_search(m).is_ok())
+            {
+                merged = true;
+            }
+        }
         tick += 40;
     }
+    assert!(two_out, "a second group went out");
+    assert!(merged, "a reinforcement merged into the strike");
 }
 
 // ---- the real game: the army is out and the guard kills the raiders -------------------------------------------
@@ -1249,4 +1307,89 @@ fn ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned() {
     let won = won.expect("the AI wins");
     assert!(won < s.ticks, "{won}");
     assert_eq!(won, VS_PASSIVE_WON_SHIPPED);
+}
+
+// ---- fix round 1: off means the old behaviour --------------------------------------------------------------------
+
+#[test]
+fn with_the_numbers_of_wp9_2a_off_a_long_list_goes_as_one_command() {
+    // The frozen profile (every number of WP9.2a 0): 25 gathered units march in one command, as before WP9.2a,
+    // although the list is longer than `gather_group` (19).
+    let (_, s, out, _) = launched(25, 1, |a| {
+        assert!(!a.groups_on());
+        assert_eq!(a.gather_group, 19);
+    });
+    assert_eq!(s.attacks_launched, 1);
+    let sizes: Vec<usize> = attack_moves(&out).iter().map(|m| m.0.len()).collect();
+    assert_eq!(sizes, [25], "{out:?}");
+}
+
+#[test]
+fn attack_value_zero_with_the_jitter_off_launches_as_before() {
+    // Before WP9.2a the trigger was `value >= attack_value`: 0 is always met (a profile file cannot write 0,
+    // the check asks for 1 or more; a profile made in code can). With the jitter off it still is; with the
+    // jitter on the scaled value is at least 1.
+    let (_, mut s) = army_state();
+    s.profile.army.attack_value = 0;
+    s.profile.army.max_wait = 1_000_000;
+    let at = Tick(u64::from(s.profile.army.first_attack_tick));
+    assert!(army::attack_due(&s, at, 0, 1));
+    s.profile.army.timing_jitter_permille = 100;
+    s.jitter = Some(0);
+    assert!(!army::attack_due(&s, at, 0, 1));
+    assert!(army::attack_due(&s, at, 1, 1));
+}
+
+// ---- fix round 1: the survivors of an attack that ended all go home --------------------------------------------
+
+#[test]
+fn every_survivor_of_an_ended_attack_is_sent_home_over_several_turns() {
+    // 12 units out, commands of 2 ids, 4 commands a turn: the end of the attack can send only 8 home in its
+    // turn. The other 4 stay in a Returning group and get their `Move` home at the next turn; then the group is
+    // gone. Before the fix they kept their `AttackMove` on the old target, in no group.
+    let (world, mut s, _, own) = launched(12, 1, |a| {
+        a.defend_ratio_permille = 1500;
+        a.gather_group = 2;
+    });
+    assert_eq!(s.groups.len(), 1);
+    let goal = s.groups[0].goal;
+    // Everyone is far from the target and marching; the patience runs out.
+    let marching: Vec<Own> = own
+        .iter()
+        .map(|o| {
+            let mut o = o.clone();
+            if o.armed {
+                o.order = Order::AttackMove(middle(goal));
+                o.cell = Cell::new(40, 50);
+            }
+            o
+        })
+        .collect();
+    let late = 3000 + u64::from(s.profile.army.attack_patience) + 40;
+    let out = army_turn(&world, &mut s, &observation(&world, late, marching.clone()));
+    let home_moves = |out: &[Command]| -> Vec<u32> {
+        out.iter()
+            .filter_map(|c| match c {
+                Command::Order {
+                    ids,
+                    order: Order::Move(_),
+                    ..
+                } => Some(ids.iter().map(|i| i.index()).collect::<Vec<_>>()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    };
+    let first = home_moves(&out);
+    assert_eq!(first, (20..28).collect::<Vec<_>>(), "{out:?}");
+    assert_eq!(s.groups.len(), 1);
+    assert_eq!(s.groups[0].stage, GroupStage::Returning);
+    assert_eq!(ids(&s.groups[0].recalled), [28, 29, 30, 31]);
+    check_groups(&s, late);
+    let out = army_turn(&world, &mut s, &observation(&world, late + 40, marching));
+    assert_eq!(home_moves(&out), [28, 29, 30, 31], "{out:?}");
+    assert!(
+        s.groups.is_empty(),
+        "the Returning group is gone once all are sent"
+    );
 }

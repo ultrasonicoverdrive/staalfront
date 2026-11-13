@@ -249,7 +249,12 @@ impl ArmyRules {
 
 /// The staging permille of a profile that does not write one.
 pub const DEFAULT_STAGE_PERMILLE: u16 = 700;
-/// The staging patience of a profile that does not write one (half a minute).
+/// The staging patience of a profile that does not write one. A placeholder: it is read only with
+/// `stage_distance` above 0, and a profile that leaves `stage_distance` out (staging off, the default) never
+/// uses it. It is not a tuned number: 600 was measured too short (riflemen need 800 to 1,000 ticks to reach the
+/// staging cell), and the shipped `normal` profile writes 1800 (`docs/rules/ai.md`, "Groups"). It stays 600
+/// because the profile digest of the frozen profiles hashes it; a profile that turns staging on must write its
+/// own patience below `attack_patience` (checked).
 pub const DEFAULT_STAGE_PATIENCE: u32 = 600;
 fn default_stage_permille() -> u16 {
     DEFAULT_STAGE_PERMILLE
@@ -424,6 +429,12 @@ impl AiProfile {
         range("army.stage_distance", a.stage_distance, 0, 64)?;
         range("army.stage_permille", a.stage_permille, 1, 1000)?;
         range("army.stage_patience", a.stage_patience, 1, MAX_TICKS)?;
+        if a.stage_distance != 0 && a.stage_patience >= a.attack_patience {
+            return err(format!(
+                "army.stage_patience {} is not below army.attack_patience {}: with staging on the attack could end while it stages",
+                a.stage_patience, a.attack_patience
+            ));
+        }
         range("army.reinforce_value", a.reinforce_value, 0, 1_000_000)?;
         range(
             "army.defend_ratio_permille",

@@ -210,8 +210,12 @@ pub fn watch(state: &mut AiState, obs: &Observation, lens: &Lens<'_>) {
     {
         state.threat = None;
         state.defend_since = None;
-        // The defence is over: the groups called back are dissolved, their members are home.
-        state.groups.retain(|g| g.stage != GroupStage::Returning);
+        // The defence is over: the groups called back are dissolved, their members are home. With the WP9.2a
+        // rules on, a group that still has members to send home stays until they are sent (`operations`).
+        let on = state.profile.army.groups_on();
+        state
+            .groups
+            .retain(|g| g.stage != GroupStage::Returning || (on && !g.recalled.is_empty()));
         state.directive = match state.strike().map(|g| g.goal) {
             Some(t) => Directive {
                 posture: Posture::Attack,
@@ -418,8 +422,12 @@ pub fn draw_jitter(state: &mut AiState) {
     state.jitter = Some(draw as i32 - spread as i32);
 }
 
-/// `value` scaled by the jitter drawn for the launch that comes next (at least 1).
+/// `value` scaled by the jitter drawn for the launch that comes next, at least 1 when the jitter is on. With
+/// `timing_jitter_permille` 0 it is `value` itself, so `attack_value` 0 still means "always" (fix round 1).
 fn jittered(state: &AiState, value: u32) -> u64 {
+    if state.profile.army.timing_jitter_permille == 0 {
+        return u64::from(value);
+    }
     let permille = 1000 + i64::from(state.jitter.unwrap_or(0));
     ((u64::from(value) * permille as u64) / 1000).max(1)
 }
@@ -645,8 +653,7 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
             }
             home.sort();
             home.dedup();
-            end_attack(state);
-            return home;
+            return end_attack_with(state, now, gather, home);
         }
         if let Some(t) = tgt {
             let g = &mut state.groups[si];
@@ -670,7 +677,7 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
             };
         }
         reinforce(state, obs, lens, gather, strike_id, &mut home);
-        return home;
+        return homing(state, now, gather, home);
     }
     // No strike with units: a strike whose members are all gone ends, and so does a reinforcement for it.
     if state
@@ -685,7 +692,7 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
         }
         home.sort();
         home.dedup();
-        end_attack(state);
+        home = end_attack_with(state, now, gather, home);
     }
     if state.threat.is_some() {
         return home;
@@ -817,6 +824,61 @@ fn end_attack(state: &mut AiState) {
     }
 }
 
+/// The end of an attack with its survivors `home` (ascending). With the WP9.2a rules off they are returned to
+/// get one `Move` home this turn, as before. With them on they go into a Returning group whose `recalled`
+/// list is everyone still to be sent home, so none of them keeps marching on the old target when the budget
+/// or the chunk size leaves some unsent (fix round 1 of WP9.2a); the returned list is then empty.
+fn end_attack_with(
+    state: &mut AiState,
+    now: sf_sim::Tick,
+    gather: Cell,
+    home: Vec<EntityId>,
+) -> Vec<EntityId> {
+    end_attack(state);
+    homing(state, now, gather, home)
+}
+
+/// With the WP9.2a rules on, puts `home` (ascending) in a Returning group whose `recalled` list is who still
+/// has to be sent home, and returns nothing; with them off returns `home` unchanged. At [`GROUPS_MAX`] groups
+/// the units join the last Returning group instead of making one.
+fn homing(
+    state: &mut AiState,
+    now: sf_sim::Tick,
+    gather: Cell,
+    home: Vec<EntityId>,
+) -> Vec<EntityId> {
+    if !state.profile.army.groups_on() || home.is_empty() {
+        return home;
+    }
+    let existing = state
+        .groups
+        .iter()
+        .rposition(|g| g.stage == GroupStage::Returning);
+    let gi = match existing {
+        Some(i) if state.groups.len() >= GROUPS_MAX => i,
+        _ => {
+            let id = state.add_group(
+                Vec::new(),
+                gather,
+                GroupStage::Returning,
+                now,
+                0,
+                None,
+                None,
+            );
+            state.groups.iter().position(|g| g.id == id).unwrap_or(0)
+        }
+    };
+    let g = &mut state.groups[gi];
+    g.members.extend(home.iter().copied());
+    g.members.sort();
+    g.members.dedup();
+    g.recalled.extend(home);
+    g.recalled.sort();
+    g.recalled.dedup();
+    Vec::new()
+}
+
 /// Whether `o` may be given an order now: `Idle` and not ordered within `resend_ticks`, or on a `Move` and not
 /// ordered since `since` (the start of a defence). Any other order (`AttackMove`, `Attack`, `Pursue`, ...) is
 /// left alone: the anti-spam rule.
@@ -857,7 +919,13 @@ pub fn operations(
 ) {
     let now = obs.tick;
     let arrive = u32::from(state.profile.army.arrive_radius);
-    let chunk = usize::from(state.profile.army.gather_group).max(1);
+    let on = state.profile.army.groups_on();
+    // Chunking is a rule of WP9.2a: with its numbers off a list goes as one command, as before.
+    let chunk = if on {
+        usize::from(state.profile.army.gather_group).max(1)
+    } else {
+        usize::MAX
+    };
     let mut left = budget;
     // Sends `order` to `ids` in commands of at most `chunk` ids while the budget lasts; returns the ids sent.
     let mut send = |state: &mut AiState,
@@ -969,8 +1037,27 @@ pub fn operations(
             group.closing.sort();
         }
     }
-    // The survivors of an attack that ended.
-    send(state, out, home.to_vec(), Order::Move(middle(gather)));
+    // The survivors of an attack that ended. With the WP9.2a rules on, `decide` keeps them in a Returning group
+    // whose `recalled` list is who still has to be sent home (over several turns when the budget or the
+    // chunk size asks for it): without a threat they get the `Move` home here; a group with nobody left to
+    // send is dissolved.
+    if on {
+        if state.threat.is_none() {
+            for gi in 0..state.groups.len() {
+                if state.groups[gi].stage != GroupStage::Returning {
+                    continue;
+                }
+                let ids = state.groups[gi].recalled.clone();
+                let sent = send(state, out, ids, Order::Move(middle(gather)));
+                state.groups[gi].recalled.retain(|id| !sent.contains(id));
+            }
+            state
+                .groups
+                .retain(|g| g.stage != GroupStage::Returning || !g.recalled.is_empty());
+        }
+    } else {
+        send(state, out, home.to_vec(), Order::Move(middle(gather)));
+    }
     // The gathering, while nothing is defended.
     if state.threat.is_none() {
         gather_units(

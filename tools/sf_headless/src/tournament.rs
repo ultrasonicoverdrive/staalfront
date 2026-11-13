@@ -11,6 +11,10 @@
 //! * **The seats** ([`factions_for`]): game `i` puts the factions of the file on the start sites in one of
 //!   four ways, cycling: as written, swapped, the first faction on both sites, the second on both sites
 //!   (the mirrors). Game 0 is the file as written.
+//! * **The start sites** ([`sites_swapped`], WP9.2a fix round, 13-11-2026): games 4 to 7 of every eight
+//!   play the same four seatings with the two players' start objects swapped, so every seat and faction
+//!   plays from both sites. A start site can favour whoever sits on it (on m1 the south-west one does), so
+//!   the summary counts the wins per site as well (site 0 = where seat 0 starts in the file).
 //! * **The world seed** and **the AI seed** ([`seeds_for`]): both come from `--seed` (the seed of the match
 //!   file when left out) and the game number through a fixed integer mixer, so a game number always has the
 //!   same seeds for the same `--seed`, and no two games share them. The AI seed feeds the random stream of
@@ -222,6 +226,12 @@ pub fn factions_for(file: [Faction; 2], index: u32) -> [Faction; 2] {
     }
 }
 
+/// Whether game `index` plays with the start sites swapped: the second half of an 8-cycle, so game `k`
+/// and game `k + 4` have the same factions on the seats and opposite start sites.
+pub fn sites_swapped(index: u32) -> bool {
+    index % 8 >= 4
+}
+
 /// One step of the SplitMix64 generator: a fixed integer mixer with no state of its own.
 fn mix(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -313,6 +323,8 @@ pub struct GameRecord {
     pub factions: [Faction; 2],
     /// The faction each seat's AI was made for; equal to `factions` in every game that is played.
     pub ai_factions: [Faction; 2],
+    /// Whether the two seats started on each other's site ([`sites_swapped`]): seat 0 on site 1.
+    pub sites_swapped: bool,
     /// How it ended.
     pub ending: Ending,
     /// The tick count the match was decided at (see [`play_seeded`]; equal to `ticks`); `None` for a draw by
@@ -459,10 +471,22 @@ pub struct Prepared {
 
 /// Makes a game: the match with `factions` on the seats, a world on `world_seed` at the game's speed
 /// ([`GAME_SPEED_RAW`]) and the AIs on `ai_seed`. It refuses a game in which the world and an AI disagree on
-/// the faction of a seat.
+/// the faction of a seat. The sites as the file writes them; see [`prepare_sited`].
 pub fn prepare(
     setup: &Setup,
     factions: [Faction; 2],
+    world_seed: u64,
+    ai_seed: u64,
+) -> Result<Prepared, String> {
+    prepare_sited(setup, factions, false, world_seed, ai_seed)
+}
+
+/// [`prepare`], with the two players' start objects swapped when `swapped` (each seat starts on the other's
+/// site; credits, faction and controller stay with the seat).
+pub fn prepare_sited(
+    setup: &Setup,
+    factions: [Faction; 2],
+    swapped: bool,
     world_seed: u64,
     ai_seed: u64,
 ) -> Result<Prepared, String> {
@@ -481,7 +505,9 @@ pub fn prepare(
             }
         })
         .collect();
-    let loaded = setup.loaded.with_factions(&by_player, setup.cells)?;
+    let loaded = setup
+        .loaded
+        .with_factions(&by_player, swapped, setup.cells)?;
     let world = Box::new(
         game::build_world_at_speed(
             world_seed,
@@ -527,7 +553,15 @@ pub fn play_game(
 ) -> Result<GameRecord, String> {
     let factions = factions_for(setup.file_factions, index);
     let seeds = seeds_for(base_seed, index);
-    play_seeded(setup, index, factions, seeds, cap, stalemate_window)
+    play_seeded_sited(
+        setup,
+        index,
+        factions,
+        sites_swapped(index),
+        seeds,
+        cap,
+        stalemate_window,
+    )
 }
 
 /// Plays one game with the given factions and seeds (`seeds` = world seed, AI seed): the AIs think right
@@ -547,13 +581,26 @@ pub fn play_seeded(
     cap: u64,
     stalemate_window: u64,
 ) -> Result<GameRecord, String> {
+    play_seeded_sited(setup, index, factions, false, seeds, cap, stalemate_window)
+}
+
+/// [`play_seeded`] with the start sites swapped when `swapped` ([`prepare_sited`]).
+pub fn play_seeded_sited(
+    setup: &Setup,
+    index: u32,
+    factions: [Faction; 2],
+    swapped: bool,
+    seeds: (u64, u64),
+    cap: u64,
+    stalemate_window: u64,
+) -> Result<GameRecord, String> {
     let (world_seed, ai_seed) = seeds;
     let Prepared {
         mut world,
         mut ais,
         world_factions,
         ai_factions,
-    } = prepare(setup, factions, world_seed, ai_seed)?;
+    } = prepare_sited(setup, factions, swapped, world_seed, ai_seed)?;
     let mut wanted = Vec::new();
     let mut last_loss = 0u64;
     let mut decided = None;
@@ -606,6 +653,7 @@ pub fn play_seeded(
         // from the AIs; `prepare` has checked that they agree.
         factions: world_factions,
         ai_factions,
+        sites_swapped: swapped,
         ending,
         defeat_tick: decided.map(|(tick, _)| tick),
         ticks,
@@ -685,6 +733,10 @@ pub struct Summary {
     pub games: u32,
     /// Games each seat won (seat 0, seat 1).
     pub seat_wins: [u32; 2],
+    /// Games won from each start site (site 0 = where seat 0 starts in the file, site 1 = seat 1's).
+    pub site_wins: [u32; 2],
+    /// Games played with the sites as written and swapped.
+    pub site_games: [u32; 2],
     /// Games both players lost in the same tick.
     pub mutual: u32,
     /// Games stopped by the cap that were stalemates.
@@ -741,6 +793,8 @@ impl Summary {
 /// Adds the games up.
 pub fn summarize(records: &[GameRecord]) -> Summary {
     let mut seat_wins = [0u32; 2];
+    let mut site_wins = [0u32; 2];
+    let mut site_games = [0u32; 2];
     let (mut mutual, mut stalemates, mut capped) = (0, 0, 0);
     let mut factions: BTreeMap<String, (u32, u32)> = BTreeMap::new();
     let mut durations = Vec::new();
@@ -775,8 +829,12 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
         row.3.insert(r.digest_key());
         row.4.insert(r.coarse_key());
         row.5.insert(r.coarse_loss_key());
+        site_games[usize::from(r.sites_swapped)] += 1;
         match r.ending {
-            Ending::Won(seat) => seat_wins[seat] += 1,
+            Ending::Won(seat) => {
+                seat_wins[seat] += 1;
+                site_wins[seat ^ usize::from(r.sites_swapped)] += 1;
+            }
             Ending::MutualDefeat => mutual += 1,
             Ending::Stalemate => stalemates += 1,
             Ending::Capped => capped += 1,
@@ -797,6 +855,8 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
     Summary {
         games: u32::try_from(records.len()).unwrap_or(u32::MAX),
         seat_wins,
+        site_wins,
+        site_games,
         mutual,
         stalemates,
         capped,
@@ -912,7 +972,7 @@ fn write_table(s: &mut String, report: &Report) -> std::fmt::Result {
     )?;
     writeln!(
         s,
-        "game  seats (seat 0 v seat 1)   result         ticks  defeat  attacks  final checksum"
+        "game  seats (seat 0 v seat 1)   sites    result         ticks  defeat  attacks  final checksum"
     )?;
     for r in records {
         let result = match r.ending {
@@ -922,9 +982,10 @@ fn write_table(s: &mut String, report: &Report) -> std::fmt::Result {
         let attacks: Vec<String> = r.ais.iter().map(|a| a.attacks.to_string()).collect();
         writeln!(
             s,
-            "{:>4}  {:<24}  {:<13} {:>6}  {:>6}  {:>7}  {}",
+            "{:>4}  {:<24}  {:<7}  {:<13} {:>6}  {:>6}  {:>7}  {}",
             r.index,
             faction_names(r),
+            if r.sites_swapped { "swapped" } else { "file" },
             result,
             r.ticks,
             r.defeat_tick.map_or("-".to_string(), |t| t.to_string()),
@@ -939,6 +1000,16 @@ fn write_table(s: &mut String, report: &Report) -> std::fmt::Result {
             "seat {seat} wins:    {wins} of {} ({})",
             sum.games,
             percent_text(permille(*wins, sum.games))
+        )?;
+    }
+    for (site, wins) in sum.site_wins.iter().enumerate() {
+        writeln!(
+            s,
+            "site {site} wins:    {wins} of {} ({}); sites as written in {} games, swapped in {}",
+            sum.games,
+            percent_text(permille(*wins, sum.games)),
+            sum.site_games[0],
+            sum.site_games[1]
         )?;
     }
     for row in &sum.factions {
@@ -1057,13 +1128,14 @@ fn write_json(
         writeln!(
             s,
             "    {{\"index\": {}, \"world_seed\": \"{}\", \"ai_seed\": \"{}\", \"seats\": [\"{:?}\", \"{:?}\"], \
-             \"ending\": {}, \"winner_seat\": {winner}, \"defeat_tick\": {}, \"ticks\": {}, \"last_loss\": {}, \
+             \"sites_swapped\": {}, \"ending\": {}, \"winner_seat\": {winner}, \"defeat_tick\": {}, \"ticks\": {}, \"last_loss\": {}, \
              \"final_checksum\": \"{}\", \"ais\": [{}]}}{comma}",
             r.index,
             log::hex(r.world_seed),
             log::hex(r.ai_seed),
             r.factions[0],
             r.factions[1],
+            r.sites_swapped,
             log::json_string(r.ending.label()),
             r.defeat_tick.map_or("null".to_string(), |t| t.to_string()),
             r.ticks,
@@ -1085,6 +1157,11 @@ fn write_json(
         "    \"seat_win_permille\": [{}, {}],",
         permille(sum.seat_wins[0], sum.games),
         permille(sum.seat_wins[1], sum.games)
+    )?;
+    writeln!(
+        s,
+        "    \"site_wins\": [{}, {}],",
+        sum.site_wins[0], sum.site_wins[1]
     )?;
     let rows: Vec<String> = sum
         .factions
