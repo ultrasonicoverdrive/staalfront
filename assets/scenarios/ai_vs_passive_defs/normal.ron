@@ -97,7 +97,7 @@
             // WP9.1c-3, the opening: the vehicle factory (and with it the second harvester) comes right after the
             // refinery, before the barracks. One harvester earns about 0.27 credits per tick, so every 100 credits
             // spent before the second harvester costs it about 370 ticks. Cost: no barracks before about tick 2,900
-            // and no unit before about 5,900 (docs/rules/ai.md "The opening").
+            // and the first unit queued at 4,460, existing at 4,621 (docs/rules/ai.md "The opening").
             // The second refinery comes before the first tower (WP9.1c-3: measured, the list completes earlier and the floor is
             // reached sooner, docs/rules/ai.md "The opening").
             build_order: [

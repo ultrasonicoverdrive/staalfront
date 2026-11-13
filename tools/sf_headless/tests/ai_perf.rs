@@ -404,7 +404,7 @@ fn a_whole_run_with_the_ai_against_the_same_run_without_it() {
 
 #[test]
 fn what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march() {
-    // WP9.1c-2: the army turn alone on the observation of `ai_vs_passive` at tick 4000 (the base and, since WP9.1c-3, one or two units: the first is queued at 4,460)
+    // WP9.1c-2: the army turn alone on the observation of `ai_vs_passive` at tick 4000 (the base and, since WP9.1c-3, no unit yet: the first is queued at 4,460 and exists at 4,621)
     // with N riflemen added idle at the gather cell, so that the turn launches an attack (the trigger, the target,
     // one `AttackMove` with N ids), and the turn after it with the N attackers idle half-way (the march: one
     // `AttackMove` again). 20,000 turns each on a copy of the state; the clock is outside the clone.

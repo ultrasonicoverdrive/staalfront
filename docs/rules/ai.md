@@ -681,7 +681,7 @@ construction saves for 1,500: the gap is the income of **one harvester, about 20
 credits on twelve units (2,000) and the first four goals, and the second harvester comes only with the vehicle factory. With the attack switched
 off (no win) **the goal list does not complete in 30,000 ticks**: `ai_vs_passive` makes 9 of its builds (the vehicle factory at 11,650, the last at
 29,090), `m1_ai` its last at 29,777; the army stays at 12 (`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`,
-`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: closed by the opening, the list now completes at 22,970 and 24,417; see "The opening".)* The guard against the known risk (under steady losses the army stays below the
+`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: with the final opening the list completes at 22,730 in `ai_vs_passive` (the 20,000 target missed, the cause is the map's ore) and at 19,777 in `m1_ai` (met); see "The opening".)* The guard against the known risk (under steady losses the army stays below the
 floor and the goal list stalls): once an attack has gone out, the floor holds only while the army defends.
 
 Measured on `ai_vs_passive` (the AI as player 0 at (12, 68) with 4,000 credits against m1's static opponent, release, 40,000 ticks, the tick the
@@ -740,7 +740,7 @@ that fails and an `attack_patience` end, are no longer run in a scenario; the un
 **The AI wins at tick 13,839** (the opponent's construction centre falls), T2 = 16,000. Army at the gather cell 0, 4, 0, 0 at 4,000, 8,000,
 12,000, 16,000; the last build before the win at 2,890 (the barracks: the list is not complete when the match ends). 18 commands in all,
 the most in any 1,000 ticks 4 (bound 15), at most one order per army turn, nothing after the win. The finishing `Attack` is not needed there:
-the second wave's `AttackMove` fights the centre on its own (the rule has its own unit test).
+the wave's `AttackMove` fights the centre on its own (the rule has its own unit test).
 
 **The finishing `Attack` on the real world** (fix round 1): `the_finishing_attack_is_sent_on_the_real_world_and_the_simulation_takes_it` runs the
 army turn on the world of `ai_vs_passive` with four riflemen of player 0 put idle beside the enemy centre (arrive radius 12 there): it sends one
@@ -761,11 +761,11 @@ after the last hit, at the next think), and no `AttackMove` or `Attack` after th
 **The fence.** `a_unit_hidden_in_the_reach_changes_nothing_the_ai_does_also_an_army_beside_the_route`: three enemy riflemen at the north-east
 shore of the lake on the way to the enemy centre against the same three in a far corner: the AI's commands and digest are equal until they come
 into view, with the scout (tick 2,110) and without one (tick 7,421, after the first attack went out). *(WP9.1c-3: the cells moved to (57, 28); with the scout the
-riflemen come into view at 6,356, without one at 14,674, see "The opening".)*
+riflemen come into view at 5,476, without one at 9,823 (one `AttackMove` before), see "The opening".)*
 
 ### The game seat (`m1_ai`)
 
-*WP9.1c-3 moved every number in this subsection (first army unit 7,387, the wave of 6 at 14,037, the win at 16,023; the cost figures below were measured
+*WP9.1c-3 moved every number in this subsection (first army unit 4,587, the wave of 6 at 9,717, the win at 11,664; the cost figures below were measured
 with the WP9.1c-2 timing): see "The opening (WP9.1c-3)". What follows is the WP9.1c-2 measurement.*
 
 `the_army_timing_in_the_game_seat` (`crates/sf_game/tests/ai_in_game.rs`, the AI as player 1 at (72, 14) with 4,000 credits, the human idle with
@@ -915,7 +915,7 @@ In both scenarios the first wave wins, so no second wave is run in a scenario.
 ### Side effects that were fixed with it
 
 * The fence test (`a_unit_hidden_in_the_reach_...`) moved its three riflemen from (58, 34) to (57, 28): the wave with tanks takes a way along the lake's north-east shore at y 25
-  to 30. With the scout the riflemen come into view at 5,476, without one later, after the wave left; printed, not asserted (it asserts equality of commands and digest until
+  to 30. With the scout the riflemen come into view at 5,476, without one at 9,823, after the wave left (one `AttackMove` before); printed, not asserted (it asserts equality of commands and digest until
   first sight).
 * `the_ai_builds_its_base_in_the_game` looks at 9,000 ticks, not 4,000: the scout, the first unit the barracks makes, was queued at 7,147 and ordered out at 7,317 with the
   first profile of this PR (measured then); the test asserts that a rally point and a scout move exist within 9,000 ticks, not their ticks.
@@ -1037,7 +1037,7 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
   ("The army floor", the money). One group at a time (no second wave while one is out; units made meanwhile gather); no retreat, regroup, focus fire or
   target priority beyond "the construction centre first" (9.2/9.3); while the whole army is out, a hit on a structure other than the centre is
   answered only by the towers (decision 3, "Threat"); the finishing `Attack` is tested on an observation the test builds, not in a scenario (in
-  `ai_vs_passive` the second wave's `AttackMove` brings the centre down on its own); the defence is a cell, not a unit, so raiders that run are
+  `ai_vs_passive` the wave's `AttackMove` brings the centre down on its own); the defence is a cell, not a unit, so raiders that run are
   not chased beyond what an `AttackMove` meets; `ai_vs_passive` and `m1_ai` are won against a passive opponent only, no opponent that rebuilds or
   answers. The army floor stalls the goal list until the army reaches it (on `m1_ai` the list stops at its fourth entry until the AI has won at
   8,396). Defences are placed only towards the other players' start sites.

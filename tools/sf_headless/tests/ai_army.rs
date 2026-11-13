@@ -555,6 +555,23 @@ fn a_defeated_ai_sends_nothing_and_its_state_stands_still() {
     assert!(mine(|k| [RIFLEMAN, Kind(13), TANK].contains(&k)) >= 1);
     // It was acting before the defeat.
     assert!(f.ai_commands.iter().any(|c| c.0 > 4_000 && c.0 <= 6_501));
+    // Control: without the defeat the same AI does send commands in 6,501..=9,000, so the silence above is the
+    // defeated-AI rule and not an idle stretch.
+    let control = run_observed(
+        &load("ai_vs_passive"),
+        &RunOptions {
+            ticks: 9000,
+            every: 100,
+        },
+        |_, _| {},
+    )
+    .unwrap();
+    assert!(
+        control
+            .ai_commands
+            .iter()
+            .any(|c| c.0 > 6_501 && c.0 <= 9_000)
+    );
     // The observation says so.
     let obs = Observation::build(&f.world, P0, &BTreeMap::new());
     assert!(obs.out_of_play);
@@ -586,7 +603,7 @@ fn a_unit_hidden_in_the_reach_changes_nothing_the_ai_does_also_an_army_beside_th
     // AI's commands and digest must be equal. Twice: with the scout (which sees them first), and without one,
     // so that the attack marches past them before they are seen. (The straight line crosses the lake in the
     // middle of the map, x 38..55, y 36..53; the cells are open ground at its north-east shore.)
-    // (WP9.1c-3: the cells moved from (58, 34) to (57, 28): the first wave now carries light tanks and leaves at 14,030,
+    // (WP9.1c-3: the cells moved from (58, 34) to (57, 28): the first wave now carries light tanks and leaves at 11,150,
     // and its way passes the lake's north-east shore at y 25 to 30, not at y 34.)
     let near = [(57, 28), (58, 28), (57, 29)];
     let probe = Cell::new(57, 28);
