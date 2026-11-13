@@ -115,6 +115,17 @@ impl Profile {
         h.write_u8(a.arrive_radius);
         h.write_u32(a.attack_patience);
         h.write_u32(a.army_floor_value);
+        // The numbers of WP9.2a, only when one is set: a profile with all of them 0 keeps the digest it had.
+        if a.groups_on() {
+            h.write_u8(0x92);
+            h.write_u32(u32::from(a.home_guard_permille));
+            h.write_u8(a.stage_distance);
+            h.write_u32(u32::from(a.stage_permille));
+            h.write_u32(a.stage_patience);
+            h.write_u32(a.reinforce_value);
+            h.write_u32(a.defend_ratio_permille);
+            h.write_u32(u32::from(a.timing_jitter_permille));
+        }
         for list in [&self.build_order, &self.unit_mix] {
             h.write_u32(list.len() as u32);
             for (kind, n) in list {

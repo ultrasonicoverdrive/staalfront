@@ -202,6 +202,60 @@ pub struct ArmyRules {
     /// profiles written before it keep the production they had).
     #[serde(default)]
     pub army_floor_value: u32,
+    /// WP9.2a, G1, the home guard: at a launch the gathered units worth this many permille of the gathered
+    /// value, the highest ids first, stay at home, 0 to 900. Left out: 0, no guard (the frozen profiles and
+    /// the pins of the earlier phases keep the whole wave).
+    #[serde(default)]
+    pub home_guard_permille: u16,
+    /// WP9.2a, G2, staging: the strike first goes to a cell this many cells short of its target on the line
+    /// from the gather cell, 0 to 64. Left out: 0, no staging (the strike marches on the target at once).
+    #[serde(default)]
+    pub stage_distance: u8,
+    /// WP9.2a, G2: the strike leaves the staging cell when this many permille of its living members are idle
+    /// within `arrive_radius` of it, 1 to 1000. Left out: [`DEFAULT_STAGE_PERMILLE`]. Read only with
+    /// `stage_distance` above 0.
+    #[serde(default = "default_stage_permille")]
+    pub stage_permille: u16,
+    /// WP9.2a, G2: the strike leaves the staging cell after this many ticks whatever its members do, 1 to
+    /// [`MAX_TICKS`]. Left out: [`DEFAULT_STAGE_PATIENCE`]. Read only with `stage_distance` above 0.
+    #[serde(default = "default_stage_patience")]
+    pub stage_patience: u32,
+    /// WP9.2a, G3, reinforcement: while a strike is staging or marching, the units at home (the guard kept
+    /// back) go as a second group once they are worth this much (unit costs), 0 to 1,000,000. Left out: 0,
+    /// no reinforcement.
+    #[serde(default)]
+    pub reinforce_value: u32,
+    /// WP9.2a, G4, partial defence: the units sent to a threat are worth this many permille of the value of
+    /// the armed enemy units seen near it, 0 to 100,000. Left out: 0, all the units at home go (as before).
+    #[serde(default)]
+    pub defend_ratio_permille: u32,
+    /// WP9.2a, timing jitter (decision of 13-11-2026): `attack_value` and `max_wait` of one launch are
+    /// scaled by a draw from minus to plus this many permille, 0 to 900. Left out: 0, no draw.
+    #[serde(default)]
+    pub timing_jitter_permille: u16,
+}
+
+impl ArmyRules {
+    /// Whether any number of WP9.2a is set: the groups, the guard, staging, reinforcement, partial defence
+    /// or the jitter. With all of them 0 the army acts as before WP9.2a and its digest has the old layout.
+    pub fn groups_on(&self) -> bool {
+        self.home_guard_permille != 0
+            || self.stage_distance != 0
+            || self.reinforce_value != 0
+            || self.defend_ratio_permille != 0
+            || self.timing_jitter_permille != 0
+    }
+}
+
+/// The staging permille of a profile that does not write one.
+pub const DEFAULT_STAGE_PERMILLE: u16 = 700;
+/// The staging patience of a profile that does not write one (half a minute).
+pub const DEFAULT_STAGE_PATIENCE: u32 = 600;
+fn default_stage_permille() -> u16 {
+    DEFAULT_STAGE_PERMILLE
+}
+fn default_stage_patience() -> u32 {
+    DEFAULT_STAGE_PATIENCE
 }
 
 /// The gather radius of a profile that does not write one.
@@ -366,6 +420,23 @@ impl AiProfile {
         range("army.arrive_radius", a.arrive_radius, 1, 32)?;
         range("army.attack_patience", a.attack_patience, 1, MAX_TICKS)?;
         range("army.army_floor_value", a.army_floor_value, 0, 1_000_000)?;
+        range("army.home_guard_permille", a.home_guard_permille, 0, 900)?;
+        range("army.stage_distance", a.stage_distance, 0, 64)?;
+        range("army.stage_permille", a.stage_permille, 1, 1000)?;
+        range("army.stage_patience", a.stage_patience, 1, MAX_TICKS)?;
+        range("army.reinforce_value", a.reinforce_value, 0, 1_000_000)?;
+        range(
+            "army.defend_ratio_permille",
+            a.defend_ratio_permille,
+            0,
+            100_000,
+        )?;
+        range(
+            "army.timing_jitter_permille",
+            a.timing_jitter_permille,
+            0,
+            900,
+        )?;
         if p.factions.is_empty() {
             return err("no faction section");
         }

@@ -57,6 +57,67 @@ pub enum Posture {
     Defend = 2,
 }
 
+/// What a group of the army is for. The numbers are hashed, so they are permanent. WP9.2a has the strike only;
+/// the raid of WP9.3b is the next number.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum GroupRole {
+    /// A wave that goes for the target of the attack (rule A5).
+    #[default]
+    Strike = 0,
+}
+
+/// Where a group is in its operation. The numbers are hashed, so they are permanent.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum GroupStage {
+    /// Walking to, or waiting at, the staging cell.
+    #[default]
+    Staging = 0,
+    /// Marching on its goal.
+    Advancing = 1,
+    /// A member is within `arrive_radius` of the goal.
+    Engaged = 2,
+    /// Called back by a hit on the construction centre: the members defend, and the group is dissolved when
+    /// the threat is over.
+    Returning = 3,
+}
+
+/// A group of army units on an operation (WP9.2a, `docs/rules/ai.md`, "Groups"). The army units that are in
+/// no group are the home.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group {
+    /// The number of the group: from 0, ascending in the order the groups were made, never reused.
+    pub id: u32,
+    /// What it is for.
+    pub role: GroupRole,
+    /// Its units, ascending by id; pruned to the live ones every army turn.
+    pub members: Vec<EntityId>,
+    /// The target cell of its operation (rule A5), worked out again every army turn; for a reinforcement the
+    /// cell it is marching to meet the strike at.
+    pub goal: Cell,
+    /// Where it is.
+    pub stage: GroupStage,
+    /// The tick it entered `stage`.
+    pub since: Tick,
+    /// What its members were worth when it went out (unit costs).
+    pub launch_value: u64,
+    /// The staging cell, fixed when the group went out; `None` without staging.
+    pub staging: Option<Cell>,
+    /// The group this one is a reinforcement for, until it merges into it.
+    pub merge_into: Option<u32>,
+    /// The structure the members at the target finish, its hit points when last seen to drop and that tick;
+    /// the operation ends when they have not dropped for `attack_patience`.
+    pub target_hp: Option<(EntityId, u32, Tick)>,
+    /// Members called back by a hit on the construction centre that have not had the defence order yet,
+    /// ascending; they get it whatever their order is.
+    pub recalled: Vec<EntityId>,
+    /// Members at the target that saw no enemy structure and got the one `AttackMove` onto the middle of the
+    /// target structure (or start site) of this operation, ascending.
+    pub closing: Vec<EntityId>,
+}
+
+/// The most groups at one time.
+pub const GROUPS_MAX: usize = 4;
+
 /// An own structure as the threat rule last saw it: `(kind, anchor cell, hit points)`.
 pub type HpSeen = (Kind, Cell, u32);
 
@@ -147,26 +208,20 @@ pub struct AiState {
     pub defend_since: Option<Tick>,
     /// What the army does now (above).
     pub directive: Directive,
-    /// The units sent on the attack going on, ascending by id; pruned to the live ones every army turn.
-    pub attackers: Vec<EntityId>,
-    /// The target cell of the attack going on.
-    pub attack_target: Option<Cell>,
+    /// WP9.2a: the groups out, ascending by id, at most [`GROUPS_MAX`] (replaces the single wave of WP9.1c-2).
+    pub groups: Vec<Group>,
+    /// The id the next group gets.
+    pub next_group: u32,
     /// The tick the last attack went out (0 before the first).
     pub last_attack_tick: Tick,
-    /// The tick the attack going on went out, or the last army turn an attacker stood within `arrive_radius`
-    /// of its target: `attack_patience` counts from here.
+    /// The tick the strike went out, or the last army turn a member of it stood within `arrive_radius` of its
+    /// target: `attack_patience` counts from here (fix round 2 of WP9.1c-2).
     pub attack_started: Tick,
     /// How many attacks went out in the match.
     pub attacks_launched: u32,
-    /// Fix round 1: the structure the attackers at the target finish, its hit points when last seen to drop
-    /// and that tick; the attack ends when they have not dropped for `attack_patience`.
-    pub target_hp: Option<(EntityId, u32, Tick)>,
-    /// Fix round 1: former attackers called back by a hit on the construction centre that have not had the
-    /// defence order yet, ascending; they get it whatever their order is.
-    pub recalled: Vec<EntityId>,
-    /// Fix round 2: attackers at the target that saw no enemy structure and got the one `AttackMove` onto the
-    /// middle of the target structure (or start site) of this attack, ascending; cleared when the attack ends.
-    pub closing: Vec<EntityId>,
+    /// WP9.2a, the timing jitter: the permille drawn (minus to plus `timing_jitter_permille`) for the launch
+    /// that comes next; `None` until the first army turn that needs it, and again after every launch.
+    pub jitter: Option<i32>,
     /// The other players whose start site the AI has seen empty (no construction centre on its cell),
     /// ascending.
     pub sites_cleared: Vec<PlayerId>,
@@ -241,14 +296,12 @@ impl AiState {
             threat: None,
             defend_since: None,
             directive: Directive::default(),
-            attackers: Vec::new(),
-            attack_target: None,
+            groups: Vec::new(),
+            next_group: 0,
             last_attack_tick: Tick(0),
             attack_started: Tick(0),
             attacks_launched: 0,
-            target_hp: None,
-            recalled: Vec::new(),
-            closing: Vec::new(),
+            jitter: None,
             sites_cleared: Vec::new(),
             sent: BTreeMap::new(),
         }
@@ -422,16 +475,20 @@ impl AiState {
         write_tick(&mut h, self.defend_since);
         h.write_u8(self.directive.posture as u8);
         write_cell(&mut h, self.directive.target);
-        h.write_u32(self.attackers.len() as u32);
-        for id in &self.attackers {
+        // The wave of WP9.1c-2, in its old layout, as the groups show it: a profile with no number of WP9.2a
+        // set has at most one group and hashes as before.
+        let attackers = self.attackers();
+        h.write_u32(attackers.len() as u32);
+        for id in &attackers {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
-        write_cell(&mut h, self.attack_target);
+        let strike = self.strike();
+        write_cell(&mut h, strike.map(|g| g.goal));
         h.write_u64(self.last_attack_tick.0);
         h.write_u64(self.attack_started.0);
         h.write_u32(self.attacks_launched);
-        match self.target_hp {
+        match strike.and_then(|g| g.target_hp) {
             Some((id, hp, t)) => {
                 h.write_u8(1);
                 h.write_u32(id.index());
@@ -441,13 +498,15 @@ impl AiState {
             }
             None => h.write_u8(0),
         }
-        h.write_u32(self.recalled.len() as u32);
-        for id in &self.recalled {
+        let recalled = self.union_of(|g| &g.recalled, true);
+        h.write_u32(recalled.len() as u32);
+        for id in &recalled {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
-        h.write_u32(self.closing.len() as u32);
-        for id in &self.closing {
+        let closing = self.union_of(|g| &g.closing, false);
+        h.write_u32(closing.len() as u32);
+        for id in &closing {
             h.write_u32(id.index());
             h.write_u32(id.generation());
         }
@@ -462,7 +521,100 @@ impl AiState {
             h.write_u64(tick.0);
             h.write_u8(*tries);
         }
+        // WP9.2a: the whole of every group and the jitter, only for a profile with a number of WP9.2a set.
+        if self.profile.army.groups_on() {
+            h.write_u8(0x92);
+            h.write_u32(self.next_group);
+            match self.jitter {
+                Some(j) => {
+                    h.write_u8(1);
+                    h.write_i32(j);
+                }
+                None => h.write_u8(0),
+            }
+            h.write_u32(self.groups.len() as u32);
+            for g in &self.groups {
+                h.write_u32(g.id);
+                h.write_u8(g.role as u8);
+                h.write_u32(g.members.len() as u32);
+                for id in &g.members {
+                    h.write_u32(id.index());
+                    h.write_u32(id.generation());
+                }
+                h.write_u32(g.goal.x);
+                h.write_u32(g.goal.y);
+                h.write_u8(g.stage as u8);
+                h.write_u64(g.since.0);
+                h.write_u64(g.launch_value);
+                write_cell(&mut h, g.staging);
+                match g.merge_into {
+                    Some(id) => {
+                        h.write_u8(1);
+                        h.write_u32(id);
+                    }
+                    None => h.write_u8(0),
+                }
+                match g.target_hp {
+                    Some((id, hp, t)) => {
+                        h.write_u8(1);
+                        h.write_u32(id.index());
+                        h.write_u32(id.generation());
+                        h.write_u32(hp);
+                        h.write_u64(t.0);
+                    }
+                    None => h.write_u8(0),
+                }
+                for list in [&g.recalled, &g.closing] {
+                    h.write_u32(list.len() as u32);
+                    for id in list {
+                        h.write_u32(id.index());
+                        h.write_u32(id.generation());
+                    }
+                }
+            }
+        }
         h.finish()
+    }
+
+    /// The units of the groups out, ascending: those of every group that is not [`GroupStage::Returning`].
+    /// What `attackers` was before WP9.2a.
+    pub fn attackers(&self) -> Vec<EntityId> {
+        let mut all: Vec<EntityId> = self
+            .groups
+            .iter()
+            .filter(|g| g.stage != GroupStage::Returning)
+            .flat_map(|g| g.members.iter().copied())
+            .collect();
+        all.sort();
+        all.dedup();
+        all
+    }
+
+    /// Whether `id` is in a group that is out (not [`GroupStage::Returning`]): such a unit is not at home.
+    pub fn in_field(&self, id: EntityId) -> bool {
+        self.groups
+            .iter()
+            .any(|g| g.stage != GroupStage::Returning && g.members.binary_search(&id).is_ok())
+    }
+
+    /// The strike: the first group that is out and is no reinforcement.
+    pub fn strike(&self) -> Option<&Group> {
+        self.groups
+            .iter()
+            .find(|g| g.stage != GroupStage::Returning && g.merge_into.is_none())
+    }
+
+    /// The units on `list` of every group (or of the Returning ones only when `returning` is set), ascending.
+    fn union_of(&self, list: impl Fn(&Group) -> &Vec<EntityId>, returning: bool) -> Vec<EntityId> {
+        let mut all: Vec<EntityId> = self
+            .groups
+            .iter()
+            .filter(|g| returning || g.stage != GroupStage::Returning)
+            .flat_map(|g| list(g).iter().copied())
+            .collect();
+        all.sort();
+        all.dedup();
+        all
     }
 }
 
