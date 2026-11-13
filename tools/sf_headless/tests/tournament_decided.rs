@@ -116,7 +116,8 @@ fn setup(strong: usize, dir: &TempDir) -> sf_headless::tournament::Setup {
 /// (strong seat, ticks the game ends at): pinned on the shipped definitions with base seed 1, game 0. A
 /// change of the unit or weapon numbers moves them and is a re-pin, not a failure of the tournament.
 // WP9.1c-3 re-pin: the fixture copies the shipped `normal.ron`, whose opening moved (seat 1 strong: 5,599 -> 5,546; seat 0 unchanged).
-const DECIDED: [(usize, u64); 2] = [(0, 1315), (1, 5546)];
+// WP9.1e re-pin: `hp_per_tick` 3 -> 1 (1,315 -> 1,224 and 5,546 -> 2,885); with the rate put back to 3 on the merged tree, 1,315 and 5,546 return.
+const DECIDED: [(usize, u64); 2] = [(0, 1224), (1, 2885)];
 
 #[test]
 fn the_seat_with_the_army_wins_and_the_tick_numbers_agree() {

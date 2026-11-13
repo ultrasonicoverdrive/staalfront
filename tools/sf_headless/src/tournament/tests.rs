@@ -292,6 +292,14 @@ fn a_tick_level_last_loss_shares_a_coarse_key_and_an_ending_or_attack_count_does
     games[1].last_loss = 42_000;
     let s = summarize(&games);
     assert_eq!((s.distinct_coarse, s.distinct_coarse_loss), (1, 2));
+    // The same per seating (all four games are one seating): the rounded key splits it, the plain one not.
+    assert_eq!(
+        (
+            s.seatings[0].distinct_coarse,
+            s.seatings[0].distinct_coarse_loss
+        ),
+        (1, 2)
+    );
     // A different ending or attack count splits both coarse keys.
     games[2].ending = Ending::Stalemate;
     games[3].ais[0].attacks = 7;
