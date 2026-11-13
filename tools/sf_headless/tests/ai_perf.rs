@@ -463,7 +463,7 @@ fn what_the_army_turn_costs_with_50_and_200_units_at_the_launch_and_on_the_march
             &mut out,
         );
         assert!(
-            launched.attackers.len() as u32 >= n,
+            launched.attackers().len() as u32 >= n,
             "the turn launches with the {n} added"
         );
         let mut march = obs.clone();

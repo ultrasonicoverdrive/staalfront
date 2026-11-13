@@ -816,10 +816,10 @@ fn opening(attack: bool, ticks: u64) -> Opening {
             launched = st.attacks_launched;
             let v = snap
                 .iter()
-                .filter(|v| st.attackers.contains(&v.id))
+                .filter(|v| st.attackers().contains(&v.id))
                 .map(|v| cost(v.kind))
                 .sum();
-            o.first_wave.get_or_insert((t - 1, st.attackers.len(), v));
+            o.first_wave.get_or_insert((t - 1, st.attackers().len(), v));
         }
         if o.won.is_none()
             && let Some(r) = w.match_result()

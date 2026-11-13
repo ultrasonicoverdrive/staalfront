@@ -604,6 +604,43 @@ impl AiState {
             .find(|g| g.stage != GroupStage::Returning && g.merge_into.is_none())
     }
 
+    /// Makes a group of `members` (ascending) with the next id and returns the id. The recall and closing lists
+    /// start empty. The one place a group is made, for the army rules and for tests.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_group(
+        &mut self,
+        members: Vec<EntityId>,
+        goal: Cell,
+        stage: GroupStage,
+        now: Tick,
+        launch_value: u64,
+        staging: Option<Cell>,
+        merge_into: Option<u32>,
+    ) -> u32 {
+        let id = self.next_group;
+        self.next_group += 1;
+        self.groups.push(Group {
+            id,
+            role: GroupRole::Strike,
+            members,
+            goal,
+            stage,
+            since: now,
+            launch_value,
+            staging,
+            merge_into,
+            target_hp: None,
+            recalled: Vec::new(),
+            closing: Vec::new(),
+        });
+        id
+    }
+
+    /// The target cell of the attack going on: the goal of the strike. What `attack_target` was before WP9.2a.
+    pub fn attack_target(&self) -> Option<Cell> {
+        self.strike().map(|g| g.goal)
+    }
+
     /// The units on `list` of every group (or of the Returning ones only when `returning` is set), ascending.
     fn union_of(&self, list: impl Fn(&Group) -> &Vec<EntityId>, returning: bool) -> Vec<EntityId> {
         let mut all: Vec<EntityId> = self
@@ -681,17 +718,39 @@ mod tests {
         s.defend_since = Some(Tick(1450));
         s.directive.posture = Posture::Defend;
         s.directive.target = Some(Cell::new(60, 20));
-        s.attackers.push(EntityId::new(20, 0));
-        s.attackers.push(EntityId::new(21, 1));
-        s.attack_target = Some(Cell::new(71, 16));
+        s.groups.push(Group {
+            id: 3,
+            role: GroupRole::Strike,
+            members: vec![EntityId::new(20, 0), EntityId::new(21, 1)],
+            goal: Cell::new(71, 16),
+            stage: GroupStage::Advancing,
+            since: Tick(1310),
+            launch_value: 2100,
+            staging: Some(Cell::new(60, 30)),
+            merge_into: None,
+            target_hp: Some((EntityId::new(11, 0), 1500, Tick(1450))),
+            recalled: vec![EntityId::new(22, 0), EntityId::new(23, 1)],
+            closing: vec![EntityId::new(24, 0), EntityId::new(25, 1)],
+        });
+        s.groups.push(Group {
+            id: 4,
+            role: GroupRole::Strike,
+            members: vec![EntityId::new(30, 0), EntityId::new(31, 0)],
+            goal: Cell::new(60, 30),
+            stage: GroupStage::Advancing,
+            since: Tick(1320),
+            launch_value: 1000,
+            staging: None,
+            merge_into: Some(3),
+            target_hp: None,
+            recalled: Vec::new(),
+            closing: Vec::new(),
+        });
+        s.next_group = 5;
+        s.jitter = Some(-40);
         s.last_attack_tick = Tick(1200);
         s.attack_started = Tick(1300);
         s.attacks_launched = 1;
-        s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1450)));
-        s.recalled.push(EntityId::new(22, 0));
-        s.recalled.push(EntityId::new(23, 1));
-        s.closing.push(EntityId::new(24, 0));
-        s.closing.push(EntityId::new(25, 1));
         s.sites_cleared.push(PlayerId(1));
         s.sites_cleared.push(PlayerId(2));
         s.sent.insert(EntityId::new(12, 0), (Tick(1500), 1));
@@ -812,14 +871,14 @@ mod tests {
     fn every_part_of_the_threat_and_attack_state_moves_the_digest() {
         let d = base_state().digest();
         let changes: [fn(&mut AiState); 32] = [
-            |s| s.closing.reverse(),
-            |s| s.closing.clear(),
-            |s| s.target_hp = None,
-            |s| s.target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
-            |s| s.target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),
-            |s| s.target_hp = Some((EntityId::new(11, 0), 1500, Tick(1451))),
-            |s| s.recalled.reverse(),
-            |s| s.recalled.clear(),
+            |s| s.groups[0].closing.reverse(),
+            |s| s.groups[0].closing.clear(),
+            |s| s.groups[0].target_hp = None,
+            |s| s.groups[0].target_hp = Some((EntityId::new(11, 1), 1500, Tick(1450))),
+            |s| s.groups[0].target_hp = Some((EntityId::new(11, 0), 1499, Tick(1450))),
+            |s| s.groups[0].target_hp = Some((EntityId::new(11, 0), 1500, Tick(1451))),
+            |s| s.groups[0].recalled.reverse(),
+            |s| s.groups[0].recalled.clear(),
             |s| {
                 s.hp_seen.remove(&EntityId::new(0, 0));
             },
@@ -842,11 +901,11 @@ mod tests {
             |s| s.defend_since = Some(Tick(1451)),
             |s| s.directive.posture = Posture::Attack,
             |s| s.directive.posture = Posture::Gather,
-            |s| s.attackers.clear(),
-            |s| s.attackers.reverse(),
-            |s| s.attackers[1] = EntityId::new(21, 2),
-            |s| s.attack_target = None,
-            |s| s.attack_target = Some(Cell::new(71, 17)),
+            |s| s.groups.clear(),
+            |s| s.groups[0].members.reverse(),
+            |s| s.groups[0].members[1] = EntityId::new(21, 2),
+            |s| s.groups[0].goal = Cell::new(71, 15),
+            |s| s.groups[0].goal = Cell::new(71, 17),
             |s| s.last_attack_tick = Tick(1201),
             |s| s.attack_started = Tick(1301),
             |s| s.attacks_launched = 2,
@@ -872,6 +931,92 @@ mod tests {
             ),
             (0, 1, 2)
         );
+    }
+
+    #[test]
+    fn the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin() {
+        // The cause of the move of the pin above, as a test: the shipped profile with the numbers of WP9.2a
+        // (guard, staging, reinforcement, partial defence, jitter) set to 0, one group and no jitter drawn hashes
+        // to the pin WP9.1c-3 left, so the new layout adds nothing for a profile that does not use it.
+        let mut s = base_state();
+        let a = &mut s.profile.army;
+        a.home_guard_permille = 0;
+        a.stage_distance = 0;
+        a.reinforce_value = 0;
+        a.defend_ratio_permille = 0;
+        a.timing_jitter_permille = 0;
+        s.groups.truncate(1);
+        s.next_group = 0;
+        s.jitter = None;
+        assert_eq!(s.digest(), 0xaa33_3a1f_d36c_b5a9);
+    }
+
+    #[test]
+    fn every_part_of_the_groups_moves_the_digest() {
+        let d = base_state().digest();
+        let changes: [fn(&mut AiState); 24] = [
+            |s| s.groups[0].id = 2,
+            |s| s.groups[0].stage = GroupStage::Engaged,
+            |s| s.groups[0].stage = GroupStage::Returning,
+            |s| s.groups[0].since = Tick(1311),
+            |s| s.groups[0].launch_value = 2101,
+            |s| s.groups[0].staging = None,
+            |s| s.groups[0].staging = Some(Cell::new(60, 31)),
+            |s| s.groups[0].merge_into = Some(4),
+            |s| s.groups[1].id = 5,
+            |s| {
+                s.groups[1].members.pop();
+            },
+            |s| s.groups[1].goal = Cell::new(60, 31),
+            |s| s.groups[1].stage = GroupStage::Staging,
+            |s| s.groups[1].since = Tick(1321),
+            |s| s.groups[1].launch_value = 1001,
+            |s| s.groups[1].staging = Some(Cell::new(1, 1)),
+            |s| s.groups[1].merge_into = None,
+            |s| s.groups[1].merge_into = Some(2),
+            |s| s.groups[1].recalled.push(EntityId::new(30, 0)),
+            |s| s.groups[1].closing.push(EntityId::new(31, 0)),
+            |s| s.groups.reverse(),
+            |s| s.next_group = 6,
+            |s| s.jitter = None,
+            |s| s.jitter = Some(-41),
+            |s| s.groups.truncate(1),
+        ];
+        for (i, change) in changes.iter().enumerate() {
+            let mut s = base_state();
+            change(&mut s);
+            assert_ne!(s.digest(), d, "change {i}");
+        }
+        // The numbers are hashed: the permanent values.
+        assert_eq!(GroupRole::Strike as u8, 0);
+        assert_eq!(
+            (
+                GroupStage::Staging as u8,
+                GroupStage::Advancing as u8,
+                GroupStage::Engaged as u8,
+                GroupStage::Returning as u8
+            ),
+            (0, 1, 2, 3)
+        );
+        assert_eq!(GROUPS_MAX, 4);
+    }
+
+    #[test]
+    fn the_legacy_view_of_the_groups_is_what_the_single_wave_was() {
+        let s = base_state();
+        // Both groups are out: the units of both, the target of the strike (the first group).
+        assert_eq!(
+            s.attackers(),
+            [(20, 0), (21, 1), (30, 0), (31, 0)].map(|(i, g)| EntityId::new(i, g))
+        );
+        assert_eq!(s.strike().map(|g| g.id), Some(3));
+        let mut t = s.clone();
+        t.groups[0].stage = GroupStage::Returning;
+        // A group called back is no longer out: the second group is the strike now, and the first one's units are
+        // home (only its `recalled` list is left in the legacy view).
+        assert_eq!(t.attackers().len(), 2);
+        assert!(!t.in_field(EntityId::new(20, 0)));
+        assert!(t.in_field(EntityId::new(30, 0)));
     }
 
     #[test]

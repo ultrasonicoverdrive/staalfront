@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use common::scenario_path;
 use sf_ai::army::{self, ARMY_COMMANDS_PER_TURN};
 use sf_ai::production;
-use sf_ai::state::Posture;
+use sf_ai::state::{GroupStage, Posture};
 use sf_ai::{Ai, AiState, Known, Lens, Observation, Own, OwnFactory, Seen};
 use sf_headless::cli::parse_checksum;
 use sf_headless::run::{Finished, RunOptions, run_full, run_observed};
@@ -112,21 +112,21 @@ fn story(s: &Scenario, ticks: u64) -> Story {
             let value = w
                 .snapshot()
                 .iter()
-                .filter(|v| st.attackers.contains(&v.id))
+                .filter(|v| st.attackers().contains(&v.id))
                 .map(|v| cost(v.kind))
                 .sum();
             waves.push(Wave {
                 tick: t - 1,
-                size: st.attackers.len(),
+                size: st.attackers().len(),
                 value,
-                survivors: st.attackers.len(),
+                survivors: st.attackers().len(),
                 ended: None,
             });
         }
-        let out = !st.attackers.is_empty();
+        let out = !st.attackers().is_empty();
         if let Some(wave) = waves.last_mut() {
             if out {
-                wave.survivors = st.attackers.len();
+                wave.survivors = st.attackers().len();
             } else if out_before && wave.ended.is_none() {
                 wave.ended = Some(t - 1);
             }
@@ -654,6 +654,14 @@ fn a_unit_hidden_in_the_reach_changes_nothing_the_ai_does_also_an_army_beside_th
 // ---- the rules, one army turn on an observation the test builds -----------------------------------------------
 
 /// The world of `ai_vs_passive` after one tick and the AI's state.
+/// The ids (indexes) still waiting for the defence order of a centre recall, over all groups.
+fn recalled_of(s: &AiState) -> Vec<u32> {
+    s.groups
+        .iter()
+        .flat_map(|g| g.recalled.iter().map(|i| i.index()))
+        .collect()
+}
+
 fn rig() -> (World, AiState) {
     let f = go(&load("ai_vs_passive"), 1);
     (*f.world, f.ais[0].state().clone())
@@ -809,13 +817,13 @@ fn the_attack_goes_at_attack_value_and_not_one_credit_below() {
     let out = army_turn(&world, &mut s, &obs);
     assert_eq!(s.attacks_launched, 1);
     assert_eq!(s.directive.posture, Posture::Attack);
-    assert_eq!(s.attackers.len(), 6);
+    assert_eq!(s.attackers().len(), 6);
     assert_eq!(s.last_attack_tick, Tick(3000));
     // One `AttackMove` for all six, to a cell beside the enemy's start site (72, 14) facing the gather cell.
     let moves = attack_moves(&out);
     assert_eq!(moves.len(), 1);
     assert_eq!(moves[0].0, [20, 21, 22, 23, 24, 25]);
-    let t = s.attack_target.unwrap();
+    let t = s.attack_target().unwrap();
     assert!(t.x.abs_diff(73) <= 3 && t.y.abs_diff(15) <= 3, "{t:?}");
     assert_eq!(moves[0].1, middle(t));
     // The shipped threshold, a literal: 2,000 (WP9.1c-3, was 3,000), equal to the army floor: the first wave is value-driven.
@@ -903,7 +911,7 @@ fn only_idle_units_within_the_gather_radius_count_and_go() {
     let out = army_turn(&world, &mut s, &observation(&world, 3040, own));
     assert_eq!(s.attacks_launched, 1);
     assert_eq!(
-        s.attackers.iter().map(|i| i.index()).collect::<Vec<_>>(),
+        s.attackers().iter().map(|i| i.index()).collect::<Vec<_>>(),
         [20, 21, 22, 30]
     );
     assert!(attack_moves(&out).iter().all(|(ids, _)| !ids.contains(&31)));
@@ -926,7 +934,7 @@ fn attackers_are_ordered_only_when_idle_and_not_again_within_resend_ticks() {
         .cloned()
         .map(|mut o| {
             if o.armed {
-                o.order = Order::AttackMove(middle(s.attack_target.unwrap()));
+                o.order = Order::AttackMove(middle(s.attack_target().unwrap()));
             }
             o
         })
@@ -973,7 +981,7 @@ fn at_the_target() -> (World, AiState, Vec<Own>) {
     let mut own = base(&world);
     own.extend(gathered_soldiers(4));
     army_turn(&world, &mut s, &observation(&world, 3000, own.clone()));
-    let t = s.attack_target.unwrap();
+    let t = s.attack_target().unwrap();
     for o in own.iter_mut().filter(|o| o.armed) {
         o.cell = Cell::new(t.x, t.y + (o.id.index() - 20));
     }
@@ -1031,7 +1039,7 @@ fn an_attack_ends_with_its_attackers_its_target_or_its_patience_and_the_survivor
     let mut s = s0.clone();
     let base_only = base(&world);
     army_turn(&world, &mut s, &observation(&world, 3200, base_only));
-    assert!(s.attackers.is_empty());
+    assert!(s.attackers().is_empty());
     assert_eq!(s.directive.posture, Posture::Gather);
     // No target left (the centre seen gone, the start site seen empty, nothing else known): home.
     let mut s = s0.clone();
@@ -1055,9 +1063,9 @@ fn an_attack_ends_with_its_attackers_its_target_or_its_patience_and_the_survivor
     let mut s = s0.clone();
     s.attack_started = Tick(3000);
     army_turn(&world, &mut s, &observation(&world, 5399, far.clone()));
-    assert_eq!(s.attackers.len(), 4);
+    assert_eq!(s.attackers().len(), 4);
     let out = army_turn(&world, &mut s, &observation(&world, 5400, far));
-    assert!(s.attackers.is_empty());
+    assert!(s.attackers().is_empty());
     assert_eq!(moves_home(&out), 1);
     assert_eq!(
         (
@@ -1194,7 +1202,7 @@ fn the_units_at_home_defend_and_only_a_hit_on_the_centre_calls_the_attack_back()
     hit[1].hp = 900;
     watch(&world, &mut s, &observation(&world, 3110, hit.clone()));
     assert_eq!(s.directive.posture, Posture::Defend);
-    assert_eq!(s.attackers.len(), 4);
+    assert_eq!(s.attackers().len(), 4);
     let out = army_turn(&world, &mut s, &observation(&world, 3120, hit.clone()));
     let moves = attack_moves(&out);
     assert_eq!(moves[0].0, [40, 41]);
@@ -1204,7 +1212,7 @@ fn the_units_at_home_defend_and_only_a_hit_on_the_centre_calls_the_attack_back()
     let mut hit = own;
     hit[0].hp = 900;
     watch(&world, &mut s, &observation(&world, 3110, hit.clone()));
-    assert!(s.attackers.is_empty());
+    assert!(s.attackers().is_empty());
     let out = army_turn(&world, &mut s, &observation(&world, 3120, hit));
     let moves = attack_moves(&out);
     assert_eq!(moves[0].0, [20, 21, 22, 23, 40, 41]);
@@ -1344,9 +1352,9 @@ fn a_hit_on_the_centre_calls_back_a_wave_that_is_still_marching() {
     let mut hit = marching.clone();
     hit[0].hp = 900;
     watch(&world, &mut s, &observation(&world, 3110, hit.clone()));
-    assert!(s.attackers.is_empty());
+    assert!(s.attackers().is_empty());
     assert_eq!(
-        s.recalled.iter().map(|i| i.index()).collect::<Vec<_>>(),
+        recalled_of(&s),
         [20, 21, 22, 23]
     );
     let out = army_turn(&world, &mut s, &observation(&world, 3240, hit.clone()));
@@ -1355,7 +1363,7 @@ fn a_hit_on_the_centre_calls_back_a_wave_that_is_still_marching() {
     assert_eq!(moves[0].0, [20, 21, 22, 23]);
     assert_eq!(moves[0].1, middle(s.threat.unwrap().0));
     // Once: now on the defence order, they are left alone.
-    assert!(s.recalled.is_empty());
+    assert!(recalled_of(&s).is_empty());
     let defending: Vec<Own> = hit
         .into_iter()
         .map(|mut o| {
@@ -1377,15 +1385,15 @@ fn a_centre_recall_leaves_no_attacker_on_the_closing_list() {
     let (world, s0, own) = at_the_target();
     let mut s = s0.clone();
     watch(&world, &mut s, &observation(&world, 3100, own.clone()));
-    s.closing = s.attackers.clone();
-    s.closing.sort();
-    assert_eq!(s.closing.len(), 4);
+    let members = s.attackers();
+    s.groups[0].closing = members;
+    assert_eq!(s.groups[0].closing.len(), 4);
     let mut hit = own;
     hit[0].hp = 900;
     watch(&world, &mut s, &observation(&world, 3110, hit));
-    assert!(s.attackers.is_empty());
-    assert_eq!(s.recalled.len(), 4);
-    assert!(s.closing.is_empty(), "{:?}", s.closing);
+    assert!(s.attackers().is_empty());
+    assert_eq!(recalled_of(&s).len(), 4);
+    assert!(s.groups[0].closing.is_empty(), "{:?}", s.groups[0].closing);
 }
 
 /// `s` with its match file changed by `change` (the starting objects made again, as `Scenario::load` does).
@@ -1488,12 +1496,12 @@ fn an_attack_ends_when_the_target_stops_losing_hit_points_for_attack_patience() 
     };
     let mut s = s0.clone();
     army_turn(&world, &mut s, &obs_at(3200, 2000));
-    assert_eq!(s.target_hp, Some((EntityId::new(11, 0), 2000, Tick(3200))));
+    assert_eq!(s.strike().unwrap().target_hp, Some((EntityId::new(11, 0), 2000, Tick(3200))));
     army_turn(&world, &mut s, &obs_at(5560, 2000));
-    assert_eq!(s.attackers.len(), 4);
+    assert_eq!(s.attackers().len(), 4);
     army_turn(&world, &mut s, &obs_at(5600, 2000));
     assert!(
-        s.attackers.is_empty(),
+        s.attackers().is_empty(),
         "stuck at the target: the attack ends"
     );
     // The control: hit points that keep dropping keep the attack going.
@@ -1501,7 +1509,7 @@ fn an_attack_ends_when_the_target_stops_losing_hit_points_for_attack_patience() 
     for (i, t) in (3200..=6000).step_by(400).enumerate() {
         army_turn(&world, &mut s, &obs_at(t, 2000 - 10 * i as u32));
     }
-    assert_eq!(s.attackers.len(), 4);
+    assert_eq!(s.attackers().len(), 4);
 }
 
 /// An armed rifleman of player 1 that the AI sees at `(x, y)`.
@@ -1678,8 +1686,16 @@ fn the_finishing_attack_is_sent_on_the_real_world_and_the_simulation_takes_it() 
     // North-east of the centre, away from the opponent's units and tower (which would draw them into a fight of
     // their own), 7 to 8 cells from the target cell on its south-west side: an arrive radius that covers that.
     state.profile.army.arrive_radius = 12;
-    state.attackers = ours.clone();
-    state.attack_target = army::target(&state, &Lens::new(&world, P0), gather);
+    let goal = army::target(&state, &Lens::new(&world, P0), gather).unwrap();
+    state.add_group(
+        ours.clone(),
+        goal,
+        GroupStage::Advancing,
+        world.tick(),
+        0,
+        None,
+        None,
+    );
     state.attack_started = world.tick();
     let mut obs = Observation::build(&world, P0, &state.known_structures);
     sf_ai::memory::update(&mut state.known_structures, &obs);
@@ -1888,7 +1904,7 @@ fn attackers_at_the_target_that_see_nothing_close_in_once_and_the_attack_still_e
             println!("closing at {t}, attack {}", s.attacks_launched);
             closing.push(s.attacks_launched);
         }
-        if ended_at.is_none() && s.attackers.is_empty() {
+        if ended_at.is_none() && s.attackers().is_empty() {
             ended_at = Some(t);
         }
     }

@@ -85,6 +85,20 @@
         // back only the reserve, while no attack has gone out yet or the army defends. (2000, measured on
         // `ai_vs_passive`; the start value 1000 wins at 26,387, docs/rules/ai.md "The army floor".)
         army_floor_value: 2000,
+        // WP9.2a (docs/rules/ai.md "Groups"; the numbers of the design memo of 12-11-2026, the jitter by measurement).
+        // G1, the home guard: a quarter of the gathered value stays home at a launch, the highest ids first.
+        home_guard_permille: 250,
+        // G2, staging: the strike first goes to a cell 14 cells short of the target, and leaves it when 70 percent of its
+        // living members stand idle within `arrive_radius` of it, or after 600 ticks.
+        stage_distance: 14,
+        stage_permille: 700,
+        stage_patience: 600,
+        // G3, reinforcement: units at home worth half an attack (`attack_value` / 2) follow the strike as a second group.
+        reinforce_value: 1000,
+        // G4, partial defence: a threat gets units worth 1.5 times the armed enemy units seen near it, nearest first.
+        defend_ratio_permille: 1500,
+        // Timing jitter (decision of 13-11-2026): the permille `attack_value` and `max_wait` of a launch may deviate by.
+        timing_jitter_permille: 0,
     ),
     factions: [
         (

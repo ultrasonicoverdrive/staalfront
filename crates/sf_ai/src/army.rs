@@ -34,7 +34,7 @@ use sf_sim::{BuildingFunction, Cell, Command, EntityId, Kind, Order, gap};
 
 use crate::observe::{Lens, Observation, Own};
 use crate::placement;
-use crate::state::{AiState, Directive, GROUPS_MAX, Group, GroupRole, GroupStage, HpSeen, Posture};
+use crate::state::{AiState, Directive, GROUPS_MAX, Group, GroupStage, HpSeen, Posture};
 
 /// The most gather commands one army turn sends (an anti-spam bound, not a tuning number: with
 /// `gather_group` 19 it is 38 units per turn, and the rest follow at the next turn).
@@ -692,26 +692,12 @@ fn decide(state: &mut AiState, obs: &Observation, lens: &Lens<'_>, gather: Cell)
         return home;
     };
     let staging = staging_cell(state, lens, gather, tgt);
-    let id = state.next_group;
-    state.next_group += 1;
-    state.groups.push(Group {
-        id,
-        role: GroupRole::Strike,
-        members: go,
-        goal: tgt,
-        stage: if staging.is_some() {
-            GroupStage::Staging
-        } else {
-            GroupStage::Advancing
-        },
-        since: now,
-        launch_value: value,
-        staging,
-        merge_into: None,
-        target_hp: None,
-        recalled: Vec::new(),
-        closing: Vec::new(),
-    });
+    let stage = if staging.is_some() {
+        GroupStage::Staging
+    } else {
+        GroupStage::Advancing
+    };
+    state.add_group(go, tgt, stage, now, value, staging, None);
     state.last_attack_tick = now;
     state.attack_started = now;
     state.attacks_launched += 1;
@@ -803,22 +789,15 @@ fn reinforce(
     if go.is_empty() || value < reinforce_value {
         return;
     }
-    let id = state.next_group;
-    state.next_group += 1;
-    state.groups.push(Group {
-        id,
-        role: GroupRole::Strike,
-        members: go,
-        goal: meet,
-        stage: GroupStage::Advancing,
-        since: now,
-        launch_value: value,
-        staging: None,
-        merge_into: Some(strike_id),
-        target_hp: None,
-        recalled: Vec::new(),
-        closing: Vec::new(),
-    });
+    state.add_group(
+        go,
+        meet,
+        GroupStage::Advancing,
+        now,
+        value,
+        None,
+        Some(strike_id),
+    );
 }
 
 /// The strike ends: every group out is dissolved (a group called back stays until the threat is over).
