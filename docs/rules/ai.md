@@ -1069,6 +1069,12 @@ no reinforcement while engaged or returning, the guard out of a reinforcement, t
 staging off (`staging_cell` returns `None`): eleven, among them `the_staging_cell_is_on_the_line_to_the_target_short_of_it_and_on_open_ground`; defend ratio 0: four, among them `the_defence_sends_units_worth_one_and_a_half_times_the_armed_enemies_seen_nearest_first`; jitter ignored: `the_draw_scales_attack_value_and_max_wait_of_that_launch_and_is_cleared_by_it` and `the_draw_scales_max_wait_too`;
 chunk size unbounded: `a_march_command_carries_at_most_gather_group_ids`; the merge never fires: `the_reinforcement_merges_into_the_strike_within_arrive_radius_of_its_staging_cell` and `a_strike_that_has_advanced_is_met_at_its_middle_cell`.
 
+### Pins that moved (WP9.2a) and why
+
+Only what the shipped `normal.ron` drives moved; every frozen scenario, every `.expected` and every AI digest of the earlier phases is unchanged (the full workspace tests and the 44 release `--expect` runs are green). `the_digest_of_the_base_state_is_pinned`: `0xaa33_3a1f_d36c_b5a9` to `0x8383_758e_5b5e_90e6`
+(the old value returns with the numbers off, `..._with_the_numbers_of_wp9_2a_off_is_the_old_pin`). In `sf_game`'s `ai_in_game.rs` (the game seat, shipped profile): the win 11,664 to 12,312, the last structure ordered 3,017 to 12,097, one more credit sample (12,000); measured: with staging, reinforcement and partial defence set to 0 in the shipped file all the old values come back (the first wave still leaves at 9,717).
+`tournament_decided.rs`: not re-pinned; its scratch profile now sets those three numbers to 0 (with them on seat 0 wins at 1,455 instead of 1,315), so `DECIDED` is untouched and does not collide with PR #132.
+
 ### Not done in WP9.2a
 
 * The home guard is off in the shipped profile (measured harmful, above); the "Known gap" is closed in the code and in `ai_raid_guard`, not in the shipped play. The jitter is 0 in the shipped profile.
