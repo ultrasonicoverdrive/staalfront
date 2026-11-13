@@ -508,8 +508,9 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
     let mid = scene.world.hp_of(plant).unwrap();
     assert_eq!(
         mid,
-        hurt + 40,
-        "1 hit point a tick from the tick after the command"
+        hurt + 39,
+        "1 hit point on 39 of the 40 ticks after the command: the plant is the scene's power source and damaged, the \
+         world is in a power shortage (940 to 960 thousandths while it heals) and one tick in about twenty-five does not advance (`advances_on`)"
     );
     // The price by hand: 300 credits * 250 / 1000 for a whole repair = h / 8 credits at h hit points.
     assert_eq!(

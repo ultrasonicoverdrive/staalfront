@@ -212,7 +212,7 @@ second, branch 816 to 844, the same final checksum `0x38d5e3c43358a889`. A world
 ## What moved in WP9.1e (re-pins)
 
 Three pins moved with the rate 3 to 1: `sf_data` `the_shipped_numbers_are_pinned` (3 to 1), the two tick pins of `tools/sf_headless/tests/tournament_decided.rs`
-(1,315 to 1,224 and 5,599 to 2,885), and `crates/sf_game/tests/repair_screenshot.rs` (the plant gains `hurt + 40` in 40 ticks, not `hurt + 3 * 40`).
+(1,315 to 1,224 and 5,599 to 2,885), and `crates/sf_game/tests/repair_screenshot.rs` (the plant gains `hurt + 39` in 40 ticks, not `hurt + 3 * 40`: at 1 a hit point a tick the scene's power shortage, 940 to 960 thousandths, skips one tick, at 3 it was exact; the picture names move with the hit points).
 Cause measured: with `hp_per_tick` put back to 3 in the shipped file, `tournament_decided` gives 1,315 and 5,599 again. The frozen scenarios carry their own numbers
 (`repair_sell` and `silo` 5, `ai_rebuild` and `ai_deadlock` 3) and no `.expected` moved.
 
