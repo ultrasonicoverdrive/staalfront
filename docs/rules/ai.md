@@ -613,7 +613,7 @@ farther than `arrive_radius` from the threat cell, not ordered within `resend_ti
 is left alone. While a threat stands nothing is gathered and no attack is launched.
 
 **Known gap** (decision 3): while the whole army is out on an attack, a hit on a structure that is not the construction centre is answered by
-nothing but the towers (no unit is at home, and the attackers are not called back).
+nothing but the towers (no unit is at home, and the attackers are not called back). *13-11-2026 (WP9.2a): the rule `home_guard_permille` closes it in the code, but the shipped profile has it off (measured harmful); see "Groups".*
 
 ### The attack (A4, A5, A6)
 
@@ -950,6 +950,134 @@ line removed it fails). `closing` is in the digest; no pinned digest moved becau
 One army turn with 200 riflemen added: 22.8 us at the launch, 25.8 us on the march (50: 5.6 and 5.3 us); worst 364 to 1,982 us (spikes of a shared machine). These sit within the
 numbers of WP9.1c-2 (0.32 to 0.42 us, 24 to 28 us, 47,454 / 82,645 ticks/s); the machine was busier, so the comparison is rough.
 
+## Groups (WP9.2a)
+
+*13-11-2026.* The army is no longer one wave. `AiState::groups: Vec<Group>` (ascending by id, at most `GROUPS_MAX` = 4) replaces `attackers`, `attack_target`
+and `target_hp`; `recalled` and `closing` are per group. **The home is every army unit that is in no group** (`army::is_army`, A1). Code: `crates/sf_ai/src/army.rs`
+(`decide`, `reinforce`, `hold_back`, `staging_cell`, `threat_value`, `defenders`, `draw_jitter`, `operations`), `state.rs` (`Group`, `GroupRole`, `GroupStage`), numbers in
+`sf_data::ai_profile::ArmyRules`, tests `tools/sf_headless/tests/ai_groups.rs`, `ai_duel.rs`, `ai_perf.rs`, scenario `ai_raid_guard`. Nothing changed in `crates/sf_sim`.
+
+**A group** is `{ id, role (Strike; the raid of WP9.3b is the next number), members (ascending), goal, stage, since, launch_value, staging, merge_into, target_hp, recalled, closing }`.
+Stages (the numbers are hashed, so permanent): `Staging` 0, `Advancing` 1, `Engaged` 2, `Returning` 3. `Engaged` is what the AI infers: a member within `arrive_radius` of the
+target. `Returning` is a group called back by a hit on the construction centre (decision 3, unchanged: the recall stays anchor-only): its members count as home and get the defence
+order once (`recalled`), and the group is dissolved when the threat is over. The strike is the group with no `merge_into`. **A unit is in at most one group**, and no group lives
+past the death of its members: `turn` prunes every list to the live units. Tested in every tick of `ai_vs_passive` (`a_unit_is_in_at_most_one_group_in_every_army_turn_of_a_long_run`), in
+`ai_raid_guard`, and in 40 army turns of launch, merge, death and recall on built observations.
+
+**G1, the home guard.** At a launch the gathered units are sorted by id; the highest ids are held back until their value reaches `home_guard_permille` (250) of the gathered value
+(`hold_back`: the last unit held may take the held value over the permille, so six units of 2,000 hold back two, a third). The trigger (A4) is then asked of the **strike that remains**: its
+count (`min_units`) and its value (`attack_value`, or `max_wait`). A guard that leaves a strike under the trigger launches nothing. This closes the "Known gap" of decision 3: a hit on a
+structure while the army is out meets the guard (`ai_raid_guard`).
+
+**G2, staging.** With `stage_distance` above 0 the strike gets an `AttackMove` to the staging cell first: the integer point on the line from the gather cell to the target cell,
+`stage_distance` cells short of the target (steps on the larger axis, `staging_cell`), moved by the ring search of `beside` (rings 1 to 3, nearest to the gather cell) when it is not open
+ground; no staging when the target is no further than the distance. The strike advances (stage `Advancing`, `attack_started = tick`) when `stage_permille` (700) of its **living** members are
+`Idle` within `arrive_radius` of the cell, or `stage_patience` ticks after the launch. Dead members leave the denominator. The advance orders the idle members to the target; members still
+walking are not ordered again (the anti-spam rule: only an `Idle` unit is ordered).
+
+**G3, reinforcement.** While the strike is `Staging` or `Advancing`, nothing is defended, no reinforcement is out and fewer than `GROUPS_MAX` groups exist, the gathered units minus the guard launch
+as a second group (`merge_into` = the strike) once they are worth `reinforce_value` (the shipped number is `attack_value / 2`). It is no attack: `attacks_launched`, `last_attack_tick` and the jitter are
+not touched. It walks to the meeting point (the strike's staging cell while it stages, else the middle cell of the strike's members) and merges when its own middle cell is within `arrive_radius` of
+it; `launch_value`s add up. No launch while the strike is `Engaged` or `Returning`; one reinforcement at a time (no third group is ever made, the next batch waits for the merge); a reinforcement
+whose strike has ended goes home with the survivors.
+
+**G4, partial defence.** Threat value = the sum of `Lens::unit_cost` over the armed units of other players in `obs.visible` within `gather_radius` of the threat cell (`threat_value`; unarmed ones and
+structures do not count, nothing out of sight counts). `defenders` sends the units at home, nearest to the threat cell first and the lowest id among equals, until their value reaches the threat value
+times `defend_ratio_permille` (1,500) / 1000; **all of home when the ratio is 0 or nothing armed is seen**. Units already idle at the threat cell count towards the amount and are not ordered again.
+Members of a `Returning` group always get the order.
+
+**Chunking.** A command carries at most `gather_group` (19, the largest formation of the sim) ids: `operations` splits a longer list into several commands, each counted against the
+`ARMY_COMMANDS_PER_TURN` (4) budget, and what the budget leaves goes at the next turn (those units stay `Idle` and unrecorded in `sent`). **Measured, and the memo's guess was wrong:** chunking does not flatten the
+launch step (below): the cost is the sim's path planning per unit, not the command.
+
+**Timing jitter** (decision of 13-11-2026). `timing_jitter_permille` is drawn once per launch from the AI's own stream (`AiState::rng`, `Rng::below(2 * p + 1) - p`) at the first army turn that checks the trigger
+after the last launch (the first of the match too), kept in `AiState::jitter`, applied as `(1000 + draw) / 1000` to **both** `attack_value` and `max_wait` of that launch, and cleared by the launch. Number 0
+draws nothing (the stream is untouched), which keeps every frozen profile. This is the first rule that draws from the AI stream: since this WP the AI seed changes a game (`the_ai_seed_alone_does_not_change_a_game`
+in `tournament.rs` plays 3,000 ticks, before the first launch, so it still holds there).
+
+**Stuck rule.** Unchanged. No tournament run of this WP showed an attack ended by `stuck` while it was winning (see the measurements; none was looked for with a tick trace beyond them).
+
+### State, digest, numbers
+
+New numbers (`ArmyRules`, all with serde defaults that switch the rule off): `home_guard_permille` 0, `stage_distance` 0 (`stage_permille` 700 and `stage_patience` 600 are read only with a distance), `reinforce_value` 0,
+`defend_ratio_permille` 0, `timing_jitter_permille` 0, checked at both ends when the file is read (`every_number_is_checked_at_both_ends_when_the_file_is_read`) and pinned for the shipped file
+(`the_shipped_profile_is_pinned`; `a_profile_without_the_numbers_of_wp9_2a_reads_with_them_off` for the frozen copies). `ArmyRules::groups_on()` is true when any is set. **The digest keeps its old layout
+when none is set**: `Profile::digest` adds the numbers, and `AiState::digest` adds the groups' full state and the jitter, only when `groups_on()`; otherwise the old fields are hashed from the groups
+(`attackers()` is the members of the groups out, `attack_target()` the strike's goal, `recalled` and `closing` the unions), so one group with every number off hashes as the single wave did. That is why no
+AI digest and no checksum of the earlier scenarios moved (`the_digest_of_the_base_state_with_the_numbers_of_wp9_2a_off_is_the_old_pin`: the old pin `0xaa33_3a1f_d36c_b5a9` comes back when the numbers are off and one group
+is left). The shipped `assets/ai/normal.ron` turns them on, so `the_digest_of_the_base_state_is_pinned` moved (cause: the numbers of the shipped profile and the groups, measured by that test).
+
+### Scenario `ai_raid_guard`
+
+`ai_raid_guard.ron` and `ai_raid_guard_defs/` (a frozen copy of the shipped definitions, a profile `normal.ron` with the guard **on** (250), staging 14 with patience 600, reinforcement, defence 1,500, the attack at 800 value from tick 100, a goal list of the
+plant and barracks the match gives the AI so it builds nothing, and a match file of its own): twelve riflemen stand at the gather cell, a power plant is the raid's target, player 1 is a lone centre. The strike (nine, the guard of three held back) launches at about
+tick 160, leaves its staging cell at about 800 and is `Engaged` by 1,900; at 1,501 two riflemen of player 1 appear west of the base and attack the plant (slot 1). Pinned: the strike is out at tick 1,700, the guard kills both raiders, the
+plant stands, the strike is never `Returning` (`ai_raid_guard_the_army_is_out_and_the_guard_kills_the_raiders`); the control with the guard and the partial defence off ends with a living raider or a lost plant
+(`ai_raid_guard_without_the_guard_the_raiders_win`). Checksum `0xbd351313bec96799` (`ai_raid_guard.expected`, in the CI list), AI digest `0x3caf5e5be7833a76`.
+
+### Measured (13-11-2026)
+
+**Repair rate.** All tournament numbers below were taken **on a local merge of this branch with PR #132 (WP9.1e, `hp_per_tick` 3 to 1), which was still open**, because at the rate of main (3) no armies decide a game (the
+first run of this WP at rate 3: 1 of 100 decided). They are not on the tree of this PR. Release, `sf_headless tournament`, `--assets` a scratch directory with the profile under test, base seed 458,758 (the file's), cap 60,000, one thread each, 2 to 3 runs in parallel on 4 cores.
+The tournament reads each seat's profile from `<assets>/ai/<name>.ron`, so a profile per seat needs no flag; `normal_old` is `tools/sf_headless/tests/fixtures/normal_old.ron` (a frozen copy of the profile of d4c06f4; tested equal to the shipped one with the numbers off).
+
+**Duel, normal-new against normal-old, 50 games with the new profile on seat 0 and 50 on seat 1** (`new` = games the new profile won; the share is of the decided games; the control `off` is the new code with every number off):
+
+| Profile (changes against `off`) | new : old | draws | new share of decided |
+|---|---|---|---|
+| off (control) | 17 : 17 | 66 | 50.0 % |
+| guard 250 + staging 14 (600) + reinforcement 1000 + defence 1500 (the memo's numbers) | 1 : 4 | 95 | 20.0 % |
+| guard 250 only | 6 : 10 | 84 | 37.5 % |
+| staging 14 (600) only | 24 : 15 | 61 | 61.5 % |
+| reinforcement 1000 only | 20 : 18 | 62 | 52.6 % |
+| partial defence 1500 only | 23 : 18 | 59 | 56.1 % |
+| staging + reinforcement + defence, guard 0 | 22 : 13 | 65 | 62.9 % |
+| the same with guard 100 | 4 : 8 | 88 | 33.3 % |
+| guard 150, `attack_value` 1700 | 1 : 7 | 92 | 12.5 % |
+| guard 250, `attack_value` 1500 | 3 : 4 | 93 | 42.9 % |
+| **shipped: guard 0, staging 14 with patience 1800, reinforcement 1000, defence 1500, jitter 0** | **37 : 7** | 56 | **84.1 %** |
+
+The shipped profile as seat 0: 33 : 2 (15 draws); as seat 1: 4 : 5 (41 draws). **Over both seats it clears 55 %, but on seat 1 alone it does not** (the seat 0 advantage of the
+tournament is large at this repair rate: the control's seat 0 won 28 of 34 decided).
+
+**What it says, and a deviation from the memo.** (1) **The home guard hurts**: any guard (100, 150, 250 permille) cut the decided games from 35 to between 5 and 16 of 100 and the duel to 12 to 43 percent, with or without a lower `attack_value`. The rule is built, tested and pinned (and the scenario `ai_raid_guard`
+shows it killing raiders while the army is out), but **the shipped profile has `home_guard_permille` 0** and so does not close the "Known gap" in play; whether a guard that is not taken from the next wave (a separate home army) works is not measured. (2) **`stage_patience` 600 made the staging cell a
+waypoint**: a rifleman needs 800 to 1,000 ticks to walk to a cell 14 short of the target, so the patience always ran out first; 1800 is shipped (84.1 % against 61.5 %). (3) The jitter: `m1_duel`, new against new, 100 games each, at 0 / 100 / 200 permille:
+
+| `timing_jitter_permille` | decided | seat 0 : seat 1 | distinct coarse (plain / rounded) | median ticks of decided |
+|---|---|---|---|---|
+| 0 | 53 | 52 : 1 | 71 / 90 | 31,038 |
+| 100 | 44 | 42 : 2 | 64 / 89 | 32,482 |
+| 200 | 40 | 35 : 5 | 58 / 81 | 36,683 |
+
+(guard 0, staging patience 600 in these three). The jitter does not add divergence once staging is on (the games already differ in 71 of 100 coarse outcomes without it) and it makes fewer games decide, so **0 is shipped**; the rule is pinned by tests and the number can be changed by data. At repair rate 3 (main), jitter 0 / 100 / 200 with the memo's numbers
+gave 25 / 25 / 26 distinct coarse and 64 / 59 / 63 rounded, 1 / 0 / 5 decided: games that are almost all capped differ little in that key whatever the jitter.
+
+**The final shipped profile, `m1_duel` 100 games (rate 1):** 73 decided (72 won by seat 0, 1 by seat 1; Meridian 21 and Veyran 19 wins of the 50 games between different factions), 27 capped (0 stalemate, 0 mutual defeat), decided in 15,142 to 56,847 ticks, median 28,815, distinct coarse outcomes 85 of 100 (rounded 95), 83 s for 100 games. Baseline B at rate 1 (PR #132) was 35 decided, median 39,632, coarse 54 and 75; Baseline A and B at rate 3 are above.
+**The seat 0 advantage is the main thing left**: 72 of 73. Not diagnosed here (the think order, the site, or the approach).
+
+**Launch step and think cost** (`ai_perf.rs`, release, this container, load average about 1 to 3): the single launch command of the whole wave was a step of 882 us in one earlier run; `ai_vs_passive` (a wave of six) now shows a launch step of 15 to 19 us with the numbers off and
+14.5 to 19.4 us with the shipped ones (three alternating runs each), so that 882 us was a spike, not the cost of the command. A wave of 45 units (`ai_raid_guard` with 48 more riflemen), as one command (`gather_group` 64, the old way) against commands of at most 19: launch step 748 to 849 us against 801 to 958 us (five alternating runs each), staging-exit step 87 to 95 us against 71 to 116 us:
+**chunking does not flatten the step**; the cost is the per-unit path planning in the sim. Think cost with groups out: `ai_vs_passive`, shipped numbers, 16,000 ticks: mean 0.24 us per AI per tick, worst think 42 us (construction); `ai_raid_guard`: mean 0.21 us, worst 29 us; budget 20 us and 1 ms (asserted in release).
+**`ai_vs_passive` with the shipped numbers wins at tick 15,908** (13,839 with the numbers off; the scenario is 16,000 ticks long), the wave of six leaving at 11,150 as before (`ai_vs_passive_still_wins_with_the_shipped_numbers_and_the_tick_is_pinned`); with the memo's numbers it did not win at all (the guard delays the first wave and holds a third of six units back). **Commands:** in a 40,000-tick duel game the AIs sent 62 and 65 commands, 1.55 and 1.62 per 1,000 ticks; the pin is a ceiling of 3.5 per 1,000 (`the_commands_of_a_duel_game_stay_at_a_bounded_rate`).
+
+### Tests and mutations
+
+`ai_groups.rs` (32 tests: the guard value and its boundary, `min_units` after the guard, the staging cell, the staging threshold at 7 of 10 and not 6, the patience at 600 and not 599, dead members out of the denominator, reinforcement at its value and not one unit less, one reinforcement and no third group, the merge at 6 cells and not 7, the strike's middle cell,
+no reinforcement while engaged or returning, the guard out of a reinforcement, the defence amount, the nearest-first order and the lowest id among equals, nothing seen sends all of home, the threat value reads only `obs.visible`, the recall of a group only by the centre, the chunk size, the jitter range, determinism and once per launch, its scaling of `attack_value` and `max_wait`, the invariant of one group per unit, `ai_raid_guard` and its control, two fog twins), `ai_duel.rs`,
+`ai_perf.rs`, the unit tests of `state.rs` and `profile.rs`, and `sf_data`. Mutations in `army.rs` (each reverted), the tests that fail: guard 0 (`hold_back` ignores the permille): six tests, among them `the_guard_holds_back_the_highest_ids_until_a_quarter_of_the_value_and_not_one_unit_less` and `ai_raid_guard_the_army_is_out_and_the_guard_kills_the_raiders`;
+staging off (`staging_cell` returns `None`): eleven, among them `the_staging_cell_is_on_the_line_to_the_target_short_of_it_and_on_open_ground`; defend ratio 0: four, among them `the_defence_sends_units_worth_one_and_a_half_times_the_armed_enemies_seen_nearest_first`; jitter ignored: `the_draw_scales_attack_value_and_max_wait_of_that_launch_and_is_cleared_by_it` and `the_draw_scales_max_wait_too`;
+chunk size unbounded: `a_march_command_carries_at_most_gather_group_ids`; the merge never fires: `the_reinforcement_merges_into_the_strike_within_arrive_radius_of_its_staging_cell` and `a_strike_that_has_advanced_is_met_at_its_middle_cell`.
+
+### Not done in WP9.2a
+
+* The home guard is off in the shipped profile (measured harmful, above); the "Known gap" is closed in the code and in `ai_raid_guard`, not in the shipped play. The jitter is 0 in the shipped profile.
+* The tournament numbers are on a local merge with PR #132, not on main; on main (repair 3) no game of 100 is decided by the new profile in most runs. They must be taken again after #132 merges.
+* The stuck rule is unchanged and no case of a winning attack ended by `stuck` was looked for beyond the runs above.
+* The seat 0 advantage (72 of 73 decided games) and the 27 capped games are not explained. Staging patience and distance were tuned on a handful of runs, one seed set; the shipped profile was not tuned against the human.
+* Raids (`GroupRole::Raid`), retreat and target choice are WP9.2b and 9.3.
+* The chunks of one launch go in the same army turn (up to the budget of 4 commands); spreading them over turns was not tried.
+
 ## The schedule
 
 An AI thinks when `(tick + stagger * player) % think_interval == 0` (`schedule::due`; `tick` is the number of ticks the world has run, the
@@ -1143,8 +1271,7 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
   stream (`AI_STREAM` plus the player number) and so its digest, but **no rule draws from that stream yet** (checked by reading: the only draw outside the
   digest is in a test, `ai.rs`), so it does not change a game, and a test shows it: `the_ai_seed_alone_does_not_change_a_game` plays one game twice with
   only the AI seed changed (same final checksum and outcome, different AI digests, which hash the stream) and once with only the world seed changed
-  (different checksum). What separates games today is the seating and the world seed. **The AI stream is not drawn yet**: 9.4's `idle_permille` or a
-  jitter number would be the first rule to use it.
+  (different checksum). What separates games today is the seating and the world seed. **The AI stream was not drawn when this was written**; since WP9.2a the timing jitter is the first rule that draws (shipped at 0).
 * **When a game ends.** After the first step with a `match_result`, or after `--cap` ticks (default 60,000): a capped game is a draw. It is a **stalemate**
   when no unit or structure was destroyed in its last `--stalemate` ticks (default 10,000; a game shorter than the window cannot be one), otherwise
   **capped**. Both defeated in the same tick is a **mutual defeat**. `classify` is a pure function and pinned at the boundary (exactly the window is a stalemate).

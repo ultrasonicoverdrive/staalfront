@@ -509,6 +509,10 @@ Layered (analysis §12, §22G):
   checksum. On coarse keys Baseline A is **27 of 100** distinct for (ending, ticks, attacks per AI) and **51 of 100** with the last loss rounded to 1,000 ticks, at or below
   the memo's "about half". **The seeded jitter is needed and goes into WP9.2a** (profile number `timing_jitter_permille`, default 0 for frozen profiles, set in the
   shipped normal profile); its effect is measured there on the coarse key.*
+  *13-11-2026 (WP9.2a, built; numbers in `docs/rules/ai.md` "Groups"): the army is in groups (`AiState::groups`, at most 4; the home is every army unit in no group): the home guard (G1), staging (G2), reinforcement (G3), partial defence (G4), chunked march commands
+  and the seeded timing jitter. All new profile numbers default to off, so frozen profiles, their digests and checksums did not move. **Measured against the profile as it was before (100 games, both seats, on a local merge with PR #132):** the memo's numbers won 20 % of the decided games; the guard alone is the cause
+  (any guard of 100 to 250 permille cut the decided games from 35 to under 17 of 100), and `stage_patience` 600 only made the staging cell a waypoint. **Shipped: guard 0 (rule built and tested, off), staging patience 1800, jitter 0:** 84.1 % of the decided games over both seats (37 : 7; as seat 1 alone 4 : 5), `m1_duel` 73 decided of 100.
+  Open for Tijmen/the orchestrator: whether the guard should be a separate home army instead of a cut from every wave; the seat 0 advantage (72 of 73 decided); the tournament numbers must be taken again once #132 is on main.*
 - WP9.2 Operational: composing armies, choosing a target, gathering.
 - WP9.3 **[xhigh]** Tactical: target priority, retreating, focusing.
 - WP9.4 Difficulty levels without cheating (reaction time, efficiency), plus one "unfair" level.
