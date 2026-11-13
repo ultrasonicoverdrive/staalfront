@@ -665,7 +665,7 @@ and not again within `resend_ticks`. How the AI learns that an order had no effe
 
 `army_floor_value` (profile, **2,000**, measured; the start value was 1,000). *Fix round 1 (decision of 12-11-2026): the floor applies only while
 no attack has gone out yet **and the tick is before `max_wait`**, or while the posture is `Defend`*, so it can never hold the goal list past
-`max_wait` (6,000) outside a defence, also when units die at the gather cell with no structure hit and no attack ever goes
+`max_wait` (6,000; 12,000 since WP9.1c-3) outside a defence, also when units die at the gather cell with no structure hit and no attack ever goes
 (`the_army_floor_ends_at_max_wait_before_the_first_attack`). The army's value (`production::army_value`) is the price of every own
 army unit (`army::is_army`) plus every item of a kind of the unit mix in an own queue plus what the production turn running has ordered (without
 that last part each factory would overshoot by one: `the_army_value_counts_the_queue_and_what_this_turn_ordered`). While it is below the floor,
@@ -681,7 +681,7 @@ construction saves for 1,500: the gap is the income of **one harvester, about 20
 credits on twelve units (2,000) and the first four goals, and the second harvester comes only with the vehicle factory. With the attack switched
 off (no win) **the goal list does not complete in 30,000 ticks**: `ai_vs_passive` makes 9 of its builds (the vehicle factory at 11,650, the last at
 29,090), `m1_ai` its last at 29,777; the army stays at 12 (`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`,
-`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. The guard against the known risk (under steady losses the army stays below the
+`the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`). That is the cost of the floor on a 4,000-credit start, stated as a gap. *(WP9.1c-3: with the final opening the list completes at 22,730 in `ai_vs_passive` (the 20,000 target missed, the cause is the map's ore) and at 19,777 in `m1_ai` (met); see "The opening".)* The guard against the known risk (under steady losses the army stays below the
 floor and the goal list stalls): once an attack has gone out, the floor holds only while the army defends.
 
 Measured on `ai_vs_passive` (the AI as player 0 at (12, 68) with 4,000 credits against m1's static opponent, release, 40,000 ticks, the tick the
@@ -698,7 +698,7 @@ match names the AI the winner):
 The first wave goes at `max_wait` (or at `attack_value`, which the floor never lets the army reach while goals are open). With 3,600 it leaves
 before the army reaches the floor and bounces off m1's tower, four riflemen and tank; the goal list then holds the money (the floor is off after
 the first attack) and the second wave comes 20,000 to 30,000 ticks later. With a floor of 3,000 the list stalls until the attack wins: the AI wins
-sooner on this map but has no base. So **`army_floor_value` 2,000 and `max_wait` 6,000** (was 3,600; both builder's measured values, decision 4).
+sooner on this map but has no base. So **`army_floor_value` 2,000 and `max_wait` 6,000** (was 3,600; both builder's measured values, decision 4). *Superseded in part by WP9.1c-3: `max_wait` 12,000 and `attack_value` 2,000 with the vehicle factory second in the list, see "The opening"; the table above is the WP9.1c-2 order.*
 
 ### A defeated AI (decision 5)
 
@@ -725,18 +725,22 @@ production they had). Changed in `normal.ron`: `defend_ticks` 200 → 400, `max_
 ### Scenarios
 
 **`ai_vs_passive`** (`assets/scenarios/ai_vs_passive.ron`, `ai_vs_passive_defs/`: frozen copies of the shipped definitions and of
-`normal.ron` as this WP leaves it, and a match file with m1's static opponent exactly as `m1.ron` lists it). 16,000 ticks (T2). Checksum
-`0x3b5a509e49e43343`, AI digest `0x74e38ea1d028c406`. Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
+`normal.ron` as WP9.1c-3 leaves it (refrozen then; WP9.1c-2's copy is `ai_raid_defs`), and a match file with m1's static opponent exactly as `m1.ron`
+lists it). 16,000 ticks (T2). Checksum `0xd39c2261cc0ad09a`, AI digest `0x5817c87452d633f1` (WP9.1c-2: `0x3b5a509e49e43343`,
+`0x74e38ea1d028c406`; cause in "Pins that moved (WP9.1c-3)"). Measured and pinned (`the_ai_beats_the_static_opponent_of_m1_before_t2`):
 
 | Wave | Launched | Units | Value | Survivors | Ended |
 |---|---|---|---|---|---|
-| 1 | 6,030 | 12 | 2,000 | 5 | 8,430 (`attack_patience`: no attacker reached the target, the tower and the units held them) |
-| 2 | 12,030 | 5 | 1,100 | 5 | the win |
+| 1 | 11,150 | 6 | 2,000 | 6 | the win |
 
-**The AI wins at tick 14,659** (the opponent's construction centre falls), T2 = 16,000. Army at the gather cell 11, 0, 5, 0 at 4,000, 8,000,
-12,000, 16,000; the last build before the win at 11,650 (the vehicle factory: the list is not complete when the match ends). 26 commands in all,
-the most in any 1,000 ticks 12 (bound 15), at most one order per army turn, nothing after the win. The finishing `Attack` is not needed there:
-the second wave's `AttackMove` fights the centre on its own (the rule has its own unit test).
+(WP9.1c-2: wave 1 at 6,030 with 12 units / 2,000, 5 survivors, ended by `attack_patience` at 8,430; wave 2 at 12,030 with 5 units / 1,100 won at 14,659. Those paths, a wave
+that fails and an `attack_patience` end, are no longer run in a scenario; the unit tests `an_attack_ends_with_its_attackers_its_target_or_its_patience_...` and
+`an_attack_ends_when_the_target_stops_losing_hit_points_for_attack_patience` hold them.)
+
+**The AI wins at tick 13,839** (the opponent's construction centre falls), T2 = 16,000. Army at the gather cell 0, 4, 0, 0 at 4,000, 8,000,
+12,000, 16,000; the last build before the win at 2,890 (the barracks: the list is not complete when the match ends). 18 commands in all,
+the most in any 1,000 ticks 4 (bound 15), at most one order per army turn, nothing after the win. The finishing `Attack` is not needed there:
+the wave's `AttackMove` fights the centre on its own (the rule has its own unit test).
 
 **The finishing `Attack` on the real world** (fix round 1): `the_finishing_attack_is_sent_on_the_real_world_and_the_simulation_takes_it` runs the
 army turn on the world of `ai_vs_passive` with four riflemen of player 0 put idle beside the enemy centre (arrive radius 12 there): it sends one
@@ -745,7 +749,7 @@ pinned by `the_finishing_attack_never_goes_to_an_own_structure`. **The defence c
 the nearer of two armed raiders, not an unarmed one, not one 9 cells off the footprint, beside the structure with none) and its fence
 (`a_hidden_raider_in_reach_of_the_raided_plant_changes_nothing_until_it_is_seen`: a fourth rifleman in fog at (10, 52), within the 8-cell reach of the plant (fix round 2; it was 16 cells off before), never seen in the run, against
 the same far away: commands and digest equal over the whole run). **A defeated AI while the match goes on**: `a_defeated_ai_stops_also_while_the_match_goes_on`
-(three players; player 0's centre removed at 3,001, the match undecided).
+(three players; player 0's centre removed at 6,501, after its first units exist since WP9.1c-3, the match undecided).
 
 **`ai_raid`** (`ai_raid.ron`, `ai_raid_defs/`: the definitions and profile of `ai_vs_passive_defs`, the match file of `ai_scout`): at tick 4,001
 the script puts three riflemen of player 1 west of the AI's base and orders them to attack its first power plant. 5,600 ticks (before the
@@ -756,9 +760,13 @@ after the last hit, at the next think), and no `AttackMove` or `Attack` after th
 
 **The fence.** `a_unit_hidden_in_the_reach_changes_nothing_the_ai_does_also_an_army_beside_the_route`: three enemy riflemen at the north-east
 shore of the lake on the way to the enemy centre against the same three in a far corner: the AI's commands and digest are equal until they come
-into view, with the scout (tick 2,110) and without one (tick 7,421, after the first attack went out).
+into view, with the scout (tick 2,110) and without one (tick 7,421, after the first attack went out). *(WP9.1c-3: the cells moved to (57, 28); with the scout the
+riflemen come into view at 5,476, without one at 9,823 (one `AttackMove` before), see "The opening".)*
 
 ### The game seat (`m1_ai`)
+
+*WP9.1c-3 moved every number in this subsection (first army unit 4,587, the wave of 6 at 9,717, the win at 11,664; the cost figures below were measured
+with the WP9.1c-2 timing): see "The opening (WP9.1c-3)". What follows is the WP9.1c-2 measurement.*
 
 `the_army_timing_in_the_game_seat` (`crates/sf_game/tests/ai_in_game.rs`, the AI as player 1 at (72, 14) with 4,000 credits, the human idle with
 its construction centre only, driven as the sim thread drives it): the first army unit is queued at **1,147** (WP9.1c-1: 17,867), 10 army units at
@@ -795,6 +803,152 @@ assert is 100 us per turn (release).
   (`the_ai_scout_repin_of_wp9_1c_2_is_the_attack`): with the trigger made unreachable the old checksum comes back. Consequences in its tests:
   the army at the gather cell at 20,000 is 4 (was 10), and without a scout the AI learns where the centre stands when the first attack arrives
   (15,781), not never.
+
+## The opening (WP9.1c-3)
+
+*Decision of the orchestrator, 12-11-2026: option A of the opening design (the vehicle factory second), data only; fix round 1 the same day: the second
+refinery before the first tower and `attack_value` 2,000, both adopted on measurement.* Shipped profile (`assets/ai/normal.ron`):
+
+* **Goal list**, both factions: power plant, refinery, **vehicle factory**, barracks, second power plant, **second refinery**, tower, radar, second tower,
+  advanced defences (Veyran: the fortified bunker after the first tower). Pinned: `the_shipped_profile_is_pinned` (`sf_data`) and the resolved list
+  (`the_roles_of_the_shipped_profile_become_the_kinds_of_the_shipped_definitions`, `sf_ai`).
+* **`attack_value` 2,000** (was 3,000), **equal to `army_floor_value`**: the first wave leaves as soon as the floor's worth of units stands gathered, in any
+  seat. Pinned with the equality (`the_attack_goes_at_attack_value_and_not_one_credit_below`).
+* **`max_wait` 12,000** (was 6,000): it ends the army floor and is the fallback trigger (below). `army_floor_value` stays 2,000.
+
+The only code change in `sf_ai` is one line unrelated to the opening (the centre recall clears `closing`, below).
+
+**Why the vehicle factory second.** The refinery brings one free harvester; a bought one (1,100 credits, a vehicle) needs the vehicle factory (1,500, needs
+the refinery). One harvester delivered about 200 credits per 750 ticks (0.27 per tick), so every 100 credits spent before the second harvester costs about
+370 ticks. In WP9.1c-2 the barracks, the second power plant and the scout (1,100 credits) came first and the army floor then spent everything above the
+reserve on units, so the vehicle factory waited until 11,650 and the goal list did not complete in 30,000 ticks.
+
+### Measured (ticks)
+
+Shipped profile; `ai_vs_passive` = player 0 on the frozen copy (Meridian), `m1_ai` = the game seat (Veyran, with the fortified bunker in its list).
+
+| | `ai_vs_passive` | `m1_ai` |
+|---|---|---|
+| vehicle factory ordered | 810 | 817 |
+| bought harvester queued | 1,480 | 1,487 |
+| second harvester exists | **1,880** | **1,887** |
+| second power plant | 2,170 | 2,177 |
+| barracks ordered | 2,890 | 3,017 |
+| first unit of the mix queued (exists) | 4,460 (4,621) | 4,587 |
+| army floor (2,000) reached | 10,687 | 9,374 |
+| first wave, on `attack_value` | 11,150, 6 units, 2,000, all 6 survive | 9,717, 6 units, 2,000 |
+| the win | **13,839** | **11,664** |
+| last structure of the list, attack off | 22,730 | **19,777** |
+| WP9.1c-2 for comparison: first unit / first wave / win | 6,030 wave of 12 / 14,659 | 1,147 / 6,037 / 8,396 |
+
+Pinned: `the_vehicle_factory_comes_before_the_barracks_and_the_second_harvester_before_the_first_army_unit` (first five builds, harvester queued 1,480, second
+harvester 1,880 and before 4,000, first unit queued 4,460 and after it, floor reached 10,687 and a thousand ticks before `max_wait`),
+`the_ai_beats_the_static_opponent_of_m1_before_t2` (win 13,839, the wave, the gather counts, the last build), `the_opening_in_the_game_seat` (the `m1_ai` column
+and the credits every 500 ticks from 500 to 11,500), `the_army_timing_in_the_game_seat`, and the two attack-off tests
+(`the_goal_list_with_the_floor_and_no_attack_over_thirty_thousand_ticks`, `the_goal_list_in_the_game_seat_with_the_floor_and_no_attack`: the list **completes**,
+at 22,730 and 19,777 ticks, the last build being the advanced defences). The credits trace of `ai_vs_passive` under the final profile was not recorded; the
+`m1_ai` one is pinned.
+
+### The 20,000 target and the ore of the map
+
+The brief's target, "goal list complete by 20,000 with the attack off", is **met in `m1_ai` (19,777) and not in `ai_vs_passive` (22,730)**. The cause is the
+map's ore, not the AI. Read off `assets/maps/m1/terrain.png` by the sweep of this PR: **174 ore cells in six diamond fields of 29 cells**. A cell starts with
+120 (`ore.ron`, inline in `ai_vs_passive.ron`), so a field holds 29 x 120 = **3,480 credits**, and it regrows 1 per cell per 200 ticks, 29 per 200 ticks for a field,
+**about 145 per 1,000 ticks**. The trace of the run with the tower first (cumulative ore delivered at ticks 1,000 to 12,000: 0, 200, 800, 1,400, 1,800, 2,200,
+2,600, 3,000, 3,400, 3,600, 4,000, 4,200) reads: about 600 per 1,000 ticks while the two harvesters work the field next to the refinery (ticks 2,000 to 4,000), 400
+per 1,000 to tick 9,000, 3,400 delivered at 9,000 (about one field's worth), then 200 to 400 per 1,000 ticks, the regrowth plus the crumbs of the next field.
+That is the near field mined out at about 9,000 to 10,000. (That the harvesters take the nearest non-empty cell is `economy.md`; the trace was measured, the field
+arithmetic and the reading of the PNG are the sweep's.) A second refinery nearer the next field would help the income, which is what the next section tries;
+raising the ore `start` only moves the cliff and moves every pinned economy scenario, so it is not done here.
+
+### The second refinery before the first tower, and `attack_value` (fix round 1)
+
+Measured, all with the vehicle factory second, one run each (`SF_` env overrides of the throw-away measurement test, not kept). Columns: floor reached, the first
+wave (tick, units, value), the win, and the last structure with the attack off.
+
+| Variant | `ai_vs_passive` floor / wave / win / list | `m1_ai` floor / wave / win / list |
+|---|---|---|
+| tower first, `attack_value` 3,000, `max_wait` 14,000 (round 0) | 12,567 / 14,030, 6, 2,000 / 16,726 / 22,970 | 13,494 / 14,037, 6, 2,000 / 16,023 / 24,417 |
+| **second refinery first**, 3,000, 14,000 | 10,687 / 14,030, 6, 2,000 / 16,682 / 22,730 | 9,374 / 14,037, 6, 2,000 / 15,973 / 19,777 |
+| tower first, `attack_value` 2,000, 14,000 | 12,567 / 12,870, 6, 2,000 / 15,576 / 22,970 | 13,494 / 13,757, 6, 2,000 / 15,756 / 24,417 |
+| **second refinery first, 2,000, 14,000** | 10,687 / **11,150, 6, 2,000 / 13,839** / 22,730 | 9,374 / **9,717, 6, 2,000 / 11,664** / 19,777 |
+
+The second refinery first completes the list earlier in both seats (22,970 -> 22,730, 24,417 -> 19,777), reaches the floor 1,900 and 4,100 ticks sooner, and the first
+wave is neither later nor smaller: **adopted**. `attack_value` 2,000 makes the first wave value-driven (6 units, 2,000, in both seats, leaving as soon as they are
+gathered) and the win earlier in both seats: **adopted**. The cost, as before: the tower comes later (ordered at 18,410 with the attack off in `ai_vs_passive`,
+15,097 in `m1_ai`; with the attack on the win comes before it).
+
+**`max_wait`** with the final order and `attack_value` 2,000 (`ai_vs_passive`; `m1_ai` is 9,717, 6, 2,000, win 11,664 at every row):
+
+| `max_wait` | first wave | win |
+|---|---|---|
+| 10,000 | 10,030, 4, 1,200; the floor ends at 10,000, before it is reached (10,687); a second wave at 20,030 | 22,602 |
+| 11,000 | 11,030, 5, 1,900 (leaves on `max_wait`, the sixth unit not yet gathered) | 14,131 |
+| **12,000** | **11,150, 6, 2,000** (leaves on `attack_value`) | **13,839** |
+| 14,000 | 11,150, 6, 2,000 | 13,839 |
+
+With `attack_value` equal to the floor, `max_wait` no longer decides the first wave in these seats; it ends the floor (`production.rs`: the floor applies before the first
+attack and before `max_wait`) and is the fallback if the army stalls below 2,000. A wave that leaves on `max_wait` alone carries 2,000 only if the floor is over
+after it was reached and the units are gathered: at 11,000 it is 1,900, at 10,000 1,200 (the floor ended unreached). **12,000** is the smallest round value where a
+wave leaving on `max_wait` alone would still carry 2,000 (the floor reached at 10,687 and the sixth unit gathered at 11,150 in the slowest seat), with 850 ticks of margin there; the old
+value 14,000 gives the same runs. Under WP9.1c-2's order and `attack_value` 3,000 the first wave needed `max_wait` after the floor (one run each, `ai_vs_passive`,
+first wave tick / units / value, win): 6,000: 16,510, 4, 1,200, 24,747; 8,000: 17,150, 4, 1,200, 25,519; 10,000: 10,030, 4, 1,200, 26,390; 12,000: 12,030, 4, 1,200, 25,178;
+12,600: 12,630, 5, 1,900, 15,605; 13,000: 13,030, 6, 2,000, 15,963; 14,000: 14,030, 6, 2,000, 16,726 (`m1_ai` at 13,000: 4 units, 1,200, win 15,572). That fragility is what
+`attack_value` 2,000 removes.
+
+**The gap between waves.** `max_wait` is also the least gap between two waves (`army::attack_due`): a wave goes when the gathered army is worth `attack_value`,
+or `max_wait` ticks after the last attack with at least `min_units` gathered. With `attack_value` equal to the floor a second wave goes at once when the army is
+worth 2,000 again, and with fewer units only 12,000 ticks after the first (was 6,000 apart at 3,000 / 6,000). Pinned: `later_waves_are_max_wait_apart_unless_attack_value_is_reached`.
+In both scenarios the first wave wins, so no second wave is run in a scenario.
+
+### Risk and gaps, stated
+
+* **The known risk, accepted by the decision.** The barracks stands at 2,890 / 3,017 and the first unit of the mix is queued at about 4,460 / 4,587: **an early infantry rush by a human
+  beats this opening**; before that the base has its power plants, refinery, vehicle factory and harvesters. From 1,880 on it has two harvesters instead of one. Not tested against a
+  rushing opponent: the only opponents are m1's static one and the idle human. The first wave (6 units with light tanks) does beat m1's tower, four riflemen and tank in
+  `ai_vs_passive` (6 of 6 survive, the win at 13,839, pinned).
+* Smaller floors complete the list sooner but lose the first wave (tower-first order, `attack_value` 3,000, attack off, `ai_vs_passive`, last build; one run each): floor 1,000 at 19,930
+  (the first wave then 4 units, 1,200, the win at 27,209), 1,500 at 22,290, 2,000 at 22,970.
+* Scenario coverage lost: the failing first wave and the `attack_patience` end of WP9.1c-2 are no longer run in a scenario (unit tests hold them).
+* The wins in `m1_ai` and `ai_vs_passive` are later or earlier than WP9.1c-2 (8,396 -> 11,664; 14,659 -> 13,839); only a passive opponent is beaten.
+
+### Side effects that were fixed with it
+
+* The fence test (`a_unit_hidden_in_the_reach_...`) moved its three riflemen from (58, 34) to (57, 28): the wave with tanks takes a way along the lake's north-east shore at y 25
+  to 30. With the scout the riflemen come into view at 5,476, without one at 9,823, after the wave left (one `AttackMove` before); printed, not asserted (it asserts equality of commands and digest until
+  first sight).
+* `the_ai_builds_its_base_in_the_game` looks at 9,000 ticks, not 4,000: the scout, the first unit the barracks makes, was queued at 7,147 and ordered out at 7,317 with the
+  first profile of this PR (measured then); the test asserts that a rally point and a scout move exist within 9,000 ticks, not their ticks.
+* The two defeated-AI tests (`a_defeated_ai_sends_nothing_and_its_state_stands_still`, `a_defeated_ai_stops_also_while_the_match_goes_on`) now remove the centre at 6,501, when
+  the AI has a barracks, units and credits (they removed it at 3,001, before it had a unit). They assert an army unit and a command in 4,000 to 6,501 exist.
+* `ai_perf.rs`: the run length stays 14,700 ticks (the win is at 13,839); the army-turn comment says what stands at tick 4,000 now.
+
+### Folded in: the centre recall clears `closing`
+
+In `army::watch`, a hit on the construction centre takes the attackers back without `end_attack`; `closing` (the attackers that were given the finishing `AttackMove`)
+then kept their ids (the reviewer's probe of #129 left 4). The recall now clears it next to `target_hp`. Test: `a_centre_recall_leaves_no_attacker_on_the_closing_list` (with the
+line removed it fails). `closing` is in the digest; no pinned digest moved because of it.
+
+### Pins that moved (WP9.1c-3) and why
+
+* **`ai_vs_passive`**: checksum `0x3b5a509e49e43343` -> `0xd39c2261cc0ad09a`, AI digest `0x74e38ea1d028c406` -> `0x5817c87452d633f1`; the length stays 16,000 ticks (T2: the win at
+  13,839 is inside it; a first version of this PR with the tower first needed 20,000). Its frozen profile (`ai_vs_passive_defs/normal.ron`) was **refrozen** to the shipped
+  profile, the only change to a frozen copy's content in this WP (brought in line with the shipped file for the rule the WP changes). **Cause, as a test:**
+  `the_repin_of_ai_vs_passive_in_wp9_1c_3_is_the_profile` puts the three changed numbers back (goal list, `attack_value` 3,000, `max_wait` 6,000) on the new frozen copy and gets
+  the old checksum and digest exactly (the `closing` fix moves neither).
+* **`ai_raid`**: unchanged (checksum and digest, `ai_raid_defs` keeps WP9.1c-2's profile). Two comments were corrected (no content): the first lines of `ai_raid.ron` and
+  `ai_raid_defs/normal.ron` said it shared the profile of `ai_vs_passive_defs`, which is no longer true; its checksum and digest pins still hold.
+* **sf_ai unit pins** that hash or resolve the shipped profile moved with it: the base-state digest `0x392b1f3256aa3c19` -> `0xaa333a1fd36cb5a9` (it hashes the shipped profile) and the
+  resolved goal list.
+* **No earlier phase moved**: all CI scenarios pass `--expect` in release (the list is in the PR).
+* Tests whose numbers moved: the wave table, `WON`, the gather counts and the last build of `ai_vs_passive`; the army timing, the credits trace and the attack-off list of `m1_ai`.
+
+### Cost (WP9.1c-3, release, this container, load average 3.3 to 3.8: other work ran on the machine)
+
+`ai_perf.rs` re-run: `ai_vs_passive` to the win: **0.29 us per AI per tick, worst think 53.4 us**; **the step of the launch tick (11,150, a wave of 6) 31.7 us against a mean step of 17.7 us**
+(WP9.1c-2: 874 us for a wave of 12, one measurement then, not repeated here); the whole run 49,343 ticks/s with the AI and 76,731 without (medians of 3 alternating runs, 14,700 ticks).
+One army turn with 200 riflemen added: 22.8 us at the launch, 25.8 us on the march (50: 5.6 and 5.3 us); worst 364 to 1,982 us (spikes of a shared machine). These sit within the
+numbers of WP9.1c-2 (0.32 to 0.42 us, 24 to 28 us, 47,454 / 82,645 ticks/s); the machine was busier, so the comparison is rough.
 
 ## The schedule
 
@@ -883,7 +1037,7 @@ than 5,000 costs proportionally more, and the managers of WP9.1b and WP9.1c add 
   ("The army floor", the money). One group at a time (no second wave while one is out; units made meanwhile gather); no retreat, regroup, focus fire or
   target priority beyond "the construction centre first" (9.2/9.3); while the whole army is out, a hit on a structure other than the centre is
   answered only by the towers (decision 3, "Threat"); the finishing `Attack` is tested on an observation the test builds, not in a scenario (in
-  `ai_vs_passive` the second wave's `AttackMove` brings the centre down on its own); the defence is a cell, not a unit, so raiders that run are
+  `ai_vs_passive` the wave's `AttackMove` brings the centre down on its own); the defence is a cell, not a unit, so raiders that run are
   not chased beyond what an `AttackMove` meets; `ai_vs_passive` and `m1_ai` are won against a passive opponent only, no opponent that rebuilds or
   answers. The army floor stalls the goal list until the army reaches it (on `m1_ai` the list stops at its fourth entry until the AI has won at
   8,396). Defences are placed only towards the other players' start sites.
@@ -1016,7 +1170,7 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
 * **A decided game in CI** (`tests/tournament_decided.rs`): the smoke games are capped long before a base falls, so a fixture decides one in a few thousand ticks. A
   match file in a scratch directory: one seat has a construction centre, 4,000 credits and twelve light tanks beside its centre, the other a construction centre and
   nothing else; the profile is the shipped `normal.ron` with `attack_value`, `max_wait` and `first_attack_tick` set low in a scratch copy (the numbers are replaced by
-  key, so a later change of the shipped values does not break it). Pinned: seat 0 strong wins at 1,315 ticks, seat 1 strong at 5,599, `defeat_tick == ticks ==
+  key, so a later change of the shipped values does not break it). Pinned: seat 0 strong wins at 1,315 ticks, seat 1 strong at 5,546 (5,599 before WP9.1c-3: the fixture uses the shipped opening), `defeat_tick == ticks ==
   last_loss`, and a second game with the factions swapped is still won by the same *seat*. A change of unit or weapon numbers moves the two tick pins (a re-pin).
   Measured while building it: **four** tanks beside the centre, on this fixture, destroyed nothing in 20,000 ticks (about 100 shots per 1,000 ticks); twelve end it.
 * **CI.** The 4-game smoke runs as a normal test in debug with a cap of 9,000 ticks (the smoke plays its 4 games three times: two command-line runs and one through the library; the whole test file
@@ -1024,8 +1178,7 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
 
 ### Baseline A: 100 games, `m1_duel`, normal against normal, before WP9.1c-3 (release)
 
-Main at 1586e1c plus this WP (fix round 1; the first version's table differed only in `defeat` being one lower). **Baseline B, after WP9.1c-3 has merged, is not measured yet**
-(the branch `wp/9.1c-3-ai-opening` was not on main when this round was pushed); it is added below when main moves.
+Main at 1586e1c plus this WP (fix round 1; the first version's table differed only in `defeat` being one lower). Baseline B, after WP9.1c-3, is below.
 
 `sf_headless tournament assets/matches/m1_duel.ron --games 100` (cap 60,000, seed 458,758 = the file's), release build, one thread, this container with a
 load average of about 4 (other agents' cargo runs): **149.1 s for 100 games (fix round; the first run 153.4 s), 1.2 to 2.0 s a game (median 1.5 s)**, i.e. roughly 40,000 ticks/s for two AIs
@@ -1044,6 +1197,28 @@ load average of about 4 (other agents' cargo runs): **149.1 s for 100 games (fix
 | Distinct coarse outcomes (ending, ticks, attacks) | **27 of 100**; per seating M v M 14, M v V 14, V v M 13, V v V 10 of 25 |
 | The same plus the last loss rounded down to 1,000 ticks | **51 of 100**; per seating M v M 22, M v V 17, V v M 20, V v V 16 of 25 |
 | Last loss | min 41,239 / median 59,031 / max 60,000 ticks |
+
+### Baseline B: 100 games, `m1_duel`, normal against normal, after WP9.1c-3 (release)
+
+Measured on the WP9.1c-3 branch with main 1d210ee (WP9.5a) merged in, same command, cap and seed as Baseline A, release build, one thread, this container
+(loaded machine): **136.7 s for 100 games, about 1.3 to 1.4 s a game**.
+
+| | |
+|---|---|
+| Decided | 8 of 100: seat 1 won 7, **seat 0 won 1** (game 42, Meridian v Meridian); ticks 44,712 to 57,274, median 48,063 |
+| By seating | Meridian v Veyran: 1 of 25 decided (seat 1 = Veyran); Veyran v Meridian: 3 of 25 (seat 1 = Meridian); Meridian v Meridian: 2 of 25 (one per seat); Veyran v Veyran: 2 of 25 (seat 1) |
+| Per faction (different factions only, 50 games) | Meridian 3 wins (6.0 %), Veyran 1 win (2.0 %) |
+| Per seat (all 100 games) | seat 0 1 win (1.0 %), seat 1 7 wins (7.0 %) |
+| Draws | 92: 0 mutual defeat, 0 stalemate, 92 capped |
+| Attacks launched | 1 to 10 per AI per game, mean 5.75 |
+| Distinct final checksums | 100 of 100 games |
+| Distinct outcomes, exact (ending, ticks, last loss, attacks) | 100 of 100 games, 25 of 25 in each seating (with digests: 100, by construction) |
+| Distinct coarse outcomes (ending, ticks, attacks) | **31 of 100**; per seating M v M 17, M v V 12, V v M 14, V v V 12 of 25 |
+| The same plus the last loss rounded down to 1,000 ticks | **53 of 100**; per seating M v M 21, M v V 17, V v M 21, V v V 15 of 25 |
+| Last loss | min 44,712 / median 58,859 / max 59,988 ticks |
+
+Against Baseline A: one more game decided (8 against 7), decided games end earlier (median 48,063 against 51,156), the first seat-0 win, the stalemate is gone,
+slightly more divergence (coarse 31 against 27, rounded 53 against 51). The seat-1 advantage stays. One run each, so these are observations, not a significant difference.
 
 What it says: today's normal AI does not finish a game against itself. 96 of the 100 games had a unit or structure destroyed at or after tick 50,000: the armies keep trading,
 the bases keep being rebuilt (game 0, looked at every 5,000 ticks with a debug print that is not in the PR: 7 to 28 entities per side), and the construction centre

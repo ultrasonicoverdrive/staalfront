@@ -3042,6 +3042,22 @@ WP9.1c-2". Nothing in `crates/sf_sim/` changed; no pin of an earlier phase moved
 - **Not done.** See `ai.md` "Not done" (WP9.1c-2 gaps): one group at a time, no retreat, the defence gap with the army out, the finishing rule not needed in
   a scenario, only passive opponents.
 
+### WP9.1c-3 notes: the computer opponent's opening (12-11-2026)
+
+Follow-up of WP9.1c-2 (#129), data only: economy before army. Rules, numbers and measurements: `docs/rules/ai.md`, "The opening (WP9.1c-3)". Nothing in
+`crates/sf_sim/` changed. One line of `sf_ai` changed (the centre recall clears `closing`, from the re-review of #129). `ai_raid` and every earlier phase's
+pin are unchanged; `ai_vs_passive` and its frozen profile were deliberately re-pinned (cause as a test, `the_repin_of_ai_vs_passive_in_wp9_1c_3_is_the_profile`).
+
+- **Built.** `assets/ai/normal.ron`: the vehicle factory second in both goal lists, the second refinery before the first tower, `attack_value` 2,000 (= the floor),
+  `max_wait` 12,000 (was 6,000). `ai_vs_passive_defs/normal.ron` refrozen to it (the scenario stays 16,000 ticks). `army::watch` clears `closing` on a centre
+  recall. Pictures re-taken: `docs/screenshots/wp9.1c-2/` (ticks 9,600, 10,600, 11,500) and `wp9.1d/` (1000, 2500, 4000).
+- **Measured.** Second harvester at 1,880 (`ai_vs_passive`) and 1,887 (`m1_ai`), barracks 2,890 / 3,017, first unit of the mix queued 4,460 / 4,587, floor reached 10,687 / 9,374, first
+  wave 6 units worth 2,000 at 11,150 / 9,717, **the win at 13,839 / 11,664** (WP9.1c-2: 14,659 / 8,396). With the attack off the goal list **completes at 22,730 / 19,777** (was: not in 30,000 ticks).
+- **Gap, stated.** The target "list complete by 20,000 with the attack off" is met in `m1_ai` and **not in `ai_vs_passive`** (22,730); the cause is the map's ore. The cost accepted by
+  the decision: no barracks before about 2,900, so an early human rush beats it; not tested against a rusher.
+- **Moved with it.** The fence test's riflemen moved to (57, 28); the two defeated-AI tests remove the centre at 6,501 (after the AI has units); `the_ai_builds_its_base_in_the_game` looks
+  at 9,000 ticks; new `later_waves_are_max_wait_apart_unless_attack_value_is_reached`; `ai_perf` re-measured.
+
 ## Open follow-ups
 
 Findings from the phase 1 work packages that are not fixed yet. Each is meant for

@@ -487,6 +487,13 @@ Layered (analysis §12, §22G):
   has not lost hit points for `attack_patience` while an attacker stands at the target. (6) The defence cell rule gets unit tests and a fence
   test. (7) The finishing `Attack` is sent and taken on the real world in a test; the owner filter is pinned. (8) Survivors of an ended attack
   walk home with `Move`, a retreat on purpose.*
+  *12-11-2026 (decisions of the orchestrator, built in WP9.1c-3 and its fix round 1: economy before army): the goal list of both factions puts the
+  **vehicle factory right after the refinery** (and with it the second harvester), before the barracks (option A of the opening design). Fix round 1, adopted on
+  measurement: the **second refinery before the first tower**, **`attack_value` 2,000 = `army_floor_value`** (the first wave is value-driven, seat-independent) and
+  `max_wait` **12,000** (was 6,000; it ends the floor and is the fallback; also the least gap between later waves unless `attack_value` is reached). Accepted risk: no barracks before
+  about tick 2,900, so an early infantry rush by a human beats the opening. The target "goal list complete by 20,000 with the attack off" is met in `m1_ai` (19,777) and missed in
+  `ai_vs_passive` (22,730); decision: the miss is accepted, its cause is the map's ore (174 cells in six fields of 3,480; the near field is mined out at about 9,000 to 10,000). Numbers and
+  tables: `docs/rules/ai.md`, "The opening (WP9.1c-3)".*
   *12-11-2026 (orchestrator; design memo `wp9.2-9.5-ontwerp`): **the rest of phase 9 is built in the order 9.5a, 9.2a, 9.2b, 9.3a [xhigh], 9.3b [xhigh], 9.4, 9.5b.**
   9.5 is split: **9.5a** the AI-vs-AI tournament runner (`sf_headless tournament`, the match `m1_duel`, built first because every later WP changes army
   behaviour and today the only evidence is two scenarios against a passive opponent) and **9.5b** the 100-game report and tuning. The tournament runs
