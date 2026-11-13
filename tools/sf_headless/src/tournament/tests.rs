@@ -265,6 +265,38 @@ fn games_played_alike_share_an_outcome_key_and_the_digests_tell_them_apart() {
 }
 
 #[test]
+fn a_tick_level_last_loss_shares_a_coarse_key_and_an_ending_or_attack_count_does_not() {
+    // Capped games whose last loss differs by a few ticks within one 1000-tick bucket.
+    let mut games: Vec<GameRecord> = (0..4)
+        .map(|i| record(i, [M, V], Ending::Capped, 60_000, 0x50 + u64::from(i)))
+        .collect();
+    for (i, g) in games.iter_mut().enumerate() {
+        g.last_loss = 41_200 + i as u64 * 7;
+    }
+    let s = summarize(&games);
+    assert_eq!(s.distinct_outcomes, 4);
+    assert_eq!((s.distinct_coarse, s.distinct_coarse_loss), (1, 1));
+    assert_eq!(
+        (
+            s.seatings[0].distinct_coarse,
+            s.seatings[0].distinct_coarse_loss
+        ),
+        (1, 1)
+    );
+    assert_eq!(games[0].coarse_loss_key().3, 41_000);
+    // A last loss in another bucket splits only the rounded key.
+    games[1].last_loss = 42_000;
+    let s = summarize(&games);
+    assert_eq!((s.distinct_coarse, s.distinct_coarse_loss), (1, 2));
+    // A different ending or attack count splits both coarse keys.
+    games[2].ending = Ending::Stalemate;
+    games[3].ais[0].attacks = 7;
+    let s = summarize(&games);
+    assert_eq!((s.distinct_coarse, s.distinct_coarse_loss), (3, 4));
+    assert_eq!(summarize(&[]).distinct_coarse, 0);
+}
+
+#[test]
 fn distinct_checksums_count_values_not_games() {
     let same: Vec<GameRecord> = (0..5)
         .map(|i| record(i, [M, V], Ending::Won(0), 5000 + u64::from(i), 0x77))
@@ -321,6 +353,7 @@ fn the_table_has_a_line_per_game_and_the_summary() {
         "duration:      min 7000 / median 8500 / max 12000 ticks (decided games)",
         "distinct final checksums: 4 of 6 games",
         "distinct outcomes (ending, ticks, last loss, attacks): 6 of 6 games; with the AI digests: 6",
+        "distinct coarse outcomes (ending, ticks, attacks): 6 of 6 games; with the last loss rounded down to 1000 ticks: 6",
         "  Meridian v Veyran: 2 games, 2 checksums, 2 outcomes, 2 with digests",
         "last loss:     min 7000 / median 10500 / max 60000 ticks",
     ] {
@@ -359,6 +392,8 @@ fn the_json_has_the_games_the_summary_and_the_host_last() {
         "\"distinct_final_checksums\": 4",
         "\"distinct_outcomes\": 6",
         "\"distinct_outcomes_with_digests\": 6",
+        "\"distinct_coarse\": 6",
+        "\"distinct_coarse_last_loss_1000\": 6",
         "\"seatings\": [{\"seating\": \"Meridian v Meridian\", \"games\": 1,",
         "\"last_loss_ticks\": {\"min\": 7000, \"median\": 10500, \"max\": 60000}",
         "\"host\": {",

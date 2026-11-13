@@ -323,9 +323,16 @@ pub struct GameRecord {
     pub ais: Vec<AiRecord>,
 }
 
+/// The width, in ticks, that the last loss is rounded down to in [`GameRecord::coarse_loss_key`].
+pub const LOSS_BUCKET: u64 = 1000;
+
 impl GameRecord {
     /// What a game looks like from outside, without anything that its seeds alone would change: the ending,
-    /// the tick counts and the attacks each AI launched. Two games with the same key played alike.
+    /// the tick counts and the attacks each AI launched. The last loss is to the exact tick, and capped games
+    /// all have the same `ticks`, so a single death one tick earlier already makes the key different: two
+    /// games with different keys need not have been played differently. See
+    /// [`coarse_key`](GameRecord::coarse_key) and [`coarse_loss_key`](GameRecord::coarse_loss_key) for keys
+    /// that ignore tick-level noise.
     pub fn outcome_key(&self) -> (Ending, u64, u64, Vec<u32>) {
         (
             self.ending,
@@ -333,6 +340,21 @@ impl GameRecord {
             self.last_loss,
             self.ais.iter().map(|a| a.attacks).collect(),
         )
+    }
+
+    /// The ending, the ticks played and the attacks per AI, without the last loss.
+    pub fn coarse_key(&self) -> (Ending, u64, Vec<u32>) {
+        (
+            self.ending,
+            self.ticks,
+            self.ais.iter().map(|a| a.attacks).collect(),
+        )
+    }
+
+    /// [`coarse_key`](GameRecord::coarse_key) plus the last loss rounded down to [`LOSS_BUCKET`] ticks.
+    pub fn coarse_loss_key(&self) -> (Ending, u64, Vec<u32>, u64) {
+        let (e, t, a) = self.coarse_key();
+        (e, t, a, self.last_loss / LOSS_BUCKET * LOSS_BUCKET)
     }
 
     /// [`outcome_key`](GameRecord::outcome_key) plus both AI digests. The digest hashes the AI's random
@@ -665,9 +687,13 @@ pub struct Summary {
     pub durations: Option<Durations>,
     /// How many different final checksums the games ended with.
     pub distinct_checksums: u32,
-    /// How many different [`GameRecord::outcome_key`]s the games have: the measure of how differently the
-    /// games were played (a checksum differs from the first spawn on, so it says little).
+    /// How many different [`GameRecord::outcome_key`]s the games have (exact last loss, so sensitive to
+    /// one-tick differences, like a checksum).
     pub distinct_outcomes: u32,
+    /// How many different [`GameRecord::coarse_key`]s: ending, ticks, attacks per AI.
+    pub distinct_coarse: u32,
+    /// How many different [`GameRecord::coarse_loss_key`]s: the coarse key plus the last loss rounded down.
+    pub distinct_coarse_loss: u32,
     /// How many different [`GameRecord::digest_key`]s (always the number of games: see there).
     pub distinct_with_digests: u32,
     /// The same counts per seating, ascending by name.
@@ -687,6 +713,10 @@ pub struct SeatingRow {
     pub distinct_checksums: u32,
     /// Different outcome keys among them.
     pub distinct_outcomes: u32,
+    /// Different coarse keys among them.
+    pub distinct_coarse: u32,
+    /// Different coarse keys with the rounded last loss among them.
+    pub distinct_coarse_loss: u32,
     /// Different outcome keys with digests among them.
     pub distinct_with_digests: u32,
 }
@@ -707,18 +737,24 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
     let mut checksums = BTreeSet::new();
     let mut outcomes = BTreeSet::new();
     let mut with_digests = BTreeSet::new();
+    let mut coarse = BTreeSet::new();
+    let mut coarse_loss = BTreeSet::new();
     let mut losses = Vec::new();
     type Sets = (
         u32,
         BTreeSet<u64>,
         BTreeSet<(Ending, u64, u64, Vec<u32>)>,
         BTreeSet<(Ending, u64, u64, Vec<u32>, Vec<u64>)>,
+        BTreeSet<(Ending, u64, Vec<u32>)>,
+        BTreeSet<(Ending, u64, Vec<u32>, u64)>,
     );
     let mut seatings: BTreeMap<String, Sets> = BTreeMap::new();
     for r in records {
         checksums.insert(r.final_checksum);
         outcomes.insert(r.outcome_key());
         with_digests.insert(r.digest_key());
+        coarse.insert(r.coarse_key());
+        coarse_loss.insert(r.coarse_loss_key());
         if r.last_loss > 0 {
             losses.push(r.last_loss);
         }
@@ -727,6 +763,8 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
         row.1.insert(r.final_checksum);
         row.2.insert(r.outcome_key());
         row.3.insert(r.digest_key());
+        row.4.insert(r.coarse_key());
+        row.5.insert(r.coarse_loss_key());
         match r.ending {
             Ending::Won(seat) => seat_wins[seat] += 1,
             Ending::MutualDefeat => mutual += 1,
@@ -764,14 +802,18 @@ pub fn summarize(records: &[GameRecord]) -> Summary {
         distinct_checksums: count(&checksums),
         distinct_outcomes: count(&outcomes),
         distinct_with_digests: count(&with_digests),
+        distinct_coarse: count(&coarse),
+        distinct_coarse_loss: count(&coarse_loss),
         seatings: seatings
             .into_iter()
-            .map(|(seating, (games, c, o, d))| SeatingRow {
+            .map(|(seating, (games, c, o, d, k, kl))| SeatingRow {
                 seating,
                 games,
                 distinct_checksums: count(&c),
                 distinct_outcomes: count(&o),
                 distinct_with_digests: count(&d),
+                distinct_coarse: count(&k),
+                distinct_coarse_loss: count(&kl),
             })
             .collect(),
         last_loss: spread(&losses),
@@ -925,15 +967,22 @@ fn write_table(s: &mut String, report: &Report) -> std::fmt::Result {
         "distinct outcomes (ending, ticks, last loss, attacks): {} of {} games; with the AI digests: {}",
         sum.distinct_outcomes, sum.games, sum.distinct_with_digests
     )?;
+    writeln!(
+        s,
+        "distinct coarse outcomes (ending, ticks, attacks): {} of {} games; with the last loss rounded down to {LOSS_BUCKET} ticks: {}",
+        sum.distinct_coarse, sum.games, sum.distinct_coarse_loss
+    )?;
     for row in &sum.seatings {
         writeln!(
             s,
-            "  {}: {} games, {} checksums, {} outcomes, {} with digests",
+            "  {}: {} games, {} checksums, {} outcomes, {} with digests, {} coarse, {} coarse with rounded last loss",
             row.seating,
             row.games,
             row.distinct_checksums,
             row.distinct_outcomes,
-            row.distinct_with_digests
+            row.distinct_with_digests,
+            row.distinct_coarse,
+            row.distinct_coarse_loss
         )?;
     }
     match sum.last_loss {
@@ -1064,17 +1113,25 @@ fn write_json(
         "    \"distinct_outcomes_with_digests\": {},",
         sum.distinct_with_digests
     )?;
+    writeln!(s, "    \"distinct_coarse\": {},", sum.distinct_coarse)?;
+    writeln!(
+        s,
+        "    \"distinct_coarse_last_loss_{LOSS_BUCKET}\": {},",
+        sum.distinct_coarse_loss
+    )?;
     let seatings: Vec<String> = sum
         .seatings
         .iter()
         .map(|r| {
             format!(
-                "{{\"seating\": {}, \"games\": {}, \"distinct_checksums\": {}, \"distinct_outcomes\": {}, \"distinct_outcomes_with_digests\": {}}}",
+                "{{\"seating\": {}, \"games\": {}, \"distinct_checksums\": {}, \"distinct_outcomes\": {}, \"distinct_outcomes_with_digests\": {}, \"distinct_coarse\": {}, \"distinct_coarse_last_loss_{LOSS_BUCKET}\": {}}}",
                 log::json_string(&r.seating),
                 r.games,
                 r.distinct_checksums,
                 r.distinct_outcomes,
-                r.distinct_with_digests
+                r.distinct_with_digests,
+                r.distinct_coarse,
+                r.distinct_coarse_loss
             )
         })
         .collect();
