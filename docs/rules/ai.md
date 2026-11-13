@@ -1178,8 +1178,7 @@ through `scenario::game`, speed 1.5 as in the game, pinned as `GAME_SPEED_RAW` =
 
 ### Baseline A: 100 games, `m1_duel`, normal against normal, before WP9.1c-3 (release)
 
-Main at 1586e1c plus this WP (fix round 1; the first version's table differed only in `defeat` being one lower). **Baseline B, after WP9.1c-3 has merged, is not measured yet**
-(the branch `wp/9.1c-3-ai-opening` was not on main when this round was pushed); it is added below when main moves.
+Main at 1586e1c plus this WP (fix round 1; the first version's table differed only in `defeat` being one lower). Baseline B, after WP9.1c-3, is below.
 
 `sf_headless tournament assets/matches/m1_duel.ron --games 100` (cap 60,000, seed 458,758 = the file's), release build, one thread, this container with a
 load average of about 4 (other agents' cargo runs): **149.1 s for 100 games (fix round; the first run 153.4 s), 1.2 to 2.0 s a game (median 1.5 s)**, i.e. roughly 40,000 ticks/s for two AIs
@@ -1198,6 +1197,28 @@ load average of about 4 (other agents' cargo runs): **149.1 s for 100 games (fix
 | Distinct coarse outcomes (ending, ticks, attacks) | **27 of 100**; per seating M v M 14, M v V 14, V v M 13, V v V 10 of 25 |
 | The same plus the last loss rounded down to 1,000 ticks | **51 of 100**; per seating M v M 22, M v V 17, V v M 20, V v V 16 of 25 |
 | Last loss | min 41,239 / median 59,031 / max 60,000 ticks |
+
+### Baseline B: 100 games, `m1_duel`, normal against normal, after WP9.1c-3 (release)
+
+Measured on the WP9.1c-3 branch with main 1d210ee (WP9.5a) merged in, same command, cap and seed as Baseline A, release build, one thread, this container
+(loaded machine): **136.7 s for 100 games, about 1.3 to 1.4 s a game**.
+
+| | |
+|---|---|
+| Decided | 8 of 100: seat 1 won 7, **seat 0 won 1** (game 42, Meridian v Meridian); ticks 44,712 to 57,274, median 48,063 |
+| By seating | Meridian v Veyran: 1 of 25 decided (seat 1 = Veyran); Veyran v Meridian: 3 of 25 (seat 1 = Meridian); Meridian v Meridian: 2 of 25 (one per seat); Veyran v Veyran: 2 of 25 (seat 1) |
+| Per faction (different factions only, 50 games) | Meridian 3 wins (6.0 %), Veyran 1 win (2.0 %) |
+| Per seat (all 100 games) | seat 0 1 win (1.0 %), seat 1 7 wins (7.0 %) |
+| Draws | 92: 0 mutual defeat, 0 stalemate, 92 capped |
+| Attacks launched | 1 to 10 per AI per game, mean 5.75 |
+| Distinct final checksums | 100 of 100 games |
+| Distinct outcomes, exact (ending, ticks, last loss, attacks) | 100 of 100 games, 25 of 25 in each seating (with digests: 100, by construction) |
+| Distinct coarse outcomes (ending, ticks, attacks) | **31 of 100**; per seating M v M 17, M v V 12, V v M 14, V v V 12 of 25 |
+| The same plus the last loss rounded down to 1,000 ticks | **53 of 100**; per seating M v M 21, M v V 17, V v M 21, V v V 15 of 25 |
+| Last loss | min 44,712 / median 58,859 / max 59,988 ticks |
+
+Against Baseline A: one more game decided (8 against 7), decided games end earlier (median 48,063 against 51,156), the first seat-0 win, the stalemate is gone,
+slightly more divergence (coarse 31 against 27, rounded 53 against 51). The seat-1 advantage stays. One run each, so these are observations, not a significant difference.
 
 What it says: today's normal AI does not finish a game against itself. 96 of the 100 games had a unit or structure destroyed at or after tick 50,000: the armies keep trading,
 the bases keep being rebuilt (game 0, looked at every 5,000 ticks with a debug print that is not in the PR: 7 to 28 entities per side), and the construction centre
