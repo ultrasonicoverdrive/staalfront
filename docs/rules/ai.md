@@ -1073,10 +1073,15 @@ The 59 decided games are 8.4 times Baseline A's 7, and the coarse keys now separ
 listed below is a separate cause. What this does not say: the remaining 41 capped games are not explained (towers, rebuilds and the army size are untouched), and whether
 the 59 decided games are decided well (by a real attack) is not looked at. **Baseline B (after WP9.1c-3 and this change together) is still to be measured when both are on main.**
 
+The fixture behind the rate (`tools/sf_headless/tests/repair_rate.rs`) is a **best case for the attackers**: tanks in range and never shot at, no towers, a defender with 0 credits. The attack
+has no "kill within `attack_patience`" rule; it ends on `stuck` (no new hit-point low of the victim for 2,400 ticks) or when no victim is in sight for that long. Measured as the longest
+stretch without a new low: at rate 3 it is 39,549 to 39,829 ticks for 2 to 5 tanks (stuck fires), at rate 2 the same for 2 and 3 tanks, at rate 1 it is 31 to 40 ticks for every tank count from 2 to 12
+(stuck never fires). Tables and the choice of 1 over 2: `docs/rules/repair_sell.md` "The rate and the wave".
+
 ### Baseline causes (all [Gissing], from a read-only sweep; input for 9.2a, none measured here)
 
 * Waves are too small to kill a base: the trigger is `attack_value` 3,000 or `max_wait` 6,000 with `min_units` 4 (`army.rs`, `attack_due`), against towers and a rebuilding
-  goal list; `attack_patience` 2,400 then sends survivors home, so the armies trade for ever. (Consistent with the fixture above: four tanks do not kill a
+  goal list; `attack_patience` 2,400 then sends survivors home (the `stuck` rule: no new hit-point low of the victim for that long), so the armies trade for ever. (Consistent with the fixture above: four tanks do not kill a
   repairing centre, twelve do.)
 * A free, fast centre repair out-heals small waves: the construction centre has no `cost`, so its repair is free; `repair.ron` had
   `hp_per_tick` 3, and the AI repairs below 70 %. Four light tanks deal about 2.1 hp/tick against the centre, twelve about 6.3. **Measured and changed in WP9.1e**

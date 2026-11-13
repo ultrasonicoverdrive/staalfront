@@ -11,7 +11,8 @@ mod common;
 use std::path::{Path, PathBuf};
 
 use common::TempDir;
-use sf_headless::tournament::{Ending, STALEMATE_WINDOW, load_setup, play_game};
+use sf_headless::tournament::{load_setup, prepare};
+use sf_sim::PlayerId;
 
 fn assets() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets")
@@ -40,9 +41,10 @@ fn set_number(text: &str, key: &str, value: u32) -> String {
     format!("{} {value}{}", &text[..from], &text[to..])
 }
 
-/// A scratch asset directory with the shipped data; `hp_per_tick` replaces the shipped repair rate when given
-/// (the measurement of other rates; the pinned test passes `None` and so reads the shipped file).
-fn scratch_assets(dir: &TempDir, hp_per_tick: Option<u32>) -> PathBuf {
+/// A scratch asset directory with the shipped data. The repair rate is **not** in it: the world is given
+/// `RepairSettings::embedded()`, compiled in from `assets/config/repair.ron`, so a copy of that file here is
+/// never read. (The rates 2 and 3 of WP9.1e were measured by editing the shipped file and rebuilding.)
+fn scratch_assets(dir: &TempDir) -> PathBuf {
     let root = dir.join("assets");
     copy_dir(&assets().join("config"), &root.join("config"));
     copy_dir(&assets().join("maps/m1"), &root.join("maps/m1"));
@@ -51,11 +53,6 @@ fn scratch_assets(dir: &TempDir, hp_per_tick: Option<u32>) -> PathBuf {
     // No attack is launched within the 20,000 ticks played (72,000 is the profile maximum): the tanks stay where the fixture puts them.
     ai = set_number(&ai, "first_attack_tick", 72_000);
     std::fs::write(root.join("ai/normal.ron"), ai).unwrap();
-    if let Some(rate) = hp_per_tick {
-        let path = root.join("config/repair.ron");
-        let text = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, set_number(&text, "hp_per_tick", rate)).unwrap();
-    }
     root
 }
 
@@ -88,22 +85,75 @@ fn fixture(tanks: u32) -> String {
     )
 }
 
-/// The tick the enemy centre falls at, or `None` when it has not fallen within `cap` ticks.
-fn kill_tick(tanks: u32, hp_per_tick: Option<u32>, cap: u64) -> Option<u64> {
+/// What a game of the fixture showed.
+struct Run {
+    /// The tick the enemy centre fell at, `None` when it stood after `cap` ticks.
+    kill: Option<u64>,
+    /// The longest stretch of ticks in which the centre's hit points made no new low, from the first hit to
+    /// the kill (or the cap), seen every tick. This is what `army.rs` `stuck` compares with
+    /// `attack_patience` (it sees the hit points at the AI's thinks, every 10 ticks, so its number is
+    /// never smaller than this one).
+    longest_no_new_low: u64,
+}
+
+fn run(tanks: u32, cap: u64) -> Run {
     let dir = TempDir::new("repair_rate");
-    let assets = scratch_assets(&dir, hp_per_tick);
+    let assets = scratch_assets(&dir);
     let path = dir.join("repair_rate.ron");
     std::fs::write(&path, fixture(tanks)).unwrap();
     let setup = load_setup(&assets, &path).unwrap();
-    let r = play_game(&setup, 1, 0, cap, STALEMATE_WINDOW).unwrap();
-    match r.ending {
-        Ending::Won(0) => Some(r.ticks),
-        _ => None,
+    let seat1 = PlayerId(1); // the fixture's player 1
+    let factions = setup.file_factions();
+    let sim = prepare(&setup, factions, 1, 1).unwrap();
+    let (mut world, mut ais) = (sim.world, sim.ais);
+    let centre = world
+        .snapshot()
+        .iter()
+        .find(|v| v.owner == seat1)
+        .expect("seat 1 has its centre")
+        .id;
+    let mut wanted = Vec::new();
+    let mut low = world.hp_of(centre).expect("the centre stands");
+    let (mut since, mut longest, mut hit) = (0u64, 0u64, false);
+    let mut kill = None;
+    while world.tick().0 < cap {
+        for ai in &mut ais {
+            if ai.due(world.tick()) {
+                wanted.clear();
+                ai.think(&world, &mut wanted);
+                for command in wanted.drain(..) {
+                    world.schedule(world.tick(), ai.player(), command).unwrap();
+                }
+            }
+        }
+        world.step();
+        let now = world.tick().0;
+        if world.match_result().is_some() {
+            kill = Some(now);
+            if hit {
+                longest = longest.max(now - since);
+            }
+            break;
+        }
+        let hp = world.hp_of(centre).unwrap_or(0);
+        if hp < low {
+            // The first hit starts the clock; every later new low restarts it.
+            if hit {
+                longest = longest.max(now - since);
+            }
+            (low, since, hit) = (hp, now, true);
+        }
+    }
+    if kill.is_none() && hit {
+        longest = longest.max(world.tick().0 - since);
+    }
+    Run {
+        kill,
+        longest_no_new_low: longest,
     }
 }
 
-/// The shipped `attack_patience` (assets/ai/normal.ron): ticks without progress after which an attack is
-/// called off.
+/// The shipped `attack_patience` (assets/ai/normal.ron).
 fn attack_patience() -> u64 {
     let text = std::fs::read_to_string(assets().join("ai/normal.ron")).unwrap();
     let at = text.find("attack_patience:").unwrap() + "attack_patience:".len();
@@ -111,47 +161,56 @@ fn attack_patience() -> u64 {
     text[at..to].trim().parse().unwrap()
 }
 
-/// With the shipped repair rate (`assets/config/repair.ron`, read by the world through `embedded()`): four
-/// light tanks take down a centre that repairs itself for free, well before the attack would be called off,
-/// and the kill tick falls with every tank added. Measured in WP9.1e (kill tick, 20,000 ticks played, tanks
-/// 3/4/5/6/8/12): at 3 hit points a tick: never/never/never/6,051/851/331; at 2: never/9,451/1,770/969/530/288;
-/// at 1 (shipped): 1,970/1,091/807/607/409/250.
+/// With the shipped repair rate (read by the world through `embedded()`) a centre that repairs itself for free
+/// keeps making new hit-point lows under 2 to 12 idle light tanks and falls. The AI's `stuck` rule
+/// (`army.rs`: the victim's hit points made no new low for `attack_patience` ticks) therefore never fires in
+/// this fixture: the longest stretch without a new low is a few dozen ticks, far under 2,400. Measured in
+/// WP9.1e (kill tick for 2/3/4/5/6/8/12 tanks, 40,000 ticks played): at 3 hit points a tick never / never / never
+/// / never / 6,052 / 851 / 332, and where it stood the hit points never went below the first low again
+/// (longest stretch without a new low 39,549 to 39,829 ticks: `stuck` would fire); at 2: never / never /
+/// 10,251 / 1,771 / 971 / 531 / 290 (never for 2 and 3 tanks, same stretch of about 39,600 to 39,700); at 1 (shipped): 20,451 / 2,051 / 1,131 / 806 / 607 / 411 / 251.
+/// A best case: tanks in range and never shot at, no towers, a defender with 0 credits.
 #[test]
-fn four_tanks_take_down_a_repairing_centre_before_the_attack_patience_runs_out() {
+fn with_the_shipped_rate_idle_tanks_keep_taking_the_repairing_centre_down_and_stuck_never_fires() {
     let patience = attack_patience();
     assert_eq!(patience, 2400, "the shipped profile");
-    let kills: Vec<_> = [3, 4, 5, 6, 8, 12]
+    let runs: Vec<_> = [2, 3, 4, 5, 6, 8, 12]
         .iter()
-        .map(|&n| kill_tick(n, None, 20_000))
+        .map(|&n| run(n, 40_000))
         .collect();
+    let kills: Vec<_> = runs.iter().map(|r| r.kill).collect();
     assert_eq!(
         kills,
         [
-            Some(1970),
-            Some(1091),
-            Some(807),
+            Some(20_451),
+            Some(2_051),
+            Some(1_131),
+            Some(806),
             Some(607),
-            Some(409),
-            Some(250)
+            Some(411),
+            Some(251)
         ],
-        "kill ticks for 3, 4, 5, 6, 8 and 12 tanks"
+        "kill ticks for 2, 3, 4, 5, 6, 8 and 12 tanks"
     );
-    assert!(kills[1].unwrap() < patience);
+    for (n, r) in [2, 3, 4, 5, 6, 8, 12].iter().zip(&runs) {
+        assert!(
+            r.longest_no_new_low < patience,
+            "{n} tanks: {} ticks without a new low",
+            r.longest_no_new_low
+        );
+    }
 }
 
-/// Two tanks deal about 1.05 hit points a tick to a structure against the 1 of repair: the centre is not
-/// taken down in 20,000 ticks. The rule is "three or more", not "any".
+/// The measurement of WP9.1e (`cargo test --release -p sf_headless --test repair_rate -- --ignored --nocapture`),
+/// for whatever rate the shipped `repair.ron` has when the test binary is built.
 #[test]
-fn two_tanks_cannot_take_down_a_repairing_centre() {
-    assert_eq!(kill_tick(2, None, 20_000), None);
-}
-
-/// The measurement of WP9.1e (`cargo test --release -p sf_headless --test repair_rate -- --ignored --nocapture`).
-#[test]
-#[ignore = "a measurement, not a check: prints the kill tick per tank count and repair rate"]
+#[ignore = "a measurement, not a check: prints the kill tick and the longest stretch without a new low per tank count, at the rate the shipped file had when this was built"]
 fn measure_kill_ticks() {
-    for tanks in [3, 4, 5, 6, 8, 12] {
-        let t = kill_tick(tanks, None, 20_000);
-        println!("tanks {tanks:2}: {t:?}");
+    for tanks in [2, 3, 4, 5, 6, 8, 12] {
+        let r = run(tanks, 40_000);
+        println!(
+            "tanks {tanks:2}: kill {:?} longest_no_new_low {}",
+            r.kill, r.longest_no_new_low
+        );
     }
 }

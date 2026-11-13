@@ -503,14 +503,30 @@ fn a_hurt_plant_is_repaired_under_its_sign_with_exact_money_up_to_full_hit_point
         }
     );
     scene.command_as(P0, command);
-    scene.run(40);
+    // The gain is the shipped rate on every tick the repair advances: the sim's own rule for a power
+    // shortage (`advances_on` with the owner's speed, `repair.rs` `repair_step`), counted tick by tick.
+    // The scene's plant is its own power source and damaged, so the world is short of power while it heals.
+    let rate = sf_data::repair::RepairSettings::embedded().hp_per_tick;
+    let mut advancing = 0u32;
+    for _ in 0..40 {
+        let speed = scene.world.power_speed_permille(P0);
+        if sf_sim::advances_on(scene.world.tick(), speed) {
+            advancing += 1;
+        }
+        scene.world.step();
+    }
+    scene.sync();
     assert!(scene.world.is_repairing(plant));
     let mid = scene.world.hp_of(plant).unwrap();
-    assert_eq!(
-        mid,
-        hurt + 39,
-        "1 hit point on 39 of the 40 ticks after the command: the plant is the scene's power source and damaged, the \
-         world is in a power shortage (940 to 960 thousandths while it heals) and one tick in about twenty-five does not advance (`advances_on`)"
+    assert!(advancing > 30 && advancing <= 40, "{advancing}");
+    // The speed read before a step is the one counted at the start of the previous step, so the count of
+    // advancing ticks can be one short of what the repair pass used (measured: exact at the shipped rate 1
+    // here, one short at the old rate 3, where the plant heals three times as fast and its power with it).
+    let gained = mid - hurt;
+    assert_eq!(gained % u32::from(rate), 0, "whole steps of the rate");
+    assert!(
+        (advancing..=advancing + 1).contains(&(gained / u32::from(rate))),
+        "{gained} hit points at {rate} a tick, {advancing} ticks counted as advancing"
     );
     // The price by hand: 300 credits * 250 / 1000 for a whole repair = h / 8 credits at h hit points.
     assert_eq!(
