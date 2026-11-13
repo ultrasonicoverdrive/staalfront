@@ -1393,3 +1393,119 @@ fn every_survivor_of_an_ended_attack_is_sent_home_over_several_turns() {
         "the Returning group is gone once all are sent"
     );
 }
+
+// ---- fix round 1: a long run with a recall and a defence call, and no lost unit --------------------------------
+
+/// What [`watch_groups`] saw over a run.
+#[derive(Default)]
+struct Watched {
+    /// A defence call (a threat) while a group was out.
+    raid_while_out: bool,
+    /// A group out was called back (stage Returning with members to defend).
+    recall: bool,
+    /// The groups out at the last look: id to (goal, staging).
+    out: BTreeMap<u32, (Cell, Option<Cell>)>,
+    /// The cells of groups that ended, and when.
+    ended: Vec<(Cell, u64)>,
+}
+
+/// How long after its group ended a unit may still carry its old attack order: the army turns that send the
+/// survivors home (four commands a turn, a turn every 10 ticks or so), with room to spare.
+const LOST_GRACE: u64 = 600;
+
+/// Checks the groups of `st` at `tick` ([`check_groups`]) and that no army unit is lost: a live army unit of
+/// the player in no group whose order is still an `AttackMove` onto the goal or staging cell of a group that
+/// ended more than [`LOST_GRACE`] ticks ago.
+fn watch_groups(world: &World, st: &AiState, tick: u64, w: &mut Watched) {
+    check_groups(st, tick);
+    let out: BTreeMap<u32, (Cell, Option<Cell>)> = st
+        .groups
+        .iter()
+        .filter(|g| g.stage != GroupStage::Returning)
+        .map(|g| (g.id, (g.goal, g.staging)))
+        .collect();
+    for (id, (goal, staging)) in &w.out {
+        if !out.contains_key(id) {
+            w.ended.push((*goal, tick));
+            if let Some(c) = staging {
+                w.ended.push((*c, tick));
+            }
+        }
+    }
+    // Called back at this look: a group that was out is Returning now.
+    let recalled_now = st
+        .groups
+        .iter()
+        .any(|g| g.stage == GroupStage::Returning && w.out.contains_key(&g.id));
+    w.recall |= recalled_now;
+    if st.threat.is_some() && (!out.is_empty() || recalled_now) {
+        w.raid_while_out = true;
+    }
+    w.out = out;
+    let obs = Observation::build(world, st.player, &BTreeMap::new());
+    for o in obs.own.iter().filter(|o| o.armed && o.mobile) {
+        if st
+            .groups
+            .iter()
+            .any(|g| g.members.binary_search(&o.id).is_ok())
+        {
+            continue;
+        }
+        if let Order::AttackMove(p) = o.order {
+            for (c, at) in &w.ended {
+                assert!(
+                    !(p == middle(*c) && tick > at + LOST_GRACE),
+                    "unit {:?} of player {:?} is lost at tick {tick}: in no group, still on its way to {c:?}, whose group ended at {at}",
+                    o.id,
+                    st.player
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_raid_on_the_centre_while_the_strike_is_out_recalls_it_defends_and_loses_no_unit() {
+    // `ai_raid_guard` with the shipped army numbers (guard 0, staging patience 1800, jitter 0), and the two
+    // raiders sent at the construction centre (slot 0) instead of the power plant, run to 8,000 ticks and
+    // watched every 10: the raid comes while the strike is out (a defence call), the hit on the centre calls the
+    // strike back (a recall), no unit is in two groups, and no unit is lost (in no group and still on its way to
+    // the old target or staging cell long after its group ended).
+    let mut s = load("ai_raid_guard");
+    let old = s.ais[0].state().clone();
+    let mut profile = old.profile.clone();
+    // The numbers of WP9.2a as shipped; the trigger stays the scenario's (attack at 800 value from tick 100).
+    let trigger = profile.army;
+    profile.army = sf_data::ai_profile::AiProfile::embedded().army;
+    profile.army.attack_value = trigger.attack_value;
+    profile.army.first_attack_tick = trigger.first_attack_tick;
+    profile.army.max_wait = trigger.max_wait;
+    profile.army.min_units = trigger.min_units;
+    s.ais[0] = Ai::new(old.player, profile, 0xA1_0001, old.start_sites);
+    let mut retargeted = 0;
+    for c in &mut s.commands {
+        if let sf_headless::scenario::Action::OrderAttack { target, .. } = &mut c.command {
+            *target = (0, 0);
+            retargeted += 1;
+        }
+    }
+    assert_eq!(retargeted, 1);
+    let mut w = Watched::default();
+    let f = run_observed(
+        &s,
+        &RunOptions {
+            ticks: 8_000,
+            every: 10,
+        },
+        |world: &World, ais: &[Ai]| {
+            watch_groups(world, ais[0].state(), world.tick().0, &mut w);
+        },
+    )
+    .unwrap();
+    assert!(w.raid_while_out, "the raid came while a group was out");
+    assert!(w.recall, "the hit on the centre called the strike back");
+    // The raiders are dead and the centre stands.
+    let snap = f.world.snapshot();
+    assert!(!snap.iter().any(|v| v.owner == P1 && v.kind == RIFLEMAN));
+    assert!(snap.iter().any(|v| v.id == EntityId::new(0, 0)));
+}

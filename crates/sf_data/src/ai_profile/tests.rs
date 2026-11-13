@@ -566,3 +566,24 @@ fn a_profile_without_the_numbers_of_wp9_2a_reads_with_them_off() {
     a.stage_patience = 1;
     assert!(!a.groups_on(), "the patience alone does nothing");
 }
+
+#[test]
+fn with_staging_on_the_stage_patience_must_be_below_the_attack_patience() {
+    // The shipped profile: staging on, 1800 below 2400.
+    let shipped = AiProfile::embedded().army;
+    assert!(shipped.stage_distance > 0 && shipped.stage_patience < shipped.attack_patience);
+    // Equal or above: refused, since the attack could end while it stages.
+    refused(
+        &edited("stage_patience: 1800", "stage_patience: 2400"),
+        "stage_patience",
+    );
+    refused(
+        &edited("stage_patience: 1800", "stage_patience: 5000"),
+        "stage_patience",
+    );
+    AiProfile::from_ron(&edited("stage_patience: 1800", "stage_patience: 2399")).unwrap();
+    // With staging off the patience is not read, so it is not compared.
+    let off = edited("stage_distance: 14", "stage_distance: 0")
+        .replace("stage_patience: 1800", "stage_patience: 5000");
+    AiProfile::from_ron(&off).unwrap();
+}
